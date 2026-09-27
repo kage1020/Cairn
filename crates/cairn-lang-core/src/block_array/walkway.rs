@@ -11,9 +11,12 @@
 //!    member's `side=` face. Ports are exposed on `door` and `window`
 //!    members; doors anchor at one of the wall-local
 //!    `at=center | left | right` positions, windows at the rectangle's
-//!    geometric centre (`offset + size.w / 2`). Other roles (stair,
-//!    roof, …) lower silently to `None` so the caller can decide
-//!    whether to fail with `W_DEFERRED_MEMBER`. Both roles are
+//!    geometric centre (`offset + size.w / 2`). A port it cannot place
+//!    — another role (stair, roof, …), an argument the opening cannot
+//!    use, masonry the opening does not reach, an opening the openings
+//!    phase did not cut, a coordinate past `i32` — comes back as the
+//!    [`PortRejection`] naming that one reason, which the caller turns
+//!    into the `W_DEFERRED_MEMBER` on the `connect` row. Both roles are
 //!    openings, so the caller hands over the [`WallColumn`] the body
 //!    was lowered with: a port is somewhere a wall was opened, and
 //!    asking the `def` a second time is what let the strip and the cut
@@ -40,6 +43,8 @@ use std::collections::HashSet;
 use std::hash::BuildHasher;
 
 use crate::ast::ValueKind;
+use crate::check::DiagnosticNote;
+use crate::error::Span;
 use crate::ids::{PortId, WalkwayScopeKey};
 use crate::intent::{DefIr, Member, MemberRole};
 
@@ -90,6 +95,349 @@ pub struct WalkwayLayout {
     pub blocked_count: usize,
 }
 
+/// How a member argument a port reads was written, when it was not written
+/// in a shape the port can use.
+///
+/// Kept apart from the value itself so the note can say *which* of the
+/// three it was — an author who left `side=` off and one who typed
+/// `side=frnt` are fixing different things.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Written {
+    /// The key is not on the line.
+    Absent,
+    /// The key carries an identifier the port does not accept.
+    Ident(String),
+    /// The key carries a value of some other shape (a number, a string, …).
+    OtherShape,
+}
+
+impl Written {
+    fn of_ident(member: &Member, key: &str) -> Self {
+        match member.intent_state.get(key).map(|v| &v.value.kind) {
+            None => Self::Absent,
+            Some(ValueKind::Ident(s)) => Self::Ident(s.clone()),
+            Some(_) => Self::OtherShape,
+        }
+    }
+}
+
+/// What is wrong with a door's `at=`, as the rest of a sentence whose
+/// subject is the door.
+///
+/// One wording for both places that say it — the door's own
+/// `W_DEFERRED_MEMBER` ([`door_at_deferral`]) and the note a `connect` row
+/// naming the door carries ([`PortRejection::note`]) — because both read
+/// `at=` through [`door_anchor_offset`], so they cannot classify it
+/// differently, and with one sentence they cannot describe it differently
+/// either.
+fn door_at_clause(written: &Written) -> String {
+    match written {
+        Written::Absent => "has no `at=`".to_owned(),
+        Written::Ident(s) => format!("has `at={s}`, which is not one of center, left, right"),
+        Written::OtherShape => "has an `at=` that is not one of center, left, right (numeric \
+                                offsets are reserved)"
+            .to_owned(),
+    }
+}
+
+/// The reason `super::lower::carve_door` defers a door whose `at=`
+/// [`door_anchor_offset`] refused.
+pub(super) fn door_at_deferral(written: &Written) -> String {
+    format!(
+        "door {} — use `at=center | left | right`",
+        door_at_clause(written)
+    )
+}
+
+/// The one window argument [`read_window_args`] could not use, and how it
+/// was written. One variant per case rather than a key and a flag, so an
+/// `offset=` that is absent — which is not a fault, it reads as `0` — has
+/// no variant to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WindowArgFault {
+    /// `offset=` is present and not a non-negative integer.
+    OffsetMalformed,
+    /// No `y=`.
+    YAbsent,
+    /// `y=` is present and not a non-negative integer.
+    YMalformed,
+    /// No `size=`.
+    SizeAbsent,
+    /// `size=` is present and not a `WxH`.
+    SizeMalformed,
+}
+
+impl WindowArgFault {
+    /// What is wrong, as the rest of a sentence whose subject is the
+    /// window — the same single wording source [`door_at_clause`] is.
+    fn clause(self) -> &'static str {
+        match self {
+            Self::OffsetMalformed => {
+                "has an `offset=` that is not a non-negative integer that fits in u32"
+            }
+            Self::YAbsent => "has no `y=`",
+            Self::YMalformed => "has a `y=` that is not a non-negative integer that fits in u32",
+            Self::SizeAbsent => "has no `size=WxH`",
+            Self::SizeMalformed => "has a `size=` that is not a `WxH` of two positive integers",
+        }
+    }
+
+    /// The reason `super::lower::fill_window` defers the window.
+    pub(super) fn deferral(self) -> String {
+        format!("window {}", self.clause())
+    }
+}
+
+/// The window arguments a port and a cut both need, read once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct WindowArgs {
+    /// `offset=`, `0` when absent.
+    pub(super) offset: u32,
+    /// `y=`, relative to the member's own level.
+    pub(super) y: u32,
+    /// `size=`'s `W`.
+    pub(super) width: u32,
+    /// `size=`'s `H`.
+    pub(super) height: u32,
+}
+
+/// Read a window's `offset=`, `y=` and `size=`, in that order, refusing
+/// at the first one that cannot be used.
+///
+/// `super::lower::fill_window` and [`port_world_position`] both call this,
+/// so the cut and the port accept one set and name one first fault.
+/// `repeat=`, `step=` and `sym=` are not read here: only the cut uses them,
+/// and a window they defer is refused as a port by
+/// [`PortRejection::NotCut`] rather than by a reason of its own.
+///
+/// # Errors
+///
+/// The [`WindowArgFault`] for the first argument that cannot be used.
+pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgFault> {
+    let offset = if member.intent_state.contains_key("offset") {
+        member
+            .nonneg_u32("offset")
+            .ok_or(WindowArgFault::OffsetMalformed)?
+    } else {
+        0
+    };
+    let y = match (
+        member.intent_state.contains_key("y"),
+        member.nonneg_u32("y"),
+    ) {
+        (_, Some(y)) => y,
+        (false, None) => return Err(WindowArgFault::YAbsent),
+        (true, None) => return Err(WindowArgFault::YMalformed),
+    };
+    let (width, height) = match (
+        member.intent_state.contains_key("size"),
+        size_value(member, "size"),
+    ) {
+        (_, Some(size)) => size,
+        (false, None) => return Err(WindowArgFault::SizeAbsent),
+        (true, None) => return Err(WindowArgFault::SizeMalformed),
+    };
+    Ok(WindowArgs {
+        offset,
+        y,
+        width,
+        height,
+    })
+}
+
+/// Why [`port_world_position`] placed no port — one variant per refusal,
+/// in the order the function asks, so the `connect` row can say which one
+/// it hit instead of listing every contract a port has.
+///
+/// Every variant that names a member carries its span, so the note on the
+/// `connect` row can point at the line the author has to change. For the
+/// side, argument and masonry variants that line also carries the
+/// member's own `W_DEFERRED_MEMBER` — the opening was not cut either — and
+/// the note says so rather than restating it.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PortRejection {
+    /// No member of the `def` body carries the port's `id=`. The resolver
+    /// refuses such a row with `E_UNRESOLVED_PORT` before lowering, so a
+    /// `connect` does not reach this; the variant exists so the function
+    /// answers every input.
+    UnknownMember,
+    /// The member's role is not one a port can anchor on. Only `door` and
+    /// `window` are openings; stair and roof ports are reserved.
+    ReservedRole { role: String, member: Span },
+    /// `side=` is missing or does not name a cardinal wall.
+    Side { written: Written, member: Span },
+    /// The `def` has no `size=`, so its walls have no length. A placement
+    /// of such a def is refused before walkways are laid, so a `connect`
+    /// does not reach this either.
+    Sizeless,
+    /// A door's `at=` is missing or is not `center | left | right`.
+    DoorAt { written: Written, member: Span },
+    /// No `walls` member of the body paints, so a door has nothing to
+    /// open.
+    DoorNoWalls { member: Span },
+    /// The walls paint, but not the row a door opens at.
+    DoorOutsideCourse { walls: WallColumn, member: Span },
+    /// A window's `offset=` / `y=` / `size=` cannot be used.
+    WindowArgument { fault: WindowArgFault, member: Span },
+    /// A window's rectangle runs past the far end of its wall.
+    WindowPastWall {
+        offset: u32,
+        width: u32,
+        wall_length: u32,
+        member: Span,
+    },
+    /// No `walls` member of the body paints, so a window has nothing to
+    /// be cut into.
+    WindowNoWalls { member: Span },
+    /// The walls paint, but not every row of the window.
+    WindowOutsideCourse {
+        y: u32,
+        height: u32,
+        walls: WallColumn,
+        member: Span,
+    },
+    /// Every rule above held and the openings pass still did not cut the
+    /// opening: a window argument only the cut reads (`repeat=`, `step=`,
+    /// `sym=`) deferred it, or its `mat_slot=` resolved to no block. The
+    /// port is refused because a strip that ends at an opening nobody cut
+    /// ends at a wall.
+    NotCut { role: &'static str, member: Span },
+    /// The port's world coordinate does not fit an `i32`: a `place` far
+    /// enough from the origin that one more step overflows.
+    OutOfRange,
+}
+
+impl PortRejection {
+    /// The note the `connect` row carries for the endpoint `port`
+    /// (`place.port`), pointing at the member when there is one.
+    ///
+    /// The wording lives here, next to the checks, and the two reasons a
+    /// member's own line can also give — a door's `at=` and a window's
+    /// arguments — come from the same clause that line is built from.
+    pub(super) fn note(&self, port: &str) -> DiagnosticNote {
+        let (member, own_line) = self.anchor();
+        let own_line = if own_line {
+            "; the member says so on its own line too"
+        } else {
+            ""
+        };
+        DiagnosticNote {
+            span: member.cloned(),
+            message: format!("`{port}` {}{own_line}", self.fault()),
+        }
+    }
+
+    /// The member the refusal is about, when it is about one, and whether
+    /// that member's own line carries a deferral for the same fault.
+    ///
+    /// One match for both so the two answers for a variant sit on one
+    /// line: they are not the same split. A reserved role has a line but
+    /// no finding on it that is about the port — a `stair` lowers clean,
+    /// and what a `roof` or an unknown `kind=` gets there is about the
+    /// member, not the port — and a refusal the openings pass made for a
+    /// reason of its own ([`Self::NotCut`]) says where to look itself.
+    fn anchor(&self) -> (Option<&Span>, bool) {
+        match self {
+            Self::Side { member, .. }
+            | Self::DoorAt { member, .. }
+            | Self::DoorNoWalls { member }
+            | Self::DoorOutsideCourse { member, .. }
+            | Self::WindowArgument { member, .. }
+            | Self::WindowPastWall { member, .. }
+            | Self::WindowNoWalls { member }
+            | Self::WindowOutsideCourse { member, .. } => (Some(member), true),
+            Self::ReservedRole { member, .. } | Self::NotCut { member, .. } => {
+                (Some(member), false)
+            }
+            Self::UnknownMember | Self::Sizeless | Self::OutOfRange => (None, false),
+        }
+    }
+
+    /// What is wrong, as the predicate of a sentence whose subject is the
+    /// port.
+    fn fault(&self) -> String {
+        const NO_WALLS: &str = "its `def` has no `walls` that paints — a positive `height=` and a `mat_slot=` that resolves";
+        match self {
+            Self::UnknownMember => "names no member of its `def` body".to_owned(),
+            Self::ReservedRole { role, .. } => {
+                // The parenthetical is about the two roles it names, so
+                // only they get it: said after `floor` it reads as though
+                // floor ports were what is reserved.
+                let reserved = if role == "stair" || role == "roof" {
+                    format!(" (`{role}` ports are reserved)")
+                } else {
+                    String::new()
+                };
+                format!(
+                    "is a `{role}`, and only a `door` or a `window` can anchor a port{reserved} \
+                     — declare the port on a door or window instead",
+                )
+            }
+            Self::Side { written, .. } => match written {
+                Written::Absent => {
+                    "has no `side=` (expected one of front, back, left, right)".to_owned()
+                }
+                Written::Ident(s) => {
+                    format!("has `side={s}`, which is not one of front, back, left, right")
+                }
+                Written::OtherShape => {
+                    "has a `side=` that is not one of front, back, left, right".to_owned()
+                }
+            },
+            Self::Sizeless => {
+                "belongs to a `def` with no `size=`, so its walls have no length".to_owned()
+            }
+            Self::DoorAt { written, .. } => format!("is a door that {}", door_at_clause(written)),
+            Self::DoorNoWalls { .. } => format!("is a door with no wall to open: {NO_WALLS}"),
+            Self::DoorOutsideCourse { walls, .. } => format!(
+                "is a door that opens at y={DOOR_PORT_BASE_V}, the row above the floor slab, which \
+                 is not inside any wall course (the walls occupy {walls})",
+            ),
+            Self::WindowArgument { fault, .. } => format!("is a window that {}", fault.clause()),
+            Self::WindowPastWall {
+                offset,
+                width,
+                wall_length,
+                ..
+            } => format!(
+                "is a window that runs past the end of its wall (`offset + size.w` = {offset} + \
+                 {width}, wall length {wall_length})",
+            ),
+            Self::WindowNoWalls { .. } => {
+                format!("is a window with no wall to cut into: {NO_WALLS}")
+            }
+            Self::WindowOutsideCourse {
+                y, height, walls, ..
+            } => match y.checked_add(height.saturating_sub(1)) {
+                Some(last) => format!(
+                    "is a window whose rows y={y}..={last} are not all inside one wall course \
+                     (the walls occupy {walls})",
+                ),
+                None => format!(
+                    "is a window whose {height} rows from y={y} run past the highest row a build \
+                     can address (the walls occupy {walls})",
+                ),
+            },
+            Self::NotCut { role, .. } => {
+                // Only a window paints a material; a door is carved to
+                // air, so its line is the one place a reason can be.
+                let why = if *role == "window" {
+                    "the finding on its own line, or on the material its `mat_slot=` names, says why"
+                } else {
+                    "the finding on its own line says why"
+                };
+                format!(
+                    "is a {role} the openings pass did not cut, so a strip would end against \
+                     the wall — {why}",
+                )
+            }
+            Self::OutOfRange => "would sit outside the coordinate range a build can address — \
+                                 bring its `place` closer to the origin"
+                .to_owned(),
+        }
+    }
+}
+
 /// World-space `(x, y, z)` coordinate one block outside the named
 /// port's wall, at the placement's ground row (`place_origin.1`).
 ///
@@ -112,72 +460,46 @@ pub struct WalkwayLayout {
 /// move it, since the strip is flat and one-voxel thick). Both sit on
 /// the ground row.
 ///
-/// Returns `None` when the port id, the member's role, its `side=` /
-/// `at=` / `offset=` / `size=` arguments, or the `walls` rows behind it
-/// make no opening — the cases `super::lower`'s `W_DEFERRED_MEMBER`
-/// note on the `connect` row spells out for the author — and on any
-/// coordinate over- or under-flow.
-#[must_use]
-pub(super) fn port_world_position(
+/// `cut` holds the spans of the doors and windows the openings pass
+/// actually cut into this body. The checks above answer *why* a port
+/// cannot be placed for every rule the port reads itself; `cut` is what
+/// makes "a port is somewhere a wall was opened" hold for the rules it
+/// does not — `repeat=`, `step=` and `sym=`, and a `mat_slot=` that
+/// resolves to no block — so a rule the cut grows later refuses the port
+/// too without being restated here.
+///
+/// # Errors
+///
+/// A [`PortRejection`] naming the first refusal. The member's role is
+/// asked first — a stair is refused for being a stair, whatever else is
+/// wrong with it — then `side=`, then whether the `def` has a `size=`,
+/// then the questions the openings pass asks of the same member in the
+/// order it asks them: the door's `at=` and masonry, or the window's
+/// `offset=` / `y=` / `size=`, horizontal fit and masonry. For those, the
+/// reason the `connect` row gives is the one the member's own line gives.
+/// Then whether the openings pass cut it at all ([`PortRejection::NotCut`]),
+/// and last whether the world coordinate fits.
+///
+/// The horizontal fit here is `offset + size.w`; the cut's is the span of
+/// every `repeat=` stamp. A window the two disagree on is one the cut
+/// deferred, and `cut` refuses it.
+pub(super) fn port_world_position<S: BuildHasher>(
     place_origin: (i32, i32, i32),
     place_dims: Dims,
     def: &DefIr,
     port_id: &PortId,
     walls: &WallColumn,
-) -> Option<(i32, i32, i32)> {
+    cut: &HashSet<Span, S>,
+) -> Result<(i32, i32, i32), PortRejection> {
     let member = def
         .members
         .iter()
-        .find(|m| m.id.as_deref() == Some(port_id.as_str()))?;
-    let side = member.ident_value("side").and_then(WallSide::from_ident)?;
-    let def_size = def.size.as_ref()?;
-    let interior_w = def_size.w.get();
-    let interior_h = def_size.h.get();
-    // Overhang inflates symmetrically on each horizontal axis, so x and
-    // z agree; `.max()` is the conservative pick if a future divergence
-    // sneaks in — it keeps the port outside the larger eave rather than
-    // averaging into a half-inside coordinate.
-    let overhang_x = place_dims.x.saturating_sub(interior_w) / 2;
-    let overhang_z = place_dims.z.saturating_sub(interior_h) / 2;
-    let overhang = overhang_x.max(overhang_z);
-    let len = wall_length(side, interior_w, interior_h);
-    let (wall_x, wall_z) = match member.role {
-        MemberRole::Door => {
-            // A doorway is a hole in a wall, so a row no `walls` member
-            // paints has no doorway for a strip to arrive at:
-            // `super::lower::carve_door` asks this same column the same
-            // question before it carves, and defers when the answer is
-            // `None`. Without this the strip was laid to a doorway that
-            // was never carved.
-            //
-            // *Where*, like the window below, rather than merely
-            // *whether*: a def whose walls live only above a `level` has
-            // a column that starts above the row a door opens at, and a
-            // port that asked only whether the column held anything
-            // anchored a strip to the doorway that row never got.
-            //
-            // The row is `DOOR_PORT_BASE_V` because a port names a
-            // member of the def body, which no `level y=N` has shifted —
-            // `carve_door` asks after adding its member's level offset.
-            walls.course_top_at(DOOR_PORT_BASE_V)?;
-            let u = door_anchor_offset(member, len)?;
-            door_world_xz(side, u, overhang, interior_w, interior_h, place_origin)?
-        }
-        MemberRole::Window => {
-            // A window port also has to fit *vertically* inside the
-            // masonry — otherwise the cut itself is deferred and the
-            // strip leads into a solid wall.
-            let u = window_center_offset(member, len, walls)?;
-            window_world_xz(
-                side,
-                u,
-                overhang,
-                interior_w,
-                interior_h,
-                place_dims,
-                place_origin,
-            )?
-        }
+        .find(|m| m.id.as_deref() == Some(port_id.as_str()))
+        .ok_or(PortRejection::UnknownMember)?;
+    // The role first: a stair with no `side=` is refused for being a
+    // stair, which is the finding, rather than for the argument.
+    match member.role {
+        MemberRole::Door | MemberRole::Window => {}
         // Stair / roof ports are reserved for a future extension.
         // Exhaustive match (no `_ =>`) so adding a new `MemberRole`
         // variant trips the non-exhaustive-patterns check instead of
@@ -191,10 +513,86 @@ pub(super) fn port_world_position(
         | MemberRole::Circuit
         | MemberRole::Place
         | MemberRole::Connect
-        | MemberRole::Other(_) => return None,
+        | MemberRole::Other(_) => {
+            return Err(PortRejection::ReservedRole {
+                role: member.role.keyword().to_owned(),
+                member: member.span.clone(),
+            });
+        }
+    }
+    let side = member
+        .ident_value("side")
+        .and_then(WallSide::from_ident)
+        .ok_or_else(|| PortRejection::Side {
+            written: Written::of_ident(member, "side"),
+            member: member.span.clone(),
+        })?;
+    let def_size = def.size.as_ref().ok_or(PortRejection::Sizeless)?;
+    let interior_w = def_size.w.get();
+    let interior_h = def_size.h.get();
+    // Overhang inflates symmetrically on each horizontal axis, so x and
+    // z agree; `.max()` is the conservative pick if a future divergence
+    // sneaks in — it keeps the port outside the larger eave rather than
+    // averaging into a half-inside coordinate.
+    let overhang_x = place_dims.x.saturating_sub(interior_w) / 2;
+    let overhang_z = place_dims.z.saturating_sub(interior_h) / 2;
+    let overhang = overhang_x.max(overhang_z);
+    let len = wall_length(side, interior_w, interior_h);
+    let (wall_x, wall_z) = if matches!(member.role, MemberRole::Door) {
+        // `at=` before the masonry, the order `super::lower::carve_door`
+        // asks in, so an `at=` typo on a body whose walls are also wrong
+        // is reported as the typo here as it is on the door's own line.
+        let u = door_anchor_offset(member, len).map_err(|written| PortRejection::DoorAt {
+            written,
+            member: member.span.clone(),
+        })?;
+        // A doorway is a hole in a wall, so a row no `walls` member
+        // paints has no doorway for a strip to arrive at:
+        // `carve_door` asks this same column the same question before it
+        // carves, and defers when the answer is `None`.
+        //
+        // *Where*, like the window below, rather than merely *whether*:
+        // a def whose walls live only above a `level` has a column that
+        // starts above the row a door opens at.
+        //
+        // The row is `DOOR_PORT_BASE_V` because a port names a member of
+        // the def body, which no `level y=N` has shifted — `carve_door`
+        // asks after adding its member's level offset.
+        if walls.is_empty() {
+            return Err(PortRejection::DoorNoWalls {
+                member: member.span.clone(),
+            });
+        }
+        if walls.course_top_at(DOOR_PORT_BASE_V).is_none() {
+            return Err(PortRejection::DoorOutsideCourse {
+                walls: walls.clone(),
+                member: member.span.clone(),
+            });
+        }
+        opening_was_cut(member, "door", cut)?;
+        door_world_xz(side, u, overhang, interior_w, interior_h, place_origin)
+            .ok_or(PortRejection::OutOfRange)?
+    } else {
+        // A window port also has to fit *vertically* inside the
+        // masonry — otherwise the cut itself is deferred and the
+        // strip leads into a solid wall.
+        let u = window_center_offset(member, len, walls)?;
+        opening_was_cut(member, "window", cut)?;
+        window_world_xz(
+            side,
+            u,
+            overhang,
+            interior_w,
+            interior_h,
+            place_dims,
+            place_origin,
+        )
+        .ok_or(PortRejection::OutOfRange)?
     };
     let (nx, nz) = side.outward_normal();
-    Some((wall_x + nx, place_origin.1, wall_z + nz))
+    let x = wall_x.checked_add(nx).ok_or(PortRejection::OutOfRange)?;
+    let z = wall_z.checked_add(nz).ok_or(PortRejection::OutOfRange)?;
+    Ok((x, place_origin.1, z))
 }
 
 /// Walk a Manhattan L between two world voxels at a fixed Y, x-axis
@@ -716,20 +1114,34 @@ pub fn build_walkway_array<S: BuildHasher>(
 ///   `right` anchor lands on a valid column.
 ///
 /// Numeric offsets (`at=N`) are reserved for a future extension and
-/// fall through to `None` so the caller cascades a
-/// `W_DEFERRED_MEMBER` warning rather than silently rounding to
-/// centre. Returns `None` when the member is missing `at=` or carries
-/// any other value.
-pub(super) fn door_anchor_offset(member: &Member, len: u32) -> Option<u32> {
-    let raw = member.intent_state.get("at")?;
-    match &raw.value.kind {
-        ValueKind::Ident(s) => match s.as_str() {
-            "center" => Some(len / 2),
-            "left" => Some(0),
-            "right" => Some(len.saturating_sub(1)),
-            _ => None,
-        },
-        _ => None,
+/// are refused with how `at=` was [`Written`] rather than silently
+/// rounded to centre, as is a missing `at=` or any other value.
+///
+/// `super::lower::carve_door` cuts the doorway at this column and defers
+/// with [`door_at_deferral`] of this refusal, so the cut, the port and
+/// both of their messages read `at=` once.
+pub(super) fn door_anchor_offset(member: &Member, len: u32) -> Result<u32, Written> {
+    match member.ident_value("at") {
+        Some("center") => Ok(len / 2),
+        Some("left") => Ok(0),
+        Some("right") => Ok(len.saturating_sub(1)),
+        _ => Err(Written::of_ident(member, "at")),
+    }
+}
+
+/// Refuse a port on an opening the openings pass did not cut.
+fn opening_was_cut<S: BuildHasher>(
+    member: &Member,
+    role: &'static str,
+    cut: &HashSet<Span, S>,
+) -> Result<(), PortRejection> {
+    if cut.contains(&member.span) {
+        Ok(())
+    } else {
+        Err(PortRejection::NotCut {
+            role,
+            member: member.span.clone(),
+        })
     }
 }
 
@@ -745,12 +1157,12 @@ fn door_world_xz(
     let w_i = i32::try_from(interior_w).ok()?;
     let h_i = i32::try_from(interior_h).ok()?;
     let o = i32::try_from(overhang).ok()?;
-    // Composed with `checked_*`, matching `window_world_xz` and the `None`
-    // contract `port_world_position` documents for both. Guarding only the
-    // individual conversions left the sum unguarded, so a `place` far enough
-    // out — `gap=2147483647` reaches it — panicked in a debug build and
-    // wrapped in a release one, sending the router billions of cells the
-    // other way.
+    // Composed with `checked_*`, matching `window_world_xz`; the caller
+    // reports a `None` from either as `PortRejection::OutOfRange`.
+    // Guarding only the individual conversions left the sum unguarded, so
+    // a `place` far enough out — `gap=2147483647` reaches it — panicked in
+    // a debug build and wrapped in a release one, sending the router
+    // billions of cells the other way.
     let (x, z) = match side {
         WallSide::Front => (
             origin.0.checked_add(o)?.checked_add(u_i)?,
@@ -779,37 +1191,72 @@ fn door_world_xz(
 }
 
 /// Window port wall-local centre offset: `offset + size.w / 2`, with
-/// two bounds checks so a window that does not fit the wall returns
-/// `None` and cascades to `W_DEFERRED_MEMBER` rather than producing an
+/// two bounds checks so a window that does not fit the wall is refused
+/// with the [`PortRejection`] that says how, rather than producing an
 /// out-of-range world coordinate.
+///
+/// `offset=`, `y=` and `size=` are read by [`read_window_args`], the
+/// function `super::lower::fill_window` reads them with, so the two
+/// accept the same values and refuse the same first one. `repeat=`,
+/// `step=` and `sym=` are not read: a window they defer is refused by the
+/// caller's `cut` check instead.
 ///
 /// Horizontal bound: `offset + size.w ≤ wall_length`. The equality
 /// case (`==`) is intentionally accepted — a window whose right edge
-/// touches the wall's right corner still fits.
+/// touches the wall's right corner still fits. This is the cut's bound
+/// for a single stamp; the cut also bounds every `repeat=` stamp, which
+/// this does not.
 ///
 /// Vertical bound: every row of the rectangle, `y ..= y + size.h - 1`,
 /// lies inside one course of the def's [`WallColumn`]. A `walls
 /// height=H` fills the world rows `1 ..= H` — the floor slab owns row
 /// `0` — so a window flush with the top course (`y + size.h == H + 1`)
 /// is inside the wall and one starting on the ground plane (`y == 0`)
-/// is not.
+/// is not. This is [`WallColumn::contains_rows`], the predicate
+/// [`super::lower`] cuts the window with, called on the column that pass
+/// builds.
 ///
-/// This is the predicate [`super::lower`] cuts the window with, called
-/// on the column that pass builds, so a rectangle that anchors a
-/// walkway and a rectangle the openings pass carves are the same set by
-/// construction rather than by two limits agreeing.
-fn window_center_offset(member: &Member, len: u32, wall_column: &WallColumn) -> Option<u32> {
-    let offset = member.nonneg_u32("offset")?;
-    let (sw, sh) = size_value(member, "size")?;
-    let y = member.nonneg_u32("y")?;
-    let horizontal_end = offset.checked_add(sw)?;
-    if horizontal_end > len {
-        return None;
+/// Horizontal before vertical, the order `fill_window` asks in, so a
+/// window wrong both ways is refused for the reason its own line gives.
+fn window_center_offset(
+    member: &Member,
+    len: u32,
+    wall_column: &WallColumn,
+) -> Result<u32, PortRejection> {
+    let WindowArgs {
+        offset,
+        y,
+        width: sw,
+        height: sh,
+    } = read_window_args(member).map_err(|fault| PortRejection::WindowArgument {
+        fault,
+        member: member.span.clone(),
+    })?;
+    match offset.checked_add(sw) {
+        Some(end) if end <= len => {}
+        _ => {
+            return Err(PortRejection::WindowPastWall {
+                offset,
+                width: sw,
+                wall_length: len,
+                member: member.span.clone(),
+            });
+        }
+    }
+    if wall_column.is_empty() {
+        return Err(PortRejection::WindowNoWalls {
+            member: member.span.clone(),
+        });
     }
     if !wall_column.contains_rows(y, sh) {
-        return None;
+        return Err(PortRejection::WindowOutsideCourse {
+            y,
+            height: sh,
+            walls: wall_column.clone(),
+            member: member.span.clone(),
+        });
     }
-    Some(offset + sw / 2)
+    Ok(offset + sw / 2)
 }
 
 /// Window-side variant of [`door_world_xz`]. Delegates to
@@ -818,6 +1265,12 @@ fn window_center_offset(member: &Member, len: u32, wall_column: &WallColumn) -> 
 /// uses the same helper for the window cut). `v = PORT_GROUND_V` pins
 /// the port to the ground row regardless of the window's authored
 /// `y=`.
+///
+/// `None` means the world coordinate overflowed: [`window_center_offset`]
+/// already put `u` inside the wall (`offset + size.w / 2 < offset + size.w
+/// ≤ wall_length`, with `size.w ≥ 1`), so the helper's own refusal is not
+/// one a caller can reach, and the caller reports it as
+/// [`PortRejection::OutOfRange`].
 fn window_world_xz(
     side: WallSide,
     u: u32,
@@ -847,6 +1300,26 @@ mod tests {
 
     fn pid(name: &str) -> PortId {
         PortId::new(name).expect("valid port id")
+    }
+
+    /// [`port_world_position`] on a body whose every door and window was
+    /// cut — the cases here are about the port's own rules, so the
+    /// openings phase's answer is taken as yes. The cases about that
+    /// answer call the function directly.
+    fn port_at(
+        origin: (i32, i32, i32),
+        dims: Dims,
+        def: &DefIr,
+        id: &PortId,
+        walls: &WallColumn,
+    ) -> Result<(i32, i32, i32), PortRejection> {
+        let cut: HashSet<Span> = def
+            .members
+            .iter()
+            .filter(|m| matches!(m.role, MemberRole::Door | MemberRole::Window))
+            .map(|m| m.span.clone())
+            .collect();
+        port_world_position(origin, dims, def, id, walls, &cut)
     }
 
     /// The column the fixtures below declare — a single span reaching
@@ -1312,7 +1785,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (11, 0, 23));
     }
@@ -1333,7 +1806,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (12, 0, 24));
     }
@@ -1352,7 +1825,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (11, 0, 19));
     }
@@ -1371,7 +1844,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (9, 0, 21));
     }
@@ -1390,7 +1863,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (13, 0, 21));
     }
@@ -1410,7 +1883,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (10, 0, 23));
     }
@@ -1430,7 +1903,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (11, 0, 19));
     }
@@ -1450,7 +1923,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (9, 0, 21));
     }
@@ -1470,7 +1943,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (13, 0, 21));
     }
@@ -1491,7 +1964,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (11, 0, 24));
     }
@@ -1513,13 +1986,13 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 11, y: 1, z: 9 };
-        let pos = port_world_position((0, 0, 0), dims, def, &pid("front"), &declared_column(def))
+        let pos = port_at((0, 0, 0), dims, def, &pid("front"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (4, 0, 8));
     }
 
     #[test]
-    fn port_world_position_window_returns_none_when_offset_size_overflows_wall() {
+    fn port_world_position_window_refuses_when_offset_size_overflows_wall() {
         // size=3x3 → wall_length(Front) = 3. offset=2 + size.w=2 = 4 > 3.
         let src = concat!(
             "def cottage size=3x3:\n",
@@ -1530,10 +2003,15 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(
-            port_world_position((0, 0, 0), dims, def, &pid("light"), &declared_column(def))
-                .is_none()
-        );
+        assert!(matches!(
+            port_at((0, 0, 0), dims, def, &pid("light"), &declared_column(def)),
+            Err(PortRejection::WindowPastWall {
+                offset: 2,
+                width: 2,
+                wall_length: 3,
+                ..
+            }),
+        ));
     }
 
     #[test]
@@ -1552,7 +2030,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (10, 0, 23));
     }
@@ -1578,13 +2056,13 @@ mod tests {
         // the `place_origin.1` lift, so the full `(x, y, z)` triple is
         // pinned: a regression that honours `window.y` would land the
         // port at `(10, 11, 23)` instead of `(10, 7, 23)`.
-        let pos = port_world_position((10, 7, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 7, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (10, 7, 23));
     }
 
     #[test]
-    fn port_world_position_returns_none_for_roof_role() {
+    fn port_world_position_refuses_for_roof_role() {
         // Roof ports are reserved; the role guard must short-circuit
         // even when `id=` matches.
         let src = concat!(
@@ -1595,22 +2073,24 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(
-            port_world_position((0, 0, 0), dims, def, &pid("top"), &declared_column(def)).is_none()
-        );
+        assert!(matches!(
+            port_at((0, 0, 0), dims, def, &pid("top"), &declared_column(def)),
+            Err(PortRejection::ReservedRole { ref role, .. }) if role == "roof",
+        ));
     }
 
     #[test]
-    fn port_world_position_returns_none_for_stair_role() {
+    fn port_world_position_refuses_for_stair_role() {
         // Stair ports are reserved; same short-circuit as roof.
         let src = concat!("def cottage size=3x3:\n", "  stair id=up at=corner\n");
         let module = crate::parse(src).expect("parse");
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(
-            port_world_position((0, 0, 0), dims, def, &pid("up"), &declared_column(def)).is_none()
-        );
+        assert!(matches!(
+            port_at((0, 0, 0), dims, def, &pid("up"), &declared_column(def)),
+            Err(PortRejection::ReservedRole { ref role, .. }) if role == "stair",
+        ));
     }
 
     #[test]
@@ -1633,7 +2113,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (12, 0, 23));
     }
@@ -1653,13 +2133,13 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (10, 0, 23));
     }
 
     #[test]
-    fn port_world_position_window_returns_none_when_the_top_edge_pierces_the_wall() {
+    fn port_world_position_window_refuses_when_the_top_edge_pierces_the_wall() {
         // The window cut itself would be deferred when its top row is
         // above the wall. Anchoring a walkway to a non-existent cut would
         // leave the user with a strip running into a solid wall, so the
@@ -1674,14 +2154,14 @@ mod tests {
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
         // `walls height=2` paints rows 1..=2; the rectangle wants 2..=3.
-        assert!(
-            port_world_position((0, 0, 0), dims, def, &pid("light"), &declared_column(def))
-                .is_none()
-        );
+        assert!(matches!(
+            port_at((0, 0, 0), dims, def, &pid("light"), &declared_column(def)),
+            Err(PortRejection::WindowOutsideCourse { y: 2, height: 2, ref walls, .. }) if !walls.is_empty(),
+        ));
     }
 
     #[test]
-    fn port_world_position_window_returns_none_when_def_has_no_walls() {
+    fn port_world_position_window_refuses_when_def_has_no_walls() {
         // A `def` without a `walls` member cannot voxelise any window
         // (the openings pass has nothing to carve into). The port must
         // defer for the same reason: anchoring a walkway to a
@@ -1695,10 +2175,10 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(
-            port_world_position((0, 0, 0), dims, def, &pid("light"), &declared_column(def))
-                .is_none()
-        );
+        assert!(matches!(
+            port_at((0, 0, 0), dims, def, &pid("light"), &declared_column(def)),
+            Err(PortRejection::WindowNoWalls { .. }),
+        ));
     }
 
     #[test]
@@ -1719,7 +2199,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (13, 0, 20));
     }
@@ -1740,13 +2220,13 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("light"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (14, 0, 23));
     }
 
     #[test]
-    fn port_world_position_returns_none_for_unknown_port_id() {
+    fn port_world_position_refuses_for_unknown_port_id() {
         let src = concat!(
             "def cottage size=3x3:\n",
             "  walls mat_slot=w height=3\n",
@@ -1756,10 +2236,10 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(
-            port_world_position((0, 0, 0), dims, def, &pid("nope"), &declared_column(def))
-                .is_none()
-        );
+        assert!(matches!(
+            port_at((0, 0, 0), dims, def, &pid("nope"), &declared_column(def)),
+            Err(PortRejection::UnknownMember),
+        ));
     }
 
     #[test]
@@ -1776,7 +2256,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (10, 0, 23));
     }
@@ -1795,7 +2275,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (12, 0, 23));
     }
@@ -1816,7 +2296,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (12, 0, 19));
     }
@@ -1835,7 +2315,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (9, 0, 22));
     }
@@ -1856,7 +2336,7 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (13, 0, 22));
     }
@@ -1877,13 +2357,13 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 5, y: 1, z: 5 };
-        let pos = port_world_position((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
+        let pos = port_at((10, 0, 20), dims, def, &pid("entry"), &declared_column(def))
             .expect("port resolves");
         assert_eq!(pos, (11, 0, 24));
     }
 
     #[test]
-    fn port_world_position_door_returns_none_when_the_body_paints_no_wall() {
+    fn port_world_position_door_refuses_when_the_body_paints_no_wall() {
         // A doorway is a hole in a wall. `super::super::lower::carve_door`
         // defers on the same question, so a port that did not ask it laid
         // a strip to a doorway that was never carved.
@@ -1895,14 +2375,14 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(
-            port_world_position((0, 0, 0), dims, def, &pid("entry"), &WallColumn::default())
-                .is_none()
-        );
+        assert!(matches!(
+            port_at((0, 0, 0), dims, def, &pid("entry"), &WallColumn::default()),
+            Err(PortRejection::DoorNoWalls { .. }),
+        ));
     }
 
     #[test]
-    fn port_world_position_door_returns_none_when_the_walls_start_above_the_doorway() {
+    fn port_world_position_door_refuses_when_the_walls_start_above_the_doorway() {
         // The column holds rows 7..=10 — a `level y=6 walls height=4` —
         // and the doorway opens at row 1, which is open air. A port that
         // asked only whether the column held anything answered "yes" and
@@ -1916,23 +2396,26 @@ mod tests {
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
         let upper_storey = WallColumn::from_walls([(6, 4)]);
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("entry"), &upper_storey).is_none());
+        assert!(matches!(
+            port_at((0, 0, 0), dims, def, &pid("entry"), &upper_storey),
+            Err(PortRejection::DoorOutsideCourse { ref walls, .. }) if !walls.is_empty(),
+        ));
         // …and the same column with a ground course under it anchors the
         // port, so the refusal is about the row and not about the level.
         let both_storeys = WallColumn::from_walls([(0, 3), (6, 4)]);
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("entry"), &both_storeys).is_some());
+        assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &both_storeys).is_ok());
         // A course of exactly that one row is enough: the port asks
         // where the doorway opens, not where it ends, so a column of
         // `1..=1` anchors it. Asked one row higher — which is what a
-        // constant off by one would do — this answers `None`.
+        // constant off by one would do — this is refused.
         let one_row = WallColumn::from_walls([(0, 1)]);
-        assert!(port_world_position((0, 0, 0), dims, def, &pid("entry"), &one_row).is_some());
+        assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &one_row).is_ok());
     }
 
     #[test]
-    fn port_world_position_door_returns_none_for_unknown_at_value() {
-        // `at=middle` is not one of `center | left | right` and must
-        // cascade to `W_DEFERRED_MEMBER` via `None` rather than being
+    fn port_world_position_door_refuses_for_unknown_at_value() {
+        // `at=middle` is not one of `center | left | right` and must be
+        // refused with the value the author wrote rather than being
         // silently rounded to a centre value.
         let src = concat!(
             "def cottage size=3x3:\n",
@@ -1943,9 +2426,466 @@ mod tests {
         let ir = crate::lower(&module);
         let def = ir.defs.first().expect("def lowered");
         let dims = Dims { x: 3, y: 1, z: 3 };
-        assert!(
-            port_world_position((0, 0, 0), dims, def, &pid("entry"), &declared_column(def))
-                .is_none()
+        assert!(matches!(
+            port_at((0, 0, 0), dims, def, &pid("entry"), &declared_column(def)),
+            Err(PortRejection::DoorAt { written: Written::Ident(ref s), .. }) if s == "middle",
+        ));
+    }
+
+    /// Lower `body` as the members of `def cottage size=3x3` and ask for
+    /// the port `id` against the column its own `walls` declare.
+    fn port_in(body: &str, id: &str) -> Result<(i32, i32, i32), PortRejection> {
+        let src = format!("def cottage size=3x3:\n{body}");
+        let module = crate::parse(&src).expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 5, z: 3 };
+        port_at((0, 0, 0), dims, def, &pid(id), &declared_column(def))
+    }
+
+    #[test]
+    fn port_world_position_asks_the_role_before_the_side() {
+        // A stair with no `side=` is refused for being a stair: fixing
+        // the side would still leave a member no port can anchor on.
+        assert!(matches!(
+            port_in("  stair id=up kind=stairs mat_slot=s\n", "up"),
+            Err(PortRejection::ReservedRole { ref role, .. }) if role == "stair",
+        ));
+    }
+
+    #[test]
+    fn port_world_position_refuses_a_missing_side_as_absent() {
+        assert!(matches!(
+            port_in("  walls mat_slot=w height=3\n  door id=e at=center\n", "e"),
+            Err(PortRejection::Side {
+                written: Written::Absent,
+                ..
+            }),
+        ));
+    }
+
+    #[test]
+    fn port_world_position_refuses_a_non_cardinal_side_with_what_was_written() {
+        assert!(matches!(
+            port_in("  walls mat_slot=w height=3\n  door id=e side=frnt at=center\n", "e"),
+            Err(PortRejection::Side { written: Written::Ident(ref s), .. }) if s == "frnt",
+        ));
+        assert!(matches!(
+            port_in(
+                "  walls mat_slot=w height=3\n  door id=e side=3 at=center\n",
+                "e"
+            ),
+            Err(PortRejection::Side {
+                written: Written::OtherShape,
+                ..
+            }),
+        ));
+    }
+
+    #[test]
+    fn port_world_position_refuses_a_missing_door_at_as_absent() {
+        assert!(matches!(
+            port_in("  walls mat_slot=w height=3\n  door id=e side=front\n", "e"),
+            Err(PortRejection::DoorAt {
+                written: Written::Absent,
+                ..
+            }),
+        ));
+    }
+
+    #[test]
+    fn port_world_position_asks_the_door_at_before_the_masonry() {
+        // `carve_door`'s order, so the reason on the `connect` row is the
+        // one on the door's own line when both are wrong.
+        assert!(matches!(
+            port_in("  door id=e side=front at=middle\n", "e"),
+            Err(PortRejection::DoorAt { .. }),
+        ));
+    }
+
+    #[test]
+    fn port_world_position_refuses_a_window_argument_by_name() {
+        for (args, fault) in [
+            ("side=front offset=0 size=1x1", WindowArgFault::YAbsent),
+            (
+                "side=front offset=0 y=abc size=1x1",
+                WindowArgFault::YMalformed,
+            ),
+            ("side=front offset=0 y=1", WindowArgFault::SizeAbsent),
+            (
+                "side=front offset=0 y=1 size=3",
+                WindowArgFault::SizeMalformed,
+            ),
+            (
+                "side=front offset=x y=1 size=1x1",
+                WindowArgFault::OffsetMalformed,
+            ),
+        ] {
+            let body = format!("  walls mat_slot=w height=3\n  window id=l {args} mat_slot=g\n");
+            assert!(
+                matches!(
+                    port_in(&body, "l"),
+                    Err(PortRejection::WindowArgument { fault: f, .. }) if f == fault,
+                ),
+                "`{args}` should be refused as {fault:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn port_world_position_window_without_offset_anchors_at_the_origin_like_the_cut() {
+        // `fill_window` reads an absent `offset=` as `0` and cuts the
+        // window; the port used to refuse the same member, so the strip
+        // was dropped beside a window that was there.
+        assert_eq!(
+            port_in(
+                "  walls mat_slot=w height=3\n  window id=l side=front y=1 size=1x1 mat_slot=g\n",
+                "l"
+            ),
+            port_in(
+                "  walls mat_slot=w height=3\n  window id=l side=front offset=0 y=1 size=1x1 mat_slot=g\n",
+                "l"
+            ),
         );
+        assert!(
+            port_in(
+                "  walls mat_slot=w height=3\n  window id=l side=front y=1 size=1x1 mat_slot=g\n",
+                "l"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn port_world_position_refuses_a_sizeless_def() {
+        let module =
+            crate::parse("def cottage:\n  door id=e side=front at=center\n").expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 5, z: 3 };
+        assert_eq!(
+            port_at(
+                (0, 0, 0),
+                dims,
+                def,
+                &pid("e"),
+                &WallColumn::from_walls([(0, 3)])
+            ),
+            Err(PortRejection::Sizeless),
+        );
+    }
+
+    #[test]
+    fn port_world_position_refuses_a_coordinate_past_i32_as_out_of_range() {
+        let module = crate::parse(
+            "def cottage size=3x3:\n  walls mat_slot=w height=3\n  door id=e side=right at=center\n",
+        )
+        .expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 5, z: 3 };
+        // The right wall sits at `origin.x + 2`, so `i32::MAX - 2` puts
+        // it one column past the last addressable one: the refusal comes
+        // from `door_world_xz`'s own sum, before the step out of the wall.
+        // `..._at_the_last_step_out_of_the_wall` below reaches that step.
+        assert_eq!(
+            port_at(
+                (i32::MAX - 2, 0, 0),
+                dims,
+                def,
+                &pid("e"),
+                &declared_column(def)
+            ),
+            Err(PortRejection::OutOfRange),
+        );
+    }
+
+    #[test]
+    fn port_world_position_refuses_a_coordinate_past_i32_at_the_last_step_out_of_the_wall() {
+        // A back door on a body at `z = i32::MIN`: the wall itself sits on
+        // the last addressable row, which `door_world_xz` computes
+        // cleanly, and only the one step outward (`-z`) leaves the range.
+        // Every other refusal in this file overflows earlier, so this is
+        // the case that holds the final `checked_add`.
+        let module = crate::parse(
+            "def cottage size=3x3:\n  walls mat_slot=w height=3\n  door id=e side=back at=center\n",
+        )
+        .expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 5, z: 3 };
+        assert_eq!(
+            port_at(
+                (0, 0, i32::MIN),
+                dims,
+                def,
+                &pid("e"),
+                &declared_column(def)
+            ),
+            Err(PortRejection::OutOfRange),
+        );
+        // One row further in, the same door is placed, so the refusal
+        // above is the last step and not the wall.
+        assert_eq!(
+            port_at(
+                (0, 0, i32::MIN + 1),
+                dims,
+                def,
+                &pid("e"),
+                &declared_column(def)
+            ),
+            Ok((1, 0, i32::MIN)),
+        );
+    }
+
+    #[test]
+    fn port_world_position_asks_the_window_horizontal_fit_before_the_masonry() {
+        // `offset=4 size=3x2` runs past a 5-long wall and `y=9` is above a
+        // 3-high course: both wrong. `fill_window` asks the horizontal
+        // fit first, so the port does too, and the two lines give one
+        // reason.
+        assert!(matches!(
+            port_in(
+                "  walls mat_slot=w height=3\n  window id=l side=front offset=4 y=9 size=3x2 mat_slot=g\n",
+                "l"
+            ),
+            Err(PortRejection::WindowPastWall { .. }),
+        ));
+    }
+
+    #[test]
+    fn port_world_position_refuses_an_opening_the_openings_pass_did_not_cut() {
+        // Every rule the port reads holds, and the body's `cut` set does
+        // not hold the member — `repeat=0`, or a `mat_slot=` that
+        // resolved to nothing. The port is refused rather than laid to
+        // a wall that is still standing.
+        let module = crate::parse(concat!(
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=w height=3\n",
+            "  door id=e side=front at=center\n",
+            "  window id=l side=back offset=0 y=1 size=1x1 mat_slot=g\n",
+        ))
+        .expect("parse");
+        let ir = crate::lower(&module);
+        let def = ir.defs.first().expect("def lowered");
+        let dims = Dims { x: 3, y: 5, z: 3 };
+        let walls = declared_column(def);
+        let none: HashSet<Span> = HashSet::new();
+        for (id, role) in [("e", "door"), ("l", "window")] {
+            assert!(
+                matches!(
+                    port_world_position((0, 0, 0), dims, def, &pid(id), &walls, &none),
+                    Err(PortRejection::NotCut { role: r, .. }) if r == role,
+                ),
+                "`{id}` was not cut",
+            );
+            assert!(port_at((0, 0, 0), dims, def, &pid(id), &walls).is_ok());
+        }
+    }
+
+    /// One rejection per variant and, where a variant carries how an
+    /// argument was [`Written`], per way of writing it. Built from an
+    /// exhaustive `match` so a new variant is a compile error here until
+    /// it has a row.
+    fn every_rejection() -> Vec<PortRejection> {
+        // One seed per variant; `samples` expands each. The seeds' fields
+        // are placeholders — only the variant is read.
+        let seeds = [
+            PortRejection::UnknownMember,
+            PortRejection::ReservedRole {
+                role: String::new(),
+                member: 0..0,
+            },
+            PortRejection::Side {
+                written: Written::Absent,
+                member: 0..0,
+            },
+            PortRejection::Sizeless,
+            PortRejection::DoorAt {
+                written: Written::Absent,
+                member: 0..0,
+            },
+            PortRejection::DoorNoWalls { member: 0..0 },
+            PortRejection::DoorOutsideCourse {
+                walls: WallColumn::default(),
+                member: 0..0,
+            },
+            PortRejection::WindowArgument {
+                fault: WindowArgFault::YAbsent,
+                member: 0..0,
+            },
+            PortRejection::WindowPastWall {
+                offset: 0,
+                width: 0,
+                wall_length: 0,
+                member: 0..0,
+            },
+            PortRejection::WindowNoWalls { member: 0..0 },
+            PortRejection::WindowOutsideCourse {
+                y: 0,
+                height: 0,
+                walls: WallColumn::default(),
+                member: 0..0,
+            },
+            PortRejection::NotCut {
+                role: "door",
+                member: 0..0,
+            },
+            PortRejection::OutOfRange,
+        ];
+        seeds.iter().flat_map(samples).collect()
+    }
+
+    /// Every rendering [`every_rejection`] checks for the variant of `r`.
+    /// An exhaustive `match`, so a new variant is a compile error here
+    /// until it has a row.
+    fn samples(r: &PortRejection) -> Vec<PortRejection> {
+        let span: Span = 3..9;
+        match r {
+            PortRejection::UnknownMember => vec![PortRejection::UnknownMember],
+            PortRejection::ReservedRole { .. } => ["stair", "roof", "floor"]
+                .into_iter()
+                .map(|role| PortRejection::ReservedRole {
+                    role: role.to_owned(),
+                    member: span.clone(),
+                })
+                .collect(),
+            PortRejection::Side { .. } => written_samples("frnt")
+                .into_iter()
+                .map(|written| PortRejection::Side {
+                    written,
+                    member: span.clone(),
+                })
+                .collect(),
+            PortRejection::Sizeless => vec![PortRejection::Sizeless],
+            PortRejection::DoorAt { .. } => written_samples("middle")
+                .into_iter()
+                .map(|written| PortRejection::DoorAt {
+                    written,
+                    member: span.clone(),
+                })
+                .collect(),
+            PortRejection::DoorNoWalls { .. } => vec![PortRejection::DoorNoWalls {
+                member: span.clone(),
+            }],
+            PortRejection::DoorOutsideCourse { .. } => {
+                vec![PortRejection::DoorOutsideCourse {
+                    walls: WallColumn::from_walls([(6, 4)]),
+                    member: span.clone(),
+                }]
+            }
+            PortRejection::WindowArgument { .. } => [
+                WindowArgFault::OffsetMalformed,
+                WindowArgFault::YAbsent,
+                WindowArgFault::YMalformed,
+                WindowArgFault::SizeAbsent,
+                WindowArgFault::SizeMalformed,
+            ]
+            .into_iter()
+            .map(|fault| PortRejection::WindowArgument {
+                fault,
+                member: span.clone(),
+            })
+            .collect(),
+            PortRejection::WindowPastWall { .. } => vec![PortRejection::WindowPastWall {
+                offset: 2,
+                width: 2,
+                wall_length: 3,
+                member: span.clone(),
+            }],
+            PortRejection::WindowNoWalls { .. } => vec![PortRejection::WindowNoWalls {
+                member: span.clone(),
+            }],
+            PortRejection::WindowOutsideCourse { .. } => [(0, 1), (u32::MAX, 2)]
+                .into_iter()
+                .map(|(y, height)| PortRejection::WindowOutsideCourse {
+                    y,
+                    height,
+                    walls: WallColumn::from_walls([(0, 3)]),
+                    member: span.clone(),
+                })
+                .collect(),
+            PortRejection::NotCut { .. } => ["door", "window"]
+                .into_iter()
+                .map(|role| PortRejection::NotCut {
+                    role,
+                    member: span.clone(),
+                })
+                .collect(),
+            PortRejection::OutOfRange => vec![PortRejection::OutOfRange],
+        }
+    }
+
+    fn written_samples(ident: &str) -> [Written; 3] {
+        [
+            Written::Absent,
+            Written::Ident(ident.to_owned()),
+            Written::OtherShape,
+        ]
+    }
+
+    #[test]
+    fn every_rejection_note_renders_in_full() {
+        const OWN: &str = "; the member says so on its own line too";
+        const NO_WALLS: &str = "its `def` has no `walls` that paints — a positive `height=` and a `mat_slot=` that resolves";
+        let expected: Vec<(String, bool)> = vec![
+            ("`a.p` names no member of its `def` body".to_owned(), false),
+            ("`a.p` is a `stair`, and only a `door` or a `window` can anchor a port (`stair` ports are reserved) — declare the port on a door or window instead".to_owned(), true),
+            ("`a.p` is a `roof`, and only a `door` or a `window` can anchor a port (`roof` ports are reserved) — declare the port on a door or window instead".to_owned(), true),
+            ("`a.p` is a `floor`, and only a `door` or a `window` can anchor a port — declare the port on a door or window instead".to_owned(), true),
+            (format!("`a.p` has no `side=` (expected one of front, back, left, right){OWN}"), true),
+            (format!("`a.p` has `side=frnt`, which is not one of front, back, left, right{OWN}"), true),
+            (format!("`a.p` has a `side=` that is not one of front, back, left, right{OWN}"), true),
+            ("`a.p` belongs to a `def` with no `size=`, so its walls have no length".to_owned(), false),
+            (format!("`a.p` is a door that has no `at=`{OWN}"), true),
+            (format!("`a.p` is a door that has `at=middle`, which is not one of center, left, right{OWN}"), true),
+            (format!("`a.p` is a door that has an `at=` that is not one of center, left, right (numeric offsets are reserved){OWN}"), true),
+            (format!("`a.p` is a door with no wall to open: {NO_WALLS}{OWN}"), true),
+            (format!("`a.p` is a door that opens at y=1, the row above the floor slab, which is not inside any wall course (the walls occupy y=7..=10){OWN}"), true),
+            (format!("`a.p` is a window that has an `offset=` that is not a non-negative integer that fits in u32{OWN}"), true),
+            (format!("`a.p` is a window that has no `y=`{OWN}"), true),
+            (format!("`a.p` is a window that has a `y=` that is not a non-negative integer that fits in u32{OWN}"), true),
+            (format!("`a.p` is a window that has no `size=WxH`{OWN}"), true),
+            (format!("`a.p` is a window that has a `size=` that is not a `WxH` of two positive integers{OWN}"), true),
+            (format!("`a.p` is a window that runs past the end of its wall (`offset + size.w` = 2 + 2, wall length 3){OWN}"), true),
+            (format!("`a.p` is a window with no wall to cut into: {NO_WALLS}{OWN}"), true),
+            (format!("`a.p` is a window whose rows y=0..=0 are not all inside one wall course (the walls occupy y=1..=3){OWN}"), true),
+            (format!("`a.p` is a window whose 2 rows from y=4294967295 run past the highest row a build can address (the walls occupy y=1..=3){OWN}"), true),
+            ("`a.p` is a door the openings pass did not cut, so a strip would end against the wall — the finding on its own line says why".to_owned(), true),
+            ("`a.p` is a window the openings pass did not cut, so a strip would end against the wall — the finding on its own line, or on the material its `mat_slot=` names, says why".to_owned(), true),
+            ("`a.p` would sit outside the coordinate range a build can address — bring its `place` closer to the origin".to_owned(), false),
+        ];
+        let got: Vec<(String, bool)> = every_rejection()
+            .iter()
+            .map(|r| {
+                let note = r.note("a.p");
+                (note.message, note.span == Some(3..9))
+            })
+            .collect();
+        assert_eq!(got.len(), expected.len(), "{got:#?}");
+        for (got, expected) in got.iter().zip(&expected) {
+            assert_eq!(got, expected);
+        }
+    }
+
+    #[test]
+    fn the_member_line_and_the_note_word_a_door_at_fault_alike() {
+        // `carve_door`'s deferral and the port's note are built from one
+        // clause, so what the note says `at=` is, the door's line says too.
+        for written in written_samples("middle") {
+            let deferral = door_at_deferral(&written);
+            let note = PortRejection::DoorAt {
+                written: written.clone(),
+                member: 0..0,
+            }
+            .note("a.p")
+            .message;
+            let clause = door_at_clause(&written);
+            assert!(
+                deferral.starts_with(&format!("door {clause}")),
+                "{deferral}"
+            );
+            assert!(note.contains(&clause), "{note}");
+        }
     }
 }

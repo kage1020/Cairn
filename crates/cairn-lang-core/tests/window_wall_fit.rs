@@ -376,26 +376,37 @@ fn walls_under_a_level_are_carved_into_and_anchor_a_port() {
 }
 
 #[test]
-fn the_port_contract_note_states_the_rule_the_port_applies() {
-    // The note is the only place an author is told what a window port
-    // needs, and it used to quote the bound that was wrong. A reader who
-    // followed it — `y + size.h <= walls.height` — would move a legal
-    // window down a row to satisfy a rule the compiler no longer has.
-    let out = lowered(&site_with_window_port(0, 1, 3));
-    let note = out
+fn the_walkway_defer_states_the_rule_the_window_broke() {
+    // The note is where an author is told why the strip is missing. It
+    // used to quote every contract a port has; a reader who followed the
+    // window one — and it once quoted a bound that was wrong — had to work
+    // out which clause their window broke. It names the rows now, and the
+    // rows the walls occupy, which is the check the port applied.
+    let src = site_with_window_port(0, 1, 3);
+    let out = lowered(&src);
+    let notes: Vec<_> = out
         .diagnostics
         .iter()
         .filter(|d| d.primary.contains("was skipped because port"))
         .flat_map(|d| &d.notes)
-        .map(|n| n.message.as_str())
-        .find(|m| m.starts_with("a `window` port requires"))
-        .expect("the walkway defer lists the window-port contract");
+        .collect();
     assert_eq!(
-        note,
-        "a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / \
-         `size=WxH` that fit inside the wall (`offset + size.w \u{2264} wall_length`, and every \
-         row `y ..= y + size.h - 1` inside one course of the masonry — `walls height=H` under \
-         `level y=N` fills rows `N + 1 ..= N + H`, and the floor slab owns row 0)",
+        notes.len(),
+        1,
+        "one note for the one refused port: {notes:?}"
+    );
+    assert_eq!(
+        notes[0].message,
+        "`a.top` is a window whose rows y=0..=0 are not all inside one wall course \
+         (the walls occupy y=1..=3); the member says so on its own line too",
+    );
+    let at = notes[0]
+        .span
+        .clone()
+        .expect("the note points at the window");
+    assert!(
+        src[at].starts_with("window id=top"),
+        "the note points at the window's own line",
     );
 }
 

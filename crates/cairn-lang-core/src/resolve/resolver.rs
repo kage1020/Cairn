@@ -106,8 +106,11 @@ pub struct Resolution {
 /// `E_UNRESOLVED_PLACE_REF` from the connect path) can underline the
 /// exact token the user wrote, not the whole `connect` line. Block-array
 /// side diagnostics (`W_WALKWAY_BLOCKED`, `W_DUPLICATE_WALKWAY`, the
-/// endpoint-cascade `W_DEFERRED_MEMBER`) describe the whole walkway and
-/// therefore anchor at `ValidatedConnect::span` instead.
+/// endpoint-cascade `W_DEFERRED_MEMBER`, and the `W_DEFERRED_MEMBER` for a
+/// port that could not be placed) describe the whole walkway and
+/// therefore anchor at `ValidatedConnect::span` instead. The last one's
+/// notes underline the refused port's member line in the `def`, not this
+/// span.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PortRef {
     /// `place id=` value the port belongs to.

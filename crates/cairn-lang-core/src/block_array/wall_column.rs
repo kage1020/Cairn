@@ -123,8 +123,10 @@ impl fmt::Display for WallColumn {
     /// form the deferral message quotes, so an author reading it can see
     /// which rows were available without counting `height=` by hand.
     ///
-    /// An empty column renders as `none`; the one caller that can reach
-    /// that case says so in its own words instead.
+    /// An empty column renders as `none`, which no caller prints: every
+    /// site that formats a column asks `is_empty()` first — or holds one a
+    /// non-empty check produced — and says "no walls" in its own words, so
+    /// only this file's tests reach the fallback.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.spans.is_empty() {
             return f.write_str("none");
