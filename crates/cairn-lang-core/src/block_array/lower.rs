@@ -1098,12 +1098,12 @@ fn lower_site<'a>(
         // `E_UNRESOLVED_PLACE_REF`); falling back to `(0, 0, 0)` would
         // silently stack the placement on top of `home1`, so we surface a
         // deferred warning and skip the row instead.
-        let Some(origin) = resolve_place_origin(member, placed, &site.name) else {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
-            ));
-            continue;
+        let origin = match resolve_place_origin(member, placed, &site.name, diagnostics) {
+            Ok(origin) => origin,
+            Err(fault) => {
+                diagnostics.push(diag_deferred_member_reason(member, &fault.deferral()));
+                continue;
+            }
         };
 
         let Some(LoweredBody { array, walls, cut }) = lower_body_to_block_array(
@@ -1640,65 +1640,101 @@ fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic
     }
 }
 
+/// Why [`resolve_place_origin`] could not give a `place` row an origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OriginFault {
+    /// None of the three selectors names a usable anchor: the resolver
+    /// already emitted `E_INVALID_PLACE_ORIGIN`, or the prior place was
+    /// skipped at lowering time.
+    PriorMissing,
+    /// The origin `east_of=` / `north_of=` works out to lies outside the
+    /// `i32` range a placement records its origin in. `axis` is the one
+    /// the selector moves along and `offset` the sum that left the range,
+    /// for the message.
+    OutOfRange { axis: char, offset: i128 },
+}
+
+impl OriginFault {
+    /// The `W_DEFERRED_MEMBER` reason for a row this fault refuses.
+    fn deferral(self) -> String {
+        match self {
+            Self::PriorMissing => "the prior place referenced by `east_of=`/`north_of=` did not \
+                                   lower, so this placement's origin cannot be resolved"
+                .to_owned(),
+            Self::OutOfRange { axis, offset } => format!(
+                "this placement's origin works out to {axis}={offset}, past the {} to {} range \
+                 a placement's origin is recorded in; shorten the `gap=` on this row or on a \
+                 row it is placed relative to",
+                i32::MIN,
+                i32::MAX,
+            ),
+        }
+    }
+}
+
 /// Solve the `at=origin` / `east_of=ID gap=N` / `north_of=ID gap=N` chain
 /// for one `place` line.
 ///
-/// Returns `None` when none of the three selectors is present in a usable
-/// shape (the resolver already emitted `E_INVALID_PLACE_ORIGIN`); callers
-/// fall back to `(0, 0, 0)` so the per-place [`BlockArray`] still lands.
 /// `east_of` advances along `+x` past the prior placement's full inflated
 /// `dims.x` (overhang already baked in); `north_of` retreats along `-z`
 /// per the front-is-`+z` convention of `spec/components-editing-sites`
 /// "Multi-building with `site`".
+///
+/// The sum is taken in `i128`, where no `i32` origin, `u32` extent and
+/// `i64` gap can overflow, and refused when it leaves `i32` rather than
+/// saturated: a saturated origin put two placements on one coordinate, the
+/// second stacked inside the first, and nothing said so.
+///
+/// A `gap=` that is not an integer is an unreadable value: the row is
+/// placed as `gap=0` would place it, and the `W_IGNORED_ARGUMENT` saying so
+/// is pushed only on the path that returns an origin, since a refused row
+/// is not placed at all.
 fn resolve_place_origin(
     member: &Member,
     placed: &IndexMap<String, PlacedBody>,
     site_name: &str,
-) -> Option<(i32, i32, i32)> {
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(i32, i32, i32), OriginFault> {
     if let Some(value) = member.intent_state.get("at")
         && matches!(&value.value.kind, ValueKind::Ident(s) if s == "origin")
     {
-        return Some((0, 0, 0));
+        return Ok((0, 0, 0));
     }
-    let gap = member
-        .intent_state
-        .get("gap")
-        .and_then(|v| match &v.value.kind {
-            ValueKind::Int(n) => i32::try_from(*n).ok(),
+    let (gap, gap_ignored) = match read_or_ignore(
+        member,
+        "gap",
+        |kind| match kind {
+            ValueKind::Int(n) => Some(*n),
             _ => None,
-        })
-        .unwrap_or(0);
-    if let Some(target) = member
-        .intent_state
-        .get("east_of")
-        .and_then(|v| v.value.as_label_str())
-        && let Some(PlacedBody {
-            placement: prev, ..
-        }) = placed.get(&place_scope_key(site_name, target))
-    {
-        let next_x = prev
-            .origin
-            .0
-            .saturating_add(i32::try_from(prev.dims.x).unwrap_or(i32::MAX))
-            .saturating_add(gap);
-        return Some((next_x, prev.origin.1, prev.origin.2));
-    }
-    if let Some(target) = member
-        .intent_state
-        .get("north_of")
-        .and_then(|v| v.value.as_label_str())
-        && let Some(PlacedBody {
-            placement: prev, ..
-        }) = placed.get(&place_scope_key(site_name, target))
-    {
-        let next_z = prev
-            .origin
-            .2
-            .saturating_sub(i32::try_from(prev.dims.z).unwrap_or(i32::MAX))
-            .saturating_sub(gap);
-        return Some((prev.origin.0, prev.origin.1, next_z));
-    }
-    None
+        },
+        "an integer",
+        "the row is placed as `gap=0` places it, edge to edge with the place it is relative to",
+    ) {
+        Ok(gap) => (gap.unwrap_or(0), None),
+        Err(ignored) => (0, Some(*ignored)),
+    };
+    let fit = |axis: char, offset: i128| {
+        i32::try_from(offset).map_err(|_| OriginFault::OutOfRange { axis, offset })
+    };
+    let prior = |key: &str| {
+        member
+            .intent_state
+            .get(key)
+            .and_then(|v| v.value.as_label_str())
+            .and_then(|target| placed.get(&place_scope_key(site_name, target)))
+            .map(|body| (body.placement.origin, body.placement.dims))
+    };
+    let origin = if let Some(((x, y, z), dims)) = prior("east_of") {
+        let next_x = i128::from(x) + i128::from(dims.x) + i128::from(gap);
+        (fit('x', next_x)?, y, z)
+    } else if let Some(((x, y, z), dims)) = prior("north_of") {
+        let next_z = i128::from(z) - i128::from(dims.z) - i128::from(gap);
+        (x, y, fit('z', next_z)?)
+    } else {
+        return Err(OriginFault::PriorMissing);
+    };
+    diagnostics.extend(gap_ignored);
+    Ok(origin)
 }
 
 /// Bundle of per-struct context shared by every member-lowering helper.
@@ -2459,14 +2495,91 @@ fn nonneg_int_or_ignore(
     consequence: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<u32> {
-    if !member.intent_state.contains_key(key) {
-        return None;
+    read_or_ignore(
+        member,
+        key,
+        |kind| match kind {
+            ValueKind::Int(v) => u32::try_from(*v).ok(),
+            _ => None,
+        },
+        NONNEG_U32,
+        consequence,
+    )
+    .unwrap_or_else(|ignored| {
+        diagnostics.push(*ignored);
+        None
+    })
+}
+
+/// What [`nonneg_int_or_ignore`] accepts, worded to complete "`key=` must
+/// be …".
+const NONNEG_U32: &str = "a non-negative integer that fits in u32";
+
+/// Read `key=` through `read` for a caller that falls back to a default,
+/// telling "absent" apart from "unreadable".
+///
+/// - `Ok(Some(v))`: the key is present and `read` accepted its value.
+/// - `Ok(None)`: the key was not written; the caller applies its default
+///   and nothing is reported.
+/// - `Err(finding)`: the key was written and `read` refused it. The
+///   finding is the `W_IGNORED_ARGUMENT` `spec/lint` "Error vs warning"
+///   calls an unreadable value, and the caller applies its default.
+///
+/// The finding is handed back rather than pushed because it says the
+/// member is in the build with the default in place, which is only true
+/// once the caller gets that far: a member that defers further down
+/// already has its repair in `W_DEFERRED_MEMBER`, and a finding about an
+/// argument nothing was built from would bill one repair twice.
+/// [`nonneg_int_or_ignore`] pushes it at once instead, and its caller words
+/// the consequence for a roof that draws and for one that does not.
+///
+/// `expected` completes "`key=` must be …"; `consequence` is what the
+/// default did to the output, in the caller's words.
+fn read_or_ignore<'m, T>(
+    member: &'m Member,
+    key: &str,
+    read: impl FnOnce(&'m ValueKind) -> Option<T>,
+    expected: &str,
+    consequence: &str,
+) -> Result<Option<T>, Box<Diagnostic>> {
+    let Some(raw) = member.intent_state.get(key) else {
+        return Ok(None);
+    };
+    match read(&raw.value.kind) {
+        Some(v) => Ok(Some(v)),
+        None => Err(Box::new(diag_ignored_argument(
+            member,
+            key,
+            &raw.value.describe(),
+            expected,
+            consequence,
+        ))),
     }
-    if let Some(v) = member.nonneg_u32(key) {
-        return Some(v);
-    }
-    diagnostics.push(diag_ignored_argument(member, key, consequence));
-    None
+}
+
+/// [`read_or_ignore`] for a key whose value is a bare identifier.
+///
+/// Which identifiers the caller accepts is still the caller's to say:
+/// this only separates "not an identifier at all" (`half="bottom"`,
+/// `facing=1`), which is an unreadable value, from an identifier the
+/// caller does not know (`half=sideways`), which names no state and so
+/// defers the member.
+fn ident_or_ignore<'m>(
+    member: &'m Member,
+    key: &str,
+    expected: &str,
+    consequence: &str,
+) -> Result<Option<&'m str>, Box<Diagnostic>> {
+    read_or_ignore(
+        member,
+        key,
+        |kind| match kind {
+            ValueKind::Ident(name) => Some(name.as_str()),
+            _ => None,
+        },
+        expected,
+        consequence,
+    )
 }
 
 fn nonneg_int_or_defer(
@@ -2485,14 +2598,6 @@ fn nonneg_int_or_defer(
             &format!("`{key}=` must be a non-negative integer that fits in u32"),
         ));
         NonNegRead::Deferred
-    }
-}
-
-fn bool_value(member: &Member, key: &str) -> Option<bool> {
-    let raw = member.intent_state.get(key)?;
-    match &raw.value.kind {
-        ValueKind::Bool(b) => Some(*b),
-        _ => None,
     }
 }
 
@@ -3240,7 +3345,31 @@ fn fill_stair(
     let Some(side) = side_of(member, diagnostics) else {
         return;
     };
-    let half = match member.ident_value("half") {
+    // A value that is not an identifier at all (`half="bottom"`,
+    // `facing=1`) is unreadable rather than unknown: the band is drawn
+    // with the default state, and the findings wait until it is, because
+    // a stair refused below has its repair in that refusal.
+    let mut ignored = Vec::new();
+    let mut ident = |key: &str, expected: &str, default: &str| {
+        ident_or_ignore(
+            member,
+            key,
+            expected,
+            &format!("the stair is built with the default `{key}={default}`"),
+        )
+        .unwrap_or_else(|finding| {
+            ignored.push(*finding);
+            None
+        })
+    };
+    let half_read = ident("half", "`top` or `bottom`", "top");
+    let facing_read = ident("facing", "`out` or `in`", "out");
+    let shape_read = ident(
+        "shape",
+        "`straight`, `outer_left`, or `outer_right`",
+        "straight",
+    );
+    let half = match half_read {
         Some("top") | None => "top",
         Some("bottom") => "bottom",
         Some(other) => {
@@ -3251,7 +3380,7 @@ fn fill_stair(
             return;
         }
     };
-    let facing = match member.ident_value("facing") {
+    let facing = match facing_read {
         Some("out") | None => shed_high_side(side),
         Some("in") => inward_cardinal(side),
         Some(other) => {
@@ -3262,7 +3391,7 @@ fn fill_stair(
             return;
         }
     };
-    let shape = match member.ident_value("shape") {
+    let shape = match shape_read {
         Some("straight") | None => StairShape::Straight,
         Some("outer_left") => StairShape::OuterLeft,
         Some("outer_right") => StairShape::OuterRight,
@@ -3329,6 +3458,7 @@ fn fill_stair(
         diagnostics,
     );
     let idx = palette.intern(stair_state(stair_id, facing, half, shape));
+    diagnostics.extend(ignored);
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
     for u in 0..length {
         let Some((wx, _wy, wz)) = wall_local_to_grid(
@@ -4114,7 +4244,21 @@ fn fill_window(
         }
     };
     let y_start = y_start_local.saturating_add(y_offset);
-    let sym = bool_value(member, "sym").unwrap_or(false);
+    // An unreadable `sym=` (`sym=yes`, `sym="true"`) draws the window
+    // unmirrored, and says so once the primary is in the build.
+    let (sym, sym_ignored) = match read_or_ignore(
+        member,
+        "sym",
+        |kind| match kind {
+            ValueKind::Bool(b) => Some(*b),
+            _ => None,
+        },
+        "`true` or `false`",
+        "the window is drawn without its mirror, as `sym=false` would draw it",
+    ) {
+        Ok(sym) => (sym.unwrap_or(false), None),
+        Err(ignored) => (false, Some(*ignored)),
+    };
     // `repeat=` stamps the same rectangle multiple times along the wall,
     // separated by `step=` voxels. Both keys are optional: an absent
     // `repeat` collapses to a single instance (the pre-repeat
@@ -4255,6 +4399,7 @@ fn fill_window(
             canvas,
         );
     }
+    diagnostics.extend(sym_ignored);
     if sym {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
         if mirror_offset == offset {
@@ -4470,13 +4615,21 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
 /// the output is the caller's to say. The primary stops at "the value was
 /// ignored" for the same reason — whether the member is in the build is
 /// not a fact this function has.
-fn diag_ignored_argument(member: &Member, key: &str, consequence: &str) -> Diagnostic {
+///
+/// `written` is the value as [`crate::ast::Value::describe`] renders it, so
+/// a quoted `"true"` reads as the string it is rather than as the word the
+/// author meant.
+fn diag_ignored_argument(
+    member: &Member,
+    key: &str,
+    written: &str,
+    expected: &str,
+    consequence: &str,
+) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::IgnoredArgument,
         span: member.span.clone(),
-        primary: format!(
-            "`{key}=` must be a non-negative integer that fits in u32; the value was ignored",
-        ),
+        primary: format!("`{key}=` must be {expected}, not {written}; the value was ignored"),
         notes: vec![DiagnosticNote {
             span: None,
             message: consequence.to_owned(),
