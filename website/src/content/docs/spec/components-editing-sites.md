@@ -67,8 +67,8 @@ Each `place` carries **exactly one** of `at`, `east_of`, `north_of`:
 | Selector | Effect | Notes |
 |---|---|---|
 | `at=origin` | Anchors at world `(0, 0, 0)`. | The only legal `at=` value. The first `place` in a site must use it, since there is no implicit default. |
-| `east_of=ID gap=N` | New origin = prior `(x + dims.x + N, y, z)`. | `ID` must name a place declared earlier in the same `site`. `gap` is in blocks, edge to edge (`0` → walls touch), defaulting to `0`. |
-| `north_of=ID gap=N` | New origin = prior `(x, y, z − dims.z − N)`. | Same `ID` and `gap` rules as `east_of`. |
+| `east_of=ID gap=N` | New origin = `(prior.x + prior.dims.x + N, prior.y, prior.z)`. | `ID` must name a place declared earlier in the same `site`. `gap` is in blocks, edge to edge (`0` → walls touch), defaulting to `0`. |
+| `north_of=ID gap=N` | New origin = `(prior.x, prior.y, prior.z − new.dims.z − N)`. | Same `ID` and `gap` rules as `east_of`. An origin is the low-`z` corner, so the step back is the new placement's own depth: that is what puts its `+z` face `N` blocks from the prior's `−z` face whatever the two depths are. |
 
 Combining selectors, or using `at=` with anything other than `origin`, is
 `E_INVALID_PLACE_ORIGIN`.

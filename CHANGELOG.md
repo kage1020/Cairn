@@ -254,6 +254,24 @@
 
 ### Fixed
 
+- *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
+  two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
+  and nothing said so. With a 3x3 `a` and a 3x9 `b`:
+
+  ```
+  place id=a use=small theme=t at=origin
+  place id=b use=deep  theme=t north_of=a gap=0
+  ```
+
+  `b` landed at `z = −3` and ran through `z = 5`, covering `a` completely; with the two defs
+  swapped, `b` landed at `z = −9`, six empty rows behind `a`. An origin is the low-`z` corner, so
+  only the new placement's own depth puts its `+z` face against the prior's `−z` face. `b` now
+  lands at `z = −9` and `z = −3` respectively, flush in both orders, and `gap=N` leaves exactly `N`
+  empty rows between them. The lockfile's `origin` and the written structures move with it.
+  `east_of=` already read the right side's width and is unchanged. `spec/components-editing-sites`
+  "Origin selectors" now names whose dims each formula reads: `prior.x + prior.dims.x + N` and
+  `prior.z − new.dims.z − N`.
+
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
   `None`, so the row had nothing to branch on:
