@@ -60,7 +60,7 @@ pub struct BlockArrayIr {
     /// [`crate::resolve::Resolution::scopes`] so the two maps line up
     /// without an extra translation step.
     pub structures: IndexMap<String, BlockArray>,
-    /// Per-`place` site coordinates. Keyed identically to [`structures`]
+    /// Per-`place` site coordinates. Keyed identically to [`Self::structures`]
     /// (`site::HAMLET::PLACE_ID`) so a consumer can join the two without an
     /// extra index. Empty for any source with no `site` blocks, which keeps
     /// the JSON shape stable for cottage/themed-tower fixtures pre-dating
@@ -69,7 +69,7 @@ pub struct BlockArrayIr {
     pub placements: IndexMap<String, Placement>,
     /// Per-`connect` walkway metadata, keyed by [`WalkwayScopeKey`]. The
     /// matching [`BlockArray`] sits under the same wire-format key in
-    /// [`structures`], so a consumer can join the two against the same
+    /// [`Self::structures`], so a consumer can join the two against the same
     /// key the way `placements` does. Empty for any source with no
     /// `connect` rows, keeping the JSON shape stable for cottage /
     /// themed-tower fixtures.
@@ -147,8 +147,8 @@ pub struct BlockArray {
     /// becomes `(W, _, H)` here; the Y extent is derived from member
     /// contributions.
     pub dims: Dims,
-    /// Block states referenced by the [`voxels`] grid. Index `0` is always
-    /// [`BlockState::AIR`]; [`Palette::intern`] preserves that invariant.
+    /// Block states referenced by the [`Self::voxels`] grid. Index `0` is always
+    /// [`BlockState::air()`]; [`Palette::intern`] preserves that invariant.
     ///
     /// Every array the lowering and walkway passes produce carries this in
     /// the canonical order [`Palette::canonicalize`] fixes — air at slot
@@ -165,13 +165,13 @@ pub struct BlockArray {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
     /// Free entities (frames, paintings, ...). Empty for the same reason
-    /// as [`block_entities`].
+    /// as [`Self::block_entities`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<Entity>,
     /// Source scope this volume was lowered from, mirroring the
     /// [`crate::resolve::Resolution`] key (`struct::cottage`). Carried in
     /// the IR so a downstream serialiser can stamp it into the output
-    /// filename without re-threading the originating [`IntentModule`].
+    /// filename without re-threading the originating [`crate::intent::IntentModule`].
     pub source_scope: String,
 }
 
@@ -292,7 +292,8 @@ impl Dims {
     }
 }
 
-/// Index into a [`Palette`]. `0` is reserved for [`BlockState::AIR`].
+/// Index into a [`Palette`]. [`Self::AIR`] (`0`) is reserved for
+/// [`BlockState::air()`].
 ///
 /// A newtype rather than a bare `u16` so a future change of the underlying
 /// width (e.g. `u32` for very large palettes) does not ripple through every
@@ -358,7 +359,7 @@ impl BlockArray {
 /// Deduplicating palette. [`Palette::intern`] appends, so the order while
 /// a body is being painted is insertion order; [`Palette::canonicalize`]
 /// then rewrites it into the order the artifact carries. The slot at index
-/// `0` is always [`BlockState::AIR`] under both.
+/// `0` is always [`BlockState::air()`] under both.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct Palette {
@@ -368,7 +369,7 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// Construct a palette pre-seeded with [`BlockState::AIR`] at index `0`.
+    /// Construct a palette pre-seeded with [`BlockState::air()`] at index `0`.
     /// This is the only constructor lowering should use so the AIR invariant
     /// holds for every [`BlockArray`].
     #[must_use]

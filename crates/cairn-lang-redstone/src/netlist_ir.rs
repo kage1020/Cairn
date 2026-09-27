@@ -113,7 +113,7 @@ pub struct CellPortDriver {
 ///
 /// The DAG is stored as a topologically ordered `Vec<CellNode>` on
 /// [`NetlistIr::cells`]; every driver [`NetRef`] is either a
-/// [`NetRef::Input`] or an earlier [`NetRef::Cell(j)`] where `j` is
+/// [`NetRef::Input`] or an earlier [`NetRef::Cell`]`(j)` where `j` is
 /// strictly less than this node's index. That mirrors the Logic IR
 /// invariant and makes any downstream simulator or placer a single
 /// forward pass.

@@ -62,9 +62,9 @@ pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
 /// `spec/redstone` "Signal binding" writes an emitted signal on the
 /// component that emits it, and the sensor set it lists is `lever` /
 /// `button` / `daylight` / `observer` — none of which the surface accepts
-/// yet. `pressure_plate` is the one sensor [`KNOWN_KEYWORDS`] holds, so it
-/// is the only member a tail may sit on, and a recognizer for the other
-/// four costs one entry here.
+/// yet. `pressure_plate` is the one sensor [`known_keywords()`] returns,
+/// so it is the only member a tail may sit on, and a recognizer for the
+/// other four costs one entry here.
 ///
 /// Beside the argument tables rather than in `cairn-lang-redstone`, where
 /// the rule started, because it is a fact about the member line and not
