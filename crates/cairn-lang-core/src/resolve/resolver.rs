@@ -1458,7 +1458,9 @@ fn usable_place_id<'a>(
     // Validate before the id becomes half of a scope key. `PlaceId` states
     // the invariants, and `place_scope_key` joins on `::`, so an id carrying
     // `.` or `:` produces a key nothing can parse back — which is where the
-    // lowering pass used to `expect` and panic.
+    // lowering pass used to `expect` and panic. The id is also the stem of
+    // the artifact's file name, so a `/` or `\` in it used to put that file
+    // outside `--out`.
     if let Err(err) = PlaceId::new(place_id) {
         diagnostics.push(invalid_place_id_diag(
             place_id,
@@ -1600,8 +1602,10 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "a place id becomes part of the `site::<site>::<place>` scope key, \
-                      so it must be non-empty and free of `.`, `:`, and whitespace"
+            message: "a place id becomes part of the `site::<site>::<place>` scope key and \
+                      the stem of the artifact file written into `--out`, so it must be \
+                      non-empty and free of `.`, `:`, `/`, `\\`, and whitespace; \
+                      rename it with letters, digits, `_`, or `-` (`home1`, `north-tower`)"
                 .to_owned(),
         }],
         data: None,

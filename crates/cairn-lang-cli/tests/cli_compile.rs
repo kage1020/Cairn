@@ -7,7 +7,7 @@ use cairn_lang_core::lock::{HashHex, LockEdition, Lockfile};
 use tempfile::TempDir;
 
 mod common;
-use common::{cairn, crn_examples, example_in_tempdir, examples_dir};
+use common::{cairn, crn_examples, example_in_tempdir, examples_dir, write_source};
 
 /// The version cargo derived for this crate from `[workspace.package]`.
 ///
@@ -1347,4 +1347,96 @@ fn c30_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
         stderr.contains(":7:3:   note: overwritten member declared here"),
         "the note must carry the `door` line's position, got: {stderr}",
     );
+}
+
+/// Every file under `root`, relative to it, sorted.
+fn files_under(root: &std::path::Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).expect("read dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let rel = path.strip_prefix(root).expect("under root");
+                found.push(rel.to_string_lossy().into_owned());
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// A `place id=` is an artifact's file name, so a path separator in it would
+/// let the source choose where the compiler writes. `check` refuses it and
+/// `compile` writes nothing — neither the artifact nor the lock.
+///
+/// Each row is set up so the build would have succeeded before the rule
+/// existed: the absolute id's directory exists outside `--out`, and so does
+/// the `sub/` the relative id names inside it. The Windows separator is a
+/// plain character on Unix, and refused there too so whether an id is
+/// accepted does not depend on the host.
+#[test]
+fn a_place_id_carrying_a_path_separator_writes_nothing() {
+    let tmp = TempDir::new().expect("tempdir");
+    let root = tmp.path();
+    let elsewhere = root.join("elsewhere");
+    fs::create_dir_all(&elsewhere).expect("create elsewhere");
+    let absolute = elsewhere.join("hut");
+    let absolute = absolute.to_str().expect("utf-8 tempdir");
+
+    for (label, id) in [
+        ("absolute", absolute),
+        ("relative", "sub/hut"),
+        ("windows", "a\\b"),
+    ] {
+        let case = root.join(label);
+        let out = case.join("out");
+        fs::create_dir_all(out.join("sub")).expect("create out/sub");
+        let src = write_source(
+            &case,
+            "escape.crn",
+            &format!(
+                "@cairn 2026.06\n\ndef hut size=3x3:\n  floor mat_slot=floor\n\n\
+                 theme t:\n  slot floor -> @oak_planks\n\n\
+                 site s:\n  place id=\"{id}\" use=hut theme=t at=origin\n"
+            ),
+        );
+
+        let checked = cairn("check", &[src.to_str().unwrap()]);
+        let check_err = String::from_utf8_lossy(&checked.stderr);
+        assert_eq!(
+            checked.status.code(),
+            Some(1),
+            "{label}: stderr={check_err}"
+        );
+        assert!(
+            check_err.contains("error[E_INVALID_PLACE_ID]"),
+            "{label}: `id=\"{id}\"` must be E_INVALID_PLACE_ID, got: {check_err}",
+        );
+
+        let compiled = cairn(
+            "compile",
+            &[
+                src.to_str().unwrap(),
+                "--edition",
+                "java",
+                "--out",
+                out.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(
+            compiled.status.code(),
+            Some(1),
+            "{label}: stderr={}",
+            String::from_utf8_lossy(&compiled.stderr),
+        );
+    }
+    let expected: Vec<String> = ["absolute", "relative", "windows"]
+        .iter()
+        .map(|label| PathBuf::from(label).join("escape.crn"))
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(files_under(root), expected, "compile must write nothing");
 }

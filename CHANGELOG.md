@@ -254,6 +254,32 @@
 
 ### Fixed
 
+- *(core,cli)* A `place id=` carrying a path separator chose where the compiler wrote. The id is
+  the artifact's file name, and only `.`, `:`, whitespace and the empty id were refused, so `/`
+  passed `check` and `compile` joined the id onto `--out` as a path. An absolute id replaced
+  `--out` altogether:
+
+  ```
+  site s:
+    place id="/tmp/elsewhere/hut" use=hut theme=t at=origin
+  ```
+
+  ```console
+  $ cairn compile escape.crn --edition java --out out
+  wrote /tmp/elsewhere/hut.nbt
+  ```
+
+  A relative id such as `sub/hut` wrote into `out/sub/` when it existed and failed with a bare I/O
+  error when it did not, and an existing file at the destination was replaced like any other
+  artifact. `/` and `\` are now `E_INVALID_PLACE_ID`, on every platform, and the row is dropped:
+
+  ```
+  escape.crn:10:3: error[E_INVALID_PLACE_ID]: `place id=/tmp/elsewhere/hut` in site `s` is not a usable id: it contains `/`
+  ```
+
+  `compile` also refuses any artifact whose file name is not a single plain name before it writes
+  anything, so a later source of file names that skips the id rules cannot reopen this.
+
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
   `None`, so the row had nothing to branch on:

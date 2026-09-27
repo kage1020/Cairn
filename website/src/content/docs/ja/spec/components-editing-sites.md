@@ -95,7 +95,9 @@ Y 軸はトポロジカルセレクタの影響を受けず、現状すべての
 
 ### 9.3.4 出力ファイル名
 
-コンパイラは `place` ごとに `.nbt` を 1 つ、`id=` の名前で書きます (`home1.nbt`、`home2.nbt`)。各
+コンパイラは `place` ごとに `.nbt` を 1 つ、`id=` の名前で出力ディレクトリの直下に書きます
+(`home1.nbt`、`home2.nbt`)。`/` や `\` を含む id はファイルではなくパスを指すので
+`E_INVALID_PLACE_ID` です ([Lint](/ja/spec/lint/))。各
 placement のワールド原点と `(site, def, theme)` の provenance は `build.cairn.lock` の `placements`
 に記録されるので、下流の消費者は座標ソルバを再実行せずにレイアウトを再構築できます。
 

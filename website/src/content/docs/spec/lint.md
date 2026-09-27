@@ -254,7 +254,7 @@ author means, so with both in scope the question has not been asked.
 
 | Code | Meaning |
 |---|---|
-| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:` or whitespace. |
+| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:`, `/`, `\` or whitespace. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
@@ -262,9 +262,13 @@ author means, so with both in scope the question has not been asked.
 | `W_UNUSED_DEF` | A `def` no `place use=` references. |
 
 `E_INVALID_PLACE_ID` is about round-tripping rather than taste. The scope key
-`site::SITE::PLACE`, and every walkway key parsed back out of one, is built from those characters
-as separators, so an id carrying one cannot be read back. `id=` accepts a string literal, which is
-what let the value through.
+`site::SITE::PLACE`, and every walkway key parsed back out of one, is built with `.` and `:` as
+separators, so an id carrying one cannot be read back. The id is also the name of the file the
+placement is written to in the output directory, and a `/` or `\` would make that name a path: a
+relative id with one lands in a subdirectory, and an absolute id replaces the output directory
+altogether. Both separators are refused on every platform, so whether an id is accepted does not
+depend on the host that checks it. `id=` accepts a string literal, which is what let the value
+through.
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.

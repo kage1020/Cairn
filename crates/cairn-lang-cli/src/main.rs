@@ -3253,7 +3253,7 @@ fn prepare_artifacts(
                 message = note.message,
             );
         }
-        let path = out_dir.join(output_filename(scope, target.output_ext()));
+        let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
         // Walkway IR keys allow `.` / `_` in place and port ids; the
         // `output_filename` flatten of `.` → `_` can fold two distinct
         // walkways into the same on-disk name (e.g. `a.b_c__d.e_f` vs
@@ -3270,6 +3270,40 @@ fn prepare_artifacts(
         prepared.push((path, tag));
     }
     Ok(prepared)
+}
+
+/// Join an artifact's file name onto `--out`, refusing any name that is not
+/// a single plain file name.
+///
+/// `check` already refuses a `place id=` carrying a path separator
+/// (`E_INVALID_PLACE_ID`), so this is the second line rather than the first:
+/// it keeps a future source of file names that skips the identifier
+/// newtypes from choosing the directory the compiler writes to. The file
+/// name is checked rather than the joined path, because `Path::join` with
+/// an absolute argument discards `out_dir` and a relative one with a
+/// separator lands in a subdirectory. `\` is refused on every platform,
+/// matching the identifier rule, so a build refused on Windows is refused
+/// everywhere.
+fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf, ExitCode> {
+    let mut components = Path::new(file_name).components();
+    let plain = matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(name)), None) if name == file_name
+    ) && !file_name.contains(['/', '\\']);
+    if !plain {
+        eprintln!(
+            "error: scope `{scope}` names its artifact `{file_name}`, which is not a plain file \
+             name, so it would be written outside `{}`",
+            out_dir.display(),
+        );
+        eprintln!(
+            "  note: every artifact is written directly into --out, named after its `place id=` \
+             or struct name; an id may not carry `/` or `\\`, so rename it (`home1`) and \
+             compile again",
+        );
+        return Err(ExitCode::from(1));
+    }
+    Ok(out_dir.join(file_name))
 }
 
 /// Refuse a `--lock` that would land on a path the artifacts already own.
@@ -4150,5 +4184,68 @@ mod tests {
             "an edition-neutral --stage follows an edition-tagged one, so `synth`'s \
              \"earlier stages\" no longer describes the edition-neutral set",
         );
+    }
+
+    /// Every file name that would leave `--out` is refused, and a plain one
+    /// joins onto it unchanged.
+    ///
+    /// The refused rows are the shapes a separator gives a name: absolute
+    /// (which `Path::join` lets replace `out_dir`), relative with a
+    /// directory, Windows-style (a separator there, and refused everywhere
+    /// so the rule does not depend on the host), and the names that are
+    /// not a file at all.
+    #[test]
+    fn an_artifact_file_name_that_is_not_plain_is_refused() {
+        let out_dir = Path::new("out");
+        for name in ["/abs/hut.nbt", "sub/hut.nbt", "a\\b.nbt", "..", ".", ""] {
+            assert!(
+                artifact_path(out_dir, "site::s::probe", name).is_err(),
+                "`{name}` would not be written directly into `out`, so it must be refused",
+            );
+        }
+        assert_eq!(
+            artifact_path(out_dir, "site::s::home1", "home1.nbt").ok(),
+            Some(out_dir.join("home1.nbt")),
+        );
+    }
+
+    /// `prepare_artifacts` routes every scope through [`artifact_path`], so a
+    /// scope key whose id carries a separator is refused before any I/O.
+    ///
+    /// No source reaches this: the resolver refuses such an id with
+    /// `E_INVALID_PLACE_ID` and the lowering pass skips it. Rekeying a real
+    /// lowering is the only way to ask what the compiler does if a future
+    /// source of scope keys skips that gate.
+    #[test]
+    fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
+        let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, Some(Edition::Java));
+        let block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+        let target =
+            resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+        let out_dir = Path::new("out");
+        let rekeyed = |key: &str| {
+            let mut ir = block_ir.clone();
+            let array = ir
+                .structures
+                .values()
+                .next()
+                .expect("the probe lowers to one structure")
+                .clone();
+            ir.structures = [(key.to_owned(), array)].into_iter().collect();
+            ir
+        };
+
+        for key in ["site::s::/abs/hut", "site::s::sub/hut", "site::s::a\\b"] {
+            assert!(
+                prepare_artifacts(&rekeyed(key), &target, out_dir).is_err(),
+                "scope `{key}` must be refused rather than written outside `out`",
+            );
+        }
+        let prepared = prepare_artifacts(&rekeyed("site::s::hut"), &target, out_dir)
+            .unwrap_or_else(|_| panic!("a plain id prepares"));
+        let paths: Vec<&Path> = prepared.iter().map(|(path, _)| path.as_path()).collect();
+        assert_eq!(paths, [out_dir.join("hut.nbt").as_path()]);
     }
 }
