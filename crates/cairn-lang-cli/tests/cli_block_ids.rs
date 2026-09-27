@@ -301,6 +301,52 @@ fn a_walkway_path_id_is_checked_too() {
     );
 }
 
+/// A theme selector binding's value reaches the check by a third route.
+///
+/// Nothing lowers the binding, so no voxel of it is written either way;
+/// what the refusal stops is a misspelled block id accepted at exit 0 on
+/// a line the build never reads. The row warns `W_IGNORED_ARGUMENT`
+/// whatever its value, and the control below is what shows the refusal
+/// is about the id rather than about the row.
+#[test]
+fn a_theme_selector_binding_id_is_checked_too() {
+    let fixture = Fixture::new(
+        "cairn-block-ids",
+        "selector",
+        &window_bound_to("totally_not_a_block"),
+    );
+    let out = compile_as(&fixture, "java", "1.21.4");
+    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("E_UNKNOWN_ID") && stderr.contains("minecraft:totally_not_a_block"),
+        "expected the binding's id to be refused, got: {stderr}",
+    );
+
+    let ok = Fixture::new(
+        "cairn-block-ids",
+        "selector-ok",
+        &window_bound_to("spruce_wood"),
+    );
+    let out = compile_as(&ok, "java", "1.21.4");
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
+    assert!(
+        stderr.contains("W_IGNORED_ARGUMENT") && !stderr.contains("E_UNKNOWN_ID"),
+        "a real block is not refused, and the row still says it does nothing: {stderr}",
+    );
+}
+
+/// The README's cottage window with a theme selector row binding
+/// `frame=@{id}`.
+fn window_bound_to(id: &str) -> String {
+    format!(
+        "theme t:\n  slot glass -> @glass_pane\n  window[class=small] -> frame=@{id}\n\n\
+         struct s size=9x7\n  \
+         window class=small side=front offset=2 y=2 size=2x2 sym=true mat_slot=glass\n"
+    )
+}
+
 /// Two placed huts and a walkway between them, with `{path}` as the strip's
 /// material.
 fn two_huts_joined_by(path: &str) -> String {

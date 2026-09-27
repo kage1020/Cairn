@@ -551,7 +551,9 @@ Each keyword's vocabulary is closed, and a `theme` selector widens the one it na
 `window[tags=...]` in a theme makes `tags=` a key something reads on a window, and on nothing else.
 The reverse direction is `E_THEME_SELECTOR_UNMATCHED`. A selector coins words; one edit away from a
 word the keyword already has is a typo written twice rather than a coinage, and is refused with the
-suggestion.
+suggestion. Widening admits the word and nothing more: the match hands the member the row's
+bindings, which are reserved ([Materials and Themes](/spec/materials-themes/)), so a key the
+keyword defines and no pass reads is still an unreached key when a selector matches on it.
 
 A member's own `[key=value]` answers to that same vocabulary. `window[clas=outer]` is the same
 defect as `window clas=outer` — a word the author expects something to read that nothing does, with
@@ -566,7 +568,8 @@ member *carry* the attribute, so a `theme` row selecting on it matches nothing.
 in the vocabulary whose value the pass cannot read is dropped and a default put in its place. An
 **unreached key**: a `key=` this specification defines that no pass reads yet — `window shape=` /
 `anchor=` and `roof footprint=` / `bounds=` are those keys today — is carried into the IR and never
-consulted. And a key **routed past**: one the keyword reads only under some ways of writing a
+consulted. Every `key=value` on the right of a `theme` selector row is one too, reported on the
+binding whatever its key or value, since no pass lowers a selector's bindings yet. And a key **routed past**: one the keyword reads only under some ways of writing a
 sibling argument, on a member that writes it another way. The boundary is the keyword: a
 spec-defined key on a keyword the compiler knows is reported this way, while a spec-defined
 *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three

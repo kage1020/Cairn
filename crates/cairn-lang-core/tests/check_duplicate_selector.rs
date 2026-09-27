@@ -26,12 +26,26 @@
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
 mod common;
-use common::{codes, diagnose, exactly_one, notes};
+use common::{diagnose, exactly_one, notes};
 
 fn selector_only(source: &str) -> Vec<Diagnostic> {
     diagnose(source)
         .into_iter()
         .filter(|d| d.code == DiagnosticCode::DuplicateSelector)
+        .collect()
+}
+
+/// Every code `source` raises but the `W_IGNORED_ARGUMENT` each selector
+/// binding earns.
+///
+/// Every row in this file binds something, no pass lowers a binding, and
+/// `check_arguments` pins that finding; counting one per binding here
+/// would make each table below restate how many bindings its rows carry.
+fn row_codes(source: &str) -> Vec<&'static str> {
+    diagnose(source)
+        .iter()
+        .filter(|d| d.code != DiagnosticCode::IgnoredArgument)
+        .map(|d| d.code.as_str())
         .collect()
 }
 
@@ -203,7 +217,7 @@ fn ds_5_value_form_matters_exactly_where_the_matcher_says_it_does() {
     for attr in ["id=front", "class=small", "mat_slot=glass"] {
         let src = theme_with(&rows_quoting(attr));
         assert_eq!(
-            codes(&src),
+            row_codes(&src),
             vec!["E_DUPLICATE_SELECTOR"],
             "a quoted `{attr}` selects the same members, and nothing went unmatched",
         );
@@ -215,7 +229,7 @@ fn ds_5_value_form_matters_exactly_where_the_matcher_says_it_does() {
     for attr in ["side=front", "offset=2"] {
         let src = theme_with(&rows_quoting(attr));
         assert_eq!(
-            codes(&src),
+            row_codes(&src),
             vec!["E_THEME_SELECTOR_UNMATCHED"],
             "a quoted `{attr}` selects nothing the bare one selects, so the rows are not a pair",
         );
@@ -393,7 +407,7 @@ fn ds_14_it_coexists_with_a_key_repeated_inside_one_row() {
         "  window[class=small] -> frame=@spruce_wood\n  \
          window[class=small] -> frame=@birch_wood frame=@dark_oak_wood\n",
     );
-    let mut seen = codes(&src);
+    let mut seen = row_codes(&src);
     seen.sort_unstable();
     assert_eq!(seen, vec!["E_DUPLICATE_ARG", "E_DUPLICATE_SELECTOR"]);
 }
@@ -438,7 +452,7 @@ fn ds_17_a_label_key_holding_a_non_label_value_pairs_with_nothing() {
             "  window[{attr}] -> frame=@spruce_wood\n  \
              window[{attr}] -> frame=@dark_oak_wood\n"
         ));
-        let mut seen = codes(&src);
+        let mut seen = row_codes(&src);
         seen.sort_unstable();
         assert_eq!(
             seen,
@@ -488,7 +502,7 @@ fn ds_15_a_pair_that_matches_nothing_is_still_a_pair() {
         "  window[class=enormous] -> frame=@spruce_wood\n  \
          window[class=enormous] -> frame=@dark_oak_wood\n",
     );
-    let mut seen = codes(&src);
+    let mut seen = row_codes(&src);
     seen.sort_unstable();
     assert_eq!(
         seen,

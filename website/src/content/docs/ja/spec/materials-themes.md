@@ -18,7 +18,7 @@ def cottage class=house size=9x7:
 theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
-  walls[class=outer]  -> trim=@spruce_log     # セレクタによる部位ディテール
+  walls[class=outer]  -> trim=@spruce_log     # セレクタによる部位ディテール (予約)
   window[class=small] -> frame=@spruce_wood
 ```
 
@@ -35,6 +35,14 @@ theme medieval:
 して比較されるので、`window[class=small]` と `window[class="small"]` は 1 つのセレクタです。一致して
 いても異なるキーを束ねる行は報告しません。それらは合成され、長いバインディング列を 2 行に分けて書く
 ことは許されています。
+
+**セレクタのバインディングは予約です。** 行がキーワードごとにどのキーを束ねてよいか、それぞれが何を
+塗るかはまだ規定されておらず、バインディングを読む下げ処理もありません。上の 2 つのセレクタ行は、そ
+れらを持たないテーマと同じ cottage を建て、メンバのブロックは `mat_slot=` だけから決まります。規定さ
+れるまで、コンパイラはすべてのバインディングを、キーや値が何であれ、まだ届いていないキーとして
+`W_IGNORED_ARGUMENT` で報告します ([Lint](/ja/spec/lint/))。行のそれ以外の性質は書かれたとおりです。
+行はマッチするので `E_THEME_SELECTOR_UNMATCHED` と `E_DUPLICATE_SELECTOR` は適用され、固定したター
+ゲットが宣言しないブロックを値に書けば、スロットと同じく `E_UNKNOWN_ID` になります。
 
 `def` / `theme` / `site` は、同じスロット保持型コンポーネント機構で統一されています
 ([コンポーネント・編集・複数建築](/ja/spec/components-editing-sites/))。

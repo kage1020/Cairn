@@ -1,6 +1,7 @@
 //! `arguments` pass — flags every `key=value` whose key is outside the
 //! vocabulary of the member's role, every key in that vocabulary no pass
-//! reads yet, and every key a sibling argument's value routed past. A
+//! reads yet, every key a sibling argument's value routed past, and every
+//! binding a theme selector carries, which no pass reads either. A
 //! member's own `[key=value]` selector answers to the same vocabulary.
 //!
 //! Walks the Intent IR beside [`super::keyword_allowlist`], which asks the
@@ -38,6 +39,15 @@
 //! never selects on fails it however plausible it looks. The reverse
 //! direction is already covered: a selector matching no member is
 //! `E_THEME_SELECTOR_UNMATCHED`.
+//!
+//! Widening admits a word; it does not make a value do anything. What a
+//! match hands the member is the row's bindings, and no pass lowers those
+//! yet, so a key the role defines and nothing reads is still reported
+//! when a selector matches on it — `window shape=slit` builds the same
+//! window with a `window[shape=slit] -> frame=...` row or without one. The
+//! row itself is reported too, once per binding on the right of its arrow,
+//! with the same code: a binding nothing lowers is the same unreached key
+//! one level up.
 //!
 //! The widening admits words the module *coins*, and one edit from an
 //! existing key is not a coinage. `walls[hieght=3]` beside `walls hieght=3`
@@ -78,7 +88,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use crate::ast::ValueKind;
-use crate::intent::{IntentModule, Member, SelectorValue};
+use crate::intent::{IntentModule, Member, MemberRole, SelectorValue, role_of};
 use crate::prose::or_list;
 use crate::suggest::{did_you_mean_note, nearest_match};
 
@@ -91,6 +101,17 @@ use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
 type SelectorKeys<'a> = HashMap<&'a str, BTreeSet<&'a str>>;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
+    for theme in &ir.themes {
+        for rule in &theme.selectors {
+            // The keyword is the repair, as it is for a member.
+            if matches!(role_of(&rule.keyword), MemberRole::Other(_)) {
+                continue;
+            }
+            for (key, value) in &rule.bindings {
+                sink.push(unlowered_binding(&rule.keyword, key, &value.span));
+            }
+        }
+    }
     let selected = selector_keys(ir);
     for s in &ir.structs {
         walk(&s.members, &selected, sink);
@@ -170,21 +191,16 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
                 ));
             }
         } else if member.role.unread_arguments().contains(&key.as_str()) {
-            // A key the specification defines and nothing reads — unless
-            // the module selects on it, in which case something does, and
-            // "the value was ignored" would be false advice that breaks a
-            // working theme.
-            if !coined {
-                sink.push(unread_argument(keyword, key, &value.span));
-            }
-        } else if !coined {
+            // A key the specification defines and nothing reads. A theme
+            // selecting on it does not change that: the selector's match
+            // hands the member bindings no pass lowers, so the build is the
+            // same with the argument or without it.
+            sink.push(unread_argument(keyword, key, &value.span));
+        } else if let Some(finding) = routed_past(member, key, &value.span) {
             // A key some lowering rule reads, on a member whose sibling
-            // argument picked a rule that does not. The selector check is
-            // the same one the unread branch makes: a key the module
-            // selects on is read whatever the lowering does with it.
-            if let Some(finding) = routed_past(member, key, &value.span) {
-                sink.push(finding);
-            }
+            // argument picked a rule that does not — selected on or not,
+            // for the same reason.
+            sink.push(finding);
         }
     }
     // The member's own `[key=value]`, against the same vocabulary. Only
@@ -213,6 +229,35 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
                 &own,
             ));
         }
+    }
+}
+
+/// A `key=value` on the right of a theme selector's arrow.
+///
+/// Every one is reported, whatever its key or value: no lowering rule reads
+/// a selector's bindings yet (`spec/materials-themes` "Slots as dependency
+/// injection"), so `frame=@spruce_wood` builds exactly what the file builds
+/// without it. That is an unreached key one level up from a member's, and
+/// `spec/lint` "Error vs warning" gives it the same code. The key is not
+/// judged against a vocabulary, because there is no vocabulary of keys a
+/// binding may set until some pass reads one.
+fn unlowered_binding(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::IgnoredArgument,
+        span: span.clone(),
+        primary: format!(
+            "`{key}=` is bound by a theme selector on `{keyword}`, and no pass lowers a \
+             selector's bindings yet; the value was ignored",
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!(
+                "every `{keyword}` this row matches is built without it — a member's block \
+                 comes from its `mat_slot=` and the theme's `slot` rows, so remove the \
+                 binding, or keep it and expect no effect until selector bindings are lowered",
+            ),
+        }],
+        data: None,
     }
 }
 

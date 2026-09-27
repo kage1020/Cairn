@@ -18,7 +18,7 @@ def cottage class=house size=9x7:
 theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
-  walls[class=outer]  -> trim=@spruce_log     # part detailing, via a selector
+  walls[class=outer]  -> trim=@spruce_log     # part detailing, via a selector (reserved)
   window[class=small] -> frame=@spruce_wood
 ```
 
@@ -37,6 +37,14 @@ order does not count, and `class=` / `id=` / `mat_slot=` values compare as label
 `window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
 different keys are not reported. They compose, and splitting a long binding list over two lines is
 allowed.
+
+**Selector bindings are reserved.** Which keys a row may bind on each keyword, and what each one
+paints, is not specified yet, and no lowering reads a binding: the two selector rows above build the
+same cottage as a theme without them, and a member's block comes from its `mat_slot=` alone. Until
+that is specified the compiler reports every binding as an unreached key, `W_IGNORED_ARGUMENT`
+([Lint](/spec/lint/)), whatever its key or value. Everything else about a row holds as written: it
+still matches, so `E_THEME_SELECTOR_UNMATCHED` and `E_DUPLICATE_SELECTOR` apply, and a value naming
+a block the pinned target does not declare is `E_UNKNOWN_ID`, as it is on a slot.
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
 ([Components, Editing, and Multi-building](/spec/components-editing-sites/)).

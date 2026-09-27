@@ -190,6 +190,10 @@ pub struct ResolvedMemberBinding {
     /// Extra `key=value` bindings injected by a matching theme selector,
     /// merged left-to-right in source order (later selector wins on key
     /// collision).
+    ///
+    /// Nothing lowers these yet. `check::arguments` reports every binding
+    /// as `W_IGNORED_ARGUMENT`, and block-array lowering resolves the
+    /// values of every matched row only to refuse an id the target lacks.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub selector_extras: IndexMap<String, ValueWithSpan>,
 }

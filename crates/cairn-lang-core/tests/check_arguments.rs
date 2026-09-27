@@ -23,6 +23,29 @@ fn only(source: &str) -> Diagnostic {
     diags.into_iter().next().expect("length checked above")
 }
 
+/// The one finding `source` raises with `code`, or a panic naming every
+/// finding it raised.
+///
+/// For a source whose theme selector row earns its own
+/// `W_IGNORED_ARGUMENT` beside the finding under test.
+fn only_with_code(source: &str, code: &str) -> Diagnostic {
+    let diags = diagnose(source);
+    let mut found = diags.iter().filter(|d| d.code.as_str() == code);
+    match (found.next(), found.next()) {
+        (Some(d), None) => d.clone(),
+        _ => panic!("expected exactly one {code}, got {diags:#?}"),
+    }
+}
+
+/// The source text each `W_IGNORED_ARGUMENT` in `source` points at.
+fn ignored_at(source: &str) -> Vec<&str> {
+    diagnose(source)
+        .iter()
+        .filter(|d| d.code.as_str() == "W_IGNORED_ARGUMENT")
+        .map(|d| &source[d.span.clone()])
+        .collect()
+}
+
 fn notes(d: &Diagnostic) -> String {
     d.notes
         .iter()
@@ -127,12 +150,14 @@ fn a_theme_selector_widens_the_vocabulary_of_the_keyword_it_names() {
     // `tags=` is read by nothing in the lowering, and it is read: the
     // resolver's selector matcher reads it. The rule is "a word nothing
     // will read", so a module that selects on the key is a module where
-    // writing it is not a mistake.
+    // writing it is not a mistake. What remains is the row's own binding,
+    // which nothing lowers.
     let selected = "theme t:\n  slot glass -> @glass_pane\n  \
                     window[tags=[a,b]] -> frame=@spruce_wood\n\n\
                     struct s size=9x7\n  \
                     window tags=[a,b] side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-    assert_eq!(codes(selected), Vec::<&str>::new());
+    assert_eq!(codes(selected), ["W_IGNORED_ARGUMENT"]);
+    assert_eq!(ignored_at(selected), ["@spruce_wood"]);
 
     // The same line without the selector row is the ordinary case again.
     let unselected = "theme t:\n  slot glass -> @glass_pane\n\n\
@@ -153,8 +178,7 @@ fn a_selector_widens_one_keyword_and_not_the_others() {
                struct s size=9x7\n  \
                window tags=[a,b] side=front offset=2 y=2 size=2x2 mat_slot=glass\n  \
                door side=front at=center tags=[a,b]\n";
-    let d = only(src);
-    assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT");
     assert!(d.primary.contains("`door`"), "got: {}", d.primary);
 }
 
@@ -248,12 +272,20 @@ fn a_selector_that_names_no_rule_is_not_billed_twice() {
 }
 
 #[test]
-fn a_selector_matched_conditional_key_is_not_reported() {
-    // The same widening the unread branch honours: a module that selects on
-    // `slope_to=` has something that reads it, whatever `fill_roof` does,
-    // and advising removal would break the override.
+fn a_selector_matched_conditional_key_is_still_reported() {
+    // Selecting on `slope_to=` does not make `fill_roof` read it: the match
+    // hands the roof a binding no pass lowers, so the gable is the same
+    // gable with the row or without it. Both the argument and the binding
+    // are reported, each where it was written.
     let src = "theme t:\n  slot roof -> @spruce_stairs\n  roof[slope_to=front] -> frame=@spruce_wood\n\nstruct s size=9x9\n  roof kind=gable slope_to=front mat_slot=roof\n";
-    assert_eq!(codes(src), Vec::<&str>::new(), "source:\n{src}");
+    assert_eq!(ignored_at(src), ["@spruce_wood", "front"], "source:\n{src}");
+    let found = diagnose(src);
+    assert!(
+        found.iter().any(|d| d
+            .primary
+            .contains("`slope_to=` is an argument `roof` reads only with")),
+        "the argument's finding is the routed-past one, got {found:#?}",
+    );
 }
 
 #[test]
@@ -381,14 +413,15 @@ fn the_table_and_the_sweep_agree_key_for_key() {
 }
 
 #[test]
-fn a_selector_matched_key_is_not_reported_as_ignored() {
-    // `window shape=` is unread by the lowering, and a module that selects
-    // on it has something that reads it. Saying "the value was ignored" and
-    // advising removal would break the theme: drop the argument and the
-    // `frame=@spruce_wood` override goes with it, and an
-    // `E_THEME_SELECTOR_UNMATCHED` arrives in its place.
+fn a_selector_matched_key_is_still_reported_as_ignored() {
+    // `window shape=` is unread by the lowering, and a theme selecting on it
+    // does not change that. The match hands the window `frame=@spruce_wood`,
+    // which nothing lowers either, so the file builds the same window with
+    // or without `shape=slit` and with or without the row — and both are
+    // said, where each was written.
     let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=slit] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=1x2 shape=slit mat_slot=glass\n";
-    assert_eq!(codes(src), Vec::<&str>::new());
+    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT", "W_IGNORED_ARGUMENT"]);
+    assert_eq!(ignored_at(src), ["@spruce_wood", "slit"]);
 }
 
 #[test]
@@ -398,8 +431,7 @@ fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
     // saw was the `W_DEFERRED_MEMBER` about the `height=` that is now
     // absent. That is the failure this whole pass exists to end.
     let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hieght=3] -> frame=@spruce_wood\n\nstruct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
-    let d = only(src);
-    assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT");
     assert!(
         notes(&d).contains("did you mean `height`?"),
         "got: {}",
@@ -419,7 +451,7 @@ fn a_widened_key_appears_once_in_the_closed_set() {
     // A key can be both in the role's vocabulary and selected on. A closed
     // set naming one word twice reads as two different things.
     let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=slit] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=1x2 shape=slit mat_slot=glass zzz=1\n";
-    let d = only(src);
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT");
     let listed = notes(&d);
     let line = listed
         .lines()
@@ -662,7 +694,12 @@ fn a_theme_selector_widens_the_bracket_as_well_as_the_line() {
                     window[tags=[a,b]] -> frame=@spruce_wood\n\n\
                     struct s size=9x7\n  \
                     window[tags=[a,b]] tags=[a,b] side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-    assert_eq!(codes(selected), Vec::<&str>::new());
+    assert_eq!(
+        ignored_at(selected),
+        ["@spruce_wood"],
+        "only the row's binding"
+    );
+    assert_eq!(codes(selected), ["W_IGNORED_ARGUMENT"]);
 
     // And a near-miss of the role's own vocabulary is a typo written
     // twice, in the bracket exactly as on the line — so the same source
@@ -674,10 +711,17 @@ fn a_theme_selector_widens_the_bracket_as_well_as_the_line() {
     let found = diagnose(near_miss);
     assert_eq!(
         codes(near_miss),
-        ["E_UNKNOWN_ARGUMENT", "E_UNKNOWN_ARGUMENT"],
-        "once on the line and once in the bracket",
+        [
+            "W_IGNORED_ARGUMENT",
+            "E_UNKNOWN_ARGUMENT",
+            "E_UNKNOWN_ARGUMENT"
+        ],
+        "the row's binding, then once on the line and once in the bracket",
     );
-    for d in &found {
+    for d in found
+        .iter()
+        .filter(|d| d.code.as_str() == "E_UNKNOWN_ARGUMENT")
+    {
         assert!(
             notes(d).contains("did you mean `side`?"),
             "got: {}",
@@ -693,5 +737,85 @@ fn an_unknown_keyword_answers_for_its_own_bracket() {
     assert_eq!(
         codes("struct s size=9x7\n  windwo[clas=outer] side=front\n"),
         ["E_UNKNOWN_KEYWORD"],
+    );
+}
+
+/// The README's first example, as it shipped: one theme selector row whose
+/// binding the build never reads.
+const COTTAGE_WITH_A_SELECTOR_ROW: &str = "theme medieval:\n  \
+    slot floor -> @oak_planks\n  slot wall  -> @cobblestone\n  \
+    slot roof  -> @spruce_stairs\n  slot glass -> @glass_pane\n  \
+    window[class=small] -> frame=@spruce_wood\n\n\
+    struct cottage size=9x7\n  floor  mat_slot=floor\n  \
+    walls  class=outer mat_slot=wall height=4\n  door   side=front at=center\n  \
+    window class=small side=front offset=2 y=2 size=2x2 sym=true mat_slot=glass\n  \
+    roof   kind=gable mat_slot=roof overhang=1\n";
+
+#[test]
+fn a_theme_selector_binding_is_reported_as_ignored() {
+    // No lowering rule reads a selector's bindings, so the cottage builds
+    // byte for byte the same with `frame=@spruce_wood`, with
+    // `frame=@diamond_block`, and without the row. Saying nothing let the
+    // opening example demonstrate a line that does nothing.
+    let src = COTTAGE_WITH_A_SELECTOR_ROW;
+    let d = only(src);
+    assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT");
+    assert_eq!(&src[d.span.clone()], "@spruce_wood");
+    assert!(
+        d.primary.contains("`frame=`") && d.primary.contains("`window`"),
+        "got: {}",
+        d.primary,
+    );
+    assert!(
+        d.primary.contains("no pass lowers a selector's bindings"),
+        "got: {}",
+        d.primary,
+    );
+    // The repair names where a block does come from.
+    assert!(notes(&d).contains("`mat_slot=`"), "got: {}", notes(&d));
+}
+
+#[test]
+fn every_binding_is_reported_whatever_its_key_or_value() {
+    // There is no vocabulary of keys a binding may set until some pass
+    // reads one, so a misspelled key and a value that is not a block are
+    // reported exactly as a well-formed one is — one finding per binding.
+    let src = "theme t:\n  slot glass -> @glass_pane\n  \
+               window[class=small] -> frame=@spruce_wood fram=42\n\n\
+               struct s size=9x7\n  \
+               window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    assert_eq!(ignored_at(src), ["@spruce_wood", "42"]);
+    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT", "W_IGNORED_ARGUMENT"]);
+}
+
+#[test]
+fn a_row_that_matches_nothing_is_reported_for_its_binding_too() {
+    // Unmatched is a second fact about the row, not a reason to drop the
+    // first: matched or not, the binding reaches no block.
+    let src = "theme t:\n  slot glass -> @glass_pane\n  \
+               window[class=big] -> frame=@spruce_wood\n\n\
+               struct s size=9x7\n  \
+               window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    assert_eq!(ignored_at(src), ["@spruce_wood"]);
+}
+
+#[test]
+fn a_selector_row_with_an_unknown_keyword_answers_only_for_the_keyword() {
+    // As for a member: the keyword is the repair, and a binding on a row
+    // that names no role is not a second mistake.
+    let src = "theme t:\n  slot glass -> @glass_pane\n  \
+               windw[class=small] -> frame=@spruce_wood\n\n\
+               struct s size=9x7\n  \
+               window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    assert_eq!(
+        ignored_at(src),
+        Vec::<&str>::new(),
+        "got {:#?}",
+        diagnose(src)
+    );
+    assert!(
+        codes(src).contains(&"E_UNKNOWN_KEYWORD"),
+        "got {:?}",
+        codes(src)
     );
 }
