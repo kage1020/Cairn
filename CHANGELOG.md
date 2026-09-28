@@ -270,7 +270,8 @@
   empty rows between them. The lockfile's `origin` and the written structures move with it.
   `east_of=` already read the right side's width and is unchanged. `spec/components-editing-sites`
   "Origin selectors" now names whose dims each formula reads: `prior.x + prior.dims.x + N` and
-  `prior.z − new.dims.z − N`.
+  `prior.z − new.dims.z − N`. It also says that `dims` includes a roof's `overhang=`, so `gap` is
+  measured between the two bounding boxes, not between the walls.
 
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same

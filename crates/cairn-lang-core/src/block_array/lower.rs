@@ -1091,14 +1091,15 @@ fn lower_site<'a>(
             continue;
         };
 
-        // The anchor reads `placements` for prior-place lookups, so the
-        // lookup has to happen before *this* placement is inserted.
-        // Lookup misses only happen when the prior place was skipped at
-        // lowering time (cascade from `W_DEF_NO_SIZE` /
-        // `E_UNRESOLVED_PLACE_REF`); falling back to `(0, 0, 0)` would
-        // silently stack the placement on top of `home1`, so we surface a
-        // deferred warning and skip the row instead — before lowering the
-        // body, so a row that cannot land reports nothing about its body.
+        // The anchor reads `placed` for prior-place lookups, so the lookup
+        // has to happen before *this* placement is inserted. A lookup
+        // misses when the prior place never reached `placed`, which is any
+        // `continue` arm of this loop: those above, this deferral, or the
+        // volume refusal below. Falling back to `(0, 0, 0)` would silently stack
+        // the placement on top of `home1`, so the row is deferred and
+        // skipped instead. As has always been the case, that happens before
+        // the body is lowered, so a row that cannot land reports nothing
+        // about its body; only the origin waits for the lowered dims.
         let Some(anchor) = resolve_place_anchor(member, placed, &site.name) else {
             diagnostics.push(diag_deferred_member_reason(
                 member,
@@ -1674,8 +1675,9 @@ impl PlaceAnchor {
     /// whose lowered body has `dims`, per `spec/components-editing-sites`
     /// "Origin selectors": `east_of` is `prior.x + prior.dims.x + gap`,
     /// `north_of` is `prior.z − new.dims.z − gap`. Either way `gap` counts
-    /// the empty blocks between the two facing walls, so `gap=0` makes them
-    /// touch whatever the two footprints are.
+    /// the empty blocks between the two facing bounding-box faces (each the
+    /// wall plus its `overhang=` columns), so `gap=0` makes the boxes touch
+    /// whichever of the two is wider or deeper.
     fn origin(self, dims: Dims) -> (i32, i32, i32) {
         match self {
             Self::WorldOrigin => (0, 0, 0),
@@ -1707,7 +1709,8 @@ impl PlaceAnchor {
 ///
 /// Returns `None` when the prior place it names did not lower, which the
 /// caller reports before skipping the row. A row with no usable selector
-/// never gets here: the resolver refuses it with `E_INVALID_PLACE_ORIGIN`
+/// never gets here: the resolver refuses it with `E_INVALID_PLACE_ORIGIN`,
+/// or with `E_UNRESOLVED_PLACE_REF` when the selector names no prior place,
 /// and binds no scope for it. The front-is-`+z` convention of
 /// `spec/components-editing-sites` "Multi-building with `site`" is why
 /// `north_of` retreats along `-z`.
@@ -6583,7 +6586,7 @@ struct s size=9x7
         assert_eq!(
             b.origin,
             (5, 0, 0),
-            "x = prev.x(0) + prev.dims.x(3) + gap(2)"
+            "x = prior.x(0) + prior.dims.x(3) + gap(2)"
         );
         assert_eq!(b.origin.2, 0, "east_of does not move along z");
     }
@@ -6620,9 +6623,16 @@ struct s size=9x7
     }
 
     /// A two-place site with `a` built from `a_def` and `b` placed next to
-    /// it with `selector=a gap=gap`. `small` is 3x3 and `deep` is 3x9, so
-    /// the two footprints differ on both axes once swapped around.
-    fn unequal_pair(a_def: &str, b_def: &str, selector: &str, gap: u32) -> BlockArrayIr {
+    /// it with `selector=a gap=gap`.
+    ///
+    /// Each pair a test draws from here differs on exactly the axis its
+    /// selector reads: `small` (3x3) against `deep` (3x9) on `z` for
+    /// `north_of`, `small` against `wide` (9x3) on `x` for `east_of`.
+    /// `eaved` is `deep` with a roof of `overhang=1`, so it lowers to 5x11:
+    /// its `dims` differ from its `size=`, which is what tells an origin
+    /// taken from the lowered body apart from one taken from `size=` (known
+    /// before lowering, and wrong whenever a roof overhangs).
+    fn unequal_pair(a_def: &str, b_def: &str, selector: &str, gap: i32) -> BlockArrayIr {
         lowered(&format!(
             concat!(
                 "def small size=3x3:\n",
@@ -6632,6 +6642,11 @@ struct s size=9x7
                 "def deep size=3x9:\n",
                 "  floor id=f mat_slot=floor\n",
                 "  walls id=w mat_slot=wall height=2\n",
+                "\n",
+                "def eaved size=3x9:\n",
+                "  floor id=f mat_slot=floor\n",
+                "  walls id=w mat_slot=wall height=2\n",
+                "  roof  id=r kind=flat mat_slot=wall overhang=1\n",
                 "\n",
                 "def wide size=9x3:\n",
                 "  floor id=f mat_slot=floor\n",
@@ -6658,45 +6673,67 @@ struct s size=9x7
         // face, whichever of the two is deeper. Stepping back by the prior
         // placement's depth instead buries a small `a` inside a deep `b`
         // at gap=0 and pushes a small `b` six rows too far behind a deep
-        // `a`.
-        for (a_def, b_def) in [("small", "deep"), ("deep", "small")] {
+        // `a`. The `eaved` row fails if the step is taken from `size=`
+        // rather than the lowered dims.
+        //
+        // `b_z` is `b`'s origin at gap=0: `-new.dims.z`, since `a` sits at 0.
+        for (a_def, b_def, b_z) in [
+            ("small", "deep", -9),
+            ("deep", "small", -3),
+            ("small", "eaved", -11),
+        ] {
             for gap in [0, 3] {
                 let out = unequal_pair(a_def, b_def, "north_of", gap);
                 let a = out.placements.get("site::s::a").expect("placement a");
                 let b = out.placements.get("site::s::b").expect("placement b");
-                let b_front = b.origin.2 + i32::try_from(b.dims.z).unwrap();
-                let empty_rows = a.origin.2 - b_front;
+                // The premise: without it, the gap check below holds for
+                // either reading.
+                assert_ne!(a.dims.z, b.dims.z, "a={a_def}, b={b_def}");
                 assert_eq!(
-                    empty_rows,
-                    i32::try_from(gap).unwrap(),
+                    b.origin,
+                    (0, 0, b_z - gap),
+                    "a={a_def}, b={b_def}, gap={gap}"
+                );
+                let b_front = b.origin.2 + i32::try_from(b.dims.z).unwrap();
+                assert_eq!(
+                    a.origin.2 - b_front,
+                    gap,
                     "a={a_def} at z {}..{}, b={b_def} at z {}..{}, gap={gap}",
                     a.origin.2,
                     a.origin.2 + i32::try_from(a.dims.z).unwrap(),
                     b.origin.2,
                     b_front,
                 );
-                assert_eq!((b.origin.0, b.origin.1), (a.origin.0, a.origin.1));
             }
         }
     }
 
     #[test]
     fn east_of_leaves_exactly_gap_columns_between_unequal_widths() {
-        // The +x twin of the test above: `east_of` moves past the prior
-        // placement's width, so it reads the prior's dims where `north_of`
-        // reads the new one's, and both leave `gap` empty columns.
-        for (a_def, b_def) in [("small", "wide"), ("wide", "small")] {
+        // A guard, not a regression test: `east_of` was already right, and
+        // this pins it against being "symmetrised" onto the new body's
+        // dims to match `north_of`. It moves past the prior placement's
+        // width, so the step is the prior's lowered `dims.x` — `eaved` is 5
+        // wide, not its `size=` 3.
+        //
+        // `b_x` is `b`'s origin at gap=0: `prior.dims.x`, since `a` sits at 0.
+        for (a_def, b_def, b_x) in [
+            ("small", "wide", 3),
+            ("wide", "small", 9),
+            ("eaved", "small", 5),
+        ] {
             for gap in [0, 3] {
                 let out = unequal_pair(a_def, b_def, "east_of", gap);
                 let a = out.placements.get("site::s::a").expect("placement a");
                 let b = out.placements.get("site::s::b").expect("placement b");
-                let a_east = a.origin.0 + i32::try_from(a.dims.x).unwrap();
+                assert_ne!(a.dims.x, b.dims.x, "a={a_def}, b={b_def}");
                 assert_eq!(
-                    b.origin.0 - a_east,
-                    i32::try_from(gap).unwrap(),
-                    "a={a_def}, b={b_def}, gap={gap}",
+                    b.origin,
+                    (b_x + gap, 0, 0),
+                    "a={a_def}, b={b_def}, gap={gap}"
                 );
-                assert_eq!((b.origin.1, b.origin.2), (a.origin.1, a.origin.2));
+                let a_east = a.origin.0 + i32::try_from(a.dims.x).unwrap();
+                assert_eq!(b.origin.0 - a_east, gap, "a={a_def}, b={b_def}, gap={gap}");
             }
         }
     }
