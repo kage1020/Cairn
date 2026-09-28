@@ -254,6 +254,24 @@
 
 ### Fixed
 
+- *(lsp,vscode)* The VS Code extension could not start its language server. It asked
+  vscode-languageclient for the stdio transport, which appends `--stdio` to the server's command
+  line, and `cairn-lsp` refused every argument but `--version` and `--help`:
+
+  ```
+  $ cairn-lsp --stdio
+  error: unknown argument `--stdio`. Valid: --version, --help. Fix: run `cairn-lsp` with no arguments to start the LSP server.
+  ```
+
+  The process exited 2 before reading a byte, so no diagnostics and no completion reached the
+  editor, while the `--version` probe the extension runs first still logged a healthy
+  `server: cairn-lsp …` line in the Output panel. Both sides are fixed, and each alone would be
+  enough: `cairn-lsp --stdio` now starts the same session as `cairn-lsp` — stdio is the only
+  transport the server speaks, so the flag names what already happens — and `--help` lists it;
+  an argument after it is still refused with exit 2, as after `--version`. The extension no
+  longer sets a transport, which keeps stdio and adds no argument, so it also starts a
+  `cairn-lsp` released before the flag was accepted.
+
 - *(core)* Whether a truth table was refused for assigning one combination two outputs depended on
   the order its rows were written in. A row was compared only with the first earlier row it
   overlapped, and a row dropped for overlapping was never compared with anything after it, so a
