@@ -12,7 +12,6 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
-  TransportKind,
 } from "vscode-languageclient/node";
 
 const execFileAsync = promisify(execFile);
@@ -32,9 +31,14 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
   await logServerVersion(serverPath, output);
 
+  // No `transport`: vscode-languageclient still spawns an `Executable` over
+  // stdio when it is unset, but setting it to `TransportKind.stdio` also
+  // appends `--stdio` to the command line. `cairn-lsp` accepts that flag,
+  // yet one released before it did exits 2 on it, and the bare command is
+  // the one every `cairn-lsp` release has started a session on.
   const serverOptions: ServerOptions = {
-    run: { command: serverPath, transport: TransportKind.stdio },
-    debug: { command: serverPath, transport: TransportKind.stdio },
+    run: { command: serverPath },
+    debug: { command: serverPath },
   };
 
   const clientOptions: LanguageClientOptions = {
