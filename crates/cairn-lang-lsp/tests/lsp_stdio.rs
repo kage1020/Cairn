@@ -1080,10 +1080,10 @@ fn lsp_29_a_clean_session_says_nothing_on_stderr() {
 #[test]
 fn lsp_31_the_stdio_flag_a_client_appends_still_starts_the_server() {
     // vscode-languageclient appends `--stdio` to an `Executable`'s argv
-    // whenever its transport is `TransportKind.stdio`, and other clients
-    // do the same. Stdio is the only transport this server speaks, so the
-    // flag must start the same session the bare command does — including
-    // the diagnostics that are the reason an editor starts it at all.
+    // whenever its transport is `TransportKind.stdio`. Stdio is the only
+    // transport this server speaks, so the flag must start the same session
+    // the bare command does — including the diagnostics that are the reason
+    // an editor starts it at all.
     let (mut server, response) = Server::start_with_args(&["--stdio"]);
     assert_eq!(response.get("id"), Some(&serde_json::json!(1)));
     assert_eq!(

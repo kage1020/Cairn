@@ -16,14 +16,12 @@ USAGE:
     cairn-lsp [OPTIONS]
 
 OPTIONS:
-        --stdio      Speak LSP over stdin/stdout (the default; accepted
-                     because LSP clients pass it when asked for stdio)
+        --stdio      Speak LSP over stdin/stdout (same as no arguments)
     -V, --version    Print version and exit
     -h, --help       Print this help and exit
 
-With no arguments, or with `--stdio`, the process speaks LSP over
-stdin/stdout. Editors spawn this binary and communicate via Content-Length
-framed JSON-RPC.
+With no arguments the process speaks LSP over stdin/stdout. Editors spawn
+this binary and communicate via Content-Length framed JSON-RPC.
 ";
 
 fn main() -> ExitCode {
@@ -56,7 +54,7 @@ fn main() -> ExitCode {
             }
             other => {
                 eprintln!(
-                    "error: unknown argument `{other}`. Valid: --stdio, --version, --help. \
+                    "error: unknown argument `{other}`. Valid: --stdio, -V/--version, -h/--help. \
                      Fix: run `cairn-lsp` with no arguments to start the LSP server."
                 );
                 return ExitCode::from(2);
