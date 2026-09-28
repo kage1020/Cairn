@@ -16,6 +16,7 @@ USAGE:
     cairn-lsp [OPTIONS]
 
 OPTIONS:
+        --stdio      Speak LSP over stdin/stdout (same as no arguments)
     -V, --version    Print version and exit
     -h, --help       Print this help and exit
 
@@ -24,9 +25,12 @@ this binary and communicate via Content-Length framed JSON-RPC.
 ";
 
 fn main() -> ExitCode {
-    // Editors always spawn `cairn-lsp` with no arguments; the flags are a
-    // support-triage affordance (log the version at activation, print help
-    // when a user runs the binary by hand).
+    // Editors spawn `cairn-lsp` either with no arguments or with `--stdio`:
+    // an LSP client told to use the stdio transport appends that flag to the
+    // command line (vscode-languageclient does), and stdio is the only
+    // transport this server speaks, so the flag names what happens anyway.
+    // The other flags are a support-triage affordance (log the version at
+    // activation, print help when a user runs the binary by hand).
     let mut args = std::env::args().skip(1);
     if let Some(arg) = args.next() {
         let extra = args.next();
@@ -39,7 +43,8 @@ fn main() -> ExitCode {
                 print!("{HELP}");
                 return ExitCode::SUCCESS;
             }
-            "-V" | "--version" | "-h" | "--help" => {
+            "--stdio" if extra.is_none() => {}
+            "--stdio" | "-V" | "--version" | "-h" | "--help" => {
                 let unexpected = extra.unwrap_or_default();
                 eprintln!(
                     "error: unexpected argument `{unexpected}` after `{arg}`. \
@@ -49,7 +54,7 @@ fn main() -> ExitCode {
             }
             other => {
                 eprintln!(
-                    "error: unknown argument `{other}`. Valid: --version, --help. \
+                    "error: unknown argument `{other}`. Valid: --stdio, -V/--version, -h/--help. \
                      Fix: run `cairn-lsp` with no arguments to start the LSP server."
                 );
                 return ExitCode::from(2);
