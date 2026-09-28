@@ -254,6 +254,24 @@
 
 ### Fixed
 
+- *(lsp,vscode)* The VS Code extension could not start its language server. It asked
+  vscode-languageclient for the stdio transport, which appends `--stdio` to the server's command
+  line, and `cairn-lsp` refused every argument but `--version` and `--help`:
+
+  ```
+  $ cairn-lsp --stdio
+  error: unknown argument `--stdio`. Valid: --version, --help. Fix: run `cairn-lsp` with no arguments to start the LSP server.
+  ```
+
+  The process exited 2 before reading a byte, so no diagnostics and no completion reached the
+  editor, while the `--version` probe the extension runs first still logged a healthy
+  `server: cairn-lsp …` line in the Output panel. Both sides are fixed, and each alone would be
+  enough: `cairn-lsp --stdio` now starts the same session as `cairn-lsp` — stdio is the only
+  transport the server speaks, so the flag names what already happens — and `--help` lists it;
+  an argument after it is still refused with exit 2, as after `--version`. The extension no
+  longer sets a transport, which keeps stdio and adds no argument, so it also starts a
+  `cairn-lsp` released before the flag was accepted.
+
 - *(core)* A walkway that runs north–south took time quadratic in its length, while one of the same
   length running east–west took linear time. Each doubling of the gap between two huts placed with
   `north_of=` roughly quadrupled the time to lower them, so a strip near the 4,000,000-cell
