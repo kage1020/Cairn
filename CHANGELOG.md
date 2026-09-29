@@ -318,8 +318,21 @@
   ```
 
   On macOS and Windows, whose file systems ignore case by default, the file name is compared
-  case-folded too, so `--lock OUT/HUT.nbt` is refused there; on a case-sensitive volume of either
-  that refuses a lockfile which would have been a separate file, and loses nothing.
+  case-folded too, so `--lock OUT/HUT.nbt` is refused there. On a case-sensitive volume of either,
+  that folding can refuse a `--lock` which would in fact have been a separate file — a spurious
+  refusal, never a lost artifact. A lock location that cannot be resolved for any reason other
+  than a missing directory now draws a warning that the check could not be made, rather than
+  passing as free.
+
+  The same comparison now backs the check between artifacts. `place id=home1` and
+  `place id=HOME1` are distinct ids, but on macOS and Windows `home1.nbt` and `HOME1.nbt` are one
+  file, and a build placing both lost both — the previous build's copy included. It is now refused
+  before anything is written:
+
+  ```
+  error: output filename `out/HOME1.nbt` collides between scopes `site::hamlet::home1` and `site::hamlet::HOME1`
+    note: `out/home1.nbt` and `out/HOME1.nbt` name one file on this file system; rename one of the scopes so their names differ by more than case
+  ```
 
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same

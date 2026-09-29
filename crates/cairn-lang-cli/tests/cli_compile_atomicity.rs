@@ -394,58 +394,72 @@ fn atomic_5_a_lock_path_that_collides_with_an_artifact_is_refused() {
     }
 }
 
-/// `compile` run from `cwd`, with `--out` and `--lock` passed exactly as
-/// spelled — the spellings are the point, so nothing here joins them onto a
-/// directory first.
-fn compile_in(cwd: &Path, out_dir: &str, lock: &str) -> (Option<i32>, String) {
-    let out = Command::new(cargo_bin())
-        .current_dir(cwd)
-        .args([
-            "compile",
-            "village.crn",
-            "--edition",
-            "java",
-            "--out",
-            out_dir,
-            "--lock",
-            lock,
-        ])
-        .output()
-        .expect("run cairn");
+/// `compile` run from `cwd`, with `--out` (when given) and `--lock` passed
+/// exactly as spelled — the spellings are the point, so nothing here joins
+/// them onto a directory first.
+fn compile_in(cwd: &Path, out_dir: Option<&str>, lock: &str) -> (Option<i32>, String) {
+    let mut cmd = Command::new(cargo_bin());
+    cmd.current_dir(cwd)
+        .args(["compile", "village.crn", "--edition", "java"]);
+    if let Some(out_dir) = out_dir {
+        cmd.args(["--out", out_dir]);
+    }
+    let out = cmd.args(["--lock", lock]).output().expect("run cairn");
     (
         out.status.code(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
 }
 
-/// Rebuild with the `--out` and `--lock` that `spell` returns for the build's
-/// directory (and run from it), and assert the collision guard refuses it
-/// with the previous build left byte-identical and nothing staged.
+/// Rebuild from `dir` with `out_dir` and `lock`, and assert the collision
+/// guard refuses it naming `artifact` — the artifact's final path as the
+/// build spells it, never a scratch name or the lock's own spelling — with
+/// `watched` left byte-identical and nothing staged in it.
+fn assert_refused_by_the_guard(
+    dir: &Path,
+    out_dir: Option<&str>,
+    lock: &str,
+    artifact: &Path,
+    watched: &Path,
+) {
+    // Edited first: `watched` may be the source's own directory.
+    change_the_source(&dir.join("village.crn"));
+    let before = snapshot(watched);
+
+    let (code, stderr) = compile_in(dir, out_dir, lock);
+    let args = format!("`--out {out_dir:?} --lock {lock}`");
+    assert_eq!(
+        code,
+        Some(1),
+        "{args} names an artifact and must be refused; stderr={stderr}",
+    );
+    // Keyed on the guard's own wording: the unguarded run also exits 1, from
+    // the failed commit, after the artifact is already gone.
+    let expected = format!(
+        "collides with an artifact this build writes (`{}`)",
+        artifact.display(),
+    );
+    assert!(
+        stderr.contains(&expected),
+        "{args} must be refused by the collision guard, naming the artifact, before \
+         anything is staged; expected {expected:?}, got {stderr}",
+    );
+    assert_eq!(
+        snapshot(watched),
+        before,
+        "{args} changed the previous build"
+    );
+}
+
+/// [`assert_refused_by_the_guard`] over a fresh [`first_successful_build`],
+/// with `--out` and `--lock` as `spell` returns them for the build's
+/// directory. The artifact is `home1.nbt` under that `--out`, as spelled.
 fn assert_lock_spelling_is_refused(spell: impl FnOnce(&Path) -> (String, String)) {
     let build = first_successful_build();
     let dir = build.source.parent().expect("source has a parent");
     let (out_dir, lock) = spell(dir);
-    let before = snapshot(&build.out_dir);
-    change_the_source(&build.source);
-
-    let (code, stderr) = compile_in(dir, &out_dir, &lock);
-    assert_eq!(
-        code,
-        Some(1),
-        "`--out {out_dir} --lock {lock}` names an artifact and must be refused; stderr={stderr}",
-    );
-    // Keyed on the guard's own wording: the unguarded run also exits 1, from
-    // the failed commit, after the artifact is already gone.
-    assert!(
-        stderr.contains("collides with an artifact this build writes"),
-        "`--out {out_dir} --lock {lock}` must be refused by the collision guard, before \
-         anything is staged; got {stderr}",
-    );
-    assert_eq!(
-        snapshot(&build.out_dir),
-        before,
-        "`--out {out_dir} --lock {lock}` changed the previous build",
-    );
+    let artifact = Path::new(&out_dir).join("home1.nbt");
+    assert_refused_by_the_guard(dir, Some(&out_dir), &lock, &artifact, &build.out_dir);
 }
 
 #[test]
@@ -493,4 +507,134 @@ fn atomic_8_a_lock_differing_only_in_case_is_refused_where_case_is_folded() {
     // Case-insensitive by default on both platforms, so `OUT/HOME1.NBT` is
     // the artifact's own directory entry.
     assert_lock_spelling_is_refused(|_| ("out".into(), "OUT/HOME1.NBT".into()));
+}
+
+#[test]
+fn atomic_9_a_bare_lock_name_collides_with_the_default_out() {
+    // With `--out` omitted the artifacts go beside the source, and a bare
+    // `--lock home1.nbt` has an empty parent. That empty parent is the
+    // current directory, the same entry as `./home1.nbt`.
+    let tmp = TempDir::new().expect("tempdir");
+    let dir = tmp.path();
+    fs::copy(examples_dir().join("village.crn"), dir.join("village.crn")).expect("copy example");
+    let (code, stderr) = compile_in(dir, None, "village.crn.lock");
+    assert_eq!(
+        code,
+        Some(0),
+        "the first build must succeed; stderr={stderr}"
+    );
+    assert!(
+        dir.join("home1.nbt").is_file(),
+        "the artifact lands beside the source"
+    );
+
+    assert_refused_by_the_guard(
+        dir,
+        None,
+        "home1.nbt",
+        &Path::new(".").join("home1.nbt"),
+        dir,
+    );
+}
+
+#[test]
+fn atomic_10_a_lock_sharing_only_the_artifacts_name_still_builds() {
+    // The control for the tests above: the key is the parent *and* the name,
+    // so the artifact's name in another directory is a different file.
+    let build = first_successful_build();
+    let dir = build.source.parent().expect("source has a parent");
+    fs::create_dir(dir.join("other")).expect("mkdir other");
+    change_the_source(&build.source);
+
+    let (code, stderr) = compile_in(dir, Some("out"), "other/home1.nbt");
+    assert_eq!(
+        code,
+        Some(0),
+        "`--lock other/home1.nbt` is not an artifact and must build; stderr={stderr}",
+    );
+    assert!(dir.join("other").join("home1.nbt").is_file());
+}
+
+#[cfg(windows)]
+#[test]
+fn atomic_7_windows_a_lock_reached_through_a_junction_is_refused() {
+    // The Windows counterpart of the symlink case: a directory junction
+    // needs no elevation, and names `out` under a spelling that shares
+    // nothing with it but the file name.
+    let junction = |dir: &Path| {
+        let status = Command::new("cmd")
+            .current_dir(dir)
+            .args(["/C", "mklink", "/J", "link", "out"])
+            .status()
+            .expect("run mklink");
+        assert!(status.success(), "mklink /J failed");
+    };
+    assert_lock_spelling_is_refused(|dir| {
+        junction(dir);
+        ("link".into(), "out/home1.nbt".into())
+    });
+    assert_lock_spelling_is_refused(|dir| {
+        junction(dir);
+        ("out".into(), "link/home1.nbt".into())
+    });
+}
+
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn atomic_11_two_artifacts_differing_only_in_case_are_refused_where_case_is_folded() {
+    // `home1` and `HOME1` are distinct ids, but `home1.nbt` and `HOME1.nbt`
+    // are one directory entry here. Staged together they overwrote each
+    // other and the commit lost both, the previous one included.
+    let build = first_successful_build();
+    let before = snapshot(&build.out_dir);
+    let body = fs::read_to_string(&build.source).expect("read source");
+    let anchor = "  place id=home3 use=cottage theme=medieval north_of=home1 gap=5\n";
+    assert!(body.contains(anchor), "village.crn places home3");
+    let edited = body.replacen(
+        anchor,
+        &format!("{anchor}  place id=HOME1 use=cottage theme=medieval east_of=home3 gap=4\n"),
+        1,
+    );
+    fs::write(&build.source, edited).expect("write source");
+
+    let (code, stderr) = compile_with_output(&build.source, &build.out_dir, &build.lock);
+    assert_eq!(code, Some(1), "stderr={stderr}");
+    assert!(
+        stderr.contains("collides between scopes") && stderr.contains("name one file"),
+        "the refusal must come from the output-filename guard; got {stderr}",
+    );
+    assert_eq!(
+        snapshot(&build.out_dir),
+        before,
+        "`home1` and `HOME1` changed the previous build",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_12_a_lock_whose_location_cannot_be_resolved_is_reported_not_passed() {
+    // Only a missing directory is an ordinary reason not to resolve a
+    // path. Anything else — here a parent that runs through a regular file —
+    // leaves the guard without a key to compare, and it says so rather than
+    // reading "no key" as "no collision".
+    let build = first_successful_build();
+    let dir = build.source.parent().expect("source has a parent");
+    change_the_source(&build.source);
+    let before = snapshot(&build.out_dir);
+
+    let (code, stderr) = compile_in(dir, Some("out"), "village.crn/sub/v.lock");
+    assert!(
+        stderr.contains("could not check that it is not one of this build's artifacts"),
+        "an unresolvable lock location must be reported; got {stderr}",
+    );
+    assert_eq!(
+        code,
+        Some(1),
+        "the lock cannot be written there; stderr={stderr}"
+    );
+    assert_eq!(
+        snapshot(&build.out_dir),
+        before,
+        "the failed build changed the previous one"
+    );
 }
