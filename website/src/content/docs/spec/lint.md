@@ -281,7 +281,7 @@ something for the name would build a site the source did not describe.
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
 | `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, so the walkway has no material to lay. |
 | `W_DUPLICATE_WALKWAY` | A `connect` repeats a `(from, to)` pair an earlier row in the same site already laid. |
-| `W_INVALID_WALKWAY_IDENT` | A site, place or port identifier in a `connect` contains `__`. |
+| `W_INVALID_WALKWAY_IDENT` | A site, place or port identifier in a `connect` contains `__`, or a place or port identifier starts or ends with `_`. |
 | `W_DEFERRED_CONNECT` | A `connect` targets a `place` that was itself refused, so there is nothing to connect. |
 | `W_WALKWAY_BLOCKED` | Cells of the fallback path overlapped an existing structure and were dropped. |
 
@@ -296,8 +296,12 @@ world, with nothing in the report to say so.
 
 `W_INVALID_WALKWAY_IDENT` is the same round-trip rule as `E_INVALID_PLACE_ID` on a different
 separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
-`c__home2` in the other encode to one string. The row is dropped and the finding names the segment
-to rename.
+`c__home2` in the other encode to one string. A `_` at the edge of a place or port merges into that
+separator the same way: `a.p_ to b.p` and `a.p to _b.p` both encode to `a.p___b.p`, and a port
+named `_` leaves a key that splits back into an empty port. Only the end of the `from` port and the
+start of the `to` place touch the separator, but a `connect` can be written in either direction, so
+both edges of every place and port are refused. The site is exempt from the edge rule, since `::`
+separates it from both neighbours. The row is dropped and the finding names the segment to rename.
 
 `W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
 failed origin selector, an unresolved `use=` or `theme=`. It is a warning because the finding that
@@ -345,14 +349,22 @@ resolution the spec mandates still happens — the finding says which voxel it h
 | `W_TRUTH_TABLE_DUPLICATE_ROW` | Two rows cover the same input combination without contradicting each other. |
 | `W_TRUTH_TABLE_PARTIAL` | The rows leave input combinations unassigned. |
 
-Both codes are reported on the later row, with a note at the first row assigning that combination.
-The spec does not say which of two conflicting rows an evaluator would read, because the repair is
-to decide which row is wrong.
+Both codes are reported on the later row. A row is compared with every earlier row that shares a
+combination with it, so whether a table is refused does not depend on the order its rows are
+written in: `0- -> 1` after `00 -> 1; 01 -> 0` is `E_TRUTH_TABLE_CONFLICT`, though it agrees with
+the first of the two. A conflict takes precedence over a duplicate on the same row, and its note is
+at the first row assigning the combination it names the other output. Any other finding's note is
+at the first row assigning the combination it names, so every finding about one combination points
+at the same row. The spec does not say which of two conflicting rows an evaluator would read,
+because the repair is to decide which row is wrong.
 
 A `-` makes the same combination reachable from rows that do not look alike, so both codes are
 about the combination rather than about the pattern: `0-` and `-1` both assign `01`. The fix
 differs with the shape. A row inside an earlier one — `01` under `0-` — is deleted. Two rows that
 merely cross are narrowed, because deleting either would lose the combinations only it assigns.
+When the earlier row is itself reported for overlapping a row before it, the fix is to settle that
+row first instead: in `0- -> 1; -0 -> 1; 10 -> 1`, `-0` is told to narrow away from `0-`, and
+deleting `10` because `-0` stands for it would, together with that, leave `10` unassigned.
 
 A `-` **output** is the one shape that is neither a conflict nor a repeat: the row declines to
 constrain its combinations, so there is nothing for a concrete output to contradict, and nothing
