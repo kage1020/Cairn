@@ -54,7 +54,7 @@ fn validate_ident(s: &str) -> Result<(), IdError> {
     Ok(())
 }
 
-fn check_no_dunder(role: &'static str, s: &str) -> Result<(), KeyConstructError> {
+fn check_no_dunder(role: KeySegmentRole, s: &str) -> Result<(), KeyConstructError> {
     if s.contains("__") {
         return Err(KeyConstructError::ConsecutiveUnderscore {
             role,
@@ -64,19 +64,24 @@ fn check_no_dunder(role: &'static str, s: &str) -> Result<(), KeyConstructError>
     Ok(())
 }
 
-/// Whether `s` starts or ends with `_`. A place or port segment with a
-/// `_` at either edge can sit next to the `from`/`to` separator and run
-/// into it: `(a, p_)` to `(b, p)` and `(a, p)` to `(_b, p)` both encode
-/// to `a.p___b.p`. Checking both edges of every
-/// place and port (not only `from_port`'s end and `to_place`'s start,
-/// the two that touch the separator) keeps the rule independent of the
-/// direction a `connect` row is written in.
+/// Whether `s` starts or ends with `_`.
 fn has_edge_underscore(s: &str) -> bool {
     s.starts_with('_') || s.ends_with('_')
 }
 
-fn check_endpoint_segment(role: &'static str, s: &str) -> Result<(), KeyConstructError> {
-    check_no_dunder(role, s)?;
+/// Check one place or port segment of a walkway scope key: no `__`
+/// anywhere, and no `_` at either edge.
+///
+/// Only two of the eight edges can touch the `from`/`to` separator in a
+/// given key: the end of `from_port` and the start of `to_place`.
+/// Allowing for a row written the other way round adds the start of
+/// `from_place` and the end of `to_port`. The other four always sit next
+/// to a `.` and can never merge into `__`. Every edge of every place and
+/// port is refused anyway, so the rule a user reads is one sentence and
+/// does not depend on which way a `connect` row is written. The site
+/// takes only [`check_no_dunder`]: `::` fences it on both sides.
+fn check_endpoint_segment(role: EndpointSegmentRole, s: &str) -> Result<(), KeyConstructError> {
+    check_no_dunder(role.into(), s)?;
     if has_edge_underscore(s) {
         return Err(KeyConstructError::UnderscoreAtEdge {
             role,
@@ -84,6 +89,69 @@ fn check_endpoint_segment(role: &'static str, s: &str) -> Result<(), KeyConstruc
         });
     }
     Ok(())
+}
+
+/// Which segment of a walkway scope key a [`KeyConstructError`] names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeySegmentRole {
+    /// The site name.
+    Site,
+    /// A `place id=`, on either end.
+    Place,
+    /// A port id, on either end.
+    Port,
+}
+
+/// Which endpoint segment a [`KeyConstructError::UnderscoreAtEdge`]
+/// names. A separate type from [`KeySegmentRole`] because the site is
+/// exempt from the edge rule, so a site-role edge error cannot be built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EndpointSegmentRole {
+    /// A `place id=`, on either end.
+    Place,
+    /// A port id, on either end.
+    Port,
+}
+
+impl KeySegmentRole {
+    /// The lowercase noun used in messages: `site`, `place` or `port`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Site => "site",
+            Self::Place => "place",
+            Self::Port => "port",
+        }
+    }
+}
+
+impl EndpointSegmentRole {
+    /// The lowercase noun used in messages: `place` or `port`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        KeySegmentRole::from(self).as_str()
+    }
+}
+
+impl From<EndpointSegmentRole> for KeySegmentRole {
+    fn from(role: EndpointSegmentRole) -> Self {
+        match role {
+            EndpointSegmentRole::Place => Self::Place,
+            EndpointSegmentRole::Port => Self::Port,
+        }
+    }
+}
+
+impl fmt::Display for KeySegmentRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl fmt::Display for EndpointSegmentRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 macro_rules! ident_newtype {
@@ -233,12 +301,11 @@ pub enum KeyParseError {
         /// The offending segment.
         segment: String,
     },
-    /// A place or port segment starts or ends with `_`, so it runs
-    /// into the `__` separator next to it. See
+    /// A place or port segment starts or ends with `_`. See
     /// [`KeyConstructError::UnderscoreAtEdge`].
     #[error(
-        "segment `{segment}` in scope key `{key}` starts or ends with `_`, which runs into \
-         the `from`/`to` separator"
+        "segment `{segment}` in scope key `{key}` starts or ends with `_`, which a walkway \
+         place or port id may not do in either position"
     )]
     UnderscoreAtEdge {
         /// The whole scope key that was being parsed.
@@ -267,25 +334,28 @@ pub enum KeyConstructError {
          `from`/`to` separator; rename the {role} so the lowered key is unambiguous"
     )]
     ConsecutiveUnderscore {
-        /// Which role the offending segment plays (`"site"`, `"place"`, `"port"`).
-        role: &'static str,
+        /// Which segment the offending string is.
+        role: KeySegmentRole,
         /// The offending segment.
         segment: String,
     },
-    /// A place or port segment starts or ends with `_`. Next to the
-    /// `__` separator that `_` joins the separator: `(a, p_)` to
-    /// `(b, p)` and `(a, p)` to `(_b, p)` both encode to
-    /// `a.p___b.p`, and a port named `_` gives `a.___b._`, which
-    /// splits back into an empty port. The site segment is exempt: it
-    /// sits between two `::` separators, which no identifier can
-    /// contain.
+    /// A place or port segment starts or ends with `_`.
+    ///
+    /// A `_` on the edge that meets the `__` separator merges into it:
+    /// `(a, p_)` to `(b, p)` and `(a, p)` to `(_b, p)` both encode to
+    /// `a.p___b.p`, and a port named `_` gives `a.___b._`, which splits
+    /// back into an empty port. The rule refuses every edge of every
+    /// place and port, including the ones next to a `.` that could not
+    /// merge, so it does not depend on which way a row is written. The
+    /// site is exempt: it sits between two `::` separators, which no
+    /// identifier can contain.
     #[error(
-        "walkway scope key segment `{segment}` starts or ends with `_`, which runs into the \
-         `from`/`to` separator; rename the {role} so the lowered key is unambiguous"
+        "walkway scope key segment `{segment}` starts or ends with `_`, which a walkway \
+         place or port id may not do in either position; rename the {role}"
     )]
     UnderscoreAtEdge {
-        /// Which role the offending segment plays (`"place"`, `"port"`).
-        role: &'static str,
+        /// Which endpoint segment the offending string is.
+        role: EndpointSegmentRole,
         /// The offending segment.
         segment: String,
     },
@@ -329,11 +399,11 @@ impl WalkwayScopeKey {
         from: &WalkwayEndpoint,
         to: &WalkwayEndpoint,
     ) -> Result<Self, KeyConstructError> {
-        check_no_dunder("site", site.as_str())?;
-        check_endpoint_segment("place", from.place.as_str())?;
-        check_endpoint_segment("port", from.port.as_str())?;
-        check_endpoint_segment("place", to.place.as_str())?;
-        check_endpoint_segment("port", to.port.as_str())?;
+        check_no_dunder(KeySegmentRole::Site, site.as_str())?;
+        check_endpoint_segment(EndpointSegmentRole::Place, from.place.as_str())?;
+        check_endpoint_segment(EndpointSegmentRole::Port, from.port.as_str())?;
+        check_endpoint_segment(EndpointSegmentRole::Place, to.place.as_str())?;
+        check_endpoint_segment(EndpointSegmentRole::Port, to.port.as_str())?;
         Ok(Self(format!(
             "walkway::{site}::{from_place}.{from_port}__{to_place}.{to_port}",
             from_place = from.place,
@@ -392,9 +462,11 @@ impl WalkwayScopeKey {
         let from_port_id = PortId::new(from_port).map_err(|e| invalid(from_port, e))?;
         let to_place_id = PlaceId::new(to_place).map_err(|e| invalid(to_place, e))?;
         let to_port_id = PortId::new(to_port).map_err(|e| invalid(to_port, e))?;
-        // `__` is ruled out above; a place or port with `_` at an edge
-        // is left to `from_parts`, whose error maps onto the matching
-        // parse-error variant.
+        // A place or port with `_` at an edge is left to `from_parts`,
+        // whose error maps onto the matching parse-error variant. Its
+        // `ConsecutiveUnderscore` arm cannot fire here, since the loop
+        // above already returned for every `__`; it is mapped rather than
+        // `unreachable!()` so removing that loop cannot introduce a panic.
         Self::from_parts(
             &site_id,
             &WalkwayEndpoint {
@@ -646,7 +718,7 @@ mod tests {
         .expect_err("port id with `__` must be rejected");
         match err {
             KeyConstructError::ConsecutiveUnderscore { role, segment } => {
-                assert_eq!(role, "port");
+                assert_eq!(role, KeySegmentRole::Port);
                 assert_eq!(segment, "b__c");
             }
             other @ KeyConstructError::UnderscoreAtEdge { .. } => {
@@ -661,11 +733,17 @@ mod tests {
                 &endpoint("a", "x"),
                 &endpoint("b", "y"),
             ),
-            Err(KeyConstructError::ConsecutiveUnderscore { role: "site", .. })
+            Err(KeyConstructError::ConsecutiveUnderscore {
+                role: KeySegmentRole::Site,
+                ..
+            })
         ));
         assert!(matches!(
             WalkwayScopeKey::from_parts(&site, &endpoint("a__b", "x"), &endpoint("c", "y"),),
-            Err(KeyConstructError::ConsecutiveUnderscore { role: "place", .. })
+            Err(KeyConstructError::ConsecutiveUnderscore {
+                role: KeySegmentRole::Place,
+                ..
+            })
         ));
     }
 
@@ -695,15 +773,60 @@ mod tests {
         // only the two that touch the separator in one direction.
         let site = SiteName::new("s").expect("site");
         let cases = [
-            (endpoint("a", "p_"), endpoint("b", "p"), "port", "p_"),
-            (endpoint("a", "p"), endpoint("_b", "p"), "place", "_b"),
-            (endpoint("a_", "p"), endpoint("b", "p"), "place", "a_"),
-            (endpoint("_a", "p"), endpoint("b", "p"), "place", "_a"),
-            (endpoint("a", "_p"), endpoint("b", "p"), "port", "_p"),
-            (endpoint("a", "p"), endpoint("b_", "p"), "place", "b_"),
-            (endpoint("a", "p"), endpoint("b", "_p"), "port", "_p"),
-            (endpoint("a", "p"), endpoint("b", "p_"), "port", "p_"),
-            (endpoint("a", "_"), endpoint("b", "_"), "port", "_"),
+            (
+                endpoint("a", "p_"),
+                endpoint("b", "p"),
+                EndpointSegmentRole::Port,
+                "p_",
+            ),
+            (
+                endpoint("a", "p"),
+                endpoint("_b", "p"),
+                EndpointSegmentRole::Place,
+                "_b",
+            ),
+            (
+                endpoint("a_", "p"),
+                endpoint("b", "p"),
+                EndpointSegmentRole::Place,
+                "a_",
+            ),
+            (
+                endpoint("_a", "p"),
+                endpoint("b", "p"),
+                EndpointSegmentRole::Place,
+                "_a",
+            ),
+            (
+                endpoint("a", "_p"),
+                endpoint("b", "p"),
+                EndpointSegmentRole::Port,
+                "_p",
+            ),
+            (
+                endpoint("a", "p"),
+                endpoint("b_", "p"),
+                EndpointSegmentRole::Place,
+                "b_",
+            ),
+            (
+                endpoint("a", "p"),
+                endpoint("b", "_p"),
+                EndpointSegmentRole::Port,
+                "_p",
+            ),
+            (
+                endpoint("a", "p"),
+                endpoint("b", "p_"),
+                EndpointSegmentRole::Port,
+                "p_",
+            ),
+            (
+                endpoint("a", "_"),
+                endpoint("b", "_"),
+                EndpointSegmentRole::Port,
+                "_",
+            ),
         ];
         for (from, to, want_role, want_segment) in cases {
             match WalkwayScopeKey::from_parts(&site, &from, &to) {
@@ -748,10 +871,12 @@ mod tests {
 
     #[test]
     fn walkway_scope_key_from_parts_is_injective_and_parses_back() {
-        // Exhaustive over segments of `a` and `_` up to three long — the
-        // only character that can merge into the `__` separator is `_`,
-        // and three is enough to put `_` at an edge, in the middle, and
-        // doubled. Every key `from_parts` accepts must parse back to the
+        // Exhaustive over endpoint segments of `a` and `_` up to three
+        // long — the only character that can merge into the `__`
+        // separator is `_`, and three is enough to put `_` at an edge, in
+        // the middle, and doubled. The site is capped at two: `::` fences
+        // it on both sides, so a third character buys nothing and would
+        // double the run. Every key `from_parts` accepts must parse back to the
         // exact parts it was built from, which rules out two accepted
         // inputs sharing a key: `parse` is a function, so a shared key
         // would parse back to only one of them.
@@ -766,7 +891,8 @@ mod tests {
         }
         let sites: Vec<&String> = all.iter().filter(|s| s.len() <= 2).collect();
         let mut accepted = 0_usize;
-        let mut rejected = 0_usize;
+        let mut rejected_dunder = 0_usize;
+        let mut rejected_edge = 0_usize;
         for site in &sites {
             let site_id = SiteName::new(site.as_str()).expect("site");
             for from_place in &all {
@@ -775,9 +901,16 @@ mod tests {
                         for to_port in &all {
                             let from = endpoint(from_place, from_port);
                             let to = endpoint(to_place, to_port);
-                            let Ok(key) = WalkwayScopeKey::from_parts(&site_id, &from, &to) else {
-                                rejected += 1;
-                                continue;
+                            let key = match WalkwayScopeKey::from_parts(&site_id, &from, &to) {
+                                Ok(key) => key,
+                                Err(KeyConstructError::ConsecutiveUnderscore { .. }) => {
+                                    rejected_dunder += 1;
+                                    continue;
+                                }
+                                Err(KeyConstructError::UnderscoreAtEdge { .. }) => {
+                                    rejected_edge += 1;
+                                    continue;
+                                }
                             };
                             accepted += 1;
                             let parsed = WalkwayScopeKey::parse(key.as_str())
@@ -805,8 +938,15 @@ mod tests {
                 }
             }
         }
-        // Both arms must have been exercised for the loop to mean anything.
-        assert!(accepted > 0 && rejected > 0, "{accepted} / {rejected}");
+        // Every combination was visited, and both refusal arms fired.
+        let total = sites.len() * all.len().pow(4);
+        assert_eq!(accepted + rejected_dunder + rejected_edge, total);
+        assert!(rejected_dunder > 0 && rejected_edge > 0);
+        // What survives: 5 sites (`a`, `_`, `aa`, `a_`, `_a`; `__` is
+        // refused) times 4 endpoint segments (`a`, `aa`, `aaa`, `a_a`) to
+        // the fourth power. A rule that narrowed or widened acceptance
+        // moves this count.
+        assert_eq!(accepted, 1280, "5 sites x 4^4 endpoint combinations");
     }
 
     #[test]

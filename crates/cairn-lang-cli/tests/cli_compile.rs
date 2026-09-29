@@ -1439,4 +1439,14 @@ fn walkway_ids_that_would_alias_across_the_separator_are_each_named() {
             "s_walkway_a_p__b_p.nbt"
         ],
     );
+    // The lockfile records the sound row alone, and still certifies the
+    // build: a dropped walkway is a warning, not a partial build.
+    let lf = Lockfile::read_from_path(&fixture.lock()).expect("read lock");
+    let walkways: Vec<String> = lf
+        .walkways
+        .iter()
+        .map(|w| format!("{}: {} -> {}", w.site, w.from, w.to))
+        .collect();
+    assert_eq!(walkways, ["s: a.p -> b.p"]);
+    assert!(lf.verified, "a dropped walkway leaves `verified: true`");
 }

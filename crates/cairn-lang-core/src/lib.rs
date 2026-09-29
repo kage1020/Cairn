@@ -32,8 +32,8 @@ pub use check::{Diagnostic, DiagnosticCode, Severity, check};
 pub use edition::{Edition, UnknownEdition};
 pub use error::{LexError, ParseError, Position, Span};
 pub use ids::{
-    IdError, KeyConstructError, KeyParseError, PlaceId, PortId, SiteName, WalkwayEndpoint,
-    WalkwayScopeKey,
+    EndpointSegmentRole, IdError, KeyConstructError, KeyParseError, KeySegmentRole, PlaceId,
+    PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey,
 };
 pub use intent::{
     CircuitRegion, IntentModule, Member, MemberRole, ScopeKind, SemanticLevel, circuit_regions,

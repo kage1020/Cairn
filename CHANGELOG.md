@@ -1140,21 +1140,27 @@
   the segment:
 
   ```
-  alias.crn:13:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p_ ↔ b.p` was dropped because the port id `p_` starts or ends with `_`, which runs into the walkway scope key's `from`/`to` separator `__`
-    note: a walkway's place and port ids may not start or end with `_`, so its scope key stays unambiguous; rename the port so it neither starts nor ends with `_`
-  alias.crn:14:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p ↔ _b.p` was dropped because the place id `_b` starts or ends with `_`, which runs into the walkway scope key's `from`/`to` separator `__`
-    note: a walkway's place and port ids may not start or end with `_`, so its scope key stays unambiguous; rename the place so it neither starts nor ends with `_`
+  alias.crn:13:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p_ ↔ b.p` was dropped because the port id `p_` starts or ends with `_`
+    note: a walkway's place and port ids may not start or end with `_` in either position, so the rule does not depend on which way the row is written; rename the port so it neither starts nor ends with `_`
+  alias.crn:14:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p ↔ _b.p` was dropped because the place id `_b` starts or ends with `_`
+    note: a walkway's place and port ids may not start or end with `_` in either position, so the rule does not depend on which way the row is written; rename the place so it neither starts nor ends with `_`
   ```
 
   Both ends of every place and port are refused, not only the two that touch the separator, so the
-  rule does not depend on which way a row is written. The site is exempt: `::` separates it from
-  both neighbours. A unit test builds every key over segments of `a` and `_` up to three long and
-  parses each accepted one back to the parts it came from.
+  rule does not depend on which way a row is written. That reaches ids which never aliased: a
+  source whose only edge-`_` id is `place id=a_` in `connect a_.p to b.p` used to lay that walkway,
+  and now drops it with the warning above while `compile` still exits 0. The site is exempt: `::`
+  separates it from both neighbours. A unit test builds every key over endpoint segments of `a` and
+  `_` up to three long and sites up to two, and parses each accepted one back to the parts it came
+  from. `spec/lint` "Connections and walkways" states the rule, with the ja mirror.
 
-  **Breaking**: `KeyConstructError` and `KeyParseError` each gain an `UnderscoreAtEdge` variant, so
-  an external exhaustive `match` on either no longer compiles. Both enums are now
-  `#[non_exhaustive]`, so the next variant costs no second break. The Rust API is Internal tier
-  per `spec/compatibility`, so no deprecation window is owed.
+  **Breaking**: `KeyConstructError` and `KeyParseError` each gain an `UnderscoreAtEdge` variant,
+  and `KeyConstructError::ConsecutiveUnderscore`'s `role` changes from `&'static str` to the new
+  `KeySegmentRole` enum (`UnderscoreAtEdge` carries `EndpointSegmentRole`, which has no site arm,
+  since the site is exempt from that rule). An external exhaustive `match` on either error enum,
+  or a comparison of `role` against a string, no longer compiles; match the enum instead, or use
+  its `as_str()`. Both error enums are now `#[non_exhaustive]`, so the next variant costs no second
+  break. The Rust API is Internal tier per `spec/compatibility`, so no deprecation window is owed.
 
 - *(cli,core,formats)* `cairn info`'s `degraded` figure counted palette entries it could name and
   did not:

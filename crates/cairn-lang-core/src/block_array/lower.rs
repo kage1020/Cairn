@@ -664,7 +664,17 @@ fn lower_connects(
             x: dims.x,
             z: dims.z,
         };
-        structures.insert(scope_key.as_str().to_owned(), array);
+        // `from_parts` refuses every id that could alias another row's key
+        // (`W_INVALID_WALKWAY_IDENT` above), so a replaced entry here means
+        // that rule has a hole: the earlier row's walkway would vanish from
+        // the build with no finding. The `insert` is bound first because a
+        // `debug_assert!` around it would drop the insert in release builds.
+        let replaced = structures.insert(scope_key.as_str().to_owned(), array);
+        debug_assert!(
+            replaced.is_none(),
+            "walkway `{scope_key}` replaced an existing structure; two `connect` rows \
+             encoded to one scope key",
+        );
         walkways.insert(
             scope_key,
             Walkway {
@@ -731,20 +741,26 @@ fn diag_walkway_invalid_ident(
     connect: &crate::resolve::ValidatedConnect,
     err: &crate::ids::KeyConstructError,
 ) -> Diagnostic {
-    use crate::ids::KeyConstructError;
-    let (role, segment, problem, constraint, fix) = match err {
+    use crate::ids::{KeyConstructError, KeySegmentRole};
+    // Sentence frame, one clause per variant:
+    //   primary: walkway `A ↔ B` was dropped because the ROLE id `SEG` PROBLEM
+    //   note:    CONSTRAINT; rename the ROLE FIX
+    let (role, segment, problem, constraint, fix): (KeySegmentRole, _, _, _, _) = match err {
         KeyConstructError::ConsecutiveUnderscore { role, segment } => (
-            role,
+            *role,
             segment,
-            "contains `__`, which collides with",
-            "a walkway's site, place and port ids may not contain `__`",
-            "(e.g. replace `__` with `_`)",
+            "contains `__`, the separator between the walkway scope key's `from` and `to` \
+             halves",
+            "a walkway's site, place and port ids may not contain `__`, so no id can be \
+             mistaken for the separator",
+            "so it has no `__`, e.g. by replacing `__` with `_`",
         ),
         KeyConstructError::UnderscoreAtEdge { role, segment } => (
-            role,
+            (*role).into(),
             segment,
-            "starts or ends with `_`, which runs into",
-            "a walkway's place and port ids may not start or end with `_`",
+            "starts or ends with `_`",
+            "a walkway's place and port ids may not start or end with `_` in either \
+             position, so the rule does not depend on which way the row is written",
             "so it neither starts nor ends with `_`",
         ),
     };
@@ -752,16 +768,13 @@ fn diag_walkway_invalid_ident(
         code: DiagnosticCode::InvalidWalkwayIdent,
         span: connect.span.clone(),
         primary: format!(
-            "walkway `{from} ↔ {to}` was dropped because the {role} id `{segment}` \
-             {problem} the walkway scope key's `from`/`to` separator `__`",
+            "walkway `{from} ↔ {to}` was dropped because the {role} id `{segment}` {problem}",
             from = connect.from,
             to = connect.to,
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: format!(
-                "{constraint}, so its scope key stays unambiguous; rename the {role} {fix}"
-            ),
+            message: format!("{constraint}; rename the {role} {fix}"),
         }],
         data: None,
     }
@@ -6866,18 +6879,25 @@ struct s size=9x7
             primaries,
             [
                 "walkway `a.p_ ↔ b.p` was dropped because the port id `p_` starts or ends \
-                 with `_`, which runs into the walkway scope key's `from`/`to` separator `__`",
+                 with `_`",
                 "walkway `a.p ↔ _b.p` was dropped because the place id `_b` starts or ends \
-                 with `_`, which runs into the walkway scope key's `from`/`to` separator `__`",
+                 with `_`",
             ],
         );
-        for (_, notes) in &findings {
-            assert_eq!(notes.len(), 1, "{notes:?}");
-            assert!(
-                notes[0].contains("so it neither starts nor ends with `_`"),
-                "the note must say how to rename an edge `_`: {notes:?}",
-            );
-        }
+        let notes: Vec<&[String]> = findings.iter().map(|(_, n)| n.as_slice()).collect();
+        let rule = "a walkway's place and port ids may not start or end with `_` in either \
+                    position, so the rule does not depend on which way the row is written";
+        assert_eq!(
+            notes,
+            [
+                [format!(
+                    "{rule}; rename the port so it neither starts nor ends with `_`"
+                )],
+                [format!(
+                    "{rule}; rename the place so it neither starts nor ends with `_`"
+                )],
+            ],
+        );
         let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
         assert_eq!(laid, ["walkway::s::a.p__b.p"]);
         let walkway_structures: Vec<&str> = out
@@ -6918,7 +6938,7 @@ struct s size=9x7
             primaries,
             [
                 "walkway `a._ ↔ b._` was dropped because the port id `_` starts or ends \
-              with `_`, which runs into the walkway scope key's `from`/`to` separator `__`"
+              with `_`"
             ],
         );
         let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
@@ -6956,11 +6976,15 @@ struct s size=9x7
         assert_eq!(
             primary,
             "walkway `a.b__c ↔ b.b__c` was dropped because the port id `b__c` contains \
-             `__`, which collides with the walkway scope key's `from`/`to` separator `__`",
+             `__`, the separator between the walkway scope key's `from` and `to` halves",
         );
-        assert!(
-            notes[0].contains("replace `__` with `_`"),
-            "the note must say how to rename a `__`: {notes:?}",
+        assert_eq!(
+            notes,
+            &[
+                "a walkway's site, place and port ids may not contain `__`, so no id can be \
+                 mistaken for the separator; rename the port so it has no `__`, e.g. by \
+                 replacing `__` with `_`"
+            ],
         );
         assert!(out.walkways.is_empty());
     }

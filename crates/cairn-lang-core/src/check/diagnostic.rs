@@ -466,12 +466,16 @@ pub enum DiagnosticCode {
     /// cascades in `block_array::lower`.
     DeferredConnect,
     /// A `connect` row whose site / place / port identifier contains the
-    /// `__` substring. The surface lexer permits `_` in identifiers, but
-    /// the canonical walkway scope key uses `__` as the `from`/`to`
+    /// `__` substring, or whose place / port identifier starts or ends
+    /// with `_`. The surface lexer permits `_` anywhere in identifiers,
+    /// but the canonical walkway scope key uses `__` as the `from`/`to`
     /// separator — so `(home, b__c, home2, entry)` and
     /// `(home, b, c__home2, entry)` would otherwise encode to the same
-    /// wire string. Lowering drops the row and asks the user to rename
-    /// the offending segment so the encoding stays unambiguous.
+    /// wire string, and so would `(a, p_, b, p)` and `(a, p, _b, p)`.
+    /// The edge rule covers both ends of every place and port, not only
+    /// the ones next to the separator, so it does not depend on which way
+    /// the row is written. Lowering drops the row and asks the user to
+    /// rename the offending segment so the encoding stays unambiguous.
     InvalidWalkwayIdent,
     /// A `connect` row whose positional shape is not
     /// `FROM.PORT to TO.PORT`. The line-based parser accepts any number
