@@ -40,7 +40,7 @@
 
   ```
   s.crn:2:52: error[E_TRUTH_TABLE_CONFLICT]: this row assigns `01` the output `1`, and an earlier row assigns it `0`
-  s.crn:2:43:   note: first row assigning `01` here
+  s.crn:2:43:   note: first row assigning `01` the output `0` here
   ```
 
   When two rows agree it stays `W_TRUTH_TABLE_DUPLICATE_ROW`, and the repair depends on the shape.
@@ -48,6 +48,16 @@
   because deleting either would lose the combinations only it assigns. That case also withholds the
   coverage finding rather than answering it with a count taken without the later row, which would
   name a combination the table does assign.
+
+  A row is compared with every earlier row, so whether a table is refused does not depend on the
+  order its rows are written in: `0- -> 1` after `00 -> 1; 01 -> 0` agrees with the first and is
+  still a conflict with the second. A conflict takes precedence over a duplicate on the same row,
+  and its note is at the first row assigning the combination the other output. Any other finding's
+  note is at the first row assigning the combination it names, so every finding about one
+  combination points at the same row. When that row is itself reported for overlapping a row before
+  it, the fix is to settle that row first rather than to delete this one: in
+  `0- -> 1; -0 -> 1; 10 -> 1`, `-0` is told to narrow away from `0-`, and deleting `10` because
+  `-0` stands for it would, together with that, leave `10` unassigned.
 
   A `-` output beside a concrete one is neither: there is nothing for the concrete output to
   contradict, and nothing for it to agree with, so the rows overlap without the usual repair being
@@ -333,6 +343,17 @@
   error: output filename `out/HOME1.nbt` collides between scopes `site::hamlet::home1` and `site::hamlet::HOME1`
     note: `out/home1.nbt` and `out/HOME1.nbt` name one file on this file system; rename one of the scopes so their names differ by more than case
   ```
+
+- *(core)* A walkway that runs north–south took time quadratic in its length, while one of the same
+  length running east–west took linear time. Each doubling of the gap between two huts placed with
+  `north_of=` roughly quadrupled the time to lower them, so a strip near the 4,000,000-cell
+  routing cap, just inside what the router accepts, would have run for hours with no output.
+  `cairn check --target`, `info`, `lower` and `compile` all run that lowering — `info` runs it
+  once per edition and once per version it weighs. Before laying each cell, the
+  z leg of the straight path searched every cell it had already laid, as a guard against laying
+  the corner twice. The order it steps in already prevents that. The search is gone, so a z strip
+  costs what an x strip costs, and a strip at the cap lowers in seconds. The cells laid are
+  unchanged.
 
 - *(core)* An argument whose value was present but unreadable was built as if it had been left
   off, and nothing said so. A window's `sym=`, an eave stair's `facing=` / `half=` / `shape=`, and a
@@ -1142,6 +1163,39 @@
   untouched: this is a row of a report `info` writes on a run it does not refuse, not a diagnostic.
 
 ### Breaking changes
+
+- *(core)* Two `connect` rows could lay one walkway between them. A place or port id that starts
+  or ends with `_` merges into the `__` that joins a walkway scope key's two ends, so these rows
+  both encoded to `walkway::s::a.p___b.p`:
+
+  ```
+  connect a.p_ to b.p path=@gravel
+  connect a.p to _b.p path=@gravel
+  ```
+
+  The second row replaced the first: one `.nbt` was written, the lockfile's `walkways:` had one
+  entry, and `W_DUPLICATE_WALKWAY` did not fire because the `(from, to)` pairs differ. A port named
+  `_` gave `walkway::s::a.___b._`, which splits back into an empty port, and `compile` panicked on
+  it in a debug build while `check` passed. `W_INVALID_WALKWAY_IDENT` already refused a segment
+  that contains `__`; it now also refuses a place or port that starts or ends with `_`, and names
+  the segment:
+
+  ```
+  alias.crn:13:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p_ ↔ b.p` was dropped because the port id `p_` starts or ends with `_`, which runs into the walkway scope key's `from`/`to` separator `__`
+    note: a walkway's place and port ids may not start or end with `_`, so its scope key stays unambiguous; rename the port so it neither starts nor ends with `_`
+  alias.crn:14:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p ↔ _b.p` was dropped because the place id `_b` starts or ends with `_`, which runs into the walkway scope key's `from`/`to` separator `__`
+    note: a walkway's place and port ids may not start or end with `_`, so its scope key stays unambiguous; rename the place so it neither starts nor ends with `_`
+  ```
+
+  Both ends of every place and port are refused, not only the two that touch the separator, so the
+  rule does not depend on which way a row is written. The site is exempt: `::` separates it from
+  both neighbours. A unit test builds every key over segments of `a` and `_` up to three long and
+  parses each accepted one back to the parts it came from.
+
+  **Breaking**: `KeyConstructError` and `KeyParseError` each gain an `UnderscoreAtEdge` variant, so
+  an external exhaustive `match` on either no longer compiles. Both enums are now
+  `#[non_exhaustive]`, so the next variant costs no second break. The Rust API is Internal tier
+  per `spec/compatibility`, so no deprecation window is owed.
 
 - *(cli,core,formats)* `cairn info`'s `degraded` figure counted palette entries it could name and
   did not:
