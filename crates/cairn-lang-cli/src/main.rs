@@ -3237,8 +3237,10 @@ fn prepare_artifacts(
     out_dir: &Path,
 ) -> Result<Vec<(PathBuf, Compound)>, ExitCode> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
-    let mut seen_paths: std::collections::HashMap<PathBuf, String> =
-        std::collections::HashMap::with_capacity(block_ir.structures.len());
+    let mut seen_paths: std::collections::HashMap<
+        (PathBuf, std::ffi::OsString),
+        (PathBuf, String),
+    > = std::collections::HashMap::with_capacity(block_ir.structures.len());
     for (scope, array) in &block_ir.structures {
         let (tag, degraded) = target.build_tag(array).map_err(|err| {
             eprintln!("error: building `{scope}`: {err}");
@@ -3259,12 +3261,32 @@ fn prepare_artifacts(
         // walkways into the same on-disk name (e.g. `a.b_c__d.e_f` vs
         // `a_b.c__d_e.f` both → `..._a_b_c__d_e_f`). Detecting that
         // here keeps the second walkway from silently overwriting the
-        // first.
-        if let Some(first) = seen_paths.insert(path.clone(), scope.clone()) {
+        // first. Keyed on the directory entry rather than the spelling:
+        // `home1` and `HOME1` are distinct ids but one file on macOS and
+        // Windows, and would destroy each other in the commit.
+        let location = entry_location(&path).map_err(|err| {
+            eprintln!(
+                "error: cannot resolve where artifact `{}` would be written: {err}",
+                path.display(),
+            );
+            eprintln!("  note: check that `--out` is readable, then run the build again");
+            ExitCode::from(1)
+        })?;
+        if let Some((first_path, first)) =
+            seen_paths.insert(location, (path.clone(), scope.clone()))
+        {
             eprintln!(
                 "error: output filename `{}` collides between scopes `{first}` and `{scope}`",
                 path.display(),
             );
+            if first_path != path {
+                eprintln!(
+                    "  note: `{}` and `{}` name one file on this file system; rename one of \
+                     the scopes so their names differ by more than case",
+                    first_path.display(),
+                    path.display(),
+                );
+            }
             return Err(ExitCode::from(1));
         }
         prepared.push((path, tag));
@@ -3313,20 +3335,53 @@ fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf
 /// destroying the previous build's artifact with no copy left. The scratch
 /// names count too: `--lock out/home1.nbt.tmp` collides during staging
 /// rather than during the commit.
+///
+/// Paths are compared by the directory entry they name, not by how they are
+/// spelled: `./out/home1.nbt`, an absolute path, and one through a symlinked
+/// `--out` all name the same file as `out/home1.nbt`. See
+/// [`entry_location`].
+///
+/// A location that cannot be resolved is not treated as free, since a key
+/// that could not be computed is one that cannot match. For an artifact it
+/// is an error: `--out` was just created, so failing to resolve it is not an
+/// ordinary state. For the lockfile it is a warning that the check could not
+/// be made, and the build goes on as it did before the check existed.
 fn check_lock_path_is_free(
     prepared: &[(PathBuf, Compound)],
     lock_path: &Path,
 ) -> Result<(), ExitCode> {
-    let reserved_paths: std::collections::HashSet<PathBuf> = prepared
-        .iter()
-        .flat_map(|(path, _)| staging::reserved_paths(path))
-        .collect();
+    let mut reserved_paths: std::collections::HashMap<(PathBuf, std::ffi::OsString), &Path> =
+        std::collections::HashMap::with_capacity(prepared.len() * 3);
+    for (artifact, _) in prepared {
+        for reserved in staging::reserved_paths(artifact) {
+            let location = entry_location(&reserved).map_err(|err| {
+                eprintln!(
+                    "error: cannot resolve where artifact `{}` would be written: {err}",
+                    reserved.display(),
+                );
+                eprintln!("  note: check that `--out` is readable, then run the build again");
+                ExitCode::from(1)
+            })?;
+            reserved_paths.insert(location, artifact);
+        }
+    }
     for reserved in staging::reserved_paths(lock_path) {
-        if reserved_paths.contains(&reserved) {
+        let location = match entry_location(&reserved) {
+            Ok(location) => location,
+            Err(err) => {
+                eprintln!(
+                    "warning: cannot resolve where lockfile path `{}` would be written ({err}); \
+                     could not check that it is not one of this build's artifacts",
+                    reserved.display(),
+                );
+                return Ok(());
+            }
+        };
+        if let Some(artifact) = reserved_paths.get(&location) {
             eprintln!(
                 "error: lockfile path `{}` collides with an artifact this build writes (`{}`)",
                 lock_path.display(),
-                reserved.display(),
+                artifact.display(),
             );
             eprintln!(
                 "  note: pass a `--lock` outside `--out`, or rename the struct whose artifact \
@@ -3336,6 +3391,57 @@ fn check_lock_path_is_free(
         }
     }
     Ok(())
+}
+
+/// The directory entry `path` names, as a key two spellings of one file
+/// compare equal on: the canonical parent directory and the file name.
+///
+/// Only the parent is canonicalised. The file itself usually does not exist
+/// yet, and when it is a symlink the commit renames the link rather than
+/// writing through it, so the entry — not what it points at — is what two
+/// staged files would fight over. Every path this is asked about either has
+/// an existing parent or is already doomed: `--out` has been created by the
+/// time it runs, and a lockfile whose directory is missing fails while
+/// staging, before anything is renamed. So only `NotFound` falls back, to
+/// the parent's absolute spelling, which still makes `./x` and `x` agree.
+/// Any other failure is returned rather than papered over, as the staging
+/// module's `occupant` does: a key computed some other way would not match
+/// the canonical one for the same file, and the caller would read that as
+/// "no collision".
+///
+/// macOS and Windows file systems are case-insensitive by default, so there
+/// the file name is compared case-folded: `OUT/HOME1.nbt` is `out/home1.nbt`.
+/// Only the name needs folding, because `canonicalize` returns the directory
+/// in the case the file system recorded it, so `OUT` and `out` already
+/// resolve alike. `to_lowercase` is not the file system's own fold (NTFS's
+/// upcase table, APFS's fold plus normalisation), but artifact names come
+/// from ASCII identifiers, where the two agree. The choice is by platform,
+/// not by volume: a case-sensitive volume on either costs at most a spurious
+/// refusal, and a case-insensitive one elsewhere (casefold ext4, exFAT or
+/// CIFS on Linux) is not folded, so the collision there goes unseen.
+fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)> {
+    let resolve = |dir: &Path| {
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        match dir.canonicalize() {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => std::path::absolute(dir),
+            resolved => resolved,
+        }
+    };
+    // No file name means the path ends in `..` or is a root; there is no
+    // entry to split off, so the whole path is the location.
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Ok((resolve(path)?, std::ffi::OsString::new()));
+    };
+    let name = if cfg!(any(target_os = "macos", windows)) {
+        name.to_string_lossy().to_lowercase().into()
+    } else {
+        name.to_os_string()
+    };
+    Ok((resolve(parent)?, name))
 }
 
 /// Write the prepared structure files and the lockfile as one set: either

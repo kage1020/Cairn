@@ -1091,14 +1091,16 @@ fn lower_site<'a>(
             continue;
         };
 
-        // The origin solver reads `placements` for prior-place lookups, so
-        // the lookup has to happen before *this* placement is inserted.
-        // Lookup misses only happen when the prior place was skipped at
-        // lowering time (cascade from `W_DEF_NO_SIZE` /
-        // `E_UNRESOLVED_PLACE_REF`); falling back to `(0, 0, 0)` would
-        // silently stack the placement on top of `home1`, so we surface a
-        // deferred warning and skip the row instead.
-        let Some(origin) = resolve_place_origin(member, placed, &site.name) else {
+        // The anchor reads `placed` for prior-place lookups, so the lookup
+        // has to happen before *this* placement is inserted. A lookup
+        // misses when the prior place never reached `placed`, which is any
+        // `continue` arm of this loop: those above, this deferral, or the
+        // volume refusal below. Falling back to `(0, 0, 0)` would silently stack
+        // the placement on top of `home1`, so the row is deferred and
+        // skipped instead. As has always been the case, that happens before
+        // the body is lowered, so a row that cannot land reports nothing
+        // about its body; only the origin waits for the lowered dims.
+        let Some(anchor) = resolve_place_anchor(member, placed, &site.name) else {
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
@@ -1129,6 +1131,9 @@ fn lower_site<'a>(
         // key (one extra clone for `placed`, one move into
         // `structures`).
         let dims = array.dims;
+        // `north_of` needs this body's own depth, so the origin is finished
+        // only now that the body has been sized.
+        let origin = anchor.origin(dims);
         // First-write-wins, as above. Two `site` blocks of one name put
         // their `place id=` rows into one `site::NAME::` namespace, so
         // only a repeated `id=` collides — and the resolver has already
@@ -1640,25 +1645,84 @@ fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic
     }
 }
 
-/// Solve the `at=origin` / `east_of=ID gap=N` / `north_of=ID gap=N` chain
-/// for one `place` line.
+/// Where one `place` line lands relative to what has already been placed:
+/// the prior placement's origin (and, for `east_of`, its width) and the
+/// `gap`, read before this placement's body is lowered.
 ///
-/// Returns `None` when none of the three selectors is present in a usable
-/// shape (the resolver already emitted `E_INVALID_PLACE_ORIGIN`); callers
-/// fall back to `(0, 0, 0)` so the per-place [`BlockArray`] still lands.
-/// `east_of` advances along `+x` past the prior placement's full inflated
-/// `dims.x` (overhang already baked in); `north_of` retreats along `-z`
-/// per the front-is-`+z` convention of `spec/components-editing-sites`
-/// "Multi-building with `site`".
-fn resolve_place_origin(
+/// Finished by [`PlaceAnchor::origin`] once the new body's dims are known,
+/// because `north_of` steps back by the *new* placement's depth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaceAnchor {
+    /// `at=origin`.
+    WorldOrigin,
+    /// `east_of=ID gap=N`: the prior placement's origin and inflated
+    /// `dims.x`.
+    EastOf {
+        prior_origin: (i32, i32, i32),
+        prior_dims_x: u32,
+        gap: i32,
+    },
+    /// `north_of=ID gap=N`: the prior placement's origin. Its depth plays
+    /// no part: the step back is the new body's own depth.
+    NorthOf {
+        prior_origin: (i32, i32, i32),
+        gap: i32,
+    },
+}
+
+impl PlaceAnchor {
+    /// The world-space origin (low-`x`, low-`z` corner) of a placement
+    /// whose lowered body has `dims`, per `spec/components-editing-sites`
+    /// "Origin selectors": `east_of` is `prior.x + prior.dims.x + gap`,
+    /// `north_of` is `prior.z − new.dims.z − gap`. Either way `gap` counts
+    /// the empty blocks between the two facing bounding-box faces (each the
+    /// wall plus its `overhang=` columns), so `gap=0` makes the boxes touch
+    /// whichever of the two is wider or deeper.
+    fn origin(self, dims: Dims) -> (i32, i32, i32) {
+        match self {
+            Self::WorldOrigin => (0, 0, 0),
+            Self::EastOf {
+                prior_origin: (x, y, z),
+                prior_dims_x,
+                gap,
+            } => {
+                let next_x = x
+                    .saturating_add(i32::try_from(prior_dims_x).unwrap_or(i32::MAX))
+                    .saturating_add(gap);
+                (next_x, y, z)
+            }
+            Self::NorthOf {
+                prior_origin: (x, y, z),
+                gap,
+            } => {
+                let next_z = z
+                    .saturating_sub(i32::try_from(dims.z).unwrap_or(i32::MAX))
+                    .saturating_sub(gap);
+                (x, y, next_z)
+            }
+        }
+    }
+}
+
+/// Read the `at=origin` / `east_of=ID gap=N` / `north_of=ID gap=N`
+/// selector of one `place` line into a [`PlaceAnchor`].
+///
+/// Returns `None` when the prior place it names did not lower, which the
+/// caller reports before skipping the row. A row with no usable selector
+/// never gets here: the resolver refuses it with `E_INVALID_PLACE_ORIGIN`,
+/// or with `E_UNRESOLVED_PLACE_REF` when the selector names no prior place,
+/// and binds no scope for it. The front-is-`+z` convention of
+/// `spec/components-editing-sites` "Multi-building with `site`" is why
+/// `north_of` retreats along `-z`.
+fn resolve_place_anchor(
     member: &Member,
     placed: &IndexMap<String, PlacedBody>,
     site_name: &str,
-) -> Option<(i32, i32, i32)> {
+) -> Option<PlaceAnchor> {
     if let Some(value) = member.intent_state.get("at")
         && matches!(&value.value.kind, ValueKind::Ident(s) if s == "origin")
     {
-        return Some((0, 0, 0));
+        return Some(PlaceAnchor::WorldOrigin);
     }
     let gap = member
         .intent_state
@@ -1673,30 +1737,27 @@ fn resolve_place_origin(
         .get("east_of")
         .and_then(|v| v.value.as_label_str())
         && let Some(PlacedBody {
-            placement: prev, ..
+            placement: prior, ..
         }) = placed.get(&place_scope_key(site_name, target))
     {
-        let next_x = prev
-            .origin
-            .0
-            .saturating_add(i32::try_from(prev.dims.x).unwrap_or(i32::MAX))
-            .saturating_add(gap);
-        return Some((next_x, prev.origin.1, prev.origin.2));
+        return Some(PlaceAnchor::EastOf {
+            prior_origin: prior.origin,
+            prior_dims_x: prior.dims.x,
+            gap,
+        });
     }
     if let Some(target) = member
         .intent_state
         .get("north_of")
         .and_then(|v| v.value.as_label_str())
         && let Some(PlacedBody {
-            placement: prev, ..
+            placement: prior, ..
         }) = placed.get(&place_scope_key(site_name, target))
     {
-        let next_z = prev
-            .origin
-            .2
-            .saturating_sub(i32::try_from(prev.dims.z).unwrap_or(i32::MAX))
-            .saturating_sub(gap);
-        return Some((prev.origin.0, prev.origin.1, next_z));
+        return Some(PlaceAnchor::NorthOf {
+            prior_origin: prior.origin,
+            gap,
+        });
     }
     None
 }
@@ -6525,15 +6586,17 @@ struct s size=9x7
         assert_eq!(
             b.origin,
             (5, 0, 0),
-            "x = prev.x(0) + prev.dims.x(3) + gap(2)"
+            "x = prior.x(0) + prior.dims.x(3) + gap(2)"
         );
         assert_eq!(b.origin.2, 0, "east_of does not move along z");
     }
 
     #[test]
     fn north_of_subtracts_dims_and_gap_on_z_axis() {
-        // north_of retreats along -z by the prior placement's full inflated
-        // dims.z plus gap. Front-is-+z (`spec/syntax` "Selectors" and
+        // north_of retreats along -z by the new placement's full inflated
+        // dims.z plus gap. Both cottages are 3 deep, so this pins the
+        // arithmetic, not whose depth it reads — the unequal-depth tests
+        // below do that. Front-is-+z (`spec/syntax` "Selectors" and
         // `spec/components-editing-sites` "Multi-building with `site`") means
         // north sits at the negative-z half-space.
         let src = concat!(
@@ -6555,8 +6618,124 @@ struct s size=9x7
         assert_eq!(
             b.origin,
             (0, 0, -7),
-            "z = prev.z(0) - prev.dims.z(3) - gap(4)"
+            "z = prior.z(0) - new.dims.z(3) - gap(4)"
         );
+    }
+
+    /// A two-place site with `a` built from `a_def` and `b` placed next to
+    /// it with `selector=a gap=gap`.
+    ///
+    /// Each pair a test draws from here differs on exactly the axis its
+    /// selector reads: `small` (3x3) against `deep` (3x9) on `z` for
+    /// `north_of`, `small` against `wide` (9x3) on `x` for `east_of`.
+    /// `eaved` is `deep` with a roof of `overhang=1`, so it lowers to 5x11:
+    /// its `dims` differ from its `size=`, which is what tells an origin
+    /// taken from the lowered body apart from one taken from `size=` (known
+    /// before lowering, and wrong whenever a roof overhangs).
+    fn unequal_pair(a_def: &str, b_def: &str, selector: &str, gap: i32) -> BlockArrayIr {
+        lowered(&format!(
+            concat!(
+                "def small size=3x3:\n",
+                "  floor id=f mat_slot=floor\n",
+                "  walls id=w mat_slot=wall height=2\n",
+                "\n",
+                "def deep size=3x9:\n",
+                "  floor id=f mat_slot=floor\n",
+                "  walls id=w mat_slot=wall height=2\n",
+                "\n",
+                "def eaved size=3x9:\n",
+                "  floor id=f mat_slot=floor\n",
+                "  walls id=w mat_slot=wall height=2\n",
+                "  roof  id=r kind=flat mat_slot=wall overhang=1\n",
+                "\n",
+                "def wide size=9x3:\n",
+                "  floor id=f mat_slot=floor\n",
+                "  walls id=w mat_slot=wall height=2\n",
+                "\n",
+                "theme t:\n",
+                "  slot floor -> @oak_planks\n",
+                "  slot wall  -> @cobblestone\n",
+                "\n",
+                "site s:\n",
+                "  place id=a use={a_def} theme=t at=origin\n",
+                "  place id=b use={b_def} theme=t {selector}=a gap={gap}\n",
+            ),
+            a_def = a_def,
+            b_def = b_def,
+            selector = selector,
+            gap = gap,
+        ))
+    }
+
+    #[test]
+    fn north_of_leaves_exactly_gap_rows_between_unequal_depths() {
+        // `gap` counts the empty rows between `b`'s +z face and `a`'s -z
+        // face, whichever of the two is deeper. Stepping back by the prior
+        // placement's depth instead buries a small `a` inside a deep `b`
+        // at gap=0 and pushes a small `b` six rows too far behind a deep
+        // `a`. The `eaved` row fails if the step is taken from `size=`
+        // rather than the lowered dims.
+        //
+        // `b_z` is `b`'s origin at gap=0: `-new.dims.z`, since `a` sits at 0.
+        for (a_def, b_def, b_z) in [
+            ("small", "deep", -9),
+            ("deep", "small", -3),
+            ("small", "eaved", -11),
+        ] {
+            for gap in [0, 3] {
+                let out = unequal_pair(a_def, b_def, "north_of", gap);
+                let a = out.placements.get("site::s::a").expect("placement a");
+                let b = out.placements.get("site::s::b").expect("placement b");
+                // The premise: without it, the gap check below holds for
+                // either reading.
+                assert_ne!(a.dims.z, b.dims.z, "a={a_def}, b={b_def}");
+                assert_eq!(
+                    b.origin,
+                    (0, 0, b_z - gap),
+                    "a={a_def}, b={b_def}, gap={gap}"
+                );
+                let b_front = b.origin.2 + i32::try_from(b.dims.z).unwrap();
+                assert_eq!(
+                    a.origin.2 - b_front,
+                    gap,
+                    "a={a_def} at z {}..{}, b={b_def} at z {}..{}, gap={gap}",
+                    a.origin.2,
+                    a.origin.2 + i32::try_from(a.dims.z).unwrap(),
+                    b.origin.2,
+                    b_front,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn east_of_leaves_exactly_gap_columns_between_unequal_widths() {
+        // A guard, not a regression test: `east_of` was already right, and
+        // this pins it against being "symmetrised" onto the new body's
+        // dims to match `north_of`. It moves past the prior placement's
+        // width, so the step is the prior's lowered `dims.x` — `eaved` is 5
+        // wide, not its `size=` 3.
+        //
+        // `b_x` is `b`'s origin at gap=0: `prior.dims.x`, since `a` sits at 0.
+        for (a_def, b_def, b_x) in [
+            ("small", "wide", 3),
+            ("wide", "small", 9),
+            ("eaved", "small", 5),
+        ] {
+            for gap in [0, 3] {
+                let out = unequal_pair(a_def, b_def, "east_of", gap);
+                let a = out.placements.get("site::s::a").expect("placement a");
+                let b = out.placements.get("site::s::b").expect("placement b");
+                assert_ne!(a.dims.x, b.dims.x, "a={a_def}, b={b_def}");
+                assert_eq!(
+                    b.origin,
+                    (b_x + gap, 0, 0),
+                    "a={a_def}, b={b_def}, gap={gap}"
+                );
+                let a_east = a.origin.0 + i32::try_from(a.dims.x).unwrap();
+                assert_eq!(b.origin.0 - a_east, gap, "a={a_def}, b={b_def}, gap={gap}");
+            }
+        }
     }
 
     fn village_pair_source(extra_connects: &str) -> String {
