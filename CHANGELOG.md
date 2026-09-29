@@ -337,8 +337,9 @@
 - *(core)* A walkway that runs north–south took time quadratic in its length, while one of the same
   length running east–west took linear time. Each doubling of the gap between two huts placed with
   `north_of=` roughly quadrupled the time to lower them, so a strip near the 4,000,000-cell
-  routing cap, well inside what the router accepts, would have run for hours with no output.
-  `cairn check --target`, `lower` and `compile` all run that lowering. Before laying each cell, the
+  routing cap, just inside what the router accepts, would have run for hours with no output.
+  `cairn check --target`, `info`, `lower` and `compile` all run that lowering — `info` runs it
+  once per edition and once per version it weighs. Before laying each cell, the
   z leg of the straight path searched every cell it had already laid, as a guard against laying
   the corner twice. The order it steps in already prevents that. The search is gone, so a z strip
   costs what an x strip costs, and a strip at the cap lowers in seconds. The cells laid are

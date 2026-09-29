@@ -22,8 +22,8 @@
 //!    asking the `def` a second time is what let the strip and the cut
 //!    disagree.
 //! 2. [`l_path`] walks a Manhattan L (x-axis first, then z-axis) between
-//!    two world voxels at a constant Y, deduplicating the corner cell so
-//!    every coordinate appears once. When the L collides with an
+//!    two world voxels at a constant Y; every coordinate appears once,
+//!    the corner included. When the L collides with an
 //!    existing structure, [`route_path`] searches the ground plane for a
 //!    deterministic shortest detour around the obstacle instead.
 //! 3. [`build_walkway_array`] turns the path into a [`BlockArray`] whose
@@ -596,8 +596,8 @@ pub(super) fn port_world_position<S: BuildHasher>(
 }
 
 /// Walk a Manhattan L between two world voxels at a fixed Y, x-axis
-/// first then z-axis. Deduplicates the corner cell so every coordinate
-/// appears in the returned `Vec` exactly once.
+/// first then z-axis. Every coordinate, the corner included, appears in
+/// the returned `Vec` exactly once.
 ///
 /// The two endpoints are included in the output. Caller is expected to
 /// have already validated that `from.1 == to.1`; mismatched Y values
@@ -610,7 +610,11 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
         "l_path called past the cap; callers must ask `l_path_area` first",
     );
     let y = from.1;
-    let mut voxels: Vec<(i32, i32, i32)> = Vec::new();
+    // The path is exactly `|dx| + |dz| + 1` cells long. Summed in u64 so
+    // two i32 spans cannot overflow; the size is only a capacity hint, so
+    // a length that does not fit `usize` falls back to growing.
+    let len = u64::from(from.0.abs_diff(to.0)) + u64::from(from.2.abs_diff(to.2)) + 1;
+    let mut voxels: Vec<(i32, i32, i32)> = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
     let (x0, z0) = (from.0, from.2);
     let (x1, z1) = (to.0, to.2);
 
@@ -1719,23 +1723,31 @@ mod tests {
         assert_eq!(path, vec![(4, 0, 0), (4, 0, 1), (4, 0, 2), (4, 0, 3)]);
     }
 
-    /// A north–south strip costs time linear in its length, as an east–west
-    /// one does. A lookup into the laid cells on every z step made it
-    /// quadratic: a million-cell strip then takes on the order of an hour in
-    /// a debug build, where the linear walk takes milliseconds. The deadline
-    /// sits orders of magnitude from both, so a slow runner cannot trip it
-    /// and the quadratic walk cannot meet it; the walk runs on its own
-    /// thread so a regression fails here instead of hanging the suite.
+    /// A north–south strip must not cost time quadratic in its length. A
+    /// lookup into the laid cells on every z step would make it quadratic:
+    /// a million-cell strip would then take hours in a debug build, where
+    /// the walk without one takes milliseconds. The deadline sits orders of
+    /// magnitude from both, so a slow runner cannot trip it and the
+    /// quadratic walk cannot meet it; the walk runs on its own thread so a
+    /// regression fails here instead of hanging the suite.
     #[test]
-    fn l_path_lays_a_long_z_strip_in_linear_time() {
+    fn l_path_lays_a_long_z_strip_in_less_than_quadratic_time() {
+        use std::sync::mpsc::RecvTimeoutError;
         const LEN: i32 = 1_000_000;
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
+        let walk = std::thread::spawn(move || {
             let _ = tx.send(l_path((0, 0, 0), (0, 0, LEN - 1)));
         });
-        let path = rx
-            .recv_timeout(std::time::Duration::from_secs(60))
-            .expect("a million-cell z strip must be laid well inside a minute");
+        let path = match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            Ok(path) => path,
+            Err(RecvTimeoutError::Timeout) => {
+                panic!("a million-cell z strip was not laid within a minute")
+            }
+            Err(RecvTimeoutError::Disconnected) => match walk.join() {
+                Err(payload) => std::panic::resume_unwind(payload),
+                Ok(()) => panic!("the walk thread ended without sending a path"),
+            },
+        };
         assert_eq!(path.len(), usize::try_from(LEN).expect("fits"));
         assert_eq!(path.first(), Some(&(0, 0, 0)));
         assert_eq!(path.last(), Some(&(0, 0, LEN - 1)));
