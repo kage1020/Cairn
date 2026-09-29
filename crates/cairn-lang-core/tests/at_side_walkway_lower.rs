@@ -31,7 +31,7 @@ fn at_side_walkway_pins_endpoint_anchors_at_wall_corners() {
     // 3 → `at=right` pins u = 2. World wall = (0 + 0 + 2, _, 0 + 0 + 3 - 1)
     // = (2, _, 2); +z normal step → port (2, 0, 3).
     //
-    // east_of=west gap=5 + prev.dims.x = 3 → east origin = (8, 0, 0). Front
+    // east_of=west gap=5 + prior.dims.x = 3 → east origin = (8, 0, 0). Front
     // wall `at=left` pins u = 0. World wall = (8, _, 2); +z → port
     // (8, 0, 3). The L collapses to a single x-axis leg at z = 3 because
     // the two ports share their z.
