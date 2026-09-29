@@ -731,22 +731,37 @@ fn diag_walkway_invalid_ident(
     connect: &crate::resolve::ValidatedConnect,
     err: &crate::ids::KeyConstructError,
 ) -> Diagnostic {
-    let crate::ids::KeyConstructError::ConsecutiveUnderscore { role, segment } = err;
+    use crate::ids::KeyConstructError;
+    let (role, segment, problem, constraint, fix) = match err {
+        KeyConstructError::ConsecutiveUnderscore { role, segment } => (
+            role,
+            segment,
+            "contains `__`, which collides with",
+            "a walkway's site, place and port ids may not contain `__`",
+            "(e.g. replace `__` with `_`)",
+        ),
+        KeyConstructError::UnderscoreAtEdge { role, segment } => (
+            role,
+            segment,
+            "starts or ends with `_`, which runs into",
+            "a walkway's place and port ids may not start or end with `_`",
+            "so it neither starts nor ends with `_`",
+        ),
+    };
     Diagnostic {
         code: DiagnosticCode::InvalidWalkwayIdent,
         span: connect.span.clone(),
         primary: format!(
             "walkway `{from} ↔ {to}` was dropped because the {role} id `{segment}` \
-             contains `__`, which collides with the walkway scope key's \
-             `from`/`to` separator",
+             {problem} the walkway scope key's `from`/`to` separator `__`",
             from = connect.from,
             to = connect.to,
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "rename the offending id (e.g. replace `__` with `_`) so the \
-                      lowered walkway scope key is unambiguous"
-                .to_owned(),
+            message: format!(
+                "{constraint}, so its scope key stays unambiguous; rename the {role} {fix}"
+            ),
         }],
         data: None,
     }
@@ -6842,6 +6857,153 @@ struct s size=9x7
             1,
             "reversed row must not lay a second strip"
         );
+    }
+
+    /// The `W_INVALID_WALKWAY_IDENT` findings on `out`, as `(primary, notes)`.
+    fn invalid_walkway_ident_findings(out: &BlockArrayIr) -> Vec<(String, Vec<String>)> {
+        out.diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::InvalidWalkwayIdent)
+            .map(|d| {
+                (
+                    d.primary.clone(),
+                    d.notes.iter().map(|n| n.message.clone()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn walkway_ids_with_an_edge_underscore_are_named_rather_than_aliased() {
+        // `a.p_ → b.p` and `a.p → _b.p` differ as `(from, to)` pairs, so
+        // `W_DUPLICATE_WALKWAY` has nothing to say, but a `_` at the edge
+        // of `p_` or `_b` merges into the `__` separator: both would
+        // encode to `walkway::s::a.p___b.p`, and the second row would
+        // replace the first in the structure map with no finding. Each
+        // row must instead be dropped with a finding naming its own
+        // segment. The third row is sound and must still lay, so the
+        // test cannot pass by dropping every walkway.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def hut size=5x5:\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  door  id=p  side=front at=center\n",
+            "  door  id=p_ side=back  at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a  use=hut theme=t at=origin\n",
+            "  place id=b  use=hut theme=t east_of=a gap=4\n",
+            "  place id=_b use=hut theme=t north_of=a gap=4\n",
+            "  connect a.p_ to b.p path=@gravel\n",
+            "  connect a.p to _b.p path=@gravel\n",
+            "  connect a.p to b.p path=@gravel\n",
+        );
+        let out = lowered(src);
+        let findings = invalid_walkway_ident_findings(&out);
+        let primaries: Vec<&str> = findings.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            primaries,
+            [
+                "walkway `a.p_ ↔ b.p` was dropped because the port id `p_` starts or ends \
+                 with `_`, which runs into the walkway scope key's `from`/`to` separator `__`",
+                "walkway `a.p ↔ _b.p` was dropped because the place id `_b` starts or ends \
+                 with `_`, which runs into the walkway scope key's `from`/`to` separator `__`",
+            ],
+        );
+        for (_, notes) in &findings {
+            assert_eq!(notes.len(), 1, "{notes:?}");
+            assert!(
+                notes[0].contains("so it neither starts nor ends with `_`"),
+                "the note must say how to rename an edge `_`: {notes:?}",
+            );
+        }
+        let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
+        assert_eq!(laid, ["walkway::s::a.p__b.p"]);
+        let walkway_structures: Vec<&str> = out
+            .structures
+            .keys()
+            .filter(|k| k.starts_with("walkway::"))
+            .map(String::as_str)
+            .collect();
+        assert_eq!(walkway_structures, ["walkway::s::a.p__b.p"]);
+    }
+
+    #[test]
+    fn a_port_named_underscore_is_named_rather_than_lowered_to_an_unparseable_key() {
+        // A port called `_` gives `walkway::s::a.___b._`, which splits
+        // back at the first `__` into an empty port; the artifact
+        // namer then tripped a debug assertion on it. The row must be
+        // dropped at lowering with a finding naming `_`, beside a sound
+        // row that still lays.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def hut size=5x5:\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  door  id=_ side=front at=center\n",
+            "  door  id=q side=back  at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=hut theme=t at=origin\n",
+            "  place id=b use=hut theme=t east_of=a gap=4\n",
+            "  connect a._ to b._ path=@gravel\n",
+            "  connect a.q to b.q path=@gravel\n",
+        );
+        let out = lowered(src);
+        let findings = invalid_walkway_ident_findings(&out);
+        let primaries: Vec<&str> = findings.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            primaries,
+            [
+                "walkway `a._ ↔ b._` was dropped because the port id `_` starts or ends \
+              with `_`, which runs into the walkway scope key's `from`/`to` separator `__`"
+            ],
+        );
+        let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
+        assert_eq!(laid, ["walkway::s::a.q__b.q"]);
+        for key in out.walkways.keys() {
+            assert_eq!(
+                WalkwayScopeKey::parse(key.as_str()).as_ref(),
+                Ok(key),
+                "every laid walkway's key must parse back to itself",
+            );
+        }
+    }
+
+    #[test]
+    fn a_walkway_id_containing_dunder_is_named_with_the_dunder_repair() {
+        // The `__` arm of the same finding, which had no lowering test:
+        // its note names the `__` repair, not the edge-`_` one.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def hut size=5x5:\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  door  id=b__c side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=hut theme=t at=origin\n",
+            "  place id=b use=hut theme=t east_of=a gap=4\n",
+            "  connect a.b__c to b.b__c path=@gravel\n",
+        );
+        let out = lowered(src);
+        let findings = invalid_walkway_ident_findings(&out);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        let (primary, notes) = &findings[0];
+        assert_eq!(
+            primary,
+            "walkway `a.b__c ↔ b.b__c` was dropped because the port id `b__c` contains \
+             `__`, which collides with the walkway scope key's `from`/`to` separator `__`",
+        );
+        assert!(
+            notes[0].contains("replace `__` with `_`"),
+            "the note must say how to rename a `__`: {notes:?}",
+        );
+        assert!(out.walkways.is_empty());
     }
 
     fn walkway_with_blocked_l_path_source() -> &'static str {

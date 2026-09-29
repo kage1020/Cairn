@@ -22,8 +22,8 @@
 //!    asking the `def` a second time is what let the strip and the cut
 //!    disagree.
 //! 2. [`l_path`] walks a Manhattan L (x-axis first, then z-axis) between
-//!    two world voxels at a constant Y, deduplicating the corner cell so
-//!    every coordinate appears once. When the L collides with an
+//!    two world voxels at a constant Y; every coordinate appears once,
+//!    the corner included. When the L collides with an
 //!    existing structure, [`route_path`] searches the ground plane for a
 //!    deterministic shortest detour around the obstacle instead.
 //! 3. [`build_walkway_array`] turns the path into a [`BlockArray`] whose
@@ -596,8 +596,8 @@ pub(super) fn port_world_position<S: BuildHasher>(
 }
 
 /// Walk a Manhattan L between two world voxels at a fixed Y, x-axis
-/// first then z-axis. Deduplicates the corner cell so every coordinate
-/// appears in the returned `Vec` exactly once.
+/// first then z-axis. Every coordinate, the corner included, appears in
+/// the returned `Vec` exactly once.
 ///
 /// The two endpoints are included in the output. Caller is expected to
 /// have already validated that `from.1 == to.1`; mismatched Y values
@@ -610,7 +610,11 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
         "l_path called past the cap; callers must ask `l_path_area` first",
     );
     let y = from.1;
-    let mut voxels: Vec<(i32, i32, i32)> = Vec::new();
+    // The path is exactly `|dx| + |dz| + 1` cells long. Summed in u64 so
+    // two i32 spans cannot overflow; the size is only a capacity hint, so
+    // a length that does not fit `usize` falls back to growing.
+    let len = u64::from(from.0.abs_diff(to.0)) + u64::from(from.2.abs_diff(to.2)) + 1;
+    let mut voxels: Vec<(i32, i32, i32)> = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
     let (x0, z0) = (from.0, from.2);
     let (x1, z1) = (to.0, to.2);
 
@@ -629,10 +633,11 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
 
     // z-axis leg: walk from (x1, z0) toward (x1, z1). The cell at
     // (x1, z0) is the corner already laid down at the end of the
-    // x-leg, so the loop steps z BEFORE pushing — every cell here
-    // is fresh and the `contains` guard is a structural safety net
-    // for callers that pass overlapping legs (e.g. a single-axis
-    // path constructed by hand) rather than a load-bearing dedup.
+    // x-leg, so the loop steps z BEFORE pushing. That order is the
+    // whole corner dedup: every x-leg cell has `z == z0` and every
+    // z-leg cell has `z != z0`, so no cell can appear twice and no
+    // lookup into `voxels` is needed. A lookup would be a linear scan
+    // per step, which makes a long north–south strip quadratic.
     let mut z = z0;
     let step_z: i32 = match z1.cmp(&z0) {
         std::cmp::Ordering::Equal => 0,
@@ -641,10 +646,7 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
     };
     while z != z1 {
         z += step_z;
-        let cell = (x1, y, z);
-        if !voxels.contains(&cell) {
-            voxels.push(cell);
-        }
+        voxels.push((x1, y, z));
     }
     voxels
 }
@@ -1711,6 +1713,44 @@ mod tests {
     fn l_path_same_endpoints_yields_single_cell() {
         let path = l_path((5, 0, 5), (5, 0, 5));
         assert_eq!(path, vec![(5, 0, 5)]);
+    }
+
+    /// A path with no x leg is all z leg, and its first cell is still the
+    /// one the x leg pushed: the stepping order alone keeps it single.
+    #[test]
+    fn l_path_along_z_alone_lays_each_cell_once() {
+        let path = l_path((4, 0, 0), (4, 0, 3));
+        assert_eq!(path, vec![(4, 0, 0), (4, 0, 1), (4, 0, 2), (4, 0, 3)]);
+    }
+
+    /// A north–south strip must not cost time quadratic in its length. A
+    /// lookup into the laid cells on every z step would make it quadratic:
+    /// a million-cell strip would then take hours in a debug build, where
+    /// the walk without one takes milliseconds. The deadline sits orders of
+    /// magnitude from both, so a slow runner cannot trip it and the
+    /// quadratic walk cannot meet it; the walk runs on its own thread so a
+    /// regression fails here instead of hanging the suite.
+    #[test]
+    fn l_path_lays_a_long_z_strip_in_less_than_quadratic_time() {
+        use std::sync::mpsc::RecvTimeoutError;
+        const LEN: i32 = 1_000_000;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let walk = std::thread::spawn(move || {
+            let _ = tx.send(l_path((0, 0, 0), (0, 0, LEN - 1)));
+        });
+        let path = match rx.recv_timeout(std::time::Duration::from_secs(60)) {
+            Ok(path) => path,
+            Err(RecvTimeoutError::Timeout) => {
+                panic!("a million-cell z strip was not laid within a minute")
+            }
+            Err(RecvTimeoutError::Disconnected) => match walk.join() {
+                Err(payload) => std::panic::resume_unwind(payload),
+                Ok(()) => panic!("the walk thread ended without sending a path"),
+            },
+        };
+        assert_eq!(path.len(), usize::try_from(LEN).expect("fits"));
+        assert_eq!(path.first(), Some(&(0, 0, 0)));
+        assert_eq!(path.last(), Some(&(0, 0, LEN - 1)));
     }
 
     fn sample_key() -> WalkwayScopeKey {
