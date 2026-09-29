@@ -1123,6 +1123,39 @@
 
 ### Breaking changes
 
+- *(core)* Two `connect` rows could lay one walkway between them. A place or port id that starts
+  or ends with `_` merges into the `__` that joins a walkway scope key's two ends, so these rows
+  both encoded to `walkway::s::a.p___b.p`:
+
+  ```
+  connect a.p_ to b.p path=@gravel
+  connect a.p to _b.p path=@gravel
+  ```
+
+  The second row replaced the first: one `.nbt` was written, the lockfile's `walkways:` had one
+  entry, and `W_DUPLICATE_WALKWAY` did not fire because the `(from, to)` pairs differ. A port named
+  `_` gave `walkway::s::a.___b._`, which splits back into an empty port, and `compile` panicked on
+  it in a debug build while `check` passed. `W_INVALID_WALKWAY_IDENT` already refused a segment
+  that contains `__`; it now also refuses a place or port that starts or ends with `_`, and names
+  the segment:
+
+  ```
+  alias.crn:13:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p_ ↔ b.p` was dropped because the port id `p_` starts or ends with `_`, which runs into the walkway scope key's `from`/`to` separator `__`
+    note: a walkway's place and port ids may not start or end with `_`, so its scope key stays unambiguous; rename the port so it neither starts nor ends with `_`
+  alias.crn:14:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p ↔ _b.p` was dropped because the place id `_b` starts or ends with `_`, which runs into the walkway scope key's `from`/`to` separator `__`
+    note: a walkway's place and port ids may not start or end with `_`, so its scope key stays unambiguous; rename the place so it neither starts nor ends with `_`
+  ```
+
+  Both ends of every place and port are refused, not only the two that touch the separator, so the
+  rule does not depend on which way a row is written. The site is exempt: `::` separates it from
+  both neighbours. A unit test builds every key over segments of `a` and `_` up to three long and
+  parses each accepted one back to the parts it came from.
+
+  **Breaking**: `KeyConstructError` and `KeyParseError` each gain an `UnderscoreAtEdge` variant, so
+  an external exhaustive `match` on either no longer compiles. Both enums are now
+  `#[non_exhaustive]`, so the next variant costs no second break. The Rust API is Internal tier
+  per `spec/compatibility`, so no deprecation window is owed.
+
 - *(cli,core,formats)* `cairn info`'s `degraded` figure counted palette entries it could name and
   did not:
 
