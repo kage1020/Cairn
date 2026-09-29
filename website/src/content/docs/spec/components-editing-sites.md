@@ -62,13 +62,16 @@ The Y axis is unaffected by topological selectors; every placement currently lan
 
 ### 9.3.2 Origin selectors
 
-Each `place` carries **exactly one** of `at`, `east_of`, `north_of`:
+Each `place` carries **exactly one** of `at`, `east_of`, `north_of`. In the formulas below,
+`prior` is the placement `ID` names and `new` is the one being placed. An origin is a placement's
+low-`x`, low-`z` corner, and `dims` is its full extent: the `size=WxH` footprint plus the roof's
+`overhang=` columns on each side, the same inflated extent the lockfile records.
 
 | Selector | Effect | Notes |
 |---|---|---|
 | `at=origin` | Anchors at world `(0, 0, 0)`. | The only legal `at=` value. The first `place` in a site must use it, since there is no implicit default. |
-| `east_of=ID gap=N` | New origin = prior `(x + dims.x + N, y, z)`. | `ID` must name a place declared earlier in the same `site`. `gap` is in blocks, edge to edge (`0` → walls touch), defaulting to `0`. |
-| `north_of=ID gap=N` | New origin = prior `(x, y, z − dims.z − N)`. | Same `ID` and `gap` rules as `east_of`. |
+| `east_of=ID gap=N` | New origin = `(prior.x + prior.dims.x + N, prior.y, prior.z)`. | `ID` must name a place declared earlier in the same `site`. `gap` is in blocks between the two facing bounding-box faces (each the wall plus its `overhang=` columns; `0` → the boxes touch), defaulting to `0`. |
+| `north_of=ID gap=N` | New origin = `(prior.x, prior.y, prior.z − new.dims.z − N)`. | Same `ID` and `gap` rules as `east_of`. Because an origin is the low-`z` corner, the step back is the new placement's own depth: that is what puts its `+z` face `N` blocks from the prior's `−z` face whichever of the two is deeper. |
 
 Combining selectors, or using `at=` with anything other than `origin`, is
 `E_INVALID_PLACE_ORIGIN`.

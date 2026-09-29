@@ -254,6 +254,25 @@
 
 ### Fixed
 
+- *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
+  two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
+  and nothing said so. With a 3x3 `a` and a 3x9 `b`:
+
+  ```
+  place id=a use=small theme=t at=origin
+  place id=b use=deep  theme=t north_of=a gap=0
+  ```
+
+  `b` landed at `z = −3` and ran through `z = 5`, covering `a` completely; with the two defs
+  swapped, `b` landed at `z = −9`, six empty rows behind `a`. An origin is the low-`z` corner, so
+  only the new placement's own depth puts its `+z` face against the prior's `−z` face. `b` now
+  lands at `z = −9` and `z = −3` respectively, flush in both orders, and `gap=N` leaves exactly `N`
+  empty rows between them. The lockfile's `origin` and the written structures move with it.
+  `east_of=` already read the right side's width and is unchanged. `spec/components-editing-sites`
+  "Origin selectors" now names whose dims each formula reads: `prior.x + prior.dims.x + N` and
+  `prior.z − new.dims.z − N`. It also says that `dims` includes a roof's `overhang=`, so `gap` is
+  measured between the two bounding boxes, not between the walls.
+
 - *(lsp,vscode)* The VS Code extension could not start its language server. It asked
   vscode-languageclient for the stdio transport, which appends `--stdio` to the server's command
   line, and `cairn-lsp` refused every argument but `--version` and `--help`:
@@ -298,7 +317,8 @@
   A `place` origin also saturated at the edge of `i32`, so `gap=3000000000` moved nothing and
   `gap=2147483647` followed by another `east_of=` row stacked the two on one coordinate. A row
   whose origin works out past that range is now refused with `W_DEFERRED_MEMBER`, naming the axis
-  and the sum, and a row placed relative to it is refused with it. The `roof overhang=` finding's
+  and the sum, and a row placed relative to it is refused with it. Like a row whose anchor did not
+  lower, a row refused this way reports nothing about its body. The `roof overhang=` finding's
   message now also names the value that was written.
 
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and

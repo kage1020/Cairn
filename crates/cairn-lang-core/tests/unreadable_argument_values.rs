@@ -327,3 +327,62 @@ fn rows_past_the_range_are_not_stacked_on_one_coordinate() {
         ir.diagnostics[1].primary,
     );
 }
+
+#[test]
+fn a_row_refused_for_its_origin_reports_nothing_about_its_body() {
+    // `north_of` needs the new body's depth, so the range is only known
+    // once the body is lowered. The body's own findings are held until
+    // then: a row that is not placed says so once, as a row whose anchor
+    // did not lower does, and says nothing about a body it never built.
+    // `bad` is placed only by the refused row, because a finding repeated
+    // word for word by a second placement of one `def` is reported once.
+    let with_b = |row: &str| {
+        lowered(&format!(
+            "def box size=3x3:\n  \
+             floor id=f mat_slot=stone\n\n\
+             def bad size=3x3:\n  \
+             floor id=f mat_slot=stone\n  \
+             walls mat_slot=stone height=2\n  \
+             window side=front offset=1 size=1x1\n\n\
+             theme t:\n  \
+             slot stone -> @stone\n\n\
+             site s:\n  \
+             place id=a use=box theme=t at=origin\n  \
+             place id=b use=bad theme=t {row}\n"
+        ))
+    };
+    // Guard: placed in range, `bad` does report its window.
+    let placed = with_b("north_of=a gap=1");
+    assert_eq!(origin(&placed, "b"), Some((0, 0, -4)));
+    assert_eq!(
+        findings(&placed),
+        vec![("W_DEFERRED_MEMBER", "window has no `y=`")],
+    );
+
+    let ir = with_b("north_of=a gap=9999999999");
+    assert_eq!(origin(&ir, "b"), None);
+    assert_eq!(
+        findings(&ir),
+        vec![(
+            "W_DEFERRED_MEMBER",
+            "this placement's origin works out to z=-10000000002, past the -2147483648 to \
+             2147483647 range a placement's origin is recorded in; shorten the `gap=` on this \
+             row or on a row it is placed relative to",
+        )],
+    );
+}
+
+#[test]
+fn an_unreadable_gap_on_a_row_refused_for_its_origin_is_not_reported() {
+    // `b` sits exactly on `i32::MAX`, so `c` leaves the range even at the
+    // `gap=0` its unreadable `gap=` falls back to. The finding would say
+    // the row is placed; it is not.
+    let ir = lowered(&site(
+        "  place id=b use=box theme=t east_of=a gap=2147483644\n  \
+         place id=c use=box theme=t east_of=b gap=wide\n",
+    ));
+    assert_eq!(origin(&ir, "b"), Some((i32::MAX, 0, 0)));
+    assert_eq!(origin(&ir, "c"), None);
+    let codes: Vec<&str> = findings(&ir).iter().map(|(code, _)| *code).collect();
+    assert_eq!(codes, vec!["W_DEFERRED_MEMBER"], "{:#?}", ir.diagnostics);
+}
