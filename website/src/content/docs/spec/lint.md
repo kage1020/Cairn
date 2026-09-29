@@ -345,14 +345,22 @@ resolution the spec mandates still happens — the finding says which voxel it h
 | `W_TRUTH_TABLE_DUPLICATE_ROW` | Two rows cover the same input combination without contradicting each other. |
 | `W_TRUTH_TABLE_PARTIAL` | The rows leave input combinations unassigned. |
 
-Both codes are reported on the later row, with a note at the first row assigning that combination.
-The spec does not say which of two conflicting rows an evaluator would read, because the repair is
-to decide which row is wrong.
+Both codes are reported on the later row. A row is compared with every earlier row that shares a
+combination with it, so whether a table is refused does not depend on the order its rows are
+written in: `0- -> 1` after `00 -> 1; 01 -> 0` is `E_TRUTH_TABLE_CONFLICT`, though it agrees with
+the first of the two. A conflict takes precedence over a duplicate on the same row, and its note is
+at the first row assigning the combination it names the other output. Any other finding's note is
+at the first row assigning the combination it names, so every finding about one combination points
+at the same row. The spec does not say which of two conflicting rows an evaluator would read,
+because the repair is to decide which row is wrong.
 
 A `-` makes the same combination reachable from rows that do not look alike, so both codes are
 about the combination rather than about the pattern: `0-` and `-1` both assign `01`. The fix
 differs with the shape. A row inside an earlier one — `01` under `0-` — is deleted. Two rows that
 merely cross are narrowed, because deleting either would lose the combinations only it assigns.
+When the earlier row is itself reported for overlapping a row before it, the fix is to settle that
+row first instead: in `0- -> 1; -0 -> 1; 10 -> 1`, `-0` is told to narrow away from `0-`, and
+deleting `10` because `-0` stands for it would, together with that, leave `10` unassigned.
 
 A `-` **output** is the one shape that is neither a conflict nor a repeat: the row declines to
 constrain its combinations, so there is nothing for a concrete output to contradict, and nothing

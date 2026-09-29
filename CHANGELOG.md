@@ -40,7 +40,7 @@
 
   ```
   s.crn:2:52: error[E_TRUTH_TABLE_CONFLICT]: this row assigns `01` the output `1`, and an earlier row assigns it `0`
-  s.crn:2:43:   note: first row assigning `01` here
+  s.crn:2:43:   note: first row assigning `01` the output `0` here
   ```
 
   When two rows agree it stays `W_TRUTH_TABLE_DUPLICATE_ROW`, and the repair depends on the shape.
@@ -48,6 +48,16 @@
   because deleting either would lose the combinations only it assigns. That case also withholds the
   coverage finding rather than answering it with a count taken without the later row, which would
   name a combination the table does assign.
+
+  A row is compared with every earlier row, so whether a table is refused does not depend on the
+  order its rows are written in: `0- -> 1` after `00 -> 1; 01 -> 0` agrees with the first and is
+  still a conflict with the second. A conflict takes precedence over a duplicate on the same row,
+  and its note is at the first row assigning the combination the other output. Any other finding's
+  note is at the first row assigning the combination it names, so every finding about one
+  combination points at the same row. When that row is itself reported for overlapping a row before
+  it, the fix is to settle that row first rather than to delete this one: in
+  `0- -> 1; -0 -> 1; 10 -> 1`, `-0` is told to narrow away from `0-`, and deleting `10` because
+  `-0` stands for it would, together with that, leave `10` unassigned.
 
   A `-` output beside a concrete one is neither: there is nothing for the concrete output to
   contradict, and nothing for it to agree with, so the rows overlap without the usual repair being
