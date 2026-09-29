@@ -128,9 +128,11 @@ pub struct LockPlacement {
     /// `north_of` placements (negative `z`) round-trip without saturation.
     pub origin: [i32; 3],
     /// Voxel extents of the per-place [`super::super::block_array::BlockArray`]
-    /// at the time of the build. Captured here so the lockfile alone is
-    /// enough to compute the next-placement offset for an incremental
-    /// re-resolve, without rehydrating every block array.
+    /// at the time of the build, roof `overhang=` included. An `east_of`
+    /// row's origin can be computed from the lockfile alone, since it
+    /// reads only the prior placement's `dims.x`; a `north_of` row's
+    /// cannot, since it steps back by the new placement's own `dims.z`,
+    /// which is known only once that body is lowered.
     pub dims: [u32; 3],
 }
 
