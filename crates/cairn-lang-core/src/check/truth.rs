@@ -124,24 +124,22 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     // now read through the don't-cares. Nothing orders the rows, so
     // there is no reading under which the second one wins.
     //
-    // A row is compared with *every* earlier row it overlaps, dropped or
-    // not, and a contradiction with any of them makes it a conflict. A row with a `-`
-    // can overlap several earlier rows at once, and those rows can
-    // disagree with each other: `0- -> 1` after `00 -> 1; 01 -> 0` agrees
-    // with the first and contradicts the second. Asking one of them would
-    // make whether the table is refused depend on the order its rows are
-    // written in, and the error is defined by the combination, not by
-    // the order. A dropped row is still a row the author wrote, so
-    // `10 -> 0` after `0- -> 1; -0 -> 1` contradicts the `-0` it never
-    // meets in the accepted set.
+    // A row is compared with every earlier row for a contradiction,
+    // dropped or not. A row with a `-` can overlap several earlier rows
+    // at once, and those rows can disagree with each other: `0- -> 1`
+    // after `00 -> 1; 01 -> 0` agrees with the first and contradicts the
+    // second. Asking only one of them would make whether the table is
+    // refused depend on the order its rows are written in, and the error
+    // is defined by the combination, not by the order. A dropped row is
+    // still a row the author wrote, so `10 -> 0` after `0- -> 1; -0 -> 1`
+    // contradicts the `-0` it never meets in the accepted set.
     //
     // A conflict is noted at the first earlier row that contradicts this
-    // one. Any other finding is noted at the first *accepted* row it
-    // overlaps, so every repeat of a combination sends the author to the
-    // same row to compare against, which is the row that has to stay if
-    // any of them do. A row can overlap dropped rows only — a dropped row
-    // that crossed an accepted one reaches combinations the accepted one
-    // does not — and its note then goes to the first of those.
+    // one. Any other finding is noted at the first earlier row this one
+    // overlaps, dropped or not. No row before that one shares a
+    // combination with this one, so it is the first row assigning the
+    // combination the finding names, and every finding naming that
+    // combination sends the author to the same row.
     //
     // A row that overlaps an accepted one is not accepted, so what
     // survives is a set of patterns no two of which share a combination.
@@ -156,26 +154,37 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     // A wrong coverage finding is worse than none, and the author's next
     // edit is the overlap either way — the argument the empty table
     // already makes against billing one repair twice.
+    //
+    // A row can be accepted and still carry a finding, when every row it
+    // overlaps was dropped. That leaves the count sound: a dropped row D
+    // overlapped an accepted row A, and were D inside A, any row
+    // overlapping D would overlap A too and not be accepted. So D crossed
+    // A, which already cleared this flag.
     let mut coverage_is_countable = true;
+    // Whether each row carries an overlap finding of its own, which
+    // changes the advice a later row noted against it can be given.
+    let mut reported = vec![false; rows.len()];
     for (index, row) in rows.iter().enumerate() {
-        let earlier = &rows[..index];
-        let first_accepted = accepted
-            .iter()
-            .copied()
-            .find(|kept| overlap(&kept.inputs, &row.inputs));
-        let noted = earlier
-            .iter()
-            .find(|other| contradicts(other, row))
-            .or(first_accepted)
-            .or_else(|| {
-                earlier
-                    .iter()
-                    .find(|other| overlap(&other.inputs, &row.inputs))
-            });
-        if let Some(noted) = noted {
-            sink.push(overlapping_row(row, noted));
+        let mut first_overlap = None;
+        let mut contradicted = None;
+        for (at, other) in rows[..index].iter().enumerate() {
+            if !overlap(&other.inputs, &row.inputs) {
+                continue;
+            }
+            first_overlap.get_or_insert(at);
+            if contradicts(other, row) {
+                contradicted = Some(at);
+                break;
+            }
         }
-        match first_accepted {
+        if let Some(at) = contradicted.or(first_overlap) {
+            sink.push(overlapping_row(row, &rows[at], reported[at]));
+            reported[index] = true;
+        }
+        match accepted
+            .iter()
+            .find(|kept| overlap(&kept.inputs, &row.inputs))
+        {
             None => accepted.push(row),
             Some(first) => coverage_is_countable &= subsumes(&first.inputs, &row.inputs),
         }
@@ -214,13 +223,13 @@ fn overlap(a: &str, b: &str) -> bool {
         .all(|(x, y)| x == b'-' || y == b'-' || x == y)
 }
 
-/// Whether two rows assign a combination in common two different outputs.
+/// Whether two rows' outputs contradict each other, read only once
+/// [`overlap`] says the rows share a combination.
 ///
 /// Only two concrete outputs can: a `-` output asserts nothing for the
 /// other row to contradict.
-fn contradicts(earlier: &TruthRow, row: &TruthRow) -> bool {
-    matches!((earlier.output, row.output), (Some(a), Some(b)) if a != b)
-        && overlap(&earlier.inputs, &row.inputs)
+fn contradicts(a: &TruthRow, b: &TruthRow) -> bool {
+    matches!((a.output, b.output), (Some(x), Some(y)) if x != y)
 }
 
 /// Whether every combination `inner` assigns, `outer` assigns too.
@@ -335,20 +344,29 @@ fn asserts_nothing(span: &Span, arity: u32) -> Diagnostic {
 /// lets the three sentences below name one output for both rows, which
 /// they have to, since each is about what the table already says.
 ///
-/// `first` is the row `check_table` chose to note. For a conflict that is
-/// the first earlier row contradicting this one, so the note names the
-/// output it assigns: no row before it assigns the shared combination
-/// that output, since such a row would contradict this one too and would
-/// have been chosen instead. The row the table opened the combination
-/// with may well agree with this one, which is why the note cannot just
-/// say "first row assigning" as the other findings' notes do.
-fn overlapping_row(row: &TruthRow, first: &TruthRow) -> Diagnostic {
+/// For a conflict, `noted` is the first earlier row contradicting this
+/// one, so the note names the output it assigns: no row before it assigns
+/// the shared combination that output, since such a row would contradict
+/// this one too and would have been chosen instead. The row the table
+/// opened the combination with may well agree with this one, which is
+/// why the note cannot just say "first row assigning" as the other
+/// findings' notes do.
+///
+/// Every other sentence's repair assumes `noted` stays as written. When
+/// `noted` carries an overlap finding of its own (`noted_is_reported`),
+/// it is being asked to change too, and "delete this row, the earlier
+/// one stands for it" can cancel against that: `10 -> 1` under the `-0`
+/// of `0- -> 1; -0 -> 1` is inside `-0`, while `-0` is told to narrow
+/// away from `0-`, and following both leaves `10` unassigned. So the
+/// repair there is to settle the earlier row first, and this row's fate
+/// follows from how that one changes.
+fn overlapping_row(row: &TruthRow, noted: &TruthRow, noted_is_reported: bool) -> Diagnostic {
     let pattern = &row.inputs;
-    let earlier = &first.inputs;
+    let earlier = &noted.inputs;
     let shared = shared_combination(earlier, pattern);
     // Everything below the match reads one output for both rows, which is
     // only sound once the cases where they say different things are gone.
-    let disagreement = match (row.output, first.output) {
+    let disagreement = match (row.output, noted.output) {
         (Some(later), Some(earlier_output)) if later != earlier_output => Some((
             DiagnosticCode::TruthTableConflict,
             format!(
@@ -373,7 +391,7 @@ fn overlapping_row(row: &TruthRow, first: &TruthRow) -> Diagnostic {
                  assigns it the output `{output}`",
                 output = bit(assigned),
             ),
-            UNCONSTRAINED_FIX.to_owned(),
+            settled_first(UNCONSTRAINED_FIX.to_owned(), earlier, noted_is_reported),
         )),
         (Some(assigned), None) => Some((
             DiagnosticCode::TruthTableDuplicateRow,
@@ -383,18 +401,18 @@ fn overlapping_row(row: &TruthRow, first: &TruthRow) -> Diagnostic {
                  `{earlier}` leaves it unconstrained",
                 output = bit(assigned),
             ),
-            UNCONSTRAINED_FIX.to_owned(),
+            settled_first(UNCONSTRAINED_FIX.to_owned(), earlier, noted_is_reported),
         )),
         _ => None,
     };
     if let Some((code, note, primary, fix)) = disagreement {
-        return finding(code, row, first, note, primary, fix);
+        return finding(code, row, noted, note, primary, fix);
     }
     let (primary, fix) = if pattern == earlier {
         (
             format!(
                 "this row repeats an earlier one: `{pattern}` is already assigned {outcome}",
-                outcome = outcome(first.output),
+                outcome = outcome(noted.output),
             ),
             "Fix: delete either row — the table asserts the same thing without it".to_owned(),
         )
@@ -403,7 +421,7 @@ fn overlapping_row(row: &TruthRow, first: &TruthRow) -> Diagnostic {
             format!(
                 "this row asserts nothing new: the earlier row `{earlier}` already assigns \
                  `{pattern}` {outcome}",
-                outcome = outcome(first.output),
+                outcome = outcome(noted.output),
             ),
             "Fix: delete this row — the earlier pattern's `-` already stands for it".to_owned(),
         )
@@ -419,18 +437,30 @@ fn overlapping_row(row: &TruthRow, first: &TruthRow) -> Diagnostic {
             ),
         )
     };
+    let fix = settled_first(fix, earlier, noted_is_reported);
     finding(
         DiagnosticCode::TruthTableDuplicateRow,
         row,
-        first,
+        noted,
         first_assigning(&shared),
         primary,
         fix,
     )
 }
 
-/// The note every overlap finding but a conflict carries at the row it is
-/// compared against.
+/// `fix`, unless the noted row is itself being asked to change — see
+/// [`overlapping_row`] for why the repair then waits on that row.
+fn settled_first(fix: String, earlier: &str, noted_is_reported: bool) -> String {
+    if !noted_is_reported {
+        return fix;
+    }
+    format!(
+        "Fix: settle the earlier row `{earlier}` first — it overlaps a row before it and is \
+         reported for that, so whether this one stays, and in what shape, depends on how that \
+         one changes"
+    )
+}
+
 fn first_assigning(shared: &str) -> String {
     format!("first row assigning `{shared}` here")
 }
@@ -440,7 +470,7 @@ fn first_assigning(shared: &str) -> String {
 fn finding(
     code: DiagnosticCode,
     row: &TruthRow,
-    first: &TruthRow,
+    noted: &TruthRow,
     note: String,
     primary: String,
     fix: String,
@@ -451,7 +481,7 @@ fn finding(
         primary,
         notes: vec![
             DiagnosticNote {
-                span: Some(first.span.clone()),
+                span: Some(noted.span.clone()),
                 message: note,
             },
             DiagnosticNote {
