@@ -378,7 +378,7 @@ impl MemberRole {
                     reads: &["side", "half", "facing", "shape", "y"],
                 }],
             }],
-            // `resolve_place_origin` answers `at=origin` with the world
+            // `resolve_place_anchor` answers `at=origin` with the world
             // origin and returns before it reads anything else, so `gap=`
             // belongs to the other rule: the relative placement a row with
             // no `at=` asks for. The two origin selectors it reads there,
