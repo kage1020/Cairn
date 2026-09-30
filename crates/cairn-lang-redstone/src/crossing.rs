@@ -1632,6 +1632,12 @@ mod tests {
         //! cells that pass strength on — checked by a walk written out
         //! here rather than through the placer's own budgets, so a
         //! placer that stopped carrying the dust across a cell fails.
+        //!
+        //! "Strand" here is the run of dust counted from the last block
+        //! that restored strength, which carries on through a cell that
+        //! passes strength on. It is not the physically contiguous dust
+        //! the rest of this module means when it keeps two signals off
+        //! one strand: a cell's body stands in the middle of this one.
 
         use std::collections::HashMap;
         use std::fmt::Write as _;

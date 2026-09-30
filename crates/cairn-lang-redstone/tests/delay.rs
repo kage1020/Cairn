@@ -389,8 +389,8 @@ struct chain size=40x5
         );
     }
     // The chain must exercise both bands of the delay model — base
-    // alone (i ≤ 13) and base + implicit buffer (i ≥ 14) — otherwise
-    // shrinking the fixture would silently lose the buffer path.
+    // alone (i = 0, 1, 2, 4) and base plus implicit buffers (the rest)
+    // — otherwise shrinking the fixture would silently lose either.
     assert!(
         entry
             .ir

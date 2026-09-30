@@ -23,7 +23,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    BufferSegment, DiagnosticCode, PlacedCellNode, RouteLayer, compile_crossing,
+    BufferCoord, BufferSegment, DiagnosticCode, PlacedCellNode, RouteLayer, compile_crossing,
     compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
@@ -64,9 +64,14 @@ fn errors(
 /// They stand 12 blocks apart rather than 15. Each cell is a Java
 /// comparator, which passes on the strength it reads rather than
 /// restoring it, so the dust from the trunk runs on through the chain
-/// of comparators after the tap, and a tap may spend less than the
-/// whole limit. The chain's own nets carry repeaters of their own for
-/// the same reason, which is why this counts the trunk's alone.
+/// of comparators after the tap. Every comparator but the last has a
+/// budget of 13: its wire out to the next cell goes round in 4 blocks,
+/// and the first coord on it that runs straight — where a repeater can
+/// refresh the rest — is 2 blocks out, so a tap may arrive over at most
+/// `15 - 2` blocks of dust. That budget, not the limit, is what the
+/// trunk's repeaters are spaced by. The chain's own nets carry
+/// repeaters of their own for the same reason, which is why this
+/// counts the trunk's alone.
 ///
 /// That the tree reaches the far cells along a trunk beside the row
 /// and not *through* the near ones is what makes this a small number
@@ -157,23 +162,11 @@ struct s size=17x3
     }
 }
 
-/// Four plates combined into one door through three cells that pass
-/// strength on, on either edition: the dust from a plate to the door is
-/// one strand, and it is buffered as one.
-///
-/// Every segment is at most 15 blocks — the one out to the door is 15
-/// exactly — so measured one at a time, as each net used to be, none
-/// needs a repeater. But a Bedrock OR is a dust merge and a Java
-/// comparator AND never outputs more than it reads, so the dust from
-/// `sig.a`'s pad through the three cells to the door is over 20 blocks
-/// with nothing restoring it, and the door never opened. The repeater
-/// goes on the wire out to the door, where there is straight wire to
-/// stand on, as early as the dust already spent upstream requires.
-#[test]
-fn cells_that_pass_strength_on_share_one_strand_with_their_inputs() {
-    for (op, edition) in [("or", Edition::Bedrock), ("and", Edition::Java)] {
-        let source = format!(
-            r"
+/// The four-plate door of the two tests below: `sig.open` is the four
+/// plates combined by `op`, which lowers to three two-input cells.
+fn four_plates_one_door(op: &str) -> String {
+    format!(
+        r"
 theme t:
   slot wall -> @oak_planks
   slot door -> @oak_door
@@ -189,7 +182,25 @@ struct s size=20x4
   door[id=d] opened_by=sig.open
   circuit region=floor void=2
 "
-        );
+    )
+}
+
+/// Four plates combined into one door through three cells that pass
+/// strength on, on either edition: the dust from a plate to the door is
+/// one strand, and it is buffered as one.
+///
+/// Every segment is at most 15 blocks — the one out to the door is 15
+/// exactly — so measured one at a time, as each net used to be, none
+/// needs a repeater. But a Bedrock OR is a dust merge and a Java
+/// comparator AND never outputs more than it reads, so the dust from
+/// `sig.a`'s pad through the three cells to the door is over 20 blocks
+/// with nothing restoring it, and the door never opened. The repeater
+/// goes on the wire out to the door, where there is straight wire to
+/// stand on, as early as the dust already spent upstream requires.
+#[test]
+fn cells_that_pass_strength_on_share_one_strand_with_their_inputs() {
+    for (op, edition) in [("or", Edition::Bedrock), ("and", Edition::Java)] {
+        let source = four_plates_one_door(op);
         let legalized = legalized_from_source(&source, edition);
         let ir = &legalized.scopes[0].ir;
         assert_eq!(ir.cells.len(), 3, "{op}: three two-input cells");
@@ -215,10 +226,53 @@ struct s size=20x4
     }
 }
 
+/// The same door through three cells that restore strength — a
+/// Bedrock `and` is torches, a Java `or` a repeater — takes no repeater
+/// anywhere: every segment is at most 15 blocks, and each cell starts
+/// the count again. The complement of the test above, so a
+/// `regenerates` that answered `false` too often would show here as
+/// repeaters on wire that needs none.
+#[test]
+fn cells_that_restore_strength_start_the_count_again() {
+    for (op, edition) in [("and", Edition::Bedrock), ("or", Edition::Java)] {
+        let legalized = legalized_from_source(&four_plates_one_door(op), edition);
+        let ir = &legalized.scopes[0].ir;
+        assert_eq!(ir.cells.len(), 3, "{op}: three two-input cells");
+        assert!(
+            ir.cells.iter().all(|cell| cell.cell.regenerates()),
+            "{op}: every cell restores strength on {edition:?}",
+        );
+        assert_eq!(
+            ir.outputs[0].wire_length(),
+            Some(15),
+            "{op}: the same layout as the pass-through case"
+        );
+        let buffers: Vec<_> = ir
+            .cells
+            .iter()
+            .flat_map(|cell| cell.buffer_coords().iter())
+            .chain(
+                ir.outputs
+                    .iter()
+                    .flat_map(|output| output.buffer_coords().iter()),
+            )
+            .collect();
+        assert_eq!(
+            buffers,
+            Vec::<&BufferCoord>::new(),
+            "{op}: no repeater anywhere"
+        );
+    }
+}
+
 /// AC1 — `examples/redstone-door.crn` compiled for Java survives
 /// crossing legalization: every driver segment sits under the
-/// dust-attenuation limit of 15 so no buffer coord materialises, and
-/// `buffer_coords` stays empty on the survived cell.
+/// dust-attenuation limit of 15, and its one cell, an `or`, lowers to
+/// `JavaRepeaterOr`, which restores strength — so no run of dust
+/// crosses the cell, no buffer coord materialises, and
+/// `buffer_coords` stays empty on the survived cell. An `and` would
+/// lower to a comparator, and the segments either side of it would
+/// count as one run.
 ///
 /// Three nets run in this scope, not one: each sensor drives the cell,
 /// and the cell drives the door. `sig.exit`'s pad sits behind
@@ -534,14 +588,26 @@ fn crossbar_void_one_is_refused_before_any_crossing_is_computed() {
 /// output is refused, as the next test pins.
 #[test]
 fn two_runs_over_the_same_delayed_input_agree() {
-    let source = load_example("redstone-door.crn");
-    let delayed = delayed_from_source(&source, Edition::Java);
+    // The shared bus, not `redstone-door.crn`: the door carries no
+    // repeaters, so it would agree on `buffer_coords` vacuously. The
+    // bus carries them on its trunk and on the nets between its
+    // comparators, whose placement depends on the budgets the delay
+    // pass works out across the cells.
+    let delayed = delayed_from_source(&shared_bus_source(), Edition::Java);
     let first = compile_crossing(&delayed);
     let second = compile_crossing(&delayed);
     assert_eq!(
         serde_json::to_string_pretty(&first.scoped).expect("first serialises"),
         serde_json::to_string_pretty(&second.scoped).expect("second serialises"),
         "two independent crossing runs on the same input must produce the same output",
+    );
+    assert!(
+        first.scoped.scopes[0]
+            .ir
+            .cells
+            .iter()
+            .any(|cell| !cell.buffer_coords().is_empty()),
+        "the fixture carries repeaters, so the agreement covers where they stand",
     );
     assert_eq!(first.diagnostics.len(), second.diagnostics.len());
 }

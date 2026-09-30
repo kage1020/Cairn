@@ -203,13 +203,18 @@ impl EditionCell {
     /// - [`Self::JavaComparatorAnd`] is a comparator, and a comparator
     ///   never outputs more than its rear input carries.
     ///
-    /// The dust before either of them and the dust after it are one
-    /// strand, and the delay pass measures them as one.
+    /// The dust before either of them and the dust after it count as
+    /// one run for the limit, though the cell stands between them, and
+    /// the delay pass measures them as one.
     ///
-    /// The `*Unpinned` placeholders answer `false` for the reason
-    /// [`Self::base_delay_ticks`] answers a sentinel above every pinned
-    /// value: until a realisation is chosen, the pessimistic answer is
-    /// the one that places a repeater too many rather than one too few.
+    /// The `*Unpinned` placeholders answer `false`: until a realisation
+    /// is chosen, the pessimistic answer is the one that never lets a
+    /// run of dust go unmeasured. Unlike [`Self::base_delay_ticks`]'
+    /// sentinel it is not distinguishable from a pinned cell's `false`,
+    /// and it does more than add a repeater: it puts the cell into the
+    /// delay pass's budget walk, which can refuse the scope with
+    /// `E_ATTENUATION_LIMIT`. Parser-unreachable today, so neither
+    /// shows in a compile.
     #[must_use]
     pub const fn regenerates(self) -> bool {
         match self {
