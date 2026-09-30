@@ -183,7 +183,7 @@ Monaco と同じ規則なので、診断の行番号とカーソル位置の行�
 
 `sym=true` は開口を壁の中点で鏡映します (`mirror_offset = wall_length - offset - size_w`)。鏡映が元
 の矩形と重なる場合は `W_DEFERRED_MEMBER` で拒否し、元の側だけを塗ります。`sym=` は裸の `true` か
-`false` を取ります。それ以外の値 (`sym=yes`、`sym="true"`、`sym=1`) は読めない値で、窓は鏡映なしで
+`false` を取り、書かれていない窓は鏡映されません。それ以外の値 (`sym=yes`、`sym="true"`、`sym=1`) は読めない値で、窓は鏡映なしで
 描かれ、その値は `W_IGNORED_ARGUMENT` で報告されます
 ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
 

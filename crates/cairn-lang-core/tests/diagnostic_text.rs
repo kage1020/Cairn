@@ -82,10 +82,12 @@ fn no_diagnostic_text_is_empty_or_padded() {
 /// them takes its prose out of the checks above without changing the code
 /// set at all.
 ///
-/// `W_IGNORED_ARGUMENT` is the one that has three, and the two-repair-site
-/// branch is the one this pins: it is the only finding in the set that
-/// names a second argument, so its sentence is the one a subset check over
-/// codes cannot see go missing.
+/// `W_IGNORED_ARGUMENT` is the code with the most: a primary per shape of
+/// finding, and for an unreadable value a note per member and per outcome.
+/// The two-repair-site branch is the one this pins: it is the only finding
+/// in the set that names a second argument, so its sentence is the one a
+/// subset check over codes cannot see go missing. The notes an unreadable
+/// value can carry are pinned below.
 #[test]
 fn the_corpus_reaches_the_two_repair_site_branch_of_the_ignored_argument_prose() {
     let reached = rendered_strings().into_iter().any(|(origin, text)| {
@@ -96,6 +98,37 @@ fn the_corpus_reaches_the_two_repair_site_branch_of_the_ignored_argument_prose()
         reached,
         "no fixture reaches the branch of `W_IGNORED_ARGUMENT` that names both repair sites",
     );
+}
+
+/// An unreadable value's note says what the default did, or that the
+/// member is not built either way, in words written per member. Each is its
+/// own literal, and so its own chance at a dropped continuation; the
+/// origin-range refusal beside them is joined from three continued lines.
+#[test]
+fn the_corpus_reaches_every_note_an_unreadable_value_carries() {
+    let rendered = rendered_strings();
+    for (code, sentence) in [
+        (
+            "W_IGNORED_ARGUMENT",
+            "the row is placed as `gap=0` places it",
+        ),
+        ("W_IGNORED_ARGUMENT", "this row is not placed either way"),
+        ("W_IGNORED_ARGUMENT", "the stair is built with the default"),
+        ("W_IGNORED_ARGUMENT", "this stair is not built either way"),
+        (
+            "W_IGNORED_ARGUMENT",
+            "the window is drawn without its mirror",
+        ),
+        ("W_IGNORED_ARGUMENT", "this window is not cut either way"),
+        ("W_DEFERRED_MEMBER", "this placement's origin works out to"),
+    ] {
+        assert!(
+            rendered
+                .iter()
+                .any(|(origin, text)| origin.starts_with(code) && text.contains(sentence)),
+            "no fixture reaches the `{code}` text `{sentence}`",
+        );
+    }
 }
 
 #[test]

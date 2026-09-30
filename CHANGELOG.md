@@ -428,24 +428,29 @@
   ```
 
   `spec/lint` "Error vs warning" calls this an unreadable value and gives it `W_IGNORED_ARGUMENT`,
-  as `roof overhang=` already had. Each of these now raises it, naming the key, the value as
-  written, and what was built instead:
+  as `roof overhang=` already had. Each of these now raises it on the value itself, naming the key,
+  the value as written, and what was built instead:
 
   ```
-  s.crn:3:3: warning[W_IGNORED_ARGUMENT]: `sym=` must be `true` or `false`, not identifier `yes`; the value was ignored
+  s.crn:3:47: warning[W_IGNORED_ARGUMENT]: `sym=` must be `true` or `false`, not identifier `yes`; the value was ignored
     note: the window is drawn without its mirror, as `sym=false` would draw it
   ```
 
-  The finding is raised only for a member that is then built. A window, stair or `place` row
-  refused further on has its repair in that `W_DEFERRED_MEMBER` already. An unknown bare identifier
-  (`half=sideways`) still defers the stair, as before.
+  The finding is raised whether or not the member is then built, as the `overhang=` one already
+  was. A window, stair or `place` row refused further on reports its unreadable values beside the
+  refusal, with a note saying it is not built either way, so one compile names every repair. An
+  unknown bare identifier (`half=sideways`) still defers the stair, as before. Like the rest of
+  block-array lowering, these findings come from `cairn lower`, `compile`, and a `check` given
+  `--edition` / `--target`; a plain `cairn check` and the language server do not reach them.
 
   A `place` origin also saturated at the edge of `i32`, so `gap=3000000000` moved nothing and
   `gap=2147483647` followed by another `east_of=` row stacked the two on one coordinate. A row
   whose origin works out past that range is now refused with `W_DEFERRED_MEMBER`, naming the axis
-  and the sum, and a row placed relative to it is refused with it. Like a row whose anchor did not
-  lower, a row refused this way reports nothing about its body. The `roof overhang=` finding's
-  message now also names the value that was written.
+  and the value, and a row placed relative to it is refused with it. The refused row still reports
+  every finding its body raises — an `E_INCOMPATIBLE_MATERIAL` or `W_NO_THEME_BOUND` is a defect in
+  the `def` or theme, and lowering the body takes nothing from the origin, so each is the finding a
+  placed row would have raised. The `roof overhang=` finding's message now also names the value
+  that was written.
 
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
