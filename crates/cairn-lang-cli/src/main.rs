@@ -3262,15 +3262,15 @@ fn prepare_artifacts(
             );
         }
         let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
-        // Place and port ids may carry `_`, and `output_filename` joins a
-        // walkway's place and port with `_` where its scope key has the
-        // place/port separator `.`, so two distinct walkways can fold into
-        // the same on-disk name (e.g. `a.b_c__d.e_f` vs `a_b.c__d_e.f`
-        // both → `..._a_b_c__d_e_f`). Detecting that
-        // here keeps the second walkway from silently overwriting the
-        // first. Keyed on the directory entry rather than the spelling:
-        // `home1` and `HOME1` are distinct ids but one file on macOS and
-        // Windows, and would destroy each other in the commit.
+        // Two scopes can name one file: a place id reused across sites or
+        // matching a struct, two walkways whose `_`-joined names fold
+        // together, or names that differ only in case. The resolver refuses
+        // every such pair it can see as `E_OUTPUT_NAME_COLLISION`, so a
+        // build that reaches here with one has found a hole in that check.
+        // This is the last point before the second file overwrites the
+        // first in the commit, so it stays, keyed on the directory entry
+        // rather than the spelling: `home1` and `HOME1` are one file on
+        // macOS and Windows.
         let location = entry_location(&path).map_err(|err| {
             eprintln!(
                 "error: cannot resolve where artifact `{}` would be written: {err}",
@@ -4421,5 +4421,37 @@ mod tests {
             .unwrap_or_else(|_| panic!("a plain id prepares"));
         let paths: Vec<&Path> = prepared.iter().map(|(path, _)| path.as_path()).collect();
         assert_eq!(paths, [out_dir.join("hut.nbt").as_path()]);
+    }
+
+    /// Two scopes that name one file are refused before any I/O.
+    ///
+    /// No source reaches this either: the resolver refuses the pair with
+    /// `E_OUTPUT_NAME_COLLISION`, so `cairn compile` stops before it lowers.
+    /// The check here is what is left if a future source of scope keys
+    /// skips that one, and rekeying a real lowering is again the only way
+    /// to reach it. The two keys are the shape the resolver's own
+    /// finding is about, a struct and a placement of one name.
+    #[test]
+    fn two_scopes_that_name_one_file_are_refused_before_any_io() {
+        let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, Some(Edition::Java));
+        let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+        let target =
+            resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+        let array = block_ir
+            .structures
+            .values()
+            .next()
+            .expect("the probe lowers to one structure")
+            .clone();
+        block_ir.structures = ["struct::hut", "site::s::hut"]
+            .into_iter()
+            .map(|key| (key.to_owned(), array.clone()))
+            .collect();
+        assert!(
+            prepare_artifacts(&block_ir, &target, Path::new("out")).is_err(),
+            "`struct::hut` and `site::s::hut` both write `hut.nbt`",
+        );
     }
 }

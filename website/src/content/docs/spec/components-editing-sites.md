@@ -114,7 +114,11 @@ instead.
 
 The compiler writes one `.nbt` per `place`, named after the `id=` (`home1.nbt`, `home2.nbt`), directly
 into the output directory. An id carrying `/` or `\` would name a path rather than a file, so it is
-`E_INVALID_PLACE_ID` ([Lint](/spec/lint/)). The
+`E_INVALID_PLACE_ID` ([Lint](/spec/lint/)). The site is not part of the name, and the same
+directory holds every `struct`, written under its own name, and every walkway
+([§9.3.5](#935-ports-and-connect)). Two artifacts that would share a file name, compared ignoring
+case, are `E_OUTPUT_NAME_COLLISION`: a `place` named after a `struct`, or one `id=` placed in two
+sites, is refused rather than written over the other. The
 world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
 `build.cairn.lock` under `placements`, so a downstream consumer can rebuild the layout without
 re-running the coordinate solver.

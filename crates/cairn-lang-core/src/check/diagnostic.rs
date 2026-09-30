@@ -426,6 +426,21 @@ pub enum DiagnosticCode {
     /// wins for downstream references; the duplicate is dropped and the
     /// error names both spans.
     DuplicatePlaceId,
+    /// Two scopes the build writes would be written to one file.
+    ///
+    /// An artifact is named by [`crate::ids::artifact_stem`]: a `struct`
+    /// by its name, a `place` by its `id=` alone, a walkway by its site
+    /// and endpoints with `.` flattened to `_`. So `struct hut` and a
+    /// `place id=hut`, or two sites that each `place id=home`, or the
+    /// walkways `a_b.c to d.e` and `a.b_c to d.e`, name one file, and the
+    /// build can write only one of them. Names are compared ignoring case,
+    /// because `Hut` and `hut` are one file on the case-insensitive file
+    /// systems macOS and Windows default to, and the verdict should not
+    /// depend on the host. A scope key declared twice (`struct hut` twice,
+    /// or one site's `id=` twice) is not this code: that is
+    /// `E_DUPLICATE_ITEM` or `E_DUPLICATE_PLACE_ID`, and the second one
+    /// builds nothing.
+    OutputNameCollision,
     /// A `place` line carries either an `at=` value other than `origin` or
     /// combines `at=` with `east_of=` / `north_of=`. Origin selectors are
     /// mutually exclusive per `spec/components-editing-sites` "Multi-building
@@ -631,6 +646,7 @@ impl DiagnosticCode {
             Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
+            Self::OutputNameCollision => "E_OUTPUT_NAME_COLLISION",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
             Self::UnusedDef => "W_UNUSED_DEF",
             Self::UnresolvedPort => "E_UNRESOLVED_PORT",
@@ -730,6 +746,7 @@ impl DiagnosticCode {
             | Self::UnresolvedThemeRef
             | Self::ThemeVariantMissing
             | Self::DuplicatePlaceId
+            | Self::OutputNameCollision
             | Self::IncompletePlace
             | Self::InvalidPlaceId
             | Self::InvalidPlaceOrigin
@@ -1417,6 +1434,7 @@ mod tests {
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
+                "E_OUTPUT_NAME_COLLISION",
                 "E_PARSE",
                 "E_THEME_SELECTOR_UNMATCHED",
                 "E_THEME_VARIANT_MISSING",
@@ -1488,6 +1506,7 @@ mod tests {
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
+                "E_OUTPUT_NAME_COLLISION",
                 "E_PARSE",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",

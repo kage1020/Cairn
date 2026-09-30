@@ -109,7 +109,11 @@ Y 軸はトポロジカルセレクタの影響を受けず、現状すべての
 
 コンパイラは `place` ごとに `.nbt` を 1 つ、`id=` の名前で出力ディレクトリの直下に書きます
 (`home1.nbt`、`home2.nbt`)。`/` や `\` を含む id はファイルではなくパスを指すので
-`E_INVALID_PLACE_ID` です ([Lint](/ja/spec/lint/))。各
+`E_INVALID_PLACE_ID` です ([Lint](/ja/spec/lint/))。名前に site は含まれず、同じディレクトリに
+すべての `struct` (自身の名前で書かれる) とすべての walkway ([§9.3.5](#935-ポートと-connect)) も書かれます。
+大文字小文字を無視して比べて同じファイル名になる 2 つの成果物は `E_OUTPUT_NAME_COLLISION` です。
+`struct` と同じ名前の `place` や、2 つの site に置かれた同じ `id=` は、片方をもう片方で上書きする代わりに
+拒否されます。各
 placement のワールド原点と `(site, def, theme)` の provenance は `build.cairn.lock` の `placements`
 に記録されるので、下流の消費者は座標ソルバを再実行せずにレイアウトを再構築できます。
 

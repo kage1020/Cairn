@@ -181,13 +181,15 @@ impl OutputExt {
     }
 }
 
-/// Filename for a single [`BlockArray`] within a multi-structure IR.
+/// Filename for a single [`BlockArray`] within a multi-structure IR: the
+/// scope's [`cairn_lang_core::artifact_stem`] plus `ext`.
 ///
-/// Strips the source-scope prefix (shown for [`OutputExt::Nbt`]):
+/// Shown for [`OutputExt::Nbt`]:
 /// - `"struct::cottage"` → `"cottage.nbt"`
 /// - `"site::hamlet::home1"` → `"home1.nbt"` — per-`place` placements
-///   share an output directory with sibling structs; the site name is
-///   collision-avoided inside the IR key, not on disk.
+///   share an output directory with sibling structs; the site name keeps
+///   the IR keys apart, not the files, and two scopes that would share a
+///   file are the resolver's `E_OUTPUT_NAME_COLLISION`.
 /// - `"walkway::hamlet::home1.entry__home2.entry"` →
 ///   `"hamlet_walkway_home1_entry__home2_entry.nbt"` — the site name
 ///   is preserved so a multi-site file's walkways do not collide on
@@ -199,52 +201,11 @@ impl OutputExt {
 /// agree on naming when they land.
 #[must_use]
 pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
-    let ext = ext.as_str();
-    // Only a canonical `walkway::SITE::PLACE.PORT__PLACE.PORT` key is
-    // parsed; a synthetic `walkway::no_site` fixture falls through to the
-    // generic name below with every other unrecognised scope.
-    if let Some(rest) = source_scope.strip_prefix("walkway::")
-        && rest.contains("::")
-    {
-        match cairn_lang_core::WalkwayScopeKey::parse(source_scope) {
-            Ok(key) => {
-                // `parts()` splits on the same validated boundaries the
-                // lowering pass built the key from, so a `.` inside a port
-                // id cannot be mistaken for the place/port separator.
-                // Known hazard: ids allow `_`, so `a_b.c__d_e.f` and
-                // `a.b_c__d.e_f` still flatten to one filename; catching
-                // that needs a write-time pass in the CLI.
-                let parts = key.parts();
-                return format!(
-                    "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}.{ext}",
-                    site = parts.site,
-                    from_place = parts.from_place,
-                    from_port = parts.from_port,
-                    to_place = parts.to_place,
-                    to_port = parts.to_port,
-                );
-            }
-            Err(e) => {
-                // A canonical prefix that fails to parse is a lowering-pass
-                // contract break; release builds fall through rather than
-                // panic.
-                debug_assert!(
-                    false,
-                    "output_filename received a `walkway::SITE::*` key that failed to parse \
-                     ({source_scope:?}): {e}",
-                );
-            }
-        }
-    }
-    let bare = source_scope
-        .strip_prefix("struct::")
-        .or_else(|| {
-            source_scope
-                .strip_prefix("site::")
-                .and_then(|rest| rest.split_once("::").map(|(_, id)| id))
-        })
-        .unwrap_or(source_scope);
-    format!("{bare}.{ext}")
+    format!(
+        "{}.{}",
+        cairn_lang_core::artifact_stem(source_scope),
+        ext.as_str()
+    )
 }
 
 pub(crate) fn is_concrete_id(id: &str) -> bool {

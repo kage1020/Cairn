@@ -184,6 +184,7 @@ mod tests {
             | C::UnresolvedPlaceRef
             | C::UnresolvedThemeRef
             | C::DuplicatePlaceId
+            | C::OutputNameCollision
             | C::InvalidPlaceOrigin
             | C::UnusedDef
             | C::UnresolvedPort

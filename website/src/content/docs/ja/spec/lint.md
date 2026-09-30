@@ -255,6 +255,7 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 |---|---|
 | `E_INVALID_PLACE_ID` | `place id=` が空、または `.` / `:` / `/` / `\` / 空白を含む。 |
 | `E_DUPLICATE_PLACE_ID` | 同じ site の 2 つの `place` 行が `id=` を共有している。 |
+| `E_OUTPUT_NAME_COLLISION` | 1 回のビルドが書く 2 つの成果物が、大文字小文字を無視して同じファイル名になる。同じ名前の `struct` と `place`、2 つの site に置かれた同じ `id=`、平坦化すると同じ名前になる 2 本の walkway など。 |
 | `E_INVALID_PLACE_ORIGIN` | `place` が `origin` 以外の `at=` を持つ、または `at=` と `east_of=` / `north_of=` を併用している ([§9.3](/ja/spec/components-editing-sites#93-site-による複数建築))。 |
 | `E_UNRESOLVED_PLACE_REF` | `place use=`、`east_of=` / `north_of=`、`connect` の端点が、存在しない place や def を名指している。 |
 | `E_UNRESOLVED_THEME_REF` | `place theme=` が、モジュールの宣言していないテーマを名指している。 |
@@ -269,6 +270,16 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 
 `E_DUPLICATE_PLACE_ID` は両方のスパンを示します。id を参照するものはすべて最初の行を採り、重複した
 方は落とされるので、「もう一方」に解決された参照が 2 つ目の指摘になることはありません。
+
+`E_OUTPUT_NAME_COLLISION` は成果物の名前の付け方から生じます
+([§9.3.4](/ja/spec/components-editing-sites#934-出力ファイル名))。`struct` はその名前、`place` は
+`id=` だけ、walkway は site とポートで名付けられます。どれも同じ出力ディレクトリに書かれるので、2 つが
+1 つのファイルを指すことがあり、ビルドはその片方しか残せません。名前は大文字小文字を無視して比べます。
+macOS と Windows が既定で使う大文字小文字を区別しないファイルシステムでは `Hut` と `hut` は 1 つの
+ファイルであり、ソースがビルドできるかどうかがビルドするホストに依存するべきではないからです。この指摘は
+他の site の指摘と同じく lowering の前に出るので、`cairn check` は `--target` なしで報告します。同じ名前を
+2 回宣言したものはこのコードではありません。2 つ目の `struct hut` は `E_DUPLICATE_ITEM`、同じ site の
+2 つ目の `id=` は `E_DUPLICATE_PLACE_ID` です。
 
 `E_UNRESOLVED_PLACE_REF` と `E_UNRESOLVED_THEME_REF` は、綴りの上限に収まる候補があれば最も近いもの
 を添えます ([did you mean](#did-you-mean))。どちらもエラーなのは、名前に何かを代入すればソースが

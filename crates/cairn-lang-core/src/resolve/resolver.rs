@@ -43,6 +43,10 @@
 //! `block_array`) consumes the resolved connects without re-walking the
 //! `DotRef`s.
 //!
+//! Once every scope is resolved, the artifact names they would be written
+//! under are compared: two scopes that share one file, ignoring case, are
+//! `E_OUTPUT_NAME_COLLISION` (see [`check_output_names`]).
+//!
 //! The returned [`Resolution::diagnostics`] is in **resolver-emission
 //! order**, not sorted by source span. The `check::check` pipeline runs
 //! its findings through `DiagnosticSink::into_sorted` after merging, so
@@ -57,7 +61,9 @@ use crate::ast::{Value, ValueKind};
 use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
-use crate::ids::{IdError, PlaceId, PortId, SiteName};
+use crate::ids::{
+    IdError, PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem,
+};
 use crate::intent::{
     ConnectEnd, DefIr, IntentModule, Member, MemberBody, MemberRole, SelectorRule, SiteIr,
     StructIr, ThemeIr, ValueWithSpan, role_of,
@@ -416,6 +422,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
         );
     }
     check_unused_defs(&ir.defs, &used_defs, &mut diagnostics);
+    check_output_names(ir, &scopes, &connects, &mut diagnostics);
 
     check_slot_targets(&declared, &mut diagnostics);
     check_unmatched_selectors(&themes, &applied_themes, &mut diagnostics);
@@ -425,6 +432,116 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
         scopes,
         connects,
         diagnostics,
+    }
+}
+
+/// `E_OUTPUT_NAME_COLLISION`: two scopes the build would write to one
+/// file.
+///
+/// The artifacts are the ones a build writes, as far as resolution can
+/// tell: every `struct`, every `place` that resolved to a scope, and a
+/// walkway for every resolved `connect` row whose scope key can be built.
+/// A walkway the lowering pass then declines to lay (past the router's
+/// area cap, or between placements that did not lower) still counts,
+/// since the row asks for it.
+///
+/// Each name is [`artifact_stem`] folded to lower case, so `Hut` and
+/// `hut` collide on every host rather than only on the case-insensitive
+/// file systems where they are one file. Two entries with the same scope
+/// key are one scope declared twice, which `E_DUPLICATE_ITEM` or
+/// `E_DUPLICATE_PLACE_ID` already reports, so they are skipped here.
+///
+/// The finding anchors on the later declaration, with a note on the
+/// earlier one, in the order structs, places and walkways are listed
+/// above and each in source order.
+fn check_output_names(
+    ir: &IntentModule,
+    scopes: &IndexMap<String, ScopeResolution>,
+    connects: &[ValidatedConnect],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    /// One artifact: its scope key, where it is declared, and how the
+    /// finding names it.
+    struct Artifact {
+        key: String,
+        span: Span,
+        label: String,
+    }
+    let structs = ir.structs.iter().map(|s| Artifact {
+        key: struct_key(s),
+        span: s.span.clone(),
+        label: format!("`struct {}`", s.name),
+    });
+    let places = ir.sites.iter().flat_map(|site| {
+        site.placements
+            .iter()
+            .filter(|m| matches!(m.role, MemberRole::Place))
+            .filter_map(move |m| {
+                let id = m.id.as_deref()?;
+                let key = place_scope_key(&site.name, id);
+                scopes.contains_key(&key).then(|| Artifact {
+                    key,
+                    span: m.span.clone(),
+                    label: format!("`place id={id}` in site `{}`", site.name),
+                })
+            })
+    });
+    let walkways = connects.iter().filter_map(|c| {
+        let endpoint = |end: &PortRef| WalkwayEndpoint {
+            place: end.place.clone(),
+            port: end.port.clone(),
+        };
+        let key =
+            WalkwayScopeKey::from_parts(&c.site, &endpoint(&c.from), &endpoint(&c.to)).ok()?;
+        Some(Artifact {
+            key: key.as_str().to_owned(),
+            span: c.span.clone(),
+            label: format!("the walkway `{} ↔ {}` in site `{}`", c.from, c.to, c.site),
+        })
+    });
+
+    let mut seen: IndexMap<String, (String, Artifact)> = IndexMap::new();
+    for artifact in structs.chain(places).chain(walkways) {
+        let stem = artifact_stem(&artifact.key);
+        let folded = stem.to_lowercase();
+        let Some((first_stem, first)) = seen.get(&folded) else {
+            seen.insert(folded, (stem, artifact));
+            continue;
+        };
+        if first.key == artifact.key {
+            continue;
+        }
+        let why = if *first_stem == stem {
+            format!(
+                "both are written to `{stem}` in the output directory, with the edition's \
+                 extension, and a build can keep only one; rename one of them"
+            )
+        } else {
+            format!(
+                "`{first_stem}` and `{stem}` differ only in case, which makes them one file on \
+                 the case-insensitive file systems macOS and Windows use by default; rename one \
+                 so the names differ by more than case"
+            )
+        };
+        diagnostics.push(Diagnostic {
+            code: DiagnosticCode::OutputNameCollision,
+            span: artifact.span,
+            primary: format!(
+                "{} is written to the same file as {}",
+                artifact.label, first.label
+            ),
+            notes: vec![
+                DiagnosticNote {
+                    span: Some(first.span.clone()),
+                    message: format!("{} is declared here", first.label),
+                },
+                DiagnosticNote {
+                    span: None,
+                    message: why,
+                },
+            ],
+            data: None,
+        });
     }
 }
 

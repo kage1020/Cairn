@@ -623,9 +623,87 @@ impl fmt::Display for WalkwayEndpoint {
     }
 }
 
+/// The name, without extension, of the file a scope of
+/// [`crate::BlockArrayIr::structures`] is written to.
+///
+/// - `struct::cottage` → `cottage`
+/// - `site::hamlet::home1` → `home1`: a placement is named after its `id=`
+///   alone, so it shares one output directory with every struct and every
+///   other site's placements (`spec/components-editing-sites` "Output
+///   naming").
+/// - `walkway::hamlet::home1.entry__home2.entry` →
+///   `hamlet_walkway_home1_entry__home2_entry`: the site is kept, and the
+///   `.` between a place and its port becomes `_`.
+///
+/// Anything else is returned unchanged. It lives here rather than beside
+/// the file writers so the resolver's `E_OUTPUT_NAME_COLLISION` and the
+/// name a build writes are one function.
+#[must_use]
+pub fn artifact_stem(source_scope: &str) -> String {
+    // Only a canonical `walkway::SITE::PLACE.PORT__PLACE.PORT` key is
+    // parsed; a synthetic `walkway::no_site` fixture falls through to the
+    // generic name below with every other unrecognised scope.
+    if let Some(rest) = source_scope.strip_prefix("walkway::")
+        && rest.contains("::")
+    {
+        match WalkwayScopeKey::parse(source_scope) {
+            Ok(key) => {
+                // `parts()` splits on the same validated boundaries the
+                // lowering pass built the key from, so a `.` inside a port
+                // id cannot be mistaken for the place/port separator. Ids
+                // allow `_`, so `a_b.c__d_e.f` and `a.b_c__d.e_f` still
+                // flatten to one name; the resolver reports that pair as
+                // `E_OUTPUT_NAME_COLLISION`.
+                let parts = key.parts();
+                return format!(
+                    "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}",
+                    site = parts.site,
+                    from_place = parts.from_place,
+                    from_port = parts.from_port,
+                    to_place = parts.to_place,
+                    to_port = parts.to_port,
+                );
+            }
+            Err(e) => {
+                // A canonical prefix that fails to parse is a lowering-pass
+                // contract break; release builds fall through rather than
+                // panic.
+                debug_assert!(
+                    false,
+                    "artifact_stem received a `walkway::SITE::*` key that failed to parse \
+                     ({source_scope:?}): {e}",
+                );
+            }
+        }
+    }
+    source_scope
+        .strip_prefix("struct::")
+        .or_else(|| {
+            source_scope
+                .strip_prefix("site::")
+                .and_then(|rest| rest.split_once("::").map(|(_, id)| id))
+        })
+        .unwrap_or(source_scope)
+        .to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn artifact_stem_names_each_scope_kind() {
+        assert_eq!(artifact_stem("struct::cottage"), "cottage");
+        assert_eq!(artifact_stem("site::hamlet::home1"), "home1");
+        assert_eq!(
+            artifact_stem("walkway::hamlet::home1.entry__home2.entry"),
+            "hamlet_walkway_home1_entry__home2_entry",
+        );
+        // Anything else passes through, including a walkway key without
+        // its site separator.
+        assert_eq!(artifact_stem("cottage"), "cottage");
+        assert_eq!(artifact_stem("walkway::no_site"), "walkway::no_site");
+    }
 
     #[test]
     fn ident_new_accepts_plain_identifiers() {
