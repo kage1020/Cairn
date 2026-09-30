@@ -1,9 +1,9 @@
 //! NBT tag tree shared by every writer in this crate.
 //!
 //! The tree owns its data — callers construct a [`Tag`] / [`Compound`] /
-//! [`List`] in memory and hand it to a writer. A borrow-based zero-copy form
-//! is deferred until profiling shows it matters; the structures lowered today
-//! are KB-scale.
+//! [`List`] in memory and hand it to a writer. Output too large to hold as a
+//! tree — a list with an entry per voxel — goes through [`crate::stream`]
+//! instead, which writes each tag as it is handed one.
 
 use indexmap::IndexMap;
 

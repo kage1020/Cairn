@@ -19,7 +19,7 @@
 use cairn_lang_core::block_array::{BlockArray, BlockState};
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
-use cairn_lang_nbt::{NbtIoError, write_java_gzip};
+use cairn_lang_nbt::{CompoundStream, NbtIoError, stream_java_gzip, write_java_gzip};
 use thiserror::Error;
 
 use crate::data_version::JavaTarget;
@@ -80,11 +80,24 @@ impl From<crate::dims::DimensionOverflow> for JavaStructureError {
     }
 }
 
-/// Build the root [`Compound`] for a Java vanilla structure file from a
-/// lowered [`BlockArray`].
+/// A [`BlockArray`] checked to serialise as a Java vanilla structure, and
+/// the target it is written for.
 ///
-/// Pure: no I/O happens here, so the same tree can be serialised twice (for
-/// the `resolved_ir_hash` and for the on-disk artifact) without rebuilding.
+/// Holding one means every refusal [`build_structure_tag`] can raise has
+/// already been ruled out, so [`Self::write_gzip`] can only fail on I/O or
+/// on a string the NBT encoder refuses. That is what lets a caller validate
+/// every structure of a build before writing any of them without building
+/// any tree: the per-voxel `blocks` list is encoded straight from the grid
+/// as it is written, one entry at a time.
+#[derive(Debug, Clone, Copy)]
+pub struct JavaStructure<'a> {
+    block_array: &'a BlockArray,
+    size: [i32; 3],
+    data_version: i32,
+}
+
+/// Check that `block_array` serialises as a Java vanilla structure for
+/// `target`, without building anything.
 ///
 /// # Errors
 ///
@@ -97,10 +110,10 @@ impl From<crate::dims::DimensionOverflow> for JavaStructureError {
 /// names a slot the palette does not have, and
 /// [`JavaStructureError::DimensionOverflow`] when a dimension does not fit
 /// the wire width.
-pub fn build_structure_tag(
-    block_array: &BlockArray,
+pub fn prepare_structure<'a>(
+    block_array: &'a BlockArray,
     target: &JavaTarget,
-) -> Result<Compound, JavaStructureError> {
+) -> Result<JavaStructure<'a>, JavaStructureError> {
     for entry in &block_array.palette.entries {
         if !is_concrete_id(&entry.id) {
             return Err(JavaStructureError::AbstractPaletteEntry {
@@ -111,42 +124,122 @@ pub fn build_structure_tag(
     if let Some((index, len)) = block_array.first_index_outside_palette() {
         return Err(JavaStructureError::PaletteIndexOutOfRange { index, len });
     }
+    Ok(JavaStructure {
+        block_array,
+        size: dims_to_i32(&block_array.dims)?,
+        data_version: target.data_version,
+    })
+}
 
-    let size = dims_to_i32(&block_array.dims)?;
+impl JavaStructure<'_> {
+    /// Gzip-write the structure under the empty root name vanilla expects.
+    /// The bytes are the ones [`write_compound_gzip`] writes for the tree
+    /// [`build_structure_tag`] builds, but nothing per voxel is held in
+    /// memory: each `blocks` entry is encoded from the grid and dropped.
+    ///
+    /// # Errors
+    ///
+    /// Propagates I/O failure from `writer` and any encoding error the NBT
+    /// writer raises (a palette string it cannot carry, a list past the
+    /// wire length).
+    pub fn write_gzip<W: std::io::Write>(&self, writer: &mut W) -> Result<(), NbtIoError> {
+        stream_java_gzip(writer, "", |root| self.write_root(root))
+    }
+
+    /// The root's entries, in [`build_structure_tag`]'s order.
+    fn write_root<W: std::io::Write>(
+        &self,
+        root: &mut CompoundStream<'_, W>,
+    ) -> Result<(), NbtIoError> {
+        let block_array = self.block_array;
+        root.tag("size", &Tag::List(List::of_ints(self.size)))?;
+        root.tag(
+            "palette",
+            &Tag::List(palette_list(&block_array.palette.entries)),
+        )?;
+        let volume = block_array.dims.volume();
+        // An empty list declares `TAG_End`, as `List::of_compounds` does.
+        let element_type_id = if volume == 0 { 0 } else { 10 };
+        root.list("blocks", element_type_id, volume, |blocks| {
+            // Same (y, z, x) order as `blocks_list`. `prepare_structure`
+            // checked every dimension fits `i32`, and each coordinate is
+            // below its dimension.
+            for y in 0..block_array.dims.y {
+                let yi = i32::try_from(y).expect("dims checked to fit i32");
+                for z in 0..block_array.dims.z {
+                    let zi = i32::try_from(z).expect("dims checked to fit i32");
+                    for x in 0..block_array.dims.x {
+                        let xi = i32::try_from(x).expect("dims checked to fit i32");
+                        let i = block_array
+                            .dims
+                            .index(x, y, z)
+                            .expect("voxel coordinate in dims by construction");
+                        let state = i32::from(block_array.voxels[i].0);
+                        blocks.compound(|entry| {
+                            entry.tag("state", &Tag::Int(state))?;
+                            entry.list("pos", 3, 3, |pos| {
+                                pos.item(&Tag::Int(xi))?;
+                                pos.item(&Tag::Int(yi))?;
+                                pos.item(&Tag::Int(zi))
+                            })
+                        })?;
+                    }
+                }
+            }
+            Ok(())
+        })?;
+        root.tag("entities", &Tag::List(List::empty()))?;
+        root.tag("DataVersion", &Tag::Int(self.data_version))
+    }
+}
+
+/// Build the root [`Compound`] for a Java vanilla structure file from a
+/// lowered [`BlockArray`].
+///
+/// The tree holds one compound per voxel, several hundred bytes each, so
+/// it is for inspecting a structure rather than for writing a large one:
+/// [`JavaStructure::write_gzip`] writes the same bytes without it.
+///
+/// # Errors
+///
+/// Every refusal of [`prepare_structure`].
+pub fn build_structure_tag(
+    block_array: &BlockArray,
+    target: &JavaTarget,
+) -> Result<Compound, JavaStructureError> {
+    let prepared = prepare_structure(block_array, target)?;
 
     let mut root = Compound::new();
-    root.insert("size", Tag::List(List::of_ints(size)));
+    root.insert("size", Tag::List(List::of_ints(prepared.size)));
     root.insert(
         "palette",
         Tag::List(palette_list(&block_array.palette.entries)),
     );
     root.insert("blocks", Tag::List(blocks_list(block_array)?));
     root.insert("entities", Tag::List(List::empty()));
-    root.insert("DataVersion", Tag::Int(target.data_version));
+    root.insert("DataVersion", Tag::Int(prepared.data_version));
     Ok(root)
 }
 
-/// Build + gzip-write a [`BlockArray`] to the given writer in one step.
+/// Check and gzip-write a [`BlockArray`] to the given writer in one step,
+/// streaming the per-voxel list rather than building the tree.
 ///
 /// # Errors
 ///
-/// Forwards every failure mode of [`build_structure_tag`] and any I/O the
-/// gzip encoder raises.
+/// Forwards every refusal of [`prepare_structure`] and any I/O the gzip
+/// encoder raises.
 pub fn write_structure_gzip<W: std::io::Write>(
     writer: &mut W,
     block_array: &BlockArray,
     target: &JavaTarget,
 ) -> Result<(), JavaStructureError> {
-    let root = build_structure_tag(block_array, target)?;
-    write_compound_gzip(writer, &root)?;
+    prepare_structure(block_array, target)?.write_gzip(writer)?;
     Ok(())
 }
 
 /// Gzip-write an already-built structure [`Compound`] under the empty root
-/// name vanilla expects. Split out from [`write_structure_gzip`] so a
-/// caller can build every tree first and only then start touching the
-/// filesystem (the CLI relies on this to validate the IR before writing
-/// any `.nbt`).
+/// name vanilla expects, for a caller holding a tree it built or edited.
+/// [`JavaStructure::write_gzip`] writes a structure without building one.
 ///
 /// # Errors
 ///

@@ -22,3 +22,4 @@ workspace = true
 
 [dev-dependencies]
 insta = { version = "1.48.0", features = ["yaml"] }
+peak_alloc = "0.3.0"

@@ -117,12 +117,12 @@ pub(crate) fn write_named_root<W: Write>(
     Ok(())
 }
 
-fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError> {
+pub(crate) fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError> {
     w.write_all(&[id])?;
     Ok(())
 }
 
-fn write_string<W: Write>(w: &mut W, endian: Endian, s: &str) -> Result<(), NbtIoError> {
+pub(crate) fn write_string<W: Write>(w: &mut W, endian: Endian, s: &str) -> Result<(), NbtIoError> {
     // Java NBT String uses Modified UTF-8; Bedrock uses plain UTF-8. Both
     // carry a u16 length prefix. The accepted byte set matches what
     // `NbtIoError::InvalidString` documents — ASCII and non-NUL only — a
@@ -144,7 +144,11 @@ fn write_string<W: Write>(w: &mut W, endian: Endian, s: &str) -> Result<(), NbtI
     Ok(())
 }
 
-fn write_payload<W: Write>(w: &mut W, endian: Endian, tag: &Tag) -> Result<(), NbtIoError> {
+pub(crate) fn write_payload<W: Write>(
+    w: &mut W,
+    endian: Endian,
+    tag: &Tag,
+) -> Result<(), NbtIoError> {
     match tag {
         Tag::Byte(v) => w.write_all(&v.to_ne_bytes())?,
         Tag::Short(v) => endian.write_i16(w, *v)?,
@@ -180,7 +184,7 @@ fn write_payload<W: Write>(w: &mut W, endian: Endian, tag: &Tag) -> Result<(), N
     Ok(())
 }
 
-fn write_array_len<W: Write>(
+pub(crate) fn write_array_len<W: Write>(
     w: &mut W,
     endian: Endian,
     context: &'static str,
@@ -217,7 +221,7 @@ fn write_list<W: Write>(w: &mut W, endian: Endian, list: &List) -> Result<(), Nb
     Ok(())
 }
 
-fn write_compound_body<W: Write>(
+pub(crate) fn write_compound_body<W: Write>(
     w: &mut W,
     endian: Endian,
     compound: &Compound,

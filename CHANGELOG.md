@@ -264,6 +264,31 @@
 
 ### Fixed
 
+- *(formats,nbt,cli)* `cairn compile` built each structure's whole NBT tree before writing a
+  byte, one tag per voxel, so its memory grew with the volume far faster than the block-array IR
+  the volume bound was sized against: about 700 bytes a voxel for Java and 145 for Bedrock,
+  against the IR's 2. A cube at the bound (`size=256x256`, `walls height=255`) that `check` accepts
+  extrapolates to roughly 12 GB to compile for Java, and the allocator or the OOM killer ended the build
+  with no diagnostic. The per-voxel lists — Java's `blocks`, Bedrock's two `block_indices` layers —
+  are now encoded from the grid while the file is written, so writing costs a fixed amount on top
+  of lowering. Peak memory of `cairn compile` on that shape, debug build, `N` for 256:
+
+  | `N` | Java before | Java after | Bedrock before | Bedrock after |
+  |---|---|---|---|---|
+  | 64 | 195 MB | 10 MB | 45 MB | 10 MB |
+  | 128 | 1,504 MB | 23 MB | 304 MB | 24 MB |
+  | 256 | not run | 136 MB | not run | 136 MB |
+
+  The files are byte-for-byte what they were. Every structure is still checked before any file is
+  written, so a refusal leaves nothing behind; the check no longer builds the tree to do it.
+
+  `cairn-lang-nbt` gains a streaming form of each writer (`stream_java_uncompressed`,
+  `stream_java_gzip`, `stream_bedrock_uncompressed`, through `CompoundStream` and `ListStream`),
+  and `cairn-lang-formats` gains `prepare_structure` / `JavaStructure` and `prepare_mcstructure` /
+  `McStructure`, which check a structure without building it and then write it streaming.
+  `write_structure_gzip` now streams too. `build_structure_tag` and `build_mcstructure_tag` are
+  unchanged and still build the whole tree.
+
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
   and nothing said so. With a 3x3 `a` and a 3x9 `b`:

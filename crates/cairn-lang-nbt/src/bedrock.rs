@@ -9,9 +9,12 @@
 //!
 //! The byte-level encoding lives in the crate-internal `writer` module,
 //! shared with the Java writer; this module only pins the byte order.
+//! [`stream_bedrock_uncompressed`] is the streaming twin of
+//! [`write_bedrock_uncompressed`] (see [`crate::stream`]).
 
 use std::io::Write;
 
+use crate::stream::{CompoundStream, stream_named_root};
 use crate::tag::Compound;
 use crate::writer::{Endian, NbtIoError, write_named_root};
 
@@ -28,4 +31,24 @@ pub fn write_bedrock_uncompressed<W: Write>(
     root: &Compound,
 ) -> Result<(), NbtIoError> {
     write_named_root(writer, Endian::Little, root_name, root)
+}
+
+/// Streaming twin of [`write_bedrock_uncompressed`]: write a root-level
+/// named compound whose entries `body` writes one at a time. The bytes are
+/// the ones [`write_bedrock_uncompressed`] writes for a root holding the
+/// same entries in the same order.
+///
+/// # Errors
+///
+/// Whatever `body` returns, and I/O failure on `writer`.
+pub fn stream_bedrock_uncompressed<W, F>(
+    writer: &mut W,
+    root_name: &str,
+    body: F,
+) -> Result<(), NbtIoError>
+where
+    W: Write,
+    F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
+{
+    stream_named_root(writer, Endian::Little, root_name, body)
 }

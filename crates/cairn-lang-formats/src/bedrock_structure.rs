@@ -35,7 +35,9 @@
 use cairn_lang_core::block_array::BlockArray;
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
-use cairn_lang_nbt::{NbtIoError, write_bedrock_uncompressed};
+use cairn_lang_nbt::{
+    CompoundStream, NbtIoError, stream_bedrock_uncompressed, write_bedrock_uncompressed,
+};
 use thiserror::Error;
 
 use crate::bedrock_state::{BedrockStateError, degradation_message, translate_states};
@@ -104,12 +106,27 @@ impl From<crate::dims::DimensionOverflow> for BedrockStructureError {
     }
 }
 
-/// Build the unnamed root [`Compound`] for a `.mcstructure` file from a
-/// lowered [`BlockArray`], alongside any [`ParityNote`]s raised while
-/// translating blockstate properties to Bedrock's `states` vocabulary.
+/// A [`BlockArray`] checked to serialise as a `.mcstructure`, with its
+/// palette already translated to Bedrock `states` for the target it is
+/// written for.
 ///
-/// Pure: no I/O happens here, so the same tree can be serialised twice
-/// (hashing, artifact write) without rebuilding.
+/// Holding one means every refusal [`build_mcstructure_tag`] can raise has
+/// already been ruled out, so [`Self::write`] can only fail on I/O or on a
+/// string the NBT encoder refuses. The two per-voxel `block_indices` layers
+/// are encoded straight from the grid as they are written.
+#[derive(Debug, Clone)]
+pub struct McStructure<'a> {
+    block_array: &'a BlockArray,
+    size: [i32; 3],
+    block_version: i32,
+    /// One translated `states` compound per palette entry, in palette order.
+    palette_states: Vec<Compound>,
+}
+
+/// Check that `block_array` serialises as a `.mcstructure` for `target`,
+/// translating each palette entry's blockstate properties to Bedrock's
+/// `states` vocabulary, alongside any [`ParityNote`]s the translation
+/// raised. Nothing per voxel is built.
 ///
 /// # Errors
 ///
@@ -121,10 +138,10 @@ impl From<crate::dims::DimensionOverflow> for BedrockStructureError {
 /// slot the palette does not have, and
 /// [`BedrockStructureError::DimensionOverflow`] when a dimension does not
 /// fit the wire width.
-pub fn build_mcstructure_tag(
-    block_array: &BlockArray,
+pub fn prepare_mcstructure<'a>(
+    block_array: &'a BlockArray,
     target: &BedrockTarget,
-) -> Result<(Compound, Vec<ParityNote>), BedrockStructureError> {
+) -> Result<(McStructure<'a>, Vec<ParityNote>), BedrockStructureError> {
     // Ahead of the translation loop, as on the Java side: the check does
     // not depend on anything the loop produces, and a rejected array should
     // cost nothing beyond the walk.
@@ -133,8 +150,8 @@ pub fn build_mcstructure_tag(
     }
 
     // Translate every palette entry up front: a mapping failure (abstract
-    // token, unmapped stateful block) aborts the whole build before any tree
-    // is assembled, mirroring the Java backend's fail-loud contract.
+    // token, unmapped stateful block) aborts the whole build before
+    // anything is written, mirroring the Java backend's fail-loud contract.
     let mut palette_states: Vec<Compound> = Vec::with_capacity(block_array.palette.entries.len());
     let mut notes: Vec<ParityNote> = Vec::new();
     for entry in &block_array.palette.entries {
@@ -153,19 +170,111 @@ pub fn build_mcstructure_tag(
         palette_states.push(translated.states);
     }
 
-    let size = dims_to_i32(&block_array.dims)?;
+    let prepared = McStructure {
+        block_array,
+        size: dims_to_i32(&block_array.dims)?,
+        block_version: target.block_version,
+        palette_states,
+    };
+    Ok((prepared, notes))
+}
+
+impl McStructure<'_> {
+    /// Write the structure under the empty root name the game expects, as
+    /// raw (uncompressed) little-endian NBT. The bytes are the ones
+    /// [`write_mcstructure`] writes for the tree [`build_mcstructure_tag`]
+    /// builds, but nothing per voxel is held in memory.
+    ///
+    /// # Errors
+    ///
+    /// Propagates I/O failure from `writer` and any encoding error the NBT
+    /// writer raises (a palette string it cannot carry, a list past the
+    /// wire length).
+    pub fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), NbtIoError> {
+        stream_bedrock_uncompressed(writer, "", |root| {
+            root.tag("format_version", &Tag::Int(1))?;
+            root.tag("size", &Tag::List(List::of_ints(self.size)))?;
+            root.compound("structure", |structure| {
+                self.write_block_indices(structure)?;
+                structure.tag("entities", &Tag::List(List::empty()))?;
+                structure.tag("palette", &Tag::Compound(self.palette_compound()))
+            })?;
+            root.tag(
+                "structure_world_origin",
+                &Tag::List(List::of_ints([0, 0, 0])),
+            )
+        })
+    }
+
+    /// The two `block_indices` layers, streamed in [`block_indices`]'s
+    /// order and shape.
+    fn write_block_indices<W: std::io::Write>(
+        &self,
+        structure: &mut CompoundStream<'_, W>,
+    ) -> Result<(), NbtIoError> {
+        let block_array = self.block_array;
+        let volume = block_array.dims.volume();
+        // An empty layer declares `TAG_End`, as `List::of_tags` does.
+        let element_type_id = if volume == 0 { 0 } else { 3 };
+        structure.list("block_indices", 9, 2, |layers| {
+            layers.list(element_type_id, volume, |layer0| {
+                for x in 0..block_array.dims.x {
+                    for y in 0..block_array.dims.y {
+                        for z in 0..block_array.dims.z {
+                            let i = block_array
+                                .dims
+                                .index(x, y, z)
+                                .expect("voxel coordinate in dims by construction");
+                            layer0.item(&Tag::Int(i32::from(block_array.voxels[i].0)))?;
+                        }
+                    }
+                }
+                Ok(())
+            })?;
+            layers.list(element_type_id, volume, |layer1| {
+                for _ in 0..volume {
+                    layer1.item(&Tag::Int(-1))?;
+                }
+                Ok(())
+            })
+        })
+    }
+
+    /// The `palette` compound for this structure's translated states.
+    fn palette_compound(&self) -> Compound {
+        palette_compound(
+            self.block_array,
+            self.block_version,
+            self.palette_states.clone(),
+        )
+    }
+}
+
+/// Build the unnamed root [`Compound`] for a `.mcstructure` file from a
+/// lowered [`BlockArray`], alongside any [`ParityNote`]s raised while
+/// translating blockstate properties to Bedrock's `states` vocabulary.
+///
+/// The tree holds both per-voxel `block_indices` layers as tags, so it is
+/// for inspecting a structure rather than for writing a large one:
+/// [`McStructure::write`] writes the same bytes without it.
+///
+/// # Errors
+///
+/// Every refusal of [`prepare_mcstructure`].
+pub fn build_mcstructure_tag(
+    block_array: &BlockArray,
+    target: &BedrockTarget,
+) -> Result<(Compound, Vec<ParityNote>), BedrockStructureError> {
+    let (prepared, notes) = prepare_mcstructure(block_array, target)?;
 
     let mut structure = Compound::new();
     structure.insert("block_indices", Tag::List(block_indices(block_array)));
     structure.insert("entities", Tag::List(List::empty()));
-    structure.insert(
-        "palette",
-        Tag::Compound(palette_compound(block_array, target, palette_states)),
-    );
+    structure.insert("palette", Tag::Compound(prepared.palette_compound()));
 
     let mut root = Compound::new();
     root.insert("format_version", Tag::Int(1));
-    root.insert("size", Tag::List(List::of_ints(size)));
+    root.insert("size", Tag::List(List::of_ints(prepared.size)));
     root.insert("structure", Tag::Compound(structure));
     root.insert(
         "structure_world_origin",
@@ -175,10 +284,9 @@ pub fn build_mcstructure_tag(
 }
 
 /// Write an already-built `.mcstructure` root under the empty root name
-/// the game expects, as raw (uncompressed) little-endian NBT. Split from
-/// [`build_mcstructure_tag`] so a caller can build every tree first and
-/// only then start touching the filesystem, mirroring the Java backend's
-/// split.
+/// the game expects, as raw (uncompressed) little-endian NBT, for a caller
+/// holding a tree it built or edited. [`McStructure::write`] writes a
+/// structure without building one.
 ///
 /// # Errors
 ///
@@ -223,7 +331,7 @@ fn block_indices(block_array: &BlockArray) -> List {
 
 fn palette_compound(
     block_array: &BlockArray,
-    target: &BedrockTarget,
+    block_version: i32,
     palette_states: Vec<Compound>,
 ) -> Compound {
     let entries: Vec<Compound> = block_array
@@ -235,10 +343,10 @@ fn palette_compound(
             let mut compound = Compound::new();
             compound.insert("name", Tag::String(state.id.clone()));
             // Bedrock `states` translated from the Java properties by
-            // `build_mcstructure_tag`; an empty compound for a bare block
+            // `prepare_mcstructure`; an empty compound for a bare block
             // (the game still expects the key).
             compound.insert("states", Tag::Compound(states));
-            compound.insert("version", Tag::Int(target.block_version));
+            compound.insert("version", Tag::Int(block_version));
             compound
         })
         .collect();
