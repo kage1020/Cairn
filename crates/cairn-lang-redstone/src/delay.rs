@@ -13,16 +13,21 @@
 //! - **Implicit buffer repeaters** are counted per driving net, not per
 //!   driver: two ports reading one signal are fed by one strand of dust
 //!   and by the repeaters standing on it. Dust loses one unit of signal
-//!   per block from strength 15, so a segment of `s` blocks needs
-//!   `floor((s - 1) / DUST_ATTENUATION_LIMIT)` repeaters, each worth
-//!   [`BUFFER_REPEATER_TICKS`].
+//!   per block from strength 15, so `repeater_sites` stands a
+//!   repeater, worth [`BUFFER_REPEATER_TICKS`], within every
+//!   `DUST_ATTENUATION_LIMIT` blocks of the net's routed tree — on a
+//!   straight run every 15 blocks, `floor((s - 1) / 15)` of them over
+//!   `s` blocks, and earlier where the coord there turns, climbs or
+//!   forks, which a repeater cannot carry a signal through.
 //!
 //! A segment is the *routed* path from the net's source to the sink
 //! (`route_to`), not the Manhattan distance: the two differ whenever the
 //! wire goes round something, and counting against the route is what
 //! lets stage 4 put every buffer this stage paid for onto the dust it
-//! refreshes. Buffers are counted here and given coords by stage 4; the
-//! two agree by construction through `buffer_count_for_segment`.
+//! refreshes. A cell is charged for the repeaters its segment passes
+//! through, and stage 4 gives those same repeaters their coords: both
+//! read them off one `RepeaterSites`, so the two agree by
+//! construction.
 //!
 //! **`local_delay_ticks` is a local wire cost, not an arrival time.** It
 //! sums the buffers on every net feeding the cell, and it is the number
@@ -39,8 +44,10 @@
 //!
 //! `E_ATTENUATION_LIMIT` fires when a single segment exceeds the v1
 //! sanity cap [`MAX_ATTENUATION_SEGMENT`]: it asks for a buffer chain
-//! longer than v1 will build. Failed scopes are elided so a partial
-//! `local_delay_ticks` set never reaches a downstream reader.
+//! longer than v1 will build. It also fires when a net has a stretch
+//! of dust past the attenuation limit on which no coord can hold a
+//! repeater. Failed scopes are elided so a partial `local_delay_ticks`
+//! set never reaches a downstream reader.
 //!
 //! The pass is one `PlacementPhase::delay` transition per cell; no new
 //! IR type. `--stage route` JSON keeps every key it had, gains
@@ -56,7 +63,10 @@ use crate::pass::{
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::sum_over_driving_nets;
+use std::collections::{HashMap, HashSet};
+
+use crate::routing_geometry::{NetTree, net_label, net_ref_key, sum_over_driving_nets};
+use crate::saturating_index;
 
 /// Signal-attenuation ceiling per dust segment (`spec/redstone`
 /// "Place-and-route" — "signal attenuation limit of 15"). A dust source
@@ -233,7 +243,10 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         }
     }
 
-    attribute_local_delay_ticks(&mut ir, entry, &|net, sink| nets.segment(net, sink));
+    let sites = repeater_sites_of_scope(&ir, entry, "routed", &region, &nets.trees)?;
+    attribute_local_delay_ticks(&mut ir, entry, &|net, sink| {
+        saturating_index(sites.along(&nets.trees, net, sink).len())
+    });
 
     Ok(ir)
 }
@@ -242,13 +255,17 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
 /// ticks per driving net`, and every actuator pad's with the buffer
 /// ticks on its own segment (a pad is not a cell, so no base delay).
 ///
+/// `buffers_on(net, sink)` is how many repeaters the signal of `net`
+/// passes through on its way to `sink` — [`RepeaterSites::along`] in
+/// the pass.
+///
 /// Per net rather than per driver — see [`sum_over_driving_nets`] — and
 /// summed rather than maxed, because the figure is a local wire cost
 /// and not the tick the cell's output settles on (see the module doc).
 fn attribute_local_delay_ticks<F>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,
-    segment_of: &F,
+    buffers_on: &F,
 ) where
     F: Fn(NetRef, CellCoord) -> u32,
 {
@@ -257,16 +274,219 @@ fn attribute_local_delay_ticks<F>(
         entry,
         |cell| {
             let buffer_ticks = sum_over_driving_nets(&cell.drivers, |net| {
-                buffer_repeater_ticks_for_segment(segment_of(net, cell.coord))
+                buffers_on(net, cell.coord).saturating_mul(BUFFER_REPEATER_TICKS)
             });
             cell.cell.base_delay_ticks().saturating_add(buffer_ticks)
         },
-        |output| buffer_repeater_ticks_for_segment(segment_of(output.driver, output.pad)),
+        |output| buffers_on(output.driver, output.pad).saturating_mul(BUFFER_REPEATER_TICKS),
         |phase, ticks, identity| phase.delay_at(ticks, identity),
     );
 }
 
-/// Buffer repeaters needed to keep `segment` blocks of dust at
+/// Where every implicit buffer repeater of one scope stands, net by
+/// net.
+///
+/// Built once per scope by [`repeater_sites_of_scope`], which stage 3
+/// counts from and stage 4 places from, so the ticks one pass charges
+/// and the blocks the other lays are one set read twice.
+pub(crate) struct RepeaterSites {
+    per_net: HashMap<NetRef, HashSet<CellCoord>>,
+}
+
+impl RepeaterSites {
+    /// The repeaters the signal of `net` passes through on its way to
+    /// `sink`, in the order it meets them.
+    ///
+    /// Two sinks of one net that share a stretch of the tree share the
+    /// repeaters standing on it, because they are read off one set
+    /// rather than placed per sink.
+    ///
+    /// Panics when `sink` is not a terminal of `net`: the driver list
+    /// and the collected nets would then disagree, and the alternative
+    /// is a node whose buffers under-count the dust it is fed through.
+    pub(crate) fn along(
+        &self,
+        trees: &HashMap<NetRef, NetTree>,
+        net: NetRef,
+        sink: CellCoord,
+    ) -> Vec<CellCoord> {
+        let route = trees
+            .get(&net)
+            .and_then(|tree| tree.route_to(sink))
+            .unwrap_or_else(|| {
+                panic!(
+                    "sink ({x},{y},{z}) is not a terminal of the net driving it — the driver list and the collected nets disagree",
+                    x = sink.x,
+                    y = sink.y,
+                    z = sink.z,
+                )
+            });
+        let Some(sites) = self.per_net.get(&net) else {
+            return Vec::new();
+        };
+        route
+            .into_iter()
+            .filter(|coord| sites.contains(coord))
+            .collect()
+    }
+}
+
+/// [`repeater_sites`] for every net of one scope, or the
+/// `E_ATTENUATION_LIMIT` that refuses the scope when a net has a stretch
+/// of dust no repeater can stand on.
+///
+/// The nets are walked in [`net_ref_key`] order, so the net a refusal
+/// names is the same one however the map happens to iterate.
+pub(crate) fn repeater_sites_of_scope(
+    ir: &PlacementIr,
+    entry: &ScopedPlacementIrEntry,
+    netlist: &str,
+    region: &CircuitRegionReservation,
+    trees: &HashMap<NetRef, NetTree>,
+) -> Result<RepeaterSites, Diagnostic> {
+    let mut nets: Vec<NetRef> = trees.keys().copied().collect();
+    nets.sort_by_key(|net| net_ref_key(*net));
+    let mut per_net = HashMap::with_capacity(nets.len());
+    for net in nets {
+        match repeater_sites(&trees[&net]) {
+            Ok(sites) => {
+                per_net.insert(net, sites.into_iter().collect());
+            }
+            Err(stretch) => {
+                return Err(no_repeater_site_diagnostic(
+                    ir, entry, netlist, region, net, stretch,
+                ));
+            }
+        }
+    }
+    Ok(RepeaterSites { per_net })
+}
+
+/// A stretch of one net's dust the signal cannot cross and no repeater
+/// can stand on: every coord between `from` and `unpowered` turns,
+/// climbs or forks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NoRepeaterSite {
+    /// The block the signal last left at full strength: the net's
+    /// source, or a repeater placed before this stretch.
+    pub(crate) from: CellCoord,
+    /// The first coord past its reach.
+    pub(crate) unpowered: CellCoord,
+}
+
+/// Where one net's implicit buffer repeaters stand, in the order the
+/// tree was laid.
+///
+/// A repeater is directional: it reads the block behind it and drives
+/// the block in front of it, on its own layer. So it can only stand on
+/// a coord the wire runs straight through, from the coord before it to
+/// the one after, all three on one layer and on one line, and from
+/// which nothing else branches — a repeater on a fork drives one branch
+/// and starves the other, and one on a turn or a climb drives into
+/// nothing.
+///
+/// Placed on the net's tree rather than per sink, so every sink past a
+/// repeater is fed by that one block. The walk finds the coord nearest
+/// the source whose distance from the last full-strength block — the
+/// source, or a repeater already placed — is past
+/// [`DUST_ATTENUATION_LIMIT`], and puts a repeater on the last coord
+/// before it, on the way back towards that block, that can hold one;
+/// then walks again. On a straight run that is every
+/// `DUST_ATTENUATION_LIMIT` coords, the count
+/// [`buffer_count_for_segment`] gives. Where a coord cannot hold one
+/// the repeater moves earlier, which only shortens the dust behind it,
+/// and the run past it can need one repeater more than its length
+/// alone implies. On a fork it moves onto the trunk, where one block
+/// serves every branch past it.
+///
+/// `Err` when a whole stretch of dust within reach of the last
+/// full-strength block has no coord that can hold a repeater.
+pub(crate) fn repeater_sites(tree: &NetTree) -> Result<Vec<CellCoord>, NoRepeaterSite> {
+    let order = tree.wire_path();
+    let source = order[0];
+    let mut children: HashMap<CellCoord, Vec<CellCoord>> = HashMap::new();
+    for coord in &order[1..] {
+        let parent = tree
+            .parent(*coord)
+            .expect("every coord but the source was attached to one");
+        children.entry(parent).or_default().push(*coord);
+    }
+    let mut sites: HashSet<CellCoord> = HashSet::new();
+    loop {
+        // Distance from the last full-strength block, and depth from
+        // the source to break ties. `order` lists a parent before its
+        // children, so one pass fills both.
+        let mut spent: HashMap<CellCoord, (u32, u32)> = HashMap::with_capacity(order.len());
+        spent.insert(source, (0, 0));
+        let mut first: Option<(u32, usize, CellCoord)> = None;
+        for (index, coord) in order.iter().enumerate().skip(1) {
+            let parent = tree
+                .parent(*coord)
+                .expect("every coord but the source was attached to one");
+            let (behind, depth) = spent[&parent];
+            let behind = if sites.contains(&parent) { 0 } else { behind };
+            let here = (behind.saturating_add(1), depth.saturating_add(1));
+            spent.insert(*coord, here);
+            if here.0 > DUST_ATTENUATION_LIMIT
+                && first.is_none_or(|(depth, at, _)| (here.1, index) < (depth, at))
+            {
+                first = Some((here.1, index, *coord));
+            }
+        }
+        let Some((_, _, unpowered)) = first else {
+            break;
+        };
+        let mut candidate = tree
+            .parent(unpowered)
+            .expect("a coord past reach is never the source");
+        loop {
+            if candidate == source || sites.contains(&candidate) {
+                return Err(NoRepeaterSite {
+                    from: candidate,
+                    unpowered,
+                });
+            }
+            if carries_straight_through(tree, &children, candidate) {
+                sites.insert(candidate);
+                break;
+            }
+            candidate = tree
+                .parent(candidate)
+                .expect("the walk back stops at the source");
+        }
+    }
+    Ok(order
+        .into_iter()
+        .filter(|coord| sites.contains(coord))
+        .collect())
+}
+
+/// Whether a repeater on `coord` would carry the signal on: one coord
+/// before it and exactly one after, all three on one layer and one
+/// line.
+fn carries_straight_through(
+    tree: &NetTree,
+    children: &HashMap<CellCoord, Vec<CellCoord>>,
+    coord: CellCoord,
+) -> bool {
+    let Some(before) = tree.parent(coord) else {
+        return false;
+    };
+    let [after] = children.get(&coord).map_or(&[][..], Vec::as_slice) else {
+        return false;
+    };
+    let step = |from: CellCoord, to: CellCoord| {
+        (
+            i64::from(to.x) - i64::from(from.x),
+            i64::from(to.y) - i64::from(from.y),
+            i64::from(to.z) - i64::from(from.z),
+        )
+    };
+    let (dx, dy, dz) = step(before, coord);
+    dy == 0 && (dx, dy, dz) == step(coord, *after)
+}
+
+/// The fewest buffer repeaters that keep `segment` blocks of dust at
 /// strength ≥ 1 at the sink.
 ///
 /// A source at strength 15 loses one unit per block, so segments of
@@ -275,9 +495,10 @@ fn attribute_local_delay_ticks<F>(
 /// `DUST_ATTENUATION_LIMIT` blocks bumps the count by one. Saturating
 /// so a pathological segment from a hand-built IR cannot overflow.
 ///
-/// `crate::crossing` calls this with the same routed length to decide
-/// how many coords to materialise, so the ticks this pass writes and
-/// the `buffer_coords` stage 4 emits are one number by construction.
+/// Exact on a straight, unbranched run, and a floor on any other:
+/// [`repeater_sites`] is what places them, and a coord a repeater
+/// cannot stand on moves the repeater earlier. So this only sizes the
+/// chain a refused segment would have needed.
 pub(crate) fn buffer_count_for_segment(segment: u32) -> u32 {
     if segment <= DUST_ATTENUATION_LIMIT {
         return 0;
@@ -291,6 +512,38 @@ fn buffer_repeater_ticks_for_segment(segment: u32) -> u32 {
     buffer_count_for_segment(segment).saturating_mul(BUFFER_REPEATER_TICKS)
 }
 
+/// The refusal for a [`NoRepeaterSite`]: a stretch of `net`'s dust past
+/// the attenuation limit with nowhere on it for a repeater to stand.
+fn no_repeater_site_diagnostic(
+    ir: &PlacementIr,
+    entry: &ScopedPlacementIrEntry,
+    netlist: &str,
+    reservation: &CircuitRegionReservation,
+    net: NetRef,
+    stretch: NoRepeaterSite,
+) -> Diagnostic {
+    let NoRepeaterSite { from, unpowered } = stretch;
+    let primary = format!(
+        "{netlist} netlist for {kind} `{name}` routes {net} so that the signal leaving ({fx},{fy},{fz}) runs out before ({ux},{uy},{uz}), past the attenuation limit of {limit} blocks of dust, and every coord between the two turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it on one layer, so none can stand there",
+        kind = entry.kind.label(),
+        name = entry.name,
+        net = net_label(net, ir),
+        fx = from.x,
+        fy = from.y,
+        fz = from.z,
+        ux = unpowered.x,
+        uy = unpowered.y,
+        uz = unpowered.z,
+        limit = DUST_ATTENUATION_LIMIT,
+    );
+    error_with_footer(
+        DiagnosticCode::AttenuationLimit,
+        reservation.span.clone(),
+        primary,
+        "Fix: enlarge `region=` so the wire has room to run straight at least once in every 15 blocks, or split the logic across several `circuit` blocks",
+    )
+}
+
 fn attenuation_diagnostic(
     entry: &ScopedPlacementIrEntry,
     reservation: &CircuitRegionReservation,
@@ -299,7 +552,7 @@ fn attenuation_diagnostic(
     segment: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into cell #{cell_index} port #{driver_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters to materialize)",
+        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into cell #{cell_index} port #{driver_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need at least {buffers} buffer repeaters to materialize)",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
@@ -320,7 +573,7 @@ fn attenuation_output_diagnostic(
     segment: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into output pad #{output_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need {buffers} buffer repeaters to materialize)",
+        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into output pad #{output_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need at least {buffers} buffer repeaters to materialize)",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
@@ -343,9 +596,9 @@ mod tests {
     use cairn_lang_core::error::Span;
 
     use super::{
-        BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, MAX_ATTENUATION_SEGMENT,
+        BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, MAX_ATTENUATION_SEGMENT, NoRepeaterSite,
         attribute_local_delay_ticks, buffer_count_for_segment, buffer_repeater_ticks_for_segment,
-        compile_delay,
+        compile_delay, repeater_sites,
     };
     use crate::diagnostic::DiagnosticCode;
     use crate::edition_netlist_ir::EditionCell;
@@ -354,7 +607,8 @@ mod tests {
     use crate::placement_ir::{
         CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, ScopedPlacementIrEntry,
     };
-    use crate::test_fixtures::{reservation, scoped};
+    use crate::routing_geometry::NetTree;
+    use crate::test_fixtures::{reservation, scoped, staircase};
 
     /// The sanity cap counts the dust, not the distance.
     ///
@@ -528,7 +782,7 @@ mod tests {
     /// two and trips the assert, rather than the assert restating a
     /// constant written twice.
     ///
-    /// Calls the fold directly with a stand-in `segment_of` rather
+    /// Calls the fold directly with a stand-in `buffers_on` rather
     /// than routing a layout: what is pinned is how the per-net
     /// charges combine, and two segments whose buffer counts differ
     /// by one are three lines here and a placement puzzle through the
@@ -543,7 +797,7 @@ mod tests {
         assert_eq!(buffer_count_for_segment(LONG), 2);
 
         // No region and no inputs: the fold walks `ir.cells` and
-        // reaches the nets only through the stand-in `segment_of`, so
+        // reaches the nets only through the stand-in `buffers_on`, so
         // carrying geometry here would suggest it mattered.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.cells.push(placed_cell(
@@ -566,14 +820,14 @@ mod tests {
             name: "arrival".to_owned(),
             ir: ir.clone(),
         };
-        let segment_of = |net: NetRef, _sink: CellCoord| -> u32 {
+        let buffers_on = |net: NetRef, _sink: CellCoord| -> u32 {
             match net {
-                NetRef::Input(0) => SHORT,
-                NetRef::Input(1) => LONG,
+                NetRef::Input(0) => buffer_count_for_segment(SHORT),
+                NetRef::Input(1) => buffer_count_for_segment(LONG),
                 other => panic!("no other net drives this cell: {other:?}"),
             }
         };
-        attribute_local_delay_ticks(&mut ir, &entry, &segment_of);
+        attribute_local_delay_ticks(&mut ir, &entry, &buffers_on);
 
         let base = EditionCell::JavaComparatorAnd.base_delay_ticks();
         let recorded = ir.cells[0]
@@ -597,6 +851,171 @@ mod tests {
             ticks(SHORT),
             "the wire cost sits above the arrival time by the buffers on the shorter segment",
         );
+    }
+
+    /// The coords a walk from `start` visits, `start` included, taking
+    /// each `(step, count)` in turn.
+    fn walk(start: (u32, u32, u32), moves: &[((i64, i64, i64), u32)]) -> Vec<CellCoord> {
+        let mut at = start;
+        let mut path = vec![CellCoord::new(at.0, at.1, at.2)];
+        let axis = |value: u32, delta: i64| {
+            u32::try_from(i64::from(value) + delta).expect("the walk stays on the grid")
+        };
+        for &((dx, dy, dz), count) in moves {
+            for _ in 0..count {
+                at = (axis(at.0, dx), axis(at.1, dy), axis(at.2, dz));
+                path.push(CellCoord::new(at.0, at.1, at.2));
+            }
+        }
+        path
+    }
+
+    const EAST: (i64, i64, i64) = (1, 0, 0);
+    const SOUTH: (i64, i64, i64) = (0, 0, 1);
+    const UP: (i64, i64, i64) = (0, 1, 0);
+
+    /// On a straight run the repeaters stand every 15 blocks, and there
+    /// are as many as the segment's length alone implies.
+    #[test]
+    fn a_straight_run_takes_a_repeater_every_fifteen_blocks() {
+        for length in [15u32, 16, 30, 31, 46] {
+            let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, length)])]);
+            let sites = repeater_sites(&tree).expect("a straight run has room everywhere");
+            let expected: Vec<CellCoord> = (1..=buffer_count_for_segment(length))
+                .map(|k| CellCoord::new(k * DUST_ATTENUATION_LIMIT, 0, 0))
+                .collect();
+            assert_eq!(sites, expected, "{length} blocks");
+        }
+    }
+
+    /// A repeater never stands on a turn: it would drive into the
+    /// coord straight ahead of it, which is not the wire.
+    #[test]
+    fn a_repeater_steps_back_off_a_turn() {
+        // 15 east then 2 south: the 15-step point is the corner.
+        let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 15), (SOUTH, 2)])]);
+        assert_eq!(
+            repeater_sites(&tree),
+            Ok(vec![CellCoord::new(14, 0, 0)]),
+            "the corner is (15,0,0); the last straight coord before it is (14,0,0)",
+        );
+    }
+
+    /// Nor on a climb: a repeater drives only its own layer, so a
+    /// coord whose wire goes up or down — straight up included — is
+    /// not one it can carry.
+    #[test]
+    fn a_repeater_steps_back_off_a_climb() {
+        // 14 east, 2 up, 2 east. (14,1,0) has the wire straight through
+        // it, but vertically; (14,0,0) is where it turns upward.
+        let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 14), (UP, 2), (EAST, 2)])]);
+        assert_eq!(
+            repeater_sites(&tree),
+            Ok(vec![CellCoord::new(13, 0, 0)]),
+            "neither the vertical run nor the foot of the climb holds a repeater",
+        );
+    }
+
+    /// Nor on a fork: one repeater faces one branch. The one on the
+    /// trunk before the fork refreshes both, so the two branches share
+    /// it rather than each getting one.
+    ///
+    /// This is the shape of two actuators on one sensor, one straight
+    /// down the row and one a row over past the first one's pad.
+    #[test]
+    fn a_repeater_steps_back_off_a_fork_onto_the_trunk() {
+        let trunk = walk((0, 0, 0), &[(EAST, 16)]);
+        let branch = walk((15, 0, 0), &[(SOUTH, 1), (EAST, 1)]);
+        let tree = NetTree::from_paths(&[&trunk, &branch]);
+        assert_eq!(
+            repeater_sites(&tree),
+            Ok(vec![CellCoord::new(14, 0, 0)]),
+            "(15,0,0) forks; (14,0,0) is the trunk coord before it",
+        );
+    }
+
+    /// Stepping back shortens the dust behind the repeater and
+    /// lengthens the run ahead of it, so a route can need one more
+    /// repeater than its length alone implies.
+    #[test]
+    fn stepping_back_can_cost_a_repeater_the_length_does_not_imply() {
+        // 30 blocks, turning at the 15-step point.
+        let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 15), (SOUTH, 15)])]);
+        let sites = repeater_sites(&tree).expect("there is straight wire on both legs");
+        assert_eq!(
+            sites,
+            vec![CellCoord::new(14, 0, 0), CellCoord::new(15, 0, 14)],
+        );
+        assert_eq!(
+            buffer_count_for_segment(30),
+            1,
+            "the length alone asks for one"
+        );
+    }
+
+    /// A stretch past the limit on which every coord turns has nowhere
+    /// for a repeater, and says so rather than placing one on a turn.
+    #[test]
+    fn a_staircase_has_nowhere_for_a_repeater() {
+        let mut moves = Vec::new();
+        for _ in 0..9 {
+            moves.push((EAST, 1));
+            moves.push((SOUTH, 1));
+        }
+        let path = walk((0, 0, 0), &moves);
+        let tree = NetTree::from_paths(&[&path]);
+        assert_eq!(
+            repeater_sites(&tree),
+            Err(NoRepeaterSite {
+                from: CellCoord::new(0, 0, 0),
+                unpowered: path[16],
+            }),
+        );
+    }
+
+    /// The stretch a refusal names starts at the last repeater, not at
+    /// the source: the wire before that repeater is already refreshed,
+    /// and a coord on it cannot stand in for one past it.
+    #[test]
+    fn a_staircase_past_a_repeater_is_measured_from_that_repeater() {
+        let mut moves = vec![(EAST, 20)];
+        for _ in 0..10 {
+            moves.push((SOUTH, 1));
+            moves.push((EAST, 1));
+        }
+        let path = walk((0, 0, 0), &moves);
+        let tree = NetTree::from_paths(&[&path]);
+        // (15,0,0) first; then (19,0,0), the last straight coord before
+        // the staircase; then nothing past (19,0,0) is straight.
+        assert_eq!(
+            repeater_sites(&tree),
+            Err(NoRepeaterSite {
+                from: CellCoord::new(19, 0, 0),
+                unpowered: path[19 + 16],
+            }),
+        );
+    }
+
+    /// A net with a stretch past the limit on which every coord turns
+    /// is refused, rather than charged for a repeater stage 4 could
+    /// only put on a turn.
+    ///
+    /// Hand-built at stage 3: walling the staircase in takes 81 gate
+    /// bodies, and stage 2's congestion budget charges each of them
+    /// more than the one coord it stands on, so the routing pass would
+    /// refuse the scope for its area before this one saw it.
+    #[test]
+    fn a_stretch_with_nowhere_for_a_repeater_is_refused() {
+        let delayed = compile_delay(&staircase(&PlacementPhase::Routed { wire_length: 0 }));
+        let codes: Vec<_> = delayed.diagnostics.iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![DiagnosticCode::AttenuationLimit]);
+        let primary = &delayed.diagnostics[0].primary;
+        assert!(
+            primary.contains("routed netlist for struct `stairs` routes sig.a so that the signal leaving (0,0,0) runs out before (8,0,8)"),
+            "the refusal names the net and the stretch, got {primary:?}",
+        );
+        let survivors: Vec<_> = delayed.scoped.scopes.iter().map(|e| &e.name).collect();
+        assert_eq!(survivors, vec!["roomy"]);
     }
 
     #[test]

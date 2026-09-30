@@ -583,6 +583,37 @@
   indented under another — and the rest keep the same amount in a different shape. Which files
   are refused does not change.
 
+- *(redstone)* A buffer repeater was put on whatever coord stood 15 steps along its route, whether
+  or not a repeater could work there. A repeater reads the block behind it and drives only the
+  block in front of it, on its own layer, so it carries a signal only where the wire runs straight
+  through a coord on one layer and nothing branches off. Two doors on one plate, one straight down
+  the row and one a row over past the first door's pad, share the wire as far as `(15,0,0)`, where
+  it forks; both outputs of `cairn synth --stage crossing` named the fork, and the pass exited 0:
+
+  ```
+  "pad":{"x":16,"y":0,"z":0},"wire_length":16,"local_delay_ticks":1,"buffer_coords":[{"port":"out","coord":{"x":15,"y":0,"z":0}}]
+  "pad":{"x":16,"y":0,"z":1},"wire_length":17,"local_delay_ticks":1,"buffer_coords":[{"port":"out","coord":{"x":15,"y":0,"z":0}}]
+  ```
+
+  A turn exactly 15 steps along, or the step where a route climbs to or drops from the bridge
+  layer, took a repeater the same way. The repeaters are now placed on each net's routed tree
+  rather than per sink: where the signal would run out, the repeater stands on the last coord
+  before that point with the wire straight through it and no branch. Before a fork that is on the
+  trunk, so one block still feeds every sink past it — both doors above are fed by `(14,0,0)`. A
+  repeater moved earlier leaves a longer run ahead of it, so a route can now take one repeater more
+  than its length alone implies; the delay pass counts from the same placement, so the ticks it
+  charges and the blocks the crossing pass lays remain one number. A stretch of dust past the
+  limit with no coord a repeater can stand on is refused rather than laid; here, a hand-built
+  scope whose only way through is a staircase:
+
+  ```
+  error[E_ATTENUATION_LIMIT]: routed netlist for struct `stairs` routes sig.a so that the signal leaving (0,0,0) runs out before (8,0,8), past the attenuation limit of 15 blocks of dust, and every coord between the two turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it on one layer, so none can stand there
+    note: Fix: enlarge `region=` so the wire has room to run straight at least once in every 15 blocks, or split the logic across several `circuit` blocks
+  ```
+
+  The refusal for a segment over the 256-block cap says the chain it would need is "at least" the
+  count its length implies, since that count is now a floor.
+
 - *(redstone)* A `circuit region=` inside a very wide struct was routed before anything measured
   it. The reservation takes the floor's extent, so `region=` is as wide as `size=` and the actuator
   pad lands at `x = width - 1`; stage 2 laid a wire out to it one coord at a time, stage 3 rebuilt
