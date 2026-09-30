@@ -1329,6 +1329,33 @@
 
 ### Breaking changes
 
+- *(core)* A `struct` / `def` header argument other than `size=` was read by nothing and checked by
+  nothing, so a typo on the header was dropped in silence:
+
+  ```
+  struct s size=5x5 hieght=3
+    floor mat_slot=wall
+  ```
+
+  `cairn check` exited 0 on it, and `compile` built the struct. When the misspelled key was `size=`
+  itself, the only finding was `W_STRUCT_NO_SIZE` / `W_DEF_NO_SIZE` telling the author to add a
+  `size=WxH` header to a line that already had one. The header now has a closed vocabulary, `size=`
+  and `class=`, and any other key is `E_UNKNOWN_ARGUMENT` with the same `did you mean` note and
+  closed-set list a member argument gets:
+
+  ```
+  b.crn:4:14: error[E_UNKNOWN_ARGUMENT]: `siz=` is not an argument a `struct` header reads
+    note: did you mean `size`?
+    note: expected one of: size, class
+  ```
+
+  `class=` is the key `spec/components-editing-sites` writes on a `def` header (`def cottage
+  class=house size=9x7:`), and no pass reads it yet, so it is reported as the unreached-key case of
+  `W_IGNORED_ARGUMENT`, as `window shape=` is. `examples/village.crn` and the tutorial's copy of it
+  drop their header `class=house` so the example stays warning-free. A source with any other key on
+  a header, which compiled before, is now refused. `spec/lint` states the header vocabulary and
+  lists the header's `class=` among the unreached keys, with the ja mirror.
+
 - *(core)* Two `connect` rows could lay one walkway between them. A `_` at the end of the `from`
   port or at the start of the `to` place merges into the `__` that joins a walkway scope key's two
   ends, so these rows both encoded to `walkway::s::a.p___b.p`:

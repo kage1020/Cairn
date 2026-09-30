@@ -96,10 +96,22 @@ fn dup_6_duplicate_selector_attribute_is_reported() {
 #[test]
 fn dup_7_duplicate_header_arg_other_than_size_is_arg_not_size() {
     // Header has a repeated non-`size` arg; the code should be the generic
-    // `E_DUPLICATE_ARG`, not the size-specific `E_DUPLICATE_SIZE`.
-    let src = "struct s size=1x1 wood=oak wood=birch\n  floor mat_slot=m\n";
+    // `E_DUPLICATE_ARG`, not the size-specific `E_DUPLICATE_SIZE`. The
+    // key is `class=`, a header key no pass reads yet, so the arguments
+    // pass reports the surviving value beside the duplicate.
+    let src = "struct s size=1x1 class=house class=hut\n  floor mat_slot=m\n";
     let diags = diagnose(src);
-    assert_eq!(diags.len(), 1, "got {diags:#?}");
-    assert_eq!(diags[0].code, DiagnosticCode::DuplicateArg);
-    assert_eq!(slice(src, &diags[0]), "wood=birch");
+    assert_eq!(diags.len(), 2, "got {diags:#?}");
+    let dup: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DuplicateArg)
+        .collect();
+    assert_eq!(dup.len(), 1, "got {diags:#?}");
+    assert_eq!(slice(src, dup[0]), "class=hut");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == DiagnosticCode::IgnoredArgument && slice(src, d) == "hut"),
+        "got {diags:#?}",
+    );
 }

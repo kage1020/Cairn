@@ -40,13 +40,13 @@ const COLS: usize = 10;
 fn site_source(rows: usize, cols: usize) -> String {
     let mut src = String::from(
         "@cairn 2026.06\n@requires version>=1.20\n\n\
-         def cottage class=house size=9x7:\n  \
+         def cottage size=9x7:\n  \
          floor  id=floor mat_slot=floor\n  \
          walls  id=walls class=outer mat_slot=wall height=4\n  \
          door   id=entry class=entry side=front at=center\n  \
          window id=front side=front y=2 offset=2 size=2x2 mat_slot=glass\n  \
          roof   id=roof  kind=gable mat_slot=roof overhang=1\n\n\
-         def keep class=house size=11x9:\n  \
+         def keep size=11x9:\n  \
          floor  id=floor mat_slot=floor\n  \
          walls  id=walls class=outer mat_slot=wall height=5\n  \
          door   id=entry class=entry side=front at=center\n  \
