@@ -270,8 +270,9 @@ struct s size=1x1
   logic sig.x = sig.a or sig.b
   logic sig.y = sig.a or sig.b
   door id=front side=front at=center
+  door id=back side=back at=center
   door[id=front] opened_by=sig.x
-  door[id=front] opened_by=sig.y
+  door[id=back] opened_by=sig.y
 ";
     let out = synth_source(source);
     let entry = out
@@ -298,8 +299,9 @@ struct s size=1x1
   logic sig.x = sig.a or sig.b
   logic sig.y = sig.b or sig.a
   door id=front side=front at=center
+  door id=back side=back at=center
   door[id=front] opened_by=sig.x
-  door[id=front] opened_by=sig.y
+  door[id=back] opened_by=sig.y
 ";
     let out = synth_source(source);
     let entry = out

@@ -69,6 +69,7 @@ use super::material::{
     IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state, validated_id,
 };
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
+use super::patch::actuator_patch_target;
 use super::roof::{
     Cardinal, FLAT_BASE_ID, GableVoxel, HipVoxel, RoofKind, STAIR_BASE_ID, ShedFace, ShedVoxel,
     StairFace, StairShape, flat_block_state, flat_extra_height, flat_voxels, gable_extra_height,
@@ -4421,77 +4422,12 @@ fn recognize_actuator_patch(
         ));
         return;
     }
-    let Some(id_value) = selector.get("id") else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "door actuator patch requires an `[id=<label>]` selector naming the physical door to bind against",
-        ));
+    // Which door the brackets pick is read from the one place the
+    // redstone front end reads it too, so the patch this defers is the
+    // patch that gets no port there.
+    if let Err(reason) = actuator_patch_target(member, siblings.iter().map(|&(_, m)| m)) {
+        diagnostics.push(diag_deferred_member_reason(member, &reason.to_string()));
         return;
-    };
-    let Some(id_label) = id_value.value.as_label_str() else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!(
-                "door actuator patch `[id=]` selector must be an identifier or string label, got {}",
-                id_value.value.kind_name(),
-            ),
-        ));
-        return;
-    };
-    // Walk the flattened view to gather every physical door's id along
-    // with an occurrence count. A physical door is `MemberRole::Door`
-    // with no selector of its own — a selector-bearing door would be
-    // another patch, not a target. Source order is preserved for the
-    // "known door ids" listing so the rendering is stable across runs.
-    // The occurrence count catches the ambiguous shape a top-level
-    // `door id=X` plus a `level y=N door id=X` produces after
-    // flattening — `duplicate` runs per-scope and does not flag it, so
-    // a silent "first hit wins" would let the patch bind to whichever
-    // door happened to sort first.
-    let mut physical_door_ids: Vec<(&str, u32)> = Vec::new();
-    for (_, m) in siblings {
-        if !matches!(m.role, MemberRole::Door) || m.selector.is_some() {
-            continue;
-        }
-        let Some(door_id) = m.id.as_deref() else {
-            continue;
-        };
-        if let Some((_, count)) = physical_door_ids.iter_mut().find(|(id, _)| *id == door_id) {
-            *count = count.saturating_add(1);
-        } else {
-            physical_door_ids.push((door_id, 1));
-        }
-    }
-    let selected = physical_door_ids
-        .iter()
-        .find(|(id, _)| *id == id_label)
-        .copied();
-    match selected {
-        Some((_, count)) if count >= 2 => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "door actuator patch selects `id={id_label}` but the same id is declared on {count} physical doors in this scope; disambiguate the target before binding an actuator signal",
-                ),
-            ));
-            return;
-        }
-        Some(_) => {}
-        None => {
-            let known_list = if physical_door_ids.is_empty() {
-                "no physical door members are declared in this scope".to_owned()
-            } else {
-                let ids: Vec<&str> = physical_door_ids.iter().map(|(id, _)| *id).collect();
-                format!("known door ids: {}", ids.join(", "))
-            };
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "door actuator patch selects `id={id_label}` but no physical door with that id exists ({known_list})",
-                ),
-            ));
-            return;
-        }
     }
     let unknown_intent_keys: Vec<&str> = member
         .intent_state

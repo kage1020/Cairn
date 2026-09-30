@@ -25,7 +25,13 @@
 //!   table.
 //! - **Actuator**: one of the argument keys in [`ACTUATOR_BINDINGS`]
 //!   (`opened_by` / `powered_by` / `lit_by` / `fired_by`) on the
-//!   component that table pairs the key with.
+//!   component that table pairs the key with. Written in the selector
+//!   form (`door[id=front] opened_by=sig.x`), it drives the physical door
+//!   `cairn_lang_core::block_array::actuator_patch_target` picks — the
+//!   lookup block-array lowering reads too — and one that picks no single
+//!   door is `E_LOGIC_UNRESOLVED_PATCH`. A component takes one binding per
+//!   key, however the lines carrying them are written; a second is
+//!   `E_LOGIC_DUPLICATE_BINDING`.
 //!
 //! The *claim* comes from either side of a pair and the value is then
 //! checked against it. A tail claims a sensor whatever the value is; an
@@ -80,6 +86,7 @@ use crate::logic_ir::{
 };
 use crate::saturating_index;
 use cairn_lang_core::ast::{DottedRef, Expr, SIGNAL_HEAD, Value, ValueKind};
+use cairn_lang_core::block_array::{PatchTargetError, actuator_patch_target};
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{
@@ -226,7 +233,8 @@ impl ModuleScope<'_> {
         };
         let scope = ScopeRef { kind, name };
         let mut collected = ScopeCollected::default();
-        collect_body(members, logic, asserts, scope, &mut collected);
+        let candidates = patch_candidates(members);
+        collect_body(members, logic, asserts, &candidates, scope, &mut collected);
         finish_scope(scope, collected, out);
     }
 }
@@ -253,9 +261,11 @@ impl ScopeCollected<'_> {
             diagnostics,
             refused_drivers,
             refused_consumers,
+            bound,
         } = self;
         !(sensors.is_empty()
             && actuators.is_empty()
+            && bound.is_empty()
             && bindings.is_empty()
             && asserts.is_empty()
             && diagnostics.is_empty()
@@ -293,6 +303,11 @@ struct ScopeCollected<'a> {
     /// finish step so an undefined driver can be reported without
     /// pretending the actuator was wired.
     actuators: Vec<PendingActuator>,
+    /// Which physical component each accepted actuator binding drives,
+    /// under which key. A patch is filed under the door its selector
+    /// picks, so a second binding on one door is found whichever line —
+    /// the door's own or a patch — carries it.
+    bound: Vec<BoundActuator<'a>>,
     /// `logic sig.X = <expr>` lines, in source order.
     bindings: Vec<PendingBinding<'a>>,
 }
@@ -309,6 +324,17 @@ struct PendingActuator {
     span: Span,
 }
 
+/// One accepted actuator binding, filed under the component it drives.
+#[derive(Debug)]
+struct BoundActuator<'a> {
+    /// The physical member the binding drives: the member itself, or the
+    /// door a selector-form patch picks.
+    host: &'a Member,
+    key: &'a str,
+    driver_name: &'a DottedRef,
+    span: Span,
+}
+
 #[derive(Debug)]
 struct PendingBinding<'a> {
     lhs: &'a DottedRef,
@@ -320,11 +346,12 @@ fn collect_body<'a>(
     members: &'a [Member],
     logic: &'a [LogicBinding],
     asserts: &'a [AssertIr],
+    candidates: &[&'a Member],
     scope: ScopeRef<'_>,
     out: &mut ScopeCollected<'a>,
 ) {
     for m in members {
-        collect_member(m, scope, out);
+        collect_member(m, candidates, scope, out);
     }
     for b in logic {
         collect_binding(b, scope, out);
@@ -349,7 +376,12 @@ fn collect_body<'a>(
     out.asserts.extend(asserts);
 }
 
-fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollected<'a>) {
+fn collect_member<'a>(
+    m: &'a Member,
+    candidates: &[&'a Member],
+    scope: ScopeRef<'_>,
+    out: &mut ScopeCollected<'a>,
+) {
     // A member whose keyword is not in the role table is already
     // `E_UNKNOWN_KEYWORD` from the `check` pass. Reading its bindings
     // could only add a second finding about a component that does not
@@ -369,12 +401,15 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
     // them round the loop to be told about the host next time.
     if let Some(binding) = &m.binding {
         let named = signal_named_by(binding);
-        if unknown_keyword || !SENSOR_HOSTS.contains(&m.role.keyword()) {
-            // `check::binding` refuses the tail, and `cairn synth` gates on
-            // `check`, so a second finding here would be the same sentence
-            // twice on one line. What this arm still owes the rest of the
-            // pass is the driver it takes away: a `logic` line reading the
-            // signal must not be told separately that nothing defines it.
+        if unknown_keyword || !SENSOR_HOSTS.contains(&m.role.keyword()) || m.selector.is_some() {
+            // `check::binding` refuses the tail — on a keyword that is not
+            // a sensor, and on a sensor keyword in the selector form, which
+            // picks a member instead of declaring one — and `cairn synth`
+            // gates on `check`, so a second finding here would be the same
+            // sentence twice on one line. What this arm still owes the rest
+            // of the pass is the driver it takes away: a `logic` line
+            // reading the signal must not be told separately that nothing
+            // defines it.
             if let Some(dr) = named {
                 out.refused_drivers.insert(dr.clone());
             }
@@ -419,11 +454,9 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
                             .push(diag_misplaced_actuator(m, key, host, vspan, scope));
                     }
                 } else if let Some(dr) = named {
-                    out.actuators.push(PendingActuator {
-                        driver_name: dr.clone(),
-                        span: vspan.span.clone(),
-                    });
-                    continue;
+                    if accept_actuator(m, key, dr, vspan, candidates, scope, out) {
+                        continue;
+                    }
                 } else {
                     out.diagnostics
                         .push(diag_argument_names_no_signal(m, key, vspan, scope));
@@ -478,12 +511,94 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
         asserts,
     } = &m.children;
     for child in children {
-        collect_member(child, scope, out);
+        collect_member(child, candidates, scope, out);
     }
     for b in logic {
         collect_binding(b, scope, out);
     }
     out.asserts.extend(asserts);
+}
+
+/// Register a well-formed actuator binding on the component it drives, or
+/// refuse it. `false` when refused, so the caller can still count the
+/// signal as consumed.
+///
+/// The component is `m`, or the door a selector-form patch picks. A patch
+/// that picks none is `E_LOGIC_UNRESOLVED_PATCH`, and a second binding
+/// under one key on one component is `E_LOGIC_DUPLICATE_BINDING`: either
+/// way the port would have no component of its own behind it.
+fn accept_actuator<'a>(
+    m: &'a Member,
+    key: &'a str,
+    driver: &'a DottedRef,
+    vspan: &ValueWithSpan,
+    candidates: &[&'a Member],
+    scope: ScopeRef<'_>,
+    out: &mut ScopeCollected<'a>,
+) -> bool {
+    let host = match actuator_host(m, candidates) {
+        Ok(host) => host,
+        Err(reason) => {
+            out.diagnostics
+                .push(diag_unresolved_patch(m, key, &reason, vspan, scope));
+            return false;
+        }
+    };
+    if let Some(first) = out
+        .bound
+        .iter()
+        .find(|b| std::ptr::eq(b.host, host) && b.key == key)
+    {
+        out.diagnostics
+            .push(diag_duplicate_binding(host, first, driver, vspan, scope));
+        return false;
+    }
+    out.bound.push(BoundActuator {
+        host,
+        key,
+        driver_name: driver,
+        span: vspan.span.clone(),
+    });
+    out.actuators.push(PendingActuator {
+        driver_name: driver.clone(),
+        span: vspan.span.clone(),
+    });
+    true
+}
+
+/// The members a selector-form patch in this scope may pick: every member
+/// this pass walks, at any depth.
+///
+/// Block-array lowering resolves a patch against its flattened view,
+/// which unwraps a `level` sitting directly in the body and nothing else.
+/// Every body it does not unwrap is `check::nesting`'s
+/// `E_UNSUPPORTED_NESTING`, and `cairn synth` gates on `check`, so on a
+/// source that reaches this pass the two views hold the same doors. The
+/// wider one is kept because [`collect_member`] reads bindings at any
+/// depth too: a patch and its door nested under the same parent pick
+/// each other here the way they would once that nesting has a reader.
+fn patch_candidates(members: &[Member]) -> Vec<&Member> {
+    fn walk<'a>(members: &'a [Member], out: &mut Vec<&'a Member>) {
+        for m in members {
+            out.push(m);
+            walk(&m.children.members, out);
+        }
+    }
+    let mut out = Vec::with_capacity(members.len());
+    walk(members, &mut out);
+    out
+}
+
+/// The physical member an actuator binding on `m` drives: `m` itself, or,
+/// for the selector form, the door its brackets pick.
+fn actuator_host<'a>(
+    m: &'a Member,
+    candidates: &[&'a Member],
+) -> Result<&'a Member, PatchTargetError> {
+    if m.selector.is_none() {
+        return Ok(m);
+    }
+    actuator_patch_target(m, candidates.iter().copied())
 }
 
 /// The signal reference a value names, or `None` for a value that names
@@ -736,6 +851,72 @@ fn diag_misplaced_actuator(
              argument until `{host}` lands.",
         )
     })
+}
+
+/// An actuator patch whose selector picks no single physical door.
+///
+/// Anchored on the selector's `id=` when it has one, because the id is
+/// what the author corrects; the binding itself is well formed.
+fn diag_unresolved_patch(
+    member: &Member,
+    key: &str,
+    reason: &PatchTargetError,
+    vspan: &ValueWithSpan,
+    scope: ScopeRef<'_>,
+) -> Diagnostic {
+    let span = member
+        .selector
+        .as_ref()
+        .and_then(|s| s.get("id"))
+        .map_or_else(|| member.span.clone(), |id| id.span.clone());
+    let keyword = member.role.keyword();
+    Diagnostic::new(
+        DiagnosticCode::LogicUnresolvedPatch,
+        span,
+        format!(
+            "{label} {reason}, so its `{key}=` binding drives nothing",
+            label = scope.label(),
+        ),
+    )
+    .with_note(vspan.span.clone(), "the binding the patch carries")
+    .with_footer(format!(
+        "Fix: set `[id=<label>]` to the id of one `{keyword}` declared in this scope \
+         without brackets, or write `{key}=` on that `{keyword}`'s own line.",
+    ))
+}
+
+/// A second binding under one actuator key on one physical component.
+fn diag_duplicate_binding(
+    host: &Member,
+    first: &BoundActuator<'_>,
+    driver: &DottedRef,
+    vspan: &ValueWithSpan,
+    scope: ScopeRef<'_>,
+) -> Diagnostic {
+    let keyword = host.role.keyword();
+    let named = host.id.as_deref().map_or_else(
+        || format!("this `{keyword}`"),
+        |id| format!("`{keyword}` `{id}`"),
+    );
+    Diagnostic::new(
+        DiagnosticCode::LogicDuplicateBinding,
+        vspan.span.clone(),
+        format!(
+            "{label} {named} is already bound by `{key}={first_driver}`, and a second \
+             `{key}=` would drive it from two wires at once",
+            label = scope.label(),
+            key = first.key,
+            first_driver = first.driver_name,
+        ),
+    )
+    .with_note(first.span.clone(), "first bound here")
+    .with_footer(format!(
+        "Fix: combine the signals in the logic layer, as in \
+         `logic {SIGNAL_HEAD}.<name> = {first_driver} or {driver}`, and bind `{key}=` \
+         once to `{SIGNAL_HEAD}.<name>`.",
+        key = first.key,
+        first_driver = first.driver_name,
+    ))
 }
 
 /// An argument whose value is a signal, under a key nothing reads.

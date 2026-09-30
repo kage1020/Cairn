@@ -190,3 +190,49 @@ fn every_sensor_host_is_a_keyword_the_role_table_knows() {
         );
     }
 }
+
+/// A sensor keyword in the selector form picks a member rather than
+/// declaring one, and no sensor patch exists, so the tail is on no sensor
+/// the author declared. It became a netlist input all the same.
+#[test]
+fn a_tail_on_a_sensor_keyword_in_the_selector_form_is_refused() {
+    let src = "struct s size=5x5\n  pressure_plate[id=nope] -> sig.b\n";
+    let d = only(src);
+    assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
+    assert!(
+        d.primary
+            .contains("`pressure_plate[...]` picks a member rather than declaring one"),
+        "got: {}",
+        d.primary,
+    );
+    assert_eq!(slice(src, &d), "sig.b");
+    let note = notes(&d).join("\n");
+    assert!(
+        note.contains("`door[id=<label>] opened_by=`"),
+        "got: {note}"
+    );
+}
+
+/// Naming a plate that exists does not make the line a plate: the
+/// brackets still pick rather than declare.
+#[test]
+fn a_selector_tail_is_refused_even_when_the_selector_names_a_real_plate() {
+    let src = concat!(
+        "struct s size=5x5\n",
+        "  pressure_plate id=p at=front.outside offset=0 y=0\n",
+        "  pressure_plate[id=p] -> sig.b\n",
+    );
+    assert_eq!(codes(src), ["E_MISPLACED_BINDING"]);
+}
+
+/// On a keyword that cannot emit, the host is the fault and it is named;
+/// dropping the brackets would not repair the line.
+#[test]
+fn a_selector_tail_on_a_non_sensor_is_told_about_the_host() {
+    let d = only("struct s size=5x5\n  walls[class=outer] mat_slot=wall height=3 -> sig.w\n");
+    assert!(
+        d.primary.contains("`walls` cannot emit a signal"),
+        "got: {}",
+        d.primary,
+    );
+}
