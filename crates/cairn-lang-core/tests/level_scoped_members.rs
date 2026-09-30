@@ -205,11 +205,11 @@ fn a_pressure_plate_under_a_raised_level_lands_at_that_level() {
     // would be caught by `walls` alone in every other test here.
     let raised = lowered(&source(
         "  roof kind=gable mat_slot=roof overhang=1\n\n  \
-         level id=upper y=3\n    pressure_plate at=inside.front mat_slot=deck\n",
+         level id=upper y=3\n    pressure_plate at=inside.front offset=1 mat_slot=deck\n",
     ));
     let ground = lowered(&source(
         "  roof kind=gable mat_slot=roof overhang=1\n  \
-         pressure_plate at=inside.front y=3 mat_slot=deck\n",
+         pressure_plate at=inside.front offset=1 y=3 mat_slot=deck\n",
     ));
 
     assert_eq!(defer_reasons(&raised), Vec::<String>::new());

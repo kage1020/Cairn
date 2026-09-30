@@ -206,7 +206,7 @@ fn circuit(size: &str) -> String {
         format!("struct big size={size}"),
         "  floor mat_slot=floor".to_owned(),
         "  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a".to_owned(),
-        "  pressure_plate id=pb at=inside.front offset=0 y=0 -> sig.b".to_owned(),
+        "  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b".to_owned(),
         "  logic sig.o = sig.a and sig.b".to_owned(),
         "  door id=d side=front at=center mat_slot=wall opened_by=sig.o".to_owned(),
         "  circuit region=floor void=3".to_owned(),
