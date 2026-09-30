@@ -43,6 +43,30 @@ use cairn_lang_redstone::{
 };
 use clap::{Parser, Subcommand, ValueEnum};
 
+/// `println!` for everything the commands write to stdout, except that a
+/// reader who has closed the pipe (`cairn lower f.crn | head -1`) is not
+/// a failure: the line is dropped and the command carries on to the exit
+/// code it decides, so the process ends with that code rather than a
+/// panic (an abort in release builds). Every later line fails the same
+/// way and is dropped the same way. Any other write error still panics
+/// with `println!`'s message.
+macro_rules! outln {
+    ($($arg:tt)*) => {
+        write_stdout_line(format_args!($($arg)*))
+    };
+}
+
+/// The body of [`outln!`].
+fn write_stdout_line(line: std::fmt::Arguments<'_>) {
+    use std::io::Write as _;
+    match writeln!(std::io::stdout().lock(), "{line}") {
+        Err(err) if err.kind() != std::io::ErrorKind::BrokenPipe => {
+            panic!("failed printing to stdout: {err}")
+        }
+        _ => {}
+    }
+}
+
 /// `cairn` — Minecraft build DSL command-line interface.
 #[derive(Parser)]
 #[command(
@@ -583,7 +607,7 @@ fn run_parse(file: &Path, format: ParseFormat) -> ExitCode {
             Err(code) => code,
         },
         ParseFormat::Debug => {
-            println!("{module:#?}");
+            outln!("{module:#?}");
             ExitCode::SUCCESS
         }
     }
@@ -727,7 +751,7 @@ fn render_diagnostics(
 fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(), ExitCode> {
     match serde_json::to_string_pretty(value) {
         Ok(json) => {
-            println!("{json}");
+            outln!("{json}");
             Ok(())
         }
         Err(err) => {
@@ -1854,9 +1878,10 @@ fn print_axes_report(axes: &VersionAxes) {
     // row"). A floor written in Java's numbering says nothing about the
     // file's Bedrock range, and the per-edition answer is the `buildable
     // targets` row below.
-    println!(
+    outln!(
         "registry compatibility:  {} .. {}",
-        axes.registry_compat.min, axes.registry_compat.max,
+        axes.registry_compat.min,
+        axes.registry_compat.max,
     );
 
     let portability_line = joined_or(
@@ -1872,7 +1897,7 @@ fn print_axes_report(axes: &VersionAxes) {
             )
         }),
     );
-    println!("edition portability:     {portability_line}");
+    outln!("edition portability:     {portability_line}");
 
     let buildable_line = joined_or(
         "(no editions requested)",
@@ -1885,7 +1910,7 @@ fn print_axes_report(axes: &VersionAxes) {
             )
         }),
     );
-    println!("buildable targets:       {buildable_line}");
+    outln!("buildable targets:       {buildable_line}");
 
     // Beside the row it can contradict, and not folded into it: one is
     // what the file says it was designed for and the other what this
@@ -1897,7 +1922,7 @@ fn print_axes_report(axes: &VersionAxes) {
         ", ",
         axes.intended_targets.iter().cloned(),
     );
-    println!("intended targets:        {intended_line}");
+    outln!("intended targets:        {intended_line}");
 
     let semantic_line = joined_or(
         "(none)",
@@ -1906,7 +1931,7 @@ fn print_axes_report(axes: &VersionAxes) {
             .iter()
             .map(|f| format!("{}({} @{})", f.member, f.reason, f.boundary_version)),
     );
-    println!("semantic-sensitive:      {semantic_line}");
+    outln!("semantic-sensitive:      {semantic_line}");
 }
 
 /// One edition's buildable versions, with the refusing ones named after
@@ -2009,7 +2034,7 @@ fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
             Err(code) => code,
         },
         LowerFormat::Debug => {
-            println!("{block_ir:#?}");
+            outln!("{block_ir:#?}");
             ExitCode::SUCCESS
         }
     }
@@ -2079,7 +2104,7 @@ fn run_synth(
         };
     match json {
         Ok(text) => {
-            println!("{text}");
+            outln!("{text}");
             ExitCode::SUCCESS
         }
         Err(err) => {
@@ -2478,19 +2503,21 @@ fn is_intended_target_cap(code: DiagnosticCode) -> bool {
 
 fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
     if block_ir.structures.is_empty() {
-        println!("(no structures lowered)");
+        outln!("(no structures lowered)");
         return;
     }
     for (key, array) in &block_ir.structures {
-        println!(
+        outln!(
             "{key}  dims={}x{}x{}",
-            array.dims.x, array.dims.y, array.dims.z
+            array.dims.x,
+            array.dims.y,
+            array.dims.z
         );
-        println!("  palette:");
+        outln!("  palette:");
         for (i, state) in array.palette.entries.iter().enumerate() {
             let glyph = ascii_glyph(i);
             if state.properties.is_empty() {
-                println!("    [{i:>3}] {glyph}  {}", state.id);
+                outln!("    [{i:>3}] {glyph}  {}", state.id);
             } else {
                 let props = state
                     .properties
@@ -2498,11 +2525,11 @@ fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
                     .map(|(k, v)| format!("{k}={v}"))
                     .collect::<Vec<_>>()
                     .join(",");
-                println!("    [{i:>3}] {glyph}  {}[{props}]", state.id);
+                outln!("    [{i:>3}] {glyph}  {}[{props}]", state.id);
             }
         }
         for y in 0..array.dims.y {
-            println!("  y={y}");
+            outln!("  y={y}");
             print_y_slice(array, y);
         }
     }
@@ -2534,7 +2561,7 @@ fn print_y_slice(array: &BlockArray, y: u32) {
             let i = array.dims.index(x, y, z).expect("in-range coordinate");
             row.push(ascii_glyph(usize::from(array.voxels[i].0)));
         }
-        println!("    {row}");
+        outln!("    {row}");
     }
 }
 
@@ -3550,7 +3577,7 @@ fn write_artifacts_and_lock(
     match staged.commit() {
         Ok(written) => {
             for path in written {
-                println!("wrote {}", path.display());
+                outln!("wrote {}", path.display());
             }
             ExitCode::SUCCESS
         }

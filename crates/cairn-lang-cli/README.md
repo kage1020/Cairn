@@ -40,6 +40,8 @@ Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 | `1` | A parse failure, an `Error`-severity diagnostic, an I/O error, or a run-level refusal such as a `--target` the edition does not ship. |
 | `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`). |
 
+A reader that stops early (`cairn lower f.crn | head -1`) does not change the code: output written after stdout has been closed is dropped, and the command exits as it would have with stdout open.
+
 A run-level refusal is reported on stderr and by the exit code in both output formats, never as an element of the `--format json` array: it is not a finding at a span in the file, and giving it a line number would put a position on a fact that has none. A `check --format json` consumer reads the verdict from the exit code and treats stderr as unstructured prose: an exit of `1` over an array with no `"severity": "error"` element is a run-level refusal, and nothing else reads that way ([lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/)).
 
 ## `cairn synth` (experimental)
