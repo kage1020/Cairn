@@ -1107,8 +1107,8 @@ fn lower_site<'a>(
         let Ok(placement_id) = PlaceId::new(place_id) else {
             continue;
         };
-        // A site name is an identifier the lexer produced, so it cannot
-        // carry `.`, `:`, or whitespace. Folding this into the arm above
+        // A site name is an identifier the lexer produced, and the lexer's
+        // `Ident` rule is a strict subset of what `SiteName` accepts. Folding this into the arm above
         // would mean a future relaxation of the site-name grammar silently
         // dropped every place in the site; the `debug_assert!` convention
         // this file already uses for unreachable invariants fails loud in

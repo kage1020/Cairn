@@ -5,9 +5,12 @@
 //! establishes (non-empty, no `.`, no `:`, no whitespace) so downstream
 //! layers cannot accidentally pass a connect endpoint such as
 //! `home.1.entry` and have the walkway scope key silently re-parse as a
-//! different `(place, port)` pair. The wire format is unchanged: every
-//! newtype is `#[serde(transparent)]` over its internal `String`, so any
-//! YAML / JSON consumer keeps seeing the same scalar string it used to.
+//! different `(place, port)` pair. The path separators `/` and `\` are
+//! refused as well: an identifier becomes an artifact's file name, and a
+//! separator in it would move the artifact out of the output directory.
+//! The wire format is unchanged: every newtype is `#[serde(transparent)]`
+//! over its internal `String`, so any YAML / JSON consumer keeps seeing the
+//! same scalar string it used to.
 //!
 //! [`WalkwayScopeKey`] is the structural counterpart: its internal
 //! representation is the normalized `walkway::SITE::PLACE.PORT__PLACE.PORT`
@@ -28,8 +31,9 @@ pub enum IdError {
     #[error("identifier is empty")]
     Empty,
     /// Construction was attempted with a string containing a character
-    /// that is reserved as a structural separator (`.`, `:`) or that the
-    /// surface lexer would not have produced (whitespace).
+    /// that is reserved as a structural separator (`.`, `:`), a path
+    /// separator (`/`, `\`), or a character the surface lexer would not
+    /// have produced (whitespace).
     #[error("identifier `{ident}` contains forbidden character `{ch}`")]
     ForbiddenChar {
         /// The full offending string.
@@ -39,12 +43,24 @@ pub enum IdError {
     },
 }
 
+/// The characters no identifier may carry.
+///
+/// `.` and `:` are the scope-key separators. `/` and `\` are the path
+/// separators: an identifier is the stem of the artifact file the compiler
+/// writes into `--out`, so either one would put that file in another
+/// directory, and an absolute id would replace `--out` altogether. Both are
+/// refused on every platform, so whether an identifier is accepted does not
+/// depend on the host that checks it.
+fn is_forbidden_ident_char(c: char) -> bool {
+    matches!(c, '.' | ':' | '/' | '\\') || c.is_whitespace()
+}
+
 fn validate_ident(s: &str) -> Result<(), IdError> {
     if s.is_empty() {
         return Err(IdError::Empty);
     }
     for c in s.chars() {
-        if c == '.' || c == ':' || c.is_whitespace() {
+        if is_forbidden_ident_char(c) {
             return Err(IdError::ForbiddenChar {
                 ident: s.to_owned(),
                 ch: c,
@@ -101,7 +117,9 @@ macro_rules! ident_newtype {
             /// Returns [`IdError::Empty`] for the empty string, or
             /// [`IdError::ForbiddenChar`] if the input contains a `.`,
             /// `:`, or whitespace character (any of which would break
-            /// the structural separators downstream lookups rely on).
+            /// the structural separators downstream lookups rely on), or
+            /// a `/` or `\` (which would make the artifact file name
+            /// a path).
             pub fn new<S: Into<String>>(s: S) -> Result<Self, IdError> {
                 let s = s.into();
                 validate_ident(&s)?;
@@ -565,6 +583,29 @@ mod tests {
             SiteName::new("foo bar"),
             Err(IdError::ForbiddenChar { ch: ' ', .. })
         ));
+    }
+
+    #[test]
+    fn ident_new_rejects_path_separators() {
+        // Every shape the output file name could take through a separator:
+        // absolute, relative with a directory, and Windows-style. Each
+        // newtype is checked, since all three become file-name segments.
+        for (ident, ch) in [("/tmp/x", '/'), ("sub/x", '/'), ("a\\b", '\\')] {
+            for result in [
+                PlaceId::new(ident).map(|_| ()),
+                PortId::new(ident).map(|_| ()),
+                SiteName::new(ident).map(|_| ()),
+            ] {
+                assert_eq!(
+                    result,
+                    Err(IdError::ForbiddenChar {
+                        ident: ident.to_owned(),
+                        ch,
+                    }),
+                    "`{ident}` must be refused on `{ch}`",
+                );
+            }
+        }
     }
 
     #[test]

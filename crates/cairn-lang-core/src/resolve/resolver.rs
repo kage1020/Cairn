@@ -1128,7 +1128,8 @@ fn port_ref_from_value(
         return None;
     }
     // INVARIANT(upstream-diagnosed): the surface lexer's `Ident` rule
-    // forbids `.`, `:`, and whitespace, so any `DotRef` segment that
+    // (ASCII letters, digits and `_`) is a strict subset of what the id
+    // newtypes accept, so any `DotRef` segment that
     // reached this point is already a valid newtype payload — the
     // `.expect` failure mode would mean the lexer accepted a token the
     // surface grammar forbids. Cheaper than re-validating per row.
@@ -1462,7 +1463,9 @@ fn usable_place_id<'a>(
     // Validate before the id becomes half of a scope key. `PlaceId` states
     // the invariants, and `place_scope_key` joins on `::`, so an id carrying
     // `.` or `:` produces a key nothing can parse back — which is where the
-    // lowering pass used to `expect` and panic.
+    // lowering pass used to `expect` and panic. The id is also the stem of
+    // the artifact's file name, so a `/` or `\` in it used to put that file
+    // outside `--out`.
     if let Err(err) = PlaceId::new(place_id) {
         diagnostics.push(invalid_place_id_diag(
             place_id,
@@ -1604,8 +1607,10 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "a place id becomes part of the `site::<site>::<place>` scope key, \
-                      so it must be non-empty and free of `.`, `:`, and whitespace"
+            message: "a place id becomes part of the `site::<site>::<place>` scope key and \
+                      the stem of the artifact file written into `--out`, so it must be \
+                      non-empty and free of `.`, `:`, `/`, `\\`, and whitespace; \
+                      rename it with letters, digits, and `_` (`home1`, `north_tower`)"
                 .to_owned(),
         }],
         data: None,
@@ -3335,5 +3340,53 @@ mod tests {
             "got {:?}",
             r.diagnostics,
         );
+    }
+
+    /// The rename `E_INVALID_PLACE_ID` recommends must give an id the rest
+    /// of the language can name. A `connect` endpoint is a dotted reference
+    /// of lexer identifiers and may not be a string, so a recommended
+    /// spelling outside that rule (`north-tower`) could be placed but never
+    /// connected. The examples are read off the note itself, so changing
+    /// them re-runs this check on the new ones.
+    #[test]
+    fn the_ids_the_invalid_place_id_note_recommends_can_be_connected() {
+        let def = "def hut size=5x5:\n  floor mat_slot=floor\n  walls mat_slot=floor height=3\n  \
+                   door id=entry side=front at=center\n\ntheme t:\n  slot floor -> @oak_planks\n\n";
+        let refused = resolve(
+            &ir(&format!(
+                "{def}site s:\n  place id=\"a/b\" use=hut theme=t at=origin\n"
+            )),
+            None,
+        );
+        let note = refused
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::InvalidPlaceId)
+            .and_then(|d| d.notes.first())
+            .map(|n| n.message.clone())
+            .expect("`a/b` is refused with a note");
+        let examples_at = note.rfind('(').expect("the note ends with its examples");
+        let examples: Vec<&str> = note[examples_at..].split('`').skip(1).step_by(2).collect();
+        assert!(!examples.is_empty(), "no examples in: {note}");
+
+        for id in examples {
+            let src = format!(
+                "{def}site s:\n  place id=home use=hut theme=t at=origin\n  \
+                 place id={id} use=hut theme=t east_of=home gap=4\n  \
+                 connect home.entry to {id}.entry path=@gravel\n"
+            );
+            let module = parse(&src)
+                .unwrap_or_else(|e| panic!("the recommended id `{id}` does not parse: {e}"));
+            let r = resolve(&lower(&module), None);
+            let errors: Vec<_> = r
+                .diagnostics
+                .iter()
+                .filter(|d| d.severity() == Severity::Error)
+                .collect();
+            assert!(
+                errors.is_empty(),
+                "the recommended id `{id}` cannot be placed and connected: {errors:?}",
+            );
+        }
     }
 }
