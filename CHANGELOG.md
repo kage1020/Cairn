@@ -264,6 +264,31 @@
 
 ### Fixed
 
+- *(core,tree-sitter)* A canonical token with a block-state literal could not be written, though
+  `spec/materials-themes` "Canonical vocabulary" lists `@oak_log[axis=x]` as one and everything
+  past the parser already read that shape. Both parsers stopped at the `[`:
+
+  ```
+  theme t:
+    slot floor -> @oak_log[axis=x]
+  ```
+
+  ```
+  st.crn:2:25: error[E_PARSE]: expected end of line, got `[`
+  ```
+
+  A `[` that touches an undotted `@` token now opens its state literal: `property=value` pairs,
+  each value a word, a run of digits, or `true` / `false`, separated by one required comma. The
+  literal folds into the token's text, so the example builds a log lying along `x`, and
+  `@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north, half=top]` are one palette
+  entry. The parser is now the only place a malformed literal is refused. That covers an empty
+  literal, a missing `=` or value, a trailing, doubled or missing comma, a string value, a missing
+  `]`, a property named twice, and a literal on an abstract token such as `@floor.wood`. A `[`
+  after a space is unchanged. The one spelling that now reads differently is a token touching a
+  nested list inside a value list. `mat=[@a [b]]` is still two items, but `mat=[@a[b]]` used to be
+  two items and is now refused. Properties and values are not yet checked against the target
+  (`E_STATE_DOMAIN` is not implemented), and `spec/syntax` "Literals and separators" says so.
+
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
   and nothing said so. With a 3x3 `a` and a 3x9 `b`:

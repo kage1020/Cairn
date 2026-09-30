@@ -999,6 +999,138 @@ impl<'a> Parser<'a> {
         Ok(Arg { key, value, span })
     }
 
+    /// Read an `@` token value — `@oak_planks`, `@floor.wood`, or a
+    /// canonical token with its state literal, `@oak_log[axis=x]` — whose
+    /// `@` starts at `start_byte`.
+    fn parse_token_value(&mut self, start_byte: usize) -> Result<Value, ParseError> {
+        self.advance();
+        let mut parts = vec![self.expect_ident()?];
+        while self.peek_is(&TokenKind::Dot) {
+            self.advance();
+            parts.push(self.expect_ident()?);
+        }
+        let mut text = parts.join(".");
+        // A `[` that touches the name is the token's own state
+        // literal; one after a space is whatever the caller reads
+        // next, which in a value list is a nested list.
+        if self
+            .peek()
+            .is_some_and(|t| t.kind == TokenKind::LBracket && t.span.start == self.last_byte())
+        {
+            // A state is one block's, and a dotted token names no
+            // block: the theme that binds it picks one.
+            if parts.len() > 1 {
+                return Err(ParseError::Syntax {
+                    position: self.position(),
+                    message: format!(
+                        "`@{text}` is an abstract material, so it takes no state \
+                         literal: a state belongs to one block, as in \
+                         `@oak_log[axis=x]`, and the theme binding `@{text}` \
+                         chooses which block that is"
+                    ),
+                });
+            }
+            text.push_str(&self.parse_state_literal(&text)?);
+        }
+        Ok(Value::new(
+            ValueKind::Token(text),
+            start_byte..self.last_byte(),
+        ))
+    }
+
+    /// Read a block-state literal, `[key=value,…]`, after the `@` token
+    /// named `token`, and return it as the text it folds into the token:
+    /// `[axis=x]`, with the spaces the source may hold between its parts
+    /// left out.
+    ///
+    /// This is the one place a malformed literal is refused.
+    /// `block_array::material` reads the folded text back into a property
+    /// map leniently, on the understanding that nothing malformed reaches
+    /// it, so an empty literal, an empty or repeated property, a stray or
+    /// trailing `,` and a missing `]` are all refused here. The literal is
+    /// Minecraft's block-state syntax rather than a Cairn list, so the
+    /// comma between pairs is required rather than optional.
+    ///
+    /// Which properties a block has, and which values each takes, is not
+    /// checked here: that is a question about the target's registry, not
+    /// about the source's shape.
+    fn parse_state_literal(&mut self, token: &str) -> Result<String, ParseError> {
+        let refuse = |position, found: &str| ParseError::Syntax {
+            position,
+            message: format!(
+                "the state literal on `@{token}` expected {found}; a state literal is \
+                 `[property=value]` pairs separated by `,`, as in `@oak_log[axis=x]`"
+            ),
+        };
+        self.expect(&TokenKind::LBracket)?;
+        let mut text = String::from("[");
+        let mut seen: Vec<String> = Vec::new();
+        loop {
+            let position = self.position();
+            let Some(TokenKind::Ident(property)) = self.peek().map(|t| t.kind.clone()) else {
+                let got = self
+                    .peek()
+                    .map_or_else(|| "end of input".to_owned(), |t| t.kind.to_string());
+                return Err(refuse(position, &format!("a property name, got {got}")));
+            };
+            if seen.contains(&property) {
+                return Err(ParseError::Syntax {
+                    position,
+                    message: format!(
+                        "the state literal on `@{token}` sets `{property}` twice; a block \
+                         state has one value per property"
+                    ),
+                });
+            }
+            self.advance();
+            let position = self.position();
+            if !self.peek_is(&TokenKind::Eq) {
+                let got = self
+                    .peek()
+                    .map_or_else(|| "end of input".to_owned(), |t| t.kind.to_string());
+                return Err(refuse(
+                    position,
+                    &format!("`=` after `{property}`, got {got}"),
+                ));
+            }
+            self.advance();
+            let position = self.position();
+            let value = match self.peek().map(|t| &t.kind) {
+                Some(TokenKind::Ident(value)) => value.clone(),
+                Some(TokenKind::Int { lexeme }) => lexeme.clone(),
+                Some(TokenKind::Bool(value)) => value.to_string(),
+                other => {
+                    let got = other.map_or_else(|| "end of input".to_owned(), ToString::to_string);
+                    return Err(refuse(
+                        position,
+                        &format!("a value for `{property}`, got {got}"),
+                    ));
+                }
+            };
+            self.advance();
+            if !seen.is_empty() {
+                text.push(',');
+            }
+            text.push_str(&property);
+            text.push('=');
+            text.push_str(&value);
+            seen.push(property);
+            let position = self.position();
+            match self.peek().map(|t| &t.kind) {
+                Some(TokenKind::Comma) => self.advance(),
+                Some(TokenKind::RBracket) => {
+                    self.advance();
+                    text.push(']');
+                    return Ok(text);
+                }
+                other => {
+                    let got = other.map_or_else(|| "end of input".to_owned(), ToString::to_string);
+                    return Err(refuse(position, &format!("`,` or `]`, got {got}")));
+                }
+            }
+        }
+    }
+
     fn parse_value(&mut self) -> Result<Value, ParseError> {
         let position = self.position();
         let start_byte = self.current_byte();
@@ -1009,18 +1141,7 @@ impl<'a> Parser<'a> {
             });
         };
         match token.kind {
-            TokenKind::At => {
-                self.advance();
-                let mut parts = vec![self.expect_ident()?];
-                while self.peek_is(&TokenKind::Dot) {
-                    self.advance();
-                    parts.push(self.expect_ident()?);
-                }
-                Ok(Value::new(
-                    ValueKind::Token(parts.join(".")),
-                    start_byte..self.last_byte(),
-                ))
-            }
+            TokenKind::At => self.parse_token_value(start_byte),
             TokenKind::Bool(b) => {
                 self.advance();
                 Ok(Value::new(ValueKind::Bool(b), token.span))

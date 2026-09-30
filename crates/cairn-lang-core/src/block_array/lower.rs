@@ -6047,10 +6047,8 @@ mod tests {
 
     #[test]
     fn state_literal_round_trips_through_palette() {
-        // Bracketed tokens are not yet emitted by the surface parser, so
-        // this exercises the palette/material path directly to lock the
-        // canonical-id and property-bag contract before the state-literal
-        // grammar lands.
+        // Exercises the palette/material path directly, below the parser,
+        // to lock the canonical-id and property-bag contract on its own.
         let mut palette = Palette::new_with_air();
         let token = ValueWithSpan::from_value(crate::ast::Value::new(
             ValueKind::Token("oak_log[axis=x]".to_owned()),

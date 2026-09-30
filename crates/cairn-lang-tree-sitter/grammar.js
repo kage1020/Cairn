@@ -252,7 +252,29 @@ module.exports = grammar({
 
     attribute: $ => seq(field('key', $.identifier), '=', field('value', $._value)),
 
-    material_ref: $ => seq('@', $.identifier, repeat(seq('.', $.identifier))),
+    // A dotted token is abstract and names no block, so only an undotted
+    // one takes a state literal. The `[` has to touch the name: one after a
+    // space is whatever comes next, which in a value list is a nested list.
+    material_ref: $ => choice(
+      seq('@', $.identifier, repeat1(seq('.', $.identifier))),
+      seq('@', $.identifier, optional($.state_literal)),
+    ),
+
+    // Minecraft's block-state syntax rather than a Cairn list, so the comma
+    // between pairs is required. A property named twice is refused by
+    // `cairn-lang-core` alone; see `KNOWN_DIVERGENCES` in the parity test.
+    state_literal: $ => seq(
+      token.immediate('['),
+      $.state_property,
+      repeat(seq(',', $.state_property)),
+      ']',
+    ),
+
+    state_property: $ => seq(
+      field('key', $.identifier),
+      '=',
+      field('value', choice($.identifier, $.integer, $.boolean)),
+    ),
 
     size_literal: $ => seq(
       alias(token(/[0-9]+/), $.integer),

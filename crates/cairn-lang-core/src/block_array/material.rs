@@ -389,10 +389,10 @@ pub(crate) fn validated_id(
 /// `minecraft:cobblestone`) into a [`BlockState`].
 ///
 /// Recognises an optional `namespace:` prefix and a trailing `[k=v,...]`
-/// state literal. The state literal is parsed defensively because the
-/// surface parser does not currently mint bracketed tokens directly — but
-/// [`crate::resolve::classify_token`] documents the shape and other code
-/// paths (registry-pack lookups, future schematic ingestion) may.
+/// state literal. The surface parser refuses a malformed literal, so a
+/// token from source reaches here well formed; the tail is still read
+/// leniently because a token can also be built by hand, as the tests
+/// below do.
 fn canonical_to_block_state(inner: &str) -> BlockState {
     let (head, properties_src) = match inner.find('[') {
         Some(i) => {
@@ -400,9 +400,9 @@ fn canonical_to_block_state(inner: &str) -> BlockState {
             let tail = &inner[i + 1..];
             // Trim the matching `]` so a well-formed `oak_log[axis=x]`
             // parses cleanly; an unterminated literal silently falls
-            // through with whatever the tail contained (still better than
-            // erroring at this layer — the surface lexer is the right
-            // place to reject malformed brackets).
+            // through with whatever the tail contained. The parser is
+            // what refuses malformed brackets, so only a hand-built token
+            // can reach this with one.
             let trimmed = tail.strip_suffix(']').unwrap_or(tail);
             (head, trimmed)
         }
@@ -422,8 +422,8 @@ fn canonical_to_block_state(inner: &str) -> BlockState {
 /// Whitespace around keys and values is trimmed; empty segments (from a
 /// trailing comma or a stray `,,`) are skipped silently. The block-array IR
 /// is below the lint layer, so noisy parsing here would surface as
-/// diagnostics in the wrong place — the resolver-side
-/// `E_UNKNOWN_SLOT_TARGET` is the right gate for badly-shaped values.
+/// diagnostics in the wrong place; the parser, which refuses every one of
+/// those shapes in source, is the gate for them.
 fn parse_state_literal(body: &str) -> IndexMap<String, String> {
     let mut out = IndexMap::new();
     if body.is_empty() {
