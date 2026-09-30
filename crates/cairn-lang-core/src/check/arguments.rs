@@ -44,10 +44,10 @@
 //! match hands the member is the row's bindings, and no pass lowers those
 //! yet, so a key the role defines and nothing reads is still reported
 //! when a selector matches on it — `window shape=slit` builds the same
-//! window with a `window[shape=slit] -> frame=...` row or without one. The
-//! row itself is reported too, once per binding on the right of its arrow,
-//! with the same code: a binding nothing lowers is the same unreached key
-//! one level up.
+//! window with a `window[shape=slit] -> frame=...` row or without one. A
+//! row whose keyword names a role is reported too, once per binding on the
+//! right of its arrow, with the same code: a binding nothing lowers is the
+//! same unreached key one level up.
 //!
 //! The widening admits words the module *coins*, and one edit from an
 //! existing key is not a coinage. `walls[hieght=3]` beside `walls hieght=3`
@@ -234,13 +234,21 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
 
 /// A `key=value` on the right of a theme selector's arrow.
 ///
-/// Every one is reported, whatever its key or value: no lowering rule reads
-/// a selector's bindings yet (`spec/materials-themes` "Slots as dependency
+/// Every binding on a row whose keyword names a role is reported, whatever
+/// its key or value; a row whose keyword names none gets
+/// `E_UNKNOWN_KEYWORD` alone, and a key written twice in one row is
+/// `E_DUPLICATE_ARG` with only its last value reported here, since the row's
+/// bindings are a map by then. No lowering rule reads a
+/// selector's bindings yet (`spec/materials-themes` "Slots as dependency
 /// injection"), so `frame=@spruce_wood` builds exactly what the file builds
 /// without it. That is an unreached key one level up from a member's, and
 /// `spec/lint` "Error vs warning" gives it the same code. The key is not
 /// judged against a vocabulary, because there is no vocabulary of keys a
-/// binding may set until some pass reads one.
+/// binding may set until some pass reads one, and for the same reason the
+/// value is not resolved as a block: what `frame=` names is not specified.
+///
+/// Matched or not, the finding is the same, so the note says nothing about
+/// which members the row selects or where their blocks come from.
 fn unlowered_binding(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::IgnoredArgument,
@@ -251,11 +259,10 @@ fn unlowered_binding(keyword: &str, key: &str, span: &crate::error::Span) -> Dia
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: format!(
-                "every `{keyword}` this row matches is built without it — a member's block \
-                 comes from its `mat_slot=` and the theme's `slot` rows, so remove the \
-                 binding, or keep it and expect no effect until selector bindings are lowered",
-            ),
+            message: "the build is the same with this binding or without it; delete it, or \
+                      the whole row if it binds nothing else, or keep it and expect no effect \
+                      until selector bindings are lowered"
+                .into(),
         }],
         data: None,
     }

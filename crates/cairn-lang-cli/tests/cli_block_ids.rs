@@ -11,7 +11,7 @@
 use std::process::Command;
 
 mod common;
-use common::{Fixture, cargo_bin, compile_as};
+use common::{Fixture, cairn_argv, cargo_bin, compile_as};
 
 /// A struct with one painted floor whose material comes from `slot floor`.
 /// `{id}` is what the theme binds, so each test names exactly the id it is
@@ -301,40 +301,151 @@ fn a_walkway_path_id_is_checked_too() {
     );
 }
 
-/// A theme selector binding's value reaches the check by a third route.
+/// A theme selector binding's value is not an id anything checks.
 ///
-/// Nothing lowers the binding, so no voxel of it is written either way;
-/// what the refusal stops is a misspelled block id accepted at exit 0 on
-/// a line the build never reads. The row warns `W_IGNORED_ARGUMENT`
-/// whatever its value, and the control below is what shows the refusal
-/// is about the id rather than about the row.
+/// Selector bindings are reserved: no lowering reads one, and what a key
+/// like `frame=` would paint is not specified, so there is no block for
+/// the value to name yet. The row is reported as `W_IGNORED_ARGUMENT`
+/// whatever its value, and a value the target lacks does not turn text the
+/// build never reads into a refused build. The slot tests above are the
+/// control: the same id on a `slot` is still `E_UNKNOWN_ID`.
 #[test]
-fn a_theme_selector_binding_id_is_checked_too() {
+fn a_theme_selector_binding_id_does_not_refuse_the_build() {
     let fixture = Fixture::new(
         "cairn-block-ids",
         "selector",
         &window_bound_to("totally_not_a_block"),
     );
     let out = compile_as(&fixture, "java", "1.21.4");
-    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
-    let stderr = stderr_of(&out);
-    assert!(
-        stderr.contains("E_UNKNOWN_ID") && stderr.contains("minecraft:totally_not_a_block"),
-        "expected the binding's id to be refused, got: {stderr}",
-    );
-
-    let ok = Fixture::new(
-        "cairn-block-ids",
-        "selector-ok",
-        &window_bound_to("spruce_wood"),
-    );
-    let out = compile_as(&ok, "java", "1.21.4");
     let stderr = stderr_of(&out);
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
     assert!(
         stderr.contains("W_IGNORED_ARGUMENT") && !stderr.contains("E_UNKNOWN_ID"),
-        "a real block is not refused, and the row still says it does nothing: {stderr}",
+        "the row says it does nothing, and nothing judges its value: {stderr}",
     );
+    assert!(
+        fixture
+            .artifacts()
+            .iter()
+            .any(|name| std::path::Path::new(name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("nbt"))),
+        "the structure is written: {:?}",
+        fixture.artifacts(),
+    );
+}
+
+/// A binding in a `def` nothing places, beside a `mat_slot=` naming a slot
+/// whose block the target lacks.
+///
+/// The slot's value would decide a block if the window ever lowered, and it
+/// is silent because the def is never placed. The binding decides no block
+/// in any case, so it may not be the louder of the two: pinned `check`
+/// reports the row and the unused def as warnings and exits 0.
+#[test]
+fn a_binding_in_a_def_nothing_places_is_not_an_error() {
+    let fixture = Fixture::new(
+        "cairn-block-ids",
+        "unplaced-def",
+        "theme medieval:\n  slot glass -> @glass_pane\n  slot bad   -> @no_such_slot_block\n  \
+         window[class=small] -> frame=@no_such_binding_block\n\n\
+         def shed size=9x7:\n  \
+         window class=small side=front offset=2 y=2 size=2x2 mat_slot=bad\n\n\
+         struct cottage size=9x7\n  floor mat_slot=glass\n",
+    );
+    let source = fixture.source();
+    let out = cairn_argv(&[
+        "check",
+        source.to_str().expect("utf-8 path"),
+        "--edition",
+        "java",
+        "--target",
+        "1.21.4",
+    ]);
+    let stderr = stderr_of(&out);
+    assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
+    assert!(
+        stderr.contains("W_IGNORED_ARGUMENT") && stderr.contains("W_UNUSED_DEF"),
+        "both warnings are still said: {stderr}",
+    );
+    assert!(
+        !stderr.contains("no_such_binding_block"),
+        "the binding's value is judged by nothing: {stderr}",
+    );
+}
+
+/// The `buildable targets:` row `cairn info` prints for `source`.
+fn buildable_row(fixture: &Fixture) -> String {
+    let source = fixture.source();
+    let out = cairn_argv(&["info", source.to_str().expect("utf-8 path")]);
+    let stdout = String::from_utf8(out.stdout.clone()).expect("utf-8 stdout");
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stdout: {stdout}\nstderr: {}",
+        stderr_of(&out),
+    );
+    stdout
+        .lines()
+        .find(|line| line.starts_with("buildable targets:"))
+        .unwrap_or_else(|| panic!("the row is printed: {stdout}"))
+        .to_owned()
+}
+
+/// `cairn info` weighs every version by lowering against it, so a binding
+/// id the lowering refused took every version out of `buildable targets`.
+/// A binding builds nothing, so the row is exactly what the same source
+/// without the binding row gets.
+#[test]
+fn a_bad_binding_id_leaves_every_target_buildable() {
+    let with = Fixture::new(
+        "cairn-block-ids",
+        "info-binding",
+        &window_bound_to("totally_not_a_block"),
+    );
+    let without = Fixture::new(
+        "cairn-block-ids",
+        "info-no-binding",
+        &window_bound_to("totally_not_a_block")
+            .replace("  window[class=small] -> frame=@totally_not_a_block\n", ""),
+    );
+    let (with, without) = (buildable_row(&with), buildable_row(&without));
+    assert!(
+        !without.contains("none"),
+        "the control has buildable targets in both editions: {without}",
+    );
+    assert_eq!(with, without);
+}
+
+/// A misspelled abstract token in a binding, which is the shape that was
+/// judged with no pin at all. Unpinned `check`, pinned `check` and `info`
+/// have to agree on it, so a CI gating on the unpinned command does not
+/// pass a file a later command refuses.
+#[test]
+fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
+    let fixture = Fixture::new(
+        "cairn-block-ids",
+        "cobbl",
+        "theme medieval:\n  slot wall -> @wall.stone.cobble\n  \
+         walls[class=outer] -> trim=@wall.stone.cobbl\n\n\
+         struct cottage size=9x7\n  walls class=outer mat_slot=wall height=3\n",
+    );
+    let source = fixture.source();
+    let source = source.to_str().expect("utf-8 path");
+    let runs: [&[&str]; 3] = [
+        &["check", source, "--edition", "java"],
+        &["check", source, "--edition", "java", "--target", "1.21.4"],
+        &["info", source],
+    ];
+    for argv in runs {
+        let out = cairn_argv(argv);
+        let stderr = stderr_of(&out);
+        assert_eq!(out.status.code(), Some(0), "{argv:?}: {stderr}");
+        assert!(
+            !stderr.contains("E_UNKNOWN_ABSTRACT_TOKEN"),
+            "{argv:?} judged the binding's token: {stderr}",
+        );
+    }
 }
 
 /// The README's cottage window with a theme selector row binding

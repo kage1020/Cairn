@@ -90,7 +90,11 @@ pub struct SelectorMatch {
     /// `key=value` bindings on the RHS of the arrow.
     pub bindings: IndexMap<String, ValueWithSpan>,
     /// Byte ranges of every member this selector matched. Empty after
-    /// `resolve()` means the selector never bound — `E_THEME_SELECTOR_UNMATCHED`.
+    /// `resolve()` means the selector matched no member. That is
+    /// `E_THEME_SELECTOR_UNMATCHED` only when some scope applied the theme
+    /// and the keyword is known: a theme no scope applies is matched
+    /// against nothing, and an unknown keyword already has
+    /// `E_UNKNOWN_KEYWORD`.
     #[serde(skip)]
     pub matched_member_spans: Vec<Span>,
     /// Byte range of the originating `KEYWORD[...] -> ...` row in source.

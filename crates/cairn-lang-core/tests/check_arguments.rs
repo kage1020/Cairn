@@ -23,13 +23,20 @@ fn only(source: &str) -> Diagnostic {
     diags.into_iter().next().expect("length checked above")
 }
 
-/// The one finding `source` raises with `code`, or a panic naming every
-/// finding it raised.
+/// The one finding `source` raises with `code`, beside exactly `total`
+/// findings in all, or a panic naming every finding it raised.
 ///
 /// For a source whose theme selector row earns its own
-/// `W_IGNORED_ARGUMENT` beside the finding under test.
-fn only_with_code(source: &str, code: &str) -> Diagnostic {
+/// `W_IGNORED_ARGUMENT` beside the finding under test. The total is
+/// asserted too, so a finding added or lost around the one under test
+/// still fails; each caller names what makes up the rest.
+fn only_with_code(source: &str, code: &str, total: usize) -> Diagnostic {
     let diags = diagnose(source);
+    assert_eq!(
+        diags.len(),
+        total,
+        "expected {total} findings in all, got {diags:#?}"
+    );
     let mut found = diags.iter().filter(|d| d.code.as_str() == code);
     match (found.next(), found.next()) {
         (Some(d), None) => d.clone(),
@@ -178,7 +185,8 @@ fn a_selector_widens_one_keyword_and_not_the_others() {
                struct s size=9x7\n  \
                window tags=[a,b] side=front offset=2 y=2 size=2x2 mat_slot=glass\n  \
                door side=front at=center tags=[a,b]\n";
-    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT");
+    // Beside it, only the row's binding.
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
     assert!(d.primary.contains("`door`"), "got: {}", d.primary);
 }
 
@@ -431,7 +439,8 @@ fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
     // saw was the `W_DEFERRED_MEMBER` about the `height=` that is now
     // absent. That is the failure this whole pass exists to end.
     let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hieght=3] -> frame=@spruce_wood\n\nstruct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
-    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT");
+    // Beside it, only the row's binding.
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
     assert!(
         notes(&d).contains("did you mean `height`?"),
         "got: {}",
@@ -451,7 +460,8 @@ fn a_widened_key_appears_once_in_the_closed_set() {
     // A key can be both in the role's vocabulary and selected on. A closed
     // set naming one word twice reads as two different things.
     let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=slit] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=1x2 shape=slit mat_slot=glass zzz=1\n";
-    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT");
+    // Beside it, the row's binding and the unread `shape=slit`.
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 3);
     let listed = notes(&d);
     let line = listed
         .lines()
@@ -771,8 +781,16 @@ fn a_theme_selector_binding_is_reported_as_ignored() {
         "got: {}",
         d.primary,
     );
-    // The repair names where a block does come from.
-    assert!(notes(&d).contains("`mat_slot=`"), "got: {}", notes(&d));
+    // The note makes no claim about which members the row selects or where
+    // their blocks come from — it is printed on a row that matched nothing
+    // too, and a `door` has no block at all — and its repair covers the
+    // whole row as well as the one binding.
+    assert_eq!(
+        notes(&d),
+        "the build is the same with this binding or without it; delete it, or the whole row \
+         if it binds nothing else, or keep it and expect no effect until selector bindings \
+         are lowered",
+    );
 }
 
 #[test]
@@ -797,6 +815,25 @@ fn a_row_that_matches_nothing_is_reported_for_its_binding_too() {
                struct s size=9x7\n  \
                window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
     assert_eq!(ignored_at(src), ["@spruce_wood"]);
+}
+
+#[test]
+fn a_binding_in_a_theme_no_scope_applies_is_reported_too() {
+    // Two themes and no `theme=` on the struct: neither is applied, so the
+    // resolver matches neither theme's rows and `E_THEME_SELECTOR_UNMATCHED`
+    // stays quiet. The binding is still text the build never reads, and it
+    // is reported from the rows themselves, applied or not.
+    let src = "theme a:\n  slot glass -> @glass_pane\n  \
+               window[class=small] -> frame=@no_such_block\n\n\
+               theme b:\n  slot glass -> @glass_pane\n\n\
+               struct s size=9x7\n  \
+               window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    assert_eq!(
+        ignored_at(src),
+        ["@no_such_block"],
+        "got {:#?}",
+        diagnose(src)
+    );
 }
 
 #[test]

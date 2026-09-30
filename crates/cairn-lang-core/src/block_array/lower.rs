@@ -163,8 +163,6 @@ pub fn lower_to_block_array(
     let mut structures: IndexMap<String, BlockArray> = IndexMap::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
 
-    check_selector_binding_ids(resolution, registry, &mut diagnostics);
-
     for s in &intent.structs {
         let key = format!("struct::{}", s.name);
         let scope = resolution.scopes.get(&key);
@@ -253,59 +251,6 @@ pub fn lower_to_block_array(
             .collect(),
         walkways,
         diagnostics,
-    }
-}
-
-/// Resolve every theme selector binding a member picked up, the way a
-/// `mat_slot=` value is resolved, and report the ones the target does not
-/// have.
-///
-/// No lowering rule paints a selector binding yet — `check::arguments`
-/// warns `W_IGNORED_ARGUMENT` on each one — so nothing here builds a
-/// voxel. The value is still the author's claim about a block, and a
-/// `frame=@no_such_block` accepted at a pinned `--target` would be a
-/// misspelling nothing ever reports, which is the silence
-/// `spec/lint` "Error vs warning" forbids.
-///
-/// Only rows that matched a member are judged, which is when a `mat_slot=`
-/// value is: the resolver matches selectors of the theme a scope applied
-/// and no other, so an edition variant the pin did not pick is left alone,
-/// and a row that matched nothing already has `E_THEME_SELECTOR_UNMATCHED`.
-/// The rows are read rather than a member's merged bindings because the
-/// merge keeps the last row's value for a key, and an earlier row's
-/// misspelling would be dropped by it unread.
-///
-/// Two outcomes stay quiet on purpose. A declared abstract token with no
-/// pack to lower it through is not a claim the target can refute, and the
-/// `W_ABSTRACT_TOKEN_DEFERRED` a slot gets would say the cell falls back to
-/// air when no cell reads it. A value that is not a token at all is not an
-/// id, and the binding's `W_IGNORED_ARGUMENT` already names the line.
-fn check_selector_binding_ids(
-    resolution: &Resolution,
-    registry: Option<&dyn TargetRegistry>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let values = resolution
-        .themes
-        .values()
-        .flat_map(|theme| &theme.selectors)
-        .filter(|row| !row.matched_member_spans.is_empty())
-        .flat_map(|row| row.bindings.values());
-    for value in values {
-        match resolve_block_state(value, registry) {
-            Err(MaterialDeferred::UnknownId(unknown)) => {
-                diagnostics.push(diag_unknown_id(value.span.clone(), &unknown));
-            }
-            Err(MaterialDeferred::UnknownAbstract { token, suggestion }) => {
-                diagnostics.push(diag_unknown_abstract_token(
-                    value.span.clone(),
-                    &token,
-                    suggestion.as_deref(),
-                    TokenSite::MemberSlot,
-                ));
-            }
-            Ok(_) | Err(MaterialDeferred::Abstract(_) | MaterialDeferred::AlreadyDiagnosed) => {}
-        }
     }
 }
 
@@ -5198,98 +5143,6 @@ mod tests {
         assert!(
             note.contains("spells the nearest block") && !note.contains("alias table"),
             "a distance guess must not be dressed up as the pack's word, got: {note}",
-        );
-    }
-
-    /// One `window` the rows in `rows` may select, under a theme whose only
-    /// slot is the window's glass.
-    fn window_under(rows: &str) -> String {
-        format!(
-            "theme t:\n  slot glass -> @glass_pane\n{rows}\n\
-             struct s size=9x7\n  \
-             window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n"
-        )
-    }
-
-    /// The source text each `code` finding in `out` points at.
-    fn spans_of<'a>(out: &BlockArrayIr, code: DiagnosticCode, source: &'a str) -> Vec<&'a str> {
-        out.diagnostics
-            .iter()
-            .filter(|d| d.code == code)
-            .map(|d| &source[d.span.clone()])
-            .collect()
-    }
-
-    /// A theme selector binding's value is checked against the pinned
-    /// target the way a slot's is, although nothing lowers the binding:
-    /// `frame=@no_such_block` compiled at exit 0 before.
-    #[test]
-    fn a_selector_binding_id_the_target_lacks_is_refused() {
-        let pinned =
-            PinnedRegistry::new(vec![], &["minecraft:glass_pane", "minecraft:spruce_wood"]);
-        let bogus = window_under("  window[class=small] -> frame=@no_such_block\n");
-        let out = lowered_with_resolver(&bogus, &pinned);
-        assert_eq!(
-            spans_of(&out, DiagnosticCode::UnknownId, &bogus),
-            ["@no_such_block"],
-        );
-        assert_eq!(unknown_id_payload(&out).id, "minecraft:no_such_block");
-
-        // The same row naming a block the target has is not refused, or the
-        // half above would pass on any source that fails.
-        let real = window_under("  window[class=small] -> frame=@spruce_wood\n");
-        let out = lowered_with_resolver(&real, &pinned);
-        assert_eq!(
-            spans_of(&out, DiagnosticCode::UnknownId, &real),
-            Vec::<&str>::new(),
-        );
-    }
-
-    /// Every matched row is judged, not only the value that survived the
-    /// merge into a member's `selector_extras`: a later row binding the
-    /// same key keeps its own value there, and the earlier misspelling
-    /// would otherwise never be read.
-    #[test]
-    fn a_selector_binding_a_later_row_overrides_is_still_judged() {
-        let pinned =
-            PinnedRegistry::new(vec![], &["minecraft:glass_pane", "minecraft:spruce_wood"]);
-        let src = window_under(
-            "  window[class=small] -> frame=@no_such_block\n  \
-             window[side=front] -> frame=@spruce_wood\n",
-        );
-        let out = lowered_with_resolver(&src, &pinned);
-        assert_eq!(
-            spans_of(&out, DiagnosticCode::UnknownId, &src),
-            ["@no_such_block"],
-        );
-    }
-
-    /// A row that matched no member is judged the way a slot no member
-    /// reads is — not at all. It already has `E_THEME_SELECTOR_UNMATCHED`.
-    #[test]
-    fn a_selector_binding_on_a_row_that_matched_nothing_is_not_judged() {
-        let pinned = PinnedRegistry::new(vec![], &["minecraft:glass_pane"]);
-        let src = window_under("  window[class=big] -> frame=@no_such_block\n");
-        let out = lowered_with_resolver(&src, &pinned);
-        assert_eq!(
-            spans_of(&out, DiagnosticCode::UnknownId, &src),
-            Vec::<&str>::new(),
-        );
-    }
-
-    /// An abstract token the pack's catalog does not declare is refused on a
-    /// binding as it is on a slot, with the same suggestion.
-    #[test]
-    fn a_selector_binding_token_the_catalog_lacks_is_refused() {
-        let pinned = PinnedRegistry::new(
-            vec![("frame.wood.spruce", "spruce_wood")],
-            &["minecraft:glass_pane", "minecraft:spruce_wood"],
-        );
-        let src = window_under("  window[class=small] -> frame=@frame.wood.sprce\n");
-        let out = lowered_with_resolver(&src, &pinned);
-        assert_eq!(
-            spans_of(&out, DiagnosticCode::UnknownAbstractToken, &src),
-            ["@frame.wood.sprce"],
         );
     }
 

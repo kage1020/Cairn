@@ -455,20 +455,24 @@
   selector made something read it.
 
   `spec/materials-themes` now says selector bindings are reserved: which keys a row may bind, and
-  what each paints, is not specified, and no lowering reads one. Until it is, every binding is
-  reported as an unreached key, whatever its key or value:
+  what each paints, is not specified, and no lowering reads one. Until it is, each binding on a row
+  whose keyword the compiler knows is reported as an unreached key, whatever its key or value, and
+  whether or not the row matched or its theme was applied. A row with an unknown keyword gets
+  `E_UNKNOWN_KEYWORD` alone. For a file `window.crn` whose third line is that row:
 
   ```
-  cottage.crn:12:32: warning[W_IGNORED_ARGUMENT]: `frame=` is bound by a theme selector on `window`, and no pass lowers a selector's bindings yet; the value was ignored
-    note: every `window` this row matches is built without it — a member's block comes from its `mat_slot=` and the theme's `slot` rows, so remove the binding, or keep it and expect no effect until selector bindings are lowered
+  window.crn:3:32: warning[W_IGNORED_ARGUMENT]: `frame=` is bound by a theme selector on `window`, and no pass lowers a selector's bindings yet; the value was ignored
+    note: the build is the same with this binding or without it; delete it, or the whole row if it binds nothing else, or keep it and expect no effect until selector bindings are lowered
   ```
 
-  A binding on a row that matched a member is resolved like a slot's value, so at a pinned
-  `--target` a block the target lacks is `E_UNKNOWN_ID` and an undeclared abstract token is
-  `E_UNKNOWN_ABSTRACT_TOKEN`. Every matched row is judged, including one whose key a later row
-  binds again. A member's unread key (`window shape=`) and a key its sibling argument routed past
+  A binding's value is not resolved as a block, because what the key would paint is not specified:
+  `frame=@no_such_block` gets exactly that warning, with or without `--target`, and no binding
+  makes `check`, `compile` or `info` exit 1 or takes a version out of `info`'s buildable targets.
+  A member's unread key (`window shape=`) and a key its sibling argument routed past
   (`roof kind=gable slope_to=`) are reported whether or not a theme selects on them, since the match
-  builds nothing. The row is gone from the opening example until a binding has an effect.
+  builds nothing. `E_DUPLICATE_SELECTOR`'s note no longer says a member reads the later row's
+  binding; it says the merge keeps it and that neither value is built. The row is gone from the
+  opening example until a binding has an effect.
 
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
