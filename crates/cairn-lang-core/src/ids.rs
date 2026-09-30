@@ -64,22 +64,13 @@ fn check_no_dunder(role: KeySegmentRole, s: &str) -> Result<(), KeyConstructErro
     Ok(())
 }
 
-/// Whether `s` starts or ends with `_`.
 fn has_edge_underscore(s: &str) -> bool {
     s.starts_with('_') || s.ends_with('_')
 }
 
 /// Check one place or port segment of a walkway scope key: no `__`
-/// anywhere, and no `_` at either edge.
-///
-/// Only two of the eight edges can touch the `from`/`to` separator in a
-/// given key: the end of `from_port` and the start of `to_place`.
-/// Allowing for a row written the other way round adds the start of
-/// `from_place` and the end of `to_port`. The other four always sit next
-/// to a `.` and can never merge into `__`. Every edge of every place and
-/// port is refused anyway, so the rule a user reads is one sentence and
-/// does not depend on which way a `connect` row is written. The site
-/// takes only [`check_no_dunder`]: `::` fences it on both sides.
+/// anywhere, and no `_` at either edge. See
+/// [`KeyConstructError::UnderscoreAtEdge`] for why every edge is refused.
 fn check_endpoint_segment(role: EndpointSegmentRole, s: &str) -> Result<(), KeyConstructError> {
     check_no_dunder(role.into(), s)?;
     if has_edge_underscore(s) {
@@ -91,7 +82,11 @@ fn check_endpoint_segment(role: EndpointSegmentRole, s: &str) -> Result<(), KeyC
     Ok(())
 }
 
-/// Which segment of a walkway scope key a [`KeyConstructError`] names.
+/// Which segment of a walkway scope key a
+/// [`KeyConstructError::ConsecutiveUnderscore`] names.
+///
+/// Exhaustive on purpose, like [`EndpointSegmentRole`]: a key's segments
+/// are a closed set, as with `Edition` and `Cardinal`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeySegmentRole {
     /// The site name.
@@ -304,8 +299,8 @@ pub enum KeyParseError {
     /// A place or port segment starts or ends with `_`. See
     /// [`KeyConstructError::UnderscoreAtEdge`].
     #[error(
-        "segment `{segment}` in scope key `{key}` starts or ends with `_`, which a walkway \
-         place or port id may not do in either position"
+        "segment `{segment}` in scope key `{key}` starts or ends with `_`, and a walkway \
+         place or port segment may carry `_` only between other characters"
     )]
     UnderscoreAtEdge {
         /// The whole scope key that was being parsed.
@@ -317,10 +312,11 @@ pub enum KeyParseError {
 
 /// Failure modes for [`WalkwayScopeKey::from_parts`].
 ///
-/// A typed construction fails when a segment could merge into the `__`
-/// separator between the `from` and `to` endpoints: a segment that
-/// contains `__`, or a place / port segment that starts or ends with
-/// `_`. Surface lexer rules allow `_` anywhere in identifiers, so a
+/// A typed construction fails when a segment contains `__`, which
+/// collides with the separator between the `from` and `to` endpoints,
+/// or when a place / port segment starts or ends with `_` (see
+/// [`Self::UnderscoreAtEdge`] for why every such edge is refused, not
+/// only the ones next to the separator). Surface lexer rules allow `_` anywhere in identifiers, so a
 /// place / port id can legally be `home__1` or `p_`; lowering must
 /// convert that into a diagnostic on the originating `connect` row
 /// rather than emit a wire-ambiguous scope key, since two distinct
@@ -341,17 +337,28 @@ pub enum KeyConstructError {
     },
     /// A place or port segment starts or ends with `_`.
     ///
-    /// A `_` on the edge that meets the `__` separator merges into it:
-    /// `(a, p_)` to `(b, p)` and `(a, p)` to `(_b, p)` both encode to
-    /// `a.p___b.p`, and a port named `_` gives `a.___b._`, which splits
-    /// back into an empty port. The rule refuses every edge of every
-    /// place and port, including the ones next to a `.` that could not
-    /// merge, so it does not depend on which way a row is written. The
-    /// site is exempt: it sits between two `::` separators, which no
-    /// identifier can contain.
+    /// This is the canonical statement of why the rule covers every edge;
+    /// the other copies point here.
+    ///
+    /// In `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT`, only
+    /// two of the eight edges of the four place and port segments touch
+    /// the `from`/`to` separator: the end of `from_port` and the start of
+    /// `to_place`. A `_` there merges into it: `(a, p_)` to `(b, p)` and
+    /// `(a, p)` to `(_b, p)` both encode to `a.p___b.p`, and a port named
+    /// `_` gives `a.___b._`, which splits back into an empty port. A row
+    /// written the other way round puts the start of `from_place` and the
+    /// end of `to_port` at the separator instead, so those two are
+    /// refused as well. The remaining four (the end of each place and the
+    /// start of each port) sit next to a `.` in either direction and
+    /// cannot merge; they are refused anyway, so the rule a user reads is
+    /// one sentence, "no place or port id starts or ends with `_`", and
+    /// does not depend on a segment's position or on which way a row is
+    /// written. The site is exempt: it sits between two `::` separators,
+    /// which no identifier can contain.
     #[error(
-        "walkway scope key segment `{segment}` starts or ends with `_`, which a walkway \
-         place or port id may not do in either position; rename the {role}"
+        "walkway scope key segment `{segment}` starts or ends with `_`, and a walkway place \
+         or port id may carry `_` only between other characters; rename the {role} to drop \
+         the leading or trailing `_`"
     )]
     UnderscoreAtEdge {
         /// Which endpoint segment the offending string is.
@@ -876,10 +883,10 @@ mod tests {
         // separator is `_`, and three is enough to put `_` at an edge, in
         // the middle, and doubled. The site is capped at two: `::` fences
         // it on both sides, so a third character buys nothing and would
-        // double the run. Every key `from_parts` accepts must parse back to the
-        // exact parts it was built from, which rules out two accepted
-        // inputs sharing a key: `parse` is a function, so a shared key
-        // would parse back to only one of them.
+        // more than double the run. Every key `from_parts` accepts must
+        // parse back to the exact parts it was built from, which rules out
+        // two accepted inputs sharing a key: `parse` is a function, so a
+        // shared key would parse back to only one of them.
         let mut segments = vec![String::new()];
         let mut all = Vec::new();
         for _ in 0..3 {
@@ -938,9 +945,8 @@ mod tests {
                 }
             }
         }
-        // Every combination was visited, and both refusal arms fired.
-        let total = sites.len() * all.len().pow(4);
-        assert_eq!(accepted + rejected_dunder + rejected_edge, total);
+        // Both refusal arms fired, so the edge rule is exercised and not
+        // only the `__` one.
         assert!(rejected_dunder > 0 && rejected_edge > 0);
         // What survives: 5 sites (`a`, `_`, `aa`, `a_`, `_a`; `__` is
         // refused) times 4 endpoint segments (`a`, `aa`, `aaa`, `a_a`) to

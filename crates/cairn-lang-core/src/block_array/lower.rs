@@ -667,14 +667,35 @@ fn lower_connects(
         // `from_parts` refuses every id that could alias another row's key
         // (`W_INVALID_WALKWAY_IDENT` above), so a replaced entry here means
         // that rule has a hole: the earlier row's walkway would vanish from
-        // the build with no finding. The `insert` is bound first because a
-        // `debug_assert!` around it would drop the insert in release builds.
+        // the build. The `insert` is bound first because a `debug_assert!`
+        // around it would drop the insert in release builds, and a release
+        // build still reports the loss, as `W_WALKWAY_BLOCKED` does above.
         let replaced = structures.insert(scope_key.as_str().to_owned(), array);
         debug_assert!(
             replaced.is_none(),
             "walkway `{scope_key}` replaced an existing structure; two `connect` rows \
              encoded to one scope key",
         );
+        if replaced.is_some() {
+            diagnostics.push(Diagnostic {
+                code: DiagnosticCode::InvalidWalkwayIdent,
+                span: connect.span.clone(),
+                primary: format!(
+                    "walkway `{from} ↔ {to}` encodes to the scope key `{scope_key}` of an \
+                     earlier `connect` row, whose walkway it replaced",
+                    from = connect.from,
+                    to = connect.to,
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message: "two different endpoint pairs must never share a scope key, so \
+                              this is a compiler bug; rename a place or port on one of the two \
+                              rows to keep both walkways"
+                        .to_owned(),
+                }],
+                data: None,
+            });
+        }
         walkways.insert(
             scope_key,
             Walkway {

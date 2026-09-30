@@ -1123,9 +1123,9 @@
 
 ### Breaking changes
 
-- *(core)* Two `connect` rows could lay one walkway between them. A place or port id that starts
-  or ends with `_` merges into the `__` that joins a walkway scope key's two ends, so these rows
-  both encoded to `walkway::s::a.p___b.p`:
+- *(core)* Two `connect` rows could lay one walkway between them. A `_` at the end of the `from`
+  port or at the start of the `to` place merges into the `__` that joins a walkway scope key's two
+  ends, so these rows both encoded to `walkway::s::a.p___b.p`:
 
   ```
   connect a.p_ to b.p path=@gravel
@@ -1146,13 +1146,26 @@
     note: a walkway's place and port ids may not start or end with `_` in either position, so the rule does not depend on which way the row is written; rename the place so it neither starts nor ends with `_`
   ```
 
-  Both ends of every place and port are refused, not only the two that touch the separator, so the
-  rule does not depend on which way a row is written. That reaches ids which never aliased: a
+  Both ends of every place and port are refused. A row written either way round can put the start
+  of a place or the end of a port at the separator; the other four edges sit next to a `.` and
+  cannot merge, and are refused so the rule stays one sentence (`KeyConstructError::UnderscoreAtEdge`
+  gives the full argument). That reaches ids which never aliased: a
   source whose only edge-`_` id is `place id=a_` in `connect a_.p to b.p` used to lay that walkway,
   and now drops it with the warning above while `compile` still exits 0. The site is exempt: `::`
   separates it from both neighbours. A unit test builds every key over endpoint segments of `a` and
   `_` up to three long and sites up to two, and parses each accepted one back to the parts it came
-  from. `spec/lint` "Connections and walkways" states the rule, with the ja mirror.
+  from. If two rows ever do encode to one key, a debug build asserts, and a release build reports
+  `W_INVALID_WALKWAY_IDENT` on the later row instead of losing the earlier walkway silently.
+  `spec/lint` "Connections and walkways" states the rule and why it covers every edge, with the
+  ja mirror.
+
+  The `__` finding's text changes too. It used to read ``contains `__`, which collides with the
+  walkway scope key's `from`/`to` separator``, with the note ``rename the offending id (e.g.
+  replace `__` with `_`) so the lowered walkway scope key is unambiguous``. It now reads ``contains
+  `__`, the separator between the walkway scope key's `from` and `to` halves``, and the note names
+  the role: ``a walkway's site, place and port ids may not contain `__`, so no id can be mistaken
+  for the separator; rename the port so it has no `__`, e.g. by replacing `__` with `_` ``.
+  `spec/compatibility` puts diagnostic prose in Evolving, so this is listed rather than deprecated.
 
   **Breaking**: `KeyConstructError` and `KeyParseError` each gain an `UnderscoreAtEdge` variant,
   and `KeyConstructError::ConsecutiveUnderscore`'s `role` changes from `&'static str` to the new
