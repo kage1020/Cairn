@@ -333,11 +333,11 @@ enum SynthStage {
     /// [`cairn_lang_redstone::BUFFER_REPEATER_TICKS`] contribution
     /// implied by each driving net's segment beyond
     /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`]; refuses with
-    /// `E_ATTENUATION_LIMIT` when a segment exceeds the v1 sanity cap
-    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], past which the
-    /// buffer chain a segment needs is longer than v1 will build, or
-    /// when a stretch of dust past the limit has no coord a repeater
-    /// can stand on.
+    /// `E_ATTENUATION_LIMIT` when a segment's routed length exceeds
+    /// the v1 sanity cap
+    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], or when a
+    /// stretch of dust past the limit has no coord a repeater can stand
+    /// on.
     Delay,
     /// Legalized Placement IR: crossing legalization over the delayed
     /// Placement IR against `--edition`. Stage 4 of the pipeline
@@ -354,6 +354,10 @@ enum SynthStage {
     /// routed around the dust of the nets before it and around the
     /// coords beside that dust, so a scope that reaches this stage has
     /// no short to find and no coord for a repeater to contest.
+    ///
+    /// Refuses with `E_ATTENUATION_LIMIT`, as stage 3 does, when a
+    /// stretch of dust past the limit has no coord a repeater can stand
+    /// on — which an IR handed straight to this stage can still carry.
     ///
     /// A scope with nothing to legalize emits no `buffer_coords` at all
     /// (the empty vector serde-skips); the

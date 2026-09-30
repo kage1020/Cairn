@@ -366,7 +366,7 @@ struct chain size=40x5
     // the first buffer arrives at i = 7 and the second at i = 14.
     // Values are hardcoded per index (not derived from the formula the
     // implementation itself uses) so a self-referential off-by-one in
-    // `buffer_repeater_ticks_for_segment` cannot slide past the test.
+    // the buffer count cannot slide past the test.
     assert_eq!(entry.ir.cells.len(), 16);
     let expected: [u32; 16] = [
         1, 1, 1, 1, 1, 1, 1, // i = 0..=6, segment ≤ 15

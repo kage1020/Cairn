@@ -421,7 +421,8 @@ impl Nets {
     }
 }
 
-/// Measure every cell and every actuator pad, then commit each figure
+/// Measure every cell and every actuator pad, each told its index in
+/// `ir.cells` or `ir.outputs` so a panic can name it, then commit each figure
 /// through `commit` with the identity a phase-transition panic names.
 ///
 /// Measured into a side vector first so `ir` is borrowed immutably while
@@ -432,16 +433,26 @@ impl Nets {
 pub(crate) fn attribute_nodes<T>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,
-    measure_cell: impl Fn(&PlacedCellNode) -> T,
-    measure_output: impl Fn(&PlacedOutputNode) -> T,
+    measure_cell: impl Fn(usize, &PlacedCellNode) -> T,
+    measure_output: impl Fn(usize, &PlacedOutputNode) -> T,
     commit: impl Fn(&mut PlacementPhase, T, CellIdentity<'_>),
 ) {
-    let cell_values: Vec<T> = ir.cells.iter().map(measure_cell).collect();
+    let cell_values: Vec<T> = ir
+        .cells
+        .iter()
+        .enumerate()
+        .map(|(index, cell)| measure_cell(index, cell))
+        .collect();
     for (index, (cell, value)) in ir.cells.iter_mut().zip(cell_values).enumerate() {
         let identity = CellIdentity::new(index, cell.coord, entry);
         commit(&mut cell.phase, value, identity);
     }
-    let output_values: Vec<T> = ir.outputs.iter().map(measure_output).collect();
+    let output_values: Vec<T> = ir
+        .outputs
+        .iter()
+        .enumerate()
+        .map(|(index, output)| measure_output(index, output))
+        .collect();
     for (index, (output, value)) in ir.outputs.iter_mut().zip(output_values).enumerate() {
         let identity = CellIdentity::output(index, output.pad, entry);
         commit(&mut output.phase, value, identity);

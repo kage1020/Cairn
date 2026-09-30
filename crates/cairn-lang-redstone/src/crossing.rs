@@ -11,16 +11,24 @@
 //! the dust of the nets before it and the coords beside that dust, so a
 //! scope that reaches this pass has no two signals on one strand. What
 //! is left is the crossing a *repeater* would make by standing on a
-//! coord it does not own, which the delay pass could not see because it
-//! counts repeaters before anything knows where they go.
+//! coord it does not own. The delay pass chose those coords off the
+//! same routed tree, and this pass reads them back.
 //!
 //! A repeater refreshes the dust it stands on, so each one stands on its
-//! net's routed tree, where `crate::delay::repeater_sites` put it — the
-//! set the delay pass charged ticks from. Each segment records the
-//! repeaters on `route_to`, the routed path from the net's source to
-//! *this* sink. A repeater is never contested: it is a coord of its own
-//! net's tree, strictly between the source and every sink, and stage 2
-//! gave that net its dust alone. Two segments of one net do pass the
+//! net's routed tree, where `crate::delay::repeater_sites` puts it. This
+//! pass builds its own set from the trees it rebuilt; it is the set the
+//! delay pass charged ticks from because that function is deterministic
+//! and nothing between the two stages moves a cell, not because one is
+//! handed to the other. Each segment records the repeaters on
+//! `route_to`, the routed path from the net's source to *this* sink.
+//!
+//! A repeater is never contested, and never stands on a cell body or a
+//! pad. A site needs a parent and exactly one child, so it is never the
+//! source and never a leaf; every terminal is a leaf, because
+//! `block_sites` makes cells and pads obstacles and `Router::tree` keeps
+//! each path's far end out of the coords a later path may leave from.
+//! So a site is dust of its own net, and stage 2 gave that net its dust
+//! alone. Two segments of one net do pass the
 //! same repeater (their routes share a prefix); both record it, because
 //! `buffer_coords` is an attribution list rather than a block list.
 //!
@@ -37,11 +45,8 @@
 //! delay-pass input did apart from the `stage` tag — which is why that
 //! tag exists (see [`crate::placement_ir::PlacementStage`]).
 
-use std::collections::HashMap;
-
-use crate::delay::{RepeaterSites, repeater_sites_of_scope};
+use crate::delay::{Fed, RepeaterSites, repeater_sites_of_scope};
 use crate::diagnostic::Diagnostic;
-use crate::netlist_ir::NetRef;
 use crate::pass::{
     OpenScope, Skipped, lay_nets, lower_scopes, missing_region_diagnostic, open_scope,
     source_of_net,
@@ -50,8 +55,6 @@ use crate::placement_ir::{
     BufferCoord, BufferSegment, CellIdentity, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::NetTree;
-
 /// Output of a [`compile_crossing`] run.
 ///
 /// Mirrors [`crate::delay::DelayOutput`]'s shape so callers see a
@@ -172,7 +175,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     // net's dust stands on, or one step from, another's. That is what
     // leaves this pass with a coord to record and no coord to contest.
     let sites = repeater_sites_of_scope(&ir, entry, "delayed", &region, &nets.trees)?;
-    let allocation = allocate_buffer_coords(&ir, &nets.trees, &sites);
+    let allocation = allocate_buffer_coords(&ir, &sites);
 
     for (index, (cell, buffers)) in ir.cells.iter_mut().zip(allocation.per_cell).enumerate() {
         // Loud in release too: `legalize_at` panics on any non-`Delayed`
@@ -193,25 +196,26 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
 /// then every actuator segment.
 ///
 /// Each segment records the repeaters of `sites` its routed path runs
-/// through — the set the delay pass charged ticks from — so stage 3
-/// and stage 4 describe one circuit. Split out of `legalize_scope` so
+/// through. `sites` is this pass's own, built as the delay pass built
+/// the one it charged ticks from, so stage 3 and stage 4 describe one
+/// circuit. Split out of `legalize_scope` so
 /// the entry function stays under clippy's `too_many_lines` budget and
 /// the allocation strategy reads as a self-contained table.
-fn allocate_buffer_coords(
-    ir: &PlacementIr,
-    trees: &HashMap<NetRef, NetTree>,
-    sites: &RepeaterSites,
-) -> BufferAllocation {
+fn allocate_buffer_coords(ir: &PlacementIr, sites: &RepeaterSites<'_>) -> BufferAllocation {
     let mut per_cell: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.cells.len());
     for (cell_index, cell) in ir.cells.iter().enumerate() {
         let mut buffers_for_cell: Vec<BufferCoord> = Vec::new();
         for driver in &cell.drivers {
-            // `along` panics on a sink that is not a terminal of the
-            // net, which `collect_nets` makes unreachable — it built
-            // the tree's terminal list out of this very driver list.
+            // `along` is `None` for a sink that is not a terminal of
+            // the net, which `collect_nets` makes unreachable — it
+            // built the tree's terminal list out of this very driver
+            // list.
             buffers_for_cell.extend(
                 sites
-                    .along(trees, driver.net, cell.coord)
+                    .along(driver.net, cell.coord)
+                    .unwrap_or_else(|| {
+                        Fed::Cell(cell_index).is_not_a_terminal(driver.net, cell.coord)
+                    })
                     .into_iter()
                     .map(|coord| BufferCoord::new(BufferSegment::Port(driver.port), coord)),
             );
@@ -246,7 +250,10 @@ fn allocate_buffer_coords(
     let mut per_output: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.outputs.len());
     for (output_index, output) in ir.outputs.iter().enumerate() {
         let buffers_for_output: Vec<BufferCoord> = sites
-            .along(trees, output.driver, output.pad)
+            .along(output.driver, output.pad)
+            .unwrap_or_else(|| {
+                Fed::Output(output_index).is_not_a_terminal(output.driver, output.pad)
+            })
             .into_iter()
             .map(|coord| BufferCoord::new(BufferSegment::Out, coord))
             .collect();
@@ -464,7 +471,7 @@ mod tests {
     /// straight line between them is 14 blocks and asks for no buffer
     /// repeater at all. A block at `(7,0,0)` sends the wire around it,
     /// and the two blocks that costs put the segment over the
-    /// attenuation limit: 16 blocks of dust, and a repeater 15 along.
+    /// attenuation limit: 16 blocks of dust, and one repeater on them.
     /// That gap between the straight line and the route is what every
     /// measurement in this pass has to be taken along.
     ///
@@ -1156,11 +1163,11 @@ mod tests {
     ///
     /// One placer walks the cells and then the actuator pads, so this
     /// is the only direction the two segment kinds can meet: the cell
-    /// takes the plane coord, and the pad's route reaches it 15 blocks
+    /// takes the plane coord, and the pad's route reaches it 14 blocks
     /// along as well. The reverse cannot happen, because no cell is
     /// allocated after an output.
     ///
-    /// The pad's route is longer than the cell's by more than the four
+    /// The pad's route is longer than the cell's by more than the 13
     /// blocks between them, because the cell is a block on the row and
     /// the wire out now steps around it — so the pad's segment asks for
     /// a second repeater of its own past the shared one.
@@ -1168,7 +1175,7 @@ mod tests {
     /// The route forks at `(15,0,0)`, into the cell and round it, so the
     /// shared repeater stands on the trunk one coord before the fork.
     /// The second stands at `(28,0,1)`, the last straight coord before
-    /// the wire turns down into the pad at `(29,0,1)`.
+    /// the wire turns at `(29,0,1)` into the pad at `(29,0,0)`.
     #[test]
     fn an_actuator_segment_records_the_repeater_a_cell_segment_placed() {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -1407,13 +1414,41 @@ mod tests {
     }
 
     /// Stage 4 refuses a stretch no repeater can stand on as stage 3
-    /// does, for an IR handed to it without stage 3 having run.
+    /// does, on the tree stage 2 laid.
+    ///
+    /// Stage 3 refuses the scope, so nothing hands stage 4 a delayed
+    /// staircase; the routed one is promoted by hand, which is the IR
+    /// `--stage crossing` would be given without stage 3 having run.
+    /// The two refusals agree word for word but for the netlist they
+    /// name.
     #[test]
     fn a_stretch_with_nowhere_for_a_repeater_is_refused() {
-        let legalized = compile_crossing(&staircase(&PlacementPhase::Delayed {
-            wire_length: 0,
-            local_delay_ticks: 0,
-        }));
+        let routed = compile_routing(&staircase(&PlacementPhase::Unrouted));
+        assert_eq!(routed.diagnostics, Vec::new(), "stage 2 lays the staircase");
+        let delayed = compile_delay(&routed.scoped);
+        let [stage_3] = delayed.diagnostics.as_slice() else {
+            panic!("stage 3 refuses once: {:?}", delayed.diagnostics);
+        };
+
+        let mut promoted = routed.scoped.clone();
+        for entry in &mut promoted.scopes {
+            let phases = entry
+                .ir
+                .cells
+                .iter_mut()
+                .map(|cell| &mut cell.phase)
+                .chain(entry.ir.outputs.iter_mut().map(|output| &mut output.phase));
+            for phase in phases {
+                let PlacementPhase::Routed { wire_length } = *phase else {
+                    panic!("stage 2 leaves every node routed: {phase:?}");
+                };
+                *phase = PlacementPhase::Delayed {
+                    wire_length,
+                    local_delay_ticks: 0,
+                };
+            }
+        }
+        let legalized = compile_crossing(&promoted);
         let codes: Vec<_> = legalized.diagnostics.iter().map(|d| d.code).collect();
         assert_eq!(codes, vec![DiagnosticCode::AttenuationLimit]);
         let primary = &legalized.diagnostics[0].primary;
@@ -1421,6 +1456,12 @@ mod tests {
             primary.contains("delayed netlist for struct `stairs` routes sig.a so that the signal leaving (0,0,0) runs out before (8,0,8)"),
             "the refusal names the net and the stretch, got {primary:?}",
         );
+        assert_eq!(
+            primary.replacen("delayed netlist", "routed netlist", 1),
+            stage_3.primary,
+            "stage 4 refuses the stretch stage 3 did",
+        );
+        assert_eq!(legalized.diagnostics[0].notes, stage_3.notes);
         let survivors: Vec<_> = legalized.scoped.scopes.iter().map(|e| &e.name).collect();
         assert_eq!(survivors, vec!["roomy"]);
     }
@@ -1804,8 +1845,11 @@ mod tests {
                                 .iter()
                                 .find(|d| d.port == port)
                                 .expect("every buffer names a driver of its own cell");
+                            // `Router::dust`, not `wire_path`: the
+                            // latter holds the terminals too, and would
+                            // accept a repeater standing on a cell body.
                             let dust: HashSet<CellCoord> =
-                                trees[&driver.net].wire_path().into_iter().collect();
+                                router.dust(&trees[&driver.net]).into_iter().collect();
                             // The whole coord, layer included. A
                             // repeater takes the layer of the route
                             // coord it stands on, so comparing
@@ -1843,7 +1887,7 @@ mod tests {
                             }
                             // And where the wire runs straight through
                             // it: one coord in, exactly one out, all
-                            // three on one line in one plane. Written
+                            // three on one line at one height. Written
                             // out here rather than through the
                             // placer's own check, so a placer that
                             // stopped asking it fails.
@@ -1871,6 +1915,40 @@ mod tests {
                                 buffer.coord,
                                 before,
                                 after,
+                                xs,
+                            );
+                            // And touching no dust of its net but the
+                            // two it joins. A repeater severs every face
+                            // but its front and back, so dust of the
+                            // same net beside it would be cut off even
+                            // where the tree does not link the two —
+                            // which is why this is asked of the grid,
+                            // not of the tree the placer walked.
+                            let c = buffer.coord;
+                            let beside: HashSet<CellCoord> = [
+                                (c.x.checked_sub(1), Some(c.y), Some(c.z)),
+                                (c.x.checked_add(1), Some(c.y), Some(c.z)),
+                                (Some(c.x), c.y.checked_sub(1), Some(c.z)),
+                                (Some(c.x), c.y.checked_add(1), Some(c.z)),
+                                (Some(c.x), Some(c.y), c.z.checked_sub(1)),
+                                (Some(c.x), Some(c.y), c.z.checked_add(1)),
+                            ]
+                            .into_iter()
+                            .filter_map(|(x, y, z)| Some(CellCoord::new(x?, y?, z?)))
+                            .filter(|n| dust.contains(n))
+                            .collect();
+                            // A terminal it joins is a block, not dust,
+                            // so it drops out of both sides.
+                            let joined: HashSet<CellCoord> = before
+                                .into_iter()
+                                .chain(after.iter().copied())
+                                .filter(|n| dust.contains(n))
+                                .collect();
+                            prop_assert_eq!(
+                                &beside,
+                                &joined,
+                                "buffer {:?} has dust of its own net beside it that it does not join (xs={:?})",
+                                buffer.coord,
                                 xs,
                             );
                         }

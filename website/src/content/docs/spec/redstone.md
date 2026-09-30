@@ -213,12 +213,13 @@ The internal algorithm runs five stages:
    `E_ATTENUATION_LIMIT` stage 2 raises — what differs is that this pass measures the wire that
    was actually laid.
 
-   A repeater reads the block behind it and drives the one in front of it, on its own layer, so it
-   stands only where the wire runs straight through a coordinate on one layer and nothing branches
-   off there. On a straight run that is every 15 blocks. Where that coordinate turns, climbs or
-   forks, the repeater stands on the last coordinate before it that runs straight, which can leave
-   a route one repeater more than its length alone implies. Before a fork, that coordinate is on
-   the trunk, so one block serves every branch past it. Repeaters are placed on each net's routed
+   A repeater reads the block behind it and drives the one in front of it, at its own height, so it
+   stands only where the wire runs straight through a coordinate at one height and nothing
+   branches off there. On a straight run that is every 15 blocks. Where that coordinate turns,
+   climbs or forks, the repeater stands on the last coordinate before it that runs straight, which
+   can leave a route one repeater more than its length alone implies. When the coordinate it steps
+   back from is a fork, the one it lands on is on the trunk, so one block serves every branch past
+   it; a fork further back than that gets a repeater on each branch. Repeaters are placed on each net's routed
    tree rather than per sink, and a sink is charged for the ones on its route. A stretch of dust
    past the limit with no coordinate a repeater can stand on is refused with
    `E_ATTENUATION_LIMIT`.
@@ -226,7 +227,8 @@ The internal algorithm runs five stages:
    wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
    path belongs to that net alone, and no other net runs within a step of it, so there is no
    short to lift and no coordinate to contest. It applies the straight-line cap as well, since it
-   lays nets of its own and a scope can reach it from a netlist an earlier stage handed over.
+   lays nets of its own and a scope can reach it from a netlist an earlier stage handed over, and
+   for the same reason it refuses a stretch of dust with nowhere for a repeater as stage 3 does.
 5. **Edition legalization.** See [§14.6](#146-edition-differences).
 
 Routing is confined to the `circuit` region. If it does not fit, the compiler fails loud. A sink
@@ -240,9 +242,13 @@ E_ROUTE_CONGESTION line 21 circuit=basement:
   Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks.
 ```
 
-`E_ATTENUATION_LIMIT` is the other refusal these passes raise. Stages 2, 3 and 4 all lay nets, and
-all three measure them against the same cap through one shared routine, so which stage refuses a
-scope depends only on which one reached it first. The primary names the netlist that pass read —
+`E_ATTENUATION_LIMIT` is the other refusal these passes raise, for three shapes. Stages 2, 3 and 4
+all lay nets, and all three test the straight line between a driver and its sink against the cap
+through one shared routine. Stage 3 also measures each routed segment against the cap. Stages 3
+and 4 both refuse a stretch of dust past the limit of 15 on which no coordinate can hold a
+repeater: each works out where the repeaters stand from the same routed tree, by the same rule,
+so the two agree on which stretch that is and the message names the node that goes dark. Which
+stage refuses a scope depends only on which one reached it first. The primary names the netlist that pass read —
 `placed` at stage 2, `routed` at stage 3, `delayed` at stage 4 — so the message says where in the
 pipeline the shape was measured.
 
