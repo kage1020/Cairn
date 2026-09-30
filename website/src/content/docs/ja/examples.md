@@ -12,7 +12,7 @@ description: 実際の .crn ファイル。言語面だけが画面に残るよ�
 
 | ファイル | 示すもの |
 |---|---|
-| [`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn) | 最小限の実用ビルド。`struct` / `theme` / スロット / 壁セレクタ。 |
+| [`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn) | 最小限の実用ビルド。`struct` / `theme` / スロット。 |
 | [`themed-tower.crn`](https://github.com/kage1020/Cairn/blob/main/examples/themed-tower.crn) | 抽象マテリアルトークン、階ごとの `level`、上書きによる intent 昇格。 |
 | [`redstone-door.crn`](https://github.com/kage1020/Cairn/blob/main/examples/redstone-door.crn) | 論理レッドストーン。信号バインディング、`circuit` 領域、アサーション。 |
 | [`village.crn`](https://github.com/kage1020/Cairn/blob/main/examples/village.crn) | `site` とトポロジカルな `connect` による複数建築。 |

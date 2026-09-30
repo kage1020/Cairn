@@ -27,7 +27,6 @@ theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
   slot glass -> @glass_pane
-  window[class=small] -> frame=@spruce_wood
 
 struct cottage size=9x7
   floor  mat_slot=floor
@@ -82,14 +81,14 @@ semantic-sensitive:      (none)
 - `cairn parse` / `check` / `info` / `lower` / `compile`
 - 単一のソースから Java `.nbt` と Bedrock `.mcstructure` を出力
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、感圧板、`level` による階層のグルーピング
-- スロットとセレクタを持つテーマ、およびそのエディション別バリアント
+- スロットを持つテーマ、およびそのエディション別バリアント
 - ソースごとのロックファイルと、バージョン別ブロック ID・リネームエイリアスを収めたレジストリパック
 - 診断と補完を提供する `cairn-lsp`、および [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ欲しいエディタ向け)
 
 **実験的機能。** `cairn synth --experimental-logic-synth` は `logic` グラフを合成・ネットリスト構築・エディション選択・配置・配線・遅延挿入・交差の合法化まで通し、各ステージを JSON で出力します。レッドストーンはまだコンパイル成果物には届いておらず、出力の形も変わりうるものです。
 
-**まだないもの。** `.litematic` と `.schem` の書き出し、既存 schematic の読み込み、コンパイル成果物へのレッドストーン出力とそれを検証するティックシミュレータ、そしてブラウザ上のプレイグラウンド (`cairn-lang-wasm` クレートは export を持たないプレースホルダのままです)。
+**まだないもの。** テーマのセレクタ束縛 (`window[class=small] -> frame=@spruce_wood` は窓にマッチしても何も塗らず、`cairn check` がそう報告します)、`.litematic` と `.schem` の書き出し、既存 schematic の読み込み、コンパイル成果物へのレッドストーン出力とそれを検証するティックシミュレータ、そしてブラウザ上のプレイグラウンド (`cairn-lang-wasm` クレートは export を持たないプレースホルダのままです)。
 
 ## 核となる考え方
 

@@ -23,16 +23,7 @@ themes:
       glass:
         kind: Token
         value: glass_pane
-    selectors:
-      - keyword: window
-        attrs:
-          class:
-            kind: Ident
-            value: small
-        bindings:
-          frame:
-            kind: Token
-            value: spruce_wood
+    selectors: []
 defs: []
 sites: []
 structs:

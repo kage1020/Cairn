@@ -27,7 +27,6 @@ theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
   slot glass -> @glass_pane
-  window[class=small] -> frame=@spruce_wood
 
 struct cottage size=9x7
   floor  mat_slot=floor
@@ -82,14 +81,14 @@ semantic-sensitive:      (none)
 - `cairn parse`, `check`, `info`, `lower`, and `compile`.
 - Java `.nbt` and Bedrock `.mcstructure` output from one source.
 - Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, pressure plates, and `level` grouping.
-- Themes with slots, selectors, and per-edition variants.
+- Themes with slots and per-edition variants.
 - A per-source lockfile, and registry packs carrying per-version block IDs and rename aliases.
 - `cairn-lsp` with diagnostics and completion, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
 
 **Experimental.** `cairn synth --experimental-logic-synth` takes a `logic` graph through synthesis, netlist construction, edition selection, placement, routing, delay insertion, and crossing legalization, printing each stage as JSON. Redstone does not reach compiled artifacts yet, and the output shape is free to change.
 
-**Not yet.** `.litematic` and `.schem` writers, importing existing schematics, redstone in compiled output and the tick simulator that verifies it, and the browser playground (the `cairn-lang-wasm` crate is still a placeholder with no exports).
+**Not yet.** Theme selector bindings (`window[class=small] -> frame=@spruce_wood` matches its windows and paints nothing, and `cairn check` says so), `.litematic` and `.schem` writers, importing existing schematics, redstone in compiled output and the tick simulator that verifies it, and the browser playground (the `cairn-lang-wasm` crate is still a placeholder with no exports).
 
 ## Key ideas
 

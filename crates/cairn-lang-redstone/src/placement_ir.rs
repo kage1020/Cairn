@@ -262,7 +262,7 @@ impl CellCoord {
 /// The driver attribution is copied verbatim from
 /// [`PlacedCellNode::drivers`]`[i].port` at push time, so a downstream
 /// consumer can group buffers by their source segment without
-/// recomputing `floor((s - 1) / DUST_ATTENUATION_LIMIT)` from scratch.
+/// re-walking the routed tree.
 ///
 /// **The vector is an attribution list, not a block list.** There is
 /// one entry per segment per repeater that segment's signal passes
