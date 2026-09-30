@@ -300,12 +300,15 @@ world, with nothing in the report to say so.
 
 `W_INVALID_WALKWAY_IDENT` is the same round-trip rule as the `.` / `:` half of
 `E_INVALID_PLACE_ID`, on a different separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
-`c__home2` in the other encode to one string. A `_` at the edge of a place or port merges into that
-separator the same way: `a.p_ to b.p` and `a.p to _b.p` both encode to `a.p___b.p`, and a port
-named `_` leaves a key that splits back into an empty port. Only the end of the `from` port and the
-start of the `to` place touch the separator, but a `connect` can be written in either direction, so
-both edges of every place and port are refused. The site is exempt from the edge rule, since `::`
-separates it from both neighbours. The row is dropped and the finding names the segment to rename.
+`c__home2` in the other encode to one string. A `_` next to that separator merges into it the same
+way: `a.p_ to b.p` and `a.p to _b.p` both encode to `a.p___b.p`, and a port named `_` leaves a key
+that splits back into an empty port. Only the end of the `from` port and the start of the `to` place
+touch the separator. A `connect` can be written in either direction, so the start of every place
+and the end of every port can end up there. The other four edges, the end of a place and the start
+of a port, sit next to a `.` whichever way the row is written and cannot merge; they are refused
+too, so the rule stays one sentence: no place or port id starts or ends with `_`. The site is exempt
+from the edge rule, since `::` separates it from both neighbours. The row is dropped and the finding
+names the segment to rename.
 
 `W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
 failed origin selector, an unresolved `use=` or `theme=`. It is a warning because the finding that

@@ -1441,6 +1441,17 @@ fn walkway_ids_that_would_alias_across_the_separator_are_each_named() {
             "s_walkway_a_p__b_p.nbt"
         ],
     );
+    // The lockfile records the sound row alone. The partial-build gate
+    // does not refuse it: `dropped_scopes` lists the `resolution.scopes`
+    // keys that lowering did not build, and `walkway::` keys are minted
+    // during lowering, so a dropped walkway is never in that list.
+    let lf = Lockfile::read_from_path(&fixture.lock()).expect("read lock");
+    let walkways: Vec<String> = lf
+        .walkways
+        .iter()
+        .map(|w| format!("{}: {} -> {}", w.site, w.from, w.to))
+        .collect();
+    assert_eq!(walkways, ["s: a.p -> b.p"]);
 }
 
 /// Every file under `root`, relative to it, sorted.
