@@ -23,7 +23,6 @@ theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
   slot glass -> @glass_pane
-  window[class=small] -> frame=@spruce_wood
 
 struct cottage size=9x7
   floor  mat_slot=floor
