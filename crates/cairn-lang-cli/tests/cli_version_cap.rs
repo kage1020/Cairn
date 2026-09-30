@@ -547,6 +547,35 @@ fn a_label_no_edition_can_place_is_not_answered_with_a_scope() {
     );
 }
 
+/// A label the other edition's table places below or above every row is not
+/// one of its releases either, so it gets no scope.
+///
+/// `1.14.5` and `1.27` name no Java release, and Bedrock's table orders
+/// both — below `1.19.30` and above `1.26.40` — without naming them. Scoped
+/// to Bedrock, the first is satisfied by every Bedrock target and the second
+/// by none, while the Java builds the author was constraining lose the floor
+/// entirely. That is the inert floor the offer is withheld to avoid.
+#[test]
+fn a_label_outside_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
+    for (name, label) in [("below_bedrock", "1.14.5"), ("above_bedrock", "1.27")] {
+        let fixture = Fixture::new(
+            "cairn-version-cap",
+            name,
+            &format!("@requires version>={label}\n{BUILD}"),
+        );
+        let stderr = String::from_utf8(compile(&fixture, "1.21.4").stderr).expect("utf-8");
+        assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
+        assert!(
+            !stderr.contains("@requires bedrock") && !stderr.contains("is a bedrock release"),
+            "`{label}` names no bedrock release, so no bedrock scope may be offered: {stderr}",
+        );
+        assert!(
+            stderr.contains("fix: name a java release"),
+            "the one repair left has to be named: {stderr}",
+        );
+    }
+}
+
 /// A floor naming a real release of the edition being built is ordered
 /// against it, even when the pack cannot build for that release.
 ///

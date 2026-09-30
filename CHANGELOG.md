@@ -264,6 +264,24 @@
 
 ### Fixed
 
+- *(cli)* `E_REQUIRES_UNORDERABLE` offered an edition scope for a floor the other edition does not
+  name either. On a Java build, `@requires version>=1.14.5` was told:
+
+  ```
+    `1.14.5` is a bedrock release; if that is the numbering this floor is written in, say so
+    fix: `@requires bedrock version>=1.14.5`, or name a java release
+  ```
+
+  `1.14.5` is no Bedrock release. Bedrock's table places it below every row, and the offer was made
+  for any placement other than "cannot place". Following the fix erased the floor: scoped to
+  Bedrock, `1.14.5` is met by every Bedrock target, and the Java builds it was written to constrain
+  no longer see it. `@requires version>=1.27` went wrong the same way from above every row, where
+  the scoped floor refuses every Bedrock target instead. The scope is now offered only when the other
+  edition's table names the label as a row or the pre-release of one; otherwise the refusal says
+  `fix: name a java release` and nothing else, so "is a bedrock release" is true whenever it is
+  printed. `spec/versioning-editions` "Ordering is by DataVersion, per edition" now says which
+  labels get the offer, with the ja mirror.
+
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
   and nothing said so. With a 3x3 `a` and a 3x9 `b`:
