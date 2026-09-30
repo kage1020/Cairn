@@ -100,6 +100,34 @@ fn a_scope_past_the_bound_is_skipped_and_named() {
 }
 
 #[test]
+fn a_place_past_the_bound_is_skipped_and_named() {
+    // The `def` path to the same refusal: a `place` voxelises its `def`
+    // through the body lowering a `struct` uses, and the row is dropped
+    // with nothing placed. The finding is the only thing the author gets,
+    // so a pass that lowered the body into a buffer and then dropped the
+    // buffer would leave an empty build with nothing said.
+    let source = format!(
+        "{THEME}def huge size=100000x100000:\n  walls mat_slot=wall height=3\n\n\
+         site s:\n  place id=a use=huge theme=t at=origin\n"
+    );
+    let out = lowered(&source);
+    assert!(out.structures.is_empty(), "{:?}", out.structures.keys());
+    assert!(out.placements.is_empty(), "{:?}", out.placements.keys());
+    let reported: Vec<&str> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code.as_str() == "W_STRUCTURE_TOO_LARGE")
+        .map(|d| d.primary.as_str())
+        .collect();
+    assert_eq!(reported.len(), 1, "{:#?}", out.diagnostics);
+    assert!(
+        reported[0].contains(&MAX_STRUCTURE_VOLUME.to_string()),
+        "the message must name the bound; got {}",
+        reported[0],
+    );
+}
+
+#[test]
 fn an_ordinary_scope_is_untouched_by_the_bound() {
     // The guard must not fire on anything anyone would write. This extent
     // is four orders of magnitude inside the bound and still far larger

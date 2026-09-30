@@ -22,7 +22,7 @@ const HUT: &str = "def hut size=3x3:\n\
 \x20\x20door  id=entry side=front at=center\n\n";
 
 pub fn noisy_sources() -> Vec<String> {
-    vec![
+    let mut sources = vec![
         // Extent, saturating reads, and roof deferral.
         format!("{THEME}struct huge size=100000x100000\n  walls mat_slot=wall height=3\n"),
         format!("{THEME}struct t size=3x3\n  walls mat_slot=wall height=5000000000\n"),
@@ -158,6 +158,41 @@ pub fn noisy_sources() -> Vec<String> {
          \x20\x20walls[class=nosuchclass] -> mat_slot=floor\n\n\
          struct s size=3x3\n\
          \x20\x20floor mat_slot=floor\n"
+            .to_owned(),
+    ];
+    sources.extend(unreadable_value_sources());
+    sources
+}
+
+/// The sources for an unreadable value's findings, kept apart only so
+/// neither list outgrows a screen.
+fn unreadable_value_sources() -> Vec<String> {
+    vec![
+        // Unreadable values, on a member that is built and on one that is
+        // not: the note is worded per member and per outcome, and only a
+        // rendered string shows each. `b`'s `gap=` is ignored and the row
+        // placed; `c`'s origin leaves the `i32` range, a message joined from
+        // three continued lines; `d` is anchored on `c`, so it is not placed
+        // and its unreadable `gap=` carries a second note. `e` sits exactly
+        // on `i32::MAX`, so `f` leaves the range at the `gap=0` its
+        // unreadable `gap=` falls back to, and carries the third.
+        format!(
+            "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n\
+             \x20\x20place id=b use=hut theme=t east_of=a gap=wide\n\
+             \x20\x20place id=c use=hut theme=t east_of=a gap=3000000000\n\
+             \x20\x20place id=d use=hut theme=t east_of=c gap=wide\n\
+             \x20\x20place id=e use=hut theme=t east_of=a gap=2147483644\n\
+             \x20\x20place id=f use=hut theme=t east_of=e gap=wide\n"
+        ),
+        // Its own theme, because an eave needs a stair material and
+        // `THEME` binds none.
+        "theme t:\n  slot wall -> @cobblestone\n  slot eave -> @oak_stairs\n\n\
+         struct t size=7x5\n  walls mat_slot=wall height=3\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  \
+         stair kind=stairs side=front facing=1 mat_slot=eave\n  \
+         stair kind=stairs side=back half=sideways shape=\"straight\" mat_slot=eave\n  \
+         window side=front offset=1 y=1 size=1x1 sym=yes mat_slot=wall\n  \
+         window side=back offset=9 y=1 size=1x1 sym=yes mat_slot=wall\n"
             .to_owned(),
     ]
 }

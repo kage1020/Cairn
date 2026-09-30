@@ -181,8 +181,15 @@ fn hostile_sources() -> Vec<(&'static str, String)> {
             ),
         ),
         // Walkway port resolution added `i32`s without checking, and the
-        // strip was materialised before anything measured it.
-        ("gap-i32-max", connected("2147483647")),
+        // strip was materialised before anything measured it. `hut` is 3
+        // wide, so this puts `b`'s origin at exactly `i32::MAX` and only
+        // the step from that origin to the door's port leaves the range.
+        // `the_port_case_reaches_port_resolution` holds it there.
+        ("gap-port-past-i32", connected("2147483644")),
+        // Three more and the origin itself leaves the range. That saturated
+        // onto `i32::MAX` once; the row is refused now, before any port is
+        // resolved against it.
+        ("gap-origin-past-i32", connected("2147483647")),
         ("gap-large", connected("100000000")),
         // Area, not length. A single-axis pair only ever spans a line, so a
         // bound on path length looks sufficient — which is exactly the shape
@@ -354,6 +361,48 @@ fn hostile_2_lowering_says_which_member_it_gave_up_on() {
         assert!(
             stderr.contains("W_") || stderr.contains("E_"),
             "{name}: lowering must name a diagnostic code for what it dropped; got {stderr:?}",
+        );
+    }
+}
+
+#[test]
+fn the_port_case_reaches_port_resolution() {
+    // `hostile_2` only asks for some diagnostic code, which a row refused
+    // for its origin satisfies without ever resolving a port. Each case is
+    // held to the stage it is named for, so a change to either value that
+    // moves it to the other stage fails here rather than going inert.
+    let tmp = TempDir::new().expect("tempdir");
+    let sources = hostile_sources();
+    for (name, reached, not_reached) in [
+        (
+            "gap-port-past-i32",
+            &["port `b.entry` could not be placed"][..],
+            "origin works out to",
+        ),
+        (
+            "gap-origin-past-i32",
+            &[
+                "origin works out to x=2147483650",
+                "the `b.entry` placement did not lower",
+            ][..],
+            "could not be placed",
+        ),
+    ] {
+        let (_, body) = sources
+            .iter()
+            .find(|(case, _)| *case == name)
+            .unwrap_or_else(|| panic!("no hostile source named {name}"));
+        let dir = tmp.path().join(name);
+        fs::create_dir_all(&dir).expect("case dir");
+        let path = write(&dir, name, body);
+        let (outcome, stderr, _) = run_bounded(&dir, &["lower", path.to_str().unwrap()]);
+        assert!(
+            matches!(outcome, Outcome::Exited(0 | 1)),
+            "{name}: ended as {outcome:?}",
+        );
+        assert!(
+            reached.iter().all(|text| stderr.contains(text)) && !stderr.contains(not_reached),
+            "{name}: expected {reached:?} and not `{not_reached}`; got {stderr}",
         );
     }
 }

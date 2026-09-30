@@ -598,6 +598,16 @@ forbids *silent* substitution, and all three are announced. For the unreached ke
 compiler's rather than the source's, which is why it is not a refusal. Whether autofix is offered
 is up to the implementation.
 
+An unreadable value is reported whether or not its member is then built. The value is wrong
+wherever the member ends up, so it is a repair of its own, and holding the finding back until a
+refusal on the same line is repaired only costs the author another compile. The note says which
+happened: what the default did to a member that is built, or that the member is not built either
+way and the refusal beside it is why. A member dropped before its arguments are read — a `roof`
+under a raised `level` — is the exception today: its values are not read, so they are not reported
+beside the drop. Most values are read only during block-array lowering, so a `cairn check` with no
+`--edition` / `--target`, and the language server, report an unreadable value only for the keys the
+check passes read themselves ([§11.1](#111-diagnostic-codes)).
+
 The routed-past shape is the vocabulary's second axis: closed per keyword *and* per the way the
 argument that selects the lowering rule is written. `roof slope_to=` is read by the `kind=shed`
 rule and by none of the others, so

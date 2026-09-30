@@ -75,9 +75,10 @@ rule, but takes its states from its own arguments.
 
 Those arguments are `facing=out | in`, `half=top | bottom` and
 `shape=straight | outer_left | outer_right`, each a bare identifier, defaulting to `out`, `top` and
-`straight`. An identifier outside the list names no state, and the stair is deferred with
+`straight`. An identifier outside the list is not yet supported, and the stair is deferred with
 `W_DEFERRED_MEMBER`. A value of another shape (`half="bottom"`, `facing=1`) is an unreadable value:
-the stair is built with that key's default, and the value is reported as `W_IGNORED_ARGUMENT`
+the stair is built with that key's default, and the value is reported as `W_IGNORED_ARGUMENT` —
+also when the stair is refused for another reason, with a note saying it is not built either way
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **Ridge axis.** The ridge runs along the long horizontal axis of the footprint. A square footprint

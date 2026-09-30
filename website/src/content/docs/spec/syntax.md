@@ -194,9 +194,9 @@ low `z` and mirror the same way.
 `sym=true` mirrors the opening across the wall's midpoint
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle is
 rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. `sym=` takes a bare `true` or
-`false`. Any other value (`sym=yes`, `sym="true"`, `sym=1`) is an unreadable value: the window is
-drawn without its mirror, and the value is reported as `W_IGNORED_ARGUMENT`
-([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+`false`, and a window without it is not mirrored. Any other value (`sym=yes`, `sym="true"`,
+`sym=1`) is an unreadable value: the window is drawn without its mirror, and the value is reported
+as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **`at=` door anchors.** A door's wall-local column comes from one of three named anchors:
 

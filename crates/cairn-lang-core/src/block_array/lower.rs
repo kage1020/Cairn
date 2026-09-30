@@ -1146,22 +1146,32 @@ fn lower_site<'a>(
         // `continue` arm of this loop: those above, this deferral, or the
         // volume refusal and the origin-range refusal below. Falling back to
         // `(0, 0, 0)` would silently stack the placement on top of `home1`,
-        // so the row is deferred and skipped instead. As has always been the
-        // case, that happens before the body is lowered, so a row that cannot
-        // land reports nothing about its body; only the origin waits for the
-        // lowered dims.
-        let Some((anchor, gap_ignored)) = resolve_place_anchor(member, placed, &site.name) else {
+        // so the row is deferred and skipped instead, before its body is
+        // lowered; only the origin waits for the lowered dims.
+        //
+        // An unreadable `gap=` is reported on every path out of this row,
+        // placed or not, with a note that says which: see
+        // [`read_or_ignore`] for why the finding is never held back.
+        let (anchor, gap_unread) = resolve_place_anchor(member, placed, &site.name);
+        let Some(anchor) = anchor else {
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
             ));
+            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
 
-        // Held back until the origin is known: a row whose origin leaves the
-        // range is not placed, and reports nothing about its body, the same
-        // as a row whose anchor did not lower.
-        let mut body_diagnostics = Vec::new();
+        // The body's findings go straight out, whether or not the row is
+        // then placed. Lowering a body takes nothing from the row's
+        // origin — the voxels are local to the body, and the origin is
+        // worked out from them afterwards — so every finding it raises is
+        // one the row would have raised had it landed: a defect in the
+        // `def` or the theme, which the author has to fix wherever the row
+        // ends up. Holding them for a refused row only moved them one
+        // compile later. A row whose anchor did not lower, above, is the
+        // different case: it returns before the body is lowered, so its
+        // body's findings are never produced at all.
         let Some(LoweredBody { array, walls, cut }) = lower_body_to_block_array(
             BodyDescriptor {
                 kind: VoxelSource::Place,
@@ -1173,12 +1183,12 @@ fn lower_site<'a>(
             },
             Some(scope),
             registry,
-            &mut body_diagnostics,
+            diagnostics,
         ) else {
             // The extent was refused; the diagnostic names the scope, and
             // recording a placement for a structure that does not exist
             // would leave the lockfile pointing at nothing.
-            diagnostics.append(&mut body_diagnostics);
+            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
         // `array.source_scope` now owns the IR key — read it back so the
@@ -1192,11 +1202,11 @@ fn lower_site<'a>(
             Ok(origin) => origin,
             Err(far) => {
                 diagnostics.push(diag_deferred_member_reason(member, &far.deferral()));
+                report_unread_gap(gap_unread, GapOutcome::OriginOutOfRange, diagnostics);
                 continue;
             }
         };
-        diagnostics.append(&mut body_diagnostics);
-        diagnostics.extend(gap_ignored);
+        report_unread_gap(gap_unread, GapOutcome::Placed, diagnostics);
         // First-write-wins, as above. Two `site` blocks of one name put
         // their `place id=` rows into one `site::NAME::` namespace, so
         // only a repeated `id=` collides — and the resolver has already
@@ -1735,7 +1745,8 @@ enum PlaceAnchor {
 
 /// The origin [`PlaceAnchor::origin`] works out to lies outside the `i32`
 /// range a placement records its origin in. `axis` is the one the selector
-/// moves along and `offset` the sum that left the range, for the message.
+/// moves along and `offset` the value that left the range — a sum for
+/// `east_of`, a difference for `north_of` — for the message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OriginOutOfRange {
     axis: char,
@@ -1797,29 +1808,31 @@ impl PlaceAnchor {
 /// Read the `at=origin` / `east_of=ID gap=N` / `north_of=ID gap=N`
 /// selector of one `place` line into a [`PlaceAnchor`].
 ///
-/// Returns `None` when the prior place it names did not lower, which the
-/// caller reports before skipping the row. A row with no usable selector
+/// On a relative (`east_of` / `north_of`) row the anchor is `None` when the
+/// prior place it names did not lower, which the caller reports before
+/// skipping the row. A row with no usable selector
 /// never gets here: the resolver refuses it with `E_INVALID_PLACE_ORIGIN`,
 /// or with `E_UNRESOLVED_PLACE_REF` when the selector names no prior place,
 /// and binds no scope for it. The front-is-`+z` convention of
 /// `spec/components-editing-sites` "Multi-building with `site`" is why
 /// `north_of` retreats along `-z`.
 ///
-/// A `gap=` that is not an integer is an unreadable value: the anchor
-/// carries `gap=0`, and the `W_IGNORED_ARGUMENT` saying so is handed back
-/// beside it for the caller to push once the row is placed, since a
-/// refused row is not placed at all.
+/// On a relative row, a `gap=` that is not an integer is an unreadable
+/// value: the anchor carries `gap=0`, and the [`UnreadArgument`] is handed
+/// back beside it — also when the anchor is `None` — for the caller to
+/// report with the note that matches whether the row was placed. An
+/// `at=origin` row returns before `gap=` is read.
 fn resolve_place_anchor(
     member: &Member,
     placed: &IndexMap<String, PlacedBody>,
     site_name: &str,
-) -> Option<(PlaceAnchor, Option<Diagnostic>)> {
+) -> (Option<PlaceAnchor>, Option<UnreadArgument>) {
     if let Some(value) = member.intent_state.get("at")
         && matches!(&value.value.kind, ValueKind::Ident(s) if s == "origin")
     {
-        return Some((PlaceAnchor::WorldOrigin, None));
+        return (Some(PlaceAnchor::WorldOrigin), None);
     }
-    let (gap, gap_ignored) = match read_or_ignore(
+    let (gap, gap_unread) = match read_or_ignore(
         member,
         "gap",
         |kind| match kind {
@@ -1827,10 +1840,9 @@ fn resolve_place_anchor(
             _ => None,
         },
         "an integer",
-        "the row is placed as `gap=0` places it, edge to edge with the place it is relative to",
     ) {
         Ok(gap) => (gap.unwrap_or(0), None),
-        Err(ignored) => (0, Some(*ignored)),
+        Err(unread) => (0, Some(unread)),
     };
     let prior = |key: &str| {
         member
@@ -1841,17 +1853,54 @@ fn resolve_place_anchor(
             .map(|body| (body.placement.origin, body.placement.dims.x))
     };
     let anchor = if let Some((prior_origin, prior_dims_x)) = prior("east_of") {
-        PlaceAnchor::EastOf {
+        Some(PlaceAnchor::EastOf {
             prior_origin,
             prior_dims_x,
             gap,
-        }
-    } else if let Some((prior_origin, _)) = prior("north_of") {
-        PlaceAnchor::NorthOf { prior_origin, gap }
+        })
     } else {
-        return None;
+        prior("north_of").map(|(prior_origin, _)| PlaceAnchor::NorthOf { prior_origin, gap })
     };
-    Some((anchor, gap_ignored))
+    (anchor, gap_unread)
+}
+
+/// Where a `place` row with an unreadable `gap=` ended up, which picks the
+/// note its finding carries.
+#[derive(Clone, Copy)]
+enum GapOutcome {
+    /// Placed at the `gap=0` the unreadable value falls back to.
+    Placed,
+    /// Refused for a reason no `gap=` reaches: its anchor did not lower,
+    /// or its body was refused.
+    NotPlaced,
+    /// Refused because the origin worked out at `gap=0` leaves the `i32`
+    /// range. Only that value was tried, so the note claims nothing about
+    /// any other `gap=`.
+    OriginOutOfRange,
+}
+
+/// Report a `place` row's unreadable `gap=`, if it had one, with the note
+/// for where the row ended up.
+fn report_unread_gap(
+    unread: Option<UnreadArgument>,
+    outcome: GapOutcome,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    diagnostics.extend(unread.map(|unread| {
+        unread.report(match outcome {
+            GapOutcome::Placed => {
+                "the row is placed as `gap=0` places it, edge to edge with the place it is \
+                 relative to"
+            }
+            GapOutcome::NotPlaced => {
+                "this row is not placed either way — see the finding on the same line"
+            }
+            GapOutcome::OriginOutOfRange => {
+                "this row is not placed at `gap=0`, the value its origin was worked out \
+                 with — see the finding on the same line"
+            }
+        })
+    }));
 }
 
 /// Bundle of per-struct context shared by every member-lowering helper.
@@ -2598,17 +2647,17 @@ enum NonNegRead {
 /// [`NonNegRead::Deferred`] means "the caller must return", and
 /// `W_DEFERRED_MEMBER` says the member did not lower. A caller that falls
 /// back to a default and draws the member anyway needs the other report:
-/// the value was unusable, here is what was used instead, and the member
-/// is in the build. `consequence` is that second half in the caller's own
-/// words, because only the caller knows what its fallback does to the
-/// output.
+/// the value was unusable, and here is what was used instead.
+/// `consequence` is that second half in the caller's own words, because
+/// only the caller knows what its fallback does to the output — and, as
+/// [`max_roof_overhang`] does, whether the member draws at all.
 ///
 /// `None` covers "absent" as well as "unusable", because a caller with a
 /// default treats them alike — the difference is only whether anything is
 /// reported.
 fn nonneg_int_or_ignore(
     member: &Member,
-    key: &str,
+    key: &'static str,
     consequence: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<u32> {
@@ -2620,10 +2669,9 @@ fn nonneg_int_or_ignore(
             _ => None,
         },
         NONNEG_U32,
-        consequence,
     )
-    .unwrap_or_else(|ignored| {
-        diagnostics.push(*ignored);
+    .unwrap_or_else(|unread| {
+        diagnostics.push(unread.report(consequence));
         None
     })
 }
@@ -2638,39 +2686,37 @@ const NONNEG_U32: &str = "a non-negative integer that fits in u32";
 /// - `Ok(Some(v))`: the key is present and `read` accepted its value.
 /// - `Ok(None)`: the key was not written; the caller applies its default
 ///   and nothing is reported.
-/// - `Err(finding)`: the key was written and `read` refused it. The
-///   finding is the `W_IGNORED_ARGUMENT` `spec/lint` "Error vs warning"
-///   calls an unreadable value, and the caller applies its default.
+/// - `Err(unread)`: the key was written and `read` refused it. This is the
+///   unreadable value `spec/lint` "Error vs warning" reports as
+///   `W_IGNORED_ARGUMENT`, and the caller applies its default.
 ///
-/// The finding is handed back rather than pushed because it says the
-/// member is in the build with the default in place, which is only true
-/// once the caller gets that far: a member that defers further down
-/// already has its repair in `W_DEFERRED_MEMBER`, and a finding about an
-/// argument nothing was built from would bill one repair twice.
-/// [`nonneg_int_or_ignore`] pushes it at once instead, and its caller words
-/// the consequence for a roof that draws and for one that does not.
+/// Every caller reports the [`UnreadArgument`], whether or not the member
+/// then reaches the build: the value is unreadable wherever the member
+/// ends up, and holding the finding back until a later refusal is repaired
+/// only costs the author another compile to learn it. What differs is the
+/// note, which [`UnreadArgument::report`] takes from the caller once it
+/// knows: the default's effect on a member in the build, or that the
+/// member is not built either way. A member dropped before its reader runs
+/// at all (a level-scoped roof, say) is not read, and so reports nothing.
 ///
-/// `expected` completes "`key=` must be …"; `consequence` is what the
-/// default did to the output, in the caller's words.
+/// `expected` completes "`key=` must be …".
 fn read_or_ignore<'m, T>(
     member: &'m Member,
-    key: &str,
+    key: &'static str,
     read: impl FnOnce(&'m ValueKind) -> Option<T>,
-    expected: &str,
-    consequence: &str,
-) -> Result<Option<T>, Box<Diagnostic>> {
+    expected: &'static str,
+) -> Result<Option<T>, UnreadArgument> {
     let Some(raw) = member.intent_state.get(key) else {
         return Ok(None);
     };
     match read(&raw.value.kind) {
         Some(v) => Ok(Some(v)),
-        None => Err(Box::new(diag_ignored_argument(
-            member,
+        None => Err(UnreadArgument {
+            span: member_or_slot_span(member, raw),
             key,
-            &raw.value.describe(),
+            written: raw.value.describe(),
             expected,
-            consequence,
-        ))),
+        }),
     }
 }
 
@@ -2679,14 +2725,12 @@ fn read_or_ignore<'m, T>(
 /// Which identifiers the caller accepts is still the caller's to say:
 /// this only separates "not an identifier at all" (`half="bottom"`,
 /// `facing=1`), which is an unreadable value, from an identifier the
-/// caller does not know (`half=sideways`), which names no state and so
-/// defers the member.
+/// caller does not support (`half=sideways`), which defers the member.
 fn ident_or_ignore<'m>(
     member: &'m Member,
-    key: &str,
-    expected: &str,
-    consequence: &str,
-) -> Result<Option<&'m str>, Box<Diagnostic>> {
+    key: &'static str,
+    expected: &'static str,
+) -> Result<Option<&'m str>, UnreadArgument> {
     read_or_ignore(
         member,
         key,
@@ -2695,8 +2739,56 @@ fn ident_or_ignore<'m>(
             _ => None,
         },
         expected,
-        consequence,
     )
+}
+
+/// A `key=` written with a value its reader cannot use — the third outcome
+/// of [`read_or_ignore`], beside "read" and "not written".
+///
+/// Not yet a [`Diagnostic`]: its note says what the default did to the
+/// output, and only the caller knows whether the member reached the build.
+#[derive(Debug)]
+struct UnreadArgument {
+    /// The value's own span, so the finding underlines what was written,
+    /// as `check::arguments` does for the same code, and two unreadable
+    /// keys on one line underline two places.
+    span: Span,
+    key: &'static str,
+    /// The value as [`crate::ast::Value::describe`] renders it, so a quoted
+    /// `"true"` reads as the string it is rather than as the word the
+    /// author meant.
+    written: String,
+    /// What the reader accepts, worded to complete "`key=` must be …".
+    expected: &'static str,
+}
+
+impl UnreadArgument {
+    /// The `W_IGNORED_ARGUMENT` for this value, with `consequence` as its
+    /// note.
+    ///
+    /// The primary stops at "the value was ignored" because whether the
+    /// member is in the build is not a fact the reader has. The note
+    /// carries it instead, in the caller's words: what the default did to
+    /// the output when the member is built, or that it is not built either
+    /// way when a finding on the same line refused it.
+    fn report(self, consequence: &str) -> Diagnostic {
+        let Self {
+            span,
+            key,
+            written,
+            expected,
+        } = self;
+        Diagnostic {
+            code: DiagnosticCode::IgnoredArgument,
+            span,
+            primary: format!("`{key}=` must be {expected}, not {written}; the value was ignored"),
+            notes: vec![DiagnosticNote {
+                span: None,
+                message: consequence.to_owned(),
+            }],
+            data: None,
+        }
+    }
 }
 
 fn nonneg_int_or_defer(
@@ -3434,7 +3526,6 @@ fn carve_door(
 /// overwrite the wall itself). Overhang has to be at least 1 for the
 /// eave to sit outside the wall; without one the stair collapses onto
 /// the wall row and a `W_DEFERRED_MEMBER` fires instead.
-#[allow(clippy::too_many_lines)] // one linear defer-and-paint chain reads better than 6 tiny helpers
 fn fill_stair(
     member: &Member,
     y_offset: u32,
@@ -3443,6 +3534,63 @@ fn fill_stair(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // A value that is not an identifier at all (`half="bottom"`,
+    // `facing=1`) is unreadable rather than unsupported: the band is drawn
+    // with the default state. Read before anything can refuse the stair,
+    // so every unreadable state is reported in the same compile as the
+    // refusal, with a note that says which of the two happened.
+    let mut unread = Vec::new();
+    let mut ident = |key: &'static str, expected: &'static str, default: &'static str| {
+        ident_or_ignore(member, key, expected).unwrap_or_else(|argument| {
+            unread.push((argument, default));
+            None
+        })
+    };
+    let states = EaveStates {
+        facing: ident("facing", "`out` or `in`", "out"),
+        half: ident("half", "`top` or `bottom`", "top"),
+        shape: ident(
+            "shape",
+            "`straight`, `outer_left`, or `outer_right`",
+            "straight",
+        ),
+    };
+    let built = draw_eave_band(member, states, y_offset, ctx, palette, canvas, diagnostics);
+    for (argument, default) in unread {
+        let consequence = if built {
+            format!(
+                "the stair is built with the default `{}={default}`",
+                argument.key
+            )
+        } else {
+            "this stair is not built either way — see the finding on the same line".to_owned()
+        };
+        diagnostics.push(argument.report(&consequence));
+    }
+}
+
+/// The three state arguments of an eave `stair`, as identifiers: `None`
+/// is a key not written, or written with a value [`fill_stair`] could not
+/// read, and either way takes the default.
+#[derive(Debug, Clone, Copy)]
+struct EaveStates<'m> {
+    facing: Option<&'m str>,
+    half: Option<&'m str>,
+    shape: Option<&'m str>,
+}
+
+/// [`fill_stair`]'s refusals and paint. Returns whether the band was drawn,
+/// which is what the note on an unreadable state has to say.
+#[allow(clippy::too_many_lines)] // one linear defer-and-paint chain reads better than 6 tiny helpers
+fn draw_eave_band(
+    member: &Member,
+    states: EaveStates<'_>,
+    y_offset: u32,
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    canvas: &mut MemberCanvas<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
     let Some(raw_kind) = member.ident_value("kind") else {
         let reason = if member.intent_state.contains_key("kind") {
             "stair `kind=` must be `stairs`"
@@ -3450,43 +3598,19 @@ fn fill_stair(
             "stair without `kind=` is not yet supported (currently only `kind=stairs`)"
         };
         diagnostics.push(diag_deferred_member_reason(member, reason));
-        return;
+        return false;
     };
     if raw_kind != "stairs" {
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!("stair `kind={raw_kind}` is not yet supported (currently only `kind=stairs`)"),
         ));
-        return;
+        return false;
     }
     let Some(side) = side_of(member, diagnostics) else {
-        return;
+        return false;
     };
-    // A value that is not an identifier at all (`half="bottom"`,
-    // `facing=1`) is unreadable rather than unknown: the band is drawn
-    // with the default state, and the findings wait until it is, because
-    // a stair refused below has its repair in that refusal.
-    let mut ignored = Vec::new();
-    let mut ident = |key: &str, expected: &str, default: &str| {
-        ident_or_ignore(
-            member,
-            key,
-            expected,
-            &format!("the stair is built with the default `{key}={default}`"),
-        )
-        .unwrap_or_else(|finding| {
-            ignored.push(*finding);
-            None
-        })
-    };
-    let half_read = ident("half", "`top` or `bottom`", "top");
-    let facing_read = ident("facing", "`out` or `in`", "out");
-    let shape_read = ident(
-        "shape",
-        "`straight`, `outer_left`, or `outer_right`",
-        "straight",
-    );
-    let half = match half_read {
+    let half = match states.half {
         Some("top") | None => "top",
         Some("bottom") => "bottom",
         Some(other) => {
@@ -3494,10 +3618,10 @@ fn fill_stair(
                 member,
                 &format!("stair `half={other}` is not yet supported (use `top` or `bottom`)"),
             ));
-            return;
+            return false;
         }
     };
-    let facing = match facing_read {
+    let facing = match states.facing {
         Some("out") | None => shed_high_side(side),
         Some("in") => inward_cardinal(side),
         Some(other) => {
@@ -3505,10 +3629,10 @@ fn fill_stair(
                 member,
                 &format!("stair `facing={other}` is not yet supported (use `out` or `in`)"),
             ));
-            return;
+            return false;
         }
     };
-    let shape = match shape_read {
+    let shape = match states.shape {
         Some("straight") | None => StairShape::Straight,
         Some("outer_left") => StairShape::OuterLeft,
         Some("outer_right") => StairShape::OuterRight,
@@ -3519,7 +3643,7 @@ fn fill_stair(
                     "stair `shape={other}` is not yet supported (use `straight`, `outer_left`, or `outer_right`)",
                 ),
             ));
-            return;
+            return false;
         }
     };
     // The gate is the overhang the roof *draws*, not the `overhang=` the
@@ -3531,12 +3655,12 @@ fn fill_stair(
             member,
             "eave `stair` needs a roof that draws an overhang of at least 1 so the band can sit outside the wall — no roof on this struct contributes one",
         ));
-        return;
+        return false;
     }
     let y_local = match nonneg_int_or_defer(member, "y", diagnostics) {
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return,
+        NonNegRead::Deferred => return false,
     };
     let y_world = y_local.saturating_add(y_offset);
     if y_world >= ctx.dims.y {
@@ -3547,7 +3671,7 @@ fn fill_stair(
                 ctx.dims.y,
             ),
         ));
-        return;
+        return false;
     }
     // An eave band is a row of stairs whose `facing` / `half` / `shape`
     // come from the member's own arguments rather than from a slope, but
@@ -3575,7 +3699,6 @@ fn fill_stair(
         diagnostics,
     );
     let idx = palette.intern(stair_state(stair_id, facing, half, shape));
-    diagnostics.extend(ignored);
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
     for u in 0..length {
         let Some((wx, _wy, wz)) = wall_local_to_grid(
@@ -3605,6 +3728,7 @@ fn fill_stair(
         let (x, z) = shift_outward(side, wx, wz);
         canvas.paint((x, y_world, z), || idx);
     }
+    true
 }
 
 /// Opposite of the wall's outward normal — used for `facing=in`.
@@ -4424,7 +4548,6 @@ fn recognize_actuator_patch(
     }
 }
 
-#[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn fill_window(
     member: &Member,
     y_offset: u32,
@@ -4433,8 +4556,47 @@ fn fill_window(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // An unreadable `sym=` (`sym=yes`, `sym="true"`) draws the window
+    // unmirrored. Read before anything can refuse the window, so it is
+    // reported in the same compile as a refusal, with a note that says
+    // which of the two happened.
+    let (sym, sym_unread) = match read_or_ignore(
+        member,
+        "sym",
+        |kind| match kind {
+            ValueKind::Bool(b) => Some(*b),
+            _ => None,
+        },
+        "`true` or `false`",
+    ) {
+        Ok(sym) => (sym.unwrap_or(false), None),
+        Err(unread) => (false, Some(unread)),
+    };
+    let cut = cut_window(member, sym, y_offset, ctx, palette, canvas, diagnostics);
+    diagnostics.extend(sym_unread.map(|unread| {
+        unread.report(if cut {
+            "the window is drawn without its mirror, as `sym=false` would draw it"
+        } else {
+            "this window is not cut either way — see the finding on the same line"
+        })
+    }));
+}
+
+/// [`fill_window`]'s refusals and paint, with `sym=` already read. Returns
+/// whether the primary rectangle was cut, which is what the note on an
+/// unreadable `sym=` has to say.
+#[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
+fn cut_window(
+    member: &Member,
+    sym: bool,
+    y_offset: u32,
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    canvas: &mut MemberCanvas<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
     let Some(side) = side_of(member, diagnostics) else {
-        return;
+        return false;
     };
     // `offset=` defaults to 0 (the wall-local axis origin) when absent, so a
     // decorative repeat=N series can be authored as `window ... repeat=N
@@ -4452,25 +4614,10 @@ fn fill_window(
         Ok(args) => args,
         Err(fault) => {
             diagnostics.push(diag_deferred_member_reason(member, &fault.deferral()));
-            return;
+            return false;
         }
     };
     let y_start = y_start_local.saturating_add(y_offset);
-    // An unreadable `sym=` (`sym=yes`, `sym="true"`) draws the window
-    // unmirrored, and says so once the primary is in the build.
-    let (sym, sym_ignored) = match read_or_ignore(
-        member,
-        "sym",
-        |kind| match kind {
-            ValueKind::Bool(b) => Some(*b),
-            _ => None,
-        },
-        "`true` or `false`",
-        "the window is drawn without its mirror, as `sym=false` would draw it",
-    ) {
-        Ok(sym) => (sym.unwrap_or(false), None),
-        Err(ignored) => (false, Some(*ignored)),
-    };
     // `repeat=` stamps the same rectangle multiple times along the wall,
     // separated by `step=` voxels. Both keys are optional: an absent
     // `repeat` collapses to a single instance (the pre-repeat
@@ -4491,30 +4638,30 @@ fn fill_window(
                 member,
                 "window `repeat=0` would stamp no instances; drop the window instead",
             ));
-            return;
+            return false;
         }
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 1,
-        NonNegRead::Deferred => return,
+        NonNegRead::Deferred => return false,
     };
     let step = match nonneg_int_or_defer(member, "step", diagnostics) {
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return,
+        NonNegRead::Deferred => return false,
     };
     if repeat > 1 && sym {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "window with both `repeat=` and `sym=true` is not yet supported",
         ));
-        return;
+        return false;
     }
     if repeat > 1 && step == 0 {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "window `repeat=` requires a positive `step=` so instances do not overlap",
         ));
-        return;
+        return false;
     }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let span_end = offset
@@ -4528,7 +4675,7 @@ fn fill_window(
                 side_name(side),
             ),
         ));
-        return;
+        return false;
     }
     // A window is a rectangle cut into a wall, so every row it cuts has
     // to be a row some `walls` member painted — not merely a row below
@@ -4563,7 +4710,7 @@ fn fill_window(
             )
         };
         diagnostics.push(diag_deferred_member_reason(member, &reason));
-        return;
+        return false;
     }
     // Resolved below the two geometry checks above, not before them: both
     // return without painting, and a palette entry claimed on the way to
@@ -4586,7 +4733,7 @@ fn fill_window(
             diagnostics,
             ctx.theme_missing,
         ) else {
-            return;
+            return false;
         };
         idx
     } else {
@@ -4611,13 +4758,12 @@ fn fill_window(
             canvas,
         );
     }
-    diagnostics.extend(sym_ignored);
     if sym {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
         if mirror_offset == offset {
             // The mirror sits exactly on top of the primary; emitting it
             // again would be a no-op so we silently coalesce.
-            return;
+            return true;
         }
         // Reject overlapping mirrors: a `sym=true` window asks for a
         // *pair*, not one wide span. If the two rectangles intersect the
@@ -4635,7 +4781,7 @@ fn fill_window(
                     side_name(side),
                 ),
             ));
-            return;
+            return true;
         }
         paint_window_rect(
             ctx,
@@ -4646,6 +4792,7 @@ fn fill_window(
             canvas,
         );
     }
+    true
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -4814,37 +4961,6 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
                       door[id=<name>] opened_by=sig.<name> actuator patches; other roles \
                       will be added as their lowering rules are spec'd"
                 .to_owned(),
-        }],
-        data: None,
-    }
-}
-
-/// The member is in the build; one of its arguments is not.
-///
-/// The note carries the consequence rather than the role table
-/// `diag_deferred_member_reason` attaches, because the role is not the
-/// problem: the value the author wrote was dropped, and what that did to
-/// the output is the caller's to say. The primary stops at "the value was
-/// ignored" for the same reason — whether the member is in the build is
-/// not a fact this function has.
-///
-/// `written` is the value as [`crate::ast::Value::describe`] renders it, so
-/// a quoted `"true"` reads as the string it is rather than as the word the
-/// author meant.
-fn diag_ignored_argument(
-    member: &Member,
-    key: &str,
-    written: &str,
-    expected: &str,
-    consequence: &str,
-) -> Diagnostic {
-    Diagnostic {
-        code: DiagnosticCode::IgnoredArgument,
-        span: member.span.clone(),
-        primary: format!("`{key}=` must be {expected}, not {written}; the value was ignored"),
-        notes: vec![DiagnosticNote {
-            span: None,
-            message: consequence.to_owned(),
         }],
         data: None,
     }

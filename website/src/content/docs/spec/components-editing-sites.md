@@ -86,7 +86,10 @@ unreadable value: the row is placed as `gap=0` places it, and the value is repor
 `W_IGNORED_ARGUMENT`. An origin is recorded as a 32-bit signed coordinate, so a row whose origin
 works out past that range is not placed at all and is reported as `W_DEFERRED_MEMBER`, as is every
 row placed relative to it. It is refused rather than clamped to the edge: a clamped origin is not
-the one the source asks for, and two rows clamped to one edge land on one coordinate.
+the one the source asks for, and two rows clamped to one edge land on one coordinate. The refused
+row still reports what its `def` body raises — an `E_INCOMPATIBLE_MATERIAL` or `W_NO_THEME_BOUND`
+is a defect in the `def` or the theme wherever the row lands — and an unreadable `gap=` on any row
+that is not placed is reported with a note saying so.
 
 ### 9.3.3 Cross-scope references
 
