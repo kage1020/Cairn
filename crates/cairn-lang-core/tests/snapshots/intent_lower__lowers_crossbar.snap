@@ -97,7 +97,7 @@ structs:
               - front
           offset:
             kind: Int
-            value: 0
+            value: 1
           y:
             kind: Int
             value: 0

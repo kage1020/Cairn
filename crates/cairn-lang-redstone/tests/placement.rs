@@ -111,7 +111,7 @@ struct sim size=7x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.and_ab   = sig.a and sig.b
   logic sig.or_ab    = sig.a or sig.b
@@ -170,7 +170,7 @@ struct tiny size=3x3
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.and_ab   = sig.a and sig.b
   logic sig.or_ab    = sig.a or sig.b
@@ -257,7 +257,7 @@ struct nomarker size=7x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.open = sig.a or sig.b
 
@@ -353,7 +353,7 @@ theme t:
 def gadget
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
   door id=d side=front at=center mat_slot=wall opened_by=sig.open
   circuit region=floor void=2
@@ -397,7 +397,7 @@ theme t:
 struct simple size=5x5
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
   door id=d side=front at=center mat_slot=wall opened_by=sig.open
   circuit region=floor void=0
@@ -479,7 +479,7 @@ theme t:
 struct dup size=7x5
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
   door id=d side=front at=center mat_slot=wall opened_by=sig.open
   circuit region=floor void=2
@@ -528,7 +528,7 @@ struct alpha size=7x5
 struct beta size=7x5
   floor mat_slot=wall
   pressure_plate id=q at=front.outside offset=0 y=0 -> sig.b1
-  pressure_plate id=r at=inside.front  offset=0 y=0 -> sig.b2
+  pressure_plate id=r at=inside.front  offset=1 y=0 -> sig.b2
   logic sig.both = sig.b1 and sig.b2
   door id=e side=front at=center mat_slot=wall opened_by=sig.both
 ";
@@ -589,7 +589,7 @@ fn source_with_cells(cells: usize, width: u32, depth: u32, void: u32) -> String 
         "  floor mat_slot=wall\n  \
          door id=front side=front at=center mat_slot=door\n  \
          pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n  \
-         pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b\n",
+         pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b\n",
     );
     let mut previous = String::from("sig.a");
     for index in 0..cells {
@@ -889,7 +889,7 @@ struct four size=8x{depth}
   door id=d3 side=left  at=center mat_slot=door
   door id=d4 side=right at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front  offset=1 y=0 -> sig.b
   logic sig.f = sig.a and sig.b
   door[id=d1] opened_by=sig.f
   door[id=d2] opened_by=sig.f

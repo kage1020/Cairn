@@ -309,7 +309,7 @@ struct thin size=4x4
   door  id=back  side=back  at=center mat_slot=door
 
   pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=plate2 at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=plate2 at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.f = sig.a and sig.b
 
@@ -469,7 +469,7 @@ struct gen size=9x8
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.c0 = sig.a or sig.b
   logic sig.c1 = sig.c0 and sig.b
   logic sig.c2 = sig.c1 or sig.b
@@ -517,7 +517,7 @@ struct reach size=40x6
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.c = sig.a or sig.b
   door[id=front] opened_by=sig.c
   circuit region=floor void=3
@@ -581,7 +581,7 @@ struct pair size=40x6
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.c = sig.a or sig.b
   door[id=front] opened_by=sig.c
   circuit region=floor void=3
@@ -621,7 +621,7 @@ struct fan size=40x6
   door id=d1 side=front at=center mat_slot=door
   door id=d2 side=back at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.f = sig.a and sig.b
   door[id=d1] opened_by=sig.f
   door[id=d2] opened_by=sig.f
@@ -710,7 +710,7 @@ struct reach size=40x6
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.c = sig.a or sig.b
   door[id=front] opened_by=sig.c
   circuit region=floor void=3
