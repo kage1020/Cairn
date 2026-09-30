@@ -757,6 +757,10 @@ impl NetTree {
             !self.parent.contains_key(&coord) && coord != self.order[0],
             "the search returns a path of coords the tree does not hold yet",
         );
+        debug_assert!(
+            from == self.order[0] || self.parent.contains_key(&from),
+            "a path grows out of a coord the tree already holds",
+        );
         self.parent.insert(coord, from);
         self.order.push(coord);
     }
@@ -836,15 +840,22 @@ impl NetTree {
     }
 
     /// A tree grown along `paths` by hand, each path starting on a coord
-    /// the tree already holds — the first one at the source.
+    /// the tree already holds — the first one at the source — and
+    /// moving one block per step. Both are debug-asserted, so a bad
+    /// fixture fails here rather than in whatever walks the tree.
     ///
-    /// For the shapes a test cannot get the router to lay on demand,
-    /// such as a staircase every coord of which turns.
+    /// For the shapes a test wants pinned coord by coord without
+    /// walling the router into them.
     #[cfg(test)]
     pub(crate) fn from_paths(paths: &[&[CellCoord]]) -> Self {
         let mut tree = Self::rooted(keyed(paths[0][0]));
         for path in paths {
             for pair in path.windows(2) {
+                debug_assert_eq!(
+                    manhattan(pair[0], pair[1]),
+                    1,
+                    "a hand-built path moves one block per step",
+                );
                 tree.attach(keyed(pair[1]), keyed(pair[0]));
             }
         }

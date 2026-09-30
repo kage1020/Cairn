@@ -353,25 +353,29 @@ pub(crate) fn far_sink(phase: &PlacementPhase, width: u32, which: FarSink) -> Sc
 /// One scope whose only net has nowhere for a buffer repeater, beside
 /// a sound one.
 ///
-/// The sensor pad at `(0,0,0)` drives a gate at `(9,0,9)`, and every
-/// other coord of the `10x10`, `void=1` reservation holds a gate body
-/// that drives nothing. The one way through is a staircase — east,
-/// south, east, south — 18 blocks long, so the signal needs a
-/// repeater, and every coord on it turns, which no repeater can carry
-/// a signal through.
+/// The sensor pad at `(0,0,0)` drives a gate at `(9,0,9)` across a
+/// `16x16`, `void=1` reservation. Seventeen gate bodies that drive
+/// nothing stand on two diagonal lines, `(x, x+1)` for `x` in `0..9`
+/// and `(x, x-2)` for `x` in `2..10`, and a path that moves one block
+/// at a time cannot cross a diagonal line without stepping onto it. So
+/// the one shortest way through — the one the router lays — is the
+/// staircase between them, east, south, east, south: 18 blocks, so the
+/// signal needs a repeater, and every coord between the two ends turns,
+/// which no repeater can carry a signal through.
+///
+/// Every node carries `phase`: handed to stage 2 unrouted, the
+/// staircase is the router's own, not one built by hand.
 ///
 /// The second scope is [`collapsed_pad_row`]'s sound one, so a caller
 /// can tell "elides the scope that earned the refusal" from "elides
 /// everything".
 pub(crate) fn staircase(phase: &PlacementPhase) -> ScopedPlacementIr {
     const SIDE: u32 = 10;
-    let mut stairs = vec![(0, 0)];
-    for step in 1..SIDE {
-        stairs.push((step, step - 1));
-        stairs.push((step, step));
-    }
+    let walls = (0..SIDE - 1)
+        .map(|x| (x, x + 1))
+        .chain((2..SIDE).map(|x| (x, x - 2)));
     let mut ir = PlacementIr::new(Edition::Java);
-    ir.region = Some(reservation(SIDE, SIDE, 1));
+    ir.region = Some(reservation(16, 16, 1));
     ir.inputs.push(NetlistInput {
         name: DottedRef::new("sig".into(), vec!["a".into()]),
         span: Span::default(),
@@ -386,18 +390,14 @@ pub(crate) fn staircase(phase: &PlacementPhase) -> ScopedPlacementIr {
         phase: phase.clone(),
         span: Span::default(),
     });
-    for x in 0..SIDE {
-        for z in 0..SIDE {
-            if !stairs.contains(&(x, z)) {
-                ir.cells.push(PlacedCellNode {
-                    cell: EditionCell::JavaRepeaterOr,
-                    drivers: Vec::new(),
-                    coord: CellCoord::new(x, 0, z),
-                    phase: phase.clone(),
-                    span: Span::default(),
-                });
-            }
-        }
+    for (x, z) in walls {
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: Vec::new(),
+            coord: CellCoord::new(x, 0, z),
+            phase: phase.clone(),
+            span: Span::default(),
+        });
     }
     let mut scoped = scoped(ScopeKind::Struct, "stairs", ir);
     scoped.scopes.push(ScopedPlacementIrEntry {

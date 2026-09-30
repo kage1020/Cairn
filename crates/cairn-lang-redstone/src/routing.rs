@@ -175,8 +175,8 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     attribute_nodes(
         &mut ir,
         entry,
-        |cell| sum_over_driving_nets(&cell.drivers, |net| nets.segment(net, cell.coord)),
-        |output| nets.segment(output.driver, output.pad),
+        |_, cell| sum_over_driving_nets(&cell.drivers, |net| nets.segment(net, cell.coord)),
+        |_, output| nets.segment(output.driver, output.pad),
         |phase, len, identity| phase.route_at(len, identity),
     );
 

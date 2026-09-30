@@ -622,13 +622,13 @@
   A chain of comparators sharing one sensor now takes repeaters on the wires between the cells as
   well, and the ones on the shared trunk stand closer together than 15, because every cell it
   feeds passes what it receives on down the chain. Where no coord near enough to such a cell can
-  hold a repeater, `E_ATTENUATION_LIMIT` says that, and how much dust the cell can spare, rather
-  than that every coord turns; a cell whose own wire out has no room is refused on its own net.
+  hold a repeater, `E_ATTENUATION_LIMIT` says that, naming the cell by its index and how much
+  dust it can spare, rather than that every coord turns; a cell whose own wire out has no room is refused on its own net.
 
 - *(redstone)* A buffer repeater was put on whatever coord stood 15 steps along its route, whether
   or not a repeater could work there. A repeater reads the block behind it and drives only the
-  block in front of it, on its own layer, so it carries a signal only where the wire runs straight
-  through a coord on one layer and nothing branches off. Two doors on one plate, one straight down
+  block in front of it, at its own height, so it carries a signal only where the wire runs straight
+  through a coord at one height and nothing branches off. Two doors on one plate, one straight down
   the row and one a row over past the first door's pad, share the wire as far as `(15,0,0)`, where
   it forks; both outputs of `cairn synth --stage crossing` named the fork, and the pass exited 0:
 
@@ -640,17 +640,20 @@
   A turn exactly 15 steps along, or the step where a route climbs to or drops from the bridge
   layer, took a repeater the same way. The repeaters are now placed on each net's routed tree
   rather than per sink: where the signal would run out, the repeater stands on the last coord
-  before that point with the wire straight through it and no branch. Before a fork that is on the
-  trunk, so one block still feeds every sink past it — both doors above are fed by `(14,0,0)`. A
-  repeater moved earlier leaves a longer run ahead of it, so a route can now take one repeater more
-  than its length alone implies; the delay pass counts from the same placement, so the ticks it
-  charges and the blocks the crossing pass lays remain one number. A stretch of dust past the
-  limit with no coord a repeater can stand on is refused rather than laid; here, a hand-built
-  scope whose only way through is a staircase:
+  before that point with the wire straight through it and no branch. When the point is a fork,
+  that coord is on the trunk, so one block still feeds every sink past it — both doors above are
+  fed by `(14,0,0)`. A repeater moved earlier leaves a longer run ahead of it, so a route can now
+  take one repeater more than its length alone implies; the delay pass and the crossing pass each
+  work the placement out by the same rule from the same routed tree, so the ticks one charges and
+  the blocks the other lays remain one number. A stretch of dust past the limit with no coord a
+  repeater can stand on is refused rather than laid, naming the node the signal never reaches.
+  Unlike the first block, this one does not come from a `.crn`: it is a scope built by hand at
+  the routing pass's input, a gate at `(9,0,9)` fenced by two diagonal lines of gates so that the
+  router's only way to it is an 18-block staircase:
 
   ```
-  error[E_ATTENUATION_LIMIT]: routed netlist for struct `stairs` routes sig.a so that the signal leaving (0,0,0) runs out before (8,0,8), past the attenuation limit of 15 blocks of dust, and every coord between the two turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it on one layer, so none can stand there
-    note: Fix: enlarge `region=` so the wire has room to run straight at least once in every 15 blocks, or split the logic across several `circuit` blocks
+  error[E_ATTENUATION_LIMIT]: routed netlist for struct `stairs` routes sig.a so that the signal leaving (0,0,0) runs out before (8,0,8), past the attenuation limit of 15 blocks of dust, and never reaches cell #0: every coord between the two turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, so none can stand there
+    note: Fix: leave the wire room to run straight at least once in every 15 blocks — a larger `region=` is one way, moving what walls it in is another — or split the logic across several `circuit` blocks
   ```
 
   The refusal for a segment over the 256-block cap says the chain it would need is "at least" the

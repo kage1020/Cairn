@@ -774,9 +774,12 @@ struct pair size=40x6
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
     let output = scope.ir.outputs.first().expect("the actuator");
 
-    // `buffer_count_for_segment` is `(s - 1) / 15`; asserting the pass's
-    // figure against that formula rather than against a literal keeps
-    // the two from being re-derived from each other.
+    // `buffer_count_for_segment` is `(s - 1) / 15`, the exact count on
+    // a route that runs straight and unbranched through every point a
+    // repeater refreshes it — as this one does — and only a floor on
+    // any other. Asserting the pass's figure against that formula
+    // rather than against a literal keeps the two from being
+    // re-derived from each other.
     let segment = output.wire_length().expect("routed");
     let expected = (segment - 1) / 15;
     assert_eq!(

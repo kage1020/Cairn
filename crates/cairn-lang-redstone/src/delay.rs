@@ -36,8 +36,10 @@
 //! through, and stage 4 gives those same repeaters their coords. Each
 //! pass builds its own `RepeaterSites` by running the same
 //! deterministic function over its own rebuilt trees and the same
-//! `ir.cells`, so the two agree as long as nothing between them moves
-//! a cell; `crossing.rs`'s proptest checks that they do.
+//! `ir.cells`, so the ticks one charges and the blocks the other lays
+//! land on the same set as long as nothing between them moves a cell.
+//! Nothing asserts it at runtime; `crossing.rs`'s proptest is what
+//! checks the two describe one circuit.
 //!
 //! **`local_delay_ticks` is a local wire cost, not an arrival time.** It
 //! sums the buffers on every net feeding the cell, and it is the number
@@ -52,12 +54,12 @@
 //! `assert latency(...)` (`spec/redstone` "Verification") is a path
 //! latency for the simulator pass to evaluate.
 //!
-//! `E_ATTENUATION_LIMIT` fires when a single segment exceeds the v1
-//! sanity cap [`MAX_ATTENUATION_SEGMENT`]: it asks for a buffer chain
-//! longer than v1 will build. It also fires when a run of dust would
-//! pass the attenuation limit — counted from the last block that
-//! restored strength, or within a cell's smaller budget — and no coord
-//! on it can hold a repeater close enough. Failed scopes are elided so a partial `local_delay_ticks`
+//! `E_ATTENUATION_LIMIT` fires when a single segment's routed length
+//! exceeds the v1 sanity cap [`MAX_ATTENUATION_SEGMENT`]. It also fires
+//! when a run of dust would pass the attenuation limit — counted from
+//! the last block that restored strength, or within a cell's smaller
+//! budget — and no coord on it can hold a repeater close enough. Failed
+//! scopes are elided so a partial `local_delay_ticks`
 //! set never reaches a downstream reader.
 //!
 //! The pass is one `PlacementPhase::delay` transition per cell; no new
@@ -97,11 +99,11 @@ pub const BUFFER_REPEATER_TICKS: u32 = 1;
 
 /// Compile-time guard on [`BUFFER_REPEATER_TICKS`]. A default repeater
 /// cannot delay by less than one tick — if this constant is ever set
-/// to zero, `buffer_repeater_ticks_for_segment` would report zero
-/// implicit-buffer contribution for any segment length, silently
-/// under-reporting `local_delay_ticks` on every fixture that crosses the
-/// 15-block attenuation limit. Assert forces the value ≥ 1 so a
-/// future edit cannot slide past this without deliberate intent.
+/// to zero, `attribute_local_delay_ticks` would charge nothing for the
+/// repeaters stage 4 still lays, silently under-reporting
+/// `local_delay_ticks` on every net that crosses the 15-block
+/// attenuation limit. Assert forces the value ≥ 1 so a future edit
+/// cannot slide past this without deliberate intent.
 const _: () = assert!(
     BUFFER_REPEATER_TICKS >= 1,
     "BUFFER_REPEATER_TICKS must be at least 1 — a default repeater delays by one tick",
@@ -109,18 +111,23 @@ const _: () = assert!(
 
 /// Compile-time guard on the sanity cap: it must sit above the
 /// attenuation limit, otherwise the "beyond attenuation limit but
-/// within cap" band that `buffer_repeater_ticks_for_segment` fills
-/// with implicit buffers would be empty and every segment past 15
-/// blocks would refuse instead of being absorbed by buffers.
+/// within cap" band that [`repeater_sites`] fills with implicit
+/// buffers would be empty and every segment past 15 blocks would
+/// refuse instead of being absorbed by buffers.
 const _: () = assert!(
     MAX_ATTENUATION_SEGMENT > DUST_ATTENUATION_LIMIT,
     "MAX_ATTENUATION_SEGMENT must exceed DUST_ATTENUATION_LIMIT so implicit buffers have a band to cover",
 );
 
-/// v1 sanity cap on a single driver segment. A segment longer than this
-/// asks for a buffer chain longer than v1 will build, so the pass that
-/// measures it refuses with `E_ATTENUATION_LIMIT` rather than count a
-/// chain nothing materialises into `local_delay_ticks`.
+/// v1 sanity cap on the routed length of a single driver segment. A
+/// segment longer than this reads as a placement mistake, so the pass
+/// that measures it refuses with `E_ATTENUATION_LIMIT` rather than
+/// charge for the repeaters it would need.
+///
+/// It caps the dust, not the repeater chain: `repeater_sites` stands
+/// a repeater earlier wherever a coord turns, climbs or forks, so a
+/// route of this length can carry more repeaters than
+/// `buffer_count_for_segment` gives for it.
 ///
 /// Two passes measure against it, and they measure different things.
 /// [`compile_delay`] applies it to the segment's *routed* length — the
@@ -134,9 +141,9 @@ const _: () = assert!(
 /// therefore refuses strictly less than this one does: everything it
 /// turns away, the delay pass would have turned away after the work.
 ///
-/// 256 blocks is 17 buffer repeaters from a fresh source
-/// (`(256 - 1) / 15`); anything past
-/// that in a single flat segment reads as a placement mistake rather
+/// 256 blocks is at least 17 buffer repeaters from a fresh source
+/// (`(256 - 1) / 15`); anything past that in a single segment reads as
+/// a placement mistake rather
 /// than a routing corner case in every fixture the crate ships today.
 pub const MAX_ATTENUATION_SEGMENT: u32 = 256;
 
@@ -259,8 +266,11 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     }
 
     let sites = repeater_sites_of_scope(&ir, entry, "routed", &region, &nets.trees)?;
-    attribute_local_delay_ticks(&mut ir, entry, &|net, sink| {
-        saturating_index(sites.along(&nets.trees, net, sink).len())
+    attribute_local_delay_ticks(&mut ir, entry, &|net, sink, fed| {
+        let buffers = sites
+            .along(net, sink)
+            .unwrap_or_else(|| fed.is_not_a_terminal(net, sink));
+        saturating_index(buffers.len())
     });
 
     Ok(ir)
@@ -270,9 +280,9 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
 /// ticks per driving net`, and every actuator pad's with the buffer
 /// ticks on its own segment (a pad is not a cell, so no base delay).
 ///
-/// `buffers_on(net, sink)` is how many repeaters the signal of `net`
-/// passes through on its way to `sink` — [`RepeaterSites::along`] in
-/// the pass.
+/// `buffers_on(net, sink, fed)` is how many repeaters the signal of
+/// `net` passes through on its way to `sink`, the coord of `fed` —
+/// [`RepeaterSites::along`] in the pass.
 ///
 /// Per net rather than per driver — see [`sum_over_driving_nets`] — and
 /// summed rather than maxed, because the figure is a local wire cost
@@ -282,67 +292,83 @@ fn attribute_local_delay_ticks<F>(
     entry: &ScopedPlacementIrEntry,
     buffers_on: &F,
 ) where
-    F: Fn(NetRef, CellCoord) -> u32,
+    F: Fn(NetRef, CellCoord, Fed) -> u32,
 {
     attribute_nodes(
         ir,
         entry,
-        |cell| {
+        |index, cell| {
             let buffer_ticks = sum_over_driving_nets(&cell.drivers, |net| {
-                buffers_on(net, cell.coord).saturating_mul(BUFFER_REPEATER_TICKS)
+                buffers_on(net, cell.coord, Fed::Cell(index)).saturating_mul(BUFFER_REPEATER_TICKS)
             });
             cell.cell.base_delay_ticks().saturating_add(buffer_ticks)
         },
-        |output| buffers_on(output.driver, output.pad).saturating_mul(BUFFER_REPEATER_TICKS),
+        |index, output| {
+            buffers_on(output.driver, output.pad, Fed::Output(index))
+                .saturating_mul(BUFFER_REPEATER_TICKS)
+        },
         |phase, ticks, identity| phase.delay_at(ticks, identity),
     );
 }
 
-/// Where every implicit buffer repeater of one scope stands, net by
-/// net.
-///
-/// Built once per scope by [`repeater_sites_of_scope`], which stage 3
-/// counts from and stage 4 places from, so the ticks one pass charges
-/// and the blocks the other lays are one set read twice.
-pub(crate) struct RepeaterSites {
-    per_net: HashMap<NetRef, HashSet<CellCoord>>,
+/// The node a segment feeds, as a panic about that segment names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Fed {
+    /// `ir.cells[i]`.
+    Cell(usize),
+    /// `ir.outputs[i]`'s pad.
+    Output(usize),
 }
 
-impl RepeaterSites {
+impl Fed {
+    /// Panic for a segment whose sink is not a terminal of the net that
+    /// drives it: the driver list and the collected nets would then
+    /// disagree, and the alternative is a node whose buffers
+    /// under-count the dust it is fed through.
+    pub(crate) fn is_not_a_terminal(self, net: NetRef, sink: CellCoord) -> ! {
+        let (x, y, z) = (sink.x, sink.y, sink.z);
+        match self {
+            Self::Cell(index) => panic!(
+                "cell #{index} at ({x},{y},{z}) is not a terminal of {net:?}, the net driving it — the driver list and the collected nets disagree"
+            ),
+            Self::Output(index) => panic!(
+                "output #{index} pad at ({x},{y},{z}) is not a terminal of {net:?}, the net driving it — the driver list and the collected nets disagree"
+            ),
+        }
+    }
+}
+
+/// Where every implicit buffer repeater of one scope stands, net by
+/// net, beside the tree each net's sites were walked on.
+///
+/// Built once per scope by [`repeater_sites_of_scope`]; stage 3 counts
+/// from the one it builds and stage 4 places from its own. Holding the
+/// tree with its sites is what keeps [`Self::along`] from being asked
+/// about one tree with the sites of another.
+pub(crate) struct RepeaterSites<'t> {
+    per_net: HashMap<NetRef, (&'t NetTree, HashSet<CellCoord>)>,
+}
+
+impl RepeaterSites<'_> {
     /// The repeaters the signal of `net` passes through on its way to
-    /// `sink`, in the order it meets them.
+    /// `sink`, in the order it meets them: its route from the source.
     ///
     /// Two sinks of one net that share a stretch of the tree share the
     /// repeaters standing on it, because they are read off one set
     /// rather than placed per sink.
     ///
-    /// Panics when `sink` is not a terminal of `net`: the driver list
-    /// and the collected nets would then disagree, and the alternative
-    /// is a node whose buffers under-count the dust it is fed through.
-    pub(crate) fn along(
-        &self,
-        trees: &HashMap<NetRef, NetTree>,
-        net: NetRef,
-        sink: CellCoord,
-    ) -> Vec<CellCoord> {
-        let route = trees
-            .get(&net)
-            .and_then(|tree| tree.route_to(sink))
-            .unwrap_or_else(|| {
-                panic!(
-                    "sink ({x},{y},{z}) is not a terminal of the net driving it — the driver list and the collected nets disagree",
-                    x = sink.x,
-                    y = sink.y,
-                    z = sink.z,
-                )
-            });
-        let Some(sites) = self.per_net.get(&net) else {
-            return Vec::new();
-        };
-        route
-            .into_iter()
-            .filter(|coord| sites.contains(coord))
-            .collect()
+    /// `None` when `sink` is not a terminal of `net`, which the caller
+    /// turns into a panic naming the node it asked for
+    /// ([`Fed::is_not_a_terminal`]).
+    pub(crate) fn along(&self, net: NetRef, sink: CellCoord) -> Option<Vec<CellCoord>> {
+        let (tree, sites) = self.per_net.get(&net)?;
+        let route = tree.route_to(sink)?;
+        Some(
+            route
+                .into_iter()
+                .filter(|coord| sites.contains(coord))
+                .collect(),
+        )
     }
 }
 
@@ -392,16 +418,21 @@ impl RepeaterSites {
 /// its order, that has nowhere left for a repeater. Either way the net
 /// a refusal names does not depend on how any map iterates.
 ///
+/// `trees` must be the ones [`lay_nets`] returned, which it only does
+/// once every tree's [`NetTree::unreachable`] is empty: an unreachable
+/// sink is parented straight to the source at whatever distance, and
+/// [`repeater_sites`] counts every step as one block.
+///
 /// [`EditionCell::regenerates`]: crate::edition_netlist_ir::EditionCell::regenerates
-pub(crate) fn repeater_sites_of_scope(
+pub(crate) fn repeater_sites_of_scope<'t>(
     ir: &PlacementIr,
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
     region: &CircuitRegionReservation,
-    trees: &HashMap<NetRef, NetTree>,
-) -> Result<RepeaterSites, Diagnostic> {
-    let refuse = |net: NetRef, stretch: NoRepeaterSite| {
-        no_repeater_site_diagnostic(ir, entry, netlist, region, net, stretch)
+    trees: &'t HashMap<NetRef, NetTree>,
+) -> Result<RepeaterSites<'t>, Diagnostic> {
+    let refuse = |net: NetRef, tree: &NetTree, stretch: NoRepeaterSite| {
+        no_repeater_site_diagnostic(ir, entry, netlist, region, net, tree, stretch)
     };
     let cell_net = |index: usize| {
         NetRef::Cell(
@@ -434,16 +465,18 @@ pub(crate) fn repeater_sites_of_scope(
         });
         let Some(budget) = budget else {
             let stretch = refusal.expect("the range is not empty, so a walk was refused");
-            return Err(refuse(cell_net(index), stretch));
+            return Err(refuse(cell_net(index), tree, stretch));
         };
         budgets.insert(cell.coord, budget);
     }
 
-    let mut nets: Vec<NetRef> = trees.keys().copied().collect();
-    nets.sort_by_key(|net| net_ref_key(*net));
-    let mut per_net: HashMap<NetRef, HashSet<CellCoord>> = HashMap::with_capacity(nets.len());
+    let mut nets: Vec<(NetRef, &'t NetTree)> =
+        trees.iter().map(|(net, tree)| (*net, tree)).collect();
+    nets.sort_by_key(|(net, _)| net_ref_key(*net));
+    let mut per_net: HashMap<NetRef, (&'t NetTree, HashSet<CellCoord>)> =
+        HashMap::with_capacity(nets.len());
     let mut spent_at_source: HashMap<NetRef, u32> = HashMap::with_capacity(nets.len());
-    for net in nets {
+    for (net, tree) in nets {
         let spent = match net {
             NetRef::Input(_) => 0,
             NetRef::Cell(j) => {
@@ -458,9 +491,10 @@ pub(crate) fn repeater_sites_of_scope(
                     cell.drivers
                         .iter()
                         .map(|driver| {
+                            let (tree, sites) = per_net.get(&driver.net).expect(PLACED);
                             spent_on_arrival(
-                                trees.get(&driver.net).expect(PLACED),
-                                per_net.get(&driver.net).expect(PLACED),
+                                tree,
+                                sites,
                                 *spent_at_source.get(&driver.net).expect(PLACED),
                                 cell.coord,
                             )
@@ -470,9 +504,9 @@ pub(crate) fn repeater_sites_of_scope(
                 }
             }
         };
-        let sites = repeater_sites(&trees[&net], spent, &budgets)
-            .map_err(|stretch| refuse(net, stretch))?;
-        per_net.insert(net, sites.into_iter().collect());
+        let sites =
+            repeater_sites(tree, spent, &budgets).map_err(|stretch| refuse(net, tree, stretch))?;
+        per_net.insert(net, (tree, sites.into_iter().collect()));
         spent_at_source.insert(net, spent);
     }
     Ok(RepeaterSites { per_net })
@@ -511,7 +545,8 @@ pub(crate) struct NoRepeaterSite {
     /// repeater or at a source that restores strength.
     pub(crate) spent: u32,
     /// The coord nearest the source that the signal reaches over more
-    /// dust than its allowance.
+    /// dust than its allowance, and the first in [`NetTree::wire_path`]
+    /// among those as near.
     pub(crate) unpowered: CellCoord,
     /// What `unpowered` may be reached over.
     pub(crate) allowance: Allowance,
@@ -552,12 +587,13 @@ pub(crate) enum Blocked {
 }
 
 /// Where one net's implicit buffer repeaters stand, in the order the
-/// tree was laid.
+/// tree was laid ([`NetTree::wire_path`]) — which is not any one sink's
+/// route order; [`RepeaterSites::along`] gives that.
 ///
 /// A repeater is directional: it reads the block behind it and drives
-/// the block in front of it, on its own layer. So it can only stand on
+/// the block in front of it, at its own height. So it can only stand on
 /// a coord the wire runs straight through, from the coord before it to
-/// the one after, all three on one layer and on one line, and from
+/// the one after, all three at the same height and on one line, and from
 /// which nothing else branches — a repeater on a fork drives one branch
 /// and starves the other, and one on a turn or a climb drives into
 /// nothing.
@@ -581,6 +617,10 @@ pub(crate) enum Blocked {
 ///
 /// `Err` when a coord past its allowance has no coord behind it, since
 /// the last full-strength block, that can hold a repeater close enough.
+///
+/// Every step of `tree` must move one block, which holds for a tree
+/// whose [`NetTree::unreachable`] is empty — the only kind
+/// [`crate::pass::lay_nets`] hands on.
 fn repeater_sites(
     tree: &NetTree,
     spent: u32,
@@ -604,8 +644,16 @@ fn repeater_sites(
     let mut sites: HashSet<CellCoord> = HashSet::new();
     loop {
         // Dust spent since the last full-strength block, and depth from
-        // the source to break ties. `order` lists a parent before its
-        // children, so one pass fills both.
+        // the source. `order` lists a parent before its children, so
+        // one pass fills both.
+        //
+        // Of the coords past their allowance (a filter rather than a
+        // key), the one fixed first is the one of least depth, with its
+        // `order` index breaking a depth tie so the answer does not
+        // depend on anything but the tree. The walk back from it either
+        // refuses or stops on a coord within that allowance of it, so a
+        // repeater there brings it within reach — every pass round the
+        // loop adds one site or returns `Err`.
         let mut walked: HashMap<CellCoord, (u32, u32)> = HashMap::with_capacity(order.len());
         walked.insert(source, (spent, 0));
         let mut first: Option<(u32, usize, CellCoord)> = None;
@@ -692,8 +740,8 @@ fn last_full_strength(tree: &NetTree, sites: &HashSet<CellCoord>, coord: CellCoo
 }
 
 /// Whether a repeater on `coord` would carry the signal on: one coord
-/// before it and exactly one after, all three on one layer and one
-/// line.
+/// before it and exactly one after, all three at the same height and
+/// on one line.
 fn carries_straight_through(
     tree: &NetTree,
     children: &HashMap<CellCoord, Vec<CellCoord>>,
@@ -736,20 +784,20 @@ pub(crate) fn buffer_count_for_segment(segment: u32) -> u32 {
     (segment.saturating_sub(1)) / DUST_ATTENUATION_LIMIT
 }
 
-/// [`buffer_count_for_segment`] converted to ticks by
-/// [`BUFFER_REPEATER_TICKS`].
-fn buffer_repeater_ticks_for_segment(segment: u32) -> u32 {
-    buffer_count_for_segment(segment).saturating_mul(BUFFER_REPEATER_TICKS)
-}
-
 /// The refusal for a [`NoRepeaterSite`]: a run of `net`'s dust past
 /// its allowance with no coord close enough for a repeater.
+///
+/// It names the node that is left without the signal: past the limit,
+/// the first cell, then the first actuator pad, whose route runs
+/// through `unpowered`; within a budget, the cell standing on
+/// `unpowered`, which the signal reaches too weak to pass on.
 fn no_repeater_site_diagnostic(
     ir: &PlacementIr,
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
     reservation: &CircuitRegionReservation,
     net: NetRef,
+    tree: &NetTree,
     stretch: NoRepeaterSite,
 ) -> Diagnostic {
     let NoRepeaterSite {
@@ -771,14 +819,33 @@ fn no_repeater_site_diagnostic(
         )
     };
     let reach = match allowance {
-        Allowance::Limit => format!(
-            "runs out before {}, past the attenuation limit of {} of dust",
-            at(unpowered),
-            blocks(DUST_ATTENUATION_LIMIT),
-        ),
+        Allowance::Limit => {
+            let passes = |sink: CellCoord| {
+                tree.route_to(sink)
+                    .is_some_and(|route| route.contains(&unpowered))
+            };
+            let dark = ir
+                .cells
+                .iter()
+                .position(|cell| cell.drivers.iter().any(|d| d.net == net) && passes(cell.coord))
+                .map(|index| format!("cell #{index}"))
+                .or_else(|| {
+                    ir.outputs
+                        .iter()
+                        .position(|output| output.driver == net && passes(output.pad))
+                        .map(|index| format!("output pad #{index}"))
+                })
+                .expect("every coord of a net's tree is on the route to one of its sinks");
+            format!(
+                "runs out before {}, past the attenuation limit of {} of dust, and never reaches {dark}",
+                at(unpowered),
+                blocks(DUST_ATTENUATION_LIMIT),
+            )
+        }
         Allowance::Budget(budget) => format!(
-            "reaches {cell} over more than the {spare} of dust it can spare — {cell} passes on the strength it receives rather than restoring it, and the wire past it needs the rest",
-            cell = at(unpowered),
+            "reaches {cell} at {coord} over more than the {spare} of dust it can spare — {cell} passes on the strength it receives rather than restoring it, and the wire past it needs the rest",
+            cell = budget_cell(ir, unpowered),
+            coord = at(unpowered),
             spare = blocks(budget),
         ),
     };
@@ -802,7 +869,7 @@ fn no_repeater_site_diagnostic(
         ),
         Allowance::Budget(budget) => format!(
             "Fix: leave the wire into {cell} room to run straight within {near} of it, or shorten the wire out of it so it can spare more — a larger `region=` is one way to do either — or drive {cell} from a cell that restores strength, or split the logic across several `circuit` blocks",
-            cell = at(unpowered),
+            cell = budget_cell(ir, unpowered),
             near = blocks(budget),
         ),
     };
@@ -812,6 +879,17 @@ fn no_repeater_site_diagnostic(
         primary,
         footer,
     )
+}
+
+/// `cell #i`, for the cell on `coord` that an [`Allowance::Budget`]
+/// belongs to: budgets are only ever given to cells, by their coord.
+fn budget_cell(ir: &PlacementIr, coord: CellCoord) -> String {
+    let index = ir
+        .cells
+        .iter()
+        .position(|cell| cell.coord == coord)
+        .expect("a budget is only ever given to a cell's coord");
+    format!("cell #{index}")
 }
 
 fn attenuation_diagnostic(
@@ -826,7 +904,7 @@ fn attenuation_diagnostic(
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
-        buffers = buffer_repeater_ticks_for_segment(segment) / BUFFER_REPEATER_TICKS.max(1),
+        buffers = buffer_count_for_segment(segment),
     );
     error_with_footer(
         DiagnosticCode::AttenuationLimit,
@@ -847,7 +925,7 @@ fn attenuation_output_diagnostic(
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
-        buffers = buffer_repeater_ticks_for_segment(segment) / BUFFER_REPEATER_TICKS.max(1),
+        buffers = buffer_count_for_segment(segment),
     );
     error_with_footer(
         DiagnosticCode::AttenuationLimit,
@@ -868,10 +946,10 @@ mod tests {
     use cairn_lang_core::error::Span;
 
     use super::{
-        Allowance, BUFFER_REPEATER_TICKS, Blocked, DUST_ATTENUATION_LIMIT, MAX_ATTENUATION_SEGMENT,
-        NoRepeaterSite, attribute_local_delay_ticks, buffer_count_for_segment,
-        buffer_repeater_ticks_for_segment, compile_delay, no_repeater_site_diagnostic,
-        repeater_sites, repeater_sites_of_scope,
+        Allowance, BUFFER_REPEATER_TICKS, Blocked, DUST_ATTENUATION_LIMIT, Fed,
+        MAX_ATTENUATION_SEGMENT, NoRepeaterSite, attribute_local_delay_ticks,
+        buffer_count_for_segment, compile_delay, no_repeater_site_diagnostic, repeater_sites,
+        repeater_sites_of_scope,
     };
     use crate::diagnostic::DiagnosticCode;
     use crate::edition_netlist_ir::EditionCell;
@@ -880,6 +958,7 @@ mod tests {
     use crate::placement_ir::{
         CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, ScopedPlacementIrEntry,
     };
+    use crate::routing::compile_routing;
     use crate::routing_geometry::NetTree;
     use crate::test_fixtures::{reservation, scoped, staircase};
 
@@ -1093,7 +1172,7 @@ mod tests {
             name: "arrival".to_owned(),
             ir: ir.clone(),
         };
-        let buffers_on = |net: NetRef, _sink: CellCoord| -> u32 {
+        let buffers_on = |net: NetRef, _sink: CellCoord, _fed: Fed| -> u32 {
             match net {
                 NetRef::Input(0) => buffer_count_for_segment(SHORT),
                 NetRef::Input(1) => buffer_count_for_segment(LONG),
@@ -1333,6 +1412,14 @@ mod tests {
             name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
             span: Span::default(),
         });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            sink,
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+        ));
         let entry = ScopedPlacementIrEntry {
             kind: ScopeKind::Struct,
             name: "near".to_owned(),
@@ -1345,15 +1432,16 @@ mod tests {
             "routed",
             &region,
             NetRef::Input(0),
+            &tree,
             stretch.expect_err("refused above"),
         );
         assert_eq!(
             diagnostic.primary,
-            "routed netlist for struct `near` routes sig.a so that the signal leaving (0,0,0) reaches (3,0,1) over more than the 1 block of dust it can spare — (3,0,1) passes on the strength it receives rather than restoring it, and the wire past it needs the rest: every coord within 1 block before it turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, and one further back would leave too little strength to get there",
+            "routed netlist for struct `near` routes sig.a so that the signal leaving (0,0,0) reaches cell #0 at (3,0,1) over more than the 1 block of dust it can spare — cell #0 passes on the strength it receives rather than restoring it, and the wire past it needs the rest: every coord within 1 block before it turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, and one further back would leave too little strength to get there",
         );
         assert_eq!(
             diagnostic.notes[0].message,
-            "Fix: leave the wire into (3,0,1) room to run straight within 1 block of it, or shorten the wire out of it so it can spare more — a larger `region=` is one way to do either — or drive (3,0,1) from a cell that restores strength, or split the logic across several `circuit` blocks",
+            "Fix: leave the wire into cell #0 room to run straight within 1 block of it, or shorten the wire out of it so it can spare more — a larger `region=` is one way to do either — or drive cell #0 from a cell that restores strength, or split the logic across several `circuit` blocks",
         );
     }
 
@@ -1491,13 +1579,13 @@ mod tests {
             let sites = repeater_sites_of_scope(&ir, &entry, "routed", &region, &trees)
                 .unwrap_or_else(|d| panic!("{kind:?}: {d:?}"));
             assert_eq!(
-                sites.along(&trees, NetRef::Input(0), cell),
-                expected,
+                sites.along(NetRef::Input(0), cell),
+                Some(expected),
                 "{kind:?}: the wire into the cell",
             );
             assert_eq!(
-                sites.along(&trees, NetRef::Cell(0), pad),
-                Vec::new(),
+                sites.along(NetRef::Cell(0), pad),
+                Some(Vec::new()),
                 "{kind:?}: the staircase out of it",
             );
         }
@@ -1559,15 +1647,35 @@ mod tests {
     /// A net with a stretch past the limit on which every coord turns
     /// is refused, rather than charged for a repeater stage 4 could
     /// only put on a turn.
+    ///
+    /// Through stage 2 first: the router lays the staircase itself, and
+    /// raises nothing, so this is a tree stage 2 hands on and stage 3
+    /// has to answer.
     #[test]
     fn a_stretch_with_nowhere_for_a_repeater_is_refused() {
-        let delayed = compile_delay(&staircase(&PlacementPhase::Routed { wire_length: 0 }));
+        let routed = compile_routing(&staircase(&PlacementPhase::Unrouted));
+        assert_eq!(routed.diagnostics, Vec::new(), "stage 2 lays the staircase");
+        let stairs = &routed.scoped.scopes[0];
+        assert_eq!(stairs.name, "stairs");
+        assert_eq!(stairs.ir.cells.len(), 18, "one sink and 17 walls");
+        assert_eq!(
+            stairs.ir.cells[0].phase.wire_length(),
+            Some(18),
+            "the one 18-block way through",
+        );
+
+        let delayed = compile_delay(&routed.scoped);
         let codes: Vec<_> = delayed.diagnostics.iter().map(|d| d.code).collect();
         assert_eq!(codes, vec![DiagnosticCode::AttenuationLimit]);
         let primary = &delayed.diagnostics[0].primary;
         assert!(
-            primary.contains("routed netlist for struct `stairs` routes sig.a so that the signal leaving (0,0,0) runs out before (8,0,8)"),
-            "the refusal names the net and the stretch, got {primary:?}",
+            primary.contains("routed netlist for struct `stairs` routes sig.a so that the signal leaving (0,0,0) runs out before (8,0,8), past the attenuation limit of 15 blocks of dust, and never reaches cell #0:"),
+            "the refusal names the net, the stretch and the node that goes dark, got {primary:?}",
+        );
+        let footer = &delayed.diagnostics[0].notes[0].message;
+        assert!(
+            footer.contains("run straight at least once in every 15 blocks"),
+            "the fix is room to run straight, got {footer:?}",
         );
         let survivors: Vec<_> = delayed.scoped.scopes.iter().map(|e| &e.name).collect();
         assert_eq!(survivors, vec!["roomy"]);
@@ -1761,10 +1869,10 @@ mod tests {
     }
 
     #[test]
-    fn buffer_repeater_ticks_boundary_table() {
+    fn buffer_count_boundary_table() {
         // Boundary values of the piecewise formula
-        // `s <= 15 → 0`, `s in (15, 30] → 1 * BUFFER_REPEATER_TICKS`,
-        // `s in (30, 45] → 2 * BUFFER_REPEATER_TICKS`, ... pinned as a
+        // `s <= 15 → 0`, `s in (15, 30] → 1`, `s in (30, 45] → 2`, ...
+        // pinned as a
         // table so a `(s - 1) / 15` → `s / 15` slip trips each row
         // rather than the aggregate.
         for (segment, expected_buffers) in [
@@ -1779,8 +1887,8 @@ mod tests {
             (MAX_ATTENUATION_SEGMENT, 17),
         ] {
             assert_eq!(
-                buffer_repeater_ticks_for_segment(segment),
-                expected_buffers * BUFFER_REPEATER_TICKS,
+                buffer_count_for_segment(segment),
+                expected_buffers,
                 "segment {segment} blocks",
             );
         }
