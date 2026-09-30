@@ -355,6 +355,35 @@
   costs what an x strip costs, and a strip at the cap lowers in seconds. The cells laid are
   unchanged.
 
+- *(core)* `pressure_plate at=inside.<side>` replaced a block of another wall, or landed outside
+  the building, without a word. The plate takes the wall cell at `offset=` and steps one voxel
+  inward, and the step was refused only when it saturated back onto that same cell. At either end
+  of a wall the cell one step in belongs to the side wall:
+
+  ```
+  struct s size=5x5
+    walls mat_slot=wall height=3
+    pressure_plate id=p at=inside.front offset=0 y=1 -> sig.a
+  ```
+
+  painted the plate into the left wall at `(0, 1, 3)`. In a struct 2 deep the step lands on the
+  opposite wall, and in one 1 deep with a roof overhang it lands in the overhang ring behind the
+  building. The inward cell must now be strictly inside the wall ring on both horizontal axes, and
+  a plate that has none defers with the cause:
+
+  ```
+  s.crn:3:3: warning[W_DEFERRED_MEMBER]: pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to 3 to reach an interior voxel. Its signal binding still reaches the netlist, with no plate placed to drive it
+  ```
+
+  A struct with a `size` below 3 on either axis has no interior at all, and the reason names every
+  such axis along with a corner offset, so one edit fixes both. The wall ring is decided from the
+  footprint whether or not a `walls` member paints it, so the rule also refuses `offset=0` on a
+  struct with only a `floor`, and at `y=0`, where the corner cell is floor under the side wall
+  rather than the wall itself; neither overwrote a block before, and both now warn and place no
+  plate. The reason says the cell belongs to a wall only at a row the walls paint. `spec/redstone`
+  now states the rule. `examples/redstone-door.crn` and `examples/crossbar.crn` placed their inside
+  plate at `offset=0` and now use `offset=1`, the first interior cell along the front wall.
+
 - *(core)* A theme selector row's bindings were matched, recorded, and never read, and nothing said
   so. The opening example — `examples/cottage.crn`, both READMEs, the tutorial and the landing page
   — carried `window[class=small] -> frame=@spruce_wood`, and the cottage built byte for byte the same

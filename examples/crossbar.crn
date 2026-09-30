@@ -35,7 +35,7 @@ struct crossbar size=6x4
   door  id=back  side=back  at=center mat_slot=door
 
   pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=plate2 at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=plate2 at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.f1 = sig.a and sig.b
   logic sig.f2 = sig.a or sig.b

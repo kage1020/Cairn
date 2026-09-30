@@ -83,7 +83,7 @@ fn circuit_source(structs: usize, gates: usize) -> String {
              door id=front side=front at=center mat_slot=door\n  \
              door id=back side=back at=center mat_slot=door\n  \
              pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a\n  \
-             pressure_plate id=pb at=inside.front offset=0 y=0 -> sig.b\n",
+             pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b\n",
         );
         let mut names = vec!["sig.a".to_owned(), "sig.b".to_owned()];
         for g in 0..gates {
