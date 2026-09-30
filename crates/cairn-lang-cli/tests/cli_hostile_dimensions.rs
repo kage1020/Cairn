@@ -443,3 +443,99 @@ fn hostile_3_compile_refuses_rather_than_certifying_the_wreckage() {
         }
     }
 }
+
+/// Two walkway rows whose coordinates reach the edge of `i32` without
+/// passing it, so neither is refused before the walkway pass does its
+/// own arithmetic there.
+///
+/// Both are standalone rather than `hostile_sources()` rows: the detour
+/// is a legitimate walkway that lowers with no diagnostic at all, which
+/// `hostile_2` would reject.
+#[test]
+fn walkway_arithmetic_at_the_edge_of_i32_answers_rather_than_panics() {
+    // `b` lands at `z = 0 - 3 - 2147483645 = i32::MIN` exactly, so its
+    // back wall is on the edge and the port one block further out is
+    // past it.
+    let port_past_the_edge = source(
+        "def hut size=3x3:\n\
+         \x20\x20walls id=w mat_slot=wall height=3\n\
+         \x20\x20door  id=back side=back at=center\n\n\
+         site s:\n\
+         \x20\x20place id=a use=hut theme=t at=origin\n\
+         \x20\x20place id=b use=hut theme=t north_of=a gap=2147483645\n\
+         \x20\x20connect a.back to b.back path=@gravel\n",
+    );
+    // The straight L from `b.east` to `c.west` crosses `b`'s floor, so
+    // the router runs, and its search rectangle's east margin is the
+    // `i32::MAX` column. `a` has no floor: with one, its cells would
+    // stretch the rectangle past the area cap and the row would be
+    // refused before the router ran.
+    let detour_along_the_edge = source(
+        "def shell size=3x3:\n\
+         \x20\x20walls id=w mat_slot=wall height=3\n\n\
+         def hut2 size=3x3:\n\
+         \x20\x20floor id=f mat_slot=wall\n\
+         \x20\x20walls id=w mat_slot=wall height=3\n\
+         \x20\x20door  id=east side=right at=center\n\
+         \x20\x20door  id=west side=left  at=center\n\n\
+         site s:\n\
+         \x20\x20place id=a use=shell theme=t at=origin\n\
+         \x20\x20place id=b use=hut2  theme=t east_of=a gap=2147483640\n\
+         \x20\x20place id=c use=hut2  theme=t north_of=b gap=2\n\
+         \x20\x20connect b.east to c.west path=@gravel\n",
+    );
+    let tmp = TempDir::new().expect("tempdir");
+    for (name, body, walkway, stderr_says) in [
+        (
+            "port-past-the-edge",
+            port_past_the_edge,
+            None,
+            Some("port `b.back` could not be placed"),
+        ),
+        (
+            "detour-along-the-edge",
+            detour_along_the_edge,
+            Some("s_walkway_b_east__c_west.nbt"),
+            None,
+        ),
+    ] {
+        let dir = tmp.path().join(name);
+        fs::create_dir_all(&dir).expect("case dir");
+        let path = write(&dir, name, &body);
+        let file = path.to_str().unwrap();
+        let out_dir = dir.join("out");
+        let out = out_dir.to_str().unwrap();
+        for args in [
+            vec!["check", file, "--edition", "java", "--target", "1.21.4"],
+            vec!["lower", file],
+            vec!["compile", file, "--edition", "java", "--out", out],
+        ] {
+            let (outcome, stderr, _) = run_bounded(&dir, &args);
+            assert_eq!(
+                outcome,
+                Outcome::Exited(0),
+                "{name}: `{}` must answer, not crash\nstderr={stderr}",
+                args[0],
+            );
+            if let Some(text) = stderr_says {
+                assert!(
+                    stderr.contains(text),
+                    "{name}: `{}` must name the refused port; got {stderr}",
+                    args[0],
+                );
+            } else {
+                assert!(
+                    !stderr.contains("W_"),
+                    "{name}: `{}` lays the detour, so it has nothing to warn about; got {stderr}",
+                    args[0],
+                );
+            }
+        }
+        if let Some(walkway) = walkway {
+            assert!(
+                out_dir.join(walkway).exists(),
+                "{name}: the detour along the edge is laid and written",
+            );
+        }
+    }
+}
