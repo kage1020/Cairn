@@ -109,7 +109,9 @@ instead.
 
 ### 9.3.4 Output naming
 
-The compiler writes one `.nbt` per `place`, named after the `id=` (`home1.nbt`, `home2.nbt`). The
+The compiler writes one `.nbt` per `place`, named after the `id=` (`home1.nbt`, `home2.nbt`), directly
+into the output directory. An id carrying `/` or `\` would name a path rather than a file, so it is
+`E_INVALID_PLACE_ID` ([Lint](/spec/lint/)). The
 world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
 `build.cairn.lock` under `placements`, so a downstream consumer can rebuild the layout without
 re-running the coordinate solver.
