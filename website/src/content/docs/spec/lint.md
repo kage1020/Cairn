@@ -446,9 +446,12 @@ other failure reads that way — a source that does not parse is an array carryi
 file that cannot be read writes no document at all. Which of the two refusals it was, and what the
 build lost, is said only on stderr.
 
-One `info` refusal is a run-level refusal of the same kind: a registry pack whose palette carries a
-blockstate the pack was expected to refuse costs that edition its portability row, and names no span
-in the source and no repair its author could make. It reads as prose on stderr in both formats.
+One `info` refusal is a run-level refusal of the same kind: a palette carrying a blockstate a
+registry pack was expected to refuse costs that edition its portability row, and names no span in
+the source. Such a blockstate is either a leak in the pack or the compiler, which the author cannot
+repair, or a state literal written in the source (`@oak_stairs[facing=up]`) whose values nothing
+checks against the target until `E_STATE_DOMAIN` is implemented. The refusal names both. It reads
+as prose on stderr in both formats.
 The document is still written — the promise is one document per input, not one element per
 refusal — so a run refused by nothing else writes `{"diagnostics": []}` and says the rest with its
 exit code.

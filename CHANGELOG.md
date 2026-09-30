@@ -264,9 +264,9 @@
 
 ### Fixed
 
-- *(core,tree-sitter)* A canonical token with a block-state literal could not be written, though
-  `spec/materials-themes` "Canonical vocabulary" lists `@oak_log[axis=x]` as one and everything
-  past the parser already read that shape. Both parsers stopped at the `[`:
+- *(core,tree-sitter,cli)* A canonical token with a block-state literal could not be written,
+  though `spec/materials-themes` "Canonical vocabulary" lists `@oak_log[axis=x]` as one and
+  everything past the parser already read that shape. Both parsers stopped at the `[`:
 
   ```
   theme t:
@@ -288,6 +288,10 @@
   nested list inside a value list. `mat=[@a [b]]` is still two items, but `mat=[@a[b]]` used to be
   two items and is now refused. Properties and values are not yet checked against the target
   (`E_STATE_DOMAIN` is not implemented), and `spec/syntax` "Literals and separators" says so.
+  Because a source can now reach it, `cairn info`'s refusal of a palette the pack was expected to
+  refuse, such as `@oak_stairs[facing=up]` on Bedrock, no longer says that none of it is the
+  source's to repair. It now names a state literal in the source as one possible origin, and
+  `spec/lint` "Machine-readable payload" says the same.
 
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
