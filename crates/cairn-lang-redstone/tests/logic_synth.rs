@@ -105,7 +105,7 @@ fn ac3_multiple_drivers_report_e_logic_multiple_drivers() {
 
 struct s size=1x1
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
   logic sig.dup = sig.a
   logic sig.dup = sig.b
   door id=front side=front at=center
@@ -266,7 +266,7 @@ fn ac7_common_subexpressions_share_a_single_gate() {
 
 struct s size=1x1
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
   logic sig.x = sig.a or sig.b
   logic sig.y = sig.a or sig.b
   door id=front side=front at=center
@@ -294,7 +294,7 @@ fn commutative_cse_shares_a_gate_when_operand_order_flips() {
 
 struct s size=1x1
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
   logic sig.x = sig.a or sig.b
   logic sig.y = sig.b or sig.a
   door id=front side=front at=center
@@ -326,7 +326,7 @@ fn and_gate_lowers_with_two_inputs() {
 
 struct s size=1x1
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
   logic sig.out = sig.a and sig.b
   door id=front side=front at=center
   door[id=front] opened_by=sig.out
@@ -384,7 +384,7 @@ fn topologically_ordered_multi_gate_dag() {
 
 struct s size=1x1
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
   logic sig.out = sig.mid and sig.tail
   logic sig.mid = sig.a or sig.b
   logic sig.tail = not sig.a

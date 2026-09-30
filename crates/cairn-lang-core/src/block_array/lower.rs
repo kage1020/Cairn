@@ -3459,9 +3459,12 @@ fn shift_outward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
     (x.saturating_add_signed(dx), z.saturating_add_signed(dz))
 }
 
-/// Shift a wall voxel's `(x, z)` by one voxel toward the interior so a
-/// fixture placed with `at=inside.<side>` sits on the interior floor row
-/// next to the wall rather than overwriting the wall itself.
+/// Shift a wall voxel's `(x, z)` by one voxel toward the interior, the
+/// cell an `at=inside.<side>` fixture sits on at whatever row it asks for.
+///
+/// The step saturates at 0 and never checks the result: whether the cell
+/// is really inside the building, rather than a block of another wall, is
+/// [`inside_plate_refusal`]'s question, asked by the caller.
 fn shift_inward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
     let (dx, dz) = side.outward_normal();
     (x.saturating_add_signed(-dx), z.saturating_add_signed(-dz))
@@ -3612,9 +3615,9 @@ fn fill_pressure_plate(
 ///
 /// `inside.<side>` always shifts one voxel inward and defers unless the
 /// shifted cell is strictly inside the wall ring on both horizontal axes
-/// (see [`inside_plate_refusal`]): otherwise the plate would replace a
-/// block of the neighbouring or opposite wall, or sit outside the
-/// building altogether.
+/// (see [`inside_plate_refusal`]), at every row including the floor row:
+/// otherwise the plate would sit on the ring, where the walls paint their
+/// courses, or outside the building altogether.
 fn plate_voxel_position(
     member: &Member,
     y_offset: u32,
@@ -3712,7 +3715,14 @@ fn plate_voxel_position(
         }
         PlateAnchor::Inside(_) => {
             let (sx, sz) = shift_inward(side, wx, wz);
-            if let Some(reason) = inside_plate_refusal(side, offset, (sx, sz), ctx) {
+            if let Some(mut reason) = inside_plate_refusal(side, offset, y_world, (sx, sz), ctx) {
+                if member.binding.is_some() {
+                    // The redstone pass reads the binding, not the block
+                    // array, so the signal outlives the refused block.
+                    reason.push_str(
+                        ". Its signal binding still reaches the netlist, with no plate placed to drive it",
+                    );
+                }
                 diagnostics.push(diag_deferred_member_reason(member, &reason));
                 return None;
             }
@@ -3722,21 +3732,25 @@ fn plate_voxel_position(
 }
 
 /// Why an `at=inside.<side>` plate whose inward step landed on `(sx, sz)`
-/// has no interior cell to sit on, or `None` when `(sx, sz)` is strictly
-/// inside the wall ring on both horizontal axes.
+/// at row `y` has no interior cell to sit on, or `None` when it has one.
 ///
-/// The ring is the footprint's outermost row and column, offset by the
-/// roof overhang, so the interior is `overhang < x < overhang + size.w - 1`
-/// and the same along `z` with `size.h`. A cell outside that range is a
-/// block of another wall (a corner offset, or the opposite wall of a
-/// 2-deep struct), the wall itself (a saturated step), or the overhang
-/// ring outside the building (a 1-deep struct).
+/// The interior is what the wall ring encloses. The ring is the
+/// footprint's outermost row and column, offset by the roof overhang, and
+/// it is where `walls` paint their courses, so only a cell strictly inside
+/// it can take a plate without replacing a wall block. The ring is decided
+/// from the footprint whether or not a `walls` member paints it, so a cell
+/// on or outside it is refused either way, and the reason claims a wall
+/// only at a row one is painted on.
 fn inside_plate_refusal(
     side: WallSide,
     offset: u32,
+    y: u32,
     (sx, sz): (u32, u32),
     ctx: &StructCtx<'_>,
 ) -> Option<String> {
+    // Saturation cannot turn an outside cell into an inside one: that
+    // needs `overhang + extent > u32::MAX`, where `dims` saturates too and
+    // `fits_volume_budget` has already dropped the struct.
     let strictly_inside = |c: u32, extent: u32| {
         c > ctx.overhang && c < ctx.overhang.saturating_add(extent).saturating_sub(1)
     };
@@ -3744,26 +3758,66 @@ fn inside_plate_refusal(
         return None;
     }
     let name = side_name(side);
+    let length = wall_length(side, ctx.interior_w, ctx.interior_h);
     // An interior needs one voxel between two walls on each axis, so a
     // size below 3 on either axis has none for any side or offset.
-    let thin = [("w", ctx.interior_w), ("h", ctx.interior_h)]
+    let thin: Vec<(&str, u32)> = [("w", ctx.interior_w), ("h", ctx.interior_h)]
         .into_iter()
-        .find(|&(_, extent)| extent < 3);
-    Some(if let Some((axis, extent)) = thin {
-        format!(
-            "pressure_plate `at=inside.{name}`: the struct's size.{axis} is {extent}, so it has \
-             no interior voxel between its walls; an interior needs a size of at least 3 on both \
-             axes. Widen the struct, or anchor the plate with `at={name}.outside`",
-        )
+        .filter(|&(_, extent)| extent < 3)
+        .collect();
+    // With both axes at least 3, every offset but the two ends steps into
+    // the interior, so a refusal with no thin axis is always a corner.
+    let corner = thin.is_empty() || offset == 0 || offset == length - 1;
+    let valid_offsets = if length >= 3 {
+        format!("from 1 to {}", length - 2)
     } else {
-        let length = wall_length(side, ctx.interior_w, ctx.interior_h);
-        format!(
+        "away from both ends of the wall".to_owned()
+    };
+    if thin.is_empty() {
+        let inside_it = if ctx.wall_column.course_top_at(y).is_some() {
+            "belongs to the neighbouring wall"
+        } else {
+            "is not an interior cell of this struct"
+        };
+        return Some(format!(
             "pressure_plate `at=inside.{name} offset={offset}` is at a corner of the {name} wall, \
-             so the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to \
-             {} to reach an interior voxel",
-            length - 2,
-        )
-    })
+             so the voxel inside it {inside_it}; use an `offset=` {valid_offsets} to reach an \
+             interior voxel",
+        ));
+    }
+    let also_corner = if corner {
+        format!(", and `offset={offset}` is at a corner of the {name} wall besides")
+    } else {
+        String::new()
+    };
+    let sizes = thin
+        .iter()
+        .map(|(axis, extent)| format!("size.{axis} is {extent}"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    let grow = thin
+        .iter()
+        .map(|(axis, _)| format!("`size.{axis}` to at least 3"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    let use_offset = if corner {
+        format!(" and use an `offset=` {valid_offsets}")
+    } else {
+        String::new()
+    };
+    // Without an overhang `<side>.outside` finds no exterior cell above
+    // the floor row and, at it, falls back to the cell under the wall, so
+    // it is a remedy only when a roof draws an overhang ring to sit in.
+    let outside = if ctx.overhang > 0 {
+        format!(", or anchor the plate with `at={name}.outside`")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "pressure_plate `at=inside.{name} offset={offset}`: the struct's {sizes}, so it has no \
+         interior voxel{also_corner}; an interior needs a size of at least 3 on both axes. \
+         Grow {grow}{use_offset}{outside}",
+    ))
 }
 
 /// Resolve a `pressure_plate` `mat_slot=` binding into the concrete
@@ -7986,12 +8040,13 @@ struct s size=9x7
         assert_eq!(block_id(ba, 1, 0, 1), "minecraft:spruce_pressure_plate");
     }
 
-    /// Lower `size=<size>` walls (cobblestone) plus `extra` and one plate
-    /// line, and return the output with the `W_DEFERRED_MEMBER` primaries.
-    fn lowered_inside_plate(size: &str, extra: &str, plate: &str) -> (BlockArrayIr, Vec<String>) {
+    /// Lower `size=<size>` with `members` (each line indented, cobblestone
+    /// on the `wall` slot) and one plate line, and return the output with
+    /// the `W_DEFERRED_MEMBER` primaries.
+    fn lowered_plate(size: &str, members: &str, plate: &str) -> (BlockArrayIr, Vec<String>) {
         let src = format!(
-            "theme t:\n  slot wall -> @cobblestone\n\nstruct s size={size}\n  \
-             walls mat_slot=wall height=3\n{extra}  pressure_plate {plate}\n",
+            "theme t:\n  slot wall -> @cobblestone\n\nstruct s size={size}\n{members}  \
+             pressure_plate {plate}\n",
         );
         let out = lowered(&src);
         let reasons = out
@@ -8003,11 +8058,33 @@ struct s size=9x7
         (out, reasons)
     }
 
+    /// [`lowered_plate`] with `walls height=3` ahead of `extra`.
+    fn lowered_inside_plate(size: &str, extra: &str, plate: &str) -> (BlockArrayIr, Vec<String>) {
+        lowered_plate(
+            size,
+            &format!("  walls mat_slot=wall height=3\n{extra}"),
+            plate,
+        )
+    }
+
     fn plate_count(ba: &BlockArray) -> usize {
         ba.voxels
             .iter()
             .filter(|v| ba.palette.entries[usize::from(v.0)].id == PRESSURE_PLATE_BASE_ID)
             .count()
+    }
+
+    /// The wall rings the inside-plate tests run against: the footprint's
+    /// own edge, and the ring a roof overhang of 1 or 2 moves inward.
+    const OVERHANGS: [u32; 3] = [0, 1, 2];
+
+    /// The member line that gives a struct `overhang`, empty for none.
+    fn overhang_roof(overhang: u32) -> String {
+        if overhang == 0 {
+            String::new()
+        } else {
+            format!("  roof kind=flat mat_slot=wall overhang={overhang}\n")
+        }
     }
 
     #[test]
@@ -8022,7 +8099,8 @@ struct s size=9x7
             vec![
                 "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
                  the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to \
-                 3 to reach an interior voxel"
+                 3 to reach an interior voxel. Its signal binding still reaches the netlist, with \
+                 no plate placed to drive it"
                     .to_owned()
             ],
         );
@@ -8031,31 +8109,104 @@ struct s size=9x7
     }
 
     #[test]
+    fn pressure_plate_inside_at_a_corner_defers_at_the_floor_row_too() {
+        // At y=0 the corner cell is floor under the side wall. The
+        // `<side>.outside` foundation fallback is y=0-only; inside has no
+        // such exemption. No wall is painted at row 0, so the reason does
+        // not claim one.
+        let (out, reasons) = lowered_inside_plate("5x5", "", "at=inside.front offset=0 y=0");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
+                 the voxel inside it is not an interior cell of this struct; use an `offset=` \
+                 from 1 to 3 to reach an interior voxel"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_claims_no_wall_where_none_is_painted() {
+        // The ring is decided from the footprint, so a corner is refused
+        // at every row — but only a row the walls paint has a wall there
+        // to name: not a floor-only struct, and not the air between two
+        // courses (rows 1 and 5 here).
+        let cases = [
+            ("  floor mat_slot=wall\n", 0),
+            (
+                "  walls mat_slot=wall height=1\n  level y=4\n    walls mat_slot=wall height=1\n",
+                3,
+            ),
+        ];
+        for (members, y) in cases {
+            let (out, reasons) =
+                lowered_plate("5x5", members, &format!("at=inside.front offset=0 y={y}"));
+            let ba = out.structures.get("struct::s").unwrap();
+            assert_eq!(
+                reasons,
+                vec![
+                    "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, \
+                     so the voxel inside it is not an interior cell of this struct; use an \
+                     `offset=` from 1 to 3 to reach an interior voxel"
+                        .to_owned()
+                ],
+                "{members:?} y={y}",
+            );
+            assert_eq!(plate_count(ba), 0);
+        }
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_of_a_long_left_wall_names_that_wall() {
+        // On a 4x6 footprint the left wall runs along `size.h`, so both
+        // its name and its offset range differ from the front wall's.
+        let (out, reasons) = lowered_inside_plate("4x6", "", "at=inside.left offset=5 y=1");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.left offset=5` is at a corner of the left wall, so \
+                 the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to \
+                 4 to reach an interior voxel"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    /// The four sides of a 4x5 footprint with the length of each wall:
+    /// front and back run along `size.w`, left and right along `size.h`.
+    const SIDES_4X5: [(&str, u32); 4] = [("front", 4), ("back", 4), ("left", 5), ("right", 5)];
+
+    #[test]
     fn pressure_plate_inside_defers_at_both_corners_of_every_side() {
         // Each side mirrors `offset=` differently, so both ends of every
         // wall are checked: a refusal keyed on one axis or one end would
         // let the other three walls or the far corner through. Under an
-        // overhang the wall ring moves in by one, so a bound measured from
-        // the volume's edge rather than the ring would let the corner in.
-        for (overhang, extra) in OVERHANGS {
-            for side in ["front", "back", "left", "right"] {
-                for offset in [0, 3] {
+        // overhang the wall ring moves in, so a bound measured from the
+        // volume's edge rather than the ring would let the corner in.
+        for overhang in OVERHANGS {
+            for (side, length) in SIDES_4X5 {
+                for offset in [0, length - 1] {
                     let (out, reasons) = lowered_inside_plate(
-                        "4x4",
-                        extra,
+                        "4x5",
+                        &overhang_roof(overhang),
                         &format!("at=inside.{side} offset={offset} y=1"),
                     );
                     let ba = out.structures.get("struct::s").unwrap();
                     let case = format!("overhang={overhang} inside.{side} offset={offset}");
                     assert_eq!(
-                        reasons.len(),
-                        1,
-                        "{case}: expected one defer, got {reasons:?}"
-                    );
-                    assert!(
-                        reasons[0].contains("is at a corner of the"),
-                        "{case}: {}",
-                        reasons[0],
+                        reasons,
+                        vec![format!(
+                            "pressure_plate `at=inside.{side} offset={offset}` is at a corner of \
+                             the {side} wall, so the voxel inside it belongs to the neighbouring \
+                             wall; use an `offset=` from 1 to {} to reach an interior voxel",
+                            length - 2,
+                        )],
+                        "{case}",
                     );
                     assert_eq!(plate_count(ba), 0, "{case} painted");
                 }
@@ -8063,30 +8214,29 @@ struct s size=9x7
         }
     }
 
-    /// The two wall rings the corner tests run against: the footprint's
-    /// own edge, and one voxel in from the edge of a volume a roof
-    /// overhang has inflated.
-    const OVERHANGS: [(u32, &str); 2] =
-        [(0, ""), (1, "  roof kind=flat mat_slot=wall overhang=1\n")];
-
     #[test]
     fn pressure_plate_inside_paints_at_every_non_corner_offset_of_every_side() {
         // The other half of the corner rule: every offset between the two
         // corners reaches a genuine interior cell and paints without a
         // word. A 4x5 footprint keeps the two axes' lengths distinct, and
         // the cells are those of the footprint with no overhang.
-        let cases = [
-            ("front", 4, [(1, 3), (2, 3)].as_slice()),
-            ("back", 4, [(2, 1), (1, 1)].as_slice()),
-            ("left", 5, [(1, 1), (1, 2), (1, 3)].as_slice()),
-            ("right", 5, [(2, 3), (2, 2), (2, 1)].as_slice()),
+        let cells: [&[(u32, u32)]; 4] = [
+            &[(1, 3), (2, 3)],
+            &[(2, 1), (1, 1)],
+            &[(1, 1), (1, 2), (1, 3)],
+            &[(2, 3), (2, 2), (2, 1)],
         ];
-        for (overhang, extra) in OVERHANGS {
-            for (side, length, cells) in cases {
+        for overhang in OVERHANGS {
+            for ((side, length), cells) in SIDES_4X5.into_iter().zip(cells) {
+                assert_eq!(
+                    cells.len(),
+                    usize::try_from(length - 2).unwrap(),
+                    "{side} has one cell per non-corner offset",
+                );
                 for (offset, &(x, z)) in (1..length - 1).zip(cells) {
                     let (out, reasons) = lowered_inside_plate(
                         "4x5",
-                        extra,
+                        &overhang_roof(overhang),
                         &format!("at=inside.{side} offset={offset} y=1"),
                     );
                     let ba = out.structures.get("struct::s").unwrap();
@@ -8106,16 +8256,19 @@ struct s size=9x7
     #[test]
     fn pressure_plate_inside_a_two_deep_struct_defers_and_keeps_the_back_wall() {
         // With size.h = 2 the cell one step in from the front wall is the
-        // back wall.
+        // back wall. With no overhang `front.outside` would bury the plate
+        // under the wall at y=0 and find no cell above it, so the reason
+        // does not offer it.
         let (out, reasons) =
             lowered_inside_plate("5x2", "", "id=p at=inside.front offset=2 y=1 -> sig.a");
         let ba = out.structures.get("struct::s").unwrap();
         assert_eq!(
             reasons,
             vec![
-                "pressure_plate `at=inside.front`: the struct's size.h is 2, so it has no \
-                 interior voxel between its walls; an interior needs a size of at least 3 on both \
-                 axes. Widen the struct, or anchor the plate with `at=front.outside`"
+                "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has \
+                 no interior voxel; an interior needs a size of at least 3 on both axes. Grow \
+                 `size.h` to at least 3. Its signal binding still reaches the netlist, with no \
+                 plate placed to drive it"
                     .to_owned()
             ],
         );
@@ -8128,35 +8281,74 @@ struct s size=9x7
         // With size.h = 1 the front and back walls are one row (z=1 under
         // `overhang=1`), and the inward step lands in the overhang ring
         // behind the building at z=0.
-        let (out, reasons) = lowered_inside_plate(
-            "5x1",
-            "  roof kind=flat mat_slot=wall overhang=1\n",
-            "id=p at=inside.front offset=2 y=1 -> sig.a",
-        );
+        let roof = overhang_roof(1);
+        let (out, reasons) = lowered_inside_plate("5x1", &roof, "at=inside.front offset=2 y=1");
         let ba = out.structures.get("struct::s").unwrap();
-        assert_eq!(reasons.len(), 1, "{reasons:?}");
-        assert!(
-            reasons[0].contains("the struct's size.h is 1, so it has no interior voxel"),
-            "{}",
-            reasons[0],
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=2`: the struct's size.h is 1, so it has \
+                 no interior voxel; an interior needs a size of at least 3 on both axes. Grow \
+                 `size.h` to at least 3, or anchor the plate with `at=front.outside`"
+                    .to_owned()
+            ],
         );
         assert_eq!(block_id(ba, 3, 1, 0), "minecraft:air");
         assert_eq!(plate_count(ba), 0);
+        // The remedy the reason offers works on this very struct.
+        let (out, reasons) = lowered_inside_plate("5x1", &roof, "at=front.outside offset=2 y=1");
+        assert_eq!(reasons, Vec::<String>::new());
+        assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 1);
     }
 
     #[test]
     fn pressure_plate_inside_a_narrow_struct_names_the_narrow_axis() {
         // The front wall of a 2-wide struct is two corners with nothing
-        // between them, so the reason is the width, not the offset.
+        // between them, so no offset can help until the width grows.
         let (out, reasons) = lowered_inside_plate("2x5", "", "at=inside.front offset=1 y=1");
         let ba = out.structures.get("struct::s").unwrap();
-        assert_eq!(reasons.len(), 1, "{reasons:?}");
-        assert!(
-            reasons[0].contains("the struct's size.w is 2, so it has no interior voxel"),
-            "{}",
-            reasons[0],
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=1`: the struct's size.w is 2, so it has \
+                 no interior voxel, and `offset=1` is at a corner of the front wall besides; an \
+                 interior needs a size of at least 3 on both axes. Grow `size.w` to at least 3 \
+                 and use an `offset=` away from both ends of the wall"
+                    .to_owned()
+            ],
         );
         assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_reports_a_thin_axis_and_a_corner_in_one_pass() {
+        // `2x9 at=inside.left offset=0` is both too narrow and a corner:
+        // one reason names both, so widening alone is not the whole fix.
+        // With both axes thin, both are named.
+        let cases = [
+            (
+                "2x9",
+                "at=inside.left offset=0 y=1",
+                "pressure_plate `at=inside.left offset=0`: the struct's size.w is 2, so it has \
+                 no interior voxel, and `offset=0` is at a corner of the left wall besides; an \
+                 interior needs a size of at least 3 on both axes. Grow `size.w` to at least 3 \
+                 and use an `offset=` from 1 to 7",
+            ),
+            (
+                "2x2",
+                "at=inside.front offset=0 y=1",
+                "pressure_plate `at=inside.front offset=0`: the struct's size.w is 2 and size.h \
+                 is 2, so it has no interior voxel, and `offset=0` is at a corner of the front \
+                 wall besides; an interior needs a size of at least 3 on both axes. Grow \
+                 `size.w` to at least 3 and `size.h` to at least 3 and use an `offset=` away \
+                 from both ends of the wall",
+            ),
+        ];
+        for (size, plate, expected) in cases {
+            let (out, reasons) = lowered_inside_plate(size, "", plate);
+            assert_eq!(reasons, vec![expected.to_owned()], "{size} {plate}");
+            assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
+        }
     }
 
     #[test]
