@@ -417,6 +417,36 @@
   `placements`; the next `compile` now warns that the existing lockfile could not be read, names the
   forbidden character, and replaces the lock without comparing against the target it recorded.
 
+- *(core)* An argument whose value was present but unreadable was built as if it had been left
+  off, and nothing said so. A window's `sym=`, an eave stair's `facing=` / `half=` / `shape=`, and a
+  `place`'s `gap=` each read a value of the wrong shape as "absent" and used the default:
+
+  ```
+  window side=front offset=1 y=1 size=1x1 sym=yes mat_slot=glass       # no mirror
+  stair kind=stairs side=front half="bottom" mat_slot=eave             # half=top
+  place id=b use=box theme=t east_of=a gap=wide                        # gap=0, walls touching
+  ```
+
+  `spec/lint` "Error vs warning" calls this an unreadable value and gives it `W_IGNORED_ARGUMENT`,
+  as `roof overhang=` already had. Each of these now raises it, naming the key, the value as
+  written, and what was built instead:
+
+  ```
+  s.crn:3:3: warning[W_IGNORED_ARGUMENT]: `sym=` must be `true` or `false`, not identifier `yes`; the value was ignored
+    note: the window is drawn without its mirror, as `sym=false` would draw it
+  ```
+
+  The finding is raised only for a member that is then built. A window, stair or `place` row
+  refused further on has its repair in that `W_DEFERRED_MEMBER` already. An unknown bare identifier
+  (`half=sideways`) still defers the stair, as before.
+
+  A `place` origin also saturated at the edge of `i32`, so `gap=3000000000` moved nothing and
+  `gap=2147483647` followed by another `east_of=` row stacked the two on one coordinate. A row
+  whose origin works out past that range is now refused with `W_DEFERRED_MEMBER`, naming the axis
+  and the sum, and a row placed relative to it is refused with it. Like a row whose anchor did not
+  lower, a row refused this way reports nothing about its body. The `roof overhang=` finding's
+  message now also names the value that was written.
+
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
   `None`, so the row had nothing to branch on:

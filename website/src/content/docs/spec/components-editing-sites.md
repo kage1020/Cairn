@@ -81,6 +81,13 @@ no distance, so a `gap=` written beside it is read by nothing and reported as `W
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)) — the argument is real, and which of the two the author
 meant is theirs to say.
 
+On a relative row, `gap=` takes an integer. Any other value (`gap=wide`, `gap="4"`) is an
+unreadable value: the row is placed as `gap=0` places it, and the value is reported as
+`W_IGNORED_ARGUMENT`. An origin is recorded as a 32-bit signed coordinate, so a row whose origin
+works out past that range is not placed at all and is reported as `W_DEFERRED_MEMBER`, as is every
+row placed relative to it. It is refused rather than clamped to the edge: a clamped origin is not
+the one the source asks for, and two rows clamped to one edge land on one coordinate.
+
 ### 9.3.3 Cross-scope references
 
 Every `place` row declares `id=`, `use=`, and `theme=`. A row short of any of them cannot become a

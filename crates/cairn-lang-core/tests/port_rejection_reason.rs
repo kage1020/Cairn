@@ -443,17 +443,13 @@ fn a_window_whose_rows_overflow_prints_no_backwards_range() {
 
 #[test]
 fn a_port_one_step_past_the_coordinate_range_is_refused_as_out_of_range() {
-    // `north_of=a` puts `b`'s origin at `z = i32::MIN` — exactly, with
-    // `gap=2147483643` (`0 - 5 - gap`), and by saturation with any larger
-    // gap — so its back wall sits on the last addressable row and only the
-    // step out of the wall leaves the range. A debug build used to panic
-    // on that step.
-    for gap in [2_147_483_643_u32, 2_147_483_647] {
-        port_one_step_past_the_range(gap);
-    }
-}
-
-fn port_one_step_past_the_range(gap: u32) {
+    // `north_of=a` puts `b`'s origin at exactly `z = i32::MIN` with
+    // `gap=2147483643` (`0 - 5 - gap`), so its back wall sits on the last
+    // addressable row and only the step out of the wall leaves the range.
+    // A debug build used to panic on that step. A larger gap no longer
+    // reaches here: the origin itself would leave the range, and the
+    // `place` is refused before it has a door to step from.
+    let gap = 2_147_483_643_u32;
     let src = format!(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
