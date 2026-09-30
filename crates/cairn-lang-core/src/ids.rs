@@ -5,9 +5,12 @@
 //! establishes (non-empty, no `.`, no `:`, no whitespace) so downstream
 //! layers cannot accidentally pass a connect endpoint such as
 //! `home.1.entry` and have the walkway scope key silently re-parse as a
-//! different `(place, port)` pair. The wire format is unchanged: every
-//! newtype is `#[serde(transparent)]` over its internal `String`, so any
-//! YAML / JSON consumer keeps seeing the same scalar string it used to.
+//! different `(place, port)` pair. The path separators `/` and `\` are
+//! refused as well: an identifier becomes an artifact's file name, and a
+//! separator in it would move the artifact out of the output directory.
+//! The wire format is unchanged: every newtype is `#[serde(transparent)]`
+//! over its internal `String`, so any YAML / JSON consumer keeps seeing the
+//! same scalar string it used to.
 //!
 //! [`WalkwayScopeKey`] is the structural counterpart: its internal
 //! representation is the normalized `walkway::SITE::PLACE.PORT__PLACE.PORT`
@@ -28,8 +31,9 @@ pub enum IdError {
     #[error("identifier is empty")]
     Empty,
     /// Construction was attempted with a string containing a character
-    /// that is reserved as a structural separator (`.`, `:`) or that the
-    /// surface lexer would not have produced (whitespace).
+    /// that is reserved as a structural separator (`.`, `:`), a path
+    /// separator (`/`, `\`), or a character the surface lexer would not
+    /// have produced (whitespace).
     #[error("identifier `{ident}` contains forbidden character `{ch}`")]
     ForbiddenChar {
         /// The full offending string.
@@ -39,12 +43,24 @@ pub enum IdError {
     },
 }
 
+/// The characters no identifier may carry.
+///
+/// `.` and `:` are the scope-key separators. `/` and `\` are the path
+/// separators: an identifier is the stem of the artifact file the compiler
+/// writes into `--out`, so either one would put that file in another
+/// directory, and an absolute id would replace `--out` altogether. Both are
+/// refused on every platform, so whether an identifier is accepted does not
+/// depend on the host that checks it.
+fn is_forbidden_ident_char(c: char) -> bool {
+    matches!(c, '.' | ':' | '/' | '\\') || c.is_whitespace()
+}
+
 fn validate_ident(s: &str) -> Result<(), IdError> {
     if s.is_empty() {
         return Err(IdError::Empty);
     }
     for c in s.chars() {
-        if c == '.' || c == ':' || c.is_whitespace() {
+        if is_forbidden_ident_char(c) {
             return Err(IdError::ForbiddenChar {
                 ident: s.to_owned(),
                 ch: c,
@@ -57,6 +73,28 @@ fn validate_ident(s: &str) -> Result<(), IdError> {
 fn check_no_dunder(role: &'static str, s: &str) -> Result<(), KeyConstructError> {
     if s.contains("__") {
         return Err(KeyConstructError::ConsecutiveUnderscore {
+            role,
+            segment: s.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+/// Whether `s` starts or ends with `_`. A place or port segment with a
+/// `_` at either edge can sit next to the `from`/`to` separator and run
+/// into it: `(a, p_)` to `(b, p)` and `(a, p)` to `(_b, p)` both encode
+/// to `a.p___b.p`. Checking both edges of every
+/// place and port (not only `from_port`'s end and `to_place`'s start,
+/// the two that touch the separator) keeps the rule independent of the
+/// direction a `connect` row is written in.
+fn has_edge_underscore(s: &str) -> bool {
+    s.starts_with('_') || s.ends_with('_')
+}
+
+fn check_endpoint_segment(role: &'static str, s: &str) -> Result<(), KeyConstructError> {
+    check_no_dunder(role, s)?;
+    if has_edge_underscore(s) {
+        return Err(KeyConstructError::UnderscoreAtEdge {
             role,
             segment: s.to_owned(),
         });
@@ -79,7 +117,9 @@ macro_rules! ident_newtype {
             /// Returns [`IdError::Empty`] for the empty string, or
             /// [`IdError::ForbiddenChar`] if the input contains a `.`,
             /// `:`, or whitespace character (any of which would break
-            /// the structural separators downstream lookups rely on).
+            /// the structural separators downstream lookups rely on), or
+            /// a `/` or `\` (which would make the artifact file name
+            /// a path).
             pub fn new<S: Into<String>>(s: S) -> Result<Self, IdError> {
                 let s = s.into();
                 validate_ident(&s)?;
@@ -165,6 +205,7 @@ ident_newtype!(
 
 /// Failure modes for [`WalkwayScopeKey::parse`].
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum KeyParseError {
     /// The key does not start with the `walkway::` prefix.
     #[error("missing `walkway::` prefix in scope key `{0}`")]
@@ -210,19 +251,33 @@ pub enum KeyParseError {
         /// The offending segment.
         segment: String,
     },
+    /// A place or port segment starts or ends with `_`, so it runs
+    /// into the `__` separator next to it. See
+    /// [`KeyConstructError::UnderscoreAtEdge`].
+    #[error(
+        "segment `{segment}` in scope key `{key}` starts or ends with `_`, which runs into \
+         the `from`/`to` separator"
+    )]
+    UnderscoreAtEdge {
+        /// The whole scope key that was being parsed.
+        key: String,
+        /// The offending segment.
+        segment: String,
+    },
 }
 
 /// Failure modes for [`WalkwayScopeKey::from_parts`].
 ///
-/// The only reason a typed construction can fail is that one of the
-/// segments contains the `__` separator substring. Surface lexer rules
-/// allow `_` in identifiers, so a place / port id can legally be e.g.
-/// `home__1`; lowering must convert that into a diagnostic on the
-/// originating `connect` row rather than emit a wire-ambiguous scope
-/// key (the `parse`/`from_parts` round-trip would otherwise rebind
-/// `(home, __1__home2, entry)` to `(home, _, _1_home2.entry)` style
-/// pairs).
+/// A typed construction fails when a segment could merge into the `__`
+/// separator between the `from` and `to` endpoints: a segment that
+/// contains `__`, or a place / port segment that starts or ends with
+/// `_`. Surface lexer rules allow `_` anywhere in identifiers, so a
+/// place / port id can legally be `home__1` or `p_`; lowering must
+/// convert that into a diagnostic on the originating `connect` row
+/// rather than emit a wire-ambiguous scope key, since two distinct
+/// endpoint pairs would otherwise encode to one string.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum KeyConstructError {
     /// A segment contains the `__` substring.
     #[error(
@@ -231,6 +286,23 @@ pub enum KeyConstructError {
     )]
     ConsecutiveUnderscore {
         /// Which role the offending segment plays (`"site"`, `"place"`, `"port"`).
+        role: &'static str,
+        /// The offending segment.
+        segment: String,
+    },
+    /// A place or port segment starts or ends with `_`. Next to the
+    /// `__` separator that `_` joins the separator: `(a, p_)` to
+    /// `(b, p)` and `(a, p)` to `(_b, p)` both encode to
+    /// `a.p___b.p`, and a port named `_` gives `a.___b._`, which
+    /// splits back into an empty port. The site segment is exempt: it
+    /// sits between two `::` separators, which no identifier can
+    /// contain.
+    #[error(
+        "walkway scope key segment `{segment}` starts or ends with `_`, which runs into the \
+         `from`/`to` separator; rename the {role} so the lowered key is unambiguous"
+    )]
+    UnderscoreAtEdge {
+        /// Which role the offending segment plays (`"place"`, `"port"`).
         role: &'static str,
         /// The offending segment.
         segment: String,
@@ -260,24 +332,26 @@ impl WalkwayScopeKey {
     /// # Errors
     ///
     /// Returns [`KeyConstructError::ConsecutiveUnderscore`] when any
-    /// segment contains the `__` substring. The surface lexer allows
-    /// `_` freely in identifiers, so a user-typed place / port id may
-    /// validly contain `__` — but the canonical scope key uses `__` as
-    /// the `from`/`to` separator, so `(home, b__c, home2, entry)` and
+    /// segment contains the `__` substring, and
+    /// [`KeyConstructError::UnderscoreAtEdge`] when a place or port
+    /// segment starts or ends with `_`. The surface lexer allows `_`
+    /// freely in identifiers, so a user-typed place / port id may
+    /// validly be `b__c` or `p_` — but the canonical scope key uses `__`
+    /// as the `from`/`to` separator, so `(home, b__c, home2, entry)` and
     /// `(home, b, c__home2, entry)` would both encode to the same
-    /// string. Lowering must surface this back to the user as a
-    /// diagnostic on the originating `connect` row rather than emit a
-    /// silent alias.
+    /// string, as would `(a, p_, b, p)` and `(a, p, _b, p)`. Lowering
+    /// must surface this back to the user as a diagnostic on the
+    /// originating `connect` row rather than emit a silent alias.
     pub fn from_parts(
         site: &SiteName,
         from: &WalkwayEndpoint,
         to: &WalkwayEndpoint,
     ) -> Result<Self, KeyConstructError> {
         check_no_dunder("site", site.as_str())?;
-        check_no_dunder("place", from.place.as_str())?;
-        check_no_dunder("port", from.port.as_str())?;
-        check_no_dunder("place", to.place.as_str())?;
-        check_no_dunder("port", to.port.as_str())?;
+        check_endpoint_segment("place", from.place.as_str())?;
+        check_endpoint_segment("port", from.port.as_str())?;
+        check_endpoint_segment("place", to.place.as_str())?;
+        check_endpoint_segment("port", to.port.as_str())?;
         Ok(Self(format!(
             "walkway::{site}::{from_place}.{from_port}__{to_place}.{to_port}",
             from_place = from.place,
@@ -294,7 +368,8 @@ impl WalkwayScopeKey {
     /// Returns a [`KeyParseError`] variant when the input does not
     /// follow the `walkway::SITE::PLACE.PORT__PLACE.PORT` shape, or
     /// when any of the five segments fails identifier validation
-    /// (e.g. a port id containing `.` or `__`).
+    /// (e.g. a port id containing `.` or `__`, or starting or ending
+    /// with `_`).
     pub fn parse(s: &str) -> Result<Self, KeyParseError> {
         let rest = s
             .strip_prefix("walkway::")
@@ -335,9 +410,9 @@ impl WalkwayScopeKey {
         let from_port_id = PortId::new(from_port).map_err(|e| invalid(from_port, e))?;
         let to_place_id = PlaceId::new(to_place).map_err(|e| invalid(to_place, e))?;
         let to_port_id = PortId::new(to_port).map_err(|e| invalid(to_port, e))?;
-        // `check_no_dunder` is satisfied above; map the
-        // construct-error variant onto the parse-error variant rather
-        // than panic, even though it cannot fire here.
+        // `__` is ruled out above; a place or port with `_` at an edge
+        // is left to `from_parts`, whose error maps onto the matching
+        // parse-error variant.
         Self::from_parts(
             &site_id,
             &WalkwayEndpoint {
@@ -349,7 +424,15 @@ impl WalkwayScopeKey {
                 port: to_port_id,
             },
         )
-        .map_err(|KeyConstructError::ConsecutiveUnderscore { segment, .. }| dunder(&segment))
+        .map_err(|e| match e {
+            KeyConstructError::ConsecutiveUnderscore { segment, .. } => dunder(&segment),
+            KeyConstructError::UnderscoreAtEdge { segment, .. } => {
+                KeyParseError::UnderscoreAtEdge {
+                    key: s.to_owned(),
+                    segment,
+                }
+            }
+        })
     }
 
     /// Borrow the wire-format string.
@@ -503,6 +586,29 @@ mod tests {
     }
 
     #[test]
+    fn ident_new_rejects_path_separators() {
+        // Every shape the output file name could take through a separator:
+        // absolute, relative with a directory, and Windows-style. Each
+        // newtype is checked, since all three become file-name segments.
+        for (ident, ch) in [("/tmp/x", '/'), ("sub/x", '/'), ("a\\b", '\\')] {
+            for result in [
+                PlaceId::new(ident).map(|_| ()),
+                PortId::new(ident).map(|_| ()),
+                SiteName::new(ident).map(|_| ()),
+            ] {
+                assert_eq!(
+                    result,
+                    Err(IdError::ForbiddenChar {
+                        ident: ident.to_owned(),
+                        ch,
+                    }),
+                    "`{ident}` must be refused on `{ch}`",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn ident_serializes_transparently() {
         // `serde_norway` emits the scalar with no extra structure, matching
         // what a bare `String` would produce — the `#[serde(transparent)]`
@@ -584,6 +690,9 @@ mod tests {
                 assert_eq!(role, "port");
                 assert_eq!(segment, "b__c");
             }
+            other @ KeyConstructError::UnderscoreAtEdge { .. } => {
+                panic!("expected ConsecutiveUnderscore, got {other:?}")
+            }
         }
         // Symmetric: the same protection applies to place ids and the
         // site name.
@@ -617,6 +726,128 @@ mod tests {
             }
             other => panic!("expected ConsecutiveUnderscore, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn walkway_scope_key_from_parts_rejects_edge_underscore_in_place_or_port() {
+        // `(a, p_) → (b, p)` and `(a, p) → (_b, p)` both used to encode
+        // to `walkway::s::a.p___b.p`: the edge `_` merges into the `__`
+        // separator. Both ends of every place and port are refused, not
+        // only the two that touch the separator in one direction.
+        let site = SiteName::new("s").expect("site");
+        let cases = [
+            (endpoint("a", "p_"), endpoint("b", "p"), "port", "p_"),
+            (endpoint("a", "p"), endpoint("_b", "p"), "place", "_b"),
+            (endpoint("a_", "p"), endpoint("b", "p"), "place", "a_"),
+            (endpoint("_a", "p"), endpoint("b", "p"), "place", "_a"),
+            (endpoint("a", "_p"), endpoint("b", "p"), "port", "_p"),
+            (endpoint("a", "p"), endpoint("b_", "p"), "place", "b_"),
+            (endpoint("a", "p"), endpoint("b", "_p"), "port", "_p"),
+            (endpoint("a", "p"), endpoint("b", "p_"), "port", "p_"),
+            (endpoint("a", "_"), endpoint("b", "_"), "port", "_"),
+        ];
+        for (from, to, want_role, want_segment) in cases {
+            match WalkwayScopeKey::from_parts(&site, &from, &to) {
+                Err(KeyConstructError::UnderscoreAtEdge { role, segment }) => {
+                    assert_eq!((role, segment.as_str()), (want_role, want_segment));
+                }
+                other => panic!("{from} → {to}: expected UnderscoreAtEdge, got {other:?}"),
+            }
+        }
+        // The site sits between two `::` separators, which no identifier
+        // can contain, so an edge `_` there cannot alias and stays legal.
+        let key = WalkwayScopeKey::from_parts(
+            &SiteName::new("_s_").expect("site"),
+            &endpoint("a", "p"),
+            &endpoint("b", "p"),
+        )
+        .expect("an edge `_` on the site is unambiguous");
+        assert_eq!(key.as_str(), "walkway::_s_::a.p__b.p");
+    }
+
+    #[test]
+    fn walkway_scope_key_parse_rejects_the_edge_underscore_aliases() {
+        // The string both aliasing rows used to produce is refused on
+        // the way back in, naming the segment the first `__` leaves
+        // with a leading `_`.
+        match WalkwayScopeKey::parse("walkway::s::a.p___b.p") {
+            Err(KeyParseError::UnderscoreAtEdge { key, segment }) => {
+                assert_eq!(key, "walkway::s::a.p___b.p");
+                assert_eq!(segment, "_b");
+            }
+            other => panic!("expected UnderscoreAtEdge, got {other:?}"),
+        }
+        // A port named `_` splits into an empty port at the first `__`.
+        assert!(matches!(
+            WalkwayScopeKey::parse("walkway::s::a.___b._"),
+            Err(KeyParseError::InvalidSegment {
+                source: IdError::Empty,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn walkway_scope_key_from_parts_is_injective_and_parses_back() {
+        // Exhaustive over segments of `a` and `_` up to three long — the
+        // only character that can merge into the `__` separator is `_`,
+        // and three is enough to put `_` at an edge, in the middle, and
+        // doubled. Every key `from_parts` accepts must parse back to the
+        // exact parts it was built from, which rules out two accepted
+        // inputs sharing a key: `parse` is a function, so a shared key
+        // would parse back to only one of them.
+        let mut segments = vec![String::new()];
+        let mut all = Vec::new();
+        for _ in 0..3 {
+            segments = segments
+                .iter()
+                .flat_map(|s| [format!("{s}a"), format!("{s}_")])
+                .collect();
+            all.extend(segments.iter().cloned());
+        }
+        let sites: Vec<&String> = all.iter().filter(|s| s.len() <= 2).collect();
+        let mut accepted = 0_usize;
+        let mut rejected = 0_usize;
+        for site in &sites {
+            let site_id = SiteName::new(site.as_str()).expect("site");
+            for from_place in &all {
+                for from_port in &all {
+                    for to_place in &all {
+                        for to_port in &all {
+                            let from = endpoint(from_place, from_port);
+                            let to = endpoint(to_place, to_port);
+                            let Ok(key) = WalkwayScopeKey::from_parts(&site_id, &from, &to) else {
+                                rejected += 1;
+                                continue;
+                            };
+                            accepted += 1;
+                            let parsed = WalkwayScopeKey::parse(key.as_str())
+                                .unwrap_or_else(|e| panic!("`{key}` does not parse back: {e}"));
+                            let parts = parsed.parts();
+                            assert_eq!(
+                                (
+                                    parts.site,
+                                    parts.from_place,
+                                    parts.from_port,
+                                    parts.to_place,
+                                    parts.to_port,
+                                ),
+                                (
+                                    site.as_str(),
+                                    from_place.as_str(),
+                                    from_port.as_str(),
+                                    to_place.as_str(),
+                                    to_port.as_str(),
+                                ),
+                                "`{key}` parses back to different parts",
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // Both arms must have been exercised for the loop to mean anything.
+        assert!(accepted > 0 && rejected > 0, "{accepted} / {rejected}");
     }
 
     #[test]

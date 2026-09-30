@@ -3239,8 +3239,10 @@ fn prepare_artifacts(
     out_dir: &Path,
 ) -> Result<Vec<(PathBuf, Compound)>, ExitCode> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
-    let mut seen_paths: std::collections::HashMap<PathBuf, String> =
-        std::collections::HashMap::with_capacity(block_ir.structures.len());
+    let mut seen_paths: std::collections::HashMap<
+        (PathBuf, std::ffi::OsString),
+        (PathBuf, String),
+    > = std::collections::HashMap::with_capacity(block_ir.structures.len());
     for (scope, array) in &block_ir.structures {
         let (tag, degraded) = target.build_tag(array).map_err(|err| {
             eprintln!("error: building `{scope}`: {err}");
@@ -3255,23 +3257,118 @@ fn prepare_artifacts(
                 message = note.message,
             );
         }
-        let path = out_dir.join(output_filename(scope, target.output_ext()));
-        // Walkway IR keys allow `.` / `_` in place and port ids; the
-        // `output_filename` flatten of `.` → `_` can fold two distinct
-        // walkways into the same on-disk name (e.g. `a.b_c__d.e_f` vs
-        // `a_b.c__d_e.f` both → `..._a_b_c__d_e_f`). Detecting that
+        let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
+        // Place and port ids may carry `_`, and `output_filename` joins a
+        // walkway's place and port with `_` where its scope key has the
+        // place/port separator `.`, so two distinct walkways can fold into
+        // the same on-disk name (e.g. `a.b_c__d.e_f` vs `a_b.c__d_e.f`
+        // both → `..._a_b_c__d_e_f`). Detecting that
         // here keeps the second walkway from silently overwriting the
-        // first.
-        if let Some(first) = seen_paths.insert(path.clone(), scope.clone()) {
+        // first. Keyed on the directory entry rather than the spelling:
+        // `home1` and `HOME1` are distinct ids but one file on macOS and
+        // Windows, and would destroy each other in the commit.
+        let location = entry_location(&path).map_err(|err| {
+            eprintln!(
+                "error: cannot resolve where artifact `{}` would be written: {err}",
+                path.display(),
+            );
+            eprintln!("  note: check that `--out` is readable, then run the build again");
+            ExitCode::from(1)
+        })?;
+        if let Some((first_path, first)) =
+            seen_paths.insert(location, (path.clone(), scope.clone()))
+        {
             eprintln!(
                 "error: output filename `{}` collides between scopes `{first}` and `{scope}`",
                 path.display(),
             );
+            if first_path != path {
+                eprintln!(
+                    "  note: `{}` and `{}` name one file on this file system; rename one of \
+                     the scopes so their names differ by more than case",
+                    first_path.display(),
+                    path.display(),
+                );
+            }
             return Err(ExitCode::from(1));
         }
         prepared.push((path, tag));
     }
     Ok(prepared)
+}
+
+/// Why an artifact file name cannot be joined onto `--out`.
+#[derive(Debug, PartialEq, Eq)]
+enum ArtifactNameRefusal {
+    /// The name carries `/`, `\` or `:`, the characters that make a name a
+    /// path on some host: a directory separator, or a Windows drive prefix
+    /// (`C:hut`) or alternate data stream (`hut.nbt:ads`).
+    Separator(char),
+    /// The name is empty, `.` or `..`: it names `--out` itself or its
+    /// parent rather than a file inside it.
+    NotAFile,
+}
+
+/// Decide whether `file_name` is a single plain file name.
+///
+/// The separator check comes first and is textual, so the same names are
+/// refused on every host: `Path::components` alone is host-dependent, since
+/// on Unix `C:hut` and `a\b` are each one `Normal` component. What remains
+/// is the shapes with no separator that are still not a file.
+fn artifact_name_refusal(file_name: &str) -> Option<ArtifactNameRefusal> {
+    if let Some(ch) = file_name.chars().find(|c| matches!(c, '/' | '\\' | ':')) {
+        return Some(ArtifactNameRefusal::Separator(ch));
+    }
+    let mut components = Path::new(file_name).components();
+    let plain = matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(name)), None) if name == file_name
+    );
+    (!plain).then_some(ArtifactNameRefusal::NotAFile)
+}
+
+/// Join an artifact's file name onto `--out`, refusing any name that is not
+/// a single plain file name.
+///
+/// `check` already refuses a `place id=` carrying a path separator
+/// (`E_INVALID_PLACE_ID`), so this is the second line rather than the first:
+/// it keeps a future source of file names that skips the identifier
+/// newtypes from choosing the directory the compiler writes to. The file
+/// name is checked rather than the joined path, because `Path::join` with
+/// an absolute argument discards `out_dir` and a relative one with a
+/// separator lands in a subdirectory. [`artifact_name_refusal`] refuses
+/// `/`, `\` and `:` textually, matching the identifier rule, so a name
+/// refused on one host is refused on every host.
+fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf, ExitCode> {
+    match artifact_name_refusal(file_name) {
+        None => Ok(out_dir.join(file_name)),
+        Some(ArtifactNameRefusal::Separator(ch)) => {
+            eprintln!(
+                "error: scope `{scope}` names its artifact `{file_name}`, which contains `{ch}`, \
+                 so it would not be written directly into `{}`",
+                out_dir.display(),
+            );
+            eprintln!(
+                "  note: every artifact is written directly into --out, named after its \
+                 `place id=`, its struct name, or its walkway's site and endpoints; an id may \
+                 not carry `/`, `\\` or `:`, so rename it (`home1`) and compile again",
+            );
+            Err(ExitCode::from(1))
+        }
+        Some(ArtifactNameRefusal::NotAFile) => {
+            eprintln!(
+                "error: scope `{scope}` names its artifact `{file_name}`, which is not a file \
+                 name inside `{}`",
+                out_dir.display(),
+            );
+            eprintln!(
+                "  note: every name the checker accepts gives a file name with an extension, so \
+                 this is a bug in Cairn rather than in the source; please report it with the \
+                 source that produced it",
+            );
+            Err(ExitCode::from(1))
+        }
+    }
 }
 
 /// Refuse a `--lock` that would land on a path the artifacts already own.
@@ -3281,20 +3378,53 @@ fn prepare_artifacts(
 /// destroying the previous build's artifact with no copy left. The scratch
 /// names count too: `--lock out/home1.nbt.tmp` collides during staging
 /// rather than during the commit.
+///
+/// Paths are compared by the directory entry they name, not by how they are
+/// spelled: `./out/home1.nbt`, an absolute path, and one through a symlinked
+/// `--out` all name the same file as `out/home1.nbt`. See
+/// [`entry_location`].
+///
+/// A location that cannot be resolved is not treated as free, since a key
+/// that could not be computed is one that cannot match. For an artifact it
+/// is an error: `--out` was just created, so failing to resolve it is not an
+/// ordinary state. For the lockfile it is a warning that the check could not
+/// be made, and the build goes on as it did before the check existed.
 fn check_lock_path_is_free(
     prepared: &[(PathBuf, Compound)],
     lock_path: &Path,
 ) -> Result<(), ExitCode> {
-    let reserved_paths: std::collections::HashSet<PathBuf> = prepared
-        .iter()
-        .flat_map(|(path, _)| staging::reserved_paths(path))
-        .collect();
+    let mut reserved_paths: std::collections::HashMap<(PathBuf, std::ffi::OsString), &Path> =
+        std::collections::HashMap::with_capacity(prepared.len() * 3);
+    for (artifact, _) in prepared {
+        for reserved in staging::reserved_paths(artifact) {
+            let location = entry_location(&reserved).map_err(|err| {
+                eprintln!(
+                    "error: cannot resolve where artifact `{}` would be written: {err}",
+                    reserved.display(),
+                );
+                eprintln!("  note: check that `--out` is readable, then run the build again");
+                ExitCode::from(1)
+            })?;
+            reserved_paths.insert(location, artifact);
+        }
+    }
     for reserved in staging::reserved_paths(lock_path) {
-        if reserved_paths.contains(&reserved) {
+        let location = match entry_location(&reserved) {
+            Ok(location) => location,
+            Err(err) => {
+                eprintln!(
+                    "warning: cannot resolve where lockfile path `{}` would be written ({err}); \
+                     could not check that it is not one of this build's artifacts",
+                    reserved.display(),
+                );
+                return Ok(());
+            }
+        };
+        if let Some(artifact) = reserved_paths.get(&location) {
             eprintln!(
                 "error: lockfile path `{}` collides with an artifact this build writes (`{}`)",
                 lock_path.display(),
-                reserved.display(),
+                artifact.display(),
             );
             eprintln!(
                 "  note: pass a `--lock` outside `--out`, or rename the struct whose artifact \
@@ -3304,6 +3434,57 @@ fn check_lock_path_is_free(
         }
     }
     Ok(())
+}
+
+/// The directory entry `path` names, as a key two spellings of one file
+/// compare equal on: the canonical parent directory and the file name.
+///
+/// Only the parent is canonicalised. The file itself usually does not exist
+/// yet, and when it is a symlink the commit renames the link rather than
+/// writing through it, so the entry — not what it points at — is what two
+/// staged files would fight over. Every path this is asked about either has
+/// an existing parent or is already doomed: `--out` has been created by the
+/// time it runs, and a lockfile whose directory is missing fails while
+/// staging, before anything is renamed. So only `NotFound` falls back, to
+/// the parent's absolute spelling, which still makes `./x` and `x` agree.
+/// Any other failure is returned rather than papered over, as the staging
+/// module's `occupant` does: a key computed some other way would not match
+/// the canonical one for the same file, and the caller would read that as
+/// "no collision".
+///
+/// macOS and Windows file systems are case-insensitive by default, so there
+/// the file name is compared case-folded: `OUT/HOME1.nbt` is `out/home1.nbt`.
+/// Only the name needs folding, because `canonicalize` returns the directory
+/// in the case the file system recorded it, so `OUT` and `out` already
+/// resolve alike. `to_lowercase` is not the file system's own fold (NTFS's
+/// upcase table, APFS's fold plus normalisation), but artifact names come
+/// from ASCII identifiers, where the two agree. The choice is by platform,
+/// not by volume: a case-sensitive volume on either costs at most a spurious
+/// refusal, and a case-insensitive one elsewhere (casefold ext4, exFAT or
+/// CIFS on Linux) is not folded, so the collision there goes unseen.
+fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)> {
+    let resolve = |dir: &Path| {
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        match dir.canonicalize() {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => std::path::absolute(dir),
+            resolved => resolved,
+        }
+    };
+    // No file name means the path ends in `..` or is a root; there is no
+    // entry to split off, so the whole path is the location.
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return Ok((resolve(path)?, std::ffi::OsString::new()));
+    };
+    let name = if cfg!(any(target_os = "macos", windows)) {
+        name.to_string_lossy().to_lowercase().into()
+    } else {
+        name.to_os_string()
+    };
+    Ok((resolve(parent)?, name))
 }
 
 /// Write the prepared structure files and the lockfile as one set: either
@@ -4152,5 +4333,89 @@ mod tests {
             "an edition-neutral --stage follows an edition-tagged one, so `synth`'s \
              \"earlier stages\" no longer describes the edition-neutral set",
         );
+    }
+
+    /// Every file name that would leave `--out` is refused, and a plain one
+    /// joins onto it unchanged.
+    ///
+    /// The refused rows are the shapes a separator gives a name: absolute
+    /// (which `Path::join` lets replace `out_dir`), relative with a
+    /// directory, Windows-style, a drive prefix (on Windows `C:hut.nbt`
+    /// joins to `C:hut.nbt` and drops `out_dir`) and an alternate data
+    /// stream, then the names that are not a file at all. Each row pins the
+    /// reason, not just the refusal, and every host takes the same one: on
+    /// Unix the `\` and `:` rows are single `Normal` components that only
+    /// the textual check refuses.
+    #[test]
+    fn an_artifact_file_name_that_is_not_plain_is_refused() {
+        let out_dir = Path::new("out");
+        for (name, refusal) in [
+            ("/abs/hut.nbt", ArtifactNameRefusal::Separator('/')),
+            ("sub/hut.nbt", ArtifactNameRefusal::Separator('/')),
+            ("a\\b.nbt", ArtifactNameRefusal::Separator('\\')),
+            ("C:hut.nbt", ArtifactNameRefusal::Separator(':')),
+            ("hut.nbt:ads", ArtifactNameRefusal::Separator(':')),
+            ("..", ArtifactNameRefusal::NotAFile),
+            (".", ArtifactNameRefusal::NotAFile),
+            ("", ArtifactNameRefusal::NotAFile),
+        ] {
+            assert_eq!(
+                artifact_name_refusal(name),
+                Some(refusal),
+                "`{name}` would not be written directly into `out`, so it must be refused",
+            );
+            assert!(artifact_path(out_dir, "site::s::probe", name).is_err());
+        }
+        assert_eq!(artifact_name_refusal("home1.nbt"), None);
+        assert_eq!(
+            artifact_path(out_dir, "site::s::home1", "home1.nbt").ok(),
+            Some(out_dir.join("home1.nbt")),
+        );
+    }
+
+    /// `prepare_artifacts` routes every scope through [`artifact_path`], so a
+    /// scope key whose id carries a separator is refused before any I/O.
+    ///
+    /// No source reaches this: the resolver refuses such an id with
+    /// `E_INVALID_PLACE_ID` and the lowering pass skips it. Rekeying a real
+    /// lowering is the only way to ask what the compiler does if a future
+    /// source of scope keys skips that gate.
+    ///
+    /// `prepare_artifacts` has three other refusals: the tag build, the
+    /// directory-entry lookup and the collision check. The plain key below
+    /// runs the same structure through all three and passes, and the
+    /// lookup falls back to `std::path::absolute` for a directory that does
+    /// not exist, so the key's file name is the only thing left to refuse.
+    #[test]
+    fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
+        let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, Some(Edition::Java));
+        let block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+        let target =
+            resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+        let out_dir = Path::new("out");
+        let rekeyed = |key: &str| {
+            let mut ir = block_ir.clone();
+            let array = ir
+                .structures
+                .values()
+                .next()
+                .expect("the probe lowers to one structure")
+                .clone();
+            ir.structures = [(key.to_owned(), array)].into_iter().collect();
+            ir
+        };
+
+        for key in ["site::s::/abs/hut", "site::s::sub/hut", "site::s::a\\b"] {
+            assert!(
+                prepare_artifacts(&rekeyed(key), &target, out_dir).is_err(),
+                "scope `{key}` must be refused rather than written outside `out`",
+            );
+        }
+        let prepared = prepare_artifacts(&rekeyed("site::s::hut"), &target, out_dir)
+            .unwrap_or_else(|_| panic!("a plain id prepares"));
+        let paths: Vec<&Path> = prepared.iter().map(|(path, _)| path.as_path()).collect();
+        assert_eq!(paths, [out_dir.join("hut.nbt").as_path()]);
     }
 }

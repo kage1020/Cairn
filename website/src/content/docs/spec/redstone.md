@@ -63,6 +63,15 @@ component that does not read it is `E_LOGIC_MISPLACED_BINDING`, raised by the sy
 **Of the components above, only `door` and `pressure_plate` are accepted today.** `lit_by=`,
 `powered_by=`, and `fired_by=` have no host yet and are refused wherever they are written.
 
+**Where an `at=inside.<side>` plate may sit.** The plate takes the wall cell at `offset=` and sits
+one voxel inward from it, and that voxel must be strictly inside the wall ring: the footprint's
+outermost row and column, where `walls` paint their courses. So `offset` runs from 1 to the wall's
+length minus 2 (the length is `size.w` for `front` and `back`, `size.h` for `left` and `right`), and
+a struct needs a `size` of at least 3 on both axes to have an interior at all. The ring is decided
+from the footprint whether or not a `walls` member paints it, and the rule holds at every `y`,
+including the floor row `y = 0`. A plate outside it is not placed and earns `W_DEFERRED_MEMBER`.
+Its `->` binding is still read, so the signal stays in the netlist with no plate to drive it.
+
 **Signal names.** Sensors emit into the `sig.` namespace and actuators read from it, so a name
 outside it can never be read, whether on the left of a `logic` line, in a sensor's `->` tail, or as
 an actuator key's value. That is `E_LOGIC_INVALID_SIGNAL`. A name is `sig.` and exactly one segment

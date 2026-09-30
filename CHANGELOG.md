@@ -40,7 +40,7 @@
 
   ```
   s.crn:2:52: error[E_TRUTH_TABLE_CONFLICT]: this row assigns `01` the output `1`, and an earlier row assigns it `0`
-  s.crn:2:43:   note: first row assigning `01` here
+  s.crn:2:43:   note: first row assigning `01` the output `0` here
   ```
 
   When two rows agree it stays `W_TRUTH_TABLE_DUPLICATE_ROW`, and the repair depends on the shape.
@@ -48,6 +48,16 @@
   because deleting either would lose the combinations only it assigns. That case also withholds the
   coverage finding rather than answering it with a count taken without the later row, which would
   name a combination the table does assign.
+
+  A row is compared with every earlier row, so whether a table is refused does not depend on the
+  order its rows are written in: `0- -> 1` after `00 -> 1; 01 -> 0` agrees with the first and is
+  still a conflict with the second. A conflict takes precedence over a duplicate on the same row,
+  and its note is at the first row assigning the combination the other output. Any other finding's
+  note is at the first row assigning the combination it names, so every finding about one
+  combination points at the same row. When that row is itself reported for overlapping a row before
+  it, the fix is to settle that row first rather than to delete this one: in
+  `0- -> 1; -0 -> 1; 10 -> 1`, `-0` is told to narrow away from `0-`, and deleting `10` because
+  `-0` stands for it would, together with that, leave `10` unassigned.
 
   A `-` output beside a concrete one is neither: there is nothing for the concrete output to
   contradict, and nothing for it to agree with, so the rows overlap without the usual repair being
@@ -253,6 +263,189 @@
   varies with the stage, so a positional encoding cannot be read back.
 
 ### Fixed
+
+- *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
+  two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
+  and nothing said so. With a 3x3 `a` and a 3x9 `b`:
+
+  ```
+  place id=a use=small theme=t at=origin
+  place id=b use=deep  theme=t north_of=a gap=0
+  ```
+
+  `b` landed at `z = −3` and ran through `z = 5`, covering `a` completely; with the two defs
+  swapped, `b` landed at `z = −9`, six empty rows behind `a`. An origin is the low-`z` corner, so
+  only the new placement's own depth puts its `+z` face against the prior's `−z` face. `b` now
+  lands at `z = −9` and `z = −3` respectively, flush in both orders, and `gap=N` leaves exactly `N`
+  empty rows between them. The lockfile's `origin` and the written structures move with it.
+  `east_of=` already read the right side's width and is unchanged. `spec/components-editing-sites`
+  "Origin selectors" now names whose dims each formula reads: `prior.x + prior.dims.x + N` and
+  `prior.z − new.dims.z − N`. It also says that `dims` includes a roof's `overhang=`, so `gap` is
+  measured between the two bounding boxes, not between the walls.
+
+- *(lsp,vscode)* The VS Code extension could not start its language server. It asked
+  vscode-languageclient for the stdio transport, which appends `--stdio` to the server's command
+  line, and `cairn-lsp` refused every argument but `--version` and `--help`:
+
+  ```
+  $ cairn-lsp --stdio
+  error: unknown argument `--stdio`. Valid: --version, --help. Fix: run `cairn-lsp` with no arguments to start the LSP server.
+  ```
+
+  The process exited 2 before reading a byte, so no diagnostics and no completion reached the
+  editor, while the `--version` probe the extension runs first still logged a healthy
+  `server: cairn-lsp …` line in the Output panel. Both sides are fixed, and each alone would be
+  enough: `cairn-lsp --stdio` now starts the same session as `cairn-lsp` — stdio is the only
+  transport the server speaks, so the flag names what already happens — and `--help` lists it;
+  an argument after it is still refused with exit 2, as after `--version`. The extension no
+  longer sets a transport, which keeps stdio and adds no argument, so it also starts a
+  `cairn-lsp` released before the flag was accepted.
+
+- *(cli)* `cairn compile` refused a `--lock` that landed on one of its own artifacts only when the
+  two paths were spelled alike. `out/hut.nbt` was caught; `./out/hut.nbt`, `$PWD/out/hut.nbt`, or
+  the artifact reached through a symlinked `--out` was not, and the two files then overwrote each
+  other during the commit — destroying the previous build's artifact with no backup left, which is
+  the loss the refusal exists to prevent:
+
+  ```
+  $ cairn compile hut.crn --edition java --out out --lock ./out/hut.nbt ; echo "exit=$?"
+  warning: ./out/hut.nbt: the existing lockfile could not be read (lockfile I/O: stream did not contain valid UTF-8); replacing it
+  error: `out/hut.nbt` was written by a build that then failed, and could not be removed: No such file or directory (os error 2)
+  error: `./out/hut.nbt` could not be restored from `./out/hut.nbt.bak`: No such file or directory (os error 2)
+  error: writing lockfile `./out/hut.nbt`: No such file or directory (os error 2)
+  exit=1
+  $ ls out
+  $
+  ```
+
+  The guard now compares the directory entry each path names — its canonical parent directory and
+  its file name — so every spelling of an artifact, and of its `.tmp` and `.bak` scratch, is refused
+  before anything is staged, and the refusal names the artifact as the build spells it:
+
+  ```
+  error: lockfile path `./out/hut.nbt` collides with an artifact this build writes (`out/hut.nbt`)
+    note: pass a `--lock` outside `--out`, or rename the struct whose artifact shares the name
+  ```
+
+  On macOS and Windows, whose file systems ignore case by default, the file name is compared
+  case-folded too, so `--lock OUT/HUT.nbt` is refused there. On a case-sensitive volume of either,
+  that folding can refuse a `--lock` which would in fact have been a separate file — a spurious
+  refusal, never a lost artifact. A lock location that cannot be resolved for any reason other
+  than a missing directory now draws a warning that the check could not be made, rather than
+  passing as free.
+
+  The same comparison now backs the check between artifacts. `place id=home1` and
+  `place id=HOME1` are distinct ids, but on macOS and Windows `home1.nbt` and `HOME1.nbt` are one
+  file, and a build placing both lost both — the previous build's copy included. It is now refused
+  before anything is written:
+
+  ```
+  error: output filename `out/HOME1.nbt` collides between scopes `site::hamlet::home1` and `site::hamlet::HOME1`
+    note: `out/home1.nbt` and `out/HOME1.nbt` name one file on this file system; rename one of the scopes so their names differ by more than case
+  ```
+
+- *(core)* A walkway that runs north–south took time quadratic in its length, while one of the same
+  length running east–west took linear time. Each doubling of the gap between two huts placed with
+  `north_of=` roughly quadrupled the time to lower them, so a strip near the 4,000,000-cell
+  routing cap, just inside what the router accepts, would have run for hours with no output.
+  `cairn check --target`, `info`, `lower` and `compile` all run that lowering — `info` runs it
+  once per edition and once per version it weighs. Before laying each cell, the
+  z leg of the straight path searched every cell it had already laid, as a guard against laying
+  the corner twice. The order it steps in already prevents that. The search is gone, so a z strip
+  costs what an x strip costs, and a strip at the cap lowers in seconds. The cells laid are
+  unchanged.
+
+- *(core)* `pressure_plate at=inside.<side>` replaced a block of another wall, or landed outside
+  the building, without a word. The plate takes the wall cell at `offset=` and steps one voxel
+  inward, and the step was refused only when it saturated back onto that same cell. At either end
+  of a wall the cell one step in belongs to the side wall:
+
+  ```
+  struct s size=5x5
+    walls mat_slot=wall height=3
+    pressure_plate id=p at=inside.front offset=0 y=1 -> sig.a
+  ```
+
+  painted the plate into the left wall at `(0, 1, 3)`. In a struct 2 deep the step lands on the
+  opposite wall, and in one 1 deep with a roof overhang it lands in the overhang ring behind the
+  building. The inward cell must now be strictly inside the wall ring on both horizontal axes, and
+  a plate that has none defers with the cause:
+
+  ```
+  s.crn:3:3: warning[W_DEFERRED_MEMBER]: pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to 3 to reach an interior voxel. Its signal binding still reaches the netlist, with no plate placed to drive it
+  ```
+
+  A struct with a `size` below 3 on either axis has no interior at all, and the reason names every
+  such axis along with a corner offset, so one edit fixes both. The wall ring is decided from the
+  footprint whether or not a `walls` member paints it, so the rule also refuses `offset=0` on a
+  struct with only a `floor`, and at `y=0`, where the corner cell is floor under the side wall
+  rather than the wall itself; neither overwrote a block before, and both now warn and place no
+  plate. The reason says the cell belongs to a wall only at a row the walls paint. `spec/redstone`
+  now states the rule. `examples/redstone-door.crn` and `examples/crossbar.crn` placed their inside
+  plate at `offset=0` and now use `offset=1`, the first interior cell along the front wall.
+
+- *(core,cli)* A `place id=` carrying a path separator chose where the compiler wrote. The id is
+  the artifact's file name, and only `.`, `:`, whitespace and the empty id were refused, so `/`
+  passed `check` and `compile` joined the id onto `--out` as a path. An absolute id replaced
+  `--out` altogether:
+
+  ```
+  site s:
+    place id="/tmp/elsewhere/hut" use=hut theme=t at=origin
+  ```
+
+  ```console
+  $ cairn compile escape.crn --edition java --out out
+  wrote /tmp/elsewhere/hut.nbt
+  ```
+
+  A relative id such as `sub/hut` wrote into `out/sub/` when it existed and failed with a bare I/O
+  error when it did not, and an existing file at the destination was replaced like any other
+  artifact. `/` and `\` are now `E_INVALID_PLACE_ID`, on every platform, and the row is dropped:
+
+  ```
+  escape.crn:3:1: warning[W_UNUSED_DEF]: def `hut` is never referenced by a `place use=hut`
+    note: remove the def, or place an instance via `site ... place use=...`
+  escape.crn:10:3: error[E_INVALID_PLACE_ID]: `place id=/tmp/elsewhere/hut` in site `s` is not a usable id: it contains `/`
+    note: a place id becomes part of the `site::<site>::<place>` scope key and the stem of the artifact file written into `--out`, so it must be non-empty and free of `.`, `:`, `/`, `\`, and whitespace; rename it with letters, digits, and `_` (`home1`, `north_tower`)
+  ```
+
+  The `W_UNUSED_DEF` is a side effect of dropping the row, as it already was for an id carrying `.`
+  or `:`. `compile` also refuses any artifact whose file name is not a single plain name, or that
+  carries `:`, before it writes anything, so a later source of file names that skips the id rules
+  cannot reopen this on any host. A lockfile an earlier build wrote from such an id holds it in
+  `placements`; the next `compile` now warns that the existing lockfile could not be read, names the
+  forbidden character, and replaces the lock without comparing against the target it recorded.
+
+- *(core)* An argument whose value was present but unreadable was built as if it had been left
+  off, and nothing said so. A window's `sym=`, an eave stair's `facing=` / `half=` / `shape=`, and a
+  `place`'s `gap=` each read a value of the wrong shape as "absent" and used the default:
+
+  ```
+  window side=front offset=1 y=1 size=1x1 sym=yes mat_slot=glass       # no mirror
+  stair kind=stairs side=front half="bottom" mat_slot=eave             # half=top
+  place id=b use=box theme=t east_of=a gap=wide                        # gap=0, walls touching
+  ```
+
+  `spec/lint` "Error vs warning" calls this an unreadable value and gives it `W_IGNORED_ARGUMENT`,
+  as `roof overhang=` already had. Each of these now raises it, naming the key, the value as
+  written, and what was built instead:
+
+  ```
+  s.crn:3:3: warning[W_IGNORED_ARGUMENT]: `sym=` must be `true` or `false`, not identifier `yes`; the value was ignored
+    note: the window is drawn without its mirror, as `sym=false` would draw it
+  ```
+
+  The finding is raised only for a member that is then built. A window, stair or `place` row
+  refused further on has its repair in that `W_DEFERRED_MEMBER` already. An unknown bare identifier
+  (`half=sideways`) still defers the stair, as before.
+
+  A `place` origin also saturated at the edge of `i32`, so `gap=3000000000` moved nothing and
+  `gap=2147483647` followed by another `east_of=` row stacked the two on one coordinate. A row
+  whose origin works out past that range is now refused with `W_DEFERRED_MEMBER`, naming the axis
+  and the sum, and a row placed relative to it is refused with it. Like a row whose anchor did not
+  lower, a row refused this way reports nothing about its body. The `roof overhang=` finding's
+  message now also names the value that was written.
 
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
@@ -1094,6 +1287,39 @@
   untouched: this is a row of a report `info` writes on a run it does not refuse, not a diagnostic.
 
 ### Breaking changes
+
+- *(core)* Two `connect` rows could lay one walkway between them. A place or port id that starts
+  or ends with `_` merges into the `__` that joins a walkway scope key's two ends, so these rows
+  both encoded to `walkway::s::a.p___b.p`:
+
+  ```
+  connect a.p_ to b.p path=@gravel
+  connect a.p to _b.p path=@gravel
+  ```
+
+  The second row replaced the first: one `.nbt` was written, the lockfile's `walkways:` had one
+  entry, and `W_DUPLICATE_WALKWAY` did not fire because the `(from, to)` pairs differ. A port named
+  `_` gave `walkway::s::a.___b._`, which splits back into an empty port, and `compile` panicked on
+  it in a debug build while `check` passed. `W_INVALID_WALKWAY_IDENT` already refused a segment
+  that contains `__`; it now also refuses a place or port that starts or ends with `_`, and names
+  the segment:
+
+  ```
+  alias.crn:13:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p_ ↔ b.p` was dropped because the port id `p_` starts or ends with `_`, which runs into the walkway scope key's `from`/`to` separator `__`
+    note: a walkway's place and port ids may not start or end with `_`, so its scope key stays unambiguous; rename the port so it neither starts nor ends with `_`
+  alias.crn:14:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a.p ↔ _b.p` was dropped because the place id `_b` starts or ends with `_`, which runs into the walkway scope key's `from`/`to` separator `__`
+    note: a walkway's place and port ids may not start or end with `_`, so its scope key stays unambiguous; rename the place so it neither starts nor ends with `_`
+  ```
+
+  Both ends of every place and port are refused, not only the two that touch the separator, so the
+  rule does not depend on which way a row is written. The site is exempt: `::` separates it from
+  both neighbours. A unit test builds every key over segments of `a` and `_` up to three long and
+  parses each accepted one back to the parts it came from.
+
+  **Breaking**: `KeyConstructError` and `KeyParseError` each gain an `UnderscoreAtEdge` variant, so
+  an external exhaustive `match` on either no longer compiles. Both enums are now
+  `#[non_exhaustive]`, so the next variant costs no second break. The Rust API is Internal tier
+  per `spec/compatibility`, so no deprecation window is owed.
 
 - *(cli,core,formats)* `cairn info`'s `degraded` figure counted palette entries it could name and
   did not:
