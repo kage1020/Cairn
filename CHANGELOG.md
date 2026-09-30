@@ -447,6 +447,33 @@
   lower, a row refused this way reports nothing about its body. The `roof overhang=` finding's
   message now also names the value that was written.
 
+- *(core)* A theme selector row's bindings were matched, recorded, and never read, and nothing said
+  so. The opening example — `examples/cottage.crn`, both READMEs, the tutorial and the landing page
+  — carried `window[class=small] -> frame=@spruce_wood`, and the cottage built byte for byte the same
+  with that row, without it, with `frame=@diamond_block` and with `frame=@no_such_block`, all at
+  exit 0. Selecting on a key also hid that key's own `W_IGNORED_ARGUMENT`, on the grounds that the
+  selector made something read it.
+
+  `spec/materials-themes` now says selector bindings are reserved: which keys a row may bind, and
+  what each paints, is not specified, and no lowering reads one. Until it is, each binding on a row
+  whose keyword the compiler knows is reported as an unreached key, whatever its key or value, and
+  whether or not the row matched or its theme was applied. A row with an unknown keyword gets
+  `E_UNKNOWN_KEYWORD` alone. For a file `window.crn` whose third line is that row:
+
+  ```
+  window.crn:3:32: warning[W_IGNORED_ARGUMENT]: `frame=` is bound by a theme selector on `window`, and no pass lowers a selector's bindings yet; the value was ignored
+    note: the build is the same with this binding or without it; delete it, or the whole row if it binds nothing else, or keep it and expect no effect until selector bindings are lowered
+  ```
+
+  A binding's value is not resolved as a block, because what the key would paint is not specified:
+  `frame=@no_such_block` gets exactly that warning, with or without `--target`, and no binding
+  makes `check`, `compile` or `info` exit 1 or takes a version out of `info`'s buildable targets.
+  A member's unread key (`window shape=`) and a key its sibling argument routed past
+  (`roof kind=gable slope_to=`) are reported whether or not a theme selects on them, since the match
+  builds nothing. `E_DUPLICATE_SELECTOR`'s note no longer says a member reads the later row's
+  binding; it says the merge keeps it and that neither value is built. The row is gone from the
+  opening example until a binding has an effect.
+
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
   `None`, so the row had nothing to branch on:

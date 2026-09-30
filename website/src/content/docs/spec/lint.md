@@ -52,7 +52,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_PARSE` | The source did not parse. |
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`. |
-| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on. |
+| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
@@ -567,7 +567,9 @@ Each keyword's vocabulary is closed, and a `theme` selector widens the one it na
 `window[tags=...]` in a theme makes `tags=` a key something reads on a window, and on nothing else.
 The reverse direction is `E_THEME_SELECTOR_UNMATCHED`. A selector coins words; one edit away from a
 word the keyword already has is a typo written twice rather than a coinage, and is refused with the
-suggestion.
+suggestion. Widening admits the word and nothing more: the match hands the member the row's
+bindings, which are reserved ([Materials and Themes](/spec/materials-themes/)), so a key the
+keyword defines and no pass reads is still an unreached key when a selector matches on it.
 
 A member's own `[key=value]` answers to that same vocabulary. `window[clas=outer]` is the same
 defect as `window clas=outer` — a word the author expects something to read that nothing does, with
@@ -582,13 +584,16 @@ member *carry* the attribute, so a `theme` row selecting on it matches nothing.
 in the vocabulary whose value the pass cannot read is dropped and a default put in its place. An
 **unreached key**: a `key=` this specification defines that no pass reads yet — `window shape=` /
 `anchor=` and `roof footprint=` / `bounds=` are those keys today — is carried into the IR and never
-consulted. And a key **routed past**: one the keyword reads only under some ways of writing a
-sibling argument, on a member that writes it another way. The boundary is the keyword: a
-spec-defined key on a keyword the compiler knows is reported this way, while a spec-defined
-*keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three
-make the build differ from the source. The rule forbids *silent* substitution, and all three are
-announced. For the unreached key the gap is the compiler's rather than the source's, which is why
-it is not a refusal. Whether autofix is offered is up to the implementation.
+consulted. Every `key=value` on the right of a `theme` selector row whose keyword the compiler
+knows is one too, reported on the binding whatever its key or value, since no pass lowers a
+selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). And a key **routed
+past**: one the keyword reads only under some ways of writing a sibling argument, on a member that
+writes it another way. The boundary is the keyword: a spec-defined key on a keyword the compiler
+knows is reported this way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD`
+and its arguments are not judged at all. All three make the build differ from the source. The rule
+forbids *silent* substitution, and all three are announced. For the unreached key the gap is the
+compiler's rather than the source's, which is why it is not a refusal. Whether autofix is offered
+is up to the implementation.
 
 The routed-past shape is the vocabulary's second axis: closed per keyword *and* per the way the
 argument that selects the lowering rule is written. `roof slope_to=` is read by the `kind=shed`

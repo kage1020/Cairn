@@ -2,14 +2,13 @@
 @requires version>=1.20
 
 # A minimum useful Cairn build.
-# Demonstrates: struct, mat_slot, theme binding, wall selectors, derive-by-default blockstate.
+# Demonstrates: struct, mat_slot, theme binding, derive-by-default blockstate.
 
 theme medieval:
   slot floor -> @oak_planks
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
   slot glass -> @glass_pane
-  window[class=small] -> frame=@spruce_wood
 
 struct cottage size=9x7
   floor  mat_slot=floor
