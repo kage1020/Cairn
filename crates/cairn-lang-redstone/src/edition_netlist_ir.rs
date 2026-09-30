@@ -189,6 +189,51 @@ impl EditionCell {
             | Self::BedrockMuxUnpinned => UNPINNED_BASE_DELAY_TICKS,
         }
     }
+
+    /// Whether this cell's output leaves at full strength, whatever
+    /// strength reached its inputs.
+    ///
+    /// Dust loses one unit of signal per block, so the attenuation
+    /// limit (`spec/redstone` "Place-and-route") runs from the last
+    /// component that restores strength. A torch does, and a repeater
+    /// does. Two of the pinned cells do not:
+    ///
+    /// - [`Self::BedrockTorchOr`] is a dust merge: its output is the
+    ///   strength that arrived, less the block it spends.
+    /// - [`Self::JavaComparatorAnd`] is a comparator, and a comparator
+    ///   never outputs more than its rear input carries.
+    ///
+    /// The dust before either of them and the dust after it count as
+    /// one run for the limit, though the cell stands between them, and
+    /// the delay pass measures them as one.
+    ///
+    /// The `*Unpinned` placeholders answer `false`: until a realisation
+    /// is chosen, the pessimistic answer is the one that never lets a
+    /// run of dust go unmeasured. Unlike [`Self::base_delay_ticks`]'
+    /// sentinel it is not distinguishable from a pinned cell's `false`,
+    /// and it does more than add a repeater: it puts the cell into the
+    /// delay pass's budget walk, which can refuse the scope with
+    /// `E_ATTENUATION_LIMIT`. Parser-unreachable today, so neither
+    /// shows in a compile.
+    #[must_use]
+    pub const fn regenerates(self) -> bool {
+        match self {
+            Self::JavaRepeaterOr
+            | Self::JavaInverterTorch
+            | Self::BedrockTorchAnd
+            | Self::BedrockInverterTorch => true,
+            Self::JavaComparatorAnd
+            | Self::BedrockTorchOr
+            | Self::JavaXorUnpinned
+            | Self::JavaNandUnpinned
+            | Self::JavaNorUnpinned
+            | Self::JavaMuxUnpinned
+            | Self::BedrockXorUnpinned
+            | Self::BedrockNandUnpinned
+            | Self::BedrockNorUnpinned
+            | Self::BedrockMuxUnpinned => false,
+        }
+    }
 }
 
 /// Pessimistic base-delay sentinel returned by

@@ -63,6 +63,15 @@ component that does not read it is `E_LOGIC_MISPLACED_BINDING`, raised by the sy
 **Of the components above, only `door` and `pressure_plate` are accepted today.** `lit_by=`,
 `powered_by=`, and `fired_by=` have no host yet and are refused wherever they are written.
 
+**Where an `at=inside.<side>` plate may sit.** The plate takes the wall cell at `offset=` and sits
+one voxel inward from it, and that voxel must be strictly inside the wall ring: the footprint's
+outermost row and column, where `walls` paint their courses. So `offset` runs from 1 to the wall's
+length minus 2 (the length is `size.w` for `front` and `back`, `size.h` for `left` and `right`), and
+a struct needs a `size` of at least 3 on both axes to have an interior at all. The ring is decided
+from the footprint whether or not a `walls` member paints it, and the rule holds at every `y`,
+including the floor row `y = 0`. A plate outside it is not placed and earns `W_DEFERRED_MEMBER`.
+Its `->` binding is still read, so the signal stays in the netlist with no plate to drive it.
+
 **Signal names.** Sensors emit into the `sig.` namespace and actuators read from it, so a name
 outside it can never be read, whether on the left of a `logic` line, in a sensor's `->` tail, or as
 an actuator key's value. That is `E_LOGIC_INVALID_SIGNAL`. A name is `sig.` and exactly one segment
@@ -203,6 +212,26 @@ The internal algorithm runs five stages:
    past the v1 cap of 256 blocks is refused rather than buffered, under the same
    `E_ATTENUATION_LIMIT` stage 2 raises — what differs is that this pass measures the wire that
    was actually laid.
+
+   A repeater reads the block behind it and drives the one in front of it, on its own layer, so it
+   stands only where the wire runs straight through a coordinate on one layer and nothing branches
+   off there. On a straight run that is every 15 blocks. Where that coordinate turns, climbs or
+   forks, the repeater stands on the last coordinate before it that runs straight, which can leave
+   a route one repeater more than its length alone implies. Before a fork, that coordinate is on
+   the trunk, so one block serves every branch past it. Repeaters are placed on each net's routed
+   tree rather than per sink, and a sink is charged for the ones on its route. A stretch of dust
+   past the limit with no coordinate a repeater can stand on is refused with
+   `E_ATTENUATION_LIMIT`.
+
+   The limit is counted from the last component that restores strength — a sensor pad, a repeater,
+   a torch — not from the start of each segment. Two of the cells pass on the strength they
+   receive instead: the Bedrock OR is a dust merge, and the Java comparator AND never outputs more
+   than its rear input carries. The wire into either of them and the wire out of it therefore count
+   as one run of dust, though the cell stands between them, measured from the input that has spent
+   the most: the pass does not track which input of a comparator is its rear, so it takes the one
+   that has spent the most. The repeater the run needs goes where the running total would pass 15:
+   on the wire out of the cell, or on the wire into it when the wire out has no coordinate near
+   enough to the cell to take one.
 4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
    wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
    path belongs to that net alone, and no other net runs within a step of it, so there is no

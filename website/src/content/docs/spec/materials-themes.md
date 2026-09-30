@@ -18,25 +18,39 @@ def cottage class=house size=9x7:
 theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
-  walls[class=outer]  -> trim=@spruce_log     # part detailing, via a selector
+  walls[class=outer]  -> trim=@spruce_log     # part detailing, via a selector (reserved)
   window[class=small] -> frame=@spruce_wood
 ```
 
 **The cascade.** A member collects the bindings of every selector row it matches, in source order,
-so when two rows bind the same key the later value wins. CSS applies the same rule to two rules of
-equal weight.
+so when two rows bind the same key the member keeps the later value. CSS applies the same rule to
+two rules of equal weight. Bindings are reserved (below), so today the cascade decides what a member
+collects and nothing that is built.
 
 Rows whose attributes partly overlap rely on that: `window[class=small,side=front]` refines
 `window[class=small]` for the members it selects, and the members only the wider row selects keep
 the wider row's binding.
 
 Two rows that select the *same* members are different. Same keyword and same attributes means they
-match member for member, so a key they both bind is read by nothing on the earlier row. That is
+match member for member, so no member keeps the earlier row's value of a key they both bind: that
+value is dead text whatever a binding comes to mean. That is
 `E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)). Sameness is by meaning: attribute
 order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
 `window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
 different keys are not reported. They compose, and splitting a long binding list over two lines is
 allowed.
+
+**Selector bindings are reserved.** Which keys a row may bind on each keyword, and what each one
+paints, is not specified yet, and no lowering reads a binding: the two selector rows above build the
+same cottage as a theme without them, and no member's block depends on them. Until that is
+specified the compiler reports each binding as an unreached key, `W_IGNORED_ARGUMENT`
+([Lint](/spec/lint/)), whatever its key or value, on every row whose keyword it knows, matched or
+not and in an applied theme or not. A row whose keyword it does not know gets `E_UNKNOWN_KEYWORD`
+instead. A binding's value is not resolved as a block either, because what the key would paint is
+not specified: `frame=@no_such_block` is reported exactly as `frame=@spruce_wood` or `frame=42` is,
+with or without `--target`, and no binding makes `check`, `compile` or `info` refuse a build. The
+rest of a row is checked as before: `E_THEME_SELECTOR_UNMATCHED` and `E_DUPLICATE_SELECTOR` apply
+to it exactly as their own entries say.
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
 ([Components, Editing, and Multi-building](/spec/components-editing-sites/)).

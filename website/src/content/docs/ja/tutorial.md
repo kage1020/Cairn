@@ -23,7 +23,6 @@ theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
   slot glass -> @glass_pane
-  window[class=small] -> frame=@spruce_wood
 
 struct cottage size=9x7
   floor  mat_slot=floor
@@ -108,7 +107,7 @@ struct gatehouse size=7x5
   door  id=front side=front at=center mat_slot=door
 
   pressure_plate id=plate at=front.outside offset=0 y=0 -> sig.step
-  pressure_plate id=inner at=inside.front  offset=0 y=0 -> sig.exit
+  pressure_plate id=inner at=inside.front  offset=1 y=0 -> sig.exit
 
   logic sig.open = sig.step or sig.exit
   door[id=front] opened_by=sig.open

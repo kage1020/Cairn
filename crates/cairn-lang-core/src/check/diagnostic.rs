@@ -76,16 +76,20 @@ pub enum DiagnosticCode {
     /// A member's selector bindings are the merge of every row it matches,
     /// taken in source order, so a key two rows bind keeps the later
     /// value. When the rows carry the same keyword and the same attributes
-    /// they match member for member, which leaves no member anywhere that
-    /// reads the earlier binding.
+    /// they match member for member, which leaves no member anywhere whose
+    /// merged bindings keep the earlier value: that row is dead text
+    /// whatever a binding comes to mean. No pass reads a merged binding yet
+    /// either (`spec/materials-themes` "Slots as dependency injection"), so
+    /// today neither value reaches the build; this code is about the merge,
+    /// not about a block.
     ///
     /// Two shapes are not covered. Rows binding *different* keys compose,
-    /// the way `@requires` floors do — every binding reaches every member
-    /// both rows select. And rows whose attributes merely overlap
-    /// (`window[class=small]` against `window[class=small,side=front]`) do
-    /// not coincide: a member the wider row selects alone still reads its
-    /// binding. Which of two overlapping rows wins is the cascade, and the
-    /// cascade is source order by design.
+    /// the way `@requires` floors do — every binding reaches the merged
+    /// bindings of every member both rows select. And rows whose attributes
+    /// merely overlap (`window[class=small]` against
+    /// `window[class=small,side=front]`) do not coincide: a member the
+    /// wider row selects alone keeps its binding. Which of two overlapping
+    /// rows wins is the cascade, and the cascade is source order by design.
     DuplicateSelector,
     /// Repeated `key=` in the same argument list (struct/def header,
     /// statement args, selector attrs / bindings).
@@ -254,8 +258,12 @@ pub enum DiagnosticCode {
     ///
     /// Three shapes, one finding. **Unreadable value**: the lowering pass
     /// could not read it, dropped it, and put the default in its place.
-    /// **Unreached key**: the specification defines it and no pass reads it
-    /// yet (`crate::intent::MemberRole::unread_arguments`). **Routed past**:
+    /// **Unreached key**: no pass reads it yet. On a member that is a key
+    /// the specification defines, listed in
+    /// `crate::intent::MemberRole::unread_arguments`; on a `theme` selector
+    /// row whose keyword names a role it is every `key=value` right of the
+    /// arrow, defined anywhere or not (`fram=42` included), since no pass
+    /// lowers a selector's bindings. **Routed past**:
     /// a sibling argument picked a lowering rule that does not consult it,
     /// which `crate::intent::MemberRole::conditional_arguments` records and
     /// `roof kind=gable slope_to=front` is the instance of — that one has no
@@ -401,11 +409,16 @@ pub enum DiagnosticCode {
     /// would be a lie and `E_TYPE_MISMATCH_LABEL` already names it.
     IncompletePlace,
     /// A `place id=` breaks an invariant [`crate::ids::PlaceId`] relies on:
-    /// it is empty, or contains `.`, `:`, or whitespace.
+    /// it is empty, or contains `.`, `:`, `/`, `\`, or whitespace.
     ///
-    /// Those characters are the structural separators the scope key
-    /// `site::SITE::PLACE` and every walkway key parsed back out of it are
-    /// built from, so an id carrying one cannot round-trip. `id=` accepts a
+    /// The rule has two reasons. `.` and `:` are the structural separators
+    /// the scope key `site::SITE::PLACE` and every walkway key parsed back
+    /// out of it are built from, so an id carrying one cannot round-trip.
+    /// `/` and `\` are path separators: the id is the stem of the artifact
+    /// file written into `--out`, so either one would put that file in
+    /// another directory, and an absolute id would replace `--out`
+    /// altogether. Both are refused on every platform, so whether an id is
+    /// accepted does not depend on the host that checks it. `id=` accepts a
     /// string literal, which is what let the value through — nothing between
     /// the lexer and the key constructor looked at its contents.
     InvalidPlaceId,

@@ -137,6 +137,14 @@ pub enum DiagnosticCode {
     /// driver segment exceeds the cap, split the logic across multiple
     /// `circuit` blocks, or pin cell / actuator placement closer to
     /// its drivers.
+    ///
+    /// Also fires when a run of dust would pass its allowance — 15
+    /// blocks since the last block that restored strength, or less on
+    /// the wire into a cell that passes on the strength it reads — and
+    /// every coord close enough to take a repeater turns, climbs or
+    /// branches: a buffer repeater carries a signal only where the wire
+    /// runs straight through it at one height. The count runs across
+    /// such a cell, so that run can start on the wire into it.
     AttenuationLimit,
     /// Lowering a `logic` binding descended past
     /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into

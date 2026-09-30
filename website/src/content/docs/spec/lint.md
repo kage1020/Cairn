@@ -52,7 +52,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_PARSE` | The source did not parse. |
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`. |
-| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on. |
+| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
@@ -254,7 +254,7 @@ author means, so with both in scope the question has not been asked.
 
 | Code | Meaning |
 |---|---|
-| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:` or whitespace. |
+| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:`, `/`, `\` or whitespace. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
@@ -262,9 +262,13 @@ author means, so with both in scope the question has not been asked.
 | `W_UNUSED_DEF` | A `def` no `place use=` references. |
 
 `E_INVALID_PLACE_ID` is about round-tripping rather than taste. The scope key
-`site::SITE::PLACE`, and every walkway key parsed back out of one, is built from those characters
-as separators, so an id carrying one cannot be read back. `id=` accepts a string literal, which is
-what let the value through.
+`site::SITE::PLACE`, and every walkway key parsed back out of one, is built with `.` and `:` as
+separators, so an id carrying one cannot be read back. The id is also the name of the file the
+placement is written to in the output directory, and a `/` or `\` would make that name a path: a
+relative id with one lands in a subdirectory, and an absolute id replaces the output directory
+altogether. Both separators are refused on every platform, so whether an id is accepted does not
+depend on the host that checks it. `id=` accepts a string literal, which is what let the value
+through.
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
@@ -294,8 +298,8 @@ author.
 that degrades to air leaves two buildings looking connected in the source and unconnected in the
 world, with nothing in the report to say so.
 
-`W_INVALID_WALKWAY_IDENT` is the same round-trip rule as `E_INVALID_PLACE_ID` on a different
-separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
+`W_INVALID_WALKWAY_IDENT` is the same round-trip rule as the `.` / `:` half of
+`E_INVALID_PLACE_ID`, on a different separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
 `c__home2` in the other encode to one string. A `_` next to that separator merges into it the same
 way: `a.p_ to b.p` and `a.p to _b.p` both encode to `a.p___b.p`, and a port named `_` leaves a key
 that splits back into an empty port. Only the end of the `from` port and the start of the `to` place
@@ -566,7 +570,9 @@ Each keyword's vocabulary is closed, and a `theme` selector widens the one it na
 `window[tags=...]` in a theme makes `tags=` a key something reads on a window, and on nothing else.
 The reverse direction is `E_THEME_SELECTOR_UNMATCHED`. A selector coins words; one edit away from a
 word the keyword already has is a typo written twice rather than a coinage, and is refused with the
-suggestion.
+suggestion. Widening admits the word and nothing more: the match hands the member the row's
+bindings, which are reserved ([Materials and Themes](/spec/materials-themes/)), so a key the
+keyword defines and no pass reads is still an unreached key when a selector matches on it.
 
 A member's own `[key=value]` answers to that same vocabulary. `window[clas=outer]` is the same
 defect as `window clas=outer` — a word the author expects something to read that nothing does, with
@@ -581,13 +587,16 @@ member *carry* the attribute, so a `theme` row selecting on it matches nothing.
 in the vocabulary whose value the pass cannot read is dropped and a default put in its place. An
 **unreached key**: a `key=` this specification defines that no pass reads yet — `window shape=` /
 `anchor=` and `roof footprint=` / `bounds=` are those keys today — is carried into the IR and never
-consulted. And a key **routed past**: one the keyword reads only under some ways of writing a
-sibling argument, on a member that writes it another way. The boundary is the keyword: a
-spec-defined key on a keyword the compiler knows is reported this way, while a spec-defined
-*keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three
-make the build differ from the source. The rule forbids *silent* substitution, and all three are
-announced. For the unreached key the gap is the compiler's rather than the source's, which is why
-it is not a refusal. Whether autofix is offered is up to the implementation.
+consulted. Every `key=value` on the right of a `theme` selector row whose keyword the compiler
+knows is one too, reported on the binding whatever its key or value, since no pass lowers a
+selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). And a key **routed
+past**: one the keyword reads only under some ways of writing a sibling argument, on a member that
+writes it another way. The boundary is the keyword: a spec-defined key on a keyword the compiler
+knows is reported this way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD`
+and its arguments are not judged at all. All three make the build differ from the source. The rule
+forbids *silent* substitution, and all three are announced. For the unreached key the gap is the
+compiler's rather than the source's, which is why it is not a refusal. Whether autofix is offered
+is up to the implementation.
 
 The routed-past shape is the vocabulary's second axis: closed per keyword *and* per the way the
 argument that selects the lowering rule is written. `roof slope_to=` is read by the `kind=shed`

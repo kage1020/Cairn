@@ -72,6 +72,12 @@ Java の DataVersion は Bedrock の block_version とは無関係です。
 譲り、`W_DEFERRED_MEMBER` を出します。軒の `stair kind=stairs` も同じ材質規則に従いますが、
 ステートは自分の引数から取ります。
 
+その引数は `facing=out | in`、`half=top | bottom`、`shape=straight | outer_left | outer_right` で、
+いずれも裸の識別子、既定はそれぞれ `out`、`top`、`straight` です。一覧にない識別子はステートを
+指さないので、階段は `W_DEFERRED_MEMBER` で保留されます。別の形の値 (`half="bottom"`、`facing=1`) は
+読めない値で、階段はそのキーの既定で作られ、その値は `W_IGNORED_ARGUMENT` で報告されます
+([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
+
 **棟の軸。** 棟は footprint の長い方の水平軸に沿います。正方形 (`size=WxW`) は `x` に倒れ、東西棟に
 なります。
 

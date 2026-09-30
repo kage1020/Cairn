@@ -1086,8 +1086,8 @@ fn lower_site<'a>(
         let Ok(placement_id) = PlaceId::new(place_id) else {
             continue;
         };
-        // A site name is an identifier the lexer produced, so it cannot
-        // carry `.`, `:`, or whitespace. Folding this into the arm above
+        // A site name is an identifier the lexer produced, and the lexer's
+        // `Ident` rule is a strict subset of what `SiteName` accepts. Folding this into the arm above
         // would mean a future relaxation of the site-name grammar silently
         // dropped every place in the site; the `debug_assert!` convention
         // this file already uses for unreachable invariants fails loud in
@@ -1144,12 +1144,13 @@ fn lower_site<'a>(
         // has to happen before *this* placement is inserted. A lookup
         // misses when the prior place never reached `placed`, which is any
         // `continue` arm of this loop: those above, this deferral, or the
-        // volume refusal below. Falling back to `(0, 0, 0)` would silently stack
-        // the placement on top of `home1`, so the row is deferred and
-        // skipped instead. As has always been the case, that happens before
-        // the body is lowered, so a row that cannot land reports nothing
-        // about its body; only the origin waits for the lowered dims.
-        let Some(anchor) = resolve_place_anchor(member, placed, &site.name) else {
+        // volume refusal and the origin-range refusal below. Falling back to
+        // `(0, 0, 0)` would silently stack the placement on top of `home1`,
+        // so the row is deferred and skipped instead. As has always been the
+        // case, that happens before the body is lowered, so a row that cannot
+        // land reports nothing about its body; only the origin waits for the
+        // lowered dims.
+        let Some((anchor, gap_ignored)) = resolve_place_anchor(member, placed, &site.name) else {
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
@@ -1157,6 +1158,10 @@ fn lower_site<'a>(
             continue;
         };
 
+        // Held back until the origin is known: a row whose origin leaves the
+        // range is not placed, and reports nothing about its body, the same
+        // as a row whose anchor did not lower.
+        let mut body_diagnostics = Vec::new();
         let Some(LoweredBody { array, walls, cut }) = lower_body_to_block_array(
             BodyDescriptor {
                 kind: VoxelSource::Place,
@@ -1168,11 +1173,12 @@ fn lower_site<'a>(
             },
             Some(scope),
             registry,
-            diagnostics,
+            &mut body_diagnostics,
         ) else {
             // The extent was refused; the diagnostic names the scope, and
             // recording a placement for a structure that does not exist
             // would leave the lockfile pointing at nothing.
+            diagnostics.append(&mut body_diagnostics);
             continue;
         };
         // `array.source_scope` now owns the IR key — read it back so the
@@ -1182,7 +1188,15 @@ fn lower_site<'a>(
         let dims = array.dims;
         // `north_of` needs this body's own depth, so the origin is finished
         // only now that the body has been sized.
-        let origin = anchor.origin(dims);
+        let origin = match anchor.origin(dims) {
+            Ok(origin) => origin,
+            Err(far) => {
+                diagnostics.push(diag_deferred_member_reason(member, &far.deferral()));
+                continue;
+            }
+        };
+        diagnostics.append(&mut body_diagnostics);
+        diagnostics.extend(gap_ignored);
         // First-write-wins, as above. Two `site` blocks of one name put
         // their `place id=` rows into one `site::NAME::` namespace, so
         // only a repeated `id=` collides — and the resolver has already
@@ -1709,14 +1723,37 @@ enum PlaceAnchor {
     EastOf {
         prior_origin: (i32, i32, i32),
         prior_dims_x: u32,
-        gap: i32,
+        gap: i64,
     },
     /// `north_of=ID gap=N`: the prior placement's origin. Its depth plays
     /// no part: the step back is the new body's own depth.
     NorthOf {
         prior_origin: (i32, i32, i32),
-        gap: i32,
+        gap: i64,
     },
+}
+
+/// The origin [`PlaceAnchor::origin`] works out to lies outside the `i32`
+/// range a placement records its origin in. `axis` is the one the selector
+/// moves along and `offset` the sum that left the range, for the message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OriginOutOfRange {
+    axis: char,
+    offset: i128,
+}
+
+impl OriginOutOfRange {
+    /// The `W_DEFERRED_MEMBER` reason for the row this refuses.
+    fn deferral(self) -> String {
+        let Self { axis, offset } = self;
+        format!(
+            "this placement's origin works out to {axis}={offset}, past the {} to {} range \
+             a placement's origin is recorded in; shorten the `gap=` on this row or on a \
+             row it is placed relative to",
+            i32::MIN,
+            i32::MAX,
+        )
+    }
 }
 
 impl PlaceAnchor {
@@ -1727,27 +1764,31 @@ impl PlaceAnchor {
     /// the empty blocks between the two facing bounding-box faces (each the
     /// wall plus its `overhang=` columns), so `gap=0` makes the boxes touch
     /// whichever of the two is wider or deeper.
-    fn origin(self, dims: Dims) -> (i32, i32, i32) {
+    ///
+    /// The sum is taken in `i128`, where no `i32` origin, `u32` extent and
+    /// `i64` gap can overflow, and refused when it leaves `i32` rather than
+    /// saturated: a saturated origin put two placements on one coordinate,
+    /// the second stacked inside the first, and nothing said so.
+    fn origin(self, dims: Dims) -> Result<(i32, i32, i32), OriginOutOfRange> {
+        let fit = |axis: char, offset: i128| {
+            i32::try_from(offset).map_err(|_| OriginOutOfRange { axis, offset })
+        };
         match self {
-            Self::WorldOrigin => (0, 0, 0),
+            Self::WorldOrigin => Ok((0, 0, 0)),
             Self::EastOf {
                 prior_origin: (x, y, z),
                 prior_dims_x,
                 gap,
             } => {
-                let next_x = x
-                    .saturating_add(i32::try_from(prior_dims_x).unwrap_or(i32::MAX))
-                    .saturating_add(gap);
-                (next_x, y, z)
+                let next_x = i128::from(x) + i128::from(prior_dims_x) + i128::from(gap);
+                Ok((fit('x', next_x)?, y, z))
             }
             Self::NorthOf {
                 prior_origin: (x, y, z),
                 gap,
             } => {
-                let next_z = z
-                    .saturating_sub(i32::try_from(dims.z).unwrap_or(i32::MAX))
-                    .saturating_sub(gap);
-                (x, y, next_z)
+                let next_z = i128::from(z) - i128::from(dims.z) - i128::from(gap);
+                Ok((x, y, fit('z', next_z)?))
             }
         }
     }
@@ -1763,52 +1804,54 @@ impl PlaceAnchor {
 /// and binds no scope for it. The front-is-`+z` convention of
 /// `spec/components-editing-sites` "Multi-building with `site`" is why
 /// `north_of` retreats along `-z`.
+///
+/// A `gap=` that is not an integer is an unreadable value: the anchor
+/// carries `gap=0`, and the `W_IGNORED_ARGUMENT` saying so is handed back
+/// beside it for the caller to push once the row is placed, since a
+/// refused row is not placed at all.
 fn resolve_place_anchor(
     member: &Member,
     placed: &IndexMap<String, PlacedBody>,
     site_name: &str,
-) -> Option<PlaceAnchor> {
+) -> Option<(PlaceAnchor, Option<Diagnostic>)> {
     if let Some(value) = member.intent_state.get("at")
         && matches!(&value.value.kind, ValueKind::Ident(s) if s == "origin")
     {
-        return Some(PlaceAnchor::WorldOrigin);
+        return Some((PlaceAnchor::WorldOrigin, None));
     }
-    let gap = member
-        .intent_state
-        .get("gap")
-        .and_then(|v| match &v.value.kind {
-            ValueKind::Int(n) => i32::try_from(*n).ok(),
+    let (gap, gap_ignored) = match read_or_ignore(
+        member,
+        "gap",
+        |kind| match kind {
+            ValueKind::Int(n) => Some(*n),
             _ => None,
-        })
-        .unwrap_or(0);
-    if let Some(target) = member
-        .intent_state
-        .get("east_of")
-        .and_then(|v| v.value.as_label_str())
-        && let Some(PlacedBody {
-            placement: prior, ..
-        }) = placed.get(&place_scope_key(site_name, target))
-    {
-        return Some(PlaceAnchor::EastOf {
-            prior_origin: prior.origin,
-            prior_dims_x: prior.dims.x,
+        },
+        "an integer",
+        "the row is placed as `gap=0` places it, edge to edge with the place it is relative to",
+    ) {
+        Ok(gap) => (gap.unwrap_or(0), None),
+        Err(ignored) => (0, Some(*ignored)),
+    };
+    let prior = |key: &str| {
+        member
+            .intent_state
+            .get(key)
+            .and_then(|v| v.value.as_label_str())
+            .and_then(|target| placed.get(&place_scope_key(site_name, target)))
+            .map(|body| (body.placement.origin, body.placement.dims.x))
+    };
+    let anchor = if let Some((prior_origin, prior_dims_x)) = prior("east_of") {
+        PlaceAnchor::EastOf {
+            prior_origin,
+            prior_dims_x,
             gap,
-        });
-    }
-    if let Some(target) = member
-        .intent_state
-        .get("north_of")
-        .and_then(|v| v.value.as_label_str())
-        && let Some(PlacedBody {
-            placement: prior, ..
-        }) = placed.get(&place_scope_key(site_name, target))
-    {
-        return Some(PlaceAnchor::NorthOf {
-            prior_origin: prior.origin,
-            gap,
-        });
-    }
-    None
+        }
+    } else if let Some((prior_origin, _)) = prior("north_of") {
+        PlaceAnchor::NorthOf { prior_origin, gap }
+    } else {
+        return None;
+    };
+    Some((anchor, gap_ignored))
 }
 
 /// Bundle of per-struct context shared by every member-lowering helper.
@@ -2569,14 +2612,91 @@ fn nonneg_int_or_ignore(
     consequence: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<u32> {
-    if !member.intent_state.contains_key(key) {
-        return None;
+    read_or_ignore(
+        member,
+        key,
+        |kind| match kind {
+            ValueKind::Int(v) => u32::try_from(*v).ok(),
+            _ => None,
+        },
+        NONNEG_U32,
+        consequence,
+    )
+    .unwrap_or_else(|ignored| {
+        diagnostics.push(*ignored);
+        None
+    })
+}
+
+/// What [`nonneg_int_or_ignore`] accepts, worded to complete "`key=` must
+/// be …".
+const NONNEG_U32: &str = "a non-negative integer that fits in u32";
+
+/// Read `key=` through `read` for a caller that falls back to a default,
+/// telling "absent" apart from "unreadable".
+///
+/// - `Ok(Some(v))`: the key is present and `read` accepted its value.
+/// - `Ok(None)`: the key was not written; the caller applies its default
+///   and nothing is reported.
+/// - `Err(finding)`: the key was written and `read` refused it. The
+///   finding is the `W_IGNORED_ARGUMENT` `spec/lint` "Error vs warning"
+///   calls an unreadable value, and the caller applies its default.
+///
+/// The finding is handed back rather than pushed because it says the
+/// member is in the build with the default in place, which is only true
+/// once the caller gets that far: a member that defers further down
+/// already has its repair in `W_DEFERRED_MEMBER`, and a finding about an
+/// argument nothing was built from would bill one repair twice.
+/// [`nonneg_int_or_ignore`] pushes it at once instead, and its caller words
+/// the consequence for a roof that draws and for one that does not.
+///
+/// `expected` completes "`key=` must be …"; `consequence` is what the
+/// default did to the output, in the caller's words.
+fn read_or_ignore<'m, T>(
+    member: &'m Member,
+    key: &str,
+    read: impl FnOnce(&'m ValueKind) -> Option<T>,
+    expected: &str,
+    consequence: &str,
+) -> Result<Option<T>, Box<Diagnostic>> {
+    let Some(raw) = member.intent_state.get(key) else {
+        return Ok(None);
+    };
+    match read(&raw.value.kind) {
+        Some(v) => Ok(Some(v)),
+        None => Err(Box::new(diag_ignored_argument(
+            member,
+            key,
+            &raw.value.describe(),
+            expected,
+            consequence,
+        ))),
     }
-    if let Some(v) = member.nonneg_u32(key) {
-        return Some(v);
-    }
-    diagnostics.push(diag_ignored_argument(member, key, consequence));
-    None
+}
+
+/// [`read_or_ignore`] for a key whose value is a bare identifier.
+///
+/// Which identifiers the caller accepts is still the caller's to say:
+/// this only separates "not an identifier at all" (`half="bottom"`,
+/// `facing=1`), which is an unreadable value, from an identifier the
+/// caller does not know (`half=sideways`), which names no state and so
+/// defers the member.
+fn ident_or_ignore<'m>(
+    member: &'m Member,
+    key: &str,
+    expected: &str,
+    consequence: &str,
+) -> Result<Option<&'m str>, Box<Diagnostic>> {
+    read_or_ignore(
+        member,
+        key,
+        |kind| match kind {
+            ValueKind::Ident(name) => Some(name.as_str()),
+            _ => None,
+        },
+        expected,
+        consequence,
+    )
 }
 
 fn nonneg_int_or_defer(
@@ -2595,14 +2715,6 @@ fn nonneg_int_or_defer(
             &format!("`{key}=` must be a non-negative integer that fits in u32"),
         ));
         NonNegRead::Deferred
-    }
-}
-
-fn bool_value(member: &Member, key: &str) -> Option<bool> {
-    let raw = member.intent_state.get(key)?;
-    match &raw.value.kind {
-        ValueKind::Bool(b) => Some(*b),
-        _ => None,
     }
 }
 
@@ -3350,7 +3462,31 @@ fn fill_stair(
     let Some(side) = side_of(member, diagnostics) else {
         return;
     };
-    let half = match member.ident_value("half") {
+    // A value that is not an identifier at all (`half="bottom"`,
+    // `facing=1`) is unreadable rather than unknown: the band is drawn
+    // with the default state, and the findings wait until it is, because
+    // a stair refused below has its repair in that refusal.
+    let mut ignored = Vec::new();
+    let mut ident = |key: &str, expected: &str, default: &str| {
+        ident_or_ignore(
+            member,
+            key,
+            expected,
+            &format!("the stair is built with the default `{key}={default}`"),
+        )
+        .unwrap_or_else(|finding| {
+            ignored.push(*finding);
+            None
+        })
+    };
+    let half_read = ident("half", "`top` or `bottom`", "top");
+    let facing_read = ident("facing", "`out` or `in`", "out");
+    let shape_read = ident(
+        "shape",
+        "`straight`, `outer_left`, or `outer_right`",
+        "straight",
+    );
+    let half = match half_read {
         Some("top") | None => "top",
         Some("bottom") => "bottom",
         Some(other) => {
@@ -3361,7 +3497,7 @@ fn fill_stair(
             return;
         }
     };
-    let facing = match member.ident_value("facing") {
+    let facing = match facing_read {
         Some("out") | None => shed_high_side(side),
         Some("in") => inward_cardinal(side),
         Some(other) => {
@@ -3372,7 +3508,7 @@ fn fill_stair(
             return;
         }
     };
-    let shape = match member.ident_value("shape") {
+    let shape = match shape_read {
         Some("straight") | None => StairShape::Straight,
         Some("outer_left") => StairShape::OuterLeft,
         Some("outer_right") => StairShape::OuterRight,
@@ -3439,6 +3575,7 @@ fn fill_stair(
         diagnostics,
     );
     let idx = palette.intern(stair_state(stair_id, facing, half, shape));
+    diagnostics.extend(ignored);
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
     for u in 0..length {
         let Some((wx, _wy, wz)) = wall_local_to_grid(
@@ -3493,9 +3630,12 @@ fn shift_outward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
     (x.saturating_add_signed(dx), z.saturating_add_signed(dz))
 }
 
-/// Shift a wall voxel's `(x, z)` by one voxel toward the interior so a
-/// fixture placed with `at=inside.<side>` sits on the interior floor row
-/// next to the wall rather than overwriting the wall itself.
+/// Shift a wall voxel's `(x, z)` by one voxel toward the interior, the
+/// cell an `at=inside.<side>` fixture sits on at whatever row it asks for.
+///
+/// The step saturates at 0 and never checks the result: whether the cell
+/// is really inside the building, rather than a block of another wall, is
+/// [`inside_plate_refusal`]'s question, asked by the caller.
 fn shift_inward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
     let (dx, dz) = side.outward_normal();
     (x.saturating_add_signed(-dx), z.saturating_add_signed(-dz))
@@ -3644,9 +3784,11 @@ fn fill_pressure_plate(
 /// phase painted, so `y_world >= 1` without a usable exterior cell
 /// defers instead.
 ///
-/// `inside.<side>` always shifts one voxel inward and defers when the
-/// shift saturates onto the wall itself (a 1-voxel-thin struct has no
-/// interior cell adjacent to any wall).
+/// `inside.<side>` always shifts one voxel inward and defers unless the
+/// shifted cell is strictly inside the wall ring on both horizontal axes
+/// (see [`inside_plate_refusal`]), at every row including the floor row:
+/// otherwise the plate would sit on the ring, where the walls paint their
+/// courses, or outside the building altogether.
 fn plate_voxel_position(
     member: &Member,
     y_offset: u32,
@@ -3744,19 +3886,109 @@ fn plate_voxel_position(
         }
         PlateAnchor::Inside(_) => {
             let (sx, sz) = shift_inward(side, wx, wz);
-            if (sx, sz) == (wx, wz) {
-                diagnostics.push(diag_deferred_member_reason(
-                    member,
-                    &format!(
-                        "pressure_plate `at=inside.{}`: no interior voxel to place the fixture on",
-                        side_name(side),
-                    ),
-                ));
+            if let Some(mut reason) = inside_plate_refusal(side, offset, y_world, (sx, sz), ctx) {
+                if member.binding.is_some() {
+                    // The redstone pass reads the binding, not the block
+                    // array, so the signal outlives the refused block.
+                    reason.push_str(
+                        ". Its signal binding still reaches the netlist, with no plate placed to drive it",
+                    );
+                }
+                diagnostics.push(diag_deferred_member_reason(member, &reason));
                 return None;
             }
             Some((sx, y_world, sz))
         }
     }
+}
+
+/// Why an `at=inside.<side>` plate whose inward step landed on `(sx, sz)`
+/// at row `y` has no interior cell to sit on, or `None` when it has one.
+///
+/// The interior is what the wall ring encloses. The ring is the
+/// footprint's outermost row and column, offset by the roof overhang, and
+/// it is where `walls` paint their courses, so only a cell strictly inside
+/// it can take a plate without replacing a wall block. The ring is decided
+/// from the footprint whether or not a `walls` member paints it, so a cell
+/// on or outside it is refused either way, and the reason claims a wall
+/// only at a row one is painted on.
+fn inside_plate_refusal(
+    side: WallSide,
+    offset: u32,
+    y: u32,
+    (sx, sz): (u32, u32),
+    ctx: &StructCtx<'_>,
+) -> Option<String> {
+    // Saturation cannot turn an outside cell into an inside one: that
+    // needs `overhang + extent > u32::MAX`, where `dims` saturates too and
+    // `fits_volume_budget` has already dropped the struct.
+    let strictly_inside = |c: u32, extent: u32| {
+        c > ctx.overhang && c < ctx.overhang.saturating_add(extent).saturating_sub(1)
+    };
+    if strictly_inside(sx, ctx.interior_w) && strictly_inside(sz, ctx.interior_h) {
+        return None;
+    }
+    let name = side_name(side);
+    let length = wall_length(side, ctx.interior_w, ctx.interior_h);
+    // An interior needs one voxel between two walls on each axis, so a
+    // size below 3 on either axis has none for any side or offset.
+    let thin: Vec<(&str, u32)> = [("w", ctx.interior_w), ("h", ctx.interior_h)]
+        .into_iter()
+        .filter(|&(_, extent)| extent < 3)
+        .collect();
+    // With both axes at least 3, every offset but the two ends steps into
+    // the interior, so a refusal with no thin axis is always a corner.
+    let corner = thin.is_empty() || offset == 0 || offset == length - 1;
+    let valid_offsets = if length >= 3 {
+        format!("from 1 to {}", length - 2)
+    } else {
+        "away from both ends of the wall".to_owned()
+    };
+    if thin.is_empty() {
+        let inside_it = if ctx.wall_column.course_top_at(y).is_some() {
+            "belongs to the neighbouring wall"
+        } else {
+            "is not an interior cell of this struct"
+        };
+        return Some(format!(
+            "pressure_plate `at=inside.{name} offset={offset}` is at a corner of the {name} wall, \
+             so the voxel inside it {inside_it}; use an `offset=` {valid_offsets} to reach an \
+             interior voxel",
+        ));
+    }
+    let also_corner = if corner {
+        format!(", and `offset={offset}` is at a corner of the {name} wall besides")
+    } else {
+        String::new()
+    };
+    let sizes = thin
+        .iter()
+        .map(|(axis, extent)| format!("size.{axis} is {extent}"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    let grow = thin
+        .iter()
+        .map(|(axis, _)| format!("`size.{axis}` to at least 3"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    let use_offset = if corner {
+        format!(" and use an `offset=` {valid_offsets}")
+    } else {
+        String::new()
+    };
+    // Without an overhang `<side>.outside` finds no exterior cell above
+    // the floor row and, at it, falls back to the cell under the wall, so
+    // it is a remedy only when a roof draws an overhang ring to sit in.
+    let outside = if ctx.overhang > 0 {
+        format!(", or anchor the plate with `at={name}.outside`")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "pressure_plate `at=inside.{name} offset={offset}`: the struct's {sizes}, so it has no \
+         interior voxel{also_corner}; an interior needs a size of at least 3 on both axes. \
+         Grow {grow}{use_offset}{outside}",
+    ))
 }
 
 /// Resolve a `pressure_plate` `mat_slot=` binding into the concrete
@@ -4224,7 +4456,21 @@ fn fill_window(
         }
     };
     let y_start = y_start_local.saturating_add(y_offset);
-    let sym = bool_value(member, "sym").unwrap_or(false);
+    // An unreadable `sym=` (`sym=yes`, `sym="true"`) draws the window
+    // unmirrored, and says so once the primary is in the build.
+    let (sym, sym_ignored) = match read_or_ignore(
+        member,
+        "sym",
+        |kind| match kind {
+            ValueKind::Bool(b) => Some(*b),
+            _ => None,
+        },
+        "`true` or `false`",
+        "the window is drawn without its mirror, as `sym=false` would draw it",
+    ) {
+        Ok(sym) => (sym.unwrap_or(false), None),
+        Err(ignored) => (false, Some(*ignored)),
+    };
     // `repeat=` stamps the same rectangle multiple times along the wall,
     // separated by `step=` voxels. Both keys are optional: an absent
     // `repeat` collapses to a single instance (the pre-repeat
@@ -4365,6 +4611,7 @@ fn fill_window(
             canvas,
         );
     }
+    diagnostics.extend(sym_ignored);
     if sym {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
         if mirror_offset == offset {
@@ -4580,13 +4827,21 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
 /// the output is the caller's to say. The primary stops at "the value was
 /// ignored" for the same reason — whether the member is in the build is
 /// not a fact this function has.
-fn diag_ignored_argument(member: &Member, key: &str, consequence: &str) -> Diagnostic {
+///
+/// `written` is the value as [`crate::ast::Value::describe`] renders it, so
+/// a quoted `"true"` reads as the string it is rather than as the word the
+/// author meant.
+fn diag_ignored_argument(
+    member: &Member,
+    key: &str,
+    written: &str,
+    expected: &str,
+    consequence: &str,
+) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::IgnoredArgument,
         span: member.span.clone(),
-        primary: format!(
-            "`{key}=` must be a non-negative integer that fits in u32; the value was ignored",
-        ),
+        primary: format!("`{key}=` must be {expected}, not {written}; the value was ignored"),
         notes: vec![DiagnosticNote {
             span: None,
             message: consequence.to_owned(),
@@ -7965,10 +8220,12 @@ struct s size=9x7
 
     #[test]
     fn pressure_plate_inside_paints_one_voxel_toward_the_interior() {
-        let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=0 y=0\n";
+        // The front wall's middle cell is (1, 0, 2); one step in is the
+        // struct's only interior cell.
+        let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=1 y=0\n";
         let out = lowered(src);
         let ba = out.structures.get("struct::s").unwrap();
-        assert_eq!(block_id(ba, 0, 0, 1), "minecraft:oak_pressure_plate");
+        assert_eq!(block_id(ba, 1, 0, 1), "minecraft:oak_pressure_plate");
         assert_eq!(deferred_count(&out), 0);
     }
 
@@ -7977,7 +8234,7 @@ struct s size=9x7
         // A `mat_slot=` bound to a canonical id must land in the palette
         // verbatim — the default `oak_pressure_plate` fallback only
         // fires when no binding resolves.
-        let src = "theme t:\n  slot fixture -> @spruce_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=fixture height=2\n  pressure_plate mat_slot=fixture at=inside.front offset=0 y=0\n";
+        let src = "theme t:\n  slot fixture -> @spruce_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=fixture height=2\n  pressure_plate mat_slot=fixture at=inside.front offset=1 y=0\n";
         let out = lowered(src);
         let ba = out.structures.get("struct::s").unwrap();
         let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
@@ -7985,7 +8242,318 @@ struct s size=9x7
             ids.contains(&"minecraft:spruce_pressure_plate"),
             "palette should carry the resolved id, got {ids:?}",
         );
-        assert_eq!(block_id(ba, 0, 0, 1), "minecraft:spruce_pressure_plate");
+        assert_eq!(block_id(ba, 1, 0, 1), "minecraft:spruce_pressure_plate");
+    }
+
+    /// Lower `size=<size>` with `members` (each line indented, cobblestone
+    /// on the `wall` slot) and one plate line, and return the output with
+    /// the `W_DEFERRED_MEMBER` primaries.
+    fn lowered_plate(size: &str, members: &str, plate: &str) -> (BlockArrayIr, Vec<String>) {
+        let src = format!(
+            "theme t:\n  slot wall -> @cobblestone\n\nstruct s size={size}\n{members}  \
+             pressure_plate {plate}\n",
+        );
+        let out = lowered(&src);
+        let reasons = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .map(|d| d.primary.clone())
+            .collect();
+        (out, reasons)
+    }
+
+    /// [`lowered_plate`] with `walls height=3` ahead of `extra`.
+    fn lowered_inside_plate(size: &str, extra: &str, plate: &str) -> (BlockArrayIr, Vec<String>) {
+        lowered_plate(
+            size,
+            &format!("  walls mat_slot=wall height=3\n{extra}"),
+            plate,
+        )
+    }
+
+    fn plate_count(ba: &BlockArray) -> usize {
+        ba.voxels
+            .iter()
+            .filter(|v| ba.palette.entries[usize::from(v.0)].id == PRESSURE_PLATE_BASE_ID)
+            .count()
+    }
+
+    /// The wall rings the inside-plate tests run against: the footprint's
+    /// own edge, and the ring a roof overhang of 1 or 2 moves inward.
+    const OVERHANGS: [u32; 3] = [0, 1, 2];
+
+    /// The member line that gives a struct `overhang`, empty for none.
+    fn overhang_roof(overhang: u32) -> String {
+        if overhang == 0 {
+            String::new()
+        } else {
+            format!("  roof kind=flat mat_slot=wall overhang={overhang}\n")
+        }
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_defers_and_keeps_the_side_wall() {
+        // The front wall of a 5x5 struct is z=4; one step in from its
+        // offset=0 end is (0, 1, 3), a block of the left wall.
+        let (out, reasons) =
+            lowered_inside_plate("5x5", "", "id=p at=inside.front offset=0 y=1 -> sig.a");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
+                 the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to \
+                 3 to reach an interior voxel. Its signal binding still reaches the netlist, with \
+                 no plate placed to drive it"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(block_id(ba, 0, 1, 3), "minecraft:cobblestone");
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_defers_at_the_floor_row_too() {
+        // At y=0 the corner cell is floor under the side wall. The
+        // `<side>.outside` foundation fallback is y=0-only; inside has no
+        // such exemption. No wall is painted at row 0, so the reason does
+        // not claim one.
+        let (out, reasons) = lowered_inside_plate("5x5", "", "at=inside.front offset=0 y=0");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
+                 the voxel inside it is not an interior cell of this struct; use an `offset=` \
+                 from 1 to 3 to reach an interior voxel"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_claims_no_wall_where_none_is_painted() {
+        // The ring is decided from the footprint, so a corner is refused
+        // at every row — but only a row the walls paint has a wall there
+        // to name: not a floor-only struct, and not the air between two
+        // courses (rows 1 and 5 here).
+        let cases = [
+            ("  floor mat_slot=wall\n", 0),
+            (
+                "  walls mat_slot=wall height=1\n  level y=4\n    walls mat_slot=wall height=1\n",
+                3,
+            ),
+        ];
+        for (members, y) in cases {
+            let (out, reasons) =
+                lowered_plate("5x5", members, &format!("at=inside.front offset=0 y={y}"));
+            let ba = out.structures.get("struct::s").unwrap();
+            assert_eq!(
+                reasons,
+                vec![
+                    "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, \
+                     so the voxel inside it is not an interior cell of this struct; use an \
+                     `offset=` from 1 to 3 to reach an interior voxel"
+                        .to_owned()
+                ],
+                "{members:?} y={y}",
+            );
+            assert_eq!(plate_count(ba), 0);
+        }
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_of_a_long_left_wall_names_that_wall() {
+        // On a 4x6 footprint the left wall runs along `size.h`, so both
+        // its name and its offset range differ from the front wall's.
+        let (out, reasons) = lowered_inside_plate("4x6", "", "at=inside.left offset=5 y=1");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.left offset=5` is at a corner of the left wall, so \
+                 the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to \
+                 4 to reach an interior voxel"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    /// The four sides of a 4x5 footprint with the length of each wall:
+    /// front and back run along `size.w`, left and right along `size.h`.
+    const SIDES_4X5: [(&str, u32); 4] = [("front", 4), ("back", 4), ("left", 5), ("right", 5)];
+
+    #[test]
+    fn pressure_plate_inside_defers_at_both_corners_of_every_side() {
+        // Each side mirrors `offset=` differently, so both ends of every
+        // wall are checked: a refusal keyed on one axis or one end would
+        // let the other three walls or the far corner through. Under an
+        // overhang the wall ring moves in, so a bound measured from the
+        // volume's edge rather than the ring would let the corner in.
+        for overhang in OVERHANGS {
+            for (side, length) in SIDES_4X5 {
+                for offset in [0, length - 1] {
+                    let (out, reasons) = lowered_inside_plate(
+                        "4x5",
+                        &overhang_roof(overhang),
+                        &format!("at=inside.{side} offset={offset} y=1"),
+                    );
+                    let ba = out.structures.get("struct::s").unwrap();
+                    let case = format!("overhang={overhang} inside.{side} offset={offset}");
+                    assert_eq!(
+                        reasons,
+                        vec![format!(
+                            "pressure_plate `at=inside.{side} offset={offset}` is at a corner of \
+                             the {side} wall, so the voxel inside it belongs to the neighbouring \
+                             wall; use an `offset=` from 1 to {} to reach an interior voxel",
+                            length - 2,
+                        )],
+                        "{case}",
+                    );
+                    assert_eq!(plate_count(ba), 0, "{case} painted");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pressure_plate_inside_paints_at_every_non_corner_offset_of_every_side() {
+        // The other half of the corner rule: every offset between the two
+        // corners reaches a genuine interior cell and paints without a
+        // word. A 4x5 footprint keeps the two axes' lengths distinct, and
+        // the cells are those of the footprint with no overhang.
+        let cells: [&[(u32, u32)]; 4] = [
+            &[(1, 3), (2, 3)],
+            &[(2, 1), (1, 1)],
+            &[(1, 1), (1, 2), (1, 3)],
+            &[(2, 3), (2, 2), (2, 1)],
+        ];
+        for overhang in OVERHANGS {
+            for ((side, length), cells) in SIDES_4X5.into_iter().zip(cells) {
+                assert_eq!(
+                    cells.len(),
+                    usize::try_from(length - 2).unwrap(),
+                    "{side} has one cell per non-corner offset",
+                );
+                for (offset, &(x, z)) in (1..length - 1).zip(cells) {
+                    let (out, reasons) = lowered_inside_plate(
+                        "4x5",
+                        &overhang_roof(overhang),
+                        &format!("at=inside.{side} offset={offset} y=1"),
+                    );
+                    let ba = out.structures.get("struct::s").unwrap();
+                    let case = format!("overhang={overhang} inside.{side} offset={offset}");
+                    assert_eq!(reasons, Vec::<String>::new(), "{case}");
+                    let (x, z) = (x + overhang, z + overhang);
+                    assert_eq!(
+                        block_id(ba, x, 1, z),
+                        PRESSURE_PLATE_BASE_ID,
+                        "{case} should land on ({x}, 1, {z})",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pressure_plate_inside_a_two_deep_struct_defers_and_keeps_the_back_wall() {
+        // With size.h = 2 the cell one step in from the front wall is the
+        // back wall. With no overhang `front.outside` would bury the plate
+        // under the wall at y=0 and find no cell above it, so the reason
+        // does not offer it.
+        let (out, reasons) =
+            lowered_inside_plate("5x2", "", "id=p at=inside.front offset=2 y=1 -> sig.a");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has \
+                 no interior voxel; an interior needs a size of at least 3 on both axes. Grow \
+                 `size.h` to at least 3. Its signal binding still reaches the netlist, with no \
+                 plate placed to drive it"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(block_id(ba, 2, 1, 0), "minecraft:cobblestone");
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_a_one_deep_struct_with_an_overhang_defers() {
+        // With size.h = 1 the front and back walls are one row (z=1 under
+        // `overhang=1`), and the inward step lands in the overhang ring
+        // behind the building at z=0.
+        let roof = overhang_roof(1);
+        let (out, reasons) = lowered_inside_plate("5x1", &roof, "at=inside.front offset=2 y=1");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=2`: the struct's size.h is 1, so it has \
+                 no interior voxel; an interior needs a size of at least 3 on both axes. Grow \
+                 `size.h` to at least 3, or anchor the plate with `at=front.outside`"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(block_id(ba, 3, 1, 0), "minecraft:air");
+        assert_eq!(plate_count(ba), 0);
+        // The remedy the reason offers works on this very struct.
+        let (out, reasons) = lowered_inside_plate("5x1", &roof, "at=front.outside offset=2 y=1");
+        assert_eq!(reasons, Vec::<String>::new());
+        assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 1);
+    }
+
+    #[test]
+    fn pressure_plate_inside_a_narrow_struct_names_the_narrow_axis() {
+        // The front wall of a 2-wide struct is two corners with nothing
+        // between them, so no offset can help until the width grows.
+        let (out, reasons) = lowered_inside_plate("2x5", "", "at=inside.front offset=1 y=1");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=1`: the struct's size.w is 2, so it has \
+                 no interior voxel, and `offset=1` is at a corner of the front wall besides; an \
+                 interior needs a size of at least 3 on both axes. Grow `size.w` to at least 3 \
+                 and use an `offset=` away from both ends of the wall"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_reports_a_thin_axis_and_a_corner_in_one_pass() {
+        // `2x9 at=inside.left offset=0` is both too narrow and a corner:
+        // one reason names both, so widening alone is not the whole fix.
+        // With both axes thin, both are named.
+        let cases = [
+            (
+                "2x9",
+                "at=inside.left offset=0 y=1",
+                "pressure_plate `at=inside.left offset=0`: the struct's size.w is 2, so it has \
+                 no interior voxel, and `offset=0` is at a corner of the left wall besides; an \
+                 interior needs a size of at least 3 on both axes. Grow `size.w` to at least 3 \
+                 and use an `offset=` from 1 to 7",
+            ),
+            (
+                "2x2",
+                "at=inside.front offset=0 y=1",
+                "pressure_plate `at=inside.front offset=0`: the struct's size.w is 2 and size.h \
+                 is 2, so it has no interior voxel, and `offset=0` is at a corner of the front \
+                 wall besides; an interior needs a size of at least 3 on both axes. Grow \
+                 `size.w` to at least 3 and `size.h` to at least 3 and use an `offset=` away \
+                 from both ends of the wall",
+            ),
+        ];
+        for (size, plate, expected) in cases {
+            let (out, reasons) = lowered_inside_plate(size, "", plate);
+            assert_eq!(reasons, vec![expected.to_owned()], "{size} {plate}");
+            assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
+        }
     }
 
     #[test]

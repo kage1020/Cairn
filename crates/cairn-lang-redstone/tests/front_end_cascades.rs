@@ -335,7 +335,7 @@ fn findings_from_two_collection_phases_come_out_in_line_order() {
     // first.
     let source = source(concat!(
         "  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n",
-        "  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.a\n",
+        "  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.a\n",
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
     ));
     let out = synth_source(&source);
