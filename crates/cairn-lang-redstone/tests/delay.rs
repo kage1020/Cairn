@@ -308,8 +308,8 @@ struct narrow_pack size=20x5
 /// `sig.b` as one of its drivers, so `cell[i]` (placed at
 /// `x = 1 + 2i, y = 0, z = 0`) sees a `sig.b` segment that grows with
 /// the column it stands in; the previous cell contributes a short one.
-/// `cell[i]`'s implicit buffer count is
-/// `(segment - 1) / DUST_ATTENUATION_LIMIT` summed across drivers.
+/// `cell[i]`'s implicit buffer count is the number of repeaters on its
+/// segments, summed across drivers.
 #[test]
 fn cascaded_and_chain_records_implicit_buffer_ticks() {
     let source = r"

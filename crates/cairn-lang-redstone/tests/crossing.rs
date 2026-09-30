@@ -56,10 +56,12 @@ fn errors(
 ///
 /// Every cell reads `sig.b`. The trunk that carries it runs along the
 /// free row beside the cell row and each cell taps off it, so the
-/// 15-step point of the route into each of them is the same coord and
-/// one repeater refreshes all of them. Two coords rather than one,
-/// because the row is `2 * cells` columns long and the far half of it
-/// is past the second refresh point.
+/// routes into all of them share the trunk and the repeaters standing
+/// on it. Two coords rather than one, because the row is `2 * cells`
+/// columns long and the far half of it is past the second refresh
+/// point. The second stands at `x = 28` rather than 15 blocks past the
+/// first: `(29,0,2)` is where the trunk forks into the cell at
+/// `(29,0,1)`, and a repeater on a fork faces one branch only.
 ///
 /// That the tree reaches the far cells along a trunk beside the row
 /// and not *through* the near ones is what makes this a small number
@@ -84,7 +86,7 @@ fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
         .collect();
     assert_eq!(
         blocks,
-        [(14, 0, 2), (29, 0, 2)].into_iter().collect(),
+        [(14, 0, 2), (28, 0, 2)].into_iter().collect(),
         "two blocks, on the plane, beside the row rather than over it — one \
          per refresh point and not one per cell",
     );
@@ -96,6 +98,52 @@ fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
         attributions >= 2,
         "the sharing is only pinned if more than one cell names it: {attributions}",
     );
+}
+
+/// Two doors on one plate, one straight down the row and one a row over
+/// past the first door's pad: the repeater the two share stands on the
+/// trunk before the fork, not on it.
+///
+/// Pad #0 is 16 blocks down the row, so the wire to it runs straight
+/// from the sensor pad. The wire to pad #1 cannot go through pad #0 and
+/// has no layer to climb to, so it leaves the row at `(15,0,0)` — 15
+/// blocks along both routes, and a coord with wire on three sides. A
+/// repeater there would face one door and starve the other. The one on
+/// `(14,0,0)` refreshes both, and both segments are charged for that
+/// one block.
+#[test]
+fn two_doors_share_the_repeater_before_their_fork() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=17x3
+  floor mat_slot=wall
+  door id=d0 side=front at=center mat_slot=door
+  door id=d1 side=back at=center mat_slot=door
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door[id=d0] opened_by=sig.a
+  door[id=d1] opened_by=sig.a
+  circuit region=floor void=1
+";
+    let legalized = legalized_from_source(source, Edition::Java);
+    let outputs = &legalized.scopes[0].ir.outputs;
+    assert_eq!(outputs.len(), 2, "one actuator pad per door");
+    let fork = (15, 0, 0);
+    for (index, output) in outputs.iter().enumerate() {
+        let buffers: Vec<(u32, u32, u32)> = output
+            .buffer_coords()
+            .iter()
+            .map(|b| (b.coord.x, b.coord.y, b.coord.z))
+            .collect();
+        assert_eq!(
+            buffers,
+            vec![(14, 0, 0)],
+            "output #{index} is fed through the trunk repeater, one short of the fork at {fork:?}",
+        );
+        assert_eq!(output.local_delay_ticks(), Some(1), "output #{index}");
+    }
 }
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java survives
