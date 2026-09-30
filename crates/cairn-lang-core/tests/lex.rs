@@ -248,11 +248,9 @@ fn dedent_emits_per_level_closed() {
 /// A `-` that is not the head of an `->` is a token of its own.
 ///
 /// It used to be an `UnexpectedChar`, which put a version label's
-/// pre-release suffix out of reach of the directive that reads it: a
-/// header's value is the raw source between its tokens, so a character the
-/// lexer refuses never reaches the pass that would accept it, and
+/// pre-release suffix out of reach of the directive that reads it:
 /// `@requires version>=1.21.4-rc1` died on the `-` before any check pass
-/// saw it. For why that label shape has to be readable, see
+/// saw it, back when the parser refused any file `lex` refuses. For why that label shape has to be readable, see
 /// `spec/versioning-editions` "The target is a compile-time parameter".
 #[test]
 fn a_lone_dash_lexes_as_a_token_rather_than_failing() {

@@ -63,6 +63,20 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "@requires version>=1.21.4-rc1\n",
         Accept,
     ),
+    // The rest of that class: a character no token starts with, and an
+    // unterminated `"`. The reference parser keeps what it cannot lex as
+    // part of the value, the way `directive_literal` always has.
+    ("cairn_unlexable_value", "@cairn 2026.6+build\n", Accept),
+    (
+        "cairn_unterminated_quote",
+        "@cairn 2026.6 \"draft\n",
+        Accept,
+    ),
+    (
+        "requires_unlexable_operator",
+        "@requires version~=1.21\n",
+        Accept,
+    ),
     (
         "requires_edition_scope",
         "@requires java version>=1.21.4\n",
@@ -153,6 +167,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "def_member_requires_nonsense",
         "def d size=2x2:\n  requires a=1\n",
+        Accept,
+    ),
+    (
+        "def_member_requires_unlexable",
+        "def d size=2x2:\n  requires version~=1.21\n",
         Accept,
     ),
     (

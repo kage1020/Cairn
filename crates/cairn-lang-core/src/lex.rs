@@ -24,6 +24,17 @@
 //! Comments (`#` to end-of-line), blank lines, and trailing whitespace are
 //! discarded silently; everything else either becomes a token or fails with a
 //! [`LexError`].
+//!
+//! Two kinds of failure, and [`lex`] reports both the same way. A failure in
+//! a line's *indentation* ends the scan, since every token after it would
+//! sit at a level nobody can name. A failure *inside* a line — a character
+//! no token starts with, an unterminated string, a malformed size or
+//! integer — does not end it in the parser's own pass: the stretch is kept
+//! as a [`TokenKind::Unlexed`] and the scan goes on, because the directives
+//! that take their value as raw text to end of line (`@cairn`, `@requires`,
+//! a part's `requires`) judge that text themselves and have a finding of
+//! their own for a value they cannot read. [`crate::parse()`] reports the
+//! deferred failure only when the stretch lands anywhere else.
 
 use crate::error::{IntContext, LexError, Position, Span};
 
@@ -93,18 +104,9 @@ pub enum TokenKind {
     /// a truth row: a `-` in the input pattern is a don't-care, which the
     /// parser reassembles out of the run of `Int` and `Minus` tokens the
     /// lexer split it into, and a `-` in the output position is the row
-    /// declining to constrain what it covers. It is also lexed rather
-    /// than refused so a version label
-    /// carrying a pre-release suffix —
-    /// `@requires version>=1.21.4-rc1`, a shape `spec/versioning-editions`
-    /// "Which labels a floor may use" and `spec/syntax` "Headers" accept —
-    /// survives to
-    /// the directive that knows what to do with it: a header's value is
-    /// the raw source between its tokens, so a character the lexer refuses
-    /// never reaches the reader that would accept it. Everywhere else the
-    /// parser reports it as an unexpected token, which names the `-` it
-    /// found in the position it found it rather than the character offset
-    /// the lexer would have named.
+    /// declining to constrain what it covers. Everywhere else the parser
+    /// reports it as an unexpected token, which names the `-` it found in
+    /// the position it found it.
     ///
     /// The lexer takes `->` greedily, so the last `-` of a run that ends
     /// at a `>` is an [`TokenKind::Arrow`] and not one of these.
@@ -145,6 +147,16 @@ pub enum TokenKind {
     Indent,
     /// Indent termination (one DEDENT per nesting level exited).
     Dedent,
+    /// A stretch of a line that is no token: a character no token starts
+    /// with, an unterminated string, or a size or integer the lexer
+    /// refused.
+    ///
+    /// [`lex`] never returns one — it reports the failure as the
+    /// [`LexError`] it is. Only [`crate::parse()`]'s own pass sees these,
+    /// so that a directive whose value is raw text to end of line can take
+    /// the stretch into that text; anywhere else the parse reports the
+    /// same `LexError` `lex` would have.
+    Unlexed,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -176,6 +188,7 @@ impl std::fmt::Display for TokenKind {
             Self::Newline => f.write_str("end of line"),
             Self::Indent => f.write_str("indent"),
             Self::Dedent => f.write_str("dedent"),
+            Self::Unlexed => f.write_str("text that is no token"),
         }
     }
 }
@@ -185,6 +198,45 @@ impl std::fmt::Display for TokenKind {
 /// # Errors
 /// Returns the first [`LexError`] encountered.
 pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
+    let Lexed {
+        tokens,
+        deferred,
+        fatal,
+    } = lex_deferring(source);
+    // Every deferred failure was met before the scan stopped, so the first
+    // of them, if any, is the first failure in the file.
+    match (deferred.into_iter().next(), fatal) {
+        (Some(first), _) => Err(first.error),
+        (None, Some(fatal)) => Err(fatal),
+        (None, None) => Ok(tokens),
+    }
+}
+
+/// A failure inside a line, kept as the [`TokenKind::Unlexed`] at index
+/// `token` rather than ending the scan.
+pub(crate) struct Deferred {
+    /// Index of the `Unlexed` token in [`Lexed::tokens`].
+    pub(crate) token: usize,
+    /// What [`lex`] reports for it.
+    pub(crate) error: LexError,
+}
+
+/// The result of a scan that defers failures inside a line.
+pub(crate) struct Lexed {
+    /// Every token scanned, with a [`TokenKind::Unlexed`] for each
+    /// deferred failure. When `fatal` is set, the tokens stop where the
+    /// scan did.
+    pub(crate) tokens: Vec<Token>,
+    /// The failures inside lines, in source order.
+    pub(crate) deferred: Vec<Deferred>,
+    /// The indentation failure that ended the scan, if one did. It comes
+    /// after every entry of `deferred`.
+    pub(crate) fatal: Option<LexError>,
+}
+
+/// Tokenise the source, keeping each failure inside a line as a
+/// [`TokenKind::Unlexed`] token rather than stopping at it.
+pub(crate) fn lex_deferring(source: &str) -> Lexed {
     Lexer::new(source).run()
 }
 
@@ -196,6 +248,7 @@ struct Lexer<'src> {
     col: u32,
     indent_stack: Vec<u32>,
     out: Vec<Token>,
+    deferred: Vec<Deferred>,
 }
 
 /// U+FEFF, the byte-order mark, as it appears in UTF-8.
@@ -226,20 +279,31 @@ impl<'src> Lexer<'src> {
             col: if has_bom { 2 } else { 1 },
             indent_stack: vec![0],
             out: Vec::new(),
+            deferred: Vec::new(),
         }
     }
 
-    fn run(mut self) -> Result<Vec<Token>, LexError> {
+    fn run(mut self) -> Lexed {
         while self.pos < self.bytes.len() {
-            self.scan_line_start()?;
-            self.scan_line_body()?;
+            if let Err(fatal) = self.scan_line_start() {
+                return Lexed {
+                    tokens: self.out,
+                    deferred: self.deferred,
+                    fatal: Some(fatal),
+                };
+            }
+            self.scan_line_body();
         }
         // Close any open indentation when the file ends.
         while self.indent_stack.len() > 1 {
             self.indent_stack.pop();
             self.push_synthetic(TokenKind::Dedent);
         }
-        Ok(self.out)
+        Lexed {
+            tokens: self.out,
+            deferred: self.deferred,
+            fatal: None,
+        }
     }
 
     /// Inspect leading whitespace of a (potential) logical line and emit
@@ -329,14 +393,18 @@ impl<'src> Lexer<'src> {
 
     /// Scan the body of a logical line up to and including a single `Newline`
     /// (or EOF).
-    fn scan_line_body(&mut self) -> Result<(), LexError> {
+    ///
+    /// A token that fails to scan does not end the line: what it covered
+    /// becomes one [`TokenKind::Unlexed`] and the scan resumes where the
+    /// failure left off, which is always past at least one character.
+    fn scan_line_body(&mut self) {
         loop {
             self.skip_spaces();
             let Some(b) = self.peek() else {
                 if !self.last_is_newline() {
                     self.push_synthetic(TokenKind::Newline);
                 }
-                return Ok(());
+                return;
             };
             if b == b'\n' || b == b'\r' {
                 // Recorded before the break is consumed. A `Newline` is
@@ -350,7 +418,7 @@ impl<'src> Lexer<'src> {
                 let position = self.position();
                 self.consume_line_break();
                 self.push_at(TokenKind::Newline, start..self.pos, position);
-                return Ok(());
+                return;
             }
             if b == b'#' {
                 while let Some(c) = self.peek() {
@@ -361,7 +429,15 @@ impl<'src> Lexer<'src> {
                 }
                 continue;
             }
-            self.scan_token(b)?;
+            let start = self.pos;
+            let position = self.position();
+            if let Err(error) = self.scan_token(b) {
+                self.deferred.push(Deferred {
+                    token: self.out.len(),
+                    error,
+                });
+                self.push_at(TokenKind::Unlexed, start..self.pos, position);
+            }
         }
     }
 
