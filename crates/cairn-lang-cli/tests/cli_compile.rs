@@ -1467,27 +1467,52 @@ fn files_under(root: &std::path::Path) -> Vec<String> {
 /// `compile` writes nothing — neither the artifact nor the lock.
 ///
 /// Each row is set up so the build would have succeeded before the rule
-/// existed: the absolute id's directory exists outside `--out`, and so does
-/// the `sub/` the relative id names inside it. The Windows separator is a
-/// plain character on Unix, and refused there too so whether an id is
-/// accepted does not depend on the host.
+/// existed: the absolute id's directory exists outside `--out`, and `out/`
+/// holds both the `sub/` the relative id names and the `a/` that `a\b`
+/// names on Windows. The Windows separator is a plain character on Unix,
+/// and refused there too so whether an id is accepted does not depend on
+/// the host.
+///
+/// Each row pins the character the diagnostic names. The absolute id is
+/// the tempdir's own path, so on Windows it begins with a drive and is
+/// refused on that `:`, a rule older than the path separators; there the
+/// relative and Windows-style rows are what exercise `/` and `\`.
+/// Elsewhere the tempdir is named without the `.` `TempDir::new` puts in
+/// front of it, so the absolute id carries no character the older rule
+/// refused, and that is asserted rather than assumed.
 #[test]
 fn a_place_id_carrying_a_path_separator_writes_nothing() {
-    let tmp = TempDir::new().expect("tempdir");
+    let tmp = tempfile::Builder::new()
+        .prefix("cairn-escape")
+        .tempdir()
+        .expect("tempdir");
     let root = tmp.path();
     let elsewhere = root.join("elsewhere");
     fs::create_dir_all(&elsewhere).expect("create elsewhere");
     let absolute = elsewhere.join("hut");
     let absolute = absolute.to_str().expect("utf-8 tempdir");
+    if !cfg!(windows) {
+        assert!(
+            !absolute.contains(|c: char| c == '.' || c == ':' || c.is_whitespace()),
+            "`{absolute}` carries a character refused before the path separators were, so the \
+             absolute row would not show that `/` is what refuses it; point TMPDIR elsewhere",
+        );
+    }
 
-    for (label, id) in [
-        ("absolute", absolute),
-        ("relative", "sub/hut"),
-        ("windows", "a\\b"),
+    let absolute_char = if cfg!(windows) { ':' } else { '/' };
+    for (label, id, ch) in [
+        ("absolute", absolute, absolute_char),
+        ("relative", "sub/hut", '/'),
+        ("windows", "a\\b", '\\'),
     ] {
         let case = root.join(label);
         let out = case.join("out");
         fs::create_dir_all(out.join("sub")).expect("create out/sub");
+        fs::create_dir_all(out.join("a")).expect("create out/a");
+        let refusal = format!(
+            "error[E_INVALID_PLACE_ID]: `place id={id}` in site `s` is not a usable id: \
+             it contains `{ch}`"
+        );
         let src = write_source(
             &case,
             "escape.crn",
@@ -1506,8 +1531,8 @@ fn a_place_id_carrying_a_path_separator_writes_nothing() {
             "{label}: stderr={check_err}"
         );
         assert!(
-            check_err.contains("error[E_INVALID_PLACE_ID]"),
-            "{label}: `id=\"{id}\"` must be E_INVALID_PLACE_ID, got: {check_err}",
+            check_err.contains(&refusal),
+            "{label}: `id=\"{id}\"` must be refused on `{ch}`, got: {check_err}",
         );
 
         let compiled = cairn(
@@ -1520,11 +1545,15 @@ fn a_place_id_carrying_a_path_separator_writes_nothing() {
                 out.to_str().unwrap(),
             ],
         );
+        let compile_err = String::from_utf8_lossy(&compiled.stderr);
         assert_eq!(
             compiled.status.code(),
             Some(1),
-            "{label}: stderr={}",
-            String::from_utf8_lossy(&compiled.stderr),
+            "{label}: stderr={compile_err}"
+        );
+        assert!(
+            compile_err.contains(&refusal),
+            "{label}: compile must stop on the same refusal, got: {compile_err}",
         );
     }
     let expected: Vec<String> = ["absolute", "relative", "windows"]

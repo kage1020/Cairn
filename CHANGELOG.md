@@ -375,11 +375,18 @@
   artifact. `/` and `\` are now `E_INVALID_PLACE_ID`, on every platform, and the row is dropped:
 
   ```
+  escape.crn:3:1: warning[W_UNUSED_DEF]: def `hut` is never referenced by a `place use=hut`
+    note: remove the def, or place an instance via `site ... place use=...`
   escape.crn:10:3: error[E_INVALID_PLACE_ID]: `place id=/tmp/elsewhere/hut` in site `s` is not a usable id: it contains `/`
+    note: a place id becomes part of the `site::<site>::<place>` scope key and the stem of the artifact file written into `--out`, so it must be non-empty and free of `.`, `:`, `/`, `\`, and whitespace; rename it with letters, digits, and `_` (`home1`, `north_tower`)
   ```
 
-  `compile` also refuses any artifact whose file name is not a single plain name before it writes
-  anything, so a later source of file names that skips the id rules cannot reopen this.
+  The `W_UNUSED_DEF` is a side effect of dropping the row, as it already was for an id carrying `.`
+  or `:`. `compile` also refuses any artifact whose file name is not a single plain name, or that
+  carries `:`, before it writes anything, so a later source of file names that skips the id rules
+  cannot reopen this on any host. A lockfile an earlier build wrote from such an id holds it in
+  `placements`; the next `compile` now warns that the existing lockfile could not be read, names the
+  forbidden character, and replaces the lock without comparing against the target it recorded.
 
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same

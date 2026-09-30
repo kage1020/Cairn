@@ -295,7 +295,8 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 walkway は、ソース上では繋がって見える 2 棟を世界では繋がないまま残し、そのことを report の中で言う
 ものが何もありません。
 
-`W_INVALID_WALKWAY_IDENT` は `E_INVALID_PLACE_ID` と同じ往復の規則を別の区切りに適用したものです。
+`W_INVALID_WALKWAY_IDENT` は `E_INVALID_PLACE_ID` のうち `.` / `:` に関する往復の規則を、別の区切りに
+適用したものです。
 `__` は walkway のスコープキーの `from` と `to` を繋ぐので、片側の `b__c` ともう片側の `c__home2` が
 同じ文字列に符号化されます。place や port の端の `_` も同じようにこの区切りに溶け込みます。
 `a.p_ to b.p` と `a.p to _b.p` はどちらも `a.p___b.p` に符号化され、`_` という名前の port は、

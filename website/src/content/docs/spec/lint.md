@@ -298,8 +298,8 @@ author.
 that degrades to air leaves two buildings looking connected in the source and unconnected in the
 world, with nothing in the report to say so.
 
-`W_INVALID_WALKWAY_IDENT` is the same round-trip rule as `E_INVALID_PLACE_ID` on a different
-separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
+`W_INVALID_WALKWAY_IDENT` is the same round-trip rule as the `.` / `:` half of
+`E_INVALID_PLACE_ID`, on a different separator. `__` joins the `from` and `to` halves of a walkway's scope key, so `b__c` in one half and
 `c__home2` in the other encode to one string. A `_` at the edge of a place or port merges into that
 separator the same way: `a.p_ to b.p` and `a.p to _b.p` both encode to `a.p___b.p`, and a port
 named `_` leaves a key that splits back into an empty port. Only the end of the `from` port and the

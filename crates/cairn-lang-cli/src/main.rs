@@ -3256,10 +3256,11 @@ fn prepare_artifacts(
             );
         }
         let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
-        // Walkway IR keys allow `.` / `_` in place and port ids; the
-        // `output_filename` flatten of `.` → `_` can fold two distinct
-        // walkways into the same on-disk name (e.g. `a.b_c__d.e_f` vs
-        // `a_b.c__d_e.f` both → `..._a_b_c__d_e_f`). Detecting that
+        // Place and port ids may carry `_`, and `output_filename` joins a
+        // walkway's place and port with `_` where its scope key has the
+        // place/port separator `.`, so two distinct walkways can fold into
+        // the same on-disk name (e.g. `a.b_c__d.e_f` vs `a_b.c__d_e.f`
+        // both → `..._a_b_c__d_e_f`). Detecting that
         // here keeps the second walkway from silently overwriting the
         // first. Keyed on the directory entry rather than the spelling:
         // `home1` and `HOME1` are distinct ids but one file on macOS and
@@ -3294,6 +3295,36 @@ fn prepare_artifacts(
     Ok(prepared)
 }
 
+/// Why an artifact file name cannot be joined onto `--out`.
+#[derive(Debug, PartialEq, Eq)]
+enum ArtifactNameRefusal {
+    /// The name carries `/`, `\` or `:`, the characters that make a name a
+    /// path on some host: a directory separator, or a Windows drive prefix
+    /// (`C:hut`) or alternate data stream (`hut.nbt:ads`).
+    Separator(char),
+    /// The name is empty, `.` or `..`: it names `--out` itself or its
+    /// parent rather than a file inside it.
+    NotAFile,
+}
+
+/// Decide whether `file_name` is a single plain file name.
+///
+/// The separator check comes first and is textual, so the same names are
+/// refused on every host: `Path::components` alone is host-dependent, since
+/// on Unix `C:hut` and `a\b` are each one `Normal` component. What remains
+/// is the shapes with no separator that are still not a file.
+fn artifact_name_refusal(file_name: &str) -> Option<ArtifactNameRefusal> {
+    if let Some(ch) = file_name.chars().find(|c| matches!(c, '/' | '\\' | ':')) {
+        return Some(ArtifactNameRefusal::Separator(ch));
+    }
+    let mut components = Path::new(file_name).components();
+    let plain = matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(name)), None) if name == file_name
+    );
+    (!plain).then_some(ArtifactNameRefusal::NotAFile)
+}
+
 /// Join an artifact's file name onto `--out`, refusing any name that is not
 /// a single plain file name.
 ///
@@ -3303,29 +3334,39 @@ fn prepare_artifacts(
 /// newtypes from choosing the directory the compiler writes to. The file
 /// name is checked rather than the joined path, because `Path::join` with
 /// an absolute argument discards `out_dir` and a relative one with a
-/// separator lands in a subdirectory. `\` is refused on every platform,
-/// matching the identifier rule, so a build refused on Windows is refused
-/// everywhere.
+/// separator lands in a subdirectory. [`artifact_name_refusal`] refuses
+/// `/`, `\` and `:` textually, matching the identifier rule, so a name
+/// refused on one host is refused on every host.
 fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf, ExitCode> {
-    let mut components = Path::new(file_name).components();
-    let plain = matches!(
-        (components.next(), components.next()),
-        (Some(std::path::Component::Normal(name)), None) if name == file_name
-    ) && !file_name.contains(['/', '\\']);
-    if !plain {
-        eprintln!(
-            "error: scope `{scope}` names its artifact `{file_name}`, which is not a plain file \
-             name, so it would be written outside `{}`",
-            out_dir.display(),
-        );
-        eprintln!(
-            "  note: every artifact is written directly into --out, named after its `place id=` \
-             or struct name; an id may not carry `/` or `\\`, so rename it (`home1`) and \
-             compile again",
-        );
-        return Err(ExitCode::from(1));
+    match artifact_name_refusal(file_name) {
+        None => Ok(out_dir.join(file_name)),
+        Some(ArtifactNameRefusal::Separator(ch)) => {
+            eprintln!(
+                "error: scope `{scope}` names its artifact `{file_name}`, which contains `{ch}`, \
+                 so it would not be written directly into `{}`",
+                out_dir.display(),
+            );
+            eprintln!(
+                "  note: every artifact is written directly into --out, named after its \
+                 `place id=`, its struct name, or its walkway's site and endpoints; an id may \
+                 not carry `/`, `\\` or `:`, so rename it (`home1`) and compile again",
+            );
+            Err(ExitCode::from(1))
+        }
+        Some(ArtifactNameRefusal::NotAFile) => {
+            eprintln!(
+                "error: scope `{scope}` names its artifact `{file_name}`, which is not a file \
+                 name inside `{}`",
+                out_dir.display(),
+            );
+            eprintln!(
+                "  note: every name the checker accepts gives a file name with an extension, so \
+                 this is a bug in Cairn rather than in the source; please report it with the \
+                 source that produced it",
+            );
+            Err(ExitCode::from(1))
+        }
     }
-    Ok(out_dir.join(file_name))
 }
 
 /// Refuse a `--lock` that would land on a path the artifacts already own.
@@ -4297,18 +4338,33 @@ mod tests {
     ///
     /// The refused rows are the shapes a separator gives a name: absolute
     /// (which `Path::join` lets replace `out_dir`), relative with a
-    /// directory, Windows-style (a separator there, and refused everywhere
-    /// so the rule does not depend on the host), and the names that are
-    /// not a file at all.
+    /// directory, Windows-style, a drive prefix (on Windows `C:hut.nbt`
+    /// joins to `C:hut.nbt` and drops `out_dir`) and an alternate data
+    /// stream, then the names that are not a file at all. Each row pins the
+    /// reason, not just the refusal, and every host takes the same one: on
+    /// Unix the `\` and `:` rows are single `Normal` components that only
+    /// the textual check refuses.
     #[test]
     fn an_artifact_file_name_that_is_not_plain_is_refused() {
         let out_dir = Path::new("out");
-        for name in ["/abs/hut.nbt", "sub/hut.nbt", "a\\b.nbt", "..", ".", ""] {
-            assert!(
-                artifact_path(out_dir, "site::s::probe", name).is_err(),
+        for (name, refusal) in [
+            ("/abs/hut.nbt", ArtifactNameRefusal::Separator('/')),
+            ("sub/hut.nbt", ArtifactNameRefusal::Separator('/')),
+            ("a\\b.nbt", ArtifactNameRefusal::Separator('\\')),
+            ("C:hut.nbt", ArtifactNameRefusal::Separator(':')),
+            ("hut.nbt:ads", ArtifactNameRefusal::Separator(':')),
+            ("..", ArtifactNameRefusal::NotAFile),
+            (".", ArtifactNameRefusal::NotAFile),
+            ("", ArtifactNameRefusal::NotAFile),
+        ] {
+            assert_eq!(
+                artifact_name_refusal(name),
+                Some(refusal),
                 "`{name}` would not be written directly into `out`, so it must be refused",
             );
+            assert!(artifact_path(out_dir, "site::s::probe", name).is_err());
         }
+        assert_eq!(artifact_name_refusal("home1.nbt"), None);
         assert_eq!(
             artifact_path(out_dir, "site::s::home1", "home1.nbt").ok(),
             Some(out_dir.join("home1.nbt")),
@@ -4322,6 +4378,12 @@ mod tests {
     /// `E_INVALID_PLACE_ID` and the lowering pass skips it. Rekeying a real
     /// lowering is the only way to ask what the compiler does if a future
     /// source of scope keys skips that gate.
+    ///
+    /// `prepare_artifacts` has three other refusals: the tag build, the
+    /// directory-entry lookup and the collision check. The plain key below
+    /// runs the same structure through all three and passes, and the
+    /// lookup falls back to `std::path::absolute` for a directory that does
+    /// not exist, so the key's file name is the only thing left to refuse.
     #[test]
     fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
         let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");

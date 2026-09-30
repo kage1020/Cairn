@@ -401,11 +401,16 @@ pub enum DiagnosticCode {
     /// would be a lie and `E_TYPE_MISMATCH_LABEL` already names it.
     IncompletePlace,
     /// A `place id=` breaks an invariant [`crate::ids::PlaceId`] relies on:
-    /// it is empty, or contains `.`, `:`, or whitespace.
+    /// it is empty, or contains `.`, `:`, `/`, `\`, or whitespace.
     ///
-    /// Those characters are the structural separators the scope key
-    /// `site::SITE::PLACE` and every walkway key parsed back out of it are
-    /// built from, so an id carrying one cannot round-trip. `id=` accepts a
+    /// The rule has two reasons. `.` and `:` are the structural separators
+    /// the scope key `site::SITE::PLACE` and every walkway key parsed back
+    /// out of it are built from, so an id carrying one cannot round-trip.
+    /// `/` and `\` are path separators: the id is the stem of the artifact
+    /// file written into `--out`, so either one would put that file in
+    /// another directory, and an absolute id would replace `--out`
+    /// altogether. Both are refused on every platform, so whether an id is
+    /// accepted does not depend on the host that checks it. `id=` accepts a
     /// string literal, which is what let the value through — nothing between
     /// the lexer and the key constructor looked at its contents.
     InvalidPlaceId,
