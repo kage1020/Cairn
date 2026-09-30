@@ -281,8 +281,14 @@ fn origin(ir: &BlockArrayIr, id: &str) -> Option<(i32, i32, i32)> {
         .map(|p| p.origin)
 }
 
-/// The note on an unreadable `gap=` whose row is refused.
+/// The note on an unreadable `gap=` whose row is refused for a reason no
+/// `gap=` reaches.
 const NOT_PLACED: &str = "this row is not placed either way — see the finding on the same line";
+
+/// The note on an unreadable `gap=` whose row is refused for its origin.
+/// Only `gap=0` was tried, so it claims nothing about any other value.
+const NOT_PLACED_AT_ZERO: &str = "this row is not placed at `gap=0`, the value its origin was \
+     worked out with — see the finding on the same line";
 
 #[test]
 fn an_unreadable_gap_places_the_row_edge_to_edge_and_says_so() {
@@ -456,9 +462,10 @@ fn a_row_refused_for_its_origin_still_reports_its_body() {
 
 #[test]
 fn an_unreadable_gap_on_a_row_refused_for_its_origin_is_still_reported() {
-    // `b` sits exactly on `i32::MAX`, so `c` leaves the range even at the
-    // `gap=0` its unreadable `gap=` falls back to: no `gap=` would place
-    // it, and the note says so.
+    // `b` sits exactly on `i32::MAX`, so `c` leaves the range at the
+    // `gap=0` its unreadable `gap=` falls back to. The note names that
+    // value only: it does not say whether some other `gap=` would place
+    // the row.
     let ir = lowered(&site(
         "  place id=b use=box theme=t east_of=a gap=2147483644\n  \
          place id=c use=box theme=t east_of=b gap=wide\n",
@@ -472,5 +479,5 @@ fn an_unreadable_gap_on_a_row_refused_for_its_origin_is_still_reported() {
         "{:#?}",
         ir.diagnostics
     );
-    assert_eq!(ir.diagnostics[1].notes[0].message, NOT_PLACED);
+    assert_eq!(ir.diagnostics[1].notes[0].message, NOT_PLACED_AT_ZERO);
 }

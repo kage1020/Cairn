@@ -438,10 +438,12 @@
 
   The finding is raised whether or not the member is then built, as the `overhang=` one already
   was. A window, stair or `place` row refused further on reports its unreadable values beside the
-  refusal, with a note saying it is not built either way, so one compile names every repair. An
-  unknown bare identifier (`half=sideways`) still defers the stair, as before. Like the rest of
-  block-array lowering, these findings come from `cairn lower`, `compile`, and a `check` given
-  `--edition` / `--target`; a plain `cairn check` and the language server do not reach them.
+  refusal, with a note saying it is not built either way, so one compile names every repair. A row
+  refused because its origin leaves the range says only that it is not placed at `gap=0`, the
+  value that origin was worked out with. An unknown bare identifier (`half=sideways`) still defers
+  the stair, as before. Like the rest of block-array lowering, these findings come from
+  `cairn lower`, `compile`, and a `check` given `--edition` / `--target`; a plain `cairn check`
+  and the language server do not reach them.
 
   A `place` origin also saturated at the edge of `i32`, so `gap=3000000000` moved nothing and
   `gap=2147483647` followed by another `east_of=` row stacked the two on one coordinate. A row

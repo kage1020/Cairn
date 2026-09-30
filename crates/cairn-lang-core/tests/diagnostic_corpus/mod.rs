@@ -173,12 +173,16 @@ fn unreadable_value_sources() -> Vec<String> {
         // rendered string shows each. `b`'s `gap=` is ignored and the row
         // placed; `c`'s origin leaves the `i32` range, a message joined from
         // three continued lines; `d` is anchored on `c`, so it is not placed
-        // and its unreadable `gap=` carries the other note.
+        // and its unreadable `gap=` carries a second note. `e` sits exactly
+        // on `i32::MAX`, so `f` leaves the range at the `gap=0` its
+        // unreadable `gap=` falls back to, and carries the third.
         format!(
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n\
              \x20\x20place id=b use=hut theme=t east_of=a gap=wide\n\
              \x20\x20place id=c use=hut theme=t east_of=a gap=3000000000\n\
-             \x20\x20place id=d use=hut theme=t east_of=c gap=wide\n"
+             \x20\x20place id=d use=hut theme=t east_of=c gap=wide\n\
+             \x20\x20place id=e use=hut theme=t east_of=a gap=2147483644\n\
+             \x20\x20place id=f use=hut theme=t east_of=e gap=wide\n"
         ),
         // Its own theme, because an eave needs a stair material and
         // `THEME` binds none.

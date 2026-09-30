@@ -1124,7 +1124,7 @@ fn lower_site<'a>(
                 member,
                 "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
             ));
-            report_unread_gap(gap_unread, false, diagnostics);
+            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
 
@@ -1154,7 +1154,7 @@ fn lower_site<'a>(
             // The extent was refused; the diagnostic names the scope, and
             // recording a placement for a structure that does not exist
             // would leave the lockfile pointing at nothing.
-            report_unread_gap(gap_unread, false, diagnostics);
+            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
         // `array.source_scope` now owns the IR key — read it back so the
@@ -1168,11 +1168,11 @@ fn lower_site<'a>(
             Ok(origin) => origin,
             Err(far) => {
                 diagnostics.push(diag_deferred_member_reason(member, &far.deferral()));
-                report_unread_gap(gap_unread, false, diagnostics);
+                report_unread_gap(gap_unread, GapOutcome::OriginOutOfRange, diagnostics);
                 continue;
             }
         };
-        report_unread_gap(gap_unread, true, diagnostics);
+        report_unread_gap(gap_unread, GapOutcome::Placed, diagnostics);
         // First-write-wins, as above. Two `site` blocks of one name put
         // their `place id=` rows into one `site::NAME::` namespace, so
         // only a repeated `id=` collides — and the resolver has already
@@ -1830,18 +1830,41 @@ fn resolve_place_anchor(
     (anchor, gap_unread)
 }
 
+/// Where a `place` row with an unreadable `gap=` ended up, which picks the
+/// note its finding carries.
+#[derive(Clone, Copy)]
+enum GapOutcome {
+    /// Placed at the `gap=0` the unreadable value falls back to.
+    Placed,
+    /// Refused for a reason no `gap=` reaches: its anchor did not lower,
+    /// or its body was refused.
+    NotPlaced,
+    /// Refused because the origin worked out at `gap=0` leaves the `i32`
+    /// range. Only that value was tried, so the note claims nothing about
+    /// any other `gap=`.
+    OriginOutOfRange,
+}
+
 /// Report a `place` row's unreadable `gap=`, if it had one, with the note
-/// for whether the row was `placed`.
+/// for where the row ended up.
 fn report_unread_gap(
     unread: Option<UnreadArgument>,
-    placed: bool,
+    outcome: GapOutcome,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     diagnostics.extend(unread.map(|unread| {
-        unread.report(if placed {
-            "the row is placed as `gap=0` places it, edge to edge with the place it is relative to"
-        } else {
-            "this row is not placed either way — see the finding on the same line"
+        unread.report(match outcome {
+            GapOutcome::Placed => {
+                "the row is placed as `gap=0` places it, edge to edge with the place it is \
+                 relative to"
+            }
+            GapOutcome::NotPlaced => {
+                "this row is not placed either way — see the finding on the same line"
+            }
+            GapOutcome::OriginOutOfRange => {
+                "this row is not placed at `gap=0`, the value its origin was worked out \
+                 with — see the finding on the same line"
+            }
         })
     }));
 }

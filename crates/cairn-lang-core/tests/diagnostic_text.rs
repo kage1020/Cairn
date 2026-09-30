@@ -113,6 +113,10 @@ fn the_corpus_reaches_every_note_an_unreadable_value_carries() {
             "the row is placed as `gap=0` places it",
         ),
         ("W_IGNORED_ARGUMENT", "this row is not placed either way"),
+        (
+            "W_IGNORED_ARGUMENT",
+            "this row is not placed at `gap=0`, the value its origin was worked out with",
+        ),
         ("W_IGNORED_ARGUMENT", "the stair is built with the default"),
         ("W_IGNORED_ARGUMENT", "this stair is not built either way"),
         (
