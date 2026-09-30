@@ -1668,6 +1668,219 @@ mod tests {
         let _ = compile_crossing(&scoped(ScopeKind::Struct, "mixed", ir));
     }
 
+    mod strand_invariant {
+        //! The attenuation limit holds along whole strands, across the
+        //! cells that pass strength on — checked by a walk written out
+        //! here rather than through the placer's own budgets, so a
+        //! placer that stopped carrying the dust across a cell fails.
+        //!
+        //! "Strand" here is the run of dust counted from the last block
+        //! that restored strength, which carries on through a cell that
+        //! passes strength on. It is not the physically contiguous dust
+        //! the rest of this module means when it keeps two signals off
+        //! one strand: a cell's body stands in the middle of this one.
+
+        use std::collections::HashMap;
+        use std::fmt::Write as _;
+
+        use cairn_lang_core::{Edition, lower, parse};
+
+        use super::{
+            CellCoord, HashSet, NetRef, PlacementIr, Router, block_sites, collect_nets,
+            compile_crossing, input_pad, net_trees,
+        };
+        use crate::delay::{DUST_ATTENUATION_LIMIT, compile_delay};
+        use crate::routing::compile_routing;
+        use crate::{compile_edition_netlist, compile_netlist, compile_placement, synthesize};
+
+        /// `source` through every stage to the legalized IR of its one
+        /// scope, each stage clean but for the cross-layer advisory.
+        fn legalized(source: &str, edition: Edition) -> PlacementIr {
+            let intent = lower(&parse(source).expect("the fixture parses"));
+            let synth = synthesize(&intent);
+            let netlist = compile_netlist(&synth.scoped);
+            let placed = compile_placement(&compile_edition_netlist(&netlist, edition), &intent);
+            assert!(placed.diagnostics.is_empty(), "{:?}", placed.diagnostics);
+            let routed = compile_routing(&placed.scoped);
+            assert!(
+                routed
+                    .diagnostics
+                    .iter()
+                    .all(|d| d.code == crate::DiagnosticCode::RouteCrossLayerClearance),
+                "{:?}",
+                routed.diagnostics,
+            );
+            let delayed = compile_delay(&routed.scoped);
+            assert!(delayed.diagnostics.is_empty(), "{:?}", delayed.diagnostics);
+            let legalized = compile_crossing(&delayed.scoped);
+            assert!(
+                legalized.diagnostics.is_empty(),
+                "{:?}",
+                legalized.diagnostics
+            );
+            legalized.scoped.scopes[0].ir.clone()
+        }
+
+        /// Walks every net in topological order, carrying the dust spent
+        /// since the last block that restores strength — a sensor pad, a
+        /// repeater, or a cell whose output is at full strength — across
+        /// the cells that pass it on, and asserts no coord is reached
+        /// over more than the limit. Returns how many buffer repeaters
+        /// it met, so a caller can tell the walk saw some.
+        fn assert_no_strand_runs_past_the_limit(ir: &PlacementIr, label: &str) -> usize {
+            let region = ir.region.clone().expect("the fixture carries a region");
+            let nets = collect_nets(ir);
+            let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
+            let router = Router::new(&region, &block_sites(ir, &region));
+            let trees = net_trees(&nets, &router, |net| match net {
+                NetRef::Input(i) => input_pad(i as usize, &region),
+                NetRef::Cell(j) => cell_coords[j as usize],
+            });
+            let mut repeaters: HashMap<NetRef, HashSet<CellCoord>> = HashMap::new();
+            for cell in &ir.cells {
+                for buffer in cell.buffer_coords() {
+                    let crate::placement_ir::BufferSegment::Port(port) = buffer.port else {
+                        panic!("a cell's buffer names one of its ports");
+                    };
+                    let net = cell
+                        .drivers
+                        .iter()
+                        .find(|d| d.port == port)
+                        .expect("a driver of its own cell")
+                        .net;
+                    repeaters.entry(net).or_default().insert(buffer.coord);
+                }
+            }
+            for output in &ir.outputs {
+                for buffer in output.buffer_coords() {
+                    repeaters
+                        .entry(output.driver)
+                        .or_default()
+                        .insert(buffer.coord);
+                }
+            }
+
+            let mut order: Vec<NetRef> = trees.keys().copied().collect();
+            order.sort_by_key(|net| match net {
+                NetRef::Input(i) => (0, *i),
+                NetRef::Cell(j) => (1, *j),
+            });
+            let mut arrived: HashMap<(NetRef, CellCoord), u32> = HashMap::new();
+            let none = HashSet::new();
+            for net in order {
+                let at_source = match net {
+                    NetRef::Input(_) => 0,
+                    NetRef::Cell(j) => {
+                        let cell = &ir.cells[j as usize];
+                        if cell.cell.regenerates() {
+                            0
+                        } else {
+                            cell.drivers
+                                .iter()
+                                .map(|d| arrived[&(d.net, cell.coord)])
+                                .max()
+                                .unwrap_or(0)
+                        }
+                    }
+                };
+                let tree = &trees[&net];
+                let reps = repeaters.get(&net).unwrap_or(&none);
+                let mut spent: HashMap<CellCoord, u32> = HashMap::new();
+                let path = tree.wire_path();
+                spent.insert(path[0], at_source);
+                for coord in &path[1..] {
+                    let parent = tree.parent(*coord).expect("attached");
+                    let behind = if reps.contains(&parent) {
+                        0
+                    } else {
+                        spent[&parent]
+                    };
+                    let here = behind + 1;
+                    assert!(
+                        here <= DUST_ATTENUATION_LIMIT,
+                        "{label}: {net:?} reaches {coord:?} over {here} blocks of dust since the last block that restores strength",
+                    );
+                    spent.insert(*coord, here);
+                    arrived.insert((net, *coord), here);
+                }
+            }
+            repeaters.values().map(HashSet::len).sum()
+        }
+
+        /// Four plates combined into one door through three two-input
+        /// cells in a row: dust merges for `or` on Bedrock, comparators
+        /// for `and` on Java. Either way the dust from a plate to the
+        /// door is one strand. No single segment is past the limit —
+        /// the door's own is 15 — and the strand is.
+        fn four_plates(op: &str) -> String {
+            format!(
+                r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=20x4
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b
+  pressure_plate id=pc at=front.outside offset=2 y=0 -> sig.c
+  pressure_plate id=pd at=inside.front offset=2 y=0 -> sig.d
+  logic sig.open = sig.a {op} sig.b {op} sig.c {op} sig.d
+  door[id=d] opened_by=sig.open
+  circuit region=floor void=2
+"
+            )
+        }
+
+        /// Sixteen Java comparators in a chain, each also reading one
+        /// shared sensor: `sig.c{i} = sig.c{i-1} and sig.b`. The dust
+        /// from `sig.b` runs on through every comparator after the one it
+        /// taps into, as far as the door.
+        fn comparator_chain() -> String {
+            let mut source = String::from(
+                r"
+theme t:
+  slot wall -> @oak_planks
+
+struct chain size=60x5
+  floor mat_slot=wall
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b
+  logic sig.c0 = sig.a and sig.b
+",
+            );
+            for i in 1..16 {
+                writeln!(source, "  logic sig.c{i} = sig.c{} and sig.b", i - 1)
+                    .expect("writing to a String cannot fail");
+            }
+            source.push_str(
+                "  door id=d side=front at=center mat_slot=wall opened_by=sig.c15\n  circuit region=floor void=2\n",
+            );
+            source
+        }
+
+        #[test]
+        fn a_strand_through_cells_that_pass_strength_on_is_buffered_as_one() {
+            for (label, source, edition) in [
+                ("bedrock or", four_plates("or"), Edition::Bedrock),
+                ("java and", four_plates("and"), Edition::Java),
+                ("comparator chain", comparator_chain(), Edition::Java),
+            ] {
+                let ir = legalized(&source, edition);
+                assert!(
+                    ir.cells.iter().all(|c| !c.cell.regenerates()),
+                    "{label}: the fixture is a chain of cells that pass strength on",
+                );
+                let met = assert_no_strand_runs_past_the_limit(&ir, label);
+                assert!(
+                    met >= 1,
+                    "{label}: the strand is past the limit, so it needs a repeater"
+                );
+            }
+        }
+    }
+
     mod phase4_invariant {
         //! Property tests for the crossing / delay agreement invariant
         //! (see the `phase4_buffer_tick_invariant_holds` doc). Kept

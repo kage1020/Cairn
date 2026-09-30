@@ -87,7 +87,8 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
     ),
     (
         // Two rows with one keyword and one attribute set select the same
-        // members, so the later `frame=` is the only one anything reads.
+        // members, so every member's merged bindings keep only the later
+        // `frame=` (and no pass lowers either value yet).
         // Written whole so the rows join the theme the struct binds.
         "E_DUPLICATE_SELECTOR",
         Source::Whole(

@@ -45,17 +45,19 @@ struct s size=9x7
 
 #[test]
 fn a_list_valued_selector_attribute_matches_the_member_that_carries_it() {
+    // Only the row's own binding, which nothing lowers. A selector that
+    // failed to match would add `E_THEME_SELECTOR_UNMATCHED` here.
     assert_eq!(
         codes(MATCHING),
-        Vec::<&str>::new(),
-        "a selector that does match must report nothing",
+        [DiagnosticCode::IgnoredArgument.as_str()],
+        "a selector that does match must report nothing but its binding",
     );
 }
 
 #[test]
 fn the_binding_that_selector_carries_actually_reaches_the_member() {
-    // The absence of a warning is not the contract — a selector that
-    // matches is a selector whose bindings land. Reading
+    // The absence of `E_THEME_SELECTOR_UNMATCHED` is not the contract — a
+    // selector that matches is a selector whose bindings land. Reading
     // `selector_extras` is what distinguishes "matched" from "no longer
     // complained about".
     let extras = selector_extras(MATCHING);
@@ -113,8 +115,8 @@ struct s size=9x7
 ";
     assert_eq!(
         codes(source),
-        Vec::<&str>::new(),
-        "a nested list should match"
+        [DiagnosticCode::IgnoredArgument.as_str()],
+        "a nested list should match, leaving only the row's binding to report"
     );
 }
 
@@ -138,9 +140,15 @@ struct s size=9x7
     // answer about a value. A matcher that regressed would add
     // `E_THEME_SELECTOR_UNMATCHED` here, which a containment check would
     // not see.
+    // Each row's binding is reported between them, since nothing lowers
+    // either.
     assert_eq!(
         codes(source),
-        vec![DiagnosticCode::DuplicateSelector.as_str()],
+        vec![
+            DiagnosticCode::IgnoredArgument.as_str(),
+            DiagnosticCode::DuplicateSelector.as_str(),
+            DiagnosticCode::IgnoredArgument.as_str(),
+        ],
     );
     let found = diagnose(source);
     let duplicate = found

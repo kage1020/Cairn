@@ -447,6 +447,33 @@
   lower, a row refused this way reports nothing about its body. The `roof overhang=` finding's
   message now also names the value that was written.
 
+- *(core)* A theme selector row's bindings were matched, recorded, and never read, and nothing said
+  so. The opening example — `examples/cottage.crn`, both READMEs, the tutorial and the landing page
+  — carried `window[class=small] -> frame=@spruce_wood`, and the cottage built byte for byte the same
+  with that row, without it, with `frame=@diamond_block` and with `frame=@no_such_block`, all at
+  exit 0. Selecting on a key also hid that key's own `W_IGNORED_ARGUMENT`, on the grounds that the
+  selector made something read it.
+
+  `spec/materials-themes` now says selector bindings are reserved: which keys a row may bind, and
+  what each paints, is not specified, and no lowering reads one. Until it is, each binding on a row
+  whose keyword the compiler knows is reported as an unreached key, whatever its key or value, and
+  whether or not the row matched or its theme was applied. A row with an unknown keyword gets
+  `E_UNKNOWN_KEYWORD` alone. For a file `window.crn` whose third line is that row:
+
+  ```
+  window.crn:3:32: warning[W_IGNORED_ARGUMENT]: `frame=` is bound by a theme selector on `window`, and no pass lowers a selector's bindings yet; the value was ignored
+    note: the build is the same with this binding or without it; delete it, or the whole row if it binds nothing else, or keep it and expect no effect until selector bindings are lowered
+  ```
+
+  A binding's value is not resolved as a block, because what the key would paint is not specified:
+  `frame=@no_such_block` gets exactly that warning, with or without `--target`, and no binding
+  makes `check`, `compile` or `info` exit 1 or takes a version out of `info`'s buildable targets.
+  A member's unread key (`window shape=`) and a key its sibling argument routed past
+  (`roof kind=gable slope_to=`) are reported whether or not a theme selects on them, since the match
+  builds nothing. `E_DUPLICATE_SELECTOR`'s note no longer says a member reads the later row's
+  binding; it says the merge keeps it and that neither value is built. The row is gone from the
+  opening example until a binding has an effect.
+
 - *(core)* A `connect` row whose port could not be placed printed every contract a port has and
   left the author to pick theirs. The port lookup answered each of its refusals with the same
   `None`, so the row had nothing to branch on:
@@ -555,6 +582,41 @@
   2 keep fewer — both runs of illegal lines where what was kept was a header the file had
   indented under another — and the rest keep the same amount in a different shape. Which files
   are refused does not change.
+
+- *(redstone)* The dust budget restarted at every cell, including the two that pass signal strength
+  through rather than restoring it. A Bedrock OR is a dust merge, and a Java comparator AND never
+  outputs more than its rear input carries, so the dust into either of them and the dust out of it
+  count as one run against the attenuation limit, though the cell stands between them. The delay
+  pass measured each segment on its own, and four plates combined into one door through three
+  such cells were legalized with no repeater anywhere. From `cairn synth --stage crossing`:
+
+  ```
+  logic sig.open = sig.a or sig.b or sig.c or sig.d
+  ```
+
+  ```
+  {"driver":{"kind":"cell","index":2},"pad":{"x":19,"y":0,"z":0},"wire_length":15,"local_delay_ticks":0}
+  ```
+
+  Every segment was at most 15 blocks, and the run from `sig.a`'s pad to the door is over 20, so
+  the door never opened. `EditionCell::regenerates` now says which cells restore strength, and the
+  limit is counted from the last block that did: each net starts with the dust its source has
+  already spent, which is the most any one input spent on its way in — the pass does not track
+  which input of a comparator is its rear, so it takes the one that spent the most. Each cell that
+  passes strength on gets a budget, the most dust it can be reached over while the wire past it
+  still reaches every sink, so a repeater the run needs goes on the wire out of the cell when there
+  is room there and on the wire into it when there is not. The door above now gets its repeater at
+  `(11,0,1)`, on either edition:
+
+  ```
+  {"driver":{"kind":"cell","index":2},"pad":{"x":19,"y":0,"z":0},"wire_length":15,"local_delay_ticks":1,"buffer_coords":[{"port":"out","coord":{"x":11,"y":0,"z":1}}]}
+  ```
+
+  A chain of comparators sharing one sensor now takes repeaters on the wires between the cells as
+  well, and the ones on the shared trunk stand closer together than 15, because every cell it
+  feeds passes what it receives on down the chain. Where no coord near enough to such a cell can
+  hold a repeater, `E_ATTENUATION_LIMIT` says that, naming the cell by its index and how much
+  dust it can spare, rather than that every coord turns; a cell whose own wire out has no room is refused on its own net.
 
 - *(redstone)* A buffer repeater was put on whatever coord stood 15 steps along its route, whether
   or not a repeater could work there. A repeater reads the block behind it and drives only the

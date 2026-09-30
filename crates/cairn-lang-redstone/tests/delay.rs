@@ -306,7 +306,7 @@ struct narrow_pack size=20x5
 /// [`MAX_ATTENUATION_SEGMENT`] gets `local_delay_ticks` bumped by the
 /// implicit-buffer contribution. Every cell in the chain shares
 /// `sig.b` as one of its drivers, so `cell[i]` (placed at
-/// `x = 1 + 2i, y = 0, z = 0`) sees a `sig.b` segment that grows with
+/// `x = 1 + 2i, y = 0, z = 1`) sees a `sig.b` segment that grows with
 /// the column it stands in; the previous cell contributes a short one.
 /// `cell[i]`'s implicit buffer count is the number of repeaters on its
 /// segments, summed across drivers.
@@ -361,17 +361,24 @@ struct chain size=40x5
     // `JavaComparatorAnd` with base_delay = 1. Each cell has two
     // drivers: the previous cell, next door but one, and shared
     // `sig.b`, whose trunk runs the length of the row. The row is
-    // spaced, so cell `i` stands at `x = 1 + 2i` and the `sig.b`
-    // segment into it grows twice as fast as the index — which is why
-    // the first buffer arrives at i = 7 and the second at i = 14.
-    // Values are hardcoded per index (not derived from the formula the
-    // implementation itself uses) so a self-referential off-by-one in
-    // the buffer count cannot slide past the test.
+    // spaced, so cell `i` stands at `x = 1 + 2i`.
+    //
+    // A comparator passes on the strength it reads rather than
+    // restoring it, so the dust from `sig.b` through every comparator
+    // after it to the door is one strand. Repeaters therefore stand on
+    // some of the cell-to-cell nets too, and the trunk's two stand
+    // earlier than 15 blocks apart, because each comparator it feeds
+    // can take less than a full budget of dust: the trunk's first
+    // reaches i = 6 and its second i = 12, and the cell-to-cell ones
+    // are the rest (into i = 3, 5, 6, 9, 11, 12).
+    // Values are hardcoded per index (not derived from the placement
+    // the implementation itself makes) so a self-referential slip in
+    // it cannot slide past the test.
     assert_eq!(entry.ir.cells.len(), 16);
     let expected: [u32; 16] = [
-        1, 1, 1, 1, 1, 1, 1, // i = 0..=6, segment ≤ 15
-        2, 2, 2, 2, 2, 2, 2, // i = 7..=13, one buffer
-        3, 3, // i = 14..=15, two
+        1, 1, 1, 2, 1, 2, 3, // i = 0..=6
+        2, 2, 3, 2, 3, 4, 3, // i = 7..=13
+        3, 3, // i = 14..=15
     ];
     for (i, cell) in entry.ir.cells.iter().enumerate() {
         assert_eq!(
@@ -382,8 +389,8 @@ struct chain size=40x5
         );
     }
     // The chain must exercise both bands of the delay model — base
-    // alone (i ≤ 13) and base + implicit buffer (i ≥ 14) — otherwise
-    // shrinking the fixture would silently lose the buffer path.
+    // alone (i = 0, 1, 2, 4) and base plus implicit buffers (the rest)
+    // — otherwise shrinking the fixture would silently lose either.
     assert!(
         entry
             .ir

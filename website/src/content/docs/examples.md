@@ -14,7 +14,7 @@ The [Tutorial](/tutorial/) walks through the four in the first group.
 
 | File | Shows |
 |---|---|
-| [`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn) | The minimum useful build: `struct`, `theme`, slots, wall selectors. |
+| [`cottage.crn`](https://github.com/kage1020/Cairn/blob/main/examples/cottage.crn) | The minimum useful build: `struct`, `theme`, slots. |
 | [`themed-tower.crn`](https://github.com/kage1020/Cairn/blob/main/examples/themed-tower.crn) | Abstract material tokens, per-floor `level`, override-promotion. |
 | [`redstone-door.crn`](https://github.com/kage1020/Cairn/blob/main/examples/redstone-door.crn) | Logical redstone: signal binding, `circuit` region, assertions. |
 | [`village.crn`](https://github.com/kage1020/Cairn/blob/main/examples/village.crn) | Multi-building with `site` and topological `connect`. |
