@@ -583,6 +583,41 @@
   indented under another — and the rest keep the same amount in a different shape. Which files
   are refused does not change.
 
+- *(redstone)* The dust budget restarted at every cell, including the two that pass signal strength
+  through rather than restoring it. A Bedrock OR is a dust merge, and a Java comparator AND never
+  outputs more than its rear input carries, so the dust into either of them and the dust out of it
+  count as one run against the attenuation limit, though the cell stands between them. The delay
+  pass measured each segment on its own, and four plates combined into one door through three
+  such cells were legalized with no repeater anywhere. From `cairn synth --stage crossing`:
+
+  ```
+  logic sig.open = sig.a or sig.b or sig.c or sig.d
+  ```
+
+  ```
+  {"driver":{"kind":"cell","index":2},"pad":{"x":19,"y":0,"z":0},"wire_length":15,"local_delay_ticks":0}
+  ```
+
+  Every segment was at most 15 blocks, and the run from `sig.a`'s pad to the door is over 20, so
+  the door never opened. `EditionCell::regenerates` now says which cells restore strength, and the
+  limit is counted from the last block that did: each net starts with the dust its source has
+  already spent, which is the most any one input spent on its way in — the pass does not track
+  which input of a comparator is its rear, so it takes the one that spent the most. Each cell that
+  passes strength on gets a budget, the most dust it can be reached over while the wire past it
+  still reaches every sink, so a repeater the run needs goes on the wire out of the cell when there
+  is room there and on the wire into it when there is not. The door above now gets its repeater at
+  `(11,0,1)`, on either edition:
+
+  ```
+  {"driver":{"kind":"cell","index":2},"pad":{"x":19,"y":0,"z":0},"wire_length":15,"local_delay_ticks":1,"buffer_coords":[{"port":"out","coord":{"x":11,"y":0,"z":1}}]}
+  ```
+
+  A chain of comparators sharing one sensor now takes repeaters on the wires between the cells as
+  well, and the ones on the shared trunk stand closer together than 15, because every cell it
+  feeds passes what it receives on down the chain. Where no coord near enough to such a cell can
+  hold a repeater, `E_ATTENUATION_LIMIT` says that, and how much dust the cell can spare, rather
+  than that every coord turns; a cell whose own wire out has no room is refused on its own net.
+
 - *(redstone)* A buffer repeater was put on whatever coord stood 15 steps along its route, whether
   or not a repeater could work there. A repeater reads the block behind it and drives only the
   block in front of it, on its own layer, so it carries a signal only where the wire runs straight
