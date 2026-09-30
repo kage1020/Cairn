@@ -117,8 +117,10 @@ fn redstone_door_outside_plate_falls_back_to_wall_column_without_overhang() {
 
 #[test]
 fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
-    // `pressure_plate id=inner at=inside.front offset=0 y=0` — shift-inward
-    // from (0, 0, 4) is (0, 0, 3), well within dims.
+    // `pressure_plate id=inner at=inside.front offset=1 y=0` — shift-inward
+    // from (1, 0, 4) is (1, 0, 3), the first interior cell along the front
+    // wall. `offset=0` would be the corner, whose inward cell sits under
+    // the left wall.
     let out = lower_redstone_door();
     let ba = out.structures.get("struct::gatehouse").unwrap();
     let plate_idx = u16::try_from(
@@ -129,7 +131,7 @@ fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
             .expect("oak_pressure_plate palette entry present"),
     )
     .expect("palette index fits in u16");
-    let i = ba.dims.index(0, 0, 3).expect("interior row within bounds");
+    let i = ba.dims.index(1, 0, 3).expect("interior row within bounds");
     assert_eq!(ba.voxels[i].0, plate_idx);
 }
 
