@@ -222,7 +222,8 @@ pub struct BuildableRefusal {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unplaceable_floors: Vec<DeclaredFloor>,
     /// Scopes the source declares that produced no voxels, in resolution
-    /// order.
+    /// order, then each walkway a `connect` row asked for and no row laid,
+    /// as `site::SITE::FROM ↔ TO`, in row order.
     ///
     /// An edition-wide answer for the same reason: a partial build is not
     /// certified, so this refuses every version at once and is identical

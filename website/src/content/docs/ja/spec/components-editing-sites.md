@@ -189,9 +189,17 @@ window の引数、矩形が壁からはみ出した量、石積みが覆って�
 はパックの materials カタログを必要とし、外れると `W_ABSTRACT_TOKEN_DEFERRED` か
 `E_UNKNOWN_ABSTRACT_TOKEN` を出します。
 
-**出力。** `connect` 行ごとに `.nbt` を 1 つ、site とポートの名前で書きます
+**出力。** walkway を敷いた `connect` 行ごとに `.nbt` を 1 つ、site とポートの名前で書きます
 (`hamlet_walkway_home1_entry__home2_entry.nbt`)。ロックファイルには、ワールド原点・寸法・解決済みの
 経路マテリアルを持つ `walkways:` エントリを記録します。
+
+何も敷かなかった行は、ソースが求めた walkway を失っています。置けないポート、walkway の名前に載せら
+れない id、解決しない経路マテリアル、それ自体がルータの探索面積上限を超える直線の L 字のいずれかで
+す。このとき `cairn compile` はスコープを失ったときと同じく `E_PARTIAL_BUILD` でビルドを拒否し、
+`cairn check --edition E --target V` も同じく拒否します ([Lint](/ja/spec/lint/))。失われた walkway は
+`site::SITE::FROM ↔ TO` と、行が書いたとおりのポートで名指されます。`W_DUPLICATE_WALKWAY` の行は何も
+失いません。その対は先の行が敷いているからです。どちらも敷かなかった同じ対を名指す 2 行は、1 件の
+損失です。
 
 **診断。**
 
@@ -202,5 +210,6 @@ window の引数、矩形が壁からはみ出した量、石積みが覆って�
 | `E_AMBIGUOUS_PORT` | def が同じ `id=` を複数のメンバで公開している。衝突をリネームしてください。 |
 | `E_MISSING_PATH_MATERIAL` | 行が `path=` を欠いており、walkway の lowering に敷くものが無い。 |
 | `E_UNRESOLVED_PLACE_REF` | 先頭の place id が、この site の先行する place を指していない ([§9.3.3](#933-スコープ跨ぎ参照) と共通)。 |
-| `W_WALKWAY_BLOCKED` | 遮られない経路が無い。直線の L 字に戻り、残りの帯は敷かれます。 |
+| `W_WALKWAY_BLOCKED` | 遮られない経路が無い。直線の L 字に戻り、残りの帯は敷かれます。直線の L 字だけでルータの探索面積上限を超えるときは、何も敷かれません。 |
 | `W_DUPLICATE_WALKWAY` | 同じ `(from, to)` のポート対がこの site で既に敷かれている。重複行は落とされます。 |
+| `W_INVALID_WALKWAY_IDENT` | site / place / port の id を walkway の名前に載せられない ([Lint](/ja/spec/lint/))。行は落とされます。 |

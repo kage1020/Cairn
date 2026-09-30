@@ -576,7 +576,7 @@ them. Each field is omitted when it carries nothing.
 | Field | Carries | What the author edits |
 |---|---|---|
 | `unplaceable_floors` | Floors | The `@requires` line. The floor names no release of this edition, so no version can be weighed against it and none is certified. |
-| `dropped_scopes` | Scope keys | The member that produced no voxels. It refuses every version before its ID table is consulted, since a partial build is not certified. |
+| `dropped_scopes` | Scope keys, and `site::SITE::FROM ↔ TO` for a walkway | The member or `connect` row that produced no voxels. It refuses every version before its ID table is consulted, since a partial build is not certified. |
 | `versions` | Refused targets | One entry per version that refused for a reason of its own. |
 
 Beside rather than instead: a file can declare a floor this edition cannot place *and* use an ID

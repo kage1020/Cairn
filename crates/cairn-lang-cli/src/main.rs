@@ -1450,27 +1450,59 @@ fn unsupported_reason(reason: &UnsupportedReason) -> String {
     }
 }
 
-/// Scopes the resolver recorded (`struct::NAME`, `site::SITE::PLACE`) that
-/// the block-array pass did not turn into a structure, in resolver order.
+/// Scopes the source asked for that the block-array pass did not turn into
+/// a structure: first the resolver's (`struct::NAME`, `site::SITE::PLACE`)
+/// in resolver order, then one per `connect` pair that laid no walkway, in
+/// row order.
 ///
 /// `def::` keys are excluded: a def is a template and lowers to voxels only
 /// through a `place` that instantiates it.
 ///
-/// One definition for the two readers. `run_compile` refuses a build that
-/// would leave any of these out, and `edition_rows` reports the same thing
+/// A walkway is not in `resolution.scopes`, because its key is minted
+/// during lowering, so it is judged by its `connect` row instead: a row
+/// asks for the walkway between its two ports, and that walkway is built
+/// when `block_ir.walkways` holds the same site and the same two ports,
+/// in either order. So a `W_DUPLICATE_WALKWAY` row, whose pair the earlier
+/// row laid, loses nothing, and two rows naming one pair that neither laid
+/// are one loss. The loss is named `site::SITE::FROM ↔ TO`, as the first
+/// row asking for the pair wrote its ports, rather than by the
+/// `walkway::` key it would have had: a row refused for its identifiers
+/// never got a key, and the key it would have spelled can be another
+/// row's.
+///
+/// One definition for the three readers. `run_compile` refuses a build
+/// that would leave any of these out, `check_lowering` refuses for the
+/// compile at its pinned target, and `edition_rows` reports the same thing
 /// as "no target can build this" — a second copy could drift into
 /// disagreeing about which scopes count.
 fn dropped_scopes(
     resolution: &cairn_lang_core::Resolution,
     block_ir: &BlockArrayIr,
 ) -> Vec<String> {
-    resolution
+    let mut dropped: Vec<String> = resolution
         .scopes
         .keys()
         .filter(|key| !key.starts_with("def::"))
         .filter(|key| !block_ir.structures.contains_key(key.as_str()))
         .cloned()
-        .collect()
+        .collect();
+    let pair = |site: &str, from: String, to: String| {
+        let (a, b) = if from <= to { (from, to) } else { (to, from) };
+        (site.to_owned(), a, b)
+    };
+    let mut accounted: HashSet<(String, String, String)> = block_ir
+        .walkways
+        .values()
+        .map(|w| pair(w.site.as_str(), w.from.to_string(), w.to.to_string()))
+        .collect();
+    for connect in &resolution.connects {
+        let (from, to) = (connect.from.to_string(), connect.to.to_string());
+        let key = format!("site::{}::{from} ↔ {to}", connect.site);
+        if accounted.insert(pair(connect.site.as_str(), from, to)) {
+            dropped.push(key);
+        }
+    }
+    dropped
 }
 
 /// Report the scopes a lowering lost, as `E_PARTIAL_BUILD`.

@@ -212,8 +212,10 @@ pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
                 // lowering pass built the key from, so a `.` inside a port
                 // id cannot be mistaken for the place/port separator.
                 // Known hazard: ids allow `_`, so `a_b.c__d_e.f` and
-                // `a.b_c__d.e_f` still flatten to one filename; catching
-                // that needs a write-time pass in the CLI.
+                // `a.b_c__d.e_f` still flatten to one filename. This
+                // function cannot see the other key; the CLI's
+                // `prepare_artifacts` refuses the collision before
+                // anything is written.
                 let parts = key.parts();
                 return format!(
                     "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}.{ext}",

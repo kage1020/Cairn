@@ -443,3 +443,51 @@ fn hostile_3_compile_refuses_rather_than_certifying_the_wreckage() {
         }
     }
 }
+
+/// A hut with a door on its front and on its back, so a `north_of=` pair
+/// faces door to door along one column and the straight L between them
+/// is a z leg alone, crossing no floor.
+const THROUGH_HUT: &str = "def hut size=3x3:\n\
+\x20\x20floor id=floor mat_slot=floor\n\
+\x20\x20walls id=walls mat_slot=wall height=3\n\
+\x20\x20door  id=front side=front at=center\n\
+\x20\x20door  id=back  side=back  at=center\n\n";
+
+/// A north–south walkway long enough that laying it in time quadratic
+/// in its length would not finish.
+///
+/// Every walkway row in [`hostile_sources`] is refused before a strip is
+/// laid, and those that span both axes are refused by the area cap, so
+/// none of them reaches the z leg of the straight L. This one does, and it
+/// is laid rather than refused, which is why it stands alone: `hostile_2`
+/// requires every row to name a diagnostic, and this row earns none.
+///
+/// `gap=1000000` is a million-cell strip. Laid in linear time it lowers in
+/// about a second in a debug build; a lookup over the laid cells per step
+/// would make that half a trillion comparisons, and the run would reach
+/// [`DEADLINE`] instead.
+#[test]
+fn a_long_north_south_walkway_lowers_within_the_deadline() {
+    let body = source(&format!(
+        "{THROUGH_HUT}site duo:\n\
+         \x20\x20place id=a use=hut theme=t at=origin\n\
+         \x20\x20place id=b use=hut theme=t north_of=a gap=1000000\n\
+         \x20\x20connect a.back to b.front path=@gravel\n"
+    ));
+    let tmp = TempDir::new().expect("tempdir");
+    let path = write(tmp.path(), "north-south", &body);
+    let (outcome, stderr, elapsed) = run_bounded(tmp.path(), &["lower", path.to_str().unwrap()]);
+    assert_eq!(
+        outcome,
+        Outcome::Exited(0),
+        "`lower` ended as {outcome:?} after {elapsed:?}; a z strip must be laid in time linear \
+         in its length\nstderr={stderr}",
+    );
+    // A row that is refused, or laid in part, says so on stderr. Silence
+    // is what says the strip was laid whole, so the run above timed the
+    // z leg rather than a refusal.
+    assert!(
+        !stderr.contains("W_") && !stderr.contains("E_"),
+        "the walkway must be laid, not refused; got {stderr}",
+    );
+}
