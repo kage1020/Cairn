@@ -11,6 +11,12 @@ Parameterization (variable size and so on) is allowed; recursion is forbidden. A
 `requires version>=X`, and the minimum version of a composite is the max of its parts
 ([Versioning and Editions](/spec/versioning-editions/)).
 
+Until a parameter mechanism is specified, the header vocabulary is closed. A `def` header takes
+`size=`, which lowering reads, and `class=`, which no pass reads yet, and a `struct` header takes
+the same two. Any other key on either is refused as `E_UNKNOWN_ARGUMENT`, and a header `class=` is
+reported as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), so the sample
+below carries that warning.
+
 ```
 def cottage class=house size=9x7:
   floor  id=floor mat_slot=floor

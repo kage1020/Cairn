@@ -11,10 +11,6 @@ items:
   - kind: Def
     name: cottage
     args:
-      - key: class
-        value:
-          kind: Ident
-          value: house
       - key: size
         value:
           kind: Size
