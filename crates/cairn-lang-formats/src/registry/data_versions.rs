@@ -59,9 +59,9 @@ pub struct DataVersionEntry {
     /// is the block-palette `version` integer every `.mcstructure`
     /// palette entry carries: `(major << 24) | (minor << 16) |
     /// (patch << 8) | revision` of the block-state version that release
-    /// writes, whose revision is not the client build's. On Bedrock that is
-    /// exact only for a [`Self::targetable`] row; the other rows never
-    /// reach a file and carry revision 0.
+    /// writes, whose revision need not be the client build's. On Bedrock
+    /// that is exact only for a [`Self::targetable`] row; the other rows
+    /// never reach a file, and the built-in pack gives them revision 0.
     pub data_version: i32,
     /// Release date in `YYYY-MM-DD` form. Informational; not consumed by
     /// the compiler. `Option` so older packs without the field still load.

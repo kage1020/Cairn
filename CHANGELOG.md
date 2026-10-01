@@ -271,7 +271,8 @@
   PocketMine-MP's `BlockStateData::CURRENT_VERSION` and the matching BedrockBlockUpgradeSchema
   `maxVersion` record. A loader picks which block-state upgrade schemas to run by comparing that
   integer with each schema's (PocketMine-MP's `BlockStateUpgrader` does), so a structure claiming
-  1.21.0.0 has the 1.21.0 schema run over states already written in it. `1.21.60` (`18168865`, 1.21.60.33) was already right.
+  1.21.0.0 has the 1.21.0 schema run over states already written in it. `1.21.60` (`18168865`,
+  1.21.60.33) was already right.
 
   A lock written by an earlier build for either target records the old integer, so the first
   rebuild against it reports it once and writes the corrected one:
@@ -280,9 +281,9 @@
   W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.21.0/block version 18153472, now 1.21.0/18153475.
   ```
 
-  The block-state revision is not the client build's (those are 1.21.0.3, 1.21.40.3 and
-  1.21.60.10), and `data_versions.json`'s `source` note, which said it was, now says which number
-  the column holds.
+  The block-state revision need not be the client build's (those are 1.21.0.3, 1.21.40.3 and
+  1.21.60.10; 1.21.0's coincides, the other two do not), and `data_versions.json`'s `source` note,
+  which said the integer was the build's, now says which number the column holds.
 
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
