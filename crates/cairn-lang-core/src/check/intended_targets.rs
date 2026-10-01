@@ -60,8 +60,8 @@ use crate::ast::{Header, Module};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::resolve::{
-    FloorPlacement, FloorVerdict, VersionFloor, VersionOrder, compare_versions,
-    declared_version_floors, versions_satisfying,
+    FloorVerdict, VersionFloor, VersionOrder, compare_versions, declared_version_floors,
+    versions_satisfying,
 };
 
 use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
@@ -164,11 +164,10 @@ fn weigh<'a>(
         // release the pack can order and one it has never heard of are
         // different news to the author, and only the first has a version
         // of this edition behind it.
-        return match order.place(label) {
-            FloorPlacement::At(_) => Verdict::NotShipped,
-            FloorPlacement::BelowEvery
-            | FloorPlacement::AboveEvery
-            | FloorPlacement::Unplaceable => Verdict::NoSuchRelease,
+        return if order.place(label).names_release() {
+            Verdict::NotShipped
+        } else {
+            Verdict::NoSuchRelease
         };
     };
     floors

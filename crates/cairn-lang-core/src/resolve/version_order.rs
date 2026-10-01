@@ -55,8 +55,11 @@
 //!
 //! The two editions' release-label sets are disjoint, which is what makes
 //! that answer available: no label names a release of both, so a label
-//! this edition's table cannot place and the other's can is a floor
-//! written in the other's numbering, and the CLI says so.
+//! this edition's table cannot place and the other's names — a row, or the
+//! pre-release of one ([`FloorPlacement::names_release`]) — is a floor
+//! written in the other's numbering, and the CLI says so. A label the other
+//! table only places below or above every row is a comparison there, not a
+//! release, and gets no such answer.
 
 use super::requires_parse::{compare_versions, is_dotted_decimal};
 
@@ -109,6 +112,24 @@ pub enum FloorPlacement {
     /// The table cannot place the label: it names no row, and no
     /// comparison this module trusts puts it outside the rows either.
     Unplaceable,
+}
+
+impl FloorPlacement {
+    /// Whether the table names the label: a row, or the pre-release of one.
+    ///
+    /// The one question the placements answer differently from their
+    /// verdicts. [`Self::BelowEvery`] and [`Self::AboveEvery`] order the
+    /// label without naming it, so for "is this a release of that edition"
+    /// they answer as [`Self::Unplaceable`] does. Written as a `match`
+    /// rather than `matches!` so a new variant has to say which side it is
+    /// on.
+    #[must_use]
+    pub const fn names_release(self) -> bool {
+        match self {
+            Self::At(_) => true,
+            Self::BelowEvery | Self::AboveEvery | Self::Unplaceable => false,
+        }
+    }
 }
 
 /// What one floor says about one target.
@@ -405,6 +426,28 @@ mod tests {
         assert_eq!(java().place("1.19-rc1"), FloorPlacement::BelowEvery);
         assert_eq!(java().place("99.0-rc1"), FloorPlacement::AboveEvery);
         assert_eq!(bedrock().place("1.21.4-rc1"), FloorPlacement::Unplaceable);
+    }
+
+    /// Naming a release is `At` and nothing else: a label ordered below or
+    /// above every row is a comparison, not a release of that table. Built
+    /// on the hand-made tables so a pack refresh cannot move the answer.
+    #[test]
+    fn only_a_row_or_its_pre_release_names_a_release() {
+        assert!(java().place("1.21").names_release(), "a row");
+        assert!(
+            java().place("1.21.4-rc1").names_release(),
+            "a row's pre-release"
+        );
+        assert!(bedrock().place("1.21.40").names_release(), "a row");
+        assert_eq!(java().place("1.19"), FloorPlacement::BelowEvery);
+        assert!(!java().place("1.19").names_release(), "below every row");
+        assert_eq!(java().place("99.0"), FloorPlacement::AboveEvery);
+        assert!(!java().place("99.0").names_release(), "above every row");
+        assert_eq!(bedrock().place("1.21.4"), FloorPlacement::Unplaceable);
+        assert!(
+            !bedrock().place("1.21.4").names_release(),
+            "inside, naming no row"
+        );
     }
 
     /// Trailing zeros are padding, not a version between two others.
