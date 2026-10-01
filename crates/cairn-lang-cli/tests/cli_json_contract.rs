@@ -405,7 +405,7 @@ fn refused_state(dir: &TempDir) -> PathBuf {
     let path = dir.path().join("refused_state.crn");
     fs::write(
         &path,
-        "theme t:\n  slot step -> @oak_stairs[facing=up]\n\nstruct s size=3x3 theme=t\n  floor mat_slot=step\n",
+        "theme t:\n  slot step -> @oak_stairs[facing=up]\n\nstruct s size=3x3\n  floor mat_slot=step\n",
     )
     .expect("write");
     path
@@ -438,7 +438,7 @@ fn an_authored_state_bedrock_cannot_map_yet_is_counted_as_unsupported() {
     let path = tmp.path().join("log.crn");
     fs::write(
         &path,
-        "theme t:\n  slot f -> @oak_log[axis=x]\n\nstruct s size=3x3 theme=t\n  floor mat_slot=f\n",
+        "theme t:\n  slot f -> @oak_log[axis=x]\n\nstruct s size=3x3\n  floor mat_slot=f\n",
     )
     .expect("write");
     let out = cairn(

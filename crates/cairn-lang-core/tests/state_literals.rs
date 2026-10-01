@@ -67,7 +67,8 @@ fn the_literal_folds_into_the_token_text() {
 
 #[test]
 fn the_issues_example_builds_a_log_along_x() {
-    let source = "theme t:\n  slot floor -> @oak_log[axis=x]\n\nstruct s size=3x3 theme=t\n  floor mat_slot=floor\n";
+    let source =
+        "theme t:\n  slot floor -> @oak_log[axis=x]\n\nstruct s size=3x3\n  floor mat_slot=floor\n";
     let ir = lowered(source);
     let structure = only_structure(&ir);
     let log = structure
@@ -87,7 +88,7 @@ fn the_issues_example_builds_a_log_along_x() {
 /// spellings name one block, so a build that binds both holds one entry.
 #[test]
 fn two_spellings_of_one_state_are_one_palette_entry() {
-    let source = "theme t:\n  slot a -> @oak_stairs[half=top,facing=north]\n  slot b -> @oak_stairs[facing=north,half=top]\n\nstruct s size=3x3 theme=t\n  floor mat_slot=a\n  walls mat_slot=b height=1\n";
+    let source = "theme t:\n  slot a -> @oak_stairs[half=top,facing=north]\n  slot b -> @oak_stairs[facing=north,half=top]\n\nstruct s size=3x3\n  floor mat_slot=a\n  walls mat_slot=b height=1\n";
     let ir = lowered(source);
     let stairs: Vec<_> = only_structure(&ir)
         .palette
