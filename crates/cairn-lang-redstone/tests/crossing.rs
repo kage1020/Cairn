@@ -171,7 +171,7 @@ theme t:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct s size=20x4
+struct s size=20x5
   floor mat_slot=wall
   door id=d side=front at=center mat_slot=door
   pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
@@ -461,12 +461,13 @@ fn json_output_byte_identical_apart_from_stage_tag_on_a_scope_with_escapes() {
 /// The escape `spec/redstone` "Place-and-route" specifies is "a bridge
 /// tile or a vertical layer", and `void=1` reserves neither. So the
 /// second net has to find its way round on the plane or not at all, and
-/// this fixture is the case where it cannot. `sig.f` fans out to two
-/// doors, so its own output net is
-/// laid first and takes the faces beside the cell; `sig.a`, which
-/// drives that cell, has none left to arrive through and nowhere to
-/// climb. The scope is refused rather than shorted, which is the whole
-/// trade this pipeline makes.
+/// this fixture is the case where it cannot. `sig.a` drives both the
+/// cell and the back door, so it has the most sinks and is laid first,
+/// and its run out to that door takes the faces of the front door's
+/// pad; `sig.f`, the cell's output, has none left to arrive through and
+/// nowhere to climb. With `void=2` the same scope routes. The scope is
+/// refused rather than shorted, which is the whole trade this pipeline
+/// makes.
 #[test]
 fn two_nets_that_want_one_coord_with_no_layer_above_are_refused() {
     let source = "\
@@ -485,7 +486,7 @@ struct thin size=4x4
   logic sig.f = sig.a and sig.b
 
   door[id=front] opened_by=sig.f
-  door[id=back]  opened_by=sig.f
+  door[id=back]  opened_by=sig.a
 
   circuit region=floor void=1
 ";
@@ -517,7 +518,7 @@ struct thin size=4x4
     assert!(
         refusal
             .primary
-            .contains("the faces it could arrive through are taken by cell #0"),
+            .contains("the faces it could arrive through are taken by sig.a"),
         "and names the net in the way: {}",
         refusal.primary,
     );
@@ -532,6 +533,18 @@ struct thin size=4x4
     assert!(
         routed.scoped.scopes.iter().all(|e| e.name != "thin"),
         "failed scope must elide before anything downstream reads it",
+    );
+
+    // The layer is what was missing: one more and the scope routes.
+    let module = parse(&source.replace("void=1", "void=2")).expect("parse");
+    let intent = lower(&module);
+    let edition_netlist =
+        compile_edition_netlist(&compile_netlist(&synthesize(&intent).scoped), Edition::Java);
+    let routed = compile_routing(&compile_placement(&edition_netlist, &intent).scoped);
+    assert!(
+        routed.scoped.scopes.iter().any(|e| e.name == "thin"),
+        "void=2 gives the escape a layer: {:?}",
+        routed.diagnostics,
     );
 }
 

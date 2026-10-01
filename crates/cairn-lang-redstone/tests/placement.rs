@@ -861,15 +861,15 @@ struct wire size=9x2
     assert_eq!(ir.outputs.len(), 1, "and an actuator pad to route out to");
 }
 
-/// Pads stand one per row down the edge columns, so the guard is
-/// about their count rather than about a depth the row check would
-/// already have refused: the region below is three rows deep, which is
-/// exactly what the cell row and its two lanes want.
+/// Pads stand one per row down the edge columns, stepping over the cell
+/// row, so the guard is about their count rather than about a depth the
+/// row check would already have refused: the refused region below is
+/// four rows deep, more than the cell row and its two lanes want.
 ///
 /// Both sides of the count in one test. `pad_rows == depth` is the
-/// accepting side — a pad column of `n` rows fits a region `n` deep,
-/// because the pads start at `z = 0` — and nothing else in the suite
-/// straddles it. The primary is asserted too: all four refusals in this
+/// accepting side — `n` pads, `n >= 2`, fit a region `n + 1` deep,
+/// because they start at `z = 0` and skip the cell row — and nothing
+/// else in the suite straddles it. The primary is asserted too: all four refusals in this
 /// pass share `E_ROUTE_CONGESTION` and the row-depth check runs first,
 /// so a fixture that drifts out of this branch's window would stay
 /// green while measuring a different one.
@@ -900,10 +900,10 @@ struct four size=8x{depth}
         )
     };
 
-    let refused = placement_of(&source(3));
+    let refused = placement_of(&source(4));
     assert!(
         refused.scoped.scopes.is_empty(),
-        "four actuators do not fit three rows",
+        "four actuators and the cell row do not fit four rows",
     );
     let diagnostic = refused
         .diagnostics
@@ -912,16 +912,18 @@ struct four size=8x{depth}
         .expect("the shortfall must surface");
     assert!(
         diagnostic.primary.contains("rows for its I/O pads")
-            && diagnostic.primary.contains("only 3 deep"),
+            && diagnostic.primary.contains("needs 5 rows")
+            && diagnostic.primary.contains("only 4 deep"),
         "the refusal must name the resource that ran out, so it cannot be \
          confused with the three that share its code: {}",
         diagnostic.primary,
     );
 
-    let placed = placement_of(&source(4));
+    let placed = placement_of(&source(5));
     assert!(
         placed.diagnostics.is_empty() && !placed.scoped.scopes.is_empty(),
-        "one row per pad is enough, because the pad column starts at z=0: {:?}",
+        "one row per pad and the cell row is enough, because the pad column \
+         starts at z=0: {:?}",
         placed.diagnostics,
     );
 }

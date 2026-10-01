@@ -75,6 +75,7 @@ use cairn_lang_core::check::Severity;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::netlist_ir::{CellPortDriver, NetRef};
+use crate::placement::CELL_ROW;
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIrEntry,
 };
@@ -102,11 +103,11 @@ pub(crate) fn coord_key(coord: CellCoord) -> (u32, u32, u32) {
 }
 
 /// v1 input-pad coordinate: left edge (`x=0`), first service layer
-/// (`y=0`), z-axis increasing as the input index grows. Saturates at
-/// `depth-1` when the input count would push z past the region; the
-/// resulting overlap is what [`collapsed_block`] finds, and every pass
-/// that lays nets surfaces it as `E_ROUTE_CONGESTION` rather than a
-/// silent misroute.
+/// (`y=0`), z-axis increasing as the input index grows and stepping over
+/// the cell row (see [`edge_pad`]). Saturates at `depth-1` when the
+/// input count would push z past the region; the resulting overlap is
+/// what [`collapsed_block`] finds, and every pass that lays nets
+/// surfaces it as `E_ROUTE_CONGESTION` rather than a silent misroute.
 pub(crate) fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
     edge_pad(i, 0, region)
 }
@@ -118,9 +119,34 @@ pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoo
 }
 
 /// The `index`th pad down the edge column at `x`.
+///
+/// The pads step along `z` from `0` and skip [`CELL_ROW`]: a pad on the
+/// cell row would stand face to face with the end cell of the row
+/// whenever the row reaches the edge column, and a pad belongs to a net
+/// that cell may have nothing to do with. Off that row a pad shares a
+/// face with no cell at any region width.
 fn edge_pad(index: usize, x: u32, region: &CircuitRegionReservation) -> CellCoord {
-    let z = saturating_index(index).min(region.depth.saturating_sub(1));
-    CellCoord::new(x, 0, z)
+    let index = saturating_index(index);
+    let z = if index >= CELL_ROW {
+        index.saturating_add(1)
+    } else {
+        index
+    };
+    CellCoord::new(x, 0, z.min(region.depth.saturating_sub(1)))
+}
+
+/// Rows an edge column of `pads` pads needs: one per pad, and the cell
+/// row [`edge_pad`] steps over once the column reaches it.
+///
+/// Read by the placement pass's pad-row refusal, so the refusal and the
+/// coordinates it guards cannot disagree.
+pub(crate) fn pad_rows(pads: usize) -> u32 {
+    let pads = saturating_index(pads);
+    if pads > CELL_ROW {
+        pads.saturating_add(1)
+    } else {
+        pads
+    }
 }
 
 /// Fold `charge` over the distinct nets driving one cell.
@@ -938,9 +964,9 @@ pub(crate) fn net_order(nets: &HashMap<NetRef, Vec<CellCoord>>) -> Vec<NetRef> {
 ///
 /// What this finds is a pad the reservation is too shallow to hold,
 /// stacked onto a cell or onto another pad: pad coords step from
-/// `z = i` and saturate at `depth - 1`, so a pad row taller than the
-/// reservation piles up on the last row. That is a reservation an
-/// author can enlarge, so it earns a diagnostic.
+/// `z = 0`, skip the cell row and saturate at `depth - 1`, so a pad row
+/// taller than the reservation piles up on the last row. That is a
+/// reservation an author can enlarge, so it earns a diagnostic.
 ///
 /// Two cells on one coord is not that. It is an IR no `size=` can
 /// repair: a cell's coord comes from its topological index in the
@@ -1505,23 +1531,36 @@ mod tests {
 
     #[test]
     fn input_pad_saturates_at_depth_minus_one() {
-        let region = reservation(10, 3);
+        let region = reservation(10, 4);
         assert_eq!(input_pad(0, &region), CellCoord::new(0, 0, 0));
-        // Input #1 lands on the cell row, which is where the pads and
-        // the cells share a row without sharing a coord.
-        assert_eq!(input_pad(1, &region), CellCoord::new(0, 0, 1));
-        assert_eq!(input_pad(2, &region), CellCoord::new(0, 0, 2));
-        // depth-1 = 2 ceilings anything past the third input.
-        assert_eq!(input_pad(5, &region), CellCoord::new(0, 0, 2));
+        // Input #1 steps over the cell row, so no pad stands face to
+        // face with the cell at the end of the row.
+        assert_eq!(input_pad(1, &region), CellCoord::new(0, 0, 2));
+        assert_eq!(input_pad(2, &region), CellCoord::new(0, 0, 3));
+        // depth-1 = 3 ceilings anything past the third input.
+        assert_eq!(input_pad(5, &region), CellCoord::new(0, 0, 3));
     }
 
     #[test]
     fn output_pad_sits_on_right_edge_and_saturates_z() {
-        let region = reservation(4, 3);
+        let region = reservation(4, 4);
         assert_eq!(output_pad(0, &region), CellCoord::new(3, 0, 0));
-        assert_eq!(output_pad(1, &region), CellCoord::new(3, 0, 1));
-        assert_eq!(output_pad(2, &region), CellCoord::new(3, 0, 2));
-        assert_eq!(output_pad(5, &region), CellCoord::new(3, 0, 2));
+        assert_eq!(output_pad(1, &region), CellCoord::new(3, 0, 2));
+        assert_eq!(output_pad(2, &region), CellCoord::new(3, 0, 3));
+        assert_eq!(output_pad(5, &region), CellCoord::new(3, 0, 3));
+    }
+
+    /// The rows the pad-row refusal reserves are the rows the pads
+    /// stand in: the highest `z` of `n` pads, plus one, in a region deep
+    /// enough not to saturate.
+    #[test]
+    fn pad_rows_counts_the_rows_the_pads_span() {
+        let region = reservation(4, 100);
+        assert_eq!(pad_rows(0), 0);
+        for n in 1..10 {
+            let deepest = output_pad(n - 1, &region).z;
+            assert_eq!(pad_rows(n), deepest + 1, "{n} pads");
+        }
     }
 
     /// Where nothing is in the way the search lays the L-shape the

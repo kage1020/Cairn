@@ -1327,6 +1327,35 @@
   `spec/lint` "Machine-readable payload" is borrowed for the shape of a finding and otherwise
   untouched: this is a row of a report `info` writes on a run it does not refuse, not a diagnostic.
 
+- *(redstone)* Placement stood I/O pads face to face with cell bodies. The pads step along `z` from
+  `0`, so pad #1 stood on the cell row: in the input-pad column against the first cell at every
+  width, and in the actuator-pad column against the last cell whenever the row filled the region.
+  A pad is a terminal of one net, and the router's one-step rule keeps one net's dust away from
+  another's rather than a pad away from a cell, so nothing looked at it. Here the inverter reads only `sig.a`, and both of `sig.b`'s
+  pads stood against it — `--stage placement` and `--stage crossing` both exited 0:
+
+  ```
+  struct s size=3x5
+    ...
+    logic sig.x = not sig.a
+    door[id=d0] opened_by=sig.x
+    door[id=d1] opened_by=sig.b
+  ```
+
+  ```
+  "outputs":[..., {"name":["sig","b"],"driver":{"kind":"input","index":1},"pad":{"x":2,"y":0,"z":1}}]
+  "cells":[{"cell":"java_inverter_torch",...,"coord":{"x":1,"y":0,"z":1}}]
+  ```
+
+  The pads now skip the cell row — pad `i` stands at `z = i` below it and at `z = i + 1` from it
+  on — so no pad shares a face with a cell at any width. That costs a row of depth once an edge
+  carries two pads: the pad-row refusal now asks for `max(inputs, outputs) + 1` rows there, so a
+  region sized to exactly one row per pad is refused with `E_ROUTE_CONGESTION` and needs one more.
+  Routed lengths move with the pads: `examples/redstone-door.crn`'s cell is reached over 4 blocks
+  rather than 3, and `examples/crossbar.crn` leaves 12 pairs of dust within one step across layers
+  rather than 9. `spec/redstone` "Place-and-route" promised a clear column at each end of the row
+  and in the same step sized the row without one; it now describes the row and the pads as built.
+
 ### Breaking changes
 
 - *(core)* Two `connect` rows could lay one walkway between them. A `_` at the end of the `from`

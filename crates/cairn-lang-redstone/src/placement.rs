@@ -21,11 +21,13 @@
 //! at `x = i` an interior cell has two, and no region size gives the
 //! third back — the router cannot lift a wire past the face it has to
 //! arrive through, and `void` buys height, not room beside a cell. One
-//! clear column between cells, one past the last (the actuator pads stand
-//! in the column at `width - 1`), and one clear row either side of the
-//! cell row are what leave every cell its faces. Enough faces is not a
-//! wiring: a net passing through can still take the last one, and stage 2
-//! refuses that scope rather than shorting it.
+//! clear column between cells and one clear row either side of the cell
+//! row are what leave every cell its faces. The end cells' outer faces
+//! are the pad columns, at `x = 0` and `x = width - 1`, which carry no pad
+//! on the cell row: the pads step over it (`routing_geometry::edge_pad`),
+//! so a pad shares a face with no cell at any width. Enough faces is not a wiring: a net passing
+//! through can still take the last one, and stage 2 refuses that scope
+//! rather than shorting it.
 //!
 //! Two diagnostic codes join the pass:
 //! - [`crate::DiagnosticCode::NoCircuitRegion`] when a scope has cells or
@@ -53,7 +55,7 @@ use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
     PlacementPhase, ScopedPlacementIr,
 };
-use crate::routing_geometry::output_pad;
+use crate::routing_geometry::{output_pad, pad_rows};
 use crate::saturating_index;
 
 /// Per-cell footprint used by the v1 congestion estimate. Four blocks
@@ -81,9 +83,9 @@ const CELL_SPACING: u32 = 2;
 ///
 /// One row in, so every cell has a clear lane on each side of it rather
 /// than only the one — see the module doc. Read here by the coordinate
-/// and by the depth refusal that reserves the rows it needs, so the two
-/// cannot drift.
-const CELL_ROW: u32 = 1;
+/// and by the depth refusal that reserves the rows it needs, and by the
+/// pad coordinates that step over it, so the three cannot drift.
+pub(crate) const CELL_ROW: u32 = 1;
 
 /// The `Fix:` footer every area-budget refusal carries, here and in the
 /// routing pass's post-routing re-check.
@@ -209,9 +211,9 @@ fn compile_scope(
         return Err(row_depth_diagnostic(&reservation));
     }
     // `input_pad` / `output_pad` saturate z at `depth - 1`, so below this
-    // depth two pads stack on one coord. Pads share a row with a cell
-    // without sharing a coord, so the cell row is not added.
-    let pad_rows = saturating_index(source.inputs.len().max(source.outputs.len()));
+    // depth two pads stack on one coord. The pads step over the cell row,
+    // so once an edge carries two it is one of the rows they span.
+    let pad_rows = pad_rows(source.inputs.len().max(source.outputs.len()));
     if pad_rows > reservation.depth {
         return Err(pad_row_diagnostic(&reservation, pad_rows));
     }
@@ -365,7 +367,7 @@ fn pad_row_diagnostic(reservation: &CircuitRegionReservation, pad_rows: u32) -> 
         DiagnosticCode::RouteCongestion,
         reservation.span.clone(),
         primary,
-        "Fix: deepen the enclosing `size=WxH` so the region has one row per sensor or actuator, or split into multiple `circuit` blocks. Raising `void` does not help — pads stand beside the cells, not above them",
+        "Fix: deepen the enclosing `size=WxH` so the region has one row per sensor or actuator, and one more for the cell row once an edge carries two, or split into multiple `circuit` blocks. Raising `void` does not help — pads stand beside the cells, not above them",
     )
 }
 
@@ -387,5 +389,141 @@ fn map_scope_kind(kind: ScopeKind) -> intent::ScopeKind {
         ScopeKind::Struct => intent::ScopeKind::Struct,
         ScopeKind::Def => intent::ScopeKind::Def,
         ScopeKind::Site => intent::ScopeKind::Site,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fmt::Write as _;
+
+    use cairn_lang_core::{Edition, lower, parse};
+
+    use super::compile_placement;
+    use crate::routing_geometry::{BlockKind, BlockSite, block_sites, pad_rows};
+    use crate::{compile_edition_netlist, compile_netlist, synthesize};
+
+    /// Every pad that shares a face with a cell, as `(pad, cell)`.
+    fn pads_against_cells(source: &str) -> Vec<(BlockSite, BlockSite)> {
+        let intent = lower(&parse(source).expect("the fixture parses"));
+        let netlist = compile_netlist(&synthesize(&intent).scoped);
+        let placed = compile_placement(&compile_edition_netlist(&netlist, Edition::Java), &intent);
+        assert!(
+            placed.diagnostics.is_empty(),
+            "the fixture places: {:?}\n{source}",
+            placed.diagnostics,
+        );
+        let ir = &placed.scoped.scopes[0].ir;
+        let region = ir.region.clone().expect("a placed scope has a region");
+        let sites = block_sites(ir, &region);
+        let mut touching = Vec::new();
+        for pad in sites.iter().filter(|s| !matches!(s.kind, BlockKind::Cell)) {
+            for cell in sites.iter().filter(|s| matches!(s.kind, BlockKind::Cell)) {
+                let apart = pad.coord.x.abs_diff(cell.coord.x)
+                    + pad.coord.y.abs_diff(cell.coord.y)
+                    + pad.coord.z.abs_diff(cell.coord.z);
+                if apart == 1 {
+                    touching.push((*pad, *cell));
+                }
+            }
+        }
+        touching
+    }
+
+    /// A chain of `cells` cells over `sensors` plates, the last cell on
+    /// the first door and each other door on a sensor of its own, so
+    /// the pads beside the row belong to nets the end cells have nothing
+    /// to do with.
+    fn chain(cells: usize, sensors: usize, doors: usize, width: usize, depth: u32) -> String {
+        let mut source =
+            String::from("theme t:\n  slot wall -> @oak_planks\n  slot door -> @oak_door\n\n");
+        let _ = writeln!(
+            source,
+            "struct s size={width}x{depth}\n  floor mat_slot=wall"
+        );
+        for (d, side) in ["front", "back", "left", "right"]
+            .iter()
+            .take(doors)
+            .enumerate()
+        {
+            let _ = writeln!(source, "  door id=d{d} side={side} at=center mat_slot=door");
+        }
+        for i in 0..sensors {
+            let at = if i % 2 == 0 {
+                "front.outside"
+            } else {
+                "inside.front"
+            };
+            let _ = writeln!(
+                source,
+                "  pressure_plate id=p{i} at={at} offset={i} y=0 -> sig.s{i}"
+            );
+        }
+        let mut previous = String::from("sig.s0");
+        for c in 0..cells {
+            let other = (c + 1) % sensors;
+            let op = if c % 2 == 0 { "or" } else { "and" };
+            let _ = writeln!(source, "  logic sig.c{c} = {previous} {op} sig.s{other}");
+            previous = format!("sig.c{c}");
+        }
+        let _ = writeln!(source, "  door[id=d0] opened_by={previous}");
+        for d in 1..doors {
+            let _ = writeln!(source, "  door[id=d{d}] opened_by=sig.s{}", d % sensors);
+        }
+        source.push_str("  circuit region=floor void=2\n");
+        source
+    }
+
+    /// No pad stands face to face with a cell, at any width the row
+    /// check accepts.
+    ///
+    /// A pad is a terminal of the one net it carries, and the router's
+    /// one-step rule keeps one net's dust away from another's rather
+    /// than a pad away from a cell, so a pad against a cell of a net it
+    /// has nothing to do with would take one of that cell's faces where
+    /// no pass looks. The pad columns
+    /// stand at `x = 0` and `x = width - 1`, and at the narrowest row
+    /// the end cells stand in the columns beside them; what keeps the
+    /// two apart is that the pads skip the cell row. Asserted against
+    /// every cell, not only the ones of other nets, because the layout
+    /// gives the stronger answer.
+    #[test]
+    fn no_pad_stands_against_a_cell() {
+        // Reported with this source, where `sig.b`'s sensor pad and its
+        // door's pad both stood against an inverter that reads only
+        // `sig.a`.
+        let reported = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=3x5
+  floor mat_slot=wall
+  door id=d0 side=front at=center mat_slot=door
+  door id=d1 side=back at=center mat_slot=door
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front offset=0 y=0 -> sig.b
+  logic sig.x = not sig.a
+  door[id=d0] opened_by=sig.x
+  door[id=d1] opened_by=sig.b
+  circuit region=floor void=2
+";
+        assert_eq!(pads_against_cells(reported), Vec::new());
+
+        for cells in 1..=3 {
+            for sensors in 2..=4 {
+                for doors in 1..=3 {
+                    let depth = pad_rows(sensors.max(doors)).max(3);
+                    for width in 2 * cells + 1..=2 * cells + 3 {
+                        let source = chain(cells, sensors, doors, width, depth);
+                        assert_eq!(
+                            pads_against_cells(&source),
+                            Vec::new(),
+                            "{cells} cells, {sensors} sensors, {doors} doors, \
+                             {width}x{depth}:\n{source}",
+                        );
+                    }
+                }
+            }
+        }
     }
 }

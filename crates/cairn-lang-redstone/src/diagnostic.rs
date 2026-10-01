@@ -90,7 +90,8 @@ pub enum DiagnosticCode {
     /// is shorter than the spaced single-row layout needs, which is
     /// twice the cell count and one more; the reservation is too
     /// shallow for the cell row to have a clear row either side of it;
-    /// too shallow for the I/O pads, which stand one per row; or a sink
+    /// too shallow for the I/O pads, which stand one per row and skip
+    /// the cell row; or a sink
     /// has no route from its driver that runs through neither a
     /// component nor another net's dust — nor within one step of that
     /// dust in its own plane. That pipeline names area shortage as the

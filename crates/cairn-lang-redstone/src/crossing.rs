@@ -1243,12 +1243,14 @@ mod tests {
     /// are three routes rather than one shared prefix, and each port
     /// has to carry its own coord out.
     ///
-    /// The four nets contend for the rows across the region. `sig.sel`
-    /// is laid first — same fanout, lowest
-    /// [`crate::routing_geometry::net_ref_key`] — and takes the row at
-    /// `z=1`; each net after it is pushed a row further out, until
-    /// `sig.port_b` has no row left and climbs. Every repeater still
-    /// stands on its own port's route, and the one on
+    /// The four nets contend for the rows across the region. Their pads
+    /// stand at `z=0`, `2`, `3` and `4`, the column stepping over the
+    /// cell row. `sig.sel` is laid first — same fanout, lowest
+    /// [`crate::routing_geometry::net_ref_key`] — and runs out along
+    /// `z=0`; `sig.blocker` takes the row at `z=2`, and `sig.port_a`,
+    /// whose pad stands beside that row, has no row left and climbs at
+    /// its own pad; `sig.port_b` runs out along `z=4`. Every repeater
+    /// still stands on its own port's route, and the one on
     /// [`RouteLayer::Bridge`] is that rule holding through the escape —
     /// `CellCoord::new` decides the layer from the height, so the
     /// comparison below carries it. `sig.sel` turns off `z=0` at
@@ -1301,8 +1303,8 @@ mod tests {
             bufs.iter().map(|b| (b.port, b.coord)).collect::<Vec<_>>(),
             vec![
                 (BufferSegment::Port(PortName::Sel), CellCoord::new(13, 0, 0),),
-                (BufferSegment::Port(PortName::A), CellCoord::new(14, 0, 3),),
-                (BufferSegment::Port(PortName::B), CellCoord::new(14, 1, 3),),
+                (BufferSegment::Port(PortName::A), CellCoord::new(11, 1, 2),),
+                (BufferSegment::Port(PortName::B), CellCoord::new(15, 0, 4),),
             ],
             "each port keeps its own segment's coord across both push sites",
         );
@@ -1819,7 +1821,7 @@ theme t:
   slot wall -> @oak_planks
   slot door -> @oak_door
 
-struct s size=20x4
+struct s size=20x5
   floor mat_slot=wall
   door id=d side=front at=center mat_slot=door
   pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a

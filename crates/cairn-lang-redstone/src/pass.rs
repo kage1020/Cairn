@@ -351,13 +351,16 @@ fn unreachable_sink_diagnostic(
 /// could not hold it.
 ///
 /// `E_ROUTE_CONGESTION`, because the cause is the reserved area: the
-/// pad row wants a row per sensor or actuator and has fewer.
+/// pad row wants a row per sensor or actuator, and the cell row it steps
+/// over, and has fewer.
 ///
-/// `depth >= max(inputs, outputs)`, not `+ 1`. `edge_pad` saturates at
-/// `z = min(index, depth - 1)`, so N pads collide only once `N > depth`
-/// — and the placement pass guards on exactly that number
-/// (`pad_rows > reservation.depth`). Two stages under one code have to
-/// hand the author the same arithmetic.
+/// `depth >= max(inputs, outputs) + 1` once an edge carries two pads,
+/// and `depth >= 1` for one. `edge_pad` puts pad `i` at `z = i` below
+/// the cell row and `z = i + 1` from it on, saturating at `depth - 1`,
+/// so N pads collide only once `pad_rows(N) > depth` — and the
+/// placement pass guards on exactly that number, read from
+/// [`crate::routing_geometry::pad_rows`]. Two stages under one code have
+/// to hand the author the same arithmetic.
 fn pad_overlap_diagnostic(
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
@@ -381,7 +384,7 @@ fn pad_overlap_diagnostic(
         DiagnosticCode::RouteCongestion,
         reservation.span.clone(),
         primary,
-        "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs)` — one row per sensor or actuator — or split into multiple `circuit` blocks",
+        "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs) + 1` — one row per sensor or actuator, and one more for the cell row the pads step over — or split into multiple `circuit` blocks",
     )
 }
 
@@ -588,8 +591,7 @@ mod tests {
                     .find(|n| n.message.starts_with("Fix:"))
                     .unwrap_or_else(|| panic!("the {stage} refusal carries a fix line"));
                 assert!(
-                    footer.message.contains("depth >= max(inputs, outputs)")
-                        && !footer.message.contains("+ 1"),
+                    footer.message.contains("depth >= max(inputs, outputs) + 1"),
                     "the fix line gives the same arithmetic as the placement pass: {}",
                     footer.message,
                 );
