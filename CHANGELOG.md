@@ -284,6 +284,27 @@
   1.21.60.10), and `data_versions.json`'s `source` note, which said it was, now says which number
   the column holds.
 
+- *(cli)* `cairn` panicked when the reader of its stdout had already gone, so an ordinary
+  pipeline turned an accepted run into a crash:
+
+  ```
+  $ cairn lower examples/village.crn | head -1
+  site::hamlet::home1  dims=11x10x9
+
+  thread 'main' panicked at library/std/src/io/stdio.rs:
+  failed printing to stdout: Broken pipe (os error 32)
+  $ echo "${PIPESTATUS[0]}"
+  101
+  ```
+
+  Every subcommand that writes to stdout did it: `parse` and `lower` in every format, `info` in
+  both formats, `check --format json`, `synth`, and `compile`'s `wrote …` lines, which come after
+  the build has committed. That transcript is from a debug build; the released binaries abort on
+  a panic rather than exiting 101, and neither is in the exit-code table. A closed stdout now
+  drops the output nobody reads, and the command exits with the code it decides with stdout open:
+  `check` keeps its `1` for a refused source, and `compile` its `0` for the build it wrote. Any
+  other failure to write stdout still panics, as before. A closed stderr still panics.
+
 - *(redstone)* A sink with no clear path made the router search the whole `circuit` reservation
   before refusing it. The search gave up only when its frontier was empty, so the cost of the
   refusal was set by `width × depth × void`, not by the distance: a sink two blocks from its driver
