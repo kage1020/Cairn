@@ -790,7 +790,7 @@ fn a_floor_above_every_release_names_the_line_under_each_version() {
     let (_tmp, row) = buildable_row(
         "@cairn 2026.06\n\
          @requires bedrock version>=1.21.40\n\n\
-         def cottage class=house size=9x7:\n\
+         def cottage size=9x7:\n\
          \x20\x20requires bedrock version>=1.99\n\
          \x20\x20floor id=floor mat_slot=floor\n\n\
          theme t:\n\
@@ -849,7 +849,7 @@ fn a_floor_is_credited_only_with_the_versions_it_refuses() {
         &src,
         "@cairn 2026.06\n\
          @requires bedrock version>=1.21.40\n\n\
-         def cottage class=house size=9x7:\n\
+         def cottage size=9x7:\n\
          \x20\x20requires bedrock version>=1.99\n\
          \x20\x20floor id=floor mat_slot=floor\n\n\
          theme t:\n\
