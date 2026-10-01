@@ -29,10 +29,7 @@ defs:
     size:
       w: 9
       h: 7
-    args:
-      class:
-        kind: Ident
-        value: house
+    args: {}
     members:
       - id: floor
         role:

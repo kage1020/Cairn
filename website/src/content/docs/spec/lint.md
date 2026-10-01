@@ -51,8 +51,8 @@ compose to the strictest across every line, so a second one adds a constraint ([
 |---|---|
 | `E_PARSE` | The source did not parse. |
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
-| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`. |
-| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
+| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` / `class=` a `struct` / `def` header takes. |
+| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
@@ -583,20 +583,30 @@ This check does not need that answer, because the word is one something reads or
 whichever the answer turns out to be. Note that a key in a member's own bracket does not make the
 member *carry* the attribute, so a `theme` row selecting on it matches nothing.
 
+A `struct` / `def` header line answers to a closed vocabulary of its own, the one [Components,
+Editing, and Multi-building](/spec/components-editing-sites/) states: `size=`, which lowering
+reads, and `class=`, which no pass reads yet. No `theme` selector widens it, since a selector names
+a member keyword. A key outside the two is the same defect one line up from a member's, and is
+refused with the suggestion: `struct s siz=7x7` is offered `size`. The missing-size warning the
+same typo causes cannot name it, and is raised only where block-array lowering runs, which
+`cairn check` does only with both `--edition` and `--target`; without this check a plain
+`cairn check` would say nothing about the line. Where both are raised, the error is printed before
+the warning.
+
 `W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=`
 in the vocabulary whose value the pass cannot read is dropped and a default put in its place. An
 **unreached key**: a `key=` this specification defines that no pass reads yet — `window shape=` /
-`anchor=` and `roof footprint=` / `bounds=` are those keys today — is carried into the IR and never
-consulted. Every `key=value` on the right of a `theme` selector row whose keyword the compiler
-knows is one too, reported on the binding whatever its key or value, since no pass lowers a
-selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). And a key **routed
-past**: one the keyword reads only under some ways of writing a sibling argument, on a member that
-writes it another way. The boundary is the keyword: a spec-defined key on a keyword the compiler
-knows is reported this way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD`
-and its arguments are not judged at all. All three make the build differ from the source. The rule
-forbids *silent* substitution, and all three are announced. For the unreached key the gap is the
-compiler's rather than the source's, which is why it is not a refusal. Whether autofix is offered
-is up to the implementation.
+`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today — is carried
+into the IR and never consulted. Every `key=value` on the right of a `theme` selector row whose
+keyword the compiler knows is one too, reported on the binding whatever its key or value, since no
+pass lowers a selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). And a key
+**routed past**: one the keyword reads only under some ways of writing a sibling argument, on a
+member that writes it another way. The boundary is the keyword: a spec-defined key on a keyword the
+compiler knows is reported this way, while a spec-defined *keyword* it does not know is
+`E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three make the build differ from
+the source. The rule forbids *silent* substitution, and all three are announced. For the unreached
+key the gap is the compiler's rather than the source's, which is why it is not a refusal. Whether
+autofix is offered is up to the implementation.
 
 An unreadable value is reported whether or not its member is then built. The value is wrong
 wherever the member ends up, so it is a repair of its own, and holding the finding back until a
