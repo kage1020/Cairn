@@ -90,7 +90,7 @@ pub struct SelectorRule {
     pub span: Span,
 }
 
-/// Lifted form of `def NAME[ ARGS] [:]` (reusable parameterised component).
+/// Lifted form of `def NAME[ ARGS] [:]` (reusable component).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DefIr {
     /// Definition name.
@@ -98,7 +98,9 @@ pub struct DefIr {
     /// Hoisted `size=WxH` header argument, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    /// Remaining header `key=value` arguments (excluding `size`).
+    /// Remaining header `key=value` arguments: every one but a `size=`
+    /// whose value is a `WxH` literal. A `size=` of any other shape stays
+    /// here, and `check::type_mismatch` reports it.
     pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the def body.
     pub members: Vec<Member>,
@@ -123,7 +125,9 @@ pub struct StructIr {
     /// Hoisted `size=WxH` header argument, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    /// Remaining header `key=value` arguments (excluding `size`).
+    /// Remaining header `key=value` arguments: every one but a `size=`
+    /// whose value is a `WxH` literal. A `size=` of any other shape stays
+    /// here, and `check::type_mismatch` reports it.
     pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the struct body.
     pub members: Vec<Member>,

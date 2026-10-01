@@ -143,7 +143,7 @@ struct gatehouse size=7x5
 ([`village.crn`](https://github.com/kage1020/Cairn/blob/main/examples/village.crn))。
 
 ```
-def cottage class=house size=9x7:
+def cottage size=9x7:
   floor  id=floor mat_slot=floor
   walls  id=walls class=outer mat_slot=wall height=4
   door   id=entry class=entry side=front at=center

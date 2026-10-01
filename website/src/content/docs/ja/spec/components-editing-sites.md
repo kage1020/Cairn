@@ -10,6 +10,12 @@ title: "9. コンポーネント・編集・複数建築"
 パラメータ化 (可変サイズなど) は許可し、再帰は禁止します。`def` は `requires version>=X` を宣言でき、
 合成物の最小バージョンは構成要素の最大値です ([バージョンとエディション](/ja/spec/versioning-editions/))。
 
+パラメータの仕組みが定まるまで、ヘッダの語彙は閉じています。`def` のヘッダが取るのは、下げが読む
+`size=` と、まだどのパスも読まない `class=` で、`struct` のヘッダも同じ 2 つを取ります。どちらでも
+それ以外のキーは `E_UNKNOWN_ARGUMENT` として拒否され、ヘッダの `class=` は `W_IGNORED_ARGUMENT`
+として報告されます ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。そのため下のサンプルは
+その警告を伴います。
+
 ```
 def cottage class=house size=9x7:
   floor  id=floor mat_slot=floor
