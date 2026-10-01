@@ -1721,12 +1721,32 @@ mod tests {
             (major << 24) | (minor << 16) | (patch << 8) | revision
         };
         let pack = load_builtin_bedrock().expect("builtin pack");
-        // 1.21.0 uses the release baseline marker 1.21.0.0.
-        let t = pack.resolve_bedrock_target("1.21.0").expect("1.21.0");
-        assert_eq!(t.mc_version, "1.21.0");
-        assert_eq!(t.block_version, version(1, 21, 0, 0));
-        // `latest` (1.21.60) carries the wiki-confirmed post-release
-        // marker 1.21.60.33, exercised in the structure test.
+        // Each targetable row is the block-state version that release
+        // writes into a palette (PocketMine-MP's
+        // `BlockStateData::CURRENT_VERSION` in the release supporting it),
+        // whose revision is not the client build's: those builds are
+        // 1.21.0.3, 1.21.40.3 and 1.21.60.10. The targetable set is pinned
+        // along with the integers, so a row added or a table regenerated
+        // with revision 0 or the build number fails here rather than in a
+        // user's lock.
+        let expected = [
+            ("1.21.0", version(1, 21, 0, 3)),
+            ("1.21.40", version(1, 21, 40, 1)),
+            ("1.21.60", version(1, 21, 60, 33)),
+        ];
+        let targetable: Vec<&str> = pack
+            .data_versions
+            .versions
+            .iter()
+            .filter(|row| row.targetable)
+            .map(|row| row.mc_version.as_str())
+            .collect();
+        assert_eq!(targetable, expected.map(|(mc_version, _)| mc_version));
+        for (mc_version, block_version) in expected {
+            let t = pack.resolve_bedrock_target(mc_version).expect(mc_version);
+            assert_eq!(t.mc_version, mc_version);
+            assert_eq!(t.block_version, block_version, "{mc_version}");
+        }
         let latest = pack.resolve_bedrock_target("latest").expect("latest");
         assert_eq!(latest.mc_version, pack.data_versions.latest);
         assert_eq!(latest.block_version, version(1, 21, 60, 33));
