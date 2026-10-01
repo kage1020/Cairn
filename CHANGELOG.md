@@ -322,6 +322,33 @@
   `fix: name a java release` and nothing else. `spec/versioning-editions` "Ordering is by
   DataVersion, per edition" now says which labels get the offer, with the ja mirror.
 
+- *(core)* A `connect` row whose detour was searched along the edge of the coordinate space
+  crashed the lowering instead of laying the walkway. The router searches a rectangle one cell
+  wider than the obstacles and ports on every side, and that margin may lie on `x` or `z` =
+  `i32::MIN` or `i32::MAX`. Expanding a cell there computed its neighbour past the edge before
+  asking whether the neighbour was inside the rectangle. With a floorless 3x3 `shell` and a 3x3
+  `hut` that has a floor and doors named `east` and `west` on its right and left sides:
+
+  ```
+  site s:
+    place id=a use=shell theme=t at=origin
+    place id=b use=hut   theme=t east_of=a gap=2147483640
+    place id=c use=hut   theme=t north_of=b gap=2
+    connect b.east to c.west path=@gravel
+  ```
+
+  ```
+  $ cairn check route.crn --edition java --target 1.21.4; echo "exit=$?"
+  thread 'main' panicked at .../walkway.rs:
+  attempt to add with overflow
+  exit=101
+  ```
+
+  `check --target`, `lower` and `compile` all exited 101 there in a build with overflow checks on.
+  A release build wraps the sum onto the opposite edge, which the rectangle then excludes, so it
+  laid the same detour by accident. A step that leaves `i32` is now skipped like any other step out
+  of the rectangle, so the row above lays its detour in either build.
+
 - *(core,tree-sitter,cli)* A canonical token with a block-state literal could not be written,
   though `spec/materials-themes` "Canonical vocabulary" lists `@oak_log[axis=x]` as one and
   everything past the parser already read that shape. Both parsers stopped at the `[`:

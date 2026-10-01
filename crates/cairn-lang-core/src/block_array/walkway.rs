@@ -692,12 +692,23 @@ enum StepDir {
 }
 
 impl StepDir {
-    fn delta(self) -> (i32, i32) {
+    /// The `(x, z)` cell one step from this cell in this direction, or
+    /// `None` when that step leaves `i32`. [`search_rect`] only
+    /// guarantees that the inflated rectangle itself fits in `i32`, so
+    /// a cell on its edge can sit at `i32::MIN` or `i32::MAX`; the
+    /// neighbour past that edge is outside the rectangle anyway, and
+    /// the caller skips it like any other out-of-bounds cell.
+    ///
+    /// Only the expansion loop in [`route_path`] can see `None`.
+    /// [`search_rect`] folds both endpoints into the rectangle before
+    /// adding the margin, so a start cell is never on the rectangle's
+    /// edge and its first steps all stay inside `i32`.
+    fn step(self, (x, z): (i32, i32)) -> Option<(i32, i32)> {
         match self {
-            Self::PosX => (1, 0),
-            Self::NegX => (-1, 0),
-            Self::PosZ => (0, 1),
-            Self::NegZ => (0, -1),
+            Self::PosX => Some((x.checked_add(1)?, z)),
+            Self::NegX => Some((x.checked_sub(1)?, z)),
+            Self::PosZ => Some((x, z.checked_add(1)?)),
+            Self::NegZ => Some((x, z.checked_sub(1)?)),
         }
     }
 }
@@ -935,8 +946,12 @@ pub fn route_path<S: BuildHasher>(
     let start = (from.0, from.2);
     let goal = (to.0, to.2);
     for dir in STEP_DIRS {
-        let (dx, dz) = dir.delta();
-        let cell = (start.0 + dx, start.1 + dz);
+        // Never `None` (see `StepDir::step`); skipped rather than
+        // unwrapped so this loop does not depend on how `search_rect`
+        // sizes the rectangle.
+        let Some(cell) = dir.step(start) else {
+            continue;
+        };
         if !in_bounds(cell) || blocked.contains((cell.0, y, cell.1)) {
             continue;
         }
@@ -961,8 +976,9 @@ pub fn route_path<S: BuildHasher>(
             break;
         }
         for next_dir in STEP_DIRS {
-            let (dx, dz) = next_dir.delta();
-            let next = (cell.0 + dx, cell.1 + dz);
+            let Some(next) = next_dir.step(cell) else {
+                continue;
+            };
             if !in_bounds(next) || blocked.contains((next.0, y, next.1)) {
                 continue;
             }
@@ -1673,6 +1689,42 @@ mod tests {
                 (4, 0, 0),
             ],
         );
+    }
+
+    #[test]
+    fn route_path_detours_along_each_edge_of_the_coordinate_space() {
+        // `search_rect` refuses a rectangle whose one-cell margin
+        // leaves `i32`, so the margin itself may lie on `i32::MIN` or
+        // `i32::MAX`, and the router expands the cells there. Each of
+        // those cells has a neighbour past the edge, which the router
+        // has to skip rather than compute.
+        //
+        // The fixture is laid out in local coordinates: `a` is the
+        // distance from the edge and `b` runs along it. The endpoints
+        // are at `a = 1`, and a wall at `b = 2` covers `a ∈ 1..=3`.
+        // The only short way round is through `a = 0`, the edge itself
+        // (7 cells); the far way round, through `a = 4`, takes 11.
+        type Local = fn(i32, i32) -> (i32, i32, i32);
+        let edges: [(&str, Local); 4] = [
+            ("+x", |a, b| (i32::MAX - a, 0, b)),
+            ("-x", |a, b| (i32::MIN + a, 0, b)),
+            ("+z", |a, b| (b, 0, i32::MAX - a)),
+            ("-z", |a, b| (b, 0, i32::MIN + a)),
+        ];
+        for (edge, at) in edges {
+            let blocked: HashSet<(i32, i32, i32)> = (1..=3).map(|a| at(a, 2)).collect();
+            let (from, to) = (at(1, 0), at(1, 4));
+            let path = route(from, to, &blocked)
+                .unwrap_or_else(|e| panic!("{edge}: a detour along the edge exists, got {e:?}"));
+            assert_route_shape(&path, from, to, &blocked);
+            assert_eq!(
+                path,
+                [(1, 0), (0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 4)]
+                    .map(|(a, b)| at(a, b))
+                    .to_vec(),
+                "{edge}: the route must run along the edge of the coordinate space",
+            );
+        }
     }
 
     #[test]
