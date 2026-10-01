@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "latest": "1.21.60",
-  "source": "Release list from Mojang/bedrock-samples `version.json`; the palette integer is (major<<24)|(minor<<16)|(patch<<8)|revision of that build.",
+  "source": "Release list from Mojang/bedrock-samples `version.json`. The integer is (major<<24)|(minor<<16)|(patch<<8)|revision of the block-state version that release writes into a palette, which is not the build number: for a targetable row it is PocketMine-MP's `BlockStateData::CURRENT_VERSION` in the release supporting that version (the `maxVersion` of the pmmp/BedrockBlockUpgradeSchema schema that upgrades to it). The other rows are ordering keys that never reach an artifact, and carry revision 0.",
   "versions": [
     {
       "mc_version": "1.19.30",
@@ -89,7 +89,7 @@
     },
     {
       "mc_version": "1.21.0",
-      "data_version": 18153472,
+      "data_version": 18153475,
       "released": "2024-06-13"
     },
     {
@@ -106,7 +106,7 @@
     },
     {
       "mc_version": "1.21.40",
-      "data_version": 18163712,
+      "data_version": 18163713,
       "released": "2024-10-22"
     },
     {
