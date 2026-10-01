@@ -4,7 +4,7 @@
 # Multiple buildings on one site, joined by topological relations rather than coordinates.
 # Demonstrates: def, theme reuse, site placement, connect with a path slot.
 
-def cottage class=house size=9x7:
+def cottage size=9x7:
   floor  id=floor mat_slot=floor
   walls  id=walls class=outer mat_slot=wall height=4
   door   id=entry class=entry side=front at=center

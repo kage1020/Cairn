@@ -138,7 +138,8 @@ pub enum DiagnosticCode {
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// A key outside the vocabulary of the member's role, written as a
-    /// `key=value` argument or inside the member's own `[key=value]`.
+    /// `key=value` argument or inside the member's own `[key=value]` — or a
+    /// key other than `size=` / `class=` on a `struct` / `def` header line.
     ///
     /// An error for the same reason [`Self::UnknownKeyword`] is, one level
     /// down: the key names nothing, so no pass will ever read the value,
@@ -146,10 +147,10 @@ pub enum DiagnosticCode {
     /// A misspelling of an argument that has a default is the worst of
     /// them — the build succeeds, silently, at the default.
     ///
-    /// One code for both fields because it is one defect: `clas=outer`
-    /// and `[clas=outer]` are each a word the author expects something to
-    /// read that nothing does, with the `class` lost either way. Only the
-    /// sentence differs, naming the field to edit.
+    /// One code for every field because it is one defect: `clas=outer`,
+    /// `[clas=outer]` and a header's `siz=7x7` are each a word the author
+    /// expects something to read that nothing does. Only the sentence
+    /// differs, naming the field to edit.
     UnknownArgument,
     /// A `-> value` tail on a member whose keyword cannot emit a signal,
     /// or on a sensor keyword written in the `[selector]` form.
@@ -266,16 +267,18 @@ pub enum DiagnosticCode {
     /// could not read it, dropped it, and put the default in its place.
     /// **Unreached key**: no pass reads it yet. On a member that is a key
     /// the specification defines, listed in
-    /// `crate::intent::MemberRole::unread_arguments`; on a `theme` selector
-    /// row whose keyword names a role it is every `key=value` right of the
-    /// arrow, defined anywhere or not (`fram=42` included), since no pass
-    /// lowers a selector's bindings. **Routed past**:
-    /// a sibling argument picked a lowering rule that does not consult it,
-    /// which `crate::intent::MemberRole::conditional_arguments` records and
-    /// `roof kind=gable slope_to=front` is the instance of — that one has no
-    /// default to substitute, and fires whether or not the member went on to
-    /// build. The build differs from the source in all three, and the
-    /// difference is announced rather than silent.
+    /// `crate::intent::MemberRole::unread_arguments`; on a `struct` / `def`
+    /// header it is a key the specification writes there, listed in
+    /// `crate::check::arguments::UNREAD_HEADER_ARGUMENTS` — today `class=`;
+    /// on a `theme` selector row whose keyword names a role it is every
+    /// `key=value` right of the arrow, defined anywhere or not (`fram=42`
+    /// included), since no pass lowers a selector's bindings. **Routed
+    /// past**: a sibling argument picked a lowering rule that does not
+    /// consult it, which `crate::intent::MemberRole::conditional_arguments`
+    /// records and `roof kind=gable slope_to=front` is the instance of —
+    /// that one has no default to substitute, and fires whether or not the
+    /// member went on to build. The build differs from the source in all
+    /// three, and the difference is announced rather than silent.
     ///
     /// Distinct from [`Self::DeferredMember`], which says the member did
     /// not lower. A roof whose `overhang=` is unusable is in the build,

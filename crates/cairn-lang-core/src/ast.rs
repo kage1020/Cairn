@@ -222,7 +222,7 @@ pub enum Item {
         #[serde(skip)]
         span: Span,
     },
-    /// `def NAME[ ARGS][:]` block — reusable parameterised component.
+    /// `def NAME[ ARGS][:]` block — reusable component.
     ///
     /// `#[non_exhaustive]`, for the reason given on [`Self::Theme`].
     #[non_exhaustive]
