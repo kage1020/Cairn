@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 cairn-lang-core = { workspace = true }
 cairn-lang-formats.workspace = true
-cairn-lang-redstone = { version = "2026.9.2", path = "../cairn-lang-redstone" }
+cairn-lang-redstone = { version = "2026.10.0", path = "../cairn-lang-redstone" }
 # clap's default features stay on deliberately; they are the obvious
 # thing to cut when shrinking the binary. Of the six, three are the reason
 # for this note (`std`, `help` and `usage` are the rest, and losing `help`

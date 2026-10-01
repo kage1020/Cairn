@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+## 2026.10.0 — 2026-10-01
+
+### Added
+- *(core,tree-sitter)* read `-` as a don't-care in an `assert truth` row ([#336](https://github.com/kage1020/Cairn/pull/336))
+- *(core)* report the argument a sibling's value routed past ([#314](https://github.com/kage1020/Cairn/pull/314))
+- *(core)* [**breaking**] render the palette as a sorted set rather than an insertion log ([#299](https://github.com/kage1020/Cairn/pull/299))
+- *(cli)* pin a target on `cairn check` so it can report E_UNKNOWN_ID ([#298](https://github.com/kage1020/Cairn/pull/298))
+- *(core,formats,cli)* [**breaking**] answer a renamed block id from a pack alias table ([#296](https://github.com/kage1020/Cairn/pull/296))
+- *(core,cli)* [**breaking**] weigh @intended_targets against the floors the file declares ([#295](https://github.com/kage1020/Cairn/pull/295))
+- *(core)* read the language version the `@cairn` header declares ([#290](https://github.com/kage1020/Cairn/pull/290))
+- *(core,cli)* [**breaking**] let a def or a theme declare its own version floor ([#293](https://github.com/kage1020/Cairn/pull/293))
+- *(core,cli)* [**breaking**] order @requires by DataVersion, and let a floor name its edition ([#291](https://github.com/kage1020/Cairn/pull/291))
+
+### Build
+- *(tree-sitter)* inherit the workspace lints and always compile the scanner ([#348](https://github.com/kage1020/Cairn/pull/348))
+
+### Changed
+- cite the spec by section name instead of section number ([#317](https://github.com/kage1020/Cairn/pull/317))
+- remove duplicated helpers, excessive comments, and unclear names across the workspace ([#316](https://github.com/kage1020/Cairn/pull/316))
+
+### Fixed
+- *(core)* report unreadable values and a refused row's body in the same compile ([#423](https://github.com/kage1020/Cairn/pull/423))
+- *(core)* [**breaking**] tighten the walkway edge-underscore rule after review ([#421](https://github.com/kage1020/Cairn/pull/421))
+- *(core)* report theme selector bindings no pass lowers ([#417](https://github.com/kage1020/Cairn/pull/417))
+- *(core)* report an unreadable `sym=`, stair state or `gap=` instead of building the default ([#416](https://github.com/kage1020/Cairn/pull/416))
+- *(core,cli)* refuse a path separator in a `place id=` ([#415](https://github.com/kage1020/Cairn/pull/415))
+- *(core)* refuse an inside pressure plate with no interior cell to sit on ([#414](https://github.com/kage1020/Cairn/pull/414))
+- *(core)* lay a north–south walkway in time linear in its length ([#413](https://github.com/kage1020/Cairn/pull/413))
+- *(core)* [**breaking**] refuse a walkway place or port id that starts or ends with `_` ([#412](https://github.com/kage1020/Cairn/pull/412))
+- *(core)* compare a truth-table row with every earlier row it overlaps ([#411](https://github.com/kage1020/Cairn/pull/411))
+- *(core)* step north_of back by the new placement's depth ([#409](https://github.com/kage1020/Cairn/pull/409))
+- *(core)* name the one rule a `connect` port broke instead of every rule a port has ([#350](https://github.com/kage1020/Cairn/pull/350))
+- *(core)* report a lowering diagnostic once, however many placements reach it ([#330](https://github.com/kage1020/Cairn/pull/330))
+- *(cli,core,formats)* [**breaking**] name the palette entries the degraded figure counts ([#323](https://github.com/kage1020/Cairn/pull/323))
+- *(cli)* say why `cairn info` found no buildable target ([#322](https://github.com/kage1020/Cairn/pull/322))
+- close the five open P1 bugs ([#318](https://github.com/kage1020/Cairn/pull/318))
+- *(core)* ask the wall column where the masonry is before carving a door ([#310](https://github.com/kage1020/Cairn/pull/310))
+- *(formats,core,cli)* [**breaking**] refuse the portability figure over a leaked blockstate ([#300](https://github.com/kage1020/Cairn/pull/300))
+- *(core)* [**breaking**] stop the lexer turning every digit run into an i64 ([#287](https://github.com/kage1020/Cairn/pull/287))
+- *(core,docs)* ask the column for the door carve, and correct five claims the review measured
+- *(core)* [**breaking**] anchor a walkway port to the masonry the openings pass cut
+
 ### Added
 
 - *(core,tree-sitter)* A truth table that is partial on purpose had no way to say so. A table may
