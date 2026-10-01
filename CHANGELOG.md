@@ -264,6 +264,26 @@
 
 ### Fixed
 
+- *(formats)* Bedrock `1.21.0` and `1.21.40` builds stamped a block-state `version` the game never
+  wrote into every `.mcstructure` palette entry and into the lock's `data_version`: `18153472`
+  (1.21.0.0) and `18163712` (1.21.40.0), with the revision dropped. They are now `18153475`
+  (1.21.0.3) and `18163713` (1.21.40.1), the block-state versions those releases write, as
+  PocketMine-MP's `BlockStateData::CURRENT_VERSION` and the matching BedrockBlockUpgradeSchema
+  `maxVersion` record. A loader picks which block-state upgrade schemas to run by comparing that
+  integer with each schema's (PocketMine-MP's `BlockStateUpgrader` does), so a structure claiming
+  1.21.0.0 has the 1.21.0 schema run over states already written in it. `1.21.60` (`18168865`, 1.21.60.33) was already right.
+
+  A lock written by an earlier build for either target records the old integer, so the first
+  rebuild against it reports it once and writes the corrected one:
+
+  ```
+  W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.21.0/block version 18153472, now 1.21.0/18153475.
+  ```
+
+  The block-state revision is not the client build's (those are 1.21.0.3, 1.21.40.3 and
+  1.21.60.10), and `data_versions.json`'s `source` note, which said it was, now says which number
+  the column holds.
+
 - *(core,tree-sitter,cli)* A canonical token with a block-state literal could not be written,
   though `spec/materials-themes` "Canonical vocabulary" lists `@oak_log[axis=x]` as one and
   everything past the parser already read that shape. Both parsers stopped at the `[`:
@@ -1803,9 +1823,9 @@
 
   The Java rows are the game's own version metadata (releases only, 1.14 onward, via
   `misode/mcmeta`'s machine-generated summary); the Bedrock rows are Mojang's own
-  `bedrock-samples` release list, with the palette integer computed as
-  `(major << 24) | (minor << 16) | (patch << 8) | revision` of that build — a formula the three
-  rows already shipped confirm exactly. `data_versions.json` records where its rows came from in a
+  `bedrock-samples` release list, with the palette integer packed as
+  `(major << 24) | (minor << 16) | (patch << 8) | revision` and revision 0 on every row added
+  for ordering. `data_versions.json` records where its rows came from in a
   new `source` field. The loader now also refuses a table whose keys are not unique and ascending,
   or whose labels do not sort the same way by text as by key — the property placing a floor
   *outside* the table's span actually rests on, which was previously stated in a doc comment as
