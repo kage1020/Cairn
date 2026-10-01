@@ -264,6 +264,17 @@
 
 ### Fixed
 
+- *(redstone)* A `logic` line's left-hand side was checked for its `sig.` head and nothing else, so
+  `logic sig = ...` and `logic sig.x.y = ...` each registered a signal, lowered into a cell, and
+  could be read by another `logic` line. `cairn synth` exited 0 with `"sig"` or `"sig.x.y"` in
+  `signal_defs`, while the same names under an actuator key were `E_LOGIC_INVALID_SIGNAL`.
+  `spec/redstone` "Signal binding" says a signal name is `sig.` and exactly one segment after it.
+  The left-hand side now passes the same test as the sensor tail and actuator values, so both lines
+  are `E_LOGIC_INVALID_SIGNAL`. The message says which way the name misses. For the namespace
+  with no name, the fix is to add one, as in `sig.<name>`. For more than one segment, it is to
+  drop the segments after the first, as in `sig.x`. A line that reads the refused name is not also
+  told it is unbound.
+
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
   and nothing said so. With a 3x3 `a` and a 3x9 `b`:

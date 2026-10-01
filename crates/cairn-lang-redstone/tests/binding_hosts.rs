@@ -602,6 +602,56 @@ fn a_logic_lhs_outside_the_sig_namespace_is_refused_and_lowers_no_gate() {
     assert_eq!(codes(&out), ["E_LOGIC_INVALID_SIGNAL"]);
 }
 
+/// `spec/redstone` "Signal binding": a signal name is `sig.` and exactly
+/// one segment after it, on the left of a `logic` line as everywhere else.
+/// The head used to be the only thing checked there, so `sig` and
+/// `sig.x.y` each became a cell that no actuator could name.
+///
+/// Each shape is asked alone and read by a downstream line. The reader is
+/// what the refusal must not double up on: the left-hand side is recorded
+/// as a refused driver, so its readers are not also told it is unbound,
+/// and the downstream line's own consumer keeps it from being unused.
+#[test]
+fn a_logic_lhs_that_is_not_one_segment_after_sig_is_refused() {
+    for (lhs, why, fix) in [
+        (
+            "sig",
+            "which is the `sig.` namespace itself rather than a signal in it",
+            "add a name, as in `sig.<name>`",
+        ),
+        (
+            "sig.x.y",
+            "which has 2 segments after `sig.`",
+            "drop the segments after the first, as in `sig.x`",
+        ),
+    ] {
+        let alone = format!(
+            "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  logic {lhs} = not sig.a\n"
+        );
+        let read = format!(
+            "{alone}  logic sig.o = not {lhs}\n  door id=front side=front at=center\n  door[id=front] opened_by=sig.o\n"
+        );
+        for body in [&alone, &read] {
+            let out = synth_source(&source(body));
+            assert_eq!(codes(&out), ["E_LOGIC_INVALID_SIGNAL"], "{body}");
+            let d = only(&out, DiagnosticCode::LogicInvalidSignal);
+            assert!(
+                d.primary
+                    .contains(&format!("`logic {lhs} = ...` names `{lhs}`, {why}")),
+                "{}",
+                d.primary,
+            );
+            assert!(
+                d.notes
+                    .iter()
+                    .any(|n| n.message.starts_with(&format!("Fix: {fix}"))),
+                "{:#?}",
+                d.notes,
+            );
+        }
+    }
+}
+
 // --- `assert` references -------------------------------------------------
 
 #[test]

@@ -486,21 +486,28 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
     out.asserts.extend(asserts);
 }
 
+/// Whether a dotted name is a signal name: `sig.` and exactly one segment
+/// after it (`spec/redstone` "Signal binding").
+///
+/// The one reading of "is this a signal name" for every position that
+/// holds one — a `logic` line's left-hand side here, and through
+/// [`signal_named_by`] the sensor tail, an argument value, and a selector
+/// attribute — so the four cannot start disagreeing about what counts.
+///
+/// Two segments, not just a `sig.` head. `sig.a.b` used to pass the value
+/// side and register a port whose name the block-array pass then refused
+/// (`must be a two-segment signal reference`), and the left-hand side
+/// checked the head alone, so `logic sig = ...` and `logic sig.a.b = ...`
+/// each became a cell the actuator side could never name.
+fn is_signal_name(dr: &DottedRef) -> bool {
+    dr.head() == SIGNAL_HEAD && dr.tail().len() == 1
+}
+
 /// The signal reference a value names, or `None` for a value that names
-/// no signal at all.
-///
-/// One reading of "is this a signal reference" for all three positions
-/// that hold one — the sensor tail, an argument value, and a selector
-/// attribute — so the three cannot start disagreeing about what counts.
-///
-/// Two segments, not just a `sig.` head. `sig.a.b` used to pass here and
-/// register a port whose name the block-array pass then refused
-/// (`must be a two-segment signal reference`), so the front end and the
-/// lowering disagreed about what a signal name is and the front end was
-/// the lenient one.
+/// no signal at all. See [`is_signal_name`].
 fn signal_named_by(value: &Value) -> Option<&DottedRef> {
     match &value.kind {
-        ValueKind::DotRef(dr) if dr.head() == SIGNAL_HEAD && dr.tail().len() == 1 => Some(dr),
+        ValueKind::DotRef(dr) if is_signal_name(dr) => Some(dr),
         _ => None,
     }
 }
@@ -540,26 +547,25 @@ fn binding_claim(key: &str, named: Option<&DottedRef>) -> Option<BindingClaim> {
 /// Take one `logic` line, or refuse its left-hand side.
 ///
 /// Sensors emit into the `sig.` namespace and actuators consume from it, so
-/// a binding named outside it can never be read. Refusing at collection is
-/// what keeps the gate out of the DAG: lowered, it took a cell and a
-/// placement coordinate for a signal with no consumer, and said so only as
-/// `W_LOGIC_UNUSED_SIGNAL`.
+/// a binding whose name is not a signal name ([`is_signal_name`]) can never
+/// be read. Refusing at collection is what keeps the gate out of the DAG:
+/// lowered, it took a cell and a placement coordinate for a signal with no
+/// consumer, and said so only as `W_LOGIC_UNUSED_SIGNAL`.
 fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut ScopeCollected<'a>) {
-    if b.lhs.head() != SIGNAL_HEAD {
+    if !is_signal_name(&b.lhs) {
+        let (why, fix) = lhs_refusal(&b.lhs);
         out.diagnostics.push(
             Diagnostic::new(
                 DiagnosticCode::LogicInvalidSignal,
                 b.span.clone(),
                 format!(
-                    "{label} `logic {lhs} = ...` names `{lhs}`, which is outside the \
-                     `{SIGNAL_HEAD}.` namespace sensors emit into and actuators read from",
+                    "{label} `logic {lhs} = ...` names `{lhs}`, {why}",
                     label = scope.label(),
                     lhs = b.lhs,
                 ),
             )
             .with_footer(format!(
-                "Fix: rename the left-hand side to `{SIGNAL_HEAD}.<name>`, or delete the \
-                 binding if nothing was meant to read it.",
+                "Fix: {fix}, or delete the binding if nothing was meant to read it."
             )),
         );
         out.refused_drivers.insert(b.lhs.clone());
@@ -576,6 +582,42 @@ fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut Scope
         rhs: &b.rhs,
         span: b.span.clone(),
     });
+}
+
+/// Why a `logic` left-hand side is not a signal name, and the repair, for
+/// the three ways it can miss: outside the namespace, the namespace with
+/// no name after it, and a name of more than one segment.
+fn lhs_refusal(lhs: &DottedRef) -> (String, String) {
+    if lhs.head() != SIGNAL_HEAD {
+        return (
+            format!(
+                "which is outside the `{SIGNAL_HEAD}.` namespace sensors emit into and \
+                 actuators read from"
+            ),
+            format!("rename the left-hand side to `{SIGNAL_HEAD}.<name>`"),
+        );
+    }
+    let segments = lhs.tail();
+    match segments.first() {
+        None => (
+            format!(
+                "which is the `{SIGNAL_HEAD}.` namespace itself rather than a signal in it; a \
+                 signal name is `{SIGNAL_HEAD}.` and exactly one segment after it"
+            ),
+            format!("add a name, as in `{SIGNAL_HEAD}.<name>`"),
+        ),
+        Some(first) => (
+            format!(
+                "which has {count} segments after `{SIGNAL_HEAD}.`; a signal name is \
+                 `{SIGNAL_HEAD}.` and exactly one segment after it",
+                count = segments.len(),
+            ),
+            format!(
+                "drop the segments after the first, as in `{SIGNAL_HEAD}.{first}`, or join \
+                 them into one name"
+            ),
+        ),
+    }
 }
 
 /// The repair for a value that names no signal, when there is one.
