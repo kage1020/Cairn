@@ -1,5 +1,9 @@
 //! Cairn command-line entry point.
 
+// Stdout goes through `outln!`, which keeps the exit code when the reader
+// has gone; a bare `println!` would panic there instead.
+#![deny(clippy::print_stdout)]
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -52,18 +56,24 @@ use clap::{Parser, Subcommand, ValueEnum};
 /// with `println!`'s message.
 macro_rules! outln {
     ($($arg:tt)*) => {
-        write_stdout_line(format_args!($($arg)*))
+        $crate::write_stdout_line(format_args!($($arg)*))
     };
 }
 
 /// The body of [`outln!`].
 fn write_stdout_line(line: std::fmt::Arguments<'_>) {
-    use std::io::Write as _;
-    match writeln!(std::io::stdout().lock(), "{line}") {
-        Err(err) if err.kind() != std::io::ErrorKind::BrokenPipe => {
-            panic!("failed printing to stdout: {err}")
-        }
-        _ => {}
+    write_line(&mut std::io::stdout().lock(), line);
+}
+
+/// Write `line` to `out` as [`outln!`] does: drop it if the reader has
+/// gone, panic on any other error.
+fn write_line(out: &mut impl std::io::Write, line: std::fmt::Arguments<'_>) {
+    match writeln!(out, "{line}") {
+        Ok(()) => {}
+        // The reader is gone. Drop the line; the command keeps the code it
+        // decides.
+        Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {}
+        Err(err) => panic!("failed printing to stdout: {err}"),
     }
 }
 
@@ -4000,6 +4010,42 @@ mod tests {
     use clap::CommandFactory;
 
     use super::*;
+
+    /// A writer whose every write fails with `kind`.
+    struct Failing(std::io::ErrorKind);
+
+    impl std::io::Write for Failing {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(self.0.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn write_line_writes_the_line() {
+        let mut out = Vec::new();
+        write_line(&mut out, format_args!("[{:>3}] {}", 7, "x"));
+        assert_eq!(out, b"[  7] x\n");
+    }
+
+    #[test]
+    fn write_line_drops_a_line_whose_reader_has_gone() {
+        write_line(
+            &mut Failing(std::io::ErrorKind::BrokenPipe),
+            format_args!("x"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "failed printing to stdout")]
+    fn write_line_panics_on_any_other_write_error() {
+        write_line(
+            &mut Failing(std::io::ErrorKind::StorageFull),
+            format_args!("x"),
+        );
+    }
 
     /// The whole note block, header included.
     ///
