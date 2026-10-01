@@ -188,6 +188,10 @@ impl std::fmt::Display for TokenKind {
             Self::Newline => f.write_str("end of line"),
             Self::Indent => f.write_str("indent"),
             Self::Dedent => f.write_str("dedent"),
+            // Not expected to surface: `parse()` reports the deferred
+            // `LexError` ahead of anything the parse found, and a raw value
+            // takes an `Unlexed` as text. Kept for totality, not as wording
+            // a user reads.
             Self::Unlexed => f.write_str("text that is no token"),
         }
     }
@@ -215,7 +219,8 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
 /// A failure inside a line, kept as the [`TokenKind::Unlexed`] at index
 /// `token` rather than ending the scan.
 pub(crate) struct Deferred {
-    /// Index of the `Unlexed` token in [`Lexed::tokens`].
+    /// Index of the `Unlexed` token in [`Lexed::tokens`], so valid only
+    /// against that vector as the scan built it.
     pub(crate) token: usize,
     /// What [`lex`] reports for it.
     pub(crate) error: LexError,

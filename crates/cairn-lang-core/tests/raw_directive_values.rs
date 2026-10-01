@@ -13,6 +13,7 @@
 //! raw value does not take it is refused with the error [`lex`] reports
 //! for it, at the same position, ahead of whatever the parse found.
 
+use cairn_lang_core::ast::Header;
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::error::ParseError;
 use cairn_lang_core::lex::lex;
@@ -95,12 +96,34 @@ fn a_comment_after_the_value_is_still_a_comment() {
     assert_eq!(codes(&format!("@cairn 2026.6 # $ ~\n{BODY}")), []);
 }
 
+/// Except where a quote opens ahead of the `#`. An unterminated string
+/// runs to end of line, so the comment is part of the stretch the lexer
+/// refused, and the value takes it whole.
+///
+/// This pins today's reading, not an intended one. The tree-sitter grammar
+/// reads the same source the other way: `directive_literal` stops at the
+/// `#` and the rest is a comment. Both parsers accept the file; only the
+/// value text differs.
+#[test]
+fn a_comment_inside_an_unterminated_quote_is_part_of_the_value() {
+    let source = format!("@cairn 2026.6 \"draft # note\n{BODY}");
+    let module = parse(&source).expect("the quote is the value's to judge");
+    let Header::Cairn { version, .. } = &module.headers[0] else {
+        panic!("expected a `@cairn` header, got {:?}", module.headers);
+    };
+    assert_eq!(version.as_str(), "2026.6 \"draft # note");
+    assert_eq!(codes(&source), [DiagnosticCode::InvalidCairnVersion]);
+}
+
 #[test]
 fn the_same_stretch_anywhere_else_is_refused_as_before() {
     for source in [
         // Whitespace other than a space separates nothing to the lexer,
         // and is no part of a value either.
         "@cairn 2026.6\tdraft\ntheme t:\n  slot wall -> @stone\n",
+        // A tab inside a stretch the lexer refused is still a tab, and
+        // still no part of a value.
+        "@cairn 2026.6 \"dr\taft\ntheme t:\n  slot wall -> @stone\n",
         // Not a raw value at all.
         "theme t:\n  slot wall -> @st$one\n",
         // `@intended_targets` re-reads its value as tokens.

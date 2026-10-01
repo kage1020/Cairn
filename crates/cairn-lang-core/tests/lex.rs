@@ -250,8 +250,9 @@ fn dedent_emits_per_level_closed() {
 /// It used to be an `UnexpectedChar`, which put a version label's
 /// pre-release suffix out of reach of the directive that reads it:
 /// `@requires version>=1.21.4-rc1` died on the `-` before any check pass
-/// saw it, back when the parser refused any file `lex` refuses. For why that label shape has to be readable, see
-/// `spec/versioning-editions` "The target is a compile-time parameter".
+/// saw it, back when the parser refused any file `lex` refuses. For why
+/// that label shape has to be readable, see `spec/versioning-editions`
+/// "The target is a compile-time parameter".
 #[test]
 fn a_lone_dash_lexes_as_a_token_rather_than_failing() {
     let suffixed = kinds("@requires version>=1.21.4-rc1\n");

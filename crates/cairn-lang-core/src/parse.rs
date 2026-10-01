@@ -100,11 +100,15 @@ impl RequiresPolicy {
 /// [`lex()`] reports it, ahead of whatever the parse itself found, which is
 /// what the file got when the whole of it was lexed first.
 ///
-/// Whitespace other than a space is never part of a value. The lexer
-/// separates tokens with spaces alone, so a tab or a no-break space
-/// between `@cairn` and its value is refused where it stands, as it always
-/// was: taken into the value, it would be trimmed off and the header would
-/// read as the version after it, which the file never declared.
+/// A stretch the lexer refused is never taken into a value if it holds
+/// whitespace other than a space, whether that whitespace is the whole
+/// stretch or sits inside an unterminated string. The lexer separates
+/// tokens with spaces alone, so a tab or a no-break space between `@cairn`
+/// and its value is refused where it stands, as it always was: taken into
+/// the value, it would be trimmed off and the header would read as the
+/// version after it, which the file never declared. A string literal that
+/// does close is a token rather than a refused stretch, and is taken whole
+/// with whatever it holds, as before.
 ///
 /// # Errors
 /// Returns a [`ParseError`] on the first lex or parse failure.
@@ -119,7 +123,7 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
     let taken = |token: usize| {
         !source[tokens[token].span.clone()]
             .chars()
-            .all(char::is_whitespace)
+            .any(|c| c.is_whitespace() && c != ' ')
             && parser.raw_values.iter().any(|raw| raw.contains(&token))
     };
     if let Some(stray) = deferred.into_iter().find(|d| !taken(d.token)) {

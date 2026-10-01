@@ -72,6 +72,13 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "@cairn 2026.6 \"draft\n",
         Accept,
     ),
+    // A tab inside the stretch that quote opens is still a tab: no part
+    // of a value on either side.
+    (
+        "cairn_tab_in_unterminated_quote",
+        "@cairn 2026.6 \"dr\taft\n",
+        Reject,
+    ),
     (
         "requires_unlexable_operator",
         "@requires version~=1.21\n",

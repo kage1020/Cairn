@@ -323,9 +323,10 @@
   and is reported as `W_INVALID_CAIRN_VERSION` (the build goes on) or `E_INVALID_REQUIRES`. The
   tree-sitter grammar already accepted all of them. Anywhere else the stretch is refused with the
   same error, at the same position, as before, including ahead of a parse error earlier in the
-  file. Whitespace other than a space is never taken into a value: `@cairn\t9999.12` is still
-  refused at the tab, since trimming it off would read the header as a version the file never
-  declared. `lex()` is unchanged and never returns an `Unlexed` token.
+  file. A refused stretch that holds whitespace other than a space is never taken into a value:
+  `@cairn\t9999.12` is still refused at the tab, since trimming it off would read the header as a
+  version the file never declared, and a tab inside an unterminated string is still refused as
+  an unterminated string. `lex()` is unchanged and never returns an `Unlexed` token.
 
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
