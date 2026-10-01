@@ -3073,20 +3073,19 @@ fn report_unplaceable_floor(
         ),
     }
     // The scope is offered only when it would change the answer, and what
-    // decides that is whether the label names a row of the *other*
-    // edition's table — not whether this floor carries a scope already.
-    // Recommending one without checking is recommending a guess: scoped to
-    // an edition that cannot place it either, the floor goes inert there
-    // and the constraint the author wrote evaporates. A label the other
-    // table places below or above every row is a comparison rather than a
-    // release, and scoped there it is the same inert floor: satisfied by
-    // every target of that edition, or by none.
+    // decides that is whether the *other* edition's table names the label
+    // — a row, or the pre-release of one — not whether this floor carries
+    // a scope already. Recommending one without checking is recommending a
+    // guess: scoped to an edition that does not name it either, the floor
+    // goes inert there and the constraint the author wrote evaporates. A
+    // label the other table places below or above every row is a
+    // comparison rather than a release, and scoped there it is the same
+    // inert floor: satisfied by every target of that edition, or by none.
     let other = edition.other();
     let other_edition_names_it = floor.edition.is_none()
-        && matches!(
-            version_order(other.registry_pack()).place(&floor.version),
-            FloorPlacement::At(_)
-        );
+        && version_order(other.registry_pack())
+            .place(&floor.version)
+            .names_release();
     if other_edition_names_it {
         eprintln!(
             "  `{}` is a {} release; if that is the numbering this floor is written in, say so",

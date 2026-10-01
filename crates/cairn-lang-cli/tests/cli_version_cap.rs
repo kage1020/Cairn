@@ -522,10 +522,10 @@ fn the_unorderable_refusal_offers_a_scope_that_works() {
     );
 }
 
-/// The scope is only offered when the *other* edition can place the label.
+/// The scope is only offered when the *other* edition names the label.
 ///
 /// Offering it otherwise recommends a guess: scoped to an edition that
-/// cannot place it either, the floor goes inert there and the constraint
+/// does not name it either, the floor goes inert there and the constraint
 /// the author wrote evaporates into a `verified: true` build.
 #[test]
 fn a_label_no_edition_can_place_is_not_answered_with_a_scope() {
@@ -547,33 +547,140 @@ fn a_label_no_edition_can_place_is_not_answered_with_a_scope() {
     );
 }
 
-/// A label the other edition's table places below or above every row is not
-/// one of its releases either, so it gets no scope.
+/// A Java build refusing a floor the Bedrock table orders without naming it,
+/// asserting no Bedrock scope is offered and the one repair left is.
 ///
-/// `1.14.5` and `1.27` name no Java release, and Bedrock's table orders
-/// both — below `1.19.30` and above `1.26.40` — without naming them. Scoped
-/// to Bedrock, the first is satisfied by every Bedrock target and the second
-/// by none, while the Java builds the author was constraining lose the floor
-/// entirely. That is the inert floor the offer is withheld to avoid.
+/// The refusal is checked whole: exit code `1` and nothing written, so a
+/// regression that prints the refusal and then builds anyway fails here.
+fn assert_no_bedrock_scope_is_offered(name: &str, label: &str) {
+    let fixture = Fixture::new(
+        "cairn-version-cap",
+        name,
+        &format!("@requires version>={label}\n{BUILD}"),
+    );
+    let out = compile(&fixture, "1.21.4");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(1), "`{label}`: {stderr}");
+    assert!(
+        stderr.contains("E_REQUIRES_UNORDERABLE"),
+        "`{label}` is inside Java's span and names no Java release: {stderr}",
+    );
+    assert!(
+        !stderr.contains("@requires bedrock") && !stderr.contains("is a bedrock release"),
+        "`{label}` names no bedrock release, so no bedrock scope may be offered: {stderr}",
+    );
+    assert!(
+        stderr.contains("fix: name a java release"),
+        "`{label}`: the one repair left has to be named: {stderr}",
+    );
+    assert_eq!(
+        fixture.artifacts(),
+        Vec::<String>::new(),
+        "`{label}`: a refused compile must leave no artifact and no lock",
+    );
+}
+
+/// A label Bedrock's table places below every row is not one of its
+/// releases, so it gets no Bedrock scope.
+///
+/// Scoped to Bedrock, the floor would be met by every Bedrock target, while
+/// the Java builds the author was constraining lose it entirely. The label
+/// has to stay below every Bedrock row and inside Java's span, naming no
+/// Java release; the Bedrock table only grows upward, so that holds.
 #[test]
-fn a_label_outside_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
-    for (name, label) in [("below_bedrock", "1.14.5"), ("above_bedrock", "1.27")] {
-        let fixture = Fixture::new(
-            "cairn-version-cap",
-            name,
-            &format!("@requires version>={label}\n{BUILD}"),
-        );
-        let stderr = String::from_utf8(compile(&fixture, "1.21.4").stderr).expect("utf-8");
-        assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
-        assert!(
-            !stderr.contains("@requires bedrock") && !stderr.contains("is a bedrock release"),
-            "`{label}` names no bedrock release, so no bedrock scope may be offered: {stderr}",
-        );
-        assert!(
-            stderr.contains("fix: name a java release"),
-            "the one repair left has to be named: {stderr}",
-        );
-    }
+fn a_label_below_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
+    assert_no_bedrock_scope_is_offered("below_every_row", "1.14.5");
+}
+
+/// A label Bedrock's table places above every row is not one of its
+/// releases either, so it gets no Bedrock scope.
+///
+/// Scoped to Bedrock, the floor would be met by no Bedrock target, while
+/// the Java builds lose it. The label has to stay above every Bedrock row
+/// and inside Java's span, naming no Java release. It is chosen far above
+/// Bedrock's newest row so the next pack refresh does not give Bedrock a
+/// row it names; if this starts offering a scope, check that premise before
+/// the code.
+#[test]
+fn a_label_above_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
+    assert_no_bedrock_scope_is_offered("above_every_row", "1.99");
+}
+
+/// A label the other edition's table carries as a row gets the scope, and
+/// the line saying whose release it is. Positive half of the two tests
+/// above: without it, their negative assertions on `is a bedrock release`
+/// would pass just as well against a message reworded to anything else.
+///
+/// The row is one Bedrock's pack orders but cannot build for, so this also
+/// pins that the offer is made for any row the table names, not only the
+/// targetable ones. And the advice is taken, to a build.
+#[test]
+fn a_label_naming_a_row_of_the_other_edition_is_offered_its_scope() {
+    let fixture = Fixture::new(
+        "cairn-version-cap",
+        "other_row",
+        &format!("@requires version>=1.21.20\n{BUILD}"),
+    );
+    let out = compile(&fixture, "1.21.4");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
+    assert!(
+        stderr.contains("`1.21.20` is a bedrock release"),
+        "should say whose release the label is: {stderr}",
+    );
+    assert!(
+        stderr.contains("fix: `@requires bedrock version>=1.21.20`, or name a java release"),
+        "should offer the bedrock scope: {stderr}",
+    );
+
+    let repaired = Fixture::new(
+        "cairn-version-cap",
+        "other_row_fixed",
+        &format!("@requires bedrock version>=1.21.20\n{BUILD}"),
+    );
+    let out = compile_as(&repaired, "bedrock", "1.21.40");
+    assert!(
+        out.status.success(),
+        "the offered repair has to build: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+/// The pre-release of a row the other edition names gets the scope too:
+/// it is placed at that row, so it names that edition's numbering just as
+/// the release does.
+///
+/// `1.19.30-rc1` is inside Java's span and names no Java release; Bedrock
+/// carries `1.19.30`. Only the repair is asserted, not the line before it,
+/// which calls the label a release where it is the candidate for one.
+#[test]
+fn a_pre_release_of_a_row_of_the_other_edition_is_offered_its_scope() {
+    let fixture = Fixture::new(
+        "cairn-version-cap",
+        "other_pre_release",
+        &format!("@requires version>=1.19.30-rc1\n{BUILD}"),
+    );
+    let out = compile(&fixture, "1.21.4");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
+    assert!(
+        stderr.contains("fix: `@requires bedrock version>=1.19.30-rc1`, or name a java release"),
+        "should offer the bedrock scope: {stderr}",
+    );
+
+    let repaired = Fixture::new(
+        "cairn-version-cap",
+        "other_pre_release_fixed",
+        &format!("@requires bedrock version>=1.19.30-rc1\n{BUILD}"),
+    );
+    let out = compile_as(&repaired, "bedrock", "1.21.40");
+    assert!(
+        out.status.success(),
+        "the offered repair has to build: {}",
+        String::from_utf8_lossy(&out.stderr),
+    );
 }
 
 /// A floor naming a real release of the edition being built is ordered

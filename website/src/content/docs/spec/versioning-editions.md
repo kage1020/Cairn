@@ -306,10 +306,10 @@ cannot place that the *other* edition names — a row of its table, or the pre-r
 floor written in the other's numbering, and `E_REQUIRES_UNORDERABLE` names it and offers the scope.
 A label the other edition does not name gets no scope offered, because recommending one would be
 recommending a guess: scoped to an edition that does not name it either, the floor goes inert there
-and the constraint disappears. That covers a label neither edition can place — a snapshot, a version
-newer than the pack — and also one the other edition places only below or above every row. Those
-two placements are comparisons rather than releases: they say nothing about which numbering the
-author meant, and scoped there the floor is met by every target of that edition or by none.
+and the constraint disappears. That covers a label neither edition can place — a snapshot — and
+also one the other edition places only below or above every row. Those two placements are
+comparisons rather than releases: they say nothing about which numbering the author meant, and
+scoped there the floor is met by every target of that edition or by none.
 
 ### A floor may name its edition
 
