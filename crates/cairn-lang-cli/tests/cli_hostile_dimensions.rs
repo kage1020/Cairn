@@ -112,6 +112,22 @@ fn connected(gap: &str) -> String {
     ))
 }
 
+/// Two huts whose doors face each other's backs along `z`, via `north_of=`.
+///
+/// `HUT`'s only door is on its front, so [`connected`] cannot put a port on
+/// the `-z` side; this pair needs a door of its own on the back.
+fn connected_back_to_back(gap: &str) -> String {
+    source(&format!(
+        "def back_door_hut size=3x3:\n\
+         \x20\x20walls id=walls mat_slot=wall height=3\n\
+         \x20\x20door  id=back side=back at=center\n\n\
+         site duo:\n\
+         \x20\x20place id=a use=back_door_hut theme=t at=origin\n\
+         \x20\x20place id=b use=back_door_hut theme=t north_of=a gap={gap}\n\
+         \x20\x20connect a.back to b.back path=@path\n"
+    ))
+}
+
 /// Two ports offset on *both* axes, via an `east_of=` / `north_of=` chain.
 ///
 /// The single-axis pair above only ever spans a line, so a pair like this is
@@ -186,6 +202,13 @@ fn hostile_sources() -> Vec<(&'static str, String)> {
         // the step from that origin to the door's port leaves the range.
         // `the_port_case_reaches_port_resolution` holds it there.
         ("gap-port-past-i32", connected("2147483644")),
+        // The same on the `-z` side: `b`'s origin lands at `z = 0 - 3 -
+        // 2147483645 = i32::MIN` exactly, and only the step out to its back
+        // door's port leaves the range.
+        (
+            "gap-port-past-i32-north",
+            connected_back_to_back("2147483645"),
+        ),
         // Three more and the origin itself leaves the range. That saturated
         // onto `i32::MAX` once; the row is refused now, before any port is
         // resolved against it.
@@ -380,6 +403,11 @@ fn the_port_case_reaches_port_resolution() {
             "origin works out to",
         ),
         (
+            "gap-port-past-i32-north",
+            &["port `b.back` could not be placed"][..],
+            "origin works out to",
+        ),
+        (
             "gap-origin-past-i32",
             &[
                 "origin works out to x=2147483650",
@@ -444,64 +472,60 @@ fn hostile_3_compile_refuses_rather_than_certifying_the_wreckage() {
     }
 }
 
-/// Two walkway rows whose coordinates reach the edge of `i32` without
-/// passing it, so neither is refused before the walkway pass does its
-/// own arithmetic there.
+/// A walkway whose router search reaches the `i32::MAX` column.
 ///
-/// Both are standalone rather than `hostile_sources()` rows: the detour
-/// is a legitimate walkway that lowers with no diagnostic at all, which
-/// `hostile_2` would reject.
+/// The straight L from `b.east` to `c.west` crosses a floor, so the
+/// router runs. With `gap=2147483640`, `b.east` sits at `x = i32::MAX - 1`,
+/// the search rectangle's east margin is the `i32::MAX` column, and the
+/// router expands a cell there. One block further east the margin itself
+/// would leave `i32`, so the router refuses the rectangle, the lowering
+/// falls back to the straight L and skips the cells it overlaps.
+///
+/// Both rows are kept so the first stays on the edge: one block west and
+/// the router never reaches `i32::MAX`, so the case goes inert, and the
+/// second row's warning would go with it; one block east and the first row
+/// starts warning. The second row is also what shows the straight L
+/// overlaps a floor, so the first row's lack of a warning means the router
+/// laid a detour.
+///
+/// Standalone rather than `hostile_sources()` rows: the first row lowers
+/// with no diagnostic at all, which `hostile_2` would reject.
 #[test]
-fn walkway_arithmetic_at_the_edge_of_i32_answers_rather_than_panics() {
-    // `b` lands at `z = 0 - 3 - 2147483645 = i32::MIN` exactly, so its
-    // back wall is on the edge and the port one block further out is
-    // past it.
-    let port_past_the_edge = source(
-        "def hut size=3x3:\n\
-         \x20\x20walls id=w mat_slot=wall height=3\n\
-         \x20\x20door  id=back side=back at=center\n\n\
-         site s:\n\
-         \x20\x20place id=a use=hut theme=t at=origin\n\
-         \x20\x20place id=b use=hut theme=t north_of=a gap=2147483645\n\
-         \x20\x20connect a.back to b.back path=@gravel\n",
-    );
-    // The straight L from `b.east` to `c.west` crosses `b`'s floor, so
-    // the router runs, and its search rectangle's east margin is the
-    // `i32::MAX` column. `a` has no floor: with one, its cells would
-    // stretch the rectangle past the area cap and the row would be
-    // refused before the router ran.
-    let detour_along_the_edge = source(
-        "def shell size=3x3:\n\
-         \x20\x20walls id=w mat_slot=wall height=3\n\n\
-         def hut2 size=3x3:\n\
-         \x20\x20floor id=f mat_slot=wall\n\
-         \x20\x20walls id=w mat_slot=wall height=3\n\
-         \x20\x20door  id=east side=right at=center\n\
-         \x20\x20door  id=west side=left  at=center\n\n\
-         site s:\n\
-         \x20\x20place id=a use=shell theme=t at=origin\n\
-         \x20\x20place id=b use=hut2  theme=t east_of=a gap=2147483640\n\
-         \x20\x20place id=c use=hut2  theme=t north_of=b gap=2\n\
-         \x20\x20connect b.east to c.west path=@gravel\n",
-    );
+fn a_detour_searched_along_the_edge_of_i32_answers_rather_than_panics() {
+    // `a` must have no floor: with one, its cells stretch the search
+    // rectangle 2.1e9 blocks west, past the router's area cap, and both
+    // rows fall back to the straight L.
+    let detour = |gap: &str| {
+        source(&format!(
+            "def shell size=3x3:\n\
+             \x20\x20walls id=walls mat_slot=wall height=3\n\n\
+             def floored_hut size=3x3:\n\
+             \x20\x20floor id=floor mat_slot=floor\n\
+             \x20\x20walls id=walls mat_slot=wall height=3\n\
+             \x20\x20door  id=east side=right at=center\n\
+             \x20\x20door  id=west side=left  at=center\n\n\
+             site s:\n\
+             \x20\x20place id=a use=shell       theme=t at=origin\n\
+             \x20\x20place id=b use=floored_hut theme=t east_of=a gap={gap}\n\
+             \x20\x20place id=c use=floored_hut theme=t north_of=b gap=2\n\
+             \x20\x20connect b.east to c.west path=@gravel\n"
+        ))
+    };
     let tmp = TempDir::new().expect("tempdir");
-    for (name, body, walkway, stderr_says) in [
+    for (name, gap, warning) in [
+        ("detour-at-the-edge", "2147483640", None),
         (
-            "port-past-the-edge",
-            port_past_the_edge,
-            None,
-            Some("port `b.back` could not be placed"),
-        ),
-        (
-            "detour-along-the-edge",
-            detour_along_the_edge,
-            Some("s_walkway_b_east__c_west.nbt"),
-            None,
+            "margin-past-the-edge",
+            "2147483641",
+            Some([
+                "W_WALKWAY_BLOCKED",
+                "the walkway endpoints sit at the edge of the representable coordinate space",
+            ]),
         ),
     ] {
         let dir = tmp.path().join(name);
         fs::create_dir_all(&dir).expect("case dir");
-        let path = write(&dir, name, &body);
+        let path = write(&dir, name, &detour(gap));
         let file = path.to_str().unwrap();
         let out_dir = dir.join("out");
         let out = out_dir.to_str().unwrap();
@@ -517,25 +541,22 @@ fn walkway_arithmetic_at_the_edge_of_i32_answers_rather_than_panics() {
                 "{name}: `{}` must answer, not crash\nstderr={stderr}",
                 args[0],
             );
-            if let Some(text) = stderr_says {
-                assert!(
-                    stderr.contains(text),
-                    "{name}: `{}` must name the refused port; got {stderr}",
-                    args[0],
-                );
-            } else {
-                assert!(
+            match warning {
+                None => assert!(
                     !stderr.contains("W_"),
                     "{name}: `{}` lays the detour, so it has nothing to warn about; got {stderr}",
                     args[0],
-                );
+                ),
+                Some(texts) => assert!(
+                    texts.iter().all(|text| stderr.contains(text)),
+                    "{name}: `{}` must say the router refused the edge; got {stderr}",
+                    args[0],
+                ),
             }
         }
-        if let Some(walkway) = walkway {
-            assert!(
-                out_dir.join(walkway).exists(),
-                "{name}: the detour along the edge is laid and written",
-            );
-        }
+        assert!(
+            out_dir.join("s_walkway_b_east__c_west.nbt").exists(),
+            "{name}: the walkway is laid and written either way",
+        );
     }
 }

@@ -284,11 +284,12 @@
   1.21.60.10), and `data_versions.json`'s `source` note, which said it was, now says which number
   the column holds.
 
-- *(core)* A `connect` row whose detour ran along the edge of the coordinate space crashed the
-  lowering instead of laying the walkway. The router searches a rectangle one cell wider than the
-  obstacles and ports on every side, and that margin may lie on `x` or `z` = `i32::MIN` or
-  `i32::MAX`. Expanding a cell there computed its neighbour past the edge before asking whether
-  the neighbour was inside the rectangle:
+- *(core)* A `connect` row whose detour was searched along the edge of the coordinate space
+  crashed the lowering instead of laying the walkway. The router searches a rectangle one cell
+  wider than the obstacles and ports on every side, and that margin may lie on `x` or `z` =
+  `i32::MIN` or `i32::MAX`. Expanding a cell there computed its neighbour past the edge before
+  asking whether the neighbour was inside the rectangle. With a floorless 3x3 `shell` and a 3x3
+  `hut` that has a floor and doors named `east` and `west` on its right and left sides:
 
   ```
   site s:
@@ -299,15 +300,16 @@
   ```
 
   ```
-  $ cairn check route.crn --edition java --target 1.21.4
-  thread 'main' panicked at crates/cairn-lang-core/src/block_array/walkway.rs:965:25:
+  $ cairn check route.crn --edition java --target 1.21.4; echo "exit=$?"
+  thread 'main' panicked at .../walkway.rs:
   attempt to add with overflow
+  exit=101
   ```
 
-  `check --target`, `lower` and `compile` all stopped there in a build with overflow checks on. A
-  release build wraps the sum onto the opposite edge, which the rectangle then excludes, so it laid
-  the same detour by accident. A step that leaves `i32` is now skipped like any other step out of
-  the rectangle, so the row above lays its detour in either build.
+  `check --target`, `lower` and `compile` all exited 101 there in a build with overflow checks on.
+  A release build wraps the sum onto the opposite edge, which the rectangle then excludes, so it
+  laid the same detour by accident. A step that leaves `i32` is now skipped like any other step out
+  of the rectangle, so the row above lays its detour in either build.
 
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,

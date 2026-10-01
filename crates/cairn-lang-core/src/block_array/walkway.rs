@@ -692,12 +692,17 @@ enum StepDir {
 }
 
 impl StepDir {
-    /// The `(x, z)` cell one step from `cell` in this direction, or
+    /// The `(x, z)` cell one step from this cell in this direction, or
     /// `None` when that step leaves `i32`. [`search_rect`] only
     /// guarantees that the inflated rectangle itself fits in `i32`, so
     /// a cell on its edge can sit at `i32::MIN` or `i32::MAX`; the
     /// neighbour past that edge is outside the rectangle anyway, and
     /// the caller skips it like any other out-of-bounds cell.
+    ///
+    /// Only the expansion loop in [`route_path`] can see `None`.
+    /// [`search_rect`] folds both endpoints into the rectangle before
+    /// adding the margin, so a start cell is never on the rectangle's
+    /// edge and its first steps all stay inside `i32`.
     fn step(self, (x, z): (i32, i32)) -> Option<(i32, i32)> {
         match self {
             Self::PosX => Some((x.checked_add(1)?, z)),
@@ -941,6 +946,9 @@ pub fn route_path<S: BuildHasher>(
     let start = (from.0, from.2);
     let goal = (to.0, to.2);
     for dir in STEP_DIRS {
+        // Never `None` (see `StepDir::step`); skipped rather than
+        // unwrapped so this loop does not depend on how `search_rect`
+        // sizes the rectangle.
         let Some(cell) = dir.step(start) else {
             continue;
         };
@@ -1685,7 +1693,7 @@ mod tests {
 
     #[test]
     fn route_path_detours_along_each_edge_of_the_coordinate_space() {
-        // `search_rect` only refuses a rectangle whose one-cell margin
+        // `search_rect` refuses a rectangle whose one-cell margin
         // leaves `i32`, so the margin itself may lie on `i32::MIN` or
         // `i32::MAX`, and the router expands the cells there. Each of
         // those cells has a neighbour past the edge, which the router
