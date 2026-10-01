@@ -349,6 +349,29 @@
   laid the same detour by accident. A step that leaves `i32` is now skipped like any other step out
   of the rectangle, so the row above lays its detour in either build.
 
+- *(core)* A `@cairn`, `@requires` or part-level `requires` value holding a character the lexer
+  has no token for refused the whole file with `E_PARSE`, before the check pass that judges the
+  value ever saw it. Whether a malformed `@cairn` was a warning or a refused build depended on
+  its punctuation:
+
+  ```
+  @cairn 2026.6 draft     # warning[W_INVALID_CAIRN_VERSION], exit 0
+  @cairn 2026.6+build     # error[E_PARSE]: unexpected character `+` (U+002B), exit 1
+  ```
+
+  The same held for `@cairn 2026/06`, `@requires version~=1.21`, `requires version~=1.21` in a
+  `def` or `theme` body, and a value with an unterminated `"`. Those values are raw text to end of
+  line, and the parser now takes them as such: a failure inside a line — a character no token
+  starts with, an unterminated string, a malformed size or integer — is kept as a
+  `TokenKind::Unlexed` token instead of ending the lex, so each value above reaches its check pass
+  and is reported as `W_INVALID_CAIRN_VERSION` (the build goes on) or `E_INVALID_REQUIRES`. The
+  tree-sitter grammar already accepted all of them. Anywhere else the stretch is refused with the
+  same error, at the same position, as before, including ahead of a parse error earlier in the
+  file. A refused stretch that holds whitespace other than a space is never taken into a value:
+  `@cairn\t9999.12` is still refused at the tab, since trimming it off would read the header as a
+  version the file never declared, and a tab inside an unterminated string is still refused as
+  an unterminated string. `lex()` is unchanged and never returns an `Unlexed` token.
+
 - *(core)* `cairn check` passed, and `cairn info` listed every supported version as buildable, for
   a source whose artifacts share a file name, which `cairn compile` then refused at every target. A
   `struct` and a `place` of one name both write `hut.nbt`:
@@ -1452,6 +1475,41 @@
   untouched: this is a row of a report `info` writes on a run it does not refuse, not a diagnostic.
 
 ### Breaking changes
+
+- *(core)* A `struct` / `def` header argument other than `size=` was read by nothing and checked by
+  nothing, so a typo on the header was dropped in silence:
+
+  ```
+  struct s size=5x5 hieght=3
+    floor mat_slot=wall
+  ```
+
+  `cairn check` exited 0 on it, and `compile` built the struct. A misspelled `size=` fared little
+  better. On `struct s siz=7x7`, a `cairn check` without `--edition` and `--target` reported
+  nothing, and a pinned `check` or `compile` reported only `W_STRUCT_NO_SIZE` / `W_DEF_NO_SIZE` on
+  the line, telling the author to add a `size=WxH` header to a line that already had one. The header
+  now has a closed vocabulary, `size=` and `class=`, and any other key is `E_UNKNOWN_ARGUMENT` with
+  the same `did you mean` note and closed-set list a member argument gets:
+
+  ```
+  b.crn:1:14: error[E_UNKNOWN_ARGUMENT]: `siz=` is not an argument a `struct` header reads
+    note: did you mean `size`?
+    note: expected one of: size, class
+  ```
+
+  Where block-array lowering runs, the missing-size warning still fires beside it, since the struct
+  really has no size, and is printed after the error.
+
+  `class=` is the key `spec/components-editing-sites` writes on a `def` header
+  (`def cottage class=house size=9x7:`), and no pass reads it yet, so it is reported as the
+  unreached-key case of `W_IGNORED_ARGUMENT`, as `window shape=` is. `examples/village.crn` and the
+  tutorial's copy of it drop their header `class=house` so the example stays warning-free. The
+  spec's own samples keep it, in `spec/components-editing-sites` and `spec/materials-themes`, and
+  now carry the warning that `spec/components-editing-sites` "`def`, the component construct"
+  documents: it states the header vocabulary as closed at `size=` / `class=` until a parameter
+  mechanism is specified. A source with any other key on a header, which compiled before, is now
+  refused. `spec/lint` states the header vocabulary and lists the header's `class=` among the
+  unreached keys, with the ja mirror.
 
 - *(core)* Two `connect` rows could lay one walkway between them. A `_` at the end of the `from`
   port or at the start of the `to` place merges into the `__` that joins a walkway scope key's two

@@ -161,7 +161,20 @@ pub fn noisy_sources() -> Vec<String> {
             .to_owned(),
     ];
     sources.extend(unreadable_value_sources());
+    sources.extend(header_sources());
     sources
+}
+
+/// The sources for the `struct` / `def` header line's own vocabulary, kept
+/// apart like `unreadable_value_sources` only so no list outgrows a screen:
+/// a misspelled `size=`, which also leaves the struct with no size, and the
+/// `class=` the header takes and no pass reads. Each finding has a header
+/// sentence of its own, distinct from the member one.
+fn header_sources() -> Vec<String> {
+    vec![
+        format!("{THEME}struct s siz=7x7\n  floor mat_slot=floor\n"),
+        format!("{THEME}def cottage class=house size=5x5:\n  floor mat_slot=floor\n"),
+    ]
 }
 
 /// The sources for an unreadable value's findings, kept apart only so

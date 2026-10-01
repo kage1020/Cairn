@@ -208,9 +208,8 @@ fn a_label_the_spec_says_will_exist_is_not_refused_by_the_directive() {
     }
 }
 
-/// A `-` used to die in the lexer, before any pass could have an opinion:
-/// a header's value is the raw source between its tokens, so a character
-/// the lexer refuses never reaches the reader that would accept it.
+/// A `-` used to die in the lexer, before any pass could have an opinion,
+/// back when the parser refused any file `lex` refuses.
 #[test]
 fn a_pre_release_label_reaches_the_directive_at_all() {
     let source = format!("@requires version>=1.21.4-rc1\n{BODY}");
