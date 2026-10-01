@@ -8,7 +8,8 @@
 //! this module was removed when the registry pack ingest landed.
 //!
 //! Bedrock `.mcstructure` palettes carry an analogous `version` integer
-//! per block (`(major << 24) | (minor << 16) | (patch << 8) | revision`);
+//! per block: the block-state version the release writes, packed as
+//! `(major << 24) | (minor << 16) | (patch << 8) | revision`;
 //! its table lives at `registry-data/bedrock/data_versions.json` and
 //! resolves through the same machinery into a [`BedrockTarget`].
 
