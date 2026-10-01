@@ -97,8 +97,10 @@ fn dup_6_duplicate_selector_attribute_is_reported() {
 fn dup_7_duplicate_header_arg_other_than_size_is_arg_not_size() {
     // Header has a repeated non-`size` arg; the code should be the generic
     // `E_DUPLICATE_ARG`, not the size-specific `E_DUPLICATE_SIZE`. The
-    // key is `class=`, a header key no pass reads yet, so the arguments
-    // pass reports the surviving value beside the duplicate.
+    // header vocabulary is closed at `size=` and `class=`, so `class=` is
+    // the only key left to repeat: any other, `wood=` included, is also an
+    // `E_UNKNOWN_ARGUMENT`. No pass reads a header's `class=` yet, so the
+    // arguments pass reports the surviving value beside the duplicate.
     let src = "struct s size=1x1 class=house class=hut\n  floor mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 2, "got {diags:#?}");

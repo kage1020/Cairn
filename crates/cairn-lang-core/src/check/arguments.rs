@@ -4,7 +4,10 @@
 //! binding a theme selector carries, which no pass reads either. A
 //! member's own `[key=value]` selector answers to the same vocabulary.
 //! The `struct` / `def` header line answers to a vocabulary of its own,
-//! `size=` and `class=`, judged the same way one line up.
+//! `size=` and `class=`, and gets two of those findings: an unknown key
+//! and an unreached one. No selector widens it, no sibling routes past one
+//! of its keys, and its `size=` is accepted whatever the value, which
+//! `check::type_mismatch` judges.
 //!
 //! Walks the Intent IR beside [`super::keyword_allowlist`], which asks the
 //! same question one level up. The two do not both fire on a line: a
@@ -560,5 +563,24 @@ fn unread_header_argument(keyword: &str, key: &str, span: &crate::error::Span) -
             ),
         }],
         data: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HEADER_ARGUMENTS, UNREAD_HEADER_ARGUMENTS};
+
+    /// The header's twin of the member tables' consistency test. A key
+    /// listed as unread but missing from the vocabulary would never reach
+    /// the unread branch: `check_header` refuses it as unknown first, so
+    /// the key the specification writes would be an error.
+    #[test]
+    fn every_unread_header_argument_is_in_the_header_vocabulary() {
+        for key in UNREAD_HEADER_ARGUMENTS {
+            assert!(
+                HEADER_ARGUMENTS.contains(key),
+                "`{key}` is called unread but the header vocabulary does not list it",
+            );
+        }
     }
 }

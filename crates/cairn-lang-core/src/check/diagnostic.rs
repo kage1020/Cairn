@@ -262,16 +262,17 @@ pub enum DiagnosticCode {
     /// **Unreached key**: no pass reads it yet. On a member that is a key
     /// the specification defines, listed in
     /// `crate::intent::MemberRole::unread_arguments`; on a `struct` / `def`
-    /// header it is `class=`; on a `theme` selector
-    /// row whose keyword names a role it is every `key=value` right of the
-    /// arrow, defined anywhere or not (`fram=42` included), since no pass
-    /// lowers a selector's bindings. **Routed past**:
-    /// a sibling argument picked a lowering rule that does not consult it,
-    /// which `crate::intent::MemberRole::conditional_arguments` records and
-    /// `roof kind=gable slope_to=front` is the instance of — that one has no
-    /// default to substitute, and fires whether or not the member went on to
-    /// build. The build differs from the source in all three, and the
-    /// difference is announced rather than silent.
+    /// header it is a key the specification writes there, listed in
+    /// `crate::check::arguments::UNREAD_HEADER_ARGUMENTS` — today `class=`;
+    /// on a `theme` selector row whose keyword names a role it is every
+    /// `key=value` right of the arrow, defined anywhere or not (`fram=42`
+    /// included), since no pass lowers a selector's bindings. **Routed
+    /// past**: a sibling argument picked a lowering rule that does not
+    /// consult it, which `crate::intent::MemberRole::conditional_arguments`
+    /// records and `roof kind=gable slope_to=front` is the instance of —
+    /// that one has no default to substitute, and fires whether or not the
+    /// member went on to build. The build differs from the source in all
+    /// three, and the difference is announced rather than silent.
     ///
     /// Distinct from [`Self::DeferredMember`], which says the member did
     /// not lower. A roof whose `overhang=` is unusable is in the build,

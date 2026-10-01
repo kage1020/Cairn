@@ -206,7 +206,7 @@ fn info_json_leaves_a_per_edition_warning_on_stderr() {
     fs::write(
         &path,
         "@cairn 2026.06\n\n\
-         def kiosk class=house size=5x5:\n\
+         def kiosk size=5x5:\n\
          \x20\x20walls id=walls class=outer mat_slot=wall height=3\n\n\
          theme shop_java:\n\
          \x20\x20slot wall           -> @wall.stone.cobble\n\

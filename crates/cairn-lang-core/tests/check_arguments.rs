@@ -26,10 +26,11 @@ fn only(source: &str) -> Diagnostic {
 /// The one finding `source` raises with `code`, beside exactly `total`
 /// findings in all, or a panic naming every finding it raised.
 ///
-/// For a source whose theme selector row earns its own
-/// `W_IGNORED_ARGUMENT` beside the finding under test. The total is
-/// asserted too, so a finding added or lost around the one under test
-/// still fails; each caller names what makes up the rest.
+/// For a source that earns other findings beside the one under test — a
+/// theme selector row's own `W_IGNORED_ARGUMENT`, or the `W_UNUSED_DEF` of
+/// a `def` nothing places. The total is asserted too, so a finding added or
+/// lost around the one under test still fails; each caller names what
+/// makes up the rest.
 fn only_with_code(source: &str, code: &str, total: usize) -> Diagnostic {
     let diags = diagnose(source);
     assert_eq!(
@@ -154,10 +155,13 @@ fn a_member_inside_a_def_is_checked_like_any_other() {
 
 #[test]
 fn a_struct_header_key_outside_its_vocabulary_is_refused_with_the_closed_set() {
-    // A member key written one line up, on the header. Nothing reads a
-    // header argument but `size=`, so the height is lost exactly as a
-    // misspelled member argument's would be — and the header's closed set
-    // is what the note offers, not `walls`'s.
+    // A misspelled `height=` written one line up, on the header. Nothing
+    // reads a header argument but `size=`, so the height is lost exactly as
+    // a misspelled member argument's would be — and the header's closed set
+    // is what the note offers, not the `floor` member's. There is no
+    // `did you mean`: the suggestion is drawn from the header's set alone,
+    // `hieght` is too far from `size` and `class` for one, and the `height`
+    // it is one transposition from is a member's key.
     let src = "struct s size=5x5 hieght=3\n  floor mat_slot=m\n";
     let d = only(src);
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
@@ -181,14 +185,13 @@ fn a_misspelled_size_on_a_header_is_told_it_is_misspelled() {
     // Before the header had a vocabulary, `siz=7x7` reached no check, and
     // the only word said about it was the missing-size warning of the
     // block-array lowering, pointing away from the typo. Both scope
-    // headers are walked, each by a loop of its own. The `def` is placed
-    // by nothing, so `W_UNUSED_DEF` makes up its second finding.
+    // headers are walked. The `def` is placed by nothing, so `W_UNUSED_DEF`
+    // makes up its second finding.
     for (src, keyword, total) in [
         ("struct s siz=7x7\n  floor mat_slot=m\n", "struct", 1),
         ("def hut siz=7x7:\n  floor mat_slot=m\n", "def", 2),
     ] {
         let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", total);
-        assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT", "source:\n{src}");
         assert_eq!(&src[d.span.clone()], "7x7", "source:\n{src}");
         assert!(
             d.primary.contains(&format!(
@@ -225,7 +228,6 @@ fn a_header_class_is_accepted_and_reported_as_ignored() {
         ),
     ] {
         let d = only_with_code(src, "W_IGNORED_ARGUMENT", total);
-        assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT", "source:\n{src}");
         assert_eq!(&src[d.span.clone()], "house", "source:\n{src}");
         assert!(
             d.primary.contains(&format!(
@@ -238,10 +240,27 @@ fn a_header_class_is_accepted_and_reported_as_ignored() {
 }
 
 #[test]
+fn a_near_miss_on_a_header_class_is_offered_the_unread_key() {
+    // `class` is in the header vocabulary although no pass reads it, so it
+    // is a candidate for the suggestion like `size` is: the repair is the
+    // word the author meant, and what becomes of it is the next finding.
+    let src = "struct s size=5x5 clas=house\n  floor mat_slot=m\n";
+    let d = only(src);
+    assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
+    assert_eq!(&src[d.span.clone()], "house");
+    assert!(
+        notes(&d).contains("did you mean `class`?"),
+        "got: {}",
+        notes(&d),
+    );
+}
+
+#[test]
 fn a_header_size_of_the_wrong_shape_is_the_type_check_s_alone() {
     // A `size=` whose value is not `WxH` is left in the header's residual
-    // arguments so the type check can see it. The key is the right word, so
-    // this pass says nothing and the value's own finding carries the repair.
+    // arguments, where this pass meets it. The key is the right word, so
+    // this pass says nothing; the type check reads the surface AST and
+    // reports the value, and that finding carries the repair alone.
     assert_eq!(
         codes("struct s size=5\n  floor mat_slot=m\n"),
         ["E_TYPE_MISMATCH_SIZE"],
