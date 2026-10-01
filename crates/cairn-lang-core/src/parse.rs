@@ -19,7 +19,7 @@ use crate::ast::{
 };
 use crate::check::{Diagnostic, DiagnosticCode, LineStarts};
 use crate::error::{IntContext, ParseError, Position};
-use crate::lex::{Token, TokenKind, lex};
+use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::resolve::parse_requirement;
 
 /// The word that introduces a version floor, as a directive name after the
@@ -91,12 +91,48 @@ impl RequiresPolicy {
 
 /// Parse a `.crn` source string into a [`Module`].
 ///
+/// A lex failure inside a line is judged after the parse rather than
+/// before it. `@cairn`, `@requires` and a part's `requires` take their
+/// value as raw text to end of line, and a value that holds a character
+/// no token starts with is theirs to judge — `W_INVALID_CAIRN_VERSION`,
+/// `E_INVALID_REQUIRES` — rather than a file that does not parse. Any such
+/// failure one of those values did not take is reported exactly as
+/// [`lex()`] reports it, ahead of whatever the parse itself found, which is
+/// what the file got when the whole of it was lexed first.
+///
+/// A stretch the lexer refused is never taken into a value if it holds
+/// whitespace other than a space, whether that whitespace is the whole
+/// stretch or sits inside an unterminated string. The lexer separates
+/// tokens with spaces alone, so a tab or a no-break space between `@cairn`
+/// and its value is refused where it stands, as it always was: taken into
+/// the value, it would be trimmed off and the header would read as the
+/// version after it, which the file never declared. A string literal that
+/// does close is a token rather than a refused stretch, and is taken whole
+/// with whatever it holds, as before.
+///
 /// # Errors
 /// Returns a [`ParseError`] on the first lex or parse failure.
 pub fn parse(source: &str) -> Result<Module, ParseError> {
-    let tokens = lex(source)?;
+    let Lexed {
+        tokens,
+        deferred,
+        fatal,
+    } = lex_deferring(source);
     let mut parser = Parser::new(source, &tokens);
-    parser.parse_module()
+    let parsed = parser.parse_module();
+    let taken = |token: usize| {
+        !source[tokens[token].span.clone()]
+            .chars()
+            .any(|c| c.is_whitespace() && c != ' ')
+            && parser.raw_values.iter().any(|raw| raw.contains(&token))
+    };
+    if let Some(stray) = deferred.into_iter().find(|d| !taken(d.token)) {
+        return Err(stray.error.into());
+    }
+    if let Some(fatal) = fatal {
+        return Err(fatal.into());
+    }
+    parsed
 }
 
 /// Render a parse failure as a [`Diagnostic`], so it can be reported
@@ -210,6 +246,10 @@ struct Parser<'a> {
     /// How many value / expression levels are currently open, bounded by
     /// [`MAX_NESTING_DEPTH`].
     depth: usize,
+    /// Token-index ranges taken whole as a raw directive value, where a
+    /// [`TokenKind::Unlexed`] is part of the text rather than a failure.
+    /// See [`parse`].
+    raw_values: Vec<std::ops::Range<usize>>,
 }
 
 impl<'a> Parser<'a> {
@@ -219,6 +259,7 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             depth: 0,
+            raw_values: Vec::new(),
         }
     }
 
@@ -265,19 +306,15 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::At)?;
         let name = self.expect_ident()?;
         let value_start_pos = self.position();
-        let value_start_byte = self.peek().map_or(self.source.len(), |t| t.span.start);
-        let mut value_end_byte = value_start_byte;
-        while let Some(t) = self.peek() {
-            if matches!(t.kind, TokenKind::Newline) {
-                break;
-            }
-            value_end_byte = t.span.end;
-            self.advance();
-        }
-        let raw = self.source[value_start_byte..value_end_byte]
-            .trim()
-            .to_owned();
+        let (value_tokens, raw, value_end_byte) = self.rest_of_line();
         let span = start_byte..value_end_byte;
+        // The two directives a check pass judges from their text take the
+        // whole of it, unlexable stretches included. `@intended_targets`
+        // re-reads its value as tokens and an unknown directive is refused
+        // whatever it holds, so neither does.
+        if matches!(name.as_str(), "cairn" | REQUIRES) {
+            self.raw_values.push(value_tokens);
+        }
         self.expect_newline()?;
         if raw.is_empty() {
             return Err(ParseError::Syntax {
@@ -544,6 +581,9 @@ impl<'a> Parser<'a> {
         // that a body reading no floors leaves the word an ordinary one.
         let position = self.position();
         let mark = self.pos;
+        // A rewound line is read again as a member, so any value it took
+        // raw is given back: an unlexable stretch in it is a failure again.
+        let raw_mark = self.raw_values.len();
         match self.parse_requires_line() {
             Ok(line) => match policy.refusal() {
                 None => Ok(Some(line)),
@@ -559,6 +599,7 @@ impl<'a> Parser<'a> {
                 }
                 Some(_) => {
                     self.pos = mark;
+                    self.raw_values.truncate(raw_mark);
                     Ok(None)
                 }
             },
@@ -570,9 +611,36 @@ impl<'a> Parser<'a> {
             Err(error) if policy == RequiresPolicy::Accepted => Err(error),
             Err(_) => {
                 self.pos = mark;
+                self.raw_values.truncate(raw_mark);
                 Ok(None)
             }
         }
+    }
+
+    /// Consume every token up to the end of the line and return their index
+    /// range, the source text they cover (trimmed), and the byte the text
+    /// ends at — the start of the first token when there is none.
+    ///
+    /// The text is sliced out of the source rather than rebuilt from the
+    /// tokens, so what the lexer split it into does not matter, and a
+    /// [`TokenKind::Unlexed`] stretch is part of it like any other token.
+    /// Whether that stretch is then a failure is the caller's to say, by
+    /// recording the range in `raw_values` or not.
+    fn rest_of_line(&mut self) -> (std::ops::Range<usize>, String, usize) {
+        let first = self.pos;
+        let value_start_byte = self.current_byte();
+        let mut value_end_byte = value_start_byte;
+        while let Some(t) = self.peek() {
+            if matches!(t.kind, TokenKind::Newline) {
+                break;
+            }
+            value_end_byte = t.span.end;
+            self.advance();
+        }
+        let raw = self.source[value_start_byte..value_end_byte]
+            .trim()
+            .to_owned();
+        (first..self.pos, raw, value_end_byte)
     }
 
     /// Read one `requires <expression>` line.
@@ -589,18 +657,8 @@ impl<'a> Parser<'a> {
         let keyword_position = self.position();
         let start_byte = self.current_byte();
         self.advance();
-        let value_start_byte = self.peek().map_or(self.source.len(), |t| t.span.start);
-        let mut value_end_byte = value_start_byte;
-        while let Some(t) = self.peek() {
-            if matches!(t.kind, TokenKind::Newline) {
-                break;
-            }
-            value_end_byte = t.span.end;
-            self.advance();
-        }
-        let raw = self.source[value_start_byte..value_end_byte]
-            .trim()
-            .to_owned();
+        let (value_tokens, raw, value_end_byte) = self.rest_of_line();
+        self.raw_values.push(value_tokens);
         let span = start_byte..value_end_byte;
         self.expect_newline()?;
         if raw.is_empty() {
