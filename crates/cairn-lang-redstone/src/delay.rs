@@ -129,17 +129,18 @@ const _: () = assert!(
 /// route of this length can carry more repeaters than
 /// `buffer_count_for_segment` gives for it.
 ///
-/// Two passes measure against it, and they measure different things.
-/// [`compile_delay`] applies it to the segment's *routed* length — the
-/// dust the signal travels — which is the cap proper.
-/// `crate::pass::lay_nets`, which all three place-and-route passes
-/// call, applies it to the straight line between the segment's ends,
-/// before a route is laid. The straight line is a floor on every route
-/// between two coords — it is the router's own admissible heuristic —
-/// so a pair further apart than this has no route any pass would
-/// accept, and laying one first buys nothing but the wait. That gate
-/// therefore refuses strictly less than this one does: everything it
-/// turns away, the delay pass would have turned away after the work.
+/// Three measures are held against it. [`compile_delay`] applies it to
+/// the segment's *routed* length — the dust the signal travels — which
+/// is the cap proper. `crate::pass::lay_nets`, which all three
+/// place-and-route passes call, applies it to the straight line between
+/// the segment's ends, before a route is laid. And the router's search
+/// stops at it: a path from the net's wire to a sink is part of that
+/// sink's segment, so a coord whose cheapest path through it is longer
+/// than this is not searched. The straight line is a floor on every
+/// route between two coords, and the path from the wire is a floor on
+/// the segment, so neither earlier answer turns away anything the delay
+/// pass would have kept: they refuse strictly less than it does, and
+/// save laying a route — or searching a reservation — first.
 ///
 /// 256 blocks is at least 17 buffer repeaters from a fresh source
 /// (`(256 - 1) / 15`); anything past that in a single segment reads as
@@ -962,55 +963,41 @@ mod tests {
     use crate::routing_geometry::NetTree;
     use crate::test_fixtures::{reservation, scoped, staircase};
 
-    /// The sanity cap counts the dust, not the distance.
+    /// The sanity cap counts the dust, not the distance, on the segment
+    /// into an actuator pad too.
     ///
-    /// An actuator pad joins its driver's net as a terminal, and the
-    /// tree reaches it through the cell row rather than straight down
-    /// the region — so the segment into a pad at the far edge is
-    /// `width + 2` where the straight line is `width`. At `width =
-    /// 256` that is the difference between "at the cap" and "over it",
-    /// and it is a shape v1's placement pass produces: one sensor
-    /// driving both a cell and a door.
-    ///
-    /// The two widths are asserted together so the boundary is pinned
-    /// from both sides rather than by one row that a changed constant
-    /// would slide past.
+    /// [`trunk_detour`] with the far sink a pad: its route is
+    /// `2 * width - 2` against a straight line of 2. At `width = 129`
+    /// that is exactly the cap and at 130 it is two over, so the boundary
+    /// is pinned from both sides rather than by one row that a changed
+    /// constant would slide past. The refusal is asserted by its wording
+    /// as well as its code: the straight-line gate and the router's bound
+    /// raise the same code, and neither of them can see this shape.
     #[test]
     fn attenuation_cap_measures_the_routed_output_segment() {
-        for (width, refuses) in [(255u32, false), (256, true)] {
-            let mut ir = PlacementIr::new(Edition::Java);
-            ir.region = Some(reservation(width, 4, 2));
-            ir.inputs.push(crate::netlist_ir::NetlistInput {
-                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
-                span: Span::default(),
+        for (width, refuses) in [(129u32, false), (130, true)] {
+            let delayed = compile_delay(&scoped(
+                ScopeKind::Struct,
+                "wide",
+                trunk_detour(width, FarSink::Pad),
+            ));
+            let fired = delayed.diagnostics.iter().any(|d| {
+                d.code == DiagnosticCode::AttenuationLimit
+                    && d.primary.contains(&format!(
+                        "has a driver segment of {} blocks into output pad #0",
+                        2 * width - 2,
+                    ))
             });
-            // Something standing on the straight line, so the route out
-            // to the pad is the two blocks longer that going round it
-            // costs. Without it the route and the straight line are one
-            // number and the fixture cannot tell which the cap was
-            // measured against.
-            ir.cells.push(placed_cell(
-                EditionCell::JavaRepeaterOr,
-                CellCoord::new(10, 0, 0),
-                Vec::new(),
-            ));
-            ir.outputs.push(routed_output(
-                NetRef::Input(0),
-                CellCoord::new(width - 1, 0, 0),
-            ));
-            let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
-            let fired = delayed
-                .diagnostics
-                .iter()
-                .any(|d| d.code == DiagnosticCode::AttenuationLimit);
             assert_eq!(
                 fired,
                 refuses,
-                "width {width}: straight line {}, routed {}, cap {MAX_ATTENUATION_SEGMENT}; got {:?}",
-                width - 1,
-                width + 1,
+                "width {width}: routed {}, cap {MAX_ATTENUATION_SEGMENT}; got {:?}",
+                2 * width - 2,
                 delayed.diagnostics,
             );
+            if !refuses {
+                assert_eq!(delayed.diagnostics, Vec::new());
+            }
         }
     }
 
@@ -1681,24 +1668,43 @@ mod tests {
         assert_eq!(survivors, vec!["roomy"]);
     }
 
-    #[test]
-    fn cell_driver_attenuation_primary_names_cell_and_port() {
-        // Cells wide-spread inside a `size=256x3` reservation, with one
-        // standing on the straight line between the other two. Only
-        // reachable by hand-built IR — the placement pass lays cell `i`
-        // at `x = i * CELL_SPACING + 1`, two columns apart, so the span
-        // from the first cell to the `k`th is `2k` and producing this
-        // shape from a `.crn` would need a chain of about 130 cells.
-        //
-        // The straight line is 255 and the route round the blocker is
-        // 257, so the cap is crossed by the detour and not by the
-        // distance. That is what puts the refusal here rather than in
-        // the straight-line gate `lay_nets` runs before any route is
-        // laid: this fixture is the case that gate must let through,
-        // and a wider region — where the distance alone is over the cap
-        // — would be answered before this pass saw it.
+    /// What the trunk in [`trunk_detour`] leads round the wall to.
+    #[derive(Clone, Copy)]
+    enum FarSink {
+        /// A cell, as cell #2.
+        Cell,
+        /// An actuator pad, as output #0.
+        Pad,
+    }
+
+    /// A segment over the cap that only the routed-length check can see.
+    ///
+    /// Cell #0 drives two sinks: cell #1 at the far end of a row
+    /// `width - 1` blocks long, and `far` two blocks from cell #0 across
+    /// a wall of cells that ends two columns short of the row's end. The
+    /// tree reaches `far` round the wall, off the trunk laid for cell #1,
+    /// so its route is `width - 2` blocks of trunk and `width` of branch:
+    /// `2 * width - 2`, with a straight line of 2.
+    ///
+    /// Neither earlier gate can see that. The straight line is far under
+    /// the cap, and the router's search is bounded by the path it lays
+    /// from the tree, which is the branch alone. Only the sum is over,
+    /// and the sum is what this pass measures. A detour laid from the
+    /// source in one piece would be refused by the router's bound first,
+    /// which is why the trunk is here.
+    ///
+    /// Hand-built: the placement pass puts every cell on one row, so no
+    /// `.crn` walls one sink off from its driver this way.
+    fn trunk_detour(width: u32, far: FarSink) -> PlacementIr {
         let mut ir = PlacementIr::new(Edition::Java);
-        ir.region = Some(reservation(256, 3, 3));
+        ir.region = Some(reservation(width, 3, 1));
+        let driven = || {
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Cell(0),
+            }]
+        };
+        let far_coord = CellCoord::new(0, 0, 2);
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
             CellCoord::new(0, 0, 0),
@@ -1706,26 +1712,45 @@ mod tests {
         ));
         ir.cells.push(placed_cell(
             EditionCell::JavaComparatorAnd,
-            CellCoord::new(10, 0, 0),
-            vec![],
+            CellCoord::new(width - 1, 0, 0),
+            driven(),
         ));
-        ir.cells.push(placed_cell(
-            EditionCell::JavaComparatorAnd,
-            CellCoord::new(255, 0, 0),
-            vec![CellPortDriver {
-                port: PortName::A,
-                net: NetRef::Cell(0),
-            }],
+        match far {
+            FarSink::Cell => ir.cells.push(placed_cell(
+                EditionCell::JavaComparatorAnd,
+                far_coord,
+                driven(),
+            )),
+            FarSink::Pad => ir.outputs.push(routed_output(NetRef::Cell(0), far_coord)),
+        }
+        for x in 0..width - 2 {
+            ir.cells.push(placed_cell(
+                EditionCell::JavaComparatorAnd,
+                CellCoord::new(x, 0, 1),
+                vec![],
+            ));
+        }
+        ir
+    }
+
+    #[test]
+    fn cell_driver_attenuation_primary_names_cell_and_port() {
+        let delayed = compile_delay(&scoped(
+            ScopeKind::Struct,
+            "wide",
+            trunk_detour(201, FarSink::Cell),
         ));
-        let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
         let attenuation = delayed
             .diagnostics
             .iter()
             .find(|d| d.code == DiagnosticCode::AttenuationLimit)
             .expect("cell-driver segment past cap must fire E_ATTENUATION_LIMIT");
         assert!(
-            attenuation.primary.contains("into cell #2"),
-            "primary must name the failing cell index, got {:?}",
+            attenuation
+                .primary
+                .contains("has a driver segment of 400 blocks into cell #2"),
+            "primary must name the failing cell index and the trunk-plus-branch \
+             length, got {:?}",
             attenuation.primary,
         );
         assert!(
@@ -1743,32 +1768,15 @@ mod tests {
     /// that crosses the cap by going round something rather than by
     /// distance — must elide its scope without disturbing a sibling.
     ///
-    /// This shape cannot be written in `.crn`: a `size=` wide enough to
-    /// strand a sink is already wide enough for the straight-line gate
-    /// in `lay_nets` to answer first, so the integration fixture in
-    /// `tests/delay.rs` exercises the routing pass's independence
-    /// rather than this one's. Hand-built is the only way in.
+    /// This shape cannot be written in `.crn`: see [`trunk_detour`],
+    /// so the integration fixture in `tests/delay.rs` exercises the
+    /// routing pass's independence rather than this one's. Hand-built is
+    /// the only way in.
     #[test]
     fn a_detour_refusal_leaves_its_sibling_alone() {
-        // Scope one: the detour fixture. Straight line 255, route 257,
-        // so it clears the straight-line gate and fails the routed one.
-        let mut detour = PlacementIr::new(Edition::Java);
-        detour.region = Some(reservation(256, 3, 3));
-        for x in [0, 10] {
-            detour.cells.push(placed_cell(
-                EditionCell::JavaComparatorAnd,
-                CellCoord::new(x, 0, 0),
-                vec![],
-            ));
-        }
-        detour.cells.push(placed_cell(
-            EditionCell::JavaComparatorAnd,
-            CellCoord::new(255, 0, 0),
-            vec![CellPortDriver {
-                port: PortName::A,
-                net: NetRef::Cell(0),
-            }],
-        ));
+        // Scope one: the detour fixture, which clears the straight-line
+        // gate and the router's bound and fails the routed length.
+        let detour = trunk_detour(201, FarSink::Cell);
 
         // Scope two: roomy, and nothing in it is near the cap.
         let mut roomy = PlacementIr::new(Edition::Java);

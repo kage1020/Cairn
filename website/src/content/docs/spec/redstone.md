@@ -204,8 +204,16 @@ The internal algorithm runs five stages:
    `E_ATTENUATION_LIMIT` at this stage rather than at stage 3. A floor and not the measure: it
    refuses strictly less than stage 3 does and replaces nothing. A region 256 wide puts its pad
    255 blocks from the driver and may route 257 to get there, which is over the cap and not over
-   this, and stage 3 is still what catches it. The fix line differs from stage 3's for the same
-   reason — nothing shortens a straight line, so enlarging the region is not the remedy here.
+   this. The fix line differs from stage 3's for the same reason — nothing shortens a straight
+   line, so enlarging the region is not the remedy here.
+
+   The router's search is bounded by the same cap. A path from a net's wire to a sink is part of
+   that sink's segment, so the search does not look past the cap, and a sink it cannot reach
+   within it earns `E_ATTENUATION_LIMIT` here too, saying that no route within the cap exists. A
+   sink the search runs out of room for before the cap is `E_ROUTE_CONGESTION`, below. The bound
+   is what keeps giving up on a walled-in sink proportional to the cap rather than to the
+   reservation: without it, the search visited every free coordinate the net could reach before
+   it refused.
 3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
    limit of 15. The segment is measured along the **routed** path from driver to sink, and the
    buffer stands on that path, so the straight line between the two is not always wire. A segment
@@ -252,9 +260,9 @@ E_ROUTE_CONGESTION line 21 circuit=basement:
   Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks.
 ```
 
-`E_ATTENUATION_LIMIT` is the other refusal these passes raise, for three shapes. Stages 2, 3 and 4
+`E_ATTENUATION_LIMIT` is the other refusal these passes raise, for four shapes. Stages 2, 3 and 4
 all lay nets, and all three test the straight line between a driver and its sink against the cap
-through one shared routine. Stage 3 also measures each routed segment against the cap. Stages 3
+through one shared routine, which also refuses a sink with no route within the cap. Stage 3 also measures each routed segment against the cap. Stages 3
 and 4 both refuse a stretch of dust past the limit of 15 on which no coordinate can hold a
 repeater: each works out where the repeaters stand from the same routed tree, by the same rule,
 so the two agree on which stretch that is and the message names the node that goes dark. Which

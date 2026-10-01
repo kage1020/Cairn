@@ -443,3 +443,69 @@ fn hostile_3_compile_refuses_rather_than_certifying_the_wreckage() {
         }
     }
 }
+
+/// A sink walled in two blocks from its driver, in a reservation as large
+/// as the `size=` and `void=` make it.
+///
+/// The sink that strands is a cell two blocks from its driver, every face
+/// of which is taken by a block, another net's dust, or the coords beside
+/// that dust. Nothing bounded the search, so the router searched until
+/// it had visited every free coord the net could reach: seconds and
+/// hundreds of megabytes per million coords of reservation, set by
+/// `width × depth × void` and not by the two blocks between the ends.
+/// Raising `void`, which the refusal's own fix line suggests, made the
+/// next run slower and the answer the same.
+fn walled_in_near_sink() -> String {
+    let body = [
+        "theme t:",
+        "  slot wall -> @oak_planks",
+        "  slot door -> @oak_door",
+        "",
+        "struct s size=31x2000",
+        "  floor mat_slot=wall",
+        "  door id=d0 side=front at=center mat_slot=door",
+        "  door id=d1 side=back at=center mat_slot=door",
+        "  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a",
+        "  logic sig.g0 = (sig.a or sig.a) or (sig.a and sig.a)",
+        "  logic sig.g1 = sig.g0 and sig.a",
+        "  door[id=d0] opened_by=sig.g0",
+        "  door[id=d1] opened_by=sig.g1",
+        "  circuit region=floor void=200",
+    ];
+    format!("{}\n", body.join("\n"))
+}
+
+#[test]
+fn hostile_5_a_walled_in_sink_is_refused_without_searching_the_reservation() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = write(tmp.path(), "walled", &walled_in_near_sink());
+    let (outcome, stderr, elapsed) = run_bounded(
+        tmp.path(),
+        &[
+            "synth",
+            path.to_str().unwrap(),
+            "--stage",
+            "route",
+            "--edition",
+            "java",
+            "--experimental-logic-synth",
+        ],
+    );
+    assert!(
+        matches!(outcome, Outcome::Exited(1)),
+        "`synth --stage route` ended as {outcome:?}\nstderr={stderr}",
+    );
+    // Still the wall, not the distance: every face of the sink is taken,
+    // so it is walled in whatever the cap allows.
+    assert!(
+        stderr.contains("E_ROUTE_CONGESTION") && stderr.contains("cannot reach (5,0,1)"),
+        "got {stderr:?}",
+    );
+    // 12.4 million coords of reservation. Searched, it ran past
+    // `DEADLINE`; answered from the sink's faces, or from a search the
+    // cap bounds, it is far inside this.
+    assert!(
+        elapsed < ANSWERED_WITHOUT_SEARCHING,
+        "`synth --stage route` took {elapsed:?} to refuse a sink two blocks from its driver",
+    );
+}

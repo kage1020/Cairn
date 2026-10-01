@@ -93,7 +93,9 @@ pub enum DiagnosticCode {
     /// too shallow for the I/O pads, which stand one per row; or a sink
     /// has no route from its driver that runs through neither a
     /// component nor another net's dust — nor within one step of that
-    /// dust in its own plane. That pipeline names area shortage as the
+    /// dust in its own plane, found by a search that ran out of coords
+    /// rather than stopping at the attenuation cap (where it stops at the
+    /// cap, the refusal is [`Self::AttenuationLimit`]). That pipeline names area shortage as the
     /// example rather than as the only shape, so all five take this code
     /// and differ in what they say: raising `void` fixes the first and the
     /// last, and cannot fix the three in between.
@@ -145,6 +147,12 @@ pub enum DiagnosticCode {
     /// branches: a buffer repeater carries a signal only where the wire
     /// runs straight through it at one height. The count runs across
     /// such a cell, so that run can start on the wire into it.
+    ///
+    /// Stage 2 raises it too, before stage 3 can measure anything, for
+    /// two shapes whose segment is over the cap whatever wire is laid: a
+    /// sink further from its driver than the cap in a straight line, and
+    /// a sink the router's search gives up on because no path from the
+    /// net's wire reaches it within the cap.
     AttenuationLimit,
     /// Lowering a `logic` binding descended past
     /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into

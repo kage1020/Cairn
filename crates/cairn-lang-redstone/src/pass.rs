@@ -154,10 +154,11 @@ pub(crate) fn source_of_net<'a>(
 /// The router over this scope, every net and its routed tree, or the
 /// first refusal the reservation earns.
 ///
-/// Three refusals under two codes. `E_ROUTE_CONGESTION` for a
+/// Four refusals under two codes. `E_ROUTE_CONGESTION` for a
 /// reservation too shallow to hold its pad row and for a sink no route
 /// reaches; `E_ATTENUATION_LIMIT` for a sink further from its driver
-/// than [`MAX_ATTENUATION_SEGMENT`] in a straight line.
+/// than [`MAX_ATTENUATION_SEGMENT`] in a straight line, and for one the
+/// router's search gave up on at that cap.
 ///
 /// Only one comes out, so the order is a decision rather than a race:
 ///
@@ -172,7 +173,7 @@ pub(crate) fn source_of_net<'a>(
 ///    makes it worse. A scope carrying both faults gets the refusal
 ///    whose fix line is true rather than the one that sends the author
 ///    the wrong way;
-/// 3. the sink no route reaches.
+/// 3. the sink no route reaches, or none within the cap.
 ///
 /// The pad row and the stranded sink are asked by all three passes for
 /// one reason. Stage 2 elides the scope that earns either, and the CLI
@@ -258,8 +259,11 @@ where
 /// [`crate::delay`] does and replaces nothing: a route is as long as the
 /// straight line only where nothing stands in the way. A region 256
 /// wide puts its pad 255 blocks from the driver and routes 257 to get
-/// there, which is over the cap and not over this, and stage 3's check
-/// is what catches it.
+/// there, which is over the cap and not over this. The router's search,
+/// bounded by the same cap, refuses such a route when the path it lays
+/// from the net's wire is itself over the cap, and stage 3's check
+/// catches the rest: a branch within the cap on a trunk that carries it
+/// over.
 ///
 /// Walked as [`crate::delay`] walks it — every cell's drivers in index
 /// order, then every actuator pad — so that where both would refuse,
