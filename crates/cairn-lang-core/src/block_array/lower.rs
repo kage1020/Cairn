@@ -856,29 +856,52 @@ fn diag_walkway_endpoint_skipped(
 enum TokenSite {
     /// A `connect` row's `path=`.
     WalkwayPath,
-    /// A member's `mat_slot=` binding.
-    MemberSlot,
+    /// A member's `mat_slot=` binding, with what that member does when the
+    /// binding resolves to nothing.
+    MemberSlot(MemberFallback),
+}
+
+/// What a member does in place of the material its `mat_slot=` did not
+/// resolve to. Each caller of [`resolve_member_state`] names its own, since
+/// only the caller knows what it paints without one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemberFallback {
+    /// The member paints nothing, so its cells stay air (`floor`, `walls`).
+    Air,
+    /// The window is not cut, so the wall it would have cut stays.
+    WallStays,
+    /// The member is built from its own default material (a roof or eave
+    /// stair's built-in stair id, a pressure plate's default plate).
+    DefaultMaterial,
 }
 
 impl TokenSite {
     fn token_noun(self) -> &'static str {
         match self {
             Self::WalkwayPath => "abstract path token",
-            Self::MemberSlot => "abstract token",
+            Self::MemberSlot(_) => "abstract token",
         }
     }
 
-    fn fallback_subject(self) -> &'static str {
+    /// What the build does instead, worded to follow "cannot be lowered
+    /// without the registry pack; ".
+    fn fallback(self) -> &'static str {
         match self {
-            Self::WalkwayPath => "the walkway",
-            Self::MemberSlot => "the cell",
+            Self::WalkwayPath => "the walkway falls back to air",
+            Self::MemberSlot(MemberFallback::Air) => "the cell falls back to air",
+            Self::MemberSlot(MemberFallback::WallStays) => {
+                "the window is not cut, and the wall stays"
+            }
+            Self::MemberSlot(MemberFallback::DefaultMaterial) => {
+                "the member is built from its default material"
+            }
         }
     }
 
     fn canonical_example(self) -> &'static str {
         match self {
             Self::WalkwayPath => "path=@gravel",
-            Self::MemberSlot => "@oak_planks",
+            Self::MemberSlot(_) => "@oak_planks",
         }
     }
 
@@ -887,7 +910,7 @@ impl TokenSite {
             Self::WalkwayPath => {
                 "abstract path tokens must be declared in the pack's `materials` catalog"
             }
-            Self::MemberSlot => {
+            Self::MemberSlot(_) => {
                 "abstract material tokens must be declared in the pack's `materials` catalog \
                  (see `spec/materials-themes` \"Canonical vocabulary\")"
             }
@@ -900,9 +923,9 @@ fn diag_abstract_token(span: Span, token: &str, site: TokenSite) -> Diagnostic {
         code: DiagnosticCode::AbstractTokenDeferred,
         span,
         primary: format!(
-            "{} `@{token}` cannot be lowered without the registry pack; {} falls back to air",
+            "{} `@{token}` cannot be lowered without the registry pack; {}",
             site.token_noun(),
-            site.fallback_subject(),
+            site.fallback(),
         ),
         notes: vec![DiagnosticNote {
             span: None,
@@ -2198,6 +2221,7 @@ fn lower_massing_member(
                 palette,
                 diagnostics,
                 ctx.theme_missing,
+                MemberFallback::Air,
             ) else {
                 return;
             };
@@ -2214,6 +2238,7 @@ fn lower_massing_member(
                 palette,
                 diagnostics,
                 ctx.theme_missing,
+                MemberFallback::Air,
             ) else {
                 return;
             };
@@ -2360,6 +2385,7 @@ fn resolve_member_state(
     registry: Option<&dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
+    fallback: MemberFallback,
 ) -> Option<BlockState> {
     if theme_missing {
         return None;
@@ -2391,7 +2417,7 @@ fn resolve_member_state(
             diagnostics.push(diag_abstract_token(
                 member_or_slot_span(member, slot_value),
                 &token,
-                TokenSite::MemberSlot,
+                TokenSite::MemberSlot(fallback),
             ));
             None
         }
@@ -2400,7 +2426,7 @@ fn resolve_member_state(
                 member_or_slot_span(member, slot_value),
                 &token,
                 suggestion.as_deref(),
-                TokenSite::MemberSlot,
+                TokenSite::MemberSlot(fallback),
             ));
             None
         }
@@ -2442,9 +2468,17 @@ fn palette_index_for(
     palette: &mut Palette,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
+    fallback: MemberFallback,
 ) -> Option<PaletteIndex> {
-    resolve_member_state(member, scope, registry, diagnostics, theme_missing)
-        .map(|state| palette.intern(state))
+    resolve_member_state(
+        member,
+        scope,
+        registry,
+        diagnostics,
+        theme_missing,
+        fallback,
+    )
+    .map(|state| palette.intern(state))
 }
 
 /// Will this member put a block anywhere?
@@ -2461,12 +2495,14 @@ fn member_will_paint(
     theme_missing: bool,
 ) -> bool {
     let mut ignored_diagnostics = Vec::new();
+    // The fallback only words a diagnostic, and these are dropped.
     resolve_member_state(
         member,
         scope,
         registry,
         &mut ignored_diagnostics,
         theme_missing,
+        MemberFallback::Air,
     )
     .is_some()
 }
@@ -3110,6 +3146,7 @@ fn fill_roof(
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
+        MemberFallback::DefaultMaterial,
     );
     let base_id = geometry_material_id(
         member,
@@ -3733,6 +3770,7 @@ fn draw_eave_band(
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
+        MemberFallback::DefaultMaterial,
     );
     let stair_id = geometry_material_id(
         member,
@@ -4197,6 +4235,7 @@ fn plate_id_for_member(
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
+        MemberFallback::DefaultMaterial,
     );
     if let Some(state) = &resolved
         && !state.properties.is_empty()
@@ -4723,6 +4762,7 @@ fn cut_window(
             palette,
             diagnostics,
             ctx.theme_missing,
+            MemberFallback::WallStays,
         ) else {
             return false;
         };
@@ -6057,6 +6097,79 @@ mod tests {
         let ba = out.structures.get("struct::s").unwrap();
         assert_eq!(block_id(ba, 1, 0, 1), "minecraft:oak_planks");
         assert_eq!(block_id(ba, 0, 1, 0), "minecraft:cobblestone");
+    }
+
+    #[test]
+    fn abstract_token_deferral_says_what_each_member_does_instead() {
+        // With no registry, each member reading `@wood.dark` reports what
+        // it builds in place of the material, and that has to match the
+        // voxels: a window is not cut, so its wall stays.
+        let src = "theme t:\n  \
+                   slot wall -> @cobblestone\n  \
+                   slot trim -> @wood.dark\n\n\
+                   struct s size=5x5\n  \
+                   walls mat_slot=wall height=3\n  \
+                   window side=front offset=1 y=1 size=1x2 mat_slot=trim\n";
+        let out = lowered(src);
+        let deferred: Vec<&str> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::AbstractTokenDeferred)
+            .map(|d| d.primary.as_str())
+            .collect();
+        assert_eq!(
+            deferred,
+            vec![
+                "abstract token `@wood.dark` cannot be lowered without the registry pack; the \
+                 window is not cut, and the wall stays"
+            ],
+        );
+        let ba = out.structures.get("struct::s").unwrap();
+        for y in 1..=2 {
+            assert_eq!(block_id(ba, 1, y, 4), "minecraft:cobblestone", "y={y}");
+        }
+
+        // A floor paints nothing, so its cells stay air; a roof or an eave
+        // stair is built from its own stair id, and a plate from the
+        // default plate.
+        for (member, consequence) in [
+            ("floor mat_slot=trim", "the cell falls back to air"),
+            (
+                "roof kind=gable mat_slot=trim",
+                "the member is built from its default material",
+            ),
+            (
+                "roof kind=flat mat_slot=wall overhang=1\n  stair kind=stairs side=front mat_slot=trim",
+                "the member is built from its default material",
+            ),
+            (
+                "pressure_plate at=front.outside offset=2 y=0 mat_slot=trim",
+                "the member is built from its default material",
+            ),
+        ] {
+            let src = format!(
+                "theme t:\n  slot wall -> @cobblestone\n  slot trim -> @wood.dark\n\n\
+                 struct s size=5x5\n  walls mat_slot=wall height=3\n  {member}\n"
+            );
+            let out = lowered(&src);
+            let deferred: Vec<&str> = out
+                .diagnostics
+                .iter()
+                .filter(|d| d.code == DiagnosticCode::AbstractTokenDeferred)
+                .map(|d| d.primary.as_str())
+                .collect();
+            assert_eq!(
+                deferred,
+                vec![
+                    format!(
+                        "abstract token `@wood.dark` cannot be lowered without the registry \
+                         pack; {consequence}"
+                    )
+                    .as_str()
+                ],
+                "{member}",
+            );
+        }
     }
 
     #[test]

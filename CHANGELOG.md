@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- *(core)* say what a member builds in place of an abstract token no pack lowers, instead of always "falls back to air"
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

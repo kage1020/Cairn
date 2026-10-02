@@ -226,8 +226,10 @@ declares more than one — or none at all — no theme binds to the def's own sc
 
 `E_UNKNOWN_ABSTRACT_TOKEN` and `W_ABSTRACT_TOKEN_DEFERRED` differ on whether anything could have
 answered. A pack was offered and does not declare the token, so the build stops with a suggestion
-towards the closest one it does declare; no pack was offered, so nothing was asked and the cell
-degrades to air with a warning. The second is the path a library caller reaches — LSP highlighting,
+towards the closest one it does declare; no pack was offered, so nothing was asked and the member
+degrades with a warning that says how: a `floor` or `walls` leaves its cells air, a `window` is not
+cut and its wall stays, and a `roof`, eave `stair` or `pressure_plate` is built from its default
+material. The second is the path a library caller reaches — LSP highlighting,
 or a `cairn check` with no pack — and it is a warning for that reason: refusing there would refuse
 every source read without a pack.
 
