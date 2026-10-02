@@ -152,7 +152,8 @@ pub enum DiagnosticCode {
     /// expects something to read that nothing does. Only the sentence
     /// differs, naming the field to edit.
     UnknownArgument,
-    /// A `-> value` tail on a member whose keyword cannot emit a signal.
+    /// A `-> value` tail on a member whose keyword cannot emit a signal,
+    /// or on a sensor keyword written in the `[selector]` form.
     ///
     /// `spec/redstone` "Signal binding" writes an emitted signal on the
     /// component that emits it, and [`crate::intent::SENSOR_HOSTS`] is the
@@ -166,6 +167,10 @@ pub enum DiagnosticCode {
     /// no signal is the redstone pipeline's `E_LOGIC_INVALID_SIGNAL`, which
     /// is a question about the `sig.` namespace and needs the Logic IR to
     /// ask.
+    ///
+    /// `pressure_plate[id=p] -> sig.x` is the second shape. The door
+    /// actuator patch is the only binding a selector line carries, and no
+    /// sensor patch exists, so the tail is on no sensor line.
     MisplacedBinding,
     /// A statement carrying bare positional values in a form that takes
     /// none.

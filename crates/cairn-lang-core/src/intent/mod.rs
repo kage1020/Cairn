@@ -20,6 +20,7 @@
 mod keyword_table;
 mod lower;
 mod member;
+mod patch;
 mod semantic_level;
 
 use std::num::NonZeroU32;
@@ -39,6 +40,7 @@ pub(crate) use self::member::ConnectEnd;
 pub use self::member::{
     BodyKind, IntentState, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan,
 };
+pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub use self::semantic_level::SemanticLevel;
 
 /// Intent IR for a whole `.crn` module.
