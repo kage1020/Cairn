@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- *(redstone)* count a buffer repeater's 15 blocks of dust without the sink, so a 16-step route
+  takes none and the repeaters stand every 16 steps
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

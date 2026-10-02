@@ -14,12 +14,12 @@
 //!   driver: two ports reading one signal are fed by one strand of dust
 //!   and by the repeaters standing on it. Dust loses one unit of signal
 //!   per block from strength 15, so `repeater_sites` stands a
-//!   repeater, worth [`BUFFER_REPEATER_TICKS`], within every
+//!   repeater, worth [`BUFFER_REPEATER_TICKS`], after at most
 //!   `DUST_ATTENUATION_LIMIT` blocks of dust since the last block that
-//!   restored strength — on a straight run from a fresh source every
-//!   15 blocks, `floor((s - 1) / 15)` of them over `s` blocks, and
-//!   earlier where the coord there turns, climbs or forks, which a
-//!   repeater cannot carry a signal through.
+//!   restored strength — on a straight run from a fresh source in
+//!   place of every 16th block, `floor((s - 1) / 16)` of them over a
+//!   segment of `s` steps, and earlier where the coord there turns,
+//!   climbs or forks, which a repeater cannot carry a signal through.
 //!
 //!   That last block is not always the start of the net. A cell that
 //!   passes on the strength it reads (a Bedrock OR, a Java comparator
@@ -85,10 +85,13 @@ use crate::saturating_index;
 /// "signal attenuation limit of 15"): the most blocks of dust a signal
 /// crosses since the last block that restored its strength. A fresh
 /// source starts at strength 15 and dust decays one unit per block, so
-/// a segment of at most this many blocks from a fresh source reaches
-/// its sink at strength ≥ 1 without a buffer repeater. From a cell
-/// that passes on the strength it reads, the dust into the cell counts
-/// too, and a shorter segment can need one.
+/// this many blocks of dust carry its signal, the last at strength 1,
+/// which still drives the block after it: a sink, or a repeater that
+/// restores the signal. A segment from a fresh source to its sink is
+/// one step longer than its dust, so one of up to
+/// `DUST_ATTENUATION_LIMIT + 1` steps needs no buffer repeater. From a
+/// cell that passes on the strength it reads, the dust into the cell
+/// counts too, and a shorter segment can need one.
 pub const DUST_ATTENUATION_LIMIT: u32 = 15;
 
 /// Tick delay added by one implicit buffer repeater. Matches the
@@ -142,8 +145,8 @@ const _: () = assert!(
 /// pass would have kept: they refuse strictly less than it does, and
 /// save laying a route — or searching a reservation — first.
 ///
-/// 256 blocks is at least 17 buffer repeaters from a fresh source
-/// (`(256 - 1) / 15`); anything past that in a single segment reads as
+/// 256 steps is at least 15 buffer repeaters from a fresh source
+/// (`(256 - 1) / 16`); anything past that in a single segment reads as
 /// a placement mistake rather
 /// than a routing corner case in every fixture the crate ships today.
 pub const MAX_ATTENUATION_SEGMENT: u32 = 256;
@@ -546,9 +549,10 @@ pub(crate) struct NoRepeaterSite {
     /// Blocks of dust already spent on leaving `from`: zero at a
     /// repeater or at a source that restores strength.
     pub(crate) spent: u32,
-    /// The coord nearest the source that the signal reaches over more
-    /// dust than its allowance, and the first in [`NetTree::wire_path`]
-    /// among those as near.
+    /// The coord nearest the source that is past its allowance — a block
+    /// of dust past the limit, or a sink reached over more dust than it
+    /// allows — and the first in [`NetTree::wire_path`] among those as
+    /// near.
     pub(crate) unpowered: CellCoord,
     /// What `unpowered` may be reached over.
     pub(crate) allowance: Allowance,
@@ -559,7 +563,9 @@ pub(crate) struct NoRepeaterSite {
 /// The most dust a coord may be reached over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Allowance {
-    /// [`DUST_ATTENUATION_LIMIT`]: any coord but the one below.
+    /// [`DUST_ATTENUATION_LIMIT`]: any coord but the one below. A block
+    /// of dust may be at most the limit's last; a sink, or a repeater,
+    /// may be reached over all of it.
     Limit,
     /// A cell that passes on the strength it reads: the wire out of it
     /// needs the rest of the limit, so it may be reached over only
@@ -602,16 +608,18 @@ pub(crate) enum Blocked {
 ///
 /// Placed on the net's tree rather than per sink, so every sink past a
 /// repeater is fed by that one block. The signal leaves the source with
-/// `spent` blocks of dust already behind it, and every coord may be
-/// reached over at most [`DUST_ATTENUATION_LIMIT`] blocks of dust since
-/// the last full-strength block — or over its entry in `budgets`, for a
-/// sink that passes its strength on. The walk finds the coord nearest
+/// `spent` blocks of dust already behind it. Since the last
+/// full-strength block, a coord the wire runs on past is dust, and may
+/// be at most the [`DUST_ATTENUATION_LIMIT`]th block of it; a sink, or a
+/// repeater, only reads the dust before it, so it may be reached over
+/// all [`DUST_ATTENUATION_LIMIT`] — or over its entry in `budgets`, for
+/// a sink that passes its strength on. The walk finds the coord nearest
 /// the source that is past its allowance, and puts a repeater on the
-/// last coord before it, on the way back towards the source or the
-/// repeater before, that can hold one and is close enough; then walks
-/// again. On a straight run from a fresh source that is every
-/// `DUST_ATTENUATION_LIMIT` coords, the count
-/// [`buffer_count_for_segment`] gives. Where a coord cannot hold one
+/// last coord, on the way back towards the source or the repeater
+/// before, that can hold one and is close enough — on that coord
+/// itself, when it is dust; then walks again. On a straight run from a
+/// fresh source that is every `DUST_ATTENUATION_LIMIT + 1`th coord, the
+/// count [`buffer_count_for_segment`] gives. Where a coord cannot hold one
 /// the repeater moves earlier, which only shortens the dust behind it,
 /// and the run past it can need one repeater more than its length
 /// alone implies. On a fork it moves onto the trunk, where one block
@@ -628,12 +636,6 @@ fn repeater_sites(
     spent: u32,
     budgets: &HashMap<CellCoord, u32>,
 ) -> Result<Vec<CellCoord>, NoRepeaterSite> {
-    let allowance = |coord: CellCoord| {
-        budgets
-            .get(&coord)
-            .copied()
-            .unwrap_or(DUST_ATTENUATION_LIMIT)
-    };
     let order = tree.wire_path();
     let source = order[0];
     let mut children: HashMap<CellCoord, Vec<CellCoord>> = HashMap::new();
@@ -643,6 +645,19 @@ fn repeater_sites(
             .expect("every coord but the source was attached to one");
         children.entry(parent).or_default().push(*coord);
     }
+    // A coord the wire runs on past is dust, and its own block counts
+    // against the limit. A leaf is a sink, and a site a repeater: both
+    // only read the dust before them, so they may be reached one block
+    // further — over the limit's worth of dust, not the limit less one.
+    let allowance = |coord: CellCoord, sites: &HashSet<CellCoord>| {
+        budgets.get(&coord).copied().unwrap_or(
+            if children.contains_key(&coord) && !sites.contains(&coord) {
+                DUST_ATTENUATION_LIMIT
+            } else {
+                DUST_ATTENUATION_LIMIT + 1
+            },
+        )
+    };
     let mut sites: HashSet<CellCoord> = HashSet::new();
     loop {
         // Dust spent since the last full-strength block, and depth from
@@ -669,7 +684,7 @@ fn repeater_sites(
             let behind = if sites.contains(&parent) { 0 } else { behind };
             let here = (behind.saturating_add(1), depth.saturating_add(1));
             walked.insert(*coord, here);
-            if here.0 > allowance(*coord)
+            if here.0 > allowance(*coord, &sites)
                 && first.is_none_or(|(depth, at, _)| (here.1, index) < (depth, at))
             {
                 first = Some((here.1, index, *coord));
@@ -678,18 +693,30 @@ fn repeater_sites(
         let Some((depth, _, unpowered)) = first else {
             break;
         };
-        let budget = allowance(unpowered);
-        let mut candidate = tree
-            .parent(unpowered)
-            .expect("a coord past its allowance is never the source");
+        let budget = allowance(unpowered, &sites);
+        // Dust past the limit can be replaced by the repeater itself,
+        // which reads the dust before it, as long as that dust is
+        // within the limit. A sink cannot: the repeater has to stand
+        // before it.
+        let reached = walked
+            .get(&unpowered)
+            .expect("every coord of the tree was walked")
+            .0;
+        let mut candidate =
+            if children.contains_key(&unpowered) && reached <= DUST_ATTENUATION_LIMIT + 1 {
+                unpowered
+            } else {
+                tree.parent(unpowered)
+                    .expect("a coord past its allowance is never the source")
+            };
         loop {
-            // `candidate` is an ancestor of `unpowered`, so it is the
-            // shallower of the two.
+            // `candidate` is `unpowered` or an ancestor of it, so it is
+            // no deeper than it.
             let candidate_depth = walked
                 .get(&candidate)
                 .expect("every coord of the tree was walked")
                 .1;
-            debug_assert!(candidate_depth < depth, "the walk back only climbs");
+            debug_assert!(candidate_depth <= depth, "the walk back only climbs");
             let too_far = depth.saturating_sub(candidate_depth) > budget;
             let fresh = candidate == source || sites.contains(&candidate);
             if fresh || too_far {
@@ -776,24 +803,26 @@ fn carries_straight_through(
         && faces(coord).all(|face| face == before || face == *after || !on_net(face))
 }
 
-/// The fewest buffer repeaters that keep `segment` blocks of dust at
-/// strength ≥ 1 at the sink.
+/// The fewest buffer repeaters on a segment `steps` blocks long from a
+/// fresh source to its sink.
 ///
-/// A source at strength 15 loses one unit per block, so segments of
-/// at most `DUST_ATTENUATION_LIMIT` blocks reach the sink without a
-/// buffer; a 16-block segment needs one; each further
-/// `DUST_ATTENUATION_LIMIT` blocks bumps the count by one. Saturating
-/// so a pathological segment from a hand-built IR cannot overflow.
+/// The segment holds `steps - 1` blocks of dust: its two ends are the
+/// source and the sink. A source at strength 15 loses one unit per
+/// block, so it carries [`DUST_ATTENUATION_LIMIT`] blocks of dust — the
+/// last at strength 1, which still drives the sink — and a segment of
+/// up to `DUST_ATTENUATION_LIMIT + 1` steps needs no buffer. A repeater
+/// stands in place of the block of dust past the limit, reads the one
+/// before it, and restores strength, so each one carries the signal
+/// `DUST_ATTENUATION_LIMIT + 1` steps further: a 17-step segment needs
+/// one, a 33-step one two. Saturating so a pathological segment from a
+/// hand-built IR cannot overflow.
 ///
 /// Exact on a straight, unbranched run, and a floor on any other:
 /// [`repeater_sites`] is what places them, and a coord a repeater
 /// cannot stand on moves the repeater earlier. So this only sizes the
 /// chain a refused segment would have needed.
-pub(crate) fn buffer_count_for_segment(segment: u32) -> u32 {
-    if segment <= DUST_ATTENUATION_LIMIT {
-        return 0;
-    }
-    (segment.saturating_sub(1)) / DUST_ATTENUATION_LIMIT
+pub(crate) fn buffer_count_for_segment(steps: u32) -> u32 {
+    steps.saturating_sub(1) / (DUST_ATTENUATION_LIMIT + 1)
 }
 
 /// The refusal for a [`NoRepeaterSite`]: a run of `net`'s dust past
@@ -1205,8 +1234,8 @@ mod tests {
     #[test]
     fn local_delay_is_the_wire_cost_not_the_arrival_time() {
         // One buffer on the short segment, two on the long one.
-        const SHORT: u32 = DUST_ATTENUATION_LIMIT + 1;
-        const LONG: u32 = 2 * DUST_ATTENUATION_LIMIT + 1;
+        const SHORT: u32 = DUST_ATTENUATION_LIMIT + 2;
+        const LONG: u32 = 2 * (DUST_ATTENUATION_LIMIT + 1) + 1;
         assert_eq!(buffer_count_for_segment(SHORT), 1);
         assert_eq!(buffer_count_for_segment(LONG), 2);
 
@@ -1288,18 +1317,20 @@ mod tests {
     const SOUTH: (i64, i64, i64) = (0, 0, 1);
     const UP: (i64, i64, i64) = (0, 1, 0);
 
-    /// On a straight run the repeaters stand every 15 blocks, and there
-    /// are as many as the segment's length alone implies.
+    /// On a straight run a repeater stands every 16 steps, in place of
+    /// the block of dust past the limit, so the 15 blocks of dust before
+    /// it carry the signal to it; and there are as many as the
+    /// segment's length alone implies.
     #[test]
-    fn a_straight_run_takes_a_repeater_every_fifteen_blocks() {
-        for length in [15u32, 16, 30, 31, 46] {
+    fn a_straight_run_takes_a_repeater_every_sixteen_steps() {
+        for length in [15u32, 16, 17, 32, 33, 48, 49] {
             let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, length)])]);
             let sites = repeater_sites(&tree, 0, &HashMap::new())
                 .expect("a straight run has room everywhere");
             let expected: Vec<CellCoord> = (1..=buffer_count_for_segment(length))
-                .map(|k| CellCoord::new(k * DUST_ATTENUATION_LIMIT, 0, 0))
+                .map(|k| CellCoord::new(k * (DUST_ATTENUATION_LIMIT + 1), 0, 0))
                 .collect();
-            assert_eq!(sites, expected, "{length} blocks");
+            assert_eq!(sites, expected, "{length} steps");
         }
     }
 
@@ -1307,12 +1338,13 @@ mod tests {
     /// coord straight ahead of it, which is not the wire.
     #[test]
     fn a_repeater_steps_back_off_a_turn() {
-        // 15 east then 2 south: the 15-step point is the corner.
-        let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 15), (SOUTH, 2)])]);
+        // 16 east then 2 south: the 16-step point, where the first
+        // repeater falls due, is the corner.
+        let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 16), (SOUTH, 2)])]);
         assert_eq!(
             repeater_sites(&tree, 0, &HashMap::new()),
-            Ok(vec![CellCoord::new(14, 0, 0)]),
-            "the corner is (15,0,0); the last straight coord before it is (14,0,0)",
+            Ok(vec![CellCoord::new(15, 0, 0)]),
+            "the corner is (16,0,0); the last straight coord before it is (15,0,0)",
         );
     }
 
@@ -1354,16 +1386,16 @@ mod tests {
     /// repeater than its length alone implies.
     #[test]
     fn stepping_back_can_cost_a_repeater_the_length_does_not_imply() {
-        // 30 blocks, turning at the 15-step point.
-        let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 15), (SOUTH, 15)])]);
+        // 32 steps, turning at the 16-step point.
+        let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 16), (SOUTH, 16)])]);
         let sites =
             repeater_sites(&tree, 0, &HashMap::new()).expect("there is straight wire on both legs");
         assert_eq!(
             sites,
-            vec![CellCoord::new(14, 0, 0), CellCoord::new(15, 0, 14)],
+            vec![CellCoord::new(15, 0, 0), CellCoord::new(16, 0, 15)],
         );
         assert_eq!(
-            buffer_count_for_segment(30),
+            buffer_count_for_segment(32),
             1,
             "the length alone asks for one"
         );
@@ -1404,7 +1436,7 @@ mod tests {
         }
         let path = walk((0, 0, 0), &moves);
         let tree = NetTree::from_paths(&[&path]);
-        // (15,0,0) first; then (19,0,0), the last straight coord before
+        // (16,0,0) first; then (19,0,0), the last straight coord before
         // the staircase; then nothing past (19,0,0) is straight.
         assert_eq!(
             repeater_sites(&tree, 0, &HashMap::new()),
@@ -1425,8 +1457,8 @@ mod tests {
         let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 20)])]);
         assert_eq!(
             repeater_sites(&tree, 5, &HashMap::new()),
-            Ok(vec![CellCoord::new(10, 0, 0)]),
-            "5 spent, so 10 more is the limit",
+            Ok(vec![CellCoord::new(11, 0, 0)]),
+            "5 spent, so 10 more blocks of dust carry the signal to a repeater in place of the 11th",
         );
     }
 
@@ -1513,9 +1545,10 @@ mod tests {
     /// however short it were.
     ///
     /// A Java comparator AND at `(0,0,0)`, 1 block from its sensor,
-    /// drives a gate up a staircase, every coord of which turns. At 16
-    /// blocks that is one too many for dust from a fresh source, so no
-    /// budget in `1..=15` is met. At 15 it is the budget-zero case: it
+    /// drives a gate up a staircase, every coord of which turns. At 17
+    /// steps that is 16 blocks of dust, one too many from a fresh
+    /// source, so no budget in `1..=15` is met. At 16 it is the
+    /// budget-zero case: it
     /// would be met from nothing spent, which no cell ever is, so it is
     /// refused on the comparator's net too, rather than handed a budget
     /// of zero that sends the refusal upstream to a wire that cannot
@@ -1523,7 +1556,7 @@ mod tests {
     #[test]
     fn a_cell_whose_own_wire_has_no_room_is_refused_on_its_own_net() {
         let cell = CellCoord::new(0, 0, 0);
-        for steps in [16, 15] {
+        for steps in [17, 16] {
             let stairs: Vec<_> = (0..steps)
                 .map(|step| (if step % 2 == 0 { EAST } else { SOUTH }, 1))
                 .collect();
@@ -1593,7 +1626,7 @@ mod tests {
     /// which turns. Measured one net at a time neither needs a
     /// repeater. Through a Bedrock OR the two are one 18-block run of dust,
     /// and the only coords a repeater can carry it through are on the
-    /// sensor's straight run: the staircase can take 7 blocks already
+    /// sensor's straight run: the staircase can take 8 blocks already
     /// spent, so the repeater stands 1 block before the cell.
     ///
     /// Trees grown by hand, so both legs are pinned coord by coord.
@@ -1962,28 +1995,32 @@ mod tests {
         );
     }
 
+    /// Boundary values of `buffer_count_for_segment`, in steps from a
+    /// fresh source to its sink: 16 steps is 15 blocks of dust and
+    /// needs no repeater, 17 needs one, and each repeater carries the
+    /// signal 16 steps further. Pinned row by row so a slip back to
+    /// counting the sink as dust (`(s - 1) / 15`) or to dropping the
+    /// `- 1` (`s / 16`) trips the rows it moves rather than an
+    /// aggregate.
     #[test]
     fn buffer_count_boundary_table() {
-        // Boundary values of the piecewise formula
-        // `s <= 15 → 0`, `s in (15, 30] → 1`, `s in (30, 45] → 2`, ...
-        // pinned as a
-        // table so a `(s - 1) / 15` → `s / 15` slip trips each row
-        // rather than the aggregate.
-        for (segment, expected_buffers) in [
+        for (steps, expected_buffers) in [
             (0_u32, 0_u32),
             (1, 0),
-            (DUST_ATTENUATION_LIMIT, 0),
-            (DUST_ATTENUATION_LIMIT + 1, 1),
-            (2 * DUST_ATTENUATION_LIMIT, 1),
-            (2 * DUST_ATTENUATION_LIMIT + 1, 2),
-            (3 * DUST_ATTENUATION_LIMIT, 2),
-            (3 * DUST_ATTENUATION_LIMIT + 1, 3),
-            (MAX_ATTENUATION_SEGMENT, 17),
+            (15, 0),
+            (16, 0),
+            (17, 1),
+            (31, 1),
+            (32, 1),
+            (33, 2),
+            (48, 2),
+            (49, 3),
+            (MAX_ATTENUATION_SEGMENT, 15),
         ] {
             assert_eq!(
-                buffer_count_for_segment(segment),
+                buffer_count_for_segment(steps),
                 expected_buffers,
-                "segment {segment} blocks",
+                "segment of {steps} steps",
             );
         }
     }
