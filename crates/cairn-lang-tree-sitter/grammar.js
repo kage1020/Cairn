@@ -29,8 +29,13 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
+  // The first set holds everywhere. `operand` is the set where a
+  // `logic` expression expects a signal: there `and` and `or` are
+  // operators, never a signal's name, so `a.b and or` is refused rather
+  // than read as a reference to a signal called `or`.
   reserved: {
     global: _ => ['true', 'false'],
+    operand: _ => ['true', 'false', 'and', 'or', 'not'],
   },
 
   conflicts: $ => [
@@ -154,8 +159,8 @@ module.exports = grammar({
       $.binary_expression,
       $.unary_expression,
       $.parenthesized_expression,
-      $.signal_ref,
-      $.identifier,
+      reserved('operand', $.signal_ref),
+      reserved('operand', $.identifier),
     ),
 
     binary_expression: $ => choice(

@@ -474,6 +474,39 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  logic true = a.b\n",
         Reject,
     ),
+    // `and` and `or` are operators wherever a signal is expected, so a
+    // missing operand is refused rather than read as a signal named after
+    // the operator. A dotted name may still end in one.
+    (
+        "logic_operator_as_operand",
+        "struct s size=3x3\n  logic s.out = a.b and or\n",
+        Reject,
+    ),
+    (
+        "logic_operator_as_whole_value",
+        "struct s size=3x3\n  logic s.out = and\n",
+        Reject,
+    ),
+    (
+        "logic_operator_after_operator",
+        "struct s size=3x3\n  logic s.out = a.b or and and c\n",
+        Reject,
+    ),
+    (
+        "logic_operator_after_not",
+        "struct s size=3x3\n  logic s.out = not or\n",
+        Reject,
+    ),
+    (
+        "logic_operator_heads_a_dotted_name",
+        "struct s size=3x3\n  logic s.out = a.b and or.x\n",
+        Reject,
+    ),
+    (
+        "logic_operator_ends_a_dotted_name",
+        "struct s size=3x3\n  logic s.out = a.b and c.or\n",
+        Accept,
+    ),
     // -- assertions ---------------------------------------------------
     (
         "truth_rows",

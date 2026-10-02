@@ -15,7 +15,7 @@
 #define EXTERNAL_TOKEN_COUNT 9
 #define FIELD_COUNT 18
 #define MAX_ALIAS_SEQUENCE_LENGTH 9
-#define MAX_RESERVED_WORD_SET_SIZE 2
+#define MAX_RESERVED_WORD_SET_SIZE 5
 #define PRODUCTION_ID_COUNT 35
 #define SUPERTYPE_COUNT 0
 
@@ -2024,17 +2024,17 @@ static const TSLexerMode ts_lex_modes[STATE_COUNT] = {
   [61] = {.lex_state = 1},
   [62] = {.lex_state = 1},
   [63] = {.lex_state = 0},
-  [64] = {.lex_state = 0, .reserved_word_set_id = 1},
-  [65] = {.lex_state = 0, .reserved_word_set_id = 1},
-  [66] = {.lex_state = 0, .reserved_word_set_id = 1},
+  [64] = {.lex_state = 0, .reserved_word_set_id = 2},
+  [65] = {.lex_state = 0, .reserved_word_set_id = 2},
+  [66] = {.lex_state = 0, .reserved_word_set_id = 2},
   [67] = {.lex_state = 1, .reserved_word_set_id = 1},
   [68] = {.lex_state = 0, .reserved_word_set_id = 1},
-  [69] = {.lex_state = 0, .reserved_word_set_id = 1},
-  [70] = {.lex_state = 0, .reserved_word_set_id = 1},
-  [71] = {.lex_state = 0, .reserved_word_set_id = 1},
-  [72] = {.lex_state = 0, .reserved_word_set_id = 1},
-  [73] = {.lex_state = 0, .reserved_word_set_id = 1},
-  [74] = {.lex_state = 0, .reserved_word_set_id = 1},
+  [69] = {.lex_state = 0, .reserved_word_set_id = 2},
+  [70] = {.lex_state = 0, .reserved_word_set_id = 2},
+  [71] = {.lex_state = 0, .reserved_word_set_id = 2},
+  [72] = {.lex_state = 0, .reserved_word_set_id = 2},
+  [73] = {.lex_state = 0, .reserved_word_set_id = 2},
+  [74] = {.lex_state = 0, .reserved_word_set_id = 2},
   [75] = {.lex_state = 1},
   [76] = {.lex_state = 0, .external_lex_state = 6},
   [77] = {.lex_state = 0, .external_lex_state = 6},
@@ -2239,8 +2239,15 @@ static const TSLexerMode ts_lex_modes[STATE_COUNT] = {
   [276] = {.lex_state = 0, .external_lex_state = 3},
 };
 
-static const TSSymbol ts_reserved_words[2][MAX_RESERVED_WORD_SET_SIZE] = {
+static const TSSymbol ts_reserved_words[3][MAX_RESERVED_WORD_SET_SIZE] = {
   [1] = {
+    anon_sym_true,
+    anon_sym_false,
+  },
+  [2] = {
+    anon_sym_or,
+    anon_sym_and,
+    anon_sym_not,
     anon_sym_true,
     anon_sym_false,
   },
@@ -6106,7 +6113,7 @@ TS_PUBLIC const TSLanguage *tree_sitter_cairn(void) {
     .primary_state_ids = ts_primary_state_ids,
     .name = "cairn",
     .reserved_words = &ts_reserved_words[0][0],
-    .max_reserved_word_set_size = 2,
+    .max_reserved_word_set_size = 5,
     .metadata = {
       .major_version = 234,
       .minor_version = 10,

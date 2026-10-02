@@ -198,8 +198,11 @@ placement's own `theme=` instead.
 `struct` and `site` take no such line. Neither is instantiated by anything — each *is* the build —
 so a floor written inside one constrains exactly the file it is in, which is what `@requires`
 already says. The same goes for a member's own indented children: the floor belongs to the part, and
-a `walls` line is not a part. The two refusals are different messages, because the repairs differ:
-one points at `@requires`, the other at a dedent. Neither refuses on the word alone: `requires` is
+a `walls` line is not a part. The refusals are different messages, because the repairs differ:
+one points at `@requires`, the other at a dedent. A member's children inside a `def` get the dedent;
+inside a `struct` or a `site` a dedent lands the line in a body that refuses it too, so they get
+`@requires`. A floor is recognised by its expression before anything after the line is read, so one
+with an indented line under it is refused as a floor rather than read as a member. Neither refuses on the word alone: `requires` is
 an ordinary keyword in a body that reads no floors, so a member line spelled that way parses in a
 `struct`, a `site`, or under a member exactly as it did before this line existed.
 

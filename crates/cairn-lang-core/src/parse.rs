@@ -43,9 +43,9 @@ const REQUIRES: &str = "requires";
 /// is written down once, and a body that did not pass through it would be a
 /// route around the rule.
 ///
-/// The two refusing variants exist because they have different repairs, and
-/// one message for both asserts something false about half the files that
-/// reach it. Neither refuses on the word alone: only a line whose
+/// The refusing variants exist because they have different repairs, and
+/// one message for all of them asserts something false about the files
+/// that reach it. Neither refuses on the word alone: only a line whose
 /// expression reads as a version floor is refused, since `requires` is an
 /// ordinary identifier in a body that reads no floors.
 ///
@@ -65,10 +65,15 @@ enum RequiresPolicy {
     /// *is* the build — so a floor written inside one constrains exactly the
     /// file it is in, which is what `@requires` already says.
     NotAPart,
-    /// A member's own indented children. The floor is the part's and a
-    /// `walls` line is not a part, so the repair is one dedent rather than a
-    /// different directive.
-    NotThisLevel,
+    /// A member's own indented children inside a `def` — the one body
+    /// with members that may carry a floor. The floor is the part's and a
+    /// `walls` line is not a part, so the repair is one dedent rather than
+    /// a different directive.
+    MemberOfAPart,
+    /// A member's own indented children inside a `struct` or a `site`.
+    /// One dedent would land the line in a body that refuses it too, so
+    /// the repair is the one [`Self::NotAPart`] names.
+    MemberOfTheBuild,
 }
 
 impl RequiresPolicy {
@@ -82,10 +87,24 @@ impl RequiresPolicy {
                  rather than a part of one, so the floor on it is the whole file's and is \
                  written `@requires version>=X` at the top of the file",
             ),
-            Self::NotThisLevel => Some(
+            Self::MemberOfAPart => Some(
                 "a member may not declare `requires version>=X`: the floor belongs to the whole \
-                 part, so it goes at the `def` or `theme` body's own level",
+                 part, so it goes at the `def` body's own level",
             ),
+            Self::MemberOfTheBuild => Some(
+                "a member may not declare `requires version>=X`, and neither may the `struct` \
+                 or `site` it is in: that is the build rather than a part of one, so the floor \
+                 is the whole file's and is written `@requires version>=X` at the top of the file",
+            ),
+        }
+    }
+
+    /// The policy for the indented children of a member in a body under
+    /// this one.
+    fn for_children(self) -> Self {
+        match self {
+            Self::Accepted | Self::MemberOfAPart => Self::MemberOfAPart,
+            Self::NotAPart | Self::MemberOfTheBuild => Self::MemberOfTheBuild,
         }
     }
 }
@@ -240,6 +259,15 @@ struct TruthPattern {
     ends_at_the_arrow: bool,
 }
 
+/// The file directives the language defines, named once the parser has
+/// read the word after `@`.
+#[derive(Debug, Clone, Copy)]
+enum Directive {
+    Cairn,
+    Requires,
+    IntendedTargets,
+}
+
 struct Parser<'a> {
     source: &'a str,
     tokens: &'a [Token],
@@ -317,22 +345,36 @@ impl<'a> Parser<'a> {
             self.raw_values.push(value_tokens);
         }
         self.expect_newline()?;
+        // The name is judged before the value: an unknown directive is
+        // wrong in its name whatever follows it, and "requires a value"
+        // would send the author after the wrong half of `@crain`.
+        let directive = match name.as_str() {
+            "cairn" => Directive::Cairn,
+            REQUIRES => Directive::Requires,
+            "intended_targets" => Directive::IntendedTargets,
+            other => {
+                return Err(ParseError::Syntax {
+                    position,
+                    message: format!("unknown directive `@{other}`"),
+                });
+            }
+        };
         if raw.is_empty() {
             return Err(ParseError::Syntax {
                 position: value_start_pos,
                 message: format!("@{name} requires a value"),
             });
         }
-        match name.as_str() {
-            "cairn" => Ok(Header::Cairn {
+        match directive {
+            Directive::Cairn => Ok(Header::Cairn {
                 version: RawVersion::new(raw),
                 span,
             }),
-            REQUIRES => Ok(Header::Requires {
+            Directive::Requires => Ok(Header::Requires {
                 requirement: RawRequirement::new(raw),
                 span,
             }),
-            "intended_targets" => {
+            Directive::IntendedTargets => {
                 // Re-parse the raw value as a list of strings.
                 //
                 // The slice is detached from the file, so the sub-parse
@@ -354,32 +396,44 @@ impl<'a> Parser<'a> {
                         message: "@intended_targets has trailing tokens after the list".into(),
                     });
                 }
+                // A refusal quotes the offending value as the author wrote
+                // it and points at it. The sub-parse's spans count from the
+                // start of `raw`, so the position is the sub-token's own,
+                // rebased like the errors above.
+                let at = |value: &Value| {
+                    sub_tokens
+                        .iter()
+                        .find(|t| t.span.start == value.span.start)
+                        .map_or(value_start_pos, |t| t.position.rebased(value_start_pos))
+                };
                 let targets = match value.kind {
                     ValueKind::List(items) => items
                         .into_iter()
                         .map(|v| match v.kind {
                             ValueKind::Str(s) => Ok(s),
-                            other => Err(ParseError::Syntax {
-                                position: value_start_pos,
+                            _ => Err(ParseError::Syntax {
+                                position: at(&v),
                                 message: format!(
-                                    "@intended_targets expects strings, got {other:?}"
+                                    "@intended_targets expects a string such as `\"1.21.4\"`, \
+                                     got `{}`",
+                                    &raw[v.span.clone()]
                                 ),
                             }),
                         })
                         .collect::<Result<Vec<_>, _>>()?,
-                    other => {
+                    _ => {
                         return Err(ParseError::Syntax {
-                            position: value_start_pos,
-                            message: format!("@intended_targets expects a list, got {other:?}"),
+                            position: at(&value),
+                            message: format!(
+                                "@intended_targets expects a list of strings such as \
+                                 `[\"1.21.4\"]`, got `{}`",
+                                &raw[value.span.clone()]
+                            ),
                         });
                     }
                 };
                 Ok(Header::IntendedTargets { targets, span })
             }
-            other => Err(ParseError::Syntax {
-                position,
-                message: format!("unknown directive `@{other}`"),
-            }),
         }
     }
 
@@ -550,7 +604,7 @@ impl<'a> Parser<'a> {
                 requires.push(line);
                 continue;
             }
-            commands.push(self.parse_command()?);
+            commands.push(self.parse_command(policy)?);
         }
         if self.peek_is(&TokenKind::Dedent) {
             self.advance();
@@ -568,7 +622,12 @@ impl<'a> Parser<'a> {
     /// spelled that way parses there exactly as it did before the line
     /// existed. Deciding the second needs the whole expression, so the line
     /// is read and then rewound — `pos` is the only state to restore, since
-    /// [`Self::parse_requires_line`] never opens a nesting level.
+    /// [`Self::read_requires_line`] never opens a nesting level.
+    ///
+    /// Whether the line is a floor is decided from its expression alone,
+    /// before anything after the line is looked at: a floor with an
+    /// indented line under it is still a floor, and is refused as one
+    /// rather than read as a member whose `>=` is then unexpected.
     fn requires_line_here(
         &mut self,
         policy: RequiresPolicy,
@@ -576,41 +635,29 @@ impl<'a> Parser<'a> {
         if !self.peek_is_ident(REQUIRES) {
             return Ok(None);
         }
-        // Under `Accepted` the expression is never consulted: the word is
-        // reserved at that level and an unreadable expression is a floor
-        // that states nothing. Only a refusing policy asks, and only so
-        // that a body reading no floors leaves the word an ordinary one.
         let position = self.position();
         let mark = self.pos;
         // A rewound line is read again as a member, so any value it took
         // raw is given back: an unlexable stretch in it is a failure again.
         let raw_mark = self.raw_values.len();
-        match self.parse_requires_line() {
-            Ok(line) => match policy.refusal() {
-                None => Ok(Some(line)),
-                // Refused, and the line reads as a floor: say which repair
-                // this body needs. Anything else would leave the author
-                // with `unexpected `>=` in value position` three tokens
-                // along, which names the token and not the mistake.
-                Some(message) if parse_requirement(line.requirement.as_str()).is_ok() => {
-                    Err(ParseError::Syntax {
-                        position,
-                        message: message.to_owned(),
-                    })
-                }
-                Some(_) => {
-                    self.pos = mark;
-                    self.raw_values.truncate(raw_mark);
-                    Ok(None)
-                }
-            },
-            // An accepting body owns its failures — `requires` with nothing
-            // after it is a floor that states nothing, and the message says
-            // that. A refusing body rewinds instead, because a bare
-            // `requires` there is a member line with no arguments and has
-            // always parsed.
-            Err(error) if policy == RequiresPolicy::Accepted => Err(error),
-            Err(_) => {
+        let (raw, span) = self.read_requires_line()?;
+        match policy.refusal() {
+            // Under `Accepted` the expression is never consulted: the word
+            // is reserved at that level and an unreadable expression is a
+            // floor that states nothing.
+            None => self.finish_requires_line(position, raw, span).map(Some),
+            // Refused, and the line reads as a floor: say which repair
+            // this body needs. Anything else would leave the author with
+            // `unexpected `>=` in value position` three tokens along,
+            // which names the token and not the mistake.
+            Some(message) if parse_requirement(&raw).is_ok() => Err(ParseError::Syntax {
+                position,
+                message: message.to_owned(),
+            }),
+            // A refusing body rewinds instead, because a line that states
+            // no floor there — a bare `requires` included — is a member
+            // line and has always parsed.
+            Some(_) => {
                 self.pos = mark;
                 self.raw_values.truncate(raw_mark);
                 Ok(None)
@@ -644,24 +691,36 @@ impl<'a> Parser<'a> {
         (first..self.pos, raw, value_end_byte)
     }
 
-    /// Read one `requires <expression>` line.
+    /// Read one `requires <expression>` line up to its line break, and
+    /// return the expression and the line's span.
     ///
     /// The expression is taken verbatim to end of line, exactly as
     /// [`Self::parse_header`] takes `@requires`\'s. That is what lets the
     /// two share one `parse_requirement`, and what keeps version labels the
     /// lexer has no token for — `24w14a` lexes as an integer and an
     /// identifier, `1.21.4-rc1` as five tokens — out of the grammar\'s way.
-    fn parse_requires_line(&mut self) -> Result<MemberRequires, ParseError> {
-        // The keyword's own position, not the value's. An empty expression
-        // has no token to point at but the newline, and its column is one
-        // past the end of the line — a caret nothing is under.
-        let keyword_position = self.position();
+    fn read_requires_line(&mut self) -> Result<(String, crate::error::Span), ParseError> {
         let start_byte = self.current_byte();
         self.advance();
         let (value_tokens, raw, value_end_byte) = self.rest_of_line();
         self.raw_values.push(value_tokens);
-        let span = start_byte..value_end_byte;
         self.expect_newline()?;
+        Ok((raw, start_byte..value_end_byte))
+    }
+
+    /// Accept a `requires` line [`Self::read_requires_line`] has read, in
+    /// a body that carries floors.
+    ///
+    /// `keyword_position` is the keyword's own position, not the value's.
+    /// An empty expression has no token to point at but the newline, and
+    /// its column is one past the end of the line — a caret nothing is
+    /// under.
+    fn finish_requires_line(
+        &self,
+        keyword_position: Position,
+        raw: String,
+        span: crate::error::Span,
+    ) -> Result<MemberRequires, ParseError> {
         if raw.is_empty() {
             return Err(ParseError::Syntax {
                 position: keyword_position,
@@ -683,13 +742,14 @@ impl<'a> Parser<'a> {
         Ok(MemberRequires::new(RawRequirement::new(raw), span))
     }
 
-    fn parse_command(&mut self) -> Result<Statement, ParseError> {
-        let position = self.position();
+    /// `policy` is the enclosing body's, so a member's own children get
+    /// the refusal that names the repair for the item they are in.
+    fn parse_command(&mut self, policy: RequiresPolicy) -> Result<Statement, ParseError> {
         let start_byte = self.current_byte();
         let keyword = self.expect_ident()?;
         match keyword.as_str() {
             "logic" => return self.parse_logic_command(start_byte),
-            "assert" => return self.parse_assert_command(position, start_byte),
+            "assert" => return self.parse_assert_command(start_byte),
             _ => {}
         }
         let selector = if self.peek_is(&TokenKind::LBracket) {
@@ -736,7 +796,7 @@ impl<'a> Parser<'a> {
         // A member's children are members. The floor belongs to the part
         // as a whole, so it is read one level up and refused here.
         let (_, children) =
-            self.nested(|p| p.parse_optional_command_body(RequiresPolicy::NotThisLevel))?;
+            self.nested(|p| p.parse_optional_command_body(policy.for_children()))?;
         Ok(Statement::Generic {
             keyword,
             selector,
@@ -757,11 +817,10 @@ impl<'a> Parser<'a> {
         Ok(Statement::Logic { lhs, rhs, span })
     }
 
-    fn parse_assert_command(
-        &mut self,
-        position: Position,
-        start_byte: usize,
-    ) -> Result<Statement, ParseError> {
+    fn parse_assert_command(&mut self, start_byte: usize) -> Result<Statement, ParseError> {
+        // The head's own position: a misspelled form is wrong in the word
+        // after `assert`, not in `assert`.
+        let position = self.position();
         let head = self.expect_ident()?;
         match head.as_str() {
             "truth" => self.parse_assert_truth(start_byte),
@@ -861,14 +920,20 @@ impl<'a> Parser<'a> {
                 self.advance();
                 None
             } else {
+                // Taken before the output is consumed: a refusal of it
+                // points at it, not at whatever token follows.
+                let output_position = self.position();
                 let out_lex = self.expect_int_lexeme()?;
                 match out_lex.as_str() {
                     "0" => Some(false),
                     "1" => Some(true),
                     other => {
-                        return Err(self.syntax_here(&format!(
-                            "truth-table output must be `0`, `1`, or `-`, got `{other}`"
-                        )));
+                        return Err(ParseError::Syntax {
+                            position: output_position,
+                            message: format!(
+                                "truth-table output must be `0`, `1`, or `-`, got `{other}`"
+                            ),
+                        });
                     }
                 }
             };
@@ -998,6 +1063,29 @@ impl<'a> Parser<'a> {
             self.expect(&TokenKind::RParen)?;
             return Ok(inner);
         }
+        // `and` and `or` are operators, never a signal's name: read as one,
+        // `sig.a and or` would parse as a reference to a signal called `or`
+        // and the missing operand would surface downstream as an unbound
+        // signal rather than here.
+        if let Some(Token {
+            kind: TokenKind::Ident(word),
+            position,
+            ..
+        }) = self.peek()
+            && matches!(word.as_str(), "and" | "or")
+        {
+            // What came before is an operator word, `=` or `(`; the words
+            // are quoted bare, as the author wrote them.
+            let after = match self.pos.checked_sub(1).map(|i| &self.tokens[i].kind) {
+                Some(TokenKind::Ident(previous)) => format!("`{previous}`"),
+                Some(previous) => previous.to_string(),
+                None => "the start of the line".to_owned(),
+            };
+            return Err(ParseError::Syntax {
+                position: *position,
+                message: format!("expected a signal after {after}, got the operator `{word}`"),
+            });
+        }
         let dotted = self.parse_dotted_ref()?;
         Ok((Expr::Ref(dotted), 1))
     }
@@ -1052,10 +1140,45 @@ impl<'a> Parser<'a> {
     fn parse_arg(&mut self) -> Result<Arg, ParseError> {
         let start_byte = self.current_byte();
         let key = self.expect_ident()?;
+        if !self.peek_is(&TokenKind::Eq)
+            && let Some(literal) = self.size_with_no_height_before(&key)
+        {
+            return Err(literal);
+        }
         self.expect(&TokenKind::Eq)?;
         let value = self.parse_value()?;
         let span = start_byte..self.last_byte();
         Ok(Arg { key, value, span })
+    }
+
+    /// The refusal for a key that is really the `x` of a size literal with
+    /// no height, as in `size=9x`, or `None` when `key` is not one.
+    ///
+    /// The lexer builds a size only when a digit follows the `x`, so `9x`
+    /// arrives as an integer value and an `x` the next argument then has to
+    /// be keyed by — a split that is intended, since `size=2x 2` is three
+    /// arguments. What the split costs is the message: ``expected `=` ``
+    /// after an `x` names the reading the parser tried and not the literal
+    /// the author wrote. So the `x` is judged here, where the argument has
+    /// failed anyway: it is the size literal's when it touches the integer
+    /// before it. An argument's value is the only thing that can end in a
+    /// bare integer ahead of a key, so that integer is the value the size
+    /// was meant to be. `key` has just been consumed.
+    fn size_with_no_height_before(&self, key: &str) -> Option<ParseError> {
+        if key != "x" {
+            return None;
+        }
+        let x = self.pos.checked_sub(1)?;
+        let int = self.tokens.get(x.checked_sub(1)?)?;
+        let TokenKind::Int { lexeme } = &int.kind else {
+            return None;
+        };
+        (int.span.end == self.tokens[x].span.start).then(|| ParseError::Syntax {
+            position: int.position,
+            message: format!(
+                "size literal `{lexeme}x` has no height; a size is two extents, as in `{lexeme}x7`"
+            ),
+        })
     }
 
     /// Read an `@` token value — `@oak_planks`, `@floor.wood`, or a

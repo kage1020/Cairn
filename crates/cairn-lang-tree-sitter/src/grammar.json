@@ -709,12 +709,20 @@
           "name": "parenthesized_expression"
         },
         {
-          "type": "SYMBOL",
-          "name": "signal_ref"
+          "type": "RESERVED",
+          "content": {
+            "type": "SYMBOL",
+            "name": "signal_ref"
+          },
+          "context_name": "operand"
         },
         {
-          "type": "SYMBOL",
-          "name": "identifier"
+          "type": "RESERVED",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          },
+          "context_name": "operand"
         }
       ]
     },
@@ -1834,6 +1842,28 @@
       {
         "type": "STRING",
         "value": "false"
+      }
+    ],
+    "operand": [
+      {
+        "type": "STRING",
+        "value": "true"
+      },
+      {
+        "type": "STRING",
+        "value": "false"
+      },
+      {
+        "type": "STRING",
+        "value": "and"
+      },
+      {
+        "type": "STRING",
+        "value": "or"
+      },
+      {
+        "type": "STRING",
+        "value": "not"
       }
     ]
   }
