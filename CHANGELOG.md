@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- *(cli)* `cairn info --editions java,java` reported Java twice: a second row in `edition
+  portability` and `buildable targets`, in text and in the JSON document, and a second per-edition
+  dry-run. The per-edition rows now walk the same deduplicated list the diagnostics gate is weighed
+  against, so a repeated edition is reported once.
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

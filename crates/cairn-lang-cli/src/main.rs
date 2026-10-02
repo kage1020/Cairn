@@ -1100,7 +1100,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         lines: &lines,
         report: format.failure_report(),
     };
-    let rows = match edition_rows(reporting, &module, &ir, editions, &combined) {
+    let rows = match edition_rows(reporting, &module, &ir, &asked, &combined) {
         Ok(rows) => rows,
         // The same refusal the edition-neutral gate above gets, one pass
         // later: which pass raised the finding does not decide whether a
@@ -1129,6 +1129,10 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 
 /// One dry-run lower per requested edition, plus one per supported
 /// version of that edition, folded into that edition's report row.
+///
+/// `editions` is [`requested_editions`]' list, the one the diagnostics
+/// gate is weighed against too, so an edition named twice in `--editions`
+/// is walked, and gets a row, once.
 ///
 /// The per-edition pass is strict where the caller's neutral pass is
 /// soft: a slot only one variant declares resolves there and not here, and
@@ -1180,7 +1184,7 @@ fn edition_rows(
     }: Reporting<'_>,
     module: &Module,
     ir: &cairn_lang_core::intent::IntentModule,
-    editions: &[String],
+    editions: &[Edition],
     already_reported: &[Diagnostic],
 ) -> Result<Vec<EditionReport>, Vec<Diagnostic>> {
     let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
@@ -1191,8 +1195,7 @@ fn edition_rows(
     let mut edition_specific_error = false;
     let mut refused: Vec<Diagnostic> = Vec::new();
 
-    for e in editions {
-        let edition: Edition = e.parse().expect("validated by the caller");
+    for &edition in editions {
         let resolution = resolve(ir, Some(edition));
         let pack = builtin_pack(edition);
         // Same reason as the pass above: no single version, so the lowering
@@ -2556,7 +2559,8 @@ fn intended_target_findings(
 ///
 /// Deduplicated because the list is a user's, and `--editions java,java`
 /// asks about Java once: a repeat that reached the fanout would report
-/// one header's finding twice, and would make `--editions java,java` read
+/// one header's finding twice, would give the edition a second row in
+/// both per-edition figures, and would make `--editions java,java` read
 /// as two editions in scope, which is what decides whether
 /// `W_INTENDED_TARGET_UNSUPPORTED` has been asked for at all.
 ///

@@ -611,3 +611,31 @@ fn declared_edge_and_refusals(stdout: &str) -> (String, Vec<&str>) {
     assert!(!refused.is_empty(), "premise: something refuses: {stdout}");
     (edge, refused)
 }
+
+/// An edition named twice in `--editions` is asked about once: its row,
+/// its buildable list and the stderr notes come out exactly as they do
+/// for the list with the repeat removed, in both formats.
+#[test]
+fn info_4b_an_edition_named_twice_is_reported_once() {
+    let path = tempfile_with_contents("repeated_edition", PAINTED_STRUCT);
+    let path = path.to_str().unwrap();
+    for (repeated, distinct) in [("java,java", "java"), ("java,bedrock,java", "java,bedrock")] {
+        for format in ["text", "json"] {
+            let run = |editions: &str| {
+                let out = cairn("info", &[path, "--editions", editions, "--format", format]);
+                assert!(
+                    out.status.success(),
+                    "--editions {editions} --format {format}: {}",
+                    String::from_utf8_lossy(&out.stderr),
+                );
+                (out.stdout, out.stderr)
+            };
+            assert_eq!(
+                run(repeated),
+                run(distinct),
+                "--editions {repeated} should report what --editions {distinct} does \
+                 (--format {format})",
+            );
+        }
+    }
+}
