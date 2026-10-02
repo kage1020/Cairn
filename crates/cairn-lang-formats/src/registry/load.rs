@@ -1724,11 +1724,13 @@ mod tests {
         // Each targetable row is the block-state version that release
         // writes into a palette (PocketMine-MP's
         // `BlockStateData::CURRENT_VERSION` in the release supporting it),
-        // whose revision is not the client build's: those builds are
-        // 1.21.0.3, 1.21.40.3 and 1.21.60.10. The targetable set is pinned
-        // along with the integers, so a row added or a table regenerated
-        // with revision 0 or the build number fails here rather than in a
-        // user's lock.
+        // whose revision need not be the client build's: those builds are
+        // 1.21.0.3, 1.21.40.3 and 1.21.60.10, so only 1.21.0's two
+        // coincide. The targetable set is pinned along with the integers,
+        // so a targetable row added, or a table regenerated with revision
+        // 0, fails here rather than in a user's lock; a regeneration from
+        // the build number fails for 1.21.40 and 1.21.60 but not for
+        // 1.21.0.
         let expected = [
             ("1.21.0", version(1, 21, 0, 3)),
             ("1.21.40", version(1, 21, 40, 1)),
@@ -1742,6 +1744,12 @@ mod tests {
             .map(|row| row.mc_version.as_str())
             .collect();
         assert_eq!(targetable, expected.map(|(mc_version, _)| mc_version));
+        // An ordering row never reaches an artifact, so the built-in pack
+        // gives it the release's base integer with revision 0. The schema
+        // does not require that of a pack; this pins it for this one.
+        for row in pack.data_versions.versions.iter().filter(|r| !r.targetable) {
+            assert_eq!(row.data_version & 0xFF, 0, "{}", row.mc_version);
+        }
         for (mc_version, block_version) in expected {
             let t = pack.resolve_bedrock_target(mc_version).expect(mc_version);
             assert_eq!(t.mc_version, mc_version);
@@ -1793,6 +1801,43 @@ mod tests {
         let t = pack.resolve_java_target("1.21.4").expect("resolve");
         assert_eq!(t.data_version, 4189);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Row order in `data_versions.json` is part of the schema, as the
+    /// `DataVersionTable::versions` doc says: a table whose keys or labels
+    /// do not ascend row by row is refused at load.
+    #[test]
+    fn data_versions_rows_out_of_order_are_refused() {
+        let keys_descend = r#"{
+            "schema_version": 1,
+            "latest": "1.21.4",
+            "versions": [
+                { "mc_version": "1.21.4", "data_version": 4189 },
+                { "mc_version": "1.20.4", "data_version": 3700 }
+            ]
+        }"#;
+        let err = load_from_dir_err("order-keys", |dir| {
+            write_pack(dir, good_manifest(), keys_descend);
+        });
+        let RegistryError::VersionOrderBroken { reason } = &err else {
+            panic!("expected VersionOrderBroken, got {err}");
+        };
+        assert!(reason.contains("keys must ascend"), "{reason}");
+        let labels_descend = r#"{
+            "schema_version": 1,
+            "latest": "1.21.4",
+            "versions": [
+                { "mc_version": "1.21.4", "data_version": 3700 },
+                { "mc_version": "1.20.4", "data_version": 4189 }
+            ]
+        }"#;
+        let err = load_from_dir_err("order-labels", |dir| {
+            write_pack(dir, good_manifest(), labels_descend);
+        });
+        let RegistryError::VersionOrderBroken { reason } = &err else {
+            panic!("expected VersionOrderBroken, got {err}");
+        };
+        assert!(reason.contains("does not sort above"), "{reason}");
     }
 
     #[test]

@@ -43,9 +43,11 @@ pub struct DataVersionTable {
     /// list.
     #[serde(default)]
     pub source: Option<String>,
-    /// Known Minecraft versions. Stored in ascending release order by
-    /// convention; the resolver does not depend on order so the order of
-    /// rows in the JSON file is informational.
+    /// Known Minecraft versions, oldest first. The order is required, not
+    /// a convention: each row's `data_version` must be higher than the
+    /// previous row's and its label must sort above the previous label, or
+    /// the pack does not load
+    /// ([`RegistryError::VersionOrderBroken`](super::RegistryError::VersionOrderBroken)).
     pub versions: Vec<DataVersionEntry>,
 }
 
@@ -59,9 +61,9 @@ pub struct DataVersionEntry {
     /// is the block-palette `version` integer every `.mcstructure`
     /// palette entry carries: `(major << 24) | (minor << 16) |
     /// (patch << 8) | revision` of the block-state version that release
-    /// writes, whose revision is not the client build's. On Bedrock that is
-    /// exact only for a [`Self::targetable`] row; the other rows never
-    /// reach a file and carry revision 0.
+    /// writes, whose revision need not be the client build's. On Bedrock
+    /// that is exact only for a [`Self::targetable`] row: the other rows
+    /// never reach a file, so their integer is used only to order them.
     pub data_version: i32,
     /// Release date in `YYYY-MM-DD` form. Informational; not consumed by
     /// the compiler. `Option` so older packs without the field still load.
