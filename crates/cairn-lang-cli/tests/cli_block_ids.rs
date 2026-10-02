@@ -449,11 +449,14 @@ fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
 }
 
 /// The README's cottage window with a theme selector row binding
-/// `frame=@{id}`.
+/// `frame=@{id}`, cut into walls that paint: a struct of air is a lost
+/// scope, which would refuse the build whatever the binding said.
 fn window_bound_to(id: &str) -> String {
     format!(
-        "theme t:\n  slot glass -> @glass_pane\n  window[class=small] -> frame=@{id}\n\n\
+        "theme t:\n  slot glass -> @glass_pane\n  slot wall -> @cobblestone\n  \
+         window[class=small] -> frame=@{id}\n\n\
          struct s size=9x7\n  \
+         walls mat_slot=wall height=5\n  \
          window class=small side=front offset=2 y=2 size=2x2 sym=true mat_slot=glass\n"
     )
 }

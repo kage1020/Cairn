@@ -483,7 +483,10 @@ fn lower_connects(
         // to_place, to_port). Normalise the pair (sort the two ends)
         // so `a.entry → b.entry` and `b.entry → a.entry` count as the
         // same walkway — laying the strip both ways would be a silent
-        // double-write.
+        // double-write. The pair is recorded only once its strip is
+        // laid, at the bottom of this loop: an earlier row with the same
+        // pair that the checks below refused laid nothing, so this row
+        // is not a duplicate of it.
         let mut endpoints = [
             (connect.from.place.clone(), connect.from.port.clone()),
             (connect.to.place.clone(), connect.to.port.clone()),
@@ -491,7 +494,7 @@ fn lower_connects(
         endpoints.sort_unstable();
         let [(a_place, a_port), (b_place, b_port)] = endpoints;
         let dedup_key = (connect.site.clone(), a_place, a_port, b_place, b_port);
-        if !seen_pairs.insert(dedup_key) {
+        if seen_pairs.contains(&dedup_key) {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DuplicateWalkway,
                 span: connect.span.clone(),
@@ -700,6 +703,7 @@ fn lower_connects(
                 data: None,
             });
         }
+        seen_pairs.insert(dedup_key);
         walkways.insert(
             scope_key,
             Walkway {
@@ -7278,6 +7282,29 @@ struct s size=9x7
             1,
             "reversed row must not lay a second strip"
         );
+    }
+
+    #[test]
+    fn a_row_refused_after_the_dedup_check_leaves_its_pair_to_the_next_row() {
+        // The first row's `path=` is an abstract token, which lowers to
+        // nothing without a registry pack, so that row lays no strip. The
+        // second row names the same pair and a concrete block. It is not
+        // a duplicate of a walkway that was never laid: it lays the strip,
+        // and the only finding is the first row's own deferral.
+        let src = village_pair_source(
+            "  connect a.entry to b.entry path=@path.gravel\n  connect b.entry to a.entry path=@gravel\n",
+        );
+        let out = lowered(&src);
+        let codes: Vec<DiagnosticCode> = out.diagnostics.iter().map(|d| d.code).collect();
+        assert_eq!(
+            codes,
+            [DiagnosticCode::AbstractTokenDeferred],
+            "{:#?}",
+            out.diagnostics
+        );
+        let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
+        assert_eq!(laid, ["walkway::s::b.entry__a.entry"]);
+        assert_eq!(out.walkways[0].path_material, "minecraft:gravel");
     }
 
     /// The `W_INVALID_WALKWAY_IDENT` findings on `out`, as `(primary, notes)`.

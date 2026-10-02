@@ -449,6 +449,42 @@
   backend's own refusal of such a value no longer suggests `--edition java`, which would write the
   same value unchanged. `spec/lint` "Machine-readable payload" says the same.
 
+- *(core,cli)* A `connect` row that laid no walkway still let `cairn compile` certify the build.
+  The partial-build gate compared the scopes the resolver recorded with the structures lowering
+  built, and a walkway's scope is minted during lowering, so it was never on the first list. A site
+  whose only `connect` named `place id=a_` wrote `a_.nbt`, `b.nbt` and a lockfile with
+  `verified: true`, and exited 0. Each `connect` pair is now counted as a requested scope: when no
+  row laid it, `compile` refuses with `E_PARTIAL_BUILD`, `cairn check --edition E --target V`
+  refuses with it too, and `info` reports that no target can build the source. The loss is named
+  by the row's own ports:
+
+  ```
+  s.crn:11:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a_.p ↔ b.p` was dropped because the place id `a_` starts or ends with `_`
+    note: a walkway's place and port ids may not start or end with `_` in either position, so the rule does not depend on which way the row is written; rename the place so it neither starts nor ends with `_`
+  error[E_PARTIAL_BUILD]: s.crn: 1 of 3 requested scopes did not lower; refusing to certify a partial build
+    note: `site::s::a_.p ↔ b.p` produced no voxels
+  ```
+
+  A `W_DUPLICATE_WALKWAY` row loses nothing, because the earlier row laid its pair, and two rows
+  naming one pair that neither laid count as one loss. A walkway or scope counts as built only when
+  it holds a block. Two huts touching at `north_of=a gap=0`, each door port buried under the other's
+  floor, used to write a walkway `.nbt` of two air blocks, and a scope that lowered to air alone
+  (every member deferred, no theme bound for its `mat_slot=` members, or no member at all) wrote an
+  `.nbt` of air; both were certified at exit 0, and both are now refused as losses. One mistake can
+  now cost more than one note: a `place` whose def has no `size=` is lost, and so is every walkway
+  with an endpoint on it.
+
+  `spec/components-editing-sites` "Ports and `connect`" said each row writes one `.nbt`; it now says
+  which rows do and what the others cost, and its diagnostics table gains the missing
+  `W_INVALID_WALKWAY_IDENT` row. `spec/lint` and the `dropped_scopes` row in
+  `spec/versioning-editions` name the walkway case, with the ja mirror.
+
+- *(core)* `W_DUPLICATE_WALKWAY` could name a row a duplicate of a walkway that was never laid.
+  The pair was recorded as seen before the row's `path=` material, the area cap and its ids were
+  checked. Two rows for one pair can differ in their `path=`, so when the first row's material did
+  not resolve, the second was reported as a duplicate and dropped too, and the pair got no walkway
+  at all. The pair is now recorded only once its strip is laid, so the later row lays it.
+
 - *(core)* `cairn check` passed, and `cairn info` listed every supported version as buildable, for
   a source whose artifacts share a file name, which `cairn compile` then refused at every target. A
   `struct` and a `place` of one name both write `hut.nbt`:
@@ -1616,13 +1652,13 @@
   cannot merge, and are refused so the rule stays one sentence (`KeyConstructError::UnderscoreAtEdge`
   gives the full argument). That reaches ids which never aliased: a
   source whose only edge-`_` id is `place id=a_` in `connect a_.p to b.p` used to lay that walkway,
-  and now drops it with the warning above while `compile` still exits 0. The site is exempt: `::`
-  separates it from both neighbours. A unit test builds every key over endpoint segments of `a` and
-  `_` up to three long and sites up to two, and parses each accepted one back to the parts it came
-  from. If two rows ever do encode to one key, a debug build asserts, and a release build reports
-  `W_INVALID_WALKWAY_IDENT` on the later row instead of losing the earlier walkway silently.
-  `spec/lint` "Connections and walkways" states the rule and why it covers every edge, with the
-  ja mirror.
+  and now drops it with the warning above; `compile` refuses a build that lost a walkway with
+  `E_PARTIAL_BUILD`. The site is exempt: `::` separates it from both neighbours. A unit test builds
+  every key over endpoint segments of `a` and `_` up to three long and sites up to two, and parses
+  each accepted one back to the parts it came from. If two rows ever do encode to one key, a debug
+  build asserts, and a release build reports `W_INVALID_WALKWAY_IDENT` on the later row instead of
+  losing the earlier walkway silently. `spec/lint` "Connections and walkways" states the rule and
+  why it covers every edge, with the ja mirror.
 
   The `__` finding's text changes too. It used to read ``contains `__`, which collides with the
   walkway scope key's `from`/`to` separator``, with the note ``rename the offending id (e.g.

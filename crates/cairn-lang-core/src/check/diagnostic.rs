@@ -491,9 +491,14 @@ pub enum DiagnosticCode {
     /// the buildings invisibly unconnected, so the build fails.
     MissingPathMaterial,
     /// Walkway voxelisation hit an existing building cell along the L-shaped
-    /// path between two ports. The blocked cell is skipped (the rest of the
-    /// walkway still lays), so the connection still reaches both ends visibly
-    /// even when an obstacle steals one or two cells in between.
+    /// path between two ports. The blocked cell is skipped and the rest of
+    /// the walkway lays, so the connection still reaches both ends visibly
+    /// when an obstacle steals one or two cells in between.
+    ///
+    /// When every cell is skipped, or the straight L alone is past the
+    /// router's area cap, nothing is laid. The code stays a warning, but
+    /// the walkway is lost, and `cairn compile` refuses the build with
+    /// `E_PARTIAL_BUILD`.
     WalkwayBlocked,
     /// A `connect` row repeats a `(from, to)` port pair already laid by an
     /// earlier row in the same site. The second walkway is dropped silently
@@ -843,8 +848,10 @@ pub enum DiagnosticData {
     /// existing structure and were dropped from the walkway lay.
     WalkwayBlocked {
         /// Count of cells the walkway lowering had to skip. Invariant:
-        /// `>= 1` — `lower_connects` only emits `W_WALKWAY_BLOCKED` when
-        /// the underlying `skipped > 0`. Typed as `u64` so `usize` lifts
+        /// `>= 1` — `lower_connects` attaches this payload only when the
+        /// underlying `skipped > 0`. The area-cap refusal emits
+        /// `W_WALKWAY_BLOCKED` with no payload, since it skipped no cells
+        /// and laid none. Typed as `u64` so `usize` lifts
         /// without lossy truncation on any platform Cairn supports.
         skipped: u64,
     },
