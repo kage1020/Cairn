@@ -331,12 +331,13 @@ fn depth_6_each_independent_chain_reports_its_own_root_cause() {
 }
 
 #[test]
-fn depth_7_the_chain_length_the_message_quotes_is_the_real_one() {
-    // The message translates the internal frame budget into bindings, which
-    // is the unit the author counts in. That translation is a factor of two
-    // — an operand descent plus the referenced binding's own expression —
-    // and nothing else pins it, so a change to the recursion shape would
-    // leave the message quoting a number that matches nothing on screen.
+fn depth_7_a_chain_of_one_operator_bindings_reaches_the_limit_where_the_doc_says() {
+    // `MAX_LOWERING_DEPTH`'s doc translates the internal frame budget into
+    // bindings, the unit the author counts in: a binding of one operator
+    // costs two frames — an operand descent plus the referenced binding's
+    // own expression — so such a chain reaches the bound at half of it.
+    // Nothing else pins that factor, so a change to the recursion shape
+    // would leave the doc describing a limit no file meets.
     let quoted = MAX_LOWERING_DEPTH / 2;
     let tmp = TempDir::new().expect("tempdir");
 
@@ -356,8 +357,8 @@ fn depth_7_the_chain_length_the_message_quotes_is_the_real_one() {
         assert_eq!(
             refused,
             want_refusal,
-            "a reverse chain of {stages} bindings should {} — the message promises \
-             about {quoted}; stderr={}",
+            "a reverse chain of {stages} bindings should {} — the doc puts the limit \
+             at {quoted}; stderr={}",
             if want_refusal { "be refused" } else { "lower" },
             String::from_utf8_lossy(&out.stderr),
         );

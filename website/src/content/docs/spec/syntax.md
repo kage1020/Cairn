@@ -82,6 +82,7 @@ The table around those rows is read the same way:
 
 | Case | Code |
 |---|---|
+| One signal listed as two or more inputs | `E_TRUTH_TABLE_DUPLICATE_INPUT` (and nothing else for the table) |
 | No rows at all, or no row with a `0` or `1` output | `E_TRUTH_TABLE_EMPTY` |
 | Two rows assign one input combination different outputs | `E_TRUTH_TABLE_CONFLICT` (on the later row) |
 | Two rows cover one input combination without contradicting each other | `W_TRUTH_TABLE_DUPLICATE_ROW` (on the later row) |

@@ -557,3 +557,86 @@ struct s size=1x1
     assert!(primaries.contains("sig.undef1"), "sig.undef1 must be named");
     assert!(primaries.contains("sig.undef2"), "sig.undef2 must be named");
 }
+
+/// A name an `assert` uses unbound is reported once, at the first
+/// `assert` in the file that uses it — not at one nested under a `level`
+/// further down, which the walk over members reaches before the scope's
+/// own `assert`s.
+#[test]
+fn an_unbound_assert_signal_is_reported_at_its_first_use_in_the_file() {
+    let source = "\
+struct s size=5x5
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  logic sig.o = not sig.a
+  assert truth(sig.zz -> sig.o) { 0 -> 1; 1 -> 0 }
+  level y=0
+    assert truth(sig.zz -> sig.o) { 0 -> 1; 1 -> 0 }
+";
+    let out = synth_source(source);
+    let unbound: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+        .collect();
+    assert_eq!(
+        unbound.len(),
+        1,
+        "one name, one finding: {:?}",
+        out.diagnostics
+    );
+    assert_eq!(
+        common::line_of(source, unbound[0].span.start),
+        4,
+        "the first `assert` naming `sig.zz` is on line 4: {:?}",
+        unbound[0],
+    );
+}
+
+/// `E_LOGIC_NESTING_TOO_DEEP` counts the bindings the lowering was inside
+/// and stands on the outermost, the one whose reference to a binding
+/// declared after it started the descent, with a note on each of the
+/// rest. Three bindings of 90 `and`s each, in reverse dependency order.
+#[test]
+fn a_nesting_refusal_counts_its_chain_and_stands_on_where_it_starts() {
+    let tail = " and sig.a".repeat(90);
+    let source = format!(
+        "struct s size=5x5\n  \
+         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+         logic sig.x1 = sig.x2{tail}\n  \
+         logic sig.x2 = sig.x3{tail}\n  \
+         logic sig.x3 = sig.a{tail}\n  \
+         door id=d side=front at=center\n  \
+         door[id=d] opened_by=sig.x1\n"
+    );
+    let out = synth_source(&source);
+    let deep: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicNestingTooDeep)
+        .collect();
+    assert_eq!(deep.len(), 1, "{:?}", out.diagnostics);
+    assert!(
+        deep[0]
+            .primary
+            .contains("inside 3 chained bindings, starting with this one"),
+        "the count is the chain's own: {}",
+        deep[0].primary,
+    );
+    assert_eq!(common::line_of(&source, deep[0].span.start), 3);
+    let noted: Vec<(usize, &str)> = deep[0]
+        .notes
+        .iter()
+        .filter_map(|n| {
+            n.span
+                .as_ref()
+                .map(|span| (common::line_of(&source, span.start), n.message.as_str()))
+        })
+        .collect();
+    assert_eq!(
+        noted,
+        [
+            (4, "chained binding 2 of 3, declared after the first"),
+            (5, "chained binding 3 of 3, declared after the first"),
+        ],
+    );
+}

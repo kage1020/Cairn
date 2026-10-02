@@ -175,6 +175,7 @@ mod tests {
             | C::TypeMismatchSize
             | C::ConnectArity
             | C::TruthTableEmpty
+            | C::TruthTableDuplicateInput
             | C::TruthTableConflict
             | C::TruthTableDuplicateRow
             | C::TruthTablePartial
@@ -252,6 +253,7 @@ mod tests {
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",

@@ -362,7 +362,12 @@ fn collect_body<'a>(
     // signal, while this one is the order the surviving bindings lower in,
     // which is the order the IR's nodes are numbered in.
     out.bindings.sort_by_key(|b| (b.span.start, b.span.end));
+    // The same walk collects a member's nested `assert`s before the
+    // scope's own, and `check_assert_refs` reports each unbound name once,
+    // at the first assert in this list that uses it — which is only the
+    // first in the file once the list is in source order.
     out.asserts.extend(asserts);
+    out.asserts.sort_by_key(|a| (a.span().start, a.span().end));
 }
 
 fn collect_member<'a>(
@@ -1402,6 +1407,7 @@ fn lower_all_bindings<'a>(
         bindings_by_lhs,
         refused_drivers,
         in_progress: HashMap::new(),
+        chain: Vec::new(),
         failed_lhs: HashSet::new(),
         cse: HashMap::new(),
         depth: 0,
@@ -1571,6 +1577,11 @@ struct LoweringCtx<'a> {
     /// a dependency cycle. Value = span of the outermost `logic` line in
     /// the chain, so the diagnostic can point at the culprit.
     in_progress: HashMap<DottedRef, Span>,
+    /// The bindings being lowered, as indices into [`Self::bindings`],
+    /// outermost first: each one is being lowered from inside the
+    /// expression of the one before it. What `E_LOGIC_NESTING_TOO_DEEP`
+    /// counts and points at.
+    chain: Vec<usize>,
     /// Signal names whose resolution already failed. Every downstream
     /// reference (RHS or actuator) checks this set before emitting a fresh
     /// `E_LOGIC_UNBOUND_SIGNAL` so the user sees the root cause once, not
@@ -1585,11 +1596,12 @@ struct LoweringCtx<'a> {
     /// [`MAX_LOWERING_DEPTH`]. [`lower_binding`] does not touch it directly;
     /// it costs depth only through the [`lower_expr`] it calls.
     depth: usize,
-    /// Bindings that already reported the limit, keyed by span. Two
-    /// independent chains in one scope each get their diagnostic, while the
-    /// several branches of one binding that all hit the wall share one —
-    /// `lower_binary` deliberately keeps every root cause on a single pass,
-    /// and a bare flag broke that for the second chain.
+    /// Bindings that already reported the limit, keyed by the span of the
+    /// outermost binding in the chain. Two independent chains in one scope
+    /// each get their diagnostic, while the several branches of one chain
+    /// that all hit the wall share one — `lower_binary` deliberately keeps
+    /// every root cause on a single pass, and a bare flag broke that for
+    /// the second chain.
     depth_reported: HashSet<(usize, usize)>,
 }
 
@@ -1602,9 +1614,11 @@ struct LoweringCtx<'a> {
 /// - one binding a reference chains through costs **two** — the operand
 ///   descent plus the referenced binding's own expression
 ///
-/// so this bound is reached by roughly `MAX_LOWERING_DEPTH / 2` chained
-/// bindings. The diagnostic states both, because "nested past 256 levels"
-/// on a file with 130 `logic` lines is not something an author can act on.
+/// so a chain of one-operator bindings reaches this bound at about
+/// `MAX_LOWERING_DEPTH / 2` of them, and a chain of longer expressions at
+/// fewer. The diagnostic counts the bindings it was inside when it
+/// stopped and points at the outermost, because "nested past 256 levels"
+/// is not something an author can act on.
 ///
 /// The depth comes from declaration order, not graph size: `lower_binding`
 /// resolves a reference by lowering the binding it names, so a chain
@@ -1658,7 +1672,9 @@ fn lower_binding<'a>(
     let rhs = ctx.bindings[binding_idx].rhs;
 
     ctx.in_progress.insert(lhs.clone(), binding_span.clone());
+    ctx.chain.push(binding_idx);
     let result = lower_expr(rhs, &binding_span, ir, ctx, diagnostics);
+    ctx.chain.pop();
     ctx.in_progress.remove(lhs);
 
     match result {
@@ -1684,26 +1700,8 @@ fn lower_expr<'a>(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<SignalRef, LoweringFailed> {
     if ctx.depth >= MAX_LOWERING_DEPTH {
-        let key = (binding_span.start, binding_span.end);
-        if ctx.depth_reported.insert(key) {
-            let label = ctx.scope.label();
-            diagnostics.push(
-                Diagnostic::new(
-                    DiagnosticCode::LogicNestingTooDeep,
-                    binding_span.clone(),
-                    format!(
-                        "{label} `logic` lowering nested past {MAX_LOWERING_DEPTH} levels, about \
-                         {} chained bindings",
-                        MAX_LOWERING_DEPTH / 2,
-                    ),
-                )
-                .with_footer(
-                    "Fix: declare each `logic` binding after the ones it references. A binding is \
-                     lowered by descending into whatever it names, so a chain written in reverse \
-                     costs two levels per binding, while the same graph in dependency order costs \
-                     none.",
-                ),
-            );
+        if let Some(diagnostic) = nesting_too_deep(ctx) {
+            diagnostics.push(diagnostic);
         }
         return Err(LoweringFailed);
     }
@@ -1711,6 +1709,68 @@ fn lower_expr<'a>(
     let result = lower_expr_inner(expr, binding_span, ir, ctx, diagnostics);
     ctx.depth -= 1;
     result
+}
+
+/// How many of a chain's bindings after the first
+/// `E_LOGIC_NESTING_TOO_DEEP` notes by line. A chain long enough to reach
+/// the limit with one-operator bindings is over a hundred lines, and the
+/// first few show the shape; the count says how many more there are.
+const CHAIN_NOTES: usize = 3;
+
+/// `E_LOGIC_NESTING_TOO_DEEP` for the chain `ctx` is inside, or `None`
+/// when that chain has already reported it.
+///
+/// Anchored on the outermost binding of the chain, the one the pass set
+/// out to lower: bindings are lowered in declaration order, so every
+/// binding it reaches through a reference is declared after it, and that
+/// is the line to move. The rest of the chain is noted in the order it was
+/// entered.
+fn nesting_too_deep(ctx: &mut LoweringCtx<'_>) -> Option<Diagnostic> {
+    let spans: Vec<Span> = ctx
+        .chain
+        .iter()
+        .map(|&index| ctx.bindings[index].span.clone())
+        .collect();
+    let anchor = spans
+        .first()
+        .expect("an expression is lowered only inside `lower_binding`, which opens the chain")
+        .clone();
+    if !ctx.depth_reported.insert((anchor.start, anchor.end)) {
+        return None;
+    }
+    let count = spans.len();
+    let label = ctx.scope.label();
+    let mut diagnostic = Diagnostic::new(
+        DiagnosticCode::LogicNestingTooDeep,
+        anchor,
+        format!(
+            "{label} `logic` lowering nested past {MAX_LOWERING_DEPTH} levels inside {count} \
+             chained binding{plural}, starting with this one",
+            plural = if count == 1 { "" } else { "s" },
+        ),
+    );
+    for (position, span) in spans.iter().enumerate().skip(1).take(CHAIN_NOTES) {
+        diagnostic = diagnostic.with_note(
+            span.clone(),
+            format!(
+                "chained binding {} of {count}, declared after the first",
+                position + 1
+            ),
+        );
+    }
+    let unnoted = count.saturating_sub(1 + CHAIN_NOTES);
+    if unnoted > 0 {
+        diagnostic = diagnostic.with_footer(format!(
+            "and {unnoted} more chained binding{}, each declared after the first",
+            if unnoted == 1 { "" } else { "s" },
+        ));
+    }
+    Some(diagnostic.with_footer(
+        "Fix: declare each `logic` binding after the ones it references. A binding is lowered by \
+         descending into whatever it names, so a chain written in reverse nests each binding's \
+         expression inside the one that references it, while the same graph in dependency order \
+         nests none.",
+    ))
 }
 
 /// Lower one boolean expression. Every operand is lowered independently

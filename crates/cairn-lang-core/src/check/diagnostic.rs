@@ -568,6 +568,18 @@ pub enum DiagnosticCode {
     /// an error rather than a note: in a diff an empty table reads exactly
     /// like one that passes.
     TruthTableEmpty,
+    /// An `assert truth(...)` lists one signal as two or more of its
+    /// inputs.
+    ///
+    /// A signal is one input, so a row giving its positions different
+    /// values describes a combination the circuit never sees, and the
+    /// coverage finding would ask for exactly those rows: any output for
+    /// them is accepted, since none is ever checked. Refused rather than
+    /// read as one input, which would give the rows a meaning the author
+    /// did not write — the shape `E_DUPLICATE_ARG` refuses for a `key=`.
+    /// The table's other findings are not raised beside it: they count
+    /// positions the table does not have.
+    TruthTableDuplicateInput,
     /// Two rows of one `assert truth(...)` assign the same inputs
     /// different outputs. No circuit satisfies both, so whatever the table
     /// was written to verify, it cannot. Reported on the later row with a
@@ -693,6 +705,7 @@ impl DiagnosticCode {
             Self::ConnectArity => "E_CONNECT_ARITY",
             Self::PhaseConflict => "W_PHASE_CONFLICT",
             Self::TruthTableEmpty => "E_TRUTH_TABLE_EMPTY",
+            Self::TruthTableDuplicateInput => "E_TRUTH_TABLE_DUPLICATE_INPUT",
             Self::TruthTableConflict => "E_TRUTH_TABLE_CONFLICT",
             Self::TruthTableDuplicateRow => "W_TRUTH_TABLE_DUPLICATE_ROW",
             Self::TruthTablePartial => "W_TRUTH_TABLE_PARTIAL",
@@ -792,6 +805,7 @@ impl DiagnosticCode {
             | Self::DuplicateHeader
             | Self::UnsupportedNesting
             | Self::TruthTableEmpty
+            | Self::TruthTableDuplicateInput
             | Self::IntendedTargetCap
             | Self::TruthTableConflict => Severity::Error,
             Self::InvalidCairnVersion
@@ -1476,6 +1490,7 @@ mod tests {
                 "E_THEME_SELECTOR_UNMATCHED",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
@@ -1548,6 +1563,7 @@ mod tests {
                 "E_PARSE",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",

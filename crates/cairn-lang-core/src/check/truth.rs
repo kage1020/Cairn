@@ -37,7 +37,7 @@
 //! `children.asserts` — so a table under a `level` is checked against its
 //! signal names today and would be the one place a shape went unreported.
 
-use crate::ast::TruthRow;
+use crate::ast::{DottedRef, TruthRow};
 use crate::error::Span;
 use crate::intent::{AssertIr, IntentModule, Member, MemberBody};
 use crate::prose::and_list;
@@ -109,6 +109,16 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     else {
         return;
     };
+    let repeated = repeated_inputs(inputs, span);
+    if !repeated.is_empty() {
+        // And nothing else: every other finding counts combinations of
+        // positions, and a table naming one signal twice has positions
+        // no combination of signals fills.
+        for finding in repeated {
+            sink.push(finding);
+        }
+        return;
+    }
     let arity = u32::try_from(inputs.len()).expect("an input list is bounded by the source length");
     if rows.is_empty() {
         // And nothing else. An empty table is trivially missing every
@@ -210,6 +220,47 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     {
         sink.push(finding);
     }
+}
+
+/// One `E_TRUTH_TABLE_DUPLICATE_INPUT` per signal the input list names
+/// more than once, in the order the signals first appear.
+///
+/// On the whole `assert`, since the input list carries no span of its
+/// own; the sentence names the signal and the positions it holds, which
+/// is what the author looks for in the list.
+fn repeated_inputs(inputs: &[DottedRef], span: &Span) -> Vec<Diagnostic> {
+    let mut positions: Vec<(&DottedRef, Vec<usize>)> = Vec::new();
+    for (index, input) in inputs.iter().enumerate() {
+        match positions.iter_mut().find(|(name, _)| *name == input) {
+            Some((_, at)) => at.push(index + 1),
+            None => positions.push((input, vec![index + 1])),
+        }
+    }
+    positions
+        .into_iter()
+        .filter(|(_, at)| at.len() > 1)
+        .map(|(name, at)| {
+            let listed: Vec<String> = at.iter().map(ToString::to_string).collect();
+            let listed = and_list(&listed).expect("a repeated input holds two positions or more");
+            Diagnostic {
+                code: DiagnosticCode::TruthTableDuplicateInput,
+                span: span.clone(),
+                primary: format!(
+                    "this `assert truth` lists `{name}` as inputs {listed}, and one signal is \
+                     one input: a row giving those positions different values describes a \
+                     combination the circuit never sees"
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message: format!(
+                        "Fix: list `{name}` once and drop its other columns from every row, or \
+                         name the signal you meant in its place"
+                    ),
+                }],
+                data: None,
+            }
+        })
+        .collect()
 }
 
 /// Whether two patterns assign a combination in common.

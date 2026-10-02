@@ -164,11 +164,14 @@ pub enum DiagnosticCode {
     /// Lowering a `logic` binding descended past
     /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into
     /// whatever it references, so a chain declared in the reverse of its
-    /// dependency order costs one level per binding. Past the limit the
-    /// native stack would overflow, which aborts the process instead of
-    /// producing a diagnostic. Fix: declare the chain in dependency order —
-    /// the same graph written that way lowers at any length, because each
-    /// reference is already resolved when it is reached.
+    /// dependency order nests each binding's expression inside the one
+    /// that references it. Past the limit the native stack would overflow,
+    /// which aborts the process instead of producing a diagnostic.
+    /// Reported on the outermost binding of the chain, with the number of
+    /// bindings the lowering was inside and a note on the first few.
+    /// Fix: declare the chain in dependency order — the same graph written
+    /// that way lowers at any length, because each reference is already
+    /// resolved when it is reached.
     LogicNestingTooDeep,
     /// A signal binding is written where nothing reads it — on a member
     /// whose kind cannot host it, or inside the `[selector]` on a line
