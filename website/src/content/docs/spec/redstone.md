@@ -222,12 +222,16 @@ The internal algorithm runs five stages:
    line, so enlarging the region is not the remedy here.
 
    The router's search is bounded by the same cap. A path from a net's wire to a sink is part of
-   that sink's segment, so the search does not look past the cap, and a sink it cannot reach
-   within it earns `E_ATTENUATION_LIMIT` here too, saying that no route within the cap exists. A
-   sink the search runs out of room for before the cap is `E_ROUTE_CONGESTION`, below. The bound
-   is what keeps giving up on a walled-in sink proportional to the cap rather than to the
-   reservation: without it, the search visited every free coordinate the net could reach before
-   it refused.
+   that sink's segment, so the search does not look past the cap. Each sink it cannot reach is
+   then judged on its own. It earns `E_ROUTE_CONGESTION`, below, when the router can prove it
+   walled in: none of its faces can be arrived through, or the search ran out of coordinates
+   before the cap cut any off, or the free coordinates the sink opens onto all lie within the cap
+   of it and the net's wire is not among them. Otherwise it earns `E_ATTENUATION_LIMIT` here,
+   which says only that no route within the cap exists — a sink walled off in a free region wider
+   than the cap is one of these. When a scope has sinks of both kinds, the message is about a
+   walled-in one. The bound is what keeps giving up on a sink proportional to the cap rather than
+   to the reservation: without it, the search visited every free coordinate the net could reach
+   before it refused.
 3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
    limit of 15. The segment is measured along the **routed** path from driver to sink, and the
    buffer stands on that path, so the straight line between the two is not always wire. A segment
@@ -275,10 +279,11 @@ E_ROUTE_CONGESTION line 21 circuit=basement:
 ```
 
 `E_ATTENUATION_LIMIT` is the other refusal these passes raise, for four shapes. Stages 2, 3 and 4
-all lay nets, and all three test the straight line between a driver and its sink against the cap
-through one shared routine, which also refuses a sink with no route within the cap. Stage 3 also measures each routed segment against the cap. Stages 3
-and 4 both refuse a stretch of dust past the limit of 15 on which no coordinate can hold a
-repeater: each works out where the repeaters stand from the same routed tree, by the same rule,
+all lay nets through one shared step, which tests the straight line between a driver and its sink
+against the cap before any route is laid, and refuses a sink no route within the cap reaches once
+the router has searched for one. Stage 3 also measures each routed segment against the cap.
+Stages 3 and 4 both refuse a stretch of dust past the limit of 15 on which no coordinate can hold
+a repeater: each works out where the repeaters stand from the same routed tree, by the same rule,
 so the two agree on which stretch that is and the message names the node that goes dark. Which
 stage refuses a scope depends only on which one reached it first. The primary names the netlist that pass read —
 `placed` at stage 2, `routed` at stage 3, `delayed` at stage 4 — so the message says where in the

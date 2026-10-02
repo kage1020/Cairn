@@ -500,20 +500,26 @@
 
 - *(redstone)* A sink with no clear path made the router search the whole `circuit` reservation
   before refusing it. The search gave up only when its frontier was empty, so the cost of the
-  refusal was set by `width × depth × void`, not by the distance: a sink two blocks from its driver
-  took 14.9 s to refuse in a `size=31x2000 void=20` reservation on a debug build, and raising `void`, as
-  the refusal's fix line says to, made the next run slower and the answer the same.
+  refusal was set by `width × depth × void`, not by the distance: a sink two blocks from its
+  driver took 14.9 s to refuse in a `size=31x2000 void=20` reservation on a debug build, and
+  raising `void`, as the refusal's fix line says to, made the next run slower and the answer the
+  same.
 
   The search is now bounded by the attenuation cap. A path from the net's wire to a sink is part
   of that sink's segment, which the delay pass refuses past 256 blocks, so a coord whose cheapest
   path through it is longer than that is not searched. Every route a pass accepts is still found,
   and the same one, and giving up costs a cap-sized neighbourhood of the wire whatever the
-  reservation. A sink the search gives up on at the cap is refused as `E_ATTENUATION_LIMIT` at
-  stage 2, saying no route within the cap reaches it. Before, a sink reachable only round a detour
-  longer than the cap was routed and then refused by stage 3.
+  reservation. Before, a sink reachable only round a detour longer than the cap was routed and
+  then refused by stage 3.
 
-  A sink whose faces are all taken is recognised as walled in before any search, so it keeps its
-  `E_ROUTE_CONGESTION` and its list of the nets in the way. The example above now answers at once.
+  Each sink the search cannot reach is then judged on its own. It keeps `E_ROUTE_CONGESTION` and
+  its list of the nets in the way when the router proves it walled in: no face it could be
+  arrived through, a search that ran out of coords before the cap cut any off, or a pocket of
+  free coords that ends within the cap of it without reaching the wire. Proving the last costs at
+  most the cap's neighbourhood of the sink. Any other sink is refused as `E_ATTENUATION_LIMIT` at
+  stage 2, saying no route within the cap reaches it, and naming any nets on its faces as the
+  walled-in refusal does. A scope with sinks of both kinds is refused for a walled-in one. The
+  example above now answers at once.
 
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,

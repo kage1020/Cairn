@@ -977,15 +977,21 @@ mod tests {
     /// into an actuator pad too.
     ///
     /// [`trunk_detour`] with the far sink a pad: its route is
-    /// `2 * width - 2` against a straight line of 2. At `width = 129`
-    /// that is exactly the cap and at 130 it is two over, so the boundary
-    /// is pinned from both sides rather than by one row that a changed
-    /// constant would slide past. The refusal is asserted by its wording
-    /// as well as its code: the straight-line gate and the router's bound
-    /// raise the same code, and neither of them can see this shape.
+    /// `2 * width - 2` against a straight line of 2. At
+    /// `width = MAX_ATTENUATION_SEGMENT / 2 + 1` that is exactly the cap
+    /// and one wider it is two over, so the boundary is pinned from both
+    /// sides rather than by one row that a changed constant would slide
+    /// past. (The fixture builds only even lengths; the odd side of the
+    /// cap is pinned by the router's own bound, in
+    /// [`a_detour_from_the_source_is_refused_at_the_cap_by_stage_two`].)
+    /// The refusal is asserted by its wording as well as its code: the
+    /// straight-line gate and the router's bound raise the same code,
+    /// and neither of them can see this shape.
     #[test]
     fn attenuation_cap_measures_the_routed_output_segment() {
-        for (width, refuses) in [(129u32, false), (130, true)] {
+        let at_cap = MAX_ATTENUATION_SEGMENT / 2 + 1;
+        assert_eq!(2 * at_cap - 2, MAX_ATTENUATION_SEGMENT, "the cap is even");
+        for (width, refuses) in [(at_cap, false), (at_cap + 1, true)] {
             let delayed = compile_delay(&scoped(
                 ScopeKind::Struct,
                 "wide",
@@ -1007,6 +1013,64 @@ mod tests {
             );
             if !refuses {
                 assert_eq!(delayed.diagnostics, Vec::new());
+            }
+        }
+    }
+
+    /// A detour laid from the source in one piece is refused by stage 2,
+    /// at the cap and not a block past it, before this pass measures it.
+    ///
+    /// A sensor's pad at `(0,0,0)` drives an actuator pad at the far
+    /// edge, with a cell standing on the straight line between them, so
+    /// the route is the straight line's `width - 1` and two more to go
+    /// round: `width + 1`. Two layers, so the way round can be over the
+    /// top as well as beside. At `width = MAX_ATTENUATION_SEGMENT - 1`
+    /// the route is exactly the cap and the scope comes through; one
+    /// wider, it is one block over and the router's bound refuses it —
+    /// through [`crate::pass::lay_nets`], which is what this pass calls,
+    /// so the refusal is stage 2's wording under stage 3's code.
+    #[test]
+    fn a_detour_from_the_source_is_refused_at_the_cap_by_stage_two() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        for (width, refuses) in [(cap - 1, false), (cap, true)] {
+            let mut ir = PlacementIr::new(Edition::Java);
+            ir.region = Some(reservation(width, 4, 2));
+            ir.inputs.push(crate::netlist_ir::NetlistInput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+                span: Span::default(),
+            });
+            ir.cells.push(placed_cell(
+                EditionCell::JavaRepeaterOr,
+                CellCoord::new(10, 0, 0),
+                Vec::new(),
+            ));
+            ir.outputs.push(routed_output(
+                NetRef::Input(0),
+                CellCoord::new(width - 1, 0, 0),
+            ));
+            let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
+            let refusal = format!(
+                "has no route from the driver at (0,0,0) to ({},0,0) within the v1 attenuation \
+                 limit of {cap} blocks",
+                width - 1,
+            );
+            let fired = delayed.diagnostics.iter().any(|d| {
+                d.code == DiagnosticCode::AttenuationLimit && d.primary.contains(&refusal)
+            });
+            assert_eq!(
+                fired,
+                refuses,
+                "width {width}: straight line {}, routed {}; got {:?}",
+                width - 1,
+                width + 1,
+                delayed.diagnostics,
+            );
+            if refuses {
+                assert_eq!(delayed.diagnostics.len(), 1, "{:?}", delayed.diagnostics);
+                assert!(delayed.scoped.scopes.is_empty(), "the scope is elided");
+            } else {
+                assert_eq!(delayed.diagnostics, Vec::new());
+                assert_eq!(delayed.scoped.scopes.len(), 1);
             }
         }
     }
@@ -1743,12 +1807,22 @@ mod tests {
         ir
     }
 
+    /// The width [`trunk_detour`] is built at by the fixtures that need
+    /// only the over-cap side. Its branch, `width` blocks, is within the
+    /// cap, so the router's own bound lays it; its total,
+    /// `2 * width - 2`, is over the cap, so only this pass refuses it.
+    /// 201 is inside both by a margin: the branch is 55 under the cap and
+    /// the total 144 over it.
+    const OVER_CAP_TRUNK: u32 = 201;
+    const _: () = assert!(OVER_CAP_TRUNK <= MAX_ATTENUATION_SEGMENT);
+    const _: () = assert!(2 * OVER_CAP_TRUNK - 2 > MAX_ATTENUATION_SEGMENT);
+
     #[test]
     fn cell_driver_attenuation_primary_names_cell_and_port() {
         let delayed = compile_delay(&scoped(
             ScopeKind::Struct,
             "wide",
-            trunk_detour(201, FarSink::Cell),
+            trunk_detour(OVER_CAP_TRUNK, FarSink::Cell),
         ));
         let attenuation = delayed
             .diagnostics
@@ -1756,9 +1830,10 @@ mod tests {
             .find(|d| d.code == DiagnosticCode::AttenuationLimit)
             .expect("cell-driver segment past cap must fire E_ATTENUATION_LIMIT");
         assert!(
-            attenuation
-                .primary
-                .contains("has a driver segment of 400 blocks into cell #2"),
+            attenuation.primary.contains(&format!(
+                "has a driver segment of {} blocks into cell #2",
+                2 * OVER_CAP_TRUNK - 2,
+            )),
             "primary must name the failing cell index and the trunk-plus-branch \
              length, got {:?}",
             attenuation.primary,
@@ -1786,7 +1861,7 @@ mod tests {
     fn a_detour_refusal_leaves_its_sibling_alone() {
         // Scope one: the detour fixture, which clears the straight-line
         // gate and the router's bound and fails the routed length.
-        let detour = trunk_detour(201, FarSink::Cell);
+        let detour = trunk_detour(OVER_CAP_TRUNK, FarSink::Cell);
 
         // Scope two: roomy, and nothing in it is near the cap.
         let mut roomy = PlacementIr::new(Edition::Java);
