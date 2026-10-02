@@ -149,29 +149,34 @@ circuit region=basement void=3       # reserve a 3-high service layer; route the
 The internal algorithm runs five stages:
 
 1. **Placement.** Topological order, left to right, one clear column between each pair of cells.
-   The row starts in the column after the input pads and may run to the column before the
-   actuator pads; neither pad column carries a pad on the cell row, so each end cell keeps the
-   coordinate beside it in the pad column as a free neighbour. A cell body is a
-   block, so a net reaches it through a neighbouring coordinate; a two-input gate has three
-   distinct nets touching it — its two drivers and its own output — and therefore needs three
-   free neighbours. Packed against each other the cells in the middle of a row have two, at any
-   region size, so a row spaced like this is what makes a short-free wiring possible at all.
+   The row starts in the column after the input pads and ends at the latest in the column before
+   the actuator pads, so a row of `n` cells needs `2n + 1` columns. That last column is the
+   actuator pads' own: at `2n` the last cell would stand in it, face to face with the pads at
+   `z = 0` and `z = 2`. Neither pad column carries a pad on the cell row, so an end cell that
+   stands beside a pad column keeps the coordinate beside it there as a free neighbour. A cell
+   body is a block, so a net reaches it through a neighbouring coordinate; a two-input gate has
+   three distinct nets touching it — its two drivers and its own output — and therefore needs
+   three free neighbours. Packed against each other the cells in the middle of a row have two, at
+   any region size, so a row spaced like this is what makes a short-free wiring possible at all.
 
-   The row also stands one row in from the near edge of the region, and the I/O pads step along
-   `z` from `0`, skipping the cell row. A pad on the cell row would stand face to face with the
-   end cell whenever the row reaches its column — the terminal of a net that cell may have
-   nothing to do with, taking one of its faces; off that row no pad touches a cell at any width.
-   Dust reads the dust in the coordinate beside it, so a lane of free coordinates
-   carries one net however long it is; a cell against the edge has one lane, and the three nets
-   touching a two-input gate cannot share it. One row in gives every cell a lane on each side.
-   That costs one row for the whole netlist rather than one per cell, so unlike the column
-   spacing it does not grow with the cell count.
+   The row also stands one row in from the near edge of the region. In a scope with cells the I/O
+   pads step along `z` from `0`, skipping the cell row; a scope with no cells has no cell row, and
+   its pads take every row from `0`. A pad on the cell row would stand face to face with the end
+   cell whenever the row reaches its column — the terminal of a net that cell may have nothing to
+   do with, taking one of its faces. With the pads off that row and the row ending before the
+   actuator-pad column, no pad touches a cell at any width the row check accepts. Dust reads the
+   dust in the coordinate beside it, so a lane of free coordinates carries one net however long it
+   is; a cell against the edge has one lane, and the three nets touching a two-input gate cannot
+   share it. One row in gives every cell a lane on each side. That costs one row for the whole
+   netlist rather than one per cell, so unlike the column spacing it does not grow with the cell
+   count.
 
-   Neither spacing is a guarantee of a wiring: a net passing through can still take the last
-   free face, and that scope is refused rather than shorted. A region that cannot hold the row —
-   `2n + 1` columns for `n` cells, and three rows — or its pads — a row per sensor or actuator
-   on the busier edge, and one more for the cell row once that edge carries two — is refused
-   here rather than left to fail as an unreachable sink two stages later.
+   Neither spacing is a guarantee of a wiring: a net passing through can still take the last free
+   face, and that scope is refused rather than shorted. A region that cannot hold the row —
+   `2n + 1` columns for `n` cells, and three rows — or the rows its pads stand in — a row per
+   sensor or actuator on the busier edge, and, in a scope with cells, one more for the cell row
+   once that edge carries two — is refused here rather than left to fail as an unreachable sink
+   two stages later.
 2. **Steiner routing.** Manhattan, around what is already standing — and around the dust of the
    nets already laid. Cell bodies and I/O pads are reserved: dust cannot be drawn on one, and a
    signal cannot pass *through* one, since a component either emits or consumes. Every sink is

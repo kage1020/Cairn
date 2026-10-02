@@ -103,51 +103,118 @@ pub(crate) fn coord_key(coord: CellCoord) -> (u32, u32, u32) {
     (coord.x, coord.z, coord.y)
 }
 
+/// How a scope's edge columns lay their pads: whether they step over
+/// the cell row.
+///
+/// The one place that decision is made. [`edge_pad`] reads it for the
+/// coordinates and [`Self::rows`] for the rows those coordinates span,
+/// so the placement pass's pad-row refusal, which reads the second,
+/// cannot disagree with the pads it places from the first. Every pass
+/// that derives a pad builds it from the IR it is working on with
+/// [`Self::of`], or, in the placement pass, before that IR has cells,
+/// from the netlist's cell count with [`Self::for_cell_count`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PadColumn {
+    steps_over_cell_row: bool,
+}
+
+impl PadColumn {
+    /// The column of a scope with `cells` cells.
+    ///
+    /// A scope with cells has a cell row at [`CELL_ROW`], and a pad on
+    /// it would stand face to face with the end cell of the row
+    /// whenever the row reaches the edge column, on a net that cell may
+    /// have nothing to do with. A scope with no cells has no row to
+    /// keep off, so its pads take every row from `z = 0`.
+    pub(crate) fn for_cell_count(cells: usize) -> Self {
+        Self {
+            steps_over_cell_row: cells > 0,
+        }
+    }
+
+    /// The column of the scope `ir` describes.
+    pub(crate) fn of(ir: &PlacementIr) -> Self {
+        Self::for_cell_count(ir.cells.len())
+    }
+
+    /// The row the `index`th pad stands in before the region clamps it:
+    /// `z = index`, plus one from the cell row on when the column steps
+    /// over it.
+    fn z(self, index: u32) -> u32 {
+        if self.steps_over_cell_row && index >= CELL_ROW {
+            index.saturating_add(1)
+        } else {
+            index
+        }
+    }
+
+    /// Rows a column of `pads` pads needs: the deepest pad's row, plus
+    /// one. That is one per pad, and the cell row as well once a column
+    /// that steps over it reaches it.
+    ///
+    /// Read by the placement pass's pad-row refusal, so the refusal and
+    /// the coordinates it guards cannot disagree.
+    pub(crate) fn rows(self, pads: usize) -> u32 {
+        match saturating_index(pads) {
+            0 => 0,
+            pads => self.z(pads - 1).saturating_add(1),
+        }
+    }
+
+    /// The depth rule [`Self::rows`] computes, as the fix line of every
+    /// pad-row refusal states it, so the placement pass and the passes
+    /// after it hand the author one sentence.
+    pub(crate) fn depth_rule(self) -> &'static str {
+        if self.steps_over_cell_row {
+            "`depth >= max(inputs, outputs) + 1` once an edge carries two pads — one row per \
+             sensor or actuator, and one for the cell row the pads step over"
+        } else {
+            "`depth >= max(inputs, outputs)` — one row per sensor or actuator, since a scope \
+             with no cells has no cell row for the pads to step over"
+        }
+    }
+}
+
 /// v1 input-pad coordinate: left edge (`x=0`), first service layer
-/// (`y=0`), z-axis increasing as the input index grows and stepping over
-/// the cell row (see [`edge_pad`]). Saturates at `depth-1` when the
-/// input count would push z past the region; the resulting overlap is
-/// what [`collapsed_block`] finds, and every pass that lays nets
-/// surfaces it as `E_ROUTE_CONGESTION` rather than a silent misroute.
-pub(crate) fn input_pad(i: usize, region: &CircuitRegionReservation) -> CellCoord {
-    edge_pad(i, 0, region)
+/// (`y=0`), z-axis increasing as the input index grows, laid by
+/// `column` (see [`edge_pad`]). Saturates at `depth-1` when the input
+/// count would push z past the region; the resulting overlap is what
+/// [`collapsed_block`] finds, and every pass that lays nets surfaces it
+/// as `E_ROUTE_CONGESTION` rather than a silent misroute.
+pub(crate) fn input_pad(
+    i: usize,
+    column: PadColumn,
+    region: &CircuitRegionReservation,
+) -> CellCoord {
+    edge_pad(i, 0, column, region)
 }
 
 /// v1 output-pad coordinate: right edge (`x=width-1`), same
 /// saturating z-axis convention as [`input_pad`].
-pub(crate) fn output_pad(k: usize, region: &CircuitRegionReservation) -> CellCoord {
-    edge_pad(k, region.width.saturating_sub(1), region)
+pub(crate) fn output_pad(
+    k: usize,
+    column: PadColumn,
+    region: &CircuitRegionReservation,
+) -> CellCoord {
+    edge_pad(k, region.width.saturating_sub(1), column, region)
 }
 
 /// The `index`th pad down the edge column at `x`.
 ///
-/// The pads step along `z` from `0` and skip [`CELL_ROW`]: a pad on the
-/// cell row would stand face to face with the end cell of the row
-/// whenever the row reaches the edge column, and a pad belongs to a net
-/// that cell may have nothing to do with. Off that row a pad shares a
-/// face with no cell at any region width.
-fn edge_pad(index: usize, x: u32, region: &CircuitRegionReservation) -> CellCoord {
-    let index = saturating_index(index);
-    let z = if index >= CELL_ROW {
-        index.saturating_add(1)
-    } else {
-        index
-    };
+/// The pads step along `z` from `0`, over the cell row when `column`
+/// says the scope has one, and saturate at `depth - 1`. In a scope
+/// with cells the saturation can put a pad back on the cell row (at
+/// `depth == 2` the second pad lands on `z = 1`), but only in a region
+/// the placement pass refuses; no pad that pass emits stands on the
+/// cell row.
+fn edge_pad(
+    index: usize,
+    x: u32,
+    column: PadColumn,
+    region: &CircuitRegionReservation,
+) -> CellCoord {
+    let z = column.z(saturating_index(index));
     CellCoord::new(x, 0, z.min(region.depth.saturating_sub(1)))
-}
-
-/// Rows an edge column of `pads` pads needs: one per pad, and the cell
-/// row [`edge_pad`] steps over once the column reaches it.
-///
-/// Read by the placement pass's pad-row refusal, so the refusal and the
-/// coordinates it guards cannot disagree.
-pub(crate) fn pad_rows(pads: usize) -> u32 {
-    let pads = saturating_index(pads);
-    if pads > CELL_ROW {
-        pads.saturating_add(1)
-    } else {
-        pads
-    }
 }
 
 /// Fold `charge` over the distinct nets driving one cell.
@@ -257,9 +324,10 @@ pub(crate) fn block_sites(ir: &PlacementIr, region: &CircuitRegionReservation) -
             index,
         });
     }
+    let column = PadColumn::of(ir);
     for index in 0..ir.inputs.len() {
         sites.push(BlockSite {
-            coord: input_pad(index, region),
+            coord: input_pad(index, column, region),
             kind: BlockKind::InputPad,
             index,
         });
@@ -1174,11 +1242,14 @@ pub(crate) fn net_order(nets: &HashMap<NetRef, Vec<CellCoord>>) -> Vec<NetRef> {
 /// `None` when every block has a coord of its own. Panics when two
 /// cells share one.
 ///
-/// What this finds is a pad the reservation is too shallow to hold,
-/// stacked onto a cell or onto another pad: pad coords step from
-/// `z = 0`, skip the cell row and saturate at `depth - 1`, so a pad row
-/// taller than the reservation piles up on the last row. That is a
-/// reservation an author can enlarge, so it earns a diagnostic.
+/// What this finds is a pad the reservation is too small to hold,
+/// stacked onto a cell or onto another pad. Too shallow: pad coords
+/// step from `z = 0`, over the cell row in a scope that has one, and
+/// saturate at `depth - 1`, so a pad column taller than the
+/// reservation piles up on the last row. Too narrow: at `width == 1`
+/// the sensor and actuator columns are one column, and pad #0 of each
+/// stands at `(0,0,0)` whatever the depth. Either is a reservation an
+/// author can enlarge, so it earns a diagnostic.
 ///
 /// Two cells on one coord is not that. It is an IR no `size=` can
 /// repair: a cell's coord comes from its topological index in the
@@ -1817,37 +1888,91 @@ mod tests {
         assert_eq!(total, 13, "10 for the repeated net, once, plus 3");
     }
 
+    /// A scope with cells, whose pad columns step over the cell row.
+    const WITH_CELLS: PadColumn = PadColumn {
+        steps_over_cell_row: true,
+    };
+    /// A scope with none, whose pad columns take every row.
+    const CELL_LESS: PadColumn = PadColumn {
+        steps_over_cell_row: false,
+    };
+
+    #[test]
+    fn the_column_steps_over_the_cell_row_only_when_there_is_one() {
+        assert_eq!(PadColumn::for_cell_count(0), CELL_LESS);
+        assert_eq!(PadColumn::for_cell_count(1), WITH_CELLS);
+        assert_eq!(PadColumn::for_cell_count(7), WITH_CELLS);
+    }
+
     #[test]
     fn input_pad_saturates_at_depth_minus_one() {
         let region = reservation(10, 4);
-        assert_eq!(input_pad(0, &region), CellCoord::new(0, 0, 0));
+        assert_eq!(input_pad(0, WITH_CELLS, &region), CellCoord::new(0, 0, 0));
         // Input #1 steps over the cell row, so no pad stands face to
         // face with the cell at the end of the row.
-        assert_eq!(input_pad(1, &region), CellCoord::new(0, 0, 2));
-        assert_eq!(input_pad(2, &region), CellCoord::new(0, 0, 3));
+        assert_eq!(input_pad(1, WITH_CELLS, &region), CellCoord::new(0, 0, 2));
+        assert_eq!(input_pad(2, WITH_CELLS, &region), CellCoord::new(0, 0, 3));
         // depth-1 = 3 ceilings anything past the third input.
-        assert_eq!(input_pad(5, &region), CellCoord::new(0, 0, 3));
+        assert_eq!(input_pad(5, WITH_CELLS, &region), CellCoord::new(0, 0, 3));
     }
 
     #[test]
     fn output_pad_sits_on_right_edge_and_saturates_z() {
         let region = reservation(4, 4);
-        assert_eq!(output_pad(0, &region), CellCoord::new(3, 0, 0));
-        assert_eq!(output_pad(1, &region), CellCoord::new(3, 0, 2));
-        assert_eq!(output_pad(2, &region), CellCoord::new(3, 0, 3));
-        assert_eq!(output_pad(5, &region), CellCoord::new(3, 0, 3));
+        assert_eq!(output_pad(0, WITH_CELLS, &region), CellCoord::new(3, 0, 0));
+        assert_eq!(output_pad(1, WITH_CELLS, &region), CellCoord::new(3, 0, 2));
+        assert_eq!(output_pad(2, WITH_CELLS, &region), CellCoord::new(3, 0, 3));
+        assert_eq!(output_pad(5, WITH_CELLS, &region), CellCoord::new(3, 0, 3));
+    }
+
+    /// With no cell row to keep off, the pads take every row from
+    /// `z = 0`, and saturate the same way.
+    #[test]
+    fn a_cell_less_column_takes_every_row() {
+        let region = reservation(4, 3);
+        for (k, z) in [(0, 0), (1, 1), (2, 2), (5, 2)] {
+            assert_eq!(input_pad(k, CELL_LESS, &region), CellCoord::new(0, 0, z));
+            assert_eq!(output_pad(k, CELL_LESS, &region), CellCoord::new(3, 0, z));
+        }
     }
 
     /// The rows the pad-row refusal reserves are the rows the pads
     /// stand in: the highest `z` of `n` pads, plus one, in a region deep
-    /// enough not to saturate.
+    /// enough not to saturate. Asked of both columns, because the
+    /// refusal reads whichever one the pads were laid by.
     #[test]
-    fn pad_rows_counts_the_rows_the_pads_span() {
+    fn rows_counts_the_rows_the_pads_span() {
         let region = reservation(4, 100);
-        assert_eq!(pad_rows(0), 0);
-        for n in 1..10 {
-            let deepest = output_pad(n - 1, &region).z;
-            assert_eq!(pad_rows(n), deepest + 1, "{n} pads");
+        for column in [WITH_CELLS, CELL_LESS] {
+            assert_eq!(column.rows(0), 0, "{column:?}");
+            for n in 1..10 {
+                let deepest = output_pad(n - 1, column, &region).z;
+                assert_eq!(column.rows(n), deepest + 1, "{column:?}, {n} pads");
+            }
+        }
+        assert_eq!(WITH_CELLS.rows(2), 3, "two pads and the cell row");
+        assert_eq!(CELL_LESS.rows(2), 2, "two pads and no cell row");
+    }
+
+    /// In a region exactly as deep as [`PadColumn::rows`] asks, every
+    /// pad has a row of its own. This is the half a refusal reading one
+    /// rule and coordinates laid by another would break: a cell-less
+    /// column refused or accepted by the stepping rule would either ask
+    /// for a row it does not use or stack two pads on the last one.
+    #[test]
+    fn a_region_as_deep_as_rows_asks_gives_every_pad_its_own_row() {
+        for column in [WITH_CELLS, CELL_LESS] {
+            for n in 1..8 {
+                let region = reservation(4, column.rows(n));
+                let pads: HashSet<CellCoord> =
+                    (0..n).map(|k| output_pad(k, column, &region)).collect();
+                assert_eq!(
+                    pads.len(),
+                    n,
+                    "{column:?}, {n} pads, depth {}",
+                    region.depth
+                );
+            }
         }
     }
 
@@ -3348,7 +3473,10 @@ mod tests {
 
         let nets = collect_nets(&ir);
         assert_eq!(nets[&NetRef::Input(0)], vec![CellCoord::new(2, 0, 1)]);
-        assert_eq!(nets[&NetRef::Cell(0)], vec![output_pad(0, &region)]);
+        assert_eq!(
+            nets[&NetRef::Cell(0)],
+            vec![output_pad(0, WITH_CELLS, &region)]
+        );
     }
 
     /// Two ports of one cell on one net are one sink.
@@ -3497,7 +3625,7 @@ mod tests {
         ir.outputs.push(PlacedOutputNode::new(
             DottedRef::new("sig".into(), vec!["out".into()]),
             NetRef::Cell(0),
-            output_pad(0, region),
+            output_pad(0, WITH_CELLS, region),
             Span::default(),
         ));
         ir

@@ -84,27 +84,26 @@ pub enum DiagnosticCode {
     /// failure of `spec/redstone` "Place-and-route": routing cannot be
     /// confined to the reserved region, so the pass fails loud with the
     /// self-correction triple ("increase `void`", "enlarge region", "split
-    /// into multiple `circuit` blocks"). Five shapes reach it — the
-    /// reserved volume
-    /// is short of the netlist's estimated footprint; the reserved row
-    /// is shorter than the spaced single-row layout needs, which is
-    /// twice the cell count and one more; the reservation is too
+    /// into multiple `circuit` blocks"). Six shapes reach it — the
+    /// reserved volume is short of the netlist's estimated footprint; the
+    /// reserved row is shorter than the spaced single-row layout needs,
+    /// which is twice the cell count and one more; the reservation is too
     /// shallow for the cell row to have a clear row either side of it;
-    /// too shallow for the I/O pads, which stand one per row and skip
-    /// the cell row; or a sink
-    /// has no route from its driver that runs through neither a
-    /// component nor another net's dust — nor within one step of that
-    /// dust in its own plane. The router says so of a sink only when it
-    /// has proved it: when no face of the sink can be arrived through,
-    /// when its search ran out of coords before the attenuation cap
-    /// pruned any, or when the free coords the sink opens onto run out
-    /// within the cap of it without reaching the net's wire. A sink none
-    /// of those proves, with no route within the cap, is
+    /// too shallow for the I/O pads, which stand one per row and, in a
+    /// scope with cells, skip the cell row; one column wide in a scope
+    /// with no cells and both sensors and actuators, whose two pad
+    /// columns are then one; or a sink has no route from its driver that
+    /// runs through neither a component nor another net's dust — nor
+    /// within one step of that dust in its own plane. The router says so
+    /// of a sink only when it has proved it: when no face of the sink can
+    /// be arrived through, when its search ran out of coords before the
+    /// attenuation cap pruned any, or when the free coords the sink opens
+    /// onto run out within the cap of it without reaching the net's wire.
+    /// A sink none of those proves, with no route within the cap, is
     /// [`Self::AttenuationLimit`] instead. That pipeline names area
-    /// shortage as the example rather than as the only shape, so all
-    /// five take this code and differ in what they say: raising `void`
-    /// fixes the first and the last, and cannot fix the three in
-    /// between.
+    /// shortage as the example rather than as the only shape, so all six
+    /// take this code and differ in what they say: raising `void` fixes
+    /// the first and the last, and cannot fix the four in between.
     RouteCongestion,
     /// Two of a scope's nets run within one step of each other across
     /// layers — one strand directly over another, or over it and one

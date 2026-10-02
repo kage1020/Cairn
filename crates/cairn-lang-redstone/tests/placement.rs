@@ -668,21 +668,19 @@ fn a_row_wide_enough_for_the_cells_and_not_the_spacing_is_refused() {
 /// The exact-fit boundary, with its neighbour one column down.
 ///
 /// A row of `n` cells wants `2n + 1` columns: one for each cell, one
-/// beside each, and one past the last so the cell at the end of the row
-/// is not left with the actuator-pad column on one side and the edge of
-/// the reservation on the other. At `2n` that cell has one free plane
-/// neighbour, and the layout is refused two stages later under `void=1`
-/// or climbs and pays for it above — measured on a four-cell chain:
-/// `2n` refuses at `void=1`, and at `void=3` reports `wire_length` 13
-/// for the last cell where `2n + 1` reports 11.
+/// beside each, and the last for the actuator pads. At `2n` the last
+/// cell would stand at `x = width - 1`, inside the actuator-pad column,
+/// face to face with the pads at `z = 0` and `z = 2`; the extra column
+/// is what keeps it out.
 ///
 /// Both sides are here rather than only the accepting one, because the
 /// number the check compares against is only pinned by a pair that
 /// straddles it: a threshold one column out in either direction passes
-/// a test that names one side alone. The depth guard is what keeps the
-/// actuator pad off the cell row, and
-/// `a_region_one_row_deep_cannot_hold_a_pad_beside_its_cells` covers
-/// the case where it does not.
+/// a test that names one side alone. That no pad touches a cell once
+/// the row fits is held by `placement::tests::no_pad_stands_against_a_cell`
+/// in the crate, and the depth guard that keeps the pads off each other
+/// by `more_actuators_than_rows_is_refused_before_their_pads_collide`
+/// below.
 #[test]
 fn a_row_of_twice_the_cell_count_plus_one_places_every_cell() {
     assert!(
@@ -866,13 +864,14 @@ struct wire size=9x2
 /// row check would already have refused: the refused region below is
 /// four rows deep, more than the cell row and its two lanes want.
 ///
-/// Both sides of the count in one test. `pad_rows == depth` is the
-/// accepting side — `n` pads, `n >= 2`, fit a region `n + 1` deep,
-/// because they start at `z = 0` and skip the cell row — and nothing
-/// else in the suite straddles it. The primary is asserted too: all four refusals in this
-/// pass share `E_ROUTE_CONGESTION` and the row-depth check runs first,
-/// so a fixture that drifts out of this branch's window would stay
-/// green while measuring a different one.
+/// Both sides of the count in one test. Rows needed `== depth` is the
+/// accepting side — `n` pads, `n >= 2`, in a scope with cells fit a
+/// region `n + 1` deep, because they start at `z = 0` and skip the cell
+/// row — and nothing else in the suite straddles it for a scope with
+/// cells. The primary is asserted too: all four refusals in this pass
+/// share `E_ROUTE_CONGESTION` and the row-depth check runs first, so a
+/// fixture that drifts out of this branch's window would stay green
+/// while measuring a different one.
 #[test]
 fn more_actuators_than_rows_is_refused_before_their_pads_collide() {
     let source = |depth: u32| {
@@ -925,6 +924,102 @@ struct four size=8x{depth}
         "one row per pad and the cell row is enough, because the pad column \
          starts at z=0: {:?}",
         placed.diagnostics,
+    );
+}
+
+/// A scope with no cells has no cell row, so its pads step over
+/// nothing: `n` pads on an edge fit a region exactly `n` deep, and stand
+/// at `z = 0..n`.
+///
+/// Two sensors and two doors with no `logic` line between them — two
+/// pads on each edge — at two rows. Were the pads to skip a row the
+/// scope does not have, the pass would refuse this region for want of
+/// a third row, and at three rows leave `z = 1` empty for nobody. Three
+/// doors at three rows is the case where the refusal and the
+/// coordinates have to agree: a refusal that did not count the cell row
+/// over coordinates that still skipped it would accept the region and
+/// put the last two pads on one coord.
+///
+/// The refused side is asserted too, so the count is pinned from both
+/// sides, and its fix line must not ask for a cell row the scope does
+/// not have.
+#[test]
+fn a_scope_with_no_cell_row_gives_its_pads_every_row() {
+    let source = |doors: usize, depth: u32| {
+        let mut source = format!(
+            "
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct wire size=9x{depth}
+  floor mat_slot=wall
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b
+"
+        );
+        for (d, side) in ["front", "back", "left"].iter().take(doors).enumerate() {
+            let _ = writeln!(
+                source,
+                "  door id=d{d} side={side} at=center mat_slot=door\n  door[id=d{d}] opened_by=sig.{}",
+                ["a", "b"][d % 2],
+            );
+        }
+        source.push_str("  circuit region=floor void=2\n");
+        source
+    };
+
+    for (doors, depth) in [(2, 2), (3, 3)] {
+        let placed = placement_of(&source(doors, depth));
+        assert!(
+            placed.diagnostics.is_empty(),
+            "{doors} doors fit {depth} rows with no cell row to step over: {:?}",
+            placed.diagnostics,
+        );
+        let ir = &placed.scoped.scopes[0].ir;
+        assert!(
+            ir.cells.is_empty(),
+            "the fixture only means something while it has no cell row",
+        );
+        let pads: Vec<(u32, u32, u32)> = ir
+            .outputs
+            .iter()
+            .map(|o| (o.pad.x, o.pad.y, o.pad.z))
+            .collect();
+        let expected: Vec<(u32, u32, u32)> = (0..depth).map(|z| (8, 0, z)).collect();
+        assert_eq!(
+            pads, expected,
+            "{doors} doors at {depth} rows: one row each, from z=0"
+        );
+    }
+
+    let refused = placement_of(&source(3, 2));
+    assert!(
+        refused.scoped.scopes.is_empty(),
+        "three doors do not fit two rows"
+    );
+    let diagnostic = refused
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .expect("the shortfall must surface");
+    assert!(
+        diagnostic.primary.contains("needs 3 rows for its I/O pads")
+            && diagnostic.primary.contains("only 2 deep"),
+        "the refusal counts one row per pad and no cell row: {}",
+        diagnostic.primary,
+    );
+    let fix = diagnostic
+        .notes
+        .iter()
+        .find(|n| n.message.starts_with("Fix:"))
+        .expect("the refusal carries a fix line");
+    assert!(
+        fix.message.contains("`depth >= max(inputs, outputs)` ")
+            && !fix.message.contains("+ 1")
+            && !fix.message.contains("step over the cell row"),
+        "the fix line asks for no cell row: {}",
+        fix.message,
     );
 }
 

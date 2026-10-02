@@ -192,7 +192,7 @@ struct sim size=7x5
 /// `sig.a and sig.a` is how a `.crn` reaches the shape: logic synth
 /// keeps both operands, so the cell arrives at the routing pass with
 /// `a` and `b` both driven by `Input(0)`. The routed length from the
-/// pad at `(0,0,1)` to the cell at `(1,0,0)` is two blocks, and a
+/// pad at `(0,0,0)` to the cell at `(1,0,1)` is two blocks, and a
 /// per-port fold reported four — twice the dust the layout has.
 ///
 /// The per-net rule is not "one segment per cell":
@@ -245,7 +245,7 @@ struct dup size=20x5
     assert_eq!(
         cell.wire_length(),
         Some(2),
-        "the pad at (0,0,1) is two blocks from the cell at (1,0,0), laid once",
+        "the pad at (0,0,0) is two blocks from the cell at (1,0,1), laid once",
     );
 }
 
@@ -390,7 +390,7 @@ struct wire size=5x5
     assert_eq!(
         output.wire_length(),
         Some(4),
-        "the pads sit at (0,0,1) and (4,0,1) of a 5-wide region",
+        "the pads sit at (0,0,0) and (4,0,0) of a 5-wide region",
     );
 }
 

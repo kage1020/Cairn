@@ -17,8 +17,8 @@ use crate::placement_ir::{
     PlacementIr, PlacementPhase, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
-    BlockSite, NetTree, Router, block_sites, collapsed_block, collect_nets, input_pad, manhattan,
-    net_trees, unroutable,
+    BlockSite, NetTree, PadColumn, Router, block_sites, collapsed_block, collect_nets, input_pad,
+    manhattan, net_trees, unroutable,
 };
 use crate::saturating_index;
 
@@ -75,6 +75,9 @@ pub(crate) struct OpenScope {
     /// `ir.inputs.len()`, for the same reason and read by the same
     /// closure: the bound `NetRef::Input(i)` is checked against.
     pub(crate) inputs: usize,
+    /// How the scope's pads are laid, for the same reason: the closure
+    /// derives each sensor's pad from it.
+    pub(crate) column: PadColumn,
     /// Every block standing in the reservation, per [`block_sites`].
     pub(crate) blocks: Vec<BlockSite>,
 }
@@ -90,12 +93,14 @@ pub(crate) fn open_scope(entry: &ScopedPlacementIrEntry) -> Result<OpenScope, Sk
     let ir = source.clone();
     let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
     let inputs = ir.inputs.len();
+    let column = PadColumn::of(&ir);
     let blocks = block_sites(&ir, &region);
     Ok(OpenScope {
         ir,
         region,
         cell_coords,
         inputs,
+        column,
         blocks,
     })
 }
@@ -129,6 +134,7 @@ pub(crate) fn open_scope(entry: &ScopedPlacementIrEntry) -> Result<OpenScope, Sk
 /// they reach the author as a plausible circuit rather than as a bug.
 pub(crate) fn source_of_net<'a>(
     region: &'a CircuitRegionReservation,
+    column: PadColumn,
     cell_coords: &'a [CellCoord],
     inputs: usize,
 ) -> impl Fn(NetRef) -> CellCoord + Copy + 'a {
@@ -139,7 +145,7 @@ pub(crate) fn source_of_net<'a>(
                 (i as usize) < inputs,
                 "NetRef::Input({i}) out of range (inputs.len()={inputs}) — netlist invariant broken by caller-side hand-built IR",
             );
-            input_pad(i as usize, region)
+            input_pad(i as usize, column, region)
         }
         NetRef::Cell(j) => *cell_coords.get(j as usize).unwrap_or_else(|| {
             panic!(
@@ -360,17 +366,28 @@ fn unreachable_sink_diagnostic(
 /// coord, naming the block that landed second and the reservation that
 /// could not hold it.
 ///
-/// `E_ROUTE_CONGESTION`, because the cause is the reserved area: the
-/// pad row wants a row per sensor or actuator, and the cell row it steps
-/// over, and has fewer.
+/// `E_ROUTE_CONGESTION`, because the cause is the reserved area. In a
+/// layout the placement pass's coordinates describe — cells on the cell
+/// row, pads laid by [`PadColumn`] — two blocks share a coord in one of
+/// two ways:
 ///
-/// `depth >= max(inputs, outputs) + 1` once an edge carries two pads,
-/// and `depth >= 1` for one. `edge_pad` puts pad `i` at `z = i` below
-/// the cell row and `z = i + 1` from it on, saturating at `depth - 1`,
-/// so N pads collide only once `pad_rows(N) > depth` — and the
-/// placement pass guards on exactly that number, read from
-/// [`crate::routing_geometry::pad_rows`]. Two stages under one code have
-/// to hand the author the same arithmetic.
+/// - a pad column taller than the region. [`PadColumn::rows`] is the
+///   depth it needs (`max(inputs, outputs) + 1` once an edge carries two
+///   pads in a scope with cells, `max(inputs, outputs)` in one without),
+///   and the pads saturate at `depth - 1` past it. The placement pass
+///   refuses on exactly that number, so the two stages hand the author
+///   the same arithmetic, [`PadColumn::depth_rule`];
+/// - a region one column wide, in a scope with no cells and both
+///   sensors and actuators. The sensor column is `x = 0` and the
+///   actuator column `x = width - 1`, so at `width == 1` they are one
+///   column and pad #0 of each stands at `(0,0,0)` at any depth. The
+///   placement pass does not refuse this one; a scope with cells cannot
+///   reach it, because its row needs three columns or more.
+///
+/// The fix line names the width when the second applies and the depth
+/// rule always. A hand-built IR can put a cell anywhere and collide in
+/// ways neither names; it gets the same fix line, since a reservation
+/// is still what an author can edit.
 fn pad_overlap_diagnostic(
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
@@ -390,11 +407,21 @@ fn pad_overlap_diagnostic(
         width = reservation.width,
         depth = reservation.depth,
     );
+    let ir = &entry.ir;
+    let rule = PadColumn::of(ir).depth_rule();
+    let one_column = reservation.width < 2 && !ir.inputs.is_empty() && !ir.outputs.is_empty();
+    let fix = if one_column {
+        format!(
+            "Fix: widen `size=WxH` to at least two columns — at one, the sensor and actuator pads share a column and collide at any depth — and keep {rule}, or split into multiple `circuit` blocks"
+        )
+    } else {
+        format!("Fix: enlarge `size=WxH` so {rule}, or split into multiple `circuit` blocks")
+    };
     error_with_footer(
         DiagnosticCode::RouteCongestion,
         reservation.span.clone(),
         primary,
-        "Fix: enlarge `size=WxH` so `depth >= max(inputs, outputs) + 1` — one row per sensor or actuator, and one more for the cell row the pads step over — or split into multiple `circuit` blocks",
+        fix,
     )
 }
 
@@ -515,8 +542,9 @@ mod tests {
     use crate::logic_ir::ScopeKind;
     use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
     use crate::placement_ir::{
-        CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, ScopedPlacementIr,
+        CellCoord, PlacedCellNode, PlacedOutputNode, PlacementIr, PlacementPhase, ScopedPlacementIr,
     };
+    use crate::routing_geometry::{PadColumn, output_pad};
     use crate::test_fixtures::{
         CollapsedRow, DanglingNet, FarSink, collapsed_pad_row, dangling_net, far_sink,
         regionless_scope, reservation, scoped,
@@ -541,7 +569,7 @@ mod tests {
     /// that asked only the stage under test could not fail on two of
     /// them at once. Both ends of the pad column are rowed, because
     /// they saturate onto different things — the actuator column onto
-    /// the cell row, the sensor column onto its own previous pad — and
+    /// a cell, the sensor column onto its own previous pad — and
     /// the message names which. `input_pad` and `output_pad` are
     /// tested as pure functions in `routing_geometry`; what their
     /// saturation feeds into is this refusal.
@@ -622,6 +650,62 @@ mod tests {
                 primaries.windows(2).all(|w| w[0] == w[1]),
                 "{row:?}: the three stages word the refusal identically past the netlist \
                  noun, got {primaries:?}",
+            );
+        }
+    }
+
+    /// A cell-less scope one column wide collapses its sensor pad and
+    /// its actuator pad onto `(0,0,0)` at any depth, and every stage
+    /// says so with a fix line that asks for the width rather than for
+    /// rows the region already has.
+    ///
+    /// The region is four rows deep, and one pad on each edge wants one.
+    /// A fix line that named only the depth rule would send the author
+    /// to deepen a region whose depth is not the problem. The placement
+    /// pass places this scope, so stage 2 is the first to refuse it, and
+    /// the CLI reaches it through `size=1x4`.
+    #[test]
+    fn every_stage_asks_a_one_column_identity_wire_for_a_second_column() {
+        let region = reservation(1, 4, 2);
+        for (stage, _, phase, run) in &stages() {
+            let mut ir = PlacementIr::new(Edition::Java);
+            ir.inputs.push(NetlistInput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+                span: Span::default(),
+            });
+            let pad = output_pad(0, PadColumn::of(&ir), &region);
+            let mut output = PlacedOutputNode::new(
+                cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["d".into()]),
+                NetRef::Input(0),
+                pad,
+                Span::default(),
+            );
+            output.phase = phase.clone();
+            ir.outputs.push(output);
+            ir.region = Some(region.clone());
+
+            let (diagnostics, kept) = run(&scoped(ScopeKind::Struct, "wire", ir));
+            assert!(kept.is_empty(), "the {stage} pass elides the scope");
+            let refusal = diagnostics
+                .iter()
+                .find(|d| d.code == DiagnosticCode::RouteCongestion)
+                .unwrap_or_else(|| panic!("the {stage} pass refuses: {diagnostics:?}"));
+            assert!(
+                refusal.primary.contains("output pad #0 at (0,0,0)"),
+                "the {stage} pass names the pad that landed second: {}",
+                refusal.primary,
+            );
+            let footer = refusal
+                .notes
+                .iter()
+                .find(|n| n.message.starts_with("Fix:"))
+                .unwrap_or_else(|| panic!("the {stage} refusal carries a fix line"));
+            assert!(
+                footer.message.contains("at least two columns")
+                    && footer.message.contains("`depth >= max(inputs, outputs)` ")
+                    && !footer.message.contains("+ 1"),
+                "the {stage} fix line asks for the width, and for no cell row: {}",
+                footer.message,
             );
         }
     }

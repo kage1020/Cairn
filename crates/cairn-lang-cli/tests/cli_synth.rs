@@ -781,17 +781,19 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
 
 #[test]
 fn cli_synth_stage_route_refuses_a_detour_past_the_attenuation_cap() {
-    // `sig.a` drives the gate and the near door, so it is laid first and
-    // its dust runs the length of the front row. The gate's own wire to
-    // the far door's pad, one row back, then has to step round that
-    // dust: its straight line is `width - 2` and its route `width`. At
-    // `width = cap` the route is the cap and the scope routes; one wider
-    // it is one block over, and the router's search, bounded by the cap,
-    // refuses it at stage 2 — still within the cap in a straight line,
-    // so the straight-line gate lets it through to the router.
+    // `sig.s1` feeds the gate from its pad at `(0,0,2)` through `(1,0,2)`,
+    // so `sig.s2`'s wire, from its pad at `(0,0,3)`, cannot start along
+    // its own row: `(1,0,3)` is one step from that dust. It steps out a
+    // row, runs the length of the region and steps back to the far
+    // door's pad at `(width - 1, 0, 2)`: its straight line is `width`
+    // and its route `width + 2`. At `width = cap - 2` the route is the
+    // cap and the scope routes; one wider it is one block over, and the
+    // router's search, bounded by the cap, refuses it at stage 2 — still
+    // within the cap in a straight line, so the straight-line gate lets
+    // it through to the router.
     use cairn_lang_redstone::MAX_ATTENUATION_SEGMENT as CAP;
     let dir = tempfile::tempdir().expect("temp dir");
-    for (width, refuses) in [(CAP, false), (CAP + 1, true)] {
+    for (width, refuses) in [(CAP - 2, false), (CAP - 1, true)] {
         let path = dir.path().join(format!("detour{width}.crn"));
         let source = format!(
             "@cairn 2026.06\n@requires version>=1.20\n\n\
@@ -800,11 +802,12 @@ fn cli_synth_stage_route_refuses_a_detour_past_the_attenuation_cap() {
              floor mat_slot=wall\n  \
              door id=d0 side=front at=center mat_slot=door\n  \
              door id=d1 side=back at=center mat_slot=door\n  \
-             pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a\n  \
-             pressure_plate id=pb at=back.outside offset=0 y=0 -> sig.b\n  \
-             logic sig.g0 = sig.a and sig.b\n  \
-             door[id=d0] opened_by=sig.a\n  \
-             door[id=d1] opened_by=sig.g0\n  \
+             pressure_plate id=p0 at=front.outside offset=0 y=0 -> sig.s0\n  \
+             pressure_plate id=p1 at=back.outside offset=0 y=0 -> sig.s1\n  \
+             pressure_plate id=p2 at=front.outside offset=1 y=0 -> sig.s2\n  \
+             logic sig.g0 = sig.s0 and sig.s1\n  \
+             door[id=d0] opened_by=sig.g0\n  \
+             door[id=d1] opened_by=sig.s2\n  \
              circuit region=floor void=1\n"
         );
         std::fs::write(&path, source).expect("write detour fixture");
@@ -833,7 +836,7 @@ fn cli_synth_stage_route_refuses_a_detour_past_the_attenuation_cap() {
                 .collect();
             assert_eq!(
                 lengths,
-                [u64::from(CAP - 1), u64::from(CAP)],
+                [u64::from(CAP - 3), u64::from(CAP)],
                 "the far door's wire is exactly the cap",
             );
             continue;
@@ -841,8 +844,8 @@ fn cli_synth_stage_route_refuses_a_detour_past_the_attenuation_cap() {
         assert_eq!(out.status.code(), Some(1), "width {width}: {stderr}");
         let expected = format!(
             "error[E_ATTENUATION_LIMIT]: placed netlist for struct `s` has no route from the \
-             driver at (1,0,1) to ({},0,1) within the v1 attenuation limit of {CAP} blocks; the \
-             faces it could arrive through are taken by sig.a\n  note: Fix: give the wire a \
+             driver at (0,0,3) to ({},0,2) within the v1 attenuation limit of {CAP} blocks; the \
+             faces it could arrive through are taken by cell #0\n  note: Fix: give the wire a \
              shorter way round",
             width - 1,
         );
@@ -892,10 +895,10 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
-    // Nothing at all. Two sensors feed the cell, so the second one's
-    // wire comes round the first one's pad and the cell's outward run
-    // climbs a layer to clear it — a layout the pipeline produces
-    // rather than a defect it announces.
+    // Nothing at all. The two sensor pads stand a row either side of
+    // the cell's, so each wire comes in through the lane on its own
+    // side, and the cell's outward run reaches the door's pad in the
+    // straight-line distance, over nothing and round nothing.
     assert!(
         stderr.is_empty(),
         "a scope that routes has nothing to say: {stderr}",
@@ -938,8 +941,8 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
 #[test]
 fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
     // Everything about crossing legalization on the redstone-door
-    // fixture is edition-independent (short segments, and a crossing
-    // that is reported rather than repaired), so the Bedrock run
+    // fixture is edition-independent (short segments, and nothing
+    // that crosses), so the Bedrock run
     // differs from the Java run only in the cell tag and the edition
     // field. Mirrors
     // the placement / route / delay stage's Java+Bedrock pattern so
@@ -959,10 +962,10 @@ fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
-    // Nothing at all. Two sensors feed the cell, so the second one's
-    // wire comes round the first one's pad and the cell's outward run
-    // climbs a layer to clear it — a layout the pipeline produces
-    // rather than a defect it announces.
+    // Nothing at all. The two sensor pads stand a row either side of
+    // the cell's, so each wire comes in through the lane on its own
+    // side, and the cell's outward run reaches the door's pad in the
+    // straight-line distance, over nothing and round nothing.
     assert!(
         stderr.is_empty(),
         "a scope that routes has nothing to say: {stderr}",

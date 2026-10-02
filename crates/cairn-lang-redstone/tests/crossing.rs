@@ -9,15 +9,14 @@
 //! distinguishable from its delayed input, and the loud refusal of a
 //! second run over the pass's own output.
 //!
-//! Both redstone examples make a net go round another. The pad column
-//! at `x=0` is where: the pads are packed down it by index, so the
-//! second sensor's wire has to come round the first sensor's pad, and
-//! the row it comes round through is the row the cell drives its
-//! actuators out along. One cell and two sensors is enough —
-//! `redstone-door.crn` is that shape, and its cell's outward wire
-//! climbs a layer at its own doorstep rather than merging with the
-//! sensor's. Neither example reaches this pass with anything to
-//! legalize, which is what the assertions here say.
+//! `examples/crossbar.crn` makes a net go round others: `cell #0`'s run
+//! climbs onto the bridge layer to clear the two sensor lanes, the
+//! escape `spec/redstone` "Place-and-route" specifies.
+//! `redstone-door.crn` does not. Its sensor pads stand a row either
+//! side of the cell's, so each sensor's wire comes in through the lane
+//! on its own side, and the cell's wire reaches the door's pad in the
+//! straight-line distance. Neither example reaches this pass with
+//! anything to legalize, which is what the assertions here say.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
@@ -146,6 +145,13 @@ struct s size=17x3
     let legalized = legalized_from_source(source, Edition::Java);
     let outputs = &legalized.scopes[0].ir.outputs;
     assert_eq!(outputs.len(), 2, "one actuator pad per door");
+    // No cells, so no cell row for the pads to step over: pad #1 is the
+    // next row down, and its route one block longer than pad #0's.
+    let pads: Vec<((u32, u32, u32), Option<u32>)> = outputs
+        .iter()
+        .map(|o| ((o.pad.x, o.pad.y, o.pad.z), o.wire_length()))
+        .collect();
+    assert_eq!(pads, vec![((16, 0, 0), Some(16)), ((16, 0, 1), Some(17))]);
     let fork = (15, 0, 0);
     for (index, output) in outputs.iter().enumerate() {
         let buffers: Vec<(u32, u32, u32)> = output
@@ -275,13 +281,12 @@ fn cells_that_restore_strength_start_the_count_again() {
 /// count as one run.
 ///
 /// Three nets run in this scope, not one: each sensor drives the cell,
-/// and the cell drives the door. `sig.exit`'s pad sits behind
-/// `sig.step`'s in the `x=0` column, so its wire has to come round the
-/// pad in front of it, and the row it comes round through is the row
-/// the cell drives its actuator out along. The cell's wire therefore
-/// climbs onto the bridge layer at its own doorstep and runs the
-/// length of the region up there — the escape `spec/redstone`
-/// "Place-and-route" specifies, in the smallest circuit the corpus has.
+/// and the cell drives the door. The pads in the `x=0` column step over
+/// the cell row, so `sig.step`'s stands at `(0,0,0)` and `sig.exit`'s
+/// at `(0,0,2)`, and each wire comes in through the lane on its own
+/// side. The cell's wire runs 6 blocks to the door's pad at `(6,0,0)`,
+/// the straight-line distance, so it goes round nothing and climbs no
+/// layer.
 #[test]
 fn redstone_door_java_carries_no_buffers() {
     let source = load_example("redstone-door.crn");
@@ -294,9 +299,8 @@ fn redstone_door_java_carries_no_buffers() {
     );
     assert!(
         legalized.diagnostics.is_empty(),
-        "the second sensor's wire comes round the first sensor's pad and the \
-         cell's outward run goes round that, so there is nothing left to \
-         report: {:?}",
+        "each sensor comes in through its own lane and the cell's outward \
+         run goes round nothing, so there is nothing to report: {:?}",
         legalized.diagnostics,
     );
     let entry = legalized
@@ -417,9 +421,9 @@ fn legalized_with_zero_buffers_is_distinguishable_from_delayed() {
 /// AC — mirror of
 /// `json_output_byte_identical_apart_from_stage_tag_when_no_crossings_and_no_buffers`
 /// for a scope whose nets had to go round each other.
-/// `examples/crossbar.crn` sends one of its sensor signals up onto the
-/// bridge layer to clear the other, and that decision belongs to stage
-/// 2: by the time this pass runs it is in the routed lengths already,
+/// `examples/crossbar.crn` sends `cell #0`'s output up onto the bridge
+/// layer to clear the two sensor lanes, and that decision belongs to
+/// stage 2: by the time this pass runs it is in the routed lengths already,
 /// and every driver segment here sits below `DUST_ATTENUATION_LIMIT`,
 /// so the legalized JSON equals the delayed JSON apart from the stage
 /// tag. Pins two invariants at once: both gate cells and both door
@@ -543,6 +547,73 @@ struct thin size=4x4
     let routed = compile_routing(&compile_placement(&edition_netlist, &intent).scoped);
     assert!(
         routed.scoped.scopes.iter().any(|e| e.name == "thin"),
+        "void=2 gives the escape a layer: {:?}",
+        routed.diagnostics,
+    );
+}
+
+/// The same refusal where the stranded sink is a cell body rather than
+/// a pad.
+///
+/// The fixture above strands an actuator pad, and
+/// `crossbar_void_one_is_refused_before_any_crossing_is_computed` below
+/// strands one too; neither has a cell coord as the sink. Here two
+/// cells form a chain at `void=1`, and the second cell's coord,
+/// `(3,0,1)`, is the sink `cell #0`'s output cannot reach: the refusal
+/// has to name a cell coord, and the nets standing on its faces. With
+/// `void=2` the same scope routes.
+#[test]
+fn a_cell_with_its_faces_taken_and_no_layer_above_is_refused() {
+    let source = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct chain size=5x3
+  floor mat_slot=wall
+  door id=d0 side=front at=center mat_slot=door
+  pressure_plate id=p0 at=front.outside offset=0 y=0 -> sig.s0
+  pressure_plate id=p1 at=inside.front offset=1 y=0 -> sig.s1
+  logic sig.c0 = sig.s0 and sig.s1
+  logic sig.c1 = sig.c0 and sig.s0
+  door[id=d0] opened_by=sig.c1
+  circuit region=floor void=1
+";
+    let routed_at = |source: &str| {
+        let intent = lower(&parse(source).expect("parse"));
+        let edition_netlist =
+            compile_edition_netlist(&compile_netlist(&synthesize(&intent).scoped), Edition::Java);
+        compile_routing(&compile_placement(&edition_netlist, &intent).scoped)
+    };
+
+    let routed = routed_at(source);
+    let refusal = routed
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .unwrap_or_else(|| panic!("void=1 must refuse: {:?}", routed.diagnostics));
+    assert!(
+        refusal
+            .primary
+            .contains("cannot reach (3,0,1) from the driver at (1,0,1)"),
+        "the stranded sink is cell #1's body, reached from cell #0's: {}",
+        refusal.primary,
+    );
+    assert!(
+        refusal
+            .primary
+            .contains("the faces it could arrive through are taken by sig.s0 and cell #1"),
+        "and the refusal names the nets on its faces: {}",
+        refusal.primary,
+    );
+    assert!(
+        routed.scoped.scopes.iter().all(|e| e.name != "chain"),
+        "failed scope must elide before anything downstream reads it",
+    );
+
+    let routed = routed_at(&source.replace("void=1", "void=2"));
+    assert!(
+        routed.scoped.scopes.iter().any(|e| e.name == "chain"),
         "void=2 gives the escape a layer: {:?}",
         routed.diagnostics,
     );

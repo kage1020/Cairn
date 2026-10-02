@@ -146,6 +146,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         region,
         cell_coords,
         inputs,
+        column,
         blocks,
     } = match open_scope(entry) {
         Err(Skipped::Empty) => return Ok(source.clone()),
@@ -167,7 +168,7 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         entry,
         "delayed",
         &region,
-        source_of_net(&region, &cell_coords, inputs),
+        source_of_net(&region, column, &cell_coords, inputs),
     )?;
 
     // Every coord a repeater can be asked to stand on is a coord of its
@@ -306,7 +307,9 @@ mod tests {
         CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, RouteLayer, ScopedPlacementIr,
     };
     use crate::routing::compile_routing;
-    use crate::routing_geometry::{Router, block_sites, collect_nets, input_pad, net_trees};
+    use crate::routing_geometry::{
+        PadColumn, Router, block_sites, collect_nets, input_pad, net_trees,
+    };
     use crate::test_fixtures::{reservation, scoped, staircase};
 
     fn placed_cell(
@@ -587,7 +590,7 @@ mod tests {
         let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
         let router = Router::new(&region, &block_sites(ir, &region));
         let trees = net_trees(&nets, &router, |net| match net {
-            NetRef::Input(i) => input_pad(i as usize, &region),
+            NetRef::Input(i) => input_pad(i as usize, PadColumn::of(ir), &region),
             NetRef::Cell(j) => cell_coords[j as usize],
         });
         let owned: HashMap<NetRef, HashSet<CellCoord>> = trees
@@ -787,7 +790,7 @@ mod tests {
         let router = Router::new(&region, &block_sites(ir, &region));
         let nets = collect_nets(ir);
         let trees = net_trees(&nets, &router, |net| match net {
-            NetRef::Input(i) => input_pad(i as usize, &region),
+            NetRef::Input(i) => input_pad(i as usize, PadColumn::of(ir), &region),
             NetRef::Cell(j) => cell_coords[j as usize],
         });
 
@@ -795,7 +798,7 @@ mod tests {
             .iter()
             .map(|(net, sinks)| {
                 let source = match net {
-                    NetRef::Input(i) => input_pad(*i as usize, &region),
+                    NetRef::Input(i) => input_pad(*i as usize, PadColumn::of(ir), &region),
                     NetRef::Cell(j) => cell_coords[*j as usize],
                 };
                 router
@@ -1688,7 +1691,7 @@ mod tests {
         use cairn_lang_core::{Edition, lower, parse};
 
         use super::{
-            CellCoord, HashSet, NetRef, PlacementIr, Router, block_sites, collect_nets,
+            CellCoord, HashSet, NetRef, PadColumn, PlacementIr, Router, block_sites, collect_nets,
             compile_crossing, input_pad, net_trees,
         };
         use crate::delay::{DUST_ATTENUATION_LIMIT, compile_delay};
@@ -1735,7 +1738,7 @@ mod tests {
             let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
             let router = Router::new(&region, &block_sites(ir, &region));
             let trees = net_trees(&nets, &router, |net| match net {
-                NetRef::Input(i) => input_pad(i as usize, &region),
+                NetRef::Input(i) => input_pad(i as usize, PadColumn::of(ir), &region),
                 NetRef::Cell(j) => cell_coords[j as usize],
             });
             let mut repeaters: HashMap<NetRef, HashSet<CellCoord>> = HashMap::new();
@@ -1894,16 +1897,16 @@ struct chain size=60x5
 
         use super::{
             BufferSegment, CellCoord, CellPortDriver, Edition, EditionCell, HashSet, NetRef,
-            PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer, Router, ScopeKind,
-            Span, block_sites, collect_nets, compile_crossing, input_pad, net_trees, reservation,
-            scoped,
+            PadColumn, PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer, Router,
+            ScopeKind, Span, block_sites, collect_nets, compile_crossing, input_pad, net_trees,
+            reservation, scoped,
         };
         use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
         use crate::routing::compile_routing;
 
         /// Strategy over sink positions for the phase-4 invariant
         /// property test. Each `(x, z)` in the returned `Vec` seeds one
-        /// cell at `(x, 0, z)` driven from `Input(0)` at `(0, 0, 1)`.
+        /// cell at `(x, 0, z)` driven from `Input(0)` at `(0, 0, 0)`.
         /// `x` in `1..=99` covers both the sub-limit segments (zero
         /// buffers) and the multi-boundary ones, so `buffer_total` is
         /// non-zero on most cases and the invariant discriminates.
@@ -2047,7 +2050,9 @@ struct chain size=60x5
                         entry.ir.cells.iter().map(|c| c.coord).collect();
                     let router = Router::new(&region, &block_sites(&entry.ir, &region));
                     let trees = net_trees(&nets, &router, |net| match net {
-                        NetRef::Input(i) => input_pad(i as usize, &region),
+                        NetRef::Input(i) => {
+                            input_pad(i as usize, PadColumn::of(&entry.ir), &region)
+                        }
                         NetRef::Cell(j) => cell_coords[j as usize],
                     });
                     for cell in &entry.ir.cells {
