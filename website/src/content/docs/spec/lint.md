@@ -51,8 +51,8 @@ compose to the strictest across every line, so a second one adds a constraint ([
 |---|---|
 | `E_PARSE` | The source did not parse. |
 | `E_UNKNOWN_KEYWORD` | The statement keyword is not in the known-keyword table. |
-| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`. |
-| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
+| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` / `class=` a `struct` / `def` header takes. |
+| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
@@ -141,6 +141,7 @@ version to compare.
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
+| `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since nothing checks its properties and values against the target until `E_STATE_DOMAIN` is implemented ([Versioning and Editions](/spec/versioning-editions/)). |
 | `W_NO_THEME_BOUND` | A scope has no theme bound to it, so every `mat_slot=` member in it lowers to air. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 
@@ -150,6 +151,13 @@ commands that lower report them: `cairn compile`, `cairn lower`, `cairn info`, a
 raise it are `cairn compile --target` and `cairn check --edition E --target V` — `info` and
 `lower` lower against no version. A `cairn check` with no `--target` runs no lowering at all and
 reaches neither code.
+
+`W_STATE_LITERAL_UNCHECKED` is raised by the same lowering, on every state literal it reads from a
+theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info` and `cairn check
+--edition E --target V` report it under either edition. It stands in for `E_STATE_DOMAIN`: until
+the compiler holds a table of each block's states, a property the block lacks or a value outside
+its domain is written into the structure file unchanged, and the warning is what keeps that from
+being silent.
 
 `cairn check --target` exists so a CI job can gate on the check command and still see the
 lowering-stage findings a compile would refuse on: an id the target does not declare passed
@@ -256,6 +264,7 @@ author means, so with both in scope the question has not been asked.
 |---|---|
 | `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:`, `/`, `\` or whitespace. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
+| `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
@@ -272,6 +281,21 @@ through.
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
+
+`E_OUTPUT_NAME_COLLISION` follows from how artifacts are named
+([§9.3.4](/spec/components-editing-sites/#934-output-naming)): a `struct` by its name, a `place` by
+its `id=` alone, and a walkway by its site and ports. Every one of them lands in the same output
+directory, so two can name one file, and if both are built, a build can keep only one of them. The
+check runs before lowering. It leaves out a sizeless `struct` and a `place` of a sizeless `def`,
+which lowering drops, and counts two `connect` rows for one pair of ports, in either order, as one
+walkway, which is what lowering lays. It still counts a struct or placement that
+`W_STRUCTURE_TOO_LARGE` drops, and a walkway whose search area is past the router's cap, which
+`W_WALKWAY_BLOCKED` reports and does not lay, so the finding says the two files *would* be one.
+Names are compared ignoring case, because `Hut` and `hut` are one file on the case-insensitive file
+systems macOS and Windows use by default, and whether a source builds should not depend on the host
+that builds it. The finding is raised with the other site findings, before lowering, so `cairn
+check` reports it without a `--target`. A name declared twice is not this code: a second `struct
+hut` is `E_DUPLICATE_ITEM`, and a second `id=` in one site is `E_DUPLICATE_PLACE_ID`.
 
 `E_UNRESOLVED_PLACE_REF` and `E_UNRESOLVED_THEME_REF` each carry a nearest-match suggestion when
 one fits the spell cap ([did you mean](#did-you-mean)). Both are errors because substituting
@@ -308,7 +332,8 @@ and the end of every port can end up there. The other four edges, the end of a p
 of a port, sit next to a `.` whichever way the row is written and cannot merge; they are refused
 too, so the rule stays one sentence: no place or port id starts or ends with `_`. The site is exempt
 from the edge rule, since `::` separates it from both neighbours. The row is dropped and the finding
-names the segment to rename.
+names the segment to rename. The walkway it asked for is lost, so `cairn compile` refuses the build
+with `E_PARTIAL_BUILD`, as it does for every row that lays nothing.
 
 `W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
 failed origin selector, an unresolved `use=` or `theme=`. It is a warning because the finding that
@@ -324,7 +349,7 @@ the author to a line that is correct.
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
 | `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](/spec/compilation/)). |
-| `E_PARTIAL_BUILD` | At least one requested scope did not lower, so the run produced less than was asked for. |
+| `E_PARTIAL_BUILD` | At least one requested scope, or a walkway a `connect` row asked for, did not lower, so the run produced less than was asked for. |
 
 `W_STRUCT_NO_SIZE` and `W_DEF_NO_SIZE` are one rule split by what carries it, so a filter matching
 on `code` can tell a struct that will not build from a template that will not instantiate.
@@ -339,8 +364,10 @@ the scope lowers, and the finding names what is missing from it.
 
 `E_PARTIAL_BUILD` is the run-level counterpart, and the one error among these: a warning above says
 a scope builds without something, and this says a scope the command was asked for did not build at
-all. It is reported once for the run, naming how many of the requested scopes were lost, by
-`cairn compile` and by a `cairn check --edition E --target V` that runs the same lowering pass.
+all. A scope that lowers to air alone did not build either, whatever left it empty: every member
+deferred, no theme gave its `mat_slot=` members a block, or it declares no member. It is reported
+once for the run, naming how many of the requested scopes were lost, by `cairn compile` and by a
+`cairn check --edition E --target V` that runs the same lowering pass.
 
 `W_PHASE_CONFLICT` is last-wins reported rather than refused. [Compilation Model](/spec/compilation/)
 grants last-wins to local overrides within one phase, which is what an author restating a member
@@ -446,9 +473,13 @@ other failure reads that way — a source that does not parse is an array carryi
 file that cannot be read writes no document at all. Which of the two refusals it was, and what the
 build lost, is said only on stderr.
 
-One `info` refusal is a run-level refusal of the same kind: a registry pack whose palette carries a
-blockstate the pack was expected to refuse costs that edition its portability row, and names no span
-in the source and no repair its author could make. It reads as prose on stderr in both formats.
+One `info` refusal is a run-level refusal of the same kind: a palette carrying a blockstate a
+registry pack was expected to refuse costs that edition its portability row, and names no span in
+the source. Such a blockstate is either a leak in the pack or the compiler, which the author cannot
+repair, or a state literal on a stair in the source — a `facing` or `half` value outside the Java
+domain (`@oak_stairs[facing=up]`), or a key other than `facing` / `half` / `shape` — which nothing
+checks against the target until `E_STATE_DOMAIN` is implemented. The refusal names both. A literal
+on any other block is counted `unsupported` instead. It reads as prose on stderr in both formats.
 The document is still written — the promise is one document per input, not one element per
 refusal — so a run refused by nothing else writes `{"diagnostics": []}` and says the rest with its
 exit code.
@@ -583,20 +614,30 @@ This check does not need that answer, because the word is one something reads or
 whichever the answer turns out to be. Note that a key in a member's own bracket does not make the
 member *carry* the attribute, so a `theme` row selecting on it matches nothing.
 
+A `struct` / `def` header line answers to a closed vocabulary of its own, the one [Components,
+Editing, and Multi-building](/spec/components-editing-sites/) states: `size=`, which lowering
+reads, and `class=`, which no pass reads yet. No `theme` selector widens it, since a selector names
+a member keyword. A key outside the two is the same defect one line up from a member's, and is
+refused with the suggestion: `struct s siz=7x7` is offered `size`. The missing-size warning the
+same typo causes cannot name it, and is raised only where block-array lowering runs, which
+`cairn check` does only with both `--edition` and `--target`; without this check a plain
+`cairn check` would say nothing about the line. Where both are raised, the error is printed before
+the warning.
+
 `W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=`
 in the vocabulary whose value the pass cannot read is dropped and a default put in its place. An
 **unreached key**: a `key=` this specification defines that no pass reads yet — `window shape=` /
-`anchor=` and `roof footprint=` / `bounds=` are those keys today — is carried into the IR and never
-consulted. Every `key=value` on the right of a `theme` selector row whose keyword the compiler
-knows is one too, reported on the binding whatever its key or value, since no pass lowers a
-selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). And a key **routed
-past**: one the keyword reads only under some ways of writing a sibling argument, on a member that
-writes it another way. The boundary is the keyword: a spec-defined key on a keyword the compiler
-knows is reported this way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD`
-and its arguments are not judged at all. All three make the build differ from the source. The rule
-forbids *silent* substitution, and all three are announced. For the unreached key the gap is the
-compiler's rather than the source's, which is why it is not a refusal. Whether autofix is offered
-is up to the implementation.
+`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today — is carried
+into the IR and never consulted. Every `key=value` on the right of a `theme` selector row whose
+keyword the compiler knows is one too, reported on the binding whatever its key or value, since no
+pass lowers a selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). And a key
+**routed past**: one the keyword reads only under some ways of writing a sibling argument, on a
+member that writes it another way. The boundary is the keyword: a spec-defined key on a keyword the
+compiler knows is reported this way, while a spec-defined *keyword* it does not know is
+`E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three make the build differ from
+the source. The rule forbids *silent* substitution, and all three are announced. For the unreached
+key the gap is the compiler's rather than the source's, which is why it is not a refusal. Whether
+autofix is offered is up to the implementation.
 
 An unreadable value is reported whether or not its member is then built. The value is wrong
 wherever the member ends up, so it is a repair of its own, and holding the finding back until a

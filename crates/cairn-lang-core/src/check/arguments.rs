@@ -3,6 +3,11 @@
 //! reads yet, every key a sibling argument's value routed past, and every
 //! binding a theme selector carries, which no pass reads either. A
 //! member's own `[key=value]` selector answers to the same vocabulary.
+//! The `struct` / `def` header line answers to a vocabulary of its own,
+//! `size=` and `class=`, and gets two of those findings: an unknown key
+//! and an unreached one. No selector widens it, no sibling routes past one
+//! of its keys, and its `size=` is accepted whatever the value, which
+//! `check::type_mismatch` judges.
 //!
 //! Walks the Intent IR beside [`super::keyword_allowlist`], which asks the
 //! same question one level up. The two do not both fire on a line: a
@@ -87,8 +92,10 @@
 
 use std::collections::{BTreeSet, HashMap};
 
+use indexmap::IndexMap;
+
 use crate::ast::ValueKind;
-use crate::intent::{IntentModule, Member, MemberRole, SelectorValue, role_of};
+use crate::intent::{IntentModule, Member, MemberRole, SelectorValue, ValueWithSpan, role_of};
 use crate::prose::or_list;
 use crate::suggest::{did_you_mean_note, nearest_match};
 
@@ -114,13 +121,54 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     }
     let selected = selector_keys(ir);
     for s in &ir.structs {
+        check_header("struct", &s.args, sink);
         walk(&s.members, &selected, sink);
     }
     for d in &ir.defs {
+        check_header("def", &d.args, sink);
         walk(&d.members, &selected, sink);
     }
     for s in &ir.sites {
         walk(&s.placements, &selected, sink);
+    }
+}
+
+/// Keys a `struct` / `def` header line may carry, in the order the
+/// closed-set note lists them.
+///
+/// `size=` is the one lowering reads. `class=` is the other key the
+/// specification writes on a header — `def cottage class=house size=9x7:`
+/// in `spec/components-editing-sites` "`def`, the component construct" —
+/// and [`UNREAD_HEADER_ARGUMENTS`] says what becomes of it.
+const HEADER_ARGUMENTS: &[&str] = &["size", "class"];
+
+/// Keys in [`HEADER_ARGUMENTS`] that no pass reads yet: carried into
+/// `StructIr::args` / `DefIr::args` and never consulted, so the scope is
+/// built the same with them or without them.
+const UNREAD_HEADER_ARGUMENTS: &[&str] = &["class"];
+
+/// Judge the `key=value` arguments of a `struct` / `def` header line, other
+/// than the `size=WxH` lowering hoisted out of them.
+///
+/// The header answers to its own closed vocabulary rather than to any
+/// member role's, and no theme selector widens it: a selector names a
+/// member keyword, and `struct` / `def` are not member keywords. A `size=`
+/// that reaches `args` is one whose value is not a `WxH` literal, which
+/// `check::type_mismatch` reports; the key is not the mistake, so it is
+/// accepted here.
+fn check_header(keyword: &str, args: &IndexMap<String, ValueWithSpan>, sink: &mut DiagnosticSink) {
+    for (key, value) in args {
+        if !HEADER_ARGUMENTS.contains(&key.as_str()) {
+            sink.push(unknown_key(
+                Field::Header,
+                keyword,
+                key,
+                &value.span,
+                HEADER_ARGUMENTS,
+            ));
+        } else if UNREAD_HEADER_ARGUMENTS.contains(&key.as_str()) {
+            sink.push(unread_header_argument(keyword, key, &value.span));
+        }
     }
 }
 
@@ -388,10 +436,11 @@ fn routed_past_argument(
     }
 }
 
-/// Which of a member's two key-bearing fields a finding is about.
+/// Which key-bearing field a finding is about: a member's two, or the
+/// `struct` / `def` header line.
 ///
 /// One defect — a word the author expects something to read, that nothing
-/// does — written in two places, so the code and the notes are shared and
+/// does — written in three places, so the code and the notes are shared and
 /// only the sentence changes, naming the field the author has to edit.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Field {
@@ -399,6 +448,8 @@ enum Field {
     Argument,
     /// The member's own `[key=value]`.
     Selector,
+    /// A `key=value` on a `struct` / `def` header line.
+    Header,
 }
 
 impl Field {
@@ -407,6 +458,7 @@ impl Field {
         match self {
             Self::Argument => format!("`{key}=` is not an argument `{keyword}` reads"),
             Self::Selector => format!("`{key}=` is not an attribute a `{keyword}` carries"),
+            Self::Header => format!("`{key}=` is not an argument a `{keyword}` header reads"),
         }
     }
 }
@@ -490,5 +542,45 @@ fn unread_argument(keyword: &str, key: &str, span: &crate::error::Span) -> Diagn
                 .to_owned(),
         }],
         data: None,
+    }
+}
+
+/// A key the specification writes on a `struct` / `def` header and no pass
+/// reads yet — [`UNREAD_HEADER_ARGUMENTS`].
+fn unread_header_argument(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::IgnoredArgument,
+        span: span.clone(),
+        primary: format!(
+            "`{key}=` is an argument a `{keyword}` header takes and no pass reads yet; the value \
+             was ignored",
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!(
+                "the `{keyword}` is built without it — remove the argument, or keep it and \
+                 expect no effect until a pass reads it"
+            ),
+        }],
+        data: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HEADER_ARGUMENTS, UNREAD_HEADER_ARGUMENTS};
+
+    /// The header's twin of the member tables' consistency test. A key
+    /// listed as unread but missing from the vocabulary would never reach
+    /// the unread branch: `check_header` refuses it as unknown first, so
+    /// the key the specification writes would be an error.
+    #[test]
+    fn every_unread_header_argument_is_in_the_header_vocabulary() {
+        for key in UNREAD_HEADER_ARGUMENTS {
+            assert!(
+                HEADER_ARGUMENTS.contains(key),
+                "`{key}` is called unread but the header vocabulary does not list it",
+            );
+        }
     }
 }

@@ -88,6 +88,20 @@ nothing written among them is read as a binding. A bracketed pair earns whicheve
 applies once it is moved out. `E_LOGIC_MISPLACED_BINDING` names the brackets when that is the only
 problem; otherwise you get the finding for the host or the key.
 
+**A selector line binds the member its brackets pick.** `door[id=front] opened_by=sig.power` binds
+the door declared as `door id=front ...` in the same scope, at the top level or directly under a
+`level`. The `id=` has to name exactly one such door, written without brackets. The patch is a line
+of its own, before or after the door it binds, at the top level or directly under a `level`,
+wherever that door is. A patch whose selector has no `id=`, or whose id no door carries or two doors
+carry, is `E_LOGIC_UNRESOLVED_PATCH`: it acts on no door, so a port for it would have no component
+behind it. The door patch is the only binding a selector line carries, so a `->` tail on
+`pressure_plate[id=p]` is `E_MISPLACED_BINDING`, as it is on a member that is not a sensor.
+
+**An actuator takes one binding per key.** A door carries one `opened_by=`, whether it is written on
+the door's own line, through a patch, or on both. A second is `E_LOGIC_DUPLICATE_BINDING`: two
+bindings would be two wires into one door, a wired OR the logic layer never states. Signals are
+combined there instead — `logic sig.open = sig.a or sig.x`, with the door bound to `sig.open`.
+
 A `sig.` value under a key that is not one of the four actuator keys is
 `E_LOGIC_UNKNOWN_BINDING_KEY`. The value says a signal was meant to be wired and the key says
 nothing reads it. That is the shape a typo takes, as in `oepend_by=sig.power`.
@@ -210,8 +224,20 @@ The internal algorithm runs five stages:
    `E_ATTENUATION_LIMIT` at this stage rather than at stage 3. A floor and not the measure: it
    refuses strictly less than stage 3 does and replaces nothing. A region 256 wide puts its pad
    255 blocks from the driver and may route 257 to get there, which is over the cap and not over
-   this, and stage 3 is still what catches it. The fix line differs from stage 3's for the same
-   reason — nothing shortens a straight line, so enlarging the region is not the remedy here.
+   this. The fix line differs from stage 3's for the same reason — nothing shortens a straight
+   line, so enlarging the region is not the remedy here.
+
+   The router's search is bounded by the same cap. A path from a net's wire to a sink is part of
+   that sink's segment, so the search does not look past the cap. Each sink it cannot reach is
+   then judged on its own. It earns `E_ROUTE_CONGESTION`, below, when the router can prove it
+   walled in: none of its faces can be arrived through, or the search ran out of coordinates
+   before the cap cut any off, or the free coordinates the sink opens onto all lie within the cap
+   of it and the net's wire is not among them. Otherwise it earns `E_ATTENUATION_LIMIT` here,
+   which says only that no route within the cap exists — a sink walled off in a free region wider
+   than the cap is one of these. When a scope has sinks of both kinds, the message is about a
+   walled-in one. The bound is what keeps giving up on a sink proportional to the cap rather than
+   to the reservation: without it, the search visited every free coordinate the net could reach
+   before it refused.
 3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
    limit of 15. The segment is measured along the **routed** path from driver to sink, and the
    buffer stands on that path, so the straight line between the two is not always wire. A segment
@@ -258,11 +284,12 @@ E_ROUTE_CONGESTION line 21 circuit=basement:
   Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks.
 ```
 
-`E_ATTENUATION_LIMIT` is the other refusal these passes raise, for three shapes. Stages 2, 3 and 4
-all lay nets, and all three test the straight line between a driver and its sink against the cap
-through one shared routine. Stage 3 also measures each routed segment against the cap. Stages 3
-and 4 both refuse a stretch of dust past the limit of 15 on which no coordinate can hold a
-repeater: each works out where the repeaters stand from the same routed tree, by the same rule,
+`E_ATTENUATION_LIMIT` is the other refusal these passes raise, for four shapes. Stages 2, 3 and 4
+all lay nets through one shared step, which tests the straight line between a driver and its sink
+against the cap before any route is laid, and refuses a sink no route within the cap reaches once
+the router has searched for one. Stage 3 also measures each routed segment against the cap.
+Stages 3 and 4 both refuse a stretch of dust past the limit of 15 on which no coordinate can hold
+a repeater: each works out where the repeaters stand from the same routed tree, by the same rule,
 so the two agree on which stretch that is and the message names the node that goes dark. Which
 stage refuses a scope depends only on which one reached it first. The primary names the netlist that pass read —
 `placed` at stage 2, `routed` at stage 3, `delayed` at stage 4 — so the message says where in the

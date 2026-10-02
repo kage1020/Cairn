@@ -68,8 +68,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **`theme`.** A CSS-like binding of slot/selector values to canonical tokens. Separates
   *structure* (where the walls are) from *style* (which blocks).
 - **`def`.** A slot-bearing Component definition (a reusable struct). Recursion forbidden;
-  parameterization allowed. The minimum version of a composite is the max of its parts.
-  See [components-editing-sites §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
+  parameterization allowed, though until a mechanism for it is specified the header takes only
+  `size=` and `class=`. The minimum version of a composite is the max of its parts. See
+  [components-editing-sites §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
 - **`site`.** A multi-building container that places `def`-derived structures by topological
   relations (`east_of`, `gap=`, `connect`), not absolute coordinates. See
   [components-editing-sites §9.3](/spec/components-editing-sites/#93-multi-building-with-site).

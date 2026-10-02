@@ -138,7 +138,8 @@ pub enum DiagnosticCode {
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
     /// A key outside the vocabulary of the member's role, written as a
-    /// `key=value` argument or inside the member's own `[key=value]`.
+    /// `key=value` argument or inside the member's own `[key=value]` — or a
+    /// key other than `size=` / `class=` on a `struct` / `def` header line.
     ///
     /// An error for the same reason [`Self::UnknownKeyword`] is, one level
     /// down: the key names nothing, so no pass will ever read the value,
@@ -146,12 +147,13 @@ pub enum DiagnosticCode {
     /// A misspelling of an argument that has a default is the worst of
     /// them — the build succeeds, silently, at the default.
     ///
-    /// One code for both fields because it is one defect: `clas=outer`
-    /// and `[clas=outer]` are each a word the author expects something to
-    /// read that nothing does, with the `class` lost either way. Only the
-    /// sentence differs, naming the field to edit.
+    /// One code for every field because it is one defect: `clas=outer`,
+    /// `[clas=outer]` and a header's `siz=7x7` are each a word the author
+    /// expects something to read that nothing does. Only the sentence
+    /// differs, naming the field to edit.
     UnknownArgument,
-    /// A `-> value` tail on a member whose keyword cannot emit a signal.
+    /// A `-> value` tail on a member whose keyword cannot emit a signal,
+    /// or on a sensor keyword written in the `[selector]` form.
     ///
     /// `spec/redstone` "Signal binding" writes an emitted signal on the
     /// component that emits it, and [`crate::intent::SENSOR_HOSTS`] is the
@@ -165,6 +167,10 @@ pub enum DiagnosticCode {
     /// no signal is the redstone pipeline's `E_LOGIC_INVALID_SIGNAL`, which
     /// is a question about the `sig.` namespace and needs the Logic IR to
     /// ask.
+    ///
+    /// `pressure_plate[id=p] -> sig.x` is the second shape. The door
+    /// actuator patch is the only binding a selector line carries, and no
+    /// sensor patch exists, so the tail is on no sensor line.
     MisplacedBinding,
     /// A statement carrying bare positional values in a form that takes
     /// none.
@@ -260,16 +266,18 @@ pub enum DiagnosticCode {
     /// could not read it, dropped it, and put the default in its place.
     /// **Unreached key**: no pass reads it yet. On a member that is a key
     /// the specification defines, listed in
-    /// `crate::intent::MemberRole::unread_arguments`; on a `theme` selector
-    /// row whose keyword names a role it is every `key=value` right of the
-    /// arrow, defined anywhere or not (`fram=42` included), since no pass
-    /// lowers a selector's bindings. **Routed past**:
-    /// a sibling argument picked a lowering rule that does not consult it,
-    /// which `crate::intent::MemberRole::conditional_arguments` records and
-    /// `roof kind=gable slope_to=front` is the instance of — that one has no
-    /// default to substitute, and fires whether or not the member went on to
-    /// build. The build differs from the source in all three, and the
-    /// difference is announced rather than silent.
+    /// `crate::intent::MemberRole::unread_arguments`; on a `struct` / `def`
+    /// header it is a key the specification writes there, listed in
+    /// `crate::check::arguments::UNREAD_HEADER_ARGUMENTS` — today `class=`;
+    /// on a `theme` selector row whose keyword names a role it is every
+    /// `key=value` right of the arrow, defined anywhere or not (`fram=42`
+    /// included), since no pass lowers a selector's bindings. **Routed
+    /// past**: a sibling argument picked a lowering rule that does not
+    /// consult it, which `crate::intent::MemberRole::conditional_arguments`
+    /// records and `roof kind=gable slope_to=front` is the instance of —
+    /// that one has no default to substitute, and fires whether or not the
+    /// member went on to build. The build differs from the source in all
+    /// three, and the difference is announced rather than silent.
     ///
     /// Distinct from [`Self::DeferredMember`], which says the member did
     /// not lower. A roof whose `overhang=` is unusable is in the build,
@@ -303,6 +311,22 @@ pub enum DiagnosticCode {
     /// silently to air when a pack was offered, so the build stops with a
     /// structured suggestion towards the closest known token.
     UnknownAbstractToken,
+    /// A canonical token's state literal (`@oak_log[axis=x]`) was taken as
+    /// written, because nothing checks its properties and values against
+    /// the target yet.
+    ///
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, which
+    /// needs a table of every block's states that this compiler does not
+    /// hold. Until it does, a literal naming a property the block lacks, or
+    /// a value outside its domain, would be written into the structure file
+    /// with nothing said. A warning rather than an error because most
+    /// literals are right, and refusing every one of them would leave the
+    /// literal unwritable; the finding is the announcement the "Error vs
+    /// warning" rule asks for in place of silence. Raised on every state
+    /// literal the lowering resolves, wherever it was bound — a theme slot
+    /// or a `connect … path=`.
+    StateLiteralUnchecked,
     /// A `mat_slot=` resolved to a block id the compile's target does not
     /// declare. Fail-loud per `spec/versioning-editions` "Fail-loud and
     /// minimum-version inference" ("unknown IDs ... are hard errors"): the id
@@ -426,6 +450,25 @@ pub enum DiagnosticCode {
     /// wins for downstream references; the duplicate is dropped and the
     /// error names both spans.
     DuplicatePlaceId,
+    /// Two scopes a build would write would be written to one file.
+    ///
+    /// An artifact is named by [`crate::ids::artifact_stem`]: a `struct`
+    /// by its name, a `place` by its `id=` alone, a walkway by its site
+    /// and endpoints with `.` flattened to `_`. So `struct hut` and a
+    /// `place id=hut`, or two sites that each `place id=home`, or the
+    /// walkways `a_b.c to d.e` and `a.b_c to d.e` in one site, name one
+    /// file, and if both are built, a build can keep only one of them.
+    /// The check runs before lowering. It leaves out a sizeless `struct`
+    /// and a `place` of a sizeless `def`, which lowering drops, but still
+    /// counts a struct or placement past the volume budget and a walkway
+    /// past the router's area cap, which lowering drops too. Names are compared ignoring case,
+    /// because `Hut` and `hut` are one file on the case-insensitive file
+    /// systems macOS and Windows default to, and the verdict should not
+    /// depend on the host. A scope key declared twice (`struct hut` twice,
+    /// or one site's `id=` twice) is not this code: that is
+    /// `E_DUPLICATE_ITEM` or `E_DUPLICATE_PLACE_ID`, and the second one
+    /// builds nothing.
+    OutputNameCollision,
     /// A `place` line carries either an `at=` value other than `origin` or
     /// combines `at=` with `east_of=` / `north_of=`. Origin selectors are
     /// mutually exclusive per `spec/components-editing-sites` "Multi-building
@@ -452,9 +495,14 @@ pub enum DiagnosticCode {
     /// the buildings invisibly unconnected, so the build fails.
     MissingPathMaterial,
     /// Walkway voxelisation hit an existing building cell along the L-shaped
-    /// path between two ports. The blocked cell is skipped (the rest of the
-    /// walkway still lays), so the connection still reaches both ends visibly
-    /// even when an obstacle steals one or two cells in between.
+    /// path between two ports. The blocked cell is skipped and the rest of
+    /// the walkway lays, so the connection still reaches both ends visibly
+    /// when an obstacle steals one or two cells in between.
+    ///
+    /// When every cell is skipped, or the straight L alone is past the
+    /// router's area cap, nothing is laid. The code stays a warning, but
+    /// the walkway is lost, and `cairn compile` refuses the build with
+    /// `E_PARTIAL_BUILD`.
     WalkwayBlocked,
     /// A `connect` row repeats a `(from, to)` port pair already laid by an
     /// earlier row in the same site. The second walkway is dropped silently
@@ -619,6 +667,7 @@ impl DiagnosticCode {
             Self::NoThemeBound => "W_NO_THEME_BOUND",
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
+            Self::StateLiteralUnchecked => "W_STATE_LITERAL_UNCHECKED",
             Self::UnknownId => "E_UNKNOWN_ID",
             Self::IncompatibleMaterial => "E_INCOMPATIBLE_MATERIAL",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
@@ -631,6 +680,7 @@ impl DiagnosticCode {
             Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
+            Self::OutputNameCollision => "E_OUTPUT_NAME_COLLISION",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
             Self::UnusedDef => "W_UNUSED_DEF",
             Self::UnresolvedPort => "E_UNRESOLVED_PORT",
@@ -730,6 +780,7 @@ impl DiagnosticCode {
             | Self::UnresolvedThemeRef
             | Self::ThemeVariantMissing
             | Self::DuplicatePlaceId
+            | Self::OutputNameCollision
             | Self::IncompletePlace
             | Self::InvalidPlaceId
             | Self::InvalidPlaceOrigin
@@ -752,6 +803,7 @@ impl DiagnosticCode {
             | Self::NoThemeBound
             | Self::IgnoredArgument
             | Self::AbstractTokenDeferred
+            | Self::StateLiteralUnchecked
             | Self::StructNoSize
             | Self::DefNoSize
             | Self::UnusedDef
@@ -800,8 +852,10 @@ pub enum DiagnosticData {
     /// existing structure and were dropped from the walkway lay.
     WalkwayBlocked {
         /// Count of cells the walkway lowering had to skip. Invariant:
-        /// `>= 1` — `lower_connects` only emits `W_WALKWAY_BLOCKED` when
-        /// the underlying `skipped > 0`. Typed as `u64` so `usize` lifts
+        /// `>= 1` — `lower_connects` attaches this payload only when the
+        /// underlying `skipped > 0`. The area-cap refusal emits
+        /// `W_WALKWAY_BLOCKED` with no payload, since it skipped no cells
+        /// and laid none. Typed as `u64` so `usize` lifts
         /// without lossy truncation on any platform Cairn supports.
         skipped: u64,
     },
@@ -1417,6 +1471,7 @@ mod tests {
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
+                "E_OUTPUT_NAME_COLLISION",
                 "E_PARSE",
                 "E_THEME_SELECTOR_UNMATCHED",
                 "E_THEME_VARIANT_MISSING",
@@ -1448,6 +1503,7 @@ mod tests {
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",
+                "W_STATE_LITERAL_UNCHECKED",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",
@@ -1488,6 +1544,7 @@ mod tests {
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
+                "E_OUTPUT_NAME_COLLISION",
                 "E_PARSE",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
@@ -1524,6 +1581,7 @@ mod tests {
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",
+                "W_STATE_LITERAL_UNCHECKED",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",

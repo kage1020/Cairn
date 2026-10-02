@@ -602,6 +602,194 @@ fn a_logic_lhs_outside_the_sig_namespace_is_refused_and_lowers_no_gate() {
     assert_eq!(codes(&out), ["E_LOGIC_INVALID_SIGNAL"]);
 }
 
+/// `spec/redstone` "Signal binding": a signal name is `sig.` and exactly
+/// one segment after it, on the left of a `logic` line as everywhere else,
+/// because that is the only shape an actuator can read.
+///
+/// The message names which way the name misses, so each branch has a row:
+/// outside the namespace (`foo`, with no segment after the head, is what
+/// keeps the head test ahead of the segment count), the namespace alone,
+/// and two and three segments after it. The rows with a reader check the
+/// refusal is not doubled: the left-hand side is a refused driver, so its
+/// reader is not also told it is unbound, and the reader's own consumer
+/// keeps it from being unused. The exact `codes` is also what shows no
+/// gate was lowered, which would add `W_LOGIC_UNUSED_SIGNAL`.
+#[test]
+fn a_logic_lhs_that_is_not_one_segment_after_sig_is_refused() {
+    for (body, lhs, why, fix) in [
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic foo = not sig.a\n",
+            ),
+            "foo",
+            "which is outside the `sig.` namespace",
+            "rename the left-hand side to `sig.<name>`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig = not sig.a\n",
+            ),
+            "sig",
+            "which is the `sig.` namespace itself rather than a signal in it",
+            "add a name, as in `sig.<name>`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig = not sig.a\n",
+                "  logic sig.o = not sig\n",
+                "  door id=front side=front at=center\n",
+                "  door[id=front] opened_by=sig.o\n",
+            ),
+            "sig",
+            "which is the `sig.` namespace itself rather than a signal in it",
+            "add a name, as in `sig.<name>`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig.x.y = not sig.a\n",
+            ),
+            "sig.x.y",
+            "which has 2 segments after `sig.`",
+            "keep one segment after `sig.`, as in `sig.x` or `sig.x_y`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig.x.y = not sig.a\n",
+                "  logic sig.o = not sig.x.y\n",
+                "  door id=front side=front at=center\n",
+                "  door[id=front] opened_by=sig.o\n",
+            ),
+            "sig.x.y",
+            "which has 2 segments after `sig.`",
+            "keep one segment after `sig.`, as in `sig.x` or `sig.x_y`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig.x.y.z = not sig.a\n",
+            ),
+            "sig.x.y.z",
+            "which has 3 segments after `sig.`",
+            "keep one segment after `sig.`, as in `sig.x` or `sig.x_y_z`",
+        ),
+    ] {
+        let out = synth_source(&source(body));
+        assert_eq!(codes(&out), ["E_LOGIC_INVALID_SIGNAL"], "{body}");
+        let d = only(&out, DiagnosticCode::LogicInvalidSignal);
+        assert!(
+            d.primary
+                .contains(&format!("`logic {lhs} = ...` names `{lhs}`, {why}")),
+            "{}",
+            d.primary,
+        );
+        let footer = format!("Fix: {fix}, or delete the binding if nothing was meant to read it.");
+        assert!(
+            d.notes.iter().any(|n| n.message == footer),
+            "{footer}\n{:#?}",
+            d.notes,
+        );
+    }
+}
+
+/// The actuator side refuses the same name the left-hand side now does,
+/// so a `logic sig.x.y` line and an actuator reading `sig.x.y` are two
+/// findings of one code: neither is reported as unbound, and the right-hand
+/// side's `sig.a` is not reported as unused.
+#[test]
+fn an_actuator_reading_a_refused_lhs_is_refused_by_the_same_rule() {
+    let out = synth_source(&source(concat!(
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  logic sig.x.y = not sig.a\n",
+        "  door id=front side=front at=center\n",
+        "  door[id=front] opened_by=sig.x.y\n",
+    )));
+    assert_eq!(
+        codes(&out),
+        ["E_LOGIC_INVALID_SIGNAL", "E_LOGIC_INVALID_SIGNAL"],
+        "{:#?}",
+        out.diagnostics,
+    );
+}
+
+/// A refused left-hand side is never collected as a binding, so two lines
+/// with the same refused name are two refusals and not two drivers.
+#[test]
+fn two_lines_with_the_same_refused_lhs_are_two_refusals() {
+    let out = synth_source(&source(concat!(
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  logic sig.x.y = not sig.a\n",
+        "  logic sig.x.y = sig.a\n",
+    )));
+    assert_eq!(
+        codes(&out),
+        ["E_LOGIC_INVALID_SIGNAL", "E_LOGIC_INVALID_SIGNAL"],
+        "{:#?}",
+        out.diagnostics,
+    );
+}
+
+/// An unbound reference that is not a signal name cannot be driven from a
+/// sensor or a `logic` line, since both refuse it, so the footer offers
+/// only the rename. A signal name keeps both repairs.
+#[test]
+fn an_unbound_reference_is_offered_only_the_repairs_that_exist() {
+    for (reference, offers_drive) in [
+        ("sig.x.y", false),
+        ("sig", false),
+        ("foo.bar", false),
+        ("sig.nowhere", true),
+    ] {
+        for (line, label) in [
+            (
+                format!("  logic sig.o = not {reference}\n"),
+                "`logic` binding",
+            ),
+            (
+                format!("  assert always(sig.a -> eventually {reference} within 3)\n"),
+                "an `assert`",
+            ),
+        ] {
+            let body = format!(
+                concat!(
+                    "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                    "  logic sig.k = not sig.a\n",
+                    "  door id=front side=front at=center\n",
+                    "  door[id=front] opened_by=sig.k\n",
+                    "{line}",
+                ),
+                line = line,
+            );
+            let out = synth_source(&source(&body));
+            let found: Vec<_> = out
+                .diagnostics
+                .iter()
+                .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+                .collect();
+            assert_eq!(found.len(), 1, "{body}{:#?}", out.diagnostics);
+            assert!(found[0].primary.contains(label), "{}", found[0].primary);
+            let footer = found[0]
+                .notes
+                .iter()
+                .find_map(|n| n.message.strip_prefix("Valid signals in scope: "))
+                .unwrap_or_else(|| panic!("{body}{:#?}", found[0].notes));
+            assert_eq!(
+                footer.contains(&format!("or drive `{reference}` from a sensor")),
+                offers_drive,
+                "{body}{footer}",
+            );
+            assert!(
+                footer.contains("Fix: rename to a defined signal"),
+                "{footer}",
+            );
+        }
+    }
+}
+
 // --- `assert` references -------------------------------------------------
 
 #[test]

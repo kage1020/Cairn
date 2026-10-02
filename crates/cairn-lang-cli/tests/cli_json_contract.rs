@@ -206,7 +206,7 @@ fn info_json_leaves_a_per_edition_warning_on_stderr() {
     fs::write(
         &path,
         "@cairn 2026.06\n\n\
-         def kiosk class=house size=5x5:\n\
+         def kiosk size=5x5:\n\
          \x20\x20walls id=walls class=outer mat_slot=wall height=3\n\n\
          theme shop_java:\n\
          \x20\x20slot wall           -> @wall.stone.cobble\n\
@@ -349,32 +349,32 @@ fn info_text_still_reports_an_edition_specific_failure_as_prose() {
     );
 }
 
-/// The three refusals a `.crn` can reach, asked the one question together.
+/// The four refusals a `.crn` can reach, asked the one question together.
 ///
-/// The per-path tests above each pin one failure's contents; this asks
-/// all three for a parseable document in one place, so the promise reads
-/// as a property of the command rather than three separate assertions.
-/// What it does not do is catch a fourth path: the array below is three
+/// The per-path tests each pin one failure's contents; this asks all four
+/// for a parseable document in one place, so the promise reads as a
+/// property of the command rather than four separate assertions. What it
+/// does not do is catch a fifth path: the array below is four
 /// hand-written fixtures, not an enumeration of `run_info`'s exits, and a
 /// path none of them reaches is a path this stays green on.
 ///
-/// The fourth refusal is not here and cannot be: a palette the pack
-/// refuses has no `.crn` that reaches it — `PackView::lookup` answers
-/// with a bare blockstate and the lexer refuses an authored `@id[k=v]` —
-/// so the only way to raise one is to intern the entry into a lowering,
-/// which `a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is`
-/// does. It writes the document with no elements, since the leak has no
-/// span in the source and no repair the author could make.
+/// The fourth is a palette the pack was expected to refuse. A source
+/// reaches it through a state literal on a stair — a `facing` or `half`
+/// value outside the Java domain, or a key other than `facing` / `half` /
+/// `shape` — since nothing checks a literal against the target yet; it
+/// writes the document with no elements, since the refusal is the run's
+/// rather than a finding.
 #[test]
 fn every_refusal_a_source_can_reach_still_writes_a_document() {
     let tmp = TempDir::new().expect("tempdir");
-    let refused: [(&str, PathBuf); 3] = [
+    let refused: [(&str, PathBuf); 4] = [
         ("a source that does not parse", unparsable(&tmp)),
         ("an error in the edition-neutral pass", unresolved(&tmp)),
         (
             "an error only a per-edition pass sees",
             edition_specific(&tmp),
         ),
+        ("a palette the pack refuses", refused_state(&tmp)),
     ];
     for (what, path) in refused {
         let out = cairn(
@@ -397,6 +397,64 @@ fn every_refusal_a_source_can_reach_still_writes_a_document() {
             "{what} should write the failure document, got {stdout}",
         );
     }
+}
+
+/// A source binding a stair to a `facing` no stair has. Nothing checks a
+/// state literal against the target yet, so this parses, passes `check`
+/// and lowers, and the Bedrock portability walk is the first thing that
+/// refuses it.
+fn refused_state(dir: &TempDir) -> PathBuf {
+    let path = dir.path().join("refused_state.crn");
+    fs::write(
+        &path,
+        "theme t:\n  slot step -> @oak_stairs[facing=up]\n\nstruct s size=3x3\n  floor mat_slot=step\n",
+    )
+    .expect("write");
+    path
+}
+
+/// The refusal says the literal is one place the blockstate can come from,
+/// because here it is the only one.
+#[test]
+fn an_authored_state_the_target_lacks_is_named_as_the_sources() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = refused_state(&tmp);
+    let out = cairn(
+        "info",
+        &[path.to_str().unwrap(), "--editions", "java,bedrock"],
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("`facing=up`"), "{stderr}");
+    assert!(
+        stderr.contains("a state literal on a stair in the source"),
+        "{stderr}",
+    );
+}
+
+/// A state the edition has the block for but this compiler cannot map yet
+/// is an `unsupported` entry, not a refusal: the run still reports.
+#[test]
+fn an_authored_state_bedrock_cannot_map_yet_is_counted_as_unsupported() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = tmp.path().join("log.crn");
+    fs::write(
+        &path,
+        "theme t:\n  slot f -> @oak_log[axis=x]\n\nstruct s size=3x3\n  floor mat_slot=f\n",
+    )
+    .expect("write");
+    let out = cairn(
+        "info",
+        &[path.to_str().unwrap(), "--editions", "java,bedrock"],
+    );
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    assert_eq!(out.status.code(), Some(0), "{stderr}");
+    assert!(stdout.contains("unsupported: 1"), "{stdout}");
+    assert!(
+        stderr.contains("`minecraft:oak_log`") && stderr.contains("`axis=x` has no form here yet"),
+        "{stderr}",
+    );
 }
 
 #[test]

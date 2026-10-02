@@ -57,6 +57,46 @@ fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
     );
 }
 
+/// A `@cairn` value holding a character no token starts with is still a
+/// header that names no version, and so still a warning: the build goes
+/// on. Pinned end to end because the difference is the exit code — the
+/// file used to be refused by the lexer before the check pass saw it.
+#[test]
+fn an_unlexable_cairn_value_is_a_warning_and_the_build_goes_on() {
+    let file = tempfile_with_contents(
+        "cairn-unlexable",
+        "@cairn 2026.6+build\n\ntheme t:\n  slot wall -> @stone\n",
+    );
+    let out = cairn("check", &[file.arg()]);
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
+    assert!(stderr.contains("W_INVALID_CAIRN_VERSION"), "{stderr}");
+    assert!(!stderr.contains("E_PARSE"), "{stderr}");
+}
+
+/// The same for a floor: `~=` is an operator Cairn does not define, which
+/// is `E_INVALID_REQUIRES` whether or not the lexer has a token for `~`.
+#[test]
+fn an_unlexable_requires_value_is_an_invalid_floor_rather_than_a_parse_error() {
+    for (label, source) in [
+        (
+            "requires-unlexable",
+            "@requires version~=1.21\n\ntheme t:\n  slot wall -> @stone\n",
+        ),
+        (
+            "member-requires-unlexable",
+            "theme t:\n  requires version~=1.21\n  slot wall -> @stone\n",
+        ),
+    ] {
+        let file = tempfile_with_contents(label, source);
+        let out = cairn("check", &[file.arg()]);
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        assert_eq!(out.status.code(), Some(1), "{label}: stderr={stderr}");
+        assert!(stderr.contains("E_INVALID_REQUIRES"), "{label}: {stderr}");
+        assert!(!stderr.contains("E_PARSE"), "{label}: {stderr}");
+    }
+}
+
 #[test]
 fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
     let path = examples_dir().join("cottage.crn");
@@ -247,11 +287,13 @@ fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
         // Forward-compatibility guard: when a future code lands with a
         // documented payload, the fixture-and-fixture-only matcher above
         // is not enough — the JSON has to carry the matching `data.kind`.
-        // `W_WALKWAY_BLOCKED` is the first such code, and currently
-        // `cairn check` does not drive walkway lowering so this branch
-        // never fires on the `duplicate.crn` fixture. If a future wiring
-        // pipes walkway diagnostics through `check`, this assertion
-        // catches a payload-stripped regression at the CLI surface.
+        // `W_WALKWAY_BLOCKED` is the first such code. This run passes no
+        // `--target`, so `cairn check` lowers nothing and this branch
+        // never fires on the `duplicate.crn` fixture; a `check --target`
+        // run does lower walkways, and there the area-cap refusal emits
+        // the code with no payload, since it skipped no cells. If this
+        // run ever lowers, this assertion catches a payload-stripped
+        // regression at the CLI surface.
         if entry["code"].as_str() == Some("W_WALKWAY_BLOCKED") {
             assert_eq!(
                 entry["data"]["kind"].as_str(),

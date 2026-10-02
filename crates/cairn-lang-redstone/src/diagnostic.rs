@@ -94,10 +94,17 @@ pub enum DiagnosticCode {
     /// the cell row; or a sink
     /// has no route from its driver that runs through neither a
     /// component nor another net's dust — nor within one step of that
-    /// dust in its own plane. That pipeline names area shortage as the
-    /// example rather than as the only shape, so all five take this code
-    /// and differ in what they say: raising `void` fixes the first and the
-    /// last, and cannot fix the three in between.
+    /// dust in its own plane. The router says so of a sink only when it
+    /// has proved it: when no face of the sink can be arrived through,
+    /// when its search ran out of coords before the attenuation cap
+    /// pruned any, or when the free coords the sink opens onto run out
+    /// within the cap of it without reaching the net's wire. A sink none
+    /// of those proves, with no route within the cap, is
+    /// [`Self::AttenuationLimit`] instead. That pipeline names area
+    /// shortage as the example rather than as the only shape, so all
+    /// five take this code and differ in what they say: raising `void`
+    /// fixes the first and the last, and cannot fix the three in
+    /// between.
     RouteCongestion,
     /// Two of a scope's nets run within one step of each other across
     /// layers — one strand directly over another, or over it and one
@@ -146,6 +153,14 @@ pub enum DiagnosticCode {
     /// branches: a buffer repeater carries a signal only where the wire
     /// runs straight through it at one height. The count runs across
     /// such a cell, so that run can start on the wire into it.
+    ///
+    /// Stage 2 raises it too, before stage 3 can measure anything, for
+    /// two shapes whose segment is over the cap whatever wire is laid: a
+    /// sink further from its driver than the cap in a straight line, and
+    /// a sink no path from the net's wire reaches within the cap, where
+    /// the router cannot prove the sink walled in (see
+    /// [`Self::RouteCongestion`]). The second says only that no route
+    /// within the cap exists; whether a longer one does, nothing looks.
     AttenuationLimit,
     /// Lowering a `logic` binding descended past
     /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into
@@ -184,9 +199,10 @@ pub enum DiagnosticCode {
     /// `opened_by=` have no legal host at all yet. Fix: move the binding
     /// onto the component that carries it.
     LogicMisplacedBinding,
-    /// A position that has to name a signal does not. Sensors emit into
-    /// the `sig.` namespace and actuators consume from it, so a name
-    /// outside it can never be read, and three positions carry one:
+    /// A position that has to name a signal does not. A signal name is
+    /// `sig.` and exactly one segment after it: sensors emit into the
+    /// `sig.` namespace and actuators read exactly one segment from it, so
+    /// any other name can never be read. Three positions carry one:
     ///
     /// - a `logic` line's left-hand side, which was lowered anyway, so a
     ///   cell took a placement coordinate for a signal with no consumer;
@@ -199,7 +215,9 @@ pub enum DiagnosticCode {
     /// nothing. Fix: name the signal `sig.<name>`. Where the value is a
     /// bare identifier the message offers the spelling, that being the
     /// one shape with a single reading; `opened_by=3` names nothing that
-    /// adding `sig.` would repair.
+    /// adding `sig.` would repair. A left-hand side that is `sig` alone is
+    /// told to add a name after it, and one with more than one segment
+    /// after `sig.` to keep one, as in `sig.x`.
     LogicInvalidSignal,
     /// An argument whose value is a `sig.`-headed reference sits under a
     /// key that is not one of the actuator keys in `spec/redstone`
@@ -224,6 +242,32 @@ pub enum DiagnosticCode {
     /// inside a `[...]` selector is answered the same three ways, by
     /// whichever fault moving it out of the brackets would not fix.
     LogicUnknownBindingKey,
+    /// An actuator binding written in the selector form picks no single
+    /// physical component. `door[id=front] opened_by=sig.x` binds the door
+    /// declared as `door id=front ...` in the same scope, and
+    /// `cairn_lang_core::intent::actuator_patch_target` is where that
+    /// door is looked up: a selector with no readable `id=`, an id no
+    /// physical door carries, or an id two doors carry leaves the patch
+    /// with nothing to act on. Block-array lowering defers such a patch
+    /// with the same reason, and a port for it would be I/O the build
+    /// does not have. Fix: set `[id=<label>]` to the id of one `door`
+    /// declared in this scope without brackets, or write `opened_by=` on
+    /// that `door`'s own line; for an id several doors carry, give them
+    /// distinct ids, and for a door declared without an `id=`, add the id
+    /// to the one the patch is meant to bind.
+    LogicUnresolvedPatch,
+    /// A physical component carries a second binding under an actuator key
+    /// it already has one for — on its own line, through a selector-form
+    /// patch, or both.
+    ///
+    /// Each binding became an output port with a pad of its own, so the
+    /// component was driven by two wires: a wired OR the author never
+    /// wrote. `spec/redstone` "The logic layer is a dependency DAG" is
+    /// where signals are combined. The binding on the component's own line
+    /// counts as the first, wherever the patch is written. Fix: bind the
+    /// component once, to a `logic` line that combines the signals; when
+    /// both bindings name the same signal, delete the duplicate line.
+    LogicDuplicateBinding,
 }
 
 impl DiagnosticCode {
@@ -246,6 +290,8 @@ impl DiagnosticCode {
             Self::LogicMisplacedBinding => "E_LOGIC_MISPLACED_BINDING",
             Self::LogicInvalidSignal => "E_LOGIC_INVALID_SIGNAL",
             Self::LogicUnknownBindingKey => "E_LOGIC_UNKNOWN_BINDING_KEY",
+            Self::LogicUnresolvedPatch => "E_LOGIC_UNRESOLVED_PATCH",
+            Self::LogicDuplicateBinding => "E_LOGIC_DUPLICATE_BINDING",
         }
     }
 
@@ -264,7 +310,9 @@ impl DiagnosticCode {
             | Self::LogicNestingTooDeep
             | Self::LogicMisplacedBinding
             | Self::LogicInvalidSignal
-            | Self::LogicUnknownBindingKey => Severity::Error,
+            | Self::LogicUnknownBindingKey
+            | Self::LogicUnresolvedPatch
+            | Self::LogicDuplicateBinding => Severity::Error,
             Self::LogicUnusedSignal | Self::RouteCrossLayerClearance => Severity::Warning,
         }
     }
