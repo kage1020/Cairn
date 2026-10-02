@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- *(lsp)* An unreadable frame was logged as "client closed stdin without `shutdown`" before the
+  frame's own error, so the first line said the opposite of what happened. The session now reports
+  the abrupt end only once the reader has ended cleanly; when it failed, its error is the one line.
+- *(lsp)* A `didChange` event carrying a `range` was stored as the whole document, so `# note\n`
+  inserted at `0:0` replaced the file and the server diagnosed and completed text nobody had. The
+  server advertises full sync and a conforming client sends no range, but one that does now has
+  each event applied in order, ranged or not (`store::apply_content_changes`,
+  `DocumentStore::apply`). A range on a line the document does not have, or one that ends before it
+  starts, drops the revision with a line on stderr and keeps the last text.
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

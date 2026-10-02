@@ -109,6 +109,13 @@ impl Server {
         self.stdin.flush().expect("flush server stdin");
     }
 
+    /// Write `bytes` to stdin as they are, framing and all, for a frame a
+    /// conforming client would never send.
+    fn send_raw(&mut self, bytes: &[u8]) {
+        self.stdin.write_all(bytes).expect("write to server stdin");
+        self.stdin.flush().expect("flush server stdin");
+    }
+
     /// Take the next message the server sent, or fail the test.
     fn read_message(&mut self) -> serde_json::Value {
         match self.messages.recv_timeout(READ_TIMEOUT) {
@@ -1127,6 +1134,117 @@ fn lsp_32_artifacts_that_share_a_file_name_publish_e_output_name_collision() {
         related[0]["location"]["range"]["start"]["line"],
         serde_json::json!(3),
         "the related pointer names the struct",
+    );
+    server.shutdown();
+}
+
+#[test]
+fn lsp_33_an_unreadable_frame_is_not_reported_as_the_client_closing_stdin() {
+    // An unreadable frame ends `lsp-server`'s reader with an error, and the
+    // dispatch loop sees that exactly as it sees end of input. The session
+    // used to log "client closed stdin" first and the frame's error second,
+    // so the first line said the opposite of what happened. The reader's
+    // error is now the only line.
+    for frame in [
+        &b"Content-Length: 10\r\n\r\n{not json}"[..],
+        &b"Content-Length: abc\r\n\r\n"[..],
+    ] {
+        let (mut server, _) = Server::start();
+        server.send_raw(frame);
+        drop(server.stdin);
+        let status = server.child.wait().expect("wait for server exit");
+        assert_eq!(status.code(), Some(1), "the transport failed");
+        let logged: Vec<String> = server.stderr.iter().collect();
+        assert!(
+            logged.len() == 1 && logged[0].starts_with("error: "),
+            "the reader's error should be the one line, got: {logged:?}",
+        );
+        assert!(
+            !logged.iter().any(|line| line.contains("closed stdin")),
+            "the client did not close stdin, got: {logged:?}",
+        );
+    }
+}
+
+#[test]
+fn lsp_34_a_ranged_change_is_applied_to_the_stored_text() {
+    // The server advertises FULL sync, so a conforming client never sends a
+    // range. One that does used to have its event's text stored as the
+    // whole document: `# note\n` inserted at 0:0 replaced the file, and
+    // version 2 published no diagnostics for a file that still has its
+    // parse error.
+    let (mut server, _) = Server::start();
+    server.did_open("@cairn 2026.06\nstruct s size=3x3\n  bogus!!\n", 1);
+    let first = server.read_until_method("textDocument/publishDiagnostics");
+    assert_eq!(diagnostics_of(&first)[0]["code"], "E_PARSE");
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 2 },
+            "contentChanges": [{
+                "range": {
+                    "start": { "line": 0, "character": 0 },
+                    "end": { "line": 0, "character": 0 },
+                },
+                "text": "# note\n",
+            }],
+        },
+    }));
+    let second = server.read_until_method("textDocument/publishDiagnostics");
+    assert_eq!(second["params"]["version"], 2);
+    let diagnostics = diagnostics_of(&second);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0]["code"], "E_PARSE");
+    assert_eq!(
+        diagnostics[0]["range"]["start"]["line"], 3,
+        "the error moved down one line with the inserted comment",
+    );
+    server.shutdown();
+}
+
+#[test]
+fn lsp_35_a_ranged_change_outside_the_document_is_dropped() {
+    // A range on a line the document does not have names no edit. The
+    // revision is dropped with a line on stderr, as a malformed payload
+    // is, and the document keeps the text it had.
+    let (mut server, _) = Server::start();
+    server.did_open("struct s size=2x2\n", 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 2 },
+            "contentChanges": [{
+                "range": {
+                    "start": { "line": 5, "character": 0 },
+                    "end": { "line": 5, "character": 0 },
+                },
+                "text": "bogus!!",
+            }],
+        },
+    }));
+    // Nothing is published for the dropped revision: the next message is
+    // the completion response.
+    server.send_completion(39, TEST_URI, 1, 0);
+    let response = server.read_message();
+    assert_eq!(
+        response["id"], 39,
+        "nothing may be published first, got: {response}"
+    );
+    assert!(
+        response["result"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty()),
+        "the document is still the one opened, got: {response}",
+    );
+    let logged = server.read_stderr_until("ignoring `textDocument/didChange`");
+    assert!(
+        logged
+            .last()
+            .is_some_and(|line| line.contains("contentChanges[0]")),
+        "the line should name the refused event, got: {logged:?}",
     );
     server.shutdown();
 }

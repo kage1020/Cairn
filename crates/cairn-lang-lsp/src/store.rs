@@ -1,12 +1,80 @@
 //! In-memory store of open documents.
 //!
-//! Diagnostics can be computed from the notification payload alone (every
-//! `didOpen`/`didChange` carries the full text under FULL sync), but a
-//! `textDocument/completion` request identifies its document by URI only —
-//! the server has to remember the last synced text to answer it. This store
-//! is that memory: URI → full text of the latest revision.
+//! A `textDocument/completion` request identifies its document by URI only,
+//! so the server has to remember the last synced text to answer it. This
+//! store is that memory: URI → full text of the latest revision.
+//!
+//! It is also what a `didChange` is applied to. The server advertises FULL
+//! sync, so a conforming client sends the whole new text in every event; a
+//! client that sends a ranged edit anyway is out of spec, but taking that
+//! edit's text as the whole document would leave the server diagnosing and
+//! completing text nobody has. [`DocumentStore::apply`] applies each event
+//! the way the protocol defines it, ranged or not.
 
 use std::collections::HashMap;
+
+use crate::line_index::LineIndex;
+
+/// A `didChange` event whose range the document it applies to does not
+/// have, so the revision cannot be built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeOutsideDocument {
+    /// Index of the refused event in the notification's `contentChanges`.
+    pub event: usize,
+    /// The range it carried.
+    pub range: lsp_types::Range,
+}
+
+impl std::fmt::Display for ChangeOutsideDocument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let lsp_types::Range { start, end } = self.range;
+        write!(
+            f,
+            "contentChanges[{}] edits {}:{}..{}:{}, which is not a range of the document as \
+             the events before it leave it",
+            self.event, start.line, start.character, end.line, end.character,
+        )
+    }
+}
+
+impl std::error::Error for ChangeOutsideDocument {}
+
+/// Apply a `didChange`'s events to `text`, in order, and return the text
+/// they build.
+///
+/// An event with no `range` replaces the whole text. One with a `range`
+/// replaces that range — 0-based lines and UTF-16 columns, read against the
+/// text as the events before it left it, which is how the protocol orders
+/// them. Columns are resolved by [`LineIndex::offset_at`], so a column past
+/// its line clamps to the line end; a line the text does not have, or a
+/// range whose end comes before its start, refuses the whole revision.
+///
+/// # Errors
+///
+/// [`ChangeOutsideDocument`] for the first event whose range the text does
+/// not have.
+pub fn apply_content_changes(
+    text: &str,
+    changes: &[lsp_types::TextDocumentContentChangeEvent],
+) -> Result<String, ChangeOutsideDocument> {
+    let mut text = text.to_owned();
+    for (event, change) in changes.iter().enumerate() {
+        let Some(range) = change.range else {
+            text.clone_from(&change.text);
+            continue;
+        };
+        let lines = LineIndex::new(&text);
+        let span = lines
+            .offset_at(&text, range.start)
+            .zip(lines.offset_at(&text, range.end))
+            .filter(|(start, end)| start <= end);
+        let Some((start, end)) = span else {
+            return Err(ChangeOutsideDocument { event, range });
+        };
+        text.replace_range(start..end, &change.text);
+    }
+    Ok(text)
+}
 
 /// Latest full text of every open document, keyed by URI.
 #[derive(Debug, Default)]
@@ -54,6 +122,29 @@ impl DocumentStore {
         let slot = self.docs.get_mut(uri)?;
         *slot = text;
         Some(slot)
+    }
+
+    /// Apply a `didChange`'s events to an open document, handing back the
+    /// text now stored, or `None` when the URI names no open document —
+    /// the guard [`Self::change`] describes.
+    ///
+    /// The events are applied by [`apply_content_changes`]. When it refuses
+    /// one, nothing is stored and the document keeps the text it had.
+    ///
+    /// # Errors
+    ///
+    /// `Some(Err(_))` carries the [`ChangeOutsideDocument`] that refused the
+    /// revision.
+    pub fn apply(
+        &mut self,
+        uri: &lsp_types::Uri,
+        changes: &[lsp_types::TextDocumentContentChangeEvent],
+    ) -> Option<Result<&str, ChangeOutsideDocument>> {
+        let slot = self.docs.get_mut(uri)?;
+        Some(apply_content_changes(slot, changes).map(|text| {
+            *slot = text;
+            slot.as_str()
+        }))
     }
 
     /// Forget a document on `didClose`. Closing a URI that was never opened
@@ -123,6 +214,101 @@ mod tests {
             None
         );
         assert_eq!(store.get(&uri("file:///a.crn")), None);
+    }
+
+    fn edit(
+        (start_line, start_character): (u32, u32),
+        (end_line, end_character): (u32, u32),
+        text: &str,
+    ) -> lsp_types::TextDocumentContentChangeEvent {
+        lsp_types::TextDocumentContentChangeEvent {
+            range: Some(lsp_types::Range {
+                start: lsp_types::Position::new(start_line, start_character),
+                end: lsp_types::Position::new(end_line, end_character),
+            }),
+            range_length: None,
+            text: text.to_owned(),
+        }
+    }
+
+    fn whole(text: &str) -> lsp_types::TextDocumentContentChangeEvent {
+        lsp_types::TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: text.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_ranged_event_replaces_its_range_and_nothing_else() {
+        assert_eq!(
+            apply_content_changes("ab\ncd\n", &[edit((1, 0), (1, 1), "X")]),
+            Ok("ab\nXd\n".to_owned()),
+        );
+    }
+
+    #[test]
+    fn events_apply_in_order_each_against_the_text_the_last_left() {
+        // The second range is only right against the first's result: on the
+        // original text, line 1 is `cd`.
+        assert_eq!(
+            apply_content_changes(
+                "ab\ncd\n",
+                &[edit((0, 0), (0, 0), "# n\n"), edit((1, 0), (1, 2), "AB")],
+            ),
+            Ok("# n\nAB\ncd\n".to_owned()),
+        );
+    }
+
+    #[test]
+    fn an_event_without_a_range_replaces_the_whole_text() {
+        assert_eq!(
+            apply_content_changes("old", &[edit((0, 0), (0, 0), "x"), whole("new")]),
+            Ok("new".to_owned()),
+        );
+    }
+
+    #[test]
+    fn a_ranged_event_counts_columns_in_utf16_units() {
+        // `🪨` is two UTF-16 units and four bytes, so column 2 is the byte
+        // after it.
+        assert_eq!(
+            apply_content_changes("🪨b", &[edit((0, 2), (0, 3), "c")]),
+            Ok("🪨c".to_owned()),
+        );
+    }
+
+    #[test]
+    fn a_range_the_text_does_not_have_refuses_the_revision() {
+        let past = edit((3, 0), (3, 0), "x");
+        assert_eq!(
+            apply_content_changes("ab\n", std::slice::from_ref(&past)),
+            Err(ChangeOutsideDocument {
+                event: 0,
+                range: past.range.expect("ranged"),
+            }),
+        );
+        let reversed = edit((0, 2), (0, 1), "x");
+        assert_eq!(
+            apply_content_changes("ab\n", &[whole("ab\n"), reversed.clone()]),
+            Err(ChangeOutsideDocument {
+                event: 1,
+                range: reversed.range.expect("ranged"),
+            }),
+        );
+    }
+
+    #[test]
+    fn a_refused_revision_leaves_the_stored_text_alone() {
+        let mut store = DocumentStore::new();
+        store.open(uri("file:///a.crn"), "ab\n".to_owned());
+        let refused = store.apply(
+            &uri("file:///a.crn"),
+            &[edit((0, 0), (0, 0), "x"), edit((9, 0), (9, 0), "y")],
+        );
+        assert!(matches!(refused, Some(Err(_))), "{refused:?}");
+        assert_eq!(store.get(&uri("file:///a.crn")), Some("ab\n"));
+        assert_eq!(store.apply(&uri("file:///b.crn"), &[whole("x")]), None);
     }
 
     #[test]

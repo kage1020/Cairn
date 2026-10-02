@@ -65,13 +65,41 @@ pub fn run() -> Result<(), DynError> {
     let (connection, io_threads) = Connection::stdio();
     let capabilities = serde_json::to_value(server_capabilities())?;
     connection.initialize(capabilities)?;
-    main_loop(&connection)?;
+    let end = main_loop(&connection)?;
     // The writer thread only terminates once the outgoing channel closes,
     // which happens when the `Connection` (and with it `sender`) drops —
     // joining before that would deadlock the shutdown.
     drop(connection);
+    // The reader's own verdict comes first. An unreadable frame ends the
+    // reader with an error and drops its sender, and the loop sees that
+    // exactly as it sees end of input: only the join tells the two apart.
+    // A reader that failed is the one line the session gets, so a frame
+    // that could not be read is not also reported as the client going
+    // away.
     io_threads.join()?;
+    // The input ended cleanly, i.e. the client shut stdin without saying
+    // anything — an editor that was killed rather than one that quit.
+    // There is nobody left to answer, so this is not an error, but it is
+    // not the orderly teardown either and the stream should say which one
+    // happened.
+    if end == LoopEnd::InputClosedBeforeShutdown {
+        eprintln!(
+            "cairn-lsp: client closed stdin without `{}`; the session ended abnormally",
+            Shutdown::METHOD,
+        );
+    }
     Ok(())
+}
+
+/// How [`main_loop`] ended, when it ended without an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LoopEnd {
+    /// `exit` after `shutdown`, or the input ending after `shutdown`.
+    Orderly,
+    /// The input ended before any `shutdown`: the client went away, or the
+    /// reader could not read a frame. Which of the two is the reader's to
+    /// say, and [`run`] asks it.
+    InputClosedBeforeShutdown,
 }
 
 /// Dispatch loop: requests are answered (`shutdown` and `completion` are
@@ -88,7 +116,10 @@ pub fn run() -> Result<(), DynError> {
 /// those became a `ProtocolError` that ended `run()` with an error before
 /// the `exit` behind it was ever read, so the process died with code 1 and
 /// the editor reported the language server as crashed.
-fn main_loop(connection: &Connection) -> Result<(), DynError> {
+///
+/// The loop ends without an error on `exit` after `shutdown` or when the
+/// input ends; which of those it was comes back as a [`LoopEnd`].
+fn main_loop(connection: &Connection) -> Result<LoopEnd, DynError> {
     let mut store = DocumentStore::new();
     let mut shutdown_requested = false;
     for message in &connection.receiver {
@@ -119,7 +150,7 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
                 // `shutdown`: the spec requires an `exit` without one to
                 // terminate the process with a non-zero code.
                 return if shutdown_requested {
-                    Ok(())
+                    Ok(LoopEnd::Orderly)
                 } else {
                     Err("exit notification received before shutdown request".into())
                 };
@@ -138,20 +169,14 @@ fn main_loop(connection: &Connection) -> Result<(), DynError> {
             }
         }
     }
-    // The loop also ends when the channel closes, i.e. the client shut
-    // stdin without saying anything — an editor that was killed rather
-    // than one that quit. There is nobody left to answer, so this is not
-    // an error, but it is not the orderly teardown either and the stream
-    // should say which one happened. `shutdown_requested` is the bit that
-    // can tell them apart, and until this loop kept it there was nothing
-    // to ask.
-    if !shutdown_requested {
-        eprintln!(
-            "cairn-lsp: client closed stdin without `{}`; the session ended abnormally",
-            Shutdown::METHOD,
-        );
-    }
-    Ok(())
+    // The loop also ends when the channel closes. `shutdown_requested` is
+    // the bit that tells an orderly end from an abrupt one, and `run`
+    // reports the abrupt one once it knows whether the reader failed.
+    Ok(if shutdown_requested {
+        LoopEnd::Orderly
+    } else {
+        LoopEnd::InputClosedBeforeShutdown
+    })
 }
 
 /// Answer one client request. Every request gets a response — a silent
@@ -258,22 +283,19 @@ fn handle_notification(
             )?;
         }
         DidChangeTextDocument::METHOD => {
-            let Some(mut params) = parse_params::<lsp_types::DidChangeTextDocumentParams>(
+            let Some(params) = parse_params::<lsp_types::DidChangeTextDocumentParams>(
                 DidChangeTextDocument::METHOD,
                 notification.params,
             ) else {
                 return Ok(());
             };
-            // Full sync: the last change event carries the complete new
-            // text. A client honouring the advertised FULL kind sends
-            // exactly one event; taking the last is correct either way.
-            let Some(change) = params.content_changes.pop() else {
+            if params.content_changes.is_empty() {
                 eprintln!(
                     "cairn-lsp: ignoring `{}` notification with empty contentChanges",
                     DidChangeTextDocument::METHOD,
                 );
                 return Ok(());
-            };
+            }
             let uri = params.text_document.uri;
             // Ahead of the diagnostics run, not after it: a revision for a
             // URI the store does not hold describes a document the client
@@ -285,13 +307,27 @@ fn handle_notification(
             // happens — the revision is dropped with a line on stderr, the
             // way a malformed payload is, and the parse that would have
             // been thrown away with it never runs.
-            let Some(source) = store.change(&uri, change.text) else {
-                eprintln!(
-                    "cairn-lsp: ignoring `{}` for a document that is not open: {}",
-                    DidChangeTextDocument::METHOD,
-                    uri.as_str(),
-                );
-                return Ok(());
+            let source = match store.apply(&uri, &params.content_changes) {
+                Some(Ok(source)) => source,
+                None => {
+                    eprintln!(
+                        "cairn-lsp: ignoring `{}` for a document that is not open: {}",
+                        DidChangeTextDocument::METHOD,
+                        uri.as_str(),
+                    );
+                    return Ok(());
+                }
+                // A ranged event the document cannot take. Dropped like a
+                // malformed payload: the stored text stays the last one
+                // that could be built, rather than becoming a guess.
+                Some(Err(refused)) => {
+                    eprintln!(
+                        "cairn-lsp: ignoring `{}` for {}: {refused}",
+                        DidChangeTextDocument::METHOD,
+                        uri.as_str(),
+                    );
+                    return Ok(());
+                }
             };
             let diagnostics = compute_diagnostics(&uri, source);
             publish(
