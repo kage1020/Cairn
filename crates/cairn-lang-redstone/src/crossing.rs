@@ -2054,10 +2054,15 @@ struct chain size=60x5
                         .find(|d| d.port == port)
                         .expect("every buffer names a driver of its own cell");
                     let tree = &trees[&driver.net];
-                    // `Router::dust`, not `wire_path`: the latter
-                    // holds the terminals too, and would accept a
-                    // repeater standing on a cell body.
+                    // `Router::dust`, not `wire_path`, for where the
+                    // buffer stands: the latter holds the terminals
+                    // too, and would accept a repeater standing on a
+                    // cell body.
                     let dust: HashSet<CellCoord> = router.dust(tree).into_iter().collect();
+                    // `wire_path` for what it may stand beside: a cell
+                    // body or a pad of the net is cut off by a repeater
+                    // beside it as surely as dust is.
+                    let net: HashSet<CellCoord> = tree.wire_path().into_iter().collect();
                     let on = Buffer {
                         coord: buffer.coord,
                         net: driver.net,
@@ -2065,7 +2070,7 @@ struct chain size=60x5
                     };
                     check_on_route(&on, tree, &dust, cell.coord)?;
                     let (before, after) = check_straight_through(&on, tree)?;
-                    check_no_dust_beside(&on, &dust, before, &after)?;
+                    check_nothing_of_its_net_beside(&on, &net, before, &after)?;
                 }
             }
             Ok(())
@@ -2172,15 +2177,17 @@ struct chain size=60x5
             Ok((before, after))
         }
 
-        /// The buffer touches no dust of its net but the two it joins.
-        /// A repeater severs every face but its front and back, so
-        /// dust of the same net on any other face would be cut off
+        /// The buffer touches no block of its net but the two it
+        /// joins: no dust, and no cell body or pad of the net either.
+        /// A repeater severs every face but its front and back, so a
+        /// block of the same net on any other face would be cut off
         /// even where the tree does not link the two — which is why
         /// this is asked of the grid, not of the tree the placer
-        /// walked.
-        fn check_no_dust_beside(
+        /// walked. `net` is every coord of the net, terminals
+        /// included.
+        fn check_nothing_of_its_net_beside(
             on: &Buffer<'_>,
-            dust: &HashSet<CellCoord>,
+            net: &HashSet<CellCoord>,
             before: Option<CellCoord>,
             after: &[CellCoord],
         ) -> Result<(), TestCaseError> {
@@ -2213,19 +2220,14 @@ struct chain size=60x5
             let beside: HashSet<CellCoord> = faces
                 .into_iter()
                 .flatten()
-                .filter(|n| dust.contains(n))
+                .filter(|n| net.contains(n))
                 .collect();
-            // A terminal it joins is a block, not dust, so it drops
-            // out of both sides.
-            let joined: HashSet<CellCoord> = before
-                .into_iter()
-                .chain(after.iter().copied())
-                .filter(|n| dust.contains(n))
-                .collect();
+            let joined: HashSet<CellCoord> =
+                before.into_iter().chain(after.iter().copied()).collect();
             prop_assert_eq!(
                 &beside,
                 &joined,
-                "buffer {:?} has dust of its own net beside it that it does not join ({})",
+                "buffer {:?} has a block of its own net beside it that it does not join ({})",
                 c,
                 on.case,
             );
@@ -2389,9 +2391,11 @@ struct chain size=60x5
         /// face is what keeps the repeater off it: the walk back passes
         /// the climb and the fork and lands on `(42, 0, 0)`.
         ///
-        /// What is under the coord is a terminal, not dust, so the
-        /// face check in [`check_no_dust_beside`] does not see it; the
-        /// sites are asserted here directly.
+        /// What is under the coord is a terminal, not dust, which
+        /// [`check_nothing_of_its_net_beside`] counts as a block of the
+        /// net, so the replay fails there if the repeater stands on it.
+        /// The sites are asserted here as well, to pin where the walk
+        /// back lands.
         #[test]
         fn a_buffer_never_stands_over_a_sink_of_its_own_net() {
             let xs = [(71, 0, false), (44, 0, false), (44, 1, false)];
@@ -2437,6 +2441,62 @@ struct chain size=60x5
                 ],
                 "{case}: the third repeater must step back off (44, 1, 0), over the sink at \
                  (44, 0, 0), onto (42, 0, 0)",
+            );
+        }
+
+        /// The planar face of a terminal. Two sinks side by side at
+        /// `(29, 0)` and `(30, 0)`: the near one is fed straight along
+        /// `z = 0`, and the route to the far one forks at `(28, 0, 0)`
+        /// and goes round the near cell along `z = 1`. Its second
+        /// repeater falls due on `(29, 0, 1)`, which runs straight
+        /// between `(28, 0, 1)` and `(30, 0, 1)` and has no dust of the
+        /// net on any other face — only the near cell's body at
+        /// `(29, 0, 0)`. The walk back passes the turn and the fork and
+        /// lands on `(27, 0, 0)`.
+        ///
+        /// [`check_nothing_of_its_net_beside`] is what fails here if the
+        /// repeater stands on `(29, 0, 1)`. Unlike
+        /// [`a_buffer_never_stands_over_a_sink_of_its_own_net`], the
+        /// terminal is in the repeater's own plane, so no climb is
+        /// needed to reach this case.
+        #[test]
+        fn a_buffer_never_stands_beside_a_sink_of_its_own_net() {
+            let xs = [(29, 0, false), (30, 0, false)];
+            let case = format!("xs={xs:?}");
+            replay(check_phase4_scope(&xs), &case);
+            let legalized =
+                legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            let entry = &legalized.scopes[0];
+            let (_, trees) = laid_trees(entry);
+            let tree = &trees[&NetRef::Input(0)];
+            let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
+            let due = plane(29, 1);
+            let route = tree.route_to(plane(30, 0)).unwrap_or_default();
+            assert!(
+                route.get(30) == Some(&due)
+                    && tree.parent(due) == Some(plane(28, 1))
+                    && route.contains(&plane(30, 1)),
+                "{case}: this shape no longer exercises the bug: the 30th coord of the route to \
+                 (30, 0, 0) is no longer (29, 0, 1), running straight beside the near sink: \
+                 {route:?}",
+            );
+            let far = entry
+                .ir
+                .cells
+                .iter()
+                .find(|c| c.coord == plane(30, 0))
+                .expect("the far cell is in the scope");
+            let mut sites: Vec<CellCoord> = Vec::new();
+            for buffer in far.buffer_coords() {
+                if !sites.contains(&buffer.coord) {
+                    sites.push(buffer.coord);
+                }
+            }
+            assert_eq!(
+                sites,
+                vec![plane(15, 0), plane(27, 0)],
+                "{case}: the second repeater must step back off (29, 0, 1), beside the sink at \
+                 (29, 0, 0), onto (27, 0, 0)",
             );
         }
 
