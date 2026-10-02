@@ -1312,10 +1312,11 @@ fn stage_is_edition_neutral(stage: &str) -> bool {
 #[test]
 fn cli_synth_missing_edition_reports_only_the_usage_error() {
     // The per-stage tests above each pin their own exit code and hint
-    // text; what this one pins is that nothing else runs first. A
-    // missing `--edition` is a usage mistake, so the gate stands ahead
-    // of every synthesis pass: `stage_is_edition_neutral` asserts that
-    // a refused stage printed nothing and said that one line.
+    // text; what this one pins is that a refused stage printed nothing
+    // and said that one line. The fixture has no findings, so whether
+    // the gate stands ahead of the passes that could print one is
+    // `cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings`'s
+    // to pin.
     //
     // Driven off every `--stage` value rather than the edition-tagged
     // ones: which side a stage falls on is the binary's own business
@@ -1329,6 +1330,62 @@ fn cli_synth_missing_edition_reports_only_the_usage_error() {
         gated > 0,
         "no --stage value required --edition, so this test asserted nothing about the gate",
     );
+}
+
+#[test]
+fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
+    // `stage_is_edition_neutral` runs on a fixture with no findings, so an
+    // earlier pass has nothing to print there and the ordering it checks
+    // holds whichever runs first. Here the source has a finding for each
+    // pass the file goes through before synthesis — a parse error, and a
+    // `check` error in a file that parses — and the usage error still has
+    // to be the one line, with the usage exit code.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let sources = [
+        ("parse.crn", "@cairn 2026.06\nstruct s size=3x3 size=\n"),
+        (
+            "check.crn",
+            "@cairn 2026.06\nstruct s size=3x3\n  bogus a=1\n",
+        ),
+    ];
+    let mut gated = 0;
+    for stage in stage_values() {
+        if stage_is_edition_neutral(&stage) {
+            continue;
+        }
+        gated += 1;
+        for (name, text) in sources {
+            let path = dir.path().join(name);
+            std::fs::write(&path, text).expect("write scratch file");
+            let out = cairn(
+                "synth",
+                &[
+                    "--experimental-logic-synth",
+                    "--stage",
+                    &stage,
+                    path.to_str().unwrap(),
+                ],
+            );
+            let stderr = String::from_utf8(out.stderr).expect("utf-8");
+            assert_eq!(
+                out.status.code(),
+                Some(2),
+                "--stage {stage} on {name} without --edition: {stderr}",
+            );
+            assert!(
+                out.stdout.is_empty(),
+                "--stage {stage} on {name} printed IR"
+            );
+            let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+            assert!(
+                lines.len() == 1
+                    && lines[0].contains(&format!("--stage {stage}"))
+                    && lines[0].contains("--edition"),
+                "--stage {stage} on {name}: the usage error should be the one line, got: {stderr}",
+            );
+        }
+    }
+    assert!(gated > 0, "no --stage value required --edition");
 }
 
 #[test]

@@ -2155,19 +2155,13 @@ fn run_synth(
         return ExitCode::from(2);
     }
 
-    // Reject `--edition` on the edition-neutral stages loud instead of
-    // silently ignoring it — a caller who passed the flag on an
-    // edition-neutral stage almost certainly expected it to shape the
-    // output, and swallowing the mistake would make the CLI's
-    // stage-vs-edition axis ambiguous.
-    if !stage_requires_edition(stage) && edition.is_some() {
-        eprintln!(
-            "error: `--edition` is only meaningful with {}; the {} stages are edition-neutral",
-            edition_required_stage_list(),
-            edition_neutral_stage_list(),
-        );
-        return ExitCode::from(2);
-    }
+    // Both halves of the stage-vs-edition rule are argv-only, so both are
+    // decided before the file is read: a caller who got the flag wrong
+    // hears about the flag, not about whatever the source has to say.
+    let edition = match synth_edition(stage, edition) {
+        Ok(edition) => edition,
+        Err(code) => return code,
+    };
 
     let (source, module) = match load_module(file, FailureReport::Text) {
         Ok(loaded) => loaded,
@@ -2209,17 +2203,46 @@ fn run_synth(
     }
 }
 
+/// The edition `stage` runs for, from the `--edition` the caller passed.
+///
+/// `Ok(None)` for an edition-neutral stage, which refuses a stray
+/// `--edition` rather than silently ignoring it — a caller who passed the
+/// flag there almost certainly expected it to shape the output, and
+/// swallowing the mistake would make the CLI's stage-vs-edition axis
+/// ambiguous. `Ok(Some(_))` for an edition-tagged stage, which requires
+/// the flag.
+///
+/// Called before the source is loaded, and so before the first pass:
+/// both refusals are usage errors (exit 2), and a usage error reported
+/// after parse, `check` and synthesis would be hidden by any finding
+/// those passes make in the file.
+fn synth_edition(
+    stage: SynthStage,
+    edition: Option<EditionArg>,
+) -> Result<Option<Edition>, ExitCode> {
+    if !stage_requires_edition(stage) {
+        if edition.is_some() {
+            eprintln!(
+                "error: `--edition` is only meaningful with {}; the {} stages are edition-neutral",
+                edition_required_stage_list(),
+                edition_neutral_stage_list(),
+            );
+            return Err(ExitCode::from(2));
+        }
+        return Ok(None);
+    }
+    require_edition(edition, stage_cli_name(stage)).map(|edition| Some(edition.as_edition()))
+}
+
 /// Run the requested pipeline stage and return the JSON serialisation
 /// plus a human-facing label.
 ///
-/// The `--edition` gate runs before the first pass rather than where the
-/// value is first consumed: a caller who forgot the flag hears about the
-/// flag, not about whatever an earlier pass had to say. `compile_netlist`
-/// and `compile_edition_netlist` are diagnostic-free by contract, so they
-/// carry no report call.
+/// `edition` is [`synth_edition`]'s answer for `stage`, resolved before
+/// the source was read. `compile_netlist` and `compile_edition_netlist`
+/// are diagnostic-free by contract, so they carry no report call.
 fn dispatch_synth_stage(
     stage: SynthStage,
-    edition: Option<EditionArg>,
+    edition: Option<Edition>,
     synth: &cairn_lang_redstone::SynthOutput,
     ir: &cairn_lang_core::IntentModule,
     file: &Path,
@@ -2229,15 +2252,6 @@ fn dispatch_synth_stage(
     if matches!(stage, SynthStage::Logic) {
         return Ok((serde_json::to_string_pretty(&synth.scoped), "Logic IR"));
     }
-
-    // Resolved ahead of `compile_netlist`: a missing `--edition` is a
-    // usage mistake, and a usage mistake is worth reporting before any
-    // synthesis work is paid for, not after.
-    let edition = if stage_requires_edition(stage) {
-        Some(require_edition(edition, stage_cli_name(stage))?.as_edition())
-    } else {
-        None
-    };
 
     let netlist = compile_netlist(&synth.scoped);
     // The edition-neutral tail dispatches on the stage, not on "no
@@ -2259,7 +2273,7 @@ fn dispatch_synth_stage(
             | SynthStage::Delay
             | SynthStage::Crossing,
         ) => unreachable!(
-            "stage_requires_edition holds here, so the gate above resolved an edition or returned"
+            "stage_requires_edition holds here, so synth_edition resolved an edition or refused"
         ),
     };
     let edition_netlist = compile_edition_netlist(&netlist, edition);

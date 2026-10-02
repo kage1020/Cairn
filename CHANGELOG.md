@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- *(cli)* `cairn synth` checked for a missing `--edition` only after the source had been parsed,
+  checked and synthesised, so a source with a finding reported that finding with exit 1 and hid the
+  usage error. Both halves of the stage-vs-edition rule are argv-only and are now decided before the
+  file is read: `--stage placement` without `--edition` exits 2 with the flag message whatever the
+  source holds, as a stray `--edition` on `logic` / `netlist` already did.
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added
