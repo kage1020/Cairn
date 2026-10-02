@@ -1489,6 +1489,8 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
     let lf = Lockfile::read_from_path(&laid.lock()).expect("read lock");
     assert_eq!(lf.walkways.len(), 1);
 
+    // Neither row lays: the trailing `_` on `a_` is refused by the
+    // walkway ident rule, whichever end of the row it sits on.
     let lost = Fixture::new(
         "cli-compile",
         "duplicate-lost-pair",
@@ -1506,6 +1508,15 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
     let result = compile_as(&lost, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
+    // Each row earns its own ident finding. The first row laid nothing,
+    // so the second is not a duplicate of it: a pair is recorded as laid
+    // only once its strip is, not when a row reaches the duplicate guard.
+    assert_eq!(
+        stderr.matches("W_INVALID_WALKWAY_IDENT").count(),
+        2,
+        "stderr={stderr}"
+    );
+    assert!(!stderr.contains("W_DUPLICATE_WALKWAY"), "stderr={stderr}");
     assert_eq!(stderr.matches(partial).count(), 1, "stderr={stderr}");
     assert!(stderr.contains(counted_once), "stderr={stderr}");
     assert_eq!(
@@ -1534,6 +1545,120 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
         stderr.contains(counted_once) && stderr.contains(named),
         "stderr={stderr}"
     );
+}
+
+#[test]
+fn a_walkway_whose_every_cell_is_blocked_is_lost_rather_than_written_as_air() {
+    // Two huts touching, each door port buried under the other's floor.
+    // The router cannot detour from a buried port, so the row falls back
+    // to the straight L, and every cell of it overlaps a floor: the
+    // walkway's array is all air. It used to be written as an `.nbt` of
+    // two air blocks and certified; holding no block, it is now a lost
+    // walkway like a row that was refused.
+    let fixture = Fixture::new(
+        "cli-compile",
+        "walkway-every-cell-blocked",
+        concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "  slot floor -> @stone\n",
+            "\n",
+            "def hut size=3x3:\n",
+            "  floor id=floor mat_slot=floor\n",
+            "  walls id=walls mat_slot=wall height=3\n",
+            "  door  id=front side=front at=center\n",
+            "  door  id=back  side=back  at=center\n",
+            "\n",
+            "site duo:\n",
+            "  place id=a use=hut theme=t at=origin\n",
+            "  place id=b use=hut theme=t north_of=a gap=0\n",
+            "  connect a.back to b.front path=@gravel\n",
+        ),
+    );
+    let refusal = "1 of 3 requested scopes did not lower";
+    let named = "  note: `site::duo::a.back ↔ b.front` produced no voxels\n";
+    let result = compile_as(&fixture, "java", "1.21.4");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        stderr.contains(
+            "warning[W_WALKWAY_BLOCKED]: walkway `a.back ↔ b.front` skipped 2 cells that \
+             overlapped an existing structure"
+        ),
+        "stderr={stderr}",
+    );
+    assert!(
+        stderr.contains(&format!(
+            "error[E_PARTIAL_BUILD]: {}: {refusal}; refusing to certify a partial build\n{named}",
+            fixture.source().display(),
+        )),
+        "stderr={stderr}",
+    );
+    assert_eq!(
+        stderr.matches("produced no voxels").count(),
+        1,
+        "stderr={stderr}"
+    );
+    assert!(fixture.artifacts().is_empty(), "{:?}", fixture.artifacts());
+
+    let source = fixture.source();
+    let check = cairn(
+        "check",
+        &[
+            source.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert_eq!(check.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        stderr.contains(refusal) && stderr.contains(named),
+        "stderr={stderr}"
+    );
+}
+
+#[test]
+fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
+    // `nada`'s one member cannot voxelise, so lowering keeps an array for
+    // `b` that holds only air. It used to be written as `b.nbt` and
+    // certified beside `a`; holding no block, it is now a lost scope.
+    let fixture = Fixture::new(
+        "cli-compile",
+        "place-every-member-deferred",
+        concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "  slot floor -> @stone\n",
+            "\n",
+            "def box size=3x3:\n",
+            "  floor id=f mat_slot=floor\n",
+            "\n",
+            "def nada size=3x3:\n",
+            "  walls id=w mat_slot=wall height=0\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=box theme=t at=origin\n",
+            "  place id=b use=nada theme=t east_of=a gap=2\n",
+        ),
+    );
+    let result = compile_as(&fixture, "java", "1.21.4");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        stderr.contains("warning[W_DEFERRED_MEMBER]: walls without a positive `height=`"),
+        "stderr={stderr}",
+    );
+    assert!(
+        stderr.contains(
+            "1 of 2 requested scopes did not lower; refusing to certify a partial build\n  \
+             note: `site::s::b` produced no voxels\n"
+        ),
+        "stderr={stderr}",
+    );
+    assert!(fixture.artifacts().is_empty(), "{:?}", fixture.artifacts());
 }
 
 #[test]

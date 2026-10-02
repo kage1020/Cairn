@@ -210,13 +210,18 @@ need the pack's materials catalog and surface `W_ABSTRACT_TOKEN_DEFERRED` or
 ports (`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the lockfile
 with the world origin, dims, and resolved path material.
 
-A row that lays nothing has lost a walkway the source asked for: a port that cannot be placed, an
-id the walkway's name cannot carry, a path material that does not resolve, or a straight L that is
-itself past the router's search-area cap. `cairn compile` then refuses the build with
-`E_PARTIAL_BUILD`, as it does for a lost scope, and `cairn check --edition E --target V` refuses
-with it too ([Lint](/spec/lint/)). The loss is named `site::SITE::FROM ↔ TO`, with the ports as the
-row wrote them. A `W_DUPLICATE_WALKWAY` row loses nothing, since the earlier row laid its pair,
-and two rows naming one pair that neither laid are one loss.
+A row that lays no block has lost a walkway the source asked for: an endpoint whose `place` was
+refused upstream (`W_DEFERRED_MEMBER`), a port that cannot be placed, an id the walkway's name
+cannot carry, a path material that does not resolve, a straight L that is itself past the router's
+search-area cap, or a straight L whose every cell overlaps a placement, which leaves the strip all
+air. `cairn compile` then refuses the build with `E_PARTIAL_BUILD`, as it does for a lost scope, and
+`cairn check --edition E --target V` refuses with it too ([Lint](/spec/lint/)). A `cairn check`
+without `--target` does not lower, so it never sees this loss. The loss is named
+`site::SITE::FROM ↔ TO`, with the ports as the row wrote them. A `W_DUPLICATE_WALKWAY` row loses
+nothing, since the earlier row laid its pair, and two rows naming one pair that neither laid are one
+loss. One mistake can cost more than one loss: a `place` whose def has no `size=` is a lost scope,
+and every walkway with an endpoint on it is lost too, so each adds a note to `E_PARTIAL_BUILD` and
+one to the count of scopes that did not lower.
 
 **Diagnostics.**
 
@@ -227,6 +232,6 @@ and two rows naming one pair that neither laid are one loss.
 | `E_AMBIGUOUS_PORT` | The def exposes the same `id=` on more than one member. Rename the collision. |
 | `E_MISSING_PATH_MATERIAL` | The row omits `path=`, so walkway lowering has nothing to lay. |
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |
-| `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. When the straight L alone is past the router's search-area cap, nothing is laid. |
+| `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. When every cell of the straight L overlaps a placement, or the straight L alone is past the router's search-area cap, nothing is laid and the walkway is lost. |
 | `W_DUPLICATE_WALKWAY` | The same `(from, to)` port pair is already laid in this site; the duplicate row is dropped. |
 | `W_INVALID_WALKWAY_IDENT` | A site, place or port id cannot be carried in the walkway's name ([Lint](/spec/lint/)); the row is dropped. |

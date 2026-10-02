@@ -53,13 +53,30 @@ enum Outcome {
 ///
 /// stderr goes to a file rather than a pipe: a pipe that fills while nobody
 /// reads it deadlocks the child, which would look exactly like the hang
-/// being tested for.
+/// being tested for. stdout is discarded; [`run_bounded_with_stdout`]
+/// keeps it.
 fn run_bounded(dir: &Path, args: &[&str]) -> (Outcome, String, Duration) {
+    run_bounded_to(dir, args, Stdio::null())
+}
+
+/// [`run_bounded`], keeping stdout as well, for a run whose output is what
+/// the test reads.
+///
+/// stdout goes to a file for the same reason stderr does.
+fn run_bounded_with_stdout(dir: &Path, args: &[&str]) -> (Outcome, String, String, Duration) {
+    let out_path = dir.join("stdout.txt");
+    let out_file = File::create(&out_path).expect("create stdout sink");
+    let (outcome, stderr, elapsed) = run_bounded_to(dir, args, Stdio::from(out_file));
+    let stdout = fs::read_to_string(&out_path).unwrap_or_default();
+    (outcome, stderr, stdout, elapsed)
+}
+
+fn run_bounded_to(dir: &Path, args: &[&str], stdout: Stdio) -> (Outcome, String, Duration) {
     let err_path = dir.join("stderr.txt");
     let err_file = File::create(&err_path).expect("create stderr sink");
     let mut child = Command::new(cargo_bin())
         .args(args)
-        .stdout(Stdio::null())
+        .stdout(stdout)
         .stderr(Stdio::from(err_file))
         .spawn()
         .expect("spawn cairn");
@@ -574,15 +591,21 @@ const THROUGH_HUT: &str = "def hut size=3x3:\n\
 /// in its length would not finish.
 ///
 /// Every walkway row in [`hostile_sources`] is refused before a strip is
-/// laid, and those that span both axes are refused by the area cap, so
-/// none of them reaches the z leg of the straight L. This one does, and it
-/// is laid rather than refused, which is why it stands alone: `hostile_2`
-/// requires every row to name a diagnostic, and this row earns none.
+/// laid: at the `i32` edge, or by the router's 4,000,000-cell area cap.
+/// The cap measures the straight L's bounding box (`l_path_area`), so the
+/// single-axis `gap-large`, a strip of about 100,000,000 cells, is past it
+/// as surely as the rows that span both axes. None of them reaches the z
+/// leg of the straight L. This one does: a million-cell z strip is one
+/// cell wide, so its bounding box sits under the cap, and that margin is
+/// the premise of the test. It is laid rather than refused, which is why
+/// it stands alone:
+/// `hostile_2` requires every row to name a diagnostic, and this row earns
+/// none.
 ///
-/// `gap=1000000` is a million-cell strip. Laid in linear time it lowers in
-/// about a second in a debug build; a lookup over the laid cells per step
-/// would make that half a trillion comparisons, and the run would reach
-/// [`DEADLINE`] instead.
+/// `gap=1000000` is a million-cell strip. Laid in linear time it lowers
+/// far inside [`DEADLINE`]; a lookup over the laid cells per step would
+/// make that half a trillion comparisons, and the run would reach the
+/// deadline instead.
 #[test]
 fn a_long_north_south_walkway_lowers_within_the_deadline() {
     let body = source(&format!(
@@ -593,18 +616,44 @@ fn a_long_north_south_walkway_lowers_within_the_deadline() {
     ));
     let tmp = TempDir::new().expect("tempdir");
     let path = write(tmp.path(), "north-south", &body);
-    let (outcome, stderr, elapsed) = run_bounded(tmp.path(), &["lower", path.to_str().unwrap()]);
+    let (outcome, stderr, stdout, elapsed) = run_bounded_with_stdout(
+        tmp.path(),
+        &["lower", path.to_str().unwrap(), "--format", "json"],
+    );
     assert_eq!(
         outcome,
         Outcome::Exited(0),
         "`lower` ended as {outcome:?} after {elapsed:?}; a z strip must be laid in time linear \
          in its length\nstderr={stderr}",
     );
-    // A row that is refused, or laid in part, says so on stderr. Silence
-    // is what says the strip was laid whole, so the run above timed the
-    // z leg rather than a refusal.
     assert!(
         !stderr.contains("W_") && !stderr.contains("E_"),
         "the walkway must be laid, not refused; got {stderr}",
+    );
+    // Silence alone does not say the strip was laid: a row dropped without
+    // a finding would leave it silent too. Read the walkway back, so the
+    // run above is known to have timed the z leg rather than a refusal.
+    let ir: serde_json::Value = serde_json::from_str(&stdout).expect("`lower` prints JSON");
+    let key = "walkway::duo::a.back__b.front";
+    let walkways = ir["walkways"].as_object().expect("a `walkways` map");
+    assert_eq!(
+        walkways.keys().collect::<Vec<_>>(),
+        [key],
+        "one walkway, for the one row"
+    );
+    assert_eq!(
+        walkways[key]["footprint"],
+        serde_json::json!({ "x": 1, "z": 1_000_000 }),
+    );
+    let strip = &ir["structures"][key];
+    assert_eq!(
+        strip["palette"],
+        serde_json::json!([{ "id": "minecraft:air" }, { "id": "minecraft:gravel" }]),
+    );
+    let voxels = strip["voxels"].as_array().expect("a voxel array");
+    assert_eq!(voxels.len(), 1_000_000);
+    assert!(
+        voxels.iter().all(|index| index == 1),
+        "every cell of the strip is gravel"
     );
 }

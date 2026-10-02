@@ -213,9 +213,11 @@ pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
                 // id cannot be mistaken for the place/port separator.
                 // Known hazard: ids allow `_`, so `a_b.c__d_e.f` and
                 // `a.b_c__d.e_f` still flatten to one filename. This
-                // function cannot see the other key; the CLI's
-                // `prepare_artifacts` refuses the collision before
-                // anything is written.
+                // function sees one key at a time and cannot detect the
+                // collision, so a consumer writing several walkways into
+                // one directory has to compare the names it generates.
+                // The CLI does that while staging artifacts, and refuses
+                // the build.
                 let parts = key.parts();
                 return format!(
                     "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}.{ext}",

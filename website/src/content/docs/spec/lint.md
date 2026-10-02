@@ -348,8 +348,10 @@ the scope lowers, and the finding names what is missing from it.
 
 `E_PARTIAL_BUILD` is the run-level counterpart, and the one error among these: a warning above says
 a scope builds without something, and this says a scope the command was asked for did not build at
-all. It is reported once for the run, naming how many of the requested scopes were lost, by
-`cairn compile` and by a `cairn check --edition E --target V` that runs the same lowering pass.
+all. A scope that lowers to air alone did not build either, whatever left it empty: every member
+deferred, no theme gave its `mat_slot=` members a block, or it declares no member. It is reported
+once for the run, naming how many of the requested scopes were lost, by `cairn compile` and by a
+`cairn check --edition E --target V` that runs the same lowering pass.
 
 `W_PHASE_CONFLICT` is last-wins reported rather than refused. [Compilation Model](/spec/compilation/)
 grants last-wins to local overrides within one phase, which is what an author restating a member

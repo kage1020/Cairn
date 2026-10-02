@@ -221,9 +221,11 @@ pub struct BuildableRefusal {
     /// learning what else the file gets wrong.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub unplaceable_floors: Vec<DeclaredFloor>,
-    /// Scopes the source declares that produced no voxels, in resolution
-    /// order, then each walkway a `connect` row asked for and no row laid,
-    /// as `site::SITE::FROM ↔ TO`, in row order.
+    /// The scopes and walkways the source asked for that produced no
+    /// voxels, as opaque keys minted by the producer of this refusal.
+    ///
+    /// Nothing in this crate writes or reads the keys; their format is
+    /// defined by the CLI's `dropped_scopes` and `spec/versioning-editions`.
     ///
     /// An edition-wide answer for the same reason: a partial build is not
     /// certified, so this refuses every version at once and is identical

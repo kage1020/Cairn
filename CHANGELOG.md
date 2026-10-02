@@ -466,10 +466,18 @@
   ```
 
   A `W_DUPLICATE_WALKWAY` row loses nothing, because the earlier row laid its pair, and two rows
-  naming one pair that neither laid count as one loss. `spec/components-editing-sites` "Ports and
-  `connect`" said each row writes one `.nbt`; it now says which rows do and what the others cost,
-  and its diagnostics table gains the missing `W_INVALID_WALKWAY_IDENT` row. `spec/lint` and the
-  `dropped_scopes` row in `spec/versioning-editions` name the walkway case, with the ja mirror.
+  naming one pair that neither laid count as one loss. A walkway or scope counts as built only when
+  it holds a block. Two huts touching at `north_of=a gap=0`, each door port buried under the other's
+  floor, used to write a walkway `.nbt` of two air blocks, and a scope that lowered to air alone
+  (every member deferred, no theme bound for its `mat_slot=` members, or no member at all) wrote an
+  `.nbt` of air; both were certified at exit 0, and both are now refused as losses. One mistake can
+  now cost more than one note: a `place` whose def has no `size=` is lost, and so is every walkway
+  with an endpoint on it.
+
+  `spec/components-editing-sites` "Ports and `connect`" said each row writes one `.nbt`; it now says
+  which rows do and what the others cost, and its diagnostics table gains the missing
+  `W_INVALID_WALKWAY_IDENT` row. `spec/lint` and the `dropped_scopes` row in
+  `spec/versioning-editions` name the walkway case, with the ja mirror.
 
 - *(core)* `W_DUPLICATE_WALKWAY` could name a row a duplicate of a walkway that was never laid.
   The pair was recorded as seen before the row's `path=` material, the area cap and its ids were
@@ -1606,13 +1614,12 @@
   gives the full argument). That reaches ids which never aliased: a
   source whose only edge-`_` id is `place id=a_` in `connect a_.p to b.p` used to lay that walkway,
   and now drops it with the warning above; `compile` refuses a build that lost a walkway with
-  `E_PARTIAL_BUILD`. The site is exempt: `::`
-  separates it from both neighbours. A unit test builds every key over endpoint segments of `a` and
-  `_` up to three long and sites up to two, and parses each accepted one back to the parts it came
-  from. If two rows ever do encode to one key, a debug build asserts, and a release build reports
-  `W_INVALID_WALKWAY_IDENT` on the later row instead of losing the earlier walkway silently.
-  `spec/lint` "Connections and walkways" states the rule and why it covers every edge, with the
-  ja mirror.
+  `E_PARTIAL_BUILD`. The site is exempt: `::` separates it from both neighbours. A unit test builds
+  every key over endpoint segments of `a` and `_` up to three long and sites up to two, and parses
+  each accepted one back to the parts it came from. If two rows ever do encode to one key, a debug
+  build asserts, and a release build reports `W_INVALID_WALKWAY_IDENT` on the later row instead of
+  losing the earlier walkway silently. `spec/lint` "Connections and walkways" states the rule and
+  why it covers every edge, with the ja mirror.
 
   The `__` finding's text changes too. It used to read ``contains `__`, which collides with the
   walkway scope key's `from`/`to` separator``, with the note ``rename the offending id (e.g.
