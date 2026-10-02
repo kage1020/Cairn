@@ -271,7 +271,8 @@
   PocketMine-MP's `BlockStateData::CURRENT_VERSION` and the matching BedrockBlockUpgradeSchema
   `maxVersion` record. A loader picks which block-state upgrade schemas to run by comparing that
   integer with each schema's (PocketMine-MP's `BlockStateUpgrader` does), so a structure claiming
-  1.21.0.0 has the 1.21.0 schema run over states already written in it. `1.21.60` (`18168865`, 1.21.60.33) was already right.
+  1.21.0.0 has the 1.21.0 schema run over states already written in it. `1.21.60` (`18168865`,
+  1.21.60.33) was already right.
 
   A lock written by an earlier build for either target records the old integer, so the first
   rebuild against it reports it once and writes the corrected one:
@@ -280,9 +281,9 @@
   W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.21.0/block version 18153472, now 1.21.0/18153475.
   ```
 
-  The block-state revision is not the client build's (those are 1.21.0.3, 1.21.40.3 and
-  1.21.60.10), and `data_versions.json`'s `source` note, which said it was, now says which number
-  the column holds.
+  The block-state revision need not be the client build's (those are 1.21.0.3, 1.21.40.3 and
+  1.21.60.10; 1.21.0's coincides, the other two do not), and `data_versions.json`'s `source` note,
+  which said the integer was the build's, now says which number the column holds.
 
 - *(cli)* `cairn` panicked when the reader of its stdout had already gone, so an ordinary
   pipeline turned an accepted run into a crash:
@@ -880,7 +881,8 @@
   well, and the ones on the shared trunk stand closer together than 15, because every cell it
   feeds passes what it receives on down the chain. Where no coord near enough to such a cell can
   hold a repeater, `E_ATTENUATION_LIMIT` says that, naming the cell by its index and how much
-  dust it can spare, rather than that every coord turns; a cell whose own wire out has no room is refused on its own net.
+  dust it can spare, rather than that every coord turns; a cell whose own wire out has no room is
+  refused on its own net.
 
 - *(redstone)* A buffer repeater could stand beside dust of its own net that its tree does not
   link to it. A repeater joins only the blocks behind and in front of it, so the strand beside it
@@ -1420,7 +1422,8 @@
 
   `spec/lint` "Machine-readable payload" says every command taking the flag writes exactly one JSON
   document per input. The two fixed here are the two whose product is a dump rather than a report —
-  the AST and the block-array IR — and a failure is not either of those with a hole in it. Both now write the document `info` writes where it has no report,
+  the AST and the block-array IR — and a failure is not either of those with a hole in it. Both now
+  write the document `info` writes where it has no report,
   `{"diagnostics": [ ... ]}`, told apart from the dump by its keys and by the exit code. `lower`
   writes it for a source that does not parse *and* for one that fails a later pass, since the second
   is the other way its stdout came out empty: it refuses to dump an IR built from a source `check`
@@ -1848,7 +1851,8 @@
   and those blocks are real. Path latency — `assert latency(sig.in -> sig.out)`, spec §14.7 — maxes
   over the incoming nets and walks back through the upstream cells; it belongs to the pass that
   evaluates the assertion against the headless per-tick simulator, and neither is built. The
-  assertion form is not parsed today either. The redstone stages reach no compiled artifact; what moves is the name, the accessors, and
+  assertion form is not parsed today either. The redstone stages reach no compiled artifact; what
+  moves is the name, the accessors, and
   one key in the stage dumps.
 
 - *(core)* The palette is a **set with a canonical rendering**, not an insertion log. Slot `0` is
