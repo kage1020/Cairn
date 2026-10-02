@@ -3,10 +3,10 @@
 ## [Unreleased]
 
 ### Breaking changes
-- *(core)* `intent::Member` gains a `mat_slot_span: Option<Span>` field, the position of the hoisted `mat_slot=` value
+- *(core)* `intent::Member` gains a `mat_slot_span: Option<Span>` field, the position of the hoisted `mat_slot=` value ([#478](https://github.com/kage1020/Cairn/pull/478))
 
 ### Fixed
-- *(core)* report `mat_slot=` on a `door`, `level`, `circuit` or `place` as ignored, and stop refusing a slot name there the theme lacks
+- *(core)* report `mat_slot=` on a `door`, `level`, `circuit` or `place` as ignored, and stop refusing a slot name there the theme lacks ([#478](https://github.com/kage1020/Cairn/pull/478))
 
 ## 2026.10.0 — 2026-10-01
 
