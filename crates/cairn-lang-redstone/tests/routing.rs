@@ -19,14 +19,12 @@ mod common;
 use common::{load_example, normalize_stage_tags, placement_from_source};
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java routes its
-/// sole `JavaRepeaterOr` cell with `wire_length = Some(3)`: the sum of
-/// the routed lengths from each input pad (v1 convention: `(0, 0, i)`)
-/// into the cell coord `(1, 0, 1)`. `sig.exit`'s pad is directly beside
-/// the cell, so its route is one step and lays no dust at all — there
-/// is no coord between the two ends to put any on, which is the first
-/// fixture where `wire_length` counting steps rather than blocks of
-/// dust is visible. `sig.step`'s pad is at the corner a row further
-/// out, and comes in round the corner for two.
+/// sole `JavaRepeaterOr` cell with `wire_length = Some(4)`: the sum of
+/// the routed lengths from each input pad into the cell coord
+/// `(1, 0, 1)`. The pads step along `z` from `0` and skip the cell row,
+/// so `sig.step`'s stands at `(0, 0, 0)` and `sig.exit`'s at
+/// `(0, 0, 2)`, one a row either side of the cell's: each comes in round
+/// the corner for two, through the lane on its own side.
 /// `local_delay_ticks` stays `None` (routing does not insert delay per
 /// `spec/redstone` "Time model"; that is stage 3).
 #[test]
@@ -51,8 +49,8 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
     let cell = &ir.cells[0];
     assert_eq!(
         cell.wire_length(),
-        Some(3),
-        "wire_length must be route(step→cell) + route(exit→cell) = 2 + 1 = 3",
+        Some(4),
+        "wire_length must be route(step→cell) + route(exit→cell) = 2 + 2 = 4",
     );
     assert!(
         cell.local_delay_ticks().is_none(),
@@ -90,8 +88,9 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 /// every cell's `wire_length` with a pinned routed sum, so a
 /// regression in the input-pad coordinate convention, the cell-row
 /// spacing, or the per-driver attribution walk trips this test. Cell
-/// placement lays cells at `x = 1 + 2i, y = 0, z = 1`, and input pads
-/// land at `(0, 0, i)`.
+/// placement lays cells at `x = 1 + 2i, y = 0, z = 1`, and input pad
+/// `i` lands at `(0, 0, i)` below the cell row and `(0, 0, i + 1)` from
+/// it on.
 ///
 /// That it routes at all is the first thing this fixture pins. A cell
 /// body is a block, so a net reaches it through a free neighbouring
@@ -101,17 +100,15 @@ fn redstone_door_bedrock_matches_java_wire_length() {
 /// would give the third back: this chain is unroutable at every width
 /// under that convention, and compiles at every width under this one.
 ///
-/// Three of the four nets here have to go round one of the others,
-/// which is what the sums are worth reading for:
+/// The pads step over the cell row, so `sig.a`'s stands at `(0,0,0)`
+/// and `sig.b`'s at `(0,0,2)`, each at the head of the lane on its own
+/// side of the row. What the sums are worth reading for:
 ///
-/// - cell[0] `sig.and_ab = sig.a and sig.b`: `sig.b`'s pad is directly
-///   beside it, so its route is one step over no dust at all. `sig.a`'s
-///   is at the corner a row further out and comes in round the corner
-///   for two: `2 + 1 = 3`.
+/// - cell[0] `sig.and_ab = sig.a and sig.b`: each pad comes in round
+///   the corner for two, from either side: `2 + 2 = 4`.
 /// - cell[1] `sig.or_ab = sig.a or sig.b`: the same two nets carrying
-///   on down the row, one along the lane at `z=0` and one along the
-///   lane at `z=2` — `sig.a` took the first, and `sig.b` cannot run
-///   beside it, so it takes the other: `4 + 5 = 9`.
+///   on down the row, `sig.a` along the lane at `z=0` and `sig.b` along
+///   the lane at `z=2`, which are not beside each other: `4 + 4 = 8`.
 /// - cell[2] `sig.combined = sig.and_ab and sig.or_ab`: cell-to-cell
 ///   drivers. cell[1] is two columns away with a clear run between it
 ///   and cell[2]. cell[0] has a lane taken on either side of it and
@@ -176,7 +173,7 @@ struct sim size=7x5
             .iter()
             .map(PlacedCellNode::wire_length)
             .collect::<Vec<_>>(),
-        vec![Some(3), Some(9), Some(8)],
+        vec![Some(4), Some(8), Some(8)],
         "each cell is charged for the dust into it, detours and climbs \
          included",
     );
@@ -195,7 +192,7 @@ struct sim size=7x5
 /// `sig.a and sig.a` is how a `.crn` reaches the shape: logic synth
 /// keeps both operands, so the cell arrives at the routing pass with
 /// `a` and `b` both driven by `Input(0)`. The routed length from the
-/// pad at `(0,0,1)` to the cell at `(1,0,0)` is two blocks, and a
+/// pad at `(0,0,0)` to the cell at `(1,0,1)` is two blocks, and a
 /// per-port fold reported four — twice the dust the layout has.
 ///
 /// The per-net rule is not "one segment per cell":
@@ -248,7 +245,7 @@ struct dup size=20x5
     assert_eq!(
         cell.wire_length(),
         Some(2),
-        "the pad at (0,0,1) is two blocks from the cell at (1,0,0), laid once",
+        "the pad at (0,0,0) is two blocks from the cell at (1,0,1), laid once",
     );
 }
 
@@ -393,7 +390,7 @@ struct wire size=5x5
     assert_eq!(
         output.wire_length(),
         Some(4),
-        "the pads sit at (0,0,1) and (4,0,1) of a 5-wide region",
+        "the pads sit at (0,0,0) and (4,0,0) of a 5-wide region",
     );
 }
 
@@ -602,12 +599,15 @@ fn re_running_routing_pass_panics_loudly() {
 /// Advisory, so the scope is routed rather than elided — a refusal
 /// here would be the router applying a rule it cannot check. Both
 /// editions, because the shape is the placement's and the cell library
-/// does not change it: one stacked pair and eight staircases, the
+/// does not change it: two stacked pairs and ten staircases, the
 /// second being the one that shorts by the same mechanism an in-plane
-/// pair does. Eight to one rather than a near-even split because
+/// pair does. Ten to two rather than a near-even split because
 /// `cell #0`'s run climbed to clear the two sensor lanes and then
-/// travels *alongside* them the length of the region, one step across
-/// from each, crossing over dust exactly once.
+/// travels *alongside* them, one step across from each, for three
+/// columns — six staircases — before it passes over `cell #1`'s output,
+/// which runs the last two blocks of the cell row beneath it out to its
+/// pad: two stacked pairs where it crosses over, and four staircases
+/// either side of them.
 ///
 /// The notes are pinned whole rather than searched. What the finding
 /// says is the whole of what this pass hands the tile layer, so the
@@ -639,7 +639,7 @@ fn crossbar_names_the_pairs_the_tile_layer_has_to_separate() {
         );
         assert!(
             finding.primary.contains(
-                "leaves 9 pairs of dust within one step of each other across layers (1 stacked, 8 staircase)"
+                "leaves 12 pairs of dust within one step of each other across layers (2 stacked, 10 staircase)"
             ),
             "{edition:?}: the primary counts both shapes: {}",
             finding.primary,
@@ -649,9 +649,10 @@ fn crossbar_names_the_pairs_the_tile_layer_has_to_separate() {
             notes,
             vec![
                 "(4,1,1) on cell #0 stands directly over (4,0,1) on cell #1",
+                "(5,1,1) on cell #0 stands directly over (5,0,1) on cell #1",
                 "(1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,0) on sig.a",
                 "(1,1,1) on cell #0 stands a layer over, and one step across from, (1,0,2) on sig.b",
-                "and 6 more of the same two shapes",
+                "and 8 more of the same two shapes",
                 "`spec/redstone` \"Place-and-route\" makes separating them the physical tile \
                  layer's obligation, and the same chapter's \"Edition differences\" states it: a \
                  `bridge` coord renders as a tile that conducts to neither another net's coord \

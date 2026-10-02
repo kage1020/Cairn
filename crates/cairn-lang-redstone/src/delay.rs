@@ -211,6 +211,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         region,
         cell_coords,
         inputs,
+        column,
         blocks,
     } = match open_scope(entry) {
         Err(Skipped::Empty) => return Ok(source.clone()),
@@ -233,7 +234,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
         entry,
         "routed",
         &region,
-        source_of_net(&region, &cell_coords, inputs),
+        source_of_net(&region, column, &cell_coords, inputs),
     )?;
 
     // Refuse before writing `local_delay_ticks`, so a failed scope leaves
