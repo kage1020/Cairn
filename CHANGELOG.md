@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- *(core)* report a `sym=true` window whose mirror coincides with it
+- *(core)* report a `sym=true` window whose mirror coincides with it ([#465](https://github.com/kage1020/Cairn/pull/465))
 
 ## 2026.10.0 — 2026-10-01
 
