@@ -58,7 +58,8 @@ use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 use crate::intent::{
-    DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan,
+    DefIr, IntentModule, Member, MemberRole, PatchTargetError, SiteIr, Size, StructIr,
+    ValueWithSpan, actuator_patch_target,
 };
 use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 use crate::suggest::{candidate_list, did_you_mean_note};
@@ -4383,7 +4384,6 @@ fn is_actuator_patch(member: &Member) -> bool {
 /// phase-bucketing loop iterates over. Passed as a slice so the
 /// recogniser can look up physical doors without a second walk of the
 /// intent IR.
-#[allow(clippy::too_many_lines)] // one linear surface-guard chain reads better than 8 tiny helpers
 fn recognize_actuator_patch(
     member: &Member,
     siblings: &[(u32, &Member)],
@@ -4425,77 +4425,19 @@ fn recognize_actuator_patch(
         ));
         return;
     }
-    let Some(id_value) = selector.get("id") else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "door actuator patch requires an `[id=<label>]` selector naming the physical door to bind against",
-        ));
+    // Which door the brackets pick is read from the one place the
+    // redstone front end reads it too, so the patch this defers is the
+    // patch that gets no port there.
+    if let Err(reason) = actuator_patch_target(member, siblings.iter().map(|&(_, m)| m)) {
+        let mut diagnostic = diag_deferred_member_reason(member, &reason.to_string());
+        if let Some(fix) = patch_target_fix(&reason) {
+            diagnostic.notes.push(DiagnosticNote {
+                span: None,
+                message: fix,
+            });
+        }
+        diagnostics.push(diagnostic);
         return;
-    };
-    let Some(id_label) = id_value.value.as_label_str() else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!(
-                "door actuator patch `[id=]` selector must be an identifier or string label, got {}",
-                id_value.value.kind_name(),
-            ),
-        ));
-        return;
-    };
-    // Walk the flattened view to gather every physical door's id along
-    // with an occurrence count. A physical door is `MemberRole::Door`
-    // with no selector of its own — a selector-bearing door would be
-    // another patch, not a target. Source order is preserved for the
-    // "known door ids" listing so the rendering is stable across runs.
-    // The occurrence count catches the ambiguous shape a top-level
-    // `door id=X` plus a `level y=N door id=X` produces after
-    // flattening — `duplicate` runs per-scope and does not flag it, so
-    // a silent "first hit wins" would let the patch bind to whichever
-    // door happened to sort first.
-    let mut physical_door_ids: Vec<(&str, u32)> = Vec::new();
-    for (_, m) in siblings {
-        if !matches!(m.role, MemberRole::Door) || m.selector.is_some() {
-            continue;
-        }
-        let Some(door_id) = m.id.as_deref() else {
-            continue;
-        };
-        if let Some((_, count)) = physical_door_ids.iter_mut().find(|(id, _)| *id == door_id) {
-            *count = count.saturating_add(1);
-        } else {
-            physical_door_ids.push((door_id, 1));
-        }
-    }
-    let selected = physical_door_ids
-        .iter()
-        .find(|(id, _)| *id == id_label)
-        .copied();
-    match selected {
-        Some((_, count)) if count >= 2 => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "door actuator patch selects `id={id_label}` but the same id is declared on {count} physical doors in this scope; disambiguate the target before binding an actuator signal",
-                ),
-            ));
-            return;
-        }
-        Some(_) => {}
-        None => {
-            let known_list = if physical_door_ids.is_empty() {
-                "no physical door members are declared in this scope".to_owned()
-            } else {
-                let ids: Vec<&str> = physical_door_ids.iter().map(|(id, _)| *id).collect();
-                format!("known door ids: {}", ids.join(", "))
-            };
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "door actuator patch selects `id={id_label}` but no physical door with that id exists ({known_list})",
-                ),
-            ));
-            return;
-        }
     }
     let unknown_intent_keys: Vec<&str> = member
         .intent_state
@@ -4949,6 +4891,31 @@ fn diag_deferred_member(member: &Member) -> Diagnostic {
         member,
         &format!("`{role}` is not yet handled by block-array lowering"),
     )
+}
+
+/// The repair for a patch whose selector picks no single member, where
+/// the reason alone does not point at one.
+///
+/// [`PatchTargetError`]'s sentence states the fault and stops, so the
+/// repair is said here. A missing or malformed `id=` and an id beside the
+/// ones the reason lists already name the edit; an id that two members
+/// carry, or a scope whose members carry none, does not.
+fn patch_target_fix(reason: &PatchTargetError) -> Option<String> {
+    let keyword = reason.keyword();
+    match reason {
+        PatchTargetError::Ambiguous { count, .. } => Some(format!(
+            "Fix: give the {count} `{keyword}` members distinct ids, so the selector names one."
+        )),
+        PatchTargetError::NoSuchId {
+            id,
+            known,
+            unlabelled,
+            ..
+        } if known.is_empty() && *unlabelled > 0 => Some(format!(
+            "Fix: add `id={id}` to the `{keyword}` this patch is meant to bind."
+        )),
+        _ => None,
+    }
 }
 
 fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
@@ -5855,10 +5822,50 @@ mod tests {
             .collect();
         assert_eq!(deferred.len(), 1);
         assert!(
-            deferred[0].primary.contains("ambiguous")
-                || deferred[0].primary.contains("2 physical doors"),
+            deferred[0].primary.contains("2 physical doors"),
             "expected the primary to flag the ambiguity, got {}",
             deferred[0].primary,
+        );
+        // The reason states the fault; the repair is a note of its own.
+        assert!(
+            deferred[0].notes.iter().any(|n| n.message
+                == "Fix: give the 2 `door` members distinct ids, so the selector names one."),
+            "expected a note telling the author to tell the doors apart, got {:?}",
+            deferred[0].notes,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_beside_unlabelled_door_defers_with_add_id_note() {
+        // A door declared without `id=` can never be picked, but it is a
+        // door: the primary counts it rather than saying none is declared,
+        // and the note points at labelling it.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door side=front at=center\n  \
+                   door[id=front] opened_by=sig.open\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0]
+                .primary
+                .contains("1 physical door is declared in this scope, without an `id=`"),
+            "got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0]
+                .notes
+                .iter()
+                .any(|n| n.message
+                    == "Fix: add `id=front` to the `door` this patch is meant to bind."),
+            "got {:?}",
+            deferred[0].notes,
         );
     }
 
