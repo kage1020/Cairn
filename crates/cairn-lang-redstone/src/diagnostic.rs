@@ -231,6 +231,32 @@ pub enum DiagnosticCode {
     /// inside a `[...]` selector is answered the same three ways, by
     /// whichever fault moving it out of the brackets would not fix.
     LogicUnknownBindingKey,
+    /// An actuator binding written in the selector form picks no single
+    /// physical component. `door[id=front] opened_by=sig.x` binds the door
+    /// declared as `door id=front ...` in the same scope, and
+    /// `cairn_lang_core::intent::actuator_patch_target` is where that
+    /// door is looked up: a selector with no readable `id=`, an id no
+    /// physical door carries, or an id two doors carry leaves the patch
+    /// with nothing to act on. Block-array lowering defers such a patch
+    /// with the same reason, and a port for it would be I/O the build
+    /// does not have. Fix: set `[id=<label>]` to the id of one `door`
+    /// declared in this scope without brackets, or write `opened_by=` on
+    /// that `door`'s own line; for an id several doors carry, give them
+    /// distinct ids, and for a door declared without an `id=`, add the id
+    /// to the one the patch is meant to bind.
+    LogicUnresolvedPatch,
+    /// A physical component carries a second binding under an actuator key
+    /// it already has one for — on its own line, through a selector-form
+    /// patch, or both.
+    ///
+    /// Each binding became an output port with a pad of its own, so the
+    /// component was driven by two wires: a wired OR the author never
+    /// wrote. `spec/redstone` "The logic layer is a dependency DAG" is
+    /// where signals are combined. The binding on the component's own line
+    /// counts as the first, wherever the patch is written. Fix: bind the
+    /// component once, to a `logic` line that combines the signals; when
+    /// both bindings name the same signal, delete the duplicate line.
+    LogicDuplicateBinding,
 }
 
 impl DiagnosticCode {
@@ -253,6 +279,8 @@ impl DiagnosticCode {
             Self::LogicMisplacedBinding => "E_LOGIC_MISPLACED_BINDING",
             Self::LogicInvalidSignal => "E_LOGIC_INVALID_SIGNAL",
             Self::LogicUnknownBindingKey => "E_LOGIC_UNKNOWN_BINDING_KEY",
+            Self::LogicUnresolvedPatch => "E_LOGIC_UNRESOLVED_PATCH",
+            Self::LogicDuplicateBinding => "E_LOGIC_DUPLICATE_BINDING",
         }
     }
 
@@ -271,7 +299,9 @@ impl DiagnosticCode {
             | Self::LogicNestingTooDeep
             | Self::LogicMisplacedBinding
             | Self::LogicInvalidSignal
-            | Self::LogicUnknownBindingKey => Severity::Error,
+            | Self::LogicUnknownBindingKey
+            | Self::LogicUnresolvedPatch
+            | Self::LogicDuplicateBinding => Severity::Error,
             Self::LogicUnusedSignal | Self::RouteCrossLayerClearance => Severity::Warning,
         }
     }
