@@ -1052,6 +1052,21 @@ fn resolve_site_placements(
             continue;
         }
 
+        // A row that names a declared def references it, whatever happens to
+        // the row afterwards. `W_UNUSED_DEF` is "a `def` no `place use=`
+        // references"; a row refused for its id or origin still references
+        // one, and the finding with the repair is the one on that row —
+        // advising the author to delete the def would send them to a line
+        // that is correct.
+        if let Some(use_name) = member
+            .intent_state
+            .get("use")
+            .and_then(|v| v.value.as_label_str())
+            && let Some(def) = defs.iter().find(|d| d.name == use_name)
+        {
+            used_defs.insert(def.name.clone());
+        }
+
         let Some(place_id) = usable_place_id(member, &site.name, &seen_place_ids, ctx.diagnostics)
         else {
             continue;
@@ -1106,7 +1121,6 @@ fn resolve_site_placements(
             ));
             continue;
         };
-        used_defs.insert(def.name.clone());
 
         // Same split as `use=` above: absent is `incomplete_place_diag`'s,
         // mistyped is `check::type_mismatch`'s. The single-theme heuristic

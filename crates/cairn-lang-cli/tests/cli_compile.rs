@@ -1184,6 +1184,62 @@ fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
     );
 }
 
+/// A `place` row refused for its id (malformed or missing) or its origin
+/// still names its def, so
+/// the def is referenced and `W_UNUSED_DEF` does not fire: following its
+/// advice to remove the def would bring the def back as
+/// `E_UNRESOLVED_PLACE_REF` once the row is repaired. The last row is the
+/// control: a `use=` naming no def references nothing, so the def the
+/// author meant is still unused.
+#[test]
+fn a_def_named_by_a_refused_place_row_is_not_unused() {
+    for (row, refusal, unused) in [
+        (
+            "place id=a use=hut theme=t at=front",
+            "E_INVALID_PLACE_ORIGIN",
+            false,
+        ),
+        (
+            "place id=\"a.b\" use=hut theme=t at=origin",
+            "E_INVALID_PLACE_ID",
+            false,
+        ),
+        (
+            "place id=a use=hut theme=t east_of=nowhere",
+            "E_UNRESOLVED_PLACE_REF",
+            false,
+        ),
+        (
+            "place id=a use=hutt theme=t at=origin",
+            "E_UNRESOLVED_PLACE_REF",
+            true,
+        ),
+    ] {
+        let tmp = TempDir::new().expect("tempdir");
+        let src = write_source(
+            tmp.path(),
+            "refused.crn",
+            &format!(
+                "theme t:\n  slot floor -> @oak_planks\n\n\
+                 def hut size=3x3:\n  floor mat_slot=floor\n\n\
+                 site v:\n  {row}\n"
+            ),
+        );
+        let result = cairn("check", &[src.to_str().unwrap()]);
+        let stderr = String::from_utf8(result.stderr).expect("utf-8");
+        assert_eq!(result.status.code(), Some(1), "`{row}`: stderr={stderr}");
+        assert!(
+            stderr.contains(&format!("error[{refusal}]")),
+            "`{row}` should be refused with {refusal}; got: {stderr}",
+        );
+        assert_eq!(
+            stderr.contains("W_UNUSED_DEF"),
+            unused,
+            "`{row}`: W_UNUSED_DEF should fire only when no row names `hut`; got: {stderr}",
+        );
+    }
+}
+
 #[test]
 fn c26b_unknown_def_in_place_compile_exits_nonzero() {
     // `cairn compile` must propagate resolver Error-severity diagnostics

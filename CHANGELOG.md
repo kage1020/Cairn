@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- *(core)* A `def` whose only `place use=` row was refused — for its id (`E_INVALID_PLACE_ID`, or a
+  missing `id=`) or its origin (`E_INVALID_PLACE_ORIGIN`, or an `east_of=` / `north_of=` naming no
+  prior place) — was also reported as `W_UNUSED_DEF`, with advice to remove the def. Following it
+  brought the def back as `E_UNRESOLVED_PLACE_REF` once the row was fixed. A row whose `use=` names a
+  declared def now references it whatever happens to the row afterwards.
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added
