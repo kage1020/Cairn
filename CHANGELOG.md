@@ -881,7 +881,8 @@
   well, and the ones on the shared trunk stand closer together than 15, because every cell it
   feeds passes what it receives on down the chain. Where no coord near enough to such a cell can
   hold a repeater, `E_ATTENUATION_LIMIT` says that, naming the cell by its index and how much
-  dust it can spare, rather than that every coord turns; a cell whose own wire out has no room is refused on its own net.
+  dust it can spare, rather than that every coord turns; a cell whose own wire out has no room is
+  refused on its own net.
 
 - *(redstone)* A buffer repeater was put on whatever coord stood 15 steps along its route, whether
   or not a repeater could work there. A repeater reads the block behind it and drives only the
@@ -1414,7 +1415,8 @@
 
   `spec/lint` "Machine-readable payload" says every command taking the flag writes exactly one JSON
   document per input. The two fixed here are the two whose product is a dump rather than a report —
-  the AST and the block-array IR — and a failure is not either of those with a hole in it. Both now write the document `info` writes where it has no report,
+  the AST and the block-array IR — and a failure is not either of those with a hole in it. Both now
+  write the document `info` writes where it has no report,
   `{"diagnostics": [ ... ]}`, told apart from the dump by its keys and by the exit code. `lower`
   writes it for a source that does not parse *and* for one that fails a later pass, since the second
   is the other way its stdout came out empty: it refuses to dump an IR built from a source `check`
@@ -1842,7 +1844,8 @@
   and those blocks are real. Path latency — `assert latency(sig.in -> sig.out)`, spec §14.7 — maxes
   over the incoming nets and walks back through the upstream cells; it belongs to the pass that
   evaluates the assertion against the headless per-tick simulator, and neither is built. The
-  assertion form is not parsed today either. The redstone stages reach no compiled artifact; what moves is the name, the accessors, and
+  assertion form is not parsed today either. The redstone stages reach no compiled artifact; what
+  moves is the name, the accessors, and
   one key in the stage dumps.
 
 - *(core)* The palette is a **set with a canonical rendering**, not an insertion log. Slot `0` is
