@@ -480,20 +480,14 @@ fn lower_connects(
         };
 
         // Duplicate guard: pin on (site, from_place, from_port,
-        // to_place, to_port). Normalise the pair (sort the two ends)
-        // so `a.entry → b.entry` and `b.entry → a.entry` count as the
+        // to_place, to_port). `walkway_pair` sorts the two ends so
+        // `a.entry → b.entry` and `b.entry → a.entry` count as the
         // same walkway — laying the strip both ways would be a silent
         // double-write. The pair is recorded only once its strip is
         // laid, at the bottom of this loop: an earlier row with the same
         // pair that the checks below refused laid nothing, so this row
         // is not a duplicate of it.
-        let mut endpoints = [
-            (connect.from.place.clone(), connect.from.port.clone()),
-            (connect.to.place.clone(), connect.to.port.clone()),
-        ];
-        endpoints.sort_unstable();
-        let [(a_place, a_port), (b_place, b_port)] = endpoints;
-        let dedup_key = (connect.site.clone(), a_place, a_port, b_place, b_port);
+        let dedup_key = connect.walkway_pair();
         if seen_pairs.contains(&dedup_key) {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DuplicateWalkway,
