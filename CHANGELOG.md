@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- *(core)* refuse a `connect` port nested under a `level` as level-scoped, not as undeclared
+- *(core)* refuse a `connect` port nested under a `level` as level-scoped, not as undeclared ([#473](https://github.com/kage1020/Cairn/pull/473))
 
 ## 2026.10.0 — 2026-10-01
 
