@@ -24,7 +24,7 @@ module.exports = grammar({
 
   externals: $ => [
     $._indent, $._dedent, $._newline, $._file_start, $._size_x, $._line_start,
-    $._file_end, $.bit_pattern, $._error_sentinel,
+    $._file_end, $.bit_pattern, $.bit, $._error_sentinel,
   ],
 
   word: $ => $.identifier,
@@ -116,18 +116,21 @@ module.exports = grammar({
 
     _dotted_ref: $ => choice($.signal_ref, $.identifier),
 
-    // `bit_pattern` is external, and the only token in this grammar that
-    // is a plain run of characters. `-` is a don't-care input, and `-`
-    // and `->` share a character: the lexer takes the longest match it
-    // can, so `/[01-]+/` reads `11--` out of `11--> 0` and leaves a bare
-    // `>` this rule's arrow cannot use. The scanner chooses where the
-    // token ends instead of falling into it.
+    // `bit_pattern` is external. `-` is a don't-care input, and `-` and
+    // `->` share a character: the lexer takes the longest match it can,
+    // so `/[01-]+/` reads `11--` out of `11--> 0` and leaves a bare `>`
+    // this rule's arrow cannot use. The scanner chooses where the token
+    // ends instead of falling into it.
+    //
+    // `bit` is external too: an output ends where its digits do, and
+    // `/[01]/` took the `1` of `101` and left `01` to start another row.
+    // Saying "one digit, and no digit after it" needs lookahead a token
+    // regex does not have. See the scanner.
     truth_row: $ => seq(
       field('inputs', $.bit_pattern),
       '->',
       field('output', choice($.bit, $.dont_care)),
     ),
-    bit: $ => token(/[01]/),
     // A `-` output. The arrow has already been taken by the time this can
     // match, so unlike the input side there is no character to share.
     dont_care: $ => token('-'),

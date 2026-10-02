@@ -588,13 +588,6 @@
         }
       ]
     },
-    "bit": {
-      "type": "TOKEN",
-      "content": {
-        "type": "PATTERN",
-        "value": "[01]"
-      }
-    },
     "dont_care": {
       "type": "TOKEN",
       "content": {
@@ -1817,6 +1810,10 @@
     {
       "type": "SYMBOL",
       "name": "bit_pattern"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "bit"
     },
     {
       "type": "SYMBOL",

@@ -526,6 +526,30 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 0 -> 01 }\n",
         Reject,
     ),
+    // An output ends where its digits do. Run into the next row with no
+    // space, `101` is one integer the reference lexer refuses as an
+    // output, not the two rows `00->1` and `01->0`.
+    (
+        "truth_output_run_into_the_next_row",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->101->0 }\n",
+        Reject,
+    ),
+    (
+        "truth_two_digit_output_run_into_the_next_row",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->11->0 }\n",
+        Reject,
+    ),
+    // A separator still ends one, with or without a space.
+    (
+        "truth_output_ended_by_a_semicolon",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->1;01->0 }\n",
+        Accept,
+    ),
+    (
+        "truth_output_ended_by_the_brace",
+        "struct s size=3x3\n  assert truth(sig.a -> sig.c) { 0->1}\n",
+        Accept,
+    ),
     (
         "truth_leading_semicolon",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { ; 0 -> 1 }\n",
@@ -1247,6 +1271,29 @@ fn both_parsers_reach_the_written_verdict() {
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// An indent too deep for the scanner's `uint16_t` levels is refused, not
+/// wrapped round to a shallow one.
+///
+/// 131072 spaces is level 65536, which narrowed to 16 bits before the
+/// comparison read as level 0, a second top-level declaration; 131074
+/// read as level 1, an ordinary body line. Built here rather than listed
+/// in `FIXTURES` because the source is 128 KiB of spaces.
+#[test]
+fn an_indent_past_sixteen_bits_of_levels_is_refused() {
+    let mut parser = new_parser();
+    for (spaces, line) in [(131_072, "struct t size=3x3"), (131_074, "floor a=1")] {
+        let source = format!("struct s size=3x3\n{}{line}\n", " ".repeat(spaces));
+        assert!(
+            cairn_lang_core::parse::parse(&source).is_err(),
+            "core accepted {spaces} spaces",
+        );
+        assert!(
+            !grammar_accepts(&mut parser, &source),
+            "the grammar accepted {spaces} spaces before `{line}`",
+        );
+    }
 }
 
 /// The scanner keeps its hands off the input during error recovery.

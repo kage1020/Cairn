@@ -10,6 +10,7 @@ enum TokenType {
   LINE_START,
   FILE_END,
   BIT_PATTERN,
+  BIT,
   ERROR_SENTINEL,
 };
 
@@ -293,6 +294,28 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // FILE_END, INDENT, DEDENT — is emitted at a line or file boundary,
   // while `bit_pattern` appears only inside an `assert truth` body's
   // `{ … }`, which the grammar gives no way to break across lines.
+  // A truth row's output: one `0` or `1`. External for the reason the
+  // pattern is, from the other side: a token regex cannot say where a
+  // run of digits ends. `/[01]/` took the first character of `101` and
+  // left the rest to start the next row's pattern, so `00->101->0` read
+  // as the two rows `00->1` and `01->0`, where the reference lexer reads
+  // `101` as one integer and refuses it as an output. The whole run is
+  // read here and taken only when it is one character long; declining
+  // leaves the internal lexer nothing it can match, since `bit` has no
+  // regex of its own, and the row fails where the reference parser's
+  // does. A `-` output is `dont_care`, an internal token this declines.
+  //
+  // Leading spaces are skipped as the pattern's are, and for the same
+  // reason a tab is not.
+  if (valid_symbols[BIT]) {
+    while (lexer->lookahead == ' ') skip(lexer);
+    if (lexer->lookahead != '0' && lexer->lookahead != '1') return false;
+    advance(lexer);
+    if (lexer->lookahead >= '0' && lexer->lookahead <= '9') return false;
+    lexer->result_symbol = BIT;
+    return true;
+  }
+
   if (valid_symbols[BIT_PATTERN]) {
     while (lexer->lookahead == ' ') skip(lexer);
     bool scanned = false;
@@ -615,11 +638,18 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   if (lexer->lookahead == '\t') return false;
 
   if (spaces & 1u) return false; // odd indent, let LR surface an ERROR
-  uint16_t level = (uint16_t)(spaces / 2);
   uint16_t current = *array_back(&s->indent_stack);
+  // Compared at the width `spaces` was counted in, before any narrowing:
+  // the stack holds `uint16_t` levels, and a level of 65536 or more
+  // narrowed first wraps to a small one — 131072 spaces read as level 0,
+  // a new top-level line, and 131074 as level 1, an ordinary body line.
+  // A level more than one past the current one is refused here, so every
+  // level that reaches the cast below is at most `current + 1`, which
+  // `MAX_INDENT_DEPTH` keeps far inside `uint16_t`.
+  if (spaces / 2 > (uint32_t)current + 1) return false;
+  uint16_t level = (uint16_t)(spaces / 2);
 
   if (level > current) {
-    if (level != current + 1) return false;
     if (!valid_symbols[INDENT]) return false;
     // See `MAX_INDENT_DEPTH`'s comment: refuse rather than push past what
     // `serialize()` can represent.
