@@ -485,6 +485,19 @@
   not resolve, the second was reported as a duplicate and dropped too, and the pair got no walkway
   at all. The pair is now recorded only once its strip is laid, so the later row lays it.
 
+- *(redstone)* A `logic` line's left-hand side was checked for its `sig.` head and nothing else, so
+  `logic sig = ...` and `logic sig.x.y = ...` each registered a signal, lowered into a cell, and
+  could be read by another `logic` line. `cairn synth` exited 0 with `"sig"` or `"sig.x.y"` in
+  `signal_defs`, while the same names under an actuator key were `E_LOGIC_INVALID_SIGNAL`.
+  `spec/redstone` "Signal binding" says a signal name is `sig.` and exactly one segment after it.
+  The left-hand side now passes the same test as the sensor tail and actuator values, so both lines
+  are `E_LOGIC_INVALID_SIGNAL`. The message says which way the name misses. For the namespace
+  with no name, the fix is to add one, as in `sig.<name>`. For more than one segment, it is to
+  keep one, as in `sig.x` or `sig.x_y`. A line that reads the refused name is not also told it is
+  unbound. A reference to an undefined name that is not a signal name, such as `sig.x.y` on a
+  right-hand side or in an `assert`, was told to rename it to a defined signal or drive it from a
+  sensor or a `logic` line, and both of those refuse it. The footer now offers only the rename.
+
 - *(redstone)* A sink with no clear path made the router search the whole `circuit` reservation
   before refusing it. The search gave up only when its frontier was empty, so the cost of the
   refusal was set by `width × depth × void`, not by the distance: a sink two blocks from its driver

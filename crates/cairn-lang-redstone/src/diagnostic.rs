@@ -191,9 +191,10 @@ pub enum DiagnosticCode {
     /// `opened_by=` have no legal host at all yet. Fix: move the binding
     /// onto the component that carries it.
     LogicMisplacedBinding,
-    /// A position that has to name a signal does not. Sensors emit into
-    /// the `sig.` namespace and actuators consume from it, so a name
-    /// outside it can never be read, and three positions carry one:
+    /// A position that has to name a signal does not. A signal name is
+    /// `sig.` and exactly one segment after it: sensors emit into the
+    /// `sig.` namespace and actuators read exactly one segment from it, so
+    /// any other name can never be read. Three positions carry one:
     ///
     /// - a `logic` line's left-hand side, which was lowered anyway, so a
     ///   cell took a placement coordinate for a signal with no consumer;
@@ -206,7 +207,9 @@ pub enum DiagnosticCode {
     /// nothing. Fix: name the signal `sig.<name>`. Where the value is a
     /// bare identifier the message offers the spelling, that being the
     /// one shape with a single reading; `opened_by=3` names nothing that
-    /// adding `sig.` would repair.
+    /// adding `sig.` would repair. A left-hand side that is `sig` alone is
+    /// told to add a name after it, and one with more than one segment
+    /// after `sig.` to keep one, as in `sig.x`.
     LogicInvalidSignal,
     /// An argument whose value is a `sig.`-headed reference sits under a
     /// key that is not one of the actuator keys in `spec/redstone`
