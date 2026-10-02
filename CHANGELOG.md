@@ -2104,6 +2104,52 @@
   `--target`, `cairn info`'s `buildable targets`, and the supported-target lists are unchanged:
   they read the targetable rows.
 
+- *(formats,nbt,cli)* `cairn compile` built each structure's whole NBT tree before writing a
+  byte, one compound per voxel, so its memory grew with the volume far faster than the
+  block-array IR the volume bound was sized against: about 700 bytes a voxel for Java and 145 for
+  Bedrock, against the IR's 2. A cube at the bound (`size=256x256`, `walls height=255`) that
+  `check` accepts extrapolates to roughly 12 GB to compile for Java, and the allocator or the OOM
+  killer ended the build with no diagnostic. The per-voxel lists — Java's `blocks`, Bedrock's two
+  `block_indices` layers — are now encoded from the grid while the file is written, so writing
+  costs a fixed amount on top of lowering. Peak memory of `cairn compile` on that shape, debug
+  build, `N` for 256:
+
+  | `N` | Java before | Java after | Bedrock before | Bedrock after |
+  |---|---|---|---|---|
+  | 64 | 195 MB | 10 MB | 45 MB | 10 MB |
+  | 128 | 1,504 MB | 23 MB | 304 MB | 24 MB |
+  | 256 | not run | 136 MB | not run | 136 MB |
+
+  The files are byte-for-byte what they were. Every structure is still checked before any file is
+  written, so a refusal leaves nothing behind; the check no longer builds the tree to do it. A
+  backend refusal now reads ``error: checking `SCOPE`: …`` rather than `error: building …`.
+  Staged files are written through a buffer, so an uncompressed `.mcstructure` is no longer two
+  system calls per voxel.
+
+  `cairn-lang-nbt` gains a streaming form of each uncompressed writer (`stream_java_uncompressed`,
+  `stream_bedrock_uncompressed`, through `CompoundStream` and `ListStream`) and `check_string`,
+  the writers' string rule on its own. A streamed empty list declares `TAG_End` whatever type it
+  names, as `List::of_tags` does. `cairn-lang-formats` gains `prepare_structure` /
+  `JavaStructure` and `prepare_mcstructure` / `McStructure`, which check a structure without
+  building it and then write it streaming. `write_structure_gzip` now streams too.
+  `build_structure_tag` and `build_mcstructure_tag` still build the whole tree.
+
+  **Breaking**: the check now refuses every grid the write could not stream, and those refusals
+  are new variants. `JavaStructureError` and `BedrockStructureError` each gain `VolumeOverflow`
+  (`x * y * z` overflows `usize`), `ListTooLong` (a voxel count or palette past an NBT list's
+  `i32` length), `VoxelCountMismatch` (`voxels.len()` is not the dims' volume) and
+  `UnencodablePaletteString` (an id, property or state string the encoder refuses, named with its
+  palette entry). These were reachable only by building a `BlockArray` by hand, never from
+  `cairn compile`: a long volume failed inside the write with `LengthOverflow`, a short grid
+  panicked indexing past its end, and a bad Bedrock palette string was found only after the whole
+  volume was encoded. `build_structure_tag`, `build_mcstructure_tag` and `write_structure_gzip`
+  refuse them the same way, and `write_structure_gzip` refuses before writing to its writer.
+  The Bedrock check runs the palette before the grid, as Java's does, so an array with an
+  abstract palette entry and an out-of-range index now reports the palette entry on both
+  editions. An external exhaustive `match` on either enum no longer compiles. Both, and
+  `NbtIoError`, are now `#[non_exhaustive]`, so the next variant costs no second break. The Rust
+  API is Internal tier per `spec/compatibility`, so no deprecation window is owed.
+
 ## 2026.9.0 — 2026-09-01
 
 ### Added
