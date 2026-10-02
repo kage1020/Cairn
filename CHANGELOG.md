@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- *(core)* name what buries a walkway port and which placements spread the router's search box
+- *(core)* name what buries a walkway port and which placements spread the router's search box ([#455](https://github.com/kage1020/Cairn/pull/455))
 
 ## 2026.10.0 — 2026-10-01
 
