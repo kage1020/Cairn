@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- *(core)* add `rejected_circuit_regions`, which hands back each `circuit` line
+  `circuit_regions` leaves out, with its span and the reason
+
+### Fixed
+- *(core,redstone)* refuse a one-column region for a scope with pads on both edges at placement,
+  in terms of width, and report an unusable `circuit` line on that line with its one reason
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

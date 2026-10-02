@@ -214,3 +214,86 @@ fn pressure_plate_binding_arrow_is_kept_separate_from_intent_state() {
         "the arrow tail must never become a synthetic intent_state key"
     );
 }
+
+/// Every `circuit` line that reserves nothing is handed back with the
+/// reason it does not, and with its own line as the span, so a pass that
+/// finds a scope with no reservation can point at the line that was
+/// meant to be one. A usable line is in [`cairn_lang_core::circuit_regions`]
+/// and not here.
+#[test]
+fn each_circuit_line_that_reserves_nothing_is_handed_back_with_its_reason() {
+    use cairn_lang_core::{
+        CircuitRegionDefect as Defect, circuit_regions, rejected_circuit_regions,
+    };
+
+    let cases: [(&str, &str, Defect); 8] = [
+        ("def", "circuit region=floor void=2", Defect::NoSize),
+        ("struct", "circuit void=2", Defect::RegionMissing),
+        (
+            "struct",
+            "circuit region=3 void=2",
+            Defect::RegionNotLabel { found: "integer" },
+        ),
+        ("struct", "circuit region=\"\" void=2", Defect::RegionEmpty),
+        ("struct", "circuit region=floor", Defect::VoidMissing),
+        (
+            "struct",
+            "circuit region=floor void=deep",
+            Defect::VoidNotInteger {
+                found: "identifier",
+            },
+        ),
+        (
+            "struct",
+            "circuit region=floor void=0",
+            Defect::VoidBelowOne { value: 0 },
+        ),
+        (
+            "struct",
+            "circuit region=floor void=4294967296",
+            Defect::VoidTooLarge {
+                value: 4_294_967_296,
+            },
+        ),
+    ];
+    for (keyword, line, defect) in cases {
+        let size = if keyword == "struct" { " size=5x5" } else { "" };
+        let src = format!("{keyword} s{size}\n  floor\n  {line}\n");
+        let ir = lower_source(&src);
+
+        assert!(
+            circuit_regions(&ir).is_empty(),
+            "`{line}` reserves nothing: {:?}",
+            circuit_regions(&ir),
+        );
+        let rejected = rejected_circuit_regions(&ir);
+        assert_eq!(
+            rejected.len(),
+            1,
+            "`{line}` is handed back once: {rejected:?}"
+        );
+        assert_eq!(rejected[0].defect, defect, "`{line}`");
+        assert_eq!(rejected[0].scope_name, "s");
+        assert_eq!(&src[rejected[0].span.clone()], line, "the span is the line");
+    }
+}
+
+/// A usable `circuit` line is a reservation and is not handed back as a
+/// rejected one, while a rejected line beside it still is.
+#[test]
+fn a_usable_circuit_line_is_not_handed_back_as_rejected() {
+    use cairn_lang_core::{CircuitRegionDefect, circuit_regions, rejected_circuit_regions};
+
+    let ir = lower_source(
+        "struct s size=5x5\n  floor\n  circuit region=floor void=0\n  circuit region=floor void=2\n",
+    );
+    let regions = circuit_regions(&ir);
+    assert_eq!(regions.len(), 1, "{regions:?}");
+    assert_eq!(regions[0].void, 2);
+    let rejected = rejected_circuit_regions(&ir);
+    assert_eq!(rejected.len(), 1, "{rejected:?}");
+    assert_eq!(
+        rejected[0].defect,
+        CircuitRegionDefect::VoidBelowOne { value: 0 }
+    );
+}

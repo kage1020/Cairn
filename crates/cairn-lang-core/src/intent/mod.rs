@@ -279,8 +279,9 @@ pub enum ScopeKind {
 /// walking [`Member`]s and re-decoding `intent_state` at every caller.
 /// The block-array pass's [`crate::block_array`] recogniser owns the
 /// shape validation and per-shape diagnostics; this lift function
-/// silently filters out any malformed or size-less fixture so the two
-/// sides cannot both fire diagnostics for the same source line.
+/// leaves out any malformed or size-less fixture, and
+/// [`rejected_circuit_regions`] hands those to a caller that needs to
+/// say why a scope has no reservation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct CircuitRegion {
@@ -308,18 +309,87 @@ pub struct CircuitRegion {
 /// under `level` blocks are not descended into for v1 — a circuit
 /// member nested inside a `level` stays a follow-up for the routing
 /// pass that actually needs it). Sites are skipped because they carry
-/// no `size` for the routing pass to budget against. Any circuit member
-/// whose `region=` value is missing, non-label, or empty, or whose
-/// `void=` is missing, non-integer, or zero, is dropped silently —
-/// downstream passes see the same "no reservation for this scope" state
-/// they would on a truly missing line and are expected to surface a
-/// diagnostic that names the malformed-fixture case alongside the
-/// missing-line one. (`cairn check` still reports each malformed shape
-/// individually via the block-array pass's `recognize_circuit_region`;
-/// this function is called from paths that skip the block-array lower,
-/// so it cannot rely on that pass firing.)
+/// no `size` for the routing pass to budget against. A circuit member
+/// that is not a usable reservation is left out here and reported by
+/// [`rejected_circuit_regions`] instead, with the reason, so a pass
+/// that finds a scope with no reservation can point at the line that
+/// was meant to be one. (`cairn check` still reports each malformed
+/// shape individually via the block-array pass's
+/// `recognize_circuit_region`; this function is called from paths that
+/// skip the block-array lower, so it cannot rely on that pass firing.)
 #[must_use]
 pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
+    circuit_members(module)
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect()
+}
+
+/// Every `circuit` member [`circuit_regions`] leaves out, in source
+/// order within each scope, with why it is not a usable reservation.
+#[must_use]
+pub fn rejected_circuit_regions(module: &IntentModule) -> Vec<RejectedCircuitRegion> {
+    circuit_members(module)
+        .into_iter()
+        .filter_map(Result::err)
+        .collect()
+}
+
+/// A `circuit` member that reserves nothing, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct RejectedCircuitRegion {
+    /// Which scope family the circuit member was declared under.
+    pub scope_kind: ScopeKind,
+    /// Source-level name of the scope.
+    pub scope_name: String,
+    /// What is wrong with the line.
+    pub defect: CircuitRegionDefect,
+    /// Byte range of the originating `circuit ...` line.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+/// Why a `circuit` member is not a usable reservation. The first that
+/// applies, in the order listed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CircuitRegionDefect {
+    /// The enclosing scope has no `size=WxH` header to reserve within.
+    NoSize,
+    /// No `region=` key.
+    RegionMissing,
+    /// `region=` holds a value that is not an identifier or a string;
+    /// `found` is the kind of value it is.
+    RegionNotLabel {
+        /// The value kind, as [`crate::ast::Value::kind_name`] names it.
+        found: &'static str,
+    },
+    /// `region=` is an empty string.
+    RegionEmpty,
+    /// No `void=` key.
+    VoidMissing,
+    /// `void=` holds a value that is not an integer; `found` is the
+    /// kind of value it is.
+    VoidNotInteger {
+        /// The value kind, as [`crate::ast::Value::kind_name`] names it.
+        found: &'static str,
+    },
+    /// `void=` is an integer below 1, which reserves no service layer.
+    VoidBelowOne {
+        /// The integer written.
+        value: i64,
+    },
+    /// `void=` is an integer too large for a `u32`.
+    VoidTooLarge {
+        /// The integer written.
+        value: i64,
+    },
+}
+
+/// Every `circuit` member of every struct and def, read into a
+/// reservation or the reason it is not one.
+fn circuit_members(module: &IntentModule) -> Vec<Result<CircuitRegion, RejectedCircuitRegion>> {
     let mut out = Vec::new();
     for s in &module.structs {
         collect_circuit_regions(
@@ -347,50 +417,68 @@ fn collect_circuit_regions(
     scope_name: &str,
     size: Option<&Size>,
     members: &[Member],
-    out: &mut Vec<CircuitRegion>,
+    out: &mut Vec<Result<CircuitRegion, RejectedCircuitRegion>>,
 ) {
-    let Some(size) = size else {
-        return;
-    };
     for m in members {
         if !matches!(m.role, MemberRole::Circuit) {
             continue;
         }
-        let Some((label, void)) = parse_circuit_region_fixture(m) else {
-            continue;
-        };
-        out.push(CircuitRegion {
-            scope_kind,
-            scope_name: scope_name.to_owned(),
-            label,
-            void,
-            width: size.w.get(),
-            depth: size.h.get(),
-            span: m.span.clone(),
+        let read = size
+            .ok_or(CircuitRegionDefect::NoSize)
+            .and_then(|size| parse_circuit_region_fixture(m).map(|fixture| (size, fixture)));
+        out.push(match read {
+            Ok((size, (label, void))) => Ok(CircuitRegion {
+                scope_kind,
+                scope_name: scope_name.to_owned(),
+                label,
+                void,
+                width: size.w.get(),
+                depth: size.h.get(),
+                span: m.span.clone(),
+            }),
+            Err(defect) => Err(RejectedCircuitRegion {
+                scope_kind,
+                scope_name: scope_name.to_owned(),
+                defect,
+                span: m.span.clone(),
+            }),
         });
     }
 }
 
 /// Parse the `region=<label>` / `void=<N>` payload of a `circuit`
-/// [`Member`] into `(label, void)` when both sides are well-formed.
-/// Returns `None` for any missing or malformed key so callers cannot
-/// silently accept a partial fixture. Callers that surface a
-/// diagnostic on `None` should mention every rejection cause the
-/// block-array pass's `recognize_circuit_region` distinguishes
-/// (`region=` absent / non-label / empty; `void=` absent / non-integer
-/// / zero) because this function is called from paths that skip
-/// `cairn check` and cannot rely on the per-shape `W_DEFERRED_MEMBER`
-/// stream to disambiguate.
-fn parse_circuit_region_fixture(member: &Member) -> Option<(String, u32)> {
-    let raw_region = member.intent_state.get("region")?;
-    let label = raw_region.value.as_label_str()?;
+/// [`Member`] into `(label, void)` when both sides are well-formed, or
+/// the first defect when not, so callers cannot silently accept a
+/// partial fixture.
+fn parse_circuit_region_fixture(member: &Member) -> Result<(String, u32), CircuitRegionDefect> {
+    let raw_region = member
+        .intent_state
+        .get("region")
+        .ok_or(CircuitRegionDefect::RegionMissing)?;
+    let label = raw_region
+        .value
+        .as_label_str()
+        .ok_or(CircuitRegionDefect::RegionNotLabel {
+            found: raw_region.value.kind_name(),
+        })?;
     if label.is_empty() {
-        return None;
+        return Err(CircuitRegionDefect::RegionEmpty);
     }
-    let raw_void = member.intent_state.get("void")?;
+    let raw_void = member
+        .intent_state
+        .get("void")
+        .ok_or(CircuitRegionDefect::VoidMissing)?;
     let void = match &raw_void.value.kind {
-        ValueKind::Int(v) if *v >= 1 => u32::try_from(*v).ok()?,
-        _ => return None,
+        ValueKind::Int(value) if *value < 1 => {
+            return Err(CircuitRegionDefect::VoidBelowOne { value: *value });
+        }
+        ValueKind::Int(value) => u32::try_from(*value)
+            .map_err(|_| CircuitRegionDefect::VoidTooLarge { value: *value })?,
+        _ => {
+            return Err(CircuitRegionDefect::VoidNotInteger {
+                found: raw_void.value.kind_name(),
+            });
+        }
     };
-    Some((label.to_owned(), void))
+    Ok((label.to_owned(), void))
 }
