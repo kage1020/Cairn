@@ -226,8 +226,8 @@ struct tiny size=3x3
         .find(|n| n.span.is_none())
         .expect("congestion has a fix footer");
     // The canonical fix triple in `spec/redstone` "Place-and-route":
-    // increase `void`, enlarge region, or split into multiple `circuit`
-    // blocks.
+    // increase `void`, enlarge region, or split the logic across several
+    // scopes, each with its own `circuit` line.
     for phrase in ["increase", "void", "enlarge", "region", "split", "circuit"] {
         assert!(
             footer.message.contains(phrase),
@@ -465,13 +465,12 @@ struct wire size=5x5
     );
 }
 
-/// A scope with two `circuit region=` lines silently keeps the first
-/// and drops the rest — the v1 policy. The follow-up routing PR may
-/// warn or route into every reservation, but today's placement pass
-/// must not fail loud on duplicates because the block-array pass
-/// already accepts them without complaint.
+/// A scope with two `circuit region=` lines is refused by `check`
+/// (`E_DUPLICATE_CIRCUIT`). Placement, which a library caller can run
+/// without `check`, keeps the first and raises nothing of its own, so
+/// the finding is reported once, by the pass that names both lines.
 #[test]
-fn duplicate_circuit_region_first_wins_silently() {
+fn duplicate_circuit_region_placement_keeps_the_first() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -490,7 +489,7 @@ struct dup size=7x5
 
     assert!(
         out.diagnostics.is_empty(),
-        "v1 must not raise diagnostics on duplicate `circuit region=` lines, got {:?}",
+        "placement leaves duplicate `circuit region=` lines to `check`, got {:?}",
         out.diagnostics,
     );
     let ir = &out

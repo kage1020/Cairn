@@ -117,6 +117,14 @@ pub enum DiagnosticCode {
     /// strictest across every line, so a second one adds a constraint
     /// rather than displacing the first.
     DuplicateHeader,
+    /// A `struct` or `def` body holds more than one `circuit` line.
+    ///
+    /// A scope has one reservation for its redstone: place-and-route
+    /// reads one region per scope and assigns nothing to a second, so a
+    /// later line would be dropped without a word. Refused as a repeated
+    /// `size=` is, rather than picking one, since either line could be
+    /// the one the author means.
+    DuplicateCircuit,
     /// A member carries an indented body that nothing reads.
     ///
     /// The surface grammar hangs a body off every command, but only
@@ -647,6 +655,7 @@ impl DiagnosticCode {
             Self::DuplicateId => "E_DUPLICATE_ID",
             Self::DuplicateItem => "E_DUPLICATE_ITEM",
             Self::DuplicateHeader => "E_DUPLICATE_HEADER",
+            Self::DuplicateCircuit => "E_DUPLICATE_CIRCUIT",
             Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
@@ -762,6 +771,7 @@ impl DiagnosticCode {
             | Self::DuplicateSelector
             | Self::DuplicateArg
             | Self::DuplicateId
+            | Self::DuplicateCircuit
             | Self::MisplacedMember
             | Self::UnknownKeyword
             | Self::UnknownArgument
@@ -1454,6 +1464,7 @@ mod tests {
                 "E_AMBIGUOUS_PORT",
                 "E_CONNECT_ARITY",
                 "E_DUPLICATE_ARG",
+                "E_DUPLICATE_CIRCUIT",
                 "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",
@@ -1527,6 +1538,7 @@ mod tests {
                 "E_AMBIGUOUS_PORT",
                 "E_CONNECT_ARITY",
                 "E_DUPLICATE_ARG",
+                "E_DUPLICATE_CIRCUIT",
                 "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",

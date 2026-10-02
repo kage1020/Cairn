@@ -30,6 +30,7 @@ turn on.
 | `E_DUPLICATE_SELECTOR` | Two selector rows in one `theme` select the same members and bind the same key. |
 | `E_DUPLICATE_ITEM` | Two top-level items of the same kind share a name. |
 | `E_DUPLICATE_HEADER` | A single-valued `@directive` is declared more than once. |
+| `E_DUPLICATE_CIRCUIT` | A `struct` or `def` body has more than one `circuit` line. |
 
 `E_DUPLICATE_SELECTOR` compares selectors by meaning, not by text: attribute order does not count,
 and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.

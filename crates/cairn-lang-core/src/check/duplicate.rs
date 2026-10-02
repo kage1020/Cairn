@@ -28,6 +28,9 @@
 //! - `E_DUPLICATE_ID`   — two members in the same immediate body scope
 //!   declare `id=NAME` for the same `NAME` (per-body scope; nested `level`
 //!   blocks have their own namespace).
+//! - `E_DUPLICATE_CIRCUIT` — a `struct` / `def` body has two `circuit`
+//!   lines among its own members, the ones place-and-route reads a
+//!   scope's reservation from.
 //!
 //! Every scope here reports the *repeat* and points a note at the first
 //! declaration, so the anchor is the token the author would edit and the
@@ -54,6 +57,7 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
             Item::Theme { body, .. } => check_theme_body(body, sink),
             Item::Def { args, body, .. } | Item::Struct { args, body, .. } => {
                 check_arg_keys(args, ArgScope::Header, sink);
+                check_circuit_lines(body, sink);
                 check_body(body, sink);
             }
             Item::Site { body, .. } => check_body(body, sink),
@@ -386,6 +390,38 @@ fn first_declaration_note(first_span: &Span) -> DiagnosticNote {
     DiagnosticNote {
         span: Some(first_span.clone()),
         message: "first declaration here".into(),
+    }
+}
+
+/// Scope reservation: a `struct` or `def` body may hold one `circuit`
+/// line.
+///
+/// Every `circuit` member of the body counts, well-formed or not and
+/// with or without a `[...]` selector: each states the scope's
+/// reservation, and [`crate::circuit_regions`] keeps every well-formed
+/// one, of which place-and-route uses the first. Only the body's own
+/// members: [`crate::circuit_regions`] does not descend into a `level`,
+/// so a `circuit` there is not a second reservation for this check to
+/// report.
+fn check_circuit_lines(body: &[Statement], sink: &mut DiagnosticSink) {
+    let mut first: Option<&Span> = None;
+    for stmt in body {
+        let Statement::Generic { keyword, span, .. } = stmt else {
+            continue;
+        };
+        if keyword != "circuit" {
+            continue;
+        }
+        match first {
+            Some(first_span) => sink.push(Diagnostic {
+                code: DiagnosticCode::DuplicateCircuit,
+                span: span.clone(),
+                primary: "this scope already has a `circuit` line, and a scope reserves one region for its redstone".into(),
+                notes: vec![first_declaration_note(first_span)],
+                data: None,
+            }),
+            None => first = Some(span),
+        }
     }
 }
 
