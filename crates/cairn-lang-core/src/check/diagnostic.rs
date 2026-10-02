@@ -311,6 +311,22 @@ pub enum DiagnosticCode {
     /// silently to air when a pack was offered, so the build stops with a
     /// structured suggestion towards the closest known token.
     UnknownAbstractToken,
+    /// A canonical token's state literal (`@oak_log[axis=x]`) was taken as
+    /// written, because nothing checks its properties and values against
+    /// the target yet.
+    ///
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, which
+    /// needs a table of every block's states that this compiler does not
+    /// hold. Until it does, a literal naming a property the block lacks, or
+    /// a value outside its domain, would be written into the structure file
+    /// with nothing said. A warning rather than an error because most
+    /// literals are right, and refusing every one of them would leave the
+    /// literal unwritable; the finding is the announcement the "Error vs
+    /// warning" rule asks for in place of silence. Raised on every state
+    /// literal the lowering resolves, wherever it was bound — a theme slot
+    /// or a `connect … path=`.
+    StateLiteralUnchecked,
     /// A `mat_slot=` resolved to a block id the compile's target does not
     /// declare. Fail-loud per `spec/versioning-editions` "Fail-loud and
     /// minimum-version inference" ("unknown IDs ... are hard errors"): the id
@@ -627,6 +643,7 @@ impl DiagnosticCode {
             Self::NoThemeBound => "W_NO_THEME_BOUND",
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
+            Self::StateLiteralUnchecked => "W_STATE_LITERAL_UNCHECKED",
             Self::UnknownId => "E_UNKNOWN_ID",
             Self::IncompatibleMaterial => "E_INCOMPATIBLE_MATERIAL",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
@@ -760,6 +777,7 @@ impl DiagnosticCode {
             | Self::NoThemeBound
             | Self::IgnoredArgument
             | Self::AbstractTokenDeferred
+            | Self::StateLiteralUnchecked
             | Self::StructNoSize
             | Self::DefNoSize
             | Self::UnusedDef
@@ -1456,6 +1474,7 @@ mod tests {
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",
+                "W_STATE_LITERAL_UNCHECKED",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",
@@ -1532,6 +1551,7 @@ mod tests {
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",
+                "W_STATE_LITERAL_UNCHECKED",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",
