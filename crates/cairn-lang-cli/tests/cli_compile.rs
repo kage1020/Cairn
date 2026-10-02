@@ -1663,11 +1663,12 @@ fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
 
 #[test]
 fn walkways_that_flatten_to_one_filename_are_refused_before_anything_is_written() {
-    // Every id here passes the walkway ident rule, so both rows lay and
-    // their scope keys differ, but the filename joins a place and its port
-    // with the same `_` that sits inside `a_b` and `b_c`: both walkways
-    // flatten to `s_walkway_a_b_c__d_e_f.nbt`. The second would overwrite
-    // the first, so the compile is refused before any artifact is staged.
+    // Every id here passes the walkway ident rule, so both rows would lay
+    // and their scope keys differ, but the filename joins a place and its
+    // port with the same `_` that sits inside `a_b` and `b_c`: both
+    // walkways flatten to `s_walkway_a_b_c__d_e_f.nbt`. The second would
+    // overwrite the first, so the resolver refuses the source with
+    // `E_OUTPUT_NAME_COLLISION` before it lowers, and nothing is staged.
     let fixture = Fixture::new(
         "cli-compile",
         "walkway-filename-collision",
@@ -1694,14 +1695,18 @@ fn walkways_that_flatten_to_one_filename_are_refused_before_anything_is_written(
     let result = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
-    // No finding from lowering: both rows laid, so the refusal is the
-    // collision and nothing else.
+    // The collision is the only finding.
     assert!(!stderr.contains("warning["), "stderr={stderr}");
+    assert_eq!(stderr.matches("error[").count(), 1, "stderr={stderr}");
     assert!(
         stderr.contains(
-            "s_walkway_a_b_c__d_e_f.nbt` collides between scopes `walkway::s::a_b.c__d_e.f` \
-             and `walkway::s::a.b_c__d.e_f`"
+            "error[E_OUTPUT_NAME_COLLISION]: the walkway `a.b_c ↔ d.e_f` in site `s` would be \
+             written to the same file as the walkway `a_b.c ↔ d_e.f` in site `s`"
         ),
+        "stderr={stderr}",
+    );
+    assert!(
+        stderr.contains("both would be written to `s_walkway_a_b_c__d_e_f`"),
         "stderr={stderr}",
     );
     assert!(fixture.artifacts().is_empty(), "{:?}", fixture.artifacts());

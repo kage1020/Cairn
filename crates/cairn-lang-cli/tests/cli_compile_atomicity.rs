@@ -579,12 +579,14 @@ fn atomic_7_windows_a_lock_reached_through_a_junction_is_refused() {
     });
 }
 
-#[cfg(any(target_os = "macos", windows))]
 #[test]
-fn atomic_11_two_artifacts_differing_only_in_case_are_refused_where_case_is_folded() {
+fn atomic_11_two_artifacts_differing_only_in_case_are_refused_on_every_host() {
     // `home1` and `HOME1` are distinct ids, but `home1.nbt` and `HOME1.nbt`
-    // are one directory entry here. Staged together they overwrote each
-    // other and the commit lost both, the previous one included.
+    // are one directory entry on macOS and Windows. Staged together there
+    // they overwrote each other and the commit lost both, the previous one
+    // included; on Linux they built as two files. The names are compared
+    // ignoring case before lowering, so every host refuses the source and
+    // the previous build stays as it was.
     let build = first_successful_build();
     let before = snapshot(&build.out_dir);
     let body = fs::read_to_string(&build.source).expect("read source");
@@ -600,8 +602,8 @@ fn atomic_11_two_artifacts_differing_only_in_case_are_refused_where_case_is_fold
     let (code, stderr) = compile_with_output(&build.source, &build.out_dir, &build.lock);
     assert_eq!(code, Some(1), "stderr={stderr}");
     assert!(
-        stderr.contains("collides between scopes") && stderr.contains("name one file"),
-        "the refusal must come from the output-filename guard; got {stderr}",
+        stderr.contains("error[E_OUTPUT_NAME_COLLISION]") && stderr.contains("differ only in case"),
+        "the refusal must be the case-folded name collision; got {stderr}",
     );
     assert_eq!(
         snapshot(&build.out_dir),
