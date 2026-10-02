@@ -204,7 +204,7 @@ fn info_9_requires_floor_reaches_the_registry_range_however_it_is_spaced() {
 fn info_9b_a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() {
     let path = tempfile_with_contents(
         "cross_edition_floor",
-        "@requires version>=1.21.4\nstruct s size=4x4\n",
+        &format!("@requires version>=1.21.4\n{PAINTED_STRUCT}"),
     );
     let out = cairn(
         "info",
@@ -236,7 +236,7 @@ fn info_9b_a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() 
 fn info_9c_a_scoped_floor_is_weighed_only_against_its_own_edition() {
     let path = tempfile_with_contents(
         "scoped_floor",
-        "@requires java version>=1.21.4\nstruct s size=4x4\n",
+        &format!("@requires java version>=1.21.4\n{PAINTED_STRUCT}"),
     );
     let out = cairn(
         "info",
@@ -364,6 +364,12 @@ fn info_10_a_rejected_requirement_stops_info_in_both_formats() {
         String::from_utf8_lossy(&json.stdout),
     );
 }
+
+/// A struct that lays blocks on every target, for a test whose subject is
+/// the floor above it: a struct of air is a lost scope, and would refuse
+/// every target before the floor is weighed.
+const PAINTED_STRUCT: &str =
+    "theme t:\n  slot m -> @oak_planks\n\nstruct s size=4x4\n  floor mat_slot=m\n";
 
 /// Write a transient `.crn` under the system temp dir.
 ///
