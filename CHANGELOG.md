@@ -884,12 +884,12 @@
   dust it can spare, rather than that every coord turns; a cell whose own wire out has no room is
   refused on its own net.
 
-- *(redstone)* A buffer repeater could stand beside dust of its own net that its tree does not
-  link to it. A repeater joins only the blocks behind and in front of it, so the strand beside it
-  was cut off from the trunk. Two sinks in a column at `(58,0,2)` and `(58,0,4)`, fed along `z = 0`,
-  put the last repeater before the turn on `(57,0,0)`, beside the branch that steps back through
-  `(57,0,1)` to get round the nearer sink. A coord with any other coord of its net on one of its
-  six faces no longer holds a repeater, so that one now stands on `(56,0,0)`.
+- *(redstone)* A buffer repeater could stand beside dust of its own net that its tree does not link
+  to it. A repeater joins only the blocks behind and in front of it, so the strand beside it was cut
+  off from the trunk. Two sinks in a column at `(58,0,2)` and `(58,0,4)`, fed along `z = 0`, put the
+  last repeater before the turn on `(57,0,0)`, beside the branch that steps back through `(57,0,1)`
+  to get round the nearer sink. A coord with another coord of its net on one of its six faces — one
+  its tree does not link to it — no longer holds a repeater, so that one now stands on `(56,0,0)`.
 
 - *(redstone)* A buffer repeater was put on whatever coord stood 15 steps along its route, whether
   or not a repeater could work there. A repeater reads the block behind it and drives only the
