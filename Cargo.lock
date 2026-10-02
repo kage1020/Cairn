@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-cli"
-version = "2026.9.2"
+version = "2026.10.0"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-formats",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-core"
-version = "2026.9.2"
+version = "2026.10.0"
 dependencies = [
  "criterion",
  "indexmap",
@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-formats"
-version = "2026.9.2"
+version = "2026.10.0"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-nbt",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-lsp"
-version = "2026.9.2"
+version = "2026.10.0"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-formats",
@@ -189,7 +189,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-nbt"
-version = "2026.9.2"
+version = "2026.10.0"
 dependencies = [
  "flate2",
  "indexmap",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-redstone"
-version = "2026.9.2"
+version = "2026.10.0"
 dependencies = [
  "cairn-lang-core",
  "criterion",
@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-tree-sitter"
-version = "2026.9.2"
+version = "2026.10.0"
 dependencies = [
  "cairn-lang-core",
  "cc",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "cairn-lang-wasm"
-version = "2026.9.2"
+version = "2026.10.0"
 dependencies = [
  "cairn-lang-core",
 ]
