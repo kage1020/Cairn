@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- *(redstone)* say a coord was refused a buffer repeater for touching its own net, not for
+  turning, when that is why
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

@@ -552,8 +552,11 @@ pub(crate) struct NoRepeaterSite {
     pub(crate) unpowered: CellCoord,
     /// What `unpowered` may be reached over.
     pub(crate) allowance: Allowance,
-    /// Why no repeater could stand before it.
+    /// How far back the walk for a repeater site went before it gave
+    /// up.
     pub(crate) blocked: Blocked,
+    /// What kept every coord it passed over from holding one.
+    pub(crate) refused: Refused,
 }
 
 /// The most dust a coord may be reached over.
@@ -576,16 +579,62 @@ impl Allowance {
     }
 }
 
-/// Why a [`NoRepeaterSite`] has no repeater.
+/// How far back a [`NoRepeaterSite`]'s walk went: which coords
+/// [`NoRepeaterSite::refused`] describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Blocked {
-    /// Every coord between `from` and `unpowered` turns, climbs or
-    /// branches.
-    EveryCoordTurns,
-    /// Every coord within the allowance before `unpowered` turns,
-    /// climbs or branches, and the straight coords further back are
-    /// too far from it to leave the signal enough.
+    /// It walked every coord between `from` and `unpowered`, and
+    /// reached `from` without finding one.
+    NoneBetween,
+    /// It walked every coord within the allowance before `unpowered`
+    /// without finding one; a repeater on any coord further back would
+    /// leave the signal too weak to reach it.
     NoneCloseEnough,
+}
+
+/// What kept the coords a [`NoRepeaterSite`]'s walk passed over from
+/// holding a repeater, each of them for one of the [`Misfit`]s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// The walk passed over no coord at all: the first one it asked
+    /// about was already `from`, or already too far.
+    Nothing,
+    /// Every one turns, climbs or branches.
+    Bends,
+    /// Every one runs straight through at one height, but touches
+    /// another block of its own net beside it.
+    Beside(Touching),
+    /// Some turn, climb or branch, and the rest run straight through
+    /// but touch another block of their own net beside them.
+    BendsOrBeside(Touching),
+}
+
+/// Of the coords a walk refused for touching their own net, the one
+/// nearest `unpowered`, and the block of its net it touches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Touching {
+    /// The coord a repeater was refused on.
+    pub(crate) at: CellCoord,
+    /// The first of its faces, in [`faces`] order, that holds a block
+    /// of the same net the wire does not run through.
+    pub(crate) beside: CellCoord,
+}
+
+impl Refused {
+    /// The record once the walk has also refused a coord for `misfit`.
+    /// The first coord refused for touching is the one kept, which is
+    /// the nearest `unpowered`, since the walk runs back from it.
+    fn and(self, misfit: Misfit) -> Self {
+        match (self, misfit) {
+            (Self::Nothing | Self::Bends, Misfit::Bends) => Self::Bends,
+            (Self::Nothing, Misfit::Beside(touching))
+            | (Self::Beside(touching), Misfit::Beside(_)) => Self::Beside(touching),
+            (Self::Bends, Misfit::Beside(touching)) => Self::BendsOrBeside(touching),
+            (Self::Beside(touching), Misfit::Bends) | (Self::BendsOrBeside(touching), _) => {
+                Self::BendsOrBeside(touching)
+            }
+        }
+    }
 }
 
 /// Where one net's implicit buffer repeaters stand, in the order the
@@ -682,6 +731,7 @@ fn repeater_sites(
         let mut candidate = tree
             .parent(unpowered)
             .expect("a coord past its allowance is never the source");
+        let mut refused = Refused::Nothing;
         loop {
             // `candidate` is an ancestor of `unpowered`, so it is the
             // shallower of the two.
@@ -706,15 +756,19 @@ fn repeater_sites(
                         .get(&unpowered)
                         .map_or(Allowance::Limit, |budget| Allowance::Budget(*budget)),
                     blocked: if fresh {
-                        Blocked::EveryCoordTurns
+                        Blocked::NoneBetween
                     } else {
                         Blocked::NoneCloseEnough
                     },
+                    refused,
                 });
             }
-            if carries_straight_through(tree, &children, candidate) {
-                sites.insert(candidate);
-                break;
+            match holds_repeater(tree, &children, candidate) {
+                Ok(()) => {
+                    sites.insert(candidate);
+                    break;
+                }
+                Err(misfit) => refused = refused.and(misfit),
             }
             candidate = tree
                 .parent(candidate)
@@ -741,25 +795,39 @@ fn last_full_strength(tree: &NetTree, sites: &HashSet<CellCoord>, coord: CellCoo
     at
 }
 
-/// Whether a repeater on `coord` would carry the signal on: one coord
+/// Why a repeater on a coord would not carry the signal on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Misfit {
+    /// The coord does not have one coord before it and exactly one
+    /// after, all three at the same height and on one line: it turns,
+    /// climbs or branches, or it is the source.
+    Bends,
+    /// The wire runs straight through it at one height, but another
+    /// block of the same net is on one of its faces.
+    Beside(Touching),
+}
+
+/// `Ok` when a repeater on `coord` would carry the signal on: one coord
 /// before it and exactly one after, all three at the same height and
-/// on one line, and no other coord of the net touching it.
+/// on one line, and no other coord of the net touching it. `Err` says
+/// which of those failed, the shape of the wire before its
+/// neighbours.
 ///
 /// The last is asked of the grid, not of the parent links. Dust joins
 /// the dust beside it whether or not the tree runs between them, and a
 /// repeater joins only the blocks at its back and front — so a strand
 /// of the same net beside it, which the tree reaches some other way,
 /// would be severed from the dust the repeater replaces.
-fn carries_straight_through(
+fn holds_repeater(
     tree: &NetTree,
     children: &HashMap<CellCoord, Vec<CellCoord>>,
     coord: CellCoord,
-) -> bool {
+) -> Result<(), Misfit> {
     let Some(before) = tree.parent(coord) else {
-        return false;
+        return Err(Misfit::Bends);
     };
     let [after] = children.get(&coord).map_or(&[][..], Vec::as_slice) else {
-        return false;
+        return Err(Misfit::Bends);
     };
     let step = |from: CellCoord, to: CellCoord| {
         (
@@ -769,11 +837,15 @@ fn carries_straight_through(
         )
     };
     let (dx, dy, dz) = step(before, coord);
+    if dy != 0 || (dx, dy, dz) != step(coord, *after) {
+        return Err(Misfit::Bends);
+    }
     // `route_to` answers for the source too, which has no parent.
     let on_net = |face: CellCoord| tree.parent(face).is_some() || tree.route_to(face).is_some();
-    dy == 0
-        && (dx, dy, dz) == step(coord, *after)
-        && faces(coord).all(|face| face == before || face == *after || !on_net(face))
+    match faces(coord).find(|face| *face != before && *face != *after && on_net(*face)) {
+        Some(beside) => Err(Misfit::Beside(Touching { at: coord, beside })),
+        None => Ok(()),
+    }
 }
 
 /// The fewest buffer repeaters that keep `segment` blocks of dust at
@@ -818,6 +890,7 @@ fn no_repeater_site_diagnostic(
         unpowered,
         allowance,
         blocked,
+        refused,
     } = stretch;
     let at = |c: CellCoord| format!("({},{},{})", c.x, c.y, c.z);
     let blocks = |n: u32| format!("{n} {}", if n == 1 { "block" } else { "blocks" });
@@ -861,13 +934,7 @@ fn no_repeater_site_diagnostic(
             spare = blocks(budget),
         ),
     };
-    let why = match blocked {
-        Blocked::EveryCoordTurns => "every coord between the two turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, so none can stand there".to_owned(),
-        Blocked::NoneCloseEnough => format!(
-            "every coord within {} before it turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, and one further back would leave too little strength to get there",
-            blocks(allowance.blocks()),
-        ),
-    };
+    let why = why_no_site(blocked, refused, allowance);
     let primary = format!(
         "{netlist} netlist for {kind} `{name}` routes {net} so that the signal leaving {leaving} {reach}: {why}",
         kind = entry.kind.label(),
@@ -891,6 +958,47 @@ fn no_repeater_site_diagnostic(
         primary,
         footer,
     )
+}
+
+/// Why a [`NoRepeaterSite`] had nowhere for a repeater: the clause of
+/// its refusal after the colon.
+fn why_no_site(blocked: Blocked, refused: Refused, allowance: Allowance) -> String {
+    const STRAIGHT: &str = "a buffer repeater carries a signal only where the wire runs straight through it at one height";
+    const JOINS: &str = "joins only the blocks at its back and front";
+    let at = |c: CellCoord| format!("({},{},{})", c.x, c.y, c.z);
+    let blocks = |n: u32| format!("{n} {}", if n == 1 { "block" } else { "blocks" });
+    let span = match blocked {
+        Blocked::NoneBetween => "between the two".to_owned(),
+        Blocked::NoneCloseEnough => format!("within {} before it", blocks(allowance.blocks())),
+    };
+    let beside = |touching: Touching| {
+        format!(
+            "runs straight but touches another block of its own net beside it, as {} touches {}",
+            at(touching.at),
+            at(touching.beside),
+        )
+    };
+    let reason = match refused {
+        Refused::Nothing => format!("no coord stands {span}"),
+        Refused::Bends => format!("every coord {span} turns, climbs or branches — {STRAIGHT}"),
+        Refused::Beside(touching) => format!(
+            "every coord {span} {} — a buffer repeater {JOINS}, and would cut that block off from the dust it replaces",
+            beside(touching),
+        ),
+        Refused::BendsOrBeside(touching) => format!(
+            "every coord {span} turns, climbs or branches, or {} — {STRAIGHT}, and {JOINS}",
+            beside(touching),
+        ),
+    };
+    match (blocked, refused) {
+        (Blocked::NoneBetween, Refused::Nothing) => {
+            format!("{reason}, so there is nowhere for a buffer repeater")
+        }
+        (Blocked::NoneBetween, _) => format!("{reason}, so none can stand there"),
+        (Blocked::NoneCloseEnough, _) => {
+            format!("{reason}, and one further back would leave too little strength to get there")
+        }
+    }
 }
 
 /// `cell #i`, for the cell on `coord` that an [`Allowance::Budget`]
@@ -959,7 +1067,7 @@ mod tests {
 
     use super::{
         Allowance, BUFFER_REPEATER_TICKS, Blocked, DUST_ATTENUATION_LIMIT, Fed,
-        MAX_ATTENUATION_SEGMENT, NoRepeaterSite, attribute_local_delay_ticks,
+        MAX_ATTENUATION_SEGMENT, NoRepeaterSite, Refused, Touching, attribute_local_delay_ticks,
         buffer_count_for_segment, compile_delay, no_repeater_site_diagnostic, repeater_sites,
         repeater_sites_of_scope,
     };
@@ -1387,8 +1495,157 @@ mod tests {
                 spent: 0,
                 unpowered: path[16],
                 allowance: Allowance::Limit,
-                blocked: Blocked::EveryCoordTurns,
+                blocked: Blocked::NoneBetween,
+                refused: Refused::Bends,
             }),
+        );
+    }
+
+    /// A run of dust that runs straight the whole way, but beside a
+    /// second strand of its own net, is refused for touching that
+    /// strand and says so — not that every coord turns, because none
+    /// of them does.
+    ///
+    /// Two strands leave the source side by side: the trunk east along
+    /// `z = 0`, and a branch that steps south once and runs east along
+    /// `z = 1`. Every trunk coord has a branch coord beside it, which a
+    /// repeater there would cut off.
+    #[test]
+    fn a_straight_run_beside_its_own_net_is_refused_for_touching_it() {
+        let trunk = walk((0, 0, 0), &[(EAST, 17)]);
+        let branch = walk((0, 0, 0), &[(SOUTH, 1), (EAST, 16)]);
+        let tree = NetTree::from_paths(&[&trunk, &branch]);
+        let stretch = repeater_sites(&tree, 0, &HashMap::new());
+        assert_eq!(
+            stretch,
+            Err(NoRepeaterSite {
+                from: CellCoord::new(0, 0, 0),
+                spent: 0,
+                unpowered: CellCoord::new(16, 0, 0),
+                allowance: Allowance::Limit,
+                blocked: Blocked::NoneBetween,
+                refused: Refused::Beside(Touching {
+                    at: CellCoord::new(15, 0, 0),
+                    beside: CellCoord::new(15, 0, 1),
+                }),
+            }),
+        );
+
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(20, 3, 1));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.outputs.push(routed_output(
+            NetRef::Input(0),
+            *trunk.last().expect("a walk has an end"),
+        ));
+        let entry = ScopedPlacementIrEntry {
+            kind: ScopeKind::Struct,
+            name: "beside".to_owned(),
+            ir: ir.clone(),
+        };
+        let region = ir.region.clone().expect("set above");
+        let diagnostic = no_repeater_site_diagnostic(
+            &ir,
+            &entry,
+            "routed",
+            &region,
+            NetRef::Input(0),
+            &tree,
+            stretch.expect_err("refused above"),
+        );
+        assert_eq!(
+            diagnostic.primary,
+            "routed netlist for struct `beside` routes sig.a so that the signal leaving (0,0,0) runs out before (16,0,0), past the attenuation limit of 15 blocks of dust, and never reaches output pad #0: every coord between the two runs straight but touches another block of its own net beside it, as (15,0,0) touches (15,0,1) — a buffer repeater joins only the blocks at its back and front, and would cut that block off from the dust it replaces, so none can stand there",
+        );
+    }
+
+    /// A stretch on which some coords turn and the rest run straight
+    /// beside their own net names both reasons, and the coord nearest
+    /// the dark end that was refused for touching.
+    ///
+    /// The trunk leaves the source east along `z = 1` and turns down a
+    /// staircase at `(8,0,1)`; a branch steps north to `z = 0` and runs
+    /// east beside the trunk's straight part as far as `(7,0,0)`.
+    #[test]
+    fn a_stretch_that_turns_and_touches_names_both() {
+        let mut stairs = vec![(EAST, 8)];
+        for _ in 0..5 {
+            stairs.push((SOUTH, 1));
+            stairs.push((EAST, 1));
+        }
+        let trunk = walk((0, 0, 1), &stairs);
+        let branch = walk((0, 0, 1), &[((0, 0, -1), 1), (EAST, 7)]);
+        let tree = NetTree::from_paths(&[&trunk, &branch]);
+        let stretch = repeater_sites(&tree, 0, &HashMap::new());
+        assert_eq!(
+            stretch,
+            Err(NoRepeaterSite {
+                from: CellCoord::new(0, 0, 1),
+                spent: 0,
+                unpowered: trunk[16],
+                allowance: Allowance::Limit,
+                blocked: Blocked::NoneBetween,
+                refused: Refused::BendsOrBeside(Touching {
+                    at: CellCoord::new(7, 0, 1),
+                    beside: CellCoord::new(7, 0, 0),
+                }),
+            }),
+        );
+    }
+
+    /// A coord past its allowance one step from the block that last
+    /// restored strength leaves the walk nothing to refuse, and the
+    /// refusal says there is no coord between the two rather than
+    /// describing coords that are not there.
+    #[test]
+    fn a_stretch_with_no_coord_in_it_says_so() {
+        let path = walk((0, 0, 0), &[(EAST, 1)]);
+        let tree = NetTree::from_paths(&[&path]);
+        let stretch = repeater_sites(&tree, DUST_ATTENUATION_LIMIT, &HashMap::new());
+        assert_eq!(
+            stretch,
+            Err(NoRepeaterSite {
+                from: CellCoord::new(0, 0, 0),
+                spent: DUST_ATTENUATION_LIMIT,
+                unpowered: CellCoord::new(1, 0, 0),
+                allowance: Allowance::Limit,
+                blocked: Blocked::NoneBetween,
+                refused: Refused::Nothing,
+            }),
+        );
+
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(3, 3, 1));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.outputs
+            .push(routed_output(NetRef::Input(0), CellCoord::new(1, 0, 0)));
+        let entry = ScopedPlacementIrEntry {
+            kind: ScopeKind::Struct,
+            name: "spent".to_owned(),
+            ir: ir.clone(),
+        };
+        let region = ir.region.clone().expect("set above");
+        let diagnostic = no_repeater_site_diagnostic(
+            &ir,
+            &entry,
+            "routed",
+            &region,
+            NetRef::Input(0),
+            &tree,
+            stretch.expect_err("refused above"),
+        );
+        assert!(
+            diagnostic.primary.ends_with(
+                ": no coord stands between the two, so there is nowhere for a buffer repeater"
+            ),
+            "{:?}",
+            diagnostic.primary,
         );
     }
 
@@ -1413,7 +1670,8 @@ mod tests {
                 spent: 0,
                 unpowered: path[19 + 16],
                 allowance: Allowance::Limit,
-                blocked: Blocked::EveryCoordTurns,
+                blocked: Blocked::NoneBetween,
+                refused: Refused::Bends,
             }),
         );
     }
@@ -1465,6 +1723,7 @@ mod tests {
                 unpowered: sink,
                 allowance: Allowance::Budget(1),
                 blocked: Blocked::NoneCloseEnough,
+                refused: Refused::Bends,
             }),
         );
 
