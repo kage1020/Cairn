@@ -25,9 +25,13 @@ use peak_alloc::PeakAlloc;
 static ALLOCATOR: PeakAlloc = PeakAlloc;
 
 /// The most bytes `f` holds live at once beyond what was live before it.
+///
+/// The peak is reset before `before` is read: the reset pins the peak at
+/// the live total, so anything freed or allocated between the two reads
+/// leaves the peak at or above `before` and the subtraction cannot wrap.
 fn peak_during(f: impl FnOnce()) -> usize {
-    let before = ALLOCATOR.current_usage();
     ALLOCATOR.reset_peak_usage();
+    let before = ALLOCATOR.current_usage();
     f();
     ALLOCATOR.peak_usage() - before
 }
@@ -114,6 +118,15 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
         ("bedrock write", &bedrock_write),
     ] {
         let (small_peak, large_peak) = (write(&small), write(&large));
+        // Both writers allocate something (the gzip encoder's window, the
+        // palette), so a zero means the allocation moved out of the
+        // counter's view, for example into a C allocator behind a
+        // different flate2 backend, and the bound below would hold
+        // vacuously.
+        assert!(
+            small_peak > 0,
+            "{label}: the counter saw no allocation, so it cannot bound one",
+        );
         assert!(
             large_peak <= small_peak + SLACK,
             "{label}: peak grew from {small_peak} to {large_peak} bytes for {grown} more voxels",

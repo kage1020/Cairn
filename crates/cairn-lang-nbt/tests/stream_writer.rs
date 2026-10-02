@@ -9,8 +9,8 @@ use std::io::Write;
 
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 use cairn_lang_nbt::{
-    CompoundStream, ListStream, NbtIoError, stream_bedrock_uncompressed, stream_java_gzip,
-    stream_java_uncompressed, write_bedrock_uncompressed, write_java_gzip, write_java_uncompressed,
+    CompoundStream, ListStream, NbtIoError, stream_bedrock_uncompressed, stream_java_uncompressed,
+    write_bedrock_uncompressed, write_java_uncompressed,
 };
 
 /// Stream `tag` under `name` through the structural calls — a compound as
@@ -109,14 +109,20 @@ fn a_streamed_root_is_the_bytes_the_tree_writer_writes() {
     stream_bedrock_uncompressed(&mut bedrock_stream, "", |c| stream_body(c, &tree))
         .expect("stream write");
     assert_eq!(bedrock_stream, bedrock_tree, "little-endian");
+}
 
-    // The gzip twin wraps the same payload in the same envelope, so the
-    // compressed bytes agree too, not only what they decompress to.
-    let mut gzip_tree = Vec::new();
-    write_java_gzip(&mut gzip_tree, "", &tree).expect("tree write");
-    let mut gzip_stream = Vec::new();
-    stream_java_gzip(&mut gzip_stream, "", |c| stream_body(c, &tree)).expect("stream write");
-    assert_eq!(gzip_stream, gzip_tree, "gzip");
+#[test]
+fn a_held_compound_streams_the_bytes_of_the_tag_wrapping_it() {
+    let inner = every_shape();
+    let mut wrapped = Vec::new();
+    stream_java_uncompressed(&mut wrapped, "", |root| {
+        root.tag("palette", &Tag::Compound(inner.clone()))
+    })
+    .expect("tag write");
+    let mut held = Vec::new();
+    stream_java_uncompressed(&mut held, "", |root| root.compound_tag("palette", &inner))
+        .expect("compound_tag write");
+    assert_eq!(held, wrapped);
 }
 
 #[test]
@@ -176,27 +182,71 @@ fn an_item_of_another_type_is_refused_with_its_index() {
 }
 
 #[test]
-fn an_empty_list_claiming_an_element_type_is_refused() {
-    // The tree writer refuses `List { element_type_id: 3, items: [] }`; the
-    // stream refuses the same declaration before writing its prefix, for
-    // a list entry and for a list item alike.
-    let mut buf = Vec::new();
-    let err = stream_java_uncompressed(&mut buf, "", |root| root.list("size", 3, 0, |_| Ok(())))
-        .expect_err("an empty list of ints");
-    assert!(
-        matches!(err, NbtIoError::EmptyListWithElementType { declared: 3 }),
-        "entry: got {err:?}",
+fn an_empty_list_declares_tag_end_whatever_type_it_names() {
+    // `List::of_tags(3, vec![])` declares `TAG_End`, and so does a streamed
+    // list of no items, for a list entry and for a list item alike, so a
+    // caller does not have to re-derive the rule.
+    let mut tree = Compound::new();
+    tree.insert("size", Tag::List(List::of_tags(3, vec![])));
+    tree.insert(
+        "block_indices",
+        Tag::List(List {
+            element_type_id: 9,
+            items: vec![Tag::List(List::of_tags(3, vec![]))],
+        }),
     );
+    let mut tree_bytes = Vec::new();
+    write_bedrock_uncompressed(&mut tree_bytes, "", &tree).expect("tree write");
 
-    let mut buf = Vec::new();
-    let err = stream_bedrock_uncompressed(&mut buf, "", |root| {
+    let mut streamed = Vec::new();
+    stream_bedrock_uncompressed(&mut streamed, "", |root| {
+        root.list("size", 3, 0, |_| Ok(()))?;
         root.list("block_indices", 9, 1, |layers| {
             layers.list(3, 0, |_| Ok(()))
         })
     })
-    .expect_err("an empty layer of ints");
+    .expect("an empty list of any named type streams");
+    assert_eq!(streamed, tree_bytes);
+}
+
+/// A writer that accepts `budget` bytes and then reports a full disk.
+struct FillsUp {
+    budget: usize,
+}
+
+impl Write for FillsUp {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.budget == 0 {
+            return Err(std::io::Error::from(std::io::ErrorKind::StorageFull));
+        }
+        let n = buf.len().min(self.budget);
+        self.budget -= n;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_writer_failing_inside_a_list_returns_its_error_rather_than_panicking() {
+    // The count check runs only after the list's closure returns `Ok`. A
+    // write failing part-way leaves the list short, and checking the count
+    // first would turn a full disk into an abort in a `panic = "abort"`
+    // build.
+    let mut disk = FillsUp { budget: 64 };
+    let err = stream_bedrock_uncompressed(&mut disk, "", |root| {
+        root.list("layer", 3, 1000, |layer| {
+            for i in 0..1000 {
+                layer.item(&Tag::Int(i))?;
+            }
+            Ok(())
+        })
+    })
+    .expect_err("the disk fills up");
     assert!(
-        matches!(err, NbtIoError::EmptyListWithElementType { declared: 3 }),
-        "item: got {err:?}",
+        matches!(&err, NbtIoError::Io(io) if io.kind() == std::io::ErrorKind::StorageFull),
+        "got {err:?}",
     );
 }

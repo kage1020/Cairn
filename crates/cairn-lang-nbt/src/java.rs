@@ -2,10 +2,12 @@
 //!
 //! Two entry points: [`write_java_uncompressed`] for tests and
 //! [`write_java_gzip`] for the on-disk `.nbt` format Minecraft Java itself
-//! emits, each with a streaming twin ([`stream_java_uncompressed`],
-//! [`stream_java_gzip`]) that writes the root's body as it goes rather than
-//! from a built tree (see [`crate::stream`]). The gzip wrapper uses [`flate2::Compression::default`] (level 6),
-//! which matches Mojang's output — important so binary snapshots of small
+//! emits. [`stream_java_uncompressed`] is the streaming twin of the first,
+//! writing the root's body as it goes rather than from a built tree (see
+//! [`crate::stream`]); a caller wanting the gzip form wraps its writer in
+//! its own encoder, so this crate's signatures name no `flate2` type. The
+//! gzip wrapper uses [`flate2::Compression::default`] (level 6), which
+//! matches Mojang's output — important so binary snapshots of small
 //! structures stay byte-stable when checked against samples from the game.
 //!
 //! The byte-level encoding lives in the crate-internal `writer` module,
@@ -60,7 +62,14 @@ pub fn write_java_gzip<W: Write>(
 ///
 /// # Errors
 ///
-/// Whatever `body` returns, and I/O failure on `writer`.
+/// [`NbtIoError::InvalidString`] or [`NbtIoError::LengthOverflow`] when
+/// `root_name` cannot be written as an NBT string, whatever `body`
+/// returns, and I/O failure on `writer`.
+///
+/// # Panics
+///
+/// Panics when a list `body` streams is given a number of items other than
+/// it declared (see [`crate::stream`]).
 pub fn stream_java_uncompressed<W, F>(
     writer: &mut W,
     root_name: &str,
@@ -71,28 +80,4 @@ where
     F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
 {
     stream_named_root(writer, Endian::Big, root_name, body)
-}
-
-/// Streaming twin of [`write_java_gzip`]: the same gzip envelope at the
-/// same level around the bytes [`stream_java_uncompressed`] writes.
-///
-/// # Errors
-///
-/// Same set as [`stream_java_uncompressed`] plus any I/O the gzip encoder
-/// raises when flushing.
-pub fn stream_java_gzip<'w, W, F>(
-    writer: &'w mut W,
-    root_name: &str,
-    body: F,
-) -> Result<(), NbtIoError>
-where
-    W: Write,
-    F: FnOnce(
-        &mut CompoundStream<'_, flate2::write::GzEncoder<&'w mut W>>,
-    ) -> Result<(), NbtIoError>,
-{
-    let mut gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
-    stream_java_uncompressed(&mut gz, root_name, body)?;
-    gz.finish()?;
-    Ok(())
 }

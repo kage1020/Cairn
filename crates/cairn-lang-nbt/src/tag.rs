@@ -7,6 +7,10 @@
 
 use indexmap::IndexMap;
 
+/// Whether a string can be written as an NBT string, checked by the rule
+/// the writers apply to every string they write.
+pub use crate::writer::check_string;
+
 /// A single NBT tag.
 ///
 /// Variants mirror the Java vanilla tag ids 1..=12; `TAG_End` (0) is implicit

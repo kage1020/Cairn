@@ -166,6 +166,7 @@ version = "2026.9.2"
 dependencies = [
  "cairn-lang-core",
  "cairn-lang-nbt",
+ "flate2",
  "indexmap",
  "insta",
  "peak_alloc",

@@ -40,7 +40,14 @@ pub fn write_bedrock_uncompressed<W: Write>(
 ///
 /// # Errors
 ///
-/// Whatever `body` returns, and I/O failure on `writer`.
+/// [`NbtIoError::InvalidString`] or [`NbtIoError::LengthOverflow`] when
+/// `root_name` cannot be written as an NBT string, whatever `body`
+/// returns, and I/O failure on `writer`.
+///
+/// # Panics
+///
+/// Panics when a list `body` streams is given a number of items other than
+/// it declared (see [`crate::stream`]).
 pub fn stream_bedrock_uncompressed<W, F>(
     writer: &mut W,
     root_name: &str,
