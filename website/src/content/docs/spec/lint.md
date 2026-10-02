@@ -348,6 +348,7 @@ the author to a line that is correct.
 | `W_STRUCT_NO_SIZE` | A `struct` declares no `size=WxH`, so lowering can derive no extent and skips it. |
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
+| `W_PALETTE_TOO_LARGE` | A scope paints more than 65,535 distinct block states besides air, past what one palette can index. |
 | `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](/spec/compilation/)). |
 | `E_PARTIAL_BUILD` | At least one requested scope, or a walkway a `connect` row asked for, did not lower, so the run produced less than was asked for. |
 
@@ -358,6 +359,12 @@ on `code` can tell a struct that will not build from a template that will not in
 `level y=` are each range-checked on their own, and this is the product of them being out of reach.
 A warning rather than an error, matching the two above — the scope is skipped and the rest of the
 build is unaffected.
+
+`W_PALETTE_TOO_LARGE` is the same kind of limit on what a scope paints rather than where. Every state
+a member writes counts, including one a later member covers, so the limit is on the states written
+rather than the states the finished scope keeps. A vanilla registry has far fewer states, so a source
+reaches it only with block ids no pinned target has checked — `cairn lower`, `cairn info`, or a
+`cairn check --target` naming a version the edition does not ship. A warning, for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it.
