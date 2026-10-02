@@ -134,6 +134,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Accept,
     ),
     (
+        "slot_state_literal_interior_spaces",
+        "theme t:\n  slot s -> @oak_stairs[ half = top , facing = north ]\n",
+        Accept,
+    ),
+    (
         "arg_state_literal",
         "struct s size=3x3\n  floor mat_slot=f\n  thing mat=@oak_log[axis=x]\n",
         Accept,
@@ -145,11 +150,39 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     // A dotted token is abstract: the theme binding it picks the block, so
-    // there is no one block for a state to belong to.
+    // there is no one block for a state to belong to and the token takes no
+    // literal. A touching `[` is then whatever comes next — nothing, in a
+    // slot, which ends at its value; a positional after an argument, or
+    // the next item of a value list, where something may follow.
     (
         "abstract_state_literal",
         "theme t:\n  slot floor -> @floor.wood[axis=x]\n",
         Reject,
+    ),
+    (
+        "abstract_token_then_positional_touching",
+        "struct s size=3x3\n  thing mat=@a.b[1]\n",
+        Accept,
+    ),
+    (
+        "abstract_token_positional_then_list_touching",
+        "struct s size=3x3\n  thing @a.b[1]\n",
+        Accept,
+    ),
+    (
+        "value_list_abstract_token_then_list_touching",
+        "struct s size=3x3\n  thing mat=[@a.b[c]]\n",
+        Accept,
+    ),
+    (
+        "place_abstract_theme_then_positional_touching",
+        "site s:\n  place id=p use=d theme=@a.b[1]\n",
+        Accept,
+    ),
+    (
+        "deep_abstract_token_then_positional_touching",
+        "struct s size=3x3\n  thing mat=@a.b.c[1]\n",
+        Accept,
     ),
     (
         "state_literal_empty",

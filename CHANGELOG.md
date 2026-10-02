@@ -385,21 +385,34 @@
   st.crn:2:25: error[E_PARSE]: expected end of line, got `[`
   ```
 
-  A `[` that touches an undotted `@` token now opens its state literal: `property=value` pairs,
-  each value a word, a run of digits, or `true` / `false`, separated by one required comma. The
-  literal folds into the token's text, so the example builds a log lying along `x`, and
-  `@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north, half=top]` are one palette
-  entry. The parser is now the only place a malformed literal is refused. That covers an empty
-  literal, a missing `=` or value, a trailing, doubled or missing comma, a string value, a missing
-  `]`, a property named twice, and a literal on an abstract token such as `@floor.wood`. A `[`
-  after a space is unchanged. The one spelling that now reads differently is a token touching a
-  nested list inside a value list. `mat=[@a [b]]` is still two items, but `mat=[@a[b]]` used to be
-  two items and is now refused. Properties and values are not yet checked against the target
-  (`E_STATE_DOMAIN` is not implemented), and `spec/syntax` "Literals and separators" says so.
+  A `[` that touches an undotted `@` token now opens its state literal: `property=value` pairs, each
+  value a word, a run of digits, or `true` / `false`, separated by one required comma. The literal
+  folds into the token's text, so the example builds a log lying along `x`. Its properties are
+  sorted by name, so `@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north, half=top]`
+  are one palette entry and write the same `.nbt` bytes and `resolved_ir_hash`. The parser is now
+  the only place a malformed literal is refused. That covers an empty literal, a missing `=` or
+  value, a trailing, doubled or missing comma, a string value, a missing `]`, and a property named
+  twice. A dotted token such as `@floor.wood` takes no literal, and a `[` touching one is read as
+  before, as is a `[` after a space.
+
+  A `[` touching an undotted token used to be whatever came next, so `mat=@a[1]`, `@a[1]` after a
+  member, `-> @a[1]` and `mat=[@a[1]]` parsed and are now refused. No program that ever passed
+  `check` is affected: a bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL` and a
+  list in a member argument is `E_TYPE_MISMATCH_LABEL`, so only the parse tree of a source that
+  could not build changes. `spec/syntax` "Literals and separators" says the same.
+
+  Properties and values are not yet checked against the target (`E_STATE_DOMAIN` is not implemented,
+  and `spec/versioning-editions` now marks that rule as not yet enforced). Every literal the
+  lowering reads, from a theme slot or a `connect … path=`, earns the new warning
+  `W_STATE_LITERAL_UNCHECKED` on the token, so a Java build that writes `@oak_log[axis=q]` as given
+  no longer does so in silence.
+
   Because a source can now reach it, `cairn info`'s refusal of a palette the pack was expected to
-  refuse, such as `@oak_stairs[facing=up]` on Bedrock, no longer says that none of it is the
-  source's to repair. It now names a state literal in the source as one possible origin, and
-  `spec/lint` "Machine-readable payload" says the same.
+  refuse no longer says that none of it is the source's to repair. It now names a state literal on a
+  stair as one possible origin: a `facing` or `half` value outside the Java domain, such as
+  `@oak_stairs[facing=up]` on Bedrock, or a key other than `facing` / `half` / `shape`. The Bedrock
+  backend's own refusal of such a value no longer suggests `--edition java`, which would write the
+  same value unchanged. `spec/lint` "Machine-readable payload" says the same.
 
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,

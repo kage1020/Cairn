@@ -389,20 +389,32 @@ pub(crate) fn validated_id(
 /// `minecraft:cobblestone`) into a [`BlockState`].
 ///
 /// Recognises an optional `namespace:` prefix and a trailing `[k=v,...]`
-/// state literal. The surface parser refuses a malformed literal, so a
-/// token from source reaches here well formed; the tail is still read
-/// leniently because a token can also be built by hand, as the tests
-/// below do.
+/// state literal, whose properties come back sorted by name: the palette
+/// is a set with a canonical rendering (`spec/compilation`), so the order
+/// a source spelled them in must reach neither the `Properties` a backend
+/// writes nor the lockfile's hash. Every other producer of a state —
+/// `roof::stair_state` — already inserts its keys in that order.
+///
+/// The parser refuses a malformed literal, so a token from source reaches
+/// here well formed, and a debug build asserts as much. A release build
+/// still reads the tail leniently, because [`resolve_block_state`] and
+/// [`ValueKind::Token`] are both public and a library caller can hand
+/// over any text at all.
 fn canonical_to_block_state(inner: &str) -> BlockState {
     let (head, properties_src) = match inner.find('[') {
         Some(i) => {
             let head = &inner[..i];
             let tail = &inner[i + 1..];
-            // Trim the matching `]` so a well-formed `oak_log[axis=x]`
-            // parses cleanly; an unterminated literal silently falls
-            // through with whatever the tail contained. The parser is
-            // what refuses malformed brackets, so only a hand-built token
-            // can reach this with one.
+            debug_assert!(
+                tail.ends_with(']')
+                    && tail[..tail.len() - 1]
+                        .split(',')
+                        .all(|pair| !pair.is_empty() && pair.contains('=')),
+                "a state literal reaches the material layer as the parser folds it, \
+                 `[key=value,...]`, got `{inner}`"
+            );
+            // Trim the matching `]`; an unterminated literal falls
+            // through with whatever the tail contained.
             let trimmed = tail.strip_suffix(']').unwrap_or(tail);
             (head, trimmed)
         }
@@ -413,7 +425,8 @@ fn canonical_to_block_state(inner: &str) -> BlockState {
     } else {
         format!("{VANILLA_NAMESPACE}:{head}")
     };
-    let properties = parse_state_literal(properties_src);
+    let mut properties = parse_state_literal(properties_src);
+    properties.sort_unstable_keys();
     BlockState { id, properties }
 }
 
@@ -423,7 +436,9 @@ fn canonical_to_block_state(inner: &str) -> BlockState {
 /// trailing comma or a stray `,,`) are skipped silently. The block-array IR
 /// is below the lint layer, so noisy parsing here would surface as
 /// diagnostics in the wrong place; the parser, which refuses every one of
-/// those shapes in source, is the gate for them.
+/// those shapes in source, is the gate for them, and
+/// [`canonical_to_block_state`] asserts in a debug build that nothing
+/// else reached here.
 fn parse_state_literal(body: &str) -> IndexMap<String, String> {
     let mut out = IndexMap::new();
     if body.is_empty() {

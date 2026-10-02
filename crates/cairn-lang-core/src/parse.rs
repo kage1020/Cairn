@@ -21,6 +21,7 @@ use crate::check::{Diagnostic, DiagnosticCode, LineStarts};
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
 use crate::resolve::parse_requirement;
+use indexmap::IndexSet;
 
 /// The word that introduces a version floor, as a directive name after the
 /// `@` and as a body line without one.
@@ -1062,32 +1063,25 @@ impl<'a> Parser<'a> {
     /// `@` starts at `start_byte`.
     fn parse_token_value(&mut self, start_byte: usize) -> Result<Value, ParseError> {
         self.advance();
-        let mut parts = vec![self.expect_ident()?];
+        let mut text = self.expect_ident()?;
+        let mut dotted = false;
         while self.peek_is(&TokenKind::Dot) {
             self.advance();
-            parts.push(self.expect_ident()?);
+            text.push('.');
+            text.push_str(&self.expect_ident()?);
+            dotted = true;
         }
-        let mut text = parts.join(".");
-        // A `[` that touches the name is the token's own state
-        // literal; one after a space is whatever the caller reads
-        // next, which in a value list is a nested list.
-        if self
-            .peek()
-            .is_some_and(|t| t.kind == TokenKind::LBracket && t.span.start == self.last_byte())
+        // A `[` that touches an undotted name is the token's own state
+        // literal. On a dotted token, or after a space, it is whatever the
+        // caller reads next — a nested list in a value list, a positional
+        // after a member — exactly as the grammar reads it: a dotted token
+        // is abstract and names no block for a state to belong to, so the
+        // grammar gives it no literal and this does not claim the `[`.
+        if !dotted
+            && self
+                .peek()
+                .is_some_and(|t| t.kind == TokenKind::LBracket && t.span.start == self.last_byte())
         {
-            // A state is one block's, and a dotted token names no
-            // block: the theme that binds it picks one.
-            if parts.len() > 1 {
-                return Err(ParseError::Syntax {
-                    position: self.position(),
-                    message: format!(
-                        "`@{text}` is an abstract material, so it takes no state \
-                         literal: a state belongs to one block, as in \
-                         `@oak_log[axis=x]`, and the theme binding `@{text}` \
-                         chooses which block that is"
-                    ),
-                });
-            }
             text.push_str(&self.parse_state_literal(&text)?);
         }
         Ok(Value::new(
@@ -1122,13 +1116,13 @@ impl<'a> Parser<'a> {
         };
         self.expect(&TokenKind::LBracket)?;
         let mut text = String::from("[");
-        let mut seen: Vec<String> = Vec::new();
+        // A set rather than a list: the literal's length is the author's
+        // to choose, and the duplicate check runs once per property.
+        let mut seen: IndexSet<String> = IndexSet::new();
         loop {
             let position = self.position();
             let Some(TokenKind::Ident(property)) = self.peek().map(|t| t.kind.clone()) else {
-                let got = self
-                    .peek()
-                    .map_or_else(|| "end of input".to_owned(), |t| t.kind.to_string());
+                let got = self.next_token_text();
                 return Err(refuse(position, &format!("a property name, got {got}")));
             };
             if seen.contains(&property) {
@@ -1143,9 +1137,7 @@ impl<'a> Parser<'a> {
             self.advance();
             let position = self.position();
             if !self.peek_is(&TokenKind::Eq) {
-                let got = self
-                    .peek()
-                    .map_or_else(|| "end of input".to_owned(), |t| t.kind.to_string());
+                let got = self.next_token_text();
                 return Err(refuse(
                     position,
                     &format!("`=` after `{property}`, got {got}"),
@@ -1157,8 +1149,8 @@ impl<'a> Parser<'a> {
                 Some(TokenKind::Ident(value)) => value.clone(),
                 Some(TokenKind::Int { lexeme }) => lexeme.clone(),
                 Some(TokenKind::Bool(value)) => value.to_string(),
-                other => {
-                    let got = other.map_or_else(|| "end of input".to_owned(), ToString::to_string);
+                _ => {
+                    let got = self.next_token_text();
                     return Err(refuse(
                         position,
                         &format!("a value for `{property}`, got {got}"),
@@ -1172,7 +1164,7 @@ impl<'a> Parser<'a> {
             text.push_str(&property);
             text.push('=');
             text.push_str(&value);
-            seen.push(property);
+            seen.insert(property);
             let position = self.position();
             match self.peek().map(|t| &t.kind) {
                 Some(TokenKind::Comma) => self.advance(),
@@ -1181,12 +1173,23 @@ impl<'a> Parser<'a> {
                     text.push(']');
                     return Ok(text);
                 }
-                other => {
-                    let got = other.map_or_else(|| "end of input".to_owned(), ToString::to_string);
+                _ => {
+                    let got = self.next_token_text();
                     return Err(refuse(position, &format!("`,` or `]`, got {got}")));
                 }
             }
         }
+    }
+
+    /// The next token as a refusal names it: `` `]` ``, `end of line`.
+    ///
+    /// The lexer ends every token stream with a `Newline`, so a construct
+    /// cut short by the end of the file reports `end of line` like one cut
+    /// short by the end of its line; `end of input` is only the answer for
+    /// a stream that breaks that rule.
+    fn next_token_text(&self) -> String {
+        self.peek()
+            .map_or_else(|| "end of input".to_owned(), |t| t.kind.to_string())
     }
 
     fn parse_value(&mut self) -> Result<Value, ParseError> {

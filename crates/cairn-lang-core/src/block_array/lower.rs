@@ -511,7 +511,10 @@ fn lower_connects(
         }
 
         let material = match resolve_block_state(&connect.path, registry) {
-            Ok(state) => state,
+            Ok(state) => {
+                diagnostics.extend(diag_state_literal_unchecked(&connect.path, &state));
+                state
+            }
             Err(MaterialDeferred::Abstract(token)) => {
                 diagnostics.push(diag_abstract_token(
                     connect.path.span.clone(),
@@ -935,6 +938,51 @@ fn diag_unknown_abstract_token(
         notes,
         data: None,
     }
+}
+
+/// Say that a state literal was taken as written, when `value` carries one.
+///
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+/// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, and
+/// nothing raises it yet: no table this compiler holds says which
+/// properties a block has or which values each takes. Until one does, the
+/// literal reaches the palette and the structure file unchanged, right or
+/// wrong, and this warning is what keeps that from being silent. It
+/// anchors on the value the way `E_UNKNOWN_ID` does, so the mistake right
+/// of the `[` is pointed at from the same place as one left of it.
+///
+/// Only a canonical token folds a `[` into its text, so a state that came
+/// from anywhere else — a catalog lookup, a member default — is not one.
+fn diag_state_literal_unchecked(value: &ValueWithSpan, state: &BlockState) -> Option<Diagnostic> {
+    let ValueKind::Token(text) = &value.value.kind else {
+        return None;
+    };
+    if state.properties.is_empty() || !text.contains('[') {
+        return None;
+    }
+    let pairs = state
+        .properties
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(Diagnostic {
+        code: DiagnosticCode::StateLiteralUnchecked,
+        span: value.span.clone(),
+        primary: format!(
+            "`{id}` is written with `{pairs}` unchecked: nothing checks a state literal's \
+             properties or values against the target yet",
+            id = state.id,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "a property the block does not have, or a value outside its domain, \
+                      reaches the structure file unchanged; check each one against the \
+                      block's states in the target edition and version"
+                .to_owned(),
+        }],
+        data: None,
+    })
 }
 
 /// Report a block id the compile's target does not declare.
@@ -2336,7 +2384,10 @@ fn resolve_member_state(
     // first is reported by neither layer.
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value, registry) {
-        Ok(state) => Some(state),
+        Ok(state) => {
+            diagnostics.extend(diag_state_literal_unchecked(slot_value, &state));
+            Some(state)
+        }
         Err(MaterialDeferred::Abstract(token)) => {
             diagnostics.push(diag_abstract_token(
                 member_or_slot_span(member, slot_value),
@@ -6413,13 +6464,14 @@ struct s size=9x7
 
     #[test]
     fn the_family_is_reported_before_the_properties_it_makes_moot() {
-        // Not reachable from source today, and the registry pack is not the
-        // way in either — `PackView::lookup` ends in `BlockState::bare`.
-        // The only producer is `canonical_to_block_state`'s bracket
-        // literal, which the grammar has no production for. Pinning the
-        // precedence anyway: once the id is refused it is not painted, and
-        // reporting that its unused properties were also dropped would ask
-        // the author to fix something that is not there.
+        // A source reaches this through a state literal on a block outside
+        // the stair family — `slot r -> @cobblestone[facing=north]` bound
+        // to a gable roof — and that literal is the only way in: the
+        // registry pack answers `PackView::lookup` with `BlockState::bare`.
+        // The state is built here rather than parsed so the test asks
+        // about the precedence alone: once the id is refused it is not
+        // painted, and reporting that its unused properties were also
+        // dropped would ask the author to fix something that is not there.
         let mut properties = IndexMap::new();
         properties.insert("facing".to_owned(), "north".to_owned());
         let state = BlockState {

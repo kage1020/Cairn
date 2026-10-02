@@ -43,10 +43,19 @@ comes next, so in a value list `[@a [b]]` is still a token and a nested list, wh
 refused because `b` is not a property. Each pair inside is `property=value`, where the value is a
 word, a run of digits, or `true` / `false`. This is Minecraft's own block-state syntax rather than a
 Cairn list, so exactly one comma separates two pairs. An empty literal, a trailing or doubled comma,
-and a property named twice are refused. An abstract token such as `@floor.wood` takes no literal,
-because the theme that binds it chooses the block. The literal's properties and values are not yet
-checked against the target: `E_STATE_DOMAIN` ([Versioning and Editions](/spec/versioning-editions/))
-is not implemented, so a Java build writes `@oak_log[axis=q]` as written.
+and a property named twice are refused. A dotted token such as `@floor.wood` is abstract and takes
+no literal, because the theme that binds it chooses the block, so a `[` touching it is whatever
+comes next, as one after a space is.
+
+Before the literal, a `[` touching an undotted token was whatever came next too, so `mat=@a[1]` and
+`mat=[@a[b]]` used to parse and are now refused. No source that passed `cairn check` had either
+shape: a bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL`, and a list where a label
+belongs is `E_TYPE_MISMATCH_LABEL`. Only the parse tree of a source that could not build changes.
+
+The literal's properties and values are not yet checked against the target: `E_STATE_DOMAIN`
+([Versioning and Editions](/spec/versioning-editions/)) is not implemented, so a Java build writes
+`@oak_log[axis=q]` as written. Each literal the build reads earns a `W_STATE_LITERAL_UNCHECKED`
+([Lint](/spec/lint/)) on the token, so that is said rather than silent.
 
 Besides that literal, the one place a comma carries meaning is the input list of
 `assert truth(...)`, where it separates the signals whose count the row width is checked against. A

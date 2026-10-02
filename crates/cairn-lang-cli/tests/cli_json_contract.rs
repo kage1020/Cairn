@@ -349,19 +349,21 @@ fn info_text_still_reports_an_edition_specific_failure_as_prose() {
     );
 }
 
-/// The three refusals a `.crn` can reach, asked the one question together.
+/// The four refusals a `.crn` can reach, asked the one question together.
 ///
-/// The per-path tests above each pin one failure's contents; this asks
-/// all three for a parseable document in one place, so the promise reads
-/// as a property of the command rather than three separate assertions.
-/// What it does not do is catch a fourth path: the array below is three
+/// The per-path tests each pin one failure's contents; this asks all four
+/// for a parseable document in one place, so the promise reads as a
+/// property of the command rather than four separate assertions. What it
+/// does not do is catch a fifth path: the array below is four
 /// hand-written fixtures, not an enumeration of `run_info`'s exits, and a
 /// path none of them reaches is a path this stays green on.
 ///
 /// The fourth is a palette the pack was expected to refuse. A source
-/// reaches it through a state literal whose values the target does not
-/// have, since nothing checks them yet; it writes the document with no
-/// elements, since the refusal is the run's rather than a finding.
+/// reaches it through a state literal on a stair — a `facing` or `half`
+/// value outside the Java domain, or a key other than `facing` / `half` /
+/// `shape` — since nothing checks a literal against the target yet; it
+/// writes the document with no elements, since the refusal is the run's
+/// rather than a finding.
 #[test]
 fn every_refusal_a_source_can_reach_still_writes_a_document() {
     let tmp = TempDir::new().expect("tempdir");
@@ -398,9 +400,9 @@ fn every_refusal_a_source_can_reach_still_writes_a_document() {
 }
 
 /// A source binding a stair to a `facing` no stair has. Nothing checks a
-/// state literal's values against the target yet, so this parses, checks
-/// clean and lowers, and the Bedrock portability walk is the first thing
-/// that refuses it.
+/// state literal against the target yet, so this parses, passes `check`
+/// and lowers, and the Bedrock portability walk is the first thing that
+/// refuses it.
 fn refused_state(dir: &TempDir) -> PathBuf {
     let path = dir.path().join("refused_state.crn");
     fs::write(
@@ -425,7 +427,7 @@ fn an_authored_state_the_target_lacks_is_named_as_the_sources() {
     assert_eq!(out.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("`facing=up`"), "{stderr}");
     assert!(
-        stderr.contains("a state literal written in the source"),
+        stderr.contains("a state literal on a stair in the source"),
         "{stderr}",
     );
 }
