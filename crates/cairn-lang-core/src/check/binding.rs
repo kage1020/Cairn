@@ -1,5 +1,6 @@
 //! `binding` pass — flags a `-> value` tail on a member that cannot emit a
-//! signal.
+//! signal: one whose keyword is not a sensor, or a sensor keyword written
+//! in the `[selector]` form, which no sensor binding is defined for.
 //!
 //! The fourth field of a member line, and the last one with no check of its
 //! own. [`super::arguments`] judges the `key=value` list and the member's
@@ -68,10 +69,43 @@ fn check_member(member: &Member, sink: &mut DiagnosticSink) {
         return;
     }
     let keyword = member.role.keyword();
-    if SENSOR_HOSTS.contains(&keyword) {
-        return;
+    if !SENSOR_HOSTS.contains(&keyword) {
+        sink.push(misplaced_binding(keyword, &binding.span));
+    } else if member.selector.is_some() {
+        sink.push(tail_on_selector(keyword, &binding.span));
     }
-    sink.push(misplaced_binding(keyword, &binding.span));
+}
+
+/// A tail on a sensor keyword written in the selector form.
+///
+/// `door[id=front] opened_by=sig.x` binds a door declared elsewhere, and
+/// that door actuator patch is the only binding `spec/redstone` "Signal
+/// binding" defines for a selector line — there is no sensor patch. Read
+/// as a sensor, `pressure_plate[id=p] -> sig.x` became a netlist input
+/// for a plate the selector may not even name. Asked after the host,
+/// because a `walls[...]` tail is wrong on the keyword first and dropping
+/// the brackets would not repair it.
+///
+/// The rule is about the tail. What a selector line *without* one builds
+/// is not this pass's question, so the sentence claims nothing about it.
+fn tail_on_selector(keyword: &str, span: &Span) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::MisplacedBinding,
+        span: span.clone(),
+        primary: format!(
+            "`{keyword}[...]` is the selector form, which carries no sensor binding; only a \
+             sensor's own line carries a `-> {SIGNAL_HEAD}.<name>` tail",
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!(
+                "write the tail on the `{keyword}` line that declares the sensor, without \
+                 brackets; the door actuator patch `door[id=<label>] opened_by=` is the only \
+                 binding a selector line carries",
+            ),
+        }],
+        data: None,
+    }
 }
 
 /// A tail on a member that is not a sensor.
