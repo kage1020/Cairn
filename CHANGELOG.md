@@ -1561,6 +1561,58 @@
 
 ### Breaking changes
 
+- *(core)* `cairn check` passed, and `cairn info` listed every supported version as buildable, for
+  a source whose artifacts share a file name, which `cairn compile` then refused at every target. A
+  `struct` and a `place` of one name both write `hut.nbt`:
+
+  ```
+  struct hut size=3x3
+    floor mat_slot=floor
+
+  site s:
+    place id=hut use=house theme=t at=origin
+  ```
+
+  ```
+  $ cairn check collide.crn --edition java --target 1.21.4; echo "exit=$?"
+  exit=0
+  $ cairn compile collide.crn --edition java --target 1.21.4 --out out; echo "exit=$?"
+  error: output filename `out/hut.nbt` collides between scopes `struct::hut` and `site::s::hut`
+  exit=1
+  ```
+
+  Only `compile` compared the names, after lowering, and its refusal carried no code for a
+  `--format json` consumer or a CI filter to match on. The names are now compared once the scopes
+  resolve, as `E_OUTPUT_NAME_COLLISION`, so `cairn check` reports it without a `--target`, `cairn
+  info` refuses the source instead of certifying it, and `cairn compile` refuses it with the code:
+
+  ```
+  $ cairn check collide.crn; echo "exit=$?"
+  collide.crn:13:3: error[E_OUTPUT_NAME_COLLISION]: `place id=hut` in site `s` would be written to the same file as `struct hut`
+  collide.crn:6:1:   note: `struct hut` is declared here
+    note: both would be written to `hut` in the output directory, with the edition's extension, and if both are built, a build can keep only one; rename one of them
+  exit=1
+  ```
+
+  The same code covers one `id=` placed in two sites, since a placement's file name leaves its site
+  out, and two walkways in one site whose names flatten alike (`x_y.entry to z.entry` and
+  `x.y_entry to z.entry`).
+
+  Two kinds of source that passed before are now refused. Names are compared ignoring case, so
+  `struct Hut` beside `struct hut`, which built as two files on Linux and was refused by `compile`
+  alone on macOS and Windows, whose default file systems make them one file, is now refused on every
+  host. And the names are compared before lowering, when not every scope lowering will drop is
+  known: a walkway whose search area is past the router's cap (`W_WALKWAY_BLOCKED`, not laid) and a
+  struct or placement past the volume budget (`W_STRUCTURE_TOO_LARGE`) still count. A source where
+  the name of such a scope matches another artifact's (`struct s_walkway_a_entry__c_entry` beside
+  `connect a.entry to c.entry` in site `s`) is now refused by `cairn check` with no `--target`,
+  which exited 0 on it. Its build is refused in this release either way, with `E_PARTIAL_BUILD` for
+  the lost scope, as the `Fixed` entry on a `connect` row that laid no walkway describes. The
+  finding says the two *would* be written to one file for this reason. A sizeless `struct`, a
+  `place` of a sizeless `def` and a walkway with an end on one are left out, since lowering drops
+  each before it writes a file, and two `connect` rows for one pair of ports, in either order, count
+  as the one walkway lowering lays.
+
 - *(core)* A `struct` / `def` header argument other than `size=` was read by nothing and checked by
   nothing, so a typo on the header was dropped in silence:
 
