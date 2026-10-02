@@ -1354,14 +1354,6 @@ fn lower_body_to_block_array<'a>(
     let interior_h = body.size.h.get();
 
     let theme_missing = scope.is_none_or(|sc| sc.bound_theme.is_none());
-    if theme_missing {
-        diagnostics.push(diag_no_theme_bound_generic(
-            body.kind,
-            body.scope_label,
-            body.header_span,
-        ));
-    }
-
     // Flatten `level y=N` grouping once, here. The result is the set of
     // members this body paints, and everything below reads it: the dim math
     // (which has to size a volume that holds them) and the phase buckets
@@ -1370,6 +1362,18 @@ fn lower_body_to_block_array<'a>(
     // `flatten_members` also emits the `W_DEFERRED_MEMBER` for every member
     // it drops, so its side effects need to happen exactly once per call.
     let flattened = flatten_members(body.members, diagnostics);
+    // `spec/lint` "Materials and targets": a scope that reads no
+    // `mat_slot=` has nothing to lower to air, so a missing theme costs it
+    // nothing and is not reported. Asked of the flattened list because a
+    // `level` is where the only reader can sit, and a member it drops
+    // paints nothing whatever the theme.
+    if theme_missing && flattened.iter().any(|(_, m)| m.mat_slot.is_some()) {
+        diagnostics.push(diag_no_theme_bound_generic(
+            body.kind,
+            body.scope_label,
+            body.header_span,
+        ));
+    }
     // Inflate the struct's footprint by the maximum `overhang=` across all
     // roof members so the roof's eaves and gable-end overhangs have voxel
     // room outside the wall ring. Floors, walls, doors, and windows are
@@ -6007,6 +6011,53 @@ mod tests {
                 assert_eq!(block_id(ba, x, 0, z), BlockState::AIR_ID);
             }
         }
+    }
+
+    /// The primary of each `W_NO_THEME_BOUND` finding `src` raises.
+    fn no_theme_bound(src: &str) -> Vec<String> {
+        lowered(src)
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::NoThemeBound)
+            .map(|d| d.primary.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_scope_that_reads_no_slot_is_not_told_its_slots_lower_to_air() {
+        // `spec/lint` "Materials and targets": a scope that reads no
+        // `mat_slot=` is not reported. An empty struct, and one whose only
+        // member takes its material from the roof fallback.
+        for src in [
+            "struct s size=3x3\n",
+            "struct s size=3x3\n  roof kind=flat\n",
+        ] {
+            assert_eq!(no_theme_bound(src), Vec::<String>::new(), "{src}");
+        }
+        // Per scope, not per module: the reader beside it does not make
+        // the roof's struct a reader.
+        let src = "struct a size=3x3\n  roof kind=flat\n\n\
+                   struct b size=3x3\n  floor mat_slot=f\n";
+        assert_eq!(
+            no_theme_bound(src),
+            ["struct `b` has no theme bound; every `mat_slot=` will lower to air"],
+        );
+    }
+
+    #[test]
+    fn a_slot_read_under_a_level_still_warns_and_one_the_level_drops_does_not() {
+        // A `level` is where the only reader in a scope can sit.
+        let src = "struct s size=3x3\n  level y=1\n    walls mat_slot=f height=2\n";
+        assert_eq!(
+            no_theme_bound(src).len(),
+            1,
+            "{:#?}",
+            lowered(src).diagnostics
+        );
+        // A `floor` above `y=0` is dropped with its own deferral, so it
+        // paints nothing whatever the theme and is not a reader.
+        let src = "struct s size=3x3\n  level y=1\n    floor mat_slot=f\n";
+        assert_eq!(no_theme_bound(src), Vec::<String>::new());
     }
 
     #[test]

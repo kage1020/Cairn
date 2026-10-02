@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- *(core)* report `W_NO_THEME_BOUND` only on a scope that reads a `mat_slot=`
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

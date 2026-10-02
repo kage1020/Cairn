@@ -232,8 +232,9 @@ or a `cairn check` with no pack — and it is a warning for that reason: refusin
 every source read without a pack.
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
-all has no slot map to read, so the member contributes no voxel. A module that binds no theme and
-reads no `mat_slot=` is not reported.
+all has no slot map to read, so the member contributes no voxel. It is judged per scope: a scope
+with no theme bound that reads no `mat_slot=` is not reported, whatever the rest of the module
+reads, and a member a `level` drops does not count as reading one.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A version
