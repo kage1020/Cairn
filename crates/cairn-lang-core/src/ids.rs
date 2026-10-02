@@ -7,7 +7,9 @@
 //! `home.1.entry` and have the walkway scope key silently re-parse as a
 //! different `(place, port)` pair. The path separators `/` and `\` are
 //! refused as well: an identifier becomes an artifact's file name, and a
-//! separator in it would move the artifact out of the output directory.
+//! separator in it would move the artifact out of the output directory. So
+//! are the characters a Windows file name cannot carry (`*`, `|`, `?`, `<`,
+//! `>`, `"` and the control characters).
 //! The wire format is unchanged: every newtype is `#[serde(transparent)]`
 //! over its internal `String`, so any YAML / JSON consumer keeps seeing the
 //! same scalar string it used to.
@@ -32,9 +34,12 @@ pub enum IdError {
     Empty,
     /// Construction was attempted with a string containing a character
     /// that is reserved as a structural separator (`.`, `:`), a path
-    /// separator (`/`, `\`), or a character the surface lexer would not
-    /// have produced (whitespace).
-    #[error("identifier `{ident}` contains forbidden character `{ch}`")]
+    /// separator (`/`, `\`), a character a Windows file name cannot carry
+    /// (`*`, `|`, `?`, `<`, `>`, `"`, control characters), or whitespace.
+    #[error(
+        "identifier `{ident}` contains forbidden character `{}`",
+        shown_char(*ch)
+    )]
     ForbiddenChar {
         /// The full offending string.
         ident: String,
@@ -48,11 +53,29 @@ pub enum IdError {
 /// `.` and `:` are the scope-key separators. `/` and `\` are the path
 /// separators: an identifier is the stem of the artifact file the compiler
 /// writes into `--out`, so either one would put that file in another
-/// directory, and an absolute id would replace `--out` altogether. Both are
+/// directory, and an absolute id would replace `--out` altogether.
+/// `*`, `|`, `?`, `<`, `>`, `"` and the control characters cannot appear in
+/// a Windows file name, so an identifier carrying one would check and build
+/// on Linux and then fail to be written on Windows. Every one of them is
 /// refused on every platform, so whether an identifier is accepted does not
 /// depend on the host that checks it.
 fn is_forbidden_ident_char(c: char) -> bool {
-    matches!(c, '.' | ':' | '/' | '\\') || c.is_whitespace()
+    matches!(
+        c,
+        '.' | ':' | '/' | '\\' | '*' | '|' | '?' | '<' | '>' | '"'
+    ) || c.is_whitespace()
+        || c.is_control()
+}
+
+/// `c` as a message quotes it: itself, or its escape when it is a control
+/// character, which would otherwise print as nothing or move the cursor.
+#[must_use]
+pub(crate) fn shown_char(c: char) -> String {
+    if c.is_control() {
+        c.escape_debug().to_string()
+    } else {
+        c.to_string()
+    }
 }
 
 fn validate_ident(s: &str) -> Result<(), IdError> {
@@ -180,9 +203,10 @@ macro_rules! ident_newtype {
             /// Returns [`IdError::Empty`] for the empty string, or
             /// [`IdError::ForbiddenChar`] if the input contains a `.`,
             /// `:`, or whitespace character (any of which would break
-            /// the structural separators downstream lookups rely on), or
-            /// a `/` or `\` (which would make the artifact file name
-            /// a path).
+            /// the structural separators downstream lookups rely on), a
+            /// `/` or `\` (which would make the artifact file name a
+            /// path), or a `*`, `|`, `?`, `<`, `>`, `"` or control
+            /// character (which a Windows file name cannot carry).
             pub fn new<S: Into<String>>(s: S) -> Result<Self, IdError> {
                 let s = s.into();
                 validate_ident(&s)?;
@@ -776,6 +800,45 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn ident_new_rejects_what_a_windows_file_name_cannot_carry() {
+        // Each newtype is checked, since all three become file-name
+        // segments, and the rule must not depend on the host.
+        for ch in ['*', '|', '?', '<', '>', '"', '\u{1}', '\u{7f}'] {
+            let ident = format!("a{ch}b");
+            for result in [
+                PlaceId::new(ident.as_str()).map(|_| ()),
+                PortId::new(ident.as_str()).map(|_| ()),
+                SiteName::new(ident.as_str()).map(|_| ()),
+            ] {
+                assert_eq!(
+                    result,
+                    Err(IdError::ForbiddenChar {
+                        ident: ident.clone(),
+                        ch,
+                    }),
+                    "`{}` must be refused",
+                    ch.escape_debug(),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_forbidden_control_character_is_quoted_as_its_escape() {
+        let err = PlaceId::new("a\u{1}b").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "identifier `a\u{1}b` contains forbidden character `\\u{1}`",
+        );
+        // A printable character is quoted as itself, the separators too.
+        let err = PlaceId::new("a\\b").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "identifier `a\\b` contains forbidden character `\\`",
+        );
     }
 
     #[test]

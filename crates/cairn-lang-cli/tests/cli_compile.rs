@@ -1126,6 +1126,124 @@ fn c25_east_of_unknown_ref_errors_with_suggestion() {
     );
 }
 
+/// A row refused with `E_INVALID_PLACE_ID` is still the row a later
+/// `east_of=` / `north_of=` naming it means, so the reference is not a
+/// second finding: `E_UNRESOLVED_PLACE_REF`'s "declare the target above this
+/// line" would send the author to a row that is correct. A reference to an
+/// id no row declares is still reported, which the last row pins.
+#[test]
+fn a_reference_to_a_place_refused_for_its_id_is_not_a_second_finding() {
+    let tmp = TempDir::new().expect("tempdir");
+    let src = tmp.path().join("refused_ref.crn");
+    fs::write(
+        &src,
+        concat!(
+            "@cairn 2026.06\n",
+            "\n",
+            "def hut size=3x3:\n",
+            "  floor mat_slot=floor\n",
+            "\n",
+            "theme t:\n",
+            "  slot floor -> @oak_planks\n",
+            "\n",
+            "site s:\n",
+            "  place id=\"sub/hut\" use=hut theme=t at=origin\n",
+            "  place id=b use=hut theme=t east_of=\"sub/hut\" gap=2\n",
+            "  place id=\"x.y\" use=hut theme=t east_of=b gap=2\n",
+            "  place id=c use=hut theme=t north_of=\"x.y\" gap=2\n",
+            "  place id=d use=hut theme=t east_of=nowhere gap=2\n",
+        ),
+    )
+    .expect("write tmp .crn");
+    let result = cairn("check", &[src.to_str().unwrap()]);
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
+    assert_eq!(result.status.code(), Some(1), "reported={reported}");
+    assert_eq!(
+        reported.matches("error[E_INVALID_PLACE_ID]").count(),
+        2,
+        "both refused ids are reported on their own rows; got: {reported}",
+    );
+    let unresolved: Vec<&str> = reported
+        .lines()
+        .filter(|line| line.contains("E_UNRESOLVED_PLACE_REF"))
+        .collect();
+    assert_eq!(
+        unresolved.len(),
+        1,
+        "only the reference to an undeclared id is unresolved; got: {reported}",
+    );
+    assert!(
+        unresolved[0].contains("`east_of=nowhere`"),
+        "the one unresolved reference is the one naming no row; got: {reported}",
+    );
+}
+
+/// The characters a Windows file name cannot carry are refused like the
+/// path separators, on every host: an id is the stem of the artifact's file
+/// name, and an id Linux accepts used to fail on Windows with a bare OS
+/// error. `"` is in the rule too, but a source string literal cannot
+/// carry one; the lockfile reader is where it is reached. A control
+/// character is quoted as its escape.
+#[test]
+fn a_place_id_carrying_a_character_windows_refuses_is_refused_on_every_host() {
+    let tmp = TempDir::new().expect("tempdir");
+    for (label, id, shown) in [
+        ("star", "a*b", "*"),
+        ("pipe", "a|b", "|"),
+        ("question", "a?b", "?"),
+        ("less", "a<b", "<"),
+        ("greater", "a>b", ">"),
+        ("control", "a\u{1}b", "\\u{1}"),
+    ] {
+        let case = tmp.path().join(label);
+        fs::create_dir_all(&case).expect("create case dir");
+        let out = case.join("out");
+        let src = write_source(
+            &case,
+            "windows.crn",
+            &format!(
+                "@cairn 2026.06\n\ndef hut size=3x3:\n  floor mat_slot=floor\n\n\
+                 theme t:\n  slot floor -> @oak_planks\n\n\
+                 site s:\n  place id=\"{id}\" use=hut theme=t at=origin\n"
+            ),
+        );
+        let refusal = format!("is not a usable id: it contains `{shown}`");
+
+        let checked = cairn("check", &[src.to_str().unwrap()]);
+        let check_err = String::from_utf8_lossy(&checked.stderr);
+        assert_eq!(
+            checked.status.code(),
+            Some(1),
+            "{label}: stderr={check_err}"
+        );
+        assert!(
+            check_err.contains("error[E_INVALID_PLACE_ID]") && check_err.contains(&refusal),
+            "{label}: the id must be refused on `{shown}`, got: {check_err}",
+        );
+
+        let compiled = cairn(
+            "compile",
+            &[
+                src.to_str().unwrap(),
+                "--edition",
+                "java",
+                "--out",
+                out.to_str().unwrap(),
+            ],
+        );
+        let compile_err = String::from_utf8_lossy(&compiled.stderr);
+        assert_eq!(
+            compiled.status.code(),
+            Some(1),
+            "{label}: stderr={compile_err}"
+        );
+        assert!(
+            !out.exists(),
+            "{label}: compile must write nothing, got: {compile_err}",
+        );
+    }
+}
+
 #[test]
 fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
     // A def that no site references is a noop (templates compile to no

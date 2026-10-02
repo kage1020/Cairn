@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::hash::HashHex;
-use crate::ids::{PlaceId, SiteName, WalkwayEndpoint};
+use crate::ids::{IdError, PlaceId, PortId, SiteName, WalkwayEndpoint};
 
 /// The lockfile schema this build reads and writes.
 ///
@@ -49,6 +49,88 @@ struct SchemaVersionProbe {
 pub(super) fn declared_schema_version(body: &str) -> Result<u32, serde_norway::Error> {
     let probe: SchemaVersionProbe = serde_norway::from_str(body)?;
     Ok(probe.lock_schema_version)
+}
+
+/// What a lockfile still says about its build when it records an identifier
+/// this build refuses.
+///
+/// Returned by [`super::Lockfile::refused_identifier`]. The identifier rule
+/// has tightened over releases, so a lock an earlier Cairn wrote can name a
+/// place, port or site the current rule refuses, and the strict read then
+/// fails on that field alone. The target it was verified for is still worth
+/// comparing against, which is why this carries it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RefusedIdentifierLock {
+    /// The first recorded identifier the current rule refuses, and why.
+    pub error: IdError,
+    /// The target the lock was verified for.
+    pub target: LockTarget,
+    /// The members the lock flagged as version-sensitive.
+    pub member_version_sensitivity: Vec<MemberSensitivity>,
+}
+
+/// The fields [`RefusedIdentifierLock`] reports, with every identifier read
+/// as a plain string so the id rule does not stop the read.
+///
+/// Unknown fields are allowed: this reads what an already-refused document
+/// still says, not whether the document is valid. Every identifier field of
+/// [`LockPlacement`] and [`LockWalkway`] has a counterpart here.
+#[derive(Deserialize)]
+struct IdentifierProbe {
+    target: LockTarget,
+    #[serde(default)]
+    member_version_sensitivity: Vec<MemberSensitivity>,
+    #[serde(default)]
+    placements: Vec<PlacementIdentifiers>,
+    #[serde(default)]
+    walkways: Vec<WalkwayIdentifiers>,
+}
+
+#[derive(Deserialize)]
+struct PlacementIdentifiers {
+    site: String,
+    id: String,
+}
+
+#[derive(Deserialize)]
+struct WalkwayIdentifiers {
+    site: String,
+    from: EndpointIdentifiers,
+    to: EndpointIdentifiers,
+}
+
+#[derive(Deserialize)]
+struct EndpointIdentifiers {
+    place: String,
+    port: String,
+}
+
+/// The first identifier in `body` the id rule refuses, with the target the
+/// document records, or `None` when `body` records no such identifier or
+/// cannot be read even with identifiers taken as plain strings.
+pub(super) fn refused_identifier(body: &str) -> Option<RefusedIdentifierLock> {
+    let probe: IdentifierProbe = serde_norway::from_str(body).ok()?;
+    let placements = probe.placements.iter().flat_map(|p| {
+        [
+            SiteName::new(p.site.as_str()).err(),
+            PlaceId::new(p.id.as_str()).err(),
+        ]
+    });
+    let walkways = probe.walkways.iter().flat_map(|w| {
+        [
+            SiteName::new(w.site.as_str()).err(),
+            PlaceId::new(w.from.place.as_str()).err(),
+            PortId::new(w.from.port.as_str()).err(),
+            PlaceId::new(w.to.place.as_str()).err(),
+            PortId::new(w.to.port.as_str()).err(),
+        ]
+    });
+    let error = placements.chain(walkways).flatten().next()?;
+    Some(RefusedIdentifierLock {
+        error,
+        target: probe.target,
+        member_version_sensitivity: probe.member_version_sensitivity,
+    })
 }
 
 /// The whole lockfile, as written to `build.cairn.lock`.

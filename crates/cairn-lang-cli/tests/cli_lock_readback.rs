@@ -343,3 +343,57 @@ fn the_default_lock_path_is_read_back_too() {
         second.stderr,
     );
 }
+
+#[test]
+fn a_lockfile_recording_an_identifier_the_rule_now_refuses_is_not_called_unreadable() {
+    // The identifier rule has tightened over releases, so a lock an earlier
+    // Cairn wrote can record an id this build refuses. That lock is not
+    // corrupt, and the target it was verified for is still compared. Both
+    // the placement and the walkway identifiers are covered, since the
+    // reader that recovers the target names each field it reads.
+    let (_tmp_src, src) = example_in_tempdir("village.crn");
+    for (label, recorded, refused, ch) in [
+        ("placement", "  id: home1\n", "  id: sub/home1\n", '/'),
+        ("walkway", "    port: entry\n", "    port: a*b\n", '*'),
+    ] {
+        let out_dir = TempDir::new().expect("out");
+        let lock = out_dir.path().join("village.lock");
+        compile(&src, out_dir.path(), "java", "1.20.4", Some(&lock));
+        let written = fs::read_to_string(&lock).expect("read lock");
+        let doctored = written.replacen(recorded, refused, 1);
+        assert_ne!(
+            doctored, written,
+            "{label}: the fixture did not change an id"
+        );
+        fs::write(&lock, doctored).expect("write lock");
+
+        let run = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+        assert_eq!(run.code, Some(0), "{label}: stderr={}", run.stderr);
+        assert!(
+            run.stderr.contains(&format!(
+                "the existing lockfile records an identifier this build refuses \
+                 (identifier `{}` contains forbidden character `{ch}`)",
+                refused.trim().rsplit(' ').next().expect("id"),
+            )),
+            "{label}: stderr should name the refused id in its own words: {}",
+            run.stderr,
+        );
+        assert!(
+            !run.stderr.contains("could not be read"),
+            "{label}: a lock with a refused id is not a corrupt one: {}",
+            run.stderr,
+        );
+        assert!(
+            run.stderr.contains(
+                "W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189."
+            ),
+            "{label}: the recorded target should still be compared: {}",
+            run.stderr,
+        );
+        let replaced = fs::read_to_string(&lock).expect("read lock");
+        assert!(
+            !replaced.contains(refused),
+            "{label}: the lockfile should have been replaced: {replaced}",
+        );
+    }
+}

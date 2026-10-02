@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- *(core)* A `place` row refused with `E_INVALID_PLACE_ID` drew a second error on every later row
+  whose `east_of=` / `north_of=` named it: `E_UNRESOLVED_PLACE_REF`, with a note telling the author to
+  declare the target above that line, which it already was. The reference is now not reported; the
+  finding on the refused row is the one with the repair.
+
+- *(core)* A `place id=` carrying `*`, `|`, `?`, `<`, `>`, `"` or a control character passed `check`
+  and built on Linux, and failed on Windows with a bare OS error when the artifact was written. Each
+  of them is now `E_INVALID_PLACE_ID` on every host, as `/` and `\` already were. A control character
+  is quoted as its escape in the message.
+
+- *(core,cli)* A lockfile recording an identifier this build refuses, such as one an earlier Cairn
+  wrote before the identifier rule tightened, was reported as one that "could not be read", and the
+  target it recorded was not compared, so a target change went without
+  `W_PREVIOUSLY_VERIFIED_TARGET`. `compile` now says the lockfile records an identifier this build
+  refuses, and still compares the target. `Lockfile::refused_identifier` reads that target back.
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 pub use hash::{HashError, HashHex, HashParseError, hash_resolved_ir, hash_source};
 pub use schema::{
     LOCK_SCHEMA_VERSION, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
-    MemberSensitivity,
+    MemberSensitivity, RefusedIdentifierLock,
 };
 
 use thiserror::Error;
@@ -150,5 +150,18 @@ impl Lockfile {
             });
         }
         Ok(serde_norway::from_str(body)?)
+    }
+
+    /// The first identifier in `body` the current id rule refuses, with the
+    /// target and version-sensitive members the document records.
+    ///
+    /// For a caller whose [`Self::from_yaml`] failed: it tells a lock that
+    /// an earlier Cairn wrote under a looser identifier rule apart from one
+    /// that is corrupt, and recovers the target it was verified for. It
+    /// does not say the rest of `body` is valid. `None` when `body` records
+    /// no refused identifier, or does not carry a readable `target`.
+    #[must_use]
+    pub fn refused_identifier(body: &str) -> Option<RefusedIdentifierLock> {
+        schema::refused_identifier(body)
     }
 }

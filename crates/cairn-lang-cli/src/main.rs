@@ -16,7 +16,7 @@ use cairn_lang_core::check::{
 };
 use cairn_lang_core::lock::{
     HashHex, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs, LockPlacement, LockTarget,
-    LockWalkway, Lockfile, hash_resolved_ir, hash_source,
+    LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::resolve::{
     BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, EditionReport, FloorDeclarer,
@@ -2879,13 +2879,23 @@ fn check_and_write(
 /// all. A lockfile that cannot be read says so; only its absence is
 /// silent.
 fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &ResolvedTarget) {
-    let previous = match Lockfile::read_from_path(lock_path) {
-        Ok(previous) => previous,
+    // Read once, here, rather than through `Lockfile::read_from_path`: a
+    // document the strict read refuses is read a second time below, and the
+    // two reads must see the same bytes.
+    let body = match std::fs::read_to_string(lock_path) {
+        Ok(body) => body,
         // No lockfile is the ordinary first-compile case, and the only one
         // that should be silent. Testing `exists()` first would fold a
         // permission error into it, and leave a window in which the file
         // vanishes between the check and the read.
-        Err(LockError::Io(err)) if err.kind() == std::io::ErrorKind::NotFound => return,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+        Err(err) => {
+            warn_unreadable_lock(lock_path, &LockError::from(err));
+            return;
+        }
+    };
+    let previous = match Lockfile::from_yaml(&body) {
+        Ok(previous) => previous,
         // A document from a newer Cairn is not corrupt, and replacing it
         // does lose something, so it says so in its own words.
         Err(LockError::UnsupportedSchemaVersion { found, supported }) => {
@@ -2897,42 +2907,77 @@ fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &Resolv
             return;
         }
         Err(err) => {
-            // Not an error: the compile is valid, and a corrupt file beside
-            // the source is no reason to refuse to build. But it was being
-            // overwritten in silence, which is how a tampered or stale
-            // lockfile went unnoticed.
-            eprintln!(
-                "warning: {}: the existing lockfile could not be read ({err}); replacing it",
-                lock_path.display(),
-            );
+            // Nor is a document that records an identifier the rule has
+            // since refused: an earlier Cairn wrote it legitimately. The
+            // target it records is still read, so a target change is still
+            // reported.
+            if let Some(refused) = Lockfile::refused_identifier(&body) {
+                eprintln!(
+                    "warning: {}: the existing lockfile records an identifier this build \
+                     refuses ({}); it was written by an earlier Cairn and is being replaced",
+                    lock_path.display(),
+                    refused.error,
+                );
+                report_target_change(
+                    &refused.target,
+                    &refused.member_version_sensitivity,
+                    edition,
+                    target,
+                );
+                return;
+            }
+            warn_unreadable_lock(lock_path, &err);
             return;
         }
     };
+    report_target_change(
+        &previous.target,
+        &previous.member_version_sensitivity,
+        edition,
+        target,
+    );
+}
+
+/// Not an error: the compile is valid, and a corrupt file beside the source
+/// is no reason to refuse to build. But it was being overwritten in
+/// silence, which is how a tampered or stale lockfile went unnoticed.
+fn warn_unreadable_lock(lock_path: &Path, err: &LockError) {
+    eprintln!(
+        "warning: {}: the existing lockfile could not be read ({err}); replacing it",
+        lock_path.display(),
+    );
+}
+
+/// The `W_PREVIOUSLY_VERIFIED_TARGET` / `W_SEMANTIC_SENSITIVITY` half of
+/// [`report_previous_target`]: `verified` and `sensitive` are what the
+/// previous lockfile recorded.
+fn report_target_change(
+    verified: &LockTarget,
+    sensitive: &[MemberSensitivity],
+    edition: EditionArg,
+    target: &ResolvedTarget,
+) {
     let now = LockTarget {
         edition: edition.as_lock_edition(),
         mc_version: target.mc_version().to_owned(),
         data_version: target.version_int(),
     };
-    if previous.target == now {
+    if *verified == now {
         return;
     }
     // The edition appears only when it changed: two editions number their
     // releases differently, so `1.21.4` against `1.21.60` reads as noise
     // without it, and naming it on every line would pad the common case.
-    let show_edition = previous.target.edition != now.edition;
+    let show_edition = verified.edition != now.edition;
     eprintln!(
         "W_PREVIOUSLY_VERIFIED_TARGET: verified for {}, now {}.",
-        describe_verified(&previous.target, show_edition),
+        describe_verified(verified, show_edition),
         describe_now(&now, show_edition),
     );
-    if previous.member_version_sensitivity.is_empty() {
+    if sensitive.is_empty() {
         return;
     }
-    let ids: Vec<&str> = previous
-        .member_version_sensitivity
-        .iter()
-        .map(|m| m.id.as_str())
-        .collect();
+    let ids: Vec<&str> = sensitive.iter().map(|m| m.id.as_str()).collect();
     eprintln!(
         "W_SEMANTIC_SENSITIVITY: {} member{} may resolve differently: {}",
         ids.len(),
