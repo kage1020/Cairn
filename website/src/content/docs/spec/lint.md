@@ -316,7 +316,8 @@ and the end of every port can end up there. The other four edges, the end of a p
 of a port, sit next to a `.` whichever way the row is written and cannot merge; they are refused
 too, so the rule stays one sentence: no place or port id starts or ends with `_`. The site is exempt
 from the edge rule, since `::` separates it from both neighbours. The row is dropped and the finding
-names the segment to rename.
+names the segment to rename. The walkway it asked for is lost, so `cairn compile` refuses the build
+with `E_PARTIAL_BUILD`, as it does for every row that lays nothing.
 
 `W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
 failed origin selector, an unresolved `use=` or `theme=`. It is a warning because the finding that
@@ -332,7 +333,7 @@ the author to a line that is correct.
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
 | `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](/spec/compilation/)). |
-| `E_PARTIAL_BUILD` | At least one requested scope did not lower, so the run produced less than was asked for. |
+| `E_PARTIAL_BUILD` | At least one requested scope, or a walkway a `connect` row asked for, did not lower, so the run produced less than was asked for. |
 
 `W_STRUCT_NO_SIZE` and `W_DEF_NO_SIZE` are one rule split by what carries it, so a filter matching
 on `code` can tell a struct that will not build from a template that will not instantiate.
@@ -347,8 +348,10 @@ the scope lowers, and the finding names what is missing from it.
 
 `E_PARTIAL_BUILD` is the run-level counterpart, and the one error among these: a warning above says
 a scope builds without something, and this says a scope the command was asked for did not build at
-all. It is reported once for the run, naming how many of the requested scopes were lost, by
-`cairn compile` and by a `cairn check --edition E --target V` that runs the same lowering pass.
+all. A scope that lowers to air alone did not build either, whatever left it empty: every member
+deferred, no theme gave its `mat_slot=` members a block, or it declares no member. It is reported
+once for the run, naming how many of the requested scopes were lost, by `cairn compile` and by a
+`cairn check --edition E --target V` that runs the same lowering pass.
 
 `W_PHASE_CONFLICT` is last-wins reported rather than refused. [Compilation Model](/spec/compilation/)
 grants last-wins to local overrides within one phase, which is what an author restating a member
