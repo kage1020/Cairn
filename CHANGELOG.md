@@ -407,6 +407,48 @@
   netlist input, though no sensor patch exists for the selector form. `check` now refuses it as
   `E_MISPLACED_BINDING`, so every command reports it.
 
+- *(core,tree-sitter,cli)* A canonical token with a block-state literal could not be written,
+  though `spec/materials-themes` "Canonical vocabulary" lists `@oak_log[axis=x]` as one and
+  everything past the parser already read that shape. Both parsers stopped at the `[`:
+
+  ```
+  theme t:
+    slot floor -> @oak_log[axis=x]
+  ```
+
+  ```
+  st.crn:2:25: error[E_PARSE]: expected end of line, got `[`
+  ```
+
+  A `[` that touches an undotted `@` token now opens its state literal: `property=value` pairs, each
+  value a word, a run of digits, or `true` / `false`, separated by one required comma. The literal
+  folds into the token's text, so the example builds a log lying along `x`. Its properties are
+  sorted by name, so `@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north, half=top]`
+  are one palette entry and write the same `.nbt` bytes and `resolved_ir_hash`. The parser is now
+  the only place a malformed literal is refused. That covers an empty literal, a missing `=` or
+  value, a trailing, doubled or missing comma, a string value, a missing `]`, and a property named
+  twice. A dotted token such as `@floor.wood` takes no literal, and a `[` touching one is read as
+  before, as is a `[` after a space.
+
+  A `[` touching an undotted token used to be whatever came next, so `mat=@a[1]`, `@a[1]` after a
+  member, `-> @a[1]` and `mat=[@a[1]]` parsed and are now refused. No program that ever passed
+  `check` is affected: a bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL` and a
+  list in a member argument is `E_TYPE_MISMATCH_LABEL`, so only the parse tree of a source that
+  could not build changes. `spec/syntax` "Literals and separators" says the same.
+
+  Properties and values are not yet checked against the target (`E_STATE_DOMAIN` is not implemented,
+  and `spec/versioning-editions` now marks that rule as not yet enforced). Every literal the
+  lowering reads, from a theme slot or a `connect … path=`, earns the new warning
+  `W_STATE_LITERAL_UNCHECKED` on the token, so a Java build that writes `@oak_log[axis=q]` as given
+  no longer does so in silence.
+
+  Because a source can now reach it, `cairn info`'s refusal of a palette the pack was expected to
+  refuse no longer says that none of it is the source's to repair. It now names a state literal on a
+  stair as one possible origin: a `facing` or `half` value outside the Java domain, such as
+  `@oak_stairs[facing=up]` on Bedrock, or a key other than `facing` / `half` / `shape`. The Bedrock
+  backend's own refusal of such a value no longer suggests `--edition java`, which would write the
+  same value unchanged. `spec/lint` "Machine-readable payload" says the same.
+
 - *(redstone)* A `logic` line's left-hand side was checked for its `sig.` head and nothing else, so
   `logic sig = ...` and `logic sig.x.y = ...` each registered a signal, lowered into a cell, and
   could be read by another `logic` line. `cairn synth` exited 0 with `"sig"` or `"sig.x.y"` in

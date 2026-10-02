@@ -115,6 +115,124 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     // -- theme bodies ------------------------------------------------
     ("slot_material", "theme t:\n  slot floor -> @oak\n", Accept),
     ("slot_ident", "theme t:\n  slot floor -> oak\n", Accept),
+    // A canonical token may carry a block-state literal, `[k=v,...]`,
+    // when the `[` touches the name. Values are the three shapes a block
+    // state takes: a word, a number, a boolean.
+    (
+        "slot_state_literal",
+        "theme t:\n  slot floor -> @oak_log[axis=x]\n",
+        Accept,
+    ),
+    (
+        "slot_state_literal_pairs",
+        "theme t:\n  slot s -> @oak_stairs[half=top, facing=north]\n",
+        Accept,
+    ),
+    (
+        "slot_state_literal_number_and_bool",
+        "theme t:\n  slot c -> @cake[bites=3,lit=true]\n",
+        Accept,
+    ),
+    (
+        "slot_state_literal_interior_spaces",
+        "theme t:\n  slot s -> @oak_stairs[ half = top , facing = north ]\n",
+        Accept,
+    ),
+    (
+        "arg_state_literal",
+        "struct s size=3x3\n  floor mat_slot=f\n  thing mat=@oak_log[axis=x]\n",
+        Accept,
+    ),
+    // After a space the `[` is not the token's, and a slot takes one value.
+    (
+        "slot_state_literal_after_a_space",
+        "theme t:\n  slot floor -> @oak_log [axis=x]\n",
+        Reject,
+    ),
+    // A dotted token is abstract: the theme binding it picks the block, so
+    // there is no one block for a state to belong to and the token takes no
+    // literal. A touching `[` is then whatever comes next — nothing, in a
+    // slot, which ends at its value; a positional after an argument, or
+    // the next item of a value list, where something may follow.
+    (
+        "abstract_state_literal",
+        "theme t:\n  slot floor -> @floor.wood[axis=x]\n",
+        Reject,
+    ),
+    (
+        "abstract_token_then_positional_touching",
+        "struct s size=3x3\n  thing mat=@a.b[1]\n",
+        Accept,
+    ),
+    (
+        "abstract_token_positional_then_list_touching",
+        "struct s size=3x3\n  thing @a.b[1]\n",
+        Accept,
+    ),
+    (
+        "value_list_abstract_token_then_list_touching",
+        "struct s size=3x3\n  thing mat=[@a.b[c]]\n",
+        Accept,
+    ),
+    (
+        "place_abstract_theme_then_positional_touching",
+        "site s:\n  place id=p use=d theme=@a.b[1]\n",
+        Accept,
+    ),
+    (
+        "deep_abstract_token_then_positional_touching",
+        "struct s size=3x3\n  thing mat=@a.b.c[1]\n",
+        Accept,
+    ),
+    (
+        "state_literal_empty",
+        "theme t:\n  slot f -> @oak_log[]\n",
+        Reject,
+    ),
+    (
+        "state_literal_unterminated",
+        "theme t:\n  slot f -> @oak_log[axis=x\n",
+        Reject,
+    ),
+    (
+        "state_literal_no_value",
+        "theme t:\n  slot f -> @oak_log[axis=]\n",
+        Reject,
+    ),
+    (
+        "state_literal_trailing_comma",
+        "theme t:\n  slot f -> @oak_log[axis=x,]\n",
+        Reject,
+    ),
+    (
+        "state_literal_double_comma",
+        "theme t:\n  slot f -> @oak_stairs[half=top,,facing=north]\n",
+        Reject,
+    ),
+    // Minecraft's syntax, not a Cairn list: the comma is not optional.
+    (
+        "state_literal_no_comma",
+        "theme t:\n  slot f -> @oak_stairs[half=top facing=north]\n",
+        Reject,
+    ),
+    (
+        "state_literal_string_value",
+        "theme t:\n  slot f -> @oak_log[axis=\"x\"]\n",
+        Reject,
+    ),
+    // In a value list a token and a nested list used to be two items
+    // whether or not a space stood between them. Touching, the `[` is now
+    // the token's, and `b` is no `key=value`; apart, they are still two.
+    (
+        "value_list_token_then_list_touching",
+        "struct s size=3x3\n  thing mat=[@a[b]]\n",
+        Reject,
+    ),
+    (
+        "value_list_token_then_list_apart",
+        "struct s size=3x3\n  thing mat=[@a [b]]\n",
+        Accept,
+    ),
     ("slot_string", "theme t:\n  slot floor -> \"oak\"\n", Accept),
     ("slot_int", "theme t:\n  slot floor -> 3\n", Accept),
     ("slot_dotted", "theme t:\n  slot a -> b.c\n", Accept),
@@ -1077,6 +1195,17 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "integer_out_of_range",
         "struct s size=3x3\n  floor n=99999999999999999999\n",
+        Accept,
+    ),
+    // -- a state literal naming one property twice ----------------------
+    //
+    // `parse_state_literal` refuses the second `axis`: a block state has
+    // one value per property, and the property map the literal becomes
+    // would keep the last one without a word. A grammar would have to
+    // compare two identifiers' text, which a context-free rule cannot.
+    (
+        "state_literal_repeated_property",
+        "theme t:\n  slot f -> @oak_log[axis=x,axis=y]\n",
         Accept,
     ),
 ];

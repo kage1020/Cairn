@@ -84,7 +84,8 @@ pub enum BedrockStateError {
     /// leaked one is refused rather than mapped to a wrong Bedrock value.
     #[error(
         "stair `{id}` has `{key}={value}`, which is not a valid Java `{key}`. Valid `{key}`: \
-         {valid}. Fix: correct the source blockstate, or compile with `--edition java`"
+         {valid}. Fix: correct the source blockstate to one of those; `--edition java` would \
+         write the same value unchanged, since Java has no such `{key}` either"
     )]
     UnknownStairState {
         /// Offending id verbatim.
@@ -470,7 +471,14 @@ mod tests {
         // Valid values (FACING_VALID) surface in the message so the lint
         // loop can steer back to the closed domain instead of guessing.
         assert!(msg.contains("east, west, south, north"), "valid: {msg}");
-        assert!(msg.contains("--edition java"), "fix: {msg}");
+        // The value is no more valid on Java, where it would be written
+        // unchanged, so the fix does not send the author there.
+        assert!(
+            msg.contains("correct the source blockstate")
+                && msg.contains("Java has no such")
+                && !msg.contains("or compile with"),
+            "fix: {msg}",
+        );
     }
 
     #[test]
@@ -491,7 +499,14 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("half=middle"), "wrong: {msg}");
         assert!(msg.contains("top, bottom"), "valid: {msg}");
-        assert!(msg.contains("--edition java"), "fix: {msg}");
+        // The value is no more valid on Java, where it would be written
+        // unchanged, so the fix does not send the author there.
+        assert!(
+            msg.contains("correct the source blockstate")
+                && msg.contains("Java has no such")
+                && !msg.contains("or compile with"),
+            "fix: {msg}",
+        );
     }
 
     #[test]
