@@ -199,14 +199,14 @@ pub fn lower_to_block_array(
     // the strip might cross. Connects survive site boundaries — the
     // resolver tags each `ValidatedConnect` with the `site` name so we
     // can pair it back to the right `placements` lookup here.
-    let blocked = collect_floor_cells(&structures, &placed);
+    let floor = collect_floor_cells(&structures, &placed);
     lower_connects(
         &ConnectInputs {
             resolution,
             defs: &intent.defs,
             registry,
             placed: &placed,
-            blocked: &blocked,
+            floor: &floor,
         },
         &mut structures,
         &mut walkways,
@@ -281,16 +281,41 @@ struct PlacedBody {
     cut: HashSet<Span>,
 }
 
-/// World-space `(x, y, z)` of every non-air voxel on the y=0 plane of
-/// every placement. The walkway voxeliser uses this set to skip cells
-/// that would overwrite an existing floor tile — a strip ducking under
-/// a corner of a building still completes, but the colliding cell stays
-/// air and the row earns a `W_WALKWAY_BLOCKED` warning.
+/// The walk plane the placements occupy: every cell a walkway may not
+/// overwrite, and how far each placement's share of it reaches.
+struct FloorPlan {
+    /// World-space `(x, y, z)` of every non-air voxel on the y=0 plane of
+    /// every placement. The walkway voxeliser uses this set to skip cells
+    /// that would overwrite an existing floor tile — a strip ducking under
+    /// a corner of a building still completes, but the colliding cell
+    /// stays air and the row earns a `W_WALKWAY_BLOCKED` warning.
+    cells: HashSet<(i32, i32, i32)>,
+    /// Per placement that put at least one cell in [`Self::cells`], under
+    /// its `site::SITE::PLACE_ID` key, the box those cells span. The
+    /// router's search rectangle spans the union of these boxes on its
+    /// plane, so a note about that rectangle can name the placements that
+    /// set it.
+    extents: IndexMap<String, FloorExtent>,
+}
+
+/// The world-space box one placement's cells in [`FloorPlan::cells`] span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FloorExtent {
+    /// The walk plane the cells lie on.
+    y: i32,
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+}
+
+/// Collect the [`FloorPlan`] of every lowered placement.
 fn collect_floor_cells(
     structures: &IndexMap<String, BlockArray>,
     placed: &IndexMap<String, PlacedBody>,
-) -> HashSet<(i32, i32, i32)> {
-    let mut out: HashSet<(i32, i32, i32)> = HashSet::new();
+) -> FloorPlan {
+    let mut cells: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut extents: IndexMap<String, FloorExtent> = IndexMap::new();
     for (key, PlacedBody { placement, .. }) in placed {
         let Some(ba) = structures.get(key) else {
             continue;
@@ -315,8 +340,65 @@ fn collect_floor_cells(
                     .origin
                     .2
                     .saturating_add(i32::try_from(z).unwrap_or(i32::MAX));
-                out.insert((wx, placement.origin.1, wz));
+                cells.insert((wx, placement.origin.1, wz));
+                extents
+                    .entry(key.clone())
+                    .and_modify(|e| {
+                        e.min_x = e.min_x.min(wx);
+                        e.max_x = e.max_x.max(wx);
+                        e.min_z = e.min_z.min(wz);
+                        e.max_z = e.max_z.max(wz);
+                    })
+                    .or_insert(FloorExtent {
+                        y: placement.origin.1,
+                        min_x: wx,
+                        max_x: wx,
+                        min_z: wz,
+                        max_z: wz,
+                    });
             }
+        }
+    }
+    FloorPlan { cells, extents }
+}
+
+/// The placements whose lowered array holds a non-air voxel at the world
+/// cell `cell` on its ground row — the voxels [`collect_floor_cells`] put
+/// in [`FloorPlan::cells`] — each with that voxel's block state, in
+/// placement order.
+fn floor_cell_owners<'a>(
+    cell: (i32, i32, i32),
+    structures: &'a IndexMap<String, BlockArray>,
+    placed: &'a IndexMap<String, PlacedBody>,
+) -> Vec<(&'a str, &'a Placement, &'a BlockState)> {
+    let mut out = Vec::new();
+    for (key, PlacedBody { placement, .. }) in placed {
+        let Some(ba) = structures.get(key) else {
+            continue;
+        };
+        if cell.1 != placement.origin.1 {
+            continue;
+        }
+        let local =
+            |world: i32, origin: i32| u32::try_from(i64::from(world) - i64::from(origin)).ok();
+        let (Some(x), Some(z)) = (
+            local(cell.0, placement.origin.0),
+            local(cell.2, placement.origin.2),
+        ) else {
+            continue;
+        };
+        if x >= ba.dims.x || z >= ba.dims.z {
+            continue;
+        }
+        let Some(i) = ba.dims.index(x, 0, z) else {
+            continue;
+        };
+        let voxel = ba.voxels[i];
+        if voxel == PaletteIndex::AIR {
+            continue;
+        }
+        if let Some(state) = ba.palette.entries.get(usize::from(voxel.0)) {
+            out.push((key.as_str(), placement, state));
         }
     }
     out
@@ -333,8 +415,8 @@ struct ConnectInputs<'a> {
     /// key.
     placed: &'a IndexMap<String, PlacedBody>,
     /// World cells on the walk plane already occupied by a placement
-    /// floor.
-    blocked: &'a HashSet<(i32, i32, i32)>,
+    /// floor, and the extent each placement's floor covers.
+    floor: &'a FloorPlan,
 }
 
 /// Lower every resolved `connect` row into a walkway `BlockArray` and
@@ -368,8 +450,9 @@ fn lower_connects(
         defs,
         registry,
         placed,
-        blocked,
+        floor,
     } = inputs;
+    let blocked = &floor.cells;
     let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
     // Index the blocked set once for every row: the router needs the
     // per-plane bounding rectangle, and deriving it per row would
@@ -574,10 +657,6 @@ fn lower_connects(
         // voxel buffer from the bounding box directly.
         let straight_area = l_path_area(from_pos, to_pos);
         if straight_area > ROUTE_AREA_CAP {
-            let failure = RoutePathError::AreaCapExceeded {
-                area: straight_area,
-                cap: ROUTE_AREA_CAP,
-            };
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::WalkwayBlocked,
                 span: connect.span.clone(),
@@ -589,7 +668,10 @@ fn lower_connects(
                 ),
                 notes: vec![DiagnosticNote {
                     span: None,
-                    message: walkway_blocked_note(connect, Some(failure)),
+                    message: format!(
+                        "the walkway search area ({straight_area} cells) exceeds the router's \
+                         cap of {ROUTE_AREA_CAP} cells; place the two structures closer together",
+                    ),
                 }],
                 data: None,
             });
@@ -647,7 +729,19 @@ fn lower_connects(
                 ),
                 notes: vec![DiagnosticNote {
                     span: None,
-                    message: walkway_blocked_note(connect, route_failure),
+                    message: walkway_blocked_note(
+                        connect,
+                        route_failure,
+                        &BlockedEndpoints {
+                            from: (from_pos, &from_key),
+                            to: (to_pos, &to_key),
+                        },
+                        &SiteFloor {
+                            structures,
+                            placed,
+                            floor,
+                        },
+                    ),
                 }],
                 data: Some(DiagnosticData::WalkwayBlocked {
                     skipped: skipped as u64,
@@ -712,36 +806,60 @@ fn lower_connects(
     }
 }
 
-/// Note text for a `W_WALKWAY_BLOCKED` warning, matched to why the
-/// router could not detour. The remedies differ per cause — widening
-/// the gap fixes an enclosed target but does nothing for a port buried
-/// under another placement's floor or a site past the area cap — so a
-/// single catch-all suggestion would misdirect the author on three of
-/// the four arms.
+/// The two ports of a `connect` row a `W_WALKWAY_BLOCKED` note talks
+/// about: each one's world cell and the `site::SITE::PLACE_ID` key of the
+/// placement it belongs to.
+struct BlockedEndpoints<'a> {
+    from: ((i32, i32, i32), &'a str),
+    to: ((i32, i32, i32), &'a str),
+}
+
+/// The finished floor plan a `W_WALKWAY_BLOCKED` note reads to name what
+/// is in the way.
+struct SiteFloor<'a> {
+    structures: &'a IndexMap<String, BlockArray>,
+    placed: &'a IndexMap<String, PlacedBody>,
+    floor: &'a FloorPlan,
+}
+
+/// Note text for a `W_WALKWAY_BLOCKED` warning on a row whose obstructed
+/// straight L sent it to the router, matched to why the router could not
+/// detour. The remedies differ per cause — widening the gap fixes an
+/// enclosed target but does nothing for a buried port or a site past the
+/// area cap — so a single catch-all suggestion would misdirect the author
+/// on three of the four arms.
 fn walkway_blocked_note(
     connect: &crate::resolve::ValidatedConnect,
     route_failure: Option<RoutePathError>,
+    ends: &BlockedEndpoints<'_>,
+    site: &SiteFloor<'_>,
 ) -> String {
     match route_failure {
         Some(RoutePathError::EndpointBlocked {
             from_blocked,
             to_blocked,
         }) => {
-            let ports = blamed_endpoints(connect, from_blocked, to_blocked);
-            let (noun, verb) = if from_blocked && to_blocked {
-                ("ports", "are")
-            } else {
-                ("port", "is")
-            };
+            let mut clauses = Vec::new();
+            if from_blocked {
+                clauses.push(buried_port_clause(&connect.from, ends.from, connect, site));
+            }
+            if to_blocked {
+                clauses.push(buried_port_clause(&connect.to, ends.to, connect, site));
+            }
+            clauses.join("; ")
+        }
+        Some(RoutePathError::AreaCapExceeded { area, cap }) => {
+            // The straight L was inside the cap (the caller refuses it
+            // before routing otherwise), so what pushed the rectangle past
+            // it is the floor plan the router has to span: every
+            // placement floor on the walk plane, not just the two ports.
+            let setters = plane_extent_setters(ends.from.0.1, connect, site.placed, site.floor);
             format!(
-                "{noun} {ports} {verb} buried inside another placement's floor; move that \
-                 door/window to an unobstructed wall or pull the placements apart",
+                "the router searches the box around every placement floor on the walk plane, \
+                 here {area} cells, past its cap of {cap} cells; the placements at that box's \
+                 edges are {setters}, so bring the outlying placements closer together",
             )
         }
-        Some(RoutePathError::AreaCapExceeded { area, cap }) => format!(
-            "the walkway search area ({area} cells) exceeds the router's cap of {cap} cells; \
-             place the two structures closer together",
-        ),
         Some(RoutePathError::CoordinateOverflow) => {
             "the walkway endpoints sit at the edge of the representable coordinate space; \
              move the site closer to the origin"
@@ -757,6 +875,112 @@ fn walkway_blocked_note(
              the walkway can round the obstacle"
                 .to_owned()
         }
+    }
+}
+
+/// A placement as a note names it: its `place id=` in backticks, plus
+/// the site when that differs from the `connect` row's own.
+fn placement_label(placement: &Placement, connect: &crate::resolve::ValidatedConnect) -> String {
+    if placement.site == connect.site {
+        format!("`{}`", placement.place_id)
+    } else {
+        format!("`{}` in site `{}`", placement.place_id, placement.site)
+    }
+}
+
+/// One clause of a buried-endpoint note: what covers the port cell, and
+/// the remedy for that. Another placement's floor is fixed by moving the
+/// opening or the placements apart; a block the port's own placement
+/// lays there (a pressure plate in front of its door) is fixed by moving
+/// that block or the opening, and pulling placements apart does nothing.
+///
+/// # Panics
+///
+/// Panics when no placement owns a voxel at the port cell: the router
+/// reported the cell blocked, and [`FloorPlan::cells`] holds only cells
+/// some placement lays.
+fn buried_port_clause(
+    port: &crate::resolve::PortRef,
+    (cell, own_key): ((i32, i32, i32), &str),
+    connect: &crate::resolve::ValidatedConnect,
+    site: &SiteFloor<'_>,
+) -> String {
+    let owners = floor_cell_owners(cell, site.structures, site.placed);
+    assert!(
+        !owners.is_empty(),
+        "port `{port}` at {cell:?} was reported blocked, but no placement lays a voxel there",
+    );
+    let others: Vec<String> = owners
+        .iter()
+        .filter(|(key, _, _)| *key != own_key)
+        .map(|(_, placement, _)| placement_label(placement, connect))
+        .collect();
+    if others.is_empty() {
+        let (_, placement, state) = owners[0];
+        format!(
+            "port `{port}` sits on the `{block}` its own placement {own} lays on that cell; \
+             move that block or the door/window",
+            block = state.id,
+            own = placement_label(placement, connect),
+        )
+    } else {
+        format!(
+            "port `{port}` is buried inside the floor of {noun} {others}; move that \
+             door/window to an unobstructed wall or pull the placements apart",
+            noun = if others.len() == 1 {
+                "placement"
+            } else {
+                "placements"
+            },
+            others = and_list(&others),
+        )
+    }
+}
+
+/// The placements whose floor reaches an edge of the bounding box of
+/// every placement floor on the walk plane `y`, in placement order,
+/// rendered as one list.
+///
+/// # Panics
+///
+/// Panics when no placement floor lies on the plane: the router only
+/// runs for a straight L that crosses a floor cell there.
+fn plane_extent_setters(
+    y: i32,
+    connect: &crate::resolve::ValidatedConnect,
+    placed: &IndexMap<String, PlacedBody>,
+    floor: &FloorPlan,
+) -> String {
+    let on_plane = || floor.extents.iter().filter(move |(_, e)| e.y == y);
+    let union = on_plane().map(|(_, e)| *e).reduce(|a, b| FloorExtent {
+        y,
+        min_x: a.min_x.min(b.min_x),
+        max_x: a.max_x.max(b.max_x),
+        min_z: a.min_z.min(b.min_z),
+        max_z: a.max_z.max(b.max_z),
+    });
+    let Some(union) = union else {
+        panic!("the router ran on the walk plane y={y}, but no placement floor lies on it");
+    };
+    let labels: Vec<String> = on_plane()
+        .filter(|(_, e)| {
+            e.min_x == union.min_x
+                || e.max_x == union.max_x
+                || e.min_z == union.min_z
+                || e.max_z == union.max_z
+        })
+        .filter_map(|(key, _)| placed.get(key))
+        .map(|body| placement_label(&body.placement, connect))
+        .collect();
+    and_list(&labels)
+}
+
+/// `a`, `a and b`, `a, b and c`: the items joined as an English list.
+fn and_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => only.clone(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
     }
 }
 
@@ -7695,6 +7919,114 @@ struct s size=9x7
         // Endpoint at b's port (world (6, 3) → local (5, 4)) remains
         // gravel — the port itself sits outside `b`'s floor.
         assert_eq!(block_id(ba, 5, 0, 4), "minecraft:gravel");
+    }
+
+    /// The note of the one `W_WALKWAY_BLOCKED` `source` lowers to.
+    fn walkway_blocked_note_of(source: &str) -> String {
+        let out = lowered(source);
+        let blocked: Vec<_> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::WalkwayBlocked)
+            .collect();
+        assert_eq!(blocked.len(), 1, "diagnostics={:?}", out.diagnostics);
+        assert_eq!(blocked[0].notes.len(), 1, "{:?}", blocked[0]);
+        blocked[0].notes[0].message.clone()
+    }
+
+    #[test]
+    fn a_port_on_its_own_placements_pressure_plate_is_not_blamed_on_another_floor() {
+        // Each hut lays a pressure plate on the cell in front of its own
+        // door, which is that door's port cell. No other placement covers
+        // either port, so pulling the placements apart cannot help.
+        let note = walkway_blocked_note_of(concat!(
+            "def hut size=5x5:\n",
+            "  floor id=f mat_slot=wall\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  roof  kind=flat mat_slot=wall overhang=1\n",
+            "  door  id=e side=front at=center\n",
+            "  pressure_plate id=pp at=front.outside offset=2 y=0\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=hut theme=t at=origin\n",
+            "  place id=b use=hut theme=t east_of=a gap=4\n",
+            "  connect a.e to b.e path=@gravel\n",
+        ));
+        assert_eq!(
+            note,
+            "port `a.e` sits on the `minecraft:oak_pressure_plate` its own placement `a` lays \
+             on that cell; move that block or the door/window; port `b.e` sits on the \
+             `minecraft:oak_pressure_plate` its own placement `b` lays on that cell; move that \
+             block or the door/window",
+        );
+    }
+
+    #[test]
+    fn a_port_buried_by_another_sites_placement_names_that_site() {
+        // `u`'s `c` sits where `walkway_with_unroutable_port_source`'s
+        // `c` does — over `a`'s back port — but in another site, so its
+        // bare id would name nothing in site `s`.
+        let source = walkway_with_unroutable_port_source()
+            .replace("  place id=c use=front_home theme=t north_of=a gap=0\n", "")
+            + concat!(
+                "\n",
+                "site u:\n",
+                "  place id=o use=front_home theme=t at=origin\n",
+                "  place id=c use=front_home theme=t north_of=o gap=0\n",
+            );
+        let note = walkway_blocked_note_of(&source);
+        assert_eq!(
+            note,
+            "port `a.back` is buried inside the floor of placement `c` in site `u`; move that \
+             door/window to an unobstructed wall or pull the placements apart",
+        );
+    }
+
+    #[test]
+    fn a_router_past_the_area_cap_names_the_placements_that_spread_the_floor_plan() {
+        // `c` and `d` are four blocks apart; the router's box is wide
+        // because `a` and `b` sit two thousand blocks off. `e1` reaches
+        // the box's west edge, `e2` sits inside it and sets no edge.
+        let note = walkway_blocked_note_of(concat!(
+            "def hut size=3x3:\n",
+            "  floor id=f mat_slot=wall\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  door  id=front side=front at=center\n",
+            "  door  id=back  side=back  at=center\n",
+            "\n",
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=hut theme=t at=origin\n",
+            "  place id=b use=hut theme=t north_of=a gap=2000\n",
+            "  place id=c use=hut theme=t east_of=b gap=2000\n",
+            "  place id=d use=hut theme=t north_of=c gap=4\n",
+            "  place id=e1 use=hut theme=t north_of=a gap=500\n",
+            "  place id=e2 use=hut theme=t east_of=e1 gap=500\n",
+            "  connect c.front to d.back path=@gravel\n",
+        ));
+        let (head, tail) = note
+            .split_once(" cells, past")
+            .unwrap_or_else(|| panic!("note names no area: {note}"));
+        let area: u64 = head
+            .strip_prefix(
+                "the router searches the box around every placement floor on the walk plane, \
+                 here ",
+            )
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("note names no area: {note}"));
+        assert!(area > ROUTE_AREA_CAP, "{note}");
+        assert_eq!(
+            tail,
+            format!(
+                " its cap of {ROUTE_AREA_CAP} cells; the placements at that box's edges are \
+                 `a`, `b`, `c`, `d` and `e1`, so bring the outlying placements closer together",
+            ),
+        );
     }
 
     fn walkway_pair_source(path_token: &str) -> String {

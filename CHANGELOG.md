@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- *(core)* name what buries a walkway port and which placements spread the router's search box
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added
