@@ -30,12 +30,12 @@ use cairn_lang_core::{
     diagnose_parse_failure, lower, parse,
 };
 use cairn_lang_formats::bedrock_state::degradation_detail;
-use cairn_lang_formats::bedrock_structure::{ParityNote, build_mcstructure_tag, write_mcstructure};
+use cairn_lang_formats::bedrock_structure::{McStructure, ParityNote, prepare_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
 use cairn_lang_formats::java_structure::{
-    Compound, OutputExt, build_structure_tag, output_filename, write_compound_gzip,
+    JavaStructure, OutputExt, output_filename, prepare_structure,
 };
 use cairn_lang_formats::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
@@ -2673,11 +2673,13 @@ enum ResolvedTarget {
 
 impl ResolvedTarget {
     /// On-disk extension the backend writes. The three edition-varying
-    /// steps of a compile — extension, tag builder ([`Self::build_tag`]),
-    /// and writer ([`Self::write_tag`]) — all live on this type so their
-    /// correspondence is co-located rather than kept in step by convention
-    /// across scattered `match`es. Adding an edition means adding one arm
-    /// to each and the compiler flags any it misses.
+    /// steps of a compile — extension, backend check ([`Self::prepare`]),
+    /// and writer ([`PreparedStructure::write`]) — are matched on this type
+    /// or on the [`PreparedStructure`] it produces, so their correspondence
+    /// is co-located rather than kept in step by convention across
+    /// scattered `match`es. Adding an edition means adding a variant to
+    /// both types and the arms that match them, and the compiler flags any
+    /// arm it misses.
     fn output_ext(&self) -> OutputExt {
         match self {
             ResolvedTarget::Java(_) => OutputExt::Nbt,
@@ -2685,40 +2687,30 @@ impl ResolvedTarget {
         }
     }
 
-    /// Build the structure tag tree for this edition's backend, plus any
+    /// Check a structure against this edition's backend, plus any
     /// `W_INTENT_DEGRADED` parity notes raised while lowering intent to the
     /// edition (Java is always lossless, so its note list is empty). The two
     /// backends raise different error types; both are rendered to a message
-    /// string here so the caller has one error shape to report.
+    /// string here so the caller has one error shape to report. Nothing per
+    /// voxel is built: [`PreparedStructure::write`] encodes the grid as it
+    /// writes.
     ///
     /// [`ParityNote`] is threaded verbatim rather than flattened to a message
     /// string so the CLI can key the warning by the palette id that
     /// degraded, keeping the (`id`, `message`) pair machine-parsable for
     /// downstream tools.
-    fn build_tag(&self, array: &BlockArray) -> Result<(Compound, Vec<ParityNote>), String> {
-        match self {
-            ResolvedTarget::Java(t) => build_structure_tag(array, t)
-                .map(|tag| (tag, Vec::new()))
-                .map_err(|e| e.to_string()),
-            ResolvedTarget::Bedrock(t) => {
-                build_mcstructure_tag(array, t).map_err(|e| e.to_string())
-            }
-        }
-    }
-
-    /// Write a built tag tree in this edition's on-disk form: Java `.nbt`
-    /// is gzip-wrapped big-endian, Bedrock `.mcstructure` is raw
-    /// little-endian.
-    fn write_tag<W: std::io::Write>(
+    fn prepare<'a>(
         &self,
-        writer: &mut W,
-        tag: &Compound,
-    ) -> Result<(), std::io::Error> {
-        let encoded = match self {
-            ResolvedTarget::Java(_) => write_compound_gzip(writer, tag),
-            ResolvedTarget::Bedrock(_) => write_mcstructure(writer, tag),
-        };
-        encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
+        array: &'a BlockArray,
+    ) -> Result<(PreparedStructure<'a>, Vec<ParityNote>), String> {
+        match self {
+            ResolvedTarget::Java(t) => prepare_structure(array, t)
+                .map(|prepared| (PreparedStructure::Java(prepared), Vec::new()))
+                .map_err(|e| e.to_string()),
+            ResolvedTarget::Bedrock(t) => prepare_mcstructure(array, t)
+                .map(|(prepared, notes)| (PreparedStructure::Bedrock(prepared), notes))
+                .map_err(|e| e.to_string()),
+        }
     }
 
     /// Human-facing Minecraft version string for the lockfile.
@@ -2745,6 +2737,27 @@ impl ResolvedTarget {
             ResolvedTarget::Java(_) => builtin_java(),
             ResolvedTarget::Bedrock(_) => builtin_bedrock(),
         }
+    }
+}
+
+/// A structure its edition's backend has checked, waiting to be written.
+enum PreparedStructure<'a> {
+    /// Java vanilla structure (`.nbt`, gzip).
+    Java(JavaStructure<'a>),
+    /// Bedrock structure (`.mcstructure`, uncompressed).
+    Bedrock(McStructure<'a>),
+}
+
+impl PreparedStructure<'_> {
+    /// Write the structure in its edition's on-disk form: Java `.nbt` is
+    /// gzip-wrapped big-endian, Bedrock `.mcstructure` is raw
+    /// little-endian.
+    fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+        let encoded = match self {
+            PreparedStructure::Java(structure) => structure.write_gzip(writer),
+            PreparedStructure::Bedrock(structure) => structure.write(writer),
+        };
+        encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
     }
 }
 
@@ -2820,7 +2833,25 @@ fn run_compile(
         Err(code) => return code,
     };
 
-    let prepared = match prepare_artifacts(&block_ir, &target, &out_dir) {
+    let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
+    check_and_write(&block_ir, &source, edition, &target, &out_dir, &lock_path)
+}
+
+/// Check every structure, then write them all and the lockfile.
+///
+/// The order is the point: [`prepare_artifacts`] refuses a structure the
+/// backend cannot write before [`write_artifacts_and_lock`] stages a byte
+/// of any of them, so a refusal leaves `out_dir` and the lockfile as they
+/// were.
+fn check_and_write(
+    block_ir: &BlockArrayIr,
+    source: &str,
+    edition: EditionArg,
+    target: &ResolvedTarget,
+    out_dir: &Path,
+    lock_path: &Path,
+) -> ExitCode {
+    let prepared = match prepare_artifacts(block_ir, target, out_dir) {
         Ok(p) => p,
         Err(PrepareRefusal::Collision(collision)) => {
             collision.report();
@@ -2828,15 +2859,13 @@ fn run_compile(
         }
         Err(PrepareRefusal::Other(code)) => return code,
     };
-
-    let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
-    if let Err(code) = check_lock_path_is_free(&prepared, &lock_path) {
+    if let Err(code) = check_lock_path_is_free(&prepared, lock_path) {
         return code;
     }
     // Before the file is replaced, not after: the lockfile about to be
     // overwritten is the only record of what was previously verified.
-    report_previous_target(&lock_path, edition, &target);
-    write_artifacts_and_lock(&prepared, &source, &block_ir, edition, &target, &lock_path)
+    report_previous_target(lock_path, edition, target);
+    write_artifacts_and_lock(&prepared, source, block_ir, edition, target, lock_path)
 }
 
 /// Compare the lockfile at `lock_path` with the target being built, and
@@ -3363,23 +3392,27 @@ fn prepare_out_dir(file: &Path, requested: Option<&Path>) -> Result<PathBuf, Exi
     Ok(out_dir)
 }
 
-/// Build every structure tag tree up front. A backend error here (abstract
-/// palette entry, stateful Bedrock entry, dimension overflow) must not
-/// leave half-written artifacts behind, so the function holds off all I/O
-/// until it knows the IR is serialisable.
-fn prepare_artifacts(
-    block_ir: &BlockArrayIr,
+/// Check every structure against the backend up front. A backend error
+/// here (abstract palette entry, stateful Bedrock entry, dimension
+/// overflow, a grid that disagrees with its dims) must not leave
+/// half-written artifacts behind, so the function holds off all I/O until
+/// it knows the IR is serialisable: once every structure is prepared, only
+/// I/O can fail its write. It builds no per-voxel tag tree: a structure's
+/// per-voxel lists are encoded while it is written, so a build holds one
+/// voxel's entry at a time rather than every structure's tree at once.
+fn prepare_artifacts<'a>(
+    block_ir: &'a BlockArrayIr,
     target: &ResolvedTarget,
     out_dir: &Path,
-) -> Result<Vec<(PathBuf, Compound)>, PrepareRefusal> {
+) -> Result<Vec<(PathBuf, PreparedStructure<'a>)>, PrepareRefusal> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
     let mut seen_paths: std::collections::HashMap<
         (PathBuf, std::ffi::OsString),
         (PathBuf, String),
     > = std::collections::HashMap::with_capacity(block_ir.structures.len());
     for (scope, array) in &block_ir.structures {
-        let (tag, degraded) = target.build_tag(array).map_err(|err| {
-            eprintln!("error: building `{scope}`: {err}");
+        let (structure, degraded) = target.prepare(array).map_err(|err| {
+            eprintln!("error: checking `{scope}`: {err}");
             ExitCode::from(1)
         })?;
         for note in degraded {
@@ -3422,7 +3455,7 @@ fn prepare_artifacts(
             };
             return Err(PrepareRefusal::Collision(collision));
         }
-        prepared.push((path, tag));
+        prepared.push((path, structure));
     }
     Ok(prepared)
 }
@@ -3571,7 +3604,7 @@ fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf
 /// ordinary state. For the lockfile it is a warning that the check could not
 /// be made, and the build goes on as it did before the check existed.
 fn check_lock_path_is_free(
-    prepared: &[(PathBuf, Compound)],
+    prepared: &[(PathBuf, PreparedStructure<'_>)],
     lock_path: &Path,
 ) -> Result<(), ExitCode> {
     let mut reserved_paths: std::collections::HashMap<(PathBuf, std::ffi::OsString), &Path> =
@@ -3681,7 +3714,7 @@ fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)>
 /// lockfile failed some destinations had already been overwritten, and the
 /// only undo available was deleting them.
 fn write_artifacts_and_lock(
-    prepared: &[(PathBuf, Compound)],
+    prepared: &[(PathBuf, PreparedStructure<'_>)],
     source: &str,
     block_ir: &BlockArrayIr,
     edition: EditionArg,
@@ -3691,10 +3724,9 @@ fn write_artifacts_and_lock(
     // Phase 1 — stage. Nothing a previous build produced is touched, so a
     // failure here costs only our own scratch.
     let mut staged = staging::StagedSet::default();
-    for (path, tag) in prepared {
-        if let Err(err) = staged.stage(path, staging::Kind::Artifact, |file| {
-            target.write_tag(file, tag)
-        }) {
+    for (path, structure) in prepared {
+        if let Err(err) = staged.stage(path, staging::Kind::Artifact, |file| structure.write(file))
+        {
             staged.discard();
             eprintln!("error: writing `{}`: {err}", path.display());
             return ExitCode::from(1);
@@ -3897,23 +3929,28 @@ mod staging {
             &mut self,
             final_path: &Path,
             kind: Kind,
-            write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+            write: impl FnOnce(&mut io::BufWriter<fs::File>) -> io::Result<()>,
         ) -> io::Result<()> {
             use std::io::Write as _;
 
             let tmp_path = with_suffix(final_path, ".tmp");
             let result = (|| {
-                let mut file = fs::File::create(&tmp_path)?;
+                // Buffered, because an uncompressed `.mcstructure` is two
+                // 4-byte writes per voxel and each would otherwise be its
+                // own system call.
+                let mut file = io::BufWriter::new(fs::File::create(&tmp_path)?);
                 write(&mut file)?;
+                // Flushed first, so the buffer's tail is in the file that
+                // `sync_all` then makes durable.
                 file.flush()?;
                 // The commit below is a rename, which is only atomic with
                 // respect to the directory entry — without this the bytes
                 // can still be in flight when the rename publishes the name,
                 // so a crash leaves a correctly-named, half-written file.
-                file.sync_all()
+                file.get_ref().sync_all()
             })();
             if let Err(err) = result {
-                let _ = fs::remove_file(&tmp_path);
+                remove_scratch(&tmp_path);
                 return Err(err);
             }
             self.entries.push(Staged {
@@ -4014,8 +4051,24 @@ mod staging {
         /// entry list afterwards.
         fn discard_scratch(&self) {
             for entry in &self.entries {
-                let _ = fs::remove_file(&entry.tmp_path);
+                remove_scratch(&entry.tmp_path);
             }
+        }
+    }
+
+    /// Delete a scratch file the build is abandoning, warning when one is
+    /// left behind. The build has already failed by then, so this does not
+    /// change the outcome, but a leftover `.tmp` the operator is not told
+    /// about is the kind of silence [`undo`] refuses. A file that was never
+    /// created is not a leftover.
+    fn remove_scratch(tmp_path: &Path) {
+        match fs::remove_file(tmp_path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => eprintln!(
+                "warning: scratch file `{}` was left behind: {err}",
+                tmp_path.display(),
+            ),
         }
     }
 
@@ -4632,7 +4685,8 @@ mod tests {
                 "scope `{key}` must be refused rather than written outside `out`",
             );
         }
-        let prepared = prepare_artifacts(&rekeyed("site::s::hut"), &target, out_dir)
+        let plain = rekeyed("site::s::hut");
+        let prepared = prepare_artifacts(&plain, &target, out_dir)
             .unwrap_or_else(|_| panic!("a plain id prepares"));
         let paths: Vec<&Path> = prepared.iter().map(|(path, _)| path.as_path()).collect();
         assert_eq!(paths, [out_dir.join("hut.nbt").as_path()]);
@@ -4662,7 +4716,7 @@ mod tests {
     /// The paths `prepare_artifacts` would write, or its refusal, without
     /// the tag trees that make a failure message unreadable.
     fn prepared_paths(
-        result: Result<Vec<(PathBuf, Compound)>, PrepareRefusal>,
+        result: Result<Vec<(PathBuf, PreparedStructure<'_>)>, PrepareRefusal>,
     ) -> Result<Vec<PathBuf>, PrepareRefusal> {
         result.map(|prepared| prepared.into_iter().map(|(path, _)| path).collect())
     }
@@ -4734,5 +4788,52 @@ mod tests {
                 prepared_paths(other),
             ),
         }
+    }
+
+    /// A structure the backend refuses stops the build before anything is
+    /// staged, including the structures ahead of it that pass. The passing
+    /// one comes first, so a check folded into the write loop would reach
+    /// it with nothing refused yet; the refused one has a grid shorter than
+    /// its dims, which the backend refuses rather than reading past.
+    #[test]
+    fn a_structure_the_backend_refuses_leaves_out_dir_and_lockfile_untouched() {
+        let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, Some(Edition::Java));
+        let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+        let target =
+            resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+        let array = block_ir
+            .structures
+            .values()
+            .next()
+            .expect("the probe lowers to one structure")
+            .clone();
+        let mut short = array.clone();
+        short.voxels.pop();
+        block_ir.structures = [
+            ("struct::a".to_owned(), array),
+            ("struct::b".to_owned(), short),
+        ]
+        .into_iter()
+        .collect();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let lock_path = dir.path().join("probe.crn.lock");
+
+        let code = check_and_write(
+            &block_ir,
+            "",
+            EditionArg::Java,
+            &target,
+            dir.path(),
+            &lock_path,
+        );
+
+        assert_eq!(code, ExitCode::from(1));
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("read temp dir")
+            .map(|entry| entry.expect("dir entry").file_name())
+            .collect();
+        assert!(left.is_empty(), "a refused build wrote {left:?}");
     }
 }
