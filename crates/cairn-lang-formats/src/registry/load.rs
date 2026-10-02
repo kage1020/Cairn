@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry};
 use cairn_lang_core::lock::HashHex;
+use cairn_lang_core::resolve::compare_versions;
 use cairn_lang_core::suggest::nearest_match;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -354,12 +355,22 @@ impl From<AliasError> for RegistryError {
 /// rather than running it, the silent-substitution hazard
 /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
 /// forbids.
+///
+/// A row is named by any spelling of its version, with trailing zeros
+/// ignored (`1.21.0` names Java's `1.21`, `1.21` names Bedrock's
+/// `1.21.0`): the rule `@requires` and `@intended_targets` read a label by,
+/// and what `spec/versioning-editions` "The target is a compile-time
+/// parameter" means by "`--target` accepts either spelling of the same
+/// version". The pair carries the row's own label, so the target and the
+/// lockfile name the version the way the table does. `validate_version_order`
+/// refuses a table carrying two spellings of one version, so at most one
+/// row matches.
 fn targetable_row_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
     table
         .versions
         .iter()
         .filter(|e| e.targetable)
-        .find(|e| e.mc_version == mc_version)
+        .find(|e| compare_versions(&e.mc_version, mc_version).is_eq())
         .map(|e| (e.mc_version.clone(), e.data_version))
 }
 
@@ -373,7 +384,7 @@ impl RegistryPack {
     /// # Errors
     ///
     /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor an exact `mc_version` match.
+    /// the `"latest"` alias nor a spelling of a targetable `mc_version`.
     ///
     /// # Panics
     ///
@@ -419,7 +430,7 @@ impl RegistryPack {
     /// # Errors
     ///
     /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor an exact `mc_version` match.
+    /// the `"latest"` alias nor a spelling of a targetable `mc_version`.
     ///
     /// # Panics
     ///
@@ -445,7 +456,7 @@ impl RegistryPack {
     /// # Errors
     ///
     /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor an exact `mc_version` match.
+    /// the `"latest"` alias nor a spelling of a targetable `mc_version`.
     ///
     /// # Panics
     ///
@@ -986,8 +997,6 @@ fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError>
 /// the lookup treats them as the same row, and a table carrying both
 /// would evaluate a floor against whichever came first.
 fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError> {
-    use cairn_lang_core::resolve::compare_versions;
-
     let mut previous: Option<&super::data_versions::DataVersionEntry> = None;
     for entry in &table.versions {
         if let Some(previous) = previous {
@@ -1683,6 +1692,34 @@ mod tests {
             .resolve_java_target("1.21.5")
             .expect_err("unknown target");
         assert_eq!(err.suggestion.as_deref(), Some("1.21.4"));
+    }
+
+    /// `--target` reads a version label the way `@requires` and
+    /// `@intended_targets` do, trailing zeros ignored, and the target
+    /// carries the row's own label. Both editions are covered, since they
+    /// spell the same release in opposite ways (`1.21` on Java, `1.21.0`
+    /// on Bedrock).
+    #[test]
+    fn either_spelling_of_a_version_names_its_row() {
+        let java = load_builtin_java().expect("java pack");
+        let named = java
+            .resolve_java_target("1.21")
+            .expect("the row's own label");
+        let padded = java
+            .resolve_java_target("1.21.0")
+            .expect("the padded spelling");
+        assert_eq!(padded, named);
+        assert_eq!(padded.mc_version, "1.21");
+
+        let bedrock = load_builtin_bedrock().expect("bedrock pack");
+        let named = bedrock
+            .resolve_bedrock_target("1.21.0")
+            .expect("the row's own label");
+        let trimmed = bedrock
+            .resolve_bedrock_target("1.21")
+            .expect("the trimmed spelling");
+        assert_eq!(trimmed, named);
+        assert_eq!(trimmed.mc_version, "1.21.0");
     }
 
     #[test]

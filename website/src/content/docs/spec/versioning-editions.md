@@ -15,6 +15,9 @@ transition.
 
 The backend holds a "version string ↔ DataVersion" table, so `--target` accepts either spelling of
 the same version. Bedrock resolves its version strings to an internal monotonic key the same way.
+Two labels are the same version when they differ only by trailing zeros (`1.21.0` is Java's `1.21`,
+and `1.21` is Bedrock's `1.21.0`), the rule `@requires` and `@intended_targets` read a label by too.
+The build and its lockfile name the version as the table spells it.
 
 ## 10.2 Language contract: recompile, don't transcode
 

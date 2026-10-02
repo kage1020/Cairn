@@ -83,8 +83,9 @@ impl std::error::Error for UnsupportedTarget {}
 ///
 /// # Errors
 ///
-/// Returns [`UnsupportedTarget`] when the requested string is neither an
-/// exact `mc_version` match nor the `"latest"` alias.
+/// Returns [`UnsupportedTarget`] when the requested string is neither a
+/// spelling of a targetable `mc_version` (trailing zeros ignored) nor the
+/// `"latest"` alias.
 pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
     builtin_java().resolve_java_target(requested)
 }
@@ -95,8 +96,9 @@ pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTar
 ///
 /// # Errors
 ///
-/// Returns [`UnsupportedTarget`] when the requested string is neither an
-/// exact `mc_version` match nor the `"latest"` alias.
+/// Returns [`UnsupportedTarget`] when the requested string is neither a
+/// spelling of a targetable `mc_version` (trailing zeros ignored) nor the
+/// `"latest"` alias.
 pub fn resolve_bedrock_target(requested: &str) -> Result<BedrockTarget, UnsupportedTarget> {
     builtin_bedrock().resolve_bedrock_target(requested)
 }

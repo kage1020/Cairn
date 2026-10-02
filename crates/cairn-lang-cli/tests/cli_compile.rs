@@ -174,6 +174,60 @@ fn c7_lockfile_records_target_triple() {
     assert_eq!(lf.target.data_version, 4189);
 }
 
+/// `--target` accepts either spelling of a version, trailing zeros
+/// ignored, as `@requires` and `@intended_targets` read one: Java's `1.21`
+/// row is reached as `1.21.0`, and Bedrock's `1.21.0` row as `1.21`. The
+/// lockfile records each row's own label and integer, read off the build
+/// that names the row the way the table does.
+#[test]
+fn c7b_either_spelling_of_a_target_builds_the_row_it_names() {
+    let (_tmp_src, src) = example_in_tempdir("roof-flat.crn");
+    let mut recorded = Vec::new();
+    for (edition, target) in [
+        ("java", "1.21"),
+        ("java", "1.21.0"),
+        ("bedrock", "1.21.0"),
+        ("bedrock", "1.21"),
+    ] {
+        let out_dir = TempDir::new().expect("out tempdir");
+        let lock_path = out_dir.path().join("spelling.lock");
+        let result = cairn(
+            "compile",
+            &[
+                src.to_str().unwrap(),
+                "--edition",
+                edition,
+                "--target",
+                target,
+                "--out",
+                out_dir.path().to_str().unwrap(),
+                "--lock",
+                lock_path.to_str().unwrap(),
+            ],
+        );
+        assert!(
+            result.status.success(),
+            "{edition} `--target {target}`: {}",
+            String::from_utf8_lossy(&result.stderr),
+        );
+        recorded.push(
+            Lockfile::read_from_path(&lock_path)
+                .expect("read lock")
+                .target,
+        );
+    }
+    assert_eq!(
+        recorded[1], recorded[0],
+        "java `1.21.0` must build the `1.21` row"
+    );
+    assert_eq!(recorded[1].mc_version, "1.21");
+    assert_eq!(
+        recorded[3], recorded[2],
+        "bedrock `1.21` must build the `1.21.0` row"
+    );
+    assert_eq!(recorded[3].mc_version, "1.21.0");
+}
+
 #[test]
 fn c8_bedrock_compiles_stateless_example_to_mcstructure() {
     // roof-flat.crn resolves entirely to bare (stateless) block ids —
