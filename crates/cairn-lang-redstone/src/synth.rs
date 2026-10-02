@@ -283,10 +283,10 @@ struct ScopeCollected<'a> {
     /// scope's `signal_defs` is complete.
     asserts: Vec<&'a AssertIr>,
     /// Signals a refused binding would have driven — a `-> sig.X` tail on
-    /// a member that is not a sensor, or a `logic` LHS outside the `sig.`
-    /// namespace. A later line referencing one of these is not a second
-    /// mistake, so the unbound-signal report skips it: the crate reports
-    /// the root cause once.
+    /// a member that is not a sensor, or a `logic` LHS that is not a
+    /// signal name ([`is_signal_name`]). A later line referencing one of
+    /// these is not a second mistake, so the unbound-signal report skips
+    /// it: the crate reports the root cause once.
     refused_drivers: HashSet<DottedRef>,
     /// Signals a refused binding would have consumed — an actuator key on
     /// the wrong member, or a signal-valued key nothing reads. The author
@@ -610,16 +610,17 @@ fn actuator_host<'a>(
 /// Whether a dotted name is a signal name: `sig.` and exactly one segment
 /// after it (`spec/redstone` "Signal binding").
 ///
-/// The one reading of "is this a signal name" for every position that
-/// holds one — a `logic` line's left-hand side here, and through
-/// [`signal_named_by`] the sensor tail, an argument value, and a selector
-/// attribute — so the four cannot start disagreeing about what counts.
+/// The positions that define or wire a signal ask it here: a `logic`
+/// line's left-hand side, and through [`signal_named_by`] the sensor tail,
+/// an argument value, and a selector attribute. A reference on a `logic`
+/// right-hand side or in an `assert` is not checked here; it is looked up
+/// in the scope's defined signals, which only a sensor tail or a `logic`
+/// left-hand side adds to, and both of those are checked here.
 ///
-/// Two segments, not just a `sig.` head. `sig.a.b` used to pass the value
-/// side and register a port whose name the block-array pass then refused
-/// (`must be a two-segment signal reference`), and the left-hand side
-/// checked the head alone, so `logic sig = ...` and `logic sig.a.b = ...`
-/// each became a cell the actuator side could never name.
+/// Two segments, not just a `sig.` head, because the reading side takes
+/// exactly one segment after `sig.`: an actuator value is a signal only by
+/// this test, and the block-array lowering refuses any other shape with
+/// `must be a two-segment signal reference`.
 fn is_signal_name(dr: &DottedRef) -> bool {
     dr.head() == SIGNAL_HEAD && dr.tail().len() == 1
 }
@@ -667,14 +668,15 @@ fn binding_claim(key: &str, named: Option<&DottedRef>) -> Option<BindingClaim> {
 
 /// Take one `logic` line, or refuse its left-hand side.
 ///
-/// Sensors emit into the `sig.` namespace and actuators consume from it, so
-/// a binding whose name is not a signal name ([`is_signal_name`]) can never
-/// be read. Refusing at collection is what keeps the gate out of the DAG:
-/// lowered, it took a cell and a placement coordinate for a signal with no
-/// consumer, and said so only as `W_LOGIC_UNUSED_SIGNAL`.
+/// A binding whose name is not a signal name ([`is_signal_name`]) can never
+/// be read by an actuator: a name outside the `sig.` namespace because
+/// actuators read from it, and `sig` or `sig.x.y` because they read exactly
+/// one segment after `sig.`. Refusing at collection is what keeps the gate
+/// out of the DAG; lowered, it would take a cell and a placement coordinate
+/// for a signal no actuator can consume.
 fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut ScopeCollected<'a>) {
     if !is_signal_name(&b.lhs) {
-        let (why, fix) = lhs_refusal(&b.lhs);
+        let LhsRefusal { why, fix } = lhs_refusal(&b.lhs);
         out.diagnostics.push(
             Diagnostic::new(
                 DiagnosticCode::LogicInvalidSignal,
@@ -696,6 +698,10 @@ fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut Scope
         let mut refs = HashSet::new();
         collect_refs(&b.rhs, &mut refs);
         out.refused_consumers.extend(refs);
+        // The line is not collected as a binding, so its right-hand side is
+        // never resolved: one finding per line, the left-hand side's, and
+        // an undefined name on the right is reported once the left is
+        // fixed.
         return;
     }
     out.bindings.push(PendingBinding {
@@ -705,39 +711,51 @@ fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut Scope
     });
 }
 
-/// Why a `logic` left-hand side is not a signal name, and the repair, for
-/// the three ways it can miss: outside the namespace, the namespace with
-/// no name after it, and a name of more than one segment.
-fn lhs_refusal(lhs: &DottedRef) -> (String, String) {
+/// Why a `logic` left-hand side is not a signal name, and its repair.
+struct LhsRefusal {
+    /// Completes "names `<lhs>`, ..." in the primary message.
+    why: String,
+    /// Completes "Fix: ..." in the footer.
+    fix: String,
+}
+
+/// The refusal for a `logic` left-hand side that fails [`is_signal_name`],
+/// for the three ways it can miss: outside the namespace, the namespace
+/// with no name after it, and more than one segment after it. Only called
+/// on such a name; on a signal name the third branch would describe a
+/// single segment as too many.
+fn lhs_refusal(lhs: &DottedRef) -> LhsRefusal {
+    debug_assert!(!is_signal_name(lhs), "`{lhs}` is a signal name");
     if lhs.head() != SIGNAL_HEAD {
-        return (
-            format!(
+        return LhsRefusal {
+            why: format!(
                 "which is outside the `{SIGNAL_HEAD}.` namespace sensors emit into and \
                  actuators read from"
             ),
-            format!("rename the left-hand side to `{SIGNAL_HEAD}.<name>`"),
-        );
+            fix: format!("rename the left-hand side to `{SIGNAL_HEAD}.<name>`"),
+        };
     }
     let segments = lhs.tail();
     match segments.first() {
-        None => (
-            format!(
+        None => LhsRefusal {
+            why: format!(
                 "which is the `{SIGNAL_HEAD}.` namespace itself rather than a signal in it; a \
                  signal name is `{SIGNAL_HEAD}.` and exactly one segment after it"
             ),
-            format!("add a name, as in `{SIGNAL_HEAD}.<name>`"),
-        ),
-        Some(first) => (
-            format!(
+            fix: format!("add a name, as in `{SIGNAL_HEAD}.<name>`"),
+        },
+        Some(first) => LhsRefusal {
+            why: format!(
                 "which has {count} segments after `{SIGNAL_HEAD}.`; a signal name is \
                  `{SIGNAL_HEAD}.` and exactly one segment after it",
                 count = segments.len(),
             ),
-            format!(
-                "drop the segments after the first, as in `{SIGNAL_HEAD}.{first}`, or join \
-                 them into one name"
+            fix: format!(
+                "keep one segment after `{SIGNAL_HEAD}.`, as in `{SIGNAL_HEAD}.{first}` or \
+                 `{SIGNAL_HEAD}.{joined}`",
+                joined = segments.join("_"),
             ),
-        ),
+        },
     }
 }
 
@@ -1815,8 +1833,8 @@ fn resolve_ref<'a>(
 
     // Root cause already reported once — silent skip. `refused_drivers`
     // joins it: a `-> sig.X` tail on a member that cannot emit, or a
-    // `logic` LHS outside the `sig.` namespace, was already refused where
-    // it was written, and the signal it would have defined going missing
+    // `logic` LHS that is not a signal name, was already refused where it
+    // was written, and the signal it would have defined going missing
     // is that finding's consequence rather than a second one.
     if ctx.failed_lhs.contains(dr) || ctx.refused_drivers.contains(dr) {
         return Err(LoweringFailed);
@@ -1923,10 +1941,18 @@ fn unbound_signal_diagnostic(
         diag = diag.with_footer(
             "Fix: add a sensor row such as `pressure_plate ... -> sig.<name>` or a `logic sig.<name> = ...` binding in this scope.",
         );
-    } else {
+    } else if is_signal_name(dr) {
         let joined = candidates.join(", ");
         diag = diag.with_footer(format!(
             "Valid signals in scope: {joined}. Fix: rename to a defined signal, or drive `{dr}` from a sensor / `logic` line.",
+        ));
+    } else {
+        // Neither a sensor tail nor a `logic` left-hand side accepts a name
+        // that is not a signal name, so offering to drive it from one would
+        // send the author to a refusal.
+        let joined = candidates.join(", ");
+        diag = diag.with_footer(format!(
+            "Valid signals in scope: {joined}. Fix: rename to a defined signal.",
         ));
     }
     diag

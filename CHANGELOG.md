@@ -493,8 +493,10 @@
   The left-hand side now passes the same test as the sensor tail and actuator values, so both lines
   are `E_LOGIC_INVALID_SIGNAL`. The message says which way the name misses. For the namespace
   with no name, the fix is to add one, as in `sig.<name>`. For more than one segment, it is to
-  drop the segments after the first, as in `sig.x`. A line that reads the refused name is not also
-  told it is unbound.
+  keep one, as in `sig.x` or `sig.x_y`. A line that reads the refused name is not also told it is
+  unbound. A reference to an undefined name that is not a signal name, such as `sig.x.y` on a
+  right-hand side or in an `assert`, was told to rename it to a defined signal or drive it from a
+  sensor or a `logic` line, and both of those refuse it. The footer now offers only the rename.
 
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
