@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- *(core)* say what a member builds in place of an abstract token no pack lowers, instead of always "falls back to air"
+- *(core)* say what a member builds in place of an abstract token no pack lowers, instead of always "falls back to air" ([#469](https://github.com/kage1020/Cairn/pull/469))
 
 ## 2026.10.0 — 2026-10-01
 
