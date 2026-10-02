@@ -12,6 +12,7 @@ use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
     PlacementPhase, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
+use crate::routing_geometry::PadColumn;
 
 pub(crate) fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
     CircuitRegionReservation {
@@ -75,7 +76,7 @@ pub(crate) fn collapsed_pad_row(phase: &PlacementPhase, row: CollapsedRow) -> Sc
 /// actuator edge all on coords of their own.
 fn roomy_ir(phase: &PlacementPhase) -> PlacementIr {
     let region = reservation(6, 3, 1);
-    let pad = crate::routing_geometry::output_pad(0, &region);
+    let pad = crate::routing_geometry::output_pad(0, PadColumn::for_cell_count(1), &region);
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(region);
     ir.inputs.push(NetlistInput {
@@ -106,7 +107,7 @@ fn roomy_ir(phase: &PlacementPhase) -> PlacementIr {
 /// Which end of the pad column runs out of rows.
 ///
 /// Both ends saturate through the same `edge_pad`, but they land on
-/// different things — the actuator column onto the cell row, the sensor
+/// different things — the actuator column onto a cell, the sensor
 /// column onto its own previous pad — and the refusal names which.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CollapsedRow {
@@ -144,7 +145,7 @@ impl CollapsedRow {
 
 fn shallow_ir(phase: &PlacementPhase, row: CollapsedRow) -> PlacementIr {
     let (region, inputs) = row.shape();
-    let pad = crate::routing_geometry::output_pad(0, &region);
+    let pad = crate::routing_geometry::output_pad(0, PadColumn::for_cell_count(1), &region);
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(region);
     for i in 0..inputs {

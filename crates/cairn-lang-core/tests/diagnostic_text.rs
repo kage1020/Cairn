@@ -135,6 +135,37 @@ fn the_corpus_reaches_every_note_an_unreadable_value_carries() {
     }
 }
 
+/// A `struct` / `def` header finding is worded apart from a member's:
+/// `E_UNKNOWN_ARGUMENT` names the header rather than a keyword's arguments,
+/// and the header's unreached `class=` has a primary and a note of its own.
+/// Both codes are reached by member findings too, so the code set above
+/// would stay whole if the header fixtures stopped reaching these.
+#[test]
+fn the_corpus_reaches_the_header_vocabulary_prose() {
+    let rendered = rendered_strings();
+    for (origin, sentence) in [
+        (
+            "E_UNKNOWN_ARGUMENT primary",
+            "`siz=` is not an argument a `struct` header reads",
+        ),
+        (
+            "W_IGNORED_ARGUMENT primary",
+            "`class=` is an argument a `def` header takes and no pass reads yet",
+        ),
+        (
+            "W_IGNORED_ARGUMENT note 0",
+            "the `def` is built without it — remove the argument",
+        ),
+    ] {
+        assert!(
+            rendered
+                .iter()
+                .any(|(o, text)| o == origin && text.contains(sentence)),
+            "no fixture reaches the {origin} `{sentence}`",
+        );
+    }
+}
+
 #[test]
 fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
     let mut seen: BTreeSet<&'static str> = BTreeSet::new();
@@ -156,6 +187,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_TRUTH_TABLE_CONFLICT",
         "E_TRUTH_TABLE_EMPTY",
         "E_UNEXPECTED_POSITIONAL",
+        "E_UNKNOWN_ARGUMENT",
         "E_UNKNOWN_KEYWORD",
         "E_UNKNOWN_SLOT_TARGET",
         "E_UNRESOLVED_PLACE_REF",
@@ -164,6 +196,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "W_DEFERRED_MEMBER",
         "W_IGNORED_ARGUMENT",
         "W_STRUCTURE_TOO_LARGE",
+        "W_STRUCT_NO_SIZE",
         "W_TRUTH_TABLE_DUPLICATE_ROW",
         "W_TRUTH_TABLE_PARTIAL",
         "W_UNUSED_DEF",

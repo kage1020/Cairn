@@ -25,7 +25,13 @@
 //!   table.
 //! - **Actuator**: one of the argument keys in [`ACTUATOR_BINDINGS`]
 //!   (`opened_by` / `powered_by` / `lit_by` / `fired_by`) on the
-//!   component that table pairs the key with.
+//!   component that table pairs the key with. Written in the selector
+//!   form (`door[id=front] opened_by=sig.x`), it drives the physical door
+//!   `cairn_lang_core::intent::actuator_patch_target` picks — the
+//!   lookup block-array lowering reads too — and one that picks no single
+//!   door is `E_LOGIC_UNRESOLVED_PATCH`. A component takes one binding per
+//!   key, however the lines carrying them are written; a second is
+//!   `E_LOGIC_DUPLICATE_BINDING`.
 //!
 //! The *claim* comes from either side of a pair and the value is then
 //! checked against it. A tail claims a sensor whatever the value is; an
@@ -83,8 +89,8 @@ use cairn_lang_core::ast::{DottedRef, Expr, SIGNAL_HEAD, Value, ValueKind};
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{
-    AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, SiteIr, StructIr,
-    ValueWithSpan, known_keywords,
+    AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
+    SiteIr, StructIr, ValueWithSpan, actuator_patch_target, known_keywords,
 };
 use cairn_lang_core::suggest::nearest_match;
 
@@ -226,7 +232,8 @@ impl ModuleScope<'_> {
         };
         let scope = ScopeRef { kind, name };
         let mut collected = ScopeCollected::default();
-        collect_body(members, logic, asserts, scope, &mut collected);
+        let candidates = patch_candidates(members);
+        collect_body(members, logic, asserts, &candidates, scope, &mut collected);
         finish_scope(scope, collected, out);
     }
 }
@@ -276,10 +283,10 @@ struct ScopeCollected<'a> {
     /// scope's `signal_defs` is complete.
     asserts: Vec<&'a AssertIr>,
     /// Signals a refused binding would have driven — a `-> sig.X` tail on
-    /// a member that is not a sensor, or a `logic` LHS outside the `sig.`
-    /// namespace. A later line referencing one of these is not a second
-    /// mistake, so the unbound-signal report skips it: the crate reports
-    /// the root cause once.
+    /// a member that is not a sensor, or a `logic` LHS that is not a
+    /// signal name ([`is_signal_name`]). A later line referencing one of
+    /// these is not a second mistake, so the unbound-signal report skips
+    /// it: the crate reports the root cause once.
     refused_drivers: HashSet<DottedRef>,
     /// Signals a refused binding would have consumed — an actuator key on
     /// the wrong member, or a signal-valued key nothing reads. The author
@@ -289,10 +296,13 @@ struct ScopeCollected<'a> {
     refused_consumers: HashSet<DottedRef>,
     /// Sensors, in source order.
     sensors: Vec<PendingSensor>,
-    /// Actuators, in source order. Resolved to [`OutputPort`]s in the
-    /// finish step so an undefined driver can be reported without
-    /// pretending the actuator was wired.
-    actuators: Vec<PendingActuator>,
+    /// Accepted actuator bindings, in walk order, each filed under the
+    /// physical component it drives. A patch is filed under the door its
+    /// selector picks, so a second binding on one door is found whichever
+    /// line — the door's own or a patch — carries it. Resolved to
+    /// [`OutputPort`]s in the finish step so an undefined driver can be
+    /// reported without pretending the actuator was wired.
+    actuators: Vec<BoundActuator<'a>>,
     /// `logic sig.X = <expr>` lines, in source order.
     bindings: Vec<PendingBinding<'a>>,
 }
@@ -303,9 +313,14 @@ struct PendingSensor {
     span: Span,
 }
 
+/// One accepted actuator binding, filed under the component it drives.
 #[derive(Debug)]
-struct PendingActuator {
-    driver_name: DottedRef,
+struct BoundActuator<'a> {
+    /// The physical member the binding drives: the member itself, or the
+    /// door a selector-form patch picks.
+    host: &'a Member,
+    key: &'a str,
+    driver_name: &'a DottedRef,
     span: Span,
 }
 
@@ -320,11 +335,12 @@ fn collect_body<'a>(
     members: &'a [Member],
     logic: &'a [LogicBinding],
     asserts: &'a [AssertIr],
+    candidates: &[&'a Member],
     scope: ScopeRef<'_>,
     out: &mut ScopeCollected<'a>,
 ) {
     for m in members {
-        collect_member(m, scope, out);
+        collect_member(m, candidates, scope, out);
     }
     for b in logic {
         collect_binding(b, scope, out);
@@ -349,7 +365,12 @@ fn collect_body<'a>(
     out.asserts.extend(asserts);
 }
 
-fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollected<'a>) {
+fn collect_member<'a>(
+    m: &'a Member,
+    candidates: &[&'a Member],
+    scope: ScopeRef<'_>,
+    out: &mut ScopeCollected<'a>,
+) {
     // A member whose keyword is not in the role table is already
     // `E_UNKNOWN_KEYWORD` from the `check` pass. Reading its bindings
     // could only add a second finding about a component that does not
@@ -369,12 +390,15 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
     // them round the loop to be told about the host next time.
     if let Some(binding) = &m.binding {
         let named = signal_named_by(binding);
-        if unknown_keyword || !SENSOR_HOSTS.contains(&m.role.keyword()) {
-            // `check::binding` refuses the tail, and `cairn synth` gates on
-            // `check`, so a second finding here would be the same sentence
-            // twice on one line. What this arm still owes the rest of the
-            // pass is the driver it takes away: a `logic` line reading the
-            // signal must not be told separately that nothing defines it.
+        if unknown_keyword || !SENSOR_HOSTS.contains(&m.role.keyword()) || m.selector.is_some() {
+            // `check::binding` refuses the tail — on a keyword that is not
+            // a sensor, and on a sensor keyword in the selector form, which
+            // no sensor binding is defined for — and `cairn synth`
+            // gates on `check`, so a second finding here would be the same
+            // sentence twice on one line. What this arm still owes the rest
+            // of the pass is the driver it takes away: a `logic` line
+            // reading the signal must not be told separately that nothing
+            // defines it.
             if let Some(dr) = named {
                 out.refused_drivers.insert(dr.clone());
             }
@@ -419,11 +443,9 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
                             .push(diag_misplaced_actuator(m, key, host, vspan, scope));
                     }
                 } else if let Some(dr) = named {
-                    out.actuators.push(PendingActuator {
-                        driver_name: dr.clone(),
-                        span: vspan.span.clone(),
-                    });
-                    continue;
+                    if accept_actuator(m, key, dr, vspan, candidates, scope, out) {
+                        continue;
+                    }
                 } else {
                     out.diagnostics
                         .push(diag_argument_names_no_signal(m, key, vspan, scope));
@@ -478,7 +500,7 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
         asserts,
     } = &m.children;
     for child in children {
-        collect_member(child, scope, out);
+        collect_member(child, candidates, scope, out);
     }
     for b in logic {
         collect_binding(b, scope, out);
@@ -486,21 +508,128 @@ fn collect_member<'a>(m: &'a Member, scope: ScopeRef<'_>, out: &mut ScopeCollect
     out.asserts.extend(asserts);
 }
 
+/// Register a well-formed actuator binding on the component it drives, or
+/// refuse it. `false` when this binding is refused, so the caller can
+/// still count the signal as consumed.
+///
+/// The component is `m`, or the door a selector-form patch picks. A patch
+/// that picks none is `E_LOGIC_UNRESOLVED_PATCH`, and a second binding
+/// under one key on one component is `E_LOGIC_DUPLICATE_BINDING`: either
+/// way the port would have no component of its own behind it.
+///
+/// Of two bindings on one component, the one on the component's own line
+/// is the first, whichever the walk reaches first. A patch may be written
+/// above the door it binds, and blaming the door's own line for coming
+/// second would underline the binding that declares the wire and point the
+/// note at the patch. So when the declaration arrives after a patch, it
+/// takes the patch's place and the patch is the binding refused.
+fn accept_actuator<'a>(
+    m: &'a Member,
+    key: &'a str,
+    driver: &'a DottedRef,
+    vspan: &ValueWithSpan,
+    candidates: &[&'a Member],
+    scope: ScopeRef<'_>,
+    out: &mut ScopeCollected<'a>,
+) -> bool {
+    let host = match actuator_host(m, candidates) {
+        Ok(host) => host,
+        Err(reason) => {
+            out.diagnostics
+                .push(diag_unresolved_patch(m, key, &reason, vspan, scope));
+            return false;
+        }
+    };
+    let incoming = BoundActuator {
+        host,
+        key,
+        driver_name: driver,
+        span: vspan.span.clone(),
+    };
+    let Some(slot) = out
+        .actuators
+        .iter_mut()
+        .find(|b| std::ptr::eq(b.host, host) && b.key == key)
+    else {
+        out.actuators.push(incoming);
+        return true;
+    };
+    // One line cannot carry a key twice, so a duplicate always involves a
+    // patch, and the line that is not one is the component's own.
+    let declares = std::ptr::eq(m, host);
+    let refused = if declares {
+        std::mem::replace(slot, incoming)
+    } else {
+        incoming
+    };
+    out.diagnostics
+        .push(diag_duplicate_binding(slot, &refused, scope));
+    if declares {
+        out.refused_consumers.insert(refused.driver_name.clone());
+    }
+    declares
+}
+
+/// The members a selector-form patch in this scope may pick: every member
+/// this pass walks, at any depth.
+///
+/// Block-array lowering resolves a patch against its flattened view,
+/// which unwraps a `level` sitting directly in the body and nothing else.
+/// Every body it does not unwrap is a `check` error — `nesting`'s
+/// `E_UNSUPPORTED_NESTING`, or the `E_UNKNOWN_KEYWORD` /
+/// `E_MISPLACED_MEMBER` on the row the body hangs off — and `cairn synth`
+/// gates on `check`, so on a source that reaches this pass the two views
+/// hold the same doors. The
+/// wider one is kept because [`collect_member`] reads bindings at any
+/// depth too: a patch and its door nested under the same parent pick
+/// each other here the way they would once that nesting has a reader.
+fn patch_candidates(members: &[Member]) -> Vec<&Member> {
+    fn walk<'a>(members: &'a [Member], out: &mut Vec<&'a Member>) {
+        for m in members {
+            out.push(m);
+            walk(&m.children.members, out);
+        }
+    }
+    let mut out = Vec::with_capacity(members.len());
+    walk(members, &mut out);
+    out
+}
+
+/// The physical member an actuator binding on `m` drives: `m` itself, or,
+/// for the selector form, the door its brackets pick.
+fn actuator_host<'a>(
+    m: &'a Member,
+    candidates: &[&'a Member],
+) -> Result<&'a Member, PatchTargetError> {
+    if m.selector.is_none() {
+        return Ok(m);
+    }
+    actuator_patch_target(m, candidates.iter().copied())
+}
+
+/// Whether a dotted name is a signal name: `sig.` and exactly one segment
+/// after it (`spec/redstone` "Signal binding").
+///
+/// The positions that define or wire a signal ask it here: a `logic`
+/// line's left-hand side, and through [`signal_named_by`] the sensor tail,
+/// an argument value, and a selector attribute. A reference on a `logic`
+/// right-hand side or in an `assert` is not checked here; it is looked up
+/// in the scope's defined signals, which only a sensor tail or a `logic`
+/// left-hand side adds to, and both of those are checked here.
+///
+/// Two segments, not just a `sig.` head, because the reading side takes
+/// exactly one segment after `sig.`: an actuator value is a signal only by
+/// this test, and the block-array lowering refuses any other shape with
+/// `must be a two-segment signal reference`.
+fn is_signal_name(dr: &DottedRef) -> bool {
+    dr.head() == SIGNAL_HEAD && dr.tail().len() == 1
+}
+
 /// The signal reference a value names, or `None` for a value that names
-/// no signal at all.
-///
-/// One reading of "is this a signal reference" for all three positions
-/// that hold one — the sensor tail, an argument value, and a selector
-/// attribute — so the three cannot start disagreeing about what counts.
-///
-/// Two segments, not just a `sig.` head. `sig.a.b` used to pass here and
-/// register a port whose name the block-array pass then refused
-/// (`must be a two-segment signal reference`), so the front end and the
-/// lowering disagreed about what a signal name is and the front end was
-/// the lenient one.
+/// no signal at all. See [`is_signal_name`].
 fn signal_named_by(value: &Value) -> Option<&DottedRef> {
     match &value.kind {
-        ValueKind::DotRef(dr) if dr.head() == SIGNAL_HEAD && dr.tail().len() == 1 => Some(dr),
+        ValueKind::DotRef(dr) if is_signal_name(dr) => Some(dr),
         _ => None,
     }
 }
@@ -539,27 +668,27 @@ fn binding_claim(key: &str, named: Option<&DottedRef>) -> Option<BindingClaim> {
 
 /// Take one `logic` line, or refuse its left-hand side.
 ///
-/// Sensors emit into the `sig.` namespace and actuators consume from it, so
-/// a binding named outside it can never be read. Refusing at collection is
-/// what keeps the gate out of the DAG: lowered, it took a cell and a
-/// placement coordinate for a signal with no consumer, and said so only as
-/// `W_LOGIC_UNUSED_SIGNAL`.
+/// A binding whose name is not a signal name ([`is_signal_name`]) can never
+/// be read by an actuator: a name outside the `sig.` namespace because
+/// actuators read from it, and `sig` or `sig.x.y` because they read exactly
+/// one segment after `sig.`. Refusing at collection is what keeps the gate
+/// out of the DAG; lowered, it would take a cell and a placement coordinate
+/// for a signal no actuator can consume.
 fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut ScopeCollected<'a>) {
-    if b.lhs.head() != SIGNAL_HEAD {
+    if !is_signal_name(&b.lhs) {
+        let LhsRefusal { why, fix } = lhs_refusal(&b.lhs);
         out.diagnostics.push(
             Diagnostic::new(
                 DiagnosticCode::LogicInvalidSignal,
                 b.span.clone(),
                 format!(
-                    "{label} `logic {lhs} = ...` names `{lhs}`, which is outside the \
-                     `{SIGNAL_HEAD}.` namespace sensors emit into and actuators read from",
+                    "{label} `logic {lhs} = ...` names `{lhs}`, {why}",
                     label = scope.label(),
                     lhs = b.lhs,
                 ),
             )
             .with_footer(format!(
-                "Fix: rename the left-hand side to `{SIGNAL_HEAD}.<name>`, or delete the \
-                 binding if nothing was meant to read it.",
+                "Fix: {fix}, or delete the binding if nothing was meant to read it."
             )),
         );
         out.refused_drivers.insert(b.lhs.clone());
@@ -569,6 +698,10 @@ fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut Scope
         let mut refs = HashSet::new();
         collect_refs(&b.rhs, &mut refs);
         out.refused_consumers.extend(refs);
+        // The line is not collected as a binding, so its right-hand side is
+        // never resolved: one finding per line, the left-hand side's, and
+        // an undefined name on the right is reported once the left is
+        // fixed.
         return;
     }
     out.bindings.push(PendingBinding {
@@ -576,6 +709,54 @@ fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut Scope
         rhs: &b.rhs,
         span: b.span.clone(),
     });
+}
+
+/// Why a `logic` left-hand side is not a signal name, and its repair.
+struct LhsRefusal {
+    /// Completes "names `<lhs>`, ..." in the primary message.
+    why: String,
+    /// Completes "Fix: ..." in the footer.
+    fix: String,
+}
+
+/// The refusal for a `logic` left-hand side that fails [`is_signal_name`],
+/// for the three ways it can miss: outside the namespace, the namespace
+/// with no name after it, and more than one segment after it. Only called
+/// on such a name; on a signal name the third branch would describe a
+/// single segment as too many.
+fn lhs_refusal(lhs: &DottedRef) -> LhsRefusal {
+    debug_assert!(!is_signal_name(lhs), "`{lhs}` is a signal name");
+    if lhs.head() != SIGNAL_HEAD {
+        return LhsRefusal {
+            why: format!(
+                "which is outside the `{SIGNAL_HEAD}.` namespace sensors emit into and \
+                 actuators read from"
+            ),
+            fix: format!("rename the left-hand side to `{SIGNAL_HEAD}.<name>`"),
+        };
+    }
+    let segments = lhs.tail();
+    match segments.first() {
+        None => LhsRefusal {
+            why: format!(
+                "which is the `{SIGNAL_HEAD}.` namespace itself rather than a signal in it; a \
+                 signal name is `{SIGNAL_HEAD}.` and exactly one segment after it"
+            ),
+            fix: format!("add a name, as in `{SIGNAL_HEAD}.<name>`"),
+        },
+        Some(first) => LhsRefusal {
+            why: format!(
+                "which has {count} segments after `{SIGNAL_HEAD}.`; a signal name is \
+                 `{SIGNAL_HEAD}.` and exactly one segment after it",
+                count = segments.len(),
+            ),
+            fix: format!(
+                "keep one segment after `{SIGNAL_HEAD}.`, as in `{SIGNAL_HEAD}.{first}` or \
+                 `{SIGNAL_HEAD}.{joined}`",
+                joined = segments.join("_"),
+            ),
+        },
+    }
 }
 
 /// The repair for a value that names no signal, when there is one.
@@ -736,6 +917,116 @@ fn diag_misplaced_actuator(
              argument until `{host}` lands.",
         )
     })
+}
+
+/// An actuator patch whose selector picks no single physical door.
+///
+/// Anchored on the selector's `id=` when it has one, because the id is
+/// what the author corrects; the binding itself is well formed. The
+/// primary carries [`PatchTargetError`]'s reason clause, the one
+/// block-array lowering defers the line with, and the footer the repair,
+/// which depends on the reason.
+fn diag_unresolved_patch(
+    member: &Member,
+    key: &str,
+    reason: &PatchTargetError,
+    vspan: &ValueWithSpan,
+    scope: ScopeRef<'_>,
+) -> Diagnostic {
+    let span = member
+        .selector
+        .as_ref()
+        .and_then(|s| s.get("id"))
+        .map_or_else(|| member.span.clone(), |id| id.span.clone());
+    let keyword = member.role.keyword();
+    let fix = match reason {
+        PatchTargetError::Ambiguous { count, .. } => format!(
+            "Fix: give the {count} `{keyword}` members distinct ids, so the selector names one.",
+        ),
+        PatchTargetError::NoSuchId {
+            id,
+            known,
+            unlabelled,
+            ..
+        } if *unlabelled > 0 => {
+            if known.is_empty() {
+                format!(
+                    "Fix: add `id={id}` to the `{keyword}` this patch is meant to bind, or \
+                     write `{key}=` on that `{keyword}`'s own line.",
+                )
+            } else {
+                format!(
+                    "Fix: set `[id=<label>]` to one of the ids listed, or add `id={id}` to \
+                     the `{keyword}` without one that this patch is meant to bind.",
+                )
+            }
+        }
+        _ => format!(
+            "Fix: set `[id=<label>]` to the id of one `{keyword}` declared in this scope \
+             without brackets, or write `{key}=` on that `{keyword}`'s own line.",
+        ),
+    };
+    Diagnostic::new(
+        DiagnosticCode::LogicUnresolvedPatch,
+        span,
+        format!(
+            "{label} {reason}, so its `{key}=` binding drives nothing",
+            label = scope.label(),
+        ),
+    )
+    .with_note(vspan.span.clone(), "the binding the patch carries")
+    .with_footer(fix)
+}
+
+/// A second binding under one actuator key on one physical component.
+///
+/// `kept` is the binding the component keeps — its own line's, when it has
+/// one — and `refused` the one this finding is anchored on.
+fn diag_duplicate_binding(
+    kept: &BoundActuator<'_>,
+    refused: &BoundActuator<'_>,
+    scope: ScopeRef<'_>,
+) -> Diagnostic {
+    let keyword = kept.host.role.keyword();
+    // One line cannot carry a key twice, so one of the two is a patch, and
+    // a patch resolves only by an `id=` its door carries: `host.id` is set
+    // here. The keyword alone keeps the sentence total without a panic.
+    let named = kept.host.id.as_deref().map_or_else(
+        || format!("this `{keyword}`"),
+        |id| format!("`{keyword}` `{id}`"),
+    );
+    let label = scope.label();
+    let key = kept.key;
+    let first_driver = kept.driver_name;
+    let driver = refused.driver_name;
+    let (primary, fix) = if first_driver == driver {
+        (
+            format!(
+                "{label} {named} is already bound by `{key}={first_driver}`, and this line \
+                 binds it to the same signal again",
+            ),
+            format!("Fix: delete the duplicate line; {named} is already bound to `{driver}`."),
+        )
+    } else {
+        (
+            format!(
+                "{label} {named} is already bound by `{key}={first_driver}`, and a second \
+                 `{key}=` would drive it from two wires at once",
+            ),
+            format!(
+                "Fix: combine the signals in the logic layer, as in \
+                 `logic {SIGNAL_HEAD}.<name> = {first_driver} or {driver}`, and bind `{key}=` \
+                 once to `{SIGNAL_HEAD}.<name>`.",
+            ),
+        )
+    };
+    Diagnostic::new(
+        DiagnosticCode::LogicDuplicateBinding,
+        refused.span.clone(),
+        primary,
+    )
+    .with_note(kept.span.clone(), "first bound here")
+    .with_footer(fix)
 }
 
 /// An argument whose value is a signal, under a key nothing reads.
@@ -1148,7 +1439,7 @@ fn lower_all_bindings<'a>(
 /// upstream; skip the cascade. Every other missing driver produces a
 /// standalone `E_LOGIC_UNBOUND_SIGNAL`.
 fn resolve_actuators(
-    actuators: &[PendingActuator],
+    actuators: &[BoundActuator<'_>],
     bindings_by_lhs: &HashMap<DottedRef, usize>,
     failed_lhs: &HashSet<DottedRef>,
     refused_drivers: &HashSet<DottedRef>,
@@ -1157,17 +1448,17 @@ fn resolve_actuators(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for act in actuators {
-        match ir.signal_defs.get(&act.driver_name).copied() {
+        match ir.signal_defs.get(act.driver_name).copied() {
             Some(driver) => ir.outputs.push(OutputPort {
                 name: act.driver_name.clone(),
                 driver,
                 span: act.span.clone(),
             }),
-            None if failed_lhs.contains(&act.driver_name)
-                || refused_drivers.contains(&act.driver_name) => {}
+            None if failed_lhs.contains(act.driver_name)
+                || refused_drivers.contains(act.driver_name) => {}
             None => diagnostics.push(unbound_signal_diagnostic(
                 scope,
-                &act.driver_name,
+                act.driver_name,
                 act.span.clone(),
                 ir,
                 bindings_by_lhs,
@@ -1542,8 +1833,8 @@ fn resolve_ref<'a>(
 
     // Root cause already reported once — silent skip. `refused_drivers`
     // joins it: a `-> sig.X` tail on a member that cannot emit, or a
-    // `logic` LHS outside the `sig.` namespace, was already refused where
-    // it was written, and the signal it would have defined going missing
+    // `logic` LHS that is not a signal name, was already refused where it
+    // was written, and the signal it would have defined going missing
     // is that finding's consequence rather than a second one.
     if ctx.failed_lhs.contains(dr) || ctx.refused_drivers.contains(dr) {
         return Err(LoweringFailed);
@@ -1650,10 +1941,18 @@ fn unbound_signal_diagnostic(
         diag = diag.with_footer(
             "Fix: add a sensor row such as `pressure_plate ... -> sig.<name>` or a `logic sig.<name> = ...` binding in this scope.",
         );
-    } else {
+    } else if is_signal_name(dr) {
         let joined = candidates.join(", ");
         diag = diag.with_footer(format!(
             "Valid signals in scope: {joined}. Fix: rename to a defined signal, or drive `{dr}` from a sensor / `logic` line.",
+        ));
+    } else {
+        // Neither a sensor tail nor a `logic` left-hand side accepts a name
+        // that is not a signal name, so offering to drive it from one would
+        // send the author to a refusal.
+        let joined = candidates.join(", ");
+        diag = diag.with_footer(format!(
+            "Valid signals in scope: {joined}. Fix: rename to a defined signal.",
         ));
     }
     diag

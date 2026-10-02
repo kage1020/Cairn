@@ -11,6 +11,12 @@ Parameterization (variable size and so on) is allowed; recursion is forbidden. A
 `requires version>=X`, and the minimum version of a composite is the max of its parts
 ([Versioning and Editions](/spec/versioning-editions/)).
 
+Until a parameter mechanism is specified, the header vocabulary is closed. A `def` header takes
+`size=`, which lowering reads, and `class=`, which no pass reads yet, and a `struct` header takes
+the same two. Any other key on either is refused as `E_UNKNOWN_ARGUMENT`, and a header `class=` is
+reported as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)), so the sample
+below carries that warning.
+
 ```
 def cottage class=house size=9x7:
   floor  id=floor mat_slot=floor
@@ -114,7 +120,11 @@ instead.
 
 The compiler writes one `.nbt` per `place`, named after the `id=` (`home1.nbt`, `home2.nbt`), directly
 into the output directory. An id carrying `/` or `\` would name a path rather than a file, so it is
-`E_INVALID_PLACE_ID` ([Lint](/spec/lint/)). The
+`E_INVALID_PLACE_ID` ([Lint](/spec/lint/)). The site is not part of the name, and the same
+directory holds every `struct`, written under its own name, and every walkway
+([§9.3.5](#935-ports-and-connect)). Two artifacts that would share a file name, compared ignoring
+case, are `E_OUTPUT_NAME_COLLISION`: a `place` named after a `struct`, or one `id=` placed in two
+sites, is refused rather than written over the other. The
 world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
 `build.cairn.lock` under `placements`, so a downstream consumer can rebuild the layout without
 re-running the coordinate solver.
@@ -200,9 +210,22 @@ Concrete tokens like `@gravel` work without a registry pack; abstract tokens lik
 need the pack's materials catalog and surface `W_ABSTRACT_TOKEN_DEFERRED` or
 `E_UNKNOWN_ABSTRACT_TOKEN` on a miss.
 
-**Output.** Each `connect` row writes one `.nbt` named after its site and ports
-(`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the lockfile with
-the world origin, dims, and resolved path material.
+**Output.** Each `connect` row that lays its walkway writes one `.nbt` named after its site and
+ports (`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the lockfile
+with the world origin, dims, and resolved path material.
+
+A row that lays no block has lost a walkway the source asked for: an endpoint whose `place` was
+refused upstream (`W_DEFERRED_MEMBER`), a port that cannot be placed, an id the walkway's name
+cannot carry, a path material that does not resolve, a straight L that is itself past the router's
+search-area cap, or a straight L whose every cell overlaps a placement, which leaves the strip all
+air. `cairn compile` then refuses the build with `E_PARTIAL_BUILD`, as it does for a lost scope, and
+`cairn check --edition E --target V` refuses with it too ([Lint](/spec/lint/)). A `cairn check`
+without `--target` does not lower, so it never sees this loss. The loss is named
+`site::SITE::FROM ↔ TO`, with the ports as the row wrote them. A `W_DUPLICATE_WALKWAY` row loses
+nothing, since the earlier row laid its pair, and two rows naming one pair that neither laid are one
+loss. One mistake can cost more than one loss: a `place` whose def has no `size=` is a lost scope,
+and every walkway with an endpoint on it is lost too, so each adds a note to `E_PARTIAL_BUILD` and
+one to the count of scopes that did not lower.
 
 **Diagnostics.**
 
@@ -213,5 +236,6 @@ the world origin, dims, and resolved path material.
 | `E_AMBIGUOUS_PORT` | The def exposes the same `id=` on more than one member. Rename the collision. |
 | `E_MISSING_PATH_MATERIAL` | The row omits `path=`, so walkway lowering has nothing to lay. |
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |
-| `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. |
+| `W_WALKWAY_BLOCKED` | No unobstructed route exists; the row falls back to the straight L and the rest of the strip still lays. When every cell of the straight L overlaps a placement, or the straight L alone is past the router's search-area cap, nothing is laid and the walkway is lost. |
 | `W_DUPLICATE_WALKWAY` | The same `(from, to)` port pair is already laid in this site; the duplicate row is dropped. |
+| `W_INVALID_WALKWAY_IDENT` | A site, place or port id cannot be carried in the walkway's name ([Lint](/spec/lint/)); the row is dropped. |

@@ -285,6 +285,243 @@
   1.21.60.10; 1.21.0's coincides, the other two do not), and `data_versions.json`'s `source` note,
   which said the integer was the build's, now says which number the column holds.
 
+- *(cli)* `cairn` panicked when the reader of its stdout had already gone, so an ordinary
+  pipeline turned an accepted run into a crash:
+
+  ```
+  $ cairn lower examples/village.crn | head -1
+  site::hamlet::home1  dims=11x10x9
+
+  thread 'main' panicked at library/std/src/io/stdio.rs:
+  failed printing to stdout: Broken pipe (os error 32)
+  $ echo "${PIPESTATUS[0]}"
+  101
+  ```
+
+  Every subcommand that writes to stdout did it: `parse` and `lower` in every format, `info` in
+  both formats, `check --format json`, `synth`, and `compile`'s `wrote …` lines, which come after
+  the build has committed. That transcript is from a debug build; the released binaries abort on
+  a panic rather than exiting 101, and neither is in the exit-code table. A closed stdout now
+  drops the output nobody reads, and the command exits with the code it decides with stdout open:
+  `check` keeps its `1` for a refused source, and `compile` its `0` for the build it wrote. Any
+  other failure to write stdout still panics, as before. A closed stderr still panics.
+
+- *(cli)* `E_REQUIRES_UNORDERABLE` offered an edition scope for a floor the other edition does not
+  name either. On a Java build, `@requires version>=1.14.5` was told:
+
+  ```
+    `1.14.5` is a bedrock release; if that is the numbering this floor is written in, say so
+    fix: `@requires bedrock version>=1.14.5`, or name a java release
+  ```
+
+  `1.14.5` is no Bedrock release. Bedrock's table places it below every row, and the offer was made
+  for any placement other than "cannot place". Following the fix erased the floor: scoped to
+  Bedrock, `1.14.5` is met by every Bedrock target, and the Java builds it was written to constrain
+  no longer see it. `@requires version>=1.99` went wrong the same way from above every row, where
+  the scoped floor refuses every Bedrock target instead. The scope is now offered only when the other
+  edition's table names the label as a row or the pre-release of one; otherwise the refusal says
+  `fix: name a java release` and nothing else. `spec/versioning-editions` "Ordering is by
+  DataVersion, per edition" now says which labels get the offer, with the ja mirror.
+
+- *(core)* A `connect` row whose detour was searched along the edge of the coordinate space
+  crashed the lowering instead of laying the walkway. The router searches a rectangle one cell
+  wider than the obstacles and ports on every side, and that margin may lie on `x` or `z` =
+  `i32::MIN` or `i32::MAX`. Expanding a cell there computed its neighbour past the edge before
+  asking whether the neighbour was inside the rectangle. With a floorless 3x3 `shell` and a 3x3
+  `hut` that has a floor and doors named `east` and `west` on its right and left sides:
+
+  ```
+  site s:
+    place id=a use=shell theme=t at=origin
+    place id=b use=hut   theme=t east_of=a gap=2147483640
+    place id=c use=hut   theme=t north_of=b gap=2
+    connect b.east to c.west path=@gravel
+  ```
+
+  ```
+  $ cairn check route.crn --edition java --target 1.21.4; echo "exit=$?"
+  thread 'main' panicked at .../walkway.rs:
+  attempt to add with overflow
+  exit=101
+  ```
+
+  `check --target`, `lower` and `compile` all exited 101 there in a build with overflow checks on.
+  A release build wraps the sum onto the opposite edge, which the rectangle then excludes, so it
+  laid the same detour by accident. A step that leaves `i32` is now skipped like any other step out
+  of the rectangle, so the row above lays its detour in either build.
+
+- *(core)* A `@cairn`, `@requires` or part-level `requires` value holding a character the lexer
+  has no token for refused the whole file with `E_PARSE`, before the check pass that judges the
+  value ever saw it. Whether a malformed `@cairn` was a warning or a refused build depended on
+  its punctuation:
+
+  ```
+  @cairn 2026.6 draft     # warning[W_INVALID_CAIRN_VERSION], exit 0
+  @cairn 2026.6+build     # error[E_PARSE]: unexpected character `+` (U+002B), exit 1
+  ```
+
+  The same held for `@cairn 2026/06`, `@requires version~=1.21`, `requires version~=1.21` in a
+  `def` or `theme` body, and a value with an unterminated `"`. Those values are raw text to end of
+  line, and the parser now takes them as such: a failure inside a line — a character no token
+  starts with, an unterminated string, a malformed size or integer — is kept as a
+  `TokenKind::Unlexed` token instead of ending the lex, so each value above reaches its check pass
+  and is reported as `W_INVALID_CAIRN_VERSION` (the build goes on) or `E_INVALID_REQUIRES`. The
+  tree-sitter grammar already accepted all of them. Anywhere else the stretch is refused with the
+  same error, at the same position, as before, including ahead of a parse error earlier in the
+  file. A refused stretch that holds whitespace other than a space is never taken into a value:
+  `@cairn\t9999.12` is still refused at the tab, since trimming it off would read the header as a
+  version the file never declared, and a tab inside an unterminated string is still refused as
+  an unterminated string. `lex()` is unchanged and never returns an `Unlexed` token.
+
+- *(core,redstone)* An actuator or sensor binding on a `[selector]` line was registered from the
+  line alone, without asking what the brackets pick, so the netlist carried ports with no component
+  behind them and every command exited 0:
+
+  ```
+  door id=front side=front at=center
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door[id=nope] opened_by=sig.a
+  ```
+
+  Block-array lowering deferred the patch, while `cairn synth` gave `sig.a` an output port and a
+  placed pad. A patch now drives the door its selector picks, looked up by the new
+  `intent::actuator_patch_target` that lowering reads too, and one that picks no single door is
+  refused as `E_LOGIC_UNRESOLVED_PATCH` in the words lowering already used:
+
+  ```
+  s.crn:9:11: error[E_LOGIC_UNRESOLVED_PATCH]: struct=s: door actuator patch selects `id=nope` but no physical door with that id exists (known door ids: front), so its `opened_by=` binding drives nothing
+  s.crn:9:27:   note: the binding the patch carries
+    note: Fix: set `[id=<label>]` to the id of one `door` declared in this scope without brackets, or write `opened_by=` on that `door`'s own line.
+  ```
+
+  A selector with no `id=`, and an id two doors carry, are refused the same way, the second told to
+  give the doors distinct ids. A door declared without an `id=` is counted in the reason rather than
+  reported as no door at all, and the fix points at adding the id to it.
+
+  Two bindings on one door were two output ports into it, a wired OR the logic layer never states.
+  A door carries one `opened_by=`, whether on its own line, through a patch, or both, and a second
+  is `E_LOGIC_DUPLICATE_BINDING`, with a note at the first and a fix that combines the signals in a
+  `logic` line, or deletes the second line when both name the same signal. The door's own line
+  counts as the first, wherever the patch is written.
+
+  A `->` tail on a sensor keyword in the selector form, `pressure_plate[id=nope] -> sig.b`, was a
+  netlist input, though no sensor patch exists for the selector form. `check` now refuses it as
+  `E_MISPLACED_BINDING`, so every command reports it.
+
+- *(core,tree-sitter,cli)* A canonical token with a block-state literal could not be written,
+  though `spec/materials-themes` "Canonical vocabulary" lists `@oak_log[axis=x]` as one and
+  everything past the parser already read that shape. Both parsers stopped at the `[`:
+
+  ```
+  theme t:
+    slot floor -> @oak_log[axis=x]
+  ```
+
+  ```
+  st.crn:2:25: error[E_PARSE]: expected end of line, got `[`
+  ```
+
+  A `[` that touches an undotted `@` token now opens its state literal: `property=value` pairs, each
+  value a word, a run of digits, or `true` / `false`, separated by one required comma. The literal
+  folds into the token's text, so the example builds a log lying along `x`. Its properties are
+  sorted by name, so `@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north, half=top]`
+  are one palette entry and write the same `.nbt` bytes and `resolved_ir_hash`. The parser is now
+  the only place a malformed literal is refused. That covers an empty literal, a missing `=` or
+  value, a trailing, doubled or missing comma, a string value, a missing `]`, and a property named
+  twice. A dotted token such as `@floor.wood` takes no literal, and a `[` touching one is read as
+  before, as is a `[` after a space.
+
+  A `[` touching an undotted token used to be whatever came next, so `mat=@a[1]`, `@a[1]` after a
+  member, `-> @a[1]` and `mat=[@a[1]]` parsed and are now refused. No program that ever passed
+  `check` is affected: a bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL` and a
+  list in a member argument is `E_TYPE_MISMATCH_LABEL`, so only the parse tree of a source that
+  could not build changes. `spec/syntax` "Literals and separators" says the same.
+
+  Properties and values are not yet checked against the target (`E_STATE_DOMAIN` is not implemented,
+  and `spec/versioning-editions` now marks that rule as not yet enforced). Every literal the
+  lowering reads, from a theme slot or a `connect … path=`, earns the new warning
+  `W_STATE_LITERAL_UNCHECKED` on the token, so a Java build that writes `@oak_log[axis=q]` as given
+  no longer does so in silence.
+
+  Because a source can now reach it, `cairn info`'s refusal of a palette the pack was expected to
+  refuse no longer says that none of it is the source's to repair. It now names a state literal on a
+  stair as one possible origin: a `facing` or `half` value outside the Java domain, such as
+  `@oak_stairs[facing=up]` on Bedrock, or a key other than `facing` / `half` / `shape`. The Bedrock
+  backend's own refusal of such a value no longer suggests `--edition java`, which would write the
+  same value unchanged. `spec/lint` "Machine-readable payload" says the same.
+
+- *(core,cli)* A `connect` row that laid no walkway still let `cairn compile` certify the build.
+  The partial-build gate compared the scopes the resolver recorded with the structures lowering
+  built, and a walkway's scope is minted during lowering, so it was never on the first list. A site
+  whose only `connect` named `place id=a_` wrote `a_.nbt`, `b.nbt` and a lockfile with
+  `verified: true`, and exited 0. Each `connect` pair is now counted as a requested scope: when no
+  row laid it, `compile` refuses with `E_PARTIAL_BUILD`, `cairn check --edition E --target V`
+  refuses with it too, and `info` reports that no target can build the source. The loss is named
+  by the row's own ports:
+
+  ```
+  s.crn:11:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a_.p ↔ b.p` was dropped because the place id `a_` starts or ends with `_`
+    note: a walkway's place and port ids may not start or end with `_` in either position, so the rule does not depend on which way the row is written; rename the place so it neither starts nor ends with `_`
+  error[E_PARTIAL_BUILD]: s.crn: 1 of 3 requested scopes did not lower; refusing to certify a partial build
+    note: `site::s::a_.p ↔ b.p` produced no voxels
+  ```
+
+  A `W_DUPLICATE_WALKWAY` row loses nothing, because the earlier row laid its pair, and two rows
+  naming one pair that neither laid count as one loss. A walkway or scope counts as built only when
+  it holds a block. Two huts touching at `north_of=a gap=0`, each door port buried under the other's
+  floor, used to write a walkway `.nbt` of two air blocks, and a scope that lowered to air alone
+  (every member deferred, no theme bound for its `mat_slot=` members, or no member at all) wrote an
+  `.nbt` of air; both were certified at exit 0, and both are now refused as losses. One mistake can
+  now cost more than one note: a `place` whose def has no `size=` is lost, and so is every walkway
+  with an endpoint on it.
+
+  `spec/components-editing-sites` "Ports and `connect`" said each row writes one `.nbt`; it now says
+  which rows do and what the others cost, and its diagnostics table gains the missing
+  `W_INVALID_WALKWAY_IDENT` row. `spec/lint` and the `dropped_scopes` row in
+  `spec/versioning-editions` name the walkway case, with the ja mirror.
+
+- *(core)* `W_DUPLICATE_WALKWAY` could name a row a duplicate of a walkway that was never laid.
+  The pair was recorded as seen before the row's `path=` material, the area cap and its ids were
+  checked. Two rows for one pair can differ in their `path=`, so when the first row's material did
+  not resolve, the second was reported as a duplicate and dropped too, and the pair got no walkway
+  at all. The pair is now recorded only once its strip is laid, so the later row lays it.
+
+- *(redstone)* A `logic` line's left-hand side was checked for its `sig.` head and nothing else, so
+  `logic sig = ...` and `logic sig.x.y = ...` each registered a signal, lowered into a cell, and
+  could be read by another `logic` line. `cairn synth` exited 0 with `"sig"` or `"sig.x.y"` in
+  `signal_defs`, while the same names under an actuator key were `E_LOGIC_INVALID_SIGNAL`.
+  `spec/redstone` "Signal binding" says a signal name is `sig.` and exactly one segment after it.
+  The left-hand side now passes the same test as the sensor tail and actuator values, so both lines
+  are `E_LOGIC_INVALID_SIGNAL`. The message says which way the name misses. For the namespace
+  with no name, the fix is to add one, as in `sig.<name>`. For more than one segment, it is to
+  keep one, as in `sig.x` or `sig.x_y`. A line that reads the refused name is not also told it is
+  unbound. A reference to an undefined name that is not a signal name, such as `sig.x.y` on a
+  right-hand side or in an `assert`, was told to rename it to a defined signal or drive it from a
+  sensor or a `logic` line, and both of those refuse it. The footer now offers only the rename.
+
+- *(redstone)* A sink with no clear path made the router search the whole `circuit` reservation
+  before refusing it. The search gave up only when its frontier was empty, so the cost of the
+  refusal was set by `width × depth × void`, not by the distance: a sink two blocks from its
+  driver took 14.9 s to refuse in a `size=31x2000 void=20` reservation on a debug build, and
+  raising `void`, as the refusal's fix line says to, made the next run slower and the answer the
+  same.
+
+  The search is now bounded by the attenuation cap. A path from the net's wire to a sink is part
+  of that sink's segment, which the delay pass refuses past 256 blocks, so a coord whose cheapest
+  path through it is longer than that is not searched. Every route a pass accepts is still found,
+  and the same one, and giving up costs a cap-sized neighbourhood of the wire whatever the
+  reservation. Before, a sink reachable only round a detour longer than the cap was routed and
+  then refused by stage 3.
+
+  Each sink the search cannot reach is then judged on its own. It keeps `E_ROUTE_CONGESTION` and
+  its list of the nets in the way when the router proves it walled in: no face it could be
+  arrived through, a search that ran out of coords before the cap cut any off, or a pocket of
+  free coords that ends within the cap of it without reaching the wire. Proving the last costs at
+  most the cap's neighbourhood of the sink. Any other sink is refused as `E_ATTENUATION_LIMIT` at
+  stage 2, saying no route within the cap reaches it, and naming any nets on its faces as the
+  walled-in refusal does. A scope with sinks of both kinds is refused for a walled-in one. The
+  example above now answers at once.
+
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
   and nothing said so. With a 3x3 `a` and a 3x9 `b`:
@@ -1348,7 +1585,131 @@
   `spec/lint` "Machine-readable payload" is borrowed for the shape of a finding and otherwise
   untouched: this is a row of a report `info` writes on a run it does not refuse, not a diagnostic.
 
+- *(redstone)* Placement stood I/O pads face to face with cell bodies. The pads step along `z` from
+  `0`, so pad #1 stood on the cell row: in the input-pad column against the first cell at every
+  width, and in the actuator-pad column against the last cell whenever the row filled the region. A
+  pad is a terminal of one net, and the router's one-step rule keeps one net's dust away from
+  another's rather than a pad away from a cell, so nothing looked at it. Here the inverter reads
+  only `sig.a`, and both of `sig.b`'s pads stood against it — `--stage placement` and
+  `--stage crossing` both exited 0:
+
+  ```
+  struct s size=3x5
+    ...
+    logic sig.x = not sig.a
+    door[id=d0] opened_by=sig.x
+    door[id=d1] opened_by=sig.b
+  ```
+
+  ```
+  "outputs":[...,{"name":["sig","b"],"driver":{"kind":"input","index":1},"pad":{"x":2,"y":0,"z":1}}]
+  "cells":[{"cell":"java_inverter_torch",...,"coord":{"x":1,"y":0,"z":1}}]
+  ```
+
+  In a scope with cells the pads now skip the cell row — pad `i` stands at `z = i` below it and at
+  `z = i + 1` from it on — so no pad shares a face with a cell at any width the row check accepts. A
+  scope with no cells has no cell row, and its pads keep `z = i`. One decision, read by both the pad
+  coordinates and the pad-row refusal, says which applies. Skipping the row costs a row of depth
+  once an edge carries two pads: the refusal asks for `max(inputs, outputs) + 1` rows in a scope
+  with cells, so a region sized to exactly one row per pad is refused with `E_ROUTE_CONGESTION` and
+  needs one more. Routed lengths move with the pads: `examples/redstone-door.crn`'s cell is reached
+  over 4 blocks rather than 3, and `examples/crossbar.crn` leaves 12 pairs of dust within one step
+  across layers rather than 9.
+
+  Listed as a fix under `spec/compatibility` C.4, reading the spec's clearance promise as the
+  contract: `spec/redstone` "Place-and-route" promised a clear column between the row and the input
+  pads, and pad #1 stood against the first cell. The same sentence sized the row at `2n + 1`
+  columns, which leaves no room for that column. This change keeps the sizing, keeps the pads off
+  the cells by moving the pads instead, and rewrites the section to the layout as built.
+
 ### Breaking changes
+
+- *(core)* `cairn check` passed, and `cairn info` listed every supported version as buildable, for
+  a source whose artifacts share a file name, which `cairn compile` then refused at every target. A
+  `struct` and a `place` of one name both write `hut.nbt`:
+
+  ```
+  struct hut size=3x3
+    floor mat_slot=floor
+
+  site s:
+    place id=hut use=house theme=t at=origin
+  ```
+
+  ```
+  $ cairn check collide.crn --edition java --target 1.21.4; echo "exit=$?"
+  exit=0
+  $ cairn compile collide.crn --edition java --target 1.21.4 --out out; echo "exit=$?"
+  error: output filename `out/hut.nbt` collides between scopes `struct::hut` and `site::s::hut`
+  exit=1
+  ```
+
+  Only `compile` compared the names, after lowering, and its refusal carried no code for a
+  `--format json` consumer or a CI filter to match on. The names are now compared once the scopes
+  resolve, as `E_OUTPUT_NAME_COLLISION`, so `cairn check` reports it without a `--target`, `cairn
+  info` refuses the source instead of certifying it, and `cairn compile` refuses it with the code:
+
+  ```
+  $ cairn check collide.crn; echo "exit=$?"
+  collide.crn:13:3: error[E_OUTPUT_NAME_COLLISION]: `place id=hut` in site `s` would be written to the same file as `struct hut`
+  collide.crn:6:1:   note: `struct hut` is declared here
+    note: both would be written to `hut` in the output directory, with the edition's extension, and if both are built, a build can keep only one; rename one of them
+  exit=1
+  ```
+
+  The same code covers one `id=` placed in two sites, since a placement's file name leaves its site
+  out, and two walkways in one site whose names flatten alike (`x_y.entry to z.entry` and
+  `x.y_entry to z.entry`).
+
+  Two kinds of source that passed before are now refused. Names are compared ignoring case, so
+  `struct Hut` beside `struct hut`, which built as two files on Linux and was refused by `compile`
+  alone on macOS and Windows, whose default file systems make them one file, is now refused on every
+  host. And the names are compared before lowering, when not every scope lowering will drop is
+  known: a walkway whose search area is past the router's cap (`W_WALKWAY_BLOCKED`, not laid) and a
+  struct or placement past the volume budget (`W_STRUCTURE_TOO_LARGE`) still count. A source where
+  the name of such a scope matches another artifact's (`struct s_walkway_a_entry__c_entry` beside
+  `connect a.entry to c.entry` in site `s`) is now refused by `cairn check` with no `--target`,
+  which exited 0 on it. Its build is refused in this release either way, with `E_PARTIAL_BUILD` for
+  the lost scope, as the `Fixed` entry on a `connect` row that laid no walkway describes. The
+  finding says the two *would* be written to one file for this reason. A sizeless `struct`, a
+  `place` of a sizeless `def` and a walkway with an end on one are left out, since lowering drops
+  each before it writes a file, and two `connect` rows for one pair of ports, in either order, count
+  as the one walkway lowering lays.
+
+- *(core)* A `struct` / `def` header argument other than `size=` was read by nothing and checked by
+  nothing, so a typo on the header was dropped in silence:
+
+  ```
+  struct s size=5x5 hieght=3
+    floor mat_slot=wall
+  ```
+
+  `cairn check` exited 0 on it, and `compile` built the struct. A misspelled `size=` fared little
+  better. On `struct s siz=7x7`, a `cairn check` without `--edition` and `--target` reported
+  nothing, and a pinned `check` or `compile` reported only `W_STRUCT_NO_SIZE` / `W_DEF_NO_SIZE` on
+  the line, telling the author to add a `size=WxH` header to a line that already had one. The header
+  now has a closed vocabulary, `size=` and `class=`, and any other key is `E_UNKNOWN_ARGUMENT` with
+  the same `did you mean` note and closed-set list a member argument gets:
+
+  ```
+  b.crn:1:14: error[E_UNKNOWN_ARGUMENT]: `siz=` is not an argument a `struct` header reads
+    note: did you mean `size`?
+    note: expected one of: size, class
+  ```
+
+  Where block-array lowering runs, the missing-size warning still fires beside it, since the struct
+  really has no size, and is printed after the error.
+
+  `class=` is the key `spec/components-editing-sites` writes on a `def` header
+  (`def cottage class=house size=9x7:`), and no pass reads it yet, so it is reported as the
+  unreached-key case of `W_IGNORED_ARGUMENT`, as `window shape=` is. `examples/village.crn` and the
+  tutorial's copy of it drop their header `class=house` so the example stays warning-free. The
+  spec's own samples keep it, in `spec/components-editing-sites` and `spec/materials-themes`, and
+  now carry the warning that `spec/components-editing-sites` "`def`, the component construct"
+  documents: it states the header vocabulary as closed at `size=` / `class=` until a parameter
+  mechanism is specified. A source with any other key on a header, which compiled before, is now
+  refused. `spec/lint` states the header vocabulary and lists the header's `class=` among the
+  unreached keys, with the ja mirror.
 
 - *(core)* Two `connect` rows could lay one walkway between them. A `_` at the end of the `from`
   port or at the start of the `to` place merges into the `__` that joins a walkway scope key's two
@@ -1378,13 +1739,13 @@
   cannot merge, and are refused so the rule stays one sentence (`KeyConstructError::UnderscoreAtEdge`
   gives the full argument). That reaches ids which never aliased: a
   source whose only edge-`_` id is `place id=a_` in `connect a_.p to b.p` used to lay that walkway,
-  and now drops it with the warning above while `compile` still exits 0. The site is exempt: `::`
-  separates it from both neighbours. A unit test builds every key over endpoint segments of `a` and
-  `_` up to three long and sites up to two, and parses each accepted one back to the parts it came
-  from. If two rows ever do encode to one key, a debug build asserts, and a release build reports
-  `W_INVALID_WALKWAY_IDENT` on the later row instead of losing the earlier walkway silently.
-  `spec/lint` "Connections and walkways" states the rule and why it covers every edge, with the
-  ja mirror.
+  and now drops it with the warning above; `compile` refuses a build that lost a walkway with
+  `E_PARTIAL_BUILD`. The site is exempt: `::` separates it from both neighbours. A unit test builds
+  every key over endpoint segments of `a` and `_` up to three long and sites up to two, and parses
+  each accepted one back to the parts it came from. If two rows ever do encode to one key, a debug
+  build asserts, and a release build reports `W_INVALID_WALKWAY_IDENT` on the later row instead of
+  losing the earlier walkway silently. `spec/lint` "Connections and walkways" states the rule and
+  why it covers every edge, with the ja mirror.
 
   The `__` finding's text changes too. It used to read ``contains `__`, which collides with the
   walkway scope key's `from`/`to` separator``, with the note ``rename the offending id (e.g.
@@ -1805,6 +2166,52 @@
 
   `--target`, `cairn info`'s `buildable targets`, and the supported-target lists are unchanged:
   they read the targetable rows.
+
+- *(formats,nbt,cli)* `cairn compile` built each structure's whole NBT tree before writing a
+  byte, one compound per voxel, so its memory grew with the volume far faster than the
+  block-array IR the volume bound was sized against: about 700 bytes a voxel for Java and 145 for
+  Bedrock, against the IR's 2. A cube at the bound (`size=256x256`, `walls height=255`) that
+  `check` accepts extrapolates to roughly 12 GB to compile for Java, and the allocator or the OOM
+  killer ended the build with no diagnostic. The per-voxel lists — Java's `blocks`, Bedrock's two
+  `block_indices` layers — are now encoded from the grid while the file is written, so writing
+  costs a fixed amount on top of lowering. Peak memory of `cairn compile` on that shape, debug
+  build, `N` for 256:
+
+  | `N` | Java before | Java after | Bedrock before | Bedrock after |
+  |---|---|---|---|---|
+  | 64 | 195 MB | 10 MB | 45 MB | 10 MB |
+  | 128 | 1,504 MB | 23 MB | 304 MB | 24 MB |
+  | 256 | not run | 136 MB | not run | 136 MB |
+
+  The files are byte-for-byte what they were. Every structure is still checked before any file is
+  written, so a refusal leaves nothing behind; the check no longer builds the tree to do it. A
+  backend refusal now reads ``error: checking `SCOPE`: …`` rather than `error: building …`.
+  Staged files are written through a buffer, so an uncompressed `.mcstructure` is no longer two
+  system calls per voxel.
+
+  `cairn-lang-nbt` gains a streaming form of each uncompressed writer (`stream_java_uncompressed`,
+  `stream_bedrock_uncompressed`, through `CompoundStream` and `ListStream`) and `check_string`,
+  the writers' string rule on its own. A streamed empty list declares `TAG_End` whatever type it
+  names, as `List::of_tags` does. `cairn-lang-formats` gains `prepare_structure` /
+  `JavaStructure` and `prepare_mcstructure` / `McStructure`, which check a structure without
+  building it and then write it streaming. `write_structure_gzip` now streams too.
+  `build_structure_tag` and `build_mcstructure_tag` still build the whole tree.
+
+  **Breaking**: the check now refuses every grid the write could not stream, and those refusals
+  are new variants. `JavaStructureError` and `BedrockStructureError` each gain `VolumeOverflow`
+  (`x * y * z` overflows `usize`), `ListTooLong` (a voxel count or palette past an NBT list's
+  `i32` length), `VoxelCountMismatch` (`voxels.len()` is not the dims' volume) and
+  `UnencodablePaletteString` (an id, property or state string the encoder refuses, named with its
+  palette entry). These were reachable only by building a `BlockArray` by hand, never from
+  `cairn compile`: a long volume failed inside the write with `LengthOverflow`, a short grid
+  panicked indexing past its end, and a bad Bedrock palette string was found only after the whole
+  volume was encoded. `build_structure_tag`, `build_mcstructure_tag` and `write_structure_gzip`
+  refuse them the same way, and `write_structure_gzip` refuses before writing to its writer.
+  The Bedrock check runs the palette before the grid, as Java's does, so an array with an
+  abstract palette entry and an out-of-range index now reports the palette entry on both
+  editions. An external exhaustive `match` on either enum no longer compiles. Both, and
+  `NbtIoError`, are now `#[non_exhaustive]`, so the next variant costs no second break. The Rust
+  API is Internal tier per `spec/compatibility`, so no deprecation window is owed.
 
 ## 2026.9.0 — 2026-09-01
 

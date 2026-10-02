@@ -86,6 +86,11 @@ dropping are forbidden. An error returns the closed set of candidates valid in t
 minimum version, and a suggested fix. That sends the model back to registry-derived candidates
 rather than to its memory.
 
+Out-of-domain states are not yet enforced: `E_STATE_DOMAIN` below is not implemented, because the
+compiler holds no table of each block's states. Until it does, a state literal
+([Syntax](/spec/syntax/)) is written as given, and every one earns `W_STATE_LITERAL_UNCHECKED`
+([Lint](/spec/lint/)) instead.
+
 ```text
 E_UNKNOWN_ID line 12: "minecraft:pale_oak_planks" not in 1.21.4 registry.
   Similar valid: minecraft:oak_planks, minecraft:dark_oak_planks, minecraft:cherry_planks
@@ -302,11 +307,14 @@ labels read it as satisfied on `40 > 4` and certified a Bedrock build against a 
 floor — the same defect enforcing the floor exists to remove, one edition to the left.
 
 Because the label sets are disjoint, the refusal can say more than "no". A label this edition
-cannot place that the *other* edition can is a floor written in the other's numbering, and
-`E_REQUIRES_UNORDERABLE` names it and offers the scope. A label neither can place — a snapshot, a
-version newer than the pack — gets no scope offered, because recommending one would be recommending
-a guess: scoped to an edition that cannot place it either, the floor goes inert there and the
-constraint disappears.
+cannot place that the *other* edition names — a row of its table, or the pre-release of one — is a
+floor written in the other's numbering, and `E_REQUIRES_UNORDERABLE` names it and offers the scope.
+A label the other edition does not name gets no scope offered, because recommending one would be
+recommending a guess: scoped to an edition that does not name it either, the floor goes inert there
+and the constraint disappears. That covers a label neither edition can place — a snapshot — and
+also one the other edition places only below or above every row. Those two placements are
+comparisons rather than releases: they say nothing about which numbering the author meant, and
+scoped there the floor is met by every target of that edition or by none.
 
 ### A floor may name its edition
 
@@ -576,7 +584,7 @@ them. Each field is omitted when it carries nothing.
 | Field | Carries | What the author edits |
 |---|---|---|
 | `unplaceable_floors` | Floors | The `@requires` line. The floor names no release of this edition, so no version can be weighed against it and none is certified. |
-| `dropped_scopes` | Scope keys | The member that produced no voxels. It refuses every version before its ID table is consulted, since a partial build is not certified. |
+| `dropped_scopes` | Scope keys, and `site::SITE::FROM ↔ TO` for a walkway | The member or `connect` row that produced no voxels. It refuses every version before its ID table is consulted, since a partial build is not certified. |
 | `versions` | Refused targets | One entry per version that refused for a reason of its own. |
 
 Beside rather than instead: a file can declare a floor this edition cannot place *and* use an ID

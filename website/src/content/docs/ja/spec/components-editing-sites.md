@@ -10,6 +10,12 @@ title: "9. コンポーネント・編集・複数建築"
 パラメータ化 (可変サイズなど) は許可し、再帰は禁止します。`def` は `requires version>=X` を宣言でき、
 合成物の最小バージョンは構成要素の最大値です ([バージョンとエディション](/ja/spec/versioning-editions/))。
 
+パラメータの仕組みが定まるまで、ヘッダの語彙は閉じています。`def` のヘッダが取るのは、下げが読む
+`size=` と、まだどのパスも読まない `class=` で、`struct` のヘッダも同じ 2 つを取ります。どちらでも
+それ以外のキーは `E_UNKNOWN_ARGUMENT` として拒否され、ヘッダの `class=` は `W_IGNORED_ARGUMENT`
+として報告されます ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。そのため下のサンプルは
+その警告を伴います。
+
 ```
 def cottage class=house size=9x7:
   floor  id=floor mat_slot=floor
@@ -109,7 +115,11 @@ Y 軸はトポロジカルセレクタの影響を受けず、現状すべての
 
 コンパイラは `place` ごとに `.nbt` を 1 つ、`id=` の名前で出力ディレクトリの直下に書きます
 (`home1.nbt`、`home2.nbt`)。`/` や `\` を含む id はファイルではなくパスを指すので
-`E_INVALID_PLACE_ID` です ([Lint](/ja/spec/lint/))。各
+`E_INVALID_PLACE_ID` です ([Lint](/ja/spec/lint/))。名前に site は含まれず、同じディレクトリに
+すべての `struct` (自身の名前で書かれる) とすべての walkway ([§9.3.5](#935-ポートと-connect)) も書かれます。
+大文字小文字を無視して比べて同じファイル名になる 2 つの成果物は `E_OUTPUT_NAME_COLLISION` です。
+`struct` と同じ名前の `place` や、2 つの site に置かれた同じ `id=` は、片方をもう片方で上書きする代わりに
+拒否されます。各
 placement のワールド原点と `(site, def, theme)` の provenance は `build.cairn.lock` の `placements`
 に記録されるので、下流の消費者は座標ソルバを再実行せずにレイアウトを再構築できます。
 
@@ -189,9 +199,21 @@ window の引数、矩形が壁からはみ出した量、石積みが覆って�
 はパックの materials カタログを必要とし、外れると `W_ABSTRACT_TOKEN_DEFERRED` か
 `E_UNKNOWN_ABSTRACT_TOKEN` を出します。
 
-**出力。** `connect` 行ごとに `.nbt` を 1 つ、site とポートの名前で書きます
+**出力。** walkway を敷いた `connect` 行ごとに `.nbt` を 1 つ、site とポートの名前で書きます
 (`hamlet_walkway_home1_entry__home2_entry.nbt`)。ロックファイルには、ワールド原点・寸法・解決済みの
 経路マテリアルを持つ `walkways:` エントリを記録します。
+
+ブロックを 1 つも敷かなかった行は、ソースが求めた walkway を失っています。`place` が上流で拒否された
+端点 (`W_DEFERRED_MEMBER`)、置けないポート、walkway の名前に載せられない id、解決しない経路マテリア
+ル、それ自体がルータの探索面積上限を超える直線の L 字、セルがすべて配置と重なり帯が空気だけになる直
+線の L 字のいずれかです。このとき `cairn compile` はスコープを失ったときと同じく `E_PARTIAL_BUILD` で
+ビルドを拒否し、`cairn check --edition E --target V` も同じく拒否します ([Lint](/ja/spec/lint/))。
+`--target` なしの `cairn check` は lowering しないので、この損失を見ることはありません。失われた
+walkway は `site::SITE::FROM ↔ TO` と、行が書いたとおりのポートで名指されます。
+`W_DUPLICATE_WALKWAY` の行は何も失いません。その対は先の行が敷いているからです。どちらも敷かなかっ
+た同じ対を名指す 2 行は、1 件の損失です。1 つの誤りが複数の損失になることもあります。def が `size=`
+を欠く `place` は失われたスコープで、そこに端点を持つ walkway もすべて失われるので、それぞれが
+`E_PARTIAL_BUILD` に note を 1 つ加え、lowering されなかったスコープの数を 1 つ増やします。
 
 **診断。**
 
@@ -202,5 +224,6 @@ window の引数、矩形が壁からはみ出した量、石積みが覆って�
 | `E_AMBIGUOUS_PORT` | def が同じ `id=` を複数のメンバで公開している。衝突をリネームしてください。 |
 | `E_MISSING_PATH_MATERIAL` | 行が `path=` を欠いており、walkway の lowering に敷くものが無い。 |
 | `E_UNRESOLVED_PLACE_REF` | 先頭の place id が、この site の先行する place を指していない ([§9.3.3](#933-スコープ跨ぎ参照) と共通)。 |
-| `W_WALKWAY_BLOCKED` | 遮られない経路が無い。直線の L 字に戻り、残りの帯は敷かれます。 |
+| `W_WALKWAY_BLOCKED` | 遮られない経路が無い。直線の L 字に戻り、残りの帯は敷かれます。直線の L 字のセルがすべて配置と重なるとき、または直線の L 字だけでルータの探索面積上限を超えるときは、何も敷かれず、walkway は失われます。 |
 | `W_DUPLICATE_WALKWAY` | 同じ `(from, to)` のポート対がこの site で既に敷かれている。重複行は落とされます。 |
+| `W_INVALID_WALKWAY_IDENT` | site / place / port の id を walkway の名前に載せられない ([Lint](/ja/spec/lint/))。行は落とされます。 |

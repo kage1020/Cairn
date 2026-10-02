@@ -58,7 +58,8 @@ use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 use crate::intent::{
-    DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan,
+    DefIr, IntentModule, Member, MemberRole, PatchTargetError, SiteIr, Size, StructIr,
+    ValueWithSpan, actuator_patch_target,
 };
 use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 use crate::suggest::{candidate_list, did_you_mean_note};
@@ -479,18 +480,15 @@ fn lower_connects(
         };
 
         // Duplicate guard: pin on (site, from_place, from_port,
-        // to_place, to_port). Normalise the pair (sort the two ends)
-        // so `a.entry → b.entry` and `b.entry → a.entry` count as the
+        // to_place, to_port). `walkway_pair` sorts the two ends so
+        // `a.entry → b.entry` and `b.entry → a.entry` count as the
         // same walkway — laying the strip both ways would be a silent
-        // double-write.
-        let mut endpoints = [
-            (connect.from.place.clone(), connect.from.port.clone()),
-            (connect.to.place.clone(), connect.to.port.clone()),
-        ];
-        endpoints.sort_unstable();
-        let [(a_place, a_port), (b_place, b_port)] = endpoints;
-        let dedup_key = (connect.site.clone(), a_place, a_port, b_place, b_port);
-        if !seen_pairs.insert(dedup_key) {
+        // double-write. The pair is recorded only once its strip is
+        // laid, at the bottom of this loop: an earlier row with the same
+        // pair that the checks below refused laid nothing, so this row
+        // is not a duplicate of it.
+        let dedup_key = connect.walkway_pair();
+        if seen_pairs.contains(&dedup_key) {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DuplicateWalkway,
                 span: connect.span.clone(),
@@ -511,7 +509,10 @@ fn lower_connects(
         }
 
         let material = match resolve_block_state(&connect.path, registry) {
-            Ok(state) => state,
+            Ok(state) => {
+                diagnostics.extend(diag_state_literal_unchecked(&connect.path, &state));
+                state
+            }
             Err(MaterialDeferred::Abstract(token)) => {
                 diagnostics.push(diag_abstract_token(
                     connect.path.span.clone(),
@@ -696,6 +697,7 @@ fn lower_connects(
                 data: None,
             });
         }
+        seen_pairs.insert(dedup_key);
         walkways.insert(
             scope_key,
             Walkway {
@@ -935,6 +937,51 @@ fn diag_unknown_abstract_token(
         notes,
         data: None,
     }
+}
+
+/// Say that a state literal was taken as written, when `value` carries one.
+///
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+/// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, and
+/// nothing raises it yet: no table this compiler holds says which
+/// properties a block has or which values each takes. Until one does, the
+/// literal reaches the palette and the structure file unchanged, right or
+/// wrong, and this warning is what keeps that from being silent. It
+/// anchors on the value the way `E_UNKNOWN_ID` does, so the mistake right
+/// of the `[` is pointed at from the same place as one left of it.
+///
+/// Only a canonical token folds a `[` into its text, so a state that came
+/// from anywhere else — a catalog lookup, a member default — is not one.
+fn diag_state_literal_unchecked(value: &ValueWithSpan, state: &BlockState) -> Option<Diagnostic> {
+    let ValueKind::Token(text) = &value.value.kind else {
+        return None;
+    };
+    if state.properties.is_empty() || !text.contains('[') {
+        return None;
+    }
+    let pairs = state
+        .properties
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(Diagnostic {
+        code: DiagnosticCode::StateLiteralUnchecked,
+        span: value.span.clone(),
+        primary: format!(
+            "`{id}` is written with `{pairs}` unchecked: nothing checks a state literal's \
+             properties or values against the target yet",
+            id = state.id,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "a property the block does not have, or a value outside its domain, \
+                      reaches the structure file unchanged; check each one against the \
+                      block's states in the target edition and version"
+                .to_owned(),
+        }],
+        data: None,
+    })
 }
 
 /// Report a block id the compile's target does not declare.
@@ -2336,7 +2383,10 @@ fn resolve_member_state(
     // first is reported by neither layer.
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value, registry) {
-        Ok(state) => Some(state),
+        Ok(state) => {
+            diagnostics.extend(diag_state_literal_unchecked(slot_value, &state));
+            Some(state)
+        }
         Err(MaterialDeferred::Abstract(token)) => {
             diagnostics.push(diag_abstract_token(
                 member_or_slot_span(member, slot_value),
@@ -4379,7 +4429,6 @@ fn is_actuator_patch(member: &Member) -> bool {
 /// phase-bucketing loop iterates over. Passed as a slice so the
 /// recogniser can look up physical doors without a second walk of the
 /// intent IR.
-#[allow(clippy::too_many_lines)] // one linear surface-guard chain reads better than 8 tiny helpers
 fn recognize_actuator_patch(
     member: &Member,
     siblings: &[(u32, &Member)],
@@ -4421,77 +4470,19 @@ fn recognize_actuator_patch(
         ));
         return;
     }
-    let Some(id_value) = selector.get("id") else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "door actuator patch requires an `[id=<label>]` selector naming the physical door to bind against",
-        ));
+    // Which door the brackets pick is read from the one place the
+    // redstone front end reads it too, so the patch this defers is the
+    // patch that gets no port there.
+    if let Err(reason) = actuator_patch_target(member, siblings.iter().map(|&(_, m)| m)) {
+        let mut diagnostic = diag_deferred_member_reason(member, &reason.to_string());
+        if let Some(fix) = patch_target_fix(&reason) {
+            diagnostic.notes.push(DiagnosticNote {
+                span: None,
+                message: fix,
+            });
+        }
+        diagnostics.push(diagnostic);
         return;
-    };
-    let Some(id_label) = id_value.value.as_label_str() else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!(
-                "door actuator patch `[id=]` selector must be an identifier or string label, got {}",
-                id_value.value.kind_name(),
-            ),
-        ));
-        return;
-    };
-    // Walk the flattened view to gather every physical door's id along
-    // with an occurrence count. A physical door is `MemberRole::Door`
-    // with no selector of its own — a selector-bearing door would be
-    // another patch, not a target. Source order is preserved for the
-    // "known door ids" listing so the rendering is stable across runs.
-    // The occurrence count catches the ambiguous shape a top-level
-    // `door id=X` plus a `level y=N door id=X` produces after
-    // flattening — `duplicate` runs per-scope and does not flag it, so
-    // a silent "first hit wins" would let the patch bind to whichever
-    // door happened to sort first.
-    let mut physical_door_ids: Vec<(&str, u32)> = Vec::new();
-    for (_, m) in siblings {
-        if !matches!(m.role, MemberRole::Door) || m.selector.is_some() {
-            continue;
-        }
-        let Some(door_id) = m.id.as_deref() else {
-            continue;
-        };
-        if let Some((_, count)) = physical_door_ids.iter_mut().find(|(id, _)| *id == door_id) {
-            *count = count.saturating_add(1);
-        } else {
-            physical_door_ids.push((door_id, 1));
-        }
-    }
-    let selected = physical_door_ids
-        .iter()
-        .find(|(id, _)| *id == id_label)
-        .copied();
-    match selected {
-        Some((_, count)) if count >= 2 => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "door actuator patch selects `id={id_label}` but the same id is declared on {count} physical doors in this scope; disambiguate the target before binding an actuator signal",
-                ),
-            ));
-            return;
-        }
-        Some(_) => {}
-        None => {
-            let known_list = if physical_door_ids.is_empty() {
-                "no physical door members are declared in this scope".to_owned()
-            } else {
-                let ids: Vec<&str> = physical_door_ids.iter().map(|(id, _)| *id).collect();
-                format!("known door ids: {}", ids.join(", "))
-            };
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "door actuator patch selects `id={id_label}` but no physical door with that id exists ({known_list})",
-                ),
-            ));
-            return;
-        }
     }
     let unknown_intent_keys: Vec<&str> = member
         .intent_state
@@ -4945,6 +4936,31 @@ fn diag_deferred_member(member: &Member) -> Diagnostic {
         member,
         &format!("`{role}` is not yet handled by block-array lowering"),
     )
+}
+
+/// The repair for a patch whose selector picks no single member, where
+/// the reason alone does not point at one.
+///
+/// [`PatchTargetError`]'s sentence states the fault and stops, so the
+/// repair is said here. A missing or malformed `id=` and an id beside the
+/// ones the reason lists already name the edit; an id that two members
+/// carry, or a scope whose members carry none, does not.
+fn patch_target_fix(reason: &PatchTargetError) -> Option<String> {
+    let keyword = reason.keyword();
+    match reason {
+        PatchTargetError::Ambiguous { count, .. } => Some(format!(
+            "Fix: give the {count} `{keyword}` members distinct ids, so the selector names one."
+        )),
+        PatchTargetError::NoSuchId {
+            id,
+            known,
+            unlabelled,
+            ..
+        } if known.is_empty() && *unlabelled > 0 => Some(format!(
+            "Fix: add `id={id}` to the `{keyword}` this patch is meant to bind."
+        )),
+        _ => None,
+    }
 }
 
 fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
@@ -5851,10 +5867,50 @@ mod tests {
             .collect();
         assert_eq!(deferred.len(), 1);
         assert!(
-            deferred[0].primary.contains("ambiguous")
-                || deferred[0].primary.contains("2 physical doors"),
+            deferred[0].primary.contains("2 physical doors"),
             "expected the primary to flag the ambiguity, got {}",
             deferred[0].primary,
+        );
+        // The reason states the fault; the repair is a note of its own.
+        assert!(
+            deferred[0].notes.iter().any(|n| n.message
+                == "Fix: give the 2 `door` members distinct ids, so the selector names one."),
+            "expected a note telling the author to tell the doors apart, got {:?}",
+            deferred[0].notes,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_beside_unlabelled_door_defers_with_add_id_note() {
+        // A door declared without `id=` can never be picked, but it is a
+        // door: the primary counts it rather than saying none is declared,
+        // and the note points at labelling it.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door side=front at=center\n  \
+                   door[id=front] opened_by=sig.open\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0]
+                .primary
+                .contains("1 physical door is declared in this scope, without an `id=`"),
+            "got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0]
+                .notes
+                .iter()
+                .any(|n| n.message
+                    == "Fix: add `id=front` to the `door` this patch is meant to bind."),
+            "got {:?}",
+            deferred[0].notes,
         );
     }
 
@@ -6047,10 +6103,8 @@ mod tests {
 
     #[test]
     fn state_literal_round_trips_through_palette() {
-        // Bracketed tokens are not yet emitted by the surface parser, so
-        // this exercises the palette/material path directly to lock the
-        // canonical-id and property-bag contract before the state-literal
-        // grammar lands.
+        // Exercises the palette/material path directly, below the parser,
+        // to lock the canonical-id and property-bag contract on its own.
         let mut palette = Palette::new_with_air();
         let token = ValueWithSpan::from_value(crate::ast::Value::new(
             ValueKind::Token("oak_log[axis=x]".to_owned()),
@@ -6415,13 +6469,14 @@ struct s size=9x7
 
     #[test]
     fn the_family_is_reported_before_the_properties_it_makes_moot() {
-        // Not reachable from source today, and the registry pack is not the
-        // way in either — `PackView::lookup` ends in `BlockState::bare`.
-        // The only producer is `canonical_to_block_state`'s bracket
-        // literal, which the grammar has no production for. Pinning the
-        // precedence anyway: once the id is refused it is not painted, and
-        // reporting that its unused properties were also dropped would ask
-        // the author to fix something that is not there.
+        // A source reaches this through a state literal on a block outside
+        // the stair family — `slot r -> @cobblestone[facing=north]` bound
+        // to a gable roof — and that literal is the only way in: the
+        // registry pack answers `PackView::lookup` with `BlockState::bare`.
+        // The state is built here rather than parsed so the test asks
+        // about the precedence alone: once the id is refused it is not
+        // painted, and reporting that its unused properties were also
+        // dropped would ask the author to fix something that is not there.
         let mut properties = IndexMap::new();
         properties.insert("facing".to_owned(), "north".to_owned());
         let state = BlockState {
@@ -7221,6 +7276,29 @@ struct s size=9x7
             1,
             "reversed row must not lay a second strip"
         );
+    }
+
+    #[test]
+    fn a_row_refused_after_the_dedup_check_leaves_its_pair_to_the_next_row() {
+        // The first row's `path=` is an abstract token, which lowers to
+        // nothing without a registry pack, so that row lays no strip. The
+        // second row names the same pair and a concrete block. It is not
+        // a duplicate of a walkway that was never laid: it lays the strip,
+        // and the only finding is the first row's own deferral.
+        let src = village_pair_source(
+            "  connect a.entry to b.entry path=@path.gravel\n  connect b.entry to a.entry path=@gravel\n",
+        );
+        let out = lowered(&src);
+        let codes: Vec<DiagnosticCode> = out.diagnostics.iter().map(|d| d.code).collect();
+        assert_eq!(
+            codes,
+            [DiagnosticCode::AbstractTokenDeferred],
+            "{:#?}",
+            out.diagnostics
+        );
+        let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
+        assert_eq!(laid, ["walkway::s::b.entry__a.entry"]);
+        assert_eq!(out.walkways[0].path_material, "minecraft:gravel");
     }
 
     /// The `W_INVALID_WALKWAY_IDENT` findings on `out`, as `(primary, notes)`.

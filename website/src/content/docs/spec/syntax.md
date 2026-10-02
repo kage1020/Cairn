@@ -37,10 +37,30 @@ punctuation they tolerate:
   parses.
 - A value list reads at most one comma between items and refuses `[a, , b]`.
 
-The one place a comma carries meaning is the input list of `assert truth(...)`, where it separates
-the signals whose count the row width is checked against. A row writes one character per input
-signal — `0`, `1`, or `-` — so `truth(a, b -> out)` takes rows two characters wide and refuses
-`{ 2->0 }` or `{ 0->0 }`.
+A canonical token may carry a **block-state literal**, as in `@oak_log[axis=x]` or
+`@oak_stairs[half=top, facing=north]`. The `[` must touch the token. After a space it is whatever
+comes next, so in a value list `[@a [b]]` is still a token and a nested list, while `[@a[b]]` is
+refused because `b` is not a property. Each pair inside is `property=value`, where the value is a
+word, a run of digits, or `true` / `false`. This is Minecraft's own block-state syntax rather than a
+Cairn list, so exactly one comma separates two pairs. An empty literal, a trailing or doubled comma,
+and a property named twice are refused. A dotted token such as `@floor.wood` is abstract and takes
+no literal, because the theme that binds it chooses the block, so a `[` touching it is whatever
+comes next, as one after a space is.
+
+Before the literal, a `[` touching an undotted token was whatever came next too, so `mat=@a[1]` and
+`mat=[@a[b]]` used to parse and are now refused. No source that passed `cairn check` had either
+shape: a bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL`, and a list where a label
+belongs is `E_TYPE_MISMATCH_LABEL`. Only the parse tree of a source that could not build changes.
+
+The literal's properties and values are not yet checked against the target: `E_STATE_DOMAIN`
+([Versioning and Editions](/spec/versioning-editions/)) is not implemented, so a Java build writes
+`@oak_log[axis=q]` as written. Each literal the build reads earns a `W_STATE_LITERAL_UNCHECKED`
+([Lint](/spec/lint/)) on the token, so that is said rather than silent.
+
+Besides that literal, the one place a comma carries meaning is the input list of
+`assert truth(...)`, where it separates the signals whose count the row width is checked against. A
+row writes one character per input signal — `0`, `1`, or `-` — so `truth(a, b -> out)` takes rows
+two characters wide and refuses `{ 2->0 }` or `{ 0->0 }`.
 
 `-` is a **don't-care**: the row means every value of that input, so `0- -> 1` says what `00->1` and
 `01->1` say together. It is a shorthand for those rows and not a construct of its own, which is why

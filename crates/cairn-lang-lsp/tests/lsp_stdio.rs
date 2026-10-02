@@ -1099,3 +1099,34 @@ fn lsp_31_the_stdio_flag_a_client_appends_still_starts_the_server() {
     );
     server.shutdown();
 }
+
+#[test]
+fn lsp_32_artifacts_that_share_a_file_name_publish_e_output_name_collision() {
+    // The resolver raises the collision, and the server publishes what
+    // `check` returns, so an editor sees it without a build. The finding
+    // sits on the `place`, with a related pointer at the struct.
+    let source = "theme t:\n  slot floor -> @oak_planks\n\n\
+                  struct hut size=3x3\n  floor mat_slot=floor\n\n\
+                  def house size=3x3:\n  floor mat_slot=floor\n\n\
+                  site s:\n  place id=hut use=house theme=t at=origin\n";
+    let (mut server, _) = Server::start();
+    server.did_open(source, 1);
+    let message = server.read_until_method("textDocument/publishDiagnostics");
+    let diagnostics = diagnostics_of(&message);
+    let found: Vec<&serde_json::Value> = diagnostics
+        .iter()
+        .filter(|d| d["code"] == serde_json::json!("E_OUTPUT_NAME_COLLISION"))
+        .collect();
+    assert_eq!(found.len(), 1, "one collision expected: {diagnostics:?}");
+    assert_eq!(found[0]["severity"], serde_json::json!(1));
+    assert_eq!(found[0]["range"]["start"]["line"], serde_json::json!(10));
+    let related = found[0]["relatedInformation"]
+        .as_array()
+        .expect("relatedInformation present");
+    assert_eq!(
+        related[0]["location"]["range"]["start"]["line"],
+        serde_json::json!(3),
+        "the related pointer names the struct",
+    );
+    server.shutdown();
+}

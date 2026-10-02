@@ -53,13 +53,30 @@ enum Outcome {
 ///
 /// stderr goes to a file rather than a pipe: a pipe that fills while nobody
 /// reads it deadlocks the child, which would look exactly like the hang
-/// being tested for.
+/// being tested for. stdout is discarded; [`run_bounded_with_stdout`]
+/// keeps it.
 fn run_bounded(dir: &Path, args: &[&str]) -> (Outcome, String, Duration) {
+    run_bounded_to(dir, args, Stdio::null())
+}
+
+/// [`run_bounded`], keeping stdout as well, for a run whose output is what
+/// the test reads.
+///
+/// stdout goes to a file for the same reason stderr does.
+fn run_bounded_with_stdout(dir: &Path, args: &[&str]) -> (Outcome, String, String, Duration) {
+    let out_path = dir.join("stdout.txt");
+    let out_file = File::create(&out_path).expect("create stdout sink");
+    let (outcome, stderr, elapsed) = run_bounded_to(dir, args, Stdio::from(out_file));
+    let stdout = fs::read_to_string(&out_path).unwrap_or_default();
+    (outcome, stderr, stdout, elapsed)
+}
+
+fn run_bounded_to(dir: &Path, args: &[&str], stdout: Stdio) -> (Outcome, String, Duration) {
     let err_path = dir.join("stderr.txt");
     let err_file = File::create(&err_path).expect("create stderr sink");
     let mut child = Command::new(cargo_bin())
         .args(args)
-        .stdout(Stdio::null())
+        .stdout(stdout)
         .stderr(Stdio::from(err_file))
         .spawn()
         .expect("spawn cairn");
@@ -109,6 +126,22 @@ fn connected(gap: &str) -> String {
         "{HUT}site duo:\n  place id=a use=hut theme=t at=origin\n\
          \x20\x20place id=b use=hut theme=t east_of=a gap={gap}\n\
          \x20\x20connect a.entry to b.entry path=@path\n"
+    ))
+}
+
+/// Two huts whose doors face each other's backs along `z`, via `north_of=`.
+///
+/// `HUT`'s only door is on its front, so [`connected`] cannot put a port on
+/// the `-z` side; this pair needs a door of its own on the back.
+fn connected_back_to_back(gap: &str) -> String {
+    source(&format!(
+        "def back_door_hut size=3x3:\n\
+         \x20\x20walls id=walls mat_slot=wall height=3\n\
+         \x20\x20door  id=back side=back at=center\n\n\
+         site duo:\n\
+         \x20\x20place id=a use=back_door_hut theme=t at=origin\n\
+         \x20\x20place id=b use=back_door_hut theme=t north_of=a gap={gap}\n\
+         \x20\x20connect a.back to b.back path=@path\n"
     ))
 }
 
@@ -186,6 +219,13 @@ fn hostile_sources() -> Vec<(&'static str, String)> {
         // the step from that origin to the door's port leaves the range.
         // `the_port_case_reaches_port_resolution` holds it there.
         ("gap-port-past-i32", connected("2147483644")),
+        // The same on the `-z` side: `b`'s origin lands at `z = 0 - 3 -
+        // 2147483645 = i32::MIN` exactly, and only the step out to its back
+        // door's port leaves the range.
+        (
+            "gap-port-past-i32-north",
+            connected_back_to_back("2147483645"),
+        ),
         // Three more and the origin itself leaves the range. That saturated
         // onto `i32::MAX` once; the row is refused now, before any port is
         // resolved against it.
@@ -380,6 +420,11 @@ fn the_port_case_reaches_port_resolution() {
             "origin works out to",
         ),
         (
+            "gap-port-past-i32-north",
+            &["port `b.back` could not be placed"][..],
+            "origin works out to",
+        ),
+        (
             "gap-origin-past-i32",
             &[
                 "origin works out to x=2147483650",
@@ -442,4 +487,239 @@ fn hostile_3_compile_refuses_rather_than_certifying_the_wreckage() {
             other => panic!("{name}: ended as {other:?}\nstderr={stderr}"),
         }
     }
+}
+
+/// A walkway whose router search reaches the `i32::MAX` column.
+///
+/// The straight L from `b.east` to `c.west` crosses a floor, so the
+/// router runs. With `gap=2147483640`, `b.east` sits at `x = i32::MAX - 1`,
+/// the search rectangle's east margin is the `i32::MAX` column, and the
+/// router expands a cell there. One block further east the margin itself
+/// would leave `i32`, so the router refuses the rectangle, the lowering
+/// falls back to the straight L and skips the cells it overlaps.
+///
+/// Both rows are kept so the first stays on the edge: one block west and
+/// the router never reaches `i32::MAX`, so the case goes inert, and the
+/// second row's warning would go with it; one block east and the first row
+/// starts warning. The second row is also what shows the straight L
+/// overlaps a floor, so the first row's lack of a warning means the router
+/// laid a detour.
+///
+/// Standalone rather than `hostile_sources()` rows: the first row lowers
+/// with no diagnostic at all, which `hostile_2` would reject.
+#[test]
+fn a_detour_searched_along_the_edge_of_i32_answers_rather_than_panics() {
+    // `a` must have no floor: with one, its cells stretch the search
+    // rectangle 2.1e9 blocks west, past the router's area cap, and both
+    // rows fall back to the straight L.
+    let detour = |gap: &str| {
+        source(&format!(
+            "def shell size=3x3:\n\
+             \x20\x20walls id=walls mat_slot=wall height=3\n\n\
+             def floored_hut size=3x3:\n\
+             \x20\x20floor id=floor mat_slot=floor\n\
+             \x20\x20walls id=walls mat_slot=wall height=3\n\
+             \x20\x20door  id=east side=right at=center\n\
+             \x20\x20door  id=west side=left  at=center\n\n\
+             site s:\n\
+             \x20\x20place id=a use=shell       theme=t at=origin\n\
+             \x20\x20place id=b use=floored_hut theme=t east_of=a gap={gap}\n\
+             \x20\x20place id=c use=floored_hut theme=t north_of=b gap=2\n\
+             \x20\x20connect b.east to c.west path=@gravel\n"
+        ))
+    };
+    let tmp = TempDir::new().expect("tempdir");
+    for (name, gap, warning) in [
+        ("detour-at-the-edge", "2147483640", None),
+        (
+            "margin-past-the-edge",
+            "2147483641",
+            Some([
+                "W_WALKWAY_BLOCKED",
+                "the walkway endpoints sit at the edge of the representable coordinate space",
+            ]),
+        ),
+    ] {
+        let dir = tmp.path().join(name);
+        fs::create_dir_all(&dir).expect("case dir");
+        let path = write(&dir, name, &detour(gap));
+        let file = path.to_str().unwrap();
+        let out_dir = dir.join("out");
+        let out = out_dir.to_str().unwrap();
+        for args in [
+            vec!["check", file, "--edition", "java", "--target", "1.21.4"],
+            vec!["lower", file],
+            vec!["compile", file, "--edition", "java", "--out", out],
+        ] {
+            let (outcome, stderr, _) = run_bounded(&dir, &args);
+            assert_eq!(
+                outcome,
+                Outcome::Exited(0),
+                "{name}: `{}` must answer, not crash\nstderr={stderr}",
+                args[0],
+            );
+            match warning {
+                None => assert!(
+                    !stderr.contains("W_"),
+                    "{name}: `{}` lays the detour, so it has nothing to warn about; got {stderr}",
+                    args[0],
+                ),
+                Some(texts) => assert!(
+                    texts.iter().all(|text| stderr.contains(text)),
+                    "{name}: `{}` must say the router refused the edge; got {stderr}",
+                    args[0],
+                ),
+            }
+        }
+        assert!(
+            out_dir.join("s_walkway_b_east__c_west.nbt").exists(),
+            "{name}: the walkway is laid and written either way",
+        );
+    }
+}
+
+/// A hut with a door on its front and on its back, so a `north_of=` pair
+/// faces door to door along one column and the straight L between them
+/// is a z leg alone, crossing no floor.
+const THROUGH_HUT: &str = "def hut size=3x3:\n\
+\x20\x20floor id=floor mat_slot=floor\n\
+\x20\x20walls id=walls mat_slot=wall height=3\n\
+\x20\x20door  id=front side=front at=center\n\
+\x20\x20door  id=back  side=back  at=center\n\n";
+
+/// A north–south walkway long enough that laying it in time quadratic
+/// in its length would not finish.
+///
+/// Every walkway row in [`hostile_sources`] is refused before a strip is
+/// laid: at the `i32` edge, or by the router's 4,000,000-cell area cap.
+/// The cap measures the straight L's bounding box (`l_path_area`), so the
+/// single-axis `gap-large`, a strip of about 100,000,000 cells, is past it
+/// as surely as the rows that span both axes. None of them reaches the z
+/// leg of the straight L. This one does: a million-cell z strip is one
+/// cell wide, so its bounding box sits under the cap, and that margin is
+/// the premise of the test. It is laid rather than refused, which is why
+/// it stands alone:
+/// `hostile_2` requires every row to name a diagnostic, and this row earns
+/// none.
+///
+/// `gap=1000000` is a million-cell strip. Laid in linear time it lowers
+/// far inside [`DEADLINE`]; a lookup over the laid cells per step would
+/// make that half a trillion comparisons, and the run would reach the
+/// deadline instead.
+#[test]
+fn a_long_north_south_walkway_lowers_within_the_deadline() {
+    let body = source(&format!(
+        "{THROUGH_HUT}site duo:\n\
+         \x20\x20place id=a use=hut theme=t at=origin\n\
+         \x20\x20place id=b use=hut theme=t north_of=a gap=1000000\n\
+         \x20\x20connect a.back to b.front path=@gravel\n"
+    ));
+    let tmp = TempDir::new().expect("tempdir");
+    let path = write(tmp.path(), "north-south", &body);
+    let (outcome, stderr, stdout, elapsed) = run_bounded_with_stdout(
+        tmp.path(),
+        &["lower", path.to_str().unwrap(), "--format", "json"],
+    );
+    assert_eq!(
+        outcome,
+        Outcome::Exited(0),
+        "`lower` ended as {outcome:?} after {elapsed:?}; a z strip must be laid in time linear \
+         in its length\nstderr={stderr}",
+    );
+    assert!(
+        !stderr.contains("W_") && !stderr.contains("E_"),
+        "the walkway must be laid, not refused; got {stderr}",
+    );
+    // Silence alone does not say the strip was laid: a row dropped without
+    // a finding would leave it silent too. Read the walkway back, so the
+    // run above is known to have timed the z leg rather than a refusal.
+    let ir: serde_json::Value = serde_json::from_str(&stdout).expect("`lower` prints JSON");
+    let key = "walkway::duo::a.back__b.front";
+    let walkways = ir["walkways"].as_object().expect("a `walkways` map");
+    assert_eq!(
+        walkways.keys().collect::<Vec<_>>(),
+        [key],
+        "one walkway, for the one row"
+    );
+    assert_eq!(
+        walkways[key]["footprint"],
+        serde_json::json!({ "x": 1, "z": 1_000_000 }),
+    );
+    let strip = &ir["structures"][key];
+    assert_eq!(
+        strip["palette"],
+        serde_json::json!([{ "id": "minecraft:air" }, { "id": "minecraft:gravel" }]),
+    );
+    let voxels = strip["voxels"].as_array().expect("a voxel array");
+    assert_eq!(voxels.len(), 1_000_000);
+    assert!(
+        voxels.iter().all(|index| index == 1),
+        "every cell of the strip is gravel"
+    );
+}
+
+/// A sink walled in two blocks from its driver, in a reservation as large
+/// as the `size=` and `void=` make it.
+///
+/// The sink that strands is a cell two blocks from its driver, every face
+/// of which is taken by a block, another net's dust, or the coords beside
+/// that dust. Nothing bounded the search, so the router searched until
+/// it had visited every free coord the net could reach: seconds and
+/// hundreds of megabytes per million coords of reservation, set by
+/// `width × depth × void` and not by the two blocks between the ends.
+/// Raising `void`, which the refusal's own fix line suggests, made the
+/// next run slower and the answer the same.
+fn walled_in_near_sink() -> String {
+    let body = [
+        "theme t:",
+        "  slot wall -> @oak_planks",
+        "  slot door -> @oak_door",
+        "",
+        "struct s size=31x2000",
+        "  floor mat_slot=wall",
+        "  door id=d0 side=front at=center mat_slot=door",
+        "  door id=d1 side=back at=center mat_slot=door",
+        "  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a",
+        "  logic sig.g0 = (sig.a or sig.a) or (sig.a and sig.a)",
+        "  logic sig.g1 = sig.g0 and sig.a",
+        "  door[id=d0] opened_by=sig.g0",
+        "  door[id=d1] opened_by=sig.g1",
+        "  circuit region=floor void=200",
+    ];
+    format!("{}\n", body.join("\n"))
+}
+
+#[test]
+fn hostile_5_a_walled_in_sink_is_refused_without_searching_the_reservation() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = write(tmp.path(), "walled", &walled_in_near_sink());
+    let (outcome, stderr, elapsed) = run_bounded(
+        tmp.path(),
+        &[
+            "synth",
+            path.to_str().unwrap(),
+            "--stage",
+            "route",
+            "--edition",
+            "java",
+            "--experimental-logic-synth",
+        ],
+    );
+    assert!(
+        matches!(outcome, Outcome::Exited(1)),
+        "`synth --stage route` ended as {outcome:?}\nstderr={stderr}",
+    );
+    // Still the wall, not the distance: every face of the sink is taken,
+    // so it is walled in whatever the cap allows.
+    assert!(
+        stderr.contains("E_ROUTE_CONGESTION") && stderr.contains("cannot reach (5,0,1)"),
+        "got {stderr:?}",
+    );
+    // 12.4 million coords of reservation. Searched, it ran past
+    // `DEADLINE`; answered from the sink's faces, or from a search the
+    // cap bounds, it is far inside this.
+    assert!(
+        elapsed < ANSWERED_WITHOUT_SEARCHING,
+        "`synth --stage route` took {elapsed:?} to refuse a sink two blocks from its driver",
+    );
 }

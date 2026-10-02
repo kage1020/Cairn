@@ -413,9 +413,8 @@ fn cli_synth_stage_edition_requires_edition_flag() {
 fn cli_synth_stage_route_java_fills_wire_length() {
     // `--stage route --edition java` runs Steiner routing over the
     // Placement IR. `redstone-door.crn`'s sole OR cell should carry
-    // `wire_length = 3` — one step from `sig.exit`'s pad, which is
-    // directly beside it with no coord between them to lay dust on, and
-    // two from `sig.step`'s, which is at the corner a row further out —
+    // `wire_length = 4` — two from each pad, which stand a row either
+    // side of the cell's row because the pad column steps over it —
     // in the routed JSON, while `local_delay_ticks`
     // stays elided because this dump stops at stage 2.
     // `cli_synth_stage_delay_java_fills_local_delay_ticks` is the stage-3
@@ -453,7 +452,7 @@ fn cli_synth_stage_route_java_fills_wire_length() {
         cells[0]["stage"], "route",
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
-    assert_eq!(cells[0]["wire_length"], 3);
+    assert_eq!(cells[0]["wire_length"], 4);
     assert!(
         cells[0].get("local_delay_ticks").is_none(),
         "local_delay_ticks must be elided at this stage: {stdout}",
@@ -492,7 +491,7 @@ fn cli_synth_stage_route_bedrock_matches_java_wire_length() {
     let ir = &gatehouse["ir"];
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
-    assert_eq!(ir["cells"][0]["wire_length"], 3);
+    assert_eq!(ir["cells"][0]["wire_length"], 4);
 }
 
 #[test]
@@ -608,7 +607,7 @@ fn cli_synth_stage_delay_java_fills_local_delay_ticks() {
         cells[0]["stage"], "delay",
         "the stage tag must echo the --stage flag that produced the dump: {stdout}",
     );
-    assert_eq!(cells[0]["wire_length"], 3);
+    assert_eq!(cells[0]["wire_length"], 4);
     assert_eq!(cells[0]["local_delay_ticks"], 1);
     // The rename is a breaking change to this dump, so the old key
     // has to be gone and not merely joined by the new one.
@@ -651,7 +650,7 @@ fn cli_synth_stage_delay_bedrock_matches_bedrock_torch_or() {
     let ir = &gatehouse["ir"];
     assert_eq!(ir["edition"], "bedrock");
     assert_eq!(ir["cells"][0]["cell"], "bedrock_torch_or");
-    assert_eq!(ir["cells"][0]["wire_length"], 3);
+    assert_eq!(ir["cells"][0]["wire_length"], 4);
     assert_eq!(ir["cells"][0]["local_delay_ticks"], 0);
     assert!(
         ir["cells"][0].get("delay_ticks").is_none(),
@@ -781,6 +780,80 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
 }
 
 #[test]
+fn cli_synth_stage_route_refuses_a_detour_past_the_attenuation_cap() {
+    // `sig.s1` feeds the gate from its pad at `(0,0,2)` through `(1,0,2)`,
+    // so `sig.s2`'s wire, from its pad at `(0,0,3)`, cannot start along
+    // its own row: `(1,0,3)` is one step from that dust. It steps out a
+    // row, runs the length of the region and steps back to the far
+    // door's pad at `(width - 1, 0, 2)`: its straight line is `width`
+    // and its route `width + 2`. At `width = cap - 2` the route is the
+    // cap and the scope routes; one wider it is one block over, and the
+    // router's search, bounded by the cap, refuses it at stage 2 — still
+    // within the cap in a straight line, so the straight-line gate lets
+    // it through to the router.
+    use cairn_lang_redstone::MAX_ATTENUATION_SEGMENT as CAP;
+    let dir = tempfile::tempdir().expect("temp dir");
+    for (width, refuses) in [(CAP - 2, false), (CAP - 1, true)] {
+        let path = dir.path().join(format!("detour{width}.crn"));
+        let source = format!(
+            "@cairn 2026.06\n@requires version>=1.20\n\n\
+             theme t:\n  slot wall -> @oak_planks\n  slot door -> @oak_door\n\n\
+             struct s size={width}x6\n  \
+             floor mat_slot=wall\n  \
+             door id=d0 side=front at=center mat_slot=door\n  \
+             door id=d1 side=back at=center mat_slot=door\n  \
+             pressure_plate id=p0 at=front.outside offset=0 y=0 -> sig.s0\n  \
+             pressure_plate id=p1 at=back.outside offset=0 y=0 -> sig.s1\n  \
+             pressure_plate id=p2 at=front.outside offset=1 y=0 -> sig.s2\n  \
+             logic sig.g0 = sig.s0 and sig.s1\n  \
+             door[id=d0] opened_by=sig.g0\n  \
+             door[id=d1] opened_by=sig.s2\n  \
+             circuit region=floor void=1\n"
+        );
+        std::fs::write(&path, source).expect("write detour fixture");
+        let out = cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                "route",
+                "--edition",
+                "java",
+                path.to_str().unwrap(),
+            ],
+        );
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        if !refuses {
+            assert_eq!(out.status.code(), Some(0), "width {width}: {stderr}");
+            let stdout = String::from_utf8(out.stdout).expect("utf-8");
+            let value: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+            let lengths: Vec<u64> = value[0]["ir"]["outputs"]
+                .as_array()
+                .expect("outputs array")
+                .iter()
+                .map(|output| output["wire_length"].as_u64().expect("routed"))
+                .collect();
+            assert_eq!(
+                lengths,
+                [u64::from(CAP - 3), u64::from(CAP)],
+                "the far door's wire is exactly the cap",
+            );
+            continue;
+        }
+        assert_eq!(out.status.code(), Some(1), "width {width}: {stderr}");
+        let expected = format!(
+            "error[E_ATTENUATION_LIMIT]: placed netlist for struct `s` has no route from the \
+             driver at (0,0,3) to ({},0,2) within the v1 attenuation limit of {CAP} blocks; the \
+             faces it could arrive through are taken by cell #0\n  note: Fix: give the wire a \
+             shorter way round",
+            width - 1,
+        );
+        assert!(stderr.contains(&expected), "width {width}: got {stderr}");
+    }
+}
+
+#[test]
 fn cli_synth_unparseable_source_exits_one() {
     // Parse-level failure follows the same exit-code convention as
     // `cairn parse` / `check`: exit 1 (build problem), position-anchored
@@ -822,10 +895,10 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
-    // Nothing at all. Two sensors feed the cell, so the second one's
-    // wire comes round the first one's pad and the cell's outward run
-    // climbs a layer to clear it — a layout the pipeline produces
-    // rather than a defect it announces.
+    // Nothing at all. The two sensor pads stand a row either side of
+    // the cell's, so each wire comes in through the lane on its own
+    // side, and the cell's outward run reaches the door's pad in the
+    // straight-line distance, over nothing and round nothing.
     assert!(
         stderr.is_empty(),
         "a scope that routes has nothing to say: {stderr}",
@@ -868,8 +941,8 @@ fn cli_synth_stage_crossing_java_legalizes_or_cell_scope() {
 #[test]
 fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
     // Everything about crossing legalization on the redstone-door
-    // fixture is edition-independent (short segments, and a crossing
-    // that is reported rather than repaired), so the Bedrock run
+    // fixture is edition-independent (short segments, and nothing
+    // that crosses), so the Bedrock run
     // differs from the Java run only in the cell tag and the edition
     // field. Mirrors
     // the placement / route / delay stage's Java+Bedrock pattern so
@@ -889,10 +962,10 @@ fn cli_synth_stage_crossing_bedrock_legalizes_or_cell_scope() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
     assert!(out.status.success(), "expected exit 0, stderr={stderr}");
-    // Nothing at all. Two sensors feed the cell, so the second one's
-    // wire comes round the first one's pad and the cell's outward run
-    // climbs a layer to clear it — a layout the pipeline produces
-    // rather than a defect it announces.
+    // Nothing at all. The two sensor pads stand a row either side of
+    // the cell's, so each wire comes in through the lane on its own
+    // side, and the cell's outward run reaches the door's pad in the
+    // straight-line distance, over nothing and round nothing.
     assert!(
         stderr.is_empty(),
         "a scope that routes has nothing to say: {stderr}",
@@ -1062,10 +1135,11 @@ fn cli_synth_stage_crossing_two_nets_over_one_coord_exits_one() {
     // between the pipeline and the JSON dump would let a refused scope
     // be printed as a legalized IR.
     //
-    // One cell, two sensors, two actuators, one service layer. The
-    // cell's own output fans out to both doors, so it is laid first and
-    // takes the coords beside the cell; the sensor that drives it has
-    // none left to arrive through and no layer to climb onto.
+    // One cell, two sensors, two actuators, one service layer. `sig.a`
+    // drives both the cell and the back door, so it is laid first, and
+    // its run out to that door takes the coords beside the front door's
+    // pad; the cell's own output has none left to arrive through and no
+    // layer to climb onto.
     let source = "\
 theme cross:
   slot wall -> @oak_planks
@@ -1082,7 +1156,7 @@ struct crossbar size=4x4
   logic sig.f = sig.a and sig.b
 
   door[id=front] opened_by=sig.f
-  door[id=back]  opened_by=sig.f
+  door[id=back]  opened_by=sig.a
 
   circuit region=floor void=1
 ";
@@ -1115,7 +1189,7 @@ struct crossbar size=4x4
     assert!(
         stderr.contains("placed netlist for struct `crossbar`")
             && stderr.contains("another net's dust, on the coord or one step from it")
-            && stderr.contains("the faces it could arrive through are taken by cell #0"),
+            && stderr.contains("the faces it could arrive through are taken by sig.a"),
         "the refusal names the scope, which of the three kinds of obstacle it \
          means and how far it reaches, and the net standing in the way, got: \
          {stderr}",
