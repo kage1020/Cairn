@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- *(core)* refuse a `connect` port nested under a `level` as level-scoped, not as undeclared
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

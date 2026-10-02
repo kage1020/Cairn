@@ -232,7 +232,7 @@ one to the count of scopes that did not lower.
 | Code | Cause |
 |---|---|
 | `E_CONNECT_ARITY` | The row's shape is not `FROM.PORT to TO.PORT`. Enforced before resolution, since an unreadable endpoint costs the row its walkway. |
-| `E_UNRESOLVED_PORT` | The right-of-dot port id does not name a member of the referenced def. Carries a nearest-match note. |
+| `E_UNRESOLVED_PORT` | The right-of-dot port id does not name a member of the referenced def's body. Carries a nearest-match note, or, when the id belongs to a member nested under a `level`, says so: a level-scoped member cannot be a port yet. |
 | `E_AMBIGUOUS_PORT` | The def exposes the same `id=` on more than one member. Rename the collision. |
 | `E_MISSING_PATH_MATERIAL` | The row omits `path=`, so walkway lowering has nothing to lay. |
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |

@@ -310,14 +310,30 @@ fn a_door_under_a_level_is_not_a_port_at_all() {
     let module = parse(&src).expect("parse");
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
-    assert!(
-        resolution
-            .diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::UnresolvedPort),
-        "a door nested under a `level` has to be refused as a port: {:?}",
-        resolution.diagnostics,
-    );
+    let refusals: Vec<_> = resolution
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::UnresolvedPort)
+        .collect();
+    // Both ends name the nested door. The refusal says where it is and
+    // that it is the nesting that is refused: "not declared", with a note
+    // to add the `id=` already written, sent the author looking for a
+    // typo that was not there.
+    assert_eq!(refusals.len(), 2, "{:?}", resolution.diagnostics);
+    for (refusal, place) in refusals.iter().zip(["a", "b"]) {
+        assert_eq!(
+            refusal.primary,
+            format!(
+                "port `e` of `def hut` (used by `place {place}`) is declared under \
+                 `level id=up`, and a member under a `level` cannot be a port yet"
+            ),
+        );
+        let notes: Vec<&str> = refusal.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(
+            notes,
+            ["a port has to be a door or window declared directly in the body of `def hut`"],
+        );
+    }
 }
 
 #[test]

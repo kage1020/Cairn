@@ -220,7 +220,7 @@ walkway は `site::SITE::FROM ↔ TO` と、行が書いたとおりのポート
 | コード | 原因 |
 |---|---|
 | `E_CONNECT_ARITY` | 行の形が `FROM.PORT to TO.PORT` でない。読めない端点はその行の walkway を失わせるので、解決の前に検査します。 |
-| `E_UNRESOLVED_PORT` | ドットの右のポート id が、参照先 def のメンバを指していない。最近傍候補の note 付き。 |
+| `E_UNRESOLVED_PORT` | ドットの右のポート id が、参照先 def の本体のメンバを指していない。最近傍候補の note 付き。その id が `level` の下に入れ子になったメンバのものなら、そう告げます。level スコープのメンバは、まだポートになれません。 |
 | `E_AMBIGUOUS_PORT` | def が同じ `id=` を複数のメンバで公開している。衝突をリネームしてください。 |
 | `E_MISSING_PATH_MATERIAL` | 行が `path=` を欠いており、walkway の lowering に敷くものが無い。 |
 | `E_UNRESOLVED_PLACE_REF` | 先頭の place id が、この site の先行する place を指していない ([§9.3.3](#933-スコープ跨ぎ参照) と共通)。 |
