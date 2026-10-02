@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- *(core)* report a `sym=true` window whose mirror coincides with it
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

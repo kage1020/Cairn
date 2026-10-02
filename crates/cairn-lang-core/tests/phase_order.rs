@@ -281,8 +281,8 @@ fn one_member_covering_its_own_cell_twice_is_not_a_conflict() {
     // `2..=3`, so column 2 is written twice by one member. `step=` is only
     // checked against zero, so this is a shape the lowering accepts rather
     // than one contrived past a guard. (A `sym=true` window would not do:
-    // its mirror is either disjoint or coalesced away, so it never writes
-    // one cell twice at all.)
+    // a mirror that meets the primary is skipped, so it never writes one
+    // cell twice at all.)
     let out = lowered(&source(
         "  window side=front y=1 offset=1 size=2x1 repeat=2 step=1 mat_slot=glass\n",
     ));
