@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- *(core)* refuse a placement whose body runs past `i32` and a repeated window whose `sym=` is unreadable, show the written `side=` / `slope_to=` value, and report the body of a row whose anchor did not lower
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

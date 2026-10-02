@@ -102,8 +102,8 @@ fn the_corpus_reaches_the_two_repair_site_branch_of_the_ignored_argument_prose()
 
 /// An unreadable value's note says what the default did, or that the
 /// member is not built either way, in words written per member. Each is its
-/// own literal, and so its own chance at a dropped continuation; the
-/// origin-range refusal beside them is joined from three continued lines.
+/// own literal, and so its own chance at a dropped continuation; the two
+/// origin-range refusals beside them are joined from continued lines.
 #[test]
 fn the_corpus_reaches_every_note_an_unreadable_value_carries() {
     let rendered = rendered_strings();
@@ -124,7 +124,12 @@ fn the_corpus_reaches_every_note_an_unreadable_value_carries() {
             "the window is drawn without its mirror",
         ),
         ("W_IGNORED_ARGUMENT", "this window is not cut either way"),
+        (
+            "W_IGNORED_ARGUMENT",
+            "this window has `repeat=`, which builds only with `sym=false`, so it is not cut",
+        ),
         ("W_DEFERRED_MEMBER", "this placement's origin works out to"),
+        ("W_DEFERRED_MEMBER", "this placement's body reaches"),
     ] {
         assert!(
             rendered

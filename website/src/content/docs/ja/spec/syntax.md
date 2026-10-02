@@ -206,7 +206,9 @@ Monaco と同じ規則なので、診断の行番号とカーソル位置の行�
 の矩形と重なる場合は `W_DEFERRED_MEMBER` で拒否し、元の側だけを塗ります。`sym=` は裸の `true` か
 `false` を取り、書かれていない窓は鏡映されません。それ以外の値 (`sym=yes`、`sym="true"`、
 `sym=1`) は読めない値で、窓は鏡映なしで描かれ、その値は `W_IGNORED_ARGUMENT` で報告されます
-([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
+([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。`repeat=` を持つ窓は例外です。`sym=true` は
+それを拒否し `sym=false` は作るので、`sym=` が読めない場合は切り抜かれず、`W_IGNORED_ARGUMENT` と
+並んで `W_DEFERRED_MEMBER` で報告されます。
 
 **`at=` によるドアのアンカー。** ドアの壁ローカル列は 3 つの名前付きアンカーから決まります。
 

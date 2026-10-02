@@ -129,6 +129,23 @@ fn connected(gap: &str) -> String {
     ))
 }
 
+/// Two huts with a door on their `+x` wall, `b` placed `east_of=a`.
+///
+/// `HUT`'s front door sits inside its body's `x` span, and a body may not
+/// reach past `i32`, so only a door on the `+x` wall can put a port one
+/// step past the range on that axis.
+fn connected_east_doors(gap: &str) -> String {
+    source(&format!(
+        "def east_door_hut size=3x3:\n\
+         \x20\x20walls id=walls mat_slot=wall height=3\n\
+         \x20\x20door  id=east side=right at=center\n\n\
+         site duo:\n\
+         \x20\x20place id=a use=east_door_hut theme=t at=origin\n\
+         \x20\x20place id=b use=east_door_hut theme=t east_of=a gap={gap}\n\
+         \x20\x20connect a.east to b.east path=@path\n"
+    ))
+}
+
 /// Two huts whose doors face each other's backs along `z`, via `north_of=`.
 ///
 /// `HUT`'s only door is on its front, so [`connected`] cannot put a port on
@@ -214,11 +231,11 @@ fn hostile_sources() -> Vec<(&'static str, String)> {
             ),
         ),
         // Walkway port resolution added `i32`s without checking, and the
-        // strip was materialised before anything measured it. `hut` is 3
-        // wide, so this puts `b`'s origin at exactly `i32::MAX` and only
-        // the step from that origin to the door's port leaves the range.
+        // strip was materialised before anything measured it. The hut is 3
+        // wide, so this puts `b`'s last column at exactly `i32::MAX` and
+        // only the step out of its `+x` door to the port leaves the range.
         // `the_port_case_reaches_port_resolution` holds it there.
-        ("gap-port-past-i32", connected("2147483644")),
+        ("gap-port-past-i32", connected_east_doors("2147483642")),
         // The same on the `-z` side: `b`'s origin lands at `z = 0 - 3 -
         // 2147483645 = i32::MIN` exactly, and only the step out to its back
         // door's port leaves the range.
@@ -226,7 +243,7 @@ fn hostile_sources() -> Vec<(&'static str, String)> {
             "gap-port-past-i32-north",
             connected_back_to_back("2147483645"),
         ),
-        // Three more and the origin itself leaves the range. That saturated
+        // Here the origin itself leaves the range. That saturated
         // onto `i32::MAX` once; the row is refused now, before any port is
         // resolved against it.
         ("gap-origin-past-i32", connected("2147483647")),
@@ -416,7 +433,7 @@ fn the_port_case_reaches_port_resolution() {
     for (name, reached, not_reached) in [
         (
             "gap-port-past-i32",
-            &["port `b.entry` could not be placed"][..],
+            &["port `b.east` could not be placed"][..],
             "origin works out to",
         ),
         (

@@ -1190,36 +1190,27 @@ fn lower_site<'a>(
         // The anchor reads `placed` for prior-place lookups, so the lookup
         // has to happen before *this* placement is inserted. A lookup
         // misses when the prior place never reached `placed`, which is any
-        // `continue` arm of this loop: those above, this deferral, or the
-        // volume refusal and the origin-range refusal below. Falling back to
-        // `(0, 0, 0)` would silently stack the placement on top of `home1`,
-        // so the row is deferred and skipped instead, before its body is
-        // lowered; only the origin waits for the lowered dims.
+        // `continue` arm of this loop: those above, the anchor deferral,
+        // or the volume refusal and the origin-range refusal below. Falling
+        // back to `(0, 0, 0)` would silently stack the placement on top of
+        // `home1`, so the row is deferred and skipped instead; only the
+        // origin waits for the lowered dims.
         //
         // An unreadable `gap=` is reported on every path out of this row,
         // placed or not, with a note that says which: see
         // [`read_or_ignore`] for why the finding is never held back.
         let (anchor, gap_unread) = resolve_place_anchor(member, placed, &site.name);
-        let Some(anchor) = anchor else {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
-            ));
-            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
-            continue;
-        };
 
         // The body's findings go straight out, whether or not the row is
-        // then placed. Lowering a body takes nothing from the row's
-        // origin — the voxels are local to the body, and the origin is
-        // worked out from them afterwards — so every finding it raises is
-        // one the row would have raised had it landed: a defect in the
-        // `def` or the theme, which the author has to fix wherever the row
-        // ends up. Holding them for a refused row only moved them one
-        // compile later. A row whose anchor did not lower, above, is the
-        // different case: it returns before the body is lowered, so its
-        // body's findings are never produced at all.
-        let Some(LoweredBody { array, walls, cut }) = lower_body_to_block_array(
+        // then placed — also when its anchor did not lower. Lowering a body
+        // takes nothing from the row's origin — the voxels are local to
+        // the body, and the origin is worked out from them afterwards — so
+        // every finding it raises is one the row would have raised had it
+        // landed: a defect in the `def` or the theme, which the author has
+        // to fix wherever the row ends up. Holding them for a refused row
+        // only moved them one compile later, and a `def` that only refused
+        // rows place would never have reported them at all.
+        let body = lower_body_to_block_array(
             BodyDescriptor {
                 kind: VoxelSource::Place,
                 scope_label: place_id,
@@ -1231,7 +1222,16 @@ fn lower_site<'a>(
             Some(scope),
             registry,
             diagnostics,
-        ) else {
+        );
+        let Some(anchor) = anchor else {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
+            ));
+            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
+            continue;
+        };
+        let Some(LoweredBody { array, walls, cut }) = body else {
             // The extent was refused; the diagnostic names the scope, and
             // recording a placement for a structure that does not exist
             // would leave the lockfile pointing at nothing.
@@ -1790,24 +1790,46 @@ enum PlaceAnchor {
     },
 }
 
-/// The origin [`PlaceAnchor::origin`] works out to lies outside the `i32`
-/// range a placement records its origin in. `axis` is the one the selector
-/// moves along and `offset` the value that left the range — a sum for
-/// `east_of`, a difference for `north_of` — for the message.
+/// A placement [`PlaceAnchor::origin`] works out lies partly outside the
+/// `i32` range world coordinates are recorded and addressed in. `axis` is
+/// the one that left the range and `offset` the coordinate that did, for
+/// the message: the origin itself (a sum for `east_of`, a difference for
+/// `north_of`), or the body's far edge, `origin + dims − 1`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct OriginOutOfRange {
+    corner: PlacementCorner,
     axis: char,
     offset: i128,
+}
+
+/// Which corner of a placement's box [`OriginOutOfRange`] found outside
+/// the range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlacementCorner {
+    /// The low-`x`, low-`z` origin the placement records.
+    Origin,
+    /// The high corner, `origin + dims − 1`, where the body's last cell
+    /// sits.
+    FarEdge,
 }
 
 impl OriginOutOfRange {
     /// The `W_DEFERRED_MEMBER` reason for the row this refuses.
     fn deferral(self) -> String {
-        let Self { axis, offset } = self;
+        let Self {
+            corner,
+            axis,
+            offset,
+        } = self;
+        let (what, recorded) = match corner {
+            PlacementCorner::Origin => {
+                ("origin works out to", "a placement's origin is recorded in")
+            }
+            PlacementCorner::FarEdge => ("body reaches", "a placement's cells are addressed in"),
+        };
         format!(
-            "this placement's origin works out to {axis}={offset}, past the {} to {} range \
-             a placement's origin is recorded in; shorten the `gap=` on this row or on a \
-             row it is placed relative to",
+            "this placement's {what} {axis}={offset}, past the {} to {} range {recorded}; \
+             shorten the `gap=` on this row or on a row it is placed relative to",
             i32::MIN,
             i32::MAX,
         )
@@ -1826,10 +1848,32 @@ impl PlaceAnchor {
     /// The sum is taken in `i128`, where no `i32` origin, `u32` extent and
     /// `i64` gap can overflow, and refused when it leaves `i32` rather than
     /// saturated: a saturated origin put two placements on one coordinate,
-    /// the second stacked inside the first, and nothing said so.
+    /// the second stacked inside the first, and nothing said so. The body's
+    /// far edge, `origin + dims − 1` on `x` and `z`, is refused the same
+    /// way, since a cell past it has no world coordinate either.
     fn origin(self, dims: Dims) -> Result<(i32, i32, i32), OriginOutOfRange> {
+        let (x, y, z) = self.origin_corner(dims)?;
+        for (axis, low, extent) in [('x', x, dims.x), ('z', z, dims.z)] {
+            let far = i128::from(low) + i128::from(extent.max(1)) - 1;
+            if i32::try_from(far).is_err() {
+                return Err(OriginOutOfRange {
+                    corner: PlacementCorner::FarEdge,
+                    axis,
+                    offset: far,
+                });
+            }
+        }
+        Ok((x, y, z))
+    }
+
+    /// [`Self::origin`]'s low corner alone.
+    fn origin_corner(self, dims: Dims) -> Result<(i32, i32, i32), OriginOutOfRange> {
         let fit = |axis: char, offset: i128| {
-            i32::try_from(offset).map_err(|_| OriginOutOfRange { axis, offset })
+            i32::try_from(offset).map_err(|_| OriginOutOfRange {
+                corner: PlacementCorner::Origin,
+                axis,
+                offset,
+            })
         };
         match self {
             Self::WorldOrigin => Ok((0, 0, 0)),
@@ -3446,12 +3490,14 @@ fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option
 /// surfaces a `W_DEFERRED_MEMBER` warning.
 fn shed_slope_to(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
     let Some(raw) = member.ident_value("slope_to") else {
-        let reason = if member.intent_state.contains_key("slope_to") {
-            "shed `slope_to=` must be one of front, back, left, right"
-        } else {
-            "shed roof requires `slope_to=` (one of front, back, left, right)"
+        let reason = match member.intent_state.get("slope_to") {
+            Some(written) => format!(
+                "shed `slope_to=` must be one of front, back, left, right, not {}",
+                written.value.describe(),
+            ),
+            None => "shed roof requires `slope_to=` (one of front, back, left, right)".to_owned(),
         };
-        diagnostics.push(diag_deferred_member_reason(member, reason));
+        diagnostics.push(diag_deferred_member_reason(member, &reason));
         return None;
     };
     if let Some(side) = WallSide::from_ident(raw) {
@@ -4560,34 +4606,56 @@ fn fill_window(
         },
         "`true` or `false`",
     ) {
-        Ok(sym) => (sym.unwrap_or(false), None),
-        Err(unread) => (false, Some(unread)),
+        Ok(sym) => (Some(sym.unwrap_or(false)), None),
+        Err(unread) => (None, Some(unread)),
     };
     let cut = cut_window(member, sym, y_offset, ctx, palette, canvas, diagnostics);
     diagnostics.extend(sym_unread.map(|unread| {
-        unread.report(if cut {
-            "the window is drawn without its mirror, as `sym=false` would draw it"
-        } else {
-            "this window is not cut either way — see the finding on the same line"
+        unread.report(match cut {
+            WindowCut::Cut => {
+                "the window is drawn without its mirror, as `sym=false` would draw it"
+            }
+            WindowCut::Refused => {
+                "this window is not cut either way — see the finding on the same line"
+            }
+            WindowCut::RefusedForUnreadSym => {
+                "this window has `repeat=`, which builds only with `sym=false`, so it is not \
+                 cut while `sym=` is unreadable — see the finding on the same line"
+            }
         })
     }));
 }
 
-/// [`fill_window`]'s refusals and paint, with `sym=` already read. Returns
-/// whether the primary rectangle was cut, which is what the note on an
+/// What [`cut_window`] did with the window, which is what the note on an
 /// unreadable `sym=` has to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowCut {
+    /// The primary rectangle was cut.
+    Cut,
+    /// The window was refused for a reason a readable `sym=` would not
+    /// change.
+    Refused,
+    /// The window has `repeat=`, which `sym=true` refuses and `sym=false`
+    /// builds, and its `sym=` is unreadable: it was refused rather than
+    /// built on a default the source may not mean.
+    RefusedForUnreadSym,
+}
+
+/// [`fill_window`]'s refusals and paint, with `sym=` already read: `None`
+/// when the value written is unreadable, in which case the window is
+/// painted unmirrored unless whether it is built at all turns on `sym=`.
 #[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn cut_window(
     member: &Member,
-    sym: bool,
+    sym: Option<bool>,
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
+) -> WindowCut {
     let Some(side) = side_of(member, diagnostics) else {
-        return false;
+        return WindowCut::Refused;
     };
     // `offset=` defaults to 0 (the wall-local axis origin) when absent, so a
     // decorative repeat=N series can be authored as `window ... repeat=N
@@ -4605,7 +4673,7 @@ fn cut_window(
         Ok(args) => args,
         Err(fault) => {
             diagnostics.push(diag_deferred_member_reason(member, &fault.deferral()));
-            return false;
+            return WindowCut::Refused;
         }
     };
     let y_start = y_start_local.saturating_add(y_offset);
@@ -4629,30 +4697,47 @@ fn cut_window(
                 member,
                 "window `repeat=0` would stamp no instances; drop the window instead",
             ));
-            return false;
+            return WindowCut::Refused;
         }
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 1,
-        NonNegRead::Deferred => return false,
+        NonNegRead::Deferred => return WindowCut::Refused,
     };
     let step = match nonneg_int_or_defer(member, "step", diagnostics) {
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return false,
+        NonNegRead::Deferred => return WindowCut::Refused,
     };
-    if repeat > 1 && sym {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "window with both `repeat=` and `sym=true` is not yet supported",
-        ));
-        return false;
+    if repeat > 1 {
+        match sym {
+            Some(false) => {}
+            Some(true) => {
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    "window with both `repeat=` and `sym=true` is not yet supported",
+                ));
+                return WindowCut::Refused;
+            }
+            // `sym=true` would refuse this window and `sym=false` would
+            // build it, so building it on the default would turn an
+            // unreadable value into a window the source may have refused.
+            None => {
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    "window with `repeat=` is not cut while its `sym=` is unreadable: \
+                     `sym=true` with `repeat=` is not yet supported, and `sym=false` is not \
+                     what was written",
+                ));
+                return WindowCut::RefusedForUnreadSym;
+            }
+        }
     }
     if repeat > 1 && step == 0 {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "window `repeat=` requires a positive `step=` so instances do not overlap",
         ));
-        return false;
+        return WindowCut::Refused;
     }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let span_end = offset
@@ -4666,7 +4751,7 @@ fn cut_window(
                 side_name(side),
             ),
         ));
-        return false;
+        return WindowCut::Refused;
     }
     // A window is a rectangle cut into a wall, so every row it cuts has
     // to be a row some `walls` member painted — not merely a row below
@@ -4701,7 +4786,7 @@ fn cut_window(
             )
         };
         diagnostics.push(diag_deferred_member_reason(member, &reason));
-        return false;
+        return WindowCut::Refused;
     }
     // Resolved below the two geometry checks above, not before them: both
     // return without painting, and a palette entry claimed on the way to
@@ -4724,7 +4809,7 @@ fn cut_window(
             diagnostics,
             ctx.theme_missing,
         ) else {
-            return false;
+            return WindowCut::Refused;
         };
         idx
     } else {
@@ -4749,12 +4834,12 @@ fn cut_window(
             canvas,
         );
     }
-    if sym {
+    if sym == Some(true) {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
         if mirror_offset == offset {
             // The mirror sits exactly on top of the primary; emitting it
             // again would be a no-op so we silently coalesce.
-            return true;
+            return WindowCut::Cut;
         }
         // Reject overlapping mirrors: a `sym=true` window asks for a
         // *pair*, not one wide span. If the two rectangles intersect the
@@ -4772,7 +4857,7 @@ fn cut_window(
                     side_name(side),
                 ),
             ));
-            return true;
+            return WindowCut::Cut;
         }
         paint_window_rect(
             ctx,
@@ -4783,7 +4868,7 @@ fn cut_window(
             canvas,
         );
     }
-    true
+    WindowCut::Cut
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -4841,12 +4926,14 @@ fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSid
         // line lower to nothing without telling the author, which breaks
         // the module-level promise that every dropped member surfaces a
         // diagnostic.
-        let reason = if member.intent_state.contains_key("side") {
-            "`side=` must be one of front, back, left, right"
-        } else {
-            "missing `side=` (expected one of front, back, left, right)"
+        let reason = match member.intent_state.get("side") {
+            Some(written) => format!(
+                "`side=` must be one of front, back, left, right, not {}",
+                written.value.describe(),
+            ),
+            None => "missing `side=` (expected one of front, back, left, right)".to_owned(),
         };
-        diagnostics.push(diag_deferred_member_reason(member, reason));
+        diagnostics.push(diag_deferred_member_reason(member, &reason));
         return None;
     };
     if let Some(side) = WallSide::from_ident(raw) {
@@ -4996,6 +5083,37 @@ fn member_or_slot_span(member: &Member, slot: &ValueWithSpan) -> Span {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_placement_whose_far_edge_leaves_i32_is_refused_on_either_axis() {
+        // A source cannot yet reach the `z` case: `at=origin` is z=0 and
+        // `north_of` only steps back. The anchor is checked directly so the
+        // `z` half of the rule is held all the same.
+        let dims = Dims { x: 5, y: 1, z: 5 };
+        let north = |prior_origin, gap| PlaceAnchor::NorthOf { prior_origin, gap };
+        // In range: the last cell on each axis is `i32::MAX`.
+        assert_eq!(
+            north((i32::MAX - 4, 0, i32::MAX), -1).origin(dims),
+            Ok((i32::MAX - 4, 0, i32::MAX - 4)),
+        );
+        // One wider on `x`: a `north_of` row keeps the prior's `x`.
+        assert_eq!(
+            north((i32::MAX - 3, 0, 0), 0).origin(dims),
+            Err(OriginOutOfRange {
+                corner: PlacementCorner::FarEdge,
+                axis: 'x',
+                offset: i128::from(i32::MAX) + 1,
+            }),
+        );
+        assert_eq!(
+            north((0, 0, i32::MAX), -2).origin(dims),
+            Err(OriginOutOfRange {
+                corner: PlacementCorner::FarEdge,
+                axis: 'z',
+                offset: i128::from(i32::MAX) + 1,
+            }),
+        );
+    }
     use crate::block_array::BlockState;
     use crate::check::Severity;
 

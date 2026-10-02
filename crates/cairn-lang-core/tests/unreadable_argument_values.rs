@@ -22,8 +22,9 @@
 //!
 //! Separately, an origin that works out past `i32` used to saturate onto
 //! the range's edge, so two `place` rows could land on one coordinate. It
-//! is refused now, and the refused row's body still reports what is wrong
-//! with its `def` and theme.
+//! is refused now, as is a body whose far edge is past the range, and a
+//! refused row's body, or that of a row placed relative to a refused one,
+//! still reports what is wrong with its `def` and theme.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 
@@ -116,6 +117,74 @@ fn an_unreadable_sym_on_a_window_that_is_not_cut_is_still_reported() {
     assert_eq!(
         ir.diagnostics[1].notes[0].message,
         "this window is not cut either way — see the finding on the same line",
+    );
+}
+
+#[test]
+fn an_unreadable_sym_on_a_repeated_window_cuts_nothing() {
+    // `sym=true` refuses a window with `repeat=`, and `sym=false` builds
+    // it. Reading an unreadable `sym=` as `false` would build three
+    // windows the source may have refused, so nothing is cut, as for
+    // `sym=true`.
+    let repeated = |sym: &str| window(&format!(" repeat=3 step=2{sym}"));
+    let refused = lowered(&repeated(" sym=true"));
+    let built = lowered(&repeated(" sym=false"));
+    assert_ne!(
+        only_structure(&refused),
+        only_structure(&built),
+        "guard: `sym=` decides whether this window is cut",
+    );
+    let ir = lowered(&repeated(" sym=yes"));
+    assert_eq!(only_structure(&ir), only_structure(&refused));
+    assert_eq!(
+        findings(&ir),
+        vec![
+            (
+                "W_DEFERRED_MEMBER",
+                "window with `repeat=` is not cut while its `sym=` is unreadable: `sym=true` \
+                 with `repeat=` is not yet supported, and `sym=false` is not what was written",
+            ),
+            (
+                "W_IGNORED_ARGUMENT",
+                "`sym=` must be `true` or `false`, not identifier `yes`; the value was ignored",
+            ),
+        ],
+    );
+    assert_eq!(
+        ir.diagnostics[1].notes[0].message,
+        "this window has `repeat=`, which builds only with `sym=false`, so it is not cut while \
+         `sym=` is unreadable — see the finding on the same line",
+    );
+}
+
+// --- `side=` / shed `slope_to=` ---------------------------------------------
+
+#[test]
+fn a_side_of_the_wrong_shape_is_refused_with_the_value_written() {
+    // A quoted `"front"` names the side the author meant; the message has
+    // to show the quotes, or it reads as if `front` itself were refused.
+    let ir = lowered(&window("").replace("side=front", "side=\"front\""));
+    assert_eq!(
+        findings(&ir),
+        vec![(
+            "W_DEFERRED_MEMBER",
+            "`side=` must be one of front, back, left, right, not string `\"front\"`",
+        )],
+    );
+    let shed = lowered(
+        "struct s size=5x5\n  \
+         walls mat_slot=wall height=3\n  \
+         roof  kind=shed slope_to=\"front\" mat_slot=roof\n\n\
+         theme t:\n  \
+         slot wall -> @cobblestone\n  \
+         slot roof -> @oak_stairs\n",
+    );
+    assert_eq!(
+        findings(&shed),
+        vec![(
+            "W_DEFERRED_MEMBER",
+            "shed `slope_to=` must be one of front, back, left, right, not string `\"front\"`",
+        )],
     );
 }
 
@@ -327,14 +396,14 @@ fn an_unreadable_gap_places_the_row_edge_to_edge_and_says_so() {
 }
 
 #[test]
-fn an_origin_past_i32_refuses_the_row_instead_of_saturating() {
-    // `a` is 3 wide, so `gap=2147483644` puts `b` at exactly `i32::MAX`
-    // and one more leaves the range.
+fn a_placement_past_i32_refuses_the_row_instead_of_saturating() {
+    // `a` and `b` are 3 wide, so `gap=2147483642` puts `b`'s last column
+    // at exactly `i32::MAX`, and one more leaves the range.
     let edge = lowered(&site(
-        "  place id=b use=box theme=t east_of=a gap=2147483644\n",
+        "  place id=b use=box theme=t east_of=a gap=2147483642\n",
     ));
     assert_eq!(findings(&edge), vec![]);
-    assert_eq!(origin(&edge, "b"), Some((i32::MAX, 0, 0)));
+    assert_eq!(origin(&edge, "b"), Some((i32::MAX - 2, 0, 0)));
     // `b` is 5 deep, so `gap=2147483643` puts it at exactly `i32::MIN`.
     let floor = lowered(&site(
         "  place id=b use=box theme=t north_of=a gap=2147483643\n",
@@ -342,24 +411,34 @@ fn an_origin_past_i32_refuses_the_row_instead_of_saturating() {
     assert_eq!(findings(&floor), vec![]);
     assert_eq!(origin(&floor, "b"), Some((0, 0, i32::MIN)));
 
-    for (row, reported) in [
-        ("east_of=a gap=2147483645", "x=2147483648"),
-        ("east_of=a gap=3000000000", "x=3000000003"),
-        ("north_of=a gap=2147483644", "z=-2147483649"),
+    let origin_past = |reported: &str| {
+        format!(
+            "this placement's origin works out to {reported}, past the -2147483648 to \
+             2147483647 range a placement's origin is recorded in; shorten the `gap=` on this \
+             row or on a row it is placed relative to"
+        )
+    };
+    // The origin is in range and the body is not: its cells would have no
+    // world coordinate, so the row is refused all the same.
+    let body_past = |reported: &str| {
+        format!(
+            "this placement's body reaches {reported}, past the -2147483648 to 2147483647 \
+             range a placement's cells are addressed in; shorten the `gap=` on this row or on \
+             a row it is placed relative to"
+        )
+    };
+    for (row, primary) in [
+        ("east_of=a gap=2147483643", body_past("x=2147483648")),
+        ("east_of=a gap=2147483644", body_past("x=2147483649")),
+        ("east_of=a gap=2147483645", origin_past("x=2147483648")),
+        ("east_of=a gap=3000000000", origin_past("x=3000000003")),
+        ("north_of=a gap=2147483644", origin_past("z=-2147483649")),
     ] {
         let ir = lowered(&site(&format!("  place id=b use=box theme=t {row}\n")));
         assert_eq!(origin(&ir, "b"), None, "{row}");
         assert_eq!(
             findings(&ir),
-            vec![(
-                "W_DEFERRED_MEMBER",
-                format!(
-                    "this placement's origin works out to {reported}, past the -2147483648 to \
-                     2147483647 range a placement's origin is recorded in; shorten the `gap=` \
-                     on this row or on a row it is placed relative to"
-                )
-                .as_str(),
-            )],
+            vec![("W_DEFERRED_MEMBER", primary.as_str())],
             "{row}",
         );
     }
@@ -461,16 +540,54 @@ fn a_row_refused_for_its_origin_still_reports_its_body() {
 }
 
 #[test]
+fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
+    // `b` is refused for its origin, so `c`, placed east of it, has no
+    // anchor. `bad` is placed by `c` alone; its stair's material is a
+    // defect in the `def` and theme wherever `c` would have landed.
+    let ir = lowered(
+        "def box size=5x5:\n  \
+         floor id=f mat_slot=wall\n\n\
+         def bad size=5x5:\n  \
+         walls mat_slot=wall height=3\n  \
+         roof  kind=flat mat_slot=wall overhang=1\n  \
+         stair kind=stairs side=front mat_slot=wall\n\n\
+         theme t:\n  \
+         slot wall -> @cobblestone\n\n\
+         site s:\n  \
+         place id=a use=box theme=t at=origin\n  \
+         place id=b use=box theme=t east_of=a gap=3000000000\n  \
+         place id=c use=bad theme=t east_of=b\n",
+    );
+    assert_eq!(origin(&ir, "c"), None);
+    let codes: Vec<&str> = findings(&ir).iter().map(|(code, _)| *code).collect();
+    assert_eq!(
+        codes,
+        vec![
+            "E_INCOMPATIBLE_MATERIAL",
+            "W_DEFERRED_MEMBER",
+            "W_DEFERRED_MEMBER"
+        ],
+        "{:#?}",
+        ir.diagnostics
+    );
+    assert!(
+        ir.diagnostics[2].primary.contains("did not lower"),
+        "{:?}",
+        ir.diagnostics[2].primary,
+    );
+}
+
+#[test]
 fn an_unreadable_gap_on_a_row_refused_for_its_origin_is_still_reported() {
-    // `b` sits exactly on `i32::MAX`, so `c` leaves the range at the
-    // `gap=0` its unreadable `gap=` falls back to. The note names that
-    // value only: it does not say whether some other `gap=` would place
-    // the row.
+    // `b`'s last column sits exactly on `i32::MAX`, so `c` leaves the
+    // range at the `gap=0` its unreadable `gap=` falls back to. The note
+    // names that value only: it does not say whether some other `gap=`
+    // would place the row.
     let ir = lowered(&site(
-        "  place id=b use=box theme=t east_of=a gap=2147483644\n  \
+        "  place id=b use=box theme=t east_of=a gap=2147483642\n  \
          place id=c use=box theme=t east_of=b gap=wide\n",
     ));
-    assert_eq!(origin(&ir, "b"), Some((i32::MAX, 0, 0)));
+    assert_eq!(origin(&ir, "b"), Some((i32::MAX - 2, 0, 0)));
     assert_eq!(origin(&ir, "c"), None);
     let codes: Vec<&str> = findings(&ir).iter().map(|(code, _)| *code).collect();
     assert_eq!(
