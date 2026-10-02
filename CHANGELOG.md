@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+### Breaking changes
+- *(core)* `RoutePathError::AreaCapExceeded` gains a `rect: SearchRect` field, the rectangle the area was measured on; `SearchRect` is new in `cairn_lang_core::block_array` ([#455](https://github.com/kage1020/Cairn/pull/455))
+
 ### Fixed
-- *(core)* name what buries a walkway port and which placements spread the router's search box ([#455](https://github.com/kage1020/Cairn/pull/455))
+- *(core)* name what buries a walkway port and what stretched the router's search box past its cap ([#455](https://github.com/kage1020/Cairn/pull/455))
 
 ## 2026.10.0 — 2026-10-01
 
