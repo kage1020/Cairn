@@ -16,11 +16,6 @@ items:
         value:
           kind: Token
           value: oak_planks
-      - kind: Slot
-        slot: door
-        value:
-          kind: Token
-          value: oak_door
   - kind: Struct
     name: gatehouse
     args:
@@ -68,10 +63,6 @@ items:
             value:
               kind: Ident
               value: center
-          - key: mat_slot
-            value:
-              kind: Ident
-              value: door
       - kind: Generic
         keyword: pressure_plate
         args:

@@ -853,6 +853,17 @@ fn bind_place_theme(
     }
 }
 
+/// The `mat_slot=` name `member` asks a theme for: its hoisted slot, unless
+/// its role is one no painter asks for a material
+/// ([`crate::intent::MemberRole::unread_arguments`]), where the name
+/// changes nothing in the build and is not looked up.
+fn read_slot(member: &Member) -> Option<&String> {
+    member
+        .mat_slot
+        .as_ref()
+        .filter(|_| !member.role.unread_arguments().contains(&"mat_slot"))
+}
+
 /// Whether any struct or def member anywhere in the module reads a
 /// `mat_slot=`.
 ///
@@ -864,7 +875,7 @@ fn any_member_reads_a_slot(ir: &IntentModule) -> bool {
     fn any(members: &[Member]) -> bool {
         members
             .iter()
-            .any(|m| m.mat_slot.is_some() || any(&m.children.members))
+            .any(|m| read_slot(m).is_some() || any(&m.children.members))
     }
     ir.structs.iter().any(|s| any(&s.members)) || ir.defs.iter().any(|d| any(&d.members))
 }
@@ -1927,7 +1938,10 @@ fn resolve_members(
         //    `slot_value` stays `None` in that case — the concrete binding is
         //    edition-specific and comes into scope only once the compile picks
         //    a variant.
-        if let Some(slot_name) = &member.mat_slot
+        //    A role that reads no `mat_slot=` (`MemberRole::unread_arguments`)
+        //    is not looked up at all: `check::arguments` reports the key as
+        //    ignored, and a slot name the theme lacks changes nothing there.
+        if let Some(slot_name) = read_slot(member)
             && let Some((tname, slots)) = bound
         {
             match slots.get(slot_name) {
@@ -3542,6 +3556,37 @@ mod tests {
         let r = resolve(&intent, Some(Edition::Java));
         assert!(
             r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn a_slot_named_on_a_role_that_reads_none_does_not_count_as_reading_one() {
+        // A door carves an opening and paints nothing from its
+        // `mat_slot=`, so the build is the same whichever theme the pin
+        // leaves bound; refusing it over the missing variant would be the
+        // refusal over nothing the slot lookup itself no longer makes.
+        let src = [
+            "theme shop_bedrock:",
+            "  slot door -> @dark_oak_door",
+            "",
+            "struct s size=7x5",
+            "  door side=front at=center mat_slot=door",
+            "",
+        ]
+        .join("\n");
+        let module = crate::parse(&src).expect("parses");
+        let intent = crate::lower(&module);
+        assert!(
+            !any_member_reads_a_slot(&intent),
+            "the door's `mat_slot=` is not a read",
+        );
+        let r = resolve(&intent, Some(Edition::Java));
+        assert!(
+            !r.diagnostics
                 .iter()
                 .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
             "got {:?}",

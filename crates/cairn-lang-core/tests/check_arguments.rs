@@ -5,8 +5,8 @@
 //! author eventually saw was a `W_DEFERRED_MEMBER` naming the argument that
 //! is now absent rather than the one that is wrong.
 
-use cairn_lang_core::Diagnostic;
 use cairn_lang_core::intent::{MemberRole, UNIVERSAL_ARGUMENTS, known_keywords, role_of};
+use cairn_lang_core::{Diagnostic, lower, parse, resolve};
 
 mod common;
 use common::{codes, diagnose};
@@ -442,7 +442,7 @@ const SWEEP: &[(&str, &str)] = &[
     ("walls", "  walls id=w class=outer mat_slot=m height=3\n"),
     (
         "door",
-        "  door id=d class=c mat_slot=m side=front at=center opened_by=sig.a\n",
+        "  door id=d class=c side=front at=center opened_by=sig.a\n",
     ),
     (
         "window",
@@ -456,18 +456,15 @@ const SWEEP: &[(&str, &str)] = &[
         "stair",
         "  stair id=s class=c mat_slot=m kind=stairs side=front half=top facing=out shape=straight y=0\n",
     ),
-    ("level", "  level id=l class=c mat_slot=m y=0\n"),
+    ("level", "  level id=l class=c y=0\n"),
     (
         "pressure_plate",
         "  pressure_plate id=p class=c mat_slot=m at=front.outside offset=0 y=0\n",
     ),
-    (
-        "circuit",
-        "  circuit id=c class=c mat_slot=m region=r void=2\n",
-    ),
+    ("circuit", "  circuit id=c class=c region=r void=2\n"),
     (
         "place",
-        "  place id=a class=c mat_slot=m use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=1\n  place id=c use=hut theme=t north_of=a gap=1\n",
+        "  place id=a class=c use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=1\n  place id=c use=hut theme=t north_of=a gap=1\n",
     ),
     (
         "connect",
@@ -511,10 +508,10 @@ fn the_table_and_the_sweep_agree_key_for_key() {
             .unwrap_or_else(|| panic!("`{keyword}` is in the table, so it has a vocabulary"));
         let mut expected: Vec<&str> = vocabulary
             .iter()
+            .chain(UNIVERSAL_ARGUMENTS)
             .copied()
             .filter(|key| !role.unread_arguments().contains(key))
             .collect();
-        expected.extend_from_slice(UNIVERSAL_ARGUMENTS);
         expected.sort_unstable();
 
         let mut written = keys_written(line);
@@ -674,8 +671,8 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
             .unwrap_or_else(|| panic!("`{keyword}` is in the table, so it has a vocabulary"));
         for unread in role.unread_arguments() {
             assert!(
-                vocabulary.contains(unread),
-                "`{keyword}` calls `{unread}` unread but does not list it",
+                vocabulary.contains(unread) || UNIVERSAL_ARGUMENTS.contains(unread),
+                "`{keyword}` calls `{unread}` unread but does not accept it",
             );
         }
         // The universal keys are added by `accepted_arguments`, so listing
@@ -969,5 +966,82 @@ fn a_selector_row_with_an_unknown_keyword_answers_only_for_the_keyword() {
         codes(src).contains(&"E_UNKNOWN_KEYWORD"),
         "got {:?}",
         codes(src)
+    );
+}
+
+/// `mat_slot=` on a role no painter asks for a material: the theme binds
+/// `door`, and each line names a slot it does not.
+const UNREAD_MAT_SLOT: &[(&str, &str)] = &[
+    ("door", "  door side=front at=center mat_slot=nosuch\n"),
+    (
+        "level",
+        "  level y=0 mat_slot=nosuch\n    walls mat_slot=wall height=3\n",
+    ),
+    ("circuit", "  circuit region=floor void=2 mat_slot=nosuch\n"),
+];
+
+/// A theme, a struct carrying `row` beside a floor and walls that read
+/// theirs, and nothing else.
+fn under_a_theme(row: &str) -> String {
+    format!(
+        "theme t:\n  slot wall -> @oak_planks\n  slot door -> @iron_door\n\n\
+         struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n{row}"
+    )
+}
+
+/// Every code `source` earns from the resolver, with no edition pinned.
+fn resolver_codes(source: &str) -> Vec<&'static str> {
+    let module = parse(source).expect("parse");
+    resolve(&lower(&module), None)
+        .diagnostics
+        .iter()
+        .map(|d| d.code.as_str())
+        .collect()
+}
+
+#[test]
+fn a_slot_name_on_a_role_that_reads_no_material_is_ignored_and_not_resolved() {
+    // `spec/lint` "Error vs warning": the key is carried and never
+    // consulted, so the author is told so; and a name the theme lacks
+    // changes nothing in the build, so it refuses nothing either.
+    for (keyword, row) in UNREAD_MAT_SLOT {
+        let src = under_a_theme(row);
+        assert_eq!(
+            ignored_at(&src),
+            ["nosuch"],
+            "{keyword}: {:#?}",
+            diagnose(&src),
+        );
+        assert!(
+            !resolver_codes(&src).contains(&"E_UNRESOLVED_SLOT"),
+            "{keyword}: {:?}",
+            resolver_codes(&src),
+        );
+    }
+}
+
+#[test]
+fn a_slot_name_on_a_place_is_reported_as_ignored() {
+    // The site path never resolved it, so a misspelling here was silent
+    // rather than refused; the check is what was missing.
+    let src = "theme t:\n  slot wall -> @oak_planks\n\n\
+               def d size=5x5:\n  floor mat_slot=wall\n\n\
+               site s:\n  place id=a use=d theme=t at=origin mat_slot=nosuch\n";
+    assert_eq!(ignored_at(src), ["nosuch"], "{:#?}", diagnose(src));
+    assert!(
+        !resolver_codes(src).contains(&"E_UNRESOLVED_SLOT"),
+        "{:?}",
+        resolver_codes(src),
+    );
+}
+
+#[test]
+fn a_slot_name_the_theme_lacks_on_a_role_that_reads_it_is_still_refused() {
+    // The control: skipping the lookup is per role, not for every member.
+    let src = under_a_theme("  window side=front y=2 offset=2 size=2x1 mat_slot=nosuch\n");
+    assert!(
+        resolver_codes(&src).contains(&"E_UNRESOLVED_SLOT"),
+        "{:?}",
+        resolver_codes(&src),
     );
 }

@@ -271,6 +271,7 @@ fn lower_member(stmt: &Statement) -> Member {
     let mut id = None;
     let mut class = None;
     let mut mat_slot = None;
+    let mut mat_slot_span = None;
     let mut intent_state = IntentState::new();
 
     for arg in args {
@@ -281,7 +282,13 @@ fn lower_member(stmt: &Statement) -> Member {
         let hoisted = match arg.key.as_str() {
             "id" => hoist_label(&arg.value, &mut id),
             "class" => hoist_label(&arg.value, &mut class),
-            "mat_slot" => hoist_label(&arg.value, &mut mat_slot),
+            "mat_slot" => {
+                let hoisted = hoist_label(&arg.value, &mut mat_slot);
+                if hoisted {
+                    mat_slot_span = Some(arg.value.span.clone());
+                }
+                hoisted
+            }
             _ => false,
         };
         if !hoisted {
@@ -300,6 +307,7 @@ fn lower_member(stmt: &Statement) -> Member {
         class,
         role,
         mat_slot,
+        mat_slot_span,
         selector: lowered_selector,
         positional: positional.clone(),
         binding: binding.clone(),
@@ -322,6 +330,7 @@ fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Me
         class: None,
         role: super::MemberRole::Other(String::new()),
         mat_slot: None,
+        mat_slot_span: None,
         selector: None,
         positional: Vec::new(),
         binding: None,

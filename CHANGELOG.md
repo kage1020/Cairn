@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Breaking changes
+- *(core)* `intent::Member` gains a `mat_slot_span: Option<Span>` field, the position of the hoisted `mat_slot=` value
+
+### Fixed
+- *(core)* report `mat_slot=` on a `door`, `level`, `circuit` or `place` as ignored, and stop refusing a slot name there the theme lacks
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

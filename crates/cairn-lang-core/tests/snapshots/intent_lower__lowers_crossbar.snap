@@ -14,9 +14,6 @@ themes:
       wall:
         kind: Token
         value: oak_planks
-      door:
-        kind: Token
-        value: oak_door
     selectors: []
 defs: []
 sites: []
@@ -42,7 +39,6 @@ structs:
       - id: front
         role:
           kind: Door
-        mat_slot: door
         intent_state:
           side:
             kind: Ident
@@ -53,7 +49,6 @@ structs:
       - id: back
         role:
           kind: Door
-        mat_slot: door
         intent_state:
           side:
             kind: Ident

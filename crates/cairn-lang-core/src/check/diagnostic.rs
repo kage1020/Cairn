@@ -235,7 +235,8 @@ pub enum DiagnosticCode {
     /// end of: a `mat_slot=` naming a slot no theme declares is that code's,
     /// and no member earns both.
     MissingMaterial,
-    /// `mat_slot=NAME` references a slot the applied theme does not declare.
+    /// `mat_slot=NAME`, on a role that reads one, references a slot the
+    /// applied theme does not declare.
     UnresolvedSlot,
     /// `slot NAME -> VALUE` whose VALUE is neither a canonical nor an
     /// abstract material token (see `spec/materials-themes` "Canonical
