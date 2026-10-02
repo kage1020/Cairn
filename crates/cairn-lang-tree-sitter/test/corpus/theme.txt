@@ -49,6 +49,40 @@ theme medieval:
               (identifier))))))))
 
 ==================
+Canonical token with a state literal
+==================
+
+theme t:
+  slot log -> @oak_log[axis=x]
+  slot step -> @oak_stairs[half=top, facing=north]
+
+---
+
+(source_file
+  (theme_decl
+    name: (identifier)
+    body: (theme_body
+      (slot_binding
+        name: (identifier)
+        target: (material_ref
+          (identifier)
+          (state_literal
+            (state_property
+              key: (identifier)
+              value: (identifier)))))
+      (slot_binding
+        name: (identifier)
+        target: (material_ref
+          (identifier)
+          (state_literal
+            (state_property
+              key: (identifier)
+              value: (identifier))
+            (state_property
+              key: (identifier)
+              value: (identifier))))))))
+
+==================
 Material with dotted path
 ==================
 

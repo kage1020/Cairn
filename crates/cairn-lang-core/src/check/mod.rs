@@ -200,6 +200,7 @@ mod tests {
             | C::IgnoredArgument
             | C::NoThemeBound
             | C::AbstractTokenDeferred
+            | C::StateLiteralUnchecked
             | C::UnknownAbstractToken
             | C::UnknownId
             | C::IncompatibleMaterial

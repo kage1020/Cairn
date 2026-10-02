@@ -138,6 +138,7 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `E_INCOMPLETE_PLACE` | `place` 行が `id=` / `use=` / `theme=` のいずれかを欠いている ([§9.3](/ja/spec/components-editing-sites#93-site-による複数建築))。 |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | `mat_slot=` が、渡されたパックのカタログが宣言していない抽象マテリアルトークンに解決される ([マテリアルとテーマ](/ja/spec/materials-themes))。 |
 | `W_ABSTRACT_TOKEN_DEFERRED` | 同じトークンだが、そもそもカタログが渡されておらず、照合する相手がいない。 |
+| `W_STATE_LITERAL_UNCHECKED` | 正準トークンのステートリテラル (`@oak_log[axis=x]`) が書かれたまま使われた。`E_STATE_DOMAIN` が実装されるまで、そのプロパティと値をターゲットに照らして検査するものがない ([バージョンとエディション](/ja/spec/versioning-editions))。 |
 | `W_NO_THEME_BOUND` | スコープにテーマが束縛されていないので、その中の `mat_slot=` メンバはすべて空気になる。 |
 | `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定されたエディションは別のものを束縛した ([バージョンとエディション](/ja/spec/versioning-editions))。 |
 
@@ -147,6 +148,12 @@ lowering を走らせるコマンド — `cairn compile`、`cairn lower`、`cair
 とするので、実際に出せるのは `cairn compile --target` と `cairn check --edition E --target V` の 2
 つです (`info` と `lower` はバージョンを固定せずに lowering します)。`--target` なしの
 `cairn check` は lowering を走らせないので、どちらのコードにも到達しません。
+
+`W_STATE_LITERAL_UNCHECKED` も同じ lowering が出します。テーマのスロットや `connect … path=` から
+読むステートリテラルのそれぞれに付くので、`cairn compile`、`cairn lower`、`cairn info`、
+`cairn check --edition E --target V` がどちらのエディションでも報告します。これは `E_STATE_DOMAIN`
+の代わりです。コンパイラが各ブロックのステートの表を持つまで、ブロックにないプロパティやドメイン外
+の値はそのまま構造ファイルに書き出されるので、それを黙って済ませないのがこの警告です。
 
 `cairn check --target` があるのは、CI ジョブが check コマンドをゲートにしつつ、compile が拒否する
 lowering 段の指摘を見られるようにするためです。ターゲットが宣言していない ID は `check` を終了コード
@@ -452,10 +459,14 @@ stderr にしか書かれません。ほかの失敗がこう見えることは�
 
 `info` の拒否のうち 1 つは同じ種類の実行レベルの拒否です。レジストリパックが拒否するはずだった
 ブロックステートをパレットが抱えている場合、その edition は portability の行を失います。この拒否は
-ソース中のスパンにも、作者に可能な修正にも紐づきません。どちらの形式でも stderr にテキストで読め
-ます。それでもドキュメントは書かれます — 約束は「入力ごとに 1 ドキュメント」であって「拒否ごとに
-1 要素」ではないからです。この拒否のほかに拒否のない実行は `{"diagnostics": []}` を書き、残りは
-終了コードで伝えます。
+ソース中のスパンに紐づきません。そのようなブロックステートは、作者には直せないパックやコンパイラの
+漏れか、ソースで階段に書かれたステートリテラルのどちらかです。後者は Java のドメイン外の `facing`
+や `half` の値 (`@oak_stairs[facing=up]`) か、`facing` / `half` / `shape` 以外のキーで、
+`E_STATE_DOMAIN` が実装されるまでターゲットに照らして検査されません。拒否は両方を挙げます。ほかの
+ブロックに書かれたリテラルは、代わりに `unsupported` として数えられます。どちらの形式でも stderr に
+テキストで読めます。それでもドキュメントは書かれます — 約束は「入力ごとに 1 ドキュメント」であって
+「拒否ごとに 1 要素」ではないからです。この拒否のほかに拒否のない実行は `{"diagnostics": []}` を
+書き、残りは終了コードで伝えます。
 
 `parse` の成果物は AST、`lower` の成果物はブロック配列 IR です。ダンプはレポートではないので、失敗
 は「穴の空いたダンプ」にはなりません。どちらも `info` と同じ `{"diagnostics": [ ... ]}` を書き、

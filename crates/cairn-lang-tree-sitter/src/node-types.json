@@ -391,6 +391,10 @@
         {
           "type": "identifier",
           "named": true
+        },
+        {
+          "type": "state_literal",
+          "named": true
         }
       ]
     }
@@ -836,6 +840,55 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "state_literal",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "state_property",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "state_property",
+    "named": true,
+    "fields": {
+      "key": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
