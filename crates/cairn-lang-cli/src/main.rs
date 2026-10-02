@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::ast::Header;
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
 use cairn_lang_core::check::{
     DiagnosticNote as Note, LineStarts, RenderedDiagnostic, weigh_intended_targets,
 };
@@ -842,7 +842,7 @@ fn check_lowering(
     let block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
     CheckLowering {
         dropped_scopes: dropped_scopes(&resolution, &block_ir),
-        built_scopes: block_ir.structures.len(),
+        built_scopes: built_scopes(&block_ir),
         diagnostics: block_ir.diagnostics,
         unsupported: resolved.err(),
     }
@@ -1490,34 +1490,113 @@ fn unsupported_reason(reason: &UnsupportedReason) -> String {
     }
 }
 
-/// Scopes the resolver recorded (`struct::NAME`, `site::SITE::PLACE`) that
-/// the block-array pass did not turn into a structure, in resolver order.
+/// Scopes the source asked for that the block-array pass did not turn into
+/// a structure holding at least one block: first the resolver's
+/// (`struct::NAME`, `site::SITE::PLACE`) in resolver order, then one per
+/// `connect` pair that laid none, in row order.
 ///
 /// `def::` keys are excluded: a def is a template and lowers to voxels only
 /// through a `place` that instantiates it.
 ///
-/// One definition for the two readers. `run_compile` refuses a build that
-/// would leave any of these out, and `edition_rows` reports the same thing
-/// as "no target can build this" — a second copy could drift into
-/// disagreeing about which scopes count.
+/// Built means at least one non-air voxel, not an entry in
+/// `block_ir.structures`: lowering keeps an array for a scope whose every
+/// member deferred, and for a walkway whose every cell overlapped a
+/// placement, and both are all air. Writing that array out would certify
+/// a build that placed nothing the source asked for there, so either is a
+/// loss like a scope with no array at all.
+///
+/// A walkway is not in `resolution.scopes`, because its key is minted
+/// during lowering, so it is judged by its `connect` row instead: a row
+/// asks for the walkway between its two `(place, port)` endpoints, and
+/// that walkway is built when `block_ir.walkways` holds the same site and
+/// the same two endpoints, in either order, and its array holds a block.
+/// So a `W_DUPLICATE_WALKWAY` row, whose pair the earlier row laid, loses
+/// nothing, and two rows naming one pair that neither laid are one loss.
+/// The loss is named `site::SITE::FROM ↔ TO`, as the first row asking for
+/// the pair wrote its endpoints, rather than by the `walkway::` key it
+/// would have had: a row refused for its identifiers never got a key, and
+/// the key it would have spelled can be another row's.
+///
+/// Only the rows in `resolution.connects` are judged. A row the resolver
+/// dropped (`E_CONNECT_ARITY` and the other resolution errors) is not
+/// there, so it is neither in this list nor in the `M` of
+/// [`report_partial_build`]'s "N of M". Today each such drop comes with an
+/// error of its own, on the row or, under `W_DEFERRED_CONNECT`, on the
+/// `place` it names. One root cause can still raise `N` by more than one:
+/// a placement refused upstream loses its own scope and, through
+/// `W_DEFERRED_MEMBER`, every walkway with an endpoint on it.
+///
+/// One definition for the three callers, so no copy can drift into
+/// disagreeing about which scopes count. `check_lowering` and
+/// `load_and_lower` collect the list for the two refusal points, `run_check`
+/// (for the compile at its pinned target) and `run_compile`, which both
+/// print it through [`report_partial_build`] and exit 1. `edition_rows`
+/// reports the same list as "no target can build this", and `cairn info`
+/// still exits 0 over it, deliberately (`spec/versioning-editions`).
 fn dropped_scopes(
     resolution: &cairn_lang_core::Resolution,
     block_ir: &BlockArrayIr,
 ) -> Vec<String> {
-    resolution
+    let built = |key: &str| block_ir.structures.get(key).is_some_and(holds_a_block);
+    let mut dropped: Vec<String> = resolution
         .scopes
         .keys()
         .filter(|key| !key.starts_with("def::"))
-        .filter(|key| !block_ir.structures.contains_key(key.as_str()))
+        .filter(|key| !built(key))
         .cloned()
-        .collect()
+        .collect();
+    let pair = |site: &str, from: String, to: String| {
+        let (a, b) = if from <= to { (from, to) } else { (to, from) };
+        (site.to_owned(), a, b)
+    };
+    let mut accounted: HashSet<(String, String, String)> = block_ir
+        .walkways
+        .iter()
+        .filter(|(key, _)| built(key.as_str()))
+        .map(|(_, w)| pair(w.site.as_str(), w.from.to_string(), w.to.to_string()))
+        .collect();
+    for connect in &resolution.connects {
+        let (from, to) = (connect.from.to_string(), connect.to.to_string());
+        let key = format!("site::{}::{from} ↔ {to}", connect.site);
+        if accounted.insert(pair(connect.site.as_str(), from, to)) {
+            dropped.push(key);
+        }
+    }
+    dropped
+}
+
+/// How many structures hold at least one block — the scopes
+/// [`dropped_scopes`] counts as built, so the two add up to the `M` of
+/// [`report_partial_build`]'s "N of M".
+fn built_scopes(block_ir: &BlockArrayIr) -> usize {
+    block_ir
+        .structures
+        .values()
+        .filter(|array| holds_a_block(array))
+        .count()
+}
+
+/// Whether any voxel of `array` is something other than air.
+///
+/// Read through the palette rather than against index `0`: the palette
+/// keeps air at `0`, but the question is what the voxel is, and a palette
+/// assembled another way must not turn an all-air array into a built one.
+fn holds_a_block(array: &BlockArray) -> bool {
+    array.voxels.iter().any(|index| {
+        array
+            .palette
+            .entries
+            .get(usize::from(index.0))
+            .is_some_and(|state| state.id != BlockState::AIR_ID)
+    })
 }
 
 /// Report the scopes a lowering lost, as `E_PARTIAL_BUILD`.
 ///
-/// One message for the two commands that refuse over it, because the
-/// count and the per-scope notes are the part an author reads and two
-/// copies of them drift. `because` is the half that cannot be shared: a
+/// One message for the two refusal points, `run_check` and `run_compile`,
+/// because the count and the per-scope notes are the part an author reads
+/// and two copies of them drift. `built` is [`built_scopes`]'s count, so
+/// the "N of M" adds the losses to the scopes that hold a block. `because` is the half that cannot be shared: a
 /// compile refuses because a lockfile must not certify a build missing
 /// part of what the source asked for, and `cairn check --target` certifies
 /// nothing — it refuses because the compile at that pin would, which is
@@ -2731,7 +2810,7 @@ fn run_compile(
         report_partial_build(
             file,
             &dropped_scopes,
-            block_ir.structures.len(),
+            built_scopes(&block_ir),
             "refusing to certify a partial build",
         );
         return ExitCode::from(1);

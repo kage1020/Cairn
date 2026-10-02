@@ -27,12 +27,18 @@ const RENAMED_ID: &str =
 
 /// A typo'd abstract token: a lowering-stage error that needs no id table,
 /// so it is what says the pass ran even where no version was pinned.
+///
+/// The walls still paint, so the struct holds blocks and is not a lost
+/// scope, whose `E_PARTIAL_BUILD` would end the run before a bad target
+/// is reported.
 const ABSTRACT_TOKEN_TYPO: &str = concat!(
     "@cairn 2026.06\n\n",
     "theme t:\n",
-    "  slot floor -> @floor.wood.broadlef\n\n",
+    "  slot floor -> @floor.wood.broadlef\n",
+    "  slot wall -> @cobblestone\n\n",
     "struct s size=3x3\n",
     "  floor mat_slot=floor\n",
+    "  walls mat_slot=wall height=2\n",
 );
 
 /// A gable roof bound outside the stair family — `E_INCOMPATIBLE_MATERIAL`,
@@ -515,9 +521,12 @@ fn a_bad_target_is_reported_after_the_findings_in_the_file() {
     // author edits come first, and a command-line mistake printed above
     // them buries the syntax error that is also true.
     let tmp = tempfile::TempDir::new().expect("tempdir");
+    // The theme gives the floor a block: a struct of air is a lost scope,
+    // whose `E_PARTIAL_BUILD` would end the run before the target is
+    // reported.
     let src = fixture(
         tmp.path(),
-        "struct s size=2x2 size=3x3\n  floor mat_slot=floor\n",
+        "theme t:\n  slot floor -> @stone\n\nstruct s size=2x2 size=3x3\n  floor mat_slot=floor\n",
     );
     let out = cairn(
         "check",
