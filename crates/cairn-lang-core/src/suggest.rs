@@ -67,10 +67,24 @@ pub fn nearest_match<'a, I>(input: &str, candidates: I) -> Option<&'a str>
 where
     I: IntoIterator<Item = &'a str>,
 {
+    nearest_match_by(input, candidates, damerau_levenshtein)
+}
+
+/// [`nearest_match`] with the distance as an argument, so a test can count
+/// which candidates the distance is computed for.
+fn nearest_match_by<'a, I>(
+    input: &str,
+    candidates: I,
+    mut distance_of: impl FnMut(&str, &str) -> usize,
+) -> Option<&'a str>
+where
+    I: IntoIterator<Item = &'a str>,
+{
     if input.is_empty() {
         return None;
     }
-    let max_edits = max_distance(input.chars().count());
+    let input_len = input.chars().count();
+    let max_edits = max_distance(input_len);
     let mut best: Option<(usize, &'a str)> = None;
     for cand in candidates {
         if cand == input {
@@ -80,7 +94,16 @@ where
             // `did you mean \`walls\`?` next to the user's literal `walls`.
             return None;
         }
-        let distance = damerau_levenshtein(input, cand);
+        // The distance is never smaller than the difference in length (each
+        // extra character costs at least one insertion or deletion), so a
+        // candidate further than `max_edits` away in length cannot pass the
+        // cap. Skipping it here changes no answer and spares the
+        // O(len(input) × len(cand)) distance, which is what an overlong
+        // unknown id paid once per id in a block table.
+        if cand.chars().count().abs_diff(input_len) > max_edits {
+            continue;
+        }
+        let distance = distance_of(input, cand);
         if distance > max_edits {
             continue;
         }
@@ -170,6 +193,82 @@ mod tests {
     use super::*;
 
     const KEYWORDS: &[&str] = &["floor", "walls", "door", "window", "roof", "stair", "level"];
+
+    /// An unknown id far longer than any candidate costs one length
+    /// comparison per candidate: no distance is computed, since none of
+    /// them can be within the cap. The candidates stand in for a pinned
+    /// target's block table: a couple of thousand ids of block-id length.
+    #[test]
+    fn a_candidate_too_far_away_in_length_is_never_scored() {
+        let table: Vec<String> = (0..2_000).map(|i| format!("block_number_{i}")).collect();
+        let input = "w".repeat(1_000);
+        let mut scored = 0_usize;
+        let answer = nearest_match_by(&input, table.iter().map(String::as_str), |a, b| {
+            scored += 1;
+            damerau_levenshtein(a, b)
+        });
+        assert_eq!(answer, None);
+        assert_eq!(
+            scored, 0,
+            "a candidate outside the cap's length band was scored"
+        );
+    }
+
+    /// The length prune changes no answer: every input below gets what
+    /// scoring every candidate gives, including inputs at the edge of the
+    /// band (one, two and three characters longer or shorter than a
+    /// candidate) where an off-by-one in the prune would drop a match.
+    #[test]
+    fn the_length_prune_agrees_with_scoring_every_candidate() {
+        fn unpruned<'a>(input: &str, candidates: &[&'a str]) -> Option<&'a str> {
+            if input.is_empty() {
+                return None;
+            }
+            let max_edits = max_distance(input.chars().count());
+            let mut best: Option<(usize, &'a str)> = None;
+            for &cand in candidates {
+                if cand == input {
+                    return None;
+                }
+                let distance = damerau_levenshtein(input, cand);
+                if distance <= max_edits && best.is_none_or(|(b, _)| distance < b) {
+                    best = Some((distance, cand));
+                }
+            }
+            best.map(|(_, c)| c)
+        }
+        let candidates = [
+            "a",
+            "ab",
+            "abc",
+            "abcd",
+            "abcde",
+            "abcdef",
+            "abcdefg",
+            "abcdefgh",
+            "abcdefghi",
+            "abcdefghij",
+            "floor",
+            "walls",
+            "window",
+            "oak_planks",
+            "stone_bricks",
+        ];
+        let mut inputs: Vec<String> = Vec::new();
+        for cand in candidates {
+            for extra in 0..=4 {
+                inputs.push(format!("{cand}{}", "z".repeat(extra)));
+                inputs.push(cand.chars().skip(extra).collect());
+            }
+        }
+        for input in &inputs {
+            assert_eq!(
+                nearest_match(input, candidates.iter().copied()),
+                unpruned(input, &candidates),
+                "the prune changed the answer for `{input}`",
+            );
+        }
+    }
 
     #[test]
     fn one_letter_deletion_suggests_match() {
