@@ -477,7 +477,9 @@ impl Default for Palette {
 pub struct BlockState {
     /// Canonical id, e.g. `minecraft:cobblestone`.
     pub id: String,
-    /// State properties in source-stable order.
+    /// State properties. A state literal's arrive sorted by name, so the
+    /// order a source spelled them in reaches neither the palette nor
+    /// anything written from it.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub properties: IndexMap<String, String>,
 }

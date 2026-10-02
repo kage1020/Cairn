@@ -85,6 +85,10 @@ constraints:
 す。エラーはターゲットで有効な候補の閉集合、最小バージョン、推奨修正を返します。モデルを自身の記憶で
 はなくレジストリ由来の候補へ引き戻すためです。
 
+ドメイン外の状態はまだ強制されていません。コンパイラが各ブロックのステートの表を持たないため、下の
+`E_STATE_DOMAIN` は未実装です。それまでステートリテラル ([構文](/ja/spec/syntax/)) は書かれたまま
+出力され、どれにも代わりに `W_STATE_LITERAL_UNCHECKED` ([Lint](/ja/spec/lint/)) が付きます。
+
 ```text
 E_UNKNOWN_ID line 12: "minecraft:pale_oak_planks" not in 1.21.4 registry.
   Similar valid: minecraft:oak_planks, minecraft:dark_oak_planks, minecraft:cherry_planks
