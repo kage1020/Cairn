@@ -90,11 +90,12 @@ problem; otherwise you get the finding for the host or the key.
 
 **A selector line binds the member its brackets pick.** `door[id=front] opened_by=sig.power` binds
 the door declared as `door id=front ...` in the same scope, at the top level or directly under a
-`level`. The `id=` has to name exactly one such door, written without brackets. A patch whose
-selector has no `id=`, or whose id no door carries or two doors carry, is `E_LOGIC_UNRESOLVED_PATCH`:
-it acts on no door, so a port for it would have no component behind it. The door patch is the only
-binding a selector line carries, so a `->` tail on `pressure_plate[id=p]` is `E_MISPLACED_BINDING`,
-the same as a tail on any other line that declares no sensor.
+`level`. The `id=` has to name exactly one such door, written without brackets. The patch is a line
+of its own, before or after the door it binds, at the top level or directly under a `level`,
+wherever that door is. A patch whose selector has no `id=`, or whose id no door carries or two doors
+carry, is `E_LOGIC_UNRESOLVED_PATCH`: it acts on no door, so a port for it would have no component
+behind it. The door patch is the only binding a selector line carries, so a `->` tail on
+`pressure_plate[id=p]` is `E_MISPLACED_BINDING`, as it is on a member that is not a sensor.
 
 **An actuator takes one binding per key.** A door carries one `opened_by=`, whether it is written on
 the door's own line, through a patch, or on both. A second is `E_LOGIC_DUPLICATE_BINDING`: two

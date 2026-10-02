@@ -168,10 +168,9 @@ pub enum DiagnosticCode {
     /// is a question about the `sig.` namespace and needs the Logic IR to
     /// ask.
     ///
-    /// `pressure_plate[id=p] -> sig.x` is the second shape. The brackets
-    /// pick a member the line acts on rather than declaring one, and the
-    /// door actuator patch is the only binding a selector line carries, so
-    /// the tail is on no sensor the author declared.
+    /// `pressure_plate[id=p] -> sig.x` is the second shape. The door
+    /// actuator patch is the only binding a selector line carries, and no
+    /// sensor patch exists, so the tail is on no sensor line.
     MisplacedBinding,
     /// A statement carrying bare positional values in a form that takes
     /// none.

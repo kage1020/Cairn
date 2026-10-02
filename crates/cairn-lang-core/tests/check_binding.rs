@@ -191,17 +191,18 @@ fn every_sensor_host_is_a_keyword_the_role_table_knows() {
     }
 }
 
-/// A sensor keyword in the selector form picks a member rather than
-/// declaring one, and no sensor patch exists, so the tail is on no sensor
-/// the author declared. It became a netlist input all the same.
+/// A sensor keyword in the selector form carries no sensor binding — no
+/// sensor patch exists — so the tail is on no sensor line. It became a
+/// netlist input all the same.
 #[test]
 fn a_tail_on_a_sensor_keyword_in_the_selector_form_is_refused() {
     let src = "struct s size=5x5\n  pressure_plate[id=nope] -> sig.b\n";
     let d = only(src);
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
     assert!(
-        d.primary
-            .contains("`pressure_plate[...]` picks a member rather than declaring one"),
+        d.primary.contains(
+            "`pressure_plate[...]` is the selector form, which carries no sensor binding"
+        ),
         "got: {}",
         d.primary,
     );
@@ -213,8 +214,8 @@ fn a_tail_on_a_sensor_keyword_in_the_selector_form_is_refused() {
     );
 }
 
-/// Naming a plate that exists does not make the line a plate: the
-/// brackets still pick rather than declare.
+/// Naming a plate that exists does not make the tail a sensor's: the
+/// line is still in the selector form.
 #[test]
 fn a_selector_tail_is_refused_even_when_the_selector_names_a_real_plate() {
     let src = concat!(

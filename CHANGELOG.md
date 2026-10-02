@@ -384,8 +384,8 @@
 
   Block-array lowering deferred the patch, while `cairn synth` gave `sig.a` an output port and a
   placed pad. A patch now drives the door its selector picks, looked up by the new
-  `block_array::actuator_patch_target` that lowering reads too, and one that picks no single door
-  is refused as `E_LOGIC_UNRESOLVED_PATCH` in the words lowering already used:
+  `intent::actuator_patch_target` that lowering reads too, and one that picks no single door is
+  refused as `E_LOGIC_UNRESOLVED_PATCH` in the words lowering already used:
 
   ```
   s.crn:9:11: error[E_LOGIC_UNRESOLVED_PATCH]: struct=s: door actuator patch selects `id=nope` but no physical door with that id exists (known door ids: front), so its `opened_by=` binding drives nothing
@@ -393,16 +393,19 @@
     note: Fix: set `[id=<label>]` to the id of one `door` declared in this scope without brackets, or write `opened_by=` on that `door`'s own line.
   ```
 
-  A selector with no `id=`, and an id two doors carry, are refused the same way.
+  A selector with no `id=`, and an id two doors carry, are refused the same way, the second told to
+  give the doors distinct ids. A door declared without an `id=` is counted in the reason rather than
+  reported as no door at all, and the fix points at adding the id to it.
 
   Two bindings on one door were two output ports into it, a wired OR the logic layer never states.
   A door carries one `opened_by=`, whether on its own line, through a patch, or both, and a second
   is `E_LOGIC_DUPLICATE_BINDING`, with a note at the first and a fix that combines the signals in a
-  `logic` line.
+  `logic` line, or deletes the second line when both name the same signal. The door's own line
+  counts as the first, wherever the patch is written.
 
   A `->` tail on a sensor keyword in the selector form, `pressure_plate[id=nope] -> sig.b`, was a
-  netlist input, though the brackets pick a member rather than declaring one and no sensor patch
-  exists. `check` now refuses it as `E_MISPLACED_BINDING`, so every command reports it.
+  netlist input, though no sensor patch exists for the selector form. `check` now refuses it as
+  `E_MISPLACED_BINDING`, so every command reports it.
 
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,

@@ -9,7 +9,7 @@ This crate is the dependency root of every crate above the byte layer; [`cairn-l
 | Module | Role | Spec reference |
 |---|---|---|
 | `lex`, `parse`, `ast` | Surface syntax to AST, with `MAX_NESTING_DEPTH` / `MAX_EXPR_DEPTH` guards and a dedicated failure diagnoser | [syntax](https://cairn.kage1020.com/spec/syntax/) |
-| `intent` | Intent IR — struct/site/def bodies reorganised into typed members with roles, plus the keyword table and semantic levels | [architecture "The Intent IR is rich and carries invariants"](https://cairn.kage1020.com/spec/architecture/) |
+| `intent` | Intent IR — struct/site/def bodies reorganised into typed members with roles, plus the keyword table, semantic levels, and the lookup of the member an actuator patch binds | [architecture "The Intent IR is rich and carries invariants"](https://cairn.kage1020.com/spec/architecture/) |
 | `check` | The diagnostic-collecting pipeline: arguments, arity, duplicates, nesting, positional form, `@requires`, `@cairn`, `@intended_targets`, materials, member scope, type mismatches | [lint](https://cairn.kage1020.com/spec/lint/) |
 | `resolve` | Theme binding, per-edition theme variants, `@requires` parsing, and the three version axes | [materials-themes](https://cairn.kage1020.com/spec/materials-themes/), [versioning-editions "The `edition portability` row" and "The `buildable targets` row"](https://cairn.kage1020.com/spec/versioning-editions/) |
 | `block_array` | The universal pivot: walls, openings, roofs, walkways, and material lowering into a palette + index array | [architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/) |

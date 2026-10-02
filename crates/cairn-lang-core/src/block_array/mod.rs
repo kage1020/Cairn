@@ -24,7 +24,6 @@
 mod lower;
 mod material;
 mod openings;
-mod patch;
 mod roof;
 mod walkway;
 mod wall_column;
@@ -36,7 +35,6 @@ pub use lower::{BUILTIN_BLOCK_IDS, lower_to_block_array};
 pub use material::{
     BlockIdSet, IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state,
 };
-pub use patch::{PatchTargetError, actuator_patch_target};
 pub use roof::is_stair;
 // `port_world_position` is deliberately not re-exported: it can only be
 // asked correctly with the wall column the body was lowered against,
