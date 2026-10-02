@@ -264,6 +264,7 @@ author means, so with both in scope the question has not been asked.
 |---|---|
 | `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:`, `/`, `\` or whitespace. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
+| `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
@@ -280,6 +281,21 @@ through.
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
+
+`E_OUTPUT_NAME_COLLISION` follows from how artifacts are named
+([§9.3.4](/spec/components-editing-sites/#934-output-naming)): a `struct` by its name, a `place` by
+its `id=` alone, and a walkway by its site and ports. Every one of them lands in the same output
+directory, so two can name one file, and if both are built, a build can keep only one of them. The
+check runs before lowering. It leaves out a sizeless `struct` and a `place` of a sizeless `def`,
+which lowering drops, and counts two `connect` rows for one pair of ports, in either order, as one
+walkway, which is what lowering lays. It still counts a struct or placement that
+`W_STRUCTURE_TOO_LARGE` drops, and a walkway whose search area is past the router's cap, which
+`W_WALKWAY_BLOCKED` reports and does not lay, so the finding says the two files *would* be one.
+Names are compared ignoring case, because `Hut` and `hut` are one file on the case-insensitive file
+systems macOS and Windows use by default, and whether a source builds should not depend on the host
+that builds it. The finding is raised with the other site findings, before lowering, so `cairn
+check` reports it without a `--target`. A name declared twice is not this code: a second `struct
+hut` is `E_DUPLICATE_ITEM`, and a second `id=` in one site is `E_DUPLICATE_PLACE_ID`.
 
 `E_UNRESOLVED_PLACE_REF` and `E_UNRESOLVED_THEME_REF` each carry a nearest-match suggestion when
 one fits the spell cap ([did you mean](#did-you-mean)). Both are errors because substituting
