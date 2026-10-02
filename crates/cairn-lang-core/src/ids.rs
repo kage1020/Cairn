@@ -632,12 +632,25 @@ impl fmt::Display for WalkwayEndpoint {
 ///   other site's placements (`spec/components-editing-sites` "Output
 ///   naming").
 /// - `walkway::hamlet::home1.entry__home2.entry` →
-///   `hamlet_walkway_home1_entry__home2_entry`: the site is kept, and the
-///   `.` between a place and its port becomes `_`.
+///   `hamlet_walkway_home1_entry__home2_entry`: the site is kept, so the
+///   walkways of different sites do not share a name even when their
+///   endpoints are spelled alike, and the `.` between a place and its port
+///   becomes `_`, so the name stays a single identifier token on every
+///   operating system.
 ///
-/// Anything else is returned unchanged. It lives here rather than beside
+/// A key with none of these shapes, such as `walkway::no_site` or
+/// `site::hamlet`, is returned unchanged. It lives here rather than beside
 /// the file writers so the resolver's `E_OUTPUT_NAME_COLLISION` and the
 /// name a build writes are one function.
+///
+/// # Panics
+///
+/// In a debug build, when `source_scope` starts with `walkway::`, has a
+/// further `::`, and does not parse as a [`WalkwayScopeKey`]
+/// (`walkway::hamlet::bogus`). A release build returns such a key
+/// unchanged. No source reaches this: every walkway key a build writes is
+/// made by [`WalkwayScopeKey::from_parts`], which round-trips through
+/// [`WalkwayScopeKey::parse`].
 #[must_use]
 pub fn artifact_stem(source_scope: &str) -> String {
     // Only a canonical `walkway::SITE::PLACE.PORT__PLACE.PORT` key is

@@ -1,11 +1,9 @@
 //! A source whose artifacts share a file name is refused by every command
 //! that predicts a build, not only by the build.
 //!
-//! `cairn compile` used to be the only one to notice, after lowering and
-//! with no code: `cairn check`, `--target` included, exited 0, and `cairn
-//! info` listed every supported version as buildable. The finding is now
-//! `E_OUTPUT_NAME_COLLISION`, raised with the other site findings, so every
-//! command sees it before it lowers.
+//! The finding is `E_OUTPUT_NAME_COLLISION`, raised with the other site
+//! findings, so `cairn check` with or without `--target`, `cairn info` and
+//! `cairn compile` all see it before anything lowers.
 
 use std::process::Command;
 

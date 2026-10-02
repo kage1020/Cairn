@@ -182,23 +182,8 @@ impl OutputExt {
 }
 
 /// Filename for a single [`BlockArray`] within a multi-structure IR: the
-/// scope's [`cairn_lang_core::artifact_stem`] plus `ext`.
-///
-/// Shown for [`OutputExt::Nbt`]:
-/// - `"struct::cottage"` → `"cottage.nbt"`
-/// - `"site::hamlet::home1"` → `"home1.nbt"` — per-`place` placements
-///   share an output directory with sibling structs; the site name keeps
-///   the IR keys apart, not the files, and two scopes that would share a
-///   file are the resolver's `E_OUTPUT_NAME_COLLISION`.
-/// - `"walkway::hamlet::home1.entry__home2.entry"` →
-///   `"hamlet_walkway_home1_entry__home2_entry.nbt"` — the site name
-///   is preserved so a multi-site file's walkways do not collide on
-///   disk, and the `.` separators between place and port id are
-///   flattened to `_` so the on-disk name stays a single identifier
-///   token across operating systems.
-///
-/// Kept here (not in the CLI) so the wasm playground and any other consumer
-/// agree on naming when they land.
+/// scope's [`cairn_lang_core::artifact_stem`] plus `ext`, so
+/// `"struct::cottage"` with [`OutputExt::Nbt`] is `"cottage.nbt"`.
 #[must_use]
 pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
     format!(

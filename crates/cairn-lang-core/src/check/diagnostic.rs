@@ -450,14 +450,18 @@ pub enum DiagnosticCode {
     /// wins for downstream references; the duplicate is dropped and the
     /// error names both spans.
     DuplicatePlaceId,
-    /// Two scopes the build writes would be written to one file.
+    /// Two scopes a build would write would be written to one file.
     ///
     /// An artifact is named by [`crate::ids::artifact_stem`]: a `struct`
     /// by its name, a `place` by its `id=` alone, a walkway by its site
     /// and endpoints with `.` flattened to `_`. So `struct hut` and a
     /// `place id=hut`, or two sites that each `place id=home`, or the
-    /// walkways `a_b.c to d.e` and `a.b_c to d.e`, name one file, and the
-    /// build can write only one of them. Names are compared ignoring case,
+    /// walkways `a_b.c to d.e` and `a.b_c to d.e` in one site, name one
+    /// file, and if both are built, a build can keep only one of them.
+    /// The check runs before lowering. It leaves out a sizeless `struct`
+    /// and a `place` of a sizeless `def`, which lowering drops, but still
+    /// counts a struct or placement past the volume budget and a walkway
+    /// past the router's area cap, which lowering drops too. Names are compared ignoring case,
     /// because `Hut` and `hut` are one file on the case-insensitive file
     /// systems macOS and Windows default to, and the verdict should not
     /// depend on the host. A scope key declared twice (`struct hut` twice,
