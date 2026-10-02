@@ -4,15 +4,26 @@
 //! Each pass is non-fatal: passes accumulate findings into a
 //! [`DiagnosticSink`] and the top-level [`check`] runs every pass before
 //! returning. The order `duplicate` → `keyword_allowlist` → `arguments` →
-//! `material` → `member_scope` → `connect_arity` → `nesting` →
+//! `binding` → `material` → `member_scope` → `connect_arity` → `nesting` →
 //! `positional` → `requires` → `truth` → `type_mismatch` →
 //! [`crate::resolve::resolve`] is fixed so the emitted list is stable
 //! across runs, but the diagnostics themselves are sorted by source
 //! position once everything has finished collecting.
 //!
 //! Block-array lowering is *not* among those passes, so an `Error` it
-//! raises never reaches `cairn check`. `check::tests` pins which codes that
-//! covers.
+//! raises never reaches [`check`]. `check::tests` pins which codes that
+//! covers. The `cairn check` *command* is a wider thing than this
+//! function: given `--edition E --target V` it runs the lowering pass
+//! beside this one and merges both streams, which is how `E_UNKNOWN_ID`
+//! reaches a command whose gate this function is. Unpinned — the ordinary
+//! invocation — it is exactly this function's findings.
+//!
+//! Neither is [`weigh_intended_targets`], for a different reason: every
+//! question it asks is answered by the target edition's `DataVersion`
+//! table, which lives in the registry pack and reaches this crate only as
+//! a [`crate::resolve::VersionOrder`] its caller builds. [`check`] takes
+//! no pack, so a caller that has one runs that pass beside this one and
+//! merges the findings.
 //!
 //! The boundary with lowering is intentional: `crate::intent::lower` is a
 //! total function (see its module doc) and never rejects input. Any
@@ -22,9 +33,12 @@
 //! problem in a file rather than only the first one.
 
 mod arguments;
+mod binding;
+pub(crate) mod cairn_version;
 mod connect_arity;
 mod diagnostic;
 mod duplicate;
+mod intended_targets;
 mod keyword_allowlist;
 mod material;
 mod member_scope;
@@ -39,6 +53,7 @@ pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, LineStarts, RenderedDiagnostic,
     RenderedNote, Severity, position_at,
 };
+pub use intended_targets::weigh_intended_targets;
 pub use sink::DiagnosticSink;
 
 use crate::ast::Module;
@@ -61,18 +76,20 @@ use crate::intent::IntentModule;
 /// in it, and appending duplicates every one of them.
 ///
 /// The `edition` argument threads through to the resolver so per-edition
-/// theme-variant selection (spec versioning-editions §10.7) can pin the
-/// diagnostic set for a specific target. Pass `None` when no target has
-/// been picked yet (the CLI's `cairn check` without `--edition`); the
-/// resolver then unions slot names across variants of one logical theme
-/// so `mat_slot=` references that only one variant declares don't
-/// spuriously fire `E_UNRESOLVED_SLOT`.
+/// theme-variant selection (`spec/versioning-editions` "Java / Bedrock
+/// portability") can pin the diagnostic set for a specific target. Pass `None`
+/// when no target has been picked yet (the CLI's `cairn check` without
+/// `--edition`); the resolver then unions slot names across variants of one
+/// logical theme so `mat_slot=` references that only one variant declares
+/// don't spuriously fire `E_UNRESOLVED_SLOT`.
 #[must_use]
 pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
     let mut sink = DiagnosticSink::new();
+    cairn_version::run(module, &mut sink);
     duplicate::run(module, ir, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(ir, &mut sink);
+    binding::run(ir, &mut sink);
     material::run(ir, &mut sink);
     member_scope::run(ir, &mut sink);
     connect_arity::run(ir, &mut sink);
@@ -97,8 +114,11 @@ mod tests {
     ///
     /// [`check`] runs the syntactic passes and merges `resolve`'s output. It
     /// does **not** run block-array lowering, so a code raised only there is
-    /// invisible to `cairn check` no matter its severity — the asymmetry
+    /// invisible to this function no matter its severity — the asymmetry
     /// `check_sees_every_error_code_except_the_lowering_only_ones` pins.
+    /// A caller holding a registry pack can lower beside it and merge, as
+    /// `cairn check --edition E --target V` does; the classification below
+    /// says which codes only that second stream carries.
     ///
     /// The match is exhaustive on purpose. `DiagnosticCode` is
     /// `#[non_exhaustive]` for downstream crates but not in-crate, so a new
@@ -111,10 +131,10 @@ mod tests {
         /// one of these — and the commands that report them build them
         /// from the [`crate::error::ParseError`] instead.
         Parser,
-        /// `duplicate` / `keyword_allowlist` / `arguments` / `material` /
-        /// `member_scope` / `connect_arity` / `nesting` / `positional` /
-        /// `requires` / `truth` / `type_mismatch`, run directly by
-        /// [`check`].
+        /// `cairn_version` / `duplicate` / `keyword_allowlist` /
+        /// `arguments` / `binding` / `material` / `member_scope` /
+        /// `connect_arity` / `nesting` / `positional` / `requires` /
+        /// `truth` / `type_mismatch`, run directly by [`check`].
         Syntactic,
         /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
         Resolver,
@@ -123,6 +143,13 @@ mod tests {
         ResolverAndLowering,
         /// `crate::block_array` only. [`check`] never runs that pass.
         LoweringOnly,
+        /// [`weigh_intended_targets`], which [`check`] cannot run: the
+        /// pass needs the target edition's version table, and this crate
+        /// holds no registry pack to read one from. A caller that has one
+        /// runs it and merges the findings, which is every `cairn`
+        /// subcommand that gates on [`check`] — and nothing that calls
+        /// [`check`] alone.
+        NeedsVersionTable,
     }
 
     fn raised_by(code: DiagnosticCode) -> RaisedBy {
@@ -139,8 +166,11 @@ mod tests {
             | C::MisplacedMember
             | C::UnknownKeyword
             | C::UnknownArgument
+            | C::MisplacedBinding
             | C::UnexpectedPositional
             | C::InvalidRequires
+            | C::InvalidCairnVersion
+            | C::FutureCairnVersion
             | C::TypeMismatchLabel
             | C::TypeMismatchSize
             | C::ConnectArity
@@ -154,6 +184,7 @@ mod tests {
             | C::UnresolvedPlaceRef
             | C::UnresolvedThemeRef
             | C::DuplicatePlaceId
+            | C::OutputNameCollision
             | C::InvalidPlaceOrigin
             | C::UnusedDef
             | C::UnresolvedPort
@@ -169,6 +200,7 @@ mod tests {
             | C::IgnoredArgument
             | C::NoThemeBound
             | C::AbstractTokenDeferred
+            | C::StateLiteralUnchecked
             | C::UnknownAbstractToken
             | C::UnknownId
             | C::IncompatibleMaterial
@@ -179,6 +211,9 @@ mod tests {
             | C::StructureTooLarge
             | C::InvalidWalkwayIdent
             | C::PhaseConflict => RaisedBy::LoweringOnly,
+            C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
+                RaisedBy::NeedsVersionTable
+            }
         }
     }
 
@@ -213,6 +248,7 @@ mod tests {
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
                 "E_INVALID_REQUIRES",
+                "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_TRUTH_TABLE_CONFLICT",
@@ -227,6 +263,29 @@ mod tests {
             "the syntactic Error set changed: add or remove the matching \
              fixture in cairn-lang-cli/tests/cli_check_parity.rs so \
              `cairn lower` / `info` / `compile` stay in step with `cairn check`",
+        );
+    }
+
+    /// The codes a version table is the only way to reach.
+    ///
+    /// Pinned as a set rather than left implied, because every entry is a
+    /// finding [`check`] returns without: a consumer calling [`check`] and
+    /// nothing else — the LSP, the wasm surface — sees none of them, and a
+    /// fourth landing here should be a decision about that rather than a
+    /// side effect. The CLI is what closes the gap, once per edition the
+    /// command is about.
+    #[test]
+    fn the_intended_target_codes_are_the_ones_check_cannot_reach() {
+        assert_eq!(
+            codes_where(|c| raised_by(c) == RaisedBy::NeedsVersionTable),
+            [
+                "E_INTENDED_TARGET_CAP",
+                "W_INTENDED_TARGET_CAP",
+                "W_INTENDED_TARGET_UNSUPPORTED",
+            ],
+            "a code whose pass needs a registry pack's version table is \
+             invisible to `check`, so a caller that only calls `check` \
+             reports a source clean that a build refuses",
         );
     }
 
@@ -247,14 +306,19 @@ mod tests {
     }
 
     /// `cairn check` is documented and used as the gate the build commands
-    /// sit behind, but it does not lower, so an `Error` raised during
-    /// block-array lowering escapes it: `cairn check` exits 0 and
-    /// `cairn compile` then exits 1 on the same file.
+    /// sit behind, but this function does not lower, so an `Error` raised
+    /// during block-array lowering escapes it: an unpinned `cairn check`
+    /// exits 0 and `cairn compile` then exits 1 on the same file.
     ///
     /// This pins the size of that hole rather than leaving it implied. A new
-    /// entry here means another way for `cairn check` to pass a source the
-    /// build refuses, so it should be a deliberate decision, not a side
-    /// effect.
+    /// entry here means another way for an unpinned `cairn check` to pass a
+    /// source the build refuses, so it should be a deliberate decision, not
+    /// a side effect.
+    ///
+    /// The hole is per-invocation, not per-command: `cairn check --edition
+    /// E --target V` runs the lowering pass itself and merges it, so every
+    /// code listed here does reach that run. The list is what the CLI
+    /// closes by lowering, which is why it is worth keeping exact.
     #[test]
     fn check_sees_every_error_code_except_the_lowering_only_ones() {
         let escapes = codes_where(|c| {

@@ -7,35 +7,36 @@
 //! [`crate::netlist_ir::CellNode`] into an [`EditionCellNode`] whose
 //! [`EditionCell`] tag names the target-edition realisation of the source
 //! [`crate::netlist_ir::LogicalCell`] — the middle rung of the three-tier
-//! cell library documented in `spec/redstone` §14.6 (`Logical Cell → Edition
-//! Cell → Physical Tile`).
+//! cell library documented in `spec/redstone` "Edition differences"
+//! (`Logical Cell → Edition Cell → Physical Tile`).
 //!
 //! The pass is structural only: driver arrays, net references, input /
 //! output ports, and `signal_defs` are copied verbatim from the source
-//! Netlist IR. Delay is still not carried — per `spec/redstone` §14.4 /
-//! §14.8 delay is first determined in the Placement IR, one step further
-//! down the pipeline.
+//! Netlist IR. Delay is still not carried — per `spec/redstone`
+//! "Time model" and "Connection to the IR and phases" delay is first
+//! determined in the Placement IR, one step further down the pipeline.
 //!
-//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, §14.6) is not scaffolded here
-//! because none of the currently reachable [`crate::netlist_ir::LogicalCell`]
-//! variants (`And` / `Or` / `Not`) require update-order semantics; the
-//! diagnostic joins the pass alongside the first cell that needs it
+//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, from `spec/redstone`
+//! "Edition differences") is not scaffolded here because none of the
+//! currently reachable [`crate::netlist_ir::LogicalCell`] variants
+//! (`And` / `Or` / `Not`) require update-order semantics; the diagnostic
+//! joins the pass alongside the first cell that needs it
 //! (sequential-macro or observer families).
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
-use serde::ser::SerializeMap;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 
 /// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`]
-/// (`spec/redstone` §14.6). Each variant carries both a target edition
-/// and a physical implementation family, so pairing a Java AND cell with
-/// a Bedrock torch tile is a type error, not a runtime mishap.
+/// (`spec/redstone` "Edition differences"). Each variant carries both a
+/// target edition and a physical implementation family, so pairing a Java
+/// AND cell with a Bedrock torch tile is a type error, not a runtime
+/// mishap.
 ///
 /// The variant set covers *every* `(Edition, LogicalCell)` combination.
 /// The pinned pairs (`ComparatorAnd` / `TorchAnd` / `RepeaterOr` /
@@ -54,9 +55,10 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 ///
 /// `#[non_exhaustive]` for the same reason [`crate::netlist_ir::LogicalCell`]
 /// carries the attribute — adding a sequential-macro cell (`latch` /
-/// `pulse` / `delay` / `edge_*` / `counter`, §14.1) later should not be a
-/// breaking change for downstream exhaustive matches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+/// `pulse` / `delay` / `edge_*` / `counter`, from `spec/redstone`
+/// "Two tiers, and the v1 boundary") later should not be a breaking
+/// change for downstream exhaustive matches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum EditionCell {
@@ -75,8 +77,9 @@ pub enum EditionCell {
     BedrockTorchOr,
     /// Java NOT — a single inverter torch. Structurally shared with
     /// Bedrock but kept edition-tagged so a later placer can pick the
-    /// correct tile orientation without re-deriving the edition (spec
-    /// §14.6 lists orientation among the edition-absorbed differences).
+    /// correct tile orientation without re-deriving the edition
+    /// (`spec/redstone` "Edition differences" lists orientation among the
+    /// edition-absorbed differences).
     JavaInverterTorch,
     /// Bedrock NOT — a single inverter torch, edition-tagged for the same
     /// reason as [`EditionCell::JavaInverterTorch`].
@@ -135,9 +138,9 @@ impl EditionCell {
     /// exclusive of any implicit buffer repeaters the delay-insertion
     /// pass adds for segments beyond the dust attenuation limit.
     ///
-    /// `spec/redstone` §14.4 ties tick counts to the cell selection
-    /// plus the routed wire length. This method exposes the first
-    /// half — the constant tick contribution of the physical tile —
+    /// `spec/redstone` "Time model" ties tick counts to the cell
+    /// selection plus the routed wire length. This method exposes the
+    /// first half — the constant tick contribution of the physical tile —
     /// so [`crate::delay::compile_delay`] can compose it with the
     /// per-net buffer count without re-deriving the edition split
     /// each time.
@@ -154,7 +157,7 @@ impl EditionCell {
     ///
     /// The `*Unpinned` variants are parser-unreachable placeholders
     /// today (Xor / Nand / Nor / Mux); they return
-    /// [`UNPINNED_BASE_DELAY_TICKS`], a pessimistic sentinel that
+    /// `UNPINNED_BASE_DELAY_TICKS`, a pessimistic sentinel that
     /// sits **strictly above** every pinned base delay so a future
     /// pinning that lands new physics without touching this table
     /// would over-estimate rather than under-estimate — the same
@@ -162,10 +165,10 @@ impl EditionCell {
     /// [`crate::edition_netlist::compile_edition_netlist`] uses for
     /// their variants. Keeping the sentinel distinct from any real
     /// value also makes the pinning migration observable in delay
-    /// dumps: an `_Unpinned` cell with `delay_ticks =
+    /// dumps: an `_Unpinned` cell with `local_delay_ticks =
     /// UNPINNED_BASE_DELAY_TICKS` is visibly different from a pinned
-    /// 2-tick cell, so a future PR that flips `JavaXorUnpinned` to
-    /// `JavaXorComparatorPair` and hard-codes 2 ticks shifts every
+    /// 2-tick cell, so pinning `JavaXorUnpinned` to
+    /// `JavaXorComparatorPair` with a hard-coded 2 ticks will shift every
     /// downstream regression that was silently accepting the sentinel.
     #[must_use]
     pub const fn base_delay_ticks(self) -> u32 {
@@ -184,6 +187,51 @@ impl EditionCell {
             | Self::BedrockNandUnpinned
             | Self::BedrockNorUnpinned
             | Self::BedrockMuxUnpinned => UNPINNED_BASE_DELAY_TICKS,
+        }
+    }
+
+    /// Whether this cell's output leaves at full strength, whatever
+    /// strength reached its inputs.
+    ///
+    /// Dust loses one unit of signal per block, so the attenuation
+    /// limit (`spec/redstone` "Place-and-route") runs from the last
+    /// component that restores strength. A torch does, and a repeater
+    /// does. Two of the pinned cells do not:
+    ///
+    /// - [`Self::BedrockTorchOr`] is a dust merge: its output is the
+    ///   strength that arrived, less the block it spends.
+    /// - [`Self::JavaComparatorAnd`] is a comparator, and a comparator
+    ///   never outputs more than its rear input carries.
+    ///
+    /// The dust before either of them and the dust after it count as
+    /// one run for the limit, though the cell stands between them, and
+    /// the delay pass measures them as one.
+    ///
+    /// The `*Unpinned` placeholders answer `false`: until a realisation
+    /// is chosen, the pessimistic answer is the one that never lets a
+    /// run of dust go unmeasured. Unlike [`Self::base_delay_ticks`]'
+    /// sentinel it is not distinguishable from a pinned cell's `false`,
+    /// and it does more than add a repeater: it puts the cell into the
+    /// delay pass's budget walk, which can refuse the scope with
+    /// `E_ATTENUATION_LIMIT`. Parser-unreachable today, so neither
+    /// shows in a compile.
+    #[must_use]
+    pub const fn regenerates(self) -> bool {
+        match self {
+            Self::JavaRepeaterOr
+            | Self::JavaInverterTorch
+            | Self::BedrockTorchAnd
+            | Self::BedrockInverterTorch => true,
+            Self::JavaComparatorAnd
+            | Self::BedrockTorchOr
+            | Self::JavaXorUnpinned
+            | Self::JavaNandUnpinned
+            | Self::JavaNorUnpinned
+            | Self::JavaMuxUnpinned
+            | Self::BedrockXorUnpinned
+            | Self::BedrockNandUnpinned
+            | Self::BedrockNorUnpinned
+            | Self::BedrockMuxUnpinned => false,
         }
     }
 }
@@ -261,20 +309,9 @@ pub struct EditionNetlistIr {
     /// consumers see a uniform shape across all three IRs.
     #[serde(
         skip_serializing_if = "IndexMap::is_empty",
-        serialize_with = "serialize_signal_defs"
+        serialize_with = "crate::logic_ir::serialize_signal_defs"
     )]
     pub signal_defs: IndexMap<DottedRef, NetRef>,
-}
-
-fn serialize_signal_defs<S: Serializer>(
-    defs: &IndexMap<DottedRef, NetRef>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let mut map = serializer.serialize_map(Some(defs.len()))?;
-    for (name, net) in defs {
-        map.serialize_entry(&name.to_string(), net)?;
-    }
-    map.end()
 }
 
 impl EditionNetlistIr {

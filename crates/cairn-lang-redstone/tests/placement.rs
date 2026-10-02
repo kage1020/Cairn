@@ -1,7 +1,7 @@
 //! Integration tests for `cairn_lang_redstone::compile_placement`.
 //!
 //! Locks the observable behaviours of the Placement IR slice
-//! (`spec/redstone` §14.5, stage 1 of place-and-route): the
+//! (stage 1 of the pipeline `spec/redstone` "Place-and-route"): the
 //! `examples/redstone-door.crn` happy path (per edition), 1D topological
 //! coordinate assignment across a multi-cell scope, `E_ROUTE_CONGESTION`
 //! when the netlist exceeds the reservation, `E_NO_CIRCUIT_REGION` when
@@ -9,51 +9,20 @@
 //! the enclosing scope), empty-scope elision, the JSON wire form, and
 //! per-scope independence when a module carries more than one scope.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{
-    DiagnosticCode, EditionCell, ScopedEditionNetlistIr, compile_edition_netlist, compile_netlist,
-    compile_placement, synthesize,
-};
+use cairn_lang_redstone::{DiagnosticCode, EditionCell, ScopedEditionNetlistIr, compile_placement};
 
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn edition_netlist_from_source(
-    source: &str,
-    edition: Edition,
-) -> (ScopedEditionNetlistIr, cairn_lang_core::IntentModule) {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    let synth = synthesize(&intent);
-    assert!(
-        synth
-            .diagnostics
-            .iter()
-            .all(|d| d.severity() != Severity::Error),
-        "fixture must synth cleanly: {:?}",
-        synth.diagnostics,
-    );
-    let netlist = compile_netlist(&synth.scoped);
-    let edition_netlist = compile_edition_netlist(&netlist, edition);
-    (edition_netlist, intent)
-}
+mod common;
+use common::{edition_netlist_from_source, load_example};
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java places its lone
 /// `JavaRepeaterOr` cell one column in from the pad column of its
 /// `circuit region=floor void=2` reservation, and the reservation
 /// copies the enclosing struct's `size=7x5` footprint. `wire_length`
-/// and `delay_ticks` are absent today because Steiner routing and
-/// delay insertion are follow-up passes.
+/// and `local_delay_ticks` are absent at `--stage placement`, which
+/// runs neither routing nor delay insertion.
 #[test]
 fn redstone_door_java_places_or_cell_beside_the_pad_column() {
     let source = load_example("redstone-door.crn");
@@ -91,8 +60,8 @@ fn redstone_door_java_places_or_cell_beside_the_pad_column() {
         "wire_length is a follow-up pass output",
     );
     assert!(
-        cell.delay_ticks().is_none(),
-        "delay_ticks is a follow-up pass output",
+        cell.local_delay_ticks().is_none(),
+        "local_delay_ticks is a follow-up pass output",
     );
 }
 
@@ -142,7 +111,7 @@ struct sim size=7x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.and_ab   = sig.a and sig.b
   logic sig.or_ab    = sig.a or sig.b
@@ -185,9 +154,9 @@ struct sim size=7x5
 /// AC4 — a scope whose synthesised netlist needs more area than its
 /// reservation offers fires `E_ROUTE_CONGESTION`, anchors the primary
 /// span at the `circuit region=` line, quotes the ratio in the primary
-/// prose per `spec/redstone` §14.5, carries the three-fix footer, and
-/// drops the failed scope so a downstream pass cannot consume a
-/// partially-placed layout.
+/// prose per `spec/redstone` "Place-and-route", carries the three-fix
+/// footer, and drops the failed scope so a downstream pass cannot consume
+/// a partially-placed layout.
 #[test]
 fn congestion_fires_route_congestion_and_elides_scope() {
     // 3 cells × 4 blocks each = 12 required blocks vs 3 × 3 × 1 = 9
@@ -201,7 +170,7 @@ struct tiny size=3x3
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.and_ab   = sig.a and sig.b
   logic sig.or_ab    = sig.a or sig.b
@@ -244,8 +213,8 @@ struct tiny size=3x3
     );
     // The primary span must anchor to the `circuit region=` line so an
     // LSP quick-fix or editor jump lands on the reservation declaration,
-    // not the first cell's source offset. `spec/redstone` §14.5's
-    // example diagnostic anchors at the region.
+    // not the first cell's source offset. The example diagnostic in
+    // `spec/redstone` "Place-and-route" anchors at the region.
     let source_at_span = &source[d.span.clone()];
     assert!(
         source_at_span.starts_with("circuit region="),
@@ -256,12 +225,14 @@ struct tiny size=3x3
         .iter()
         .find(|n| n.span.is_none())
         .expect("congestion has a fix footer");
-    // Spec §14.5's canonical fix triple: increase `void`, enlarge
-    // region, or split into multiple `circuit` blocks.
+    // The canonical fix triple in `spec/redstone` "Place-and-route":
+    // increase `void`, enlarge region, or split into multiple `circuit`
+    // blocks.
     for phrase in ["increase", "void", "enlarge", "region", "split", "circuit"] {
         assert!(
             footer.message.contains(phrase),
-            "footer should carry the spec §14.5 triple (missing {phrase:?}), got {:?}",
+            "footer should carry the `spec/redstone` \"Place-and-route\" triple \
+             (missing {phrase:?}), got {:?}",
             footer.message,
         );
     }
@@ -286,7 +257,7 @@ struct nomarker size=7x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.open = sig.a or sig.b
 
@@ -329,7 +300,7 @@ fn empty_edition_netlist_produces_no_placement_entry() {
 /// AC7 — the JSON dump carries `edition`, a `region` object with the
 /// four reservation fields, a per-cell `coord` object, and the
 /// `stage` tag naming the pass that produced it. `wire_length` and
-/// `delay_ticks` are absent (the phase this stage stamps carries
+/// `local_delay_ticks` are absent (the phase this stage stamps carries
 /// neither) so the wire form does not carry future-only fields today.
 #[test]
 fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
@@ -361,8 +332,8 @@ fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
         "wire_length must be elided today: {json}",
     );
     assert!(
-        !json.contains("\"delay_ticks\""),
-        "delay_ticks must be elided today: {json}",
+        !json.contains("\"local_delay_ticks\""),
+        "local_delay_ticks must be elided today: {json}",
     );
 }
 
@@ -382,7 +353,7 @@ theme t:
 def gadget
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
   door id=d side=front at=center mat_slot=wall opened_by=sig.open
   circuit region=floor void=2
@@ -426,7 +397,7 @@ theme t:
 struct simple size=5x5
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
   door id=d side=front at=center mat_slot=wall opened_by=sig.open
   circuit region=floor void=0
@@ -448,10 +419,10 @@ struct simple size=5x5
 
 /// A scope whose Edition Netlist IR carries inputs and outputs but no
 /// cells — a `pressure_plate -> sig.a` bound straight to `door
-/// opened_by=sig.a`, which `spec/redstone` §14.2 permits — still has a
-/// layout: the wire from the sensor pad to the actuator pad. It used to
-/// be dropped here, and `--stage placement` onward printed `[]` at exit
-/// 0 for a scope the netlist stage had just described in full.
+/// opened_by=sig.a`, which `spec/redstone` "Signal binding" permits —
+/// still has a layout: the wire from the sensor pad to the actuator pad.
+/// It used to be dropped here, and `--stage placement` onward printed `[]`
+/// at exit 0 for a scope the netlist stage had just described in full.
 #[test]
 fn identity_wire_scope_places_its_actuator_pad() {
     let source = r"
@@ -508,7 +479,7 @@ theme t:
 struct dup size=7x5
   floor mat_slot=wall
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
   logic sig.open = sig.a or sig.b
   door id=d side=front at=center mat_slot=wall opened_by=sig.open
   circuit region=floor void=2
@@ -557,7 +528,7 @@ struct alpha size=7x5
 struct beta size=7x5
   floor mat_slot=wall
   pressure_plate id=q at=front.outside offset=0 y=0 -> sig.b1
-  pressure_plate id=r at=inside.front  offset=0 y=0 -> sig.b2
+  pressure_plate id=r at=inside.front  offset=1 y=0 -> sig.b2
   logic sig.both = sig.b1 and sig.b2
   door id=e side=front at=center mat_slot=wall opened_by=sig.both
 ";
@@ -588,7 +559,7 @@ struct beta size=7x5
     );
 }
 
-// ---- the row has to hold the cells (`spec/redstone` §14.5) ----
+// ---- the row has to hold the cells (`spec/redstone` "Place-and-route") ----
 //
 // The v1 layout stamps `x = 1 + 2i`, so the reservation's *width* is
 // the resource the cells consume — twice their count and one column
@@ -618,7 +589,7 @@ fn source_with_cells(cells: usize, width: u32, depth: u32, void: u32) -> String 
         "  floor mat_slot=wall\n  \
          door id=front side=front at=center mat_slot=door\n  \
          pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n  \
-         pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b\n",
+         pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b\n",
     );
     let mut previous = String::from("sig.a");
     for index in 0..cells {
@@ -697,21 +668,19 @@ fn a_row_wide_enough_for_the_cells_and_not_the_spacing_is_refused() {
 /// The exact-fit boundary, with its neighbour one column down.
 ///
 /// A row of `n` cells wants `2n + 1` columns: one for each cell, one
-/// beside each, and one past the last so the cell at the end of the row
-/// is not left with the actuator-pad column on one side and the edge of
-/// the reservation on the other. At `2n` that cell has one free plane
-/// neighbour, and the layout is refused two stages later under `void=1`
-/// or climbs and pays for it above — measured on a four-cell chain:
-/// `2n` refuses at `void=1`, and at `void=3` reports `wire_length` 13
-/// for the last cell where `2n + 1` reports 11.
+/// beside each, and the last for the actuator pads. At `2n` the last
+/// cell would stand at `x = width - 1`, inside the actuator-pad column,
+/// face to face with the pads at `z = 0` and `z = 2`; the extra column
+/// is what keeps it out.
 ///
 /// Both sides are here rather than only the accepting one, because the
 /// number the check compares against is only pinned by a pair that
 /// straddles it: a threshold one column out in either direction passes
-/// a test that names one side alone. The depth guard is what keeps the
-/// actuator pad off the cell row, and
-/// `a_region_one_row_deep_cannot_hold_a_pad_beside_its_cells` covers
-/// the case where it does not.
+/// a test that names one side alone. That no pad touches a cell once
+/// the row fits is held by `placement::tests::no_pad_stands_against_a_cell`
+/// in the crate, and the depth guard that keeps the pads off each other
+/// by `more_actuators_than_rows_is_refused_before_their_pads_collide`
+/// below.
 #[test]
 fn a_row_of_twice_the_cell_count_plus_one_places_every_cell() {
     assert!(
@@ -890,18 +859,19 @@ struct wire size=9x2
     assert_eq!(ir.outputs.len(), 1, "and an actuator pad to route out to");
 }
 
-/// Pads stand one per row down the edge columns, so the guard is
-/// about their count rather than about a depth the row check would
-/// already have refused: the region below is three rows deep, which is
-/// exactly what the cell row and its two lanes want.
+/// Pads stand one per row down the edge columns, stepping over the cell
+/// row, so the guard is about their count rather than about a depth the
+/// row check would already have refused: the refused region below is
+/// four rows deep, more than the cell row and its two lanes want.
 ///
-/// Both sides of the count in one test. `pad_rows == depth` is the
-/// accepting side — a pad column of `n` rows fits a region `n` deep,
-/// because the pads start at `z = 0` — and nothing else in the suite
-/// straddles it. The primary is asserted too: all four refusals in this
-/// pass share `E_ROUTE_CONGESTION` and the row-depth check runs first,
-/// so a fixture that drifts out of this branch's window would stay
-/// green while measuring a different one.
+/// Both sides of the count in one test. Rows needed `== depth` is the
+/// accepting side — `n` pads, `n >= 2`, in a scope with cells fit a
+/// region `n + 1` deep, because they start at `z = 0` and skip the cell
+/// row — and nothing else in the suite straddles it for a scope with
+/// cells. The primary is asserted too: all four refusals in this pass
+/// share `E_ROUTE_CONGESTION` and the row-depth check runs first, so a
+/// fixture that drifts out of this branch's window would stay green
+/// while measuring a different one.
 #[test]
 fn more_actuators_than_rows_is_refused_before_their_pads_collide() {
     let source = |depth: u32| {
@@ -918,7 +888,7 @@ struct four size=8x{depth}
   door id=d3 side=left  at=center mat_slot=door
   door id=d4 side=right at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front  offset=1 y=0 -> sig.b
   logic sig.f = sig.a and sig.b
   door[id=d1] opened_by=sig.f
   door[id=d2] opened_by=sig.f
@@ -929,10 +899,10 @@ struct four size=8x{depth}
         )
     };
 
-    let refused = placement_of(&source(3));
+    let refused = placement_of(&source(4));
     assert!(
         refused.scoped.scopes.is_empty(),
-        "four actuators do not fit three rows",
+        "four actuators and the cell row do not fit four rows",
     );
     let diagnostic = refused
         .diagnostics
@@ -941,17 +911,115 @@ struct four size=8x{depth}
         .expect("the shortfall must surface");
     assert!(
         diagnostic.primary.contains("rows for its I/O pads")
-            && diagnostic.primary.contains("only 3 deep"),
+            && diagnostic.primary.contains("needs 5 rows")
+            && diagnostic.primary.contains("only 4 deep"),
         "the refusal must name the resource that ran out, so it cannot be \
          confused with the three that share its code: {}",
         diagnostic.primary,
     );
 
-    let placed = placement_of(&source(4));
+    let placed = placement_of(&source(5));
     assert!(
         placed.diagnostics.is_empty() && !placed.scoped.scopes.is_empty(),
-        "one row per pad is enough, because the pad column starts at z=0: {:?}",
+        "one row per pad and the cell row is enough, because the pad column \
+         starts at z=0: {:?}",
         placed.diagnostics,
+    );
+}
+
+/// A scope with no cells has no cell row, so its pads step over
+/// nothing: `n` pads on an edge fit a region exactly `n` deep, and stand
+/// at `z = 0..n`.
+///
+/// Two sensors and two doors with no `logic` line between them — two
+/// pads on each edge — at two rows. Were the pads to skip a row the
+/// scope does not have, the pass would refuse this region for want of
+/// a third row, and at three rows leave `z = 1` empty for nobody. Three
+/// doors at three rows is the case where the refusal and the
+/// coordinates have to agree: a refusal that did not count the cell row
+/// over coordinates that still skipped it would accept the region and
+/// put the last two pads on one coord.
+///
+/// The refused side is asserted too, so the count is pinned from both
+/// sides, and its fix line must not ask for a cell row the scope does
+/// not have.
+#[test]
+fn a_scope_with_no_cell_row_gives_its_pads_every_row() {
+    let source = |doors: usize, depth: u32| {
+        let mut source = format!(
+            "
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct wire size=9x{depth}
+  floor mat_slot=wall
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b
+"
+        );
+        for (d, side) in ["front", "back", "left"].iter().take(doors).enumerate() {
+            let _ = writeln!(
+                source,
+                "  door id=d{d} side={side} at=center mat_slot=door\n  door[id=d{d}] opened_by=sig.{}",
+                ["a", "b"][d % 2],
+            );
+        }
+        source.push_str("  circuit region=floor void=2\n");
+        source
+    };
+
+    for (doors, depth) in [(2, 2), (3, 3)] {
+        let placed = placement_of(&source(doors, depth));
+        assert!(
+            placed.diagnostics.is_empty(),
+            "{doors} doors fit {depth} rows with no cell row to step over: {:?}",
+            placed.diagnostics,
+        );
+        let ir = &placed.scoped.scopes[0].ir;
+        assert!(
+            ir.cells.is_empty(),
+            "the fixture only means something while it has no cell row",
+        );
+        let pads: Vec<(u32, u32, u32)> = ir
+            .outputs
+            .iter()
+            .map(|o| (o.pad.x, o.pad.y, o.pad.z))
+            .collect();
+        let expected: Vec<(u32, u32, u32)> = (0..depth).map(|z| (8, 0, z)).collect();
+        assert_eq!(
+            pads, expected,
+            "{doors} doors at {depth} rows: one row each, from z=0"
+        );
+    }
+
+    let refused = placement_of(&source(3, 2));
+    assert!(
+        refused.scoped.scopes.is_empty(),
+        "three doors do not fit two rows"
+    );
+    let diagnostic = refused
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .expect("the shortfall must surface");
+    assert!(
+        diagnostic.primary.contains("needs 3 rows for its I/O pads")
+            && diagnostic.primary.contains("only 2 deep"),
+        "the refusal counts one row per pad and no cell row: {}",
+        diagnostic.primary,
+    );
+    let fix = diagnostic
+        .notes
+        .iter()
+        .find(|n| n.message.starts_with("Fix:"))
+        .expect("the refusal carries a fix line");
+    assert!(
+        fix.message.contains("`depth >= max(inputs, outputs)` ")
+            && !fix.message.contains("+ 1")
+            && !fix.message.contains("step over the cell row"),
+        "the fix line asks for no cell row: {}",
+        fix.message,
     );
 }
 

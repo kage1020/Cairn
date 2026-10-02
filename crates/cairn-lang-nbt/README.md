@@ -1,28 +1,23 @@
 # cairn-lang-nbt
 
-NBT codec for the Cairn language. The Java and Bedrock writers ship today;
-the streaming reader follows.
+NBT codec for the Cairn language, in both on-disk dialects.
 
-- **Java**: big-endian, gzipped, root compound tags. **Writer is public.**
-- **Bedrock**: little-endian, uncompressed (the `.mcstructure` on-disk
-  form). **Writer is public.** The varint little-endian network payload
-  form is not needed for structure files and has not landed.
+- **Java**: big-endian, gzip-wrapped, root compound tags.
+- **Bedrock**: little-endian, uncompressed — the `.mcstructure` on-disk form. The varint little-endian network payload is a different shape, is not needed for structure files, and has not landed.
 
-This crate is deliberately *just* the codec. It does not know anything about Litematica regions,
-schematic palettes, or Cairn's block-array IR — those live in
-[`cairn-lang-formats`](../cairn-lang-formats/README.md). Keeping the byte layer separate means the codec can be
-fuzzed and benchmarked without dragging in the higher-level format machinery.
+This crate is deliberately *just* the codec. It knows nothing about Litematica regions, schematic palettes, or Cairn's block-array IR — those live in [`cairn-lang-formats`](../cairn-lang-formats/README.md). Keeping the byte layer separate means it can be fuzzed and benchmarked without dragging in the higher-level format machinery. The CLI never reaches in directly; it talks to the format helpers, which talk to this crate.
 
 ## Status
 
-Both writers ship. The full NBT tag taxonomy (`Byte` through `LongArray`),
-an `IndexMap`-ordered `Compound`, and the writer entrypoints are public.
-The byte-level encoder is a single endian-parameterised core, so the Java
-and Bedrock writers share validation rules and cannot drift apart.
+Both writers ship. The full tag taxonomy (`Byte` through `LongArray`), an `IndexMap`-ordered `Compound`, and the writer entry points are public. The byte-level encoder is a single endian-parameterised core, so the Java and Bedrock writers share their validation rules and cannot drift apart.
 
-The streaming reader is still to land.
+Each uncompressed writer also has a streaming form, which writes a root compound entry by entry instead of from a built tree: a list declares its length up front and takes its items one at a time, so a list with an entry per voxel never has to be in memory. It goes through the same encoder core, so a streamed root is the bytes the tree writer writes for the same tags.
+
+The streaming reader is still to land. It is what the reverse direction needs — reading large files such as Litematica regions and structure blocks split across many chunks — so no `.nbt` → IR path exists until it does.
 
 ## Public API
+
+Every item the crate root re-exports, and nothing else — the same rule [`cairn-lang-formats`](../cairn-lang-formats/README.md) states, held by the same test in both directions.
 
 | Item | Role |
 |---|---|
@@ -32,21 +27,18 @@ The streaming reader is still to land.
 | `java::write_java_uncompressed` | Raw big-endian payload, no gzip. |
 | `java::write_java_gzip` | Gzip-wrapped big-endian output at `Compression::default()`. |
 | `bedrock::write_bedrock_uncompressed` | Raw little-endian payload (the `.mcstructure` form). |
-| `java::NbtIoError` | `InvalidString`, `HeterogeneousList`, `LengthOverflow`, `Io`. |
+| `java::stream_java_uncompressed` / `bedrock::stream_bedrock_uncompressed` | Streaming twins of the two uncompressed writers: a closure writes the root's entries through a `CompoundStream`. Same bytes as the tree writer for the same tags. For gzip, wrap the writer in an encoder at `Compression::default()`; no `flate2` type is in this crate's signatures. |
+| `stream::CompoundStream` | A compound being written: `tag` appends a named tag, `compound_tag` a compound the caller holds, `compound` and `list` open a nested one. `TAG_End` is written when the closure returns successfully. A key named twice is written twice. |
+| `stream::ListStream` | A list being written after its declared length: `item`, `compound` and `list` append one item each. An empty list declares `TAG_End`, as `List::of_tags` does. Writing a number of items other than the declared length panics; a wrong item type is refused before any of its bytes, so it returns `HeterogeneousList` instead. |
+| `tag::check_string` | Whether a string can be written as an NBT string, by the rule the writers apply: the error they would raise, ahead of the write. |
+| `java::NbtIoError` | `InvalidString`, `HeterogeneousList`, `EmptyListWithElementType`, `LengthOverflow`, `Io`. `#[non_exhaustive]`. |
 
-## Scope
+Tag types covered: `Byte`, `Short`, `Int`, `Long`, `Float`, `Double`, `ByteArray`, `String`, `List`, `Compound`, `IntArray`, `LongArray`. `TAG_End` has no variant — it is implicit in `Compound` termination, so a caller cannot construct a stray end marker.
 
-- Tag types: `End`, `Byte`, `Short`, `Int`, `Long`, `Float`, `Double`, `ByteArray`, `String`, `List`,
-  `Compound`, `IntArray`, `LongArray`.
-- Both endiannesses (big-endian Java, little-endian Bedrock) ship on the writer side.
-- A streaming reader for large files (Litematica regions, structure blocks split across many chunks).
+## Out of scope
 
-Out of scope:
-
-- SNBT parsing — Cairn never round-trips through SNBT
-  ([overview §1.1](https://cairn.kage1020.com/spec/overview/)).
-- DataFixerUpper-style version migration. DFU is explicitly kept out of the Cairn language semantics
-  ([versioning-editions §10.2](https://cairn.kage1020.com/spec/versioning-editions/)).
+- SNBT parsing — Cairn never round-trips through SNBT ([overview "Purpose"](https://cairn.kage1020.com/spec/overview/)).
+- DataFixerUpper-style version migration. DFU is explicitly kept out of Cairn's language semantics ([versioning-editions "Language contract: recompile, don't transcode"](https://cairn.kage1020.com/spec/versioning-editions/)).
 
 ## License
 

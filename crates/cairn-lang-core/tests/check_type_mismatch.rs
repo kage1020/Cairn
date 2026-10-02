@@ -1,17 +1,10 @@
 //! Acceptance tests for the `type_mismatch` pass of
 //! `cairn_lang_core::check`.
 
-use cairn_lang_core::{DiagnosticCode, check, lower, parse};
+use cairn_lang_core::DiagnosticCode;
 
-fn diagnose(source: &str) -> Vec<cairn_lang_core::Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn slice<'a>(source: &'a str, diag: &cairn_lang_core::Diagnostic) -> &'a str {
-    &source[diag.span.clone()]
-}
+mod common;
+use common::{diagnose, slice};
 
 #[test]
 fn tm_1_id_set_to_token_is_flagged_as_label_mismatch() {
@@ -62,9 +55,9 @@ fn tm_4_struct_size_set_to_integer_is_flagged() {
 
 #[test]
 fn tm_5_window_size_with_proper_literal_passes() {
-    // `at=` is a door anchor (spec syntax §5.4) and a window does not read
-    // it; the second argument is here only so the line under test carries
-    // more than the one key it is about.
+    // `at=` is a door anchor (`spec/syntax` "Selectors") and a window does
+    // not read it; the second argument is here only so the line under test
+    // carries more than the one key it is about.
     let src = "struct s size=4x4\n  window size=2x2 side=front\n";
     let diags = diagnose(src);
     assert!(

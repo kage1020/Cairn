@@ -22,7 +22,7 @@ use crate::line_index::LineIndex;
 /// A parse/lex failure pre-empts the check passes (the AST has to be
 /// well-formed before invariant collection can run — same rule as
 /// `cairn check`) and yields exactly one error diagnostic. It goes through
-/// the same [`convert`] every other finding does, because
+/// the same `to_lsp_diagnostic` every other finding does, because
 /// [`diagnose_parse_failure`] gives it the same shape: a code, a span, a
 /// message. This file used to build that one by hand — a diagnostic with
 /// no code, in a converter only it could reach — which is how the server
@@ -38,18 +38,18 @@ pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types:
         Err(err) => {
             let lines = LineStarts::new(source);
             let diagnostic = diagnose_parse_failure(source, &lines, &err);
-            return vec![convert(uri, source, &index, &diagnostic)];
+            return vec![to_lsp_diagnostic(uri, source, &index, &diagnostic)];
         }
     };
     let ir = lower(&module);
     check(&module, &ir, None)
         .iter()
-        .map(|d| convert(uri, source, &index, d))
+        .map(|d| to_lsp_diagnostic(uri, source, &index, d))
         .collect()
 }
 
 /// Map one core [`CoreDiagnostic`] into the LSP shape.
-fn convert(
+fn to_lsp_diagnostic(
     uri: &lsp_types::Uri,
     source: &str,
     index: &LineIndex,

@@ -5,7 +5,7 @@ title: "12. エコシステム連携と逆方向変換"
 ## 12.1 順方向
 
 block-array IR をシリアライズすると `.nbt` / `.litematic` / `.schem` / `.mcstructure` が出ます
-([アーキテクチャ](architecture))。各フォーマットは単なるシリアライザで、既存フォーマットはピボットの
+([アーキテクチャ](/ja/spec/architecture/))。各フォーマットは単なるシリアライザで、既存フォーマットはピボットの
 周りに置かれる追加バックエンドです。
 
 ## 12.2 逆方向: コンパイラは写し取り、リフトは LLM
@@ -54,7 +54,7 @@ window id=front_windows side=front mat_slot=glass repeat=5 ...
 
 取り込み時に `(edition, version)` と provenance を block-array IR にスタンプします (`.litematic` →
 java、`.mcstructure` → bedrock、`.schem` → java)。これが取り込みを再現性につなぎます
-([バージョンとエディション](versioning-editions))。
+([バージョンとエディション](/ja/spec/versioning-editions/))。
 
 **取り込みを「作者の意図の復元」として提示してはいけません。** これが最大の落とし穴です。回復できる
 のはボクセルと一部の規則性だけであり、CLI は `W_SEMANTIC_LOSS` でそう告げます。
@@ -66,9 +66,9 @@ java、`.mcstructure` → bedrock、`.schem` → java)。これが取り込み�
 - Litematica の複数 region とサブリージョンの offset はフラット化せず provenance として保持し、
   region は `site` または複数の struct に対応付けます。
 - エンティティを含む schematic では、block IoU だけで成功と判定してはいけません。エンティティの指標
-  を別に持ち、ファーストクラスのエンティティ ([エンティティ](entities)) だけを取り出します。チェスト
+  を別に持ち、ファーストクラスのエンティティ ([エンティティ](/ja/spec/entities/)) だけを取り出します。チェスト
   の中身とコマンドブロックは捨てます。
 - 巨大な schematic (48³ 超、村全体) を一度にリフトすると LLM の文脈が破綻します。チャンク分割 →
   チャンクごとの L1 → パートごとのリフト → `site` での結合を、ストリーミングパースの上でオーケスト
   レーションする必要があります。
-- 1.13 のフラット化以前の数値 ID `.schematic` は v1 では未対応です ([目的とスコープ](overview))。
+- 1.13 のフラット化以前の数値 ID `.schematic` は v1 では未対応です ([目的とスコープ](/ja/spec/overview/))。

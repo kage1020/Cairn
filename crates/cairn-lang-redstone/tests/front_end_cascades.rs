@@ -1,11 +1,13 @@
 //! What each refusal takes away, and what it must not take away with it.
 //!
-//! The front end refuses a binding in four ways now — a sensor tail on a
+//! The front end declines a binding in four ways now — a sensor tail on a
 //! member that cannot emit, an actuator key on the wrong component, a
 //! signal-valued key nothing reads, and a `logic` left-hand side outside
 //! the `sig.` namespace — and a member whose keyword the role table does
 //! not know is skipped without a word, because `E_UNKNOWN_KEYWORD` is
-//! already its finding.
+//! already its finding. The first of the four is declined without a word
+//! too: `check::binding` refuses the tail with `E_MISPLACED_BINDING`, and
+//! this pass only takes the driver away.
 //!
 //! Each of those takes a driver or a consumer out of the scope, and every
 //! pass downstream would then report the hole as a mistake of its own. The
@@ -14,14 +16,10 @@
 //! *whole* finding list, because "the code I asked about is present" is
 //! exactly the assertion a leaked cascade slips past.
 
-use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{ScopeKind, SynthOutput, synthesize};
+use cairn_lang_redstone::{ScopeKind, SynthOutput};
 
-fn synth_source(source: &str) -> SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
+mod common;
+use common::synth_source;
 
 fn codes(out: &SynthOutput) -> Vec<&'static str> {
     out.diagnostics.iter().map(|d| d.code.as_str()).collect()
@@ -64,9 +62,10 @@ fn an_unknown_keyword_that_would_have_consumed_a_signal_leaves_no_unused_warning
 
 #[test]
 fn an_unknown_keyword_that_would_have_driven_a_signal_leaves_no_unbound_error() {
-    // The mirror on the driver side: `lever` is §14.2's sensor and not a
-    // keyword, so the tail is skipped — and the `logic` line reading
-    // `sig.w` must not be told the signal does not exist.
+    // The mirror on the driver side: `lever` is one of the sensors in
+    // `spec/redstone` "Signal binding" and not a keyword, so the tail is
+    // skipped — and the `logic` line reading `sig.w` must not be told the
+    // signal does not exist.
     let out = synth_source(&source(concat!(
         "  lever id=v side=front offset=1 y=1 -> sig.w\n",
         "  logic sig.x = not sig.w\n",
@@ -98,19 +97,16 @@ fn a_misplaced_actuator_on_a_derived_signal_leaves_no_unused_warning() {
 fn an_actuator_reading_a_signal_a_refused_tail_would_have_driven_is_not_reported() {
     // The actuator path has its own unbound check, separate from the one
     // `resolve_ref` walks, and this is the fixture that reaches it: the
-    // door is well formed and reads a signal the refused `walls` tail
-    // would have emitted.
+    // door is well formed and reads a signal the declined `walls` tail
+    // would have emitted. The tail itself is `check`'s
+    // `E_MISPLACED_BINDING`, so the whole list here is what the cascade
+    // would have added, and it is empty.
     let out = synth_source(&source(concat!(
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
         "  door id=front side=front at=center\n",
         "  door[id=front] opened_by=sig.w\n",
     )));
-    assert_eq!(
-        codes(&out),
-        ["E_LOGIC_MISPLACED_BINDING"],
-        "{:#?}",
-        out.diagnostics
-    );
+    assert_eq!(codes(&out), Vec::<&str>::new(), "{:#?}", out.diagnostics);
 }
 
 #[test]
@@ -339,7 +335,7 @@ fn findings_from_two_collection_phases_come_out_in_line_order() {
     // first.
     let source = source(concat!(
         "  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n",
-        "  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.a\n",
+        "  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.a\n",
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
     ));
     let out = synth_source(&source);

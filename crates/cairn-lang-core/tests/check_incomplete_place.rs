@@ -8,20 +8,18 @@
 //! exited 0 on a site whose buildings were simply absent.
 //!
 //! The keys are required rather than auto-filled. The auto-address of
-//! `spec/components-editing-sites.md` §9.2 derives from parent / role /
-//! side / level / offset and names nothing outside the body it sits in; a
-//! `place`'s `id=` is the name `east_of=` and `connect` refer to and the
-//! name its `.nbt` is written under (§9.3.4), so an invented one would be a
-//! name the author never wrote and cannot point at.
+//! `spec/components-editing-sites` "Editing model" derives from parent /
+//! role / side / level / offset and names nothing outside the body it sits
+//! in; a `place`'s `id=` is the name `east_of=` and `connect` refer to and
+//! the name its `.nbt` is written under (that chapter's "Output naming"),
+//! so an invented one would be a name the author never wrote and cannot
+//! point at.
 
 use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse, resolve};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, lower, parse, resolve};
 
-fn diagnose(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
+mod common;
+use common::{PRELUDE, diagnose, exactly_one, notes};
 
 fn incomplete_only(source: &str) -> Vec<Diagnostic> {
     diagnose(source)
@@ -31,22 +29,8 @@ fn incomplete_only(source: &str) -> Vec<Diagnostic> {
 }
 
 fn one(source: &str) -> Diagnostic {
-    let mut found = incomplete_only(source);
-    assert_eq!(found.len(), 1, "expected one finding, got {found:#?}");
-    found.remove(0)
+    exactly_one(incomplete_only(source))
 }
-
-fn notes(diag: &Diagnostic) -> Vec<&str> {
-    diag.notes.iter().map(|n| n.message.as_str()).collect()
-}
-
-const PRELUDE: &str = "theme plain:\n  \
-slot floor -> @oak_planks\n  \
-slot wall  -> @cobblestone\n\n\
-def hut size=3x3:\n  \
-floor id=floor mat_slot=floor\n  \
-walls id=walls class=outer mat_slot=wall height=3\n  \
-door  id=entry side=front at=center\n\n";
 
 /// A site whose first row anchors at the origin, so the row under test is
 /// the only thing that can be wrong.
@@ -138,8 +122,8 @@ fn ip_1b_each_note_explains_the_key_it_belongs_to() {
 }
 
 /// The structured payload carries the key set, so a quick-fix does not have
-/// to parse the sentence back apart — which `spec/lint.md` §11.2 exists to
-/// stop consumers doing.
+/// to parse the sentence back apart — which is what
+/// `spec/lint` "Machine-readable payload" exists to stop consumers doing.
 #[test]
 fn ip_1c_the_payload_lists_the_missing_keys() {
     let src = site_with("place east_of=anchor gap=4");

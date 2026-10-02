@@ -7,27 +7,10 @@
 //! those — lowering arithmetic, phase ordering, overhang shift, or roof
 //! orientation — fails immediately.
 
-use std::path::PathBuf;
-
-use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::DiagnosticCode;
-use cairn_lang_core::{lower, parse, resolve};
 
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
-
-fn lower_example(name: &str) -> BlockArrayIr {
-    let source =
-        std::fs::read_to_string(examples_dir().join(name)).expect("example file must be readable");
-    let module = parse(&source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, None)
-}
+mod common;
+use common::{lowered, read_example};
 
 #[test]
 fn cottage_lowers_to_overhang_inflated_volume() {
@@ -35,7 +18,7 @@ fn cottage_lowers_to_overhang_inflated_volume() {
     // dims.x = 9 + 2*1 = 11. dims.z = 7 + 2*1 = 9.
     // ridge span (short axis of inflated bbox) = min(11, 9) = 9.
     // ridge_extra = ceil(9/2) = 5 → dims.y = 1 + 4 + 5 = 10.
-    let out = lower_example("cottage.crn");
+    let out = lowered(&read_example("cottage.crn"));
     let ba = out
         .structures
         .get("struct::cottage")
@@ -47,7 +30,7 @@ fn cottage_lowers_to_overhang_inflated_volume() {
 
 #[test]
 fn cottage_palette_contains_all_five_materials() {
-    let out = lower_example("cottage.crn");
+    let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
     let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
     assert!(ids.contains(&"minecraft:air"));
@@ -71,7 +54,7 @@ fn cottage_palette_contains_all_five_materials() {
 
 #[test]
 fn cottage_floor_plane_fills_interior_only() {
-    let out = lower_example("cottage.crn");
+    let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
     // Interior x∈[1, 9], z∈[1, 7] (overhang=1). 9 * 7 = 63 oak_planks cells.
     let mut interior_non_air = 0;
@@ -99,7 +82,7 @@ fn cottage_floor_plane_fills_interior_only() {
 
 #[test]
 fn cottage_wall_ring_at_y1_has_perimeter_minus_door() {
-    let out = lower_example("cottage.crn");
+    let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
     // Walls form a 9x7 outline at x∈[1,9], z∈[1,7]. Perimeter cells:
     // 2 * (9 + 7) - 4 = 28. The door at side=front (z=7) at=center
@@ -119,7 +102,7 @@ fn cottage_wall_ring_at_y1_has_perimeter_minus_door() {
 
 #[test]
 fn cottage_door_carves_front_opening() {
-    let out = lower_example("cottage.crn");
+    let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
     // Front wall at z = overhang + size.h - 1 = 7. Center x = 1 + 4 = 5.
     let i1 = ba.dims.index(5, 1, 7).unwrap();
@@ -130,7 +113,7 @@ fn cottage_door_carves_front_opening() {
 
 #[test]
 fn cottage_window_pair_lowered_to_glass_panes() {
-    let out = lower_example("cottage.crn");
+    let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
     // Front wall at z=7. Primary x∈[3,5), y∈[2,4) (offset=2 shifted by
     // overhang=1, size=2x2). Mirror at x∈[6,8) for sym=true.
@@ -149,7 +132,7 @@ fn cottage_window_pair_lowered_to_glass_panes() {
 
 #[test]
 fn cottage_roof_palette_includes_stairs_with_facing() {
-    let out = lower_example("cottage.crn");
+    let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
     // At least one entry with facing=south + half=bottom (north slope) and
     // one with facing=north + half=bottom (south slope) and one half=top
@@ -177,7 +160,7 @@ fn cottage_roof_palette_includes_stairs_with_facing() {
 
 #[test]
 fn cottage_emits_zero_deferred_warnings() {
-    let out = lower_example("cottage.crn");
+    let out = lowered(&read_example("cottage.crn"));
     let deferred = out
         .diagnostics
         .iter()

@@ -18,7 +18,8 @@ use crate::block_array::BlockArrayIr;
 const PREFIX: &str = "sha256:";
 const HEX_LEN: usize = 64;
 
-/// Hex-encoded sha256 with the spec §10.6 `sha256:` prefix.
+/// Hex-encoded sha256 with the `sha256:` prefix `spec/versioning-editions`
+/// "Provenance and lock" gives it.
 ///
 /// Newtype rather than a bare `String` so a future algorithm switch is one
 /// `impl From` away, and so a caller cannot accidentally hand an arbitrary
@@ -166,4 +167,18 @@ pub fn hash_source(src: &str) -> HashHex {
 pub fn hash_resolved_ir(ir: &BlockArrayIr) -> Result<HashHex, HashError> {
     let bytes = serde_json::to_vec(ir)?;
     Ok(HashHex::from_bytes(&bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HashHex;
+
+    #[test]
+    fn zero_is_the_prefix_and_sixty_four_hex_zeros() {
+        assert_eq!(HashHex::ZERO_STR, format!("sha256:{}", "0".repeat(64)));
+        assert_eq!(
+            HashHex::parse(HashHex::ZERO_STR).expect("the zero hash parses"),
+            HashHex::zero(),
+        );
+    }
 }

@@ -106,14 +106,41 @@ fn a_size_literal_with_no_height_is_still_two_tokens() {
     assert_eq!(
         kinds("9x\n"),
         vec![
-            TokenKind::Int {
-                value: 9,
-                lexeme: "9".into()
-            },
+            TokenKind::Int { lexeme: "9".into() },
             TokenKind::Ident("x".into()),
             TokenKind::Newline,
         ],
     );
+}
+
+/// A digit run past `i64` is not the lexer's to refuse.
+///
+/// `scan_number` used to parse every run into an `i64` on the way through,
+/// which made the token type a range check on text the lexer cannot type:
+/// a truth-table row is digits too, and `11111111111111111111` is a legal
+/// twenty-input pattern rather than an overflow. The refusal still exists
+/// where a value is actually asked for — `parse_value` reports
+/// `IntContext::IntLiteral` — but it belongs there, not here.
+#[test]
+fn an_integer_past_i64_still_lexes() {
+    assert_eq!(
+        kinds("99999999999999999999\n"),
+        vec![
+            TokenKind::Int {
+                lexeme: "99999999999999999999".into()
+            },
+            TokenKind::Newline,
+        ],
+    );
+}
+
+/// The size literal is the other way round, and stays that way: `WxH` is
+/// a size in every position it can appear, so the lexer builds one and
+/// reports an extent it cannot hold.
+#[test]
+fn an_extent_past_u32_is_still_the_lexers_to_refuse() {
+    let err = lex("struct s size=99999999999999999999x9\n").unwrap_err();
+    assert!(matches!(err, LexError::InvalidInt { .. }), "{err:?}");
 }
 
 // -- indentation ----------------------------------------------------------

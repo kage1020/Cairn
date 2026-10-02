@@ -1,18 +1,9 @@
 //! Acceptance tests for the `duplicate` pass of `cairn_lang_core::check`.
 
-use cairn_lang_core::{DiagnosticCode, check, lower, parse};
+use cairn_lang_core::DiagnosticCode;
 
-fn diagnose(source: &str) -> Vec<cairn_lang_core::Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-/// Convenience: pull `&source[span]` so AC tables can assert what text the
-/// diagnostic actually points at.
-fn slice<'a>(source: &'a str, diag: &cairn_lang_core::Diagnostic) -> &'a str {
-    &source[diag.span.clone()]
-}
+mod common;
+use common::{diagnose, slice};
 
 #[test]
 fn dup_1_duplicate_size_flags_second_occurrence_only() {
@@ -105,10 +96,24 @@ fn dup_6_duplicate_selector_attribute_is_reported() {
 #[test]
 fn dup_7_duplicate_header_arg_other_than_size_is_arg_not_size() {
     // Header has a repeated non-`size` arg; the code should be the generic
-    // `E_DUPLICATE_ARG`, not the size-specific `E_DUPLICATE_SIZE`.
-    let src = "struct s size=1x1 wood=oak wood=birch\n  floor mat_slot=m\n";
+    // `E_DUPLICATE_ARG`, not the size-specific `E_DUPLICATE_SIZE`. The
+    // header vocabulary is closed at `size=` and `class=`, so `class=` is
+    // the only key left to repeat: any other, `wood=` included, is also an
+    // `E_UNKNOWN_ARGUMENT`. No pass reads a header's `class=` yet, so the
+    // arguments pass reports the surviving value beside the duplicate.
+    let src = "struct s size=1x1 class=house class=hut\n  floor mat_slot=m\n";
     let diags = diagnose(src);
-    assert_eq!(diags.len(), 1, "got {diags:#?}");
-    assert_eq!(diags[0].code, DiagnosticCode::DuplicateArg);
-    assert_eq!(slice(src, &diags[0]), "wood=birch");
+    assert_eq!(diags.len(), 2, "got {diags:#?}");
+    let dup: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DuplicateArg)
+        .collect();
+    assert_eq!(dup.len(), 1, "got {diags:#?}");
+    assert_eq!(slice(src, dup[0]), "class=hut");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == DiagnosticCode::IgnoredArgument && slice(src, d) == "hut"),
+        "got {diags:#?}",
+    );
 }

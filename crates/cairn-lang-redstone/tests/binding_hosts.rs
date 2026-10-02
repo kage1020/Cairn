@@ -1,7 +1,8 @@
 //! A signal binding sits on the component that carries it.
 //!
-//! `spec/redstone` §14.2 does not offer `-> sig.X` and the four actuator
-//! keys as free-floating attributes: it writes each one on one component —
+//! `spec/redstone` "Signal binding" does not offer `-> sig.X` and the four
+//! actuator keys as free-floating attributes: it writes each one on one
+//! component —
 //! a sensor emits, `door ... opened_by=`, `lamp ... lit_by=`,
 //! `piston ... powered_by=`, `dispenser ... fired_by=`. The front end read
 //! only the *value*, so any member carrying a `sig.`-valued argument became
@@ -21,15 +22,20 @@
 //! is reported when the host is wrong too, and the one place a
 //! well-formed binding is still in the wrong place — inside the
 //! `[selector]`.
+//!
+//! One of the two host questions is no longer asked here. A `->` tail on
+//! a member that cannot emit is `check`'s `E_MISPLACED_BINDING`, because
+//! the answer needs no Logic IR and every command should have it;
+//! `cairn-lang-core/tests/check_binding.rs` holds those assertions. What
+//! this pass still owes such a line is what it takes away: the driver
+//! comes out of the scope so nothing downstream reports the hole as a
+//! fault of its own, and the fixtures below assert that silence rather
+//! than a finding.
 
-use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{DiagnosticCode, SynthOutput, synthesize};
+use cairn_lang_redstone::{DiagnosticCode, SynthOutput};
 
-fn synth_source(source: &str) -> SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
+mod common;
+use common::synth_source;
 
 fn codes(out: &SynthOutput) -> Vec<&'static str> {
     out.diagnostics.iter().map(|d| d.code.as_str()).collect()
@@ -145,23 +151,19 @@ fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
     }
 }
 
-/// A tail on a member that cannot carry one is a host fault, whatever the
-/// value says.
+/// A tail on a member that cannot carry one draws no value-side finding,
+/// whatever the value says.
 ///
 /// No edit to the value makes `walls` emit a signal, so reporting the
-/// value first would send the author round the loop to be told about the
-/// host on the next run. One finding, and it is the one that has to be
-/// answered.
+/// value would send the author round the loop to be told about the host
+/// on the next run. The host fault itself is `check`'s, and `cairn synth`
+/// gates on `check`, so the line the author sees is the same one; what
+/// matters here is that this pass does not add a second sentence about
+/// the value under it.
 #[test]
-fn a_tail_on_the_wrong_host_is_a_host_fault_even_when_it_names_no_signal() {
+fn a_tail_on_the_wrong_host_draws_no_value_side_finding() {
     let out = synth_source(&source("  walls class=inner mat_slot=wall height=1 -> a\n"));
-    assert_eq!(codes(&out), ["E_LOGIC_MISPLACED_BINDING"]);
-    let d = only(&out, DiagnosticCode::LogicMisplacedBinding);
-    assert!(
-        d.primary.contains("`walls` cannot emit a signal"),
-        "{}",
-        d.primary,
-    );
+    assert_eq!(codes(&out), Vec::<&str>::new(), "{:#?}", out.diagnostics);
 }
 
 /// An actuator key on its own host, with a value that names no signal.
@@ -385,21 +387,28 @@ fn a_malformed_value_and_the_signal_it_leaves_unconsumed_are_both_reported() {
 
 // --- sensor tails --------------------------------------------------------
 
+/// A tail this pass will not honour registers no input port, and the
+/// `logic` line reading the signal is not told it is undefined.
+///
+/// `check::binding` is what refuses the line; the scope still has to come
+/// out of this pass without the driver *and* without a cascade, which is
+/// the half that stays here.
 #[test]
-fn a_sensor_tail_on_a_wall_is_refused_and_registers_no_input() {
+fn a_sensor_tail_on_a_wall_registers_no_input_and_no_cascade() {
     let out = synth_source(&source(concat!(
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
         "  logic sig.x = not sig.w\n",
     )));
-    let d = only(&out, DiagnosticCode::LogicMisplacedBinding);
+    // Root cause once, and it is `E_MISPLACED_BINDING` on the `walls`
+    // line: that `sig.w` is now defined by nothing is that finding's
+    // consequence, not a second one.
+    assert_eq!(codes(&out), Vec::<&str>::new(), "{:#?}", out.diagnostics);
+    let scope = out.scoped.scopes.first().expect("one scope");
     assert!(
-        d.primary.contains("`walls` cannot emit a signal"),
-        "{}",
-        d.primary,
+        scope.ir.inputs.is_empty(),
+        "the tail is not a sensor's, so it is no input port: {:#?}",
+        scope.ir.inputs,
     );
-    // Root cause once: the `logic` line below names `sig.w`, and that it
-    // is now undefined is this finding's consequence, not a second one.
-    assert_eq!(codes(&out), ["E_LOGIC_MISPLACED_BINDING"]);
 }
 
 #[test]
@@ -496,11 +505,12 @@ fn a_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
 
 #[test]
 fn an_unknown_keyword_that_matches_a_future_host_is_still_skipped() {
-    // `lamp` is the component §14.2 pairs with `lit_by=`, so its keyword
-    // string satisfies the host check on its own — but `lamp` is not a
-    // keyword the surface accepts, the member is `E_UNKNOWN_KEYWORD`, and
-    // the front end must not build a port on it. Without the role guard
-    // this line registers a live output on a member that does not exist.
+    // `lamp` is the component `spec/redstone` "Signal binding" pairs with
+    // `lit_by=`, so its keyword string satisfies the host check on its own
+    // — but `lamp` is not a keyword the surface accepts, the member is
+    // `E_UNKNOWN_KEYWORD`, and the front end must not build a port on it.
+    // Without the role guard this line registers a live output on a member
+    // that does not exist.
     let out = synth_source(&source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  lamp id=l1 lit_by=sig.a\n",
@@ -592,6 +602,194 @@ fn a_logic_lhs_outside_the_sig_namespace_is_refused_and_lowers_no_gate() {
     assert_eq!(codes(&out), ["E_LOGIC_INVALID_SIGNAL"]);
 }
 
+/// `spec/redstone` "Signal binding": a signal name is `sig.` and exactly
+/// one segment after it, on the left of a `logic` line as everywhere else,
+/// because that is the only shape an actuator can read.
+///
+/// The message names which way the name misses, so each branch has a row:
+/// outside the namespace (`foo`, with no segment after the head, is what
+/// keeps the head test ahead of the segment count), the namespace alone,
+/// and two and three segments after it. The rows with a reader check the
+/// refusal is not doubled: the left-hand side is a refused driver, so its
+/// reader is not also told it is unbound, and the reader's own consumer
+/// keeps it from being unused. The exact `codes` is also what shows no
+/// gate was lowered, which would add `W_LOGIC_UNUSED_SIGNAL`.
+#[test]
+fn a_logic_lhs_that_is_not_one_segment_after_sig_is_refused() {
+    for (body, lhs, why, fix) in [
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic foo = not sig.a\n",
+            ),
+            "foo",
+            "which is outside the `sig.` namespace",
+            "rename the left-hand side to `sig.<name>`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig = not sig.a\n",
+            ),
+            "sig",
+            "which is the `sig.` namespace itself rather than a signal in it",
+            "add a name, as in `sig.<name>`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig = not sig.a\n",
+                "  logic sig.o = not sig\n",
+                "  door id=front side=front at=center\n",
+                "  door[id=front] opened_by=sig.o\n",
+            ),
+            "sig",
+            "which is the `sig.` namespace itself rather than a signal in it",
+            "add a name, as in `sig.<name>`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig.x.y = not sig.a\n",
+            ),
+            "sig.x.y",
+            "which has 2 segments after `sig.`",
+            "keep one segment after `sig.`, as in `sig.x` or `sig.x_y`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig.x.y = not sig.a\n",
+                "  logic sig.o = not sig.x.y\n",
+                "  door id=front side=front at=center\n",
+                "  door[id=front] opened_by=sig.o\n",
+            ),
+            "sig.x.y",
+            "which has 2 segments after `sig.`",
+            "keep one segment after `sig.`, as in `sig.x` or `sig.x_y`",
+        ),
+        (
+            concat!(
+                "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                "  logic sig.x.y.z = not sig.a\n",
+            ),
+            "sig.x.y.z",
+            "which has 3 segments after `sig.`",
+            "keep one segment after `sig.`, as in `sig.x` or `sig.x_y_z`",
+        ),
+    ] {
+        let out = synth_source(&source(body));
+        assert_eq!(codes(&out), ["E_LOGIC_INVALID_SIGNAL"], "{body}");
+        let d = only(&out, DiagnosticCode::LogicInvalidSignal);
+        assert!(
+            d.primary
+                .contains(&format!("`logic {lhs} = ...` names `{lhs}`, {why}")),
+            "{}",
+            d.primary,
+        );
+        let footer = format!("Fix: {fix}, or delete the binding if nothing was meant to read it.");
+        assert!(
+            d.notes.iter().any(|n| n.message == footer),
+            "{footer}\n{:#?}",
+            d.notes,
+        );
+    }
+}
+
+/// The actuator side refuses the same name the left-hand side now does,
+/// so a `logic sig.x.y` line and an actuator reading `sig.x.y` are two
+/// findings of one code: neither is reported as unbound, and the right-hand
+/// side's `sig.a` is not reported as unused.
+#[test]
+fn an_actuator_reading_a_refused_lhs_is_refused_by_the_same_rule() {
+    let out = synth_source(&source(concat!(
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  logic sig.x.y = not sig.a\n",
+        "  door id=front side=front at=center\n",
+        "  door[id=front] opened_by=sig.x.y\n",
+    )));
+    assert_eq!(
+        codes(&out),
+        ["E_LOGIC_INVALID_SIGNAL", "E_LOGIC_INVALID_SIGNAL"],
+        "{:#?}",
+        out.diagnostics,
+    );
+}
+
+/// A refused left-hand side is never collected as a binding, so two lines
+/// with the same refused name are two refusals and not two drivers.
+#[test]
+fn two_lines_with_the_same_refused_lhs_are_two_refusals() {
+    let out = synth_source(&source(concat!(
+        "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "  logic sig.x.y = not sig.a\n",
+        "  logic sig.x.y = sig.a\n",
+    )));
+    assert_eq!(
+        codes(&out),
+        ["E_LOGIC_INVALID_SIGNAL", "E_LOGIC_INVALID_SIGNAL"],
+        "{:#?}",
+        out.diagnostics,
+    );
+}
+
+/// An unbound reference that is not a signal name cannot be driven from a
+/// sensor or a `logic` line, since both refuse it, so the footer offers
+/// only the rename. A signal name keeps both repairs.
+#[test]
+fn an_unbound_reference_is_offered_only_the_repairs_that_exist() {
+    for (reference, offers_drive) in [
+        ("sig.x.y", false),
+        ("sig", false),
+        ("foo.bar", false),
+        ("sig.nowhere", true),
+    ] {
+        for (line, label) in [
+            (
+                format!("  logic sig.o = not {reference}\n"),
+                "`logic` binding",
+            ),
+            (
+                format!("  assert always(sig.a -> eventually {reference} within 3)\n"),
+                "an `assert`",
+            ),
+        ] {
+            let body = format!(
+                concat!(
+                    "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+                    "  logic sig.k = not sig.a\n",
+                    "  door id=front side=front at=center\n",
+                    "  door[id=front] opened_by=sig.k\n",
+                    "{line}",
+                ),
+                line = line,
+            );
+            let out = synth_source(&source(&body));
+            let found: Vec<_> = out
+                .diagnostics
+                .iter()
+                .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+                .collect();
+            assert_eq!(found.len(), 1, "{body}{:#?}", out.diagnostics);
+            assert!(found[0].primary.contains(label), "{}", found[0].primary);
+            let footer = found[0]
+                .notes
+                .iter()
+                .find_map(|n| n.message.strip_prefix("Valid signals in scope: "))
+                .unwrap_or_else(|| panic!("{body}{:#?}", found[0].notes));
+            assert_eq!(
+                footer.contains(&format!("or drive `{reference}` from a sensor")),
+                offers_drive,
+                "{body}{footer}",
+            );
+            assert!(
+                footer.contains("Fix: rename to a defined signal"),
+                "{footer}",
+            );
+        }
+    }
+}
+
 // --- `assert` references -------------------------------------------------
 
 #[test]
@@ -665,8 +863,9 @@ fn an_assert_naming_a_signal_a_refused_binding_would_have_driven_is_not_a_second
     )));
     assert_eq!(
         codes(&out),
-        ["E_LOGIC_MISPLACED_BINDING"],
-        "{:#?}",
+        Vec::<&str>::new(),
+        "the tail is `check`'s `E_MISPLACED_BINDING`, and the `assert` over \
+         the signal it would have driven is not a second finding: {:#?}",
         out.diagnostics
     );
 }

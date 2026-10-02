@@ -1,9 +1,286 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "latest": "1.21.4",
+  "source": "DataVersion extracted from the game's own version metadata (misode/mcmeta `summary/versions`); releases only.",
   "versions": [
-    { "mc_version": "1.20.4", "data_version": 3700, "released": "2023-12-07" },
-    { "mc_version": "1.21",   "data_version": 3953, "released": "2024-06-13" },
-    { "mc_version": "1.21.4", "data_version": 4189, "released": "2024-12-03" }
+    {
+      "mc_version": "1.14",
+      "data_version": 1952,
+      "released": "2019-04-23",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.14.1",
+      "data_version": 1957,
+      "released": "2019-05-13",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.14.2",
+      "data_version": 1963,
+      "released": "2019-05-27",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.14.3",
+      "data_version": 1968,
+      "released": "2019-06-24",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.14.4",
+      "data_version": 1976,
+      "released": "2019-07-19",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.15",
+      "data_version": 2225,
+      "released": "2019-12-09",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.15.1",
+      "data_version": 2227,
+      "released": "2019-12-16",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.15.2",
+      "data_version": 2230,
+      "released": "2020-01-17",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.16",
+      "data_version": 2566,
+      "released": "2020-06-23",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.16.1",
+      "data_version": 2567,
+      "released": "2020-06-24",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.16.2",
+      "data_version": 2578,
+      "released": "2020-08-11",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.16.3",
+      "data_version": 2580,
+      "released": "2020-09-10",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.16.4",
+      "data_version": 2584,
+      "released": "2020-10-29",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.16.5",
+      "data_version": 2586,
+      "released": "2021-01-14",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.17",
+      "data_version": 2724,
+      "released": "2021-06-08",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.17.1",
+      "data_version": 2730,
+      "released": "2021-07-06",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.18",
+      "data_version": 2860,
+      "released": "2021-11-30",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.18.1",
+      "data_version": 2865,
+      "released": "2021-12-10",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.18.2",
+      "data_version": 2975,
+      "released": "2022-02-28",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19",
+      "data_version": 3105,
+      "released": "2022-06-07",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19.1",
+      "data_version": 3117,
+      "released": "2022-07-27",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19.2",
+      "data_version": 3120,
+      "released": "2022-08-05",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19.3",
+      "data_version": 3218,
+      "released": "2022-12-07",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.19.4",
+      "data_version": 3337,
+      "released": "2023-03-14",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20",
+      "data_version": 3463,
+      "released": "2023-06-02",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.1",
+      "data_version": 3465,
+      "released": "2023-06-12",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.2",
+      "data_version": 3578,
+      "released": "2023-09-20",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.3",
+      "data_version": 3698,
+      "released": "2023-12-04",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.4",
+      "data_version": 3700,
+      "released": "2023-12-07"
+    },
+    {
+      "mc_version": "1.20.5",
+      "data_version": 3837,
+      "released": "2024-04-23",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.20.6",
+      "data_version": 3839,
+      "released": "2024-04-29",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21",
+      "data_version": 3953,
+      "released": "2024-06-13"
+    },
+    {
+      "mc_version": "1.21.1",
+      "data_version": 3955,
+      "released": "2024-08-08",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.2",
+      "data_version": 4080,
+      "released": "2024-10-22",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.3",
+      "data_version": 4082,
+      "released": "2024-10-23",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.4",
+      "data_version": 4189,
+      "released": "2024-12-03"
+    },
+    {
+      "mc_version": "1.21.5",
+      "data_version": 4325,
+      "released": "2025-03-25",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.6",
+      "data_version": 4435,
+      "released": "2025-06-17",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.7",
+      "data_version": 4438,
+      "released": "2025-06-30",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.8",
+      "data_version": 4440,
+      "released": "2025-07-17",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.9",
+      "data_version": 4554,
+      "released": "2025-09-30",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.10",
+      "data_version": 4556,
+      "released": "2025-10-07",
+      "targetable": false
+    },
+    {
+      "mc_version": "1.21.11",
+      "data_version": 4671,
+      "released": "2025-12-09",
+      "targetable": false
+    },
+    {
+      "mc_version": "26.1",
+      "data_version": 4786,
+      "released": "2026-03-24",
+      "targetable": false
+    },
+    {
+      "mc_version": "26.1.1",
+      "data_version": 4788,
+      "released": "2026-04-01",
+      "targetable": false
+    },
+    {
+      "mc_version": "26.1.2",
+      "data_version": 4790,
+      "released": "2026-04-09",
+      "targetable": false
+    },
+    {
+      "mc_version": "26.2",
+      "data_version": 4903,
+      "released": "2026-06-16",
+      "targetable": false
+    }
   ]
 }

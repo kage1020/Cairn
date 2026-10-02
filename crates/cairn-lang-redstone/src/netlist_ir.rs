@@ -6,7 +6,8 @@
 //! [`crate::logic_ir::ScopedLogicIrEntry`] once and rewrites each
 //! [`crate::logic_ir::GateNode`] into a [`CellNode`] tagged with a
 //! [`LogicalCell`] — the top of the three-tier cell library documented in
-//! `spec/redstone` §14.6 (`Logical Cell → Edition Cell → Physical Tile`).
+//! `spec/redstone` "Edition differences" (`Logical Cell → Edition Cell →
+//! Physical Tile`).
 //! The Java `ComparatorAND` vs Bedrock `TorchAND` split is *not* decided
 //! here; that is the Edition Cell selection a follow-up pass will run
 //! against a target [`cairn_lang_core::Edition`].
@@ -16,13 +17,13 @@
 //! deliberately mirrors the Logic IR's [`crate::logic_ir::SignalRef`]
 //! shape so a downstream simulator can share the same forward-walk
 //! skeleton across both IRs. Delay is not carried — per `spec/redstone`
-//! §14.4 / §14.8 delay is first determined in the Placement IR.
+//! "Time model" and "Connection to the IR and phases" delay is first
+//! determined in the Placement IR.
 
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
-use serde::ser::SerializeMap;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 use crate::logic_ir::ScopeKind;
 
@@ -33,8 +34,13 @@ use crate::logic_ir::ScopeKind;
 /// consumer can dispatch by variant without cross-checking against
 /// [`NetlistIr::inputs`] or [`NetlistIr::cells`] lengths — the same
 /// invariant [`crate::logic_ir::SignalRef`] carries at the Logic IR layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[serde(tag = "kind", content = "index", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "index",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 #[non_exhaustive]
 pub enum NetRef {
     /// Index into [`NetlistIr::inputs`].
@@ -45,16 +51,17 @@ pub enum NetRef {
 
 /// Logical cell chosen for a [`CellNode`]. Edition-neutral by contract:
 /// the same [`LogicalCell::And`] value lowers to Java `ComparatorAND` or
-/// Bedrock `TorchAND` at a later pass (`spec/redstone` §14.6).
+/// Bedrock `TorchAND` at a later pass (`spec/redstone`
+/// "Edition differences").
 ///
 /// `#[non_exhaustive]` for two reasons: (1) the combinational variants
 /// `Xor` / `Nand` / `Nor` / `Mux` reserved on `GateKind` today are
 /// unreachable until a follow-up parser change teaches the surface
 /// call-expression form, and (2) the sequential-macro cells reserved by
-/// `spec/redstone` §14.1 (`latch` / `pulse` / `delay` / `edge_rising` /
-/// `edge_falling` / `counter`) will join once the synth path grows to
-/// emit them. Both add-in paths should stay non-breaking for downstream
-/// exhaust matches.
+/// `spec/redstone` "Two tiers, and the v1 boundary" (`latch` / `pulse` /
+/// `delay` / `edge_rising` / `edge_falling` / `counter`) will join once
+/// the synth path grows to emit them. Both add-in paths should stay
+/// non-breaking for downstream exhaust matches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -84,8 +91,9 @@ pub enum LogicalCell {
 /// cell picks its subset (`Not` uses just `A`; `Mux` uses `Sel` / `A` /
 /// `B`). `#[non_exhaustive]` so future cells (e.g. a `counter` with
 /// `reset` / `enable` ports) can add ports without breakage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum PortName {
     /// First data input (`a` operand).
@@ -99,7 +107,8 @@ pub enum PortName {
 /// One `(port name, driving net)` pair on a [`CellNode`]. Encoded as a
 /// struct rather than a tuple so the JSON wire form carries labelled
 /// fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CellPortDriver {
     /// Which input port this driver feeds.
     pub port: PortName,
@@ -111,7 +120,7 @@ pub struct CellPortDriver {
 ///
 /// The DAG is stored as a topologically ordered `Vec<CellNode>` on
 /// [`NetlistIr::cells`]; every driver [`NetRef`] is either a
-/// [`NetRef::Input`] or an earlier [`NetRef::Cell(j)`] where `j` is
+/// [`NetRef::Input`] or an earlier [`NetRef::Cell`]`(j)` where `j` is
 /// strictly less than this node's index. That mirrors the Logic IR
 /// invariant and makes any downstream simulator or placer a single
 /// forward pass.
@@ -180,27 +189,9 @@ pub struct NetlistIr {
     /// both IRs.
     #[serde(
         skip_serializing_if = "IndexMap::is_empty",
-        serialize_with = "serialize_signal_defs"
+        serialize_with = "crate::logic_ir::serialize_signal_defs"
     )]
     pub signal_defs: IndexMap<DottedRef, NetRef>,
-}
-
-/// Serialise `signal_defs` as a JSON object keyed by the dotted signal
-/// name flattened with `.`. Relies on [`DottedRef::to_string`] being
-/// injective on the value space that reaches this map — the synth pass
-/// only inserts distinct `sig.X` names (a second insert would already
-/// have surfaced `E_LOGIC_MULTIPLE_DRIVERS`), so distinct
-/// [`DottedRef`] keys map to distinct string keys and no entry is
-/// silently overwritten.
-fn serialize_signal_defs<S: Serializer>(
-    defs: &IndexMap<DottedRef, NetRef>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let mut map = serializer.serialize_map(Some(defs.len()))?;
-    for (name, net) in defs {
-        map.serialize_entry(&name.to_string(), net)?;
-    }
-    map.end()
 }
 
 impl NetlistIr {

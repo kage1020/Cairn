@@ -1,11 +1,11 @@
 //! Maturity tag for an [`IntentModule`](super::IntentModule).
 //!
-//! Cairn distinguishes three IR maturity states (see `spec/architecture.md`
-//! §3.2). The current `lower()` produces [`SemanticLevel::Grouped`] — the
-//! surface AST has been mechanically lifted into named members, but
-//! materials/themes have not been resolved yet. [`SemanticLevel::Lifted`]
-//! is the next maturity tier; [`SemanticLevel::Raw`] is reserved for
-//! schematic-import paths once that surface lands.
+//! Cairn distinguishes three IR maturity states (see `spec/architecture` "The
+//! Intent IR is rich and carries invariants"). The current `lower()` produces
+//! [`SemanticLevel::Grouped`] — the surface AST has been mechanically lifted
+//! into named members, but materials/themes have not been resolved yet.
+//! [`SemanticLevel::Lifted`] is the next maturity tier; [`SemanticLevel::Raw`]
+//! is reserved for schematic-import paths once that surface lands.
 
 use serde::Serialize;
 

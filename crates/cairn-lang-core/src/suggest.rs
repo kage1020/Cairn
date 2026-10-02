@@ -4,7 +4,7 @@
 //! unknown identifier against a known set (`E_UNKNOWN_KEYWORD`,
 //! `E_UNRESOLVED_SLOT`, the `--target` resolver in `cairn-lang-formats`) call
 //! it to attach a `did you mean X?` note. The function is fail-loud's
-//! second half — `spec/glossary.md` "Fail-loud" requires errors return the
+//! second half — `spec/glossary` "Fail-loud" requires errors return the
 //! closed set of valid candidates *and* a suggested DSL fix; the existing
 //! `expected one of: ...` notes cover the former and this module covers the
 //! latter.
@@ -17,6 +17,19 @@
 //! meant.
 
 use strsim::damerau_levenshtein;
+
+use crate::check::DiagnosticNote;
+
+/// The "did you mean X?" note every unknown-identifier diagnostic
+/// attaches, with `suggested` already spelled the way the source would
+/// write it (`@token`, `place.port`, a bare keyword).
+#[must_use]
+pub(crate) fn did_you_mean_note(suggested: &str) -> DiagnosticNote {
+    DiagnosticNote {
+        span: None,
+        message: format!("did you mean `{suggested}`?"),
+    }
+}
 
 /// Maximum Damerau-Levenshtein distance allowed for a suggestion, scaled by
 /// the user's input length. The cut-offs (3 / 6 chars) are picked so a
@@ -34,7 +47,7 @@ fn max_distance(input_len: usize) -> usize {
 }
 
 /// Return the candidate closest to `input` under Damerau-Levenshtein
-/// distance, subject to the length-scaled threshold from [`max_distance`].
+/// distance, subject to the length-scaled threshold from `max_distance`.
 ///
 /// Returns `None` when `input` is empty, no candidate sits within the
 /// threshold, or `input` exactly matches some candidate (an exact match is
@@ -45,7 +58,7 @@ fn max_distance(input_len: usize) -> usize {
 ///
 /// Comparison goes through Damerau-Levenshtein character-by-character, so
 /// case differences cost one edit each. DSL identifiers are case-sensitive
-/// (spec `syntax.md`) — `Walls` is a different keyword from `walls` — but
+/// (`spec/syntax`) — `Walls` is a different keyword from `walls` — but
 /// a wrong case is exactly the typo this function is meant to catch, and
 /// the distance threshold prevents the suggestion from drifting beyond
 /// "one or two edits away."
@@ -57,7 +70,7 @@ where
     if input.is_empty() {
         return None;
     }
-    let cap = max_distance(input.chars().count());
+    let max_edits = max_distance(input.chars().count());
     let mut best: Option<(usize, &'a str)> = None;
     for cand in candidates {
         if cand == input {
@@ -67,15 +80,15 @@ where
             // `did you mean \`walls\`?` next to the user's literal `walls`.
             return None;
         }
-        let d = damerau_levenshtein(input, cand);
-        if d > cap {
+        let distance = damerau_levenshtein(input, cand);
+        if distance > max_edits {
             continue;
         }
         match best {
             // Strict `<` keeps the tie-break "first wins": the candidate
             // iterator's order is the contract surface for ambiguous cases.
-            Some((bd, _)) if d >= bd => {}
-            _ => best = Some((d, cand)),
+            Some((best_distance, _)) if distance >= best_distance => {}
+            _ => best = Some((distance, cand)),
         }
     }
     best.map(|(_, c)| c)
@@ -116,6 +129,40 @@ where
         .filter(|(known_namespace, _)| *known_namespace == namespace)
         .map(|(_, known_path)| known_path);
     nearest_match(path, paths).map(|best| format!("{namespace}:{best}"))
+}
+
+/// How many candidates [`candidate_list`] prints before counting the
+/// rest.
+///
+/// A registry-pack alias group runs to sixteen ids where one spelling was
+/// split into a family (`light_block_0` … `_15`), and a note that prints
+/// all of them buries the line saying what went wrong.
+pub const CANDIDATES_SHOWN: usize = 4;
+
+/// Render a closed candidate set as the fragment a diagnostic note reads,
+/// in the order given and truncated to [`CANDIDATES_SHOWN`].
+///
+/// One definition because the truncation is a presentation rule about the
+/// same kind of list in two commands — the `E_UNKNOWN_ID` note and `cairn
+/// info`'s unsupported-entry rows — and a cap that differed between them
+/// would be a difference nobody chose.
+///
+/// Truncating at all is a claim only about the sentence. Where a consumer
+/// needs the closed set an error must return per `spec/versioning-editions`
+/// "Fail-loud and minimum-version inference", it reads the diagnostic's `data`
+/// payload, which carries every candidate.
+#[must_use]
+pub fn candidate_list(candidates: &[String]) -> String {
+    let listed = candidates
+        .iter()
+        .take(CANDIDATES_SHOWN)
+        .map(|c| format!("`{c}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match candidates.len().saturating_sub(CANDIDATES_SHOWN) {
+        0 => listed,
+        rest => format!("{listed} and {rest} more"),
+    }
 }
 
 #[cfg(test)]
@@ -176,7 +223,7 @@ mod tests {
 
     #[test]
     fn case_difference_is_a_one_edit_suggestion() {
-        // DSL identifiers are case-sensitive (spec/syntax.md) — `Walls` is
+        // DSL identifiers are case-sensitive (`spec/syntax`) — `Walls` is
         // a different keyword from `walls` — but wrong case is exactly the
         // typo we want to catch, so the suggestion fires (distance 1, well
         // inside the cap of 2 for a 5-char input).
@@ -197,6 +244,38 @@ mod tests {
         // A 3-char input gets cap 1; a 2-edit candidate must not be picked.
         let cands: &[&str] = &["abcdef"];
         assert!(nearest_match("abc", cands.iter().copied()).is_none());
+    }
+
+    fn owned(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| (*id).to_owned()).collect()
+    }
+
+    #[test]
+    fn a_short_candidate_list_is_printed_whole() {
+        assert_eq!(
+            candidate_list(&owned(&["minecraft:oak_sign", "minecraft:spruce_sign"])),
+            "`minecraft:oak_sign`, `minecraft:spruce_sign`",
+        );
+    }
+
+    #[test]
+    fn a_long_candidate_list_counts_the_rest() {
+        let ids: Vec<String> = (0..16)
+            .map(|i| format!("minecraft:light_block_{i}"))
+            .collect();
+        assert_eq!(
+            candidate_list(&ids),
+            "`minecraft:light_block_0`, `minecraft:light_block_1`, \
+             `minecraft:light_block_2`, `minecraft:light_block_3` and 12 more",
+        );
+    }
+
+    #[test]
+    fn an_empty_candidate_list_renders_empty() {
+        // Callers ask whether the set is empty before rendering it, so this
+        // is the shape of a bug rather than of a message — it must not come
+        // out as a stray "and 0 more".
+        assert_eq!(candidate_list(&[]), "");
     }
 
     #[test]

@@ -12,28 +12,26 @@ members = [
 ]
 
 [workspace.package]
-version = "2026.9.2"
+version = "2026.10.0"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
 repository = "https://github.com/kage1020/Cairn"
 homepage = "https://github.com/kage1020/Cairn"
 authors = ["kage1020 and the Cairn authors"]
-# Publish is enabled so release-plz's monthly minor path can open a release PR;
-# without this it silently no-ops (`prs:[]`) because it treats `publish = false`
-# crates as intentionally excluded from crates.io release automation. The
-# workflow's pre-set version step is what actually decides the CalVer number, so
-# this flag being on does not cause a spurious 0.0.0 push — release-plz only
-# reaches `cargo publish` when a release PR is merged with a real bumped version.
 publish = true
 
 [workspace.dependencies]
-cairn-lang-core = { version = "2026.9.2", path = "crates/cairn-lang-core" }
-cairn-lang-nbt = { version = "2026.9.2", path = "crates/cairn-lang-nbt" }
-cairn-lang-formats = { version = "2026.9.2", path = "crates/cairn-lang-formats" }
+cairn-lang-core = { version = "2026.10.0", path = "crates/cairn-lang-core" }
+cairn-lang-nbt = { version = "2026.10.0", path = "crates/cairn-lang-nbt" }
+cairn-lang-formats = { version = "2026.10.0", path = "crates/cairn-lang-formats" }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+# `deny` rather than `forbid` only so the tree-sitter binding's `ffi` module
+# can lift it: `forbid` refuses every inner `allow`/`expect`, including that
+# one. `cairn-lang-core`'s `unsafe_code_is_confined` test checks this line and
+# states the rest of the policy it enforces.
+unsafe_code = "deny"
 missing_docs = "warn"
 
 [workspace.lints.clippy]
@@ -43,6 +41,17 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 
 [profile.release]
-lto = "thin"
+# Sized for the release archives rather than build time; CI only builds this
+# profile on the publish matrix.
+lto = "fat"
 codegen-units = 1
 strip = "symbols"
+# A panic aborts the shipped binaries instead of exiting 101. Tests are
+# unaffected: Cargo builds test targets with unwinding regardless.
+panic = "abort"
+# `opt-level` is written out at the default 3 on purpose, because it is
+# the one setting here that trades throughput: "s" and "z" shrink the
+# gzipped binaries and slow the compiler passes, place-and-route most.
+# The `lowering` and `place_and_route` benches measure that side, and
+# CONTRIBUTING.md says how to rerun them before changing this.
+opt-level = 3

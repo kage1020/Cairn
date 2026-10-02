@@ -1,40 +1,37 @@
 //! Integration tests for `cairn_lang_redstone::compile_crossing`.
 //!
 //! Locks the observable behaviours of the crossing-legalization slice
-//! (`spec/redstone` §14.5, stage 4 of place-and-route): the
-//! `examples/redstone-door.crn` happy path (per edition), empty-module
-//! pass-through, the JSON wire form staying byte-identical to the
-//! delayed IR apart from the `stage` tag when no buffer coord landed
-//! (the field serde-skips on its default), the tag itself keeping a
-//! zero-buffer legalized dump distinguishable from its delayed input,
-//! and per-scope independence when a module carries more than one
-//! scope.
+//! (stage 4 of the pipeline `spec/redstone` "Place-and-route"), among
+//! them the `examples/redstone-door.crn` happy path (per edition), the
+//! JSON wire form staying byte-identical to the delayed IR apart from
+//! the `stage` tag when no buffer coord landed (the field serde-skips
+//! on its default), the tag itself keeping a zero-buffer legalized dump
+//! distinguishable from its delayed input, and the loud refusal of a
+//! second run over the pass's own output.
 //!
-//! Both redstone examples make a net go round another. The pad column
-//! at `x=0` is where: the pads are packed down it by index, so the
-//! second sensor's wire has to come round the first sensor's pad, and
-//! the row it comes round through is the row the cell drives its
-//! actuators out along. One cell and two sensors is enough —
-//! `redstone-door.crn` is that shape, and its cell's outward wire
-//! climbs a layer at its own doorstep rather than merging with the
-//! sensor's. Neither example reaches this pass with anything to
-//! legalize, which is what the assertions here say.
-
-use std::fmt::Write as _;
-use std::path::PathBuf;
+//! `examples/crossbar.crn` makes a net go round others: `cell #0`'s run
+//! climbs onto the bridge layer to clear the two sensor lanes, the
+//! escape `spec/redstone` "Place-and-route" specifies.
+//! `redstone-door.crn` does not. Its sensor pads stand a row either
+//! side of the cell's, so each sensor's wire comes in through the lane
+//! on its own side, and the cell's wire reaches the door's pad in the
+//! straight-line distance. Neither example reaches this pass with
+//! anything to legalize, which is what the assertions here say.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    BufferSegment, DiagnosticCode, PlacedCellNode, RouteLayer, ScopedPlacementIr, compile_crossing,
-    compile_delay, compile_edition_netlist, compile_netlist, compile_placement, compile_routing,
-    synthesize,
+    BufferCoord, BufferSegment, DiagnosticCode, PlacedCellNode, RouteLayer, compile_crossing,
+    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
 mod common;
 
-use common::normalize_stage_tags;
+use common::{
+    delayed_from_source, legalized_from_source, load_example, normalize_stage_tags,
+    shared_bus_source,
+};
 
 /// The Error-severity half of a pass's findings.
 ///
@@ -53,59 +50,27 @@ fn errors(
         .collect()
 }
 
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    let synth = synthesize(&intent);
-    assert!(
-        synth
-            .diagnostics
-            .iter()
-            .all(|d| d.severity() != Severity::Error),
-        "fixture must synth cleanly: {:?}",
-        synth.diagnostics,
-    );
-    let netlist = compile_netlist(&synth.scoped);
-    let edition_netlist = compile_edition_netlist(&netlist, edition);
-    let placement = compile_placement(&edition_netlist, &intent);
-    assert!(
-        placement.diagnostics.is_empty(),
-        "fixture must place cleanly: {:?}",
-        placement.diagnostics,
-    );
-    let routing = compile_routing(&placement.scoped);
-    assert!(
-        routing.diagnostics.is_empty(),
-        "fixture must route cleanly: {:?}",
-        routing.diagnostics,
-    );
-    let delay = compile_delay(&routing.scoped);
-    assert!(
-        delay.diagnostics.is_empty(),
-        "fixture must delay cleanly: {:?}",
-        delay.diagnostics,
-    );
-    delay.scoped
-}
-
 /// A shared bus of 16 cells legalizes at `void=2`, with one repeater
-/// per refresh point rather than one per cell.
+/// per refresh point on the bus rather than one per cell.
 ///
 /// Every cell reads `sig.b`. The trunk that carries it runs along the
 /// free row beside the cell row and each cell taps off it, so the
-/// 15-step point of the route into each of them is the same coord and
-/// one repeater refreshes all of them. Two coords rather than one,
-/// because the row is `2 * cells` columns long and the far half of it
-/// is past the second refresh point.
+/// routes into all of them share the trunk and the repeaters standing
+/// on it. Two coords rather than one, because the row is `2 * cells`
+/// columns long and the far half of it is past the second refresh
+/// point.
+///
+/// They stand 12 blocks apart rather than 15. Each cell is a Java
+/// comparator, which passes on the strength it reads rather than
+/// restoring it, so the dust from the trunk runs on through the chain
+/// of comparators after the tap. Every comparator but the last has a
+/// budget of 13: its wire out to the next cell goes round in 4 blocks,
+/// and the first coord on it that runs straight — where a repeater can
+/// refresh the rest — is 2 blocks out, so a tap may arrive over at most
+/// `15 - 2` blocks of dust. That budget, not the limit, is what the
+/// trunk's repeaters are spaced by. The chain's own nets carry
+/// repeaters of their own for the same reason, which is why this
+/// counts the trunk's alone.
 ///
 /// That the tree reaches the far cells along a trunk beside the row
 /// and not *through* the near ones is what makes this a small number
@@ -114,83 +79,214 @@ fn delayed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
 ///
 /// Built from source rather than by hand because the claim is about
 /// what a `.crn` a user can write does, and because the shape depends
-/// on where the placement pass lays the cell row.
+/// on where the placement pass lays the cell row. The source is
+/// `common::shared_bus_source`, which the Placement IR round-trip tests
+/// read back as well.
 #[test]
 fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
-    let mut source = String::from(
-        r"
-theme t:
-  slot wall -> @oak_planks
+    let legalized = legalized_from_source(&shared_bus_source(), Edition::Java);
 
-struct chain size=60x5
-  floor mat_slot=wall
-
-  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=pb at=inside.front  offset=0 y=0 -> sig.b
-
-  logic sig.s0 = sig.a and sig.b
-",
-    );
-    for i in 1..16 {
-        writeln!(
-            source,
-            "  logic sig.s{i} = sig.s{prev} and sig.b",
-            prev = i - 1
-        )
-        .expect("writing to a String cannot fail");
-    }
-    source.push_str(
-        r"
-  door id=d side=front at=center mat_slot=wall opened_by=sig.s15
-
-  circuit region=floor void=2
-",
-    );
-
-    let delayed = delayed_from_source(&source, Edition::Java);
-    let legalized = compile_crossing(&delayed);
-    assert!(
-        legalized.diagnostics.is_empty(),
-        "a bus every cell hangs off needs one repeater, not one per cell: {:?}",
-        legalized.diagnostics,
-    );
-
-    let cells = &legalized.scoped.scopes[0].ir.cells;
+    let cells = &legalized.scopes[0].ir.cells;
     assert_eq!(cells.len(), 16, "the fixture is the 16-cell chain");
-    let blocks: std::collections::BTreeSet<(u32, u32, u32)> = cells
-        .iter()
-        .flat_map(PlacedCellNode::buffer_coords)
-        .map(|b| (b.coord.x, b.coord.y, b.coord.z))
-        .collect();
+    let bus = cairn_lang_redstone::NetRef::Input(1);
+    let on_the_bus = |cell: &PlacedCellNode| -> Vec<(u32, u32, u32)> {
+        cell.buffer_coords()
+            .iter()
+            .filter(|b| {
+                cell.drivers
+                    .iter()
+                    .any(|d| d.net == bus && BufferSegment::Port(d.port) == b.port)
+            })
+            .map(|b| (b.coord.x, b.coord.y, b.coord.z))
+            .collect()
+    };
+    let blocks: std::collections::BTreeSet<(u32, u32, u32)> =
+        cells.iter().flat_map(on_the_bus).collect();
     assert_eq!(
         blocks,
-        [(14, 0, 2), (29, 0, 2)].into_iter().collect(),
-        "two blocks, on the plane, beside the row rather than over it — one \
+        [(12, 0, 2), (24, 0, 2)].into_iter().collect(),
+        "two blocks on the bus, on the plane, beside the row rather than over it — one \
          per refresh point and not one per cell",
     );
-    let attributions = cells
-        .iter()
-        .filter(|c| !c.buffer_coords().is_empty())
-        .count();
+    let attributions = cells.iter().filter(|c| !on_the_bus(c).is_empty()).count();
     assert!(
         attributions >= 2,
         "the sharing is only pinned if more than one cell names it: {attributions}",
     );
 }
 
+/// Two doors on one plate, one straight down the row and one a row over
+/// past the first door's pad: the repeater the two share stands on the
+/// trunk before the fork, not on it.
+///
+/// Pad #0 is 16 blocks down the row, so the wire to it runs straight
+/// from the sensor pad. The wire to pad #1 cannot go through pad #0 and
+/// has no layer to climb to, so it leaves the row at `(15,0,0)` — 15
+/// blocks along both routes, and a coord with wire on three sides. A
+/// repeater there would face one door and starve the other. The one on
+/// `(14,0,0)` refreshes both, and both segments are charged for that
+/// one block.
+#[test]
+fn two_doors_share_the_repeater_before_their_fork() {
+    let source = r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=17x3
+  floor mat_slot=wall
+  door id=d0 side=front at=center mat_slot=door
+  door id=d1 side=back at=center mat_slot=door
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door[id=d0] opened_by=sig.a
+  door[id=d1] opened_by=sig.a
+  circuit region=floor void=1
+";
+    let legalized = legalized_from_source(source, Edition::Java);
+    let outputs = &legalized.scopes[0].ir.outputs;
+    assert_eq!(outputs.len(), 2, "one actuator pad per door");
+    // No cells, so no cell row for the pads to step over: pad #1 is the
+    // next row down, and its route one block longer than pad #0's.
+    let pads: Vec<((u32, u32, u32), Option<u32>)> = outputs
+        .iter()
+        .map(|o| ((o.pad.x, o.pad.y, o.pad.z), o.wire_length()))
+        .collect();
+    assert_eq!(pads, vec![((16, 0, 0), Some(16)), ((16, 0, 1), Some(17))]);
+    let fork = (15, 0, 0);
+    for (index, output) in outputs.iter().enumerate() {
+        let buffers: Vec<(u32, u32, u32)> = output
+            .buffer_coords()
+            .iter()
+            .map(|b| (b.coord.x, b.coord.y, b.coord.z))
+            .collect();
+        assert_eq!(
+            buffers,
+            vec![(14, 0, 0)],
+            "output #{index} is fed through the trunk repeater, one short of the fork at {fork:?}",
+        );
+        assert_eq!(output.local_delay_ticks(), Some(1), "output #{index}");
+    }
+}
+
+/// The four-plate door of the two tests below: `sig.open` is the four
+/// plates combined by `op`, which lowers to three two-input cells.
+fn four_plates_one_door(op: &str) -> String {
+    format!(
+        r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=20x5
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b
+  pressure_plate id=pc at=front.outside offset=2 y=0 -> sig.c
+  pressure_plate id=pd at=inside.front offset=2 y=0 -> sig.d
+  logic sig.open = sig.a {op} sig.b {op} sig.c {op} sig.d
+  door[id=d] opened_by=sig.open
+  circuit region=floor void=2
+"
+    )
+}
+
+/// Four plates combined into one door through three cells that pass
+/// strength on, on either edition: the dust from a plate to the door is
+/// one strand, and it is buffered as one.
+///
+/// Every segment is at most 15 blocks — the one out to the door is 15
+/// exactly — so measured one at a time, as each net used to be, none
+/// needs a repeater. But a Bedrock OR is a dust merge and a Java
+/// comparator AND never outputs more than it reads, so the dust from
+/// `sig.a`'s pad through the three cells to the door is over 20 blocks
+/// with nothing restoring it, and the door never opened. The repeater
+/// goes on the wire out to the door, where there is straight wire to
+/// stand on, as early as the dust already spent upstream requires.
+#[test]
+fn cells_that_pass_strength_on_share_one_strand_with_their_inputs() {
+    for (op, edition) in [("or", Edition::Bedrock), ("and", Edition::Java)] {
+        let source = four_plates_one_door(op);
+        let legalized = legalized_from_source(&source, edition);
+        let ir = &legalized.scopes[0].ir;
+        assert_eq!(ir.cells.len(), 3, "{op}: three two-input cells");
+        let door = &ir.outputs[0];
+        assert_eq!(
+            door.wire_length(),
+            Some(15),
+            "{op}: the door's own segment is at the limit, not past it"
+        );
+        assert_eq!(
+            door.buffer_coords()
+                .iter()
+                .map(|b| (b.coord.x, b.coord.y, b.coord.z))
+                .collect::<Vec<_>>(),
+            vec![(11, 0, 1)],
+            "{op}: one repeater on the wire out to the door",
+        );
+        assert_eq!(
+            door.local_delay_ticks(),
+            Some(1),
+            "{op}: and one tick for it"
+        );
+    }
+}
+
+/// The same door through three cells that restore strength — a
+/// Bedrock `and` is torches, a Java `or` a repeater — takes no repeater
+/// anywhere: every segment is at most 15 blocks, and each cell starts
+/// the count again. The complement of the test above, so a
+/// `regenerates` that answered `false` too often would show here as
+/// repeaters on wire that needs none.
+#[test]
+fn cells_that_restore_strength_start_the_count_again() {
+    for (op, edition) in [("and", Edition::Bedrock), ("or", Edition::Java)] {
+        let legalized = legalized_from_source(&four_plates_one_door(op), edition);
+        let ir = &legalized.scopes[0].ir;
+        assert_eq!(ir.cells.len(), 3, "{op}: three two-input cells");
+        assert!(
+            ir.cells.iter().all(|cell| cell.cell.regenerates()),
+            "{op}: every cell restores strength on {edition:?}",
+        );
+        assert_eq!(
+            ir.outputs[0].wire_length(),
+            Some(15),
+            "{op}: the same layout as the pass-through case"
+        );
+        let buffers: Vec<_> = ir
+            .cells
+            .iter()
+            .flat_map(|cell| cell.buffer_coords().iter())
+            .chain(
+                ir.outputs
+                    .iter()
+                    .flat_map(|output| output.buffer_coords().iter()),
+            )
+            .collect();
+        assert_eq!(
+            buffers,
+            Vec::<&BufferCoord>::new(),
+            "{op}: no repeater anywhere"
+        );
+    }
+}
+
 /// AC1 — `examples/redstone-door.crn` compiled for Java survives
 /// crossing legalization: every driver segment sits under the
-/// dust-attenuation limit of 15 so no buffer coord materialises, and
-/// `buffer_coords` stays empty on the survived cell.
+/// dust-attenuation limit of 15, and its one cell, an `or`, lowers to
+/// `JavaRepeaterOr`, which restores strength — so no run of dust
+/// crosses the cell, no buffer coord materialises, and
+/// `buffer_coords` stays empty on the survived cell. An `and` would
+/// lower to a comparator, and the segments either side of it would
+/// count as one run.
 ///
 /// Three nets run in this scope, not one: each sensor drives the cell,
-/// and the cell drives the door. `sig.exit`'s pad sits behind
-/// `sig.step`'s in the `x=0` column, so its wire has to come round the
-/// pad in front of it, and the row it comes round through is the row
-/// the cell drives its actuator out along. The cell's wire therefore
-/// climbs onto the bridge layer at its own doorstep and runs the
-/// length of the region up there — the escape §14.5 specifies, in the
-/// smallest circuit the corpus has.
+/// and the cell drives the door. The pads in the `x=0` column step over
+/// the cell row, so `sig.step`'s stands at `(0,0,0)` and `sig.exit`'s
+/// at `(0,0,2)`, and each wire comes in through the lane on its own
+/// side. The cell's wire runs 6 blocks to the door's pad at `(6,0,0)`,
+/// the straight-line distance, so it goes round nothing and climbs no
+/// layer.
 #[test]
 fn redstone_door_java_carries_no_buffers() {
     let source = load_example("redstone-door.crn");
@@ -203,9 +299,8 @@ fn redstone_door_java_carries_no_buffers() {
     );
     assert!(
         legalized.diagnostics.is_empty(),
-        "the second sensor's wire comes round the first sensor's pad and the \
-         cell's outward run goes round that, so there is nothing left to \
-         report: {:?}",
+        "each sensor comes in through its own lane and the cell's outward \
+         run goes round nothing, so there is nothing to report: {:?}",
         legalized.diagnostics,
     );
     let entry = legalized
@@ -228,7 +323,7 @@ fn redstone_door_java_carries_no_buffers() {
 
 /// AC2 — the same example compiled for Bedrock legalizes identically:
 /// the cell realisation swaps and the geometry does not, so the same
-/// nets take the same coords. `wire_length` and `delay_ticks` are
+/// nets take the same coords. `wire_length` and `local_delay_ticks` are
 /// preserved verbatim from the delayed IR.
 #[test]
 fn redstone_door_bedrock_carries_no_buffers() {
@@ -252,24 +347,11 @@ fn redstone_door_bedrock_carries_no_buffers() {
         .first()
         .expect("gatehouse must have a placed cell");
     assert_eq!(
-        cell.delay_ticks(),
+        cell.local_delay_ticks(),
         Some(0),
         "delay ticks preserved from stage 3",
     );
     assert!(cell.buffer_coords().is_empty(), "no buffer expected");
-}
-
-/// AC3 — empty module (no scopes with redstone) passes through
-/// unchanged. Mirrors the pipeline-wide fail-loud policy: pass-through
-/// on empty, refuse on partial-but-broken.
-#[test]
-fn empty_module_passes_through() {
-    // Minimal `.crn` with a theme but no logic. Handled by delaying an
-    // upstream-empty scoped IR: `ScopedPlacementIr::new()` starts
-    // empty and every stage leaves it empty.
-    let legalized = compile_crossing(&ScopedPlacementIr::new());
-    assert!(legalized.diagnostics.is_empty());
-    assert!(legalized.scoped.scopes.is_empty());
 }
 
 /// AC4 — apart from the `stage` tag, the JSON wire form of the
@@ -339,9 +421,9 @@ fn legalized_with_zero_buffers_is_distinguishable_from_delayed() {
 /// AC — mirror of
 /// `json_output_byte_identical_apart_from_stage_tag_when_no_crossings_and_no_buffers`
 /// for a scope whose nets had to go round each other.
-/// `examples/crossbar.crn` sends one of its sensor signals up onto the
-/// bridge layer to clear the other, and that decision belongs to stage
-/// 2: by the time this pass runs it is in the routed lengths already,
+/// `examples/crossbar.crn` sends `cell #0`'s output up onto the bridge
+/// layer to clear the two sensor lanes, and that decision belongs to
+/// stage 2: by the time this pass runs it is in the routed lengths already,
 /// and every driver segment here sits below `DUST_ATTENUATION_LIMIT`,
 /// so the legalized JSON equals the delayed JSON apart from the stage
 /// tag. Pins two invariants at once: both gate cells and both door
@@ -380,14 +462,16 @@ fn json_output_byte_identical_apart_from_stage_tag_on_a_scope_with_escapes() {
 /// AC — two nets that want the coords beside one cell, in a
 /// reservation with no layer above the plane to climb to.
 ///
-/// The escape §14.5 specifies is "a bridge tile or a vertical layer",
-/// and `void=1` reserves neither. So the second net has to find its way
-/// round on the plane or not at all, and this fixture is the case where
-/// it cannot. `sig.f` fans out to two doors, so its own output net is
-/// laid first and takes the faces beside the cell; `sig.a`, which
-/// drives that cell, has none left to arrive through and nowhere to
-/// climb. The scope is refused rather than shorted, which is the whole
-/// trade this pipeline makes.
+/// The escape `spec/redstone` "Place-and-route" specifies is "a bridge
+/// tile or a vertical layer", and `void=1` reserves neither. So the
+/// second net has to find its way round on the plane or not at all, and
+/// this fixture is the case where it cannot. `sig.a` drives both the
+/// cell and the back door, so it has the most sinks and is laid first,
+/// and its run out to that door takes the faces of the front door's
+/// pad; `sig.f`, the cell's output, has none left to arrive through and
+/// nowhere to climb. With `void=2` the same scope routes. The scope is
+/// refused rather than shorted, which is the whole trade this pipeline
+/// makes.
 #[test]
 fn two_nets_that_want_one_coord_with_no_layer_above_are_refused() {
     let source = "\
@@ -401,12 +485,12 @@ struct thin size=4x4
   door  id=back  side=back  at=center mat_slot=door
 
   pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=plate2 at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=plate2 at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.f = sig.a and sig.b
 
   door[id=front] opened_by=sig.f
-  door[id=back]  opened_by=sig.f
+  door[id=back]  opened_by=sig.a
 
   circuit region=floor void=1
 ";
@@ -438,7 +522,7 @@ struct thin size=4x4
     assert!(
         refusal
             .primary
-            .contains("the faces it could arrive through are taken by cell #0"),
+            .contains("the faces it could arrive through are taken by sig.a"),
         "and names the net in the way: {}",
         refusal.primary,
     );
@@ -453,6 +537,85 @@ struct thin size=4x4
     assert!(
         routed.scoped.scopes.iter().all(|e| e.name != "thin"),
         "failed scope must elide before anything downstream reads it",
+    );
+
+    // The layer is what was missing: one more and the scope routes.
+    let module = parse(&source.replace("void=1", "void=2")).expect("parse");
+    let intent = lower(&module);
+    let edition_netlist =
+        compile_edition_netlist(&compile_netlist(&synthesize(&intent).scoped), Edition::Java);
+    let routed = compile_routing(&compile_placement(&edition_netlist, &intent).scoped);
+    assert!(
+        routed.scoped.scopes.iter().any(|e| e.name == "thin"),
+        "void=2 gives the escape a layer: {:?}",
+        routed.diagnostics,
+    );
+}
+
+/// The same refusal where the stranded sink is a cell body rather than
+/// a pad.
+///
+/// The fixture above strands an actuator pad, and
+/// `crossbar_void_one_is_refused_before_any_crossing_is_computed` below
+/// strands one too; neither has a cell coord as the sink. Here two
+/// cells form a chain at `void=1`, and the second cell's coord,
+/// `(3,0,1)`, is the sink `cell #0`'s output cannot reach: the refusal
+/// has to name a cell coord, and the nets standing on its faces. With
+/// `void=2` the same scope routes.
+#[test]
+fn a_cell_with_its_faces_taken_and_no_layer_above_is_refused() {
+    let source = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct chain size=5x3
+  floor mat_slot=wall
+  door id=d0 side=front at=center mat_slot=door
+  pressure_plate id=p0 at=front.outside offset=0 y=0 -> sig.s0
+  pressure_plate id=p1 at=inside.front offset=1 y=0 -> sig.s1
+  logic sig.c0 = sig.s0 and sig.s1
+  logic sig.c1 = sig.c0 and sig.s0
+  door[id=d0] opened_by=sig.c1
+  circuit region=floor void=1
+";
+    let routed_at = |source: &str| {
+        let intent = lower(&parse(source).expect("parse"));
+        let edition_netlist =
+            compile_edition_netlist(&compile_netlist(&synthesize(&intent).scoped), Edition::Java);
+        compile_routing(&compile_placement(&edition_netlist, &intent).scoped)
+    };
+
+    let routed = routed_at(source);
+    let refusal = routed
+        .diagnostics
+        .iter()
+        .find(|d| d.code == DiagnosticCode::RouteCongestion)
+        .unwrap_or_else(|| panic!("void=1 must refuse: {:?}", routed.diagnostics));
+    assert!(
+        refusal
+            .primary
+            .contains("cannot reach (3,0,1) from the driver at (1,0,1)"),
+        "the stranded sink is cell #1's body, reached from cell #0's: {}",
+        refusal.primary,
+    );
+    assert!(
+        refusal
+            .primary
+            .contains("the faces it could arrive through are taken by sig.s0 and cell #1"),
+        "and the refusal names the nets on its faces: {}",
+        refusal.primary,
+    );
+    assert!(
+        routed.scoped.scopes.iter().all(|e| e.name != "chain"),
+        "failed scope must elide before anything downstream reads it",
+    );
+
+    let routed = routed_at(&source.replace("void=1", "void=2"));
+    assert!(
+        routed.scoped.scopes.iter().any(|e| e.name == "chain"),
+        "void=2 gives the escape a layer: {:?}",
+        routed.diagnostics,
     );
 }
 
@@ -502,15 +665,19 @@ fn crossbar_void_one_is_refused_before_any_crossing_is_computed() {
     );
 }
 
-/// AC5 — running the crossing pass twice is idempotent on a
-/// fixture that has nothing to legalize: the second run reads the
-/// same input as the first and produces the same output. Guards
-/// against a future refactor that starts mutating shared state across
-/// invocations.
+/// Two runs over the same delayed input produce the same output: the
+/// pass is deterministic and leaves its input untouched. Guards against
+/// a future refactor that starts mutating shared state across
+/// invocations. This is not idempotence — feeding the pass its own
+/// output is refused, as the next test pins.
 #[test]
-fn crossing_is_idempotent_on_clean_fixture() {
-    let source = load_example("redstone-door.crn");
-    let delayed = delayed_from_source(&source, Edition::Java);
+fn two_runs_over_the_same_delayed_input_agree() {
+    // The shared bus, not `redstone-door.crn`: the door carries no
+    // repeaters, so it would agree on `buffer_coords` vacuously. The
+    // bus carries them on its trunk and on the nets between its
+    // comparators, whose placement depends on the budgets the delay
+    // pass works out across the cells.
+    let delayed = delayed_from_source(&shared_bus_source(), Edition::Java);
     let first = compile_crossing(&delayed);
     let second = compile_crossing(&delayed);
     assert_eq!(
@@ -518,7 +685,34 @@ fn crossing_is_idempotent_on_clean_fixture() {
         serde_json::to_string_pretty(&second.scoped).expect("second serialises"),
         "two independent crossing runs on the same input must produce the same output",
     );
+    assert!(
+        first.scoped.scopes[0]
+            .ir
+            .cells
+            .iter()
+            .any(|cell| !cell.buffer_coords().is_empty()),
+        "the fixture carries repeaters, so the agreement covers where they stand",
+    );
     assert_eq!(first.diagnostics.len(), second.diagnostics.len());
+}
+
+/// Chaining `compile_crossing(&legalized.scoped)` is forbidden by the
+/// producer↔variant table on `PlacementPhase`, and the panic it raises
+/// names the cell that tripped it. The unit test in `src/crossing.rs`
+/// pins the refusal over a hand-built IR; this one feeds the pass an IR
+/// that came out of `compile_delay` over a real fixture, the way the
+/// routing and delay passes' equivalents do. `gatehouse` carries both
+/// cells and outputs, so the identity in the panic also pins that the
+/// cell loop runs before the output loop — which the hand-built IR,
+/// having no outputs, cannot observe.
+#[test]
+#[should_panic(
+    expected = "for cell #0 at (1,0,1) in struct `gatehouse` — crossing legalization must run exactly once per delayed IR"
+)]
+fn re_running_crossing_pass_panics_loudly() {
+    let source = load_example("redstone-door.crn");
+    let legalized = compile_crossing(&delayed_from_source(&source, Edition::Java));
+    let _twice = compile_crossing(&legalized.scoped);
 }
 
 /// The exact-fit boundary the placement pass now allows, carried all the
@@ -542,7 +736,7 @@ struct gen size=9x8
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.c0 = sig.a or sig.b
   logic sig.c1 = sig.c0 and sig.b
   logic sig.c2 = sig.c1 or sig.b
@@ -590,7 +784,7 @@ struct reach size=40x6
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.c = sig.a or sig.b
   door[id=front] opened_by=sig.c
   circuit region=floor void=3
@@ -620,14 +814,14 @@ struct reach size=40x6
     );
 
     assert!(
-        output.delay_ticks().is_some_and(|ticks| ticks >= 1),
+        output.local_delay_ticks().is_some_and(|ticks| ticks >= 1),
         "the outward segment must be charged for its repeaters, got {:?}",
-        output.delay_ticks(),
+        output.local_delay_ticks(),
     );
     assert_eq!(
         u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
             * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
-        output.delay_ticks().expect("delayed"),
+        output.local_delay_ticks().expect("delayed"),
         "every tick the delay pass counted must have a coord behind it",
     );
     assert!(
@@ -654,7 +848,7 @@ struct pair size=40x6
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.c = sig.a or sig.b
   door[id=front] opened_by=sig.c
   circuit region=floor void=3
@@ -664,9 +858,12 @@ struct pair size=40x6
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
     let output = scope.ir.outputs.first().expect("the actuator");
 
-    // `buffer_count_for_segment` is `(s - 1) / 15`; asserting the pass's
-    // figure against that formula rather than against a literal keeps
-    // the two from being re-derived from each other.
+    // `buffer_count_for_segment` is `(s - 1) / 15`, the exact count on
+    // a route that runs straight and unbranched through every point a
+    // repeater refreshes it — as this one does — and only a floor on
+    // any other. Asserting the pass's figure against that formula
+    // rather than against a literal keeps the two from being
+    // re-derived from each other.
     let segment = output.wire_length().expect("routed");
     let expected = (segment - 1) / 15;
     assert_eq!(
@@ -694,7 +891,7 @@ struct fan size=40x6
   door id=d1 side=front at=center mat_slot=door
   door id=d2 side=back at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.f = sig.a and sig.b
   door[id=d1] opened_by=sig.f
   door[id=d2] opened_by=sig.f
@@ -763,7 +960,7 @@ struct pass size=40x6
     assert_eq!(
         u32::try_from(output.buffer_coords().len()).expect("buffer count fits")
             * cairn_lang_redstone::BUFFER_REPEATER_TICKS,
-        output.delay_ticks().expect("delayed"),
+        output.local_delay_ticks().expect("delayed"),
         "every tick counted at stage 3 has a coord at stage 4",
     );
 }
@@ -783,7 +980,7 @@ struct reach size=40x6
   floor mat_slot=wall
   door id=front side=front at=center mat_slot=door
   pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
   logic sig.c = sig.a or sig.b
   door[id=front] opened_by=sig.c
   circuit region=floor void=3
@@ -792,14 +989,37 @@ struct reach size=40x6
     let out = compile_crossing(&delayed);
     let json = serde_json::to_string(&out.scoped).expect("serialise");
 
+    // The output node's own object, not the whole dump: a cell emits
+    // `wire_length` and `local_delay_ticks` too, so a substring search
+    // over the dump passes even when the actuator serialises a key of
+    // its own under the wrong name.
+    let value: serde_json::Value = serde_json::from_str(&json).expect("dump parses");
+    let output = value
+        .as_array()
+        .and_then(|scopes| scopes.iter().find(|s| s["name"] == "reach"))
+        .map(|scope| &scope["ir"]["outputs"][0])
+        .expect("the reach scope carries one actuator");
+
     for key in [
-        "\"stage\":\"crossing\"",
-        "\"pad\":",
-        "\"wire_length\":",
-        "\"delay_ticks\":",
-        "\"buffer_coords\":",
-        "\"port\":\"out\"",
+        "name",
+        "driver",
+        "pad",
+        "stage",
+        "wire_length",
+        "local_delay_ticks",
+        "buffer_coords",
     ] {
-        assert!(json.contains(key), "the dump must carry {key}: {json}");
+        assert!(
+            output.get(key).is_some(),
+            "the actuator's own object must carry {key}: {output}",
+        );
     }
+    assert_eq!(output["stage"], "crossing");
+    // A pad's buffers name the wire out rather than one of the driver
+    // ports a cell's do.
+    assert_eq!(output["buffer_coords"][0]["port"], "out");
+    assert!(
+        output.get("delay_ticks").is_none(),
+        "the actuator must not carry the pre-rename key: {output}",
+    );
 }

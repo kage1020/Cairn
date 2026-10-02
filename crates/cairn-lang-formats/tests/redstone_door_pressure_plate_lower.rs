@@ -9,19 +9,13 @@
 //! logic-graph signal. Line-number references are intentionally avoided
 //! so the tests survive edits to the fixture.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::{lower, parse, resolve};
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::examples_dir;
 
 fn lower_redstone_door() -> BlockArrayIr {
     lower_redstone_door_with(builtin_java(), &builtin_java().data_versions.latest)
@@ -72,7 +66,16 @@ fn redstone_door_palette_contains_oak_pressure_plate() {
 #[test]
 fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
     let pack = builtin_bedrock();
-    for version in pack.data_versions.versions.iter().map(|e| &e.mc_version) {
+    // The buildable rows only: the table also carries the releases the
+    // pack can order a floor against but has no block data for, and
+    // pinning a lowering to one of those checks nothing.
+    for version in pack
+        .data_versions
+        .versions
+        .iter()
+        .filter(|e| e.targetable)
+        .map(|e| &e.mc_version)
+    {
         let out = lower_redstone_door_with(pack, version);
         let ba = out.structures.get("struct::gatehouse").unwrap();
         let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
@@ -114,8 +117,10 @@ fn redstone_door_outside_plate_falls_back_to_wall_column_without_overhang() {
 
 #[test]
 fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
-    // `pressure_plate id=inner at=inside.front offset=0 y=0` — shift-inward
-    // from (0, 0, 4) is (0, 0, 3), well within dims.
+    // `pressure_plate id=inner at=inside.front offset=1 y=0` — shift-inward
+    // from (1, 0, 4) is (1, 0, 3), the first interior cell along the front
+    // wall. `offset=0` would be the corner, whose inward cell sits under
+    // the left wall.
     let out = lower_redstone_door();
     let ba = out.structures.get("struct::gatehouse").unwrap();
     let plate_idx = u16::try_from(
@@ -126,7 +131,7 @@ fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
             .expect("oak_pressure_plate palette entry present"),
     )
     .expect("palette index fits in u16");
-    let i = ba.dims.index(0, 0, 3).expect("interior row within bounds");
+    let i = ba.dims.index(1, 0, 3).expect("interior row within bounds");
     assert_eq!(ba.voxels[i].0, plate_idx);
 }
 

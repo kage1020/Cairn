@@ -7,53 +7,20 @@
 //! L's elbow (corner omitted, axis swap, off-by-one in either leg) would
 //! pass `village_lower` and only fail at this boundary. The fixture
 //! intentionally places the middle home so the elbow column clears every
-//! footprint, pinning `blocked_count == 0` as the regression-free state.
+//! footprint, pinning `blocked_count == 0` as the regression-free state;
+//! that, and the walkway's key, are asserted for every walkway example in
+//! `walkway_examples_lower`.
 
-use std::path::PathBuf;
+use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex};
 
-use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex, lower_to_block_array};
-use cairn_lang_core::check::DiagnosticCode;
-use cairn_lang_core::{lower, parse, resolve};
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{lowered_with_resolver_diagnostics, read_example};
 
 fn lower_l_walkway() -> BlockArrayIr {
-    let source = std::fs::read_to_string(examples_dir().join("l-walkway.crn"))
-        .expect("l-walkway.crn must read");
-    let module = parse(&source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let mut out = lower_to_block_array(&ir, &resolution, None);
-    // Mirror the CLI wiring: resolver diagnostics fire before lowering, so
-    // merge both lists for the W_WALKWAY_BLOCKED assertion below.
-    let mut combined = resolution.diagnostics;
-    combined.append(&mut out.diagnostics);
-    out.diagnostics = combined;
-    out
+    lowered_with_resolver_diagnostics(&read_example("l-walkway.crn"))
 }
 
 const WALKWAY_KEY: &str = "walkway::duo::home1.entry__home3.side_entry";
-
-#[test]
-fn l_walkway_emits_single_walkway_with_expected_key() {
-    let out = lower_l_walkway();
-    assert_eq!(
-        out.walkways.len(),
-        1,
-        "expected exactly one walkway, got {:?}",
-        out.walkways.keys().collect::<Vec<_>>(),
-    );
-    assert!(
-        out.walkways.contains_key(WALKWAY_KEY),
-        "missing walkway under key `{WALKWAY_KEY}`, keys = {:?}",
-        out.walkways.keys().collect::<Vec<_>>(),
-    );
-}
 
 #[test]
 fn l_walkway_spans_both_axes_with_pinned_bounding_box() {
@@ -131,25 +98,5 @@ fn l_walkway_block_array_paints_27_gravel_cells() {
     assert_eq!(
         gravel_count, 27,
         "expected 27 gravel cells (x-leg 12 + z-leg 15 after corner-dedup), got {gravel_count}",
-    );
-}
-
-#[test]
-fn l_walkway_emits_no_walkway_blocked_warning() {
-    // Geometry is chosen so the L clears every home footprint:
-    //   - x-leg at z=3 is north of home1 / home2 (max z=2)
-    //   - z-leg at x=12 is west of home2 / home3 (min x=13)
-    // `build_walkway_array` reports the skip count via W_WALKWAY_BLOCKED,
-    // so the diagnostic's absence is the integration-layer proxy for
-    // `skipped == 0`.
-    let out = lower_l_walkway();
-    let blocked: Vec<_> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::WalkwayBlocked)
-        .collect();
-    assert!(
-        blocked.is_empty(),
-        "L-walkway must not collide with any placement, got {blocked:#?}",
     );
 }

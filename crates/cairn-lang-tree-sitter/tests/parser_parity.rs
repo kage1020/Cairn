@@ -2,14 +2,12 @@
 //!
 //! The grammar in this crate is a second implementation of the language
 //! `cairn-lang-core` defines, so any source the two disagree about is a
-//! bug in one of them — and by [the design doc's constraint 1][design],
-//! the reference parser is the one that is right. Nothing else in the
-//! crate compares them: `tests/examples.rs` checks the grammar accepts
-//! every file in `examples/`, which is one direction over a corpus of
-//! twelve valid files, and `test/corpus/` pins trees this grammar builds
-//! without consulting the other side at all.
-//!
-//! [design]: ../../../docs/superpowers/specs/2026-07-23-tree-sitter-cairn-design.md
+//! bug in one of them — and the reference parser is by design the one
+//! that is right. Nothing else in the crate compares them:
+//! `tests/examples.rs` checks the grammar accepts every file in
+//! `examples/`, which is one direction over a corpus of twelve valid
+//! files, and `test/corpus/` pins trees this grammar builds without
+//! consulting the other side at all.
 //!
 //! Every fixture below is fed to both parsers and their verdicts compared.
 //! The expected verdict is written out too, so a fixture that silently
@@ -56,6 +54,41 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ),
     ("requires_other_prefix", "@requires mc>=1.20\n", Accept),
     ("requires_bare", "@requires 1.20\n", Accept),
+    // A pre-release label carries a `-`, which the reference lexer used to
+    // refuse outright while `directive_literal` (`[^#\r\n \t]+`) has always
+    // taken it — a live divergence that was never in `KNOWN_DIVERGENCES`
+    // because no fixture held a `-` outside an `->`. Both accept it now.
+    (
+        "requires_prerelease",
+        "@requires version>=1.21.4-rc1\n",
+        Accept,
+    ),
+    // The rest of that class: a character no token starts with, and an
+    // unterminated `"`. The reference parser keeps what it cannot lex as
+    // part of the value, the way `directive_literal` always has.
+    ("cairn_unlexable_value", "@cairn 2026.6+build\n", Accept),
+    (
+        "cairn_unterminated_quote",
+        "@cairn 2026.6 \"draft\n",
+        Accept,
+    ),
+    // A tab inside the stretch that quote opens is still a tab: no part
+    // of a value on either side.
+    (
+        "cairn_tab_in_unterminated_quote",
+        "@cairn 2026.6 \"dr\taft\n",
+        Reject,
+    ),
+    (
+        "requires_unlexable_operator",
+        "@requires version~=1.21\n",
+        Accept,
+    ),
+    (
+        "requires_edition_scope",
+        "@requires java version>=1.21.4\n",
+        Accept,
+    ),
     (
         "intended_targets",
         "@intended_targets [\"1.20.4\",\"1.21.4\"]\n",
@@ -82,6 +115,124 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     // -- theme bodies ------------------------------------------------
     ("slot_material", "theme t:\n  slot floor -> @oak\n", Accept),
     ("slot_ident", "theme t:\n  slot floor -> oak\n", Accept),
+    // A canonical token may carry a block-state literal, `[k=v,...]`,
+    // when the `[` touches the name. Values are the three shapes a block
+    // state takes: a word, a number, a boolean.
+    (
+        "slot_state_literal",
+        "theme t:\n  slot floor -> @oak_log[axis=x]\n",
+        Accept,
+    ),
+    (
+        "slot_state_literal_pairs",
+        "theme t:\n  slot s -> @oak_stairs[half=top, facing=north]\n",
+        Accept,
+    ),
+    (
+        "slot_state_literal_number_and_bool",
+        "theme t:\n  slot c -> @cake[bites=3,lit=true]\n",
+        Accept,
+    ),
+    (
+        "slot_state_literal_interior_spaces",
+        "theme t:\n  slot s -> @oak_stairs[ half = top , facing = north ]\n",
+        Accept,
+    ),
+    (
+        "arg_state_literal",
+        "struct s size=3x3\n  floor mat_slot=f\n  thing mat=@oak_log[axis=x]\n",
+        Accept,
+    ),
+    // After a space the `[` is not the token's, and a slot takes one value.
+    (
+        "slot_state_literal_after_a_space",
+        "theme t:\n  slot floor -> @oak_log [axis=x]\n",
+        Reject,
+    ),
+    // A dotted token is abstract: the theme binding it picks the block, so
+    // there is no one block for a state to belong to and the token takes no
+    // literal. A touching `[` is then whatever comes next — nothing, in a
+    // slot, which ends at its value; a positional after an argument, or
+    // the next item of a value list, where something may follow.
+    (
+        "abstract_state_literal",
+        "theme t:\n  slot floor -> @floor.wood[axis=x]\n",
+        Reject,
+    ),
+    (
+        "abstract_token_then_positional_touching",
+        "struct s size=3x3\n  thing mat=@a.b[1]\n",
+        Accept,
+    ),
+    (
+        "abstract_token_positional_then_list_touching",
+        "struct s size=3x3\n  thing @a.b[1]\n",
+        Accept,
+    ),
+    (
+        "value_list_abstract_token_then_list_touching",
+        "struct s size=3x3\n  thing mat=[@a.b[c]]\n",
+        Accept,
+    ),
+    (
+        "place_abstract_theme_then_positional_touching",
+        "site s:\n  place id=p use=d theme=@a.b[1]\n",
+        Accept,
+    ),
+    (
+        "deep_abstract_token_then_positional_touching",
+        "struct s size=3x3\n  thing mat=@a.b.c[1]\n",
+        Accept,
+    ),
+    (
+        "state_literal_empty",
+        "theme t:\n  slot f -> @oak_log[]\n",
+        Reject,
+    ),
+    (
+        "state_literal_unterminated",
+        "theme t:\n  slot f -> @oak_log[axis=x\n",
+        Reject,
+    ),
+    (
+        "state_literal_no_value",
+        "theme t:\n  slot f -> @oak_log[axis=]\n",
+        Reject,
+    ),
+    (
+        "state_literal_trailing_comma",
+        "theme t:\n  slot f -> @oak_log[axis=x,]\n",
+        Reject,
+    ),
+    (
+        "state_literal_double_comma",
+        "theme t:\n  slot f -> @oak_stairs[half=top,,facing=north]\n",
+        Reject,
+    ),
+    // Minecraft's syntax, not a Cairn list: the comma is not optional.
+    (
+        "state_literal_no_comma",
+        "theme t:\n  slot f -> @oak_stairs[half=top facing=north]\n",
+        Reject,
+    ),
+    (
+        "state_literal_string_value",
+        "theme t:\n  slot f -> @oak_log[axis=\"x\"]\n",
+        Reject,
+    ),
+    // In a value list a token and a nested list used to be two items
+    // whether or not a space stood between them. Touching, the `[` is now
+    // the token's, and `b` is no `key=value`; apart, they are still two.
+    (
+        "value_list_token_then_list_touching",
+        "struct s size=3x3\n  thing mat=[@a[b]]\n",
+        Reject,
+    ),
+    (
+        "value_list_token_then_list_apart",
+        "struct s size=3x3\n  thing mat=[@a [b]]\n",
+        Accept,
+    ),
     ("slot_string", "theme t:\n  slot floor -> \"oak\"\n", Accept),
     ("slot_int", "theme t:\n  slot floor -> 3\n", Accept),
     ("slot_dotted", "theme t:\n  slot a -> b.c\n", Accept),
@@ -119,6 +270,71 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("theme_no_body", "theme empty:\n", Accept),
+    // -- member-level version floors ----------------------------------
+    //
+    // `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    // gives `def` and `theme` a floor of their own. Its expression is the
+    // opaque rest-of-line slice `@requires` takes, so the grammar\'s job
+    // here is *where* the line may stand, not what is on it.
+    (
+        "def_member_requires",
+        "def d size=2x2:\n  requires version>=1.21\n",
+        Accept,
+    ),
+    (
+        "def_member_requires_scoped",
+        "def d size=2x2:\n  requires java version>=1.21.4\n",
+        Accept,
+    ),
+    // The expression is opaque to both parsers, so an unreadable one is
+    // `E_INVALID_REQUIRES` from `check` rather than a syntax error — the
+    // same division `@requires mc>=1.20` is already under.
+    (
+        "def_member_requires_nonsense",
+        "def d size=2x2:\n  requires a=1\n",
+        Accept,
+    ),
+    (
+        "def_member_requires_unlexable",
+        "def d size=2x2:\n  requires version~=1.21\n",
+        Accept,
+    ),
+    (
+        "def_member_requires_no_value",
+        "def d size=2x2:\n  requires\n",
+        Reject,
+    ),
+    (
+        "theme_member_requires",
+        "theme t:\n  requires version>=1.21\n  slot floor -> @oak\n",
+        Accept,
+    ),
+    // A `struct` and a `site` are the build rather than a part of one, so
+    // the floor on them is the file\'s and is spelled `@requires`.
+    (
+        "struct_member_requires",
+        "struct s size=3x3\n  requires version>=1.21\n",
+        Reject,
+    ),
+    (
+        "site_member_requires",
+        "site p:\n  requires version>=1.21\n",
+        Reject,
+    ),
+    // Nor may a member carry one: the floor belongs to the part, and a
+    // `walls` line is not a part.
+    (
+        "member_child_requires",
+        "def d size=2x2:\n  walls height=3\n    requires version>=1.21\n",
+        Reject,
+    ),
+    // `requires` is an ordinary word everywhere the line is not legal, so
+    // a member may still be called one where no floor may stand.
+    (
+        "struct_member_named_requires",
+        "struct s size=3x3\n  requires a=1\n",
+        Accept,
+    ),
     // -- member commands ---------------------------------------------
     (
         "struct_member",
@@ -292,6 +508,14 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { 01 -> 1 }\n",
         Accept,
     ),
+    // A row's pattern is bounded by the input arity and nothing else.
+    // Twenty ones used to overflow the `i64` `scan_number` parsed every
+    // digit run into, a ceiling this grammar never had.
+    (
+        "truth_row_wider_than_i64",
+        "struct s size=3x3\n  assert truth(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t -> z) { 11111111111111111111 -> 1 }\n",
+        Accept,
+    ),
     (
         "truth_multi_digit_output",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 0 -> 10 }\n",
@@ -305,6 +529,82 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "truth_leading_semicolon",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { ; 0 -> 1 }\n",
+        Reject,
+    ),
+    // A `-` is a don't-care input, and the character it shares with `->`
+    // is why `bit_pattern` is an external token here. The pair below is
+    // the whole reason: both spell a three-wide pattern ending in a
+    // don't-care, and a grammar that let the lexer take the longest run
+    // of `[01-]` accepts the spaced one and refuses the other.
+    (
+        "truth_dont_care_low",
+        "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { 0-->1 }\n",
+        Accept,
+    ),
+    (
+        "truth_dont_care_high",
+        "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { -0->1 }\n",
+        Accept,
+    ),
+    (
+        "truth_dont_care_between_bits",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 0-1->1 }\n",
+        Accept,
+    ),
+    (
+        "truth_dont_care_run_together_with_the_arrow",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 11--> 1 }\n",
+        Accept,
+    ),
+    (
+        "truth_dont_care_spaced_from_the_arrow",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 11- -> 1 }\n",
+        Accept,
+    ),
+    (
+        "truth_all_dont_care",
+        "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { --->1 }\n",
+        Accept,
+    ),
+    // A `-` on the output side. The arrow is behind the parser by then,
+    // so there is no character to share and the two spellings are one
+    // row — which is exactly what the comparison below has to see, since
+    // acceptance alone cannot tell a `-` output from a `0` one.
+    (
+        "truth_dash_output",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 000 -> - }\n",
+        Accept,
+    ),
+    (
+        "truth_dash_output_run_together",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 000->- }\n",
+        Accept,
+    ),
+    (
+        "truth_dash_output_under_a_dont_care_pattern",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 00--> - }\n",
+        Accept,
+    ),
+    // The scanner skips a leading space before a pattern and nothing
+    // else. The reference lexer's `skip_spaces` reads `b' '` alone and
+    // refuses a tab outright, so a scanner that skipped one would take
+    // a row the reference parser rejects — the silent direction this
+    // file exists to hold shut.
+    (
+        "truth_tab_before_pattern",
+        "struct s size=3x3\n  assert truth(a -> z) {\t1 -> 0 }\n",
+        Reject,
+    ),
+    (
+        "truth_tab_before_a_later_row",
+        "struct s size=3x3\n  assert truth(a -> z) { 1 -> 0;\t0 -> 1 }\n",
+        Reject,
+    ),
+    // A pattern is the characters the source ran together, so a space
+    // ends it and the `1` after it is a token the row has no place for.
+    (
+        "truth_dont_care_split_by_a_space",
+        "struct s size=3x3\n  assert truth(a, b, c -> z) { 0- 1->1 }\n",
         Reject,
     ),
     (
@@ -327,6 +627,16 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     // declaration header refuses *any* trailing bare token, so
     // `size=2x2 junk` fails here identically. The size rule is not
     // consulted, which is why the real case lives in
+    // The other half of the `-` pair: it lexes, and no value position
+    // reads one. Tree-sitter's `identifier` is `[A-Za-z_][A-Za-z0-9_]*` so
+    // the grammar stops at `a`, and the reference parser now lexes `a`,
+    // `Minus`, `b` and refuses the token. They agree on the answer for
+    // different reasons, which is what this suite is for.
+    (
+        "a_dash_in_a_value_is_refused",
+        "theme t:\n  slot a-b -> @c\n",
+        Reject,
+    ),
     // `KNOWN_DIVERGENCES` — see `size_with_a_third_extent`.
     (
         "a_header_refuses_a_trailing_token",
@@ -343,14 +653,73 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=9 x 7\n  floor mat_slot=f\n",
         Reject,
     ),
-    // `size_spaced` is refused on the right of the separator, by the
-    // `token.immediate` height, so it says nothing about the left. This
-    // one does: the separator is an external token consulted before any
+    // `size_spaced` is refused on the right of the separator — the
+    // scanner declines an `x` with no digit directly behind it — so it
+    // says nothing about the left. This one does: the separator is an external token consulted before any
     // run of spaces is read, and reading the run first would let a
     // separator cross one.
     (
         "size_space_before_x",
         "struct s size=9 x7\n  floor mat_slot=f\n",
+        Reject,
+    ),
+    // The mirror of `size_space_before_x`: a space after the separator
+    // rather than before it. Not a refusal, because the reference parser
+    // never reads a size here at all — `scan_number` stops at an `x` with
+    // no digit behind it, and `parse_command`'s argument loop takes the
+    // `x` and the `2` as positional values, the reading `size=2 x 2` gets.
+    // The separator's scanner branch looks at the character behind the
+    // `x` for the same reason, and declines where no digit stands there.
+    (
+        "size_separator_before_a_space",
+        "struct s size=3x3\n  floor size=2x 2\n",
+        Accept,
+    ),
+    (
+        "size_separator_before_a_space_crlf",
+        "struct s size=3x3\r\n  floor size=2x 2\r\n",
+        Accept,
+    ),
+    // Whatever stands behind the `x`, if it is not a digit the separator
+    // is declined, including nothing at all: at the end of the file the
+    // scanner's `lookahead` is 0.
+    (
+        "size_separator_at_end_of_line",
+        "struct s size=3x3\n  floor size=2x\n",
+        Accept,
+    ),
+    (
+        "size_separator_at_end_of_file",
+        "struct s size=3x3\n  floor size=2x",
+        Accept,
+    ),
+    (
+        "size_separator_before_a_letter",
+        "struct s size=3x3\n  floor size=2xx\n",
+        Accept,
+    ),
+    (
+        "size_separator_before_a_space_and_a_word",
+        "struct s size=3x3\n  floor size=2x f\n",
+        Accept,
+    ),
+    (
+        "size_separator_before_a_space_in_a_list",
+        "struct s size=3x3\n  floor a=[2x 2]\n",
+        Accept,
+    ),
+    // Declining the separator rescues nothing it should not: `2`, `x` and
+    // `-1` is still a sequence neither parser reads.
+    (
+        "size_separator_before_a_dash",
+        "struct s size=3x3\n  floor size=2x-1\n",
+        Reject,
+    ),
+    // A declaration header refuses any trailing bare token, so there the
+    // three values are refused as `size=2x2 junk` is.
+    (
+        "size_separator_before_a_space_in_a_header",
+        "struct s size=2x 2\n  floor a=1\n",
         Reject,
     ),
     // A string ends at the first quote and never spans a line.
@@ -389,13 +758,12 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     ("tab_indent", "theme t:\n\tslot a -> @b\n", Reject),
-    // Refusals on a line the preceding break could not speak for. A break
-    // is where an illegal indent is normally refused, one line early —
-    // but a header's break is followed by an `_indent` and nothing else,
-    // so no NEWLINE is asked for at the blank line after it, and the
-    // blank line is crossed by the scanner's own blank-line loop instead.
-    // The line the loop lands on is measured where it stands: an odd
-    // count, by two routes, and a jump of more than one level.
+    // Refusals on a line reached across a blank or comment line. A
+    // header's break is followed by an `_indent` and nothing else, so no
+    // NEWLINE is asked for at the blank line after it, and the blank line
+    // is crossed by the scanner's own blank-line loop instead. The line
+    // the loop lands on is measured where it stands, as every line is: an
+    // odd count, by two routes, and a jump of more than one level.
     (
         "odd_indent_after_a_blank_line",
         "struct s size=3x3\n\n   floor a=1\n",
@@ -421,10 +789,10 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n\n\tfloor a=1\n",
         Reject,
     ),
-    // A line the break in front of it cannot speak for, because the level
-    // it asks for is legal arithmetic: one deeper than the line above.
+    // A line whose level is legal arithmetic: one deeper than the line
+    // above, so the scanner's count has nothing against it.
     // Whether a body may open there is the grammar's knowledge and not
-    // the scanner's, so the refusal comes from the line itself — the
+    // the scanner's, so the refusal comes from the grammar — the
     // token every construct starts with is withheld, and nothing else can
     // start one.
     (
@@ -467,6 +835,73 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "bodyless_decl_then_decl",
         "theme a:\nstruct s size=3x3\n  floor a=1\n",
+        Accept,
+    ),
+    // The same shapes with nothing behind the layout at all. These were
+    // the last position in the class: with no construct to cross to, the
+    // trailing run had no token that could consume it until `_file_end`
+    // closed it.
+    (
+        "bodyless_decl_then_blank_line_at_eof",
+        "theme a:\n\n",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_comment_line_at_eof",
+        "theme a:\n# c\n",
+        Accept,
+    ),
+    (
+        "decl_whose_body_is_only_a_comment",
+        "struct s size=3x3\n  # note\n",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_blank_and_comment_lines_at_eof",
+        "theme a:\n\n# c\n\n",
+        Accept,
+    ),
+    (
+        "decl_with_body_then_comment_line_at_eof",
+        "theme a:\n  slot x -> @y\n# c\n",
+        Accept,
+    ),
+    (
+        "lone_cr_bodyless_decl_then_blank_line_at_eof",
+        "theme a:\r\r",
+        Accept,
+    ),
+    (
+        "crlf_decl_whose_body_is_only_a_comment",
+        "struct s size=3x3\r\n  # note\r\n",
+        Accept,
+    ),
+    // The same class with a member row in front of the layout, and with
+    // more than one level to close. The fixtures above all have empty
+    // bodies, so the EOF block's DEDENT loop runs at most once in them
+    // and `accepted_sources_place_every_member_at_the_same_depth`
+    // compares two empty lists; these two are what reach both.
+    (
+        "struct_member_then_comment_at_eof",
+        "struct s size=3x3\n  floor a=1\n\n# c\n",
+        Accept,
+    ),
+    (
+        "nested_body_then_comment_at_eof",
+        "struct s size=3x3\n  level y=1\n    floor a=1\n\n# c\n",
+        Accept,
+    ),
+    // A file that ends without a final break, and one whose trailing
+    // layout is spaces rather than a comment: the two other ways the
+    // scanner can arrive at the end of the file with something crossed.
+    (
+        "bodyless_decl_then_comment_with_no_final_break",
+        "theme a:\n# c",
+        Accept,
+    ),
+    (
+        "bodyless_decl_then_spaces_only_line_at_eof",
+        "theme a:\n  \n",
         Accept,
     ),
     // Blank and comment lines behind a declaration that *does* have a
@@ -616,10 +1051,12 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  a x=1\n    b x=2\n      c x=3\nstruct t size=3x3\n  e x=5\n",
         Accept,
     ),
-    // A jump of more than one level, inside a body. The scanner can
-    // decline the INDENT, but declining alone lets the `/ +/` extra eat
-    // the spaces and the line lands as a sibling one level short — so the
-    // refusal has to come from the newline in front of it.
+    // A jump of more than one level, inside a body. Declining the INDENT
+    // alone would let the `/ +/` extra eat the spaces and land the line as
+    // a sibling one level short. What refuses it is where the scanner
+    // declines: the `level != current + 1` return sits inside the
+    // `level > current` arm, so it withholds `_line_start` as well, and no
+    // construct can start on the line.
     (
         "indent_jump_inside_a_body",
         "struct s size=3x3\n  level y=0\n      room\n",
@@ -704,16 +1141,19 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
 const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     // -- value ranges, which no grammar can express -------------------
     //
-    // `NonZeroU32::new` in `parse_value` refuses a zero extent after the
-    // token is built, and `str::parse::<i64>` refuses an integer past
-    // `i64` while building one — the latter in the lexer (`scan_number`),
-    // as `LexError::InvalidInt`, so it is a lex error rather than a value
-    // check on a finished token. A grammar can only
-    // approximate either by digit count, which would mis-refuse a valid
-    // literal one digit longer — and a narrower `size_literal` pattern
-    // collides with `integer` at the same position, so every bare `1` in
-    // value position would start a size literal and fail for want of an
-    // `x`.
+    // Both are `parse_value`'s: `NonZeroU32::new` refuses a zero extent,
+    // and `str::parse::<i64>` refuses an integer past `i64`. (An extent
+    // past `u32` is a different case and still the lexer's — `WxH` is a
+    // size wherever it appears, so `scan_number` builds one and reports
+    // an extent it cannot hold.) The token is lexically well-formed in
+    // each case: digits become a number only where a value is asked for,
+    // which is why a digit run of this width is legal as a truth row's
+    // pattern — these particular digits are not, since a pattern holds
+    // only `0` and `1`. A grammar can only approximate either by digit
+    // count, which would mis-refuse a valid literal one digit longer —
+    // and a narrower `size_literal` pattern collides with `integer` at
+    // the same position, so every bare `1` in value position would start
+    // a size literal and fail for want of an `x`.
     (
         "size_zero_extent",
         "struct s size=0x3\n  floor mat_slot=f\n",
@@ -741,19 +1181,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor mat_slot=f size=2x2y\n",
         Accept,
     ),
-    // -- a truth row wider than `i64` -----------------------------------
-    //
-    // A row's pattern reaches the parser as an `Int` token, so `lex.rs`
-    // parses it as `i64` on the way through and a 20-bit row of ones
-    // overflows. The digits are pattern data rather than a number — the
-    // parser keeps the lexeme precisely because `01` and `1` differ — so
-    // the ceiling is an artefact of the token type, not a rule. This
-    // grammar's `bit_pattern` has no such ceiling and accepts the row.
-    (
-        "truth_row_wider_than_i64",
-        "struct s size=3x3\n  assert truth(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t -> z) { 11111111111111111111 -> 1 }\n",
-        Accept,
-    ),
     // -- a truth row of the wrong width --------------------------------
     //
     // `parse_assert_truth` compares a row's width against the number of
@@ -770,55 +1197,16 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  floor n=99999999999999999999\n",
         Accept,
     ),
-    // -- a declaration with nothing but layout behind it --------------
+    // -- a state literal naming one property twice ----------------------
     //
-    // The blank and comment lines after a declaration are crossed on the
-    // way to the construct behind them. At the end of a file there is no
-    // such construct, nothing asks, and the layout is left over. A
-    // declaration whose body has a row absorbs it through that body's
-    // trailing `repeat1($._newline)`, and a directive through its own,
-    // which is why this is the one position where it survives —
-    // `theme empty:\n` parses, and so does a bodyless declaration with
-    // another declaration behind the blank line.
-    //
-    // "Bodyless" is not the whole of it: a header whose body holds
-    // nothing but comment lines has no row to do the absorbing either,
-    // and is left over the same way.
-    //
-    // Closing it means making trailing layout consumable with no
-    // construct behind it. The obvious shape — a `repeat($._newline)` at
-    // the end of `source_file` — is ambiguous against the one at the
-    // start, which owns the same tokens for a file that holds nothing
-    // else, and tree-sitter refuses to generate it.
+    // `parse_state_literal` refuses the second `axis`: a block state has
+    // one value per property, and the property map the literal becomes
+    // would keep the last one without a word. A grammar would have to
+    // compare two identifiers' text, which a context-free rule cannot.
     (
-        "bodyless_decl_then_blank_line_at_eof",
-        "theme a:\n\n",
-        Reject,
-    ),
-    (
-        "bodyless_decl_then_comment_line_at_eof",
-        "theme a:\n# c\n",
-        Reject,
-    ),
-    (
-        "decl_whose_body_is_only_a_comment",
-        "struct s size=3x3\n  # note\n",
-        Reject,
-    ),
-    // -- a size separator with a space after it -----------------------
-    //
-    // `2x 2` is two arguments to `parse_command`: `scan_number` reads the
-    // `2`, stops at the `x` because no digit follows it, and the `x` and
-    // the `2` go on as positional values. This grammar cannot stop there.
-    // The separator is an external token consulted before extras are
-    // skipped, and it commits to the `x` on sight — so `size_literal` is
-    // entered and then fails for want of an immediate height, rather than
-    // never being entered. Deciding it needs the character after the `x`,
-    // which that branch does not look at.
-    (
-        "size_separator_before_a_space",
-        "struct s size=3x3\n  floor size=2x 2\n",
-        Reject,
+        "state_literal_repeated_property",
+        "theme t:\n  slot f -> @oak_log[axis=x,axis=y]\n",
+        Accept,
     ),
 ];
 
@@ -964,6 +1352,103 @@ fn a_tab_indented_line_does_not_close_the_body_around_it() {
     }
 }
 
+/// An illegally indented line is refused on its own row, and the lines
+/// around it keep their shape.
+///
+/// The scanner used to read one line ahead of every line break and
+/// withhold the NEWLINE when the line behind it was indented illegally.
+/// That could refuse no file the scanner does not refuse anyway:
+/// `body()` and `source_file` in `grammar.js` put `_line_start` in front
+/// of every construct that starts a line, so the scanner is always asked
+/// at a content line's start, and there the odd-count and
+/// `level != current + 1` tests read the same predicate against the same
+/// indent stack the lookahead read one line earlier — nothing pops in
+/// between, and blank and comment lines answered `false` in the old
+/// check too. So only where the error sits could move, and on the break
+/// it took the line in front down with the one it was meant to protect.
+///
+/// Asserted here and not in `FIXTURES` because the verdict is `Reject`
+/// either way. Each source is parsed in all three line endings, because
+/// the break the lookahead sat behind is spelled three ways and each is
+/// a path it could come back on.
+#[test]
+fn a_bad_indent_errors_on_its_own_row() {
+    let mut parser = new_parser();
+    for ending in ["\n", "\r\n", "\r"] {
+        // The header in front of the offending line survives it. With the
+        // break withheld, the whole file was one `ERROR`.
+        let source = "theme t:\n    walls b=2\n".replace('\n', ending);
+        let tree = parser.parse(&source, None).expect("parse produced no tree");
+        let root = tree.root_node();
+        assert!(
+            root.has_error(),
+            "the fixture is supposed to be malformed; it no longer is: {source:?}",
+        );
+        let header = root.child(0).expect("source_file has a first child");
+        assert_eq!(
+            header.kind(),
+            "theme_decl",
+            "the header in front of an over-indented line went down with it: {source:?} {}",
+            root.to_sexp(),
+        );
+        assert!(
+            !header.has_error(),
+            "the header kept its node but took the error inside it: {source:?} {}",
+            root.to_sexp(),
+        );
+
+        // The rows behind it are read as rows. With the break withheld,
+        // the offending row's keyword and argument were folded into the
+        // row in front as two more arguments, so `walls` disappeared as a
+        // member. Keywords only: the depth a recovery gives a row written
+        // at an illegal indent is not something to pin.
+        let source =
+            "struct s size=3x3\n  floor a=1\n      walls b=2\n  door x=1\n".replace('\n', ending);
+        let tree = parser.parse(&source, None).expect("parse produced no tree");
+        assert!(
+            tree.root_node().has_error(),
+            "the fixture is supposed to be malformed; it no longer is: {source:?}",
+        );
+        let mut placed = Vec::new();
+        grammar_members(tree.root_node(), &source, 0, &mut placed);
+        let keywords: Vec<_> = placed.into_iter().map(|(_, keyword)| keyword).collect();
+        assert_eq!(
+            keywords,
+            ["floor", "walls", "door"],
+            "an over-indented row was folded into the row in front of it: {source:?}",
+        );
+
+        // An odd indent across a blank line between two rows. Both rows
+        // stay whole statements; with the break withheld, the row in front
+        // lost its statement to the error and only its keyword survived.
+        let source = "struct s size=3x3\n  floor a=1\n\n   walls b=2\n".replace('\n', ending);
+        let tree = parser.parse(&source, None).expect("parse produced no tree");
+        assert!(
+            tree.root_node().has_error(),
+            "the fixture is supposed to be malformed; it no longer is: {source:?}",
+        );
+        let mut statements = 0usize;
+        count_member_statements(tree.root_node(), &mut statements);
+        assert_eq!(
+            statements,
+            2,
+            "a row next to an odd-indented one lost its statement: {source:?} {}",
+            tree.root_node().to_sexp(),
+        );
+    }
+}
+
+/// Every `member_stmt` in the tree, inside an `ERROR` or not.
+fn count_member_statements(node: tree_sitter::Node<'_>, count: &mut usize) {
+    if node.kind() == "member_stmt" {
+        *count += 1;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        count_member_statements(child, count);
+    }
+}
+
 /// Every listed divergence still diverges, in the direction listed.
 ///
 /// This does not claim the list is complete — nothing here can, since the
@@ -1041,6 +1526,96 @@ fn accepted_sources_place_every_member_at_the_same_depth() {
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The two parsers read the same row out of a truth row.
+///
+/// Accept/reject parity cannot see this one. `bit_pattern` is a token, so
+/// the corpus writes it `(bit_pattern)` with no text, and a grammar that
+/// read `11--` where the reference parser reads `11-` builds a tree of
+/// exactly the same shape from exactly the same source — accepted on both
+/// sides, and describing a different row.
+///
+/// That is not a hypothetical: it is what a plain `/[01-]+/` token does,
+/// because the lexer takes the longest run it can and `-` and `->` share
+/// a character. The external scanner exists for this test.
+///
+/// The output travels with the pattern for the same reason: `-` and `0`
+/// are different rows that build the same tree shape.
+#[test]
+fn both_parsers_read_the_same_row() {
+    let mut parser = new_parser();
+    let mut wrong = Vec::new();
+    for (name, source, expected) in FIXTURES {
+        if *expected != Accept {
+            continue;
+        }
+        let Ok(module) = cairn_lang_core::parse::parse(source) else {
+            continue;
+        };
+        let tree = parser.parse(source, None).expect("parse produced no tree");
+        let core = core_rows(&module);
+        if core.is_empty() {
+            continue;
+        }
+        let grammar = grammar_rows(tree.root_node(), source);
+        if core != grammar {
+            wrong.push(format!(
+                "{name}: the reference parser reads {core:?}, the grammar {grammar:?}\n  source: {source:?}"
+            ));
+        }
+    }
+    // The fixtures that exercise this are the `truth_dont_care_*` group,
+    // so an empty comparison would pass this test while saying nothing.
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every truth row in a module as `PATTERN OUTPUT`, in source order.
+fn core_rows(module: &cairn_lang_core::ast::Module) -> Vec<String> {
+    use cairn_lang_core::ast::{Item, Statement};
+    let mut out = Vec::new();
+    for item in &module.items {
+        let Item::Struct { body, .. } = item else {
+            continue;
+        };
+        for statement in body {
+            if let Statement::AssertTruth { rows, .. } = statement {
+                out.extend(rows.iter().map(|row| {
+                    let output = match row.output {
+                        Some(bit) => u8::from(bit).to_string(),
+                        None => "-".to_owned(),
+                    };
+                    format!("{} {output}", row.inputs)
+                }));
+            }
+        }
+    }
+    out
+}
+
+/// The same list read off the tree-sitter tree.
+///
+/// A `truth_row` holds the pattern and the output and nothing else, so
+/// the two are read off its fields rather than by collecting token kinds
+/// — which would also pick up the `bit` of an unrelated rule if one ever
+/// grew a use for it.
+fn grammar_rows(node: tree_sitter::Node<'_>, source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if node.kind() == "truth_row" {
+        let text = |field: &str| {
+            node.child_by_field_name(field)
+                .unwrap_or_else(|| panic!("a `truth_row` has a `{field}` field"))
+                .utf8_text(source.as_bytes())
+                .expect("utf-8")
+                .to_owned()
+        };
+        out.push(format!("{} {}", text("inputs"), text("output")));
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        out.extend(grammar_rows(child, source));
+    }
+    out
 }
 
 /// The two properties above, swept over generated layouts rather than
@@ -1268,10 +1843,16 @@ fn grammar_members(
         // the depth recorded here is the one already accumulated.
         out.push((depth, keyword.to_owned()));
         depth
-    } else if node.kind() == "struct_body" {
-        // Only `struct_body` counts a level: a theme body holds rules
-        // rather than member commands, so it contributes nothing to walk
-        // and `core_members` skips it on the other side too.
+    } else if node.kind() == "struct_body" || node.kind() == "def_body" {
+        // The two member-carrying bodies count a level. They are separate
+        // rules only because a `def` body may also hold a `requires` line
+        // — the members inside them are the same members, so a walk that
+        // counted one and not the other would report every member of a
+        // `def` one level shallower than the reference parser puts it.
+        //
+        // A theme body is deliberately absent: it holds rules rather than
+        // member commands, so it contributes nothing to walk and
+        // `core_members` skips it on the other side too.
         depth + 1
     } else {
         depth

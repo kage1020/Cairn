@@ -3,6 +3,13 @@
   "theme" "struct" "def" "site" "slot" "logic" "assert"
 ] @keyword
 
+; The member-level version floor's keyword, captured through its statement
+; rather than added to the list above. The same literal also spells the
+; second half of the `@requires` directive name, and there the sigil and
+; the word are one keyword rather than two — listing the bare literal
+; splits that span in half.
+(requires_stmt "requires" @keyword)
+
 ; A member command's keyword is any identifier — `floor`, `walls`, and the
 ; rest are not reserved words, they are the names the compiler happens to
 ; know (see `member_keyword` in grammar.js). The node exists so this

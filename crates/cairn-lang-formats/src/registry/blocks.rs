@@ -1,18 +1,19 @@
 //! Per-version block-id table component of a [`crate::registry::RegistryPack`].
 //!
 //! Answers one question: *does this block id exist in the target the compile
-//! is pinned to?* Spec versioning-editions §10.4 makes an unknown id a hard
-//! error, and until this component landed the check was structural only
-//! ("the id has exactly one `:`"), so `@totally_not_a_block` rode all the way
-//! into a written `.mcstructure`.
+//! is pinned to?* `spec/versioning-editions` "Fail-loud and minimum-version
+//! inference" makes an unknown id a hard error, and until this component
+//! landed the check was structural only ("the id has exactly one `:`"), so
+//! `@totally_not_a_block` rode all the way into a written `.mcstructure`.
 //!
-//! The on-disk shape follows §10.3's folding rule — "fold versions with
+//! The on-disk shape follows the folding rule of
+//! `spec/versioning-editions` "Backend = data tables" — "fold versions with
 //! `inherits + diffs`" — because the alternative, one full list per version,
 //! repeats a thousand shared ids three times and hides the interesting part.
 //! What a reader wants from `blocks.json` is exactly the diff: Bedrock
 //! 1.21.40 is where `stonebrick` became `stone_bricks` and `light_block`
-//! became `light_block_0` … `light_block_15`, and its `removed` list is
-//! that flattening wave written out in full.
+//! became `light_block_0` … `light_block_15`, and its `removed` list is that
+//! flattening wave written out in full.
 //!
 //! Folding is validated rather than trusted. A diff that removes an id its
 //! parent never had, or adds one the parent already has, is a pack-author

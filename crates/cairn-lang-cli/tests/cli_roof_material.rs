@@ -19,9 +19,8 @@ use std::process::Command;
 use flate2::read::GzDecoder;
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
+mod common;
+use common::cargo_bin;
 
 /// A hut whose roof reads `slot roof`, bound to `material`.
 fn roofed_source(material: &str) -> String {

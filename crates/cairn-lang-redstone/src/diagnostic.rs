@@ -8,7 +8,7 @@
 //! the shared [`Severity`] rendering and the `code.as_str()` convention
 //! adopted below.
 //!
-//! Message prose follows the self-correction triple from `spec/lint` §11:
+//! Message prose follows the self-correction triple from `spec/lint`:
 //! what is wrong, valid alternatives, suggested fix. The primary string
 //! carries the first clause; the alternatives and the suggestion land in
 //! [`DiagnosticNote`]s so the human-readable output still reads as three
@@ -70,52 +70,96 @@ pub enum DiagnosticCode {
     /// enclosing struct / def
     /// declared no `circuit region=<label> void=<N>` reservation (or the
     /// enclosing scope had no `size=WxH` for the reservation to sit
-    /// inside). Fail-loud per `spec/redstone` §14.5 — silently placing
-    /// cells "somewhere" would produce voxels outside the author's
+    /// inside). Fail-loud per `spec/redstone` "Place-and-route" — silently
+    /// placing cells "somewhere" would produce voxels outside the author's
     /// declared footprint. Fix: add a `circuit region=` line with a
     /// non-empty `region=` label and a `void=` of at least 1, and give
     /// the enclosing scope a `size=WxH` header. The label names the
-    /// reservation and is the author's to choose — §14.5's own example
-    /// is `region=basement`, which is not a member keyword — so it is
-    /// checked for being present and non-empty, nothing more.
+    /// reservation and is the author's to choose — that pipeline's own
+    /// example is `region=basement`, which is not a member keyword — so it
+    /// is checked for being present and non-empty, nothing more.
     NoCircuitRegion,
     /// The synthesised netlist for a scope does not fit its
-    /// `circuit region=<label> void=<N>` reservation. `spec/redstone`
-    /// §14.5's canonical failure: routing cannot be confined to the
-    /// reserved region, so the pass fails loud with the self-correction
-    /// triple ("increase `void`", "enlarge region", "split into multiple
-    /// `circuit` blocks"). Five shapes reach it — the reserved volume
-    /// is short of the netlist's estimated footprint; the reserved row
-    /// is shorter than the spaced single-row layout needs, which is
-    /// twice the cell count and one more; the reservation is too
+    /// `circuit region=<label> void=<N>` reservation. This is the canonical
+    /// failure of `spec/redstone` "Place-and-route": routing cannot be
+    /// confined to the reserved region, so the pass fails loud with the
+    /// self-correction triple ("increase `void`", "enlarge region", "split
+    /// into multiple `circuit` blocks"). Six shapes reach it — the
+    /// reserved volume is short of the netlist's estimated footprint; the
+    /// reserved row is shorter than the spaced single-row layout needs,
+    /// which is twice the cell count and one more; the reservation is too
     /// shallow for the cell row to have a clear row either side of it;
-    /// too shallow for the I/O pads, which stand one per row; or a sink
-    /// has no route from its driver that runs through neither a
-    /// component nor another net's dust — nor within one step of that
-    /// dust in its own plane. §14.5 names area shortage as the example
-    /// rather than as the only shape, so all five take this code and
-    /// differ in what they say: raising `void` fixes the first and the
-    /// last, and cannot fix the three in between.
+    /// too shallow for the I/O pads, which stand one per row and, in a
+    /// scope with cells, skip the cell row; one column wide in a scope
+    /// with no cells and both sensors and actuators, whose two pad
+    /// columns are then one; or a sink has no route from its driver that
+    /// runs through neither a component nor another net's dust — nor
+    /// within one step of that dust in its own plane. The router says so
+    /// of a sink only when it has proved it: when no face of the sink can
+    /// be arrived through, when its search ran out of coords before the
+    /// attenuation cap pruned any, or when the free coords the sink opens
+    /// onto run out within the cap of it without reaching the net's wire.
+    /// A sink none of those proves, with no route within the cap, is
+    /// [`Self::AttenuationLimit`] instead. That pipeline names area
+    /// shortage as the example rather than as the only shape, so all six
+    /// take this code and differ in what they say: raising `void` fixes
+    /// the first and the last, and cannot fix the four in between.
     RouteCongestion,
+    /// Two of a scope's nets run within one step of each other across
+    /// layers — one strand directly over another, or over it and one
+    /// step across, which is the staircase dust climbs. Advisory
+    /// because it is not a fault in the layout: the routing pass keeps
+    /// two nets one step apart *in one plane*, and `spec/redstone`
+    /// "Place-and-route" makes separating two a layer apart the physical
+    /// tile layer's obligation, because whether the upper strand reads the
+    /// lower one depends on what is standing between them and the
+    /// pseudo-2.5D model carries no answer. The escape is what makes
+    /// the pairs: a net climbing to clear another lands over it, or
+    /// beside it a layer up. Named here so the obligation is owed by
+    /// something a reader can see — the finding lists the coords and
+    /// the nets, which is what the tile catalogue has to separate and
+    /// what an author reading a dump would otherwise have to derive.
+    /// Fix: nothing in the source is wrong, and enlarging the region is
+    /// not a remedy — where a net has to climb at its own doorstep,
+    /// more room only lengthens the run it then makes on the upper
+    /// layer.
+    RouteCrossLayerClearance,
     /// A routed driver segment (source pad or driver cell → sink coord,
     /// where the sink is either a downstream cell coord or an actuator
     /// output-pad coord, measured along the routed path rather than as
     /// the straight-line distance between its ends) exceeds the v1
     /// sanity cap
-    /// for implicit buffer-repeater insertion. `spec/redstone` §14.5
-    /// stage 3 lets segments longer than the 15-block dust attenuation
-    /// limit be covered by buffer repeaters silently; this code fires
-    /// only when the segment is so long that the buffer chain
+    /// for implicit buffer-repeater insertion. Stage 3 of the
+    /// `spec/redstone` "Place-and-route" pipeline lets segments longer
+    /// than the 15-block dust attenuation limit be covered by buffer
+    /// repeaters silently; this code fires only when the segment is so
+    /// long that the buffer chain
     /// materialising it would be longer than the cap
     /// [`crate::delay::MAX_ATTENUATION_SEGMENT`] sets, so the pass
     /// refuses instead of quietly counting an unrealisable chain into
-    /// `delay_ticks`. Fires on both driver-to-cell and driver-to-
+    /// `local_delay_ticks`. Fires on both driver-to-cell and driver-to-
     /// output-pad segments — a wide `circuit region=` reservation can
     /// trip either edge depending on which side sits farther from the
     /// driver. Fix: enlarge the `circuit region=` footprint so no
     /// driver segment exceeds the cap, split the logic across multiple
     /// `circuit` blocks, or pin cell / actuator placement closer to
     /// its drivers.
+    ///
+    /// Also fires when a run of dust would pass its allowance — 15
+    /// blocks since the last block that restored strength, or less on
+    /// the wire into a cell that passes on the strength it reads — and
+    /// every coord close enough to take a repeater turns, climbs or
+    /// branches: a buffer repeater carries a signal only where the wire
+    /// runs straight through it at one height. The count runs across
+    /// such a cell, so that run can start on the wire into it.
+    ///
+    /// Stage 2 raises it too, before stage 3 can measure anything, for
+    /// two shapes whose segment is over the cap whatever wire is laid: a
+    /// sink further from its driver than the cap in a straight line, and
+    /// a sink no path from the net's wire reaches within the cap, where
+    /// the router cannot prove the sink walled in (see
+    /// [`Self::RouteCongestion`]). The second says only that no route
+    /// within the cap exists; whether a longer one does, nothing looks.
     AttenuationLimit,
     /// Lowering a `logic` binding descended past
     /// [`crate::synth::MAX_LOWERING_DEPTH`]. A binding is lowered by descending into
@@ -131,32 +175,33 @@ pub enum DiagnosticCode {
     /// whose binding belongs after the brackets.
     ///
     /// The first is a `-> value` sensor tail, or one of the actuator
-    /// argument keys `spec/redstone` §14.2 lists, on the wrong
+    /// argument keys `spec/redstone` "Signal binding" lists, on the wrong
     /// component. Asked before the value is looked at: no edit to the
     /// value makes `walls` carry a tail, so reporting the value first
     /// would send the author round the loop.
     ///
     /// The second is `door[id=front,opened_by=sig.x]`. The brackets pick
     /// a member that already exists and the binding is written after
-    /// them, which is the shape §14.2 uses;
+    /// them, which is the shape that section uses;
     /// `block_array::recognize_actuator_patch` refuses any selector
     /// attribute but `id=` for the door patch, and this is the same
-    /// answer for every host. §14.2 pairs each binding with the
+    /// answer for every host. That section pairs each binding with the
     /// component that carries it — `opened_by=` with `door`, `lit_by=`
     /// with `lamp`, `powered_by=` with `piston`, `fired_by=` with
     /// `dispenser`, and the sensor tail with a sensor — and the front end
     /// used to read the argument's *value* only, so `walls powered_by=`
     /// and `window -> sig.x` both became live ports on members with no
-    /// component behind them. Of the components §14.2 names, only `door`
-    /// and `pressure_plate` are keywords the surface accepts today;
+    /// component behind them. Of the components that section names, only
+    /// `door` and `pressure_plate` are keywords the surface accepts today;
     /// `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, and
     /// `dispenser` are not, so the three actuator keys other than
     /// `opened_by=` have no legal host at all yet. Fix: move the binding
     /// onto the component that carries it.
     LogicMisplacedBinding,
-    /// A position that has to name a signal does not. Sensors emit into
-    /// the `sig.` namespace and actuators consume from it, so a name
-    /// outside it can never be read, and three positions carry one:
+    /// A position that has to name a signal does not. A signal name is
+    /// `sig.` and exactly one segment after it: sensors emit into the
+    /// `sig.` namespace and actuators read exactly one segment from it, so
+    /// any other name can never be read. Three positions carry one:
     ///
     /// - a `logic` line's left-hand side, which was lowered anyway, so a
     ///   cell took a placement coordinate for a signal with no consumer;
@@ -169,12 +214,15 @@ pub enum DiagnosticCode {
     /// nothing. Fix: name the signal `sig.<name>`. Where the value is a
     /// bare identifier the message offers the spelling, that being the
     /// one shape with a single reading; `opened_by=3` names nothing that
-    /// adding `sig.` would repair.
+    /// adding `sig.` would repair. A left-hand side that is `sig` alone is
+    /// told to add a name after it, and one with more than one segment
+    /// after `sig.` to keep one, as in `sig.x`.
     LogicInvalidSignal,
     /// An argument whose value is a `sig.`-headed reference sits under a
-    /// key that is not one of §14.2's actuator keys. The value says the
-    /// author meant to wire a signal; the key means nothing reads it, so
-    /// the actuator silently disappears and only the now-unconsumed
+    /// key that is not one of the actuator keys in `spec/redstone`
+    /// "Signal binding". The value says the author meant to wire a signal;
+    /// the key means nothing reads it, so the actuator silently disappears
+    /// and only the now-unconsumed
     /// signal is mentioned. A typo (`oepend_by=`) gets a `did you mean`
     /// note; a key from another vocabulary entirely gets the list. Fix:
     /// correct the key, or drop the argument if the member is not an
@@ -193,6 +241,32 @@ pub enum DiagnosticCode {
     /// inside a `[...]` selector is answered the same three ways, by
     /// whichever fault moving it out of the brackets would not fix.
     LogicUnknownBindingKey,
+    /// An actuator binding written in the selector form picks no single
+    /// physical component. `door[id=front] opened_by=sig.x` binds the door
+    /// declared as `door id=front ...` in the same scope, and
+    /// `cairn_lang_core::intent::actuator_patch_target` is where that
+    /// door is looked up: a selector with no readable `id=`, an id no
+    /// physical door carries, or an id two doors carry leaves the patch
+    /// with nothing to act on. Block-array lowering defers such a patch
+    /// with the same reason, and a port for it would be I/O the build
+    /// does not have. Fix: set `[id=<label>]` to the id of one `door`
+    /// declared in this scope without brackets, or write `opened_by=` on
+    /// that `door`'s own line; for an id several doors carry, give them
+    /// distinct ids, and for a door declared without an `id=`, add the id
+    /// to the one the patch is meant to bind.
+    LogicUnresolvedPatch,
+    /// A physical component carries a second binding under an actuator key
+    /// it already has one for — on its own line, through a selector-form
+    /// patch, or both.
+    ///
+    /// Each binding became an output port with a pad of its own, so the
+    /// component was driven by two wires: a wired OR the author never
+    /// wrote. `spec/redstone` "The logic layer is a dependency DAG" is
+    /// where signals are combined. The binding on the component's own line
+    /// counts as the first, wherever the patch is written. Fix: bind the
+    /// component once, to a `logic` line that combines the signals; when
+    /// both bindings name the same signal, delete the duplicate line.
+    LogicDuplicateBinding,
 }
 
 impl DiagnosticCode {
@@ -209,11 +283,14 @@ impl DiagnosticCode {
             Self::LogicUnusedSignal => "W_LOGIC_UNUSED_SIGNAL",
             Self::NoCircuitRegion => "E_NO_CIRCUIT_REGION",
             Self::RouteCongestion => "E_ROUTE_CONGESTION",
+            Self::RouteCrossLayerClearance => "W_ROUTE_CROSS_LAYER_CLEARANCE",
             Self::AttenuationLimit => "E_ATTENUATION_LIMIT",
             Self::LogicNestingTooDeep => "E_LOGIC_NESTING_TOO_DEEP",
             Self::LogicMisplacedBinding => "E_LOGIC_MISPLACED_BINDING",
             Self::LogicInvalidSignal => "E_LOGIC_INVALID_SIGNAL",
             Self::LogicUnknownBindingKey => "E_LOGIC_UNKNOWN_BINDING_KEY",
+            Self::LogicUnresolvedPatch => "E_LOGIC_UNRESOLVED_PATCH",
+            Self::LogicDuplicateBinding => "E_LOGIC_DUPLICATE_BINDING",
         }
     }
 
@@ -232,8 +309,10 @@ impl DiagnosticCode {
             | Self::LogicNestingTooDeep
             | Self::LogicMisplacedBinding
             | Self::LogicInvalidSignal
-            | Self::LogicUnknownBindingKey => Severity::Error,
-            Self::LogicUnusedSignal => Severity::Warning,
+            | Self::LogicUnknownBindingKey
+            | Self::LogicUnresolvedPatch
+            | Self::LogicDuplicateBinding => Severity::Error,
+            Self::LogicUnusedSignal | Self::RouteCrossLayerClearance => Severity::Warning,
         }
     }
 }
@@ -326,6 +405,20 @@ impl Diagnostic {
         });
         self
     }
+}
+
+/// An Error-severity finding with one `Fix:` footer — the shape every
+/// refusal in the place-and-route passes takes. Debug-asserts the code
+/// really is an error, so a pass cannot elide a scope over a warning.
+pub(crate) fn error_with_footer(
+    code: DiagnosticCode,
+    span: Span,
+    primary: String,
+    footer: impl Into<String>,
+) -> Diagnostic {
+    let diag = Diagnostic::new(code, span, primary).with_footer(footer);
+    debug_assert_eq!(diag.severity(), Severity::Error);
+    diag
 }
 
 #[cfg(test)]

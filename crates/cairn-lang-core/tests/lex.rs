@@ -35,10 +35,7 @@ fn lexes_simple_command() {
             TokenKind::Ident("wall".into()),
             TokenKind::Ident("height".into()),
             TokenKind::Eq,
-            TokenKind::Int {
-                value: 4,
-                lexeme: "4".into()
-            },
+            TokenKind::Int { lexeme: "4".into() },
             TokenKind::Newline,
         ]
     );
@@ -58,7 +55,6 @@ fn lexes_header_and_at_token() {
     assert_eq!(
         kinds[2],
         TokenKind::Int {
-            value: 2026,
             lexeme: "2026".into()
         }
     );
@@ -66,7 +62,6 @@ fn lexes_header_and_at_token() {
     assert_eq!(
         kinds[4],
         TokenKind::Int {
-            value: 6,
             lexeme: "06".into()
         }
     );
@@ -248,4 +243,42 @@ fn dedent_emits_per_level_closed() {
         .filter(|k| matches!(k, TokenKind::Dedent))
         .count();
     assert_eq!(dedents, 2);
+}
+
+/// A `-` that is not the head of an `->` is a token of its own.
+///
+/// It used to be an `UnexpectedChar`, which put a version label's
+/// pre-release suffix out of reach of the directive that reads it:
+/// `@requires version>=1.21.4-rc1` died on the `-` before any check pass
+/// saw it, back when the parser refused any file `lex` refuses. For why
+/// that label shape has to be readable, see `spec/versioning-editions`
+/// "The target is a compile-time parameter".
+#[test]
+fn a_lone_dash_lexes_as_a_token_rather_than_failing() {
+    let suffixed = kinds("@requires version>=1.21.4-rc1\n");
+    assert!(
+        suffixed.contains(&TokenKind::Minus),
+        "the `-` should be a token: {suffixed:?}",
+    );
+    assert!(
+        !suffixed.contains(&TokenKind::Arrow),
+        "and not half an arrow: {suffixed:?}",
+    );
+    // The arrow still wins where it is one.
+    let arrow = kinds("  slot floor -> @oak_planks\n");
+    assert!(arrow.contains(&TokenKind::Arrow), "{arrow:?}");
+    assert!(!arrow.contains(&TokenKind::Minus), "{arrow:?}");
+}
+
+/// No value position reads a `-`, so lexing one does not make a negative
+/// integer a value. The parser names the token it found, which is a better
+/// answer than a character offset.
+#[test]
+fn a_lone_dash_is_still_refused_where_no_grammar_reads_one() {
+    let err = cairn_lang_core::parse("struct s size=2x2\n  level y=-3\n")
+        .expect_err("no value position reads a `-`");
+    assert!(
+        err.to_string().contains('-'),
+        "the message should name what it found: {err}",
+    );
 }

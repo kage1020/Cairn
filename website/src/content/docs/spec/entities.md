@@ -39,7 +39,7 @@ Every primitive therefore carries four things in the IR: an `anchor` (reference 
 bbox, an actual bbox, and a host face.
 
 Overlapping AABBs resolve by a rule the spec fixes, either priority merge or a lint error
-([Lint](lint)). Neighbour-dependent blockstate (stairs, fences) breaks when overwritten without
+([Lint](/spec/lint/)). Neighbour-dependent blockstate (stairs, fences) breaks when overwritten without
 interference detection: an inner-corner stair left as an outer corner, hanging in mid-air.
 Re-resolving boundary blockstate is the IR layer's responsibility.
 

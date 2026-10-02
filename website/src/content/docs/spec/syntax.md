@@ -37,17 +37,54 @@ punctuation they tolerate:
   parses.
 - A value list reads at most one comma between items and refuses `[a, , b]`.
 
-The one place a comma carries meaning is the input list of `assert truth(...)`, where it separates
-the signals whose count the row width is checked against. A row assigns one bit per input signal, so
-`truth(a, b -> out)` takes rows two bits wide and refuses `{ 2->0 }` or `{ 0->0 }`.
+A canonical token may carry a **block-state literal**, as in `@oak_log[axis=x]` or
+`@oak_stairs[half=top, facing=north]`. The `[` must touch the token. After a space it is whatever
+comes next, so in a value list `[@a [b]]` is still a token and a nested list, while `[@a[b]]` is
+refused because `b` is not a property. Each pair inside is `property=value`, where the value is a
+word, a run of digits, or `true` / `false`. This is Minecraft's own block-state syntax rather than a
+Cairn list, so exactly one comma separates two pairs. An empty literal, a trailing or doubled comma,
+and a property named twice are refused. A dotted token such as `@floor.wood` is abstract and takes
+no literal, because the theme that binds it chooses the block, so a `[` touching it is whatever
+comes next, as one after a space is.
+
+Before the literal, a `[` touching an undotted token was whatever came next too, so `mat=@a[1]` and
+`mat=[@a[b]]` used to parse and are now refused. No source that passed `cairn check` had either
+shape: a bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL`, and a list where a label
+belongs is `E_TYPE_MISMATCH_LABEL`. Only the parse tree of a source that could not build changes.
+
+The literal's properties and values are not yet checked against the target: `E_STATE_DOMAIN`
+([Versioning and Editions](/spec/versioning-editions/)) is not implemented, so a Java build writes
+`@oak_log[axis=q]` as written. Each literal the build reads earns a `W_STATE_LITERAL_UNCHECKED`
+([Lint](/spec/lint/)) on the token, so that is said rather than silent.
+
+Besides that literal, the one place a comma carries meaning is the input list of
+`assert truth(...)`, where it separates the signals whose count the row width is checked against. A
+row writes one character per input signal — `0`, `1`, or `-` — so `truth(a, b -> out)` takes rows
+two characters wide and refuses `{ 2->0 }` or `{ 0->0 }`.
+
+`-` is a **don't-care**: the row means every value of that input, so `0- -> 1` says what `00->1` and
+`01->1` say together. It is a shorthand for those rows and not a construct of its own, which is why
+two rows may not both stand for one combination — see the table below.
+
+`-` and `->` share a character, and the lexer takes the arrow whenever it can. A row whose last
+input is a don't-care is therefore written `11--> 0` or `11- -> 0`; both are the same three-wide
+row. Whitespace ends a pattern, so `0- 1 -> 1` is a two-wide pattern and a stray `1`, not a
+three-wide row.
+
+A row's **output** is `0`, `1`, or `-` as well, and there it means something else: the row's
+combinations are deliberately unconstrained. `--0 -> -` says the table has nothing to say about any
+combination with a low third input, which is what answers `W_TRUTH_TABLE_PARTIAL` without asserting
+four outputs the author does not mean. The arrow is already read by then, so `-> -` and `->-` are
+the same row. A table every row of which has a `-` output constrains nothing and is
+`E_TRUTH_TABLE_EMPTY`, the same as a table with no rows.
 
 The table around those rows is read the same way:
 
 | Case | Code |
 |---|---|
-| No rows at all | `E_TRUTH_TABLE_EMPTY` |
+| No rows at all, or no row with a `0` or `1` output | `E_TRUTH_TABLE_EMPTY` |
 | Two rows assign one input combination different outputs | `E_TRUTH_TABLE_CONFLICT` (on the later row) |
-| A row repeats an earlier one and agrees with it | `W_TRUTH_TABLE_DUPLICATE_ROW` |
+| Two rows cover one input combination without contradicting each other | `W_TRUTH_TABLE_DUPLICATE_ROW` (on the later row) |
 | Some input combinations are unassigned | `W_TRUTH_TABLE_PARTIAL` |
 
 The last two are warnings because the rows that *are* present still assert what they say. A
@@ -75,7 +112,7 @@ terminated only by lone `\r` highlights as one long line even though it parses c
 
 Keep nesting shallow: `struct` / `def` / `level` / `theme` / `site`. Deep nesting increases LLM
 generation errors. (`room` is not on this list; it is still open, so writing one today is
-`E_UNKNOWN_KEYWORD`. See [Open Issues](open-issues).)
+`E_UNKNOWN_KEYWORD`. See [Open Issues](/spec/open-issues/).)
 
 Inside a body, `level y=N` is the only member that groups other members, and only in a `struct` or a
 `def`. A `site` body is a flat list of `place` and `connect` rows with no grouping construct at all.
@@ -87,7 +124,7 @@ which bind materials and open nothing, so a line indented under one is a syntax 
 nesting diagnostic. So is a line indented after a directive: a directive is one line, and the line
 under it belongs to no construct.
 
-[Compilation Model §4.7](compilation#47-level-grouping-and-volume-derivation) defines what `y=N`
+[Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what `y=N`
 means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
@@ -118,21 +155,50 @@ Metadata MAY go in headers rather than in the semantic body:
 
 **`@cairn`** is the version of the Cairn language itself, a separate axis from the two Minecraft
 headers. It is optional and exists as provenance, so a future compiler can parse and warn correctly.
+No pass branches on the value, but it is read: `YYYY.M` or `YYYY.M.PATCH`, with a four-digit year
+and a month `1 … 12`. A leading zero on the month is accepted, so `2026.06` and `2026.6` are one
+version. Anything else is `W_INVALID_CAIRN_VERSION`, and a version later than the compiler reading
+it is `W_FUTURE_CAIRN_VERSION` — provenance that cannot be read by a later compiler is not doing
+the job the header exists for.
 
-**`@requires`** is a capability floor. Its expression is the subject `version`, the operator `>=`,
-and a dotted-decimal version, with whitespace optional between the three, so `version>=1.21` and
-`version >= 1.21` are one requirement. `>=` is the only operator, since a floor is the only
-constraint that composes by folding to the strictest. Every other expression is
+**`@requires`** is a capability floor. Its expression is an optional edition, the subject
+`version`, the operator `>=`, and a version label, with whitespace optional between them, so
+`version>=1.21` and `version >= 1.21` are one requirement. `>=` is the only operator, since a floor
+is the only constraint that composes by folding to the strictest. Every other expression is
 `E_INVALID_REQUIRES` rather than a line that quietly declares nothing: a floor that evaporates is
-worse than an absent one, because a reader will still believe it. See
-[Versioning and Editions](versioning-editions).
+worse than an absent one, because a reader will still believe it.
+
+```
+@requires version>=1.21                  # a floor on whichever edition is built
+@requires java version>=1.21.4           # a floor in Java's numbering, inert on a Bedrock build
+@requires bedrock version>=1.21.40
+```
+
+The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 /
+1.21.40 / 1.21.60`: `1.21.4` is Java's newest release and names no Bedrock release at all. A label
+is dot-separated components that each begin with a digit and carry only letters and digits, with an
+optional `-` and a pre-release tag of the same — `1.21.4`, `1.21.4-rc1`, and `24w14a` are all
+labels. Which of them the *target edition* can order is not a syntax question and is not answered
+here. See [Versioning and Editions](/spec/versioning-editions/).
 
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
 of being verified. That record lives only in the lock.
 
+A hint is still weighed against the floor beside it. A file whose `@requires` refuses every version
+its `@intended_targets` names that the target edition can build states an intention the compiler
+will refuse the moment anyone acts on it, and that is `E_INTENDED_TARGET_CAP`; a list only partly
+below the floor is `W_INTENDED_TARGET_CAP`, and a version the target edition cannot build at all is
+`W_INTENDED_TARGET_UNSUPPORTED`. See
+[Versioning and Editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor).
+
 `@cairn` and `@intended_targets` appear at most once per module, and a repeat is
 `E_DUPLICATE_HEADER`. `@requires` is the exception: its floors compose, so repeating it adds a
 constraint rather than displacing one.
+
+A `def` or a `theme` may carry the same expression as a body line, spelled `requires` without the
+`@` — a floor on that part rather than on the file, inherited by every build that instantiates it.
+The sigil is what marks a file directive, and a part's floor is not one. See
+[Versioning and Editions](/spec/versioning-editions/).
 
 ## 5.4 Selectors
 
@@ -147,7 +213,10 @@ low `z` and mirror the same way.
 
 `sym=true` mirrors the opening across the wall's midpoint
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle is
-rejected with `W_DEFERRED_MEMBER`, and only the primary is painted.
+rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. `sym=` takes a bare `true` or
+`false`, and a window without it is not mirrored. Any other value (`sym=yes`, `sym="true"`,
+`sym=1`) is an unreadable value: the window is drawn without its mirror, and the value is reported
+as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **`at=` door anchors.** A door's wall-local column comes from one of three named anchors:
 
@@ -157,15 +226,23 @@ rejected with `W_DEFERRED_MEMBER`, and only the primary is painted.
 | `at=left` | The wall-local axis origin, `u = 0`. |
 | `at=right` | The far corner, `u = wall_length - 1`. |
 
-The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](components-editing-sites#935-ports-and-connect)).
+The same column resolves both the openings cut and any `connect` walkway anchored to this door ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 Numeric offsets (`at=N`) are reserved for a future extension.
+
+**Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
+level's base plane, and takes the two rows a doorway wants, or as much of that row's wall course as
+it has counting the row it opens at — so a door under a one-row course opens that one row rather
+than cutting into the roof. The row it opens at MUST be inside a course of the masonry; a door
+written against walls that do not reach it is `W_DEFERRED_MEMBER` and cuts nothing, the same finding
+the `window` on that body earns ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the
+courses a `walls` paints).
 
 ## 5.5 IDs, classes, addresses
 
 Important members MAY declare `id=`, and `class=` groups members. Members without an `id=` get a
 stable, meaning-based address assigned by the compiler, derived from parent / role / side / level /
 offset. See
-[Components, Editing, and Multi-building §9.2](components-editing-sites#92-editing-model).
+[Components, Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model).
 
 A `place` row is the exception: its `id=` is required, and omitting it is `E_INCOMPLETE_PLACE`. An
 auto-address names nothing outside the body it sits in. A `place`'s `id=` is what `east_of=` and

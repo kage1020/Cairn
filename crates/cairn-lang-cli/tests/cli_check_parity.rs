@@ -11,23 +11,23 @@
 //! The build commands report `check`'s findings verbatim and in order, then
 //! append their own lowering diagnostics; anything else (a dropped code, a
 //! duplicated one, a reordered one) is a regression these tests catch.
+//!
+//! Most of that is a *prefix* assertion, because the unpinned `cairn check`
+//! those tests invoke runs no lowering and so has nothing to compare the
+//! appended half against. `parity_8` is the one that closes it: `cairn
+//! check --edition java --target latest` runs the same two stages at the
+//! same pin `cairn compile` does, so its stream is compared **equal**
+//! rather than prefixed — which is what keeps `check_lowering` and
+//! `load_and_lower` from drifting as two hand-written copies of the same
+//! `resolve` + `view` + `lower_to_block_array` sequence.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{cairn_argv, examples_dir};
 
 /// Shared prologue so each fixture differs only in the construct that trips
 /// its diagnostic. Named for its role rather than for the `@directive`
@@ -87,7 +87,8 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
     ),
     (
         // Two rows with one keyword and one attribute set select the same
-        // members, so the later `frame=` is the only one anything reads.
+        // members, so every member's merged bindings keep only the later
+        // `frame=` (and no pass lowers either value yet).
         // Written whole so the rows join the theme the struct binds.
         "E_DUPLICATE_SELECTOR",
         Source::Whole(
@@ -151,6 +152,14 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  walls class=outer height=3\n"),
     ),
     (
+        // The tail belongs to a sensor; `walls` is not one, and the
+        // signal it names is emitted by nothing.
+        "E_MISPLACED_BINDING",
+        Source::WithPrologue(
+            "struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n",
+        ),
+    ),
+    (
         // The site half of this code. It is the half that had no reporter
         // at either stage — a geometry row among a site's placements
         // produced neither voxels nor a diagnostic — so it is the one
@@ -173,7 +182,7 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n"),
     ),
     (
-        // `spec/syntax.md` §5.1's own forbidden example.
+        // The forbidden example `spec/syntax` "Lexical" gives.
         "E_UNEXPECTED_POSITIONAL",
         Source::WithPrologue("struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),
     ),
@@ -285,13 +294,6 @@ fn write_fixture(root: &Path, index: usize, source: &Source) -> PathBuf {
     path
 }
 
-fn run(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
-
 fn exit_code(out: &std::process::Output) -> i32 {
     out.status.code().expect("process exited via a signal")
 }
@@ -303,7 +305,7 @@ type Reported = (u64, u64, String, String);
 
 /// Diagnostics from `cairn check --format json`, in emission order.
 fn check_stream(path: &Path) -> Vec<Reported> {
-    let out = run(&["check", path.to_str().unwrap(), "--format", "json"]);
+    let out = cairn_argv(&["check", path.to_str().unwrap(), "--format", "json"]);
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
     parsed
@@ -384,7 +386,7 @@ fn parity_1_check_reports_each_fixture_code_exactly_once() {
             "{code}: fixture should trip exactly one error, got {errors:?}",
         );
         assert_eq!(errors[0].3, *code, "{code}: wrong code reported");
-        let out = run(&["check", path.to_str().unwrap()]);
+        let out = cairn_argv(&["check", path.to_str().unwrap()]);
         assert_eq!(exit_code(&out), 1, "{code}: check should exit 1");
     }
 }
@@ -409,7 +411,7 @@ fn parity_2_build_commands_replay_the_check_stream_verbatim() {
 
         for (name, args) in build_commands(path.to_str().unwrap(), out_dir.to_str().unwrap()) {
             let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-            let out = run(&argv);
+            let out = cairn_argv(&argv);
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
             let actual = stderr_stream(&stderr);
 
@@ -439,7 +441,7 @@ fn parity_3_build_commands_refuse_every_check_error() {
 
         for (name, args) in build_commands(path.to_str().unwrap(), out_dir.to_str().unwrap()) {
             let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-            let out = run(&argv);
+            let out = cairn_argv(&argv);
             assert_eq!(
                 exit_code(&out),
                 1,
@@ -466,7 +468,7 @@ fn parity_4_a_refused_compile_leaves_no_artifact_and_no_lockfile() {
         let out_dir = path.parent().expect("fixture dir").join("out");
         fs::create_dir_all(&out_dir).expect("create out dir");
 
-        let out = run(&[
+        let out = cairn_argv(&[
             "compile",
             path.to_str().unwrap(),
             "--edition",
@@ -510,7 +512,7 @@ fn parity_5_a_template_only_library_compiles_to_nothing_without_complaint() {
     .expect("write library");
     let out_dir = tmp.path().join("out");
 
-    let out = run(&[
+    let out = cairn_argv(&[
         "compile",
         path.to_str().unwrap(),
         "--edition",
@@ -555,7 +557,7 @@ fn parity_6_a_partially_lowered_source_is_not_certified() {
     let out_dir = tmp.path().join("out");
     fs::create_dir_all(&out_dir).expect("create out dir");
 
-    let out = run(&[
+    let out = cairn_argv(&[
         "compile",
         path.to_str().unwrap(),
         "--edition",
@@ -601,7 +603,7 @@ fn parity_7_every_example_still_passes_all_four_commands() {
         fs::copy(&src, &work).expect("copy example");
         let path = work.to_str().unwrap();
 
-        let out = run(&["check", path]);
+        let out = cairn_argv(&["check", path]);
         assert_eq!(
             exit_code(&out),
             0,
@@ -613,7 +615,7 @@ fn parity_7_every_example_still_passes_all_four_commands() {
         let out_dir = tmp.path().join(format!("out-{}", name.to_string_lossy()));
         for (cmd, args) in build_commands(path, out_dir.to_str().unwrap()) {
             let argv: Vec<&str> = args.iter().map(String::as_str).collect();
-            let out = run(&argv);
+            let out = cairn_argv(&argv);
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
             assert_eq!(
                 exit_code(&out),
@@ -631,4 +633,71 @@ fn parity_7_every_example_still_passes_all_four_commands() {
         }
     }
     assert!(seen > 0, "no examples found — the corpus path is wrong");
+}
+
+#[test]
+fn parity_8_a_pinned_check_reports_exactly_what_the_compile_reports() {
+    // Equality in both directions. A dropped lowering finding fails it, and
+    // so does a compile-only one — the two commands run the same passes
+    // against the same table, so a code either of them reaches alone is a
+    // divergence to explain rather than to discover later.
+    //
+    // `--target latest` on the check side because `compile --target`
+    // defaults to `latest`; naming a version here would compare two
+    // different pins and call the difference parity.
+    let tmp = TempDir::new().expect("tempdir");
+    for (index, (code, body)) in all_fixtures().enumerate() {
+        let path = write_fixture(tmp.path(), index, body);
+        let source = path.to_str().unwrap();
+        let out_dir = path.parent().expect("fixture dir").join("out");
+
+        let checked = cairn_argv(&[
+            "check",
+            source,
+            "--edition",
+            "java",
+            "--target",
+            "latest",
+            "--format",
+            "json",
+        ]);
+        let checked_code = exit_code(&checked);
+        let stdout = String::from_utf8(checked.stdout).expect("utf-8");
+        let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+        let expected: Vec<Reported> = parsed
+            .as_array()
+            .expect("array of diagnostics")
+            .iter()
+            .map(|d| {
+                (
+                    d["line"].as_u64().expect("line"),
+                    d["col"].as_u64().expect("col"),
+                    d["severity"].as_str().expect("severity").to_owned(),
+                    d["code"].as_str().expect("code").to_owned(),
+                )
+            })
+            .collect();
+        assert!(!expected.is_empty(), "{code}: pinned check reports nothing");
+
+        let out = cairn_argv(&[
+            "compile",
+            source,
+            "--edition",
+            "java",
+            "--out",
+            out_dir.to_str().unwrap(),
+        ]);
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert_eq!(
+            stderr_stream(&stderr),
+            expected,
+            "{code}: the pinned check and the compile must report the same \
+             stream\n  check: {expected:?}\n  compile stderr:\n{stderr}",
+        );
+        assert_eq!(
+            checked_code,
+            exit_code(&out),
+            "{code}: and refuse the same source\n  compile stderr:\n{stderr}",
+        );
+    }
 }

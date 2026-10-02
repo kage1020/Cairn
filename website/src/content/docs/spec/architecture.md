@@ -19,19 +19,19 @@ here. It holds a voxel grid, a palette, block entities, and entities, and is neu
 edition, and version.
 
 It is the output target of the forward direction and the input destination of the reverse one
-([Ecosystem Interop](ecosystem-interop)).
+([Ecosystem Interop](/spec/ecosystem-interop/)).
 
 ## 3.2 The Intent IR is rich and carries invariants
 
 A named member carries `id`, `class`, `role`, `mat_slot`, `intent_state`, and `resolved_state`
-([Blockstate Model](blockstate)).
+([Blockstate Model](/spec/blockstate/)).
 
 A raw import does not produce a valid Intent IR. It reaches one only after a semantic lift, and an
 artifact's progress along that path is `semantic_level: raw | grouped | lifted`.
 
 ## 3.3 Redstone sub-layers
 
-When redstone is described logically ([Redstone](redstone)), three IR layers with distinct roles sit
+When redstone is described logically ([Redstone](/spec/redstone/)), three IR layers with distinct roles sit
 between the Intent IR and the block-array IR, the same separation HDL uses:
 
 ```

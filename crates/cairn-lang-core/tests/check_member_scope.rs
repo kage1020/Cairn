@@ -15,13 +15,10 @@
 //! both `continue` past a non-`place` row without a word, so the member
 //! produced no voxels and no diagnostic anywhere.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
-fn diagnose(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
+mod common;
+use common::{PRELUDE, def_with, diagnose, exactly_one, notes, struct_with};
 
 fn misplaced_only(source: &str) -> Vec<Diagnostic> {
     diagnose(source)
@@ -31,22 +28,8 @@ fn misplaced_only(source: &str) -> Vec<Diagnostic> {
 }
 
 fn one(source: &str) -> Diagnostic {
-    let mut found = misplaced_only(source);
-    assert_eq!(found.len(), 1, "expected one finding, got {found:#?}");
-    found.remove(0)
+    exactly_one(misplaced_only(source))
 }
-
-fn notes(diag: &Diagnostic) -> Vec<&str> {
-    diag.notes.iter().map(|n| n.message.as_str()).collect()
-}
-
-const PRELUDE: &str = "theme plain:\n  \
-slot floor -> @oak_planks\n  \
-slot wall  -> @cobblestone\n\n\
-def hut size=3x3:\n  \
-floor id=floor mat_slot=floor\n  \
-walls id=walls class=outer mat_slot=wall height=3\n  \
-door  id=entry side=front at=center\n\n";
 
 /// Every keyword the role table knows, with a well-formed argument list
 /// for each so the finding under test is the only thing wrong with the
@@ -67,18 +50,6 @@ const SITE_ROWS: &[&str] = &[
     "place id=extra use=hut theme=plain at=origin",
     "connect anchor.entry to peer.entry path=@gravel",
 ];
-
-fn struct_with(row: &str) -> String {
-    format!("{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  {row}\n")
-}
-
-/// `run` walks `ir.structs` and `ir.defs` in separate loops, so a
-/// struct-only suite leaves the `def` loop unexecuted — deleting it used
-/// to keep the whole crate green. And a `def` is the half users reach
-/// first, since a `site` is what instantiates one.
-fn def_with(row: &str) -> String {
-    format!("{PRELUDE}def lodge size=5x5:\n  floor mat_slot=floor\n  {row}\n")
-}
 
 fn site_with(row: &str) -> String {
     format!(

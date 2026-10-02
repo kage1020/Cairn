@@ -1,0 +1,377 @@
+{
+  "schema_version": 1,
+  "namespace": "minecraft",
+  "groups": [
+    {
+      "spellings": [
+        "light",
+        "light_block",
+        "light_block_0",
+        "light_block_1",
+        "light_block_2",
+        "light_block_3",
+        "light_block_4",
+        "light_block_5",
+        "light_block_6",
+        "light_block_7",
+        "light_block_8",
+        "light_block_9",
+        "light_block_10",
+        "light_block_11",
+        "light_block_12",
+        "light_block_13",
+        "light_block_14",
+        "light_block_15"
+      ]
+    },
+    {
+      "spellings": [
+        "oak_sign",
+        "standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "oak_wall_sign",
+        "wall_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "dark_oak_sign",
+        "darkoak_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "dark_oak_wall_sign",
+        "darkoak_wall_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "spruce_sign",
+        "spruce_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "birch_sign",
+        "birch_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "jungle_sign",
+        "jungle_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "acacia_sign",
+        "acacia_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "cherry_sign",
+        "cherry_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "bamboo_sign",
+        "bamboo_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "crimson_sign",
+        "crimson_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "warped_sign",
+        "warped_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "mangrove_sign",
+        "mangrove_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "pale_oak_sign",
+        "pale_oak_standing_sign"
+      ]
+    },
+    {
+      "spellings": [
+        "oak_button",
+        "wooden_button"
+      ]
+    },
+    {
+      "spellings": [
+        "oak_door",
+        "wooden_door"
+      ]
+    },
+    {
+      "spellings": [
+        "oak_pressure_plate",
+        "wooden_pressure_plate"
+      ]
+    },
+    {
+      "spellings": [
+        "oak_trapdoor",
+        "trapdoor"
+      ]
+    },
+    {
+      "spellings": [
+        "oak_fence_gate",
+        "fence_gate"
+      ]
+    },
+    {
+      "spellings": [
+        "bricks",
+        "brick_block"
+      ]
+    },
+    {
+      "spellings": [
+        "nether_bricks",
+        "nether_brick"
+      ]
+    },
+    {
+      "spellings": [
+        "red_nether_bricks",
+        "red_nether_brick"
+      ]
+    },
+    {
+      "spellings": [
+        "end_stone_bricks",
+        "end_bricks"
+      ]
+    },
+    {
+      "spellings": [
+        "end_stone_brick_stairs",
+        "end_brick_stairs"
+      ]
+    },
+    {
+      "spellings": [
+        "prismarine_brick_stairs",
+        "prismarine_bricks_stairs"
+      ]
+    },
+    {
+      "spellings": [
+        "cobweb",
+        "web"
+      ]
+    },
+    {
+      "spellings": [
+        "dead_bush",
+        "deadbush"
+      ]
+    },
+    {
+      "spellings": [
+        "terracotta",
+        "hardened_clay"
+      ]
+    },
+    {
+      "spellings": [
+        "magma_block",
+        "magma"
+      ]
+    },
+    {
+      "spellings": [
+        "melon",
+        "melon_block"
+      ]
+    },
+    {
+      "spellings": [
+        "note_block",
+        "noteblock"
+      ]
+    },
+    {
+      "spellings": [
+        "powered_rail",
+        "golden_rail"
+      ]
+    },
+    {
+      "spellings": [
+        "dirt_path",
+        "grass_path"
+      ]
+    },
+    {
+      "spellings": [
+        "lily_pad",
+        "waterlily"
+      ]
+    },
+    {
+      "spellings": [
+        "sugar_cane",
+        "reeds"
+      ]
+    },
+    {
+      "spellings": [
+        "slime_block",
+        "slime"
+      ]
+    },
+    {
+      "spellings": [
+        "spawner",
+        "mob_spawner"
+      ]
+    },
+    {
+      "spellings": [
+        "nether_quartz_ore",
+        "quartz_ore"
+      ]
+    },
+    {
+      "spellings": [
+        "light_gray_glazed_terracotta",
+        "silver_glazed_terracotta"
+      ]
+    },
+    {
+      "spellings": [
+        "waxed_copper_block",
+        "waxed_copper"
+      ]
+    },
+    {
+      "spellings": [
+        "flowering_azalea_leaves",
+        "azalea_leaves_flowered"
+      ]
+    },
+    {
+      "spellings": [
+        "rooted_dirt",
+        "dirt_with_roots"
+      ]
+    },
+    {
+      "spellings": [
+        "small_dripleaf",
+        "small_dripleaf_block"
+      ]
+    },
+    {
+      "spellings": [
+        "beetroots",
+        "beetroot"
+      ]
+    },
+    {
+      "spellings": [
+        "shulker_box",
+        "undyed_shulker_box"
+      ]
+    },
+    {
+      "spellings": [
+        "jack_o_lantern",
+        "lit_pumpkin"
+      ]
+    },
+    {
+      "spellings": [
+        "tripwire",
+        "trip_wire"
+      ]
+    },
+    {
+      "spellings": [
+        "frogspawn",
+        "frog_spawn"
+      ]
+    },
+    {
+      "spellings": [
+        "stone_slab",
+        "normal_stone_slab"
+      ]
+    },
+    {
+      "spellings": [
+        "stonebrick",
+        "stone_bricks",
+        "chiseled_stone_bricks",
+        "cracked_stone_bricks",
+        "mossy_stone_bricks"
+      ]
+    },
+    {
+      "spellings": [
+        "monster_egg",
+        "infested_stone",
+        "infested_cobblestone",
+        "infested_stone_bricks",
+        "infested_mossy_stone_bricks",
+        "infested_cracked_stone_bricks",
+        "infested_chiseled_stone_bricks"
+      ]
+    },
+    {
+      "spellings": [
+        "skull",
+        "skeleton_skull",
+        "wither_skeleton_skull",
+        "zombie_head",
+        "creeper_head",
+        "dragon_head",
+        "player_head",
+        "piglin_head"
+      ]
+    },
+    {
+      "spellings": [
+        "yellow_flower",
+        "dandelion"
+      ]
+    },
+    {
+      "spellings": [
+        "coral_fan_hang",
+        "coral_fan_hang2",
+        "coral_fan_hang3",
+        "tube_coral_wall_fan",
+        "brain_coral_wall_fan",
+        "bubble_coral_wall_fan",
+        "fire_coral_wall_fan",
+        "horn_coral_wall_fan",
+        "dead_tube_coral_wall_fan",
+        "dead_brain_coral_wall_fan",
+        "dead_bubble_coral_wall_fan",
+        "dead_fire_coral_wall_fan",
+        "dead_horn_coral_wall_fan"
+      ]
+    }
+  ]
+}

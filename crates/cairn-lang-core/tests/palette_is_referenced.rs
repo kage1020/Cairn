@@ -23,15 +23,10 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
-use cairn_lang_core::{lower, parse, resolve};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState};
 
-fn lower_source(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, None)
-}
+mod common;
+use common::lowered;
 
 /// Palette slots no voxel names, rendered for the failure message.
 ///
@@ -92,7 +87,7 @@ fn no_shipped_example_ships_a_palette_entry_it_does_not_use() {
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let name = path.file_name().expect("file name").to_string_lossy();
-        assert_every_entry_is_used(&name, &lower_source(&source));
+        assert_every_entry_is_used(&name, &lowered(&source));
     }
 }
 
@@ -101,7 +96,7 @@ fn a_gable_too_small_for_a_high_apex_does_not_intern_one() {
     // 3x3 leaves one ridge voxel, so the generator emits three of the four
     // gable faces. Interning the table up front put the fourth in the
     // palette anyway.
-    let ir = lower_source(
+    let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
          slot roof -> @spruce_stairs\n\n\
@@ -125,7 +120,7 @@ fn a_gable_too_small_for_a_high_apex_does_not_intern_one() {
 fn a_shed_shallow_enough_to_be_all_apex_does_not_intern_a_slope() {
     // A one-deep slope span is a single layer, and that layer is the apex.
     // The slope face the other half of the table describes never appears.
-    let ir = lower_source(
+    let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
          slot roof -> @spruce_stairs\n\n\
@@ -149,7 +144,7 @@ fn a_shed_shallow_enough_to_be_all_apex_does_not_intern_a_slope() {
 fn a_window_that_does_not_fit_the_wall_adds_no_palette_entry() {
     // The two geometry checks refuse to paint anything, so the material
     // must not have been resolved into the palette on the way to them.
-    let ir = lower_source(
+    let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
          slot glass -> @glass\n\n\
@@ -177,7 +172,7 @@ fn a_window_that_does_not_fit_the_wall_adds_no_palette_entry() {
 fn a_window_that_runs_past_the_wall_adds_no_palette_entry() {
     // The other of the two checks — this one fires on the horizontal span
     // rather than the vertical one, and they return from different places.
-    let ir = lower_source(
+    let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
          slot glass -> @glass\n\n\
@@ -207,7 +202,7 @@ fn a_pressure_plate_with_nowhere_to_sit_adds_no_palette_entry() {
     // the plate defers. A deferred member must leave nothing behind: an
     // entry in the palette is a block `cairn info` counts and the `.nbt`
     // ships for a fixture that was never placed.
-    let ir = lower_source(
+    let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
          slot plate -> @oak_pressure_plate\n\n\

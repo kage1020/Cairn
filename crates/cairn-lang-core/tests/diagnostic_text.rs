@@ -77,6 +77,95 @@ fn no_diagnostic_text_is_empty_or_padded() {
 /// file, are not all represented. Severity is deliberately not among the
 /// properties guarded here: `Diagnostic::severity` reads the ledger, so
 /// there is no per-diagnostic value left for a fixture to catch.
+/// The codes are a floor and not the whole story: one code can render
+/// several different sentences, and a fixture that stops reaching one of
+/// them takes its prose out of the checks above without changing the code
+/// set at all.
+///
+/// `W_IGNORED_ARGUMENT` is the code with the most: a primary per shape of
+/// finding, and for an unreadable value a note per member and per outcome.
+/// The two-repair-site branch is the one this pins: it is the only finding
+/// in the set that names a second argument, so its sentence is the one a
+/// subset check over codes cannot see go missing. The notes an unreadable
+/// value can carry are pinned below.
+#[test]
+fn the_corpus_reaches_the_two_repair_site_branch_of_the_ignored_argument_prose() {
+    let reached = rendered_strings().into_iter().any(|(origin, text)| {
+        origin.starts_with("W_IGNORED_ARGUMENT")
+            && text.contains("either argument may be the repair")
+    });
+    assert!(
+        reached,
+        "no fixture reaches the branch of `W_IGNORED_ARGUMENT` that names both repair sites",
+    );
+}
+
+/// An unreadable value's note says what the default did, or that the
+/// member is not built either way, in words written per member. Each is its
+/// own literal, and so its own chance at a dropped continuation; the
+/// origin-range refusal beside them is joined from three continued lines.
+#[test]
+fn the_corpus_reaches_every_note_an_unreadable_value_carries() {
+    let rendered = rendered_strings();
+    for (code, sentence) in [
+        (
+            "W_IGNORED_ARGUMENT",
+            "the row is placed as `gap=0` places it",
+        ),
+        ("W_IGNORED_ARGUMENT", "this row is not placed either way"),
+        (
+            "W_IGNORED_ARGUMENT",
+            "this row is not placed at `gap=0`, the value its origin was worked out with",
+        ),
+        ("W_IGNORED_ARGUMENT", "the stair is built with the default"),
+        ("W_IGNORED_ARGUMENT", "this stair is not built either way"),
+        (
+            "W_IGNORED_ARGUMENT",
+            "the window is drawn without its mirror",
+        ),
+        ("W_IGNORED_ARGUMENT", "this window is not cut either way"),
+        ("W_DEFERRED_MEMBER", "this placement's origin works out to"),
+    ] {
+        assert!(
+            rendered
+                .iter()
+                .any(|(origin, text)| origin.starts_with(code) && text.contains(sentence)),
+            "no fixture reaches the `{code}` text `{sentence}`",
+        );
+    }
+}
+
+/// A `struct` / `def` header finding is worded apart from a member's:
+/// `E_UNKNOWN_ARGUMENT` names the header rather than a keyword's arguments,
+/// and the header's unreached `class=` has a primary and a note of its own.
+/// Both codes are reached by member findings too, so the code set above
+/// would stay whole if the header fixtures stopped reaching these.
+#[test]
+fn the_corpus_reaches_the_header_vocabulary_prose() {
+    let rendered = rendered_strings();
+    for (origin, sentence) in [
+        (
+            "E_UNKNOWN_ARGUMENT primary",
+            "`siz=` is not an argument a `struct` header reads",
+        ),
+        (
+            "W_IGNORED_ARGUMENT primary",
+            "`class=` is an argument a `def` header takes and no pass reads yet",
+        ),
+        (
+            "W_IGNORED_ARGUMENT note 0",
+            "the `def` is built without it — remove the argument",
+        ),
+    ] {
+        assert!(
+            rendered
+                .iter()
+                .any(|(o, text)| o == origin && text.contains(sentence)),
+            "no fixture reaches the {origin} `{sentence}`",
+        );
+    }
+}
+
 #[test]
 fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
     let mut seen: BTreeSet<&'static str> = BTreeSet::new();
@@ -98,6 +187,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_TRUTH_TABLE_CONFLICT",
         "E_TRUTH_TABLE_EMPTY",
         "E_UNEXPECTED_POSITIONAL",
+        "E_UNKNOWN_ARGUMENT",
         "E_UNKNOWN_KEYWORD",
         "E_UNKNOWN_SLOT_TARGET",
         "E_UNRESOLVED_PLACE_REF",
@@ -106,6 +196,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "W_DEFERRED_MEMBER",
         "W_IGNORED_ARGUMENT",
         "W_STRUCTURE_TOO_LARGE",
+        "W_STRUCT_NO_SIZE",
         "W_TRUTH_TABLE_DUPLICATE_ROW",
         "W_TRUTH_TABLE_PARTIAL",
         "W_UNUSED_DEF",

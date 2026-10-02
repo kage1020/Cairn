@@ -7,14 +7,16 @@
 //! lockfile's `inputs.registry_pack_hash` field so a build is reproducible
 //! against a pinned set of bytes.
 //!
-//! Three components ship today: `data_versions` (which let `data_version.rs`
+//! Four components ship today: `data_versions` (which let `data_version.rs`
 //! stop carrying a hardcoded `(mc_version, DataVersion)` array), `materials`
-//! (abstract `@token` → id), and `blocks` (the per-version id table an
-//! `E_UNKNOWN_ID` is decided against). Later additions — item and tag
-//! tables, the semantic-sensitivity catalog — slot in by extending
-//! [`PackFiles`] with new `Option` fields, so an older pack stays
-//! loadable.
+//! (abstract `@token` → id), `blocks` (the per-version id table an
+//! `E_UNKNOWN_ID` is decided against), and `aliases` (the spellings one
+//! block has worn, which is what turns a refused id into the name the
+//! target does use). Later additions — item and tag tables, the
+//! semantic-sensitivity catalog — slot in by extending [`PackFiles`] with
+//! new `Option` fields, so an older pack stays loadable.
 
+pub mod aliases;
 pub mod blocks;
 pub mod data_versions;
 pub mod hash;
@@ -22,6 +24,7 @@ pub mod load;
 pub mod manifest;
 pub mod materials;
 
+pub use aliases::{AliasCatalog, AliasError, AliasGroup, AliasIndex, SUPPORTED_ALIASES_SCHEMA};
 pub use blocks::{
     BlocksBase, BlocksCatalog, BlocksDiff, BlocksError, BlocksIndex, SUPPORTED_BLOCKS_SCHEMA,
 };
@@ -36,11 +39,13 @@ pub use manifest::{PackEdition, PackFiles, PackManifest};
 
 /// Prepend `namespace` to a component entry that does not carry one.
 ///
-/// Shared by the `materials` and `blocks` components because they name the
-/// same thing the same way: an entry may write `oak_planks` and inherit the
-/// catalog's namespace, or write `create:cogwheel` and keep its own. Two
-/// copies of this rule is two places for the two components to drift apart
-/// on what counts as namespaced.
+/// Shared by the `materials`, `blocks` and `aliases` components because
+/// they name the same thing the same way: an entry may write `oak_planks`
+/// and inherit the catalog's namespace, or write `create:cogwheel` and keep
+/// its own. Three copies of this rule is three places for the components to
+/// drift apart on what counts as namespaced — and an alias group is matched
+/// against a block table by string equality, so a drift between those two
+/// would silently stop every group answering.
 pub(crate) fn namespaced(namespace: &str, block: &str) -> String {
     if block.contains(':') {
         block.to_owned()

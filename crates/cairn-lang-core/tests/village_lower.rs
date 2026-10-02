@@ -9,37 +9,15 @@
 //! of those would mean a future change quietly re-broke either site
 //! lowering or walkway voxelisation.
 
-use std::path::PathBuf;
-
-use cairn_lang_core::block_array::{BlockArrayIr, Footprint, lower_to_block_array};
+use cairn_lang_core::block_array::Footprint;
 use cairn_lang_core::check::{DiagnosticCode, Severity};
-use cairn_lang_core::{lower, parse, resolve};
 
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
-
-fn lower_village() -> BlockArrayIr {
-    let source =
-        std::fs::read_to_string(examples_dir().join("village.crn")).expect("village.crn must read");
-    let module = parse(&source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let mut out = lower_to_block_array(&ir, &resolution, None);
-    // Resolver diagnostics are produced before lowering; mirror the CLI
-    // wiring so the assertion below sees both lists merged.
-    let mut combined = resolution.diagnostics;
-    combined.append(&mut out.diagnostics);
-    out.diagnostics = combined;
-    out
-}
+mod common;
+use common::{lowered_with_resolver_diagnostics, read_example};
 
 #[test]
 fn village_emits_three_placements_and_two_walkways() {
-    let out = lower_village();
+    let out = lowered_with_resolver_diagnostics(&read_example("village.crn"));
     // Three named places — `home1`, `home2`, `home3` — should each have
     // their own `BlockArray` and `Placement` under the matching
     // `site::hamlet::*` key.
@@ -120,7 +98,7 @@ fn village_emits_three_placements_and_two_walkways() {
 
 #[test]
 fn village_walkway_block_arrays_share_keys_with_walkways_map() {
-    let out = lower_village();
+    let out = lowered_with_resolver_diagnostics(&read_example("village.crn"));
     // The `BlockArray` for each walkway must live under the same scope
     // key as its `Walkway` metadata so a downstream consumer can join the
     // two maps without an extra translation step.
@@ -152,7 +130,7 @@ fn village_emits_zero_walkway_blocked_warnings() {
     // hole). With the ground-plane router the walkway detours around the
     // building instead, so the whole example must lower warning-free and
     // the laid strip must be unbroken.
-    let out = lower_village();
+    let out = lowered_with_resolver_diagnostics(&read_example("village.crn"));
     let blocked: Vec<_> = out
         .diagnostics
         .iter()
@@ -196,7 +174,7 @@ fn village_emits_zero_walkway_blocked_warnings() {
 
 #[test]
 fn village_emits_zero_deferred_member_warnings() {
-    let out = lower_village();
+    let out = lowered_with_resolver_diagnostics(&read_example("village.crn"));
     let deferred = out
         .diagnostics
         .iter()
@@ -211,7 +189,7 @@ fn village_emits_zero_deferred_member_warnings() {
 
 #[test]
 fn village_emits_no_resolver_errors() {
-    let out = lower_village();
+    let out = lowered_with_resolver_diagnostics(&read_example("village.crn"));
     let errors: Vec<_> = out
         .diagnostics
         .iter()

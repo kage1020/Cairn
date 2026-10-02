@@ -1,26 +1,5 @@
 name: npm publish
 
-# Publishes the `tree-sitter-cairn` npm package for an already-released tag.
-#
-# Kept out of tree-sitter.yml on purpose: that workflow runs on every pull
-# request, and a workflow that can mint an npm publishing token has no business
-# being reachable from a fork's `pull_request` event. release.yml dispatches this
-# one after release-plz has published to crates.io, so the npm version and the
-# crates.io version always come from the same tag and the same commit.
-#
-# Authentication is npm Trusted Publishing (OIDC): the package has this
-# repository + this workflow file registered as a trusted publisher on npmjs.com,
-# so no `NPM_TOKEN` secret is read here. The first publish of a package can never
-# use OIDC — npm has no pending-publisher concept, so the package must already
-# exist before a trusted publisher can be attached to it. That one initial
-# publish was done by hand; every one after it runs here.
-#
-# The upload uses the npm CLI rather than pnpm, even though pnpm is what installs
-# and tests the package. pnpm's OIDC support is still open upstream
-# (pnpm/pnpm#9812) and the paths that did work regressed to a 404 in pnpm 11
-# (pnpm/pnpm#11513), so pnpm handles the lockfile and the test run and npm
-# handles the token exchange.
-
 on:
   workflow_dispatch:
     inputs:
@@ -45,12 +24,8 @@ jobs:
     name: Publish tree-sitter-cairn
     runs-on: ubuntu-latest
     permissions:
-      # Lets the npm CLI mint the OIDC token npmjs.com exchanges for a
-      # short-lived, package-scoped registry token.
       id-token: write
     steps:
-      # Bind the untrusted dispatch input to an env var and reject anything that
-      # is not a CalVer release tag before it reaches the checkout below.
       - id: validate
         name: Validate tag
         working-directory: .
@@ -66,15 +41,10 @@ jobs:
           echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
           echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.validate.outputs.tag }}
 
-      # tree-sitter.yml's version-sync job proves the three manifests agree with
-      # each other on any ref it runs against. This is the narrower question the
-      # publish itself turns on: the tarball is named after package.json, so a
-      # package.json left behind by a bump would silently republish an old
-      # version number against new code.
       - name: Ensure package.json matches the tag
         shell: bash
         env:
@@ -87,19 +57,10 @@ jobs:
             exit 1
           fi
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
-      # Deliberately no `registry-url`. Setting it makes setup-node write an
-      # .npmrc containing `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`
-      # and export NODE_AUTH_TOKEN as a placeholder. npm then sees auth as
-      # already configured, never starts the OIDC exchange, and sends the
-      # placeholder as a credential — which the registry answers with a 404 on
-      # the PUT rather than a 403, because it will not confirm that a package it
-      # won't let you touch exists (actions/setup-node#1551). Trusted Publishing
-      # only engages when nothing has configured a token, and registry.npmjs.org
-      # is npm's default registry anyway, so there is nothing to point at.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -107,28 +68,55 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # The tarball ships the generated parser, so a drifted src/parser.c would
-      # go out verbatim. Regenerate and diff here rather than trusting that the
-      # tagged commit's own CI run covered it.
       - run: pnpm run generate
       - name: Ensure generated files match the tag
         run: git diff --exit-code src/parser.c src/grammar.json src/node-types.json
       - run: pnpm test
 
-      # Trusted Publishing needs npm >= 11.5.1, which is newer than the npm
-      # bundled with Node 22 on the runner images.
+      # `actions/setup-node` with `node-version: 22` brings the npm Node 22
+      # bundles, which is 10.x and carries no Trusted Publishing support at
+      # all — so this upgrade is required, not cosmetic. Trusted Publishing
+      # needs npm 11.5.1 or newer. The major is what carries the argument; the
+      # patch moves with each v22 release and nothing here maintains it.
+      #
+      # Pinned rather than `@latest` because this is the binary that performs
+      # the OIDC token exchange under the `id-token: write` granted above and
+      # signs the provenance attestation: whoever controls what a floating tag
+      # resolves to controls the publish. The one third-party action in this
+      # job is SHA-pinned and the install is `--frozen-lockfile`; `actions/*`
+      # stays on its major tag as the accepted risk `.github/dependabot.yml`
+      # records. This line was the one moving target nothing had decided about.
+      #
+      # `.github/dependabot.yml` configures `github-actions` only, and no
+      # ecosystem watches a version inside a `run:` line — nothing will raise
+      # this for you. Bump it deliberately when Trusted Publishing needs a
+      # newer npm, and re-run this workflow on a tag to prove it.
+      #
+      # Checked rather than trusted, because the pin is only worth the binary
+      # that ends up on `PATH` and this workflow cannot be exercised from a
+      # pull request: a self-check at runtime is the only thing that ever
+      # tests it. `--engine-strict` turns an engine mismatch from an
+      # `EBADENGINE` warning into a failure at the install, where it is
+      # readable, rather than a failure later in some shape nobody can place.
+      # Both land before the tarball is built and before a token is minted,
+      # which is the direction to fail in. `hash -r` is what keeps the
+      # comparison honest: bash hashed `npm` on the install line, and a stale
+      # entry would report the version this step replaced and fail a publish
+      # for no reason.
       - name: Install a Trusted-Publishing-capable npm
-        run: npm install -g npm@latest
+        shell: bash
+        env:
+          NPM_VERSION: "12.1.0"
+        run: |
+          set -euo pipefail
+          npm install -g --engine-strict "npm@$NPM_VERSION"
+          hash -r
+          installed=$(npm --version)
+          if [ "$installed" != "$NPM_VERSION" ]; then
+            echo "npm $installed is on PATH, but this job pinned $NPM_VERSION" >&2
+            exit 1
+          fi
 
-      # tree-sitter.yml's packed-tarball job exercises the published file set
-      # end to end, but it cannot hold this publish back: release.yml dispatches
-      # the three tag-triggered workflows in one fire-and-forget loop, so a red
-      # job there is an artifact to re-run rather than a gate. The narrow
-      # question the publish itself turns on is whether the manifest that
-      # declares `file-types` and the query paths is in the tarball at all —
-      # without it an editor installing this package finds no language for
-      # `.crn`. Same shape of re-check as the tag/manifest match and the
-      # generated parser above: verified here rather than assumed covered.
       - name: Ensure the tarball carries the tree-sitter manifest
         shell: bash
         run: |
@@ -141,8 +129,4 @@ jobs:
             exit 1
           fi
 
-      # --provenance is passed explicitly even though npm documents it as
-      # automatic under Trusted Publishing; it is a no-op when the attestation
-      # would have been generated anyway, and a hard failure rather than a silent
-      # omission if it would not have been.
       - run: npm publish --access public --provenance

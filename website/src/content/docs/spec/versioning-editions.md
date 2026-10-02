@@ -5,7 +5,7 @@ title: "10. Versioning and Edition Strategy"
 ## 10.1 The target is a compile-time parameter
 
 The target is the pair `(edition, version)`, and neither is written in the source. Only the backend
-knows them ([Compilation Model](compilation)).
+knows them ([Compilation Model](/spec/compilation/)).
 
 **Version strings are opaque labels.** A Minecraft version may be the legacy semver-ish `1.21.4` or,
 from the latest release onward, date-based. Cairn does not compare version strings; it orders by
@@ -86,6 +86,11 @@ dropping are forbidden. An error returns the closed set of candidates valid in t
 minimum version, and a suggested fix. That sends the model back to registry-derived candidates
 rather than to its memory.
 
+Out-of-domain states are not yet enforced: `E_STATE_DOMAIN` below is not implemented, because the
+compiler holds no table of each block's states. Until it does, a state literal
+([Syntax](/spec/syntax/)) is written as given, and every one earns `W_STATE_LITERAL_UNCHECKED`
+([Lint](/spec/lint/)) instead.
+
 ```text
 E_UNKNOWN_ID line 12: "minecraft:pale_oak_planks" not in 1.21.4 registry.
   Similar valid: minecraft:oak_planks, minecraft:dark_oak_planks, minecraft:cherry_planks
@@ -108,16 +113,43 @@ it `stone_bricks`, so an edition-wide answer would accept both everywhere and ca
 The tables ship in the registry pack's `blocks` component, folded with the `inherits + diffs` rule
 of [§10.3](#103-backend--data-tables).
 
-The check therefore runs on `cairn compile --target` and nowhere else. `cairn info` and `cairn
-lower` do lower, but pin no version, since `info` reports across the whole range by design. They
-skip the comparison rather than pick a version on the author's behalf. `cairn check` does not run
-block-array lowering at all, so no lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN`
-included.
+The check therefore runs where a version is pinned and nowhere else: on `cairn compile --target`,
+and on `cairn check --edition E --target V`, which pins the same pair to run the same pass without
+writing anything. `cairn info` and `cairn lower` do lower, but pin no version, since `info` reports
+across the whole range by design. They skip the comparison rather than pick a version on the
+author's behalf. A `cairn check` with no `--target` does not run block-array lowering at all, so no
+lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN` included.
 
-The suggested fix is a typo finder over the same table: `oak_plank` is answered with `oak_planks`.
-A **rename** is not a typo. Bedrock calls Java's `light` `light_block`, six edits away, so the
-message says it has no candidate rather than offering the nearest unrelated block.
-Closing that gap needs a per-edition alias table the pack does not carry yet.
+Checking against *every* version the edition ships and refusing only the ids valid in none of them
+would need no flag, and would answer a different question: `stone_bricks` is valid somewhere on
+Bedrock, so a build pinned to 1.21.0 would still be told nothing. The pin is what makes the answer
+true of the build being made.
+
+The suggested fix has two halves, because a wrong ID arrives two ways. A **typo** is answered by a
+distance search over the same table: `oak_plank` is answered with `oak_planks`. A **rename** is not
+a typo — Bedrock spells Java's `light` `light_block_0` … `light_block_15`, eight edits away — and no
+threshold that keeps the typo finder honest will ever connect the two. Renames are answered from
+the registry pack's `aliases` component instead, and only where the pack has a row; where it does
+not, the message says it has no candidate rather than offering the nearest unrelated block.
+
+An `aliases` row is a **group of spellings**: the names one block has worn, across editions and
+across one edition's own range, including the several IDs one old spelling split into.
+
+```json
+{ "spellings": ["light", "light_block", "light_block_0", "light_block_1"] }
+```
+
+Nothing in the row says which spelling belongs to which `(edition, version)`. The `blocks`
+component already knows that, per version, so a lookup is "take the group, keep the members the
+pinned target declares" — which is what lets one set of rows answer Java → Bedrock
+(`oak_sign` → `standing_sign`) and Bedrock 1.21.0 → 1.21.40 (`stonebrick` → `stone_bricks`) alike.
+An answer is the closed set §10.4 asks for, never a pick from it: `@light` on Bedrock 1.21.60 is
+answered with all sixteen light levels, because choosing one would be the silent substitution this
+section forbids.
+
+What the key cannot express is a spelling both editions declare meaning different blocks — Bedrock's
+`snow` is Java's `snow_block` while Java's `snow` is Bedrock's `snow_layer`. Such a pair gets no
+row, and the typo search still runs behind it.
 
 The same per-version scoping applies to a pack's own material mappings. An entry may carry
 `overrides` naming the versions that spell it differently, which is what lets one
@@ -125,15 +157,118 @@ The same per-version scoping applies to a pack's own material mappings. An entry
 deferred: the tables record which IDs a version *has*, not which version first introduced one, so
 the `E_VERSION_CAP` example above is an `@requires` floor rather than registry-inferred.
 
-`def` and `theme` may declare `requires version>=X`, and the minimum version of a composite is the
-max of its parts. Module-level `@requires` is implemented; the member-level form is not yet parsed.
+### A part may declare its own floor
+
+`def` and `theme` may declare `requires version>=X` on a line of their own, and the minimum version
+of a composite is the max of its parts:
+
+```
+def cottage size=9x7:
+  requires version>=1.21.4
+  walls mat_slot=wall height=4
+```
+
+The expression is the one `@requires` takes, edition scope and all — the two spellings differ in
+what they constrain, not in what they say. A module-level `@requires` is a floor on the *file*; this
+one is a floor on the *part*, so a `place use=cottage` inherits it and a library of templates
+carries its own requirements instead of every consumer restating them.
+
+**Which parts a build inherits from.** A `def` a `place use=` names, and a `theme` a scope binds. A
+part nothing instantiates contributes nothing: a `def` no `place` names builds no voxels (and is
+already `W_UNUSED_DEF`), so refusing a target over it would be refusing over a template the author
+left in the file.
+
+**A theme's floor applies when the theme is bound**, whether or not a member reads a slot from it.
+Binding a theme is the act of taking on what it declares. The alternative — charge the floor only
+once one of its rules fires — makes the floor depend on which selectors matched and which variant
+the pin picked, so one source could require `1.21` on Java and nothing on Bedrock for a reason that
+is not about editions; and it errs in the unsafe direction, since an over-applied floor is reported
+against the line that set it and is one edit away, while an under-applied one certifies a build the
+file itself rules out.
+
+Two things bind a theme, and both of them are a scope a build lowers: a `place ... theme=NAME`
+reference — which is also what instantiates the `def` it places, since `theme=` is required on a
+`place` — and the module-level auto-pick, read for a `struct`, the one scope a build lowers without
+a placement. The auto-pick also binds the sole theme to every `def` scope, and a floor does *not*
+follow it there: a `def` no `place` names builds nothing, so charging a theme's floor because such a
+`def` exists would read one `def` as instantiated enough to take on a theme's floor and not
+instantiated enough to be charged its own. A `def` that is placed reaches the theme through its
+placement's own `theme=` instead.
+
+`struct` and `site` take no such line. Neither is instantiated by anything — each *is* the build —
+so a floor written inside one constrains exactly the file it is in, which is what `@requires`
+already says. The same goes for a member's own indented children: the floor belongs to the part, and
+a `walls` line is not a part. The two refusals are different messages, because the repairs differ:
+one points at `@requires`, the other at a dedent. Neither refuses on the word alone: `requires` is
+an ordinary keyword in a body that reads no floors, so a member line spelled that way parses in a
+`struct`, a `site`, or under a member exactly as it did before this line existed.
+
+A `def` or `theme` body is the other half of that, and takes the word whatever follows it: the line
+is a floor, and an expression that reads as none is `E_INVALID_REQUIRES` rather than a member. That
+costs nothing — `requires` has never been a member keyword, so the same line was `E_UNKNOWN_KEYWORD`
+before.
+
+`E_VERSION_CAP` names the part that imposed the floor, not only the number. A target refused by a
+floor written inside a template is not actionable as a bare version, because the repair is at the
+other end of the `place use=` that inherited it.
 
 ### The declared floor is enforced
 
-A module's `@requires` floor is the strictest of its `@requires` lines. `cairn compile --target`
-below it is `E_VERSION_CAP`, reported before any artifact is prepared, so a refused build leaves no
-structure file and no lock. That ordering matters: a lock records what was verified, and it must
-never say `verified: true` for a target the source itself rules out.
+A module's floors compose by intersection: `cairn compile --target` is held to every `@requires`
+line that applies to the build, and a target below any of them is `E_VERSION_CAP`, reported before
+any artifact is prepared, so a refused build leaves no structure file and no lock. That ordering
+matters: a lock records what was verified, and it must never say `verified: true` for a target the
+source itself rules out.
+
+### The hint is weighed against the floor
+
+`@intended_targets` ([§5.3](/spec/syntax/#53-headers)) is a wish rather than a verification record, and the
+floor above it is a constraint. A file may state both in a way that cannot hold — `@requires
+version>=1.21` beside `@intended_targets ["1.20.4"]` — and before the floor was enforced that was
+two inert statements. Now one of them decides a build and the other does not, which is the worst
+arrangement: the header that reads like an instruction is the ignored one.
+
+So each version the header names is placed in the target edition's table and answered in one of
+three ways:
+
+| The version | The finding |
+|---|---|
+| No `--target` of the edition names it: a release the pack ships no block data for (`1.19` on Java), or a label the table cannot place at all (`1.21.40` on Java) | `W_INTENDED_TARGET_UNSUPPORTED` |
+| A version the edition builds, below a floor the file declares | `E_INTENDED_TARGET_CAP` when *every buildable* one is, `W_INTENDED_TARGET_CAP` when only some are |
+| A version the edition builds, at or above every floor | Nothing |
+
+The order is deliberate: a version the compiler cannot build is reported as that whatever the floors
+say, because `--target 1.19` not existing is what the author acts on and a cap beside it would ask
+them to edit a floor that is not what stops the build. The split between the two cap codes is
+reach rather than kind. Nothing the file says it is for can be built is the strongest reading a
+contradiction between two declarations gets, and no author meant it; a list that reaches past the
+floor at one end is a wish stated too widely, and what it names above the floor still builds.
+
+**"Every" counts the versions the edition can build.** A name no `--target` of it carries answers
+for none of the list, so `@intended_targets ["1.20.4", "1.19"]` under `version>=1.21` is the first
+case and not the second: Java builds exactly one of the two, and the floor refuses it. Counting
+`1.19` would let a version that was never buildable report a file nothing can build as half a
+problem — and it is separately reported as the unsupported case, which is where its own repair is.
+
+Which floors count is the composite fold [§10.4](#a-part-may-declare-its-own-floor) already
+defines — the file's `@requires` lines plus every part the build instantiates — so a `def` in a
+library can refuse the intent of the file that places it, and the finding names the part. A floor
+scoped to the other edition is inert here as everywhere, and a floor this edition's table cannot
+place refuses nothing: that is `E_REQUIRES_UNORDERABLE`, whose repair is on the `requires` line
+rather than on the intent.
+
+Every command that gates on `cairn check` reports the two cap codes — `check`, `info`, `lower`,
+`compile`, `synth` — and each weighs the header in the tables of the editions it is about: the one
+`--edition` names, the ones `cairn info --editions` lists, or both where the command names none. A
+finding either edition reaches is reported, since the contradiction is between two lines of the file
+however it is later built, and one span carries one cap finding: two editions disagreeing about how
+far it reaches report the error, because one of them finding part of the list still buildable does
+not make the other's "none of it is" less true.
+
+`W_INTENDED_TARGET_UNSUPPORTED` waits until exactly one edition is in scope, because a version Java
+cannot build is routinely the Bedrock target the author means. `cairn info --editions bedrock` is
+one edition in scope, and is weighed in Bedrock's table alone — a report scoped to one edition is
+not refused by the other's answer.
 
 `E_REQUIRES_CONFLICT` is **reserved**. It is defined as a declared floor contradicting the
 registry-*inferred* range, and no inferred range is derived yet, because the pack carries no `since`
@@ -141,35 +276,97 @@ registry-*inferred* range, and no inferred range is derived yet, because the pac
 strictest, so their intersection is never empty. A constraint needing an upper bound, such as
 `version<1.20`, is not a shape the language accepts; that is `E_INVALID_REQUIRES`.
 
-### Ordering, and where it stops
+### Ordering is by DataVersion, per edition
 
-[§10.1](#101-the-target-is-a-compile-time-parameter) makes `DataVersion` the canonical ordering key.
-Version comparison today is **component-wise over dotted decimals** instead. That is a known
-shortfall, not a second convention. The pack does ship a `DataVersion` table; the obstacle is its
-coverage, since it names only the versions the pack was built for while a floor may name any
-version.
+[§10.1](#101-the-target-is-a-compile-time-parameter) makes `DataVersion` the canonical ordering key,
+and `@requires` uses it. A floor is placed in the **target edition's** version table
+(`registry-data/{java,bedrock}/data_versions.json`) and weighed against the target's own
+`DataVersion`.
 
-Until a lookup can answer for an arbitrary label, a version Cairn cannot order is refused at the
-directive rather than sorted wrongly later: pre-release, snapshot, and date-based labels
-(`1.21.4-rc1`, `24w14a`) are not accepted in `@requires`.
+That table names every **release** of its edition, which is a different set from the versions the
+pack can *build* for — three per edition, the ones it ships block and material data for. A row says
+which it is (`targetable`). Keeping the two apart is what lets "inside the table's span, naming no
+row" mean "not a release of this edition": a floor of `1.21.1` is a Java release the pack cannot
+build for and can order perfectly well, while `1.21.4` names no Bedrock release at all, because
+Bedrock numbers its patch releases in tens (`1.21.0`, `1.21.20`, `1.21.40`). The two editions'
+release-label sets are disjoint.
 
-Two things the convention still gets wrong within what it does accept:
+A floor may still name something no table carries, so placing one is not a bare lookup. Four
+answers, and only the first is exact:
 
-- **A date-based label against a semver one.** This is the transition
-  [§10.1](#101-the-target-is-a-compile-time-parameter) exists to survive, and dotted-decimal
-  comparison does not survive it.
-- **The two editions' numbering, compared as if it were one.** Java releases run `1.20.4 / 1.21 /
-  1.21.4`, Bedrock `1.21.0 / 1.21.40 / 1.21.60`. A floor carries no edition, so
-  `@requires version>=1.21.4` reads as satisfied by Bedrock `1.21.40` (`40 > 4`), certifying a build
-  against a version that is below the floor in Java's numbering. Whether `@requires` is
-  edition-neutral at all is an open question.
+| The floor | Placed as | Because |
+|---|---|---|
+| Names a row (trailing zeros ignored: `1.21` is Bedrock's `1.21.0`) | That row's `DataVersion` | Exact. |
+| Names a pre-release of a row (`1.21.4-rc1`) | That row's `DataVersion` | Nothing ships between a release candidate and its release, so no supported target lies between them either. |
+| Sits below every row, or above every one | Met by every target, or by none | Reached by comparing the floor's label against the first and last rows' *labels*, while which rows those are is decided by their *keys* — so it holds exactly when the table's labels sort the same way by text as by key. The registry pack loader checks that at load time. The floor's own label must be a dotted decimal to be compared at all. |
+| Anything else — inside the table's span, naming no row | Not placed at all | It has no `DataVersion`, and there is none to give it. `E_REQUIRES_UNORDERABLE`. |
+
+The last row is a refusal, not a guess. `@requires version>=1.21.4` against Bedrock is exactly it:
+Java's release names no Bedrock release and sits between `1.21.0` and `1.21.20`. Comparing the
+labels read it as satisfied on `40 > 4` and certified a Bedrock build against a version below the
+floor — the same defect enforcing the floor exists to remove, one edition to the left.
+
+Because the label sets are disjoint, the refusal can say more than "no". A label this edition
+cannot place that the *other* edition names — a row of its table, or the pre-release of one — is a
+floor written in the other's numbering, and `E_REQUIRES_UNORDERABLE` names it and offers the scope.
+A label the other edition does not name gets no scope offered, because recommending one would be
+recommending a guess: scoped to an edition that does not name it either, the floor goes inert there
+and the constraint disappears. That covers a label neither edition can place — a snapshot — and
+also one the other edition places only below or above every row. Those two placements are
+comparisons rather than releases: they say nothing about which numbering the author meant, and
+scoped there the floor is met by every target of that edition or by none.
+
+### A floor may name its edition
+
+Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 / 1.21.40 / 1.21.60`. The two are
+different scales, and a floor written in one of them means nothing in the other. So a floor may say
+which it is written in:
+
+```
+@requires java    version>=1.21.4
+@requires bedrock version>=1.21.40
+```
+
+A **scoped** floor constrains its own edition's build and is inert in the other's — inert, not
+violated, so the pair above builds on both. An **unscoped** floor is a floor on whatever is being
+built, and is resolved in that edition's table like any other. That makes `@requires version>=1.21`
+a floor both editions can honour (Java's `1.21`, Bedrock's `1.21.0`), and makes a floor that names
+one edition's release and not the other's the error above rather than a silent pass.
+
+The `registry compatibility` row of `cairn info` ([§10.5](#the-registry-compatibility-row))
+reads only the unscoped floors. It is one row for a file that may be reported against both editions
+at once, and a floor in Java's numbering says nothing about the file's Bedrock range; the
+per-edition answer is the `buildable targets` row.
+
+A floor a `theme` declares is held to the same test, and for the *part* it is inherited through
+rather than for the words on the line. Per-edition theme variants ([§10.7](#107-java--bedrock-portability))
+mean the two editions can bind different themes for one `theme=` reference, so a theme feeds this
+row only when both bind the same one — otherwise the floor is a per-edition fact wearing no edition
+scope. A `def` needs no such test: a `place use=NAME` names one def and not a family of variants.
+Whatever the row leaves out is named on stderr with the reason, so a `0.0` beside a `buildable
+targets` row that refuses versions is never left to be inferred.
+
+### Which labels a floor may use
+
+Every label shape [§10.1](#101-the-target-is-a-compile-time-parameter) says will exist is accepted
+by the directive: the semver-ish `1.21.4`, the pre-release `1.21.4-rc1`, a snapshot `24w14a`, and
+whatever a date-based scheme spells. The shape rule is dot-separated components that each begin
+with a digit and carry only letters and digits, with an optional `-` and a pre-release tag of the
+same. `1.a` and `x` name no version in any scheme and are `E_INVALID_REQUIRES`.
+
+Accepting a label is not claiming it can be ordered. Whether a given label has a `DataVersion` is
+the table's answer, and it is asked per edition: `cairn compile --target` refuses the build, and
+`cairn info --editions` reports the edition as having no buildable target and says why. `cairn
+check` pins no edition and does not ask.
 
 ## 10.5 "Which version is it for?" has three answers
 
 There is no single "for-version". `cairn info` reports three axes:
 
-1. **Registry-compatible range `[Vmin, Vmax]`**: the intersection of `since`/`until` over the used
-   tokens and states.
+1. **Declared registry range `[Vmin, Vmax]`**: the floors the file declares without naming an
+   edition, composed, against an open upper edge. A reading of what the source and the parts it
+   instantiates declare, not a fact derived from the blocks they use — see
+   [the `registry compatibility` row](#the-registry-compatibility-row).
 2. **Semantic-sensitive members**: cases where the ID stays valid but meaning, behaviour, or
    appearance changes. This matters more than the range: behaviour changes far more often than IDs
    disappear, so deciding Vmax from the registry alone is dangerous. The constraint catalog carries
@@ -183,6 +380,7 @@ $ cairn info build.crn --editions java,bedrock
 registry compatibility:  1.21.40 .. latest
 edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
 buildable targets:       Java: none (1.20.4, 1.21, 1.21.4 all refuse)   Bedrock: 1.21.40, 1.21.60 (1.21.0 refuses)
+intended targets:        1.21.40, 1.21.60
 semantic-sensitive:      yard_water(cauldron split@1.17), fence(wall conn@1.16)
 ```
 
@@ -190,36 +388,165 @@ Every version named is one the built-in packs declare. The file behind this outp
 `@requires version>=1.21.40`, which is what puts every Java target below the floor, and Bedrock
 1.21.0 with them.
 
-The four lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A pipeline
-reading the rows sees the same four lines every time `cairn info` runs to completion. A run that
-A run that does not complete is a different case. A finding refuses the command before any row is
-computed, so stdout is empty rather than short a line.
+`intended targets` is the file's own `@intended_targets` line, verbatim, and the one row that is a
+declaration rather than an answer. It sits beside `buildable targets` because that is the row it can
+contradict — the comparison [§10.4](#the-hint-is-weighed-against-the-floor) automates for the half
+of it that is decidable, and the reader makes for the rest. A file declaring none gets
+`(none declared)` rather than a missing row.
+
+The five lines go to stdout; what each figure is made of goes to stderr as `note:` lines. A pipeline
+reading the rows sees the same five lines every time `cairn info` runs to completion. A run that
+does not complete is a different case: a finding refuses the command before any row is computed, so
+stdout is empty rather than short a line.
+
+### The `registry compatibility` row
+
+The row reads declarations back; it never looks at the blocks the source uses. `Vmin` is the
+strictest floor the file is bound by with no edition named — the `@requires version>=X` headers,
+plus the `requires version>=X` line of every `def` and `theme` the build instantiates
+([§10.4](#a-part-may-declare-its-own-floor)) — and `0.0` when none of them feed it. Working out
+*which* parts a build instantiates is real work over the source; reading which blocks they paint is
+not part of it.
+
+"Strictest" is a comparison of the labels, so it is exact only while they are all dotted decimals.
+A label the comparison cannot read as a number sorts above every one it can, which is fixed rather
+than meaningful: a file declaring both `version>=1.21.4` and `version>=24w14a` reports the snapshot.
+That order decides no build — every gate that does weighs each floor against the target edition's
+table separately ([§10.4](#ordering-is-by-dataversion-per-edition)).
+
+The row is edition-agnostic, which is why it reads only the unscoped floors, for the reasons and
+with the stderr notes [§10.4](#a-floor-may-name-its-edition) gives. So `0.0` has two causes — a
+file that declares no floor, and one whose every floor names an edition — and the row cannot tell
+them apart. The note on stderr can.
+
+`Vmax` is the literal `latest`. An upper edge is the half of a *derived* range and this row carries
+the declaration, so a pack that grows `since` / `until` would give its answer to `buildable targets`
+rather than fill this in.
+
+**The row is a declaration, not an answer about which versions build.** Those are easy to read as
+one thing, and a source can make them look identical. This one declares a floor every supported
+version clears, and uses a block Java gained in 1.21.4:
+
+```text
+$ cat hut.crn
+@cairn 2026.06
+@requires version>=1.20.4
+
+theme pale:
+  slot floor -> @pale_moss_block
+  slot wall  -> @cobblestone
+
+struct hut size=5x5
+  floor mat_slot=floor
+  walls mat_slot=wall height=3
+
+$ cairn info hut.crn --editions java
+registry compatibility:  1.20.4 .. latest
+edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
+buildable targets:       Java: 1.21.4 (1.20.4, 1.21 refuse)
+intended targets:        (none declared)
+semantic-sensitive:      (none)
+```
+
+`1.20.4 .. latest` reads as an answer, and the row two below disproves it — with `1.20.4` itself
+in the refusal list. The declared floor is not wrong; it is answering a different question.
+`minecraft:pale_moss_block` arriving in 1.21.4 is a fact about the pack, and this row reads only
+what the file declares.
+
+**The derivation is the `buildable targets` row**, two rows down. It weighs the source against every
+supported version and reports which ones a build would accept, per edition — the answer an
+intersection of `since` / `until` was meant to approximate, reached by asking rather than by
+inferring. It is also the shape the intersection could not take: the answer is per edition, and it
+need not be contiguous, so a `[Vmin, Vmax]` pair would have to claim a gap it cannot see.
+
+The declared floor stays a row of its own because it is a different kind of fact: an **input** the
+author wrote, which bounds what `cairn compile --target` accepts and what the file promises a
+reader, where `buildable targets` is an **output** about the packs that happen to ship.
+`E_REQUIRES_CONFLICT` ([§10.4](#104-fail-loud-and-minimum-version-inference)) is reserved for the
+day the two can be compared — a declared floor contradicting a registry-*inferred* range — and
+stays unreachable until a pack carries `since` / `until`.
 
 ### The `edition portability` row
 
-The row counts palette entries. An entry is `unsupported` for one of four reasons:
+The row counts palette entries. An entry is `unsupported` for one of two reasons:
 
 | Reason | The repair |
 |---|---|
 | The edition has no such block at all. | Change the material, or the pack's mapping for it. |
 | It has the block, but Cairn has no mapping for the states the intent carries ([§10.7](#107-java--bedrock-portability)). | None yet. The mapping is Cairn's to add. |
-| A state value outside the Java domain reached the state translator. | None. A pack is expected to reject it, though no pack schema can state a value domain today. |
-| A state key the translator does not read reached it. | Remove the key from the source blockstate. |
 
-The first is a question about IDs and the rest about states. Only the second can produce `degraded`:
-a block that does not exist has nothing to lose detail from, and a state the translator refuses
-outright is not a partial loss. The third and fourth are not portability facts at all: something
-upstream let a blockstate through.
+The first is a question about IDs and the second about states. Only the second can produce
+`degraded`: a block that does not exist has nothing to lose detail from.
 
-Because four different repairs hide behind one figure, each counted entry is named on stderr with
-its reason. The ID case also gets a `did you mean` read the way `E_UNKNOWN_ID` reads one.
+Because two different repairs hide behind one figure, each counted entry is named on stderr with
+its reason. The ID case is answered the way `E_UNKNOWN_ID` answers one, and by the same two halves:
+the `aliases` component where it has a row, so an entry this edition has under another name is
+reported as that name rather than as a dead end (`standing_sign` on Java is `oak_sign`), and a
+`did you mean` where it has none. They are alternatives, not a sequence — a row is the pack's word
+about which block this is, and printing a distance guess beside it would ask the reader to choose
+between them. The alias question is asked of the edition here too: a spelling *some* supported
+version declares is an answer, where a pinned build would keep only its own version's.
 `--format json` carries them as `edition_portability[].unsupported_entries`, one element per unit of
 the count, in palette order.
 
 Both questions are asked of the *edition* rather than of a version, because this row reports across
 a whole compatible range. An ID valid for only part of that range is therefore not `unsupported`, as
 when Bedrock renamed `stonebrick` to `stone_bricks` at 1.21.40. Whether the version being built has
-it is what `cairn compile --target` answers, as `E_UNKNOWN_ID` ([§10.4](#104-fail-loud-and-minimum-version-inference)).
+it is what a pinned target answers, as `E_UNKNOWN_ID` — `cairn compile --target`, or `cairn check
+--edition E --target V` for the same answer without a build
+([§10.4](#104-fail-loud-and-minimum-version-inference)).
+
+#### Which entries degraded, and what they lost
+
+`degraded` is the other figure over entries the command can name, and it is named the same way. The
+case is weaker than `unsupported`'s: there is one reason an entry degrades and one repair for it, so
+a reader is not choosing between repairs. What is identical is "which of the N" — `roof-hip` reports
+`degraded: 4` — and the only other place that is answered is the build, as `W_INTENT_DEGRADED`,
+which is the run this command exists to be read *before*.
+
+Each counted entry is named on stderr and carried in `--format json` as
+`edition_portability[].degraded_entries`, one element per unit of the count, in palette order. An
+entry is `{id, states, dropped}`:
+
+| Field | Carries |
+|---|---|
+| `id` | The palette entry's block ID, verbatim as the lowering interned it. |
+| `states` | The entry's `key=value` pairs, comma-joined, the same spelling the `states_unmapped` reason uses. |
+| `dropped` | One `{key, value}` per intent the edition has no form for. `key` is a closed set (`shape`); a new kind of loss is a new `key` rather than a change to an existing one. |
+
+Two lists rather than one under a category tag, and `states` rather than the ID alone. Degradation
+is a fact about the *state combination*, not about the block: one ID reaches this list once per
+combination that loses something, and `roof-hip`'s four entries are four spellings of
+`minecraft:spruce_stairs`. A list keyed by the ID alone would print the same line four times.
+
+`dropped` carries the property and the value rather than the sentence about them, for the reason the
+`unsupported` reasons do: a consumer that reads this should not have to parse English to learn which
+state was lost. A value the edition *can* express is not a loss and does not appear — Bedrock's
+stairs are `straight`, so `shape=straight` drops without an entry. The prose both the note and
+`W_INTENT_DEGRADED` print is written in one place, and per `key` rather than over the pair, because
+the sentence for a dropped `shape` talks about stairs: a second block family that drops an intent
+brings its own `key` and its own sentence rather than inheriting this one.
+
+#### A blockstate the pack should have refused is not a figure
+
+Two further failures can reach the state translator: a state value outside the Java domain
+(`facing=up` on a stair), and a state key the translator does not read. Neither is an answer about
+the edition. Both say that a blockstate no validated registry pack can produce reached the
+translator anyway, which is a defect in the pack or in Cairn and not a property of the build being
+reported on.
+
+So they are not a third and fourth reason for `unsupported`. `cairn info` reports **no** portability
+figures for an edition whose palette carries one: the counts would still be computable, and they
+would read as ordinary portability — a leaked `facing=up` counted as `unsupported: 1` is
+indistinguishable from a stair whose corner shape Bedrock simply has no state for, which is the one
+conclusion the reader must not draw. The command names every leaked entry on stderr with the
+translator's own message, says the repair belongs to the pack or to Cairn rather than to the source,
+and exits non-zero without a row, the way any other finding that refuses the command does.
+
+The state translator is the only place this can be observed, so the rule is stated for the states
+question alone. It is not a licence to answer `unsupported` for a validation gap elsewhere: a figure
+computed over a palette a validated pack could not have produced is not a portability answer,
+whatever produced it.
 
 ### The `buildable targets` row
 
@@ -240,6 +567,58 @@ Like the counters, this row reports and does not refuse. `cairn info` exits 0 ev
 supported version can build, because the build is the command that refuses it. Each refusing
 version's own findings are printed under that version, so an `E_UNKNOWN_ID` never stands without the
 target that raised it.
+
+#### Why the list is empty
+
+An empty `buildable` has four causes, and they are not all repaired by the same edit: the
+`@requires` line answers two of them, the member that produced no voxels a third, and whatever the
+pinned lowering named the fourth. The list alone cannot tell them apart, so under `--format json` a
+`reason` accompanies it. The key is **absent** whenever a version builds, so an ordinary report is
+unchanged.
+
+`reason` is an object, and every cause that holds is reported. Two of the four are facts about the
+**edition** — identical under every release, and settled before any release is weighed — so they
+are its own fields; the other two differ between releases and sit in a per-version list beside
+them. Each field is omitted when it carries nothing.
+
+| Field | Carries | What the author edits |
+|---|---|---|
+| `unplaceable_floors` | Floors | The `@requires` line. The floor names no release of this edition, so no version can be weighed against it and none is certified. |
+| `dropped_scopes` | Scope keys, and `site::SITE::FROM ↔ TO` for a walkway | The member or `connect` row that produced no voxels. It refuses every version before its ID table is consulted, since a partial build is not certified. |
+| `versions` | Refused targets | One entry per version that refused for a reason of its own. |
+
+Beside rather than instead: a file can declare a floor this edition cannot place *and* use an ID
+one of its releases has never had. A shape that reported the first alone would send the author back
+for the second after the repair, one cause per run, which is the loop this row exists to close.
+
+`versions` is a **subsequence** of `considered`, not a parallel array — a release with nothing
+against it but an edition-wide answer above contributes no entry — so a consumer joins on `version`
+rather than by position. Each entry carries its `version` and a `refusal` tag:
+
+| `refusal` | Carries | What the author edits |
+|---|---|---|
+| `below_floor` | `floors` | The `@requires` line. Only the floors that refuse *this* version: a file declaring several is a file where the repair is one line rather than all of them. |
+| `lowering_refused` | `findings` | Whatever the findings name, usually a material or an ID, and it differs per version. |
+
+The two are exclusive, because a version below a floor is never lowered: a floor is a relation
+between the source and the target and no ID table changes it.
+
+A floor is `{declared, line, col, declared_by?}`: the floor as the author wrote it, scope and all,
+and where it is written. `declared_by` is `{keyword, name}` with `keyword` one of `def` or `theme`,
+for a floor a build inherited from a part; it is absent for a floor on the file itself — the
+position already points at the line, and the line is the file's.
+
+`findings` are rendered the way `spec/lint` "Machine-readable payload" renders a finding, and are
+the same findings the run prints under that version on stderr. That section is unchanged by this
+row: these ride inside the report rather than in the `{"diagnostics": [ ... ]}` document, and a
+report is not a refusal.
+
+The text rows say none of this. `buildable targets: Bedrock: none (1.21.0, 1.21.40, 1.21.60 all
+refuse)` is true for every one of the four causes. Each cause is reported on stderr as well, though
+not in the same shape: the two floor causes print a `note:` carrying the position of the line, a
+dropped scope prints a `note:` naming the scope and no position, and a refused lowering prints the
+findings themselves under the version, each with its own position. It is the JSON that could not be
+read.
 
 A fifth line, `recommended test targets`, belongs to this axis and answers a different question
 again: which versions are worth testing against. No code path emits it yet.
@@ -322,13 +701,44 @@ down this hierarchy:
    nature.
 
 ```
+@requires bedrock version>=1.21.40   # the Bedrock branch below is spelled for the flattened ids
+
 hologram id=shop_sign text="Weapon" mat_slot=floating_text   # the semantic layer is always neutral
 theme shop_java:    slot floating_text -> text_display scale=2.0
 theme shop_bedrock: slot floating_text -> sign glowing=true   # Bedrock fallback
 
 @edition java    { raw_block mat=minecraft:light[level=15] at=4,3,2 }
-@edition bedrock { raw_block mat=minecraft:light_block["block_light_level"=15] at=4,3,2 }
+@edition bedrock { raw_block mat=minecraft:light_block_15 at=4,3,2 }
 ```
+
+### `@edition` pins an edition, not a version
+
+The guard settles which branch is built and nothing else. The id inside it is still checked against
+the one `(edition, version)` the compile pinned
+([§10.4](#104-fail-loud-and-minimum-version-inference)), so where an edition respells a block
+inside its own supported range, `@edition bedrock` names the branch and the file's floor names the
+spelling.
+
+Bedrock's light block is that case, and it is why the snippet above carries a floor. 1.21.0 spells
+the block `light_block` and carries the level beside it as a `block_light_level` state; 1.21.40
+promoted the level into the id, so 1.21.40 and 1.21.60 spell the same block `light_block_0` …
+`light_block_15` and have no id named `light_block` at all. The `aliases` row holding all of those
+spellings together ([§10.4](#104-fail-loud-and-minimum-version-inference)) answers the diagnostic
+and not the source. Its answer is the closed set the pinned target declares — `light` against
+Bedrock 1.21.60 comes back as all sixteen levels — and a set of sixteen is not a spelling: picking
+one of them is the silent substitution that section forbids, so it stays the author's to do.
+Writing the branch for one of the two shapes is doing it, and the floor is what says which shape
+that is. Being scoped, it is inert on the Java build ([§10.4](#a-floor-may-name-its-edition)),
+which the other branch serves.
+
+Leaving the floor off is loud rather than wrong: `light_block_15` against Bedrock 1.21.0 is
+`E_UNKNOWN_ID`, since the check is per version. What the floor adds is not a different refusal but
+a declaration — the version half of what the branch is for, written where the rest of the file's
+constraints are, and the half the other headers can be read against. A file floored at 1.21.40
+whose `@intended_targets` names 1.21.0 is `E_INTENDED_TARGET_CAP` at `cairn check`
+([§10.4](#the-hint-is-weighed-against-the-floor)), before any target is picked; the same file
+without the floor says nothing until one is. A build that must serve both spellings is two builds:
+there is no version conditional to pair with `@edition`.
 
 ### The build picks the variant, not the source
 
@@ -367,5 +777,5 @@ portability.
 The `(edition, version)` axis above covers what Cairn *emits*. The orthogonal axis is what Cairn
 promises about its own evolution: `.crn` syntax, the lockfile, the CLI flags, the Rust API. CalVer
 has no "major" axis to read those promises off, so they are spelled out in
-[Compatibility Tiers](compatibility). A `Stable` surface gives one release of `W_DEPRECATED` lead
+[Compatibility Tiers](/spec/compatibility/). A `Stable` surface gives one release of `W_DEPRECATED` lead
 time; an `Evolving` surface can change in any monthly minor; `Internal` makes no promise.

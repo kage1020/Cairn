@@ -4,36 +4,36 @@
 //! walks the rows in source order and, for each one the member matches,
 //! inserts every binding into the member's `selector_extras` — so a key
 //! bound by two rows keeps the later value. When the two rows select the
-//! *same* members there is no member left anywhere that reads the earlier
-//! one: the binding the author wrote is unreachable. `check::duplicate`
+//! *same* members there is no member left anywhere whose merged bindings
+//! keep the earlier one: the binding the author wrote is dead text, and
+//! would stay dead whatever a binding comes to mean. `check::duplicate`
 //! reported a repeated `slot NAME ->` line and a key repeated inside one
 //! row's brackets, and nothing about the row as a whole, so `cairn check`
 //! exited 0 on it.
 //!
+//! No pass lowers a merged binding yet (`spec/materials-themes` "Slots as
+//! dependency injection"), so neither row's value reaches a block today,
+//! and every binding here also earns `W_IGNORED_ARGUMENT`. This finding is
+//! about the merge, which is decided now, not about what gets built.
+//!
 //! Two shapes are deliberately not findings.
 //!
 //! - **Disjoint bindings.** Two rows with one selector and no key in common
-//!   compose: every binding reaches every member both rows select and
-//!   nothing is displaced. Splitting a long binding list over two lines is
-//!   a thing an author means to do, and this is the same reason `@requires`
-//!   is exempt from `E_DUPLICATE_HEADER` in the same pass.
+//!   compose: every binding reaches the merged bindings of every member
+//!   both rows select and nothing is displaced. Splitting a long binding
+//!   list over two lines is a thing an author means to do, and this is the
+//!   same reason `@requires` is exempt from `E_DUPLICATE_HEADER` in the
+//!   same pass.
 //! - **Different attributes.** `window[class=small]` and
 //!   `window[class=small,side=front]` overlap without coinciding — a member
-//!   the first selects and the second does not still reads the first row's
+//!   the first selects and the second does not keeps the first row's
 //!   binding. Which of two *overlapping* rows wins is the cascade, and the
 //!   cascade is source order by design; only a coincidence is a duplicate.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, lower, parse};
 
-fn diagnose(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn codes(source: &str) -> Vec<&'static str> {
-    diagnose(source).iter().map(|d| d.code.as_str()).collect()
-}
+mod common;
+use common::{diagnose, exactly_one, notes};
 
 fn selector_only(source: &str) -> Vec<Diagnostic> {
     diagnose(source)
@@ -42,14 +42,44 @@ fn selector_only(source: &str) -> Vec<Diagnostic> {
         .collect()
 }
 
-fn one(source: &str) -> Diagnostic {
-    let mut found = selector_only(source);
-    assert_eq!(found.len(), 1, "expected one finding, got {found:#?}");
-    found.remove(0)
+/// Every code `source` raises but the `W_IGNORED_ARGUMENT` each selector
+/// binding earns.
+///
+/// Every row in this file binds something, no pass lowers a binding, and
+/// `check_arguments` pins that finding; counting one per binding in each
+/// table below would make it restate how many bindings its rows carry. What
+/// is dropped is still checked: exactly one binding finding per binding the
+/// rows carry after the merge into a map, and nothing else, so a regression
+/// that adds or loses one, or hides another `W_IGNORED_ARGUMENT` in here,
+/// fails.
+fn row_codes(source: &str) -> Vec<&'static str> {
+    let found = diagnose(source);
+    let (dropped, kept): (Vec<_>, Vec<_>) = found
+        .iter()
+        .partition(|d| d.code == DiagnosticCode::IgnoredArgument);
+    let module = parse(source).expect("fixtures parse");
+    let bindings: usize = lower(&module)
+        .themes
+        .iter()
+        .flat_map(|theme| &theme.selectors)
+        .map(|row| row.bindings.len())
+        .sum();
+    assert_eq!(
+        dropped.len(),
+        bindings,
+        "one W_IGNORED_ARGUMENT per binding, got {found:#?}",
+    );
+    for d in &dropped {
+        assert!(
+            d.primary.contains("is bound by a theme selector"),
+            "only binding findings may be filtered out here: {d:#?}",
+        );
+    }
+    kept.iter().map(|d| d.code.as_str()).collect()
 }
 
-fn notes(diag: &Diagnostic) -> Vec<&str> {
-    diag.notes.iter().map(|n| n.message.as_str()).collect()
+fn one(source: &str) -> Diagnostic {
+    exactly_one(selector_only(source))
 }
 
 /// The selector rows are the variable; the struct below them carries one
@@ -138,7 +168,7 @@ fn ds_3_the_notes_point_at_the_displaced_binding_and_say_what_to_do() {
         notes(&d),
         vec![
             "`frame=` bound here",
-            "rows with the same attributes match exactly the same members, and bindings merge in source order, so what every member reads is this row's `frame=`",
+            "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's `frame=` and the earlier value is lost (no pass lowers a selector's bindings yet, so neither value is built today)",
             "merge the rows, or narrow one selector so they pick different members",
         ],
     );
@@ -216,7 +246,7 @@ fn ds_5_value_form_matters_exactly_where_the_matcher_says_it_does() {
     for attr in ["id=front", "class=small", "mat_slot=glass"] {
         let src = theme_with(&rows_quoting(attr));
         assert_eq!(
-            codes(&src),
+            row_codes(&src),
             vec!["E_DUPLICATE_SELECTOR"],
             "a quoted `{attr}` selects the same members, and nothing went unmatched",
         );
@@ -228,7 +258,7 @@ fn ds_5_value_form_matters_exactly_where_the_matcher_says_it_does() {
     for attr in ["side=front", "offset=2"] {
         let src = theme_with(&rows_quoting(attr));
         assert_eq!(
-            codes(&src),
+            row_codes(&src),
             vec!["E_THEME_SELECTOR_UNMATCHED"],
             "a quoted `{attr}` selects nothing the bare one selects, so the rows are not a pair",
         );
@@ -380,7 +410,8 @@ fn ds_12_rows_with_different_keywords_are_not_a_pair() {
 }
 
 /// The payload carries the rebound keys, so a quick-fix does not parse the
-/// sentence back apart — what `spec/lint.md` §11.2 exists to stop.
+/// sentence back apart — what `spec/lint` "Machine-readable payload" exists
+/// to stop.
 #[test]
 fn ds_13_the_payload_lists_the_rebound_keys() {
     let src = theme_with(
@@ -405,7 +436,7 @@ fn ds_14_it_coexists_with_a_key_repeated_inside_one_row() {
         "  window[class=small] -> frame=@spruce_wood\n  \
          window[class=small] -> frame=@birch_wood frame=@dark_oak_wood\n",
     );
-    let mut seen = codes(&src);
+    let mut seen = row_codes(&src);
     seen.sort_unstable();
     assert_eq!(seen, vec!["E_DUPLICATE_ARG", "E_DUPLICATE_SELECTOR"]);
 }
@@ -450,7 +481,7 @@ fn ds_17_a_label_key_holding_a_non_label_value_pairs_with_nothing() {
             "  window[{attr}] -> frame=@spruce_wood\n  \
              window[{attr}] -> frame=@dark_oak_wood\n"
         ));
-        let mut seen = codes(&src);
+        let mut seen = row_codes(&src);
         seen.sort_unstable();
         assert_eq!(
             seen,
@@ -500,7 +531,7 @@ fn ds_15_a_pair_that_matches_nothing_is_still_a_pair() {
         "  window[class=enormous] -> frame=@spruce_wood\n  \
          window[class=enormous] -> frame=@dark_oak_wood\n",
     );
-    let mut seen = codes(&src);
+    let mut seen = row_codes(&src);
     seen.sort_unstable();
     assert_eq!(
         seen,

@@ -1,6 +1,6 @@
 //! AST → Intent IR lowering.
 //!
-//! Intentionally total: every AST that survives [`crate::parse`] lowers to a
+//! Intentionally total: every AST that survives [`crate::parse()`] lowers to a
 //! well-formed [`IntentModule`]. Validation lives elsewhere (the diagnostic
 //! passes in `crate::check`) so that diagnostic collection can run to
 //! completion instead of being short-circuited by the first structural
@@ -177,9 +177,11 @@ fn split_size(header_args: &[Arg]) -> HeaderBreakdown {
         // declaration is still visible to the `duplicate` pass via
         // `&Module`, so it isn't lost — it just doesn't leak into the
         // residual `args` map and contradict that field's documented
-        // contract ("everything except size"). Non-`Size` values for `size=`
-        // do fall through and end up in `args` so the type-mismatch pass
-        // can flag them.
+        // contract (everything but a well-typed `size=`). Non-`Size` values
+        // for `size=` do fall through and end up in `args`, where
+        // `check::arguments` accepts the key; the type-mismatch pass reads
+        // the surface AST, so it flags the value whether or not it lands
+        // here.
         if arg.key == "size"
             && let ValueKind::Size { w, h } = &arg.value.kind
         {

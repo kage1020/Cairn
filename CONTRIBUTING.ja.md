@@ -1,212 +1,189 @@
 # Cairn へのコントリビュート
 
 > 言語: **日本語** ([English](CONTRIBUTING.md))
->
-> 英語版が source of truth です。本ファイルは英語版の二次コピーで、内容差分が出た場合は英語版を正と
-> します。
 
-Cairn に興味を持っていただきありがとうございます。本プロジェクトは **設計段階** にあります。正規
-[仕様書](https://cairn.kage1020.com/ja/spec/) (ソースは
-[`website/src/content/docs/spec/`](website/src/content/docs/spec/)) はありますが、リファレンス実装は
-まだありません。現時点で最も価値のあるコントリビュートは、設計に対する批判、具体的な提案、そして
-実用例です。
+Cairn は、規範的な[仕様](https://cairn.kage1020.com/ja/spec/)を背後に持つ、動くコンパイラです。どちらもまだ動いている最中で、どちらもコントリビュートを受け付けています。
 
-## コントリビュートの仕方
+## 手伝えること
 
-- **設計議論**。仕様内の特定の判断に対する反論、抜けているケースの指摘、代替案の提案を Issue で
-  受け付けます。該当する章/節を指してください。
-- **実用例**。実在する建築物を `.crn` で書いてみて、言語が不便・曖昧・不十分な箇所を指摘してください。
-  これが語彙の駆動力です。
-- **仕様編集**。誤りの修正、表現の明確化、例の改善。各章は自己完結を保ち、相対リンクで相互参照して
-  ください。
-- **先行研究**。レッドストーンコンパイラ、schematic フォーマット、ボクセル/CAD の place-and-route、HDL
-  合成への参照は議論で歓迎します。
+- **バグ報告。** `.crn` ファイル、実行したコマンド、期待した結果。クラッシュするファイルと同じくらい、間違ったブロックにコンパイルされるファイルにも価値があります。
+- **サンプル。** 実際の建築を書いて、言語が扱いにくかった・曖昧だった・力尽きた箇所を教えてください。語彙を育てるのはこれです。メンバーをひとつずつ扱う小さなファイルも、大きなものと並べて [`examples/`](examples/) に置いています。
+- **コード。** パーサ、lowering、バックエンド、レッドストーン、LSP、周辺ツール。[ロードマップ](https://cairn.kage1020.com/ja/roadmap/)から選んでも、自分の困りごとから始めても構いません。
+- **仕様の修正。** 誤りの修正、記述の明確化、例の改善。各章は単体で読めるように保ち、相対リンクで相互参照してください。
+- **設計への批判。** 決定に異議を唱える、抜けているケースを指摘する、代案を出す。該当する章と節を指した issue を立ててください。
+- **先行事例。** レッドストーンコンパイラ、schematic フォーマット、ボクセル/CAD の place-and-route、HDL 合成 — 設計議論での情報提供は歓迎します。
 
-## 作業言語
+仕様とドキュメントの正典は英語です。翻訳は、二次的なコピーであることが明示されている限り歓迎します。
 
-仕様書および本プロジェクトドキュメントの正規言語は **英語** です。翻訳は明確にラベル付けされた二次
-コピーとして歓迎しますが、英語が source of truth です。日本語版のドキュメント (`*.ja.md`) は英語版の
-反映を保つために随時更新します。
+## 開発環境
 
-## 規約
-
-- 仕様書が source of truth です。後から読み直したときに外部文脈が必要になるような、セッション固有の
-  識別子、Issue/PR 番号、参照は導入しないでください。
-- 定義された用語 (`intent_state` / `resolved_state`, `mat_slot`, canonical token など) を一貫して使って
-  ください。新しい用語はその場限りではなく該当章で導入してください。
-  [用語集](https://cairn.kage1020.com/ja/spec/glossary/) を参照。
-- 設計原則は `P1`–`P5` として参照してください
-  ([設計原則](https://cairn.kage1020.com/ja/spec/principles/))。
-- 例は具体的かつ最小限に。エラーメッセージは「何が間違っているか / 有効な代替候補 / 推奨される修正」の
-  形に揃え、自己修正ループに乗るようにしてください。
-
-### マイルストーン / PR タグの扱い
-
-上のセッション固有識別子禁止には意図的な例外がいくつかあり、毎回のレビューで判定し直さなくて済む
-ように本節で固定します。区分は「面ごとの役割」に従います:
-[CHANGELOG.md](CHANGELOG.md) と
-[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/) C.2 節の表は履歴とロードマップ
-語彙を保持する場で、Rust ソースと spec 散文は「実装済み挙動」を述べる場なので、特定 PR への参照
-を残してはいけません。
-
-**`MN-PRk` / `pre-MN` / `later PR` / 特定の `YYYY.MM.0` 言及を残してよい場所:**
-
-- [CHANGELOG.md](CHANGELOG.md) / [CHANGELOG.ja.md](CHANGELOG.ja.md)。`[Unreleased]` セクション内も
-  含む。`release-plz` は追記のみで既存タグは触りません。
-- [ロードマップ](https://cairn.kage1020.com/ja/roadmap/)
-  (`website/src/content/docs/roadmap.md` および `ja/` ミラー) — ロードマップ自体がマイルストーン
-  語彙の定義元。
-- [`spec/compatibility.md`](website/src/content/docs/spec/compatibility.md) C.2 節のマイルストーン
-  列 (`現在 (M1 前) | M2 (minimal build) | M3 (examples work) | M5 (DX) | M6 (redstone)`) と
-  英語版同等行。これは表の軸ラベルです。
-- Git のリリースタグ (`v2026.MM.0`) と `release-plz.toml`。
-
-**これらのタグを残してはいけない場所:**
-
-- `crates/**/*.rs` の Rust ソース (コメント、docstring)。
-- `website/src/content/docs/spec/**/*.md` の spec 本文および `ja/` ミラー。ただし上記 C.2 表頭は
-  例外。
-- [`examples/`](examples/) の `.crn` ファイル。
-- README、本ファイル、その他 docs の本文。
-
-**書き換えガイド**。PR 座標は、その PR が代理表現していた「実装事実」に置き換えます。
-
-- 旧: `// M3-PR4 only exposes ports on door members (window / stair / roof ports land in a later PR).`
-- 新: `// Ports are currently exposed only on door members. Window / stair / roof ports are reserved for a future extension.`
-
-要は「今コードが何をするか、何を意図的にまだ含めないか」を書き、「誰がいつ入れた PR か」は書かない。
-コメントが古くなった場合 (deferred 機能が後で land した場合) は、その機能を land する PR の中で
-コメントも同時に更新します。
-
-**チェック**。レビュアー (人間でもツールでも) は承認前に以下を走らせてください:
+[`rust-toolchain.toml`](rust-toolchain.toml) が正確なコンパイラを固定しており、`rustup` がそれを自動で拾います。チェックアウトして `cargo build` すれば、CI と同じツールチェーンになります。
 
 ```sh
-rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\blater PR\b|\bfuture PR\b' \
-  --glob '!CHANGELOG*' \
-  --glob '!CONTRIBUTING*' \
-  --glob '!**/compatibility.md' \
-  --glob '!**/roadmap.md' \
-  --glob '!target/**'
+cargo build --workspace
+cargo test --workspace
+cargo run -p cairn-lang-cli -- check examples/cottage.crn --edition java --target 1.21.4
 ```
 
-空 hit が契約です。`\bM[1-6]\b` のアームは裸のマイルストーン名 (`M2`, `M3` ...) を catch します
-— これらは roadmap と compatibility 表のみに属し、Rust ソースや spec 本文では「the keyword table」
-「the lowering pass」「reserved for a future extension」のような実装事実表現に置き換えます。
-CI には未組み込み (リポジトリ規模上、human review で十分)。
+`check` は何も書き出しません。`compile` はソースの隣に構造ファイルとロックファイルを書くので、`examples/` にビルド成果物を残したくなければ `--out` と `--lock` をツリーの外に向けてください。
 
-## 確定した判断を覆したい場合
+PR を出す前に、CI と同じものを回してください。Linux・macOS・Windows で走るのはこれらのコマンドで、いずれも `RUSTFLAGS=-D warnings` の下で実行されます。
 
-いくつかの判断は意図的に確定しています (例: 位置引数ではなく key=value、フェーズ順評価、
-recompile-don't-transcode、サイレントな置換ではなく fail-loud)。これを覆したい場合は次の内容を含む
-Issue を立ててください:
+```sh
+export RUSTFLAGS="-D warnings"
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo build --workspace --locked
+cargo test --workspace --locked
+cargo test -p cairn-lang-core --bench lowering
+cargo test -p cairn-lang-redstone --bench place_and_route
+```
 
-1. その判断と仕様内の所在。
-2. それで扱えない具体ケース。
-3. 代替案 (構文/IR/メッセージの例つき)。
-4. 評価メトリクスへの影響
-   ([評価フレームワーク](https://cairn.kage1020.com/ja/spec/evaluation/))。
+最後の 2 つは各ベンチを計測なしのテストとして一度ずつ実行します。`--workspace` はベンチターゲットを選びません。何を確かめているかは[リリースプロファイルの変更](#リリースプロファイルの変更)にあります。
+
+CI はこれとは別に、Linux で rustdoc の警告を致命的にして API ドキュメントを 2 回ビルドします。非公開の項目や解決できなくなったパスへのドキュメントリンクは clippy には見えないためです。1 回目は公開 API が対象で、公開ドキュメントから非公開項目へのリンクを検出するのはこちらだけです。2 回目はコントリビューターだけが読むドキュメントも対象にします。
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
+```
+
+### リポジトリの構成
+
+| パス | 中身 |
+|---|---|
+| `crates/cairn-lang-core` | 字句解析、構文解析、Intent IR、check パス、解決、ブロック配列への lowering |
+| `crates/cairn-lang-nbt` | NBT コーデック — Java はビッグエンディアン、Bedrock はリトルエンディアン |
+| `crates/cairn-lang-formats` | 構造ファイルの書き出し (`.nbt` / `.mcstructure`)、レジストリパック、可搬性 |
+| `crates/cairn-lang-redstone` | Logic IR、ネットリスト、配置、配線、遅延、交差の合法化 |
+| `crates/cairn-lang-cli` | `cairn` バイナリ |
+| `crates/cairn-lang-lsp` | 言語サーバー `cairn-lsp` |
+| `crates/cairn-lang-tree-sitter` | tree-sitter 文法。npm 向けには `tree-sitter-cairn` として梱包 |
+| `crates/cairn-lang-wasm` | 将来のプレイグラウンド向けブラウザバインディング。現状はプレースホルダ |
+| `editors/vscode` | VS Code 拡張 — `cairn-lsp` の薄いクライアント |
+| `website` | Astro + Starlight のドキュメントサイト。仕様・チュートリアル・開発者ガイドを英語と日本語で |
+| `examples` | `.crn` ソース (ロックファイルは生成物で、追跡していません) |
+
+クレート間の依存ルールは[開発者ガイド](https://cairn.kage1020.com/development/) (英語のみ) が詳しく扱っています。
+
+## 書き方
+
+原則は、**How** はコードに、**What** はコミットメッセージに、最小限の **Why** をコメントに。
+
+- 仕様が正典です。同義語を作らず、仕様の用語 (`intent_state` / `resolved_state`、`mat_slot`、canonical token) をそのまま使ってください。新しい用語は、それが属する章で導入します。
+- 設計原則は [Design Principles](https://cairn.kage1020.com/ja/spec/principles/) の `P1`–`P5` として参照します。
+- エラーメッセージは「何が誤りか / 何なら妥当か / 修正案」の形を取ります。この形が「書く → チェックする → 直す」のループを成立させているので、一文増えるだけの価値があります。
+- 例は具体的かつ最小限に。
+
+### セッション固有の参照を残さない
+
+Rust のソース、仕様本文、サンプル、ドキュメントは、何年か後に単体で読めなければなりません。issue や PR の番号、`M3-PR4` のような座標、裸のマイルストーンラベル、「後続の PR で対応」といった記述は入れないでください。座標は、それが代弁していた事実に置き換えます。
+
+> 変更前: `// M3-PR4 only exposes ports on door members (window / stair / roof ports land later).`
+>
+> 変更後: `// Ports are currently exposed only on door members. Window / stair / roof ports are reserved for a future extension.`
+
+先送りされていたものが実装されたら、それを入れる PR の中で同時にコメントを更新します。
+
+例外は 3 つだけです。マイルストーンの語彙こそがその目的である面 — [CHANGELOG.md](CHANGELOG.md)、[ロードマップ](https://cairn.kage1020.com/ja/roadmap/)、[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)表のマイルストーン列。それ以外はレビュー時に次で確認できます。
+
+```sh
+rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\b' \
+  --glob '!CHANGELOG*' --glob '!CONTRIBUTING*' \
+  --glob '!**/compatibility.md' --glob '!**/roadmap.md' --glob '!target/**'
+```
+
+結果が空であることが約束事です。
+
+### 仕様は番号ではなく名前で参照する
+
+節番号も同じ種類の座標です。`§14.5` が正しいのは「Place-and-route」がたまたま第 14 章の 5 番目の節である間だけで、章を差し込んだり節を分割したりすれば、それを名指していたコメントはすべて黙って嘘になります。そして見つける手段はソースツリー全体を読み直すことだけです。仕様を直すのにその代償を払う必要はありません。章のファイルと、特定の節を指すならその見出しの名前を書いてください。
+
+> 変更前: ``/// Stable per `spec/lint.md` §11.3: errors are things the compiler refuses to guess at.``
+>
+> 変更後: ``/// Stable per `spec/lint` "Error vs warning": errors are things the compiler refuses to guess at.``
+
+章は拡張子なしのファイル名（`spec/redstone`、`spec/versioning-editions`）で書き、節の見出しはそのまま写します。章全体を指すときは章だけを挙げます。一度その形で引いたあとは、同じコメントの後続の文では「that pipeline」「the phase order」のように散文で受けてください。同じ引用を繰り返す必要はありません。
+
+これは `cargo test --workspace` が `crates/`、`examples/`、`.github/` の 3 つの木に対して守ります。その中に `§` や "section 11.3" が残っていないこと、`spec/<章>` が実在する章を指していること、引用符で囲まれた見出しがその章に実在することの 3 点です。仕様を採番し直しても Rust 側は 1 行も動きません。節の見出しを変えた場合はテストが引用箇所をファイルと行番号で名指して落ちますが、それが狙いです。見出しの変更は意味の変更であり、それに寄りかかっていたコメントは読み直す価値があります。
+
+残りは人の目で見るしかありません。`website/` を読まないのは、そこが番号を定義している側だからです。仕様の隣に並ぶガイドページは今も番号を埋め込んだアンカーで節を参照しており、それをほどくのは見出しそのものを変える変更と一緒にやる仕事です。`editors/`、このファイル、CHANGELOG は単に走査範囲の外です。
+
+### クレートの README
+
+各クレートの `README.md` は crates.io に表示されるものであり、リポジトリを一度も見たことがない人にとっての表紙です。ステージが実装されたら、同じ PR でそのクレートの README も更新してください。表紙がまだ「これから」と言っているうちは、そのステージは出荷されていません。
+
+コードと突き合わせられる一覧を持つクレートの README は 4 つあり、そのすべてがレビューではなくテストで守られています。`cairn-lang-core` のモジュール表はクレートの `pub mod` 宣言と、`cairn-lang-cli` のサブコマンド表は `cairn --help` が並べるものと、`cairn-lang-nbt` と `cairn-lang-formats` の `## Public API` 表は各クレートルートの再エクスポートと照合されます。`pub mod`・サブコマンド・`pub use` のいずれかを追加して行を足さなければ `cargo test --workspace` が落ち、足りていないものを名指しします。どの照合も双方向なので、もう出荷されていないものの行が残っていても落ちます。
+
+`## Public API` が指すのは、クレートルートの `pub use` 再エクスポートだけです。モジュール内でしか `pub` でない項目 — `registry::AliasCatalog` や `registry::blocks` 以下のもの — は意図的に表に載せません。説明が要るなら散文で書いてください。行の第一セルはコードスパン 1 つにつき `module::item` の完全パスを 1 つ書き、1 つの説明文を共有する項目どうしなら複数のスパンを並べて構いません。まだ表を持たないクレートに `## Public API` 表を足すときは、`readme_public_api_tables.rs` の `TABLED_CRATES` にそのクレートを追加してください。忘れても同じテストが教えてくれます。
+
+どのテストも読めないのは散文のほうです。行の説明、「Status」の段落、表を*予定*と呼ぶ見出し、「まだここにない」一覧 — どれも誰かが覚えていたから正しかっただけで、公開済みの 2 クレートではコンパイラが動いたあとも長らく未実装のスケルトンだと説明し続けていました。「まだ」から出したものは README からも出してください。今日出荷されているものを書き、これから先のものは独立した節に置く。そうすればコードを動かさなくても読者が両者を見分けられます。
 
 ## ブランチとプルリクエスト
 
-Cairn は **`canary` トランク + `main` リリースポインタ** 構成を採用します。進行中のすべての作業は
-`canary` に乗り、`main` はリリースが公開された直後にのみ自動で更新されます。`main` の履歴は公開済み
-リリースの列そのものになります。
+トランクは `canary` です。`main` はリリース済みの状態で、publish のたびにパイプラインが `canary` からの promote-to-main PR を開き auto-merge を有効にします。したがって `main` は 1 リリースごとに承認済みのマージコミット 1 つ分だけ進み、リリースより先へは行きません。
 
-### ブランチ
+| ブランチ | 役割 |
+|---|---|
+| `canary` | 機能・修正・ドキュメントのすべてがここに入る。保護対象 |
+| `main` | パイプラインの promote-to-main PR だけが動かし、メンテナが承認する。直接 push は不可。コントリビューターが `main` 宛に PR を出すことはない |
+| `<type>/<short-kebab>` | 変更ひとつ分の作業ブランチ。`canary` を対象にし、マージ後に削除 |
+| `release-plz-*` | 月次マイナーとパッチのために自動で開かれる |
 
-| ブランチ | 用途 | 寿命 |
+ブランチ名は、その作業が最終的に載る Conventional Commits の type に合わせます (`feat/parser-lexer`、`fix/wall-corner-shape`、`docs/roadmap-2027`)。
+
+**PR タイトルは [Conventional Commits](https://www.conventionalcommits.org/) の 1 行でなければなりません。** squash merge が唯一のマージ方式なので、このタイトルがそのまま `canary` 上のコミットになり、`release-plz` がパッチリリースの要否を判断するために読むのもこれです。ブランチ上の個々のコミットは自由形式で構いません。スコープには対象のクレートか仕様領域を書きます (`feat(core)`、`fix(nbt)`、`docs(spec)`、`build(deps)`)。
+
+| Type | 使う場面 | パッチリリースを切るか |
 |---|---|---|
-| `canary` | トランク。機能、修正、ドキュメント、`release-plz-*` ローリング release PR がすべて乗る。保護ブランチ。 | 永続 |
-| `main` | リリース済み状態。リリース成功直後に `canary` に自動で fast-forward される。保護ブランチ。直接 push 不可、PR 受付なし。 | 永続 |
-| `<type>/<short-kebab>` | 単一の変更のための作業ブランチ。`canary` 宛。 | PR マージまで、マージ後削除 |
-| `release-plz-*` | 月次 minor と patch のために `release-plz` が `canary` に対して自動で開く。 | PR マージまで |
+| `feat` | 新機能、公開 API、サブコマンドの追加 | はい |
+| `fix` | 挙動を仕様に合わせ直す修正 | はい |
+| `perf` | 性能改善 | はい |
+| `refactor` | 挙動を変えない内部の再構成 | はい |
+| `build` | ビルドシステム、パッケージング、Cargo の依存 | はい |
+| `docs` | ドキュメント、仕様本文、README、サンプル | いいえ |
+| `test` | テストコードのみ | いいえ |
+| `ci` | ワークフロー、release-plz、`rust-toolchain.toml` | いいえ |
+| `chore` | 利用者に届かないその他すべて | いいえ |
+| `style` | 整形・lint だけの変更 | いいえ |
 
-`<type>` は、その作業がマージ時に乗ることになる Conventional Commits の type に揃えてください
-(`feat/parser-lexer`、`fix/wall-corner-shape`、`docs/roadmap-2027`、`refactor/ir-pivot`)。
+**破壊的変更はコロンの直前に `!` を付けます** — type の後ろ、スコープを書くときはスコープの後ろです (`feat(core)!: replace lexer`、`fix!: …`)。`!` と CHANGELOG は対になっています。[CHANGELOG.md](CHANGELOG.md) の `## [Unreleased]` → `### Breaking changes` にエントリを足す PR はタイトルに `!` を付け、タイトルに `!` を付けた PR はそのエントリを足します。手書きのエントリは [compatibility「breaking はどう告知されるか」](https://cairn.kage1020.com/ja/spec/compatibility/) が求めるもので、`CHANGELOG.md` を読む人が目にするのはこちらです。`!` は同じ事実を `release-plz` が解析するコミットの側に書いたものです。片方だけの PR を見たレビュアーは、マージ前にもう片方を求めます。
 
-### プルリクエスト
+`!` はバージョンを決めません。semver ならメジャーバンプと読むところですが、ここではリリースワークフローが日付と既存タグから次の `YYYY.M.PATCH` を計算して `release-plz` の実行前に `Cargo.toml` へ書き込み、`release-plz` は公開済みのものと既に異なるバージョンには手を付けません。リリースの要否も決めません — それを決めるのは上の表の type です。変わるのは生成されるリリースノートです。`release-plz` はそのコミットの行の先頭に `[**breaking**]` を付け、`protect_breaking_commits` によって、普段は行が落とされる type (`docs!:`、`ci!:`) でもその行が残ります。
 
-- **すべての PR は `canary` を宛先にする**。`main` 宛の PR は受け付けません。`main` はリリース
-  パイプラインによってのみ更新されます。
-- **PR タイトルは [Conventional Commits](https://www.conventionalcommits.org/) 形式とする (MUST)**。
-  例: `feat(core): add lexer`、`fix(formats): correct big-endian NBT length`、
-  `docs(spec): clarify §6.3`、`feat(redstone)!: rewrite tick simulator`。feature ブランチ内の個別
-  コミットは自由形式で構いません。
-- **マージ方式は squash merge のみ**。PR タイトルが `canary` のコミットメッセージとして残り、
-  `release-plz` がそれを `release-plz.toml` の `release_commits` で解析して patch リリースの要否を
-  判断します。
-- breaking change には `!` 接尾辞 (例: `feat(core)!: replace lexer`) を付けてください。これにより
-  [互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/) C.3 節の "Breaking changes"
-  扱いになります。
-- メンテナ 1 名の承認を必須とし、CI (fmt + clippy + test の Linux/macOS/Windows 3 OS) はすべて
-  通過してからマージします。
-- リリース PR (`release-plz-*` → `canary`) も同じレビュー規約に従います。月次 minor PR は毎月 1 日
-  に cron が立ち上げ、人間レビュー後にマージされます。マージで publish が走り、同時に `main` が
-  fast-forward されます。
+自分で開く PR はすべて `canary` を対象にします。`main` 宛の PR はパイプラインの promote-to-main だけです。メンテナ 1 名の承認と CI のグリーンが必須です。リリース PR も同じルールで、これをマージすると公開が走り、`main` が fast-forward されます。
 
-Cairn で使う Conventional Commits の type:
+## 決着した決定を蒸し返す
 
-| type | 用途 | patch リリースを誘発するか |
-|---|---|---|
-| `feat` | 新機能、新しい公開 API、新サブコマンド | する |
-| `fix` | spec に挙動を合わせるバグ修正 | する |
-| `perf` | 性能改善 | する |
-| `refactor` | 挙動を変えない内部リファクタリング | する |
-| `build` | ビルド、パッケージング、Cargo 依存 | する |
-| `docs` | ドキュメント、spec 散文、README、サンプル | しない |
-| `test` | テストコードのみ | しない |
-| `ci` | GitHub Actions、release-plz、workflow 設定、`rust-toolchain.toml` | しない |
-| `chore` | 利用者に届かない雑多な変更 | しない |
-| `style` | フォーマット / lint のみ | しない |
+いくつかの決定は意図的に閉じています。位置引数ではなく `key=value`、フェーズ順の評価、変換ではなく再コンパイル、黙って代替せず大きく失敗する、など。これを再び開くには、その決定と仕様上の在り処を示し、それが扱えない具体的なケースを挙げ、構文・IR・メッセージの例を伴う代案を出し、[評価指標](https://cairn.kage1020.com/ja/spec/evaluation/)への影響に触れた issue を立ててください。
 
-括弧内のスコープは影響する crate や spec 領域を示します: `feat(core)`、`fix(nbt)`、`docs(spec)`、
-`build(deps)`。
+## ツールチェーンの更新
+
+固定は意図的にチャンネル追従ではありません。`stable` にしていると、Rust のリリースひとつで開いているすべてのブランチが同時に赤くなります。しかもその指摘は、そのブランチが触ってもいないファイルに出ます。固定は新しい lint を避けるためのものではなく、それが「誰かが意図して開いた PR」として届くようにするためのものです。
+
+`channel` を変え、上の CI コマンドを回し (新しいコンパイラは clippy の lint だけでなく *rustc* や *rustdoc* の警告も出すので、固定の更新で `Docs` が赤くなることもあります)、見つかったものを同じ PR で直し、コミットの type は `ci` にします。「新しいコンパイラと、それが要求した修正だけ」という差分は、レビュアーが実際に読める差分です。
+
+固定は MSRV ではありません。ワークスペースマニフェストの `rust-version` は、利用者が Cairn をビルドするのに必要な下限であり、固定はつねにそれより新しいコンパイラです。安定化されたばかりの API に手を伸ばした変更は固定側では緑で、下限では壊れます。その一部は clippy が既に見ています。`clippy::incompatible_msrv` は `rust-version` を読んで、それより上で安定化された**標準ライブラリ**の項目を拒み、`-D warnings` がそれを致命的にします。ただしこれは lint なので `#[allow]` 一行で黙り、さらに**依存先**自身の `rust-version` が我々の下限より上である場合については何も言いません。後者は cargo のハードエラーで、固定側では決して現れません。両方を捕まえるのが、下限でコンパイルする CI の `MSRV` ジョブです。`cargo metadata` でマニフェストから `rust-version` を読み直し (古くなる二つ目のコピーを作らないため)、そのコンパイラを入れて `cargo check --workspace --locked --all-features` を回します。`test` ではなく `check` なのは、下限が問うているのが「利用者が依存するクレートがコンパイルできるか」だからです。dev-dependencies やテストハーネスは、ライブラリ本体より新しいコンパイラを要求してかまいません。`--all-features` を付けるのは、`rust-version` がパッケージごとに一つしか書けず、「この下限、ただしその feature を有効にした場合を除く」と cargo に伝える手段がないからです。`--locked` は、リポジトリをクローンした利用者が解決するのが、コミットされたロックファイルそのものだからで、壊れているのが Cairn のコードではなく依存先自身の下限であるとき、cargo がそのパッケージ名を挙げてくれます。
+
+`rust-version` を上げることは、誰が Cairn をビルドできるかを変えることなので、マニフェストを黙って書き換えて済ませません。コミットの type は `build` にし (パッチリリースが切られるので、新しい下限が crates.io まで届きます)、どのコンパイラが必要になり何がそれを要求したのかを `CHANGELOG.md` に書きます。新しい下限より下に固定している利用者は、どのみち cargo から知らされます。理由を伝えるのがこのエントリです。
+
+## リリースプロファイルの変更
+
+ワークスペースマニフェストの `[profile.release]` はリリースアーカイブのサイズに合わせて調整してあり、その理由はコメントに書いてあります。ほとんどの設定はビルド時間しか使いません。例外は `opt-level` で、これはブロック配列への lowering と配置配線 (place-and-route) のスループットと引き換えになります。どちらもビルドが時間を費やす処理です。その側を測るベンチが二つあります。`cairn-lang-core` の `lowering` と、`cairn-lang-redstone` の `place_and_route` です。どちらもパスをプロセス内で呼び出します。例に対して CLI を計測すると、ほとんどプロセス起動を計ることになるからです。また、例ではなく生成したソースを使います。例ほど小さいソースは、変更による差をタイマーが見分けられないほど速くパスを通り抜けるからです。ベンチはリリースプロファイルの設定を受け継ぐので、`opt-level`・`lto`・`codegen-units` は配布されるとおりに計測されます。例外は `panic` で、Cargo はテストと同じく、ベンチターゲットとその依存をアンワインドありでビルドします。ベースラインを保存し、プロファイルを変えて (ファイルを編集せずに環境変数で一つだけ上書きしてもかまいません) 比較します。
+
+```sh
+cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --save-baseline before
+CARGO_PROFILE_RELEASE_OPT_LEVEL=s cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route -- --baseline before
+```
+
+二つのベンチは名前で指定してください。`--bench` を付けないと、`cargo bench` は各ライブラリの単体テストハーネスも実行し、そちらは criterion の `--save-baseline` を受け付けません。差を信じる前に、一度ベースラインをそれ自身と比べてください。共有マシンでは、同一のビルドどうしでも小さいベンチは数パーセント動きます。
+
+サイズの変化は gzip 後のバイナリで比べます。リリースアーカイブが `.tar.gz` と `.zip` だからです。数値はプロファイルのコメントではなくコミットメッセージに書きます。コメントに書くと、次の依存更新で黙って古くなります。CI はどちらのベンチも計測しません。共有ランナーでの時間計測のゲートはノイズにしかならず、プロファイルの変更は回帰を監視する対象ではなく、一度下す決定だからです。CI が実行するのは、各ベンチを計測なしのテストとして一度ずつ走らせる `cargo test -p cairn-lang-core --bench lowering` と `cargo test -p cairn-lang-redstone --bench place_and_route` です。各ベンチは計測の前に、生成したソースが想定した処理をしていることを確かめます。`lowering` はすべての配置と通路がブロック配列への lowering から出てくること、`place_and_route` はすべてのスコープが全パスを通り、ゲート一つにつき配置済みセルが一つあることです。そのため、パスまで届かなくなった生成器は、黙って少ない処理を計測するのではなく、CI で失敗します。
 
 ## バージョニング
 
-Cairn は日付ベースバージョニング (CalVer) `YYYY.M[.PATCH]` を採用します。主要な変更は
-[CHANGELOG.md](CHANGELOG.md) に記録されます。バージョン番号ではなく
-[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/) が各面の互換契約を定めます。
+日付ベースの `YYYY.M[.PATCH]` です。主要な変更は [CHANGELOG.md](CHANGELOG.md) に記録します。バージョンを上げるときに何を壊してよいかは番号そのものではなく、[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)が定めます。
 
-## ツールチェーン
+## 行動規範
 
-[`rust-toolchain.toml`](rust-toolchain.toml) はコンパイラを正確なバージョンで指定し、Rust を入れる
-ワークフローはすべて `rustup show` を使うので、決めているのはこのファイルです。手元の `rustup` も同じ
-ように読むため、**あなたと CI は同じコンパイラで動きます**。findings まで同じとは限りません — CI は
-3 OS のマトリクスで走り、lint には `cfg` 依存のものがあります。
-
-チャンネル指定にしていないのは意図的です。CI は
-`cargo clippy --workspace --all-targets -- -D warnings` を走らせるので、`stable` のままだと Rust の
-リリースだけで全ブランチが赤くなります。findings はそのブランチが触っていないファイルに出て、しかも
-その変更が到達しないジョブで出て、最初に読むのは次に push した人です。固定しても新しい lint を避けられる
-わけではありません。**いつ来るかを決められる**だけで、誰かが開いた PR として来るようになります。
-
-**上げ方**。`channel` を変えたら、CI が走らせるものをそのまま走らせます。環境も検査の一部で、新しい
-コンパイラが増やすのは clippy の lint とは限らず rustc の warning のこともあります。
-
-```sh
-cargo fmt --all -- --check
-RUSTFLAGS="-D warnings" cargo clippy --workspace --all-targets -- -D warnings
-RUSTFLAGS="-D warnings" cargo test --workspace --locked
-```
-
-新しいリリースが見つけたものは同じ PR で直し、コミット種別は `ci` にします。feature ブランチの中で
-上げるより単独の PR にする価値があります — 「新しいコンパイラと、それが要求した lint 修正だけ」という
-差分はレビューできるからです。
-
-**MSRV ではありません**。workspace マニフェストの `rust-version` は利用者が Cairn をビルドするのに
-必要な下限で、この pin はプロジェクト自身の検査が走る唯一のバージョンです。pin を上げても下限は上がり
-ません。`rust-version` が動くのはコードが実際に新しいコンパイラを必要とし始めたときだけで、それは誰が
-crate をビルドできるかを変える変更だからです。
-
-検査されているのは片方向だけです。下限を **下回る** pin は最初のビルドで落ちます。cargo が
-`rust-version` より古いコンパイラでの package ビルドを拒否するからです。もう一方は検査されていません。
-1.95 で Cairn をビルドするものはどこにも無いので、新しいコンパイラを必要とし始めたコードは pin では
-緑のまま通り、宣言した下限にいる利用者だけが壊れます。`rust-version` は宣言であって検査済みの保証では
-ありません。確かめるのは `cargo +1.95 check --workspace` で、最近安定化した API に手を伸ばした変更の
-ときは回す価値があります。
-
-## Code of Conduct
-
-本プロジェクトは [Contributor Covenant](CODE_OF_CONDUCT.md) に従います。参加にあたっては本規約の
-順守が期待されます。
+このプロジェクトは [Contributor Covenant](CODE_OF_CONDUCT.md) に従います。参加する時点で、これを守ることに同意したものとみなされます。

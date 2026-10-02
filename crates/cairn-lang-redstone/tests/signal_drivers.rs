@@ -18,19 +18,10 @@
 //! come in mirrored pairs because a rule that always blames the sensor,
 //! or always blames the `logic` line, would satisfy either half alone.
 
-use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput, synthesize};
+use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput};
 
-fn synth_source(source: &str) -> SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
-
-/// 1-based line of a byte offset, counted the way the source reads.
-fn line_of(source: &str, offset: usize) -> usize {
-    source[..offset].bytes().filter(|b| *b == b'\n').count() + 1
-}
+mod common;
+use common::{line_of, synth_source};
 
 fn drivers_findings(out: &SynthOutput) -> Vec<&Diagnostic> {
     out.diagnostics
@@ -53,7 +44,7 @@ const TWO_SENSORS: &str = concat!(
     "\n",
     "struct gate size=5x5\n",
     "  pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a\n",
-    "  pressure_plate id=plate2 at=inside.front offset=0 y=0 -> sig.a\n",
+    "  pressure_plate id=plate2 at=inside.front offset=1 y=0 -> sig.a\n",
     "  logic sig.x = not sig.a\n",
     "  door id=front side=front at=center\n",
     "  door[id=front] opened_by=sig.x\n",
@@ -123,7 +114,7 @@ fn a_sensor_and_two_logic_lines_report_the_sensor_as_the_first_driver() {
         "\n",
         "struct gate size=5x5\n",
         "  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n",
-        "  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b\n",
+        "  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b\n",
         "  logic sig.a = sig.b and sig.b\n",
         "  logic sig.a = sig.b or sig.b\n",
         "  door id=front side=front at=center\n",
@@ -154,7 +145,7 @@ fn a_logic_line_above_the_sensor_is_the_first_driver() {
         "@cairn 2026.06\n",
         "\n",
         "struct gate size=5x5\n",
-        "  pressure_plate id=q at=inside.front offset=0 y=0 -> sig.b\n",
+        "  pressure_plate id=q at=inside.front offset=1 y=0 -> sig.b\n",
         "  logic sig.a = sig.b and sig.b\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door id=front side=front at=center\n",
@@ -195,8 +186,8 @@ fn a_third_driver_adds_no_second_finding() {
         "\n",
         "struct gate size=5x5\n",
         "  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n",
-        "  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.a\n",
-        "  pressure_plate id=p3 at=inside.back offset=0 y=0 -> sig.a\n",
+        "  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.a\n",
+        "  pressure_plate id=p3 at=inside.back offset=1 y=0 -> sig.a\n",
         "  door id=front side=front at=center\n",
         "  door[id=front] opened_by=sig.a\n",
     );
@@ -242,7 +233,7 @@ fn one_sensor_per_signal_still_lowers_untouched() {
         "\n",
         "struct gate size=5x5\n",
         "  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n",
-        "  pressure_plate id=p2 at=inside.front offset=0 y=0 -> sig.b\n",
+        "  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b\n",
         "  logic sig.x = sig.a or sig.b\n",
         "  door id=front side=front at=center\n",
         "  door[id=front] opened_by=sig.x\n",
@@ -267,7 +258,7 @@ fn a_nested_binding_above_a_sensor_is_still_the_first_driver() {
 ",
         "struct gate size=5x5
 ",
-        "  pressure_plate id=q at=inside.front offset=0 y=0 -> sig.b
+        "  pressure_plate id=q at=inside.front offset=1 y=0 -> sig.b
 ",
         "  level y=0
 ",

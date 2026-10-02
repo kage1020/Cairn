@@ -7,22 +7,16 @@
 //! introducing a cycle. Pins the dim math (with per-level walls extending
 //! the tower to two stories), the palette (four resolved theme slots plus
 //! air), the eave stair band, and the `repeat=/step=` arrow-slit window
-//! pattern. Zero `W_DEFERRED_MEMBER` is the top-level M3 contract this
-//! file replaces the older `c14b` "at least one deferred" pin with.
-
-use std::path::PathBuf;
+//! pattern. Zero `W_DEFERRED_MEMBER` at the top level is what this file
+//! pins, replacing an older "at least one deferred" expectation.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::{lower, parse, resolve};
 use cairn_lang_formats::registry::builtin_java;
 
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::examples_dir;
 
 fn lower_themed_tower() -> BlockArrayIr {
     let source = std::fs::read_to_string(examples_dir().join("themed-tower.crn"))

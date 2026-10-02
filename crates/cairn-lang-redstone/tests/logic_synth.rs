@@ -7,27 +7,11 @@
 //! per primitive, topological ordering across out-of-order declarations,
 //! and cascade-suppression so a single root cause fires one diagnostic.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::check::Severity;
-use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef, synthesize};
+use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef};
 
-/// Load `examples/<name>` relative to the workspace root.
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn synth_source(source: &str) -> cairn_lang_redstone::SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
+mod common;
+use common::{load_example, synth_source};
 
 fn count_code(out: &cairn_lang_redstone::SynthOutput, code: DiagnosticCode) -> usize {
     out.diagnostics.iter().filter(|d| d.code == code).count()
@@ -286,8 +270,9 @@ struct s size=1x1
   logic sig.x = sig.a or sig.b
   logic sig.y = sig.a or sig.b
   door id=front side=front at=center
+  door id=back side=back at=center
   door[id=front] opened_by=sig.x
-  door[id=front] opened_by=sig.y
+  door[id=back] opened_by=sig.y
 ";
     let out = synth_source(source);
     let entry = out
@@ -314,8 +299,9 @@ struct s size=1x1
   logic sig.x = sig.a or sig.b
   logic sig.y = sig.b or sig.a
   door id=front side=front at=center
+  door id=back side=back at=center
   door[id=front] opened_by=sig.x
-  door[id=front] opened_by=sig.y
+  door[id=back] opened_by=sig.y
 ";
     let out = synth_source(source);
     let entry = out

@@ -7,27 +7,31 @@
 //! its own typed keys (`weirdo_direction: Int`, `upside_down_bit: Byte`), and
 //! for some intents (stair `shape`) it has **no** key at all.
 //!
-//! Per spec versioning-editions §10.3 ("Java as the base, Bedrock as
-//! overriding diffs") and §10.7 (`intent_state` neutral, `resolved_state`
-//! per-edition), this module holds the hand-written Bedrock diff. It
-//! currently covers the **stair family**; further block families extend
-//! the same match dispatch additively as their lowering paths land. Any
-//! block with properties outside a covered family is a hard error rather
-//! than a silent pass-through.
+//! Per `spec/versioning-editions` "Folding the `(edition, version)` matrix"
+//! and "Java / Bedrock portability" — Java is the base and Bedrock the
+//! overriding diffs; `intent_state` is neutral and `resolved_state`
+//! per-edition — this module holds the hand-written Bedrock diff. It currently covers the **stair family**;
+//! further block families extend the same match dispatch additively as their
+//! lowering paths land. Any block with properties outside a covered family is
+//! a hard error rather than a silent pass-through.
 //!
-//! `shape` has no Bedrock equivalent (§10.7: "stairs shape — no state on
-//! Bedrock"). A non-`straight` shape is **dropped with a degradation note**
-//! (spec §10.3 `dropped_states: [shape]`, §10.7 `W_INTENT_DEGRADED`), never
-//! silently (§10.4 forbids implicit dropping). `shape=straight` is the
-//! Bedrock default, so it drops without a note.
+//! `shape` has no Bedrock equivalent — the portability section lists "stairs
+//! `shape` (no such state on Bedrock)" among the differences the canonical
+//! vocabulary does not absorb. A non-`straight` shape is **dropped with a
+//! degradation note** (`dropped_states: [shape]` in the matrix section,
+//! `W_INTENT_DEGRADED` in the portability one), never silently:
+//! `spec/versioning-editions` "Fail-loud and minimum-version inference"
+//! forbids implicit dropping. `shape=straight` is the Bedrock default, so it
+//! drops without a note.
 //!
 //! Numeric domains here are pinned against the Bedrock stair block-state
 //! listing on `minecraft.wiki` / `wiki.bedrock.dev` (`Stairs/BS`,
-//! consulted 2026-07 against Bedrock 1.21.60). The Cairn spec's §10.7
-//! illustrative example uses different `weirdo_direction` values; the
+//! consulted 2026-07 against Bedrock 1.21.60). The Cairn spec's own
+//! portability example uses different `weirdo_direction` values; the
 //! wiki listing is authoritative for the on-disk mapping.
 
 use cairn_lang_core::block_array::is_stair;
+use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
 use indexmap::IndexMap;
@@ -40,15 +44,21 @@ pub struct StateTranslation {
     /// Typed Bedrock `states` (e.g. `weirdo_direction: Int`,
     /// `upside_down_bit: Byte`). Empty for a bare (property-free) block.
     pub states: Compound,
-    /// Human-readable degradation notes — one per intent that Bedrock cannot
-    /// express (e.g. a dropped non-`straight` stair `shape`). Surfaced by the
-    /// caller as `W_INTENT_DEGRADED`. Empty on a lossless translation.
-    pub degraded: Vec<String>,
+    /// One entry per intent Bedrock cannot express (e.g. a dropped
+    /// non-`straight` stair `shape`). Empty on a lossless translation.
+    ///
+    /// The pieces rather than the sentence, so a caller that wants to act
+    /// on the dropped property does not have to parse it back out of
+    /// English. [`degradation_detail`] writes the sentence, and both
+    /// `W_INTENT_DEGRADED` and `cairn info`'s portability note come off
+    /// that one function.
+    pub degraded: Vec<DroppedIntent>,
 }
 
 /// A Java property that the Bedrock backend cannot map. Carries the
 /// self-correction triple (what is wrong / what is valid / suggested fix) so
-/// the lint loop can act on the message (spec §10.4).
+/// the lint loop can act on the message, per `spec/versioning-editions`
+/// "Fail-loud and minimum-version inference".
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum BedrockStateError {
     /// A block carries blockstate properties but is not a family this backend
@@ -74,7 +84,8 @@ pub enum BedrockStateError {
     /// leaked one is refused rather than mapped to a wrong Bedrock value.
     #[error(
         "stair `{id}` has `{key}={value}`, which is not a valid Java `{key}`. Valid `{key}`: \
-         {valid}. Fix: correct the source blockstate, or compile with `--edition java`"
+         {valid}. Fix: correct the source blockstate to one of those; `--edition java` would \
+         write the same value unchanged, since Java has no such `{key}` either"
     )]
     UnknownStairState {
         /// Offending id verbatim.
@@ -165,6 +176,52 @@ pub fn translate_states(
     }
 }
 
+/// What one dropped intent cost, without naming what carried it.
+///
+/// The single place this wording lives. `W_INTENT_DEGRADED` from the
+/// `.mcstructure` writer and the `degraded:` note `cairn info` prints are
+/// the same fact told to the same reader at two moments, and a second
+/// wording would be a thing to keep in step. [`DroppedIntent`] carries the
+/// pieces so this is the only place they are put into words.
+///
+/// Without the id because the two callers introduce the entry
+/// differently. [`degradation_message`] makes the block the sentence's
+/// subject, because a [`ParityNote`](crate::bedrock_structure::ParityNote)
+/// has to read on its own — the CLI happens to prefix the id again when
+/// it renders one, which is that renderer's wart and not a reason for
+/// this split. `cairn info`'s note has already printed `id[states]` as
+/// its line's subject and wants the clause alone. Composing the one form
+/// from the other is what keeps that a matter of framing rather than of
+/// wording.
+///
+/// A `match` rather than a format over the pieces, because this sentence
+/// is about stairs. [`DroppedIntent`] is a closed set so that the day a
+/// second family drops an intent, this stops compiling until someone
+/// writes what *that* loss looks like — the alternative is a slab told to
+/// check its corners.
+#[must_use]
+pub fn degradation_detail(dropped: &DroppedIntent) -> String {
+    match dropped {
+        DroppedIntent::Shape { value } => format!(
+            "shape={value} has no Bedrock state; Bedrock stairs render straight, so corners show \
+             visual gaps"
+        ),
+    }
+}
+
+/// [`degradation_detail`] with the block that carried the intent, as
+/// `W_INTENT_DEGRADED` reports it.
+///
+/// The family word comes out of the same `match` for the same reason the
+/// sentence does: `stair` is true of this variant, not of the type.
+#[must_use]
+pub fn degradation_message(id: &str, dropped: &DroppedIntent) -> String {
+    let family = match dropped {
+        DroppedIntent::Shape { .. } => "stair",
+    };
+    format!("{family} `{id}` {}", degradation_detail(dropped))
+}
+
 fn translate_stair(
     id: &str,
     properties: &IndexMap<String, String>,
@@ -181,14 +238,15 @@ fn translate_stair(
                 states.insert("upside_down_bit", Tag::Byte(upside_down_bit(id, value)?));
             }
             "shape" => {
-                // Bedrock stairs have no `shape` state (§10.7). `straight`
-                // is Bedrock's default so it drops losslessly; any corner
-                // shape drops with a degradation note (§10.3/§10.4).
+                // Bedrock stairs have no `shape` state
+                // (`spec/versioning-editions` "Java / Bedrock portability").
+                // `straight` is Bedrock's default so it drops losslessly; any
+                // corner shape drops with a degradation note ("Backend = data
+                // tables" and "Fail-loud and minimum-version inference").
                 if value != "straight" {
-                    degraded.push(format!(
-                        "stair `{id}` shape={value} has no Bedrock state; Bedrock stairs render \
-                         straight, so corners show visual gaps"
-                    ));
+                    degraded.push(DroppedIntent::Shape {
+                        value: value.clone(),
+                    });
                 }
             }
             other => {
@@ -237,7 +295,7 @@ fn upside_down_bit(id: &str, half: &str) -> Result<i8, BedrockStateError> {
     }
 }
 
-fn join_properties(properties: &IndexMap<String, String>) -> String {
+pub(crate) fn join_properties(properties: &IndexMap<String, String>) -> String {
     properties
         .iter()
         .map(|(k, v)| format!("{k}={v}"))
@@ -246,21 +304,24 @@ fn join_properties(properties: &IndexMap<String, String>) -> String {
 }
 
 #[cfg(test)]
+pub(crate) fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
+    pairs
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect()
+}
+
+/// Stair properties in the `facing` / `half` / `shape` insertion order the
+/// lowering uses, so `translate_states` sees the same key stream as at
+/// runtime.
+#[cfg(test)]
+pub(crate) fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
+    props([("facing", facing), ("half", half), ("shape", shape)])
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
-        pairs
-            .into_iter()
-            .map(|(k, v)| (k.to_owned(), v.to_owned()))
-            .collect()
-    }
-
-    fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
-        // Preserve the facing / half / shape insertion order the lowering
-        // uses so `translate_states` sees the same key stream at runtime.
-        props([("facing", facing), ("half", half), ("shape", shape)])
-    }
 
     #[test]
     fn bare_block_has_empty_states_and_no_degradation() {
@@ -311,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn non_straight_shape_drops_with_degradation_note() {
+    fn non_straight_shape_drops_as_the_property_and_the_value() {
         let t = translate_states(
             "minecraft:oak_stairs",
             &stair_props("south", "top", "outer_left"),
@@ -321,11 +382,26 @@ mod tests {
         assert_eq!(t.states.entries.get("weirdo_direction"), Some(&Tag::Int(2)));
         assert_eq!(t.states.entries.get("upside_down_bit"), Some(&Tag::Byte(1)));
         assert_eq!(t.states.entries.len(), 2);
-        // One degradation note, naming the dropped intent.
-        assert_eq!(t.degraded.len(), 1);
-        let note = &t.degraded[0];
-        assert!(note.contains("shape"), "got: {note}");
-        assert!(note.contains("Bedrock"), "got: {note}");
+        // One dropped intent, as the pieces: a consumer of
+        // `degraded_entries` reads which property was lost without
+        // parsing it back out of a sentence.
+        assert_eq!(
+            t.degraded,
+            [DroppedIntent::Shape {
+                value: "outer_left".to_owned(),
+            }],
+        );
+        // The sentence is written once, from those pieces, and the
+        // warning's form is the note's with the block named.
+        let detail = degradation_detail(&t.degraded[0]);
+        assert!(
+            detail.starts_with("shape=outer_left has no Bedrock state"),
+            "got: {detail}"
+        );
+        assert_eq!(
+            degradation_message("minecraft:oak_stairs", &t.degraded[0]),
+            format!("stair `minecraft:oak_stairs` {detail}"),
+        );
 
         // `straight` produces no note.
         let straight = translate_states(
@@ -367,9 +443,10 @@ mod tests {
             err,
             BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:oak_door"
         ));
-        // Self-correction triple (spec §10.4): what is wrong / what is
-        // valid / suggested fix. Each fragment is pinned so a message
-        // reword that breaks the lint loop's expectation fails here first.
+        // Self-correction triple per `spec/versioning-editions` "Fail-loud
+        // and minimum-version inference": what is wrong / what is valid /
+        // suggested fix. Each fragment is pinned so a message reword that
+        // breaks the lint loop's expectation fails here first.
         let msg = err.to_string();
         assert!(msg.contains("minecraft:oak_door"), "wrong: {msg}");
         assert!(msg.contains("facing=north"), "wrong: {msg}");
@@ -394,14 +471,22 @@ mod tests {
         // Valid values (FACING_VALID) surface in the message so the lint
         // loop can steer back to the closed domain instead of guessing.
         assert!(msg.contains("east, west, south, north"), "valid: {msg}");
-        assert!(msg.contains("--edition java"), "fix: {msg}");
+        // The value is no more valid on Java, where it would be written
+        // unchanged, so the fix does not send the author there.
+        assert!(
+            msg.contains("correct the source blockstate")
+                && msg.contains("Java has no such")
+                && !msg.contains("or compile with"),
+            "fix: {msg}",
+        );
     }
 
     #[test]
     fn unknown_stair_half_value_fails_loud() {
         // Mirrors the facing test to guard against a future
         // `upside_down_bit()` refactor that silently maps unknown values to
-        // `0` — a silent drop that spec §10.4 forbids.
+        // `0` — a silent drop that `spec/versioning-editions` "Fail-loud and
+        // minimum-version inference" forbids.
         let err = translate_states(
             "minecraft:oak_stairs",
             &stair_props("north", "middle", "straight"),
@@ -414,7 +499,14 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("half=middle"), "wrong: {msg}");
         assert!(msg.contains("top, bottom"), "valid: {msg}");
-        assert!(msg.contains("--edition java"), "fix: {msg}");
+        // The value is no more valid on Java, where it would be written
+        // unchanged, so the fix does not send the author there.
+        assert!(
+            msg.contains("correct the source blockstate")
+                && msg.contains("Java has no such")
+                && !msg.contains("or compile with"),
+            "fix: {msg}",
+        );
     }
 
     #[test]

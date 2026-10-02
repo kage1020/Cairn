@@ -15,25 +15,10 @@
 //! volume of a source that never mentioned it. Anything in between is the
 //! shape of this bug.
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::{lower, parse, resolve};
+use cairn_lang_core::block_array::BlockArrayIr;
 
-fn lowered(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, None)
-}
-
-/// The single structure the sources below declare.
-fn only_structure(ir: &BlockArrayIr) -> &BlockArray {
-    assert_eq!(
-        ir.structures.len(),
-        1,
-        "these sources declare exactly one struct",
-    );
-    ir.structures.values().next().expect("one structure")
-}
+mod common;
+use common::{lowered, only_structure};
 
 fn defer_reasons(ir: &BlockArrayIr) -> Vec<String> {
     ir.diagnostics.iter().map(|d| d.primary.clone()).collect()
@@ -192,7 +177,8 @@ fn a_level_scoped_roofs_overhang_is_validated_exactly_once() {
             .collect::<Vec<_>>(),
         vec![(
             "W_IGNORED_ARGUMENT",
-            "`overhang=` must be a non-negative integer that fits in u32; the value was ignored",
+            "`overhang=` must be a non-negative integer that fits in u32, not identifier `nope`; \
+             the value was ignored",
         )],
     );
 }
@@ -220,11 +206,11 @@ fn a_pressure_plate_under_a_raised_level_lands_at_that_level() {
     // would be caught by `walls` alone in every other test here.
     let raised = lowered(&source(
         "  roof kind=gable mat_slot=roof overhang=1\n\n  \
-         level id=upper y=3\n    pressure_plate at=inside.front mat_slot=deck\n",
+         level id=upper y=3\n    pressure_plate at=inside.front offset=1 mat_slot=deck\n",
     ));
     let ground = lowered(&source(
         "  roof kind=gable mat_slot=roof overhang=1\n  \
-         pressure_plate at=inside.front y=3 mat_slot=deck\n",
+         pressure_plate at=inside.front offset=1 y=3 mat_slot=deck\n",
     ));
 
     assert_eq!(defer_reasons(&raised), Vec::<String>::new());

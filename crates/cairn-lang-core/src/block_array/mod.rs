@@ -4,7 +4,7 @@
 //! grid, a palette of [`BlockState`]s, and (eventually) block entities and
 //! entities, all neutral to file format, edition, and version. Compile diffs,
 //! `IoU` comparisons, and serialisation hang off this single shape (see
-//! `spec/architecture.md` §3.1).
+//! `spec/architecture` "The block-array IR is the universal pivot").
 //!
 //! The [`lower::lower_to_block_array`] pass handles `floor`, `walls`,
 //! `door`, `window`, `stair`, `pressure_plate`, the `level y=N` grouping,
@@ -36,9 +36,12 @@ pub use material::{
     BlockIdSet, IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state,
 };
 pub use roof::is_stair;
+// `port_world_position` is deliberately not re-exported: it can only be
+// asked correctly with the wall column the body was lowered against,
+// which nothing outside this module holds. Exporting it invited the
+// second derivation the port used to carry.
 pub use walkway::{
-    BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, port_world_position,
-    route_path,
+    BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, route_path,
 };
 
 use crate::check::Diagnostic;
@@ -57,7 +60,7 @@ pub struct BlockArrayIr {
     /// [`crate::resolve::Resolution::scopes`] so the two maps line up
     /// without an extra translation step.
     pub structures: IndexMap<String, BlockArray>,
-    /// Per-`place` site coordinates. Keyed identically to [`structures`]
+    /// Per-`place` site coordinates. Keyed identically to [`Self::structures`]
     /// (`site::HAMLET::PLACE_ID`) so a consumer can join the two without an
     /// extra index. Empty for any source with no `site` blocks, which keeps
     /// the JSON shape stable for cottage/themed-tower fixtures pre-dating
@@ -66,7 +69,7 @@ pub struct BlockArrayIr {
     pub placements: IndexMap<String, Placement>,
     /// Per-`connect` walkway metadata, keyed by [`WalkwayScopeKey`]. The
     /// matching [`BlockArray`] sits under the same wire-format key in
-    /// [`structures`], so a consumer can join the two against the same
+    /// [`Self::structures`], so a consumer can join the two against the same
     /// key the way `placements` does. Empty for any source with no
     /// `connect` rows, keeping the JSON shape stable for cottage /
     /// themed-tower fixtures.
@@ -140,12 +143,18 @@ pub struct Placement {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BlockArray {
     /// Voxel extents along X (east), Y (up), Z (south). Front of a struct is
-    /// `+z` (`spec/components-editing-sites.md` §5.4) so the source
-    /// `size=WxH` literal becomes `(W, _, H)` here; the Y extent is derived
-    /// from member contributions.
+    /// `+z` (`spec/syntax` "Selectors") so the source `size=WxH` literal
+    /// becomes `(W, _, H)` here; the Y extent is derived from member
+    /// contributions.
     pub dims: Dims,
-    /// Block states referenced by the [`voxels`] grid. Index `0` is always
-    /// [`BlockState::AIR`]; [`Palette::intern`] preserves that invariant.
+    /// Block states referenced by the [`Self::voxels`] grid. Index `0` is always
+    /// [`BlockState::air()`]; [`Palette::intern`] preserves that invariant.
+    ///
+    /// Every array the lowering and walkway passes produce carries this in
+    /// the canonical order [`Palette::canonicalize`] fixes — air at slot
+    /// `0`, the rest ascending by `(id, properties)`. The field is public,
+    /// so an array assembled by hand (the format backends' tests do) holds
+    /// whatever order its author put there; nothing here enforces it.
     pub palette: Palette,
     /// Palette indices in `(y, z, x)` order: `voxels[((y * dims.z) + z) *
     /// dims.x + x]`. Y-major lets ASCII renderers walk one slice at a time
@@ -156,13 +165,13 @@ pub struct BlockArray {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
     /// Free entities (frames, paintings, ...). Empty for the same reason
-    /// as [`block_entities`].
+    /// as [`Self::block_entities`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<Entity>,
     /// Source scope this volume was lowered from, mirroring the
     /// [`crate::resolve::Resolution`] key (`struct::cottage`). Carried in
     /// the IR so a downstream serialiser can stamp it into the output
-    /// filename without re-threading the originating [`IntentModule`].
+    /// filename without re-threading the originating [`crate::intent::IntentModule`].
     pub source_scope: String,
 }
 
@@ -215,6 +224,9 @@ impl Footprint {
 /// A structure at the bound already costs 32 MB for the index vector alone
 /// (`PaletteIndex` is two bytes), so the ceiling is well past where the
 /// output stops being useful and well below where the allocator gives up.
+/// That holds for writing the artifact too: `cairn-lang-formats` encodes a
+/// structure's per-voxel lists from this vector as it writes them, so the
+/// writer adds a fixed amount on top of it rather than a multiple of it.
 ///
 /// Per scope, not per module: a source declaring a thousand structs can
 /// still ask for a thousand times this. Bounding the total would need a
@@ -283,7 +295,8 @@ impl Dims {
     }
 }
 
-/// Index into a [`Palette`]. `0` is reserved for [`BlockState::AIR`].
+/// Index into a [`Palette`]. [`Self::AIR`] (`0`) is reserved for
+/// [`BlockState::air()`].
 ///
 /// A newtype rather than a bare `u16` so a future change of the underlying
 /// width (e.g. `u32` for very large palettes) does not ripple through every
@@ -300,6 +313,31 @@ impl PaletteIndex {
 }
 
 impl BlockArray {
+    /// Put the palette in canonical order and renumber the grid onto it.
+    ///
+    /// The pass that paints a body numbers its palette by first use, and
+    /// first use is a paint, so two members that share no voxel still
+    /// reach the palette in the order their lines happen to be written —
+    /// and the numbering rides into the `.nbt` bytes, `cairn info`'s
+    /// per-entry rows, and `resolved_ir_hash`. Calling this once the grid
+    /// is finished makes all three a function of the grid alone
+    /// (`spec/compilation` "Within-phase conflicts and the palette").
+    ///
+    /// A voxel naming a slot the palette does not have is left as it is
+    /// rather than remapped onto air: the fields here are public, so a
+    /// caller can assemble a disagreeing pair by hand, and quietly
+    /// rewriting one is how [`Self::first_index_outside_palette`] — which
+    /// both backends ask before they assemble anything — would stop
+    /// seeing it.
+    pub fn canonicalize_palette(&mut self) {
+        let remap = self.palette.canonicalize();
+        for index in &mut self.voxels {
+            if let Some(moved) = remap.get(usize::from(index.0)) {
+                *index = *moved;
+            }
+        }
+    }
+
     /// The first voxel whose index is not a slot of [`Self::palette`], as
     /// `(index, palette length)`.
     ///
@@ -321,17 +359,20 @@ impl BlockArray {
     }
 }
 
-/// Append-only palette with deduplication on insertion. Insertion order is
-/// preserved so the slot at index `0` is always [`BlockState::AIR`].
+/// Deduplicating palette. [`Palette::intern`] appends, so the order while
+/// a body is being painted is insertion order; [`Palette::canonicalize`]
+/// then rewrites it into the order the artifact carries. The slot at index
+/// `0` is always [`BlockState::air()`] under both.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct Palette {
-    /// Block states in insertion order.
+    /// Block states, in insertion order while the body is painted and in
+    /// [`Palette::canonicalize`]'s order once it is finished.
     pub entries: Vec<BlockState>,
 }
 
 impl Palette {
-    /// Construct a palette pre-seeded with [`BlockState::AIR`] at index `0`.
+    /// Construct a palette pre-seeded with [`BlockState::air()`] at index `0`.
     /// This is the only constructor lowering should use so the AIR invariant
     /// holds for every [`BlockArray`].
     #[must_use]
@@ -362,6 +403,64 @@ impl Palette {
         self.entries.push(state);
         PaletteIndex(idx)
     }
+
+    /// Reorder the entries into the canonical order and return the
+    /// old-slot → new-slot map, so the caller can renumber a voxel grid
+    /// that was painted against the old numbering.
+    ///
+    /// Air keeps slot `0` — it is the one entry a reader may assume the
+    /// position of, and `minecraft:acacia_log` sorts ahead of
+    /// `minecraft:air` — and every other entry is placed by
+    /// [`BlockState::canonical_key`]: the id, then the properties sorted
+    /// by name. The result is a function of the *set* of states the body
+    /// contains, which is what makes the palette a rendering of the
+    /// finished grid rather than a log of the order the paints happened
+    /// to run in. Two sources that differ only in the order they declare
+    /// two members that share no voxel then produce the same `.nbt` bytes
+    /// and the same `resolved_ir_hash` (`spec/compilation` "Within-phase
+    /// conflicts and the palette").
+    ///
+    /// Only the palette moves: this hands back the map rather than
+    /// touching a grid it does not own, because a [`Palette`] outside a
+    /// [`BlockArray`] has no grid. [`BlockArray::canonicalize_palette`]
+    /// is the pairing that does both.
+    ///
+    /// # Panics
+    ///
+    /// Panics on a palette longer than 65536 entries. [`Self::intern`]
+    /// cannot build one — it refuses the 65537th — so this is reachable
+    /// only from a palette assembled by hand past the width
+    /// [`PaletteIndex`] can name.
+    #[must_use]
+    pub fn canonicalize(&mut self) -> Vec<PaletteIndex> {
+        // Slot 0 is reserved rather than guaranteed: `new_with_air` seeds
+        // it, but the field is public and a hand-assembled palette may be
+        // empty, which `drain(1..)` would panic on. Nothing to reorder
+        // and nothing to renumber, so answer with the empty map.
+        if self.entries.is_empty() {
+            return Vec::new();
+        }
+        // Each entry travels with the slot it came from, so the map back
+        // to the old numbering falls out of the sort instead of having to
+        // be reconstructed from a separately sorted permutation.
+        let mut tagged: Vec<(usize, BlockState)> = self
+            .entries
+            .drain(1..)
+            .enumerate()
+            .map(|(i, state)| (i + 1, state))
+            .collect();
+        tagged.sort_by(|a, b| a.1.canonical_key().cmp(&b.1.canonical_key()));
+
+        let mut remap = vec![PaletteIndex::AIR; tagged.len() + 1];
+        for (new_slot, (old_slot, _)) in tagged.iter().enumerate() {
+            remap[*old_slot] = PaletteIndex(
+                u16::try_from(new_slot + 1).expect("a reordering is no longer than the original"),
+            );
+        }
+        self.entries
+            .extend(tagged.into_iter().map(|(_, state)| state));
+        remap
+    }
 }
 
 impl Default for Palette {
@@ -381,7 +480,9 @@ impl Default for Palette {
 pub struct BlockState {
     /// Canonical id, e.g. `minecraft:cobblestone`.
     pub id: String,
-    /// State properties in source-stable order.
+    /// State properties. A state literal's arrive sorted by name, so the
+    /// order a source spelled them in reaches neither the palette nor
+    /// anything written from it.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub properties: IndexMap<String, String>,
 }
@@ -409,6 +510,32 @@ impl BlockState {
             id: id.into(),
             properties: IndexMap::new(),
         }
+    }
+
+    /// Total order over block states, used by [`Palette::canonicalize`] to
+    /// place every non-air slot.
+    ///
+    /// The properties are sorted by name here rather than read in the
+    /// order they were inserted. [`IndexMap`] compares as a map, so two
+    /// states carrying the same pairs in different orders are already
+    /// [`PartialEq`]-equal and [`Palette::intern`] folds them onto one
+    /// slot — but their iteration orders differ, and a key that read them
+    /// in place would order the palette by which of the two was interned
+    /// first, which is the source-order dependence this ordering exists to
+    /// remove.
+    ///
+    /// Borrows rather than owning: it is called `O(n log n)` times inside
+    /// one sort, and every id and value it names is already in the
+    /// palette.
+    #[must_use]
+    pub fn canonical_key(&self) -> (&str, Vec<(&str, &str)>) {
+        let mut properties: Vec<(&str, &str)> = self
+            .properties
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        properties.sort_unstable();
+        (self.id.as_str(), properties)
     }
 }
 
@@ -480,5 +607,142 @@ mod tests {
         let planks = p.intern(BlockState::bare("minecraft:oak_planks"));
         assert_ne!(cobble, planks);
         assert_eq!(p.entries.len(), 3);
+    }
+
+    fn state(id: &str, properties: &[(&str, &str)]) -> BlockState {
+        BlockState {
+            id: id.to_owned(),
+            properties: properties
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        }
+    }
+
+    fn ids(p: &Palette) -> Vec<&str> {
+        p.entries.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    #[test]
+    fn canonicalize_sorts_by_id_and_pins_air_at_slot_zero() {
+        // `minecraft:acacia_log` sorts ahead of `minecraft:air`, so the
+        // pin is doing work here rather than agreeing with the sort.
+        let mut p = Palette::new_with_air();
+        p.intern(BlockState::bare("minecraft:oak_planks"));
+        p.intern(BlockState::bare("minecraft:acacia_log"));
+        p.intern(BlockState::bare("minecraft:cobblestone"));
+        let remap = p.canonicalize();
+        assert_eq!(
+            ids(&p),
+            [
+                "minecraft:air",
+                "minecraft:acacia_log",
+                "minecraft:cobblestone",
+                "minecraft:oak_planks",
+            ],
+        );
+        // The map has to name where each old slot went, or a grid painted
+        // against the old numbering cannot follow.
+        assert_eq!(
+            remap,
+            vec![
+                PaletteIndex(0),
+                PaletteIndex(3),
+                PaletteIndex(1),
+                PaletteIndex(2),
+            ],
+        );
+    }
+
+    #[test]
+    fn canonicalize_breaks_an_id_tie_on_the_properties() {
+        let mut p = Palette::new_with_air();
+        p.intern(state("minecraft:oak_stairs", &[("facing", "south")]));
+        p.intern(state("minecraft:oak_stairs", &[("facing", "north")]));
+        let _ = p.canonicalize();
+        let facings: Vec<&str> = p.entries[1..]
+            .iter()
+            .map(|s| s.properties["facing"].as_str())
+            .collect();
+        assert_eq!(facings, ["north", "south"]);
+    }
+
+    #[test]
+    fn canonicalize_reads_properties_in_name_order_not_insertion_order() {
+        // Same id on both, so the property bag is the whole decision.
+        // `half` is written first in one bag and second in the other, so a
+        // key that read the pairs in place would compare `half=top`
+        // against `facing=south` and order the two by which property the
+        // author happened to write first.
+        //
+        // Reachable from source, not only by hand: `parse_state_literal`
+        // fills the `IndexMap` in the order the literal spells its
+        // properties, so `@oak_stairs[half=top,facing=north]` beside
+        // `@oak_stairs[facing=south,half=bottom]` is a pair of theme slots
+        // someone can write.
+        let mut p = Palette::new_with_air();
+        p.intern(state(
+            "minecraft:oak_stairs",
+            &[("half", "top"), ("facing", "north")],
+        ));
+        p.intern(state(
+            "minecraft:oak_stairs",
+            &[("facing", "south"), ("half", "bottom")],
+        ));
+        let _ = p.canonicalize();
+        let facings: Vec<&str> = p.entries[1..]
+            .iter()
+            .map(|s| s.properties["facing"].as_str())
+            .collect();
+        assert_eq!(facings, ["north", "south"]);
+    }
+
+    #[test]
+    fn canonicalizing_a_block_array_renumbers_the_grid_onto_the_new_slots() {
+        let mut palette = Palette::new_with_air();
+        let planks = palette.intern(BlockState::bare("minecraft:oak_planks"));
+        let cobble = palette.intern(BlockState::bare("minecraft:cobblestone"));
+        let mut array = BlockArray {
+            dims: Dims { x: 2, y: 1, z: 1 },
+            palette,
+            voxels: vec![planks, cobble],
+            block_entities: Vec::new(),
+            entities: Vec::new(),
+            source_scope: "struct::t".to_owned(),
+        };
+        array.canonicalize_palette();
+        // Same two blocks in the same two cells, read back through the
+        // palette the reordering left behind.
+        let read: Vec<&str> = array
+            .voxels
+            .iter()
+            .map(|i| array.palette.entries[usize::from(i.0)].id.as_str())
+            .collect();
+        assert_eq!(read, ["minecraft:oak_planks", "minecraft:cobblestone"]);
+        assert_eq!(
+            ids(&array.palette),
+            [
+                "minecraft:air",
+                "minecraft:cobblestone",
+                "minecraft:oak_planks",
+            ],
+        );
+    }
+
+    #[test]
+    fn canonicalizing_leaves_an_index_the_palette_does_not_have_alone() {
+        // A hand-assembled disagreement stays visible to
+        // `first_index_outside_palette`, which is what both backends ask
+        // before they write anything.
+        let mut array = BlockArray {
+            dims: Dims { x: 1, y: 1, z: 1 },
+            palette: Palette::new_with_air(),
+            voxels: vec![PaletteIndex(7)],
+            block_entities: Vec::new(),
+            entities: Vec::new(),
+            source_scope: "struct::t".to_owned(),
+        };
+        array.canonicalize_palette();
+        assert_eq!(array.first_index_outside_palette(), Some((7, 1)));
     }
 }

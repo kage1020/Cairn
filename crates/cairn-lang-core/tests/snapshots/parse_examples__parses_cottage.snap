@@ -31,18 +31,6 @@ items:
         value:
           kind: Token
           value: glass_pane
-      - kind: Selector
-        keyword: window
-        attrs:
-          - key: class
-            value:
-              kind: Ident
-              value: small
-        bindings:
-          - key: frame
-            value:
-              kind: Token
-              value: spruce_wood
   - kind: Struct
     name: cottage
     args:

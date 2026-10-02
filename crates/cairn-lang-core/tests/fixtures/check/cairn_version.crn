@@ -1,0 +1,7 @@
+@cairn banana
+
+theme t:
+  slot floor -> @oak_planks
+
+struct s size=2x2
+  floor mat_slot=floor

@@ -3,7 +3,7 @@ title: "Compatibility Tiers"
 ---
 
 Cairn ships a single release train under
-[date-based versioning](versioning-editions#101-the-target-is-a-compile-time-parameter) (`YYYY.M[.PATCH]`).
+[date-based versioning](/spec/versioning-editions/#101-the-target-is-a-compile-time-parameter) (`YYYY.M[.PATCH]`).
 Because CalVer has no semver-style "major" axis, the **scope of what is and is not safe to break in
 a release** is set by this document rather than by version numbers.
 
@@ -29,7 +29,7 @@ Stable surfaces:
 - `.crn` syntax that is normative in the spec (keywords, headers, block kinds, blockstate
   primitives, theme/material primitives, edition guards).
 - `build.cairn.lock` file format (fields, hash inputs, the `verified` semantics defined in
-  [§10.6](versioning-editions#106-provenance-and-lock)).
+  [§10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 - `cairn compile`, `cairn check`, and `cairn info`: their flag names, argument shapes, JSON
   output schemas, and process exit codes.
 - The canonical material vocabulary's tier-1 tokens (the names users write in source).
@@ -48,7 +48,7 @@ No deprecation window is promised.
 Evolving surfaces:
 
 - Spec chapters or sections explicitly marked as draft (the
-  [Open Issues](open-issues) list and any section flagged "subject to change" in its prose).
+  [Open Issues](/spec/open-issues/) list and any section flagged "subject to change" in its prose).
 - New `cairn` subcommands during their first three monthly minors after introduction.
 - registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving).
@@ -132,4 +132,4 @@ Two classes of change sit outside this matrix:
   promised at any tier. Two releases may produce structurally-different files for the same
   source; what matters is that the result is valid for the target `(edition, version)` and
   matches the lockfile's `resolved_ir_hash`. See
-  [§10.6](versioning-editions#106-provenance-and-lock).
+  [§10.6](/spec/versioning-editions/#106-provenance-and-lock).

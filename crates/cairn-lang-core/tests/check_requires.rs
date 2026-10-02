@@ -7,12 +7,15 @@
 //! evaporates is worse than no floor, because it is still written in the
 //! file and still read by whoever opens it.
 //!
-//! Only `version>=X` is defined (spec syntax §5.3, versioning-editions
-//! §10.4). Anything else is reported rather than ignored — including the
-//! shapes an author reasonably reaches for first, since "not supported" is
-//! an answer and silence is not.
+//! Only `version>=X` is defined (`spec/syntax` "Headers" and
+//! `spec/versioning-editions` "Fail-loud and minimum-version inference").
+//! Anything else is reported rather than ignored — including the shapes an
+//! author reasonably reaches for first, since "not supported" is an answer
+//! and silence is not.
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::check::DiagnosticCode;
+use cairn_lang_core::resolve::compare_versions;
 use cairn_lang_core::{check, lower, parse};
 
 /// The body every fixture shares, so the header is the only variable.
@@ -49,12 +52,41 @@ fn message(header: &str) -> String {
     invalid[0].primary.clone()
 }
 
-/// The strictest floor the module declares, as `cairn info` derives it.
+/// The strictest edition-neutral floor the module declares, as
+/// `cairn info` renders it on the `registry compatibility` row.
 fn floor(header: &str) -> String {
+    floors_for(header, None)
+        .into_iter()
+        .reduce(|best, next| {
+            if compare_versions(&next.version, &best.version).is_gt() {
+                next
+            } else {
+                best
+            }
+        })
+        .map_or_else(|| "(none)".to_owned(), |f| f.version)
+}
+
+/// Every floor a build of `edition` is held to, in source order.
+fn floors_for(
+    header: &str,
+    edition: Option<cairn_lang_core::Edition>,
+) -> Vec<cairn_lang_core::resolve::VersionFloor> {
     let source = format!("{header}{BODY}");
     let module = parse(&source).expect("parse");
-    cairn_lang_core::resolve::declared_version_floor(&module)
-        .map_or_else(|| "(none)".to_owned(), |f| f.version)
+    match edition {
+        Some(edition) => cairn_lang_core::resolve::declared_version_floors(&module, edition),
+        None => cairn_lang_core::resolve::unscoped_version_floors(&module),
+    }
+}
+
+/// The version labels of those floors, which is what most of the tests
+/// below are actually about.
+fn versions_for(header: &str, edition: Option<cairn_lang_core::Edition>) -> Vec<String> {
+    floors_for(header, edition)
+        .into_iter()
+        .map(|f| f.version)
+        .collect()
 }
 
 // -- the grammar ----------------------------------------------------------
@@ -80,7 +112,7 @@ fn whitespace_around_the_operator_does_not_change_the_floor() {
 }
 
 /// Repeating the directive composes rather than conflicts: the floors fold
-/// to the strictest. Spec syntax §5.3 exempts `@requires` from
+/// to the strictest. `spec/syntax` "Headers" exempts `@requires` from
 /// `E_DUPLICATE_HEADER` for exactly this reason.
 #[test]
 fn repeated_requirements_fold_to_the_strictest() {
@@ -154,16 +186,34 @@ fn a_component_that_is_not_a_number_is_refused() {
     );
 }
 
-/// A snapshot label is a real Minecraft version, so the refusal has to say
-/// Cairn cannot order it rather than that it is a number out of range.
+/// A snapshot, a pre-release, and a date-based label are real Minecraft
+/// versions, and two of the three will be how releases are spelled, per
+/// `spec/versioning-editions` "The target is a compile-time parameter".
+/// The directive accepts them: whether one can be *ordered* is the target
+/// edition's `DataVersion` table's answer, asked at the command that pins
+/// an edition, and refusing them here would pre-empt it with the wrong one.
 #[test]
-fn a_snapshot_label_is_refused_for_the_reason_it_is_refused() {
-    let text = message("@requires version>=24w14a\n");
-    assert!(text.contains("24w14a"), "{text}");
-    assert!(
-        !text.contains("4294967295"),
-        "a snapshot label is not a number out of range: {text}",
-    );
+fn a_label_the_spec_says_will_exist_is_not_refused_by_the_directive() {
+    for (header, version) in [
+        ("@requires version>=1.21.4-rc1\n", "1.21.4-rc1"),
+        ("@requires version>=24w14a\n", "24w14a"),
+        ("@requires version>=2026.1\n", "2026.1"),
+    ] {
+        assert!(
+            !codes(header).contains(&"E_INVALID_REQUIRES"),
+            "{header:?}: {:?}",
+            codes(header),
+        );
+        assert_eq!(floor(header), version, "{header:?}");
+    }
+}
+
+/// A `-` used to die in the lexer, before any pass could have an opinion,
+/// back when the parser refused any file `lex` refuses.
+#[test]
+fn a_pre_release_label_reaches_the_directive_at_all() {
+    let source = format!("@requires version>=1.21.4-rc1\n{BODY}");
+    parse(&source).expect("a pre-release suffix lexes");
 }
 
 /// `4294967296` is all ASCII digits, so a digit-only check passes it to a
@@ -180,10 +230,10 @@ fn a_component_too_large_to_compare_is_refused() {
 }
 
 /// The payload carries the failure as data, so a quick-fix does not have to
-/// take the sentence apart. `spec/lint.md` §11.2 asks for exactly that, and
-/// this one code covers several mistakes whose repairs have nothing in
-/// common — replacing `<` with `>=` is a one-character edit a tool can
-/// offer, while a snapshot label cannot be repaired at all today.
+/// take the sentence apart. `spec/lint` "Machine-readable payload" asks for
+/// exactly that, and this one code covers several mistakes whose repairs
+/// have nothing in common — replacing `<` with `>=` is a one-character edit
+/// a tool can offer, while a snapshot label cannot be repaired at all today.
 #[test]
 fn the_finding_carries_the_failure_as_data() {
     use cairn_lang_core::check::DiagnosticData;
@@ -238,6 +288,68 @@ fn an_expression_that_is_not_a_version_requirement_is_refused() {
             "{header:?} should show the shape that works: {text}",
         );
     }
+}
+
+// -- the edition scope ---------------------------------------------------
+//
+// Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 / 1.21.40
+// / 1.21.60`, so `1.21.4` names Java's newest release and no Bedrock
+// release at all. A floor may say which numbering it is written in.
+
+/// A scoped floor is in its own edition's build.
+#[test]
+fn a_scoped_floor_is_collected_for_the_edition_it_names() {
+    let header = "@requires java version>=1.21.4\n";
+    assert_eq!(versions_for(header, Some(Edition::Java)), ["1.21.4"]);
+    assert!(codes(header).is_empty(), "{:?}", codes(header));
+}
+
+/// And inert in the other's — not violated by it. A file declaring a floor
+/// per edition would otherwise be unbuildable everywhere.
+#[test]
+fn a_scoped_floor_is_not_a_floor_on_the_other_edition() {
+    let header = "@requires java version>=1.21.4\n@requires bedrock version>=1.21.40\n";
+    assert_eq!(versions_for(header, Some(Edition::Java)), ["1.21.4"]);
+    assert_eq!(versions_for(header, Some(Edition::Bedrock)), ["1.21.40"]);
+}
+
+/// An unscoped floor is a floor on whatever is being built, so it is in
+/// both — and beside a scoped one, both apply to that edition.
+#[test]
+fn an_unscoped_floor_is_in_every_edition() {
+    let header = "@requires version>=1.21\n@requires bedrock version>=1.21.40\n";
+    assert_eq!(versions_for(header, Some(Edition::Java)), ["1.21"]);
+    assert_eq!(
+        versions_for(header, Some(Edition::Bedrock)),
+        ["1.21", "1.21.40"],
+    );
+}
+
+/// The edition-neutral question — the `registry compatibility` row, which
+/// `cairn info` prints once for a file it may be reporting on for both
+/// editions — takes only the unscoped floors. A floor written in Java's
+/// numbering says nothing about a file's Bedrock range.
+#[test]
+fn the_neutral_row_reads_only_the_unscoped_floors() {
+    assert_eq!(floor("@requires java version>=1.21.4\n"), "(none)");
+    assert_eq!(
+        floor("@requires java version>=1.21.4\n@requires version>=1.20\n"),
+        "1.20",
+    );
+}
+
+/// A typo in the scope is a floor with a typo in it, and says so. Reading
+/// it as "not a version requirement" would point at the half that is
+/// right.
+#[test]
+fn a_scope_that_is_not_an_edition_is_named() {
+    let text = message("@requires jaba version>=1.21\n");
+    assert!(text.contains("jaba"), "should quote the scope: {text}");
+    assert!(
+        text.contains("java") && text.contains("bedrock"),
+        "should name the editions that work: {text}",
+    );
+    assert_eq!(floor("@requires jaba version>=1.21\n"), "(none)");
 }
 
 /// A refused requirement declares no floor. Reporting the error and then

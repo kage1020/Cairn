@@ -15,21 +15,15 @@
 //! of the comparison move with it; and the constant being reset to a literal
 //! equal to today's number, which only diverges at the next bump.
 
-use std::process::Command;
+mod common;
+use common::cairn_argv;
 
 /// The version cargo derived for this crate from `[workspace.package]`.
 const WORKSPACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-fn run(flag: &str) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_cairn"))
-        .arg(flag)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
-
 #[test]
 fn version_flag_prints_the_workspace_version_on_stdout() {
-    let output = run("--version");
+    let output = cairn_argv(&["--version"]);
     assert!(
         output.status.success(),
         "cairn --version exited non-zero: {:?}, stderr={}",
@@ -51,10 +45,10 @@ fn version_flag_prints_the_workspace_version_on_stdout() {
 
 #[test]
 fn short_version_flag_matches_long() {
-    let short = run("-V");
+    let short = cairn_argv(&["-V"]);
     assert!(short.status.success(), "cairn -V exited non-zero");
     assert_eq!(
         String::from_utf8(short.stdout).expect("stdout is utf-8"),
-        String::from_utf8(run("--version").stdout).expect("stdout is utf-8"),
+        String::from_utf8(cairn_argv(&["--version"]).stdout).expect("stdout is utf-8"),
     );
 }

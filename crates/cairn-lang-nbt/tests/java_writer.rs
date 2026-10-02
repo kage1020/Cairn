@@ -140,6 +140,7 @@ fn n7_string_with_nul_byte_rejected() {
 fn n8_numeric_types_are_big_endian() {
     // AC N8: numeric payloads are big-endian regardless of host endianness.
     let mut root = Compound::new();
+    root.insert("i16", Tag::Short(0x1234));
     root.insert("i32", Tag::Int(0x1234_5678));
     root.insert("i64", Tag::Long(0x0123_4567_89AB_CDEF_i64));
     root.insert("f32", Tag::Float(f32::from_bits(0xDEAD_BEEF)));
@@ -148,6 +149,8 @@ fn n8_numeric_types_are_big_endian() {
 
     // Find each named entry by scanning for its name (each unique here).
     let find = |needle: &[u8]| -> usize { find_subsequence(&buf, needle).expect("found") };
+    let i16_off = find(b"i16") + 3;
+    assert_eq!(&buf[i16_off..i16_off + 2], &[0x12, 0x34]);
     let i32_off = find(b"i32") + 3;
     assert_eq!(&buf[i32_off..i32_off + 4], &[0x12, 0x34, 0x56, 0x78]);
     let i64_off = find(b"i64") + 3;

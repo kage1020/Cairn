@@ -213,6 +213,37 @@
     }
   },
   {
+    "type": "def_body",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "assert_stmt",
+          "named": true
+        },
+        {
+          "type": "logic_decl",
+          "named": true
+        },
+        {
+          "type": "member_stmt",
+          "named": true
+        },
+        {
+          "type": "member_stmt_with_body",
+          "named": true
+        },
+        {
+          "type": "requires_stmt",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "def_decl",
     "named": true,
     "fields": {
@@ -231,7 +262,7 @@
         "required": false,
         "types": [
           {
-            "type": "struct_body",
+            "type": "def_body",
             "named": true
           }
         ]
@@ -359,6 +390,10 @@
       "types": [
         {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "state_literal",
           "named": true
         }
       ]
@@ -551,6 +586,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "requires_stmt",
+    "named": true,
+    "fields": {
+      "arg": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "directive_literal",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -792,6 +843,55 @@
     }
   },
   {
+    "type": "state_literal",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "state_property",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "state_property",
+    "named": true,
+    "fields": {
+      "key": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "string_list",
     "named": true,
     "fields": {},
@@ -937,6 +1037,10 @@
       "required": false,
       "types": [
         {
+          "type": "requires_stmt",
+          "named": true
+        },
+        {
           "type": "selector_rule",
           "named": true
         },
@@ -1033,6 +1137,10 @@
         "types": [
           {
             "type": "bit",
+            "named": true
+          },
+          {
+            "type": "dont_care",
             "named": true
           }
         ]
@@ -1193,6 +1301,10 @@
   },
   {
     "type": "directive_literal",
+    "named": true
+  },
+  {
+    "type": "dont_care",
     "named": true
   },
   {

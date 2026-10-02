@@ -16,6 +16,7 @@ use crate::tag::{Compound, List, Tag};
 
 /// Errors raised while encoding an NBT tag tree.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum NbtIoError {
     /// A [`Tag::String`] contained a byte that cannot be carried by Java
     /// Modified UTF-8. The encoder currently declines the NUL byte and
@@ -78,48 +79,30 @@ pub(crate) enum Endian {
     Little,
 }
 
-impl Endian {
-    fn write_u16<W: Write>(self, w: &mut W, v: u16) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
+/// One `write_<scalar>` method per multi-byte scalar type, each emitting
+/// the value in `self`'s byte order.
+macro_rules! scalar_writers {
+    ($($name:ident: $ty:ty),* $(,)?) => {
+        impl Endian {
+            $(
+                fn $name<W: Write>(self, w: &mut W, v: $ty) -> std::io::Result<()> {
+                    match self {
+                        Endian::Big => w.write_all(&v.to_be_bytes()),
+                        Endian::Little => w.write_all(&v.to_le_bytes()),
+                    }
+                }
+            )*
         }
-    }
+    };
+}
 
-    fn write_i16<W: Write>(self, w: &mut W, v: i16) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
-
-    fn write_i32<W: Write>(self, w: &mut W, v: i32) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
-
-    fn write_i64<W: Write>(self, w: &mut W, v: i64) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
-
-    fn write_f32<W: Write>(self, w: &mut W, v: f32) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
-
-    fn write_f64<W: Write>(self, w: &mut W, v: f64) -> std::io::Result<()> {
-        match self {
-            Endian::Big => w.write_all(&v.to_be_bytes()),
-            Endian::Little => w.write_all(&v.to_le_bytes()),
-        }
-    }
+scalar_writers! {
+    write_u16: u16,
+    write_i16: i16,
+    write_i32: i32,
+    write_i64: i64,
+    write_f32: f32,
+    write_f64: f64,
 }
 
 /// Write a root-level named compound in the given byte order.
@@ -135,12 +118,30 @@ pub(crate) fn write_named_root<W: Write>(
     Ok(())
 }
 
-fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError> {
+pub(crate) fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError> {
     w.write_all(&[id])?;
     Ok(())
 }
 
-fn write_string<W: Write>(w: &mut W, endian: Endian, s: &str) -> Result<(), NbtIoError> {
+/// Check that `s` can be written as an NBT string, in either dialect,
+/// without writing it.
+///
+/// The writers apply this same check to every string they write, a tag
+/// name or a [`Tag::String`] payload, so a caller holding strings it will
+/// write later can refuse them up front with the error the writer would
+/// raise.
+///
+/// # Errors
+///
+/// [`NbtIoError::InvalidString`] for a NUL or non-ASCII byte, and
+/// [`NbtIoError::LengthOverflow`] for a string longer than the `u16`
+/// length prefix can carry.
+pub fn check_string(s: &str) -> Result<(), NbtIoError> {
+    string_len(s).map(drop)
+}
+
+/// [`check_string`], returning the length prefix to write.
+fn string_len(s: &str) -> Result<u16, NbtIoError> {
     // Java NBT String uses Modified UTF-8; Bedrock uses plain UTF-8. Both
     // carry a u16 length prefix. The accepted byte set matches what
     // `NbtIoError::InvalidString` documents — ASCII and non-NUL only — a
@@ -151,18 +152,25 @@ fn write_string<W: Write>(w: &mut W, endian: Endian, s: &str) -> Result<(), NbtI
             return Err(NbtIoError::InvalidString { byte, index });
         }
     }
-    let bytes = s.as_bytes();
-    let len = u16::try_from(bytes.len()).map_err(|_| NbtIoError::LengthOverflow {
+    u16::try_from(s.len()).map_err(|_| NbtIoError::LengthOverflow {
         context: "string",
-        len: bytes.len(),
+        len: s.len(),
         limit: u16::MAX as usize,
-    })?;
+    })
+}
+
+pub(crate) fn write_string<W: Write>(w: &mut W, endian: Endian, s: &str) -> Result<(), NbtIoError> {
+    let len = string_len(s)?;
     endian.write_u16(w, len)?;
-    w.write_all(bytes)?;
+    w.write_all(s.as_bytes())?;
     Ok(())
 }
 
-fn write_payload<W: Write>(w: &mut W, endian: Endian, tag: &Tag) -> Result<(), NbtIoError> {
+pub(crate) fn write_payload<W: Write>(
+    w: &mut W,
+    endian: Endian,
+    tag: &Tag,
+) -> Result<(), NbtIoError> {
     match tag {
         Tag::Byte(v) => w.write_all(&v.to_ne_bytes())?,
         Tag::Short(v) => endian.write_i16(w, *v)?,
@@ -214,33 +222,55 @@ fn write_array_len<W: Write>(
 }
 
 fn write_list<W: Write>(w: &mut W, endian: Endian, list: &List) -> Result<(), NbtIoError> {
-    if list.items.is_empty() && list.element_type_id != 0 {
-        return Err(NbtIoError::EmptyListWithElementType {
-            declared: list.element_type_id,
-        });
-    }
-    w.write_all(&[list.element_type_id])?;
-    write_array_len(w, endian, "list", list.items.len())?;
+    write_list_header(w, endian, list.element_type_id, list.items.len())?;
     for (index, item) in list.items.iter().enumerate() {
-        let actual = item.type_id();
-        if actual != list.element_type_id {
-            return Err(NbtIoError::HeterogeneousList {
-                declared: list.element_type_id,
-                index,
-                actual,
-            });
-        }
+        check_item_type(list.element_type_id, index, item.type_id())?;
         write_payload(w, endian, item)?;
     }
     Ok(())
 }
 
-fn write_compound_body<W: Write>(
+/// Write a list's element type and length prefix, refusing an empty list
+/// that declares an element type other than `TAG_End`.
+///
+/// The tree writer and the streaming writer both frame a list here, so the
+/// empty-list rule and the length limit have one implementation.
+pub(crate) fn write_list_header<W: Write>(
     w: &mut W,
     endian: Endian,
-    c: &Compound,
+    element_type_id: u8,
+    len: usize,
 ) -> Result<(), NbtIoError> {
-    for (name, tag) in &c.entries {
+    if len == 0 && element_type_id != 0 {
+        return Err(NbtIoError::EmptyListWithElementType {
+            declared: element_type_id,
+        });
+    }
+    w.write_all(&[element_type_id])?;
+    write_array_len(w, endian, "list", len)
+}
+
+/// Refuse item `index` of a list declaring `declared` when the item's type
+/// id is `actual` and the two differ. Shared by the tree writer and the
+/// streaming writer, so list homogeneity has one implementation.
+pub(crate) fn check_item_type(declared: u8, index: usize, actual: u8) -> Result<(), NbtIoError> {
+    if actual == declared {
+        Ok(())
+    } else {
+        Err(NbtIoError::HeterogeneousList {
+            declared,
+            index,
+            actual,
+        })
+    }
+}
+
+pub(crate) fn write_compound_body<W: Write>(
+    w: &mut W,
+    endian: Endian,
+    compound: &Compound,
+) -> Result<(), NbtIoError> {
+    for (name, tag) in &compound.entries {
         write_tag_id(w, tag.type_id())?;
         write_string(w, endian, name)?;
         write_payload(w, endian, tag)?;

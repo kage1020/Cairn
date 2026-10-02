@@ -7,10 +7,10 @@
 //! and the size header on a struct is hoisted into a dedicated field.
 //!
 //! This is what the spec calls the "rich member with invariants" layer
-//! (`architecture.md` §3.2). The current lowering produces it at semantic
-//! level [`SemanticLevel::Grouped`]; registry-backed resolution
-//! (materials, themes, per-edition blockstate) belongs to the later
-//! [`SemanticLevel::Lifted`] tier.
+//! (`spec/architecture` "The Intent IR is rich and carries invariants"). The
+//! current lowering produces it at semantic level [`SemanticLevel::Grouped`];
+//! registry-backed resolution (materials, themes, per-edition blockstate)
+//! belongs to the later [`SemanticLevel::Lifted`] tier.
 //!
 //! Each IR node carries a `span: Span` pointing at the originating byte range
 //! in the source. The `check` module relies on those spans to emit gcc-style
@@ -20,6 +20,7 @@
 mod keyword_table;
 mod lower;
 mod member;
+mod patch;
 mod semantic_level;
 
 use std::num::NonZeroU32;
@@ -30,18 +31,22 @@ use serde::Serialize;
 use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
-pub use self::keyword_table::{UNIVERSAL_ARGUMENTS, known_keywords, role_of};
+pub use self::keyword_table::{
+    SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue, UNIVERSAL_ARGUMENTS, known_keywords,
+    role_of,
+};
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;
 pub use self::member::{
     BodyKind, IntentState, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan,
 };
+pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub use self::semantic_level::SemanticLevel;
 
 /// Intent IR for a whole `.crn` module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct IntentModule {
-    /// Maturity of this IR. The current [`lower`] always returns
+    /// Maturity of this IR. The current [`lower()`] always returns
     /// [`SemanticLevel::Grouped`].
     pub semantic_level: SemanticLevel,
     /// Headers carried through verbatim from the AST.
@@ -87,7 +92,7 @@ pub struct SelectorRule {
     pub span: Span,
 }
 
-/// Lifted form of `def NAME[ ARGS] [:]` (reusable parameterised component).
+/// Lifted form of `def NAME[ ARGS] [:]` (reusable component).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DefIr {
     /// Definition name.
@@ -95,7 +100,9 @@ pub struct DefIr {
     /// Hoisted `size=WxH` header argument, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    /// Remaining header `key=value` arguments (excluding `size`).
+    /// Remaining header `key=value` arguments: every one but a `size=`
+    /// whose value is a `WxH` literal. A `size=` of any other shape stays
+    /// here, and `check::type_mismatch` reports it.
     pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the def body.
     pub members: Vec<Member>,
@@ -120,7 +127,9 @@ pub struct StructIr {
     /// Hoisted `size=WxH` header argument, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    /// Remaining header `key=value` arguments (excluding `size`).
+    /// Remaining header `key=value` arguments: every one but a `size=`
+    /// whose value is a `WxH` literal. A `size=` of any other shape stays
+    /// here, and `check::type_mismatch` reports it.
     pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the struct body.
     pub members: Vec<Member>,
@@ -265,8 +274,8 @@ pub enum ScopeKind {
 /// with the footprint of its enclosing scope.
 ///
 /// Produced by [`circuit_regions`] out of a lowered [`IntentModule`] so
-/// the redstone placement pass (`spec/redstone` §14.5) has one entry
-/// point for looking up the reserved area of each scope instead of
+/// the redstone placement pass (`spec/redstone` "Place-and-route") has one
+/// entry point for looking up the reserved area of each scope instead of
 /// walking [`Member`]s and re-decoding `intent_state` at every caller.
 /// The block-array pass's [`crate::block_array`] recogniser owns the
 /// shape validation and per-shape diagnostics; this lift function

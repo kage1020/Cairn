@@ -6,30 +6,15 @@
 //! the parser-unreachable `Mux`), the topological invariant carried
 //! across from the Logic IR, and empty-scope elision.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::check::Severity;
-use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
     CellNode, GateKind, GateNode, InputPort, LogicIr, LogicalCell, NetRef, OutputPort, PortName,
-    ScopeKind, ScopedLogicIr, ScopedLogicIrEntry, SignalRef, compile_netlist, synthesize,
+    ScopeKind, ScopedLogicIr, ScopedLogicIrEntry, SignalRef, compile_netlist,
 };
 
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn synth_source(source: &str) -> cairn_lang_redstone::SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
+mod common;
+use common::{load_example, synth_source};
 
 fn find_cell_port(cell: &CellNode, port: PortName) -> NetRef {
     cell.drivers
@@ -120,7 +105,7 @@ struct sim size=5x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.and_ab   = sig.a and sig.b
   logic sig.or_ab    = sig.a or sig.b
@@ -190,7 +175,7 @@ struct sim size=5x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.both = sig.a and sig.b
   logic sig.na   = not sig.a
@@ -252,7 +237,7 @@ struct sim size=5x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.out = sig.mid and sig.a
   logic sig.mid = sig.a or sig.b
@@ -397,7 +382,7 @@ struct alpha size=5x5
 struct beta size=5x5
   floor mat_slot=wall
   pressure_plate id=q at=front.outside offset=0 y=0 -> sig.b1
-  pressure_plate id=r at=inside.front  offset=0 y=0 -> sig.b2
+  pressure_plate id=r at=inside.front  offset=1 y=0 -> sig.b2
   logic sig.both = sig.b1 and sig.b2
   door id=e side=front at=center mat_slot=wall opened_by=sig.both
 ";
@@ -431,9 +416,9 @@ struct beta size=5x5
 }
 
 /// A `struct` with no redstone content sits alongside a scope with
-/// bindings — the empty one is elided per `spec/redstone` §14.8's
-/// "proportional to redstone content" wording, so the netlist output
-/// still contains exactly one entry.
+/// bindings — the empty one is elided per the "proportional to redstone
+/// content" wording in `spec/redstone` "Connection to the IR and phases",
+/// so the netlist output still contains exactly one entry.
 #[test]
 fn empty_scope_is_elided_next_to_a_non_empty_one() {
     let source = r"

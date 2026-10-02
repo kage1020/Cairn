@@ -8,8 +8,8 @@
 //!
 //! ## Phase ordering
 //!
-//! `spec/compilation.md` §4.1 evaluates members in a fixed phase order
-//! independent of source order:
+//! `spec/compilation` "Phase evaluation" evaluates members in a fixed phase
+//! order independent of source order:
 //!
 //! ```text
 //! massing  (floor, walls)
@@ -18,8 +18,8 @@
 //!   → fixtures (pressure_plate)
 //! ```
 //!
-//! The current pass implements those four. §4.1 continues with the three
-//! redstone phases, which `cairn-lang-redstone` owns, and closes with
+//! The current pass implements those four. That section continues with the
+//! three redstone phases, which `cairn-lang-redstone` owns, and closes with
 //! `raw` — not a keyword the surface accepts yet, so a `raw` line is
 //! `E_UNKNOWN_KEYWORD` from the allowlist pass rather than a phase this
 //! one is missing.
@@ -43,10 +43,11 @@
 //! member being in the list does not mean the dims read it; it means the
 //! dims and the paint pass are looking at the same members.
 //!
-//! Defs are skipped at this layer: they only concretise via a `site`
-//! `place ... use=def_name` reference, and site lowering arrives with the
-//! multi-building pass. Sites themselves are also skipped for the same
-//! reason.
+//! A `def` is not voxelised on its own: it concretises only through a
+//! `site`'s `place ... use=def_name`, and this pass walks that body once
+//! per placement, against the theme that placement bound. So a `def`'s
+//! members are reached as many times as they are placed, which is why
+//! `lower_to_block_array` ends by dropping findings that repeat.
 
 use std::collections::HashSet;
 
@@ -57,14 +58,16 @@ use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 use crate::intent::{
-    DefIr, IntentModule, Member, MemberRole, SiteIr, Size, StructIr, ValueWithSpan,
+    DefIr, IntentModule, Member, MemberRole, PatchTargetError, SiteIr, Size, StructIr,
+    ValueWithSpan, actuator_patch_target,
 };
 use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
+use crate::suggest::{candidate_list, did_you_mean_note};
 
 use super::{Footprint, MAX_STRUCTURE_VOLUME, Placement, Walkway};
 
 use super::material::{
-    IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, check_id, resolve_block_state,
+    IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state, validated_id,
 };
 use super::openings::{WallSide, wall_length, wall_local_to_grid};
 use super::roof::{
@@ -75,8 +78,9 @@ use super::roof::{
     shed_voxels, stair_state,
 };
 use super::walkway::{
-    BlockedIndex, ROUTE_AREA_CAP, RoutePathError, WalkwayLayout, build_walkway_array, l_path,
-    l_path_area, port_world_position, route_path,
+    BlockedIndex, ROUTE_AREA_CAP, RoutePathError, WalkwayLayout, WindowArgs, build_walkway_array,
+    door_anchor_offset, door_at_deferral, l_path, l_path_area, port_world_position,
+    read_window_args, route_path,
 };
 use super::wall_column::WallColumn;
 use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
@@ -95,14 +99,24 @@ const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
 /// Pressure plate id used when the pack cannot supply one — no registry
 /// at all, or a registry with no [`PRESSURE_PLATE_TOKEN`] row.
 ///
-/// Neither case carries an edition, and spec versioning-editions §10.3
-/// makes Java the base, so the Java spelling is the honest default. It is
-/// still checked against the pinned target before it reaches a palette.
+/// Neither case carries an edition, and `spec/versioning-editions` "Backend =
+/// data tables" makes Java the base, so the Java spelling is the honest
+/// default. It is still checked against the pinned target before it reaches a
+/// palette.
 /// Species-specific plates (spruce, dark oak, ...) still come from a
 /// `mat_slot=` binding, which is honoured verbatim — mirroring
 /// [`FLAT_BASE_ID`]'s contract, not [`STAIR_BASE_ID`]'s. A plate attaches
 /// no blockstates, so it has nothing to require of the block it names.
 const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
+
+/// Rows a doorway opens where the course it is cut into has room for
+/// them: the head height of a Minecraft door.
+///
+/// A ceiling rather than a size. The rows are counted from the row the
+/// door opens at, that row included, so a course whose top *is* that row
+/// yields an opening one row tall — the row above a short course is the
+/// roof or the gap over the wall, not masonry to cut. See [`carve_door`].
+const DOOR_HEIGHT: u32 = 2;
 
 /// Block ids lowering can put in a palette that no pack can redirect.
 ///
@@ -119,8 +133,8 @@ const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
 /// list. This one stays because it covers the three ids no example is
 /// obliged to reach.
 ///
-/// [`PRESSURE_PLATE_BASE_ID`] is deliberately absent: it *is* redirectable
-/// (through [`PRESSURE_PLATE_TOKEN`]), so its per-edition correctness is a
+/// `PRESSURE_PLATE_BASE_ID` is deliberately absent: it *is* redirectable
+/// (through `PRESSURE_PLATE_TOKEN`), so its per-edition correctness is a
 /// question about the packs, and the pack-side tests ask it there.
 pub const BUILTIN_BLOCK_IDS: &[&str] = &[BlockState::AIR_ID, STAIR_BASE_ID, FLAT_BASE_ID];
 
@@ -167,7 +181,7 @@ pub fn lower_to_block_array(
         }
     }
 
-    let mut placements: IndexMap<String, Placement> = IndexMap::new();
+    let mut placed: IndexMap<String, PlacedBody> = IndexMap::new();
     let mut walkways: IndexMap<WalkwayScopeKey, Walkway> = IndexMap::new();
     for site in &intent.sites {
         lower_site(
@@ -176,7 +190,7 @@ pub fn lower_to_block_array(
             resolution,
             registry,
             &mut structures,
-            &mut placements,
+            &mut placed,
             &mut diagnostics,
         );
     }
@@ -185,13 +199,15 @@ pub fn lower_to_block_array(
     // the strip might cross. Connects survive site boundaries — the
     // resolver tags each `ValidatedConnect` with the `site` name so we
     // can pair it back to the right `placements` lookup here.
-    let blocked = collect_floor_cells(&structures, &placements);
+    let blocked = collect_floor_cells(&structures, &placed);
     lower_connects(
-        resolution,
-        &intent.defs,
-        registry,
-        &placements,
-        &blocked,
+        &ConnectInputs {
+            resolution,
+            defs: &intent.defs,
+            registry,
+            placed: &placed,
+            blocked: &blocked,
+        },
         &mut structures,
         &mut walkways,
         &mut diagnostics,
@@ -204,13 +220,65 @@ pub fn lower_to_block_array(
     // around. The sort is stable, so two findings on one span keep the
     // order the passes raised them in.
     diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
+    // A lowering diagnostic's identity is the diagnostic. Two that agree on
+    // code, span, message, notes and data are one finding reported twice,
+    // and the second copy is an artifact of how this pass walks rather than
+    // anything the author can act on: a `def` body is voxelised once per
+    // `place` that instantiates it, so a finding about the def — or about
+    // the theme `slot` line the def reads — comes back once per placement,
+    // byte-for-byte the same. Three placements used to mean three copies of
+    // `E_INCOMPATIBLE_MATERIAL`, each anchored on the same theme line and
+    // each ending in a note saying every member reading that slot has it too.
+    //
+    // The rule holds only while every finding that is not a repeat says so
+    // in its own text, which is a live obligation on the messages here and
+    // not a property of the walk: `geometry_material_id`'s deferral names
+    // its theme for exactly this reason. `tests/def_member_lowering_diagnostics.rs`
+    // holds the cases that must stay apart, and `resolve::resolver`'s module
+    // doc says why that stage keeps ledgers instead.
+    //
+    // `retain` rather than a rebuild, so what is left keeps its order.
+    let mut said: HashSet<Diagnostic> = HashSet::new();
+    diagnostics.retain(|d| said.insert(d.clone()));
 
     BlockArrayIr {
         structures,
-        placements,
+        // The wall columns stop here: they exist so the `connect` pass
+        // can ask a placement's masonry the question the openings phase
+        // asked it, and that pass has run.
+        placements: placed
+            .into_iter()
+            .map(|(key, body)| (key, body.placement))
+            .collect(),
         walkways,
         diagnostics,
     }
+}
+
+/// One `place` row that lowered, and the masonry its body lowered with.
+///
+/// The column travels beside the placement rather than in a map of its
+/// own so the two cannot disagree about which bodies exist: a key in one
+/// and not the other would be a `connect` port judged against a body
+/// that is in no artifact, and two `place` rows sharing an `id=` is the
+/// shape that produces it — the resolver refuses the duplicate, the
+/// second body still lowers, and only the first is kept.
+///
+/// Not a field on [`Placement`]: that record is hashed into
+/// `resolved_ir_hash`, and the rows a wall occupies must not move it.
+/// The lockfile's own `LockPlacement` is a named projection that would
+/// not carry them anyway, and [`WallColumn`] derives no `Serialize`, so
+/// the question would not compile before it could be decided.
+struct PlacedBody {
+    placement: Placement,
+    /// The rows this body's `walls` painted — the value the openings
+    /// phase cut against. A `connect` row anchoring a port here reads
+    /// it, so the port and the cut ask the wall one question.
+    walls: WallColumn,
+    /// The doors and windows the openings phase cut, by member span. A
+    /// port on any other opening is refused: whatever stopped the cut, the
+    /// strip would end against the wall.
+    cut: HashSet<Span>,
 }
 
 /// World-space `(x, y, z)` of every non-air voxel on the y=0 plane of
@@ -220,10 +288,10 @@ pub fn lower_to_block_array(
 /// air and the row earns a `W_WALKWAY_BLOCKED` warning.
 fn collect_floor_cells(
     structures: &IndexMap<String, BlockArray>,
-    placements: &IndexMap<String, Placement>,
+    placed: &IndexMap<String, PlacedBody>,
 ) -> HashSet<(i32, i32, i32)> {
     let mut out: HashSet<(i32, i32, i32)> = HashSet::new();
-    for (key, placement) in placements {
+    for (key, PlacedBody { placement, .. }) in placed {
         let Some(ba) = structures.get(key) else {
             continue;
         };
@@ -254,22 +322,54 @@ fn collect_floor_cells(
     out
 }
 
+/// What laying the walkways reads: the whole finished site at once —
+/// every placement, the masonry each of them lowered with, and the floor
+/// plan they occupy.
+struct ConnectInputs<'a> {
+    resolution: &'a Resolution,
+    defs: &'a [DefIr],
+    registry: Option<&'a dyn TargetRegistry>,
+    /// Every `place` row that lowered, under its `site::SITE::PLACE_ID`
+    /// key.
+    placed: &'a IndexMap<String, PlacedBody>,
+    /// World cells on the walk plane already occupied by a placement
+    /// floor.
+    blocked: &'a HashSet<(i32, i32, i32)>,
+}
+
 /// Lower every resolved `connect` row into a walkway `BlockArray` and
-/// a matching [`Walkway`] metadata record. Skips rows whose ports do
-/// not resolve to a [`MemberRole::Door`] (other roles are not yet
-/// modelled as ports) and emits a `W_DUPLICATE_WALKWAY` when the same
-/// `(from, to)` pair has already been laid in the same site.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+/// a matching [`Walkway`] metadata record.
+///
+/// Skips a row whose port [`port_world_position`] refuses — a role other
+/// than [`MemberRole::Door`] or [`MemberRole::Window`], an argument the
+/// opening cannot use, masonry the opening does not reach, an opening the
+/// openings phase did not cut, a coordinate past `i32` — with a
+/// `W_DEFERRED_MEMBER` carrying one note per refused endpoint, each naming
+/// that endpoint's [`super::walkway::PortRejection`]. Emits a `W_DUPLICATE_WALKWAY` when
+/// the same `(from, to)` pair has already been laid in the same site.
+///
+/// Every finding raised here anchors on `ValidatedConnect::span`, which
+/// the resolver sets to one `connect` member's span, and this loop runs
+/// once per row — so two rows never share a span, and the dedup at the end
+/// of [`lower_to_block_array`] cannot reach them. That holds because
+/// `connect` is one row per pair. A block form, where several pairs sat
+/// under one header, would give them a shared span and two identical
+/// `W_WALKWAY_BLOCKED` warnings would collapse into one, `skipped` count
+/// and all.
+#[allow(clippy::too_many_lines)] // one linear resolve-route-and-lay chain per row
 fn lower_connects(
-    resolution: &Resolution,
-    defs: &[DefIr],
-    registry: Option<&dyn TargetRegistry>,
-    placements: &IndexMap<String, Placement>,
-    blocked: &HashSet<(i32, i32, i32)>,
+    inputs: &ConnectInputs<'_>,
     structures: &mut IndexMap<String, BlockArray>,
     walkways: &mut IndexMap<WalkwayScopeKey, Walkway>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    let &ConnectInputs {
+        resolution,
+        defs,
+        registry,
+        placed,
+        blocked,
+    } = inputs;
     let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
     // Index the blocked set once for every row: the router needs the
     // per-plane bounding rectangle, and deriving it per row would
@@ -281,9 +381,9 @@ fn lower_connects(
     for connect in &resolution.connects {
         let from_key = place_scope_key(connect.site.as_str(), connect.from.place.as_str());
         let to_key = place_scope_key(connect.site.as_str(), connect.to.place.as_str());
-        let from_placement = placements.get(&from_key);
-        let to_placement = placements.get(&to_key);
-        let (Some(from_placement), Some(to_placement)) = (from_placement, to_placement) else {
+        let from_body = placed.get(&from_key);
+        let to_body = placed.get(&to_key);
+        let (Some(from_body), Some(to_body)) = (from_body, to_body) else {
             // At least one placement was rejected upstream (sizeless def,
             // unresolved theme, broken origin chain). The connect itself
             // resolved, so without a follow-up warning the walkway would
@@ -292,13 +392,15 @@ fn lower_connects(
             // strip was not laid.
             diagnostics.push(diag_walkway_endpoint_skipped(
                 connect,
-                from_placement.is_none(),
-                to_placement.is_none(),
+                from_body.is_none(),
+                to_body.is_none(),
             ));
             continue;
         };
-        let from_def = defs.iter().find(|d| d.name == from_placement.source_def);
-        let to_def = defs.iter().find(|d| d.name == to_placement.source_def);
+        let from_def = defs
+            .iter()
+            .find(|d| d.name == from_body.placement.source_def);
+        let to_def = defs.iter().find(|d| d.name == to_body.placement.source_def);
         let (Some(from_def), Some(to_def)) = (from_def, to_def) else {
             // Invariant: `lower_site` only inserts a `Placement` after
             // resolving its `use=DEF` against `defs`, so a placement
@@ -314,78 +416,79 @@ fn lower_connects(
         };
 
         let from_pos = port_world_position(
-            from_placement.origin,
-            from_placement.dims,
+            from_body.placement.origin,
+            from_body.placement.dims,
             from_def,
             &connect.from.port,
+            &from_body.walls,
+            &from_body.cut,
         );
         let to_pos = port_world_position(
-            to_placement.origin,
-            to_placement.dims,
+            to_body.placement.origin,
+            to_body.placement.dims,
             to_def,
             &connect.to.port,
+            &to_body.walls,
+            &to_body.cut,
         );
-        let (Some(from_pos), Some(to_pos)) = (from_pos, to_pos) else {
-            // The resolver already validated the port id, so this miss
-            // means `port_world_position` rejected one of the member's
-            // own properties: a missing / non-cardinal `side=`, a door
-            // `at=` value outside `center | left | right`, a window
-            // whose rectangle leaves the wall on either axis, or a
-            // stair / roof role for which port support is reserved.
-            // Name the offending side so the user is not pointed at
-            // the wrong half of the row.
-            let from_label = connect.from.to_string();
-            let to_label = connect.to.to_string();
-            let unplaceable = match (from_pos.is_none(), to_pos.is_none()) {
-                (true, true) => format!("`{from_label}` and `{to_label}`"),
-                (true, false) => format!("`{from_label}`"),
-                (false, true) => format!("`{to_label}`"),
-                (false, false) => unreachable!("else arm requires at least one None"),
-            };
-            diagnostics.push(Diagnostic {
-                code: DiagnosticCode::DeferredMember,
-                span: connect.span.clone(),
-                primary: format!(
-                    "walkway `{from_label} ↔ {to_label}` was skipped because port {unplaceable} could not be placed",
-                ),
-                notes: vec![
-                    DiagnosticNote {
-                        span: None,
-                        message:
-                            "a `door` port requires `side=front|back|left|right` and `at=center|left|right`"
-                                .to_owned(),
-                    },
-                    DiagnosticNote {
-                        span: None,
-                        message:
-                            "a `window` port requires `side=front|back|left|right`, plus `offset=` / `y=` / `size=WxH` that fit inside the wall (`offset + size.w ≤ wall_length`, and every row `y ..= y + size.h - 1` inside `1 ..= walls.height` — the floor slab owns row 0)"
-                                .to_owned(),
-                    },
-                    DiagnosticNote {
-                        span: None,
-                        message:
-                            "stair / roof / other member roles cannot anchor a port yet — declare the port on a door or window instead"
-                                .to_owned(),
-                    },
+        // One note per refused endpoint, naming the reason
+        // `port_world_position` gave for it rather than every contract a
+        // port has. Where the reason is on a member, the note points at
+        // that member's line — which, for a side, argument or masonry
+        // fault, carries the member's own deferral too, since the opening
+        // was not cut either. Each refusing arm is spelled out and builds
+        // its notes from the `Err`s it matched, so a defer with a primary
+        // and no note under it is not a shape this can produce.
+        let refused = match (from_pos, to_pos) {
+            (Ok(from_pos), Ok(to_pos)) => Ok((from_pos, to_pos)),
+            (Err(from_err), Err(to_err)) => Err((
+                vec![
+                    from_err.note(&connect.from.to_string()),
+                    to_err.note(&connect.to.to_string()),
                 ],
-                data: None,
-            });
-            continue;
+                "ports",
+                (true, true),
+            )),
+            (Err(from_err), Ok(_)) => Err((
+                vec![from_err.note(&connect.from.to_string())],
+                "port",
+                (true, false),
+            )),
+            (Ok(_), Err(to_err)) => Err((
+                vec![to_err.note(&connect.to.to_string())],
+                "port",
+                (false, true),
+            )),
+        };
+        let (from_pos, to_pos) = match refused {
+            Ok(positions) => positions,
+            Err((notes, noun, (from_refused, to_refused))) => {
+                let unplaceable = blamed_endpoints(connect, from_refused, to_refused);
+                diagnostics.push(Diagnostic {
+                    code: DiagnosticCode::DeferredMember,
+                    span: connect.span.clone(),
+                    primary: format!(
+                        "walkway `{from} ↔ {to}` was skipped because {noun} {unplaceable} could not be placed",
+                        from = connect.from,
+                        to = connect.to,
+                    ),
+                    notes,
+                    data: None,
+                });
+                continue;
+            }
         };
 
         // Duplicate guard: pin on (site, from_place, from_port,
-        // to_place, to_port). Normalise the pair (sort the two ends)
-        // so `a.entry → b.entry` and `b.entry → a.entry` count as the
+        // to_place, to_port). `walkway_pair` sorts the two ends so
+        // `a.entry → b.entry` and `b.entry → a.entry` count as the
         // same walkway — laying the strip both ways would be a silent
-        // double-write.
-        let mut endpoints = [
-            (connect.from.place.clone(), connect.from.port.clone()),
-            (connect.to.place.clone(), connect.to.port.clone()),
-        ];
-        endpoints.sort_unstable();
-        let [(a_place, a_port), (b_place, b_port)] = endpoints;
-        let dedup_key = (connect.site.clone(), a_place, a_port, b_place, b_port);
-        if !seen_pairs.insert(dedup_key) {
+        // double-write. The pair is recorded only once its strip is
+        // laid, at the bottom of this loop: an earlier row with the same
+        // pair that the checks below refused laid nothing, so this row
+        // is not a duplicate of it.
+        let dedup_key = connect.walkway_pair();
+        if seen_pairs.contains(&dedup_key) {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DuplicateWalkway,
                 span: connect.span.clone(),
@@ -406,16 +509,24 @@ fn lower_connects(
         }
 
         let material = match resolve_block_state(&connect.path, registry) {
-            Ok(state) => state,
+            Ok(state) => {
+                diagnostics.extend(diag_state_literal_unchecked(&connect.path, &state));
+                state
+            }
             Err(MaterialDeferred::Abstract(token)) => {
-                diagnostics.push(diag_walkway_abstract_token(connect, &token));
+                diagnostics.push(diag_abstract_token(
+                    connect.path.span.clone(),
+                    &token,
+                    TokenSite::WalkwayPath,
+                ));
                 continue;
             }
             Err(MaterialDeferred::UnknownAbstract { token, suggestion }) => {
-                diagnostics.push(diag_walkway_unknown_token(
-                    connect,
+                diagnostics.push(diag_unknown_abstract_token(
+                    connect.path.span.clone(),
                     &token,
                     suggestion.as_deref(),
+                    TokenSite::WalkwayPath,
                 ));
                 continue;
             }
@@ -456,16 +567,11 @@ fn lower_connects(
         // overflow) falls back to the L with skipped cells so the row
         // still lays and earns its `W_WALKWAY_BLOCKED` below, with a
         // note matched to the error.
-        // Ask how long the L would be before building it. The cap has
-        // always described this case — "two ports megametres apart" — but
-        // only `route_path` consulted it, and `route_path` runs second and
-        // only when something is in the way. An unobstructed pair walked
-        // past the cap and materialised the whole strip: `gap=100000000`
-        // spent 53 seconds on a 1.4 GB `Vec` before any check saw it.
-        // Measure before building. `route_path` already refuses on this
-        // quantity, but it runs second and only when the straight L is
-        // obstructed — an unobstructed pair reached `build_walkway_array`
-        // and sized a voxel buffer from the bounding box directly.
+        //
+        // Measure the L before building it. `route_path` refuses on the
+        // same quantity, but it runs second and only when the straight L
+        // is obstructed, so an unobstructed pair would otherwise size a
+        // voxel buffer from the bounding box directly.
         let straight_area = l_path_area(from_pos, to_pos);
         if straight_area > ROUTE_AREA_CAP {
             let failure = RoutePathError::AreaCapExceeded {
@@ -559,7 +665,39 @@ fn lower_connects(
             x: dims.x,
             z: dims.z,
         };
-        structures.insert(scope_key.as_str().to_owned(), array);
+        // `from_parts` refuses every id that could alias another row's key
+        // (`W_INVALID_WALKWAY_IDENT` above), so a replaced entry here means
+        // that rule has a hole: the earlier row's walkway would vanish from
+        // the build. The `insert` is bound first because a `debug_assert!`
+        // around it would drop the insert in release builds, and a release
+        // build still reports the loss, as `W_WALKWAY_BLOCKED` does above.
+        let replaced = structures.insert(scope_key.as_str().to_owned(), array);
+        debug_assert!(
+            replaced.is_none(),
+            "walkway `{scope_key}` replaced an existing structure; two `connect` rows \
+             encoded to one scope key",
+        );
+        if replaced.is_some() {
+            diagnostics.push(Diagnostic {
+                code: DiagnosticCode::InvalidWalkwayIdent,
+                span: connect.span.clone(),
+                primary: format!(
+                    "walkway `{from} ↔ {to}` encodes to the scope key `{scope_key}` of an \
+                     earlier `connect` row, whose walkway it replaced",
+                    from = connect.from,
+                    to = connect.to,
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message: "two different endpoint pairs must never share a scope key, so \
+                              this is a compiler bug; rename a place or port on one of the two \
+                              rows to keep both walkways"
+                        .to_owned(),
+                }],
+                data: None,
+            });
+        }
+        seen_pairs.insert(dedup_key);
         walkways.insert(
             scope_key,
             Walkway {
@@ -589,21 +727,15 @@ fn walkway_blocked_note(
             from_blocked,
             to_blocked,
         }) => {
-            let buried = match (from_blocked, to_blocked) {
-                (true, true) => format!(
-                    "ports `{from}` and `{to}` are",
-                    from = connect.from,
-                    to = connect.to,
-                ),
-                (true, false) => format!("port `{from}` is", from = connect.from),
-                (false, true) => format!("port `{to}` is", to = connect.to),
-                (false, false) => {
-                    unreachable!("EndpointBlocked carries at least one blocked side")
-                }
+            let ports = blamed_endpoints(connect, from_blocked, to_blocked);
+            let (noun, verb) = if from_blocked && to_blocked {
+                ("ports", "are")
+            } else {
+                ("port", "is")
             };
             format!(
-                "{buried} buried inside another placement's floor; move that door/window to \
-                 an unobstructed wall or pull the placements apart",
+                "{noun} {ports} {verb} buried inside another placement's floor; move that \
+                 door/window to an unobstructed wall or pull the placements apart",
             )
         }
         Some(RoutePathError::AreaCapExceeded { area, cap }) => format!(
@@ -632,24 +764,59 @@ fn diag_walkway_invalid_ident(
     connect: &crate::resolve::ValidatedConnect,
     err: &crate::ids::KeyConstructError,
 ) -> Diagnostic {
-    let crate::ids::KeyConstructError::ConsecutiveUnderscore { role, segment } = err;
+    use crate::ids::{KeyConstructError, KeySegmentRole};
+    // Sentence frame, one clause per variant:
+    //   primary: walkway `A ↔ B` was dropped because the ROLE id `SEG` PROBLEM
+    //   note:    CONSTRAINT; rename the ROLE FIX
+    let (role, segment, problem, constraint, fix): (KeySegmentRole, _, _, _, _) = match err {
+        KeyConstructError::ConsecutiveUnderscore { role, segment } => (
+            *role,
+            segment,
+            "contains `__`, the separator between the walkway scope key's `from` and `to` \
+             halves",
+            "a walkway's site, place and port ids may not contain `__`, so no id can be \
+             mistaken for the separator",
+            "so it has no `__`, e.g. by replacing `__` with `_`",
+        ),
+        KeyConstructError::UnderscoreAtEdge { role, segment } => (
+            (*role).into(),
+            segment,
+            "starts or ends with `_`",
+            "a walkway's place and port ids may not start or end with `_` in either \
+             position, so the rule does not depend on which way the row is written",
+            "so it neither starts nor ends with `_`",
+        ),
+    };
     Diagnostic {
         code: DiagnosticCode::InvalidWalkwayIdent,
         span: connect.span.clone(),
         primary: format!(
-            "walkway `{from} ↔ {to}` was dropped because the {role} id `{segment}` \
-             contains `__`, which collides with the walkway scope key's \
-             `from`/`to` separator",
+            "walkway `{from} ↔ {to}` was dropped because the {role} id `{segment}` {problem}",
             from = connect.from,
             to = connect.to,
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "rename the offending id (e.g. replace `__` with `_`) so the \
-                      lowered walkway scope key is unambiguous"
-                .to_owned(),
+            message: format!("{constraint}; rename the {role} {fix}"),
         }],
         data: None,
+    }
+}
+
+/// The endpoint(s) of `connect` a diagnostic blames, each in backticks:
+/// `` `a` and `b` ``, `` `a` `` or `` `b` ``. At least one side must be at
+/// fault.
+fn blamed_endpoints(
+    connect: &crate::resolve::ValidatedConnect,
+    from_at_fault: bool,
+    to_at_fault: bool,
+) -> String {
+    let (from, to) = (&connect.from, &connect.to);
+    match (from_at_fault, to_at_fault) {
+        (true, true) => format!("`{from}` and `{to}`"),
+        (true, false) => format!("`{from}`"),
+        (false, true) => format!("`{to}`"),
+        (false, false) => unreachable!("at least one endpoint must be at fault"),
     }
 }
 
@@ -658,25 +825,19 @@ fn diag_walkway_endpoint_skipped(
     from_missing: bool,
     to_missing: bool,
 ) -> Diagnostic {
-    let from_label = connect.from.to_string();
-    let to_label = connect.to.to_string();
-    let missing = match (from_missing, to_missing) {
-        (true, true) => format!("`{from_label}` and `{to_label}` placements"),
-        (true, false) => format!("`{from_label}` placement"),
-        (false, true) => format!("`{to_label}` placement"),
-        // Caller only invokes this helper when at least one side is
-        // missing; the unreachable arm fails loud in tests if a future
-        // refactor breaks that contract instead of emitting an empty
-        // message at runtime.
-        (false, false) => {
-            unreachable!("diag_walkway_endpoint_skipped requires at least one side missing")
-        }
+    let missing = blamed_endpoints(connect, from_missing, to_missing);
+    let placements = if from_missing && to_missing {
+        "placements"
+    } else {
+        "placement"
     };
     Diagnostic {
         code: DiagnosticCode::DeferredMember,
         span: connect.span.clone(),
         primary: format!(
-            "walkway `{from_label} ↔ {to_label}` was skipped because the {missing} did not lower",
+            "walkway `{from} ↔ {to}` was skipped because the {missing} {placements} did not lower",
+            from = connect.from,
+            to = connect.to,
         ),
         notes: vec![DiagnosticNote {
             span: None,
@@ -689,52 +850,138 @@ fn diag_walkway_endpoint_skipped(
     }
 }
 
-fn diag_walkway_abstract_token(
-    connect: &crate::resolve::ValidatedConnect,
-    token: &str,
-) -> Diagnostic {
+/// Where an `@token` was read from, for the prose of the abstract-token
+/// diagnostics.
+#[derive(Clone, Copy)]
+enum TokenSite {
+    /// A `connect` row's `path=`.
+    WalkwayPath,
+    /// A member's `mat_slot=` binding.
+    MemberSlot,
+}
+
+impl TokenSite {
+    fn token_noun(self) -> &'static str {
+        match self {
+            Self::WalkwayPath => "abstract path token",
+            Self::MemberSlot => "abstract token",
+        }
+    }
+
+    fn fallback_subject(self) -> &'static str {
+        match self {
+            Self::WalkwayPath => "the walkway",
+            Self::MemberSlot => "the cell",
+        }
+    }
+
+    fn canonical_example(self) -> &'static str {
+        match self {
+            Self::WalkwayPath => "path=@gravel",
+            Self::MemberSlot => "@oak_planks",
+        }
+    }
+
+    fn catalog_note(self) -> &'static str {
+        match self {
+            Self::WalkwayPath => {
+                "abstract path tokens must be declared in the pack's `materials` catalog"
+            }
+            Self::MemberSlot => {
+                "abstract material tokens must be declared in the pack's `materials` catalog \
+                 (see `spec/materials-themes` \"Canonical vocabulary\")"
+            }
+        }
+    }
+}
+
+fn diag_abstract_token(span: Span, token: &str, site: TokenSite) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::AbstractTokenDeferred,
-        span: connect.path.span.clone(),
+        span,
         primary: format!(
-            "abstract path token `@{token}` cannot be lowered without the registry pack; the walkway falls back to air",
+            "{} `@{token}` cannot be lowered without the registry pack; {} falls back to air",
+            site.token_noun(),
+            site.fallback_subject(),
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message:
-                "use a canonical block token (e.g. `path=@gravel`) until the registry pack ships"
-                    .to_owned(),
+            message: format!(
+                "use a canonical block token (e.g. `{}`) until the registry pack ships",
+                site.canonical_example(),
+            ),
         }],
         data: None,
     }
 }
 
-fn diag_walkway_unknown_token(
-    connect: &crate::resolve::ValidatedConnect,
+fn diag_unknown_abstract_token(
+    span: Span,
     token: &str,
     suggestion: Option<&str>,
+    site: TokenSite,
 ) -> Diagnostic {
     let mut notes = Vec::with_capacity(2);
-    if let Some(s) = suggestion {
-        notes.push(DiagnosticNote {
-            span: None,
-            message: format!("did you mean `@{s}`?"),
-        });
-    }
+    notes.extend(suggestion.map(|s| did_you_mean_note(&format!("@{s}"))));
     notes.push(DiagnosticNote {
         span: None,
-        message: "abstract path tokens must be declared in the pack's `materials` catalog"
-            .to_owned(),
+        message: site.catalog_note().to_owned(),
     });
     Diagnostic {
         code: DiagnosticCode::UnknownAbstractToken,
-        span: connect.path.span.clone(),
+        span,
         primary: format!(
-            "abstract path token `@{token}` is not declared by the registry pack's materials catalog",
+            "{} `@{token}` is not declared by the registry pack's materials catalog",
+            site.token_noun(),
         ),
         notes,
         data: None,
     }
+}
+
+/// Say that a state literal was taken as written, when `value` carries one.
+///
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+/// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, and
+/// nothing raises it yet: no table this compiler holds says which
+/// properties a block has or which values each takes. Until one does, the
+/// literal reaches the palette and the structure file unchanged, right or
+/// wrong, and this warning is what keeps that from being silent. It
+/// anchors on the value the way `E_UNKNOWN_ID` does, so the mistake right
+/// of the `[` is pointed at from the same place as one left of it.
+///
+/// Only a canonical token folds a `[` into its text, so a state that came
+/// from anywhere else — a catalog lookup, a member default — is not one.
+fn diag_state_literal_unchecked(value: &ValueWithSpan, state: &BlockState) -> Option<Diagnostic> {
+    let ValueKind::Token(text) = &value.value.kind else {
+        return None;
+    };
+    if state.properties.is_empty() || !text.contains('[') {
+        return None;
+    }
+    let pairs = state
+        .properties
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(Diagnostic {
+        code: DiagnosticCode::StateLiteralUnchecked,
+        span: value.span.clone(),
+        primary: format!(
+            "`{id}` is written with `{pairs}` unchecked: nothing checks a state literal's \
+             properties or values against the target yet",
+            id = state.id,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "a property the block does not have, or a value outside its domain, \
+                      reaches the structure file unchanged; check each one against the \
+                      block's states in the target edition and version"
+                .to_owned(),
+        }],
+        data: None,
+    })
 }
 
 /// Report a block id the compile's target does not declare.
@@ -750,6 +997,7 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
         registry,
         origin,
         suggestion,
+        aliases,
     } = unknown;
     let mut notes = Vec::with_capacity(2);
     match origin {
@@ -767,12 +1015,23 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             ),
         }),
     }
+    // One note, and the alias table wins it when it has anything to say.
+    // The two answers are not additive: a reader handed "this target calls
+    // it X" and "the nearest spelling is Y" has to work out which of the
+    // two the compiler believes, and the answer is always the first. The
+    // payload still carries both, for a consumer that can show them apart.
     notes.push(DiagnosticNote {
         span: None,
-        message: match suggestion {
-            Some(candidate) => format!("`{registry}` spells the nearest block `{candidate}`"),
-            None => format!(
+        message: match (aliases.as_slice(), suggestion) {
+            ([], None) => format!(
                 "no block in `{registry}` is near enough to suggest; compile against a target that declares `{id}`, or pick a block this one has",
+            ),
+            ([], Some(candidate)) => {
+                format!("`{registry}` spells the nearest block `{candidate}`")
+            }
+            (spellings, _) => format!(
+                "`{registry}` spells this block {}, per the registry pack's alias table",
+                candidate_list(spellings),
             ),
         },
     });
@@ -787,6 +1046,7 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             origin: origin.kind().to_owned(),
             token: origin.token().map(str::to_owned),
             suggestion: suggestion.clone(),
+            aliases: aliases.clone(),
         }),
     }
 }
@@ -801,7 +1061,9 @@ fn lower_struct<'a>(
         diagnostics.push(diag_struct_no_size(s));
         return None;
     };
-    lower_body_to_block_array(
+    // A struct is never placed, so nothing ever anchors a port to it and
+    // its wall column has no second reader.
+    let lowered = lower_body_to_block_array(
         BodyDescriptor {
             kind: VoxelSource::Struct,
             scope_label: &s.name,
@@ -813,7 +1075,8 @@ fn lower_struct<'a>(
         scope,
         registry,
         diagnostics,
-    )
+    )?;
+    Some(lowered.array)
 }
 
 /// Lower every `place` in `site` into its own per-place [`BlockArray`] and a
@@ -841,7 +1104,7 @@ fn lower_site<'a>(
     resolution: &'a Resolution,
     registry: Option<&'a dyn TargetRegistry>,
     structures: &mut IndexMap<String, BlockArray>,
-    placements: &mut IndexMap<String, Placement>,
+    placed: &mut IndexMap<String, PlacedBody>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for member in &site.placements {
@@ -870,8 +1133,8 @@ fn lower_site<'a>(
         let Ok(placement_id) = PlaceId::new(place_id) else {
             continue;
         };
-        // A site name is an identifier the lexer produced, so it cannot
-        // carry `.`, `:`, or whitespace. Folding this into the arm above
+        // A site name is an identifier the lexer produced, and the lexer's
+        // `Ident` rule is a strict subset of what `SiteName` accepts. Folding this into the arm above
         // would mean a future relaxation of the site-name grammar silently
         // dropped every place in the site; the `debug_assert!` convention
         // this file already uses for unreachable invariants fails loud in
@@ -924,22 +1187,39 @@ fn lower_site<'a>(
             continue;
         };
 
-        // The origin solver reads `placements` for prior-place lookups, so
-        // the lookup has to happen before *this* placement is inserted.
-        // Lookup misses only happen when the prior place was skipped at
-        // lowering time (cascade from `W_DEF_NO_SIZE` /
-        // `E_UNRESOLVED_PLACE_REF`); falling back to `(0, 0, 0)` would
-        // silently stack the placement on top of `home1`, so we surface a
-        // deferred warning and skip the row instead.
-        let Some(origin) = resolve_place_origin(member, placements, &site.name) else {
+        // The anchor reads `placed` for prior-place lookups, so the lookup
+        // has to happen before *this* placement is inserted. A lookup
+        // misses when the prior place never reached `placed`, which is any
+        // `continue` arm of this loop: those above, this deferral, or the
+        // volume refusal and the origin-range refusal below. Falling back to
+        // `(0, 0, 0)` would silently stack the placement on top of `home1`,
+        // so the row is deferred and skipped instead, before its body is
+        // lowered; only the origin waits for the lowered dims.
+        //
+        // An unreadable `gap=` is reported on every path out of this row,
+        // placed or not, with a note that says which: see
+        // [`read_or_ignore`] for why the finding is never held back.
+        let (anchor, gap_unread) = resolve_place_anchor(member, placed, &site.name);
+        let Some(anchor) = anchor else {
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
             ));
+            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
 
-        let Some(ba) = lower_body_to_block_array(
+        // The body's findings go straight out, whether or not the row is
+        // then placed. Lowering a body takes nothing from the row's
+        // origin — the voxels are local to the body, and the origin is
+        // worked out from them afterwards — so every finding it raises is
+        // one the row would have raised had it landed: a defect in the
+        // `def` or the theme, which the author has to fix wherever the row
+        // ends up. Holding them for a refused row only moved them one
+        // compile later. A row whose anchor did not lower, above, is the
+        // different case: it returns before the body is lowered, so its
+        // body's findings are never produced at all.
+        let Some(LoweredBody { array, walls, cut }) = lower_body_to_block_array(
             BodyDescriptor {
                 kind: VoxelSource::Place,
                 scope_label: place_id,
@@ -955,39 +1235,59 @@ fn lower_site<'a>(
             // The extent was refused; the diagnostic names the scope, and
             // recording a placement for a structure that does not exist
             // would leave the lockfile pointing at nothing.
+            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
-        // `ba.source_scope` now owns the IR key — read it back so the two
-        // map inserts share that one allocation as their canonical key
-        // (one extra clone for `placements`, one move into `structures`).
-        let dims = ba.dims;
+        // `array.source_scope` now owns the IR key — read it back so the
+        // two map inserts share that one allocation as their canonical
+        // key (one extra clone for `placed`, one move into
+        // `structures`).
+        let dims = array.dims;
+        // `north_of` needs this body's own depth, so the origin is finished
+        // only now that the body has been sized.
+        let origin = match anchor.origin(dims) {
+            Ok(origin) => origin,
+            Err(far) => {
+                diagnostics.push(diag_deferred_member_reason(member, &far.deferral()));
+                report_unread_gap(gap_unread, GapOutcome::OriginOutOfRange, diagnostics);
+                continue;
+            }
+        };
+        report_unread_gap(gap_unread, GapOutcome::Placed, diagnostics);
         // First-write-wins, as above. Two `site` blocks of one name put
         // their `place id=` rows into one `site::NAME::` namespace, so
         // only a repeated `id=` collides — and the resolver has already
-        // bound the first of those. `placements` and `structures` share
-        // the key here, and the lockfile reads a placement's dims beside
-        // the structure it names, so the two must agree on which body
-        // won.
-        placements
-            .entry(ba.source_scope.clone())
-            .or_insert(Placement {
-                site: placement_site,
-                place_id: placement_id,
-                source_def: use_name.to_owned(),
-                // The theme that governed the build, not the one the row
-                // spelled. A `--edition` pin can bind a different variant
-                // than the `place` named (`W_THEME_VARIANT_REBOUND`), and
-                // the warning scrolls away while the lockfile is what a
-                // later reader has. Recording the written name there would
-                // name a variant whose materials are not in the artifact.
-                theme: scope
-                    .bound_theme
-                    .clone()
-                    .unwrap_or_else(|| theme_name.to_owned()),
-                origin,
-                dims,
+        // bound the first of those. `placed` and `structures` share the
+        // key here, and the lockfile reads a placement's dims beside the
+        // structure it names, so the two must agree on which body won.
+        placed
+            .entry(array.source_scope.clone())
+            .or_insert(PlacedBody {
+                walls,
+                cut,
+                placement: Placement {
+                    site: placement_site,
+                    place_id: placement_id,
+                    source_def: use_name.to_owned(),
+                    // The theme that governed the build, not the one the
+                    // row spelled. A `--edition` pin can bind a different
+                    // variant than the `place` named
+                    // (`W_THEME_VARIANT_REBOUND`), and the warning
+                    // scrolls away while the lockfile is what a later
+                    // reader has. Recording the written name there would
+                    // name a variant whose materials are not in the
+                    // artifact.
+                    theme: scope
+                        .bound_theme
+                        .clone()
+                        .unwrap_or_else(|| theme_name.to_owned()),
+                    origin,
+                    dims,
+                },
             });
-        structures.entry(ba.source_scope.clone()).or_insert(ba);
+        structures
+            .entry(array.source_scope.clone())
+            .or_insert(array);
     }
 }
 
@@ -1020,6 +1320,25 @@ struct BodyDescriptor<'a> {
     source_scope: String,
 }
 
+/// What lowering one body produced: the voxels, and the wall column they
+/// were painted against.
+///
+/// The column comes back out because the `connect` pass asks a
+/// placement's masonry the same question the openings phase asked it,
+/// and one answer is what keeps them from disagreeing. Deriving it a
+/// second time from the `def` would be this rule written twice — which
+/// is how a strip came to be laid to a window the openings phase had
+/// deferred, and refused to one it had cut.
+struct LoweredBody {
+    array: BlockArray,
+    walls: WallColumn,
+    /// The spans of the `door` and `window` members that painted at
+    /// least one cell — the openings the `connect` pass may anchor a port
+    /// on. Read off the canvas rather than reported by the generators, so
+    /// a new way for a cut to defer cannot forget to say so.
+    cut: HashSet<Span>,
+}
+
 /// Lower one struct or place body into voxels.
 ///
 /// `None` means the extent the body asks for is past
@@ -1030,7 +1349,7 @@ fn lower_body_to_block_array<'a>(
     scope: Option<&'a ScopeResolution>,
     registry: Option<&'a dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<BlockArray> {
+) -> Option<LoweredBody> {
     let interior_w = body.size.w.get();
     let interior_h = body.size.h.get();
 
@@ -1095,47 +1414,8 @@ fn lower_body_to_block_array<'a>(
         wall_column,
     };
 
-    let PhaseBuckets {
-        massing,
-        envelope,
-        openings,
-        fixtures,
-        phases,
-    } = bucket_members(&flattened, diagnostics);
-    let mut canvas = Canvas::new(dims, phases);
-
-    run_phase(
-        massing,
-        lower_massing_member,
-        &ctx,
-        &mut palette,
-        &mut canvas,
-        diagnostics,
-    );
-    run_phase(
-        envelope,
-        lower_envelope_member,
-        &ctx,
-        &mut palette,
-        &mut canvas,
-        diagnostics,
-    );
-    run_phase(
-        openings,
-        lower_opening_member,
-        &ctx,
-        &mut palette,
-        &mut canvas,
-        diagnostics,
-    );
-    run_phase(
-        fixtures,
-        lower_fixture_member,
-        &ctx,
-        &mut palette,
-        &mut canvas,
-        diagnostics,
-    );
+    let buckets = bucket_members(&flattened, diagnostics);
+    let canvas = paint_phases(buckets, &ctx, &mut palette, diagnostics);
 
     for ((overridden, overriding), voxels) in &canvas.conflicts {
         diagnostics.push(diag_phase_conflict(
@@ -1144,6 +1424,14 @@ fn lower_body_to_block_array<'a>(
             *voxels,
         ));
     }
+    let cut: HashSet<Span> = flattened
+        .iter()
+        .zip(&canvas.wrote)
+        .filter(|((_, m), wrote)| {
+            **wrote && matches!(m.role, MemberRole::Door | MemberRole::Window)
+        })
+        .map(|((_, m), _)| m.span.clone())
+        .collect();
     let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
     debug_assert!(
         never_painted.is_empty(),
@@ -1152,14 +1440,102 @@ fn lower_body_to_block_array<'a>(
         body.scope_label,
     );
 
-    Some(BlockArray {
+    let mut array = BlockArray {
         dims,
         palette,
         voxels,
         block_entities: Vec::new(),
         entities: Vec::new(),
         source_scope: body.source_scope,
+    };
+    // Last, and after the prune: the grid is finished, so this is the
+    // point where the palette can be a rendering of what the body
+    // contains instead of a log of the order the paints ran in. Doing it
+    // before the prune would sort entries that are about to be dropped
+    // and renumber twice for the same answer.
+    array.canonicalize_palette();
+
+    Some(LoweredBody {
+        array,
+        walls: ctx.wall_column,
+        cut,
     })
+}
+
+/// Paint one body's members onto a fresh canvas, phase by phase in the
+/// order `spec/compilation` "Phase evaluation" fixes.
+///
+/// That order is the whole content of this helper: a `door` written
+/// before `walls` in the source still cuts through the resulting wall
+/// because openings run after massing, whatever the lines say. It owns
+/// the canvas because a canvas outlives no phase — it is created from
+/// the same buckets that are about to be painted onto it, and handing
+/// the two to a caller separately is an order for the caller to get
+/// right.
+///
+/// None of the three adjacent swaps — massing/envelope,
+/// envelope/openings, openings/fixtures — is observable with today's
+/// generators, because no two neighbouring phases write the same cell.
+/// A roof starts at `wall_top + 1` and an eave `stair` is shifted a
+/// voxel outside the wall line into an overhang it defers without, while
+/// every opening is cut into the wall ring at or below `wall_top`; a
+/// `pressure_plate` is shifted a voxel in or out for the same reason;
+/// and a `floor` is the single interior plane at row 0, which no opening
+/// reaches. Separation in y for some of those pairs, in x/z for the
+/// others.
+///
+/// What the corpus does see is massing running after openings — a
+/// two-step move rather than a swap — which fills a carved opening back
+/// in. So the order here is the spec's, held by the argument above
+/// rather than by a test, which is what a generator that grows into a
+/// neighbour's cells will change.
+fn paint_phases(
+    buckets: PhaseBuckets<'_>,
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Canvas {
+    let PhaseBuckets {
+        massing,
+        envelope,
+        openings,
+        fixtures,
+        phases,
+    } = buckets;
+    let mut canvas = Canvas::new(ctx.dims, phases);
+    run_phase(
+        massing,
+        lower_massing_member,
+        ctx,
+        palette,
+        &mut canvas,
+        diagnostics,
+    );
+    run_phase(
+        envelope,
+        lower_envelope_member,
+        ctx,
+        palette,
+        &mut canvas,
+        diagnostics,
+    );
+    run_phase(
+        openings,
+        lower_opening_member,
+        ctx,
+        palette,
+        &mut canvas,
+        diagnostics,
+    );
+    run_phase(
+        fixtures,
+        lower_fixture_member,
+        ctx,
+        palette,
+        &mut canvas,
+        diagnostics,
+    );
+    canvas
 }
 
 /// The paint set filed by phase, each entry keeping its position in the
@@ -1175,10 +1551,11 @@ struct PhaseBuckets<'a> {
     phases: Vec<Option<Phase>>,
 }
 
-/// File every member of the paint set under the phase §4.1 evaluates it in,
-/// reporting the ones no phase has a reader for.
+/// File every member of the paint set under the phase `spec/compilation`
+/// "Phase evaluation" evaluates it in, reporting the ones no phase has a
+/// reader for.
 ///
-/// Within a bucket the members keep source order, which is what §4.1's
+/// Within a bucket the members keep source order, which is what that section's
 /// last-wins grant is about; across buckets the order is the spec's, which
 /// is what makes the source order-free.
 fn bucket_members<'a>(
@@ -1204,7 +1581,7 @@ fn bucket_members<'a>(
         // phase, or `carve_door`'s `side_of` guard would false-positive
         // "missing side=". The recogniser handles the surface shape
         // here; the wired signal graph is threaded on by the future
-        // redstone lowering pipeline (spec/redstone.md §14.2).
+        // redstone lowering pipeline (`spec/redstone` "Signal binding").
         if is_actuator_patch(member) {
             recognize_actuator_patch(member, flattened, diagnostics);
             buckets.phases.push(None);
@@ -1230,10 +1607,11 @@ fn bucket_members<'a>(
             }
             // `circuit region=<label> void=<N>` reserves a routing region
             // for the future `logic_synth → logic_place → logic_route`
-            // passes (spec/redstone.md §14.5 / §14.8). Nothing lands in
-            // the block array from this member; the recognizer only checks
-            // the surface shape so a valid fixture stays quiet while a
-            // malformed one still surfaces a targeted `W_DEFERRED_MEMBER`.
+            // passes (`spec/redstone` "Place-and-route" and "Connection to
+            // the IR and phases"). Nothing lands in the block array from this
+            // member; the recognizer only checks the surface shape so a valid
+            // fixture stays quiet while a malformed one still surfaces a
+            // targeted `W_DEFERRED_MEMBER`.
             MemberDisposition::Reserves => recognize_circuit_region(member, diagnostics),
             MemberDisposition::NotLowered => diagnostics.push(diag_deferred_member(member)),
         }
@@ -1274,12 +1652,12 @@ fn run_phase(
 
 /// Two members of one phase wrote the same cell to different blocks.
 ///
-/// §4.1 settles that by source order — "last-wins applies only to local
-/// overrides within the same phase" — and this says so out loud, because an
-/// override the author meant and two footprints that happen to intersect
-/// look identical from the grid. Anchored at the member that wrote last,
-/// the way `E_LOGIC_MULTIPLE_DRIVERS` anchors at the redefinition and notes
-/// the first declaration.
+/// `spec/compilation` "Phase evaluation" settles that by source order —
+/// "last-wins applies only to local overrides within the same phase" — and
+/// this says so out loud, because an override the author meant and two
+/// footprints that happen to intersect look identical from the grid. Anchored
+/// at the member that wrote last, the way `E_LOGIC_MULTIPLE_DRIVERS` anchors
+/// at the redefinition and notes the first declaration.
 fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) -> Diagnostic {
     let cell = if voxels == 1 { "voxel" } else { "voxels" };
     Diagnostic {
@@ -1298,9 +1676,10 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
             },
             DiagnosticNote {
                 span: None,
-                message: "If the override is deliberate this is §4.1's local-override \
-                          rule and the later line wins as written. If it is not, move \
-                          one of the two so their footprints do not meet."
+                message: "If the override is deliberate this is the local-override rule of \
+                          spec/compilation \"Phase evaluation\" and the later line wins as \
+                          written. If it is not, move one of the two so their footprints do \
+                          not meet."
                     .to_owned(),
             },
             DiagnosticNote {
@@ -1329,14 +1708,9 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
 /// Slot 0 stays whatever happens: [`Palette::new_with_air`] puts air there
 /// before any member runs, and a fully paved volume names it nowhere.
 ///
-/// A slot that was **never painted at all** is the other thing entirely —
-/// a generator interning a material for geometry it does not emit — and it
-/// is left in the palette rather than swept out here. Dropping it would
-/// delete the only evidence a released build carries: the entry reaches
-/// the artifact, `cairn info` counts it, and `tests/palette_is_referenced`
-/// fails on it, which is the whole watch on that bug class. The slots are
-/// returned instead so the caller can assert on them in a debug build,
-/// where failing a test beats shipping a quieter compiler.
+/// A slot that was **never painted at all** is a generator bug, not a
+/// covered cell, and is left in place so `tests/palette_is_referenced`
+/// can catch it; such slots are returned for the caller to assert on.
 fn prune_unreferenced(palette: &mut Palette, canvas: &Canvas) -> (Vec<PaletteIndex>, Vec<usize>) {
     let mut referenced = vec![false; palette.entries.len()];
     for v in &canvas.voxels {
@@ -1391,61 +1765,189 @@ fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic
     }
 }
 
-/// Solve the `at=origin` / `east_of=ID gap=N` / `north_of=ID gap=N` chain
-/// for one `place` line.
+/// Where one `place` line lands relative to what has already been placed:
+/// the prior placement's origin (and, for `east_of`, its width) and the
+/// `gap`, read before this placement's body is lowered.
 ///
-/// Returns `None` when none of the three selectors is present in a usable
-/// shape (the resolver already emitted `E_INVALID_PLACE_ORIGIN`); callers
-/// fall back to `(0, 0, 0)` so the per-place [`BlockArray`] still lands.
-/// `east_of` advances along `+x` past the prior placement's full inflated
-/// `dims.x` (overhang already baked in); `north_of` retreats along `-z`
-/// per the `spec/components-editing-sites.md` §9.3 front-is-`+z`
-/// convention.
-fn resolve_place_origin(
+/// Finished by [`PlaceAnchor::origin`] once the new body's dims are known,
+/// because `north_of` steps back by the *new* placement's depth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaceAnchor {
+    /// `at=origin`.
+    WorldOrigin,
+    /// `east_of=ID gap=N`: the prior placement's origin and inflated
+    /// `dims.x`.
+    EastOf {
+        prior_origin: (i32, i32, i32),
+        prior_dims_x: u32,
+        gap: i64,
+    },
+    /// `north_of=ID gap=N`: the prior placement's origin. Its depth plays
+    /// no part: the step back is the new body's own depth.
+    NorthOf {
+        prior_origin: (i32, i32, i32),
+        gap: i64,
+    },
+}
+
+/// The origin [`PlaceAnchor::origin`] works out to lies outside the `i32`
+/// range a placement records its origin in. `axis` is the one the selector
+/// moves along and `offset` the value that left the range — a sum for
+/// `east_of`, a difference for `north_of` — for the message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OriginOutOfRange {
+    axis: char,
+    offset: i128,
+}
+
+impl OriginOutOfRange {
+    /// The `W_DEFERRED_MEMBER` reason for the row this refuses.
+    fn deferral(self) -> String {
+        let Self { axis, offset } = self;
+        format!(
+            "this placement's origin works out to {axis}={offset}, past the {} to {} range \
+             a placement's origin is recorded in; shorten the `gap=` on this row or on a \
+             row it is placed relative to",
+            i32::MIN,
+            i32::MAX,
+        )
+    }
+}
+
+impl PlaceAnchor {
+    /// The world-space origin (low-`x`, low-`z` corner) of a placement
+    /// whose lowered body has `dims`, per `spec/components-editing-sites`
+    /// "Origin selectors": `east_of` is `prior.x + prior.dims.x + gap`,
+    /// `north_of` is `prior.z − new.dims.z − gap`. Either way `gap` counts
+    /// the empty blocks between the two facing bounding-box faces (each the
+    /// wall plus its `overhang=` columns), so `gap=0` makes the boxes touch
+    /// whichever of the two is wider or deeper.
+    ///
+    /// The sum is taken in `i128`, where no `i32` origin, `u32` extent and
+    /// `i64` gap can overflow, and refused when it leaves `i32` rather than
+    /// saturated: a saturated origin put two placements on one coordinate,
+    /// the second stacked inside the first, and nothing said so.
+    fn origin(self, dims: Dims) -> Result<(i32, i32, i32), OriginOutOfRange> {
+        let fit = |axis: char, offset: i128| {
+            i32::try_from(offset).map_err(|_| OriginOutOfRange { axis, offset })
+        };
+        match self {
+            Self::WorldOrigin => Ok((0, 0, 0)),
+            Self::EastOf {
+                prior_origin: (x, y, z),
+                prior_dims_x,
+                gap,
+            } => {
+                let next_x = i128::from(x) + i128::from(prior_dims_x) + i128::from(gap);
+                Ok((fit('x', next_x)?, y, z))
+            }
+            Self::NorthOf {
+                prior_origin: (x, y, z),
+                gap,
+            } => {
+                let next_z = i128::from(z) - i128::from(dims.z) - i128::from(gap);
+                Ok((x, y, fit('z', next_z)?))
+            }
+        }
+    }
+}
+
+/// Read the `at=origin` / `east_of=ID gap=N` / `north_of=ID gap=N`
+/// selector of one `place` line into a [`PlaceAnchor`].
+///
+/// On a relative (`east_of` / `north_of`) row the anchor is `None` when the
+/// prior place it names did not lower, which the caller reports before
+/// skipping the row. A row with no usable selector
+/// never gets here: the resolver refuses it with `E_INVALID_PLACE_ORIGIN`,
+/// or with `E_UNRESOLVED_PLACE_REF` when the selector names no prior place,
+/// and binds no scope for it. The front-is-`+z` convention of
+/// `spec/components-editing-sites` "Multi-building with `site`" is why
+/// `north_of` retreats along `-z`.
+///
+/// On a relative row, a `gap=` that is not an integer is an unreadable
+/// value: the anchor carries `gap=0`, and the [`UnreadArgument`] is handed
+/// back beside it — also when the anchor is `None` — for the caller to
+/// report with the note that matches whether the row was placed. An
+/// `at=origin` row returns before `gap=` is read.
+fn resolve_place_anchor(
     member: &Member,
-    placements: &IndexMap<String, Placement>,
+    placed: &IndexMap<String, PlacedBody>,
     site_name: &str,
-) -> Option<(i32, i32, i32)> {
+) -> (Option<PlaceAnchor>, Option<UnreadArgument>) {
     if let Some(value) = member.intent_state.get("at")
         && matches!(&value.value.kind, ValueKind::Ident(s) if s == "origin")
     {
-        return Some((0, 0, 0));
+        return (Some(PlaceAnchor::WorldOrigin), None);
     }
-    let gap = member
-        .intent_state
-        .get("gap")
-        .and_then(|v| match &v.value.kind {
-            ValueKind::Int(n) => i32::try_from(*n).ok(),
+    let (gap, gap_unread) = match read_or_ignore(
+        member,
+        "gap",
+        |kind| match kind {
+            ValueKind::Int(n) => Some(*n),
             _ => None,
+        },
+        "an integer",
+    ) {
+        Ok(gap) => (gap.unwrap_or(0), None),
+        Err(unread) => (0, Some(unread)),
+    };
+    let prior = |key: &str| {
+        member
+            .intent_state
+            .get(key)
+            .and_then(|v| v.value.as_label_str())
+            .and_then(|target| placed.get(&place_scope_key(site_name, target)))
+            .map(|body| (body.placement.origin, body.placement.dims.x))
+    };
+    let anchor = if let Some((prior_origin, prior_dims_x)) = prior("east_of") {
+        Some(PlaceAnchor::EastOf {
+            prior_origin,
+            prior_dims_x,
+            gap,
         })
-        .unwrap_or(0);
-    if let Some(target) = member
-        .intent_state
-        .get("east_of")
-        .and_then(|v| v.value.as_label_str())
-        && let Some(prev) = placements.get(&place_scope_key(site_name, target))
-    {
-        let next_x = prev
-            .origin
-            .0
-            .saturating_add(i32::try_from(prev.dims.x).unwrap_or(i32::MAX))
-            .saturating_add(gap);
-        return Some((next_x, prev.origin.1, prev.origin.2));
-    }
-    if let Some(target) = member
-        .intent_state
-        .get("north_of")
-        .and_then(|v| v.value.as_label_str())
-        && let Some(prev) = placements.get(&place_scope_key(site_name, target))
-    {
-        let next_z = prev
-            .origin
-            .2
-            .saturating_sub(i32::try_from(prev.dims.z).unwrap_or(i32::MAX))
-            .saturating_sub(gap);
-        return Some((prev.origin.0, prev.origin.1, next_z));
-    }
-    None
+    } else {
+        prior("north_of").map(|(prior_origin, _)| PlaceAnchor::NorthOf { prior_origin, gap })
+    };
+    (anchor, gap_unread)
+}
+
+/// Where a `place` row with an unreadable `gap=` ended up, which picks the
+/// note its finding carries.
+#[derive(Clone, Copy)]
+enum GapOutcome {
+    /// Placed at the `gap=0` the unreadable value falls back to.
+    Placed,
+    /// Refused for a reason no `gap=` reaches: its anchor did not lower,
+    /// or its body was refused.
+    NotPlaced,
+    /// Refused because the origin worked out at `gap=0` leaves the `i32`
+    /// range. Only that value was tried, so the note claims nothing about
+    /// any other `gap=`.
+    OriginOutOfRange,
+}
+
+/// Report a `place` row's unreadable `gap=`, if it had one, with the note
+/// for where the row ended up.
+fn report_unread_gap(
+    unread: Option<UnreadArgument>,
+    outcome: GapOutcome,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    diagnostics.extend(unread.map(|unread| {
+        unread.report(match outcome {
+            GapOutcome::Placed => {
+                "the row is placed as `gap=0` places it, edge to edge with the place it is \
+                 relative to"
+            }
+            GapOutcome::NotPlaced => {
+                "this row is not placed either way — see the finding on the same line"
+            }
+            GapOutcome::OriginOutOfRange => {
+                "this row is not placed at `gap=0`, the value its origin was worked out \
+                 with — see the finding on the same line"
+            }
+        })
+    }));
 }
 
 /// Bundle of per-struct context shared by every member-lowering helper.
@@ -1471,9 +1973,12 @@ struct StructCtx<'a> {
     wall_top: u32,
     /// Every row the walls members actually paint, gaps and all.
     ///
-    /// A `window` has to land inside masonry, which `wall_top` cannot
-    /// decide: it says nothing about the rows below the first course and
-    /// nothing about the air between two of them.
+    /// A `window` has to land inside masonry and a `door` has to open
+    /// into it, neither of which `wall_top` can decide: it says nothing
+    /// about the rows below the first course and nothing about the air
+    /// between two of them. `walkway::port_world_position` is handed
+    /// this same column, so a port and the cut it anchors to read one
+    /// answer rather than two that agree.
     wall_column: WallColumn,
 }
 
@@ -1503,7 +2008,7 @@ enum MemberDisposition {
     NotLowered,
 }
 
-/// Where a member's role puts it, per `spec/compilation.md` §4.1.
+/// Where a member's role puts it, per `spec/compilation` "Phase evaluation".
 ///
 /// The spec's order is `massing (shell: floor/walls/volume) → envelope
 /// (roof/exterior) → openings (door/window) → fixtures (furnishings:
@@ -1512,18 +2017,25 @@ enum MemberDisposition {
 /// alike:
 ///
 /// - `floor` / `walls` are the shell the sentence names.
-/// - `roof` is the envelope; `stair` joins it because §4.3 describes it as
-///   an *eave* stair, and an eave is exterior.
+/// - `roof` is the envelope; `stair` joins it because `spec/compilation`
+///   "Gable roof voxel rules" describes it as an *eave* stair, and an eave is
+///   exterior.
 /// - `door` / `window` are the openings the sentence names.
 /// - `pressure_plate` is a sensor, so it is a fixture. Sharing the openings
 ///   bucket with `window` meant a contested cell went to whichever line came
-///   last, which is the order accident §4.1 opens by promising away.
+///   last, which is the order accident the phase order promises away.
 /// - `circuit` reserves a routing region for the redstone phases and
 ///   writes no voxel.
 /// - `place` and `connect` belong to a site body, which this pass does not
 ///   lower; `Other` is a keyword the role table does not know, which
-///   includes §4.1's `raw` — not yet a keyword at all, so it is reported
-///   as unknown by the allowlist pass on top of the deferral here.
+///   includes the `raw` that same phase order names — not yet a keyword at
+///   all, so it is reported as unknown by the allowlist pass on top of the
+///   deferral here.
+///
+/// The four `lower_*_member` matches spell every role out with no wildcard
+/// so a role added here fails the compile there rather than reaching a
+/// user's source and panicking. `Level` never arrives: flattening runs
+/// first, so one that does means a caller skipped it.
 fn member_disposition(role: &MemberRole) -> MemberDisposition {
     match role {
         MemberRole::Floor | MemberRole::Walls => MemberDisposition::Paints(Phase::Massing),
@@ -1629,7 +2141,7 @@ fn flatten_members<'a>(
 /// somewhere unexpected — and, being dropped, it contributes nothing to the
 /// volume.
 ///
-/// Every variant is spelled out for the reason [`member_phase`] spells its
+/// Every variant is spelled out for the reason [`member_disposition`] spells its
 /// own out: a role added later must not fall into "lowers the same at any
 /// offset" because that is the arm a wildcard happens to reach. The three
 /// that lower to nothing at any offset are listed with the rest — they
@@ -1707,12 +2219,7 @@ fn lower_massing_member(
             };
             fill_walls(ctx, height, y_offset, idx, canvas);
         }
-        // Spelled out rather than left to a wildcard: `member_disposition`
-        // is the one place that decides which bucket a role lands in, and a
-        // role added there has to fail the compile here rather than reach a
-        // user's source and panic. The `Level` arm is the same rule the
-        // disposition table applies — flattening happens first, so one
-        // arriving means a caller skipped it.
+        // No wildcard: see [`member_disposition`].
         MemberRole::Roof
         | MemberRole::Stair
         | MemberRole::Door
@@ -1744,12 +2251,7 @@ fn lower_envelope_member(
         // `roof` at a non-zero offset before it reaches a phase.
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, canvas, diagnostics),
-        // Spelled out rather than left to a wildcard: `member_disposition`
-        // is the one place that decides which bucket a role lands in, and a
-        // role added there has to fail the compile here rather than reach a
-        // user's source and panic. The `Level` arm is the same rule the
-        // disposition table applies — flattening happens first, so one
-        // arriving means a caller skipped it.
+        // No wildcard: see [`member_disposition`].
         MemberRole::Floor
         | MemberRole::Walls
         | MemberRole::Door
@@ -1779,12 +2281,7 @@ fn lower_opening_member(
     match &member.role {
         MemberRole::Door => carve_door(member, y_offset, ctx, canvas, diagnostics),
         MemberRole::Window => fill_window(member, y_offset, ctx, palette, canvas, diagnostics),
-        // Spelled out rather than left to a wildcard: `member_disposition`
-        // is the one place that decides which bucket a role lands in, and a
-        // role added there has to fail the compile here rather than reach a
-        // user's source and panic. The `Level` arm is the same rule the
-        // disposition table applies — flattening happens first, so one
-        // arriving means a caller skipped it.
+        // No wildcard: see [`member_disposition`].
         MemberRole::Floor
         | MemberRole::Walls
         | MemberRole::Roof
@@ -1815,12 +2312,7 @@ fn lower_fixture_member(
         MemberRole::PressurePlate => {
             fill_pressure_plate(member, y_offset, ctx, palette, canvas, diagnostics);
         }
-        // Spelled out rather than left to a wildcard: `member_disposition`
-        // is the one place that decides which bucket a role lands in, and a
-        // role added there has to fail the compile here rather than reach a
-        // user's source and panic. The `Level` arm is the same rule the
-        // disposition table applies — flattening happens first, so one
-        // arriving means a caller skipped it.
+        // No wildcard: see [`member_disposition`].
         MemberRole::Floor
         | MemberRole::Walls
         | MemberRole::Roof
@@ -1891,17 +2383,24 @@ fn resolve_member_state(
     // first is reported by neither layer.
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value, registry) {
-        Ok(state) => Some(state),
+        Ok(state) => {
+            diagnostics.extend(diag_state_literal_unchecked(slot_value, &state));
+            Some(state)
+        }
         Err(MaterialDeferred::Abstract(token)) => {
-            diagnostics.push(diag_abstract_token(member, &token, slot_value));
+            diagnostics.push(diag_abstract_token(
+                member_or_slot_span(member, slot_value),
+                &token,
+                TokenSite::MemberSlot,
+            ));
             None
         }
         Err(MaterialDeferred::UnknownAbstract { token, suggestion }) => {
             diagnostics.push(diag_unknown_abstract_token(
-                member,
+                member_or_slot_span(member, slot_value),
                 &token,
                 suggestion.as_deref(),
-                slot_value,
+                TokenSite::MemberSlot,
             ));
             None
         }
@@ -1952,36 +2451,24 @@ fn palette_index_for(
 ///
 /// The same question [`palette_index_for`] asks when the massing phase
 /// paints, through the same function, so the volume and the paint cannot
-/// answer differently.
-///
-/// The diagnostics are discarded because this is a question and not a
-/// report. Three of [`resolve_member_state`]'s arms push one — the
-/// deferred abstract token, the unknown abstract token and the unknown id
-/// — and the massing phase's own call pushes it for real, so keeping this
-/// one would say it twice. The other arms push
-/// nothing at all, here or there: a themeless scope is reported once
-/// against the body, an unresolved slot target once by the resolver, and a
-/// member with no `mat_slot=` at all once by `check::material`, before
-/// lowering runs.
-///
-/// Sound exactly as long as the walls painter's question stays
-/// [`resolve_member_state`]. A roof already has a painter-side fallback
-/// material; if walls ever grow one, they will paint where this says they
-/// will not, and this predicate has to move with it — as does
-/// `check::material`'s `without_a_material`, which answers the same
-/// question one stage earlier. `tests/check_missing_material.rs` measures
-/// the two against each other, on the one question they share: *whether*
-/// a role paints without a `mat_slot=`. It says nothing about *what* it
-/// paints, so [`geometry_material_id`] substituting its fallback silently
-/// passes that test untouched.
+/// answer differently. The diagnostics are ignored because the massing
+/// phase's own call pushes them for real; keeping them here would say
+/// each twice.
 fn member_will_paint(
     member: &Member,
     scope: Option<&ScopeResolution>,
     registry: Option<&dyn TargetRegistry>,
     theme_missing: bool,
 ) -> bool {
-    let mut discarded = Vec::new();
-    resolve_member_state(member, scope, registry, &mut discarded, theme_missing).is_some()
+    let mut ignored_diagnostics = Vec::new();
+    resolve_member_state(
+        member,
+        scope,
+        registry,
+        &mut ignored_diagnostics,
+        theme_missing,
+    )
+    .is_some()
 }
 
 /// Highest wall voxel Y across every walls member the flatten pass surfaced.
@@ -2011,13 +2498,13 @@ fn max_wall_top(painting: &[(u32, u32)]) -> u32 {
 /// stand and paint.
 ///
 /// One list behind both the volume and [`WallColumn`], because
-/// `spec/compilation.md` §4.7 makes them two readings of a single list and
-/// rests the "no member paints past the end of the array" invariant on
-/// their agreeing. Filtering one and not the other would leave the window
-/// carve writing rows the array no longer has. `max_wall_top` collapses
-/// the pairs to their maximum, which sizes the volume and seats the roof;
-/// the column keeps the spans, which is what decides whether a rectangle
-/// cut into a wall lands in masonry.
+/// `spec/compilation` "Level grouping and volume derivation" makes them two
+/// readings of a single list and rests the "no member paints past the end of
+/// the array" invariant on their agreeing. Filtering one and not the other
+/// would leave the window carve writing rows the array no longer has.
+/// `max_wall_top` collapses the pairs to their maximum, which sizes the volume
+/// and seats the roof; the column keeps the spans, which is what decides
+/// whether a rectangle cut into a wall lands in masonry.
 fn painting_walls<'a>(
     flattened: &'a [(u32, &'a Member)],
     scope: Option<&'a ScopeResolution>,
@@ -2105,7 +2592,10 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
             // choice goes through `shed_slope_span` — the same helper
             // `shed_voxels` uses — so the dim and the generator cannot
             // disagree on which axis the slope runs along.
-            match ident_value(member, "slope_to").and_then(WallSide::from_ident) {
+            match member
+                .ident_value("slope_to")
+                .and_then(WallSide::from_ident)
+            {
                 Some(slope_to) => shed_extra_height(shed_slope_span(roof_w, roof_h, slope_to)),
                 None => 0,
             }
@@ -2131,7 +2621,8 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
 fn roof_draws(member: &Member) -> Option<RoofKind> {
     let kind = roof_kind_of(member)?;
     if matches!(kind, RoofKind::Shed)
-        && ident_value(member, "slope_to")
+        && member
+            .ident_value("slope_to")
             .and_then(WallSide::from_ident)
             .is_none()
     {
@@ -2165,24 +2656,14 @@ fn wall_height(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<u32
 /// alike, which is what [`wall_height`] turns into one `W_DEFERRED_MEMBER`.
 ///
 /// Saturating instead would put a wall top at `u32::MAX` because the author
-/// asked for `2^33` — the outcome [`nonneg_int`] documents as the reason it
-/// refuses rather than clamps.
+/// asked for `2^33` — the outcome [`Member::nonneg_u32`] documents as the
+/// reason it refuses rather than clamps.
 fn height_value(member: &Member) -> Option<u32> {
     let raw = member.intent_state.get("height")?;
     match &raw.value.kind {
         ValueKind::Int(v) if *v > 0 => u32::try_from(*v).ok(),
         _ => None,
     }
-}
-
-/// Read `key=` as a non-negative `u32`.
-///
-/// Thin wrapper over [`Member::nonneg_u32`] so this file keeps its
-/// local vocabulary; the rule itself lives on the member because
-/// `check::nesting` decides whether a `level` has a usable offset and
-/// has to agree with where the children are placed.
-fn nonneg_int(member: &Member, key: &str) -> Option<u32> {
-    member.nonneg_u32(key)
 }
 
 /// Result of reading a non-negative integer `key=` with defer semantics.
@@ -2197,7 +2678,7 @@ fn nonneg_int(member: &Member, key: &str) -> Option<u32> {
 ///
 /// Using a named tri-state keeps callers explicit about which case they
 /// treat as a default vs which case aborts, and closes the
-/// `y="top"`-silently-becomes-`0` gap that the plain [`nonneg_int`]
+/// `y="top"`-silently-becomes-`0` gap that the plain [`Member::nonneg_u32`]
 /// return type could not.
 ///
 /// Every caller keeps the `Deferred` contract: each one returns or
@@ -2216,28 +2697,148 @@ enum NonNegRead {
 /// [`NonNegRead::Deferred`] means "the caller must return", and
 /// `W_DEFERRED_MEMBER` says the member did not lower. A caller that falls
 /// back to a default and draws the member anyway needs the other report:
-/// the value was unusable, here is what was used instead, and the member
-/// is in the build. `consequence` is that second half in the caller's own
-/// words, because only the caller knows what its fallback does to the
-/// output.
+/// the value was unusable, and here is what was used instead.
+/// `consequence` is that second half in the caller's own words, because
+/// only the caller knows what its fallback does to the output — and, as
+/// [`max_roof_overhang`] does, whether the member draws at all.
 ///
 /// `None` covers "absent" as well as "unusable", because a caller with a
 /// default treats them alike — the difference is only whether anything is
 /// reported.
 fn nonneg_int_or_ignore(
     member: &Member,
-    key: &str,
+    key: &'static str,
     consequence: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<u32> {
-    if !member.intent_state.contains_key(key) {
-        return None;
+    read_or_ignore(
+        member,
+        key,
+        |kind| match kind {
+            ValueKind::Int(v) => u32::try_from(*v).ok(),
+            _ => None,
+        },
+        NONNEG_U32,
+    )
+    .unwrap_or_else(|unread| {
+        diagnostics.push(unread.report(consequence));
+        None
+    })
+}
+
+/// What [`nonneg_int_or_ignore`] accepts, worded to complete "`key=` must
+/// be …".
+const NONNEG_U32: &str = "a non-negative integer that fits in u32";
+
+/// Read `key=` through `read` for a caller that falls back to a default,
+/// telling "absent" apart from "unreadable".
+///
+/// - `Ok(Some(v))`: the key is present and `read` accepted its value.
+/// - `Ok(None)`: the key was not written; the caller applies its default
+///   and nothing is reported.
+/// - `Err(unread)`: the key was written and `read` refused it. This is the
+///   unreadable value `spec/lint` "Error vs warning" reports as
+///   `W_IGNORED_ARGUMENT`, and the caller applies its default.
+///
+/// Every caller reports the [`UnreadArgument`], whether or not the member
+/// then reaches the build: the value is unreadable wherever the member
+/// ends up, and holding the finding back until a later refusal is repaired
+/// only costs the author another compile to learn it. What differs is the
+/// note, which [`UnreadArgument::report`] takes from the caller once it
+/// knows: the default's effect on a member in the build, or that the
+/// member is not built either way. A member dropped before its reader runs
+/// at all (a level-scoped roof, say) is not read, and so reports nothing.
+///
+/// `expected` completes "`key=` must be …".
+fn read_or_ignore<'m, T>(
+    member: &'m Member,
+    key: &'static str,
+    read: impl FnOnce(&'m ValueKind) -> Option<T>,
+    expected: &'static str,
+) -> Result<Option<T>, UnreadArgument> {
+    let Some(raw) = member.intent_state.get(key) else {
+        return Ok(None);
+    };
+    match read(&raw.value.kind) {
+        Some(v) => Ok(Some(v)),
+        None => Err(UnreadArgument {
+            span: member_or_slot_span(member, raw),
+            key,
+            written: raw.value.describe(),
+            expected,
+        }),
     }
-    if let Some(v) = nonneg_int(member, key) {
-        return Some(v);
+}
+
+/// [`read_or_ignore`] for a key whose value is a bare identifier.
+///
+/// Which identifiers the caller accepts is still the caller's to say:
+/// this only separates "not an identifier at all" (`half="bottom"`,
+/// `facing=1`), which is an unreadable value, from an identifier the
+/// caller does not support (`half=sideways`), which defers the member.
+fn ident_or_ignore<'m>(
+    member: &'m Member,
+    key: &'static str,
+    expected: &'static str,
+) -> Result<Option<&'m str>, UnreadArgument> {
+    read_or_ignore(
+        member,
+        key,
+        |kind| match kind {
+            ValueKind::Ident(name) => Some(name.as_str()),
+            _ => None,
+        },
+        expected,
+    )
+}
+
+/// A `key=` written with a value its reader cannot use — the third outcome
+/// of [`read_or_ignore`], beside "read" and "not written".
+///
+/// Not yet a [`Diagnostic`]: its note says what the default did to the
+/// output, and only the caller knows whether the member reached the build.
+#[derive(Debug)]
+struct UnreadArgument {
+    /// The value's own span, so the finding underlines what was written,
+    /// as `check::arguments` does for the same code, and two unreadable
+    /// keys on one line underline two places.
+    span: Span,
+    key: &'static str,
+    /// The value as [`crate::ast::Value::describe`] renders it, so a quoted
+    /// `"true"` reads as the string it is rather than as the word the
+    /// author meant.
+    written: String,
+    /// What the reader accepts, worded to complete "`key=` must be …".
+    expected: &'static str,
+}
+
+impl UnreadArgument {
+    /// The `W_IGNORED_ARGUMENT` for this value, with `consequence` as its
+    /// note.
+    ///
+    /// The primary stops at "the value was ignored" because whether the
+    /// member is in the build is not a fact the reader has. The note
+    /// carries it instead, in the caller's words: what the default did to
+    /// the output when the member is built, or that it is not built either
+    /// way when a finding on the same line refused it.
+    fn report(self, consequence: &str) -> Diagnostic {
+        let Self {
+            span,
+            key,
+            written,
+            expected,
+        } = self;
+        Diagnostic {
+            code: DiagnosticCode::IgnoredArgument,
+            span,
+            primary: format!("`{key}=` must be {expected}, not {written}; the value was ignored"),
+            notes: vec![DiagnosticNote {
+                span: None,
+                message: consequence.to_owned(),
+            }],
+            data: None,
+        }
     }
-    diagnostics.push(diag_ignored_argument(member, key, consequence));
-    None
 }
 
 fn nonneg_int_or_defer(
@@ -2248,7 +2849,7 @@ fn nonneg_int_or_defer(
     if !member.intent_state.contains_key(key) {
         return NonNegRead::Absent;
     }
-    if let Some(v) = nonneg_int(member, key) {
+    if let Some(v) = member.nonneg_u32(key) {
         NonNegRead::Valid(v)
     } else {
         diagnostics.push(diag_deferred_member_reason(
@@ -2259,23 +2860,7 @@ fn nonneg_int_or_defer(
     }
 }
 
-fn ident_value<'a>(member: &'a Member, key: &str) -> Option<&'a str> {
-    let raw = member.intent_state.get(key)?;
-    match &raw.value.kind {
-        ValueKind::Ident(name) => Some(name.as_str()),
-        _ => None,
-    }
-}
-
-fn bool_value(member: &Member, key: &str) -> Option<bool> {
-    let raw = member.intent_state.get(key)?;
-    match &raw.value.kind {
-        ValueKind::Bool(b) => Some(*b),
-        _ => None,
-    }
-}
-
-fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
+pub(super) fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
     let raw = member.intent_state.get(key)?;
     match &raw.value.kind {
         ValueKind::Size { w, h } => Some((w.get(), h.get())),
@@ -2286,13 +2871,13 @@ fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
 /// The voxel grid under construction, plus the two things the phase model
 /// needs to know about the writes that built it.
 ///
-/// **Who wrote each cell.** §4.1 promises that a `window` written after a
-/// `roof` still lands as an opening, and only says last-wins for "local
-/// overrides within the same phase". So a cross-phase overwrite is the
-/// model working and a within-phase one is the author's two members
-/// contesting a cell with nothing but line order to separate them. The
-/// canvas can tell the two apart because it remembers the writer, and
-/// reports the second kind rather than resolving it silently.
+/// **Who wrote each cell.** `spec/compilation` "Phase evaluation" promises
+/// that a `window` written after a `roof` still lands as an opening, and only
+/// says last-wins for "local overrides within the same phase". So a
+/// cross-phase overwrite is the model working and a within-phase one is the
+/// author's two members contesting a cell with nothing but line order to
+/// separate them. The canvas can tell the two apart because it remembers the
+/// writer, and reports the second kind rather than resolving it silently.
 ///
 /// **Which palette slots a write has named.** An entry no voxel references
 /// reaches the `.nbt`, the `resolved_ir_hash`, and `cairn info`'s per-entry
@@ -2327,6 +2912,10 @@ struct Canvas {
     phases: Vec<Option<Phase>>,
     /// Indexed by palette slot: `true` once a write has named that slot.
     painted: Vec<bool>,
+    /// Indexed like [`Self::phases`]: `true` once that member has written
+    /// a cell, whatever a later write did to it. How the pass knows which
+    /// openings were cut, for the `connect` rows that anchor on them.
+    wrote: Vec<bool>,
     /// `(overridden, overriding)` member pairs to the number of voxels the
     /// second took from the first. Insertion-ordered so the diagnostics
     /// come out in the order the phases discovered them, then sorted by
@@ -2340,6 +2929,7 @@ impl Canvas {
             dims,
             voxels: vec![PaletteIndex::AIR; dims.volume()],
             owners: vec![0; dims.volume()],
+            wrote: vec![false; phases.len()],
             phases,
             painted: vec![false; 1],
             conflicts: IndexMap::new(),
@@ -2427,6 +3017,9 @@ impl MemberCanvas<'_> {
             canvas.painted.resize(slot + 1, false);
         }
         canvas.painted[slot] = true;
+        if let Some(wrote) = canvas.wrote.get_mut(member as usize) {
+            *wrote = true;
+        }
         let before = canvas.voxels[i];
         canvas.voxels[i] = after;
         let previous = std::mem::replace(&mut canvas.owners[i], member + 1);
@@ -2523,7 +3116,7 @@ fn fill_roof(
         ctx.scope,
         resolved.as_ref(),
         kind.base_block_id(),
-        &MemberShape {
+        &GeometryMemberDescription {
             subject: format!("`{}` roof", kind.name()),
             states_from: "the geometry",
             requires_stair: kind.paints_stairs(),
@@ -2543,7 +3136,7 @@ fn fill_roof(
 ///
 /// Lets one function serve every such member: it can name the member and
 /// say where its blockstates came from without knowing which one it is.
-struct MemberShape {
+struct GeometryMemberDescription {
     /// How the member names itself in a message, already quoted: a roof
     /// renders as `` `gable` roof ``, an eave as `` eave `stair` ``.
     subject: String,
@@ -2589,15 +3182,26 @@ fn geometry_material_id<'a>(
     scope: Option<&ScopeResolution>,
     resolved: Option<&'a BlockState>,
     fallback: &'a str,
-    shape: &MemberShape,
+    shape: &GeometryMemberDescription,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> &'a str {
     let Some(state) = resolved else {
         if member.mat_slot.is_some() {
+            // The theme is named because it is the thing the author edits,
+            // and because without it two placements under two themes write
+            // the same sentence. This is the arm sibling-variant softening
+            // reaches: with no `--edition` pin the resolver stays silent on
+            // a slot only the sibling variant declares, so lowering is the
+            // only reporter, and the member line is shared by every
+            // placement of the `def`. Two broken themes then differ in
+            // nothing at all, and fixing one of them changes no output.
+            let under = scope
+                .and_then(|scope| scope.bound_theme.as_deref())
+                .map_or_else(String::new, |theme| format!(" under theme `{theme}`"));
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 &format!(
-                    "{}'s `mat_slot=` did not resolve to a block id; it falls back to `{fallback}`",
+                    "{}'s `mat_slot=` did not resolve to a block id{under}; it falls back to `{fallback}`",
                     shape.subject,
                 ),
             ));
@@ -2634,7 +3238,7 @@ fn geometry_material_id<'a>(
 fn diag_incompatible_material(
     member: &Member,
     state: &BlockState,
-    shape: &MemberShape,
+    shape: &GeometryMemberDescription,
     slot_value: Option<&ValueWithSpan>,
 ) -> Diagnostic {
     let mut notes = vec![DiagnosticNote {
@@ -2751,10 +3355,10 @@ fn fill_roof_hip(
 ) {
     let roof_w = ctx.dims.x;
     let roof_h = ctx.dims.z;
-    // Hip and gable share the same long-axis-wins-with-x-tiebreak ridge
-    // rule (`spec/compilation.md` §4.5 falls through to §4.3). Reusing
-    // `gable_ridge_axis` keeps the two paths from drifting if the
-    // tiebreak rule ever changes.
+    // Hip and gable share the same long-axis-wins-with-x-tiebreak ridge rule
+    // (`spec/compilation` "Hip roof voxel rules" falls through to "Gable roof
+    // voxel rules"). Reusing `gable_ridge_axis` keeps the two paths from
+    // drifting if the tiebreak rule ever changes.
     let ridge_axis = gable_ridge_axis(roof_w, roof_h);
     // Intern per voxel: `palette.intern` dedupes, so each face's state
     // lands at exactly one slot, in the order [`hip_voxels`] visits the
@@ -2802,13 +3406,23 @@ fn fill_roof_flat(
 /// set. Keeping the dispatch table in [`RoofKind::from_ident`] and the
 /// diagnostic phrasing here lets each side stay self-contained.
 fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<RoofKind> {
-    let Some(raw) = ident_value(member, "kind") else {
-        let reason = if member.intent_state.contains_key("kind") {
-            "roof `kind=` must be one of gable, shed, hip, flat"
-        } else {
-            "missing `kind=` (expected one of gable, shed, hip, flat)"
+    let Some(raw) = member.ident_value("kind") else {
+        // A value of the wrong shape is named by its shape, not by the
+        // closed set: `kind="shed"` spells a kind that is in the set, and
+        // being told the set again answers a question the author did not
+        // ask. `recognize_circuit_region` words the same case the same way.
+        // It matters more since `check::arguments` began deferring to this
+        // finding — a `kind=` naming no rule is where the conditional
+        // argument check stays quiet, so this is the whole repair.
+        let reason = match member.intent_state.get("kind") {
+            Some(raw) => format!(
+                "roof `kind=` must be an identifier naming one of {}, got {}",
+                RoofKind::names(),
+                raw.value.kind_name(),
+            ),
+            None => format!("missing `kind=` (expected one of {})", RoofKind::names()),
         };
-        diagnostics.push(diag_deferred_member_reason(member, reason));
+        diagnostics.push(diag_deferred_member_reason(member, &reason));
         return None;
     };
     if let Some(k) = RoofKind::from_ident(raw) {
@@ -2816,7 +3430,10 @@ fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option
     }
     diagnostics.push(diag_deferred_member_reason(
         member,
-        &format!("unknown roof `kind={raw}` (expected one of gable, shed, hip, flat)"),
+        &format!(
+            "unknown roof `kind={raw}` (expected one of {})",
+            RoofKind::names(),
+        ),
     ));
     None
 }
@@ -2828,7 +3445,7 @@ fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option
 /// peaks on the wrong wall. Missing or mis-typed `slope_to=` therefore
 /// surfaces a `W_DEFERRED_MEMBER` warning.
 fn shed_slope_to(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
-    let Some(raw) = ident_value(member, "slope_to") else {
+    let Some(raw) = member.ident_value("slope_to") else {
         let reason = if member.intent_state.contains_key("slope_to") {
             "shed `slope_to=` must be one of front, back, left, right"
         } else {
@@ -2857,79 +3474,62 @@ fn carve_door(
     let Some(side) = side_of(member, diagnostics) else {
         return;
     };
-    // A door needs at least one wall row to carve into. Without one there
-    // is nothing above the floor to open up; the envelope phase has
-    // already written roof voxels at y=1, and carving them would punch a
-    // gap into the roof.
-    //
-    // `wall_top` counts the walls that paint, so this reads "no walls
-    // member puts a block anywhere" — which a positive `height=` alone no
-    // longer settles. Naming only the height would send an author who
-    // wrote `height=4` over a themeless struct to the wrong line.
-    if ctx.wall_top < 1 {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into",
-        ));
-        return;
-    }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
-    // Three named anchors are accepted: `center` (`len / 2`, round-down
-    // on even widths — documented in spec/syntax.md §5.4), `left` (`0`,
-    // the wall-local axis origin), and `right` (`len - 1`, the far
-    // corner). The same vocabulary is recognised by
-    // `super::walkway::door_anchor_offset` for port resolution, so the
-    // openings cut and any walkway that connects to this door land at
-    // the same column. Numeric offsets are reserved for a future
-    // extension. `len.saturating_sub(1)` returns 0 for the degenerate
-    // `len == 0` case; `wall_local_to_grid` then rejects the bounds and
-    // the door defers cleanly, so no out-of-range carve sneaks through.
-    let at = match ident_value(member, "at") {
-        Some("center") => len / 2,
-        Some("left") => 0,
-        Some("right") => len.saturating_sub(1),
-        Some(other) => {
+    // `at=` is read by `super::walkway::door_anchor_offset`, the function
+    // a `connect` port on this door reads it with, and a refusal is worded
+    // by `door_at_deferral` from the same classification the port's note
+    // uses — so the cut, the walkway and both messages cannot disagree
+    // about what `at=` says. Asked before the wall below, the way
+    // `fill_window` reads its rectangle before asking where the masonry
+    // is, so an `at=` typo is reported as one on a body whose walls are
+    // also wrong.
+    let at = match door_anchor_offset(member, len) {
+        Ok(at) => at,
+        Err(written) => {
             diagnostics.push(diag_deferred_member_reason(
                 member,
-                &format!(
-                    "door `at={other}` is not yet supported (use `at=center | left | right`)",
-                ),
-            ));
-            return;
-        }
-        None => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                "door without `at=` is not yet supported (use `at=center | left | right`)",
+                &door_at_deferral(&written),
             ));
             return;
         }
     };
-    // Doors carve a 1-wide opening starting at v_local=1 (the row just
-    // above the floor of whichever level this door belongs to), capped
-    // at the wall column above this door so a short-wall door cannot
-    // overwrite roof voxels written in the envelope phase. The cap
-    // subtracts the level's `y_offset` from the struct's `wall_top` so a
-    // level-scoped door never punches past its own wall column — using
-    // `wall_top` directly (which now aggregates every level's walls)
-    // would let a `level y=8 door` carve at world y=9, 10 when the wall
-    // above only reaches y=9. Deferring instead of clamping to 0 when
-    // the level sits at or above `wall_top` keeps the failure loud: the
-    // author almost certainly wrote the door against a missing wall.
-    // The door block itself (`oak_door`, hinge / half / facing / open)
-    // is not yet placed; that landed deferred along with per-theme door
-    // materials.
-    let effective_top = ctx.wall_top.saturating_sub(y_offset);
-    if effective_top < 1 {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "door needs at least one wall voxel above its level to carve into",
-        ));
+    // Gate and cap both come from the course holding the row this door
+    // opens at — `y_offset + 1`, one above the level's base plane, which
+    // the floor slab owns — and never from the struct's tallest wall
+    // row: what stands over a shorter course is the gap above it or the
+    // roof the envelope phase wrote at `wall_top + 1`, so a door judged
+    // against `wall_top` carved that air, and one gated on "does the
+    // column hold anything" carved it without a word. `fill_window` asks
+    // the same column where its rectangle lands, so the two members
+    // answer one question.
+    let base_row = y_offset.saturating_add(1);
+    let Some(course_top) = ctx.wall_column.course_top_at(base_row) else {
+        // "Nowhere" and "not here" are different findings. An empty
+        // column means no `walls` member paints at all — which a
+        // positive `height=` does not settle, since a `mat_slot=` that
+        // does not resolve empties it too, and naming only the height
+        // would send an author who wrote `height=4` over a themeless
+        // struct to the wrong line. Same split as `fill_window`'s.
+        let reason = if ctx.wall_column.is_empty() {
+            "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into".to_owned()
+        } else {
+            format!(
+                "door opens at y={base_row}, which is not inside any wall course (the walls occupy {})",
+                ctx.wall_column,
+            )
+        };
+        diagnostics.push(diag_deferred_member_reason(member, &reason));
         return;
-    }
-    let door_height = effective_top.min(2);
-    for v_local in 1..=door_height {
-        let v = v_local.saturating_add(y_offset);
+    };
+    // The door block itself (`oak_door`, hinge / half / facing / open) is
+    // not yet placed; that landed deferred along with per-theme door
+    // materials.
+    let door_height = course_top
+        .saturating_sub(base_row)
+        .saturating_add(1)
+        .min(DOOR_HEIGHT);
+    for v_local in 0..door_height {
+        let v = base_row.saturating_add(v_local);
         let Some((x, y, z)) = wall_local_to_grid(
             side,
             at,
@@ -2939,6 +3539,21 @@ fn carve_door(
             ctx.interior_h,
             ctx.dims,
         ) else {
+            // INVARIANT(wall-grid-validated): `at` is below `len` by the
+            // match above, and every row the loop asks for is at most
+            // `course_top` because `door_height` is clamped to the course
+            // holding `base_row` — so the helper has nothing to reject.
+            // Reaching here means one of those two stopped agreeing with
+            // `wall_local_to_grid`'s `u < length` / `v < dims.y`. Loud in
+            // debug builds; release builds skip the cell rather than panic
+            // over one voxel.
+            debug_assert!(
+                false,
+                "door row y={v} at u={at} on the {} wall is outside the wall grid; \
+                 `at=` against `wall_length` / `door_height` against the course \
+                 stopped agreeing with `wall_local_to_grid`",
+                side_name(side),
+            );
             continue;
         };
         canvas.paint((x, y, z), || PaletteIndex::AIR);
@@ -2961,7 +3576,6 @@ fn carve_door(
 /// overwrite the wall itself). Overhang has to be at least 1 for the
 /// eave to sit outside the wall; without one the stair collapses onto
 /// the wall row and a `W_DEFERRED_MEMBER` fires instead.
-#[allow(clippy::too_many_lines)] // one linear defer-and-paint chain reads better than 6 tiny helpers
 fn fill_stair(
     member: &Member,
     y_offset: u32,
@@ -2970,26 +3584,83 @@ fn fill_stair(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Some(raw_kind) = ident_value(member, "kind") else {
+    // A value that is not an identifier at all (`half="bottom"`,
+    // `facing=1`) is unreadable rather than unsupported: the band is drawn
+    // with the default state. Read before anything can refuse the stair,
+    // so every unreadable state is reported in the same compile as the
+    // refusal, with a note that says which of the two happened.
+    let mut unread = Vec::new();
+    let mut ident = |key: &'static str, expected: &'static str, default: &'static str| {
+        ident_or_ignore(member, key, expected).unwrap_or_else(|argument| {
+            unread.push((argument, default));
+            None
+        })
+    };
+    let states = EaveStates {
+        facing: ident("facing", "`out` or `in`", "out"),
+        half: ident("half", "`top` or `bottom`", "top"),
+        shape: ident(
+            "shape",
+            "`straight`, `outer_left`, or `outer_right`",
+            "straight",
+        ),
+    };
+    let built = draw_eave_band(member, states, y_offset, ctx, palette, canvas, diagnostics);
+    for (argument, default) in unread {
+        let consequence = if built {
+            format!(
+                "the stair is built with the default `{}={default}`",
+                argument.key
+            )
+        } else {
+            "this stair is not built either way — see the finding on the same line".to_owned()
+        };
+        diagnostics.push(argument.report(&consequence));
+    }
+}
+
+/// The three state arguments of an eave `stair`, as identifiers: `None`
+/// is a key not written, or written with a value [`fill_stair`] could not
+/// read, and either way takes the default.
+#[derive(Debug, Clone, Copy)]
+struct EaveStates<'m> {
+    facing: Option<&'m str>,
+    half: Option<&'m str>,
+    shape: Option<&'m str>,
+}
+
+/// [`fill_stair`]'s refusals and paint. Returns whether the band was drawn,
+/// which is what the note on an unreadable state has to say.
+#[allow(clippy::too_many_lines)] // one linear defer-and-paint chain reads better than 6 tiny helpers
+fn draw_eave_band(
+    member: &Member,
+    states: EaveStates<'_>,
+    y_offset: u32,
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    canvas: &mut MemberCanvas<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let Some(raw_kind) = member.ident_value("kind") else {
         let reason = if member.intent_state.contains_key("kind") {
             "stair `kind=` must be `stairs`"
         } else {
             "stair without `kind=` is not yet supported (currently only `kind=stairs`)"
         };
         diagnostics.push(diag_deferred_member_reason(member, reason));
-        return;
+        return false;
     };
     if raw_kind != "stairs" {
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!("stair `kind={raw_kind}` is not yet supported (currently only `kind=stairs`)"),
         ));
-        return;
+        return false;
     }
     let Some(side) = side_of(member, diagnostics) else {
-        return;
+        return false;
     };
-    let half = match ident_value(member, "half") {
+    let half = match states.half {
         Some("top") | None => "top",
         Some("bottom") => "bottom",
         Some(other) => {
@@ -2997,10 +3668,10 @@ fn fill_stair(
                 member,
                 &format!("stair `half={other}` is not yet supported (use `top` or `bottom`)"),
             ));
-            return;
+            return false;
         }
     };
-    let facing = match ident_value(member, "facing") {
+    let facing = match states.facing {
         Some("out") | None => shed_high_side(side),
         Some("in") => inward_cardinal(side),
         Some(other) => {
@@ -3008,10 +3679,10 @@ fn fill_stair(
                 member,
                 &format!("stair `facing={other}` is not yet supported (use `out` or `in`)"),
             ));
-            return;
+            return false;
         }
     };
-    let shape = match ident_value(member, "shape") {
+    let shape = match states.shape {
         Some("straight") | None => StairShape::Straight,
         Some("outer_left") => StairShape::OuterLeft,
         Some("outer_right") => StairShape::OuterRight,
@@ -3022,7 +3693,7 @@ fn fill_stair(
                     "stair `shape={other}` is not yet supported (use `straight`, `outer_left`, or `outer_right`)",
                 ),
             ));
-            return;
+            return false;
         }
     };
     // The gate is the overhang the roof *draws*, not the `overhang=` the
@@ -3034,12 +3705,12 @@ fn fill_stair(
             member,
             "eave `stair` needs a roof that draws an overhang of at least 1 so the band can sit outside the wall — no roof on this struct contributes one",
         ));
-        return;
+        return false;
     }
     let y_local = match nonneg_int_or_defer(member, "y", diagnostics) {
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return,
+        NonNegRead::Deferred => return false,
     };
     let y_world = y_local.saturating_add(y_offset);
     if y_world >= ctx.dims.y {
@@ -3050,7 +3721,7 @@ fn fill_stair(
                 ctx.dims.y,
             ),
         ));
-        return;
+        return false;
     }
     // An eave band is a row of stairs whose `facing` / `half` / `shape`
     // come from the member's own arguments rather than from a slope, but
@@ -3068,7 +3739,7 @@ fn fill_stair(
         ctx.scope,
         resolved.as_ref(),
         STAIR_BASE_ID,
-        &MemberShape {
+        &GeometryMemberDescription {
             subject: "eave `stair`".to_owned(),
             states_from: "its own arguments",
             // An eave is a row of stairs by construction — `fill_stair`
@@ -3089,11 +3760,25 @@ fn fill_stair(
             ctx.interior_h,
             ctx.dims,
         ) else {
+            // INVARIANT(wall-grid-validated): `u` walks `0..length`, the
+            // same length the helper checks, and any `y_world >= dims.y`
+            // was refused above with a diagnostic — so the helper has
+            // nothing to reject. Reaching here means one of those stopped
+            // agreeing with `wall_local_to_grid`. Loud in debug builds;
+            // release builds skip the cell rather than panic.
+            debug_assert!(
+                false,
+                "eave stair cell u={u} y={y_world} on the {} wall is outside the wall grid; \
+                 the band's `u < wall_length` / `y_world < dims.y` checks stopped agreeing \
+                 with `wall_local_to_grid`",
+                side_name(side),
+            );
             continue;
         };
         let (x, z) = shift_outward(side, wx, wz);
         canvas.paint((x, y_world, z), || idx);
     }
+    true
 }
 
 /// Opposite of the wall's outward normal — used for `facing=in`.
@@ -3115,24 +3800,19 @@ fn inward_cardinal(side: WallSide) -> Cardinal {
 /// normal so an eave lands in the overhang row instead of overwriting the
 /// wall itself.
 fn shift_outward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
-    match side {
-        WallSide::Front => (x, z.saturating_add(1)),
-        WallSide::Back => (x, z.saturating_sub(1)),
-        WallSide::Left => (x.saturating_sub(1), z),
-        WallSide::Right => (x.saturating_add(1), z),
-    }
+    let (dx, dz) = side.outward_normal();
+    (x.saturating_add_signed(dx), z.saturating_add_signed(dz))
 }
 
-/// Shift a wall voxel's `(x, z)` by one voxel toward the interior so a
-/// fixture placed with `at=inside.<side>` sits on the interior floor row
-/// next to the wall rather than overwriting the wall itself.
+/// Shift a wall voxel's `(x, z)` by one voxel toward the interior, the
+/// cell an `at=inside.<side>` fixture sits on at whatever row it asks for.
+///
+/// The step saturates at 0 and never checks the result: whether the cell
+/// is really inside the building, rather than a block of another wall, is
+/// [`inside_plate_refusal`]'s question, asked by the caller.
 fn shift_inward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
-    match side {
-        WallSide::Front => (x, z.saturating_sub(1)),
-        WallSide::Back => (x, z.saturating_add(1)),
-        WallSide::Left => (x.saturating_add(1), z),
-        WallSide::Right => (x.saturating_sub(1), z),
-    }
+    let (dx, dz) = side.outward_normal();
+    (x.saturating_add_signed(-dx), z.saturating_add_signed(-dz))
 }
 
 /// Which side of the wall a `pressure_plate at=…` anchor sits on.
@@ -3245,7 +3925,7 @@ fn fill_pressure_plate(
     else {
         return;
     };
-    let Some(base_id) = resolve_plate_base_id(member, ctx, diagnostics) else {
+    let Some(base_id) = plate_id_for_member(member, ctx, diagnostics) else {
         return;
     };
     // Interned only once the cell is known to exist. `plate_voxel_position`
@@ -3265,7 +3945,9 @@ fn fill_pressure_plate(
 /// Resolve a `pressure_plate` anchor + `offset=` + `y=` into the world
 /// voxel `(x, y, z)` the plate should paint onto, or `None` (with a
 /// diagnostic already pushed) when any of the inputs is missing / out
-/// of range / lands outside the block array.
+/// of range / lands outside the block array. The one `None` without a
+/// diagnostic is the `INVARIANT(wall-grid-validated)` arm, which the
+/// checks before it make unreachable and which asserts in debug builds.
 ///
 /// `<side>.outside` shifts one voxel toward the exterior. When the
 /// shift lands outside the struct's dims *and* `y_world == 0`, it falls
@@ -3276,9 +3958,11 @@ fn fill_pressure_plate(
 /// phase painted, so `y_world >= 1` without a usable exterior cell
 /// defers instead.
 ///
-/// `inside.<side>` always shifts one voxel inward and defers when the
-/// shift saturates onto the wall itself (a 1-voxel-thin struct has no
-/// interior cell adjacent to any wall).
+/// `inside.<side>` always shifts one voxel inward and defers unless the
+/// shifted cell is strictly inside the wall ring on both horizontal axes
+/// (see [`inside_plate_refusal`]), at every row including the floor row:
+/// otherwise the plate would sit on the ring, where the walls paint their
+/// courses, or outside the building altogether.
 fn plate_voxel_position(
     member: &Member,
     y_offset: u32,
@@ -3328,15 +4012,21 @@ fn plate_voxel_position(
         ctx.interior_h,
         ctx.dims,
     ) else {
-        // Preceding bounds checks (`y_world < dims.y`, `offset < length`)
-        // already cover every rejection `wall_local_to_grid` performs
-        // today. Turning the `None` into a defer keeps the guard honest
-        // if that helper grows a new failure mode: a silent skip would
-        // let plates disappear without a diagnostic.
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "pressure_plate anchor did not map onto the wall grid (internal invariant broken)",
-        ));
+        // INVARIANT(wall-grid-validated): the two refusals above
+        // (`y_world >= dims.y`, `offset >= length`) each pushed their own
+        // diagnostic and returned, and they are every rejection
+        // `wall_local_to_grid` performs — so it has nothing to reject.
+        // Reaching here means one of them stopped agreeing with the
+        // helper, which is a compiler bug, not something the author can
+        // act on, so it is an assertion rather than a warning. Loud in
+        // debug builds; release builds drop the plate.
+        debug_assert!(
+            false,
+            "pressure_plate cell u={offset} y={y_world} on the {} wall is outside the wall grid; \
+             the `offset < wall_length` / `y_world < dims.y` checks stopped agreeing with \
+             `wall_local_to_grid`",
+            side_name(side),
+        );
         return None;
     };
     match anchor {
@@ -3370,19 +4060,109 @@ fn plate_voxel_position(
         }
         PlateAnchor::Inside(_) => {
             let (sx, sz) = shift_inward(side, wx, wz);
-            if (sx, sz) == (wx, wz) {
-                diagnostics.push(diag_deferred_member_reason(
-                    member,
-                    &format!(
-                        "pressure_plate `at=inside.{}`: no interior voxel to place the fixture on",
-                        side_name(side),
-                    ),
-                ));
+            if let Some(mut reason) = inside_plate_refusal(side, offset, y_world, (sx, sz), ctx) {
+                if member.binding.is_some() {
+                    // The redstone pass reads the binding, not the block
+                    // array, so the signal outlives the refused block.
+                    reason.push_str(
+                        ". Its signal binding still reaches the netlist, with no plate placed to drive it",
+                    );
+                }
+                diagnostics.push(diag_deferred_member_reason(member, &reason));
                 return None;
             }
             Some((sx, y_world, sz))
         }
     }
+}
+
+/// Why an `at=inside.<side>` plate whose inward step landed on `(sx, sz)`
+/// at row `y` has no interior cell to sit on, or `None` when it has one.
+///
+/// The interior is what the wall ring encloses. The ring is the
+/// footprint's outermost row and column, offset by the roof overhang, and
+/// it is where `walls` paint their courses, so only a cell strictly inside
+/// it can take a plate without replacing a wall block. The ring is decided
+/// from the footprint whether or not a `walls` member paints it, so a cell
+/// on or outside it is refused either way, and the reason claims a wall
+/// only at a row one is painted on.
+fn inside_plate_refusal(
+    side: WallSide,
+    offset: u32,
+    y: u32,
+    (sx, sz): (u32, u32),
+    ctx: &StructCtx<'_>,
+) -> Option<String> {
+    // Saturation cannot turn an outside cell into an inside one: that
+    // needs `overhang + extent > u32::MAX`, where `dims` saturates too and
+    // `fits_volume_budget` has already dropped the struct.
+    let strictly_inside = |c: u32, extent: u32| {
+        c > ctx.overhang && c < ctx.overhang.saturating_add(extent).saturating_sub(1)
+    };
+    if strictly_inside(sx, ctx.interior_w) && strictly_inside(sz, ctx.interior_h) {
+        return None;
+    }
+    let name = side_name(side);
+    let length = wall_length(side, ctx.interior_w, ctx.interior_h);
+    // An interior needs one voxel between two walls on each axis, so a
+    // size below 3 on either axis has none for any side or offset.
+    let thin: Vec<(&str, u32)> = [("w", ctx.interior_w), ("h", ctx.interior_h)]
+        .into_iter()
+        .filter(|&(_, extent)| extent < 3)
+        .collect();
+    // With both axes at least 3, every offset but the two ends steps into
+    // the interior, so a refusal with no thin axis is always a corner.
+    let corner = thin.is_empty() || offset == 0 || offset == length - 1;
+    let valid_offsets = if length >= 3 {
+        format!("from 1 to {}", length - 2)
+    } else {
+        "away from both ends of the wall".to_owned()
+    };
+    if thin.is_empty() {
+        let inside_it = if ctx.wall_column.course_top_at(y).is_some() {
+            "belongs to the neighbouring wall"
+        } else {
+            "is not an interior cell of this struct"
+        };
+        return Some(format!(
+            "pressure_plate `at=inside.{name} offset={offset}` is at a corner of the {name} wall, \
+             so the voxel inside it {inside_it}; use an `offset=` {valid_offsets} to reach an \
+             interior voxel",
+        ));
+    }
+    let also_corner = if corner {
+        format!(", and `offset={offset}` is at a corner of the {name} wall besides")
+    } else {
+        String::new()
+    };
+    let sizes = thin
+        .iter()
+        .map(|(axis, extent)| format!("size.{axis} is {extent}"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    let grow = thin
+        .iter()
+        .map(|(axis, _)| format!("`size.{axis}` to at least 3"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+    let use_offset = if corner {
+        format!(" and use an `offset=` {valid_offsets}")
+    } else {
+        String::new()
+    };
+    // Without an overhang `<side>.outside` finds no exterior cell above
+    // the floor row and, at it, falls back to the cell under the wall, so
+    // it is a remedy only when a roof draws an overhang ring to sit in.
+    let outside = if ctx.overhang > 0 {
+        format!(", or anchor the plate with `at={name}.outside`")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "pressure_plate `at=inside.{name} offset={offset}`: the struct's {sizes}, so it has no \
+         interior voxel{also_corner}; an interior needs a size of at least 3 on both axes. \
+         Grow {grow}{use_offset}{outside}",
+    ))
 }
 
 /// Resolve a `pressure_plate` `mat_slot=` binding into the concrete
@@ -3406,7 +4186,7 @@ fn plate_voxel_position(
 /// keeps painting) — `pressure_plate` has no geometry-derived state
 /// axis of its own, so the plain-plate fallback carries less signal
 /// than the stair band's does.
-fn resolve_plate_base_id(
+fn plate_id_for_member(
     member: &Member,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -3432,7 +4212,7 @@ fn resolve_plate_base_id(
     }
     match resolved {
         Some(state) => Some(state.id),
-        None => plate_base_id(member, ctx.registry, diagnostics),
+        None => pack_plate_default(member, ctx.registry, diagnostics),
     }
 }
 
@@ -3444,14 +4224,14 @@ fn resolve_plate_base_id(
 /// pack declares no such row. A pack that declares it wins, which is how
 /// `--edition bedrock` stops emitting the Java-only `oak_pressure_plate`.
 ///
-/// The result goes through [`check_id`] because it reaches the palette
+/// The result goes through [`validated_id`] because it reaches the palette
 /// without passing [`resolve_block_state`]. Skipping it would leave one
 /// path in the build — the one whose default is edition-specific and
 /// whose fallback is a Java spelling — writing an id nothing verified,
 /// which is the failure this whole pass exists to remove. Returns `None`
 /// after diagnosing, so the plate is dropped rather than painted with an
 /// id the target has no block for.
-fn plate_base_id(
+fn pack_plate_default(
     member: &Member,
     registry: Option<&dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -3470,20 +4250,21 @@ fn plate_base_id(
             },
         ),
     };
-    match check_id(state, registry, &origin) {
+    match validated_id(state, registry, &origin) {
         Ok(state) => Some(state.id),
         Err(MaterialDeferred::UnknownId(unknown)) => {
             diagnostics.push(diag_unknown_id(member.span.clone(), &unknown));
             None
         }
-        // INVARIANT(check-id-refuses-one-way): `check_id` returns either
+        // INVARIANT(validated-id-refuses-one-way): `validated_id` returns either
         // the state or `UnknownId`; it has no path to the three deferral
         // variants, which describe how a `mat_slot=` value failed to
         // resolve and there is no such value here.
         Err(other) => {
             debug_assert!(
                 false,
-                "check_id returned {other:?} for the pressure plate default,                  which resolves no mat_slot= value",
+                "validated_id returned {other:?} for the pressure plate default, \
+                 which resolves no mat_slot= value",
             );
             None
         }
@@ -3494,10 +4275,11 @@ fn plate_base_id(
 /// voxels.
 ///
 /// `circuit` reserves a routing region for the future
-/// `logic_synth → logic_place → logic_route` passes (spec/redstone.md
-/// §14.5 / §14.8). Nothing lands in the block array at this stage — the
-/// physical dust / repeater / cell tiles are decided by the logic layer,
-/// which is not part of block-array lowering yet. Recognising the shape
+/// `logic_synth → logic_place → logic_route` passes (`spec/redstone`
+/// "Place-and-route" and "Connection to the IR and phases"). Nothing lands in
+/// the block array at this stage — the physical dust / repeater / cell tiles
+/// are decided by the logic layer, which is not part of block-array lowering
+/// yet. Recognising the shape
 /// here (rather than defaulting to `W_DEFERRED_MEMBER`) keeps
 /// `redstone-door.crn` from firing a per-source-line warning while the
 /// downstream passes are still under construction, mirroring how
@@ -3578,15 +4360,16 @@ const ACTUATOR_PATCH_SELECTOR_KEYS: &[&str] = &["id"];
 
 /// The only intent-state key an actuator patch recognises today. Extending
 /// this list to `lit_by` / `powered_by` / `fired_by` requires landing the
-/// matching keyword in the role table first (spec/redstone.md §14.2).
+/// matching keyword in the role table first (`spec/redstone` "Signal
+/// binding").
 const ACTUATOR_PATCH_INTENT_KEYS: &[&str] = &["opened_by"];
 
 /// A door member is an **actuator patch** when its surface line uses the
 /// selector form (`door[…] …`). The bracketed selector references an
 /// already-declared physical door by `id=`; its role in block-array
 /// lowering is pure metadata (an `opened_by=` signal binding for the
-/// future redstone lowering pipeline, `spec/redstone.md` §14.2). Routing
-/// patch lines through `carve_door` would false-positive `side_of`'s
+/// future redstone lowering pipeline, `spec/redstone` "Signal binding").
+/// Routing patch lines through `carve_door` would false-positive `side_of`'s
 /// "missing `side=`" guard, so `lower_body_to_block_array` peels them off
 /// before the phase-bucketing match. Whether the patch also carries
 /// stray `side=` / `at=` keys is checked inside the recogniser, not
@@ -3622,7 +4405,7 @@ fn is_actuator_patch(member: &Member) -> bool {
 ///   two scopes the flattener merges) defers separately with an
 ///   "ambiguous" primary so the author is never silently rebinding the
 ///   first hit.
-/// - `opened_by=` must be present. `spec/redstone.md` §14.2 also
+/// - `opened_by=` must be present. `spec/redstone` "Signal binding" also
 ///   defines `lit_by=` on lamps, `powered_by=` on pistons, and
 ///   `fired_by=` on dispensers, but those keywords are not yet in the
 ///   role table — door + `opened_by` is the only shape
@@ -3631,7 +4414,7 @@ fn is_actuator_patch(member: &Member) -> bool {
 ///   `powered_by=` implementation cannot silently change the meaning
 ///   of existing source (see [`ACTUATOR_PATCH_INTENT_KEYS`]).
 /// - The `opened_by=` value must be a two-segment `sig.<name>`
-///   `DotRef`. Non-`DotRef` values defer with a "got <kind>" primary;
+///   `DotRef`. Non-`DotRef` values defer with a "got `<kind>`" primary;
 ///   a `DotRef` whose head is not `sig` or whose segment count is not
 ///   2 defers with the offending path rendered verbatim.
 ///
@@ -3646,7 +4429,6 @@ fn is_actuator_patch(member: &Member) -> bool {
 /// phase-bucketing loop iterates over. Passed as a slice so the
 /// recogniser can look up physical doors without a second walk of the
 /// intent IR.
-#[allow(clippy::too_many_lines)] // one linear surface-guard chain reads better than 8 tiny helpers
 fn recognize_actuator_patch(
     member: &Member,
     siblings: &[(u32, &Member)],
@@ -3665,10 +4447,18 @@ fn recognize_actuator_patch(
     let Some(selector) = member.selector.as_ref() else {
         return;
     };
+    // Only keys a `door` does carry. One outside the role's vocabulary is
+    // `check::arguments`' `E_UNKNOWN_ARGUMENT`, which names it, offers the
+    // word it may be a typo for, and reaches an unpinned `cairn check`
+    // that runs no lowering at all — so repeating it here would bill one
+    // repair twice. What is left for this recogniser is the key that
+    // passes a `door`'s vocabulary and still has no reader in the patch,
+    // `door[side=front]` being the shape.
+    let vocabulary = member.role.accepted_arguments().unwrap_or_default();
     let unknown_selector_keys: Vec<&str> = selector
         .keys()
         .map(String::as_str)
-        .filter(|k| !ACTUATOR_PATCH_SELECTOR_KEYS.contains(k))
+        .filter(|k| !ACTUATOR_PATCH_SELECTOR_KEYS.contains(k) && vocabulary.contains(k))
         .collect();
     if !unknown_selector_keys.is_empty() {
         diagnostics.push(diag_deferred_member_reason(
@@ -3680,77 +4470,19 @@ fn recognize_actuator_patch(
         ));
         return;
     }
-    let Some(id_value) = selector.get("id") else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "door actuator patch requires an `[id=<label>]` selector naming the physical door to bind against",
-        ));
+    // Which door the brackets pick is read from the one place the
+    // redstone front end reads it too, so the patch this defers is the
+    // patch that gets no port there.
+    if let Err(reason) = actuator_patch_target(member, siblings.iter().map(|&(_, m)| m)) {
+        let mut diagnostic = diag_deferred_member_reason(member, &reason.to_string());
+        if let Some(fix) = patch_target_fix(&reason) {
+            diagnostic.notes.push(DiagnosticNote {
+                span: None,
+                message: fix,
+            });
+        }
+        diagnostics.push(diagnostic);
         return;
-    };
-    let Some(id_label) = id_value.value.as_label_str() else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!(
-                "door actuator patch `[id=]` selector must be an identifier or string label, got {}",
-                id_value.value.kind_name(),
-            ),
-        ));
-        return;
-    };
-    // Walk the flattened view to gather every physical door's id along
-    // with an occurrence count. A physical door is `MemberRole::Door`
-    // with no selector of its own — a selector-bearing door would be
-    // another patch, not a target. Source order is preserved for the
-    // "known door ids" listing so the rendering is stable across runs.
-    // The occurrence count catches the ambiguous shape a top-level
-    // `door id=X` plus a `level y=N door id=X` produces after
-    // flattening — `duplicate` runs per-scope and does not flag it, so
-    // a silent "first hit wins" would let the patch bind to whichever
-    // door happened to sort first.
-    let mut physical_door_ids: Vec<(&str, u32)> = Vec::new();
-    for (_, m) in siblings {
-        if !matches!(m.role, MemberRole::Door) || m.selector.is_some() {
-            continue;
-        }
-        let Some(door_id) = m.id.as_deref() else {
-            continue;
-        };
-        if let Some((_, count)) = physical_door_ids.iter_mut().find(|(id, _)| *id == door_id) {
-            *count = count.saturating_add(1);
-        } else {
-            physical_door_ids.push((door_id, 1));
-        }
-    }
-    let selected = physical_door_ids
-        .iter()
-        .find(|(id, _)| *id == id_label)
-        .copied();
-    match selected {
-        Some((_, count)) if count >= 2 => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "door actuator patch selects `id={id_label}` but the same id is declared on {count} physical doors in this scope; disambiguate the target before binding an actuator signal",
-                ),
-            ));
-            return;
-        }
-        Some(_) => {}
-        None => {
-            let known_list = if physical_door_ids.is_empty() {
-                "no physical door members are declared in this scope".to_owned()
-            } else {
-                let ids: Vec<&str> = physical_door_ids.iter().map(|(id, _)| *id).collect();
-                format!("known door ids: {}", ids.join(", "))
-            };
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "door actuator patch selects `id={id_label}` but no physical door with that id exists ({known_list})",
-                ),
-            ));
-            return;
-        }
     }
     let unknown_intent_keys: Vec<&str> = member
         .intent_state
@@ -3762,7 +4494,9 @@ fn recognize_actuator_patch(
         diagnostics.push(diag_deferred_member_reason(
             member,
             &format!(
-                "door actuator patch accepts only `opened_by=sig.<name>` today; unknown attribute(s): {} (spec/redstone.md §14.2 reserves `lit_by=` / `powered_by=` / `fired_by=` for future keywords)",
+                "door actuator patch accepts only `opened_by=sig.<name>` today; unknown \
+                 attribute(s): {} (spec/redstone \"Signal binding\" reserves `lit_by=` / \
+                 `powered_by=` / `fired_by=` for future keywords)",
                 unknown_intent_keys.join(", "),
             ),
         ));
@@ -3805,7 +4539,6 @@ fn recognize_actuator_patch(
     }
 }
 
-#[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn fill_window(
     member: &Member,
     y_offset: u32,
@@ -3814,36 +4547,68 @@ fn fill_window(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // An unreadable `sym=` (`sym=yes`, `sym="true"`) draws the window
+    // unmirrored. Read before anything can refuse the window, so it is
+    // reported in the same compile as a refusal, with a note that says
+    // which of the two happened.
+    let (sym, sym_unread) = match read_or_ignore(
+        member,
+        "sym",
+        |kind| match kind {
+            ValueKind::Bool(b) => Some(*b),
+            _ => None,
+        },
+        "`true` or `false`",
+    ) {
+        Ok(sym) => (sym.unwrap_or(false), None),
+        Err(unread) => (false, Some(unread)),
+    };
+    let cut = cut_window(member, sym, y_offset, ctx, palette, canvas, diagnostics);
+    diagnostics.extend(sym_unread.map(|unread| {
+        unread.report(if cut {
+            "the window is drawn without its mirror, as `sym=false` would draw it"
+        } else {
+            "this window is not cut either way — see the finding on the same line"
+        })
+    }));
+}
+
+/// [`fill_window`]'s refusals and paint, with `sym=` already read. Returns
+/// whether the primary rectangle was cut, which is what the note on an
+/// unreadable `sym=` has to say.
+#[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
+fn cut_window(
+    member: &Member,
+    sym: bool,
+    y_offset: u32,
+    ctx: &StructCtx<'_>,
+    palette: &mut Palette,
+    canvas: &mut MemberCanvas<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
     let Some(side) = side_of(member, diagnostics) else {
-        return;
+        return false;
     };
     // `offset=` defaults to 0 (the wall-local axis origin) when absent, so a
     // decorative repeat=N series can be authored as `window ... repeat=N
-    // step=M size=WxH` without a redundant `offset=0`. A key that is
-    // present but not a non-negative integer still defers — validation is
-    // stricter than "missing" and matches how `repeat=` and `step=` treat
-    // the same shape below.
-    let offset = match nonneg_int_or_defer(member, "offset", diagnostics) {
-        NonNegRead::Valid(v) => v,
-        NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return,
-    };
-    let Some(y_start_local) = nonneg_int(member, "y") else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "window without `y=` is not yet supported",
-        ));
-        return;
+    // step=M size=WxH` without a redundant `offset=0`; `y=` and `size=` are
+    // required. A key that is present but ill-shaped defers, with a reason
+    // that says so rather than calling it missing. Read by
+    // `super::walkway::read_window_args`, which a `connect` port on this
+    // window reads the same three with.
+    let WindowArgs {
+        offset,
+        y: y_start_local,
+        width: sw,
+        height: sh,
+    } = match read_window_args(member) {
+        Ok(args) => args,
+        Err(fault) => {
+            diagnostics.push(diag_deferred_member_reason(member, &fault.deferral()));
+            return false;
+        }
     };
     let y_start = y_start_local.saturating_add(y_offset);
-    let Some((sw, sh)) = size_value(member, "size") else {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "window without `size=WxH` is not yet supported",
-        ));
-        return;
-    };
-    let sym = bool_value(member, "sym").unwrap_or(false);
     // `repeat=` stamps the same rectangle multiple times along the wall,
     // separated by `step=` voxels. Both keys are optional: an absent
     // `repeat` collapses to a single instance (the pre-repeat
@@ -3864,30 +4629,30 @@ fn fill_window(
                 member,
                 "window `repeat=0` would stamp no instances; drop the window instead",
             ));
-            return;
+            return false;
         }
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 1,
-        NonNegRead::Deferred => return,
+        NonNegRead::Deferred => return false,
     };
     let step = match nonneg_int_or_defer(member, "step", diagnostics) {
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return,
+        NonNegRead::Deferred => return false,
     };
     if repeat > 1 && sym {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "window with both `repeat=` and `sym=true` is not yet supported",
         ));
-        return;
+        return false;
     }
     if repeat > 1 && step == 0 {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "window `repeat=` requires a positive `step=` so instances do not overlap",
         ));
-        return;
+        return false;
     }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let span_end = offset
@@ -3901,7 +4666,7 @@ fn fill_window(
                 side_name(side),
             ),
         ));
-        return;
+        return false;
     }
     // A window is a rectangle cut into a wall, so every row it cuts has
     // to be a row some `walls` member painted — not merely a row below
@@ -3922,15 +4687,21 @@ fn fill_window(
             format!(
                 "window at y={y_start} size={sw}x{sh} has no wall to cut into (this struct declares no `walls` that paints — one with a positive `height=` and a `mat_slot=` that resolves)",
             )
-        } else {
-            let last = y_start.saturating_add(sh).saturating_sub(1);
+        } else if let Some(last) = y_start.checked_add(sh.saturating_sub(1)) {
             format!(
                 "window rows y={y_start}..={last} are not all inside one wall course (size={sw}x{sh}; the walls occupy {})",
                 ctx.wall_column,
             )
+        } else {
+            // Saturating here printed `y=4294967295..=4294967294`, a range
+            // that ends before it starts.
+            format!(
+                "window rows from y={y_start} run past the highest row a build can address (size={sw}x{sh}; the walls occupy {})",
+                ctx.wall_column,
+            )
         };
         diagnostics.push(diag_deferred_member_reason(member, &reason));
-        return;
+        return false;
     }
     // Resolved below the two geometry checks above, not before them: both
     // return without painting, and a palette entry claimed on the way to
@@ -3953,7 +4724,7 @@ fn fill_window(
             diagnostics,
             ctx.theme_missing,
         ) else {
-            return;
+            return false;
         };
         idx
     } else {
@@ -3983,7 +4754,7 @@ fn fill_window(
         if mirror_offset == offset {
             // The mirror sits exactly on top of the primary; emitting it
             // again would be a no-op so we silently coalesce.
-            return;
+            return true;
         }
         // Reject overlapping mirrors: a `sym=true` window asks for a
         // *pair*, not one wide span. If the two rectangles intersect the
@@ -4001,7 +4772,7 @@ fn fill_window(
                     side_name(side),
                 ),
             ));
-            return;
+            return true;
         }
         paint_window_rect(
             ctx,
@@ -4012,6 +4783,7 @@ fn fill_window(
             canvas,
         );
     }
+    true
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -4027,24 +4799,42 @@ struct WindowRect {
 fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut MemberCanvas<'_>) {
     for du in 0..rect.width {
         for dv in 0..rect.height {
-            let Some((x, y, z)) = wall_local_to_grid(
+            let along = rect.offset.saturating_add(du);
+            let row = rect.y_start.saturating_add(dv);
+            let Some(cell) = wall_local_to_grid(
                 rect.side,
-                rect.offset + du,
-                rect.y_start + dv,
+                along,
+                row,
                 ctx.overhang,
                 ctx.interior_w,
                 ctx.interior_h,
                 ctx.dims,
             ) else {
+                // INVARIANT(wall-grid-validated): `fill_window` refused any
+                // span past the wall (`span_end = offset + step*(repeat-1) +
+                // size.w` is at most the wall length, which also bounds the
+                // `sym=true` mirror) and any row outside a wall course before
+                // it got here — so the helper has nothing to reject. Reaching
+                // here means one of those checks stopped agreeing with
+                // `wall_local_to_grid`. Loud in debug builds; release builds
+                // skip the cell rather than panic.
+                debug_assert!(
+                    false,
+                    "window cell u={along} y={row} on the {} wall is outside the wall grid; \
+                     `fill_window`'s span check (`offset + step*(repeat-1) + size.w <= wall \
+                     length`, which also bounds the mirror) / wall-course check stopped \
+                     agreeing with `wall_local_to_grid`",
+                    side_name(rect.side),
+                );
                 continue;
             };
-            canvas.paint((x, y, z), || rect.palette_index);
+            canvas.paint(cell, || rect.palette_index);
         }
     }
 }
 
 fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
-    let Some(raw) = ident_value(member, "side") else {
+    let Some(raw) = member.ident_value("side") else {
         // Distinguish "missing entirely" (no `side=` key) from "wrong
         // type" (`side=` present but its value is not an identifier). A
         // silent return on the missing case would let a `door at=center`
@@ -4148,6 +4938,31 @@ fn diag_deferred_member(member: &Member) -> Diagnostic {
     )
 }
 
+/// The repair for a patch whose selector picks no single member, where
+/// the reason alone does not point at one.
+///
+/// [`PatchTargetError`]'s sentence states the fault and stops, so the
+/// repair is said here. A missing or malformed `id=` and an id beside the
+/// ones the reason lists already name the edit; an id that two members
+/// carry, or a scope whose members carry none, does not.
+fn patch_target_fix(reason: &PatchTargetError) -> Option<String> {
+    let keyword = reason.keyword();
+    match reason {
+        PatchTargetError::Ambiguous { count, .. } => Some(format!(
+            "Fix: give the {count} `{keyword}` members distinct ids, so the selector names one."
+        )),
+        PatchTargetError::NoSuchId {
+            id,
+            known,
+            unlabelled,
+            ..
+        } if known.is_empty() && *unlabelled > 0 => Some(format!(
+            "Fix: add `id={id}` to the `{keyword}` this patch is meant to bind."
+        )),
+        _ => None,
+    }
+}
+
 fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DeferredMember,
@@ -4163,77 +4978,6 @@ fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
                       will be added as their lowering rules are spec'd"
                 .to_owned(),
         }],
-        data: None,
-    }
-}
-
-/// The member is in the build; one of its arguments is not.
-///
-/// The note carries the consequence rather than the role table
-/// `diag_deferred_member_reason` attaches, because the role is not the
-/// problem: the value the author wrote was dropped, and what that did to
-/// the output is the caller's to say. The primary stops at "the value was
-/// ignored" for the same reason — whether the member is in the build is
-/// not a fact this function has.
-fn diag_ignored_argument(member: &Member, key: &str, consequence: &str) -> Diagnostic {
-    Diagnostic {
-        code: DiagnosticCode::IgnoredArgument,
-        span: member.span.clone(),
-        primary: format!(
-            "`{key}=` must be a non-negative integer that fits in u32; the value was ignored",
-        ),
-        notes: vec![DiagnosticNote {
-            span: None,
-            message: consequence.to_owned(),
-        }],
-        data: None,
-    }
-}
-
-fn diag_abstract_token(member: &Member, token: &str, slot: &ValueWithSpan) -> Diagnostic {
-    Diagnostic {
-        code: DiagnosticCode::AbstractTokenDeferred,
-        span: member_or_slot_span(member, slot),
-        primary: format!(
-            "abstract token `@{token}` cannot be lowered without the registry pack; the cell falls back to air",
-        ),
-        notes: vec![DiagnosticNote {
-            span: None,
-            message:
-                "use a canonical block token (e.g. `@oak_planks`) until the registry pack ships"
-                    .to_owned(),
-        }],
-        data: None,
-    }
-}
-
-fn diag_unknown_abstract_token(
-    member: &Member,
-    token: &str,
-    suggestion: Option<&str>,
-    slot: &ValueWithSpan,
-) -> Diagnostic {
-    let primary = format!(
-        "abstract token `@{token}` is not declared by the registry pack's materials catalog",
-    );
-    let mut notes = Vec::with_capacity(2);
-    if let Some(s) = suggestion {
-        notes.push(DiagnosticNote {
-            span: None,
-            message: format!("did you mean `@{s}`?"),
-        });
-    }
-    notes.push(DiagnosticNote {
-        span: None,
-        message: "abstract material tokens must be declared in the pack's `materials` catalog \
-                  (see `spec/materials-themes.md` §7.2)"
-            .to_owned(),
-    });
-    Diagnostic {
-        code: DiagnosticCode::UnknownAbstractToken,
-        span: member_or_slot_span(member, slot),
-        primary,
-        notes,
         data: None,
     }
 }
@@ -4349,13 +5093,26 @@ mod tests {
         entries: Vec<(&'static str, &'static str)>,
         /// Sorted, fully namespaced ids the pinned target declares.
         ids: Vec<String>,
+        /// One alias group, in the order a pack wrote it. Empty for a pack
+        /// shipping no `aliases` component.
+        group: Vec<String>,
     }
 
     impl PinnedRegistry {
         fn new(entries: Vec<(&'static str, &'static str)>, ids: &[&str]) -> Self {
             let mut ids: Vec<String> = ids.iter().map(|id| (*id).to_owned()).collect();
             ids.sort();
-            Self { entries, ids }
+            Self {
+                entries,
+                ids,
+                group: Vec::new(),
+            }
+        }
+
+        /// Declare one alias group over the same ids.
+        fn aliasing(mut self, group: &[&str]) -> Self {
+            self.group = group.iter().map(|id| (*id).to_owned()).collect();
+            self
         }
     }
 
@@ -4374,6 +5131,17 @@ mod tests {
         fn block_ids(&self) -> Option<crate::block_array::BlockIdSet<'_>> {
             Some(crate::block_array::BlockIdSet::new("test 1.0", &self.ids))
         }
+
+        fn aliases_for(&self, id: &str) -> Vec<String> {
+            if !self.group.iter().any(|spelling| spelling == id) {
+                return Vec::new();
+            }
+            self.group
+                .iter()
+                .filter(|spelling| self.ids.binary_search(spelling).is_ok())
+                .cloned()
+                .collect()
+        }
     }
 
     struct UnknownIdPayload {
@@ -4382,6 +5150,7 @@ mod tests {
         origin: String,
         token: Option<String>,
         suggestion: Option<String>,
+        aliases: Vec<String>,
     }
 
     fn unknown_id_payload(out: &BlockArrayIr) -> UnknownIdPayload {
@@ -4406,12 +5175,14 @@ mod tests {
                 origin,
                 token,
                 suggestion,
+                aliases,
             }) => UnknownIdPayload {
                 id,
                 registry,
                 origin,
                 token,
                 suggestion,
+                aliases,
             },
             other => panic!("expected an UnknownId payload, got {other:?}"),
         }
@@ -4503,6 +5274,88 @@ mod tests {
                 .map(|d| d.primary.as_str())
                 .collect::<Vec<_>>(),
         );
+    }
+
+    /// A rename reaches the message as a statement, and a typo as a
+    /// guess, and the note says which it is holding.
+    ///
+    /// The wording is the load-bearing part: "spells this block" is the
+    /// pack asserting two names are one block, "spells the nearest block"
+    /// is a distance search offering its best candidate, and an author who
+    /// cannot tell them apart has to go and check either way.
+    #[test]
+    fn a_rename_and_a_typo_read_as_different_claims() {
+        let renamed = PinnedRegistry::new(vec![], &["minecraft:standing_sign"])
+            .aliasing(&["minecraft:oak_sign", "minecraft:standing_sign"]);
+        let out = lowered_with_resolver(
+            "theme t:\n  slot floor -> @oak_sign\nstruct s size=2x2\n  floor mat_slot=floor\n",
+            &renamed,
+        );
+        let payload = unknown_id_payload(&out);
+        assert_eq!(payload.aliases, ["minecraft:standing_sign".to_owned()]);
+        let note = unknown_id_note(&out);
+        assert!(
+            note.contains("spells this block `minecraft:standing_sign`")
+                && note.contains("alias table"),
+            "the note must name the alias table it is quoting, got: {note}",
+        );
+
+        let typo = PinnedRegistry::new(vec![], &["minecraft:oak_planks"]);
+        let out = lowered_with_resolver(
+            "theme t:\n  slot floor -> @oak_plank\nstruct s size=2x2\n  floor mat_slot=floor\n",
+            &typo,
+        );
+        let note = unknown_id_note(&out);
+        assert!(
+            note.contains("spells the nearest block") && !note.contains("alias table"),
+            "a distance guess must not be dressed up as the pack's word, got: {note}",
+        );
+    }
+
+    /// A split lists the first few candidates and counts the rest, and the
+    /// payload keeps all of them.
+    ///
+    /// The truncation is about the sentence a person reads;
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// asks the error to return the closed set of candidates, and the `data`
+    /// payload is where a consumer finds it whole.
+    #[test]
+    fn a_split_is_summarised_in_the_note_and_kept_whole_in_the_payload() {
+        let ids: Vec<String> = (0..16)
+            .map(|i| format!("minecraft:light_block_{i}"))
+            .collect();
+        let mut group = vec!["minecraft:light".to_owned()];
+        group.extend(ids.iter().cloned());
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let group_refs: Vec<&str> = group.iter().map(String::as_str).collect();
+        let registry = PinnedRegistry::new(vec![], &refs).aliasing(&group_refs);
+        let out = lowered_with_resolver(
+            "theme t:\n  slot floor -> @light\nstruct s size=2x2\n  floor mat_slot=floor\n",
+            &registry,
+        );
+        let payload = unknown_id_payload(&out);
+        assert_eq!(payload.aliases.len(), 16, "every candidate reaches a tool");
+        let note = unknown_id_note(&out);
+        assert!(
+            note.contains("and 12 more"),
+            "the sentence counts what it does not list, got: {note}",
+        );
+    }
+
+    /// The one note the `E_UNKNOWN_ID` finding carries about candidates —
+    /// the last one, after the origin note the two pack-chosen origins add.
+    fn unknown_id_note(out: &BlockArrayIr) -> String {
+        let found = out
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::UnknownId)
+            .expect("an E_UNKNOWN_ID finding");
+        found
+            .notes
+            .last()
+            .expect("the candidate note")
+            .message
+            .clone()
     }
 
     fn block_id(ba: &BlockArray, x: u32, y: u32, z: u32) -> &str {
@@ -4916,8 +5769,8 @@ mod tests {
     #[test]
     fn actuator_patch_opened_by_non_sig_dotref_defers() {
         // `opened_by=foo.bar` parses as a two-segment DotRef but the
-        // head is not `sig`, so it cannot be a signal reference under
-        // spec/redstone.md §14.2's namespace.
+        // head is not `sig`, so it cannot be a signal reference under the
+        // namespace of `spec/redstone` "Signal binding".
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
                    walls mat_slot=w height=3\n  \
                    door id=front side=front at=center\n  \
@@ -4963,11 +5816,11 @@ mod tests {
     fn actuator_patch_unknown_intent_key_defers() {
         // `door[id=front] opened_by=sig.x powered_by=sig.y` — the
         // recogniser accepts only `opened_by=` today. Silently allowing
-        // a `powered_by=` on doors would let a future PR that lands
-        // `powered_by=` on doors silently change the meaning of source
+        // a `powered_by=` on doors would let a later extension that
+        // gives the key a meaning silently change the meaning of source
         // that shipped meanwhile. Reject the shape now with a primary
-        // that names the offending key(s) and points at
-        // spec/redstone.md §14.2.
+        // that names the offending key(s) and points at `spec/redstone`
+        // "Signal binding".
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
                    walls mat_slot=w height=3\n  \
                    door id=front side=front at=center\n  \
@@ -5014,10 +5867,50 @@ mod tests {
             .collect();
         assert_eq!(deferred.len(), 1);
         assert!(
-            deferred[0].primary.contains("ambiguous")
-                || deferred[0].primary.contains("2 physical doors"),
+            deferred[0].primary.contains("2 physical doors"),
             "expected the primary to flag the ambiguity, got {}",
             deferred[0].primary,
+        );
+        // The reason states the fault; the repair is a note of its own.
+        assert!(
+            deferred[0].notes.iter().any(|n| n.message
+                == "Fix: give the 2 `door` members distinct ids, so the selector names one."),
+            "expected a note telling the author to tell the doors apart, got {:?}",
+            deferred[0].notes,
+        );
+    }
+
+    #[test]
+    fn actuator_patch_beside_unlabelled_door_defers_with_add_id_note() {
+        // A door declared without `id=` can never be picked, but it is a
+        // door: the primary counts it rather than saying none is declared,
+        // and the note points at labelling it.
+        let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
+                   walls mat_slot=w height=3\n  \
+                   door side=front at=center\n  \
+                   door[id=front] opened_by=sig.open\n";
+        let out = lowered(src);
+        let deferred: Vec<&Diagnostic> = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .collect();
+        assert_eq!(deferred.len(), 1);
+        assert!(
+            deferred[0]
+                .primary
+                .contains("1 physical door is declared in this scope, without an `id=`"),
+            "got {}",
+            deferred[0].primary,
+        );
+        assert!(
+            deferred[0]
+                .notes
+                .iter()
+                .any(|n| n.message
+                    == "Fix: add `id=front` to the `door` this patch is meant to bind."),
+            "got {:?}",
+            deferred[0].notes,
         );
     }
 
@@ -5050,7 +5943,7 @@ mod tests {
     fn actuator_patch_three_segment_sig_defers() {
         // `opened_by=sig.a.b` — the head is `sig` but the tail has more
         // than one segment, so this is not a signal reference under
-        // spec/redstone.md §14.2. Silently accepting a
+        // `spec/redstone` "Signal binding". Silently accepting a
         // longer-than-expected DotRef would let a future guard that
         // degrades to `head() == "sig"` (dropping the segment-count
         // check) slip through unnoticed; pin the segment-count arm
@@ -5210,10 +6103,8 @@ mod tests {
 
     #[test]
     fn state_literal_round_trips_through_palette() {
-        // Bracketed tokens are not yet emitted by the surface parser, so
-        // this exercises the palette/material path directly to lock the
-        // canonical-id and property-bag contract before the state-literal
-        // grammar lands.
+        // Exercises the palette/material path directly, below the parser,
+        // to lock the canonical-id and property-bag contract on its own.
         let mut palette = Palette::new_with_air();
         let token = ValueWithSpan::from_value(crate::ast::Value::new(
             ValueKind::Token("oak_log[axis=x]".to_owned()),
@@ -5578,13 +6469,14 @@ struct s size=9x7
 
     #[test]
     fn the_family_is_reported_before_the_properties_it_makes_moot() {
-        // Not reachable from source today, and the registry pack is not the
-        // way in either — `PackView::lookup` ends in `BlockState::bare`.
-        // The only producer is `canonical_to_block_state`'s bracket
-        // literal, which the grammar has no production for. Pinning the
-        // precedence anyway: once the id is refused it is not painted, and
-        // reporting that its unused properties were also dropped would ask
-        // the author to fix something that is not there.
+        // A source reaches this through a state literal on a block outside
+        // the stair family — `slot r -> @cobblestone[facing=north]` bound
+        // to a gable roof — and that literal is the only way in: the
+        // registry pack answers `PackView::lookup` with `BlockState::bare`.
+        // The state is built here rather than parsed so the test asks
+        // about the precedence alone: once the id is refused it is not
+        // painted, and reporting that its unused properties were also
+        // dropped would ask the author to fix something that is not there.
         let mut properties = IndexMap::new();
         properties.insert("facing".to_owned(), "north".to_owned());
         let state = BlockState {
@@ -5609,7 +6501,7 @@ struct s size=9x7
             Some(scope),
             Some(&state),
             STAIR_BASE_ID,
-            &MemberShape {
+            &GeometryMemberDescription {
                 subject: "`gable` roof".to_owned(),
                 states_from: "the geometry",
                 requires_stair: true,
@@ -5627,7 +6519,7 @@ struct s size=9x7
         // The payload is the whole reason this is an error rather than a
         // softer finding: it says where the material came from, so a
         // consumer can tell a source line from a pack mapping without
-        // parsing the sentence (`spec/lint.md` §11.2).
+        // parsing the sentence (`spec/lint` "Machine-readable payload").
         let Some(DiagnosticData::IncompatibleMaterial {
             id,
             required,
@@ -5936,35 +6828,13 @@ struct s size=9x7
         assert_eq!(block_id(ba, 1, 2, 4), "minecraft:cobblestone");
     }
 
-    #[test]
-    fn door_capped_at_wall_top_does_not_punch_through_roof() {
-        // walls height=1 → wall_top=1. Door y=1..=2 would carve a hole at
-        // y=2 which the roof's south-eave layer occupies. Capping at
-        // wall_top keeps the roof intact.
-        let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=1\n  roof kind=gable mat_slot=r\n  door side=front at=center\n";
-        let out = lowered(src);
-        let ba = out.structures.get("struct::s").unwrap();
-        // Door carves only y=1 of the front wall.
-        assert_eq!(block_id(ba, 2, 1, 4), BlockState::AIR_ID);
-        // y=2 on the front-eave row of the roof must still be stairs.
-        // span = min(5,5) = 5, ridge axis = x, low slope at z=0 layer 0,
-        // high slope at z=4 layer 0, y = wall_top+1 = 2.
-        let south_eave = block_state_at(ba, 2, 2, 4);
-        assert_eq!(south_eave.id, "minecraft:spruce_stairs");
-    }
-
-    #[test]
-    fn door_without_walls_emits_deferred_warning() {
-        // No walls member → wall_top=0. The door cannot carve anything
-        // and must complain instead of doing nothing silently.
-        let src = "theme t:\n  slot f -> @oak_planks\n\nstruct s size=5x5\n  floor mat_slot=f\n  door side=front at=center\n";
-        let out = lowered(src);
-        assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains("walls")),
-            "expected walls-required diagnostic, got {:?}",
-            out.diagnostics,
-        );
-    }
+    // The one-row course under a roof, and the struct with no walls at
+    // all, live in `tests/door_wall_fit.rs`. Both were asserted here too
+    // loosely to hold what this file now decides: the cap test named
+    // `wall_top` for a mechanism that is the course's, and the
+    // no-walls test matched any message containing "walls", which both
+    // branches of the gate satisfy — so the split between "nowhere" and
+    // "not here" went unguarded on the side that has its own sentence.
 
     #[test]
     fn at_center_picks_right_of_centre_on_even_width_walls() {
@@ -6191,16 +7061,19 @@ struct s size=9x7
         assert_eq!(
             b.origin,
             (5, 0, 0),
-            "x = prev.x(0) + prev.dims.x(3) + gap(2)"
+            "x = prior.x(0) + prior.dims.x(3) + gap(2)"
         );
         assert_eq!(b.origin.2, 0, "east_of does not move along z");
     }
 
     #[test]
     fn north_of_subtracts_dims_and_gap_on_z_axis() {
-        // north_of retreats along -z by the prior placement's full inflated
-        // dims.z plus gap. Front-is-+z (`spec/components-editing-sites.md`
-        // §5.4 / §9.3) means north sits at the negative-z half-space.
+        // north_of retreats along -z by the new placement's full inflated
+        // dims.z plus gap. Both cottages are 3 deep, so this pins the
+        // arithmetic, not whose depth it reads — the unequal-depth tests
+        // below do that. Front-is-+z (`spec/syntax` "Selectors" and
+        // `spec/components-editing-sites` "Multi-building with `site`") means
+        // north sits at the negative-z half-space.
         let src = concat!(
             "theme t:\n",
             "  slot wall -> @cobblestone\n",
@@ -6220,8 +7093,124 @@ struct s size=9x7
         assert_eq!(
             b.origin,
             (0, 0, -7),
-            "z = prev.z(0) - prev.dims.z(3) - gap(4)"
+            "z = prior.z(0) - new.dims.z(3) - gap(4)"
         );
+    }
+
+    /// A two-place site with `a` built from `a_def` and `b` placed next to
+    /// it with `selector=a gap=gap`.
+    ///
+    /// Each pair a test draws from here differs on exactly the axis its
+    /// selector reads: `small` (3x3) against `deep` (3x9) on `z` for
+    /// `north_of`, `small` against `wide` (9x3) on `x` for `east_of`.
+    /// `eaved` is `deep` with a roof of `overhang=1`, so it lowers to 5x11:
+    /// its `dims` differ from its `size=`, which is what tells an origin
+    /// taken from the lowered body apart from one taken from `size=` (known
+    /// before lowering, and wrong whenever a roof overhangs).
+    fn unequal_pair(a_def: &str, b_def: &str, selector: &str, gap: i32) -> BlockArrayIr {
+        lowered(&format!(
+            concat!(
+                "def small size=3x3:\n",
+                "  floor id=f mat_slot=floor\n",
+                "  walls id=w mat_slot=wall height=2\n",
+                "\n",
+                "def deep size=3x9:\n",
+                "  floor id=f mat_slot=floor\n",
+                "  walls id=w mat_slot=wall height=2\n",
+                "\n",
+                "def eaved size=3x9:\n",
+                "  floor id=f mat_slot=floor\n",
+                "  walls id=w mat_slot=wall height=2\n",
+                "  roof  id=r kind=flat mat_slot=wall overhang=1\n",
+                "\n",
+                "def wide size=9x3:\n",
+                "  floor id=f mat_slot=floor\n",
+                "  walls id=w mat_slot=wall height=2\n",
+                "\n",
+                "theme t:\n",
+                "  slot floor -> @oak_planks\n",
+                "  slot wall  -> @cobblestone\n",
+                "\n",
+                "site s:\n",
+                "  place id=a use={a_def} theme=t at=origin\n",
+                "  place id=b use={b_def} theme=t {selector}=a gap={gap}\n",
+            ),
+            a_def = a_def,
+            b_def = b_def,
+            selector = selector,
+            gap = gap,
+        ))
+    }
+
+    #[test]
+    fn north_of_leaves_exactly_gap_rows_between_unequal_depths() {
+        // `gap` counts the empty rows between `b`'s +z face and `a`'s -z
+        // face, whichever of the two is deeper. Stepping back by the prior
+        // placement's depth instead buries a small `a` inside a deep `b`
+        // at gap=0 and pushes a small `b` six rows too far behind a deep
+        // `a`. The `eaved` row fails if the step is taken from `size=`
+        // rather than the lowered dims.
+        //
+        // `b_z` is `b`'s origin at gap=0: `-new.dims.z`, since `a` sits at 0.
+        for (a_def, b_def, b_z) in [
+            ("small", "deep", -9),
+            ("deep", "small", -3),
+            ("small", "eaved", -11),
+        ] {
+            for gap in [0, 3] {
+                let out = unequal_pair(a_def, b_def, "north_of", gap);
+                let a = out.placements.get("site::s::a").expect("placement a");
+                let b = out.placements.get("site::s::b").expect("placement b");
+                // The premise: without it, the gap check below holds for
+                // either reading.
+                assert_ne!(a.dims.z, b.dims.z, "a={a_def}, b={b_def}");
+                assert_eq!(
+                    b.origin,
+                    (0, 0, b_z - gap),
+                    "a={a_def}, b={b_def}, gap={gap}"
+                );
+                let b_front = b.origin.2 + i32::try_from(b.dims.z).unwrap();
+                assert_eq!(
+                    a.origin.2 - b_front,
+                    gap,
+                    "a={a_def} at z {}..{}, b={b_def} at z {}..{}, gap={gap}",
+                    a.origin.2,
+                    a.origin.2 + i32::try_from(a.dims.z).unwrap(),
+                    b.origin.2,
+                    b_front,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn east_of_leaves_exactly_gap_columns_between_unequal_widths() {
+        // A guard, not a regression test: `east_of` was already right, and
+        // this pins it against being "symmetrised" onto the new body's
+        // dims to match `north_of`. It moves past the prior placement's
+        // width, so the step is the prior's lowered `dims.x` — `eaved` is 5
+        // wide, not its `size=` 3.
+        //
+        // `b_x` is `b`'s origin at gap=0: `prior.dims.x`, since `a` sits at 0.
+        for (a_def, b_def, b_x) in [
+            ("small", "wide", 3),
+            ("wide", "small", 9),
+            ("eaved", "small", 5),
+        ] {
+            for gap in [0, 3] {
+                let out = unequal_pair(a_def, b_def, "east_of", gap);
+                let a = out.placements.get("site::s::a").expect("placement a");
+                let b = out.placements.get("site::s::b").expect("placement b");
+                assert_ne!(a.dims.x, b.dims.x, "a={a_def}, b={b_def}");
+                assert_eq!(
+                    b.origin,
+                    (b_x + gap, 0, 0),
+                    "a={a_def}, b={b_def}, gap={gap}"
+                );
+                let a_east = a.origin.0 + i32::try_from(a.dims.x).unwrap();
+                assert_eq!(b.origin.0 - a_east, gap, "a={a_def}, b={b_def}, gap={gap}");
+            }
+        }
     }
 
     fn village_pair_source(extra_connects: &str) -> String {
@@ -6287,6 +7276,187 @@ struct s size=9x7
             1,
             "reversed row must not lay a second strip"
         );
+    }
+
+    #[test]
+    fn a_row_refused_after_the_dedup_check_leaves_its_pair_to_the_next_row() {
+        // The first row's `path=` is an abstract token, which lowers to
+        // nothing without a registry pack, so that row lays no strip. The
+        // second row names the same pair and a concrete block. It is not
+        // a duplicate of a walkway that was never laid: it lays the strip,
+        // and the only finding is the first row's own deferral.
+        let src = village_pair_source(
+            "  connect a.entry to b.entry path=@path.gravel\n  connect b.entry to a.entry path=@gravel\n",
+        );
+        let out = lowered(&src);
+        let codes: Vec<DiagnosticCode> = out.diagnostics.iter().map(|d| d.code).collect();
+        assert_eq!(
+            codes,
+            [DiagnosticCode::AbstractTokenDeferred],
+            "{:#?}",
+            out.diagnostics
+        );
+        let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
+        assert_eq!(laid, ["walkway::s::b.entry__a.entry"]);
+        assert_eq!(out.walkways[0].path_material, "minecraft:gravel");
+    }
+
+    /// The `W_INVALID_WALKWAY_IDENT` findings on `out`, as `(primary, notes)`.
+    fn invalid_walkway_ident_findings(out: &BlockArrayIr) -> Vec<(String, Vec<String>)> {
+        out.diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::InvalidWalkwayIdent)
+            .map(|d| {
+                (
+                    d.primary.clone(),
+                    d.notes.iter().map(|n| n.message.clone()).collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn walkway_ids_with_an_edge_underscore_are_named_rather_than_aliased() {
+        // `a.p_ → b.p` and `a.p → _b.p` differ as `(from, to)` pairs, so
+        // `W_DUPLICATE_WALKWAY` has nothing to say, but a `_` at the edge
+        // of `p_` or `_b` merges into the `__` separator: both would
+        // encode to `walkway::s::a.p___b.p`, and the second row would
+        // replace the first in the structure map with no finding. Each
+        // row must instead be dropped with a finding naming its own
+        // segment. The third row is sound and must still lay, so the
+        // test cannot pass by dropping every walkway.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def hut size=5x5:\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  door  id=p  side=front at=center\n",
+            "  door  id=p_ side=back  at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a  use=hut theme=t at=origin\n",
+            "  place id=b  use=hut theme=t east_of=a gap=4\n",
+            "  place id=_b use=hut theme=t north_of=a gap=4\n",
+            "  connect a.p_ to b.p path=@gravel\n",
+            "  connect a.p to _b.p path=@gravel\n",
+            "  connect a.p to b.p path=@gravel\n",
+        );
+        let out = lowered(src);
+        let findings = invalid_walkway_ident_findings(&out);
+        let primaries: Vec<&str> = findings.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            primaries,
+            [
+                "walkway `a.p_ ↔ b.p` was dropped because the port id `p_` starts or ends \
+                 with `_`",
+                "walkway `a.p ↔ _b.p` was dropped because the place id `_b` starts or ends \
+                 with `_`",
+            ],
+        );
+        let notes: Vec<&[String]> = findings.iter().map(|(_, n)| n.as_slice()).collect();
+        let rule = "a walkway's place and port ids may not start or end with `_` in either \
+                    position, so the rule does not depend on which way the row is written";
+        assert_eq!(
+            notes,
+            [
+                [format!(
+                    "{rule}; rename the port so it neither starts nor ends with `_`"
+                )],
+                [format!(
+                    "{rule}; rename the place so it neither starts nor ends with `_`"
+                )],
+            ],
+        );
+        let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
+        assert_eq!(laid, ["walkway::s::a.p__b.p"]);
+        let walkway_structures: Vec<&str> = out
+            .structures
+            .keys()
+            .filter(|k| k.starts_with("walkway::"))
+            .map(String::as_str)
+            .collect();
+        assert_eq!(walkway_structures, ["walkway::s::a.p__b.p"]);
+    }
+
+    #[test]
+    fn a_port_named_underscore_is_named_rather_than_lowered_to_an_unparseable_key() {
+        // A port called `_` gives `walkway::s::a.___b._`, which splits
+        // back at the first `__` into an empty port; the artifact
+        // namer then tripped a debug assertion on it. The row must be
+        // dropped at lowering with a finding naming `_`, beside a sound
+        // row that still lays.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def hut size=5x5:\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  door  id=_ side=front at=center\n",
+            "  door  id=q side=back  at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=hut theme=t at=origin\n",
+            "  place id=b use=hut theme=t east_of=a gap=4\n",
+            "  connect a._ to b._ path=@gravel\n",
+            "  connect a.q to b.q path=@gravel\n",
+        );
+        let out = lowered(src);
+        let findings = invalid_walkway_ident_findings(&out);
+        let primaries: Vec<&str> = findings.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            primaries,
+            [
+                "walkway `a._ ↔ b._` was dropped because the port id `_` starts or ends \
+              with `_`"
+            ],
+        );
+        let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
+        assert_eq!(laid, ["walkway::s::a.q__b.q"]);
+        for key in out.walkways.keys() {
+            assert_eq!(
+                WalkwayScopeKey::parse(key.as_str()).as_ref(),
+                Ok(key),
+                "every laid walkway's key must parse back to itself",
+            );
+        }
+    }
+
+    #[test]
+    fn a_walkway_id_containing_dunder_is_named_with_the_dunder_repair() {
+        // The `__` arm of the same finding, which had no lowering test:
+        // its note names the `__` repair, not the edge-`_` one.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def hut size=5x5:\n",
+            "  walls id=w mat_slot=wall height=3\n",
+            "  door  id=b__c side=front at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=hut theme=t at=origin\n",
+            "  place id=b use=hut theme=t east_of=a gap=4\n",
+            "  connect a.b__c to b.b__c path=@gravel\n",
+        );
+        let out = lowered(src);
+        let findings = invalid_walkway_ident_findings(&out);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        let (primary, notes) = &findings[0];
+        assert_eq!(
+            primary,
+            "walkway `a.b__c ↔ b.b__c` was dropped because the port id `b__c` contains \
+             `__`, the separator between the walkway scope key's `from` and `to` halves",
+        );
+        assert_eq!(
+            notes,
+            &[
+                "a walkway's site, place and port ids may not contain `__`, so no id can be \
+                 mistaken for the separator; rename the port so it has no `__`, e.g. by \
+                 replacing `__` with `_`"
+            ],
+        );
+        assert!(out.walkways.is_empty());
     }
 
     fn walkway_with_blocked_l_path_source() -> &'static str {
@@ -6448,7 +7618,7 @@ struct s size=9x7
             note.contains("port `a.back` is buried"),
             "note must point at the buried port, got {note}",
         );
-        // AC4 from issue #40: the `primary` string is part of the gcc-style
+        // The `primary` string is part of the gcc-style
         // text-format contract that humans (and existing pre-payload test
         // harnesses) read; the structured `data` is meant to *augment* it,
         // not replace it. Asserting both keeps a regression that drops
@@ -6612,7 +7782,8 @@ struct s size=9x7
 
     #[test]
     fn walkway_unknown_abstract_path_emits_e_unknown_abstract_token() {
-        // Pack supplied but does not declare `@walkway.grvl`; spec §7.2
+        // Pack supplied but does not declare `@walkway.grvl`;
+        // `spec/materials-themes` "Canonical vocabulary"
         // requires fail-loud here — the typo must surface as
         // `E_UNKNOWN_ABSTRACT_TOKEN` with the nearest declared token as a
         // suggestion note.
@@ -7151,21 +8322,20 @@ struct s size=9x7
         );
     }
 
-    // --- carve_door level cap regression (C2) -------------------------------
+    // --- carve_door course cap ----------------------------------------------
 
     #[test]
-    fn door_defers_when_level_sits_at_or_above_wall_top() {
-        // struct walls height=3 (top=3) with a door inside `level y=3`:
-        // the door would try to carve at world y=4, 5 which are outside
-        // any wall column. The cap `wall_top - y_offset < 1` fires the
-        // "no wall above this level" defer instead of silently painting.
+    fn door_defers_when_its_level_sits_at_or_above_the_wall_it_would_carve() {
+        // struct walls height=3 (rows 1..=3) with a door inside `level
+        // y=3`: the door opens at world y=4, which is above the course
+        // and inside no other. The defer names the row and the rows the
+        // walls do occupy instead of silently painting AIR over air.
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=roofline y=3\n    door id=hole side=front at=center\n";
         let out = lowered(src);
         assert!(
-            out.diagnostics
-                .iter()
-                .any(|d| d.primary.contains("at least one wall voxel above")),
-            "expected level-cap defer, got {:?}",
+            out.diagnostics.iter().any(|d| d.primary
+                == "door opens at y=4, which is not inside any wall course (the walls occupy y=1..=3)"),
+            "expected a wall-course defer, got {:?}",
             out.diagnostics,
         );
     }
@@ -7244,10 +8414,12 @@ struct s size=9x7
 
     #[test]
     fn pressure_plate_inside_paints_one_voxel_toward_the_interior() {
-        let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=0 y=0\n";
+        // The front wall's middle cell is (1, 0, 2); one step in is the
+        // struct's only interior cell.
+        let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=1 y=0\n";
         let out = lowered(src);
         let ba = out.structures.get("struct::s").unwrap();
-        assert_eq!(block_id(ba, 0, 0, 1), "minecraft:oak_pressure_plate");
+        assert_eq!(block_id(ba, 1, 0, 1), "minecraft:oak_pressure_plate");
         assert_eq!(deferred_count(&out), 0);
     }
 
@@ -7256,7 +8428,7 @@ struct s size=9x7
         // A `mat_slot=` bound to a canonical id must land in the palette
         // verbatim — the default `oak_pressure_plate` fallback only
         // fires when no binding resolves.
-        let src = "theme t:\n  slot fixture -> @spruce_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=fixture height=2\n  pressure_plate mat_slot=fixture at=inside.front offset=0 y=0\n";
+        let src = "theme t:\n  slot fixture -> @spruce_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=fixture height=2\n  pressure_plate mat_slot=fixture at=inside.front offset=1 y=0\n";
         let out = lowered(src);
         let ba = out.structures.get("struct::s").unwrap();
         let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
@@ -7264,7 +8436,318 @@ struct s size=9x7
             ids.contains(&"minecraft:spruce_pressure_plate"),
             "palette should carry the resolved id, got {ids:?}",
         );
-        assert_eq!(block_id(ba, 0, 0, 1), "minecraft:spruce_pressure_plate");
+        assert_eq!(block_id(ba, 1, 0, 1), "minecraft:spruce_pressure_plate");
+    }
+
+    /// Lower `size=<size>` with `members` (each line indented, cobblestone
+    /// on the `wall` slot) and one plate line, and return the output with
+    /// the `W_DEFERRED_MEMBER` primaries.
+    fn lowered_plate(size: &str, members: &str, plate: &str) -> (BlockArrayIr, Vec<String>) {
+        let src = format!(
+            "theme t:\n  slot wall -> @cobblestone\n\nstruct s size={size}\n{members}  \
+             pressure_plate {plate}\n",
+        );
+        let out = lowered(&src);
+        let reasons = out
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::DeferredMember)
+            .map(|d| d.primary.clone())
+            .collect();
+        (out, reasons)
+    }
+
+    /// [`lowered_plate`] with `walls height=3` ahead of `extra`.
+    fn lowered_inside_plate(size: &str, extra: &str, plate: &str) -> (BlockArrayIr, Vec<String>) {
+        lowered_plate(
+            size,
+            &format!("  walls mat_slot=wall height=3\n{extra}"),
+            plate,
+        )
+    }
+
+    fn plate_count(ba: &BlockArray) -> usize {
+        ba.voxels
+            .iter()
+            .filter(|v| ba.palette.entries[usize::from(v.0)].id == PRESSURE_PLATE_BASE_ID)
+            .count()
+    }
+
+    /// The wall rings the inside-plate tests run against: the footprint's
+    /// own edge, and the ring a roof overhang of 1 or 2 moves inward.
+    const OVERHANGS: [u32; 3] = [0, 1, 2];
+
+    /// The member line that gives a struct `overhang`, empty for none.
+    fn overhang_roof(overhang: u32) -> String {
+        if overhang == 0 {
+            String::new()
+        } else {
+            format!("  roof kind=flat mat_slot=wall overhang={overhang}\n")
+        }
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_defers_and_keeps_the_side_wall() {
+        // The front wall of a 5x5 struct is z=4; one step in from its
+        // offset=0 end is (0, 1, 3), a block of the left wall.
+        let (out, reasons) =
+            lowered_inside_plate("5x5", "", "id=p at=inside.front offset=0 y=1 -> sig.a");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
+                 the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to \
+                 3 to reach an interior voxel. Its signal binding still reaches the netlist, with \
+                 no plate placed to drive it"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(block_id(ba, 0, 1, 3), "minecraft:cobblestone");
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_defers_at_the_floor_row_too() {
+        // At y=0 the corner cell is floor under the side wall. The
+        // `<side>.outside` foundation fallback is y=0-only; inside has no
+        // such exemption. No wall is painted at row 0, so the reason does
+        // not claim one.
+        let (out, reasons) = lowered_inside_plate("5x5", "", "at=inside.front offset=0 y=0");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so \
+                 the voxel inside it is not an interior cell of this struct; use an `offset=` \
+                 from 1 to 3 to reach an interior voxel"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_claims_no_wall_where_none_is_painted() {
+        // The ring is decided from the footprint, so a corner is refused
+        // at every row — but only a row the walls paint has a wall there
+        // to name: not a floor-only struct, and not the air between two
+        // courses (rows 1 and 5 here).
+        let cases = [
+            ("  floor mat_slot=wall\n", 0),
+            (
+                "  walls mat_slot=wall height=1\n  level y=4\n    walls mat_slot=wall height=1\n",
+                3,
+            ),
+        ];
+        for (members, y) in cases {
+            let (out, reasons) =
+                lowered_plate("5x5", members, &format!("at=inside.front offset=0 y={y}"));
+            let ba = out.structures.get("struct::s").unwrap();
+            assert_eq!(
+                reasons,
+                vec![
+                    "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, \
+                     so the voxel inside it is not an interior cell of this struct; use an \
+                     `offset=` from 1 to 3 to reach an interior voxel"
+                        .to_owned()
+                ],
+                "{members:?} y={y}",
+            );
+            assert_eq!(plate_count(ba), 0);
+        }
+    }
+
+    #[test]
+    fn pressure_plate_inside_at_a_corner_of_a_long_left_wall_names_that_wall() {
+        // On a 4x6 footprint the left wall runs along `size.h`, so both
+        // its name and its offset range differ from the front wall's.
+        let (out, reasons) = lowered_inside_plate("4x6", "", "at=inside.left offset=5 y=1");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.left offset=5` is at a corner of the left wall, so \
+                 the voxel inside it belongs to the neighbouring wall; use an `offset=` from 1 to \
+                 4 to reach an interior voxel"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    /// The four sides of a 4x5 footprint with the length of each wall:
+    /// front and back run along `size.w`, left and right along `size.h`.
+    const SIDES_4X5: [(&str, u32); 4] = [("front", 4), ("back", 4), ("left", 5), ("right", 5)];
+
+    #[test]
+    fn pressure_plate_inside_defers_at_both_corners_of_every_side() {
+        // Each side mirrors `offset=` differently, so both ends of every
+        // wall are checked: a refusal keyed on one axis or one end would
+        // let the other three walls or the far corner through. Under an
+        // overhang the wall ring moves in, so a bound measured from the
+        // volume's edge rather than the ring would let the corner in.
+        for overhang in OVERHANGS {
+            for (side, length) in SIDES_4X5 {
+                for offset in [0, length - 1] {
+                    let (out, reasons) = lowered_inside_plate(
+                        "4x5",
+                        &overhang_roof(overhang),
+                        &format!("at=inside.{side} offset={offset} y=1"),
+                    );
+                    let ba = out.structures.get("struct::s").unwrap();
+                    let case = format!("overhang={overhang} inside.{side} offset={offset}");
+                    assert_eq!(
+                        reasons,
+                        vec![format!(
+                            "pressure_plate `at=inside.{side} offset={offset}` is at a corner of \
+                             the {side} wall, so the voxel inside it belongs to the neighbouring \
+                             wall; use an `offset=` from 1 to {} to reach an interior voxel",
+                            length - 2,
+                        )],
+                        "{case}",
+                    );
+                    assert_eq!(plate_count(ba), 0, "{case} painted");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pressure_plate_inside_paints_at_every_non_corner_offset_of_every_side() {
+        // The other half of the corner rule: every offset between the two
+        // corners reaches a genuine interior cell and paints without a
+        // word. A 4x5 footprint keeps the two axes' lengths distinct, and
+        // the cells are those of the footprint with no overhang.
+        let cells: [&[(u32, u32)]; 4] = [
+            &[(1, 3), (2, 3)],
+            &[(2, 1), (1, 1)],
+            &[(1, 1), (1, 2), (1, 3)],
+            &[(2, 3), (2, 2), (2, 1)],
+        ];
+        for overhang in OVERHANGS {
+            for ((side, length), cells) in SIDES_4X5.into_iter().zip(cells) {
+                assert_eq!(
+                    cells.len(),
+                    usize::try_from(length - 2).unwrap(),
+                    "{side} has one cell per non-corner offset",
+                );
+                for (offset, &(x, z)) in (1..length - 1).zip(cells) {
+                    let (out, reasons) = lowered_inside_plate(
+                        "4x5",
+                        &overhang_roof(overhang),
+                        &format!("at=inside.{side} offset={offset} y=1"),
+                    );
+                    let ba = out.structures.get("struct::s").unwrap();
+                    let case = format!("overhang={overhang} inside.{side} offset={offset}");
+                    assert_eq!(reasons, Vec::<String>::new(), "{case}");
+                    let (x, z) = (x + overhang, z + overhang);
+                    assert_eq!(
+                        block_id(ba, x, 1, z),
+                        PRESSURE_PLATE_BASE_ID,
+                        "{case} should land on ({x}, 1, {z})",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pressure_plate_inside_a_two_deep_struct_defers_and_keeps_the_back_wall() {
+        // With size.h = 2 the cell one step in from the front wall is the
+        // back wall. With no overhang `front.outside` would bury the plate
+        // under the wall at y=0 and find no cell above it, so the reason
+        // does not offer it.
+        let (out, reasons) =
+            lowered_inside_plate("5x2", "", "id=p at=inside.front offset=2 y=1 -> sig.a");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has \
+                 no interior voxel; an interior needs a size of at least 3 on both axes. Grow \
+                 `size.h` to at least 3. Its signal binding still reaches the netlist, with no \
+                 plate placed to drive it"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(block_id(ba, 2, 1, 0), "minecraft:cobblestone");
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_a_one_deep_struct_with_an_overhang_defers() {
+        // With size.h = 1 the front and back walls are one row (z=1 under
+        // `overhang=1`), and the inward step lands in the overhang ring
+        // behind the building at z=0.
+        let roof = overhang_roof(1);
+        let (out, reasons) = lowered_inside_plate("5x1", &roof, "at=inside.front offset=2 y=1");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=2`: the struct's size.h is 1, so it has \
+                 no interior voxel; an interior needs a size of at least 3 on both axes. Grow \
+                 `size.h` to at least 3, or anchor the plate with `at=front.outside`"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(block_id(ba, 3, 1, 0), "minecraft:air");
+        assert_eq!(plate_count(ba), 0);
+        // The remedy the reason offers works on this very struct.
+        let (out, reasons) = lowered_inside_plate("5x1", &roof, "at=front.outside offset=2 y=1");
+        assert_eq!(reasons, Vec::<String>::new());
+        assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 1);
+    }
+
+    #[test]
+    fn pressure_plate_inside_a_narrow_struct_names_the_narrow_axis() {
+        // The front wall of a 2-wide struct is two corners with nothing
+        // between them, so no offset can help until the width grows.
+        let (out, reasons) = lowered_inside_plate("2x5", "", "at=inside.front offset=1 y=1");
+        let ba = out.structures.get("struct::s").unwrap();
+        assert_eq!(
+            reasons,
+            vec![
+                "pressure_plate `at=inside.front offset=1`: the struct's size.w is 2, so it has \
+                 no interior voxel, and `offset=1` is at a corner of the front wall besides; an \
+                 interior needs a size of at least 3 on both axes. Grow `size.w` to at least 3 \
+                 and use an `offset=` away from both ends of the wall"
+                    .to_owned()
+            ],
+        );
+        assert_eq!(plate_count(ba), 0);
+    }
+
+    #[test]
+    fn pressure_plate_inside_reports_a_thin_axis_and_a_corner_in_one_pass() {
+        // `2x9 at=inside.left offset=0` is both too narrow and a corner:
+        // one reason names both, so widening alone is not the whole fix.
+        // With both axes thin, both are named.
+        let cases = [
+            (
+                "2x9",
+                "at=inside.left offset=0 y=1",
+                "pressure_plate `at=inside.left offset=0`: the struct's size.w is 2, so it has \
+                 no interior voxel, and `offset=0` is at a corner of the left wall besides; an \
+                 interior needs a size of at least 3 on both axes. Grow `size.w` to at least 3 \
+                 and use an `offset=` from 1 to 7",
+            ),
+            (
+                "2x2",
+                "at=inside.front offset=0 y=1",
+                "pressure_plate `at=inside.front offset=0`: the struct's size.w is 2 and size.h \
+                 is 2, so it has no interior voxel, and `offset=0` is at a corner of the front \
+                 wall besides; an interior needs a size of at least 3 on both axes. Grow \
+                 `size.w` to at least 3 and `size.h` to at least 3 and use an `offset=` away \
+                 from both ends of the wall",
+            ),
+        ];
+        for (size, plate, expected) in cases {
+            let (out, reasons) = lowered_inside_plate(size, "", plate);
+            assert_eq!(reasons, vec![expected.to_owned()], "{size} {plate}");
+            assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
+        }
     }
 
     #[test]
@@ -7305,6 +8788,20 @@ struct s size=9x7
             "expected offset-out-of-range defer, got {:?}",
             out.diagnostics,
         );
+        // offset=3 is the first column past a 3-length wall: the boundary
+        // `wall_local_to_grid` refuses on, so it has to be refused here
+        // first — the arm after the helper call asserts rather than reports
+        // (`INVARIANT(wall-grid-validated)`).
+        let out = lowered(
+            "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=3 y=0\n",
+        );
+        assert!(
+            out.diagnostics
+                .iter()
+                .any(|d| d.primary.contains("`offset=3` runs past the front wall")),
+            "expected the boundary offset to be refused, got {:?}",
+            out.diagnostics,
+        );
         // y=99 past the struct's dims.y.
         let out = lowered(
             "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=0 y=99\n",
@@ -7318,12 +8815,9 @@ struct s size=9x7
         );
     }
 
-    // --- nonneg_int overflow guard (I5) -------------------------------------
-
     #[test]
     fn nonneg_int_rejects_values_that_do_not_fit_in_u32() {
-        // 5_000_000_000 exceeds u32::MAX (~4.29 * 10^9). The overflow
-        // used to clamp to u32::MAX silently; it now defers via
+        // 5_000_000_000 exceeds u32::MAX (~4.29 * 10^9); it defers via
         // `nonneg_int_or_defer` at the level's `y=`.
         let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=huge y=5000000000\n    walls id=upper mat_slot=w height=1\n";
         let out = lowered(src);

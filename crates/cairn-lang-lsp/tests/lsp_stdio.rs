@@ -42,7 +42,14 @@ impl Server {
     /// Spawn the binary and run the `initialize`/`initialized` handshake,
     /// returning the server plus the raw `initialize` response.
     fn start() -> (Self, serde_json::Value) {
+        Self::start_with_args(&[])
+    }
+
+    /// [`Server::start`] with `args` on the command line, for the argv an
+    /// LSP client builds rather than the bare one a test would pick.
+    fn start_with_args(args: &[&str]) -> (Self, serde_json::Value) {
         let mut child = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1068,4 +1075,58 @@ fn lsp_29_a_clean_session_says_nothing_on_stderr() {
         logged.is_empty(),
         "a clean session is quiet, got: {logged:?}"
     );
+}
+
+#[test]
+fn lsp_31_the_stdio_flag_a_client_appends_still_starts_the_server() {
+    // vscode-languageclient appends `--stdio` to an `Executable`'s argv
+    // whenever its transport is `TransportKind.stdio`. Stdio is the only
+    // transport this server speaks, so the flag must start the same session
+    // the bare command does — including the diagnostics that are the reason
+    // an editor starts it at all.
+    let (mut server, response) = Server::start_with_args(&["--stdio"]);
+    assert_eq!(response.get("id"), Some(&serde_json::json!(1)));
+    assert_eq!(
+        response["result"]["capabilities"]["textDocumentSync"]["change"],
+        serde_json::json!(1),
+        "`--stdio` should answer `initialize` like the bare command: {response}",
+    );
+    server.did_open(DUPLICATE, 1);
+    let message = server.read_until_method("textDocument/publishDiagnostics");
+    assert!(
+        !diagnostics_of(&message).is_empty(),
+        "`--stdio` session should publish the duplicate fixture's diagnostics",
+    );
+    server.shutdown();
+}
+
+#[test]
+fn lsp_32_artifacts_that_share_a_file_name_publish_e_output_name_collision() {
+    // The resolver raises the collision, and the server publishes what
+    // `check` returns, so an editor sees it without a build. The finding
+    // sits on the `place`, with a related pointer at the struct.
+    let source = "theme t:\n  slot floor -> @oak_planks\n\n\
+                  struct hut size=3x3\n  floor mat_slot=floor\n\n\
+                  def house size=3x3:\n  floor mat_slot=floor\n\n\
+                  site s:\n  place id=hut use=house theme=t at=origin\n";
+    let (mut server, _) = Server::start();
+    server.did_open(source, 1);
+    let message = server.read_until_method("textDocument/publishDiagnostics");
+    let diagnostics = diagnostics_of(&message);
+    let found: Vec<&serde_json::Value> = diagnostics
+        .iter()
+        .filter(|d| d["code"] == serde_json::json!("E_OUTPUT_NAME_COLLISION"))
+        .collect();
+    assert_eq!(found.len(), 1, "one collision expected: {diagnostics:?}");
+    assert_eq!(found[0]["severity"], serde_json::json!(1));
+    assert_eq!(found[0]["range"]["start"]["line"], serde_json::json!(10));
+    let related = found[0]["relatedInformation"]
+        .as_array()
+        .expect("relatedInformation present");
+    assert_eq!(
+        related[0]["location"]["range"]["start"]["line"],
+        serde_json::json!(3),
+        "the related pointer names the struct",
+    );
+    server.shutdown();
 }

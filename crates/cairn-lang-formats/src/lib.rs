@@ -9,24 +9,27 @@
 pub mod bedrock_state;
 pub mod bedrock_structure;
 pub mod data_version;
+mod dims;
 pub mod java_structure;
 pub mod portability;
 pub mod registry;
 
 pub use bedrock_state::{BedrockStateError, StateTranslation, translate_states};
 pub use bedrock_structure::{
-    BedrockStructureError, ParityNote, build_mcstructure_tag, write_mcstructure,
+    BedrockStructureError, McStructure, ParityNote, build_mcstructure_tag, prepare_mcstructure,
+    write_mcstructure,
 };
 pub use data_version::{
     BedrockTarget, JavaTarget, UnsupportedTarget, resolve_bedrock_target, resolve_java_target,
     supported_list,
 };
 pub use java_structure::{
-    Compound, JavaStructureError, OutputExt, build_structure_tag, output_filename,
-    write_compound_gzip, write_structure_gzip,
+    Compound, JavaStructure, JavaStructureError, OutputExt, build_structure_tag, output_filename,
+    prepare_structure, write_compound_gzip, write_structure_gzip,
 };
 pub use portability::{
-    PortabilityCounts, PortabilityReport, portability_for_bedrock, portability_for_java,
+    InvalidPalette, PortabilityCounts, PortabilityReport, portability_for_bedrock,
+    portability_for_java,
 };
 pub use registry::{
     PackEdition, PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_bedrock,

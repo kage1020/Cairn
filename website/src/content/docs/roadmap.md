@@ -4,7 +4,7 @@ description: Date-driven, small-and-frequent releases. Monthly minor with patche
 ---
 
 Cairn ships **monthly minor releases** under
-[date-based versioning](spec/versioning-editions#101-the-target-is-a-compile-time-parameter)
+[date-based versioning](/spec/versioning-editions/#101-the-target-is-a-compile-time-parameter)
 `YYYY.M[.PATCH]`. Each month delivers what is ready; nothing is held back for an arbitrary "1.0".
 Six named milestones cross-cut the monthly schedule so contributors and consumers can plan against
 something more durable than a calendar tick.
@@ -21,7 +21,7 @@ something more durable than a calendar tick.
   lands. Typical triggers: registry/constraint pack updates, regressions, and security fixes.
   No upper bound on patches per month.
 - **Channel:** there is only one, `stable`. Cairn does not run a separate nightly or beta train.
-  Behaviour that is not yet stable is gated by [compatibility tier](spec/compatibility), not by
+  Behaviour that is not yet stable is gated by [compatibility tier](/spec/compatibility/), not by
   release channel.
 - **Backports:** none. The latest release is the supported release. Older `YYYY.M.*` lines do
   not receive further patches.
@@ -82,6 +82,6 @@ The release strategy itself is automated:
    `cargo publish` every workspace crate to crates.io.
 
 Compatibility expectations across this schedule are defined separately by
-[compatibility tier](spec/compatibility): `.crn` syntax and the lockfile evolve under **Stable**
+[compatibility tier](/spec/compatibility/): `.crn` syntax and the lockfile evolve under **Stable**
 rules, the Rust API stays **Internal** (`#[doc(hidden)]`) until M3, and most other surfaces sit at
 **Evolving** for now.

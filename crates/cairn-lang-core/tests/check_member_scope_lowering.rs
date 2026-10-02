@@ -11,6 +11,9 @@
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::{lower, parse, resolve};
 
+mod common;
+use common::PRELUDE;
+
 fn build(source: &str) -> BlockArrayIr {
     let module = parse(source).expect("parse");
     let ir = lower(&module);
@@ -21,14 +24,6 @@ fn build(source: &str) -> BlockArrayIr {
 fn solid_cells(array: &BlockArray) -> usize {
     array.voxels.iter().filter(|c| c.0 != 0).count()
 }
-
-const PRELUDE: &str = "theme plain:\n  \
-slot floor -> @oak_planks\n  \
-slot wall  -> @cobblestone\n\n\
-def hut size=3x3:\n  \
-floor id=floor mat_slot=floor\n  \
-walls id=walls class=outer mat_slot=wall height=3\n  \
-door  id=entry side=front at=center\n\n";
 
 /// A geometry row among a site's placements lays no voxels. Same source,
 /// same site, one row apart — and the site's own placement is unchanged,

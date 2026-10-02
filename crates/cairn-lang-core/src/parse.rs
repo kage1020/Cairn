@@ -1,6 +1,6 @@
 //! Cairn surface-syntax parser.
 //!
-//! Consumes the token stream from [`crate::lex`] and produces a [`Module`].
+//! Consumes the token stream from [`crate::lex()`] and produces a [`Module`].
 //! The grammar is line-based with indent-driven nesting: a command can carry
 //! `key=value` arguments, an optional bracketed selector, optional bare
 //! positional values (for forms like `connect a.entry to b.entry path=@gravel`), and an
@@ -8,23 +8,132 @@
 //!
 //! Special forms `logic` and `assert` flow into dedicated
 //! [`crate::ast::Statement`] variants rather than the generic command shape.
+//! `requires` is a third special form, and the only one that leaves the body
+//! entirely: it declares a version floor rather than anything to build, so it
+//! is lifted onto the `def` / `theme` that carries it
+//! ([`crate::ast::MemberRequires`]).
 
 use crate::ast::{
-    Arg, DottedRef, Expr, Header, Item, Module, RawRequirement, RawVersion, Statement, ThemeRule,
-    TruthRow, Value, ValueKind,
+    Arg, DottedRef, Expr, Header, Item, MemberRequires, Module, RawRequirement, RawVersion,
+    Statement, ThemeRule, TruthRow, Value, ValueKind,
 };
 use crate::check::{Diagnostic, DiagnosticCode, LineStarts};
 use crate::error::{IntContext, ParseError, Position};
-use crate::lex::{Token, TokenKind, lex};
+use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
+use crate::resolve::parse_requirement;
+use indexmap::IndexSet;
+
+/// The word that introduces a version floor, as a directive name after the
+/// `@` and as a body line without one.
+///
+/// The sigil is what marks a *file* directive; the bare word on a body line
+/// is a floor on the part. Named once so the two sites that test for it —
+/// [`Parser::parse_header`] and [`Parser::requires_line_here`], which every
+/// body of the language goes through — cannot drift apart. The refusal
+/// messages spell it inside prose and are not among them.
+const REQUIRES: &str = "requires";
+
+/// Whether the body being parsed may carry `requires version>=X` lines,
+/// and what to say when it may not.
+///
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference" gives
+/// the member-level floor to `def` and `theme`, the two kinds a build
+/// instantiates rather than *is*. Every body of the language passes one of
+/// these, `theme` included — the decision about which words are reserved where
+/// is written down once, and a body that did not pass through it would be a
+/// route around the rule.
+///
+/// The two refusing variants exist because they have different repairs, and
+/// one message for both asserts something false about half the files that
+/// reach it. Neither refuses on the word alone: only a line whose
+/// expression reads as a version floor is refused, since `requires` is an
+/// ordinary identifier in a body that reads no floors.
+///
+/// An accepting body is the other half of that, and takes the word whatever
+/// follows it: the line is lifted onto the item without the expression being
+/// consulted, so `requires foo=1` in a `def` body is a floor that states
+/// nothing (`E_INVALID_REQUIRES`) rather than a member line. That is the
+/// coherent reading once a floor may stand there, and it costs nothing —
+/// the same line was `E_UNKNOWN_KEYWORD` before, since the word has never
+/// been a member keyword.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequiresPolicy {
+    /// A `def` or `theme` body: lift the line onto the item, whatever
+    /// follows the word.
+    Accepted,
+    /// A `struct` or `site` body. Neither is instantiated by anything — each
+    /// *is* the build — so a floor written inside one constrains exactly the
+    /// file it is in, which is what `@requires` already says.
+    NotAPart,
+    /// A member's own indented children. The floor is the part's and a
+    /// `walls` line is not a part, so the repair is one dedent rather than a
+    /// different directive.
+    NotThisLevel,
+}
+
+impl RequiresPolicy {
+    /// The refusal for a floor written where this policy holds, or `None`
+    /// where one may stand.
+    fn refusal(self) -> Option<&'static str> {
+        match self {
+            Self::Accepted => None,
+            Self::NotAPart => Some(
+                "a `struct` or a `site` may not declare `requires version>=X`: it is the build \
+                 rather than a part of one, so the floor on it is the whole file's and is \
+                 written `@requires version>=X` at the top of the file",
+            ),
+            Self::NotThisLevel => Some(
+                "a member may not declare `requires version>=X`: the floor belongs to the whole \
+                 part, so it goes at the `def` or `theme` body's own level",
+            ),
+        }
+    }
+}
 
 /// Parse a `.crn` source string into a [`Module`].
+///
+/// A lex failure inside a line is judged after the parse rather than
+/// before it. `@cairn`, `@requires` and a part's `requires` take their
+/// value as raw text to end of line, and a value that holds a character
+/// no token starts with is theirs to judge — `W_INVALID_CAIRN_VERSION`,
+/// `E_INVALID_REQUIRES` — rather than a file that does not parse. Any such
+/// failure one of those values did not take is reported exactly as
+/// [`lex()`] reports it, ahead of whatever the parse itself found, which is
+/// what the file got when the whole of it was lexed first.
+///
+/// A stretch the lexer refused is never taken into a value if it holds
+/// whitespace other than a space, whether that whitespace is the whole
+/// stretch or sits inside an unterminated string. The lexer separates
+/// tokens with spaces alone, so a tab or a no-break space between `@cairn`
+/// and its value is refused where it stands, as it always was: taken into
+/// the value, it would be trimmed off and the header would read as the
+/// version after it, which the file never declared. A string literal that
+/// does close is a token rather than a refused stretch, and is taken whole
+/// with whatever it holds, as before.
 ///
 /// # Errors
 /// Returns a [`ParseError`] on the first lex or parse failure.
 pub fn parse(source: &str) -> Result<Module, ParseError> {
-    let tokens = lex(source)?;
+    let Lexed {
+        tokens,
+        deferred,
+        fatal,
+    } = lex_deferring(source);
     let mut parser = Parser::new(source, &tokens);
-    parser.parse_module()
+    let parsed = parser.parse_module();
+    let taken = |token: usize| {
+        !source[tokens[token].span.clone()]
+            .chars()
+            .any(|c| c.is_whitespace() && c != ' ')
+            && parser.raw_values.iter().any(|raw| raw.contains(&token))
+    };
+    if let Some(stray) = deferred.into_iter().find(|d| !taken(d.token)) {
+        return Err(stray.error.into());
+    }
+    if let Some(fatal) = fatal {
+        return Err(fatal.into());
+    }
+    parsed
 }
 
 /// Render a parse failure as a [`Diagnostic`], so it can be reported
@@ -55,6 +164,15 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
 /// more than one position: every renderer of this diagnostic needs an
 /// index to put a position in front of the message, so building a second
 /// one here would walk the source twice for one finding.
+///
+/// The one note it can carry comes from the `@cairn` header, when the
+/// file declares a later language than this build, or names no language
+/// version at all. That is the finding
+/// `W_FUTURE_CAIRN_VERSION` would make and cannot: it is raised by a
+/// check pass, and no check pass runs on a source that does not parse —
+/// which is exactly what a later language's new syntactic form does
+/// here. Built in `core` rather than in either front end so the CLI and
+/// the language server both get it.
 #[must_use]
 pub fn diagnose_parse_failure(source: &str, lines: &LineStarts, err: &ParseError) -> Diagnostic {
     let start = lines.offset_of(source, err.position());
@@ -66,7 +184,9 @@ pub fn diagnose_parse_failure(source: &str, lines: &LineStarts, err: &ParseError
         // the span; `ParseError`'s own `Display` prefixes it too, which is
         // why this reads `user_message` rather than `to_string`.
         primary: err.user_message(),
-        notes: Vec::new(),
+        notes: crate::check::cairn_version::future_version_note(source, lines.line_starts())
+            .into_iter()
+            .collect(),
         // No structured payload. A consumer that wants to branch on which
         // parse failure it is has the message; giving it a payload means
         // freezing a shape for two `#[non_exhaustive]` enums, and that can
@@ -108,6 +228,18 @@ pub const MAX_NESTING_DEPTH: usize = 64;
 /// splits into intermediate `logic` bindings, which the diagnostic says.
 pub const MAX_EXPR_DEPTH: usize = 128;
 
+/// A truth row's input pattern, and whether the lexer's `->` could have
+/// eaten its last character.
+///
+/// The flag is only ever read to decide whether a width mismatch gets the
+/// sentence about that, so it answers one question rather than describing
+/// the run: a pattern that stopped at an adjacent `Arrow` is one whose
+/// author may have written one more `-` than came back.
+struct TruthPattern {
+    text: String,
+    ends_at_the_arrow: bool,
+}
+
 struct Parser<'a> {
     source: &'a str,
     tokens: &'a [Token],
@@ -115,6 +247,10 @@ struct Parser<'a> {
     /// How many value / expression levels are currently open, bounded by
     /// [`MAX_NESTING_DEPTH`].
     depth: usize,
+    /// Token-index ranges taken whole as a raw directive value, where a
+    /// [`TokenKind::Unlexed`] is part of the text rather than a failure.
+    /// See [`parse`].
+    raw_values: Vec<std::ops::Range<usize>>,
 }
 
 impl<'a> Parser<'a> {
@@ -124,6 +260,7 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             depth: 0,
+            raw_values: Vec::new(),
         }
     }
 
@@ -170,19 +307,15 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::At)?;
         let name = self.expect_ident()?;
         let value_start_pos = self.position();
-        let value_start_byte = self.peek().map_or(self.source.len(), |t| t.span.start);
-        let mut value_end_byte = value_start_byte;
-        while let Some(t) = self.peek() {
-            if matches!(t.kind, TokenKind::Newline) {
-                break;
-            }
-            value_end_byte = t.span.end;
-            self.advance();
-        }
-        let raw = self.source[value_start_byte..value_end_byte]
-            .trim()
-            .to_owned();
+        let (value_tokens, raw, value_end_byte) = self.rest_of_line();
         let span = start_byte..value_end_byte;
+        // The two directives a check pass judges from their text take the
+        // whole of it, unlexable stretches included. `@intended_targets`
+        // re-reads its value as tokens and an unknown directive is refused
+        // whatever it holds, so neither does.
+        if matches!(name.as_str(), "cairn" | REQUIRES) {
+            self.raw_values.push(value_tokens);
+        }
         self.expect_newline()?;
         if raw.is_empty() {
             return Err(ParseError::Syntax {
@@ -195,15 +328,25 @@ impl<'a> Parser<'a> {
                 version: RawVersion::new(raw),
                 span,
             }),
-            "requires" => Ok(Header::Requires {
+            REQUIRES => Ok(Header::Requires {
                 requirement: RawRequirement::new(raw),
                 span,
             }),
             "intended_targets" => {
                 // Re-parse the raw value as a list of strings.
-                let sub_tokens = lex(&raw)?;
+                //
+                // The slice is detached from the file, so the sub-parse
+                // counts from its own 1:1 and every diagnostic out of it
+                // has to be rebased onto `value_start_pos` before it
+                // reaches a caller. Without that a bad element is
+                // reported on line 1 of the file whatever line the
+                // directive is on.
+                let sub_tokens =
+                    lex(&raw).map_err(|err| ParseError::from(err).rebased(value_start_pos))?;
                 let mut p = Parser::new(&raw, &sub_tokens);
-                let value = p.parse_value()?;
+                let value = p
+                    .parse_value()
+                    .map_err(|err| err.rebased(value_start_pos))?;
                 // Reject trailing tokens — `@intended_targets [..] junk` should fail.
                 if !matches!(p.peek().map(|t| &t.kind), None | Some(TokenKind::Newline),) {
                     return Err(ParseError::Syntax {
@@ -262,10 +405,15 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident_spanned()?;
         self.consume_optional_colon();
         self.expect_newline()?;
+        let mut requires = Vec::new();
         let body = if self.peek_is(&TokenKind::Indent) {
             self.advance();
             let mut rules = Vec::new();
             while !self.peek_is(&TokenKind::Dedent) && !self.at_eof() {
+                if let Some(line) = self.requires_line_here(RequiresPolicy::Accepted)? {
+                    requires.push(line);
+                    continue;
+                }
                 rules.push(self.parse_theme_rule()?);
             }
             if self.peek_is(&TokenKind::Dedent) {
@@ -279,6 +427,7 @@ impl<'a> Parser<'a> {
         Ok(Item::Theme {
             name,
             name_span,
+            requires,
             body,
             span,
         })
@@ -328,12 +477,13 @@ impl<'a> Parser<'a> {
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
-        let body = self.parse_optional_command_body()?;
+        let (requires, body) = self.parse_optional_command_body(RequiresPolicy::Accepted)?;
         let span = start_byte..self.last_content_byte();
         Ok(Item::Def {
             name,
             name_span,
             args,
+            requires,
             body,
             span,
         })
@@ -343,7 +493,7 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident_spanned()?;
         self.consume_optional_colon();
         self.expect_newline()?;
-        let body = self.parse_optional_command_body()?;
+        let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
         let span = start_byte..self.last_content_byte();
         Ok(Item::Site {
             name,
@@ -358,7 +508,7 @@ impl<'a> Parser<'a> {
         let args = self.parse_header_args_until_eol()?;
         self.consume_optional_colon();
         self.expect_newline()?;
-        let body = self.parse_optional_command_body()?;
+        let (_, body) = self.parse_optional_command_body(RequiresPolicy::NotAPart)?;
         let span = start_byte..self.last_content_byte();
         Ok(Item::Struct {
             name,
@@ -369,19 +519,168 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_optional_command_body(&mut self) -> Result<Vec<Statement>, ParseError> {
+    /// Parse an indented body, splitting `requires` lines out of it.
+    ///
+    /// The two halves come back separately because they are different
+    /// things that happen to share an indentation level: a `requires` line
+    /// declares a version floor on the enclosing part and builds nothing.
+    /// Left among the statements it would not be skipped, it would be
+    /// refused: `intent::keyword_table` has no arm for the word, so the
+    /// line lowers to `MemberRole::Other("requires")` and
+    /// `check::keyword_allowlist` reports every one of them as
+    /// `E_UNKNOWN_KEYWORD`.
+    ///
+    /// `policy` is which bodies may carry one, and is forwarded to
+    /// [`Self::requires_line_here`]. It is a parameter rather than a second
+    /// copy of this loop because the refusal has to happen where the
+    /// offending line's position is still in hand — a caller handed an
+    /// empty statement list back has nothing left to underline.
+    fn parse_optional_command_body(
+        &mut self,
+        policy: RequiresPolicy,
+    ) -> Result<(Vec<MemberRequires>, Vec<Statement>), ParseError> {
         if !self.peek_is(&TokenKind::Indent) {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
         self.advance();
+        let mut requires = Vec::new();
         let mut commands = Vec::new();
         while !self.peek_is(&TokenKind::Dedent) && !self.at_eof() {
+            if let Some(line) = self.requires_line_here(policy)? {
+                requires.push(line);
+                continue;
+            }
             commands.push(self.parse_command()?);
         }
         if self.peek_is(&TokenKind::Dedent) {
             self.advance();
         }
-        Ok(commands)
+        Ok((requires, commands))
+    }
+
+    /// Read a `requires` line at the current position, if one stands there
+    /// and `policy` lets it.
+    ///
+    /// `Ok(None)` means the caller should read the line as an ordinary body
+    /// item. Under a refusing policy that covers both "the next line does
+    /// not open with the word" and "it does, but declares no floor": a body
+    /// that reads no floors leaves the word an ordinary one, so a member
+    /// spelled that way parses there exactly as it did before the line
+    /// existed. Deciding the second needs the whole expression, so the line
+    /// is read and then rewound — `pos` is the only state to restore, since
+    /// [`Self::parse_requires_line`] never opens a nesting level.
+    fn requires_line_here(
+        &mut self,
+        policy: RequiresPolicy,
+    ) -> Result<Option<MemberRequires>, ParseError> {
+        if !self.peek_is_ident(REQUIRES) {
+            return Ok(None);
+        }
+        // Under `Accepted` the expression is never consulted: the word is
+        // reserved at that level and an unreadable expression is a floor
+        // that states nothing. Only a refusing policy asks, and only so
+        // that a body reading no floors leaves the word an ordinary one.
+        let position = self.position();
+        let mark = self.pos;
+        // A rewound line is read again as a member, so any value it took
+        // raw is given back: an unlexable stretch in it is a failure again.
+        let raw_mark = self.raw_values.len();
+        match self.parse_requires_line() {
+            Ok(line) => match policy.refusal() {
+                None => Ok(Some(line)),
+                // Refused, and the line reads as a floor: say which repair
+                // this body needs. Anything else would leave the author
+                // with `unexpected `>=` in value position` three tokens
+                // along, which names the token and not the mistake.
+                Some(message) if parse_requirement(line.requirement.as_str()).is_ok() => {
+                    Err(ParseError::Syntax {
+                        position,
+                        message: message.to_owned(),
+                    })
+                }
+                Some(_) => {
+                    self.pos = mark;
+                    self.raw_values.truncate(raw_mark);
+                    Ok(None)
+                }
+            },
+            // An accepting body owns its failures — `requires` with nothing
+            // after it is a floor that states nothing, and the message says
+            // that. A refusing body rewinds instead, because a bare
+            // `requires` there is a member line with no arguments and has
+            // always parsed.
+            Err(error) if policy == RequiresPolicy::Accepted => Err(error),
+            Err(_) => {
+                self.pos = mark;
+                self.raw_values.truncate(raw_mark);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Consume every token up to the end of the line and return their index
+    /// range, the source text they cover (trimmed), and the byte the text
+    /// ends at — the start of the first token when there is none.
+    ///
+    /// The text is sliced out of the source rather than rebuilt from the
+    /// tokens, so what the lexer split it into does not matter, and a
+    /// [`TokenKind::Unlexed`] stretch is part of it like any other token.
+    /// Whether that stretch is then a failure is the caller's to say, by
+    /// recording the range in `raw_values` or not.
+    fn rest_of_line(&mut self) -> (std::ops::Range<usize>, String, usize) {
+        let first = self.pos;
+        let value_start_byte = self.current_byte();
+        let mut value_end_byte = value_start_byte;
+        while let Some(t) = self.peek() {
+            if matches!(t.kind, TokenKind::Newline) {
+                break;
+            }
+            value_end_byte = t.span.end;
+            self.advance();
+        }
+        let raw = self.source[value_start_byte..value_end_byte]
+            .trim()
+            .to_owned();
+        (first..self.pos, raw, value_end_byte)
+    }
+
+    /// Read one `requires <expression>` line.
+    ///
+    /// The expression is taken verbatim to end of line, exactly as
+    /// [`Self::parse_header`] takes `@requires`\'s. That is what lets the
+    /// two share one `parse_requirement`, and what keeps version labels the
+    /// lexer has no token for — `24w14a` lexes as an integer and an
+    /// identifier, `1.21.4-rc1` as five tokens — out of the grammar\'s way.
+    fn parse_requires_line(&mut self) -> Result<MemberRequires, ParseError> {
+        // The keyword's own position, not the value's. An empty expression
+        // has no token to point at but the newline, and its column is one
+        // past the end of the line — a caret nothing is under.
+        let keyword_position = self.position();
+        let start_byte = self.current_byte();
+        self.advance();
+        let (value_tokens, raw, value_end_byte) = self.rest_of_line();
+        self.raw_values.push(value_tokens);
+        let span = start_byte..value_end_byte;
+        self.expect_newline()?;
+        if raw.is_empty() {
+            return Err(ParseError::Syntax {
+                position: keyword_position,
+                message: "`requires` requires a value".into(),
+            });
+        }
+        // A floor is one line. Left to the body loop this reaches
+        // `parse_theme_rule` or `parse_command` and comes back as
+        // `expected identifier, got indent`, which names the token the
+        // parser met and not the thing the author wrote.
+        if self.peek_is(&TokenKind::Indent) {
+            return Err(ParseError::Syntax {
+                position: self.position(),
+                message: "a `requires` floor takes no indented body: it declares one constraint \
+                          and nothing is nested under it"
+                    .into(),
+            });
+        }
+        Ok(MemberRequires::new(RawRequirement::new(raw), span))
     }
 
     fn parse_command(&mut self) -> Result<Statement, ParseError> {
@@ -434,7 +733,10 @@ impl<'a> Parser<'a> {
         // repeats its own indent, but that is a constant factor, not a
         // bound — 400 levels is a third of a megabyte and used to abort the
         // process just as `[[[…` did.
-        let children = self.nested(Self::parse_optional_command_body)?;
+        // A member's children are members. The floor belongs to the part
+        // as a whole, so it is read one level up and refused here.
+        let (_, children) =
+            self.nested(|p| p.parse_optional_command_body(RequiresPolicy::NotThisLevel))?;
         Ok(Statement::Generic {
             keyword,
             selector,
@@ -494,7 +796,8 @@ impl<'a> Parser<'a> {
         while !self.peek_is(&TokenKind::RBrace) && !self.at_eof() {
             let pattern_position = self.position();
             let row_start_byte = self.current_byte();
-            let inputs_lex = self.expect_int_lexeme()?;
+            let pattern = self.expect_truth_pattern()?;
+            let inputs_lex = pattern.text;
             // A row assigns one bit per input signal, so the pattern is
             // checked against the list left of the arrow.
             //
@@ -511,37 +814,62 @@ impl<'a> Parser<'a> {
             //
             // A leading zero is data here rather than a numeric quirk,
             // which is why the row keeps the raw lexeme: `01` and `1` are
-            // different rows of a two-input table.
-            if let Some(bad) = inputs_lex.chars().find(|c| !matches!(c, '0' | '1')) {
+            // different rows of a two-input table. A `-` is the third
+            // character a pattern may hold, and says the row means every
+            // value of that input rather than one.
+            if let Some(bad) = inputs_lex.chars().find(|c| !matches!(c, '0' | '1' | '-')) {
                 return Err(ParseError::Syntax {
                     position: pattern_position,
                     message: format!(
-                        "truth-table input pattern `{inputs_lex}` must hold only `0` and `1`, \
-                         got `{bad}`"
+                        "truth-table input pattern `{inputs_lex}` must hold only `0`, `1` and \
+                         `-`, got `{bad}`"
                     ),
                 });
             }
-            if inputs_lex.chars().count() != inputs.len() {
+            let width = inputs_lex.chars().count();
+            if width != inputs.len() {
+                // One bit short is the shape a swallowed `-` makes, and
+                // only ever one: the lexer reads `->` greedily, so the
+                // last of a run of dashes before a `>` goes into the
+                // arrow and the rest do not. Naming that here saves the
+                // reader working out why a pattern they wrote wider came
+                // back narrower.
+                let hint = if width + 1 == inputs.len() && pattern.ends_at_the_arrow {
+                    format!(
+                        ". A `-` written immediately before `->` is read as part of the arrow, \
+                         so a row whose last input is a don't-care is written `{inputs_lex}--> \
+                         0` or `{inputs_lex}- -> 0`"
+                    )
+                } else {
+                    String::new()
+                };
                 return Err(ParseError::Syntax {
                     position: pattern_position,
                     message: format!(
-                        "truth-table input pattern `{inputs_lex}` is {got} bits wide, \
-                         but the table has {want} input{plural}",
-                        got = inputs_lex.chars().count(),
+                        "truth-table input pattern `{inputs_lex}` is {width} bits wide, \
+                         but the table has {want} input{plural}{hint}",
                         want = inputs.len(),
                         plural = if inputs.len() == 1 { "" } else { "s" },
                     ),
                 });
             }
             self.expect(&TokenKind::Arrow)?;
-            let out_lex = self.expect_int_lexeme()?;
-            let output = match out_lex.as_str() {
-                "0" => false,
-                "1" => true,
-                other => {
-                    return Err(self.syntax_here(&format!(
-                        "truth-table output must be `0` or `1`, got `{other}`"
-                    )));
+            let output = if self.peek_is(&TokenKind::Minus) {
+                // A `-` output asserts nothing about this combination.
+                // The arrow has already been taken, so a lone `-` here is
+                // never the arrow's own dash.
+                self.advance();
+                None
+            } else {
+                let out_lex = self.expect_int_lexeme()?;
+                match out_lex.as_str() {
+                    "0" => Some(false),
+                    "1" => Some(true),
+                    other => {
+                        return Err(self.syntax_here(&format!(
+                            "truth-table output must be `0`, `1`, or `-`, got `{other}`"
+                        )));
+                    }
                 }
             };
             rows.push(TruthRow {
@@ -674,6 +1002,16 @@ impl<'a> Parser<'a> {
         Ok((Expr::Ref(dotted), 1))
     }
 
+    /// Is the next token the bare identifier `name`?
+    ///
+    /// [`Self::match_keyword`] answers the same question and consumes the
+    /// token; the `requires` dispatch needs the answer without the
+    /// consumption, because the line it hands off to re-reads the keyword
+    /// to fix its own span.
+    fn peek_is_ident(&self, name: &str) -> bool {
+        matches!(self.peek(), Some(t) if matches!(&t.kind, TokenKind::Ident(ident) if ident == name))
+    }
+
     fn match_keyword(&mut self, kw: &str) -> bool {
         if let Some(t) = self.peek()
             && let TokenKind::Ident(name) = &t.kind
@@ -720,6 +1058,140 @@ impl<'a> Parser<'a> {
         Ok(Arg { key, value, span })
     }
 
+    /// Read an `@` token value — `@oak_planks`, `@floor.wood`, or a
+    /// canonical token with its state literal, `@oak_log[axis=x]` — whose
+    /// `@` starts at `start_byte`.
+    fn parse_token_value(&mut self, start_byte: usize) -> Result<Value, ParseError> {
+        self.advance();
+        let mut text = self.expect_ident()?;
+        let mut dotted = false;
+        while self.peek_is(&TokenKind::Dot) {
+            self.advance();
+            text.push('.');
+            text.push_str(&self.expect_ident()?);
+            dotted = true;
+        }
+        // A `[` that touches an undotted name is the token's own state
+        // literal. On a dotted token, or after a space, it is whatever the
+        // caller reads next — a nested list in a value list, a positional
+        // after a member — exactly as the grammar reads it: a dotted token
+        // is abstract and names no block for a state to belong to, so the
+        // grammar gives it no literal and this does not claim the `[`.
+        if !dotted
+            && self
+                .peek()
+                .is_some_and(|t| t.kind == TokenKind::LBracket && t.span.start == self.last_byte())
+        {
+            text.push_str(&self.parse_state_literal(&text)?);
+        }
+        Ok(Value::new(
+            ValueKind::Token(text),
+            start_byte..self.last_byte(),
+        ))
+    }
+
+    /// Read a block-state literal, `[key=value,…]`, after the `@` token
+    /// named `token`, and return it as the text it folds into the token:
+    /// `[axis=x]`, with the spaces the source may hold between its parts
+    /// left out.
+    ///
+    /// This is the one place a malformed literal is refused.
+    /// `block_array::material` reads the folded text back into a property
+    /// map leniently, on the understanding that nothing malformed reaches
+    /// it, so an empty literal, an empty or repeated property, a stray or
+    /// trailing `,` and a missing `]` are all refused here. The literal is
+    /// Minecraft's block-state syntax rather than a Cairn list, so the
+    /// comma between pairs is required rather than optional.
+    ///
+    /// Which properties a block has, and which values each takes, is not
+    /// checked here: that is a question about the target's registry, not
+    /// about the source's shape.
+    fn parse_state_literal(&mut self, token: &str) -> Result<String, ParseError> {
+        let refuse = |position, found: &str| ParseError::Syntax {
+            position,
+            message: format!(
+                "the state literal on `@{token}` expected {found}; a state literal is \
+                 `[property=value]` pairs separated by `,`, as in `@oak_log[axis=x]`"
+            ),
+        };
+        self.expect(&TokenKind::LBracket)?;
+        let mut text = String::from("[");
+        // A set rather than a list: the literal's length is the author's
+        // to choose, and the duplicate check runs once per property.
+        let mut seen: IndexSet<String> = IndexSet::new();
+        loop {
+            let position = self.position();
+            let Some(TokenKind::Ident(property)) = self.peek().map(|t| t.kind.clone()) else {
+                let got = self.next_token_text();
+                return Err(refuse(position, &format!("a property name, got {got}")));
+            };
+            if seen.contains(&property) {
+                return Err(ParseError::Syntax {
+                    position,
+                    message: format!(
+                        "the state literal on `@{token}` sets `{property}` twice; a block \
+                         state has one value per property"
+                    ),
+                });
+            }
+            self.advance();
+            let position = self.position();
+            if !self.peek_is(&TokenKind::Eq) {
+                let got = self.next_token_text();
+                return Err(refuse(
+                    position,
+                    &format!("`=` after `{property}`, got {got}"),
+                ));
+            }
+            self.advance();
+            let position = self.position();
+            let value = match self.peek().map(|t| &t.kind) {
+                Some(TokenKind::Ident(value)) => value.clone(),
+                Some(TokenKind::Int { lexeme }) => lexeme.clone(),
+                Some(TokenKind::Bool(value)) => value.to_string(),
+                _ => {
+                    let got = self.next_token_text();
+                    return Err(refuse(
+                        position,
+                        &format!("a value for `{property}`, got {got}"),
+                    ));
+                }
+            };
+            self.advance();
+            if !seen.is_empty() {
+                text.push(',');
+            }
+            text.push_str(&property);
+            text.push('=');
+            text.push_str(&value);
+            seen.insert(property);
+            let position = self.position();
+            match self.peek().map(|t| &t.kind) {
+                Some(TokenKind::Comma) => self.advance(),
+                Some(TokenKind::RBracket) => {
+                    self.advance();
+                    text.push(']');
+                    return Ok(text);
+                }
+                _ => {
+                    let got = self.next_token_text();
+                    return Err(refuse(position, &format!("`,` or `]`, got {got}")));
+                }
+            }
+        }
+    }
+
+    /// The next token as a refusal names it: `` `]` ``, `end of line`.
+    ///
+    /// The lexer ends every token stream with a `Newline`, so a construct
+    /// cut short by the end of the file reports `end of line` like one cut
+    /// short by the end of its line; `end of input` is only the answer for
+    /// a stream that breaks that rule.
+    fn next_token_text(&self) -> String {
+        self.peek()
+            .map_or_else(|| "end of input".to_owned(), |t| t.kind.to_string())
+    }
+
     fn parse_value(&mut self) -> Result<Value, ParseError> {
         let position = self.position();
         let start_byte = self.current_byte();
@@ -730,18 +1202,7 @@ impl<'a> Parser<'a> {
             });
         };
         match token.kind {
-            TokenKind::At => {
-                self.advance();
-                let mut parts = vec![self.expect_ident()?];
-                while self.peek_is(&TokenKind::Dot) {
-                    self.advance();
-                    parts.push(self.expect_ident()?);
-                }
-                Ok(Value::new(
-                    ValueKind::Token(parts.join(".")),
-                    start_byte..self.last_byte(),
-                ))
-            }
+            TokenKind::At => self.parse_token_value(start_byte),
             TokenKind::Bool(b) => {
                 self.advance();
                 Ok(Value::new(ValueKind::Bool(b), token.span))
@@ -760,8 +1221,18 @@ impl<'a> Parser<'a> {
                 })?;
                 Ok(Value::new(ValueKind::Size { w, h }, size_span))
             }
-            TokenKind::Int { value, .. } => {
+            TokenKind::Int { lexeme, .. } => {
                 self.advance();
+                // Where the digits are asked to be a number, so where the
+                // `i64` ceiling belongs. See `TokenKind::Int`.
+                let value = lexeme
+                    .parse::<i64>()
+                    .map_err(|err: std::num::ParseIntError| ParseError::InvalidInt {
+                        position,
+                        context: IntContext::IntLiteral,
+                        lexeme: lexeme.clone(),
+                        kind: *err.kind(),
+                    })?;
                 Ok(Value::new(ValueKind::Int(value), token.span))
             }
             TokenKind::Str(s) => {
@@ -911,6 +1382,61 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// The pattern left of a truth row's `->`, reassembled from the
+    /// tokens the lexer split it into.
+    ///
+    /// A pattern holds one character per input signal — `0`, `1`, or `-`
+    /// for a don't-care (`spec/syntax` "Lexical") — and the lexer has no
+    /// table around it to say so: a run of digits is one `Int`, each `-`
+    /// is a `Minus`, so `0-1` arrives as three tokens. They are one
+    /// pattern exactly when the source put nothing between them, which
+    /// is what the byte spans say. `0- 1` is a one-bit-too-narrow
+    /// pattern followed by a stray `1`, not a three-wide row, and the
+    /// width check downstream is what reports it.
+    ///
+    /// The run stops at the first token that is neither — for a pattern
+    /// ending in a don't-care that is the `->` itself, since the lexer
+    /// takes `->` greedily and the last dash of `--->` goes into the
+    /// arrow. So `11--> 0` and `11- -> 0` are the same row.
+    fn expect_truth_pattern(&mut self) -> Result<TruthPattern, ParseError> {
+        let position = self.position();
+        let mut text = String::new();
+        let mut previous_end: Option<usize> = None;
+        let mut ends_at_the_arrow = false;
+        while let Some(token) = self.peek() {
+            let adjacent = previous_end.is_none_or(|end| token.span.start == end);
+            if !adjacent {
+                break;
+            }
+            let piece = match &token.kind {
+                TokenKind::Int { lexeme } => lexeme.clone(),
+                TokenKind::Minus => "-".to_owned(),
+                _ => {
+                    ends_at_the_arrow = matches!(token.kind, TokenKind::Arrow);
+                    break;
+                }
+            };
+            previous_end = Some(token.span.end);
+            text.push_str(&piece);
+            self.advance();
+        }
+        if text.is_empty() {
+            return Err(ParseError::Syntax {
+                position,
+                message: match self.peek() {
+                    Some(token) => {
+                        format!("expected a truth-table input pattern, got {}", token.kind)
+                    }
+                    None => "expected a truth-table input pattern, got end of input".to_owned(),
+                },
+            });
+        }
+        Ok(TruthPattern {
+            text,
+            ends_at_the_arrow,
+        })
+    }
+
     fn syntax_here(&self, message: &str) -> ParseError {
         ParseError::Syntax {
             position: self.position(),
@@ -949,6 +1475,8 @@ impl<'a> Parser<'a> {
     /// Byte offset where the next un-consumed token begins, or `source.len()`
     /// at EOF. Anchors the start of a node's [`Span`] before any token is
     /// consumed in its parser arm.
+    ///
+    /// [`Span`]: crate::error::Span
     fn current_byte(&self) -> usize {
         self.peek().map_or(self.source.len(), |t| t.span.start)
     }
@@ -957,6 +1485,8 @@ impl<'a> Parser<'a> {
     /// close a [`Span`] right after the last meaningful token for a node;
     /// callers capture this *before* `expect_newline()` so trailing layout
     /// tokens stay outside the node's span.
+    ///
+    /// [`Span`]: crate::error::Span
     fn last_byte(&self) -> usize {
         self.tokens
             .get(self.pos.wrapping_sub(1))

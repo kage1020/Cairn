@@ -53,35 +53,80 @@ leaf integrations that nothing depends on. `cairn-lang-formats` is the only crat
 | Tool | Pinned by | Notes |
 |---|---|---|
 | Rust | `rust-toolchain.toml` | An exact version, not a channel. With `rustfmt` and `clippy`. |
-| Edition 2024, MSRV 1.95 | `Cargo.toml` | Workspace package metadata. |
+| Edition 2024, MSRV | `Cargo.toml` | Workspace package metadata, inherited by every crate. |
 | Formatting | `rustfmt.toml` | `max_width = 100`, Unix line endings. |
-| Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = forbid`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
+| Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = deny`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
 
 The Rust version is exact because CI treats every clippy finding as fatal. On a channel, a Rust
 release turns every open branch red on its own — the finding lands on a file the branch never
 touched. The pin decides when new lints arrive rather than whether: bumping it is its own pull
 request, carrying whatever the new release found. It is not the MSRV; `rust-version` is the floor a
-consumer needs, and raising the pin does not raise it.
+consumer needs, and raising the pin does not raise it. The number itself lives only in
+`Cargo.toml`: CI's `MSRV` job reads it back out with `cargo metadata` and checks the workspace at
+that compiler, so a change reaching for a newly stabilised API goes red there rather than at a
+consumer's.
 
-`unsafe_code` is forbidden workspace-wide with no escape hatch. If a use case ever needs it, it goes
-through a focused PR that lifts the lint on a single module with documented invariants, never
-`#[allow]` at a call site.
+Every crate inherits these with `[lints] workspace = true` and writes no `[lints.*]` table of its
+own. Inheritance is opt-in per crate and all-or-nothing: a crate without that line receives none of
+the workspace lints, so a lint added to the workspace later would silently skip it.
+
+`unsafe_code` is denied workspace-wide and lifted inside one module: `ffi` in the tree-sitter
+crate's Rust binding, which is the only way to reach the generated C parser. The level is `deny`
+rather than `forbid` because `forbid` refuses that module's `#![expect(unsafe_code)]` too. The
+`unsafe_code_is_confined` test in `cairn-lang-core` makes up the difference, over every crate
+`cargo metadata` reports as a workspace member: it fails if the workspace level is anything but
+`deny`, if a crate does not inherit the workspace lints, or if an `allow`, `expect`, `warn` or
+`cfg_attr` attribute names `unsafe_code` outside that module. Its module doc is the full statement
+of the policy and of what the test cannot see. If another use case ever needs `unsafe`, it goes
+through a focused PR that lifts the lint on a single module with documented invariants and adds
+that file and module to the test's `ALLOWED` list, never `#[allow]` at a call site.
 
 ## Build, test, lint
 
-CI runs these four on Linux, macOS, and Windows. Run them before opening a PR.
+CI runs these on Linux, macOS, and Windows, checks the workspace once more at the
+declared MSRV, and builds the API docs on Linux (below). Run them before opening a PR.
 
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
+cargo test -p cairn-lang-core --bench lowering
+cargo test -p cairn-lang-redstone --bench place_and_route
 ```
+
+The last two run each bench once as a test, untimed; `--workspace` does not select bench
+targets.
 
 CI sets `RUSTFLAGS=-D warnings`, so any new warning fails the build. To match it locally:
 
 ```sh
 RUSTFLAGS="-D warnings" cargo build --workspace --locked
+```
+
+CI also builds the API docs on Linux, twice, with rustdoc's warnings fatal, since clippy does not
+see a doc link to a private item or to a path that no longer resolves. The first run is the
+public surface and the only one that flags a public doc linking to a private item; the second
+also covers the docs only a contributor reads:
+
+```sh
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
+```
+
+Two benches time the passes a build spends its time in: `lowering` in `cairn-lang-core` and
+`place_and_route` in `cairn-lang-redstone`. They call the passes in-process, since timing the CLI
+over an example would mostly time process startup, and they generate their sources, since an
+example-sized one goes through a pass faster than the timer can tell a change apart. They take
+their settings from the release profile except `panic`, which Cargo builds unwinding for benches as
+it does for tests. CI runs them once as tests, above, but never times them. They exist to measure
+a change to `[profile.release]`, `opt-level` above all, before it is made.
+[CONTRIBUTING.md](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md) walks through
+comparing two profiles with them from the first release that includes the benches; until then that
+section is only on `canary`. To run both:
+
+```sh
+cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route
 ```
 
 `cairn-lang-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) and the website

@@ -8,17 +8,18 @@
 //! once, looks up the scope's [`cairn_lang_core::CircuitRegion`], and
 //! assigns each [`crate::edition_netlist_ir::EditionCellNode`] an
 //! integer [`CellCoord`] inside the reservation — the first stage of
-//! the five-stage place-and-route pipeline `spec/redstone` §14.5 lays
-//! out (Placement → Steiner routing → Delay insertion → Crossing
+//! the five-stage pipeline `spec/redstone` "Place-and-route" lays out
+//! (Placement → Steiner routing → Delay insertion → Crossing
 //! legalization → Edition legalization).
 //!
 //! Delay is not carried at the placement stage itself. Per
-//! `spec/redstone` §14.4 delay is determined "for the first time in
-//! the Placement IR" once wire length is known; wire length is the
-//! output of the routing pass (Steiner routing, stage 2 of §14.5) and
-//! is folded into `delay_ticks` by the delay-insertion pass
+//! `spec/redstone` "Time model" delay is determined "for the first
+//! time in the Placement IR" once wire length is known; wire length is
+//! the output of the routing pass (Steiner routing, stage 2 of that
+//! pipeline) and is folded into `local_delay_ticks` by the
+//! delay-insertion pass
 //! ([`crate::delay::compile_delay`], stage 3), so
-//! [`PlacedCellNode::wire_length`] and [`PlacedCellNode::delay_ticks`]
+//! [`PlacedCellNode::wire_length`] and [`PlacedCellNode::local_delay_ticks`]
 //! are reserved as `Option`s that the placement pass leaves `None`.
 //! Adding values in a follow-up pass is a field-write, not a schema
 //! change, so downstream JSON consumers see a stable wire shape. Which
@@ -26,14 +27,20 @@
 //! every cell carries ([`PlacementStage`]) rather than inferred from
 //! which optional keys are present, because that inference cannot
 //! separate a stage-4 dump with nothing to legalize from its stage-3
-//! input.
+//! input. The tag is also what makes a dumped cell readable again:
+//! [`PlacedCellNode`]'s [`Deserialize`] picks the phase by it and
+//! refuses a cell whose keys disagree with it.
 //!
 //! `circuit region=... void=N` congestion detection (`E_ROUTE_CONGESTION`)
 //! and missing-reservation refusal (`E_NO_CIRCUIT_REGION`) fire here —
 //! this is the first pass with a physical footprint to measure against.
-//! Attenuation limits (dust segments exceeding 15 blocks) belong to
-//! [`crate::delay::compile_delay`], stage 3 of §14.5, which fires
-//! `E_ATTENUATION_LIMIT` against the routed segment length.
+//! Attenuation limits are measured later and in two places, both
+//! against [`crate::delay::MAX_ATTENUATION_SEGMENT`]:
+//! [`crate::delay::compile_delay`], stage 3, fires `E_ATTENUATION_LIMIT`
+//! against the routed segment length, and `crate::pass::lay_nets`,
+//! which every place-and-route pass calls, fires the same code against
+//! the straight line between a driver and its sink before routing to
+//! it.
 
 use std::fmt;
 
@@ -41,17 +48,19 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
-use serde::ser::{SerializeMap, SerializeStruct};
-use serde::{Serialize, Serializer};
+use serde::de::{self, IntoDeserializer, MapAccess, Visitor};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::edition_netlist_ir::EditionCell;
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 
-/// Which of `spec/redstone` §14.5's three pseudo-2.5D layers a
-/// coordinate lives on. `Plane` is the ground layer every cell coord
-/// and every pad sits on; `Bridge` is the horizontal escape layer
-/// above it; `Via` is the vertical tap between the two.
+/// Which of the three pseudo-2.5D layers in `spec/redstone`
+/// "Place-and-route" a coordinate lives on. `Plane` is the ground
+/// layer every cell coord and every pad sits on; `Bridge` is the
+/// horizontal escape layer above it; `Via` is the vertical tap between
+/// the two.
 ///
 /// Cell coords are `Plane` by construction — the placement pass never
 /// stamps `Bridge` / `Via` on a cell body. Everything else the
@@ -61,8 +70,12 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 /// at one voxel are one map key rather than two.
 /// Serialising as the enum's stable lowercase string (`plane` /
 /// `bridge` / `via`) keeps the JSON wire form small and matches the
-/// vocabulary spec §14.5 uses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+/// vocabulary `spec/redstone` "Place-and-route" uses. Reading one back
+/// is derived, so it accepts exactly the variant names in snake case —
+/// the words [`Self::as_str`] writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(strum::EnumIter))]
 pub enum RouteLayer {
     /// Ground layer — every cell coord, every pad, and every coord
     /// the router did not have to climb to sits here. Default so that
@@ -79,8 +92,9 @@ pub enum RouteLayer {
     /// materialises `Via` in v1: a climb is a step between two coords
     /// rather than a coord of its own, so there is no ramp to name.
     /// Kept in the enum so a downstream consumer can match exhaustively
-    /// against the full §14.5 vocabulary; a subsequent pass that grows
-    /// `Via` producers is `#[non_exhaustive]`-safe.
+    /// against the full `spec/redstone` "Place-and-route" vocabulary; a
+    /// subsequent pass that grows `Via` producers is
+    /// `#[non_exhaustive]`-safe.
     Via,
 }
 
@@ -97,8 +111,9 @@ impl RouteLayer {
     }
 
     /// Stable lowercase string form used in the JSON wire format and
-    /// matched by downstream tooling. Mirrors the vocabulary spec
-    /// §14.5 uses when it introduces the three concepts.
+    /// matched by downstream tooling. Mirrors the vocabulary
+    /// `spec/redstone` "Place-and-route" uses when it introduces the
+    /// three concepts.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -121,8 +136,11 @@ impl Serialize for RouteLayer {
 /// by value. Cell coords stamped by [`crate::placement::compile_placement`]
 /// use `x = 1 + 2 * topological index`, `y = 0`, `z = 1`,
 /// [`RouteLayer::Plane`]. Pad coords derived by the routing pass at the
-/// reservation edges use `y = 0` on the plane with `z = i`
-/// (saturating at `depth-1` for pathological regions). Routed wire
+/// reservation edges use `y = 0` on the plane, and in a scope with cells
+/// `z = i` below the cell row and `z = i + 1` from it on, saturating at
+/// `depth-1`; in a scope with none, `z = i`. No pad the placement pass
+/// emits stands on the cell row: the saturation can put one there, but
+/// only in a region that pass refuses. Routed wire
 /// coords and buffer-repeater coords may use `y >= 1`, and take
 /// [`RouteLayer::Bridge`] when they do — see [`Self::new`].
 ///
@@ -140,7 +158,17 @@ impl Serialize for RouteLayer {
 /// entirely: the legalized IR shape is an additive superset of the
 /// earlier stages' shape apart from the `stage` tag
 /// ([`PlacementStage`]), whose value changes rather than appears.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+///
+/// Reading a coord back goes through [`Self::new`] too, so a read-back
+/// coord is one the pipeline could have built: an absent `layer` is the
+/// one the height gives, an explicit `layer` that agrees with it is
+/// accepted, and one that disagrees is refused rather than read as a
+/// second spelling of the voxel. That refuses every explicit `via`,
+/// deliberately: no producer writes it and [`Self::new`] cannot spell
+/// it, so the reader grows it when the rule does. A key the wire form
+/// does not have is refused as well.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "CellCoordWire")]
 pub struct CellCoord {
     /// Column along the region's x-axis. Zero at the region's origin.
     pub x: u32,
@@ -151,9 +179,9 @@ pub struct CellCoord {
     pub y: u32,
     /// Row along the region's z-axis. `1` for cell coords stamped by
     /// the placement pass — one row in, so every cell has a clear lane
-    /// on each side; pad coords step from `z = i` (saturating at
-    /// `depth-1`), and buffer coords take the row of the wire they
-    /// stand on.
+    /// on each side; pad coords step from `z = 0` and skip the cell
+    /// row (saturating at `depth-1`), and buffer coords take the row of
+    /// the wire they stand on.
     pub z: u32,
     /// Pseudo-2.5D layer this coord lives on. Cell coords are
     /// [`RouteLayer::Plane`] by construction; wire the routing pass
@@ -165,12 +193,42 @@ pub struct CellCoord {
     pub layer: RouteLayer,
 }
 
+/// [`CellCoord`]'s wire form as read, before [`CellCoord::new`] judges
+/// the `layer` against the height.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CellCoordWire {
+    x: u32,
+    y: u32,
+    z: u32,
+    #[serde(default)]
+    layer: Option<RouteLayer>,
+}
+
+impl TryFrom<CellCoordWire> for CellCoord {
+    type Error = String;
+
+    fn try_from(wire: CellCoordWire) -> Result<Self, Self::Error> {
+        let coord = Self::new(wire.x, wire.y, wire.z);
+        match wire.layer {
+            Some(layer) if layer != coord.layer => Err(format!(
+                "a coord at `y: {y}` is on the `{want}` layer, not `{got}`",
+                y = wire.y,
+                want = coord.layer.as_str(),
+                got = layer.as_str(),
+            )),
+            _ => Ok(coord),
+        }
+    }
+}
+
 impl CellCoord {
     /// The coord at `(x, y, z)`: [`RouteLayer::Plane`] on the ground
     /// layer, [`RouteLayer::Bridge`] above it.
     ///
-    /// The only constructor, so the layer is a function of the height
-    /// for everything the pipeline builds. One rule rather than one
+    /// The only constructor, and the one a coord read back from a dump
+    /// goes through, so the layer is a function of the height for
+    /// everything the pipeline builds. One rule rather than one
     /// per producer, because `(x, 1, z, Plane)` and
     /// `(x, 1, z, Bridge)` are distinct map keys and one voxel: two
     /// producers with two rules would key past each other and put two
@@ -207,7 +265,7 @@ impl CellCoord {
 /// The driver attribution is copied verbatim from
 /// [`PlacedCellNode::drivers`]`[i].port` at push time, so a downstream
 /// consumer can group buffers by their source segment without
-/// recomputing `floor((s - 1) / DUST_ATTENUATION_LIMIT)` from scratch.
+/// re-walking the routed tree.
 ///
 /// **The vector is an attribution list, not a block list.** There is
 /// one entry per segment per repeater that segment's signal passes
@@ -220,8 +278,8 @@ impl CellCoord {
 /// wants the number of blocks deduplicates by `coord`**; a consumer
 /// that wants a segment's repeaters filters by `port`. The delay pass
 /// charges ticks per driving net for the same reason, so
-/// `delay_ticks - base_delay_ticks` counts the deduplicated blocks
-/// and not the entries.
+/// `local_delay_ticks - base_delay_ticks` is `BUFFER_REPEATER_TICKS`
+/// per deduplicated block and not per entry.
 ///
 /// **Order contract on `Vec<BufferCoord>`** (as returned by
 /// [`PlacedCellNode::buffer_coords`]): entries appear in
@@ -242,7 +300,8 @@ impl CellCoord {
 /// The nested `coord` still elides its `layer` field when it stays on
 /// [`RouteLayer::Plane`], so the JSON footprint of a plane buffer stays
 /// compact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BufferCoord {
     /// Which segment this buffer stands on: a driver port of the owning
     /// cell, or the wire out to an actuator pad.
@@ -299,6 +358,34 @@ impl Serialize for BufferSegment {
     }
 }
 
+impl BufferSegment {
+    /// Every word a segment is written as — the driver ports as
+    /// [`PortName`]'s derived `Serialize` spells them, then `out` — for
+    /// the error an unknown word earns. Only the error reads it: the
+    /// acceptance set is [`PortName`]'s own, so a port added there reads
+    /// back without touching this list, and a test holds the list to
+    /// every word a segment is written as.
+    const WORDS: &'static [&'static str] = &["a", "b", "sel", "out"];
+}
+
+/// Reads back the one flat string vocabulary [`Serialize`] writes:
+/// `out`, or any word [`PortName`]'s own `Deserialize` accepts. An
+/// unknown word is refused naming every segment word rather than only
+/// the ports.
+impl<'de> Deserialize<'de> for BufferSegment {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let word = String::deserialize(deserializer)?;
+        if word == "out" {
+            return Ok(Self::Out);
+        }
+        PortName::deserialize(IntoDeserializer::<de::value::Error>::into_deserializer(
+            word.as_str(),
+        ))
+        .map(Self::Port)
+        .map_err(|_| de::Error::unknown_variant(&word, Self::WORDS))
+    }
+}
+
 /// The `circuit region=<label> void=<N>` reservation the enclosing
 /// scope declared, together with the footprint that reservation sits
 /// inside.
@@ -324,12 +411,39 @@ pub struct CircuitRegionReservation {
 }
 
 impl CircuitRegionReservation {
-    /// Total blocks reserved for routing: `width * depth * void`. Uses
-    /// `u64` so a large-but-legal reservation cannot overflow when
-    /// multiplied against a large cell budget elsewhere in the pass.
+    /// Total blocks reserved for routing: `width * depth * void`,
+    /// saturating.
+    ///
+    /// `u64` holds the product of two `u32`s and not of three —
+    /// `u32::MAX` squared is already within a rounding error of
+    /// `u64::MAX`, `2^33 - 2` short of it — so a reservation taken from
+    /// a hostile `size=` can carry it over, though not every `void`
+    /// above 1 does: `2147483647x2147483647` still fits at `void=4`.
+    /// What overflowed is reachable from a `.crn` either way.
+    ///
+    /// The workspace sets no `overflow-checks`, so what that cost
+    /// depended on the build. A debug build panicked. A release build
+    /// wrapped, and wrapping is the worse of the two, because it is
+    /// silent exactly where the number is still plausible:
+    /// `size=4294967295x4294967295 void=3` wraps to ~1.8e19, which no
+    /// caller distinguishes from a real reservation, and the run exits
+    /// 0. Where the product is an exact multiple of `2^64` it wraps to
+    /// **zero** instead — `size=2147483648x2147483648 void=4` is the
+    /// smallest such shape — and a zero reservation is not merely
+    /// wrong: the congestion test it then fails divides by it in
+    /// `area_ratio_tenths`, which takes the process down.
+    ///
+    /// Saturating rather than widening, because every caller compares
+    /// this against a budget or divides into it, and `u64::MAX` is the
+    /// right answer to both: a reservation that large is not the
+    /// constraint on anything. The refusal such a scope earns comes
+    /// from the attenuation cap, which its own span and its own
+    /// sentence are about.
     #[must_use]
     pub const fn reserved_area(&self) -> u64 {
-        (self.width as u64) * (self.depth as u64) * (self.void as u64)
+        (self.width as u64)
+            .saturating_mul(self.depth as u64)
+            .saturating_mul(self.void as u64)
     }
 }
 
@@ -349,11 +463,15 @@ impl CircuitRegionReservation {
 /// accepts, so a dump names the flag that produced it and a consumer
 /// can round-trip the two. Keep them in step with the CLI's
 /// `SynthStage` value names — the CLI test suite asserts the
-/// equality per stage.
+/// equality per stage. Reading a tag back is derived, so it accepts
+/// exactly the variant names in snake case, which are the words
+/// [`Self::as_str`] writes; a test walks every variant through both.
 ///
 /// `#[non_exhaustive]` for the same reason [`PlacementPhase`] is: the
 /// fifth stage (Edition legalization) has no variant yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum PlacementStage {
     /// Produced by [`crate::placement::compile_placement`] — paired
@@ -394,26 +512,26 @@ impl Serialize for PlacementStage {
 }
 
 /// Progressive state of a [`PlacedCellNode`] as it moves through the
-/// first four of the five stages of the place-and-route pipeline
-/// (`spec/redstone` §14.5 — Placement → Steiner routing → Delay
+/// first four of the five stages of the pipeline `spec/redstone`
+/// "Place-and-route" lays out (Placement → Steiner routing → Delay
 /// insertion → Crossing legalization → Edition legalization; the
 /// fifth stage is future work and does not yet have a variant).
 ///
-/// Every legal `(wire_length, delay_ticks, buffer_coords)` combination
+/// Every legal `(wire_length, local_delay_ticks, buffer_coords)` combination
 /// the pipeline can produce is one of these variants:
 ///
 /// | Producer                                             | Variant                                                                     | `stage` tag   |
 /// |------------------------------------------------------|-----------------------------------------------------------------------------|---------------|
 /// | [`crate::placement::compile_placement`] (Stage 1)    | [`Self::Unrouted`]                                                          | `placement`   |
 /// | [`crate::routing::compile_routing`]     (Stage 2)    | [`Self::Routed`] `{ wire_length }`                                          | `route`       |
-/// | [`crate::delay::compile_delay`]         (Stage 3)    | [`Self::Delayed`] `{ wire_length, delay_ticks }`                            | `delay`       |
-/// | [`crate::crossing::compile_crossing`]   (Stage 4)    | [`Self::Legalized`] `{ wire_length, delay_ticks, buffer_coords }`           | `crossing`    |
+/// | [`crate::delay::compile_delay`]         (Stage 3)    | [`Self::Delayed`] `{ wire_length, local_delay_ticks }`                      | `delay`       |
+/// | [`crate::crossing::compile_crossing`]   (Stage 4)    | [`Self::Legalized`] `{ wire_length, local_delay_ticks, buffer_coords }`     | `crossing`    |
 ///
 /// The rightmost column is [`Self::stage`] — see [`PlacementStage`]
 /// for why the JSON dump names its stage outright instead of leaving
 /// a consumer to infer it from which optional keys are present.
 ///
-/// Illegal shapes such as "have `delay_ticks` but no `wire_length`" or
+/// Illegal shapes such as "have `local_delay_ticks` but no `wire_length`" or
 /// "carry `buffer_coords` before the delay pass has run" are
 /// unrepresentable — each transition is expressed by the mutation
 /// methods [`Self::route`], [`Self::delay`], and [`Self::legalize`],
@@ -448,9 +566,12 @@ pub enum PlacementPhase {
     Delayed {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
-        /// Tick count implied by the routed wire length + this cell's
-        /// physical realisation per `spec/redstone` §14.4.
-        delay_ticks: u32,
+        /// The owning node's base delay (`spec/redstone` "Time model";
+        /// zero for an actuator pad) plus `BUFFER_REPEATER_TICKS` per
+        /// implicit buffer repeater on each distinct net feeding it.
+        /// A local wire cost, not an arrival time — see the
+        /// [`crate::delay`] module doc.
+        local_delay_ticks: u32,
     },
     /// After crossing legalization: buffer coordinates for the implicit
     /// repeaters the delay pass counted have been materialised, per
@@ -459,7 +580,7 @@ pub enum PlacementPhase {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
         /// Preserved from [`Self::Delayed`].
-        delay_ticks: u32,
+        local_delay_ticks: u32,
         /// One entry per implicit buffer repeater the delay pass
         /// counted; the crossing pass populates each entry with the
         /// coord it chose and the driver port that buffer belongs to.
@@ -483,14 +604,19 @@ impl PlacementPhase {
         }
     }
 
-    /// Delay ticks once delay insertion has run, `None` otherwise.
+    /// Local delay ticks once delay insertion has run, `None`
+    /// otherwise. See the `local_delay_ticks` field on
+    /// [`Self::Delayed`].
     #[must_use]
-    pub const fn delay_ticks(&self) -> Option<u32> {
+    pub const fn local_delay_ticks(&self) -> Option<u32> {
         match self {
             Self::Unrouted | Self::Routed { .. } => None,
-            Self::Delayed { delay_ticks, .. } | Self::Legalized { delay_ticks, .. } => {
-                Some(*delay_ticks)
+            Self::Delayed {
+                local_delay_ticks, ..
             }
+            | Self::Legalized {
+                local_delay_ticks, ..
+            } => Some(*local_delay_ticks),
         }
     }
 
@@ -547,7 +673,7 @@ impl PlacementPhase {
     /// a caller-side bug.
     #[track_caller]
     pub fn route(&mut self, wire_length: u32) {
-        self.route_inner(wire_length, None);
+        or_panic(self.try_route(wire_length), None);
     }
 
     /// [`Self::Unrouted`] → [`Self::Routed`], naming `context` in the
@@ -555,8 +681,7 @@ impl PlacementPhase {
     ///
     /// `#[track_caller]` alone puts the calling `.rs:line` in the
     /// backtrace but says nothing about *which* cell tripped the
-    /// guard, leaving the operator to walk back from the backtrace
-    /// into the IR. Pipeline passes pass a [`CellIdentity`]; any
+    /// guard. Pipeline passes pass a crate-internal `CellIdentity`; any
     /// [`fmt::Display`] works.
     ///
     /// # Panics
@@ -564,7 +689,7 @@ impl PlacementPhase {
     /// Panics under exactly the conditions [`Self::route`] does.
     #[track_caller]
     pub fn route_at(&mut self, wire_length: u32, context: impl fmt::Display) {
-        self.route_inner(wire_length, Some(&context));
+        or_panic(self.try_route(wire_length), Some(&context));
     }
 
     /// [`Self::Unrouted`] → [`Self::Routed`], refusing an out-of-order
@@ -605,16 +730,6 @@ impl PlacementPhase {
         }
     }
 
-    /// The panicking forms are [`Self::try_route`] plus a panic, so the
-    /// guard itself is stated once and the two forms cannot disagree
-    /// about which transitions are legal.
-    #[track_caller]
-    fn route_inner(&mut self, wire_length: u32, context: Option<&dyn fmt::Display>) {
-        if let Err(error) = self.try_route(wire_length) {
-            transition_panic(&error, context);
-        }
-    }
-
     /// [`Self::Routed`] → [`Self::Delayed`].
     ///
     /// Carries no caller context — see [`Self::delay_at`] for the form
@@ -624,24 +739,23 @@ impl PlacementPhase {
     ///
     /// Panics if the phase is not [`Self::Routed`]. Delay insertion
     /// must run exactly once per routed IR, and the producer↔variant
-    /// table on this enum forbids re-writing a `delay_ticks` that was
+    /// table on this enum forbids re-writing a `local_delay_ticks` that was
     /// already committed. See [`Self::try_delay`] for the fallible
     /// mirror.
     #[track_caller]
-    pub fn delay(&mut self, delay_ticks: u32) {
-        self.delay_inner(delay_ticks, None);
+    pub fn delay(&mut self, local_delay_ticks: u32) {
+        or_panic(self.try_delay(local_delay_ticks), None);
     }
 
     /// [`Self::Routed`] → [`Self::Delayed`], naming `context` in the
-    /// panic an out-of-order call raises. See [`Self::route_at`] for
-    /// why the context is worth carrying.
+    /// panic an out-of-order call raises, as [`Self::route_at`] does.
     ///
     /// # Panics
     ///
     /// Panics under exactly the conditions [`Self::delay`] does.
     #[track_caller]
-    pub fn delay_at(&mut self, delay_ticks: u32, context: impl fmt::Display) {
-        self.delay_inner(delay_ticks, Some(&context));
+    pub fn delay_at(&mut self, local_delay_ticks: u32, context: impl fmt::Display) {
+        or_panic(self.try_delay(local_delay_ticks), Some(&context));
     }
 
     /// [`Self::Routed`] → [`Self::Delayed`], refusing an out-of-order
@@ -654,7 +768,10 @@ impl PlacementPhase {
     /// Returns [`PlacementPhaseTransitionError::DelayOnNonRouted`],
     /// carrying the phase it found, whenever the phase is not
     /// [`Self::Routed`].
-    pub fn try_delay(&mut self, delay_ticks: u32) -> Result<(), PlacementPhaseTransitionError> {
+    pub fn try_delay(
+        &mut self,
+        local_delay_ticks: u32,
+    ) -> Result<(), PlacementPhaseTransitionError> {
         let wire_length = match self {
             Self::Routed { wire_length } => *wire_length,
             Self::Unrouted | Self::Delayed { .. } | Self::Legalized { .. } => {
@@ -665,17 +782,9 @@ impl PlacementPhase {
         };
         *self = Self::Delayed {
             wire_length,
-            delay_ticks,
+            local_delay_ticks,
         };
         Ok(())
-    }
-
-    /// See [`Self::route_inner`] for why the panicking forms delegate.
-    #[track_caller]
-    fn delay_inner(&mut self, delay_ticks: u32, context: Option<&dyn fmt::Display>) {
-        if let Err(error) = self.try_delay(delay_ticks) {
-            transition_panic(&error, context);
-        }
     }
 
     /// [`Self::Delayed`] → [`Self::Legalized`].
@@ -693,19 +802,18 @@ impl PlacementPhase {
     /// See [`Self::try_legalize`] for the fallible mirror.
     #[track_caller]
     pub fn legalize(&mut self, buffer_coords: Vec<BufferCoord>) {
-        self.legalize_inner(buffer_coords, None);
+        or_panic(self.try_legalize(buffer_coords), None);
     }
 
     /// [`Self::Delayed`] → [`Self::Legalized`], naming `context` in the
-    /// panic an out-of-order call raises. See [`Self::route_at`] for
-    /// why the context is worth carrying.
+    /// panic an out-of-order call raises, as [`Self::route_at`] does.
     ///
     /// # Panics
     ///
     /// Panics under exactly the conditions [`Self::legalize`] does.
     #[track_caller]
     pub fn legalize_at(&mut self, buffer_coords: Vec<BufferCoord>, context: impl fmt::Display) {
-        self.legalize_inner(buffer_coords, Some(&context));
+        or_panic(self.try_legalize(buffer_coords), Some(&context));
     }
 
     /// [`Self::Delayed`] → [`Self::Legalized`], refusing an
@@ -728,11 +836,11 @@ impl PlacementPhase {
         &mut self,
         buffer_coords: Vec<BufferCoord>,
     ) -> Result<(), PlacementPhaseTransitionError> {
-        let (wire_length, delay_ticks) = match self {
+        let (wire_length, local_delay_ticks) = match self {
             Self::Delayed {
                 wire_length,
-                delay_ticks,
-            } => (*wire_length, *delay_ticks),
+                local_delay_ticks,
+            } => (*wire_length, *local_delay_ticks),
             Self::Unrouted | Self::Routed { .. } | Self::Legalized { .. } => {
                 return Err(PlacementPhaseTransitionError::LegalizeOnNonDelayed {
                     current: self.clone(),
@@ -741,22 +849,20 @@ impl PlacementPhase {
         };
         *self = Self::Legalized {
             wire_length,
-            delay_ticks,
+            local_delay_ticks,
             buffer_coords,
         };
         Ok(())
     }
+}
 
-    /// See [`Self::route_inner`] for why the panicking forms delegate.
-    #[track_caller]
-    fn legalize_inner(
-        &mut self,
-        buffer_coords: Vec<BufferCoord>,
-        context: Option<&dyn fmt::Display>,
-    ) {
-        if let Err(error) = self.try_legalize(buffer_coords) {
-            transition_panic(&error, context);
-        }
+/// The panicking transition forms are their `try_*` mirror plus this,
+/// so the guard itself is stated once and the two forms cannot disagree
+/// about which transitions are legal.
+#[track_caller]
+fn or_panic(result: Result<(), PlacementPhaseTransitionError>, context: Option<&dyn fmt::Display>) {
+    if let Err(error) = result {
+        transition_panic(&error, context);
     }
 }
 
@@ -771,7 +877,7 @@ impl PlacementPhase {
 ///
 /// The whole offending phase is carried rather than just its variant
 /// name: a consumer diagnosing a stale cache entry or a malformed IR
-/// dump wants the `wire_length` / `delay_ticks` the phase got as far
+/// dump wants the `wire_length` / `local_delay_ticks` the phase got as far
 /// as, and it is what lets [`fmt::Display`] reproduce the panic
 /// wording exactly.
 ///
@@ -1067,19 +1173,19 @@ impl fmt::Display for CellIdentity<'_> {
 /// inside the reservation.
 ///
 /// The progressive fields the routing, delay-insertion, and
-/// crossing-legalization passes produce (`wire_length`, `delay_ticks`,
-/// `buffer_coords`) live inside [`Self::phase`] as a
+/// crossing-legalization passes produce (`wire_length`, `local_delay_ticks`,
+/// `buffer_coords`) live inside the `phase` field as a
 /// [`PlacementPhase`] — see that enum's docstring for the four
 /// legitimate states and the transition methods each pass calls.
 /// Read-only convenience accessors [`Self::wire_length`],
-/// [`Self::delay_ticks`], and [`Self::buffer_coords`] project the
+/// [`Self::local_delay_ticks`], and [`Self::buffer_coords`] project the
 /// phase back onto the three flat fields the JSON wire form exposes,
 /// so consumers that only care about the values do not need to match
 /// on the phase enum; [`Self::stage`] projects the discriminant
 /// itself.
 ///
-/// The custom [`Serialize`] impl flattens [`Self::phase`] onto
-/// `{stage, cell, drivers, coord[, wire_length][, delay_ticks][, buffer_coords]}`.
+/// The custom [`Serialize`] impl flattens that `phase` field onto
+/// `{stage, cell, drivers, coord[, wire_length][, local_delay_ticks][, buffer_coords]}`.
 /// The three optionals carry the shape earlier revisions of this
 /// struct produced via `skip_serializing_if`, so the JSON dump of a
 /// stage-N output is an additive subset of the stage-(N+1) dump *apart
@@ -1088,6 +1194,45 @@ impl fmt::Display for CellIdentity<'_> {
 /// appears, and it exists precisely because the subset relation made
 /// a zero-buffer [`PlacementPhase::Legalized`] indistinguishable from
 /// a [`PlacementPhase::Delayed`] — see [`PlacementStage`].
+///
+/// The matching [`Deserialize`] reads that flat form back. It picks the
+/// [`PlacementPhase`] variant by the `stage` tag, never by which
+/// optional keys are present, and refuses a dump whose keys disagree
+/// with its tag: a payload key the named stage has not written yet
+/// (`buffer_coords` under `"route"`), or one it must have written and
+/// is missing (`local_delay_ticks` under `"delay"`). `buffer_coords`
+/// is the one payload key that may be absent at its own stage, because
+/// [`Serialize`] leaves it out when the crossing pass placed nothing.
+/// A missing `stage`, an unknown `stage` or `layer` word, a `layer`
+/// that disagrees with the coord's height (see [`CellCoord`]), a buffer
+/// on a segment the cell has no driver for, and a key the wire form
+/// does not have — at any depth — are refused too. Every refusal is a
+/// deserializer error, not a panic.
+///
+/// This reader is the first way code outside this crate can build a
+/// `PlacedCellNode` at all: the struct is `#[non_exhaustive]` with a
+/// crate-private phase and has no public constructor. What it builds is
+/// a cell as its `stage`'s pass left it, so hand it to the pass *after*
+/// that stage. The phase transitions still panic on a phase they do
+/// not expect, as they do for a cell the pipeline built: the promise
+/// above that a bad dump is an error rather than a panic is this
+/// reader's, not theirs.
+///
+/// [`Self::span`] is not part of the wire form, so a cell read back
+/// carries `0..0` — which is also a real empty span at the start of a
+/// file, and `PartialEq` compares it. A round trip is therefore equal
+/// except for the span: compare against the original with its span set
+/// to `0..0`.
+///
+/// Read-back is for self-describing formats (JSON and the like). The
+/// reader takes a map; the field count of the flat form varies with the
+/// phase, from four keys to seven, so a positional encoding such as
+/// bincode or postcard cannot be read back unambiguously, and a
+/// non-map input is refused rather than guessed at. A repeated key is
+/// refused only where the deserializer hands over the map as written —
+/// `serde_json::from_str`, `from_slice`, `from_reader`. Through a
+/// `serde_json::Value` it cannot be: the `Value` has already folded the
+/// duplicates, last one winning, before this reader sees the map.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PlacedCellNode {
@@ -1116,95 +1261,330 @@ pub struct PlacedCellNode {
     pub span: Span,
 }
 
+/// The read-only projections of a placed node's [`PlacementPhase`],
+/// spelled once for the two node types that carry one.
+macro_rules! phase_projections {
+    ($subject:literal, $wire_length:literal) => {
+        #[doc = $wire_length]
+        /// See [`PlacementPhase::wire_length`].
+        #[must_use]
+        pub const fn wire_length(&self) -> Option<u32> {
+            self.phase.wire_length()
+        }
+
+        /// Local delay ticks once delay insertion has run. See
+        /// [`PlacementPhase::local_delay_ticks`].
+        #[must_use]
+        pub const fn local_delay_ticks(&self) -> Option<u32> {
+            self.phase.local_delay_ticks()
+        }
+
+        /// Buffer coordinates once crossing legalization has run. See
+        /// [`PlacementPhase::buffer_coords`].
+        #[must_use]
+        pub fn buffer_coords(&self) -> &[BufferCoord] {
+            self.phase.buffer_coords()
+        }
+
+        #[doc = concat!("Which pass last wrote to this ", $subject, ". See")]
+        /// [`PlacementPhase::stage`].
+        #[must_use]
+        pub const fn stage(&self) -> PlacementStage {
+            self.phase.stage()
+        }
+    };
+}
+
 impl PlacedCellNode {
-    /// Wire length once routing has run. See
-    /// [`PlacementPhase::wire_length`].
-    #[must_use]
-    pub const fn wire_length(&self) -> Option<u32> {
-        self.phase.wire_length()
+    phase_projections!("cell", "Wire length once routing has run.");
+}
+
+/// The flat wire form both placed node types share: `stage` first, so a
+/// truncated or eyeballed dump still says which pass produced it, then
+/// the node's own `identity_fields` (written by `identity`), then the
+/// phase's fields as far as the pipeline has filled them.
+///
+/// Hand-written rather than derived because the derived form would tag
+/// the phase enum and reshape the flat form the integration tests lock
+/// byte-for-byte. Binary formats (bincode, postcard, msgpack) rely on the
+/// announced field count being exact, so every write goes through a
+/// [`CountedFields`] and the count is checked against it before `end`;
+/// a new visible field on either node type, or a Stage-5 variant whose
+/// payload the JSON must expose, is added here and given a
+/// [`PlacementStage`] variant.
+fn serialize_phased<S: Serializer>(
+    serializer: S,
+    name: &'static str,
+    phase: &PlacementPhase,
+    identity_fields: usize,
+    identity: impl FnOnce(&mut CountedFields<S::SerializeStruct>) -> Result<(), S::Error>,
+) -> Result<S::Ok, S::Error> {
+    let wire_length = phase.wire_length();
+    let local_delay_ticks = phase.local_delay_ticks();
+    let buffer_coords = phase.buffer_coords();
+    let field_count = 1
+        + identity_fields
+        + usize::from(wire_length.is_some())
+        + usize::from(local_delay_ticks.is_some())
+        + usize::from(!buffer_coords.is_empty());
+
+    let mut state = CountedFields {
+        inner: serializer.serialize_struct(name, field_count)?,
+        written: 0,
+    };
+    state.serialize_field("stage", &phase.stage())?;
+    identity(&mut state)?;
+    if let Some(wl) = wire_length {
+        state.serialize_field("wire_length", &wl)?;
+    }
+    if let Some(dt) = local_delay_ticks {
+        state.serialize_field("local_delay_ticks", &dt)?;
+    }
+    if !buffer_coords.is_empty() {
+        state.serialize_field("buffer_coords", buffer_coords)?;
+    }
+    debug_assert_eq!(
+        state.written, field_count,
+        "{name}: announced field_count ({field_count}) diverges from the serialize_field \
+         call count ({}); binary formats such as bincode / postcard would produce \
+         malformed output",
+        state.written,
+    );
+    state.end()
+}
+
+/// A [`SerializeStruct`] that counts the fields written through it, so
+/// [`serialize_phased`] can hold the announced field count to the writes.
+struct CountedFields<T> {
+    inner: T,
+    written: usize,
+}
+
+impl<T: SerializeStruct> SerializeStruct for CountedFields<T> {
+    type Ok = T::Ok;
+    type Error = T::Error;
+
+    fn serialize_field<V: ?Sized + Serialize>(
+        &mut self,
+        key: &'static str,
+        value: &V,
+    ) -> Result<(), T::Error> {
+        self.written += 1;
+        self.inner.serialize_field(key, value)
     }
 
-    /// Delay ticks once delay insertion has run. See
-    /// [`PlacementPhase::delay_ticks`].
-    #[must_use]
-    pub const fn delay_ticks(&self) -> Option<u32> {
-        self.phase.delay_ticks()
-    }
-
-    /// Buffer coordinates once crossing legalization has run. See
-    /// [`PlacementPhase::buffer_coords`].
-    #[must_use]
-    pub fn buffer_coords(&self) -> &[BufferCoord] {
-        self.phase.buffer_coords()
-    }
-
-    /// Which pass last wrote to this cell. See
-    /// [`PlacementPhase::stage`].
-    #[must_use]
-    pub const fn stage(&self) -> PlacementStage {
-        self.phase.stage()
+    fn end(self) -> Result<T::Ok, T::Error> {
+        self.inner.end()
     }
 }
 
-// If [`PlacedCellNode`] grows a new visible field — or [`PlacementPhase`]
-// gains a Stage-5 variant whose payload the JSON must expose — add it to
-// both the field-count tally and the `serialize_field` calls below, and
-// give the new stage a [`PlacementStage`] variant so the `stage` tag
-// keeps naming the pass that produced the dump.
-// `serde_json` tolerates a field-count mismatch, but binary formats
-// (bincode, postcard, msgpack) rely on the announced count being exact;
-// the `debug_assert_eq!` at the end catches a divergence in tests. Do not
-// `#[derive(Serialize)]` this type — the derived output would tag the
-// enum variant and reshape the flat wire form locked in by
-// `routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_stage`
-// et al.
 impl Serialize for PlacedCellNode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let wire_length = self.wire_length();
-        let delay_ticks = self.delay_ticks();
-        let buffer_coords = self.buffer_coords();
+        serialize_phased(serializer, "PlacedCellNode", &self.phase, 3, |state| {
+            state.serialize_field("cell", &self.cell)?;
+            state.serialize_field("drivers", &self.drivers)?;
+            state.serialize_field("coord", &self.coord)
+        })
+    }
+}
 
-        let mut field_count = 4; // stage, cell, drivers, coord
-        if wire_length.is_some() {
-            field_count += 1;
+/// The keys of [`PlacedCellNode`]'s flat wire form, in the order
+/// [`serialize_phased`] writes them — what an unknown key's error lists.
+const PLACED_CELL_FIELDS: &[&str] = &[
+    "stage",
+    "cell",
+    "drivers",
+    "coord",
+    "wire_length",
+    "local_delay_ticks",
+    "buffer_coords",
+];
+
+/// The phase half of a placed node's flat wire form, as read off the
+/// map before anything is checked — so the keys may arrive in any order
+/// and are judged against the `stage` tag only once all of them are in.
+#[derive(Default)]
+struct PhaseFields {
+    stage: Option<PlacementStage>,
+    wire_length: Option<u32>,
+    local_delay_ticks: Option<u32>,
+    buffer_coords: Option<Vec<BufferCoord>>,
+}
+
+impl PhaseFields {
+    /// Store `key`'s value if it is one of the four phase keys,
+    /// refusing a second occurrence of it. Returns `false` for any
+    /// other key, which the caller reads itself.
+    fn read<'de, A: MapAccess<'de>>(&mut self, key: &str, map: &mut A) -> Result<bool, A::Error> {
+        fn once<'de, T: Deserialize<'de>, A: MapAccess<'de>>(
+            slot: &mut Option<T>,
+            key: &'static str,
+            map: &mut A,
+        ) -> Result<(), A::Error> {
+            if slot.is_some() {
+                return Err(de::Error::duplicate_field(key));
+            }
+            *slot = Some(map.next_value()?);
+            Ok(())
         }
-        if delay_ticks.is_some() {
-            field_count += 1;
+        match key {
+            "stage" => once(&mut self.stage, "stage", map)?,
+            "wire_length" => once(&mut self.wire_length, "wire_length", map)?,
+            "local_delay_ticks" => once(&mut self.local_delay_ticks, "local_delay_ticks", map)?,
+            "buffer_coords" => once(&mut self.buffer_coords, "buffer_coords", map)?,
+            _ => return Ok(false),
         }
-        if !buffer_coords.is_empty() {
-            field_count += 1;
+        Ok(true)
+    }
+
+    /// The [`PlacementPhase`] the `stage` tag names, holding the
+    /// payload keys to exactly what that stage carries.
+    ///
+    /// Each payload key belongs to the pass that writes it: a stage
+    /// before that pass must not carry it, and the pass's own stage
+    /// and every later one must — except `buffer_coords`, which
+    /// [`serialize_phased`] leaves out when it is empty, so its absence
+    /// at the crossing stage reads back as no buffers.
+    fn into_phase<E: de::Error>(self) -> Result<PlacementPhase, E> {
+        use PlacementStage::{Crossing, Delay, Placement, Route};
+
+        let stage = self.stage.ok_or_else(|| E::missing_field("stage"))?;
+        // A payload key the tagged stage has not reached yet.
+        let early = |key: &str, writer: PlacementStage, present: bool| {
+            if present {
+                Err(E::custom(format_args!(
+                    "`{key}` is written by the {writer} stage, which a cell tagged \
+                     `stage: \"{stage}\"` has not reached",
+                    writer = writer.as_str(),
+                    stage = stage.as_str(),
+                )))
+            } else {
+                Ok(())
+            }
+        };
+        // A payload key the tagged stage has been through and must carry.
+        let due = |key: &str, writer: PlacementStage, value: Option<u32>| {
+            value.ok_or_else(|| {
+                E::custom(format_args!(
+                    "a cell tagged `stage: \"{stage}\"` has been through the {writer} \
+                     stage and must carry `{key}`",
+                    writer = writer.as_str(),
+                    stage = stage.as_str(),
+                ))
+            })
+        };
+        let wire_length = |v| due("wire_length", Route, v);
+        let local_delay_ticks = |v| due("local_delay_ticks", Delay, v);
+        let buffer_coords = |present| early("buffer_coords", Crossing, present);
+
+        Ok(match stage {
+            Placement => {
+                early("wire_length", Route, self.wire_length.is_some())?;
+                early("local_delay_ticks", Delay, self.local_delay_ticks.is_some())?;
+                buffer_coords(self.buffer_coords.is_some())?;
+                PlacementPhase::Unrouted
+            }
+            Route => {
+                early("local_delay_ticks", Delay, self.local_delay_ticks.is_some())?;
+                buffer_coords(self.buffer_coords.is_some())?;
+                PlacementPhase::Routed {
+                    wire_length: wire_length(self.wire_length)?,
+                }
+            }
+            Delay => {
+                buffer_coords(self.buffer_coords.is_some())?;
+                PlacementPhase::Delayed {
+                    wire_length: wire_length(self.wire_length)?,
+                    local_delay_ticks: local_delay_ticks(self.local_delay_ticks)?,
+                }
+            }
+            Crossing => PlacementPhase::Legalized {
+                wire_length: wire_length(self.wire_length)?,
+                local_delay_ticks: local_delay_ticks(self.local_delay_ticks)?,
+                buffer_coords: self.buffer_coords.unwrap_or_default(),
+            },
+        })
+    }
+}
+
+/// Refuse a buffer a cell could not carry: every [`BufferCoord`] on a
+/// cell stands on [`BufferSegment::Port`] of one of that cell's own
+/// drivers. It is the contract the crossing pass debug-asserts where it
+/// writes them, held here in every build so a dump cannot bring in what
+/// the pass itself would never emit — `out` belongs to a
+/// [`PlacedOutputNode`], and a port the cell has no driver on would
+/// group buffers under a driver that does not exist.
+fn check_buffers_stand_on_drivers<E: de::Error>(
+    phase: &PlacementPhase,
+    drivers: &[CellPortDriver],
+) -> Result<(), E> {
+    for (i, buffer) in phase.buffer_coords().iter().enumerate() {
+        match buffer.port {
+            BufferSegment::Port(port) if drivers.iter().any(|d| d.port == port) => {}
+            BufferSegment::Port(_) => {
+                return Err(E::custom(format_args!(
+                    "`buffer_coords[{i}]` stands on a port no entry of this cell's `drivers` feeds"
+                )));
+            }
+            BufferSegment::Out => {
+                return Err(E::custom(format_args!(
+                    "`buffer_coords[{i}]` stands on the `out` segment, which runs to a placed \
+                     output and is never a cell's"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+impl<'de> Deserialize<'de> for PlacedCellNode {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct CellVisitor;
+
+        impl<'de> Visitor<'de> for CellVisitor {
+            type Value = PlacedCellNode;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a placed cell in the flat Placement IR wire form")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<PlacedCellNode, A::Error> {
+                let mut phase = PhaseFields::default();
+                let mut cell: Option<EditionCell> = None;
+                let mut drivers: Option<Vec<CellPortDriver>> = None;
+                let mut coord: Option<CellCoord> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    if phase.read(&key, &mut map)? {
+                        continue;
+                    }
+                    match key.as_str() {
+                        "cell" if cell.is_some() => return Err(de::Error::duplicate_field("cell")),
+                        "cell" => cell = Some(map.next_value()?),
+                        "drivers" if drivers.is_some() => {
+                            return Err(de::Error::duplicate_field("drivers"));
+                        }
+                        "drivers" => drivers = Some(map.next_value()?),
+                        "coord" if coord.is_some() => {
+                            return Err(de::Error::duplicate_field("coord"));
+                        }
+                        "coord" => coord = Some(map.next_value()?),
+                        other => return Err(de::Error::unknown_field(other, PLACED_CELL_FIELDS)),
+                    }
+                }
+                let drivers = drivers.ok_or_else(|| de::Error::missing_field("drivers"))?;
+                let phase = phase.into_phase()?;
+                check_buffers_stand_on_drivers(&phase, &drivers)?;
+                Ok(PlacedCellNode {
+                    cell: cell.ok_or_else(|| de::Error::missing_field("cell"))?,
+                    drivers,
+                    coord: coord.ok_or_else(|| de::Error::missing_field("coord"))?,
+                    phase,
+                    span: Span::default(),
+                })
+            }
         }
 
-        let mut state = serializer.serialize_struct("PlacedCellNode", field_count)?;
-        let mut written = 0_usize;
-        // First so a truncated or eyeballed dump still says which pass
-        // produced it, and so the tag reads ahead of the values it
-        // qualifies.
-        state.serialize_field("stage", &self.stage())?;
-        written += 1;
-        state.serialize_field("cell", &self.cell)?;
-        written += 1;
-        state.serialize_field("drivers", &self.drivers)?;
-        written += 1;
-        state.serialize_field("coord", &self.coord)?;
-        written += 1;
-        if let Some(wl) = wire_length {
-            state.serialize_field("wire_length", &wl)?;
-            written += 1;
-        }
-        if let Some(dt) = delay_ticks {
-            state.serialize_field("delay_ticks", &dt)?;
-            written += 1;
-        }
-        if !buffer_coords.is_empty() {
-            state.serialize_field("buffer_coords", buffer_coords)?;
-            written += 1;
-        }
-        debug_assert_eq!(
-            written, field_count,
-            "PlacedCellNode Serialize: announced field_count ({field_count}) diverges from serialize_field call count ({written}); binary formats such as bincode / postcard would produce malformed output",
-        );
-        state.end()
+        deserializer.deserialize_struct("PlacedCellNode", PLACED_CELL_FIELDS, CellVisitor)
     }
 }
 
@@ -1222,8 +1602,8 @@ impl Serialize for PlacedCellNode {
 ///
 /// It carries the same [`PlacementPhase`] the cells do, so the four
 /// stages fill it by the same rules and a dump reads alike on both
-/// sides: `wire_length` after routing, `delay_ticks` after delay
-/// insertion, `buffer_coords` after legalization. `delay_ticks` here is
+/// sides: `wire_length` after routing, `local_delay_ticks` after delay
+/// insertion, `buffer_coords` after legalization. `local_delay_ticks` here is
 /// the wire's own contribution — the buffers standing on the segment —
 /// with no base delay to add, because a pad is not a cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1270,84 +1650,19 @@ impl PlacedOutputNode {
         }
     }
 
-    /// Routed length of the segment from this output's driver to its
-    /// pad, once routing has run. See [`PlacementPhase::wire_length`].
-    #[must_use]
-    pub const fn wire_length(&self) -> Option<u32> {
-        self.phase.wire_length()
-    }
-
-    /// Ticks the buffer repeaters on this output's segment add, once
-    /// delay insertion has run. See [`PlacementPhase::delay_ticks`].
-    #[must_use]
-    pub const fn delay_ticks(&self) -> Option<u32> {
-        self.phase.delay_ticks()
-    }
-
-    /// Buffer coordinates once crossing legalization has run. See
-    /// [`PlacementPhase::buffer_coords`].
-    #[must_use]
-    pub fn buffer_coords(&self) -> &[BufferCoord] {
-        self.phase.buffer_coords()
-    }
-
-    /// Which pass last wrote to this output. See
-    /// [`PlacementPhase::stage`].
-    #[must_use]
-    pub const fn stage(&self) -> PlacementStage {
-        self.phase.stage()
-    }
+    phase_projections!(
+        "output",
+        "Routed length of the segment from this output's driver to its pad, once routing has run."
+    );
 }
 
-// Hand-written for the same reasons [`PlacedCellNode`]'s is: the derived
-// form would tag the phase enum and reshape the flat wire form, and
-// binary formats rely on the announced field count being exact. Keep the
-// two impls in step — a consumer reading a dump should not have to learn
-// two shapes for "the same stage wrote this".
 impl Serialize for PlacedOutputNode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let wire_length = self.wire_length();
-        let delay_ticks = self.delay_ticks();
-        let buffer_coords = self.buffer_coords();
-
-        let mut field_count = 4; // stage, name, driver, pad
-        if wire_length.is_some() {
-            field_count += 1;
-        }
-        if delay_ticks.is_some() {
-            field_count += 1;
-        }
-        if !buffer_coords.is_empty() {
-            field_count += 1;
-        }
-
-        let mut state = serializer.serialize_struct("PlacedOutputNode", field_count)?;
-        let mut written = 0_usize;
-        state.serialize_field("stage", &self.stage())?;
-        written += 1;
-        state.serialize_field("name", &self.name)?;
-        written += 1;
-        state.serialize_field("driver", &self.driver)?;
-        written += 1;
-        state.serialize_field("pad", &self.pad)?;
-        written += 1;
-        if let Some(wl) = wire_length {
-            state.serialize_field("wire_length", &wl)?;
-            written += 1;
-        }
-        if let Some(dt) = delay_ticks {
-            state.serialize_field("delay_ticks", &dt)?;
-            written += 1;
-        }
-        if !buffer_coords.is_empty() {
-            state.serialize_field("buffer_coords", buffer_coords)?;
-            written += 1;
-        }
-        debug_assert_eq!(
-            written, field_count,
-            "PlacedOutputNode Serialize: announced field_count ({field_count}) diverges from serialize_field call count ({written}); binary formats such as bincode / postcard would produce malformed output",
-        );
-        state.end()
+        serialize_phased(serializer, "PlacedOutputNode", &self.phase, 3, |state| {
+            state.serialize_field("name", &self.name)?;
+            state.serialize_field("driver", &self.driver)?;
+            state.serialize_field("pad", &self.pad)
+        })
     }
 }
 
@@ -1393,20 +1708,9 @@ pub struct PlacementIr {
     /// IR in the pipeline.
     #[serde(
         skip_serializing_if = "IndexMap::is_empty",
-        serialize_with = "serialize_signal_defs"
+        serialize_with = "crate::logic_ir::serialize_signal_defs"
     )]
     pub signal_defs: IndexMap<DottedRef, NetRef>,
-}
-
-fn serialize_signal_defs<S: Serializer>(
-    defs: &IndexMap<DottedRef, NetRef>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    let mut map = serializer.serialize_map(Some(defs.len()))?;
-    for (name, net) in defs {
-        map.serialize_entry(&name.to_string(), net)?;
-    }
-    map.end()
 }
 
 impl PlacementIr {
@@ -1508,7 +1812,7 @@ mod tests {
     fn delayed() -> PlacementPhase {
         PlacementPhase::Delayed {
             wire_length: 3,
-            delay_ticks: 1,
+            local_delay_ticks: 1,
         }
     }
 
@@ -1518,7 +1822,7 @@ mod tests {
         // the buffer-coord vector's shape and identity round-trip.
         PlacementPhase::Legalized {
             wire_length: 3,
-            delay_ticks: 1,
+            local_delay_ticks: 1,
             buffer_coords: vec![BufferCoord::new(
                 BufferSegment::Port(PortName::A),
                 CellCoord::new(5, 0, 0),
@@ -1562,7 +1866,7 @@ mod tests {
             phase,
             PlacementPhase::Delayed {
                 wire_length: 9,
-                delay_ticks: 4,
+                local_delay_ticks: 4,
             },
         );
     }
@@ -1592,7 +1896,7 @@ mod tests {
     fn legalize_from_delayed_transitions_and_preserves_prior_fields() {
         let mut phase = PlacementPhase::Delayed {
             wire_length: 12,
-            delay_ticks: 3,
+            local_delay_ticks: 3,
         };
         let coords = vec![
             BufferCoord::new(BufferSegment::Port(PortName::A), CellCoord::new(1, 0, 0)),
@@ -1603,7 +1907,7 @@ mod tests {
             phase,
             PlacementPhase::Legalized {
                 wire_length: 12,
-                delay_ticks: 3,
+                local_delay_ticks: 3,
                 buffer_coords: coords,
             },
         );
@@ -1616,7 +1920,7 @@ mod tests {
         // mean "not yet legalized".
         let mut phase = PlacementPhase::Delayed {
             wire_length: 4,
-            delay_ticks: 0,
+            local_delay_ticks: 0,
         };
         phase.legalize(Vec::new());
         assert!(matches!(
@@ -1754,7 +2058,7 @@ mod tests {
             phase,
             PlacementPhase::Delayed {
                 wire_length: 9,
-                delay_ticks: 4,
+                local_delay_ticks: 4,
             },
         );
     }
@@ -1794,7 +2098,7 @@ mod tests {
         let scope = probe_scope();
         let mut phase = PlacementPhase::Delayed {
             wire_length: 12,
-            delay_ticks: 3,
+            local_delay_ticks: 3,
         };
         let coords = vec![BufferCoord::new(
             BufferSegment::Port(PortName::A),
@@ -1805,7 +2109,7 @@ mod tests {
             phase,
             PlacementPhase::Legalized {
                 wire_length: 12,
-                delay_ticks: 3,
+                local_delay_ticks: 3,
                 buffer_coords: coords,
             },
         );
@@ -1928,7 +2232,7 @@ mod tests {
             phase,
             PlacementPhase::Delayed {
                 wire_length: 9,
-                delay_ticks: 4,
+                local_delay_ticks: 4,
             },
         );
     }
@@ -1937,7 +2241,7 @@ mod tests {
     fn try_legalize_from_delayed_transitions_and_preserves_prior_fields() {
         let mut phase = PlacementPhase::Delayed {
             wire_length: 12,
-            delay_ticks: 3,
+            local_delay_ticks: 3,
         };
         let coords = vec![BufferCoord::new(
             BufferSegment::Port(PortName::A),
@@ -1948,7 +2252,7 @@ mod tests {
             phase,
             PlacementPhase::Legalized {
                 wire_length: 12,
-                delay_ticks: 3,
+                local_delay_ticks: 3,
                 buffer_coords: coords,
             },
         );
@@ -1961,7 +2265,7 @@ mod tests {
     fn try_legalize_from_delayed_with_empty_buffers_stays_legalized() {
         let mut phase = PlacementPhase::Delayed {
             wire_length: 4,
-            delay_ticks: 0,
+            local_delay_ticks: 0,
         };
         assert_eq!(phase.try_legalize(Vec::new()), Ok(()));
         assert!(matches!(
@@ -2037,7 +2341,7 @@ mod tests {
             phase,
             PlacementPhase::Delayed {
                 wire_length: 3,
-                delay_ticks: 2,
+                local_delay_ticks: 2,
             },
         );
     }
@@ -2193,11 +2497,11 @@ mod tests {
     }
 
     #[test]
-    fn delay_ticks_accessor_covers_every_variant() {
-        assert_eq!(PlacementPhase::Unrouted.delay_ticks(), None);
-        assert_eq!(routed().delay_ticks(), None);
-        assert_eq!(delayed().delay_ticks(), Some(1));
-        assert_eq!(legalized().delay_ticks(), Some(1));
+    fn local_delay_ticks_accessor_covers_every_variant() {
+        assert_eq!(PlacementPhase::Unrouted.local_delay_ticks(), None);
+        assert_eq!(routed().local_delay_ticks(), None);
+        assert_eq!(delayed().local_delay_ticks(), Some(1));
+        assert_eq!(legalized().local_delay_ticks(), Some(1));
     }
 
     #[test]
@@ -2230,7 +2534,7 @@ mod tests {
     fn legalized_with_zero_buffers_still_reports_the_crossing_stage() {
         let empty = PlacementPhase::Legalized {
             wire_length: 3,
-            delay_ticks: 1,
+            local_delay_ticks: 1,
             buffer_coords: Vec::new(),
         };
         assert_eq!(empty.stage(), PlacementStage::Crossing);
@@ -2296,7 +2600,7 @@ mod tests {
             serde_json::to_string(&probe_cell(delayed())).expect("delayed cell serialises");
         let legalized_json = serde_json::to_string(&probe_cell(PlacementPhase::Legalized {
             wire_length: 3,
-            delay_ticks: 1,
+            local_delay_ticks: 1,
             buffer_coords: Vec::new(),
         }))
         .expect("legalized cell serialises");
@@ -2318,11 +2622,404 @@ mod tests {
             "empty buffer_coords must still serde-skip: {legalized_json}",
         );
         // Rewriting the tag's key/value pair — not the bare word
-        // `"delay"`, which also prefixes the `delay_ticks` key — turns
-        // one dump into the other exactly, so nothing else moved.
+        // `delay`, which also sits inside the `local_delay_ticks`
+        // key — turns one dump into the other exactly, so nothing
+        // else moved.
         assert_eq!(
             delayed_json.replace("\"stage\":\"delay\"", "\"stage\":\"crossing\""),
             legalized_json,
         );
+    }
+
+    /// `reserved_area` saturates rather than overflowing, which is what
+    /// a reservation taken from a hostile `size=` makes it do.
+    ///
+    /// `u64` holds `u32::MAX` squared within a rounding error — `2^33 - 2`
+    /// short of `u64::MAX` — so the third factor is where this goes,
+    /// and the last row is the one that matters. A product that merely
+    /// exceeds `u64::MAX` wraps to something large and plausible, which
+    /// a release build carries all the way to a clean exit; a product
+    /// that is an exact multiple of `2^64` wraps to **zero**, and a
+    /// zero reservation divides by itself in the congestion ratio.
+    /// `2147483648^2 * 4` is exactly `2^64`, the smallest such shape a
+    /// `size=` can reach, and it is the row that fails again if anyone
+    /// puts `wrapping_mul` back on the third factor.
+    #[test]
+    fn reserved_area_saturates_on_a_reservation_no_u64_can_hold() {
+        let region = |width: u32, depth: u32, void: u32| CircuitRegionReservation {
+            label: "floor".to_owned(),
+            void,
+            width,
+            depth,
+            span: Span::default(),
+        };
+        assert_eq!(region(6, 3, 2).reserved_area(), 36, "the ordinary product");
+        assert_eq!(
+            region(u32::MAX, u32::MAX, 1).reserved_area(),
+            u64::from(u32::MAX) * u64::from(u32::MAX),
+            "two u32s fit, so this one is exact",
+        );
+        assert_eq!(
+            region(u32::MAX, u32::MAX, 3).reserved_area(),
+            u64::MAX,
+            "three do not, and the answer is the ceiling rather than a panic",
+        );
+        assert_eq!(
+            region(2_147_483_648, 2_147_483_648, 4).reserved_area(),
+            u64::MAX,
+            "exactly 2^64: the ceiling, not the zero a wrap would give",
+        );
+    }
+
+    /// `probe_cell`'s dump read back, or the deserializer's refusal
+    /// rendered to a string.
+    fn read_back(json: &str) -> Result<PlacedCellNode, String> {
+        serde_json::from_str(json).map_err(|err| err.to_string())
+    }
+
+    /// Every phase — including a legalized cell with no buffers, and a
+    /// buffer standing on the bridge layer — dumps and reads back equal.
+    #[test]
+    fn every_phase_round_trips_through_the_flat_wire_form() {
+        let bridged = PlacementPhase::Legalized {
+            wire_length: 20,
+            local_delay_ticks: 2,
+            buffer_coords: vec![
+                BufferCoord::new(BufferSegment::Port(PortName::Sel), CellCoord::new(4, 0, 2)),
+                BufferCoord::new(BufferSegment::Port(PortName::A), CellCoord::new(9, 1, 2)),
+            ],
+        };
+        let empty = PlacementPhase::Legalized {
+            wire_length: 3,
+            local_delay_ticks: 1,
+            buffer_coords: Vec::new(),
+        };
+        for phase in [
+            PlacementPhase::Unrouted,
+            routed(),
+            delayed(),
+            legalized(),
+            empty,
+            bridged,
+        ] {
+            let mut cell = probe_cell(phase);
+            cell.drivers = vec![
+                CellPortDriver {
+                    port: PortName::Sel,
+                    net: NetRef::Input(0),
+                },
+                CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Cell(2),
+                },
+            ];
+            let json = serde_json::to_string(&cell).expect("cell serialises");
+            assert_eq!(read_back(&json), Ok(cell), "{json}");
+        }
+    }
+
+    /// The two phases the keys alone cannot tell apart read back as
+    /// themselves, because the reader goes by the tag.
+    #[test]
+    fn delayed_and_legalized_with_zero_buffers_read_back_apart() {
+        let empty = PlacementPhase::Legalized {
+            wire_length: 3,
+            local_delay_ticks: 1,
+            buffer_coords: Vec::new(),
+        };
+        for phase in [delayed(), empty] {
+            let json = serde_json::to_string(&probe_cell(phase.clone())).expect("serialises");
+            let back = read_back(&json).expect("reads back");
+            assert_eq!(back.phase, phase, "{json}");
+        }
+    }
+
+    /// A refusal's sentence, without the ` at line 1 column N` position
+    /// `serde_json` appends to it.
+    fn sentence(err: &str) -> &str {
+        err.split(" at line ").next().unwrap_or(err)
+    }
+
+    /// Every one of the eleven `(stage tag, payload key)` pairs the
+    /// reader holds is refused, each with the whole sentence naming the
+    /// tag, the key and the stage that writes it — so no guard in
+    /// `PhaseFields::into_phase` can go missing without a row failing.
+    ///
+    /// Each row breaks exactly one pair and is otherwise a valid dump of
+    /// its stage.
+    #[test]
+    fn every_payload_key_that_disagrees_with_the_stage_is_refused() {
+        let body = r#""cell":"java_repeater_or","drivers":[],"coord":{"x":0,"y":0,"z":0}"#;
+        let early = |key: &str, writer: &str, stage: &str| {
+            format!(
+                "`{key}` is written by the {writer} stage, which a cell tagged \
+                 `stage: \"{stage}\"` has not reached"
+            )
+        };
+        let due = |key: &str, writer: &str, stage: &str| {
+            format!(
+                "a cell tagged `stage: \"{stage}\"` has been through the {writer} stage and \
+                 must carry `{key}`"
+            )
+        };
+        let rows = [
+            (
+                "placement",
+                r#","wire_length":3"#,
+                early("wire_length", "route", "placement"),
+            ),
+            (
+                "placement",
+                r#","local_delay_ticks":1"#,
+                early("local_delay_ticks", "delay", "placement"),
+            ),
+            (
+                "placement",
+                r#","buffer_coords":[]"#,
+                early("buffer_coords", "crossing", "placement"),
+            ),
+            (
+                "route",
+                r#","wire_length":3,"local_delay_ticks":1"#,
+                early("local_delay_ticks", "delay", "route"),
+            ),
+            (
+                "route",
+                r#","wire_length":3,"buffer_coords":[]"#,
+                early("buffer_coords", "crossing", "route"),
+            ),
+            ("route", "", due("wire_length", "route", "route")),
+            (
+                "delay",
+                r#","wire_length":3,"local_delay_ticks":1,"buffer_coords":[]"#,
+                early("buffer_coords", "crossing", "delay"),
+            ),
+            (
+                "delay",
+                r#","local_delay_ticks":1"#,
+                due("wire_length", "route", "delay"),
+            ),
+            (
+                "delay",
+                r#","wire_length":3"#,
+                due("local_delay_ticks", "delay", "delay"),
+            ),
+            (
+                "crossing",
+                r#","local_delay_ticks":1"#,
+                due("wire_length", "route", "crossing"),
+            ),
+            (
+                "crossing",
+                r#","wire_length":3"#,
+                due("local_delay_ticks", "delay", "crossing"),
+            ),
+        ];
+        for (stage, payload, expected) in rows {
+            let json = format!(r#"{{"stage":"{stage}"{payload},{body}}}"#);
+            let err = read_back(&json).expect_err(&json);
+            assert_eq!(sentence(&err), expected, "{json}");
+        }
+    }
+
+    /// The shapes the wire form never has: no tag, an unknown tag or
+    /// layer word, an unknown or repeated key, a missing identity key —
+    /// and an unknown key at every nesting level a cell has, since each
+    /// nested type refuses its own.
+    #[test]
+    fn malformed_dumps_are_refused_rather_than_guessed_at() {
+        let coord = r#""coord":{"x":0,"y":0,"z":0}"#;
+        let cell = r#""cell":"java_repeater_or","drivers":[]"#;
+        let crossing =
+            r#""stage":"crossing","wire_length":1,"local_delay_ticks":1,"cell":"java_repeater_or""#;
+        let driver_a = r#"{"port":"a","net":{"kind":"input","index":0}}"#;
+        for (json, expected) in [
+            (format!("{{{cell},{coord}}}"), "missing field `stage`"),
+            (
+                format!(r#"{{"stage":"legalize",{cell},{coord}}}"#),
+                "unknown variant `legalize`, expected one of `placement`, `route`, `delay`, \
+                 `crossing`",
+            ),
+            (
+                format!(
+                    r#"{{"stage":"placement",{cell},"coord":{{"x":0,"y":1,"z":0,"layer":"attic"}}}}"#
+                ),
+                "unknown variant `attic`, expected one of `plane`, `bridge`, `via`",
+            ),
+            (
+                format!(
+                    r#"{{{crossing},"drivers":[],"buffer_coords":[{{"port":"c","coord":{{"x":0,"y":0,"z":0}}}}],{coord}}}"#
+                ),
+                "unknown variant `c`, expected one of `a`, `b`, `sel`, `out`",
+            ),
+            (
+                format!(r#"{{"stage":"placement","edition":"java",{cell},{coord}}}"#),
+                "unknown field `edition`",
+            ),
+            (
+                format!(r#"{{"stage":"placement","stage":"route",{cell},{coord}}}"#),
+                "duplicate field `stage`",
+            ),
+            (
+                format!(r#"{{"stage":"placement","drivers":[],{coord}}}"#),
+                "missing field `cell`",
+            ),
+            (
+                format!(r#"{{"stage":"placement",{cell},"coord":{{"x":0,"y":0,"z":0,"junk":7}}}}"#),
+                "unknown field `junk`",
+            ),
+            (
+                format!(
+                    r#"{{"stage":"placement","cell":"java_repeater_or","drivers":[{{"port":"a","net":{{"kind":"input","index":0}},"junk":7}}],{coord}}}"#
+                ),
+                "unknown field `junk`",
+            ),
+            (
+                format!(
+                    r#"{{"stage":"placement","cell":"java_repeater_or","drivers":[{{"port":"a","net":{{"kind":"input","index":0,"junk":7}}}}],{coord}}}"#
+                ),
+                // An adjacently tagged enum words its refusal this way.
+                r#"invalid value: string "junk", expected "kind" or "index""#,
+            ),
+            (
+                format!(
+                    r#"{{{crossing},"drivers":[{driver_a}],"buffer_coords":[{{"port":"a","coord":{{"x":0,"y":0,"z":2}},"junk":7}}],{coord}}}"#
+                ),
+                "unknown field `junk`",
+            ),
+        ] {
+            let err = read_back(&json).expect_err(&json);
+            assert!(err.contains(expected), "{json}: {err}");
+        }
+    }
+
+    /// A coord reads back as the coord [`CellCoord::new`] builds at its
+    /// height: an absent `layer` is the one the height gives, an explicit
+    /// one that agrees is accepted, and one that disagrees — `via`
+    /// included, which no height gives — is refused rather than read as
+    /// a second spelling of the same voxel.
+    #[test]
+    fn a_coord_reads_back_only_on_the_layer_its_height_gives() {
+        let read = |json: &str| serde_json::from_str::<CellCoord>(json).map_err(|e| e.to_string());
+        for (json, expected) in [
+            (
+                r#"{"x":4,"y":0,"z":2}"#,
+                CellCoord::with_layer(4, 0, 2, RouteLayer::Plane),
+            ),
+            (
+                r#"{"x":4,"y":1,"z":2}"#,
+                CellCoord::with_layer(4, 1, 2, RouteLayer::Bridge),
+            ),
+            (
+                r#"{"x":4,"y":0,"z":2,"layer":"plane"}"#,
+                CellCoord::with_layer(4, 0, 2, RouteLayer::Plane),
+            ),
+            (
+                r#"{"x":4,"y":2,"z":2,"layer":"bridge"}"#,
+                CellCoord::with_layer(4, 2, 2, RouteLayer::Bridge),
+            ),
+        ] {
+            assert_eq!(read(json), Ok(expected), "{json}");
+        }
+        for (json, expected) in [
+            (
+                r#"{"x":0,"y":0,"z":1,"layer":"bridge"}"#,
+                "a coord at `y: 0` is on the `plane` layer, not `bridge`",
+            ),
+            (
+                r#"{"x":0,"y":1,"z":1,"layer":"plane"}"#,
+                "a coord at `y: 1` is on the `bridge` layer, not `plane`",
+            ),
+            (
+                r#"{"x":0,"y":0,"z":1,"layer":"via"}"#,
+                "a coord at `y: 0` is on the `plane` layer, not `via`",
+            ),
+            (
+                r#"{"x":0,"y":3,"z":1,"layer":"via"}"#,
+                "a coord at `y: 3` is on the `bridge` layer, not `via`",
+            ),
+        ] {
+            let err = read(json).expect_err(json);
+            assert_eq!(sentence(&err), expected, "{json}");
+        }
+    }
+
+    /// Every buffer a cell carries stands on one of that cell's own
+    /// driver ports — the contract the crossing pass debug-asserts when
+    /// it writes them — so a dump naming `out`, or a port the cell has
+    /// no driver on, is refused rather than read into a cell the pass
+    /// could never have produced.
+    #[test]
+    fn a_buffer_on_a_segment_the_cell_has_no_driver_for_is_refused() {
+        let head = r#""stage":"crossing","wire_length":3,"local_delay_ticks":1,"cell":"java_repeater_or","coord":{"x":0,"y":0,"z":1},"drivers":[{"port":"a","net":{"kind":"input","index":0}}]"#;
+        let on =
+            |port: &str, x: u32| format!(r#"{{"port":"{port}","coord":{{"x":{x},"y":0,"z":2}}}}"#);
+
+        let fine = format!(
+            r#"{{{head},"buffer_coords":[{},{}]}}"#,
+            on("a", 3),
+            on("a", 9)
+        );
+        let cell = read_back(&fine).expect(&fine);
+        assert_eq!(cell.buffer_coords().len(), 2, "{fine}");
+
+        for (buffers, expected) in [
+            (
+                format!("{},{}", on("a", 3), on("out", 9)),
+                "`buffer_coords[1]` stands on the `out` segment, which runs to a placed output \
+                 and is never a cell's",
+            ),
+            (
+                format!("{},{}", on("a", 3), on("sel", 9)),
+                "`buffer_coords[1]` stands on a port no entry of this cell's `drivers` feeds",
+            ),
+        ] {
+            let json = format!(r#"{{{head},"buffer_coords":[{buffers}]}}"#);
+            let err = read_back(&json).expect_err(&json);
+            assert_eq!(sentence(&err), expected, "{json}");
+        }
+    }
+
+    /// Each wire word reads back as the variant that writes it, walking
+    /// every variant through `EnumIter` rather than a list kept by hand,
+    /// so a variant added later is covered the day it lands.
+    #[test]
+    fn every_wire_word_reads_back_as_its_variant() {
+        use strum::IntoEnumIterator;
+
+        fn round_trip<T: Serialize + for<'de> Deserialize<'de> + PartialEq + fmt::Debug>(
+            value: &T,
+        ) {
+            let json = serde_json::to_string(&value).expect("serialises");
+            let back: T = serde_json::from_str(&json).expect("reads back");
+            assert_eq!(&back, value, "{json}");
+        }
+        for layer in RouteLayer::iter() {
+            round_trip(&layer);
+        }
+        for stage in PlacementStage::iter() {
+            round_trip(&stage);
+        }
+        for port in PortName::iter() {
+            round_trip(&BufferSegment::Port(port));
+        }
+        round_trip(&BufferSegment::Out);
+    }
+
+    /// The word list an unknown segment's error names is every word a
+    /// segment is written as, in order: every [`PortName`], then `out`.
+    #[test]
+    fn the_segment_vocabulary_is_every_word_a_segment_is_written_as() {
+        use strum::IntoEnumIterator;
+
+        let written: Vec<String> = PortName::iter()
+            .map(BufferSegment::Port)
+            .chain([BufferSegment::Out])
+            .map(|segment| match serde_json::to_value(segment) {
+                Ok(serde_json::Value::String(word)) => word,
+                other => panic!("a segment serialises as a string: {other:?}"),
+            })
+            .collect();
+        assert_eq!(written, BufferSegment::WORDS);
     }
 }

@@ -24,7 +24,7 @@ test prompt set (~50)
 
 ## 13.2 Reverse-conversion auxiliary metrics
 
-Reverse-conversion quality ([Ecosystem Interop](ecosystem-interop)) is removed from the primary
+Reverse-conversion quality ([Ecosystem Interop](/spec/ecosystem-interop/)) is removed from the primary
 evaluation and treated as auxiliary, consistent with the lossy approach. What it measures is not
 "did it reproduce the shape" but **"did it become editable DSL"**.
 
@@ -56,4 +56,4 @@ corpus → import → normalize(edition/version) → L1 compact → cluster(shap
 
 The headless geometry simulator extends to a per-tick redstone logic simulator. It simulates the
 synthesized circuit per target edition and checks it against the declared truth table and temporal
-assertions, in a synth → sim → diff → patch loop. See [Redstone](redstone).
+assertions, in a synth → sim → diff → patch loop. See [Redstone](/spec/redstone/).

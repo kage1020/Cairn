@@ -19,11 +19,13 @@ raw         escape hatch
 ```
 
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
-what a member means.
+what a member means — nor, per [§4.8](#48-within-phase-conflicts-and-the-palette), what the artifact
+is: permuting two members that share no voxel leaves the whole `BlockArray` equal, palette
+numbering included, and not only the voxels.
 
 `circuit` marks a routing region and writes no voxel, so it belongs to no phase. The three
 `logic_*` phases follow `fixtures` because port coordinates are not fixed until sensors and
-actuators are placed in 3D. See [Redstone](redstone).
+actuators are placed in 3D. See [Redstone](/spec/redstone/).
 
 Last-wins applies only to **local overrides within the same phase**, and `raw` always runs last. Two
 different members contesting a voxel inside a phase resolve the same way and are reported. See
@@ -41,7 +43,7 @@ door   id=entry  side=front at=center
 ## 4.2 Target axes
 
 The target is the pair `(edition, version)`. Neither is written in the source; only the backend
-knows them. See [Versioning and Editions](versioning-editions).
+knows them. See [Versioning and Editions](/spec/versioning-editions/).
 
 ```sh
 cairn compile build.crn --edition java    --target 1.21.4
@@ -56,7 +58,9 @@ Bedrock, and Java's DataVersion has nothing to do with Bedrock's block_version.
 `roof kind=gable [overhang=N] mat_slot=...` lowers to two opposite stair slopes meeting at a ridge.
 
 The four roof kinds (`gable`, `shed`, `hip`, `flat`) share the overhang and wall-top conventions
-below. Their layouts are this section and the three that follow.
+below. Their layouts are this section and the three that follow. `overhang=` is read whatever the
+kind; `slope_to=` belongs to `shed` alone, and written on any other kind it is read by nothing and
+reported as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **Material.** A sloped roof takes its material from `mat_slot=` and it MUST be in the stair family
 — an id whose path ends in `_stairs`. The geometry attaches `facing`, `half`, and `shape` to
@@ -68,6 +72,14 @@ whatever it paints, and a whole block cannot carry them. A binding outside the f
 A binding inside the family that carries blockstates of its own keeps its id and loses those states
 to the geometry, with `W_DEFERRED_MEMBER`. An eave `stair kind=stairs` follows the same material
 rule, but takes its states from its own arguments.
+
+Those arguments are `facing=out | in`, `half=top | bottom` and
+`shape=straight | outer_left | outer_right`, each a bare identifier, defaulting to `out`, `top` and
+`straight`. An identifier outside the list is not yet supported, and the stair is deferred with
+`W_DEFERRED_MEMBER`. A value of another shape (`half="bottom"`, `facing=1`) is an unreadable value:
+the stair is built with that key's default, and the value is reported as `W_IGNORED_ARGUMENT` —
+also when the stair is refused for another reason, with a note saying it is not built either way
+([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **Ridge axis.** The ridge runs along the long horizontal axis of the footprint. A square footprint
 (`size=WxW`) ties to `x`, giving an east-west ridge.
@@ -219,10 +231,37 @@ Two cases are not conflicts:
 - A member writing over itself, as when a `window`'s `repeat=` / `step=` stamps overlap.
 
 **The palette** of an evaluated body (a `struct`, a `def`, and each `place` that instantiates one)
-lists the blocks that body contains, in the order the phases first painted them, with air at slot
-`0`. It is not a log of everything interned along the way: a material whose last voxel a later
-phase covered is dropped, and the remaining slots renumber onto the gap. Otherwise two sources
-differing only in which member lost would produce different artifacts for the same build, since the
-loser would reach the `.nbt`, be counted by `cairn info`, and be covered by `resolved_ir_hash`.
+is a *set with a canonical rendering*, not a log of the writes that filled it. It lists the blocks
+that body contains, and it lists them in one fixed order: air at slot `0`, then every other entry
+ascending by `(id, properties)`.
+
+The id decides first. When two entries share an id, each one's properties are sorted by name and the
+two lists are then compared pair by pair, so the **value** decides once the names agree
+(`facing=north` before `facing=south`), and a shorter bag sorts before a longer one that begins with
+it (`oak_stairs[facing=north]` before `oak_stairs[facing=north,half=top]`). Sorting the names is what
+makes the order independent of how a state literal happens to spell its properties:
+`@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north,half=top]` name one block, and
+which of them a theme wrote first must not move a slot.
+
+Slot `0` is the one exception to "the blocks that body contains": air holds it whatever happens, so a
+fully paved volume still carries the entry. A slot that was never painted at all is the other, and it
+is kept on purpose — dropping it would delete the only evidence a released build carries that a
+generator interned a material for geometry it does not emit.
+
+Two rules follow, and both exist because the numbering reaches the `.nbt`, `cairn info`'s per-entry
+rows, and `resolved_ir_hash`:
+
+- A material whose last voxel a later phase covered is **dropped**, and the remaining slots renumber
+  onto the gap. Otherwise two sources differing only in which member lost would produce different
+  artifacts for the same build.
+- Two members that share no voxel do not order each other. Nothing about the finished grid depends
+  on which of their lines came first, so nothing about the artifact may either — which is what §4.1
+  opens by promising, and it is a claim about the bytes and not only about the voxels. Sorting is
+  what makes it true: the palette is derived from the finished grid alone, so any permutation of the
+  source that leaves the grid alone leaves the whole `BlockArray` alone.
+
+The sort is over the resolved state, so it is stable across editions and versions in the sense that
+matters: it does not consult source spans, member ids, phases, or paint order. It is not a claim
+that two targets agree on the palette, because two targets need not agree on the ids in it.
 
 A walkway's array is laid by the `connect` pass rather than by the phases, and is not covered here.

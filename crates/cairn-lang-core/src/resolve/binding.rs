@@ -15,11 +15,11 @@ use crate::intent::ValueWithSpan;
 
 /// Classification of a `@TOKEN` value used as a theme slot target.
 ///
-/// Drawn from `spec/materials-themes.md` §7.2: a canonical token names a
-/// concrete Minecraft meaning (`@oak_planks`, `@oak_log[axis=x]`), an
-/// abstract token names an aesthetic choice that the theme policy may
-/// downgrade (`@floor.wood.broadleaf`). Anything else — a bare identifier,
-/// a string, a list — is `NotAToken` and surfaces as
+/// Drawn from `spec/materials-themes` "Canonical vocabulary": a canonical
+/// token names a concrete Minecraft meaning (`@oak_planks`,
+/// `@oak_log[axis=x]`), an abstract token names an aesthetic choice that the
+/// theme policy may downgrade (`@floor.wood.broadleaf`). Anything else — a
+/// bare identifier, a string, a list — is `NotAToken` and surfaces as
 /// `E_UNKNOWN_SLOT_TARGET`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TokenKind {
@@ -90,7 +90,11 @@ pub struct SelectorMatch {
     /// `key=value` bindings on the RHS of the arrow.
     pub bindings: IndexMap<String, ValueWithSpan>,
     /// Byte ranges of every member this selector matched. Empty after
-    /// `resolve()` means the selector never bound — `E_THEME_SELECTOR_UNMATCHED`.
+    /// `resolve()` means the selector matched no member. That is
+    /// `E_THEME_SELECTOR_UNMATCHED` only when some scope applied the theme
+    /// and the keyword is known: a theme no scope applies is matched
+    /// against nothing, and an unknown keyword already has
+    /// `E_UNKNOWN_KEYWORD`.
     #[serde(skip)]
     pub matched_member_spans: Vec<Span>,
     /// Byte range of the originating `KEYWORD[...] -> ...` row in source.

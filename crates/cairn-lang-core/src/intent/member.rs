@@ -1,10 +1,11 @@
 //! Named member of an Intent IR.
 //!
-//! Mirrors the spec's "rich member with invariants" (see `architecture.md`
-//! §3.2): every member knows its [`MemberRole`], may carry an `id` / `class` /
-//! `mat_slot`, holds an [`IntentState`] of raw `key=value` attributes, and
-//! reserves a [`ResolvedState`] slot that the lift pass fills in once
-//! materials and themes resolve.
+//! Mirrors the spec's "rich member with invariants" (see `spec/architecture`
+//! "The Intent IR is rich and carries invariants"): every member knows its
+//! [`MemberRole`], may carry an `id` / `class` / `mat_slot`, holds an
+//! [`IntentState`] of raw `key=value` attributes, and reserves a
+//! [`ResolvedState`] slot that the lift pass fills in once materials and themes
+//! resolve.
 
 use std::ops::{Deref, DerefMut};
 
@@ -138,6 +139,23 @@ impl Member {
             _ => None,
         }
     }
+
+    /// Read `key=` as a bare identifier, or `None` when the argument is
+    /// absent or its value is of any other shape.
+    ///
+    /// Shared for the same reason [`Self::nonneg_u32`] is. A `kind=` picks
+    /// which lowering rule runs, and `check::arguments` decides from the
+    /// same value which of that rule's arguments it will read — so "what
+    /// counts as naming a rule" has to be one answer. A quoted `kind="shed"`
+    /// is not that identifier in either place: the member does not lower,
+    /// and the check pass leaves the whole line to the deferral.
+    #[must_use]
+    pub fn ident_value(&self, key: &str) -> Option<&str> {
+        match &self.intent_state.get(key)?.value.kind {
+            ValueKind::Ident(name) => Some(name.as_str()),
+            _ => None,
+        }
+    }
 }
 
 /// Which top-level body a member sits in, and so which roles the later
@@ -192,7 +210,7 @@ impl MemberRole {
     /// accepts every keyword in every body, so this is the only place the
     /// distinction is written down.
     ///
-    /// * Geometry — `block_array`'s `member_phase` buckets `floor`,
+    /// * Geometry — `block_array`'s `member_disposition` buckets `floor`,
     ///   `walls`, `roof`, `stair`, `door`, `window`, and `pressure_plate`;
     ///   `recognize_circuit_region` reads `circuit`; `flatten_members`
     ///   unwraps `level`.
@@ -302,7 +320,7 @@ impl ConnectEnd {
 /// top level: ordinary member commands, `logic` bindings, and `assert`
 /// properties. Defined as a struct rather than a `Vec` of one big sum so a
 /// `level` block whose body mixes all three flavours lowers without losing
-/// any of them (spec lint.md §11.3 forbids silent dropping).
+/// any of them (`spec/lint` "Error vs warning" forbids silent dropping).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct MemberBody {
     /// Nested members in declaration order.

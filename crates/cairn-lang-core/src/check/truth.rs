@@ -24,8 +24,8 @@
 //! that repeats one already written and agrees with it, where the repair
 //! is to delete a line and nothing else moves.
 //!
-//! Nothing evaluates a truth table yet — the simulator `roadmap.md`
-//! schedules for M6 is unbuilt — and none of this waits on it. Which of
+//! Nothing evaluates a truth table yet — the tick simulator is unbuilt
+//! — and none of this waits on it. Which of
 //! two disagreeing rows an evaluator would read is the one thing these
 //! messages will not say: there is no evaluator to describe, and the
 //! author's next action is to decide which row is wrong either way.
@@ -36,8 +36,6 @@
 //! nested `assert` — its `collect_member` extends the scope's list with
 //! `children.asserts` — so a table under a `level` is checked against its
 //! signal names today and would be the one place a shape went unreported.
-
-use std::collections::{HashMap, HashSet};
 
 use crate::ast::TruthRow;
 use crate::error::Span;
@@ -54,6 +52,21 @@ use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, Diagnost
 /// twenty-input table from building a million strings to describe a
 /// one-row mistake.
 const MISSING_SAMPLE: usize = 4;
+
+/// How many steps the walk for a missing combination may take before it
+/// gives the finding up.
+///
+/// Generous on purpose: it is a backstop against a table no one writes,
+/// not a budget any real table comes near.
+///
+/// A step leaves a row behind only when [`fill_free_tail`] can jump to
+/// the row's last combination, and it fills only the positions *below*
+/// the row's lowest fixed one. Don't-cares above that are re-entered one
+/// combination at a time, so the cost is nearer
+/// `rows × 2^(don't-cares above the lowest fixed position) ×
+/// MISSING_SAMPLE`. `{ --00; --01; --10 }` is three rows and sixteen
+/// steps for its four missing combinations, not three.
+const MISSING_WALK_STEPS: usize = 10_000;
 
 /// Past this many inputs the number of combinations is written `2^n`.
 ///
@@ -105,26 +118,149 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
         return;
     }
 
-    // Each repeat is judged against the *first* row carrying its pattern,
-    // not against the one before it. Two rows that flip an assignment and
-    // then flip it back are then a conflict and a repeat rather than two
-    // conflicts, and — the reason to prefer it — every finding about a
-    // pattern sends the author to the same row to compare against, which
-    // is the row that has to stay if any of them do.
-    let mut first_by_pattern: HashMap<&str, &TruthRow> = HashMap::new();
-    for row in rows {
-        match first_by_pattern.get(row.inputs.as_str()) {
-            None => {
-                first_by_pattern.insert(row.inputs.as_str(), row);
+    // Rows do not overlap. A `-` is shorthand for the rows it stands
+    // for, so two rows that share a combination write that combination
+    // twice — the same thing writing one pattern twice has always been,
+    // now read through the don't-cares. Nothing orders the rows, so
+    // there is no reading under which the second one wins.
+    //
+    // A row is compared with every earlier row for a contradiction,
+    // dropped or not. A row with a `-` can overlap several earlier rows
+    // at once, and those rows can disagree with each other: `0- -> 1`
+    // after `00 -> 1; 01 -> 0` agrees with the first and contradicts the
+    // second. Asking only one of them would make whether the table is
+    // refused depend on the order its rows are written in, and the error
+    // is defined by the combination, not by the order. A dropped row is
+    // still a row the author wrote, so `10 -> 0` after `0- -> 1; -0 -> 1`
+    // contradicts the `-0` it never meets in the accepted set.
+    //
+    // A conflict is noted at the first earlier row that contradicts this
+    // one. Any other finding is noted at the first earlier row this one
+    // overlaps, dropped or not. No row before that one shares a
+    // combination with this one, so it is the first row assigning the
+    // combination the finding names, and every finding naming that
+    // combination sends the author to the same row.
+    //
+    // A row that overlaps an accepted one is not accepted, so what
+    // survives is a set of patterns no two of which share a combination.
+    // Coverage is then the sum of their sizes and needs no union.
+    let mut accepted: Vec<&TruthRow> = Vec::with_capacity(rows.len());
+    // Whether what was dropped is still accounted for. A row inside the
+    // row it answers to — `01` under `0-`, and the exact repeat that has
+    // always been this — assigns nothing the accepted set does not, so
+    // dropping it leaves the count right. A row that merely crosses one
+    // does assign something new, and counting without it would name a
+    // combination as missing that the source assigns on the line above.
+    // A wrong coverage finding is worse than none, and the author's next
+    // edit is the overlap either way — the argument the empty table
+    // already makes against billing one repair twice.
+    //
+    // A row can be accepted and still carry a finding, when every row it
+    // overlaps was dropped. That leaves the count sound: a dropped row D
+    // overlapped an accepted row A, and were D inside A, any row
+    // overlapping D would overlap A too and not be accepted. So D crossed
+    // A, which already cleared this flag.
+    let mut coverage_is_countable = true;
+    // Whether each row carries an overlap finding of its own, which
+    // changes the advice a later row noted against it can be given.
+    let mut reported = vec![false; rows.len()];
+    for (index, row) in rows.iter().enumerate() {
+        let mut first_overlap = None;
+        let mut contradicted = None;
+        for (at, other) in rows[..index].iter().enumerate() {
+            if !overlap(&other.inputs, &row.inputs) {
+                continue;
             }
-            Some(first) => sink.push(repeated_pattern(row, first)),
+            first_overlap.get_or_insert(at);
+            if contradicts(other, row) {
+                contradicted = Some(at);
+                break;
+            }
+        }
+        if let Some(at) = contradicted.or(first_overlap) {
+            sink.push(overlapping_row(row, &rows[at], reported[at]));
+            reported[index] = true;
+        }
+        match accepted
+            .iter()
+            .find(|kept| overlap(&kept.inputs, &row.inputs))
+        {
+            None => accepted.push(row),
+            Some(first) => coverage_is_countable &= subsumes(&first.inputs, &row.inputs),
         }
     }
 
-    let covered: HashSet<&str> = first_by_pattern.keys().copied().collect();
-    if let Some(finding) = unassigned_combinations(span, arity, &covered) {
+    // A table every row of which declines to assert an output is the
+    // empty table written at length, so it earns the empty table's
+    // finding — and not the coverage one beside it, which would bill the
+    // same repair twice.
+    //
+    // Asked of `rows` rather than of `accepted`, because acceptance is
+    // first-come: a row is dropped for overlapping an *earlier* one, so
+    // a broad `-` row written first survives and the concrete row after
+    // it is the one that goes. Reading the survivors calls the table
+    // empty while the author is looking at a `0` in it, and `-` first
+    // with the exceptions after is the ordinary way to write one. What
+    // the author wrote is what this sentence is about; that the two rows
+    // overlap is a separate finding, already raised above.
+    if rows.iter().all(|row| row.output.is_none()) {
+        sink.push(asserts_nothing(span, arity));
+    } else if coverage_is_countable
+        && let Some(finding) = unassigned_combinations(span, arity, &accepted)
+    {
         sink.push(finding);
     }
+}
+
+/// Whether two patterns assign a combination in common.
+///
+/// Position by position: they share one unless both are concrete and
+/// differ. A `-` agrees with anything, which is what makes `0-` and `-1`
+/// overlap at `01` while `00` and `01` overlap nowhere.
+fn overlap(a: &str, b: &str) -> bool {
+    a.bytes()
+        .zip(b.bytes())
+        .all(|(x, y)| x == b'-' || y == b'-' || x == y)
+}
+
+/// Whether two rows' outputs contradict each other, read only once
+/// [`overlap`] says the rows share a combination.
+///
+/// Only two concrete outputs can: a `-` output asserts nothing for the
+/// other row to contradict.
+fn contradicts(a: &TruthRow, b: &TruthRow) -> bool {
+    matches!((a.output, b.output), (Some(x), Some(y)) if x != y)
+}
+
+/// Whether every combination `inner` assigns, `outer` assigns too.
+///
+/// Read only after [`overlap`] says yes, to pick which sentence the
+/// finding gets: a row inside an earlier one is deleted, a row merely
+/// crossing it is narrowed.
+fn subsumes(outer: &str, inner: &str) -> bool {
+    outer
+        .bytes()
+        .zip(inner.bytes())
+        .all(|(o, i)| o == b'-' || o == i)
+}
+
+/// One combination both patterns assign, for a message to name.
+///
+/// Where both are don't-cares any value would do and `0` is chosen, so
+/// the witness is the lowest combination the two share. The caller has
+/// checked they overlap, so no position disagrees.
+fn shared_combination(a: &str, b: &str) -> String {
+    a.bytes()
+        .zip(b.bytes())
+        .map(|(x, y)| {
+            let bit = if x == b'-' {
+                if y == b'-' { b'0' } else { y }
+            } else {
+                x
+            };
+            char::from(bit)
+        })
+        .collect()
 }
 
 fn empty_table(span: &Span, arity: u32) -> Diagnostic {
@@ -145,72 +281,245 @@ fn empty_table(span: &Span, arity: u32) -> Diagnostic {
     }
 }
 
-/// A row whose pattern an earlier row already assigned.
+/// What to do about a row that constrains a combination an overlapping row
+/// declines to, or the other way round.
 ///
-/// One code when the two outputs differ and another when they agree: the
-/// repairs are different work, and severity is a property of the code.
-fn repeated_pattern(row: &TruthRow, first: &TruthRow) -> Diagnostic {
+/// Not a conflict: no circuit is being asked for two outputs, so the code
+/// stays in the duplicate-row family. But the repair is not the
+/// duplicate-row family's either — "delete either row" is what a pair
+/// saying the same thing earns, and these two do not say the same thing,
+/// so which one goes changes the table.
+const UNCONSTRAINED_FIX: &str = "Fix: delete whichever of the two you did not mean — a `-` output says the combination is \
+     deliberately unconstrained, and the other row constrains it, so the table reads differently \
+     depending on which one stays";
+
+/// A table with rows, none of which asserts an output.
+///
+/// The same code as [`empty_table`], because it is the same table: a row
+/// whose output is `-` marks its combinations as deliberately
+/// unconstrained, and a table of nothing but those constrains nothing.
+/// The sentence differs because the repair does — there are rows to
+/// change here, not rows to add.
+fn asserts_nothing(span: &Span, arity: u32) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::TruthTableEmpty,
+        span: span.clone(),
+        primary: "every row of this `assert truth` has a `-` output, so it verifies nothing"
+            .to_owned(),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!(
+                "Fix: give at least one row a `0` or `1` output, or delete the assertion — a \
+                 `-` output says a combination is deliberately unconstrained, which is only \
+                 worth writing beside combinations that are constrained (this table has \
+                 {total} to choose from)",
+                total = total_combinations(arity),
+            ),
+        }],
+        data: None,
+    }
+}
+
+/// A row assigning a combination an earlier row already assigned.
+///
+/// One code when the two outputs contradict each other and another when
+/// they do not: the repairs are different work, and severity is a property
+/// of the code. Only two concrete outputs can contradict — a `-` asserts
+/// nothing to be contradicted, so a `-` meeting a `0` is the second code,
+/// a row written twice rather than a circuit asked for two things.
+///
+/// The agreeing case carries three sentences rather than one, because the
+/// repair is three different edits. A row repeating an earlier pattern
+/// exactly is a line to delete. A row inside an earlier one — `01` under
+/// `0-` — is also a line to delete, but the reader has to be told which
+/// row already covers it, since the two do not read alike. A row merely
+/// crossing an earlier one — `-1` against `0-` — asserts something the
+/// earlier row does not, so deleting it would lose coverage, and the edit
+/// is to narrow one of the two.
+///
+/// A `-` output beside a concrete one is a fourth sentence and neither
+/// code's usual repair: the rows do not contradict, since a `-` asserts
+/// nothing to contradict, but they do not agree either, and deleting the
+/// wrong one changes what the table says. Splitting it off is also what
+/// lets the three sentences below name one output for both rows, which
+/// they have to, since each is about what the table already says.
+///
+/// For a conflict, `noted` is the first earlier row contradicting this
+/// one, so the note names the output it assigns: no row before it assigns
+/// the shared combination that output, since such a row would contradict
+/// this one too and would have been chosen instead. The row the table
+/// opened the combination with may well agree with this one, which is
+/// why the note cannot just say "first row assigning" as the other
+/// findings' notes do.
+///
+/// Every other sentence's repair assumes `noted` stays as written. When
+/// `noted` carries an overlap finding of its own (`noted_is_reported`),
+/// it is being asked to change too, and "delete this row, the earlier
+/// one stands for it" can cancel against that: `10 -> 1` under the `-0`
+/// of `0- -> 1; -0 -> 1` is inside `-0`, while `-0` is told to narrow
+/// away from `0-`, and following both leaves `10` unassigned. So the
+/// repair there is to settle the earlier row first, and this row's fate
+/// follows from how that one changes.
+fn overlapping_row(row: &TruthRow, noted: &TruthRow, noted_is_reported: bool) -> Diagnostic {
     let pattern = &row.inputs;
-    let conflicts = row.output != first.output;
-    let (code, primary, fix) = if conflicts {
-        (
+    let earlier = &noted.inputs;
+    let shared = shared_combination(earlier, pattern);
+    // Everything below the match reads one output for both rows, which is
+    // only sound once the cases where they say different things are gone.
+    let disagreement = match (row.output, noted.output) {
+        (Some(later), Some(earlier_output)) if later != earlier_output => Some((
             DiagnosticCode::TruthTableConflict,
             format!(
-                "this row assigns `{pattern}` the output `{output}`, and an earlier row assigns \
-                 it `{earlier}`",
-                output = bit(row.output),
-                earlier = bit(first.output),
+                "first row assigning `{shared}` the output `{other}` here",
+                other = bit(earlier_output),
             ),
-            "Fix: decide which of the two the circuit should do and delete the other row — no \
-             circuit produces both outputs for one input combination",
+            format!(
+                "this row assigns `{shared}` the output `{output}`, and an earlier row assigns \
+                 it `{other}`",
+                output = bit(later),
+                other = bit(earlier_output),
+            ),
+            "Fix: decide which of the two the circuit should do and change or delete the other \
+             row — no circuit produces both outputs for one input combination"
+                .to_owned(),
+        )),
+        (None, Some(assigned)) => Some((
+            DiagnosticCode::TruthTableDuplicateRow,
+            first_assigning(&shared),
+            format!(
+                "this row leaves `{shared}` unconstrained, and the earlier row `{earlier}` \
+                 assigns it the output `{output}`",
+                output = bit(assigned),
+            ),
+            settled_first(UNCONSTRAINED_FIX.to_owned(), earlier, noted_is_reported),
+        )),
+        (Some(assigned), None) => Some((
+            DiagnosticCode::TruthTableDuplicateRow,
+            first_assigning(&shared),
+            format!(
+                "this row assigns `{shared}` the output `{output}`, and the earlier row \
+                 `{earlier}` leaves it unconstrained",
+                output = bit(assigned),
+            ),
+            settled_first(UNCONSTRAINED_FIX.to_owned(), earlier, noted_is_reported),
+        )),
+        _ => None,
+    };
+    if let Some((code, note, primary, fix)) = disagreement {
+        return finding(code, row, noted, note, primary, fix);
+    }
+    let (primary, fix) = if pattern == earlier {
+        (
+            format!(
+                "this row repeats an earlier one: `{pattern}` is already assigned {outcome}",
+                outcome = outcome(noted.output),
+            ),
+            "Fix: delete either row — the table asserts the same thing without it".to_owned(),
+        )
+    } else if subsumes(earlier, pattern) {
+        (
+            format!(
+                "this row asserts nothing new: the earlier row `{earlier}` already assigns \
+                 `{pattern}` {outcome}",
+                outcome = outcome(noted.output),
+            ),
+            "Fix: delete this row — the earlier pattern's `-` already stands for it".to_owned(),
         )
     } else {
         (
-            DiagnosticCode::TruthTableDuplicateRow,
             format!(
-                "this row repeats an earlier one: `{pattern}` is already assigned the output \
-                 `{output}`",
-                output = bit(row.output),
+                "this row and the earlier row `{earlier}` both stand for `{shared}`, and a \
+                 combination is covered by one row or none"
             ),
-            "Fix: delete either row — the table asserts the same thing without it",
+            format!(
+                "Fix: narrow one of the two so no combination is written twice — `{pattern}` \
+                 and `{earlier}` may not both stand for `{shared}`"
+            ),
         )
     };
+    let fix = settled_first(fix, earlier, noted_is_reported);
+    finding(
+        DiagnosticCode::TruthTableDuplicateRow,
+        row,
+        noted,
+        first_assigning(&shared),
+        primary,
+        fix,
+    )
+}
+
+/// `fix`, unless the noted row is itself being asked to change — see
+/// [`overlapping_row`] for why the repair then waits on that row.
+fn settled_first(fix: String, earlier: &str, noted_is_reported: bool) -> String {
+    if !noted_is_reported {
+        return fix;
+    }
+    format!(
+        "Fix: settle the earlier row `{earlier}` first — it overlaps a row before it and is \
+         reported for that, so whether this one stays, and in what shape, depends on how that \
+         one changes"
+    )
+}
+
+fn first_assigning(shared: &str) -> String {
+    format!("first row assigning `{shared}` here")
+}
+
+/// The shape every overlap finding shares: reported on the later row,
+/// with the earlier one noted and the fix last.
+fn finding(
+    code: DiagnosticCode,
+    row: &TruthRow,
+    noted: &TruthRow,
+    note: String,
+    primary: String,
+    fix: String,
+) -> Diagnostic {
     Diagnostic {
         code,
         span: row.span.clone(),
         primary,
         notes: vec![
             DiagnosticNote {
-                span: Some(first.span.clone()),
-                message: format!("first row for `{pattern}` here"),
+                span: Some(noted.span.clone()),
+                message: note,
             },
             DiagnosticNote {
                 span: None,
-                message: fix.to_owned(),
+                message: fix,
             },
         ],
         data: None,
     }
 }
 
-/// The combinations no row assigns, or `None` when the table is complete.
+/// The combinations no accepted row assigns, or `None` when there is
+/// nothing to report.
 ///
-/// Neither subtraction below can underflow, and the guarantee is the
-/// parser's: every pattern in `covered` came off a row, and a row whose
-/// width is not the arity is refused where the arity is in hand, so
-/// `covered` is a set of `arity`-wide patterns and has at most `2^arity`
-/// members. Stated rather than branched on — `IntentModule`'s fields are
-/// `pub`, so a hand-built IR could break it, and this crate documents its
-/// invariants where the next reader looks instead of guarding them.
-fn unassigned_combinations(span: &Span, arity: u32, covered: &HashSet<&str>) -> Option<Diagnostic> {
-    let sample = missing_sample(arity, covered);
+/// `None` covers three cases, and only the first is "the table is
+/// complete". The other two are counts the compiler cannot state: a
+/// covered total past `u64`, which the payload carries, and a walk that
+/// ran out of steps before it found a missing combination. Both need an
+/// input list far past anything written by hand, and a finding whose
+/// numbers are guesses is worse than one that is missing — so the finding
+/// is withheld rather than approximated.
+///
+/// `accepted` is pairwise non-overlapping, which is what `check_table`
+/// drops a row to keep, so the covered total is the sum of the rows'
+/// sizes and no union is computed.
+fn unassigned_combinations(span: &Span, arity: u32, accepted: &[&TruthRow]) -> Option<Diagnostic> {
+    let total = combination_count(arity);
+    let covered = assigned_count(accepted)?;
+    if total == Some(covered) {
+        return None;
+    }
+    let covered_count = u64::try_from(covered).ok()?;
+    let sample = missing_sample(arity, accepted)?;
     if sample.is_empty() {
         return None;
     }
     let quoted: Vec<String> = sample.iter().map(|p| format!("`{p}`")).collect();
-    let covered_count =
-        u64::try_from(covered.len()).expect("a row count is bounded by the source length");
-    let missing_total = combination_count(arity).map(|total| total - u128::from(covered_count));
+    let missing_total = total.map(|total| total - covered);
     // The sample stops at the cap, so the sentence has to say it is a
     // sample — a list of four that reads as the whole set is the opposite
     // of what a coverage finding is for. The count is arithmetic and needs
@@ -245,24 +554,107 @@ fn unassigned_combinations(span: &Span, arity: u32, covered: &HashSet<&str>) -> 
     })
 }
 
-/// The lowest few patterns no row assigns, in ascending order.
+/// How many combinations the accepted rows assign between them, or `None`
+/// past `u128`.
+///
+/// A plain sum, because no two accepted rows share a combination. A row
+/// with `d` don't-cares stands for `2^d` of them.
+fn assigned_count(accepted: &[&TruthRow]) -> Option<u128> {
+    accepted.iter().try_fold(0u128, |sum, row| {
+        sum.checked_add(pattern_size(&row.inputs)?)
+    })
+}
+
+/// `2^d` for a pattern with `d` don't-cares, or `None` when that is past
+/// `u128` — 128 or more of them, which needs an input list to match.
+fn pattern_size(pattern: &str) -> Option<u128> {
+    let dashes = u32::try_from(pattern.bytes().filter(|b| *b == b'-').count())
+        .expect("a pattern is bounded by the source length");
+    1u128.checked_shl(dashes)
+}
+
+/// The lowest few combinations no accepted row assigns, in ascending
+/// order, or `None` when the walk ran out of steps.
 ///
 /// Counting up and skipping what is covered, rather than building the
-/// space and subtracting: the loop runs at most `covered.len() +
-/// MISSING_SAMPLE` times whatever the arity, so a twenty-input table costs
-/// the same as a two-input one.
-fn missing_sample(arity: u32, covered: &HashSet<&str>) -> Vec<String> {
-    let total = combination_count(arity);
+/// space and subtracting. The skip is what keeps that affordable: landing
+/// inside a row, the walk does not step through the row one combination
+/// at a time but jumps to the last one it assigns without leaving it, so
+/// a row standing for a million combinations costs one step rather than a
+/// million.
+///
+/// [`MISSING_WALK_STEPS`] is the backstop. A step either yields a missing
+/// combination or advances past one the rows cover, and only the second
+/// of those leaves a row behind for good — see the constant for what
+/// that costs a row whose don't-cares sit above its fixed positions. A
+/// table that runs the budget out is one whose sample would not help
+/// anyone read it.
+fn missing_sample(arity: u32, accepted: &[&TruthRow]) -> Option<Vec<String>> {
+    let width = usize::try_from(arity).expect("an input list is bounded by the source length");
+    let mut combination = vec![b'0'; width];
     let mut sample = Vec::new();
-    let mut candidate = 0u128;
-    while sample.len() < MISSING_SAMPLE && total.is_none_or(|total| candidate < total) {
-        let pattern = pattern_text(candidate, arity);
-        if !covered.contains(pattern.as_str()) {
-            sample.push(pattern);
+    let mut steps = 0usize;
+    while sample.len() < MISSING_SAMPLE {
+        steps += 1;
+        if steps > MISSING_WALK_STEPS {
+            return None;
         }
-        candidate += 1;
+        match accepted
+            .iter()
+            .find(|row| assigns(&row.inputs, &combination))
+        {
+            None => sample.push(
+                String::from_utf8(combination.clone()).expect("the walk writes `0` and `1` only"),
+            ),
+            Some(row) => fill_free_tail(&row.inputs, &mut combination),
+        }
+        if !increment(&mut combination) {
+            break;
+        }
     }
-    sample
+    Some(sample)
+}
+
+/// Whether `pattern` assigns this combination: every position it fixes
+/// agrees, and the rest are its don't-cares.
+fn assigns(pattern: &str, combination: &[u8]) -> bool {
+    pattern
+        .bytes()
+        .zip(combination)
+        .all(|(p, c)| p == b'-' || p == *c)
+}
+
+/// Raise a combination the row assigns to the last one it assigns before
+/// the row's lowest fixed position has to change.
+///
+/// Every position below that one is a don't-care, so setting them all to
+/// `1` skips only combinations this row already assigns, and the
+/// increment that follows carries into the fixed position and leaves the
+/// row. A row that fixes nothing assigns everything, so the walk is never
+/// called on one — it would mean a complete table, which returns earlier.
+fn fill_free_tail(pattern: &str, combination: &mut [u8]) {
+    let Some(lowest_fixed) = pattern.bytes().rposition(|b| b != b'-') else {
+        return;
+    };
+    for (slot, _) in combination
+        .iter_mut()
+        .zip(pattern.bytes())
+        .skip(lowest_fixed + 1)
+    {
+        *slot = b'1';
+    }
+}
+
+/// Step to the next combination, or report there is none left.
+fn increment(combination: &mut [u8]) -> bool {
+    for slot in combination.iter_mut().rev() {
+        if *slot == b'0' {
+            *slot = b'1';
+            return true;
+        }
+        *slot = b'0';
+    }
+    false
 }
 
 /// `2^arity`, or `None` when no integer the compiler carries holds it.
@@ -282,13 +674,17 @@ fn total_combinations(arity: u32) -> String {
     }
 }
 
-/// A combination spelled the way a row spells it: one character per input,
-/// leading zeros kept, because `01` and `10` are different rows.
-fn pattern_text(value: u128, arity: u32) -> String {
-    let width = usize::try_from(arity).expect("an input list is bounded by the source length");
-    format!("{value:0width$b}")
-}
-
 fn bit(output: bool) -> char {
     if output { '1' } else { '0' }
+}
+
+/// How a row's output reads inside a sentence about what it assigns.
+///
+/// A `-` output is not a third value the circuit can produce, so it is
+/// named as the absence it is rather than rendered as a bit.
+fn outcome(output: Option<bool>) -> String {
+    match output {
+        Some(value) => format!("the output `{}`", bit(value)),
+        None => "no output, by its `-`".to_owned(),
+    }
 }

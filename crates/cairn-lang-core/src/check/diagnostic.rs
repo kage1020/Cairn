@@ -9,8 +9,9 @@ use crate::error::{Position, Span};
 /// Severity of a single [`Diagnostic`].
 ///
 /// `Error` participates in the `cairn check` exit code (any error → exit 1);
-/// `Warning` does not. Stable per `spec/lint.md` §11.3: errors are things
-/// that, left alone, cause unintended results; warnings are advisory drift.
+/// `Warning` does not. Stable per `spec/lint` "Error vs warning": errors are
+/// things that, left alone, cause unintended results; warnings are advisory
+/// drift.
 /// Both variants ship in the public enum so a new `Warning` code can land
 /// without changing the discriminant a downstream matcher already pinned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -75,16 +76,20 @@ pub enum DiagnosticCode {
     /// A member's selector bindings are the merge of every row it matches,
     /// taken in source order, so a key two rows bind keeps the later
     /// value. When the rows carry the same keyword and the same attributes
-    /// they match member for member, which leaves no member anywhere that
-    /// reads the earlier binding.
+    /// they match member for member, which leaves no member anywhere whose
+    /// merged bindings keep the earlier value: that row is dead text
+    /// whatever a binding comes to mean. No pass reads a merged binding yet
+    /// either (`spec/materials-themes` "Slots as dependency injection"), so
+    /// today neither value reaches the build; this code is about the merge,
+    /// not about a block.
     ///
     /// Two shapes are not covered. Rows binding *different* keys compose,
-    /// the way `@requires` floors do — every binding reaches every member
-    /// both rows select. And rows whose attributes merely overlap
-    /// (`window[class=small]` against `window[class=small,side=front]`) do
-    /// not coincide: a member the wider row selects alone still reads its
-    /// binding. Which of two overlapping rows wins is the cascade, and the
-    /// cascade is source order by design.
+    /// the way `@requires` floors do — every binding reaches the merged
+    /// bindings of every member both rows select. And rows whose attributes
+    /// merely overlap (`window[class=small]` against
+    /// `window[class=small,side=front]`) do not coincide: a member the
+    /// wider row selects alone keeps its binding. Which of two overlapping
+    /// rows wins is the cascade, and the cascade is source order by design.
     DuplicateSelector,
     /// Repeated `key=` in the same argument list (struct/def header,
     /// statement args, selector attrs / bindings).
@@ -132,21 +137,47 @@ pub enum DiagnosticCode {
     MisplacedMember,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
-    /// A `key=value` argument whose key is outside the vocabulary of the
-    /// member's role.
+    /// A key outside the vocabulary of the member's role, written as a
+    /// `key=value` argument or inside the member's own `[key=value]` — or a
+    /// key other than `size=` / `class=` on a `struct` / `def` header line.
     ///
     /// An error for the same reason [`Self::UnknownKeyword`] is, one level
     /// down: the key names nothing, so no pass will ever read the value,
     /// and the member is built without whatever the author was asking for.
     /// A misspelling of an argument that has a default is the worst of
     /// them — the build succeeds, silently, at the default.
+    ///
+    /// One code for every field because it is one defect: `clas=outer`,
+    /// `[clas=outer]` and a header's `siz=7x7` are each a word the author
+    /// expects something to read that nothing does. Only the sentence
+    /// differs, naming the field to edit.
     UnknownArgument,
+    /// A `-> value` tail on a member whose keyword cannot emit a signal,
+    /// or on a sensor keyword written in the `[selector]` form.
+    ///
+    /// `spec/redstone` "Signal binding" writes an emitted signal on the
+    /// component that emits it, and [`crate::intent::SENSOR_HOSTS`] is the
+    /// set of keywords the surface accepts one on. A tail anywhere else
+    /// describes no circuit: the member is built without it and the signal
+    /// it names is driven by nothing, which is [`Self::UnknownArgument`]'s
+    /// failure in the one field that had no vocabulary to answer to.
+    ///
+    /// The host is the fault rather than the value, because no edit to the
+    /// value makes a `walls` emit. A tail on a *sensor* whose value names
+    /// no signal is the redstone pipeline's `E_LOGIC_INVALID_SIGNAL`, which
+    /// is a question about the `sig.` namespace and needs the Logic IR to
+    /// ask.
+    ///
+    /// `pressure_plate[id=p] -> sig.x` is the second shape. The door
+    /// actuator patch is the only binding a selector line carries, and no
+    /// sensor patch exists, so the tail is on no sensor line.
+    MisplacedBinding,
     /// A statement carrying bare positional values in a form that takes
     /// none.
     ///
-    /// Spec §5.1 requires `key=value` for everything after the command
-    /// keyword; `connect FROM.PORT to TO.PORT` is the single exception and
-    /// is checked by `E_CONNECT_ARITY` instead. The line-based parser
+    /// `spec/syntax` "Lexical" requires `key=value` for everything after the
+    /// command keyword; `connect FROM.PORT to TO.PORT` is the single exception
+    /// and is checked by `E_CONNECT_ARITY` instead. The line-based parser
     /// collects any bare token into `positional` and every reader but
     /// `connect`'s ignores that list, so a dropped `=` (`height 3`) or a
     /// spec-forbidden positional form (`window front G 2 2 2x2`) changes
@@ -159,13 +190,30 @@ pub enum DiagnosticCode {
     /// author cannot tell, because the line is still in the file. The
     /// grammar is `version>=X` and only that: a floor composes with other
     /// floors by taking the strictest, which no other operator does
-    /// (spec syntax §5.3, versioning-editions §10.4).
+    /// (`spec/syntax` "Headers", `spec/versioning-editions` "Fail-loud and
+    /// minimum-version inference").
     ///
     /// Not to be confused with `E_REQUIRES_CONFLICT`, which the spec
     /// reserves for a declared floor contradicting the registry-*inferred*
     /// range. No such range is derived yet, so that code has nothing to
     /// compare against and is not defined here.
     InvalidRequires,
+    /// The `@cairn` header's value is not a `YYYY.M[.PATCH]` language
+    /// version. The directive is provenance rather than an input, so the
+    /// build is unaffected and this is a warning — but provenance whose
+    /// whole job is to be readable by a later compiler has to be
+    /// readable, and nothing else in the pipeline ever looks at the
+    /// string. `data` names which component failed and what it held.
+    InvalidCairnVersion,
+    /// The `@cairn` header names a language version later than the build
+    /// reading it. A warning for the reason [`Self::InvalidCairnVersion`]
+    /// is — the header is provenance, so the build is the same either
+    /// way — and the only finding that can say an unknown keyword or
+    /// argument elsewhere in the file may be about the version gap rather
+    /// than about the line it names. A whole new syntactic form is
+    /// [`Self::Parse`] instead, and no check pass runs then, so the gap
+    /// goes unsaid in exactly the case it explains best.
+    FutureCairnVersion,
     /// A label-typed key whose value is not a label (identifier or
     /// string): `id=`, `class=`, `mat_slot=`, `use=`, or `theme=`.
     ///
@@ -190,12 +238,13 @@ pub enum DiagnosticCode {
     /// `mat_slot=NAME` references a slot the applied theme does not declare.
     UnresolvedSlot,
     /// `slot NAME -> VALUE` whose VALUE is neither a canonical nor an
-    /// abstract material token (see `spec/materials-themes.md` §7.2).
+    /// abstract material token (see `spec/materials-themes` "Canonical
+    /// vocabulary").
     ///
     /// Error rather than advisory: the slot binds to nothing, so every
     /// `mat_slot=NAME` pointing at it lowers to air. A theme whose slots
     /// are all mistyped builds a hollow shell of the requested extent —
-    /// the "implicit dropping" `spec/lint.md` §11.3 forbids, and not
+    /// the "implicit dropping" `spec/lint` "Error vs warning" forbids, and not
     /// something the author can see in an exit code that stayed 0.
     UnknownSlotTarget,
     /// `theme` selector rule that does not match any member in the file.
@@ -205,21 +254,44 @@ pub enum DiagnosticCode {
     /// material it would have had with the rule deleted. Nothing is
     /// dropped and the build is exactly what the rest of the source
     /// asked for — the finding is about the author's intent, which is
-    /// the advisory half of `spec/lint.md` §11.3.
+    /// the advisory half of `spec/lint` "Error vs warning".
     ThemeSelectorUnmatched,
     /// A member role the block-array lowering pass does not yet handle
     /// (door/window/roof/...). Surfaces during `cairn lower` so a partial
     /// build is still inspectable, rather than failing the whole module.
     DeferredMember,
-    /// A `key=` the lowering pass could not read, on a member it drew
-    /// anyway with the default in place of the value.
+    /// A `key=` no pass read on the line it was written on.
+    ///
+    /// Three shapes, one finding. **Unreadable value**: the lowering pass
+    /// could not read it, dropped it, and put the default in its place.
+    /// **Unreached key**: no pass reads it yet. On a member that is a key
+    /// the specification defines, listed in
+    /// `crate::intent::MemberRole::unread_arguments`; on a `struct` / `def`
+    /// header it is a key the specification writes there, listed in
+    /// `crate::check::arguments::UNREAD_HEADER_ARGUMENTS` — today `class=`;
+    /// on a `theme` selector row whose keyword names a role it is every
+    /// `key=value` right of the arrow, defined anywhere or not (`fram=42`
+    /// included), since no pass lowers a selector's bindings. **Routed
+    /// past**: a sibling argument picked a lowering rule that does not
+    /// consult it, which `crate::intent::MemberRole::conditional_arguments`
+    /// records and `roof kind=gable slope_to=front` is the instance of —
+    /// that one has no default to substitute, and fires whether or not the
+    /// member went on to build. The build differs from the source in all
+    /// three, and the difference is announced rather than silent.
     ///
     /// Distinct from [`Self::DeferredMember`], which says the member did
     /// not lower. A roof whose `overhang=` is unusable is in the build,
     /// flush with the wall line, and reporting that as a deferral tells
-    /// the author to look for a member that is not missing.
+    /// the author to look for a member that is not missing. The boundary
+    /// the routed-past shape draws is about the *selector* rather than the
+    /// member: where the selector names no rule — a `kind=` the dispatch
+    /// does not know, or, on an axis with no absent arm, none at all — the
+    /// deferral carries the whole repair and this code stays quiet rather
+    /// than billing the argument that rule would not have read. A member
+    /// that fails to lower for any other reason still gets both findings,
+    /// because they are then two repairs.
     ///
-    /// Where it sits against `spec/lint.md` §11.3, and why it is a
+    /// Where it sits against `spec/lint` "Error vs warning", and why it is a
     /// warning, is argued once on [`Self::severity`] rather than twice.
     IgnoredArgument,
     /// A struct/def scope has no theme bound to it, so every `mat_slot=`
@@ -234,38 +306,58 @@ pub enum DiagnosticCode {
     /// library callers (LSP highlighting, `cairn check` without a pack).
     AbstractTokenDeferred,
     /// A `mat_slot=` resolved to an abstract material token that the registry
-    /// pack's materials catalog does not declare. Fail-loud per spec §7.2:
-    /// the cell cannot lower silently to air when a pack was offered, so the
-    /// build stops with a structured suggestion towards the closest known
-    /// token.
+    /// pack's materials catalog does not declare. Fail-loud per
+    /// `spec/materials-themes` "Canonical vocabulary": the cell cannot lower
+    /// silently to air when a pack was offered, so the build stops with a
+    /// structured suggestion towards the closest known token.
     UnknownAbstractToken,
-    /// A `mat_slot=` resolved to a block id the compile's target does not
-    /// declare. Fail-loud per spec versioning-editions §10.4 ("unknown IDs
-    /// ... are hard errors"): the id would otherwise be written into a
-    /// structure file the game loads as air, with nothing to explain the
-    /// hole. Distinct from `UnknownAbstractToken`, which fires one step
-    /// earlier when the abstract token itself is undeclared — this variant
-    /// fires on an id that resolved cleanly and simply does not exist in
-    /// that `(edition, version)`, whether the author or the pack's catalog
-    /// chose it.
+    /// A canonical token's state literal (`@oak_log[axis=x]`) was taken as
+    /// written, because nothing checks its properties and values against
+    /// the target yet.
     ///
-    /// Only raised when the run pinned a target (`cairn compile --target`).
-    /// `cairn check` / `info` / `lower` have no version to check against
-    /// and skip the comparison rather than guess one.
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, which
+    /// needs a table of every block's states that this compiler does not
+    /// hold. Until it does, a literal naming a property the block lacks, or
+    /// a value outside its domain, would be written into the structure file
+    /// with nothing said. A warning rather than an error because most
+    /// literals are right, and refusing every one of them would leave the
+    /// literal unwritable; the finding is the announcement the "Error vs
+    /// warning" rule asks for in place of silence. Raised on every state
+    /// literal the lowering resolves, wherever it was bound — a theme slot
+    /// or a `connect … path=`.
+    StateLiteralUnchecked,
+    /// A `mat_slot=` resolved to a block id the compile's target does not
+    /// declare. Fail-loud per `spec/versioning-editions` "Fail-loud and
+    /// minimum-version inference" ("unknown IDs ... are hard errors"): the id
+    /// would otherwise be written into a structure file the game loads as air,
+    /// with nothing to explain the hole. Distinct from `UnknownAbstractToken`,
+    /// which fires one step earlier when the abstract token itself is
+    /// undeclared — this variant fires on an id that resolved cleanly and
+    /// simply does not exist in that `(edition, version)`, whether the author
+    /// or the pack's catalog chose it.
+    ///
+    /// Only raised when the run pinned a target — `cairn compile --target`
+    /// and `cairn check --edition E --target V`. `cairn info`, `cairn
+    /// lower` and an unpinned `cairn check` have no version to check
+    /// against and skip the comparison rather than guess one.
     UnknownId,
     /// A member whose geometry attaches blockstates was bound to a material
     /// that cannot carry them — a sloped roof or an eave `stair` bound to
     /// something outside the stair family.
     ///
-    /// Error, and by the first clause of §11.3 rather than the last. The
-    /// pass is not the incomplete side: `gable` / `shed` / `hip` lowering
-    /// is finished, and what it is being asked for does not exist. Adopting
-    /// the id writes a blockstate no version of the game has; substituting
-    /// the fallback species builds a roof out of a material nobody asked
-    /// for. Both are the silent substitution §10.4 forbids, and a warning
-    /// does not make either loud: no machine-readable surface carries a
-    /// lowering warning — `cairn check` does not lower, the lockfile still
-    /// says `verified: true`, and there is no `--deny-warnings`.
+    /// Error, and by the first clause of `spec/lint` "Error vs warning"
+    /// rather than the last. The pass is not the incomplete side: `gable` /
+    /// `shed` / `hip` lowering is finished, and what it is being asked for
+    /// does not exist. Adopting the id writes a blockstate no version of the
+    /// game has; substituting the fallback species builds a roof out of a
+    /// material nobody asked for. Both are the silent substitution
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// forbids, and a warning does not make either loud: the lockfile still
+    /// says `verified: true`, there is no `--deny-warnings`, and the one
+    /// machine-readable surface that carries a lowering finding at all is
+    /// `cairn check --target --format json`, which an unpinned check — the
+    /// invocation a CI job writes by default — is not.
     ///
     /// Whose mistake it is rides in `data` (`slot` and `token`), the way
     /// [`Self::UnknownId`] carries `origin` — a pack that maps a token onto
@@ -292,10 +384,12 @@ pub enum DiagnosticCode {
     /// Fail-loud because the per-place colour scheme would otherwise vanish
     /// silently; carries a nearest-match suggestion when one fits.
     UnresolvedThemeRef,
-    /// The module declares a theme, but under the pinned edition none of
-    /// its per-edition variants (spec versioning-editions §10.7) can bind.
+    /// The module declares a theme, but under the pinned edition none of its
+    /// per-edition variants (`spec/versioning-editions` "Java / Bedrock
+    /// portability") can bind.
     ///
-    /// Error, and for the reason §10.4 gives: the alternative to stopping
+    /// Error, and for the reason the same chapter's "Fail-loud and
+    /// minimum-version inference" gives: the alternative to stopping
     /// is binding the other edition's variant — which routes, say,
     /// Bedrock-only slot values into a Java `.nbt` — or binding nothing,
     /// which builds the requested extent out of air. Both are silent
@@ -308,11 +402,11 @@ pub enum DiagnosticCode {
     ///
     /// Warning, not an error: binding whichever variant the pin selects is
     /// what the author almost certainly wants — that is the pinned edition's
-    /// variant when the module has one, and the unsuffixed theme when it
-    /// does not — and §10.7 asks the semantic layer to stay edition-neutral
-    /// anyway. But an explicit name silently becoming a different name is
-    /// worth one line, and the fix — write the logical name — is the
-    /// spelling §10.7 prescribes.
+    /// variant when the module has one, and the unsuffixed theme when it does
+    /// not — and `spec/versioning-editions` "Java / Bedrock portability" asks
+    /// the semantic layer to stay edition-neutral anyway. But an explicit name
+    /// silently becoming a different name is worth one line, and the fix —
+    /// write the logical name — is the spelling that section prescribes.
     ThemeVariantRebound,
     /// A scope's derived voxel extent exceeds
     /// [`crate::block_array::MAX_STRUCTURE_VOLUME`], so the pass skips it
@@ -339,11 +433,16 @@ pub enum DiagnosticCode {
     /// would be a lie and `E_TYPE_MISMATCH_LABEL` already names it.
     IncompletePlace,
     /// A `place id=` breaks an invariant [`crate::ids::PlaceId`] relies on:
-    /// it is empty, or contains `.`, `:`, or whitespace.
+    /// it is empty, or contains `.`, `:`, `/`, `\`, or whitespace.
     ///
-    /// Those characters are the structural separators the scope key
-    /// `site::SITE::PLACE` and every walkway key parsed back out of it are
-    /// built from, so an id carrying one cannot round-trip. `id=` accepts a
+    /// The rule has two reasons. `.` and `:` are the structural separators
+    /// the scope key `site::SITE::PLACE` and every walkway key parsed back
+    /// out of it are built from, so an id carrying one cannot round-trip.
+    /// `/` and `\` are path separators: the id is the stem of the artifact
+    /// file written into `--out`, so either one would put that file in
+    /// another directory, and an absolute id would replace `--out`
+    /// altogether. Both are refused on every platform, so whether an id is
+    /// accepted does not depend on the host that checks it. `id=` accepts a
     /// string literal, which is what let the value through — nothing between
     /// the lexer and the key constructor looked at its contents.
     InvalidPlaceId,
@@ -351,10 +450,29 @@ pub enum DiagnosticCode {
     /// wins for downstream references; the duplicate is dropped and the
     /// error names both spans.
     DuplicatePlaceId,
+    /// Two scopes a build would write would be written to one file.
+    ///
+    /// An artifact is named by [`crate::ids::artifact_stem`]: a `struct`
+    /// by its name, a `place` by its `id=` alone, a walkway by its site
+    /// and endpoints with `.` flattened to `_`. So `struct hut` and a
+    /// `place id=hut`, or two sites that each `place id=home`, or the
+    /// walkways `a_b.c to d.e` and `a.b_c to d.e` in one site, name one
+    /// file, and if both are built, a build can keep only one of them.
+    /// The check runs before lowering. It leaves out a sizeless `struct`
+    /// and a `place` of a sizeless `def`, which lowering drops, but still
+    /// counts a struct or placement past the volume budget and a walkway
+    /// past the router's area cap, which lowering drops too. Names are compared ignoring case,
+    /// because `Hut` and `hut` are one file on the case-insensitive file
+    /// systems macOS and Windows default to, and the verdict should not
+    /// depend on the host. A scope key declared twice (`struct hut` twice,
+    /// or one site's `id=` twice) is not this code: that is
+    /// `E_DUPLICATE_ITEM` or `E_DUPLICATE_PLACE_ID`, and the second one
+    /// builds nothing.
+    OutputNameCollision,
     /// A `place` line carries either an `at=` value other than `origin` or
     /// combines `at=` with `east_of=` / `north_of=`. Origin selectors are
-    /// mutually exclusive per spec §9.3 so the placement coordinate is
-    /// unambiguous.
+    /// mutually exclusive per `spec/components-editing-sites` "Multi-building
+    /// with `site`" so the placement coordinate is unambiguous.
     InvalidPlaceOrigin,
     /// A `def NAME` is never referenced by any `place use=NAME`. The def
     /// itself lowers to no voxels (defs are templates), so this is advisory
@@ -377,9 +495,14 @@ pub enum DiagnosticCode {
     /// the buildings invisibly unconnected, so the build fails.
     MissingPathMaterial,
     /// Walkway voxelisation hit an existing building cell along the L-shaped
-    /// path between two ports. The blocked cell is skipped (the rest of the
-    /// walkway still lays), so the connection still reaches both ends visibly
-    /// even when an obstacle steals one or two cells in between.
+    /// path between two ports. The blocked cell is skipped and the rest of
+    /// the walkway lays, so the connection still reaches both ends visibly
+    /// when an obstacle steals one or two cells in between.
+    ///
+    /// When every cell is skipped, or the straight L alone is past the
+    /// router's area cap, nothing is laid. The code stays a warning, but
+    /// the walkway is lost, and `cairn compile` refuses the build with
+    /// `E_PARTIAL_BUILD`.
     WalkwayBlocked,
     /// A `connect` row repeats a `(from, to)` port pair already laid by an
     /// earlier row in the same site. The second walkway is dropped silently
@@ -404,12 +527,19 @@ pub enum DiagnosticCode {
     /// cascades in `block_array::lower`.
     DeferredConnect,
     /// A `connect` row whose site / place / port identifier contains the
-    /// `__` substring. The surface lexer permits `_` in identifiers, but
-    /// the canonical walkway scope key uses `__` as the `from`/`to`
+    /// `__` substring, or whose place / port identifier starts or ends
+    /// with `_`. The surface lexer permits `_` anywhere in identifiers,
+    /// but the canonical walkway scope key uses `__` as the `from`/`to`
     /// separator — so `(home, b__c, home2, entry)` and
     /// `(home, b, c__home2, entry)` would otherwise encode to the same
-    /// wire string. Lowering drops the row and asks the user to rename
-    /// the offending segment so the encoding stays unambiguous.
+    /// wire string, and so would `(a, p_, b, p)` and `(a, p, _b, p)`.
+    /// The edge rule covers both ends of every place and port, not only
+    /// the ones that can touch the separator; see
+    /// [`crate::ids::KeyConstructError::UnderscoreAtEdge`] for why.
+    /// Lowering drops the row and asks the user to rename the offending
+    /// segment so the encoding stays unambiguous. A release build also
+    /// raises it if a row's key replaces an earlier row's anyway, which
+    /// only a hole in that rule allows (a debug build asserts instead).
     InvalidWalkwayIdent,
     /// A `connect` row whose positional shape is not
     /// `FROM.PORT to TO.PORT`. The line-based parser accepts any number
@@ -422,8 +552,8 @@ pub enum DiagnosticCode {
     ConnectArity,
     /// Two members evaluated in the same phase wrote one voxel to different
     /// blocks, so the block the build keeps is the one whose line comes
-    /// last. `spec/compilation.md` §4.1 opens by promising that "order
-    /// accidents are eliminated" and then grants last-wins to "local
+    /// last. `spec/compilation` "Phase evaluation" opens by promising that
+    /// "order accidents are eliminated" and then grants last-wins to "local
     /// overrides within the same phase" — an author restating a member is
     /// the case that grant is for, and two footprints that happen to
     /// intersect is not, yet the grid cannot tell them apart. Warned rather
@@ -459,6 +589,47 @@ pub enum DiagnosticCode {
     /// through writing one is writing something true. `data` carries the
     /// combinations to write.
     TruthTablePartial,
+    /// Every version `@intended_targets` names is below a version floor
+    /// the same file declares, so the file can be built for nothing it
+    /// says it is for.
+    ///
+    /// The two headers are one statement of intent and one constraint on
+    /// it, and a file whose constraint refuses its whole intent is a file
+    /// whose author meant one of the two lines differently. An error
+    /// rather than the warning [`Self::IntendedTargetCapPartial`] carries,
+    /// because there is nothing left that the declaration and the floor
+    /// agree on: the first `cairn compile --target` naming any version the
+    /// header asks for is `E_VERSION_CAP`.
+    ///
+    /// A version the edition cannot build at all is
+    /// [`Self::IntendedTargetUnsupported`] instead and is not counted
+    /// here, which is what keeps this code on the one shape it names — a
+    /// list of buildable versions the file's own floor rules out.
+    IntendedTargetCap,
+    /// Some, not all, of the versions `@intended_targets` names are below
+    /// a version floor the same file declares.
+    ///
+    /// A warning because the header is "a hint, not a verification record"
+    /// (`spec/syntax` "Headers") and the versions above the floor still
+    /// build: the list reaches past the floor at one end, which is a wish
+    /// stated too widely rather than a file that cannot be built. Shares
+    /// its name with [`Self::IntendedTargetCap`] because it is the same
+    /// contradiction — what differs is how much of the intent survives it.
+    IntendedTargetCapPartial,
+    /// `@intended_targets` names a version no `--target` of the edition
+    /// can build.
+    ///
+    /// Two shapes reach it: a release the registry pack ships no block
+    /// data for (`1.19` on Java), and a label the edition's table cannot
+    /// place at all — which is what a version written in the *other*
+    /// edition's numbering looks like (`1.21.40` on Java). One code
+    /// because the repair is the same edit to the same line, and the note
+    /// says which of the two it was.
+    ///
+    /// A warning, and only under a pinned edition: without one, a version
+    /// this edition cannot build may be exactly the target the author
+    /// means on the other.
+    IntendedTargetUnsupported,
 }
 
 impl DiagnosticCode {
@@ -480,8 +651,11 @@ impl DiagnosticCode {
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
             Self::UnknownArgument => "E_UNKNOWN_ARGUMENT",
+            Self::MisplacedBinding => "E_MISPLACED_BINDING",
             Self::UnexpectedPositional => "E_UNEXPECTED_POSITIONAL",
             Self::InvalidRequires => "E_INVALID_REQUIRES",
+            Self::InvalidCairnVersion => "W_INVALID_CAIRN_VERSION",
+            Self::FutureCairnVersion => "W_FUTURE_CAIRN_VERSION",
             Self::TypeMismatchLabel => "E_TYPE_MISMATCH_LABEL",
             Self::TypeMismatchSize => "E_TYPE_MISMATCH_SIZE",
             Self::MissingMaterial => "E_MISSING_MATERIAL",
@@ -493,6 +667,7 @@ impl DiagnosticCode {
             Self::NoThemeBound => "W_NO_THEME_BOUND",
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
             Self::UnknownAbstractToken => "E_UNKNOWN_ABSTRACT_TOKEN",
+            Self::StateLiteralUnchecked => "W_STATE_LITERAL_UNCHECKED",
             Self::UnknownId => "E_UNKNOWN_ID",
             Self::IncompatibleMaterial => "E_INCOMPATIBLE_MATERIAL",
             Self::StructNoSize => "W_STRUCT_NO_SIZE",
@@ -505,6 +680,7 @@ impl DiagnosticCode {
             Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
+            Self::OutputNameCollision => "E_OUTPUT_NAME_COLLISION",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
             Self::UnusedDef => "W_UNUSED_DEF",
             Self::UnresolvedPort => "E_UNRESOLVED_PORT",
@@ -520,6 +696,9 @@ impl DiagnosticCode {
             Self::TruthTableConflict => "E_TRUTH_TABLE_CONFLICT",
             Self::TruthTableDuplicateRow => "W_TRUTH_TABLE_DUPLICATE_ROW",
             Self::TruthTablePartial => "W_TRUTH_TABLE_PARTIAL",
+            Self::IntendedTargetCap => "E_INTENDED_TARGET_CAP",
+            Self::IntendedTargetCapPartial => "W_INTENDED_TARGET_CAP",
+            Self::IntendedTargetUnsupported => "W_INTENDED_TARGET_UNSUPPORTED",
         }
     }
 
@@ -528,14 +707,14 @@ impl DiagnosticCode {
     /// **The** severity for the code: every emission site reads it from
     /// here rather than writing a literal, so reclassifying a code is one
     /// edit and cannot leave a pass disagreeing with the ledger. Pinned by
-    /// `every_code_is_classified_against_spec_11_3` below, which partitions
-    /// the whole enum rather than whatever a corpus happens to reach — with
-    /// [`Diagnostic::severity`] reading this function there is no
-    /// per-finding value left for a fixture to disagree with, which
+    /// `every_code_is_classified_against_the_error_vs_warning_rule` below,
+    /// which partitions the whole enum rather than whatever a corpus happens
+    /// to reach — with [`Diagnostic::severity`] reading this function there is
+    /// no per-finding value left for a fixture to disagree with, which
     /// `tests/diagnostic_text.rs` records from the other side.
     ///
-    /// `spec/lint.md` §11.3 draws the line at the *build*: a finding is an
-    /// error when leaving it alone yields something other than what the
+    /// `spec/lint` "Error vs warning" draws the line at the *build*: a finding
+    /// is an error when leaving it alone yields something other than what the
     /// source asked for — a concept that is absent, an id that resolves to
     /// nothing, a value outside its domain — because silent substitution
     /// and implicit dropping are forbidden. Everything else is a warning:
@@ -546,8 +725,8 @@ impl DiagnosticCode {
     /// incomplete side and `cairn compile` refuses separately rather than
     /// certifying a partial build.
     ///
-    /// `W_IGNORED_ARGUMENT` sits on the line. §11.3's error clause covers
-    /// a value dropped and a default substituted, which is the build
+    /// `W_IGNORED_ARGUMENT` sits on the line. That section's error clause
+    /// covers a value dropped and a default substituted, which is the build
     /// differing from the source — but the clause forbids *silent*
     /// substitution, and this code is the announcement, so the letter
     /// cuts both ways. It is a warning because it replaces a
@@ -556,7 +735,14 @@ impl DiagnosticCode {
     /// an argument key the compiler does not recognise waits on — those
     /// are unreported outside the actuator-patch keys, and every source
     /// carrying one builds today — and the two want one decision rather
-    /// than two. §11.3 records the same.
+    /// than two. That section records the same.
+    ///
+    /// Its routed-past shape lands on the warning side by a second argument
+    /// as well. A key outside the vocabulary names nothing and has one
+    /// repair site, which is what makes `E_UNKNOWN_ARGUMENT` a refusal; a
+    /// key a sibling routed past names something real, and the repair is
+    /// either argument — the rule the author meant, or the leftover key.
+    /// Refusing would pick one of them.
     ///
     /// Two codes sit close to the line and are decided in their variant
     /// docs: `E_UNKNOWN_SLOT_TARGET` is an error because the members
@@ -565,7 +751,8 @@ impl DiagnosticCode {
     /// `E_UNKNOWN_ABSTRACT_TOKEN` is the one lowering code that is an
     /// error: when a registry pack *was* offered but does not declare the
     /// bound token, falling back to air would hide a typo the pack author
-    /// needs to fix (spec §7.2's fail-loud rule).
+    /// needs to fix (the fail-loud rule of `spec/materials-themes` "Canonical
+    /// vocabulary").
     #[must_use]
     pub fn severity(self) -> Severity {
         match self {
@@ -578,6 +765,7 @@ impl DiagnosticCode {
             | Self::MisplacedMember
             | Self::UnknownKeyword
             | Self::UnknownArgument
+            | Self::MisplacedBinding
             | Self::UnexpectedPositional
             | Self::InvalidRequires
             | Self::TypeMismatchLabel
@@ -592,6 +780,7 @@ impl DiagnosticCode {
             | Self::UnresolvedThemeRef
             | Self::ThemeVariantMissing
             | Self::DuplicatePlaceId
+            | Self::OutputNameCollision
             | Self::IncompletePlace
             | Self::InvalidPlaceId
             | Self::InvalidPlaceOrigin
@@ -603,14 +792,18 @@ impl DiagnosticCode {
             | Self::DuplicateHeader
             | Self::UnsupportedNesting
             | Self::TruthTableEmpty
+            | Self::IntendedTargetCap
             | Self::TruthTableConflict => Severity::Error,
-            Self::StructureTooLarge
+            Self::InvalidCairnVersion
+            | Self::FutureCairnVersion
+            | Self::StructureTooLarge
             | Self::ThemeSelectorUnmatched
             | Self::ThemeVariantRebound
             | Self::DeferredMember
             | Self::NoThemeBound
             | Self::IgnoredArgument
             | Self::AbstractTokenDeferred
+            | Self::StateLiteralUnchecked
             | Self::StructNoSize
             | Self::DefNoSize
             | Self::UnusedDef
@@ -620,6 +813,8 @@ impl DiagnosticCode {
             | Self::InvalidWalkwayIdent
             | Self::PhaseConflict
             | Self::TruthTableDuplicateRow
+            | Self::IntendedTargetCapPartial
+            | Self::IntendedTargetUnsupported
             | Self::TruthTablePartial => Severity::Warning,
         }
     }
@@ -648,7 +843,7 @@ impl Serialize for DiagnosticCode {
 /// existing variant is still breaking by itself; per-variant
 /// `#[non_exhaustive]` is added on a per-case basis when a follow-up
 /// expansion is anticipated.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DiagnosticData {
@@ -657,8 +852,10 @@ pub enum DiagnosticData {
     /// existing structure and were dropped from the walkway lay.
     WalkwayBlocked {
         /// Count of cells the walkway lowering had to skip. Invariant:
-        /// `>= 1` — `lower_connects` only emits `W_WALKWAY_BLOCKED` when
-        /// the underlying `skipped > 0`. Typed as `u64` so `usize` lifts
+        /// `>= 1` — `lower_connects` attaches this payload only when the
+        /// underlying `skipped > 0`. The area-cap refusal emits
+        /// `W_WALKWAY_BLOCKED` with no payload, since it skipped no cells
+        /// and laid none. Typed as `u64` so `usize` lifts
         /// without lossy truncation on any platform Cairn supports.
         skipped: u64,
     },
@@ -668,9 +865,9 @@ pub enum DiagnosticData {
     ///
     /// Carried because "insert the missing keys" is the obvious quick-fix
     /// for this code, and recovering the set from the rendered sentence is
-    /// exactly the prose-parsing `spec/lint.md` §11.2 tells consumers to
-    /// avoid. Invariant: non-empty — a row that declares all three keys
-    /// produces no finding at all.
+    /// exactly the prose-parsing `spec/lint` "Machine-readable payload" tells
+    /// consumers to avoid. Invariant: non-empty — a row that declares all
+    /// three keys produces no finding at all.
     IncompletePlace {
         /// Missing key names (`id`, `use`, `theme`).
         missing: Vec<String>,
@@ -683,7 +880,8 @@ pub enum DiagnosticData {
     /// between them — replacing `<` with `>=` is a one-character edit a
     /// tool can offer, while a snapshot label is not repairable at all
     /// today. Telling them apart from the rendered sentence is the
-    /// prose-parsing `spec/lint.md` §11.2 tells consumers to avoid.
+    /// prose-parsing `spec/lint` "Machine-readable payload" tells consumers
+    /// to avoid.
     InvalidRequires {
         /// Stable name of the failure, from
         /// [`crate::resolve::RequirementError::kind`]:
@@ -695,6 +893,41 @@ pub enum DiagnosticData {
         /// written, the offending component, or the trailing text. Empty
         /// when the failure names no fragment of its own.
         found: String,
+    },
+    /// Companion payload for [`DiagnosticCode::InvalidCairnVersion`].
+    /// Which way the value failed, and the text that failed.
+    ///
+    /// Carried for the reason [`Self::InvalidRequires`] is, and shaped the
+    /// same way so a consumer handling both version headers handles them
+    /// alike: the repairs differ between a month of `13` and a
+    /// four-component string, and telling them apart from the rendered
+    /// sentence is the prose-parsing `spec/lint` "Machine-readable payload"
+    /// tells consumers to avoid.
+    InvalidCairnVersion {
+        /// Stable name of the failure, from
+        /// [`crate::calver::LanguageVersionError::kind`]:
+        /// `component_count`, `component_not_a_number`,
+        /// `year_not_four_digits`, `month_out_of_range`,
+        /// `patch_too_large`, or `trailing_tokens`.
+        reason: String,
+        /// The component the reason is about, as written. Empty when the
+        /// failure names no fragment of its own: `component_count` is
+        /// about the whole value, and `component_not_a_number` reports an
+        /// empty component when that is what the value has (`2026.`).
+        found: String,
+    },
+    /// Companion payload for [`DiagnosticCode::FutureCairnVersion`]. The
+    /// two versions, each as its own side spells it.
+    ///
+    /// Both are verbatim rather than normalised: `declared` is the string
+    /// the author has to edit, and `compiler` is the build a bug report
+    /// has to name. `2026.06` and `2026.6` are one version to the
+    /// comparison and two strings to whoever reads the finding.
+    FutureCairnVersion {
+        /// The `@cairn` value, as written.
+        declared: String,
+        /// [`crate::CAIRN_VERSION`], the build that reported this.
+        compiler: String,
     },
     /// Companion payload for [`DiagnosticCode::DuplicateSelector`]. The
     /// binding keys this selector row takes over from an earlier row,
@@ -735,6 +968,19 @@ pub enum DiagnosticData {
         /// suggestion cap. Absent from the JSON when there is none.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
+        /// Every id the target declares for the same block, from the
+        /// registry pack's alias table — the closed set of candidates a
+        /// rename has and a typo search cannot find. Absent from the JSON
+        /// when the pack names none, which is also the whole of what an
+        /// older pack, carrying no alias table, can say.
+        ///
+        /// Beside `suggestion` rather than merged with it because the two
+        /// are different claims: an alias is the pack stating that two
+        /// names are one block, a suggestion is a guess from a string
+        /// distance. A quick-fix can apply the first unasked and should
+        /// not the second.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        aliases: Vec<String>,
     },
     /// Companion payload for [`DiagnosticCode::IncompatibleMaterial`].
     ///
@@ -794,6 +1040,33 @@ pub enum DiagnosticData {
         /// `2^inputs - covered`.
         missing: Vec<String>,
     },
+    /// Companion payload for the three `@intended_targets` codes
+    /// ([`DiagnosticCode::IntendedTargetCap`],
+    /// [`DiagnosticCode::IntendedTargetCapPartial`],
+    /// [`DiagnosticCode::IntendedTargetUnsupported`]).
+    ///
+    /// Carried for the reason [`Self::IncompletePlace`] is: the obvious
+    /// quick-fix rewrites the list, and which of its entries the finding
+    /// is about should not have to be recovered from a sentence naming
+    /// several of them. The edition rides along because every one of these
+    /// findings is a per-edition answer — the same header earns different
+    /// ones from a Java and a Bedrock build — and nothing else in the
+    /// payload says which build asked.
+    IntendedTargets {
+        /// Which edition weighed the header, as
+        /// [`crate::edition::Edition::as_str`] spells it.
+        edition: String,
+        /// The versions this finding is about, in the order the header
+        /// lists them. A subset of the header's list, and non-empty: a
+        /// header with nothing to report raises nothing.
+        targets: Vec<String>,
+        /// The floor that refuses the first of them, as the author wrote
+        /// it (scope included). Absent for
+        /// [`DiagnosticCode::IntendedTargetUnsupported`], which is not
+        /// about a floor at all.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        floor: Option<String>,
+    },
 }
 
 /// Secondary location for a [`Diagnostic`] (the "first declared here"
@@ -804,7 +1077,7 @@ pub enum DiagnosticData {
 /// `E_UNKNOWN_KEYWORD`, for example, has no byte range distinct from the
 /// primary finding's span. Renderers should suppress the `file:L:C:`
 /// prefix for `span == None`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct DiagnosticNote {
     /// Byte range the note refers to, when the note points at a distinct
     /// secondary location.
@@ -823,7 +1096,17 @@ pub struct DiagnosticNote {
 /// In-crate sites still build the struct directly and update in step
 /// when new fields land; cross-crate consumers must route through a
 /// future builder rather than depending on the field set being frozen.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+///
+/// `Eq` and `Hash` let a pass ask whether it has already said this, and
+/// every field answers: two findings that agree on all of them are one
+/// finding reported twice, because nothing outside the struct distinguishes
+/// them. `block_array::lower_to_block_array` relies on that to drop the
+/// copies a def body's per-placement walk produces.
+///
+/// A field added here therefore has to be `Eq + Hash` — no `f64`, no
+/// `serde_json::Value` — or that call stops compiling, and a field left out
+/// of the identity is not an option while the derive reads all of them.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
 pub struct Diagnostic {
     /// Stable code identifying the kind of finding.
@@ -920,7 +1203,7 @@ impl Diagnostic {
 /// Built via [`Diagnostic::render`]. The `code` field serialises to the same
 /// `E_*` string as the text format (see [`DiagnosticCode::as_str`]) so
 /// downstream tooling matches a single contract regardless of `--format`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RenderedDiagnostic {
     /// Stable code identifying the kind of finding.
     pub code: DiagnosticCode,
@@ -949,7 +1232,7 @@ pub struct RenderedDiagnostic {
 }
 
 /// JSON-friendly rendering of a [`DiagnosticNote`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RenderedNote {
     /// 1-based line of the note's source position, when the note has a
     /// distinct secondary location. Omitted for informational notes.
@@ -982,6 +1265,19 @@ impl LineStarts {
         Self {
             starts: crate::lines::starts(source),
         }
+    }
+
+    /// The byte offset each line begins at, as [`crate::lines::starts`]
+    /// computed them.
+    ///
+    /// For a caller that wants the *text* of a line rather than a position
+    /// in it, and already holds this index. Handing back the slice keeps
+    /// the line-break rule where `crate::lines` puts it: the alternative
+    /// is a second walk of the source deciding again where a line ends,
+    /// which is what that module exists to prevent.
+    #[must_use]
+    pub fn line_starts(&self) -> &[usize] {
+        &self.starts
     }
 
     /// Resolve a byte offset into a 1-based `line:column` [`Position`].
@@ -1167,12 +1463,15 @@ mod tests {
                 "E_DUPLICATE_SLOT",
                 "E_INCOMPATIBLE_MATERIAL",
                 "E_INCOMPLETE_PLACE",
+                "E_INTENDED_TARGET_CAP",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
+                "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
+                "E_OUTPUT_NAME_COLLISION",
                 "E_PARSE",
                 "E_THEME_SELECTOR_UNMATCHED",
                 "E_THEME_VARIANT_MISSING",
@@ -1196,10 +1495,15 @@ mod tests {
                 "W_DEFERRED_MEMBER",
                 "W_DEF_NO_SIZE",
                 "W_DUPLICATE_WALKWAY",
+                "W_FUTURE_CAIRN_VERSION",
                 "W_IGNORED_ARGUMENT",
+                "W_INTENDED_TARGET_CAP",
+                "W_INTENDED_TARGET_UNSUPPORTED",
+                "W_INVALID_CAIRN_VERSION",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",
+                "W_STATE_LITERAL_UNCHECKED",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",
@@ -1212,7 +1516,7 @@ mod tests {
     }
 
     #[test]
-    fn every_code_is_classified_against_spec_11_3() {
+    fn every_code_is_classified_against_the_error_vs_warning_rule() {
         // Errors block a build; warnings are advisory. `severity` carries
         // the rule and the two borderline calls; this pins the resulting
         // partition so a reclassification is a deliberate edit here rather
@@ -1232,12 +1536,15 @@ mod tests {
                 "E_DUPLICATE_SLOT",
                 "E_INCOMPATIBLE_MATERIAL",
                 "E_INCOMPLETE_PLACE",
+                "E_INTENDED_TARGET_CAP",
                 "E_INVALID_PLACE_ID",
                 "E_INVALID_PLACE_ORIGIN",
                 "E_INVALID_REQUIRES",
+                "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_MISSING_PATH_MATERIAL",
+                "E_OUTPUT_NAME_COLLISION",
                 "E_PARSE",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
@@ -1266,10 +1573,15 @@ mod tests {
                 "W_DEFERRED_MEMBER",
                 "W_DEF_NO_SIZE",
                 "W_DUPLICATE_WALKWAY",
+                "W_FUTURE_CAIRN_VERSION",
                 "W_IGNORED_ARGUMENT",
+                "W_INTENDED_TARGET_CAP",
+                "W_INTENDED_TARGET_UNSUPPORTED",
+                "W_INVALID_CAIRN_VERSION",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
                 "W_PHASE_CONFLICT",
+                "W_STATE_LITERAL_UNCHECKED",
                 "W_STRUCTURE_TOO_LARGE",
                 "W_STRUCT_NO_SIZE",
                 "W_THEME_VARIANT_REBOUND",
@@ -1278,11 +1590,11 @@ mod tests {
                 "W_UNUSED_DEF",
                 "W_WALKWAY_BLOCKED",
             ],
-            "the `W_` prefix marks a partial-build degradation, which is a \
-             claim about what the compiler did rather than about severity, so \
-             an `E_`-prefixed warning is not by itself a misclassification — \
-             but it is the shape worth re-reading against §11.3 whenever one \
-             lands",
+            "the prefix is not the severity: `E_THEME_SELECTOR_UNMATCHED` is a \
+             warning and most `W_` codes are partial-build degradations without \
+             that being what the letter means, so neither shape is by itself a \
+             misclassification — but both are worth re-reading against \
+             spec/lint \"Error vs warning\" whenever one lands",
         );
     }
 
@@ -1324,18 +1636,19 @@ mod tests {
 
     #[test]
     fn unknown_id_payload_omits_the_halves_it_does_not_have() {
-        // `spec/lint.md` §11.2 documents both optional fields as absent
-        // rather than `null`, and the two absences mean distinct things: no
-        // `token` says the author wrote the id, no `suggestion` says the
-        // target has nothing near it. A `null` would read as "unknown" for
-        // both. `origin` is never optional — it is what separates the three
-        // cases, so a consumer always has it.
+        // `spec/lint` "Machine-readable payload" documents both optional
+        // fields as absent rather than `null`, and the two absences mean
+        // distinct things: no `token` says the author wrote the id, no
+        // `suggestion` says the target has nothing near it. A `null` would
+        // read as "unknown" for both. `origin` is never optional — it is what
+        // separates the three cases, so a consumer always has it.
         let authored = serde_json::to_value(DiagnosticData::UnknownId {
             id: "minecraft:light".to_owned(),
             registry: "bedrock 1.21.60".to_owned(),
             origin: "authored".to_owned(),
             token: None,
             suggestion: None,
+            aliases: Vec::new(),
         })
         .expect("serialise payload");
         assert_eq!(
@@ -1354,6 +1667,7 @@ mod tests {
             origin: "catalog".to_owned(),
             token: Some("floor.stone.smooth".to_owned()),
             suggestion: Some("minecraft:stonebrick".to_owned()),
+            aliases: vec!["minecraft:stonebrick".to_owned()],
         })
         .expect("serialise payload");
         assert_eq!(
@@ -1365,6 +1679,7 @@ mod tests {
                 "origin": "catalog",
                 "token": "floor.stone.smooth",
                 "suggestion": "minecraft:stonebrick",
+                "aliases": ["minecraft:stonebrick"],
             }),
         );
     }
@@ -1479,5 +1794,131 @@ mod tests {
                 }
             }
         }
+    }
+    /// Where the spec chapters live, in each language. The mirror is the
+    /// same catalog, so a code missing from one is missing.
+    ///
+    /// Split from the file name rather than written whole because a path
+    /// holding the chapter reads as a citation to the test that checks
+    /// them, which then looks for a section title in the rest of the
+    /// path.
+    const SPEC_DIRS: [(&str, &str); 2] = [
+        ("website/src/content/docs/spec", "Diagnostic codes"),
+        ("website/src/content/docs/ja/spec", "診断コード"),
+    ];
+
+    /// The chapter the catalog is in.
+    const LINT_CHAPTER: &str = "lint.md";
+
+    /// The catalog section of a lint chapter: the heading whose title is
+    /// `title`, up to the next `##`.
+    ///
+    /// Found by title and not by section number. `CONTRIBUTING.md`'s
+    /// "Cite the spec by name, not by number" holds for a test as much as
+    /// for a comment, and its promise — renumbering the spec touches no
+    /// Rust — would end at a `find("## 11.1")` that `expect`s its answer.
+    /// The title is translated, which is why it is carried per language
+    /// in [`SPEC_DIRS`] rather than written once. A retitle failing here
+    /// is the convention working: a title change is a change of meaning,
+    /// and the test that leaned on it deserves a re-read.
+    fn catalog_section<'a>(chapter: &'a str, title: &str) -> &'a str {
+        let mut offset = 0;
+        for line in chapter.split_inclusive('\n') {
+            if line
+                .strip_prefix("## ")
+                .is_some_and(|rest| rest.trim_end().ends_with(title))
+            {
+                let rest = &chapter[offset + "## ".len()..];
+                let end = rest.find("\n## ").map_or(rest.len(), |at| at + 1);
+                return &rest[..end];
+            }
+            offset += line.len();
+        }
+        panic!("no `## ` heading titled {title:?} in the lint chapter")
+    }
+
+    /// The codes the catalog gives a row of its own.
+    ///
+    /// A row, not a mention: a code named in the prose of a neighbouring
+    /// row, or in the payload table further down, is not what a reader
+    /// with a code in hand finds. That is the gap this looks for, and
+    /// six codes were in exactly it.
+    fn rows_of(section: &str) -> Vec<&str> {
+        section
+            .lines()
+            .filter_map(|line| line.strip_prefix("| `"))
+            .filter_map(|rest| rest.split_once("` |"))
+            .map(|(code, _)| code)
+            .filter(|code| code.starts_with("E_") || code.starts_with("W_"))
+            .collect()
+    }
+
+    #[test]
+    fn every_code_has_a_row_in_the_spec_catalog() {
+        // A code is public contract: it is the `code` field of the
+        // `--format json` payload and what a consumer branches on instead
+        // of matching the message. `spec/lint` "Diagnostic codes" is where
+        // one is looked up, so a code with no row there is a string the
+        // compiler prints and no one can read back.
+        //
+        // Only this direction. `E_VERSION_CAP`, `E_REQUIRES_UNORDERABLE`
+        // and `E_PARTIAL_BUILD` are run-level refusals raised outside this
+        // enum and have rows for the same reason, so a row without a
+        // variant is not a finding.
+        //
+        // Outside a checkout there is no spec to read and the test has
+        // nothing to say; inside one every way of reaching that branch is
+        // a bug, so the chapter is read rather than skipped once the
+        // decision to run has been made. A silent pass here is a code
+        // with no row that CI never mentions.
+        let Some(root) = workspace_root() else {
+            return;
+        };
+        for (dir, title) in SPEC_DIRS {
+            let path = root.join(dir).join(LINT_CHAPTER);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|err| panic!("{} should be readable: {err}", path.display()));
+            let rows = rows_of(catalog_section(&text, title));
+            assert!(
+                !rows.is_empty(),
+                "no code rows in {}; either the catalog moved or the row scan is broken, \
+                 and this test would otherwise pass without reading anything",
+                path.display(),
+            );
+            let missing: Vec<&'static str> = DiagnosticCode::iter()
+                .map(DiagnosticCode::as_str)
+                .filter(|code| !rows.contains(code))
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "{} must give every code a row of its own; these have none: {missing:?}",
+                path.display(),
+            );
+        }
+    }
+
+    /// The repository root, or `None` when this is not running from a
+    /// checkout.
+    ///
+    /// A packaged crate unpacked into a registry directory carries its own
+    /// manifest but not the workspace one, and `cargo package` rewrites
+    /// what it ships — so the `[workspace]` table is the marker that tells
+    /// "no spec here" apart from "the spec moved".
+    ///
+    /// The marker is read strictly — a bare `[workspace]` line — so a
+    /// comment after the table header, or a leading space, answers `None`
+    /// from a real checkout. That is why the caller does not treat a
+    /// readable chapter as optional once it has decided to run: the skip
+    /// is a best-effort "not a checkout", not a guarantee.
+    fn workspace_root() -> Option<std::path::PathBuf> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)?
+            .to_path_buf();
+        let manifest = std::fs::read_to_string(root.join("Cargo.toml")).ok()?;
+        manifest
+            .lines()
+            .any(|line| line.trim_end() == "[workspace]")
+            .then_some(root)
     }
 }

@@ -25,10 +25,8 @@
 //!
 //! The last two also earn a `W_DEFERRED_MEMBER` from block-array
 //! lowering. That is not a substitute: `check` does not lower (see the
-//! module doc on [`super::check`]), so `cairn check` exited 0 on both
-//! until this pass covered them — and a nested `level` in a `def` that
-//! no `site` places is never lowered at all, so it had no reporter
-//! anywhere.
+//! module doc on [`super::check`]), and a nested `level` in a `def` that
+//! no `site` places is never lowered at all.
 //!
 //! Dropped is not quite inert, which is why the geometry message is
 //! about blocks rather than about the member disappearing. A member
@@ -48,11 +46,6 @@
 //! a nested `assert` is no worse off than a top-level one either way, so
 //! reporting it here would blame the indentation for a gap the
 //! indentation did not open.
-//!
-//! Without this pass the failure was inverted: `check::connect_arity`
-//! recurses into children, so a *malformed* nested `connect` earned a
-//! position-anchored error while a well-formed one laid no walkway and
-//! said nothing at all.
 //!
 //! Anchoring: the indented members, from the first to the last byte of
 //! the last one's own subtree, so the underline reaches the members

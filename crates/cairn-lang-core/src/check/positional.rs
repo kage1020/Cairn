@@ -1,6 +1,6 @@
 //! `positional` pass — flags bare values on a line that reads none.
 //!
-//! `spec/syntax.md` §5.1 requires `key=value` for everything after the
+//! `spec/syntax` "Lexical" requires `key=value` for everything after the
 //! command keyword, and gives the reason: positional arguments make the
 //! author (or the model) remember an order, and a dropped or reordered one
 //! is invisible. `connect FROM.PORT to TO.PORT` is the single form that

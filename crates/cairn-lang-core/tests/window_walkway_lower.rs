@@ -8,51 +8,21 @@
 //! the authored `y=` — fails loud here rather than only at the spec
 //! boundary. Geometry is chosen so the Manhattan strip is a single
 //! x-leg that clears both cottage footprints, pinning `blocked_count
-//! == 0` as the regression-free state.
+//! == 0` as the regression-free state; that, the walkway's key and the
+//! absence of any `W_DEFERRED_MEMBER` cascade are asserted for every
+//! walkway example in `walkway_examples_lower`.
 
-use std::path::PathBuf;
-
-use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex};
 use cairn_lang_core::check::{DiagnosticCode, Severity};
-use cairn_lang_core::{lower, parse, resolve};
 
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{lowered_with_resolver_diagnostics, read_example};
 
 fn lower_window_walkway() -> BlockArrayIr {
-    let source = std::fs::read_to_string(examples_dir().join("window-walkway.crn"))
-        .expect("window-walkway.crn must read");
-    let module = parse(&source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let mut out = lower_to_block_array(&ir, &resolution, None);
-    let mut combined = resolution.diagnostics;
-    combined.append(&mut out.diagnostics);
-    out.diagnostics = combined;
-    out
+    lowered_with_resolver_diagnostics(&read_example("window-walkway.crn"))
 }
 
 const WALKWAY_KEY: &str = "walkway::pair::home1.entry__home2.front";
-
-#[test]
-fn window_walkway_emits_single_walkway_with_expected_key() {
-    let out = lower_window_walkway();
-    assert_eq!(
-        out.walkways.len(),
-        1,
-        "expected exactly one walkway, got {:?}",
-        out.walkways.keys().collect::<Vec<_>>(),
-    );
-    assert!(
-        out.walkways.contains_key(WALKWAY_KEY),
-        "missing walkway under key `{WALKWAY_KEY}`, keys = {:?}",
-        out.walkways.keys().collect::<Vec<_>>(),
-    );
-}
 
 #[test]
 fn window_walkway_endpoints_pin_door_and_window_ports() {
@@ -111,34 +81,13 @@ fn window_walkway_block_array_paints_ten_gravel_cells() {
 }
 
 #[test]
-fn window_walkway_emits_no_deferred_or_blocked_warnings() {
-    // Window-port resolution must not cascade `W_DEFERRED_MEMBER`, and
-    // the chosen geometry keeps the strip clear of both placement
-    // floors so `W_WALKWAY_BLOCKED` must stay silent.
-    let out = lower_window_walkway();
-    let deferred: Vec<_> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert!(
-        deferred.is_empty(),
-        "window-walkway must not surface W_DEFERRED_MEMBER, got {deferred:#?}",
-    );
-    let blocked: Vec<_> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::WalkwayBlocked)
-        .collect();
-    assert!(
-        blocked.is_empty(),
-        "window-walkway must not collide with placements, got {blocked:#?}",
-    );
+fn window_walkway_openings_do_not_contest_a_cell() {
     // The window sits one course above the door's opening, and the wall
     // carries the extra course so it still fits inside. Put the window
     // back in the doorway and `door` and `window` — both openings — decide
     // the cell by line order. The example's header says why; this is the
     // assertion that holds it, next to the comment.
+    let out = lower_window_walkway();
     let contested: Vec<_> = out
         .diagnostics
         .iter()
@@ -169,15 +118,15 @@ fn window_walkway_emits_no_resolver_errors() {
 /// half of the row identified as the side that *did* place. Pins the
 /// `port_world_position` → `W_DEFERRED_MEMBER` cascade across the
 /// resolver / lower boundary: a regression that returns early from
-/// `lower_connects` on the first `None` (skipping the diagnostic
+/// `lower_connects` on the first rejection (skipping the diagnostic
 /// push) would silently drop the walkway and only fail this
 /// integration test.
 #[test]
 fn window_walkway_overflowing_window_cascades_one_deferred_member() {
     // size=3x3 → wall_length(Front) = 3. The overflow window declares
     // `offset=2 size=2x2`, so `offset + size.w = 4 > 3` and
-    // `window_center_offset` returns `None`. The peer's door port still
-    // resolves cleanly, so the cascade names the window side.
+    // `window_center_offset` refuses it as past the wall. The peer's door
+    // port still resolves cleanly, so the cascade names the window side.
     let src = "@cairn 2026.06\n\n\
 def hut size=3x3:\n  \
 floor mat_slot=floor\n  \
@@ -192,19 +141,15 @@ site duo:\n  \
 place id=anchor use=hut theme=plain at=origin\n  \
 place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
 connect anchor.entry to peer.overflow path=@gravel\n";
-    let module = parse(src).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let mut out = lower_to_block_array(&ir, &resolution, None);
-    let mut combined = resolution.diagnostics;
-    combined.append(&mut out.diagnostics);
+    let out = lowered_with_resolver_diagnostics(src);
     // Two `W_DEFERRED_MEMBER` warnings come from the def-side openings
     // pass dropping the overflow window itself (one per placement —
     // `anchor` and `peer` both reuse `def hut`); the cascade we are
     // pinning fires from `lower_connects` and is the one whose
     // `primary` mentions "walkway". Filtering by message keeps the
     // assertion robust against the unrelated def-side count.
-    let walkway_cascades: Vec<_> = combined
+    let walkway_cascades: Vec<_> = out
+        .diagnostics
         .iter()
         .filter(|d| d.code == DiagnosticCode::DeferredMember)
         .filter(|d| d.primary.contains("walkway"))
@@ -212,7 +157,8 @@ connect anchor.entry to peer.overflow path=@gravel\n";
     assert_eq!(
         walkway_cascades.len(),
         1,
-        "overflowing window must surface exactly one walkway-cascade W_DEFERRED_MEMBER, got {combined:#?}",
+        "overflowing window must surface exactly one walkway-cascade W_DEFERRED_MEMBER, got {:#?}",
+        out.diagnostics,
     );
     let primary = &walkway_cascades[0].primary;
     assert!(
@@ -223,22 +169,19 @@ connect anchor.entry to peer.overflow path=@gravel\n";
         !primary.contains("`anchor.entry` and `peer.overflow`"),
         "the door side resolves; only the window side should be reported, got: {primary}",
     );
-    // The expanded `notes` carry the door / window / reserved-role
-    // breakdown so the user sees every contract they could have hit.
+    // The note names the rule this window broke, with the numbers that
+    // broke it — not every contract a port could have hit.
     let note_messages: Vec<_> = walkway_cascades[0]
         .notes
         .iter()
         .map(|n| n.message.as_str())
         .collect();
-    assert!(
-        note_messages.iter().any(|m| m.contains("`door` port")),
-        "notes should describe the door contract, got {note_messages:#?}",
-    );
-    assert!(
-        note_messages
-            .iter()
-            .any(|m| m.contains("`window` port") && m.contains("y + size.h")),
-        "notes should describe the window contract including the vertical bound, got {note_messages:#?}",
+    assert_eq!(
+        note_messages,
+        vec![
+            "`peer.overflow` is a window that runs past the end of its wall \
+             (`offset + size.w` = 2 + 2, wall length 3); the member says so on its own line too",
+        ],
     );
     // The walkway IR must drop the row rather than lay a partial strip.
     assert!(

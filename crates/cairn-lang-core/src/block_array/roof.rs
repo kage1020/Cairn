@@ -10,8 +10,9 @@
 //! per-voxel `BlockState` clone in the caller.
 //!
 //! The four kinds share their wall-top and overhang convention, but each
-//! one's exact ridge / corner rule lives in `spec/compilation.md` §4.3–4.6
-//! and is mirrored by the per-kind generator below.
+//! one's exact ridge / corner rule lives in `spec/compilation` — "Gable roof
+//! voxel rules", "Shed roof voxel rules", "Hip roof voxel rules" and "Flat
+//! roof voxel rules" — and is mirrored by the per-kind generator below.
 //!
 //! ## Common geometry conventions
 //!
@@ -100,6 +101,17 @@ pub enum RoofKind {
 }
 
 impl RoofKind {
+    /// Every kind the roof dispatch has a generator for.
+    ///
+    /// The enum is closed, so this is the whole set a `kind=` can name and
+    /// lower. Held as a constant because a table elsewhere has to be
+    /// compared against it: `MemberRole::conditional_arguments` says which
+    /// of these read `slope_to=`, and a kind added here without a row there
+    /// would go back to dropping the direction in silence.
+    /// `every_roof_kind_the_dispatch_knows_has_an_arm` below is what fails
+    /// instead.
+    pub const ALL: [Self; 4] = [Self::Gable, Self::Shed, Self::Hip, Self::Flat];
+
     /// Parse a `kind=` identifier value into a [`RoofKind`].
     ///
     /// Returns `None` for any other identifier; the caller turns that into
@@ -114,6 +126,19 @@ impl RoofKind {
             "flat" => Some(Self::Flat),
             _ => None,
         }
+    }
+
+    /// Every kind name, as a message lists them: `gable, shed, hip, flat`.
+    ///
+    /// Derived from [`Self::ALL`] so the closed set a refusal quotes cannot
+    /// fall behind the set it is refusing against.
+    #[must_use]
+    pub fn names() -> String {
+        Self::ALL
+            .iter()
+            .map(|kind| kind.name())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Lowercase kind name, matching the source `kind=` identifier.
@@ -221,7 +246,8 @@ pub enum StairFace {
     HighSlope,
     /// The single cap on an apex row where the two slopes converge —
     /// an odd short span. Keeps the low slope's facing, which is the
-    /// facing `spec/compilation.md` §4.3 picks for it. `half=top`.
+    /// facing `spec/compilation` "Gable roof voxel rules" picks for it.
+    /// `half=top`.
     Apex,
     /// Low-side cap of an even-span apex pair, facing *away* from the
     /// ridge. `half=top`.
@@ -240,14 +266,17 @@ pub enum Axis {
     Z,
 }
 
-/// One stair voxel produced by [`gable_voxels`].
+/// One stair voxel of a roof surface, tagged with the face it belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GableVoxel {
+pub struct RoofVoxel<F> {
     /// Grid position `(x, y, z)` to write the stair into.
     pub pos: (u32, u32, u32),
     /// Which face this voxel belongs to.
-    pub face: StairFace,
+    pub face: F,
 }
+
+/// One stair voxel produced by [`gable_voxels`].
+pub type GableVoxel = RoofVoxel<StairFace>;
 
 /// Vertical rise of a gable roof above its wall top.
 ///
@@ -264,7 +293,7 @@ pub fn gable_extra_height(short_span: u32) -> u32 {
 /// Choose the ridge axis for a given roof bounding box.
 ///
 /// The ridge runs along the longer axis so the slopes stay as short as
-/// possible. Ties break to `x` (spec/compilation.md §4.3).
+/// possible. Ties break to `x` (`spec/compilation` "Gable roof voxel rules").
 #[must_use]
 pub fn gable_ridge_axis(roof_w: u32, roof_h: u32) -> Axis {
     if roof_w >= roof_h { Axis::X } else { Axis::Z }
@@ -285,9 +314,10 @@ pub fn gable_stair_state(ridge_axis: Axis, face: StairFace) -> BlockState {
     // length of the roof along both outer faces.
     //
     // A converged apex is one cell wide, so both of its faces are outer
-    // ones and a stair can only serve one. The void is unavoidable
-    // there, and §4.3 settles which side keeps it by naming the low
-    // slope's facing rather than by weighing the two.
+    // ones and a stair can only serve one. The void is unavoidable there,
+    // and `spec/compilation` "Gable roof voxel rules" settles which side
+    // keeps it by naming the low slope's facing rather than by weighing the
+    // two.
     let facing = match (ridge_axis, face) {
         // x-ridge: short axis is z. Low slope is on -z; its riser faces
         // toward +z (south) — the upper-step side ends up on the inward
@@ -347,10 +377,10 @@ pub fn gable_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<GableVoxel> 
         let is_apex = layer > 0 && layer + 1 == layers;
 
         if converged {
-            // The two slopes meet on one row, so it is emitted once. At
-            // the apex that is §4.3's single cap; on layer 0 it is a
-            // short span of 1 — one row of slope, with no ridge to
-            // straddle.
+            // The two slopes meet on one row, so it is emitted once. At the
+            // apex that is the single cap of `spec/compilation` "Gable roof
+            // voxel rules"; on layer 0 it is a short span of 1 — one row of
+            // slope, with no ridge to straddle.
             let face = if is_apex {
                 StairFace::Apex
             } else {
@@ -407,13 +437,7 @@ pub enum ShedFace {
 }
 
 /// One stair voxel produced by [`shed_voxels`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ShedVoxel {
-    /// Grid position `(x, y, z)` to write the stair into.
-    pub pos: (u32, u32, u32),
-    /// Which face this voxel belongs to.
-    pub face: ShedFace,
-}
+pub type ShedVoxel = RoofVoxel<ShedFace>;
 
 /// Vertical rise of a shed roof above its wall top.
 ///
@@ -556,23 +580,16 @@ pub enum HipFace {
 }
 
 /// One stair voxel produced by [`hip_voxels`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct HipVoxel {
-    /// Grid position `(x, y, z)` to write the stair into.
-    pub pos: (u32, u32, u32),
-    /// Which face this voxel belongs to.
-    pub face: HipFace,
-}
+pub type HipVoxel = RoofVoxel<HipFace>;
 
 /// Vertical rise of a hip roof above its wall top.
 ///
-/// Identical math to [`gable_extra_height`] — the short-axis slope
-/// reaches the ridge at `ceil(short_span / 2)`. The long-axis slope is
-/// shorter or equal and so finishes at or before the same layer.
+/// The short-axis slope reaches the ridge at `ceil(short_span / 2)`, as a
+/// gable's does. The long-axis slope is shorter or equal and so finishes
+/// at or before the same layer.
 #[must_use]
 pub fn hip_extra_height(roof_w: u32, roof_h: u32) -> u32 {
-    let short = roof_w.min(roof_h);
-    short.div_ceil(2).max(1)
+    gable_extra_height(roof_w.min(roof_h))
 }
 
 /// Build the [`BlockState`] for one face of a hip roof.
@@ -819,7 +836,55 @@ pub(super) fn stair_state(id: &str, facing: Cardinal, half: &str, shape: StairSh
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
+    use crate::intent::MemberRole;
+
+    /// The dispatch side of the conditional-argument table.
+    ///
+    /// `tests/conditional_arguments.rs` holds the table to the lowering by
+    /// building each pair twice, but every enumeration it makes starts from
+    /// the table — so it catches a row edited into a lie and not a kind
+    /// added here with no row at all. That kind would take the
+    /// `arm(...) == None` path in `check::arguments` and go back to
+    /// dropping `slope_to=` in silence, which is the defect the table
+    /// exists to end.
+    ///
+    /// Here rather than beside the other guards because this is the one
+    /// assertion that needs [`RoofKind`], which is this module's and not
+    /// part of the crate's public surface. `stair` gets no equivalent: its
+    /// kinds are a string literal in `fill_stair` rather than a closed
+    /// type, so there is nothing to enumerate until that changes.
+    #[test]
+    fn every_roof_kind_the_dispatch_knows_has_an_arm() {
+        let conditional = MemberRole::Roof.conditional_arguments();
+        let [axis] = conditional else {
+            panic!("`roof` dispatches on one selector, got {conditional:?}");
+        };
+        let from_dispatch: BTreeSet<&str> = RoofKind::ALL.iter().map(|kind| kind.name()).collect();
+        let from_table: BTreeSet<&str> = axis
+            .arms
+            .iter()
+            .map(|arm| {
+                arm.value
+                    .ident()
+                    .expect("every `kind=` arm names an identifier; a roof with none defers")
+            })
+            .collect();
+        assert_eq!(
+            from_dispatch, from_table,
+            "`RoofKind` and `MemberRole::Roof.conditional_arguments()` disagree about the kinds",
+        );
+        // And every arm names a kind the parser accepts, so the two cannot
+        // agree on a set and disagree on a spelling.
+        for name in from_table {
+            assert!(
+                RoofKind::from_ident(name).is_some(),
+                "`kind={name}` has an arm and is not a kind `from_ident` knows",
+            );
+        }
+    }
 
     // -------- gable --------
 
@@ -886,10 +951,10 @@ mod tests {
             assert_eq!(v.pos.2, 4);
         }
         // A converged cap is one cell wide, so both of its faces are outer
-        // ones and a stair serves only one. `spec/compilation.md` §4.3
-        // settles it on the low slope's facing, which is the reason it is
-        // a face of its own rather than the even-span pair's low half —
-        // the pair's outward rule has two sides to choose between and
+        // ones and a stair serves only one. `spec/compilation` "Gable roof
+        // voxel rules" settles it on the low slope's facing, which is the
+        // reason it is a face of its own rather than the even-span pair's low
+        // half — the pair's outward rule has two sides to choose between and
         // this has none to spare.
         let state = gable_stair_state(Axis::X, StairFace::Apex);
         assert_eq!(state.properties.get("half").unwrap(), "top");
@@ -1063,9 +1128,9 @@ mod tests {
         // x) × `lo_z=1..=hi_z=2` (2 cells along z). The two-row ridge
         // band must all carry `HipFace::ApexRidge` and `hip_stair_state`
         // must give every cell `facing=south, half=top`, matching the
-        // spec §4.5 single-facing rule (no opposite-facing close-up like
-        // gable's even-span apex). This pins the "open V on even short
-        // span" behaviour as deliberate.
+        // single-facing rule of `spec/compilation` "Hip roof voxel rules" (no
+        // opposite-facing close-up like gable's even-span apex). This pins the
+        // "open V on even short span" behaviour as deliberate.
         let voxels = hip_voxels(8, 4, 4);
         let apex_y = 4 + hip_extra_height(8, 4);
         assert_eq!(apex_y, 6);

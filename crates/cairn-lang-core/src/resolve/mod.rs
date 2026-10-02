@@ -26,18 +26,20 @@
 //! next maturity tier's responsibility — `Member.resolved_state` is left
 //! untouched here.
 //!
-//! See `spec/materials-themes.md` §7 (slots, selectors, canonical vs.
-//! abstract tokens) and `spec/versioning-editions.md` §10.5 (the three info
-//! axes) for the rules this module enforces.
+//! See `spec/materials-themes` (slots, selectors, canonical vs. abstract
+//! tokens) and `spec/versioning-editions` (the three info axes) for the rules
+//! this module enforces.
 
 mod binding;
 mod requires_parse;
 mod resolver;
+mod theme_variant;
 mod version_axes;
+mod version_order;
 
 pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
 pub use requires_parse::{
-    RequirementError, compare_versions, parse_min_version, parse_requirement,
+    Requirement, RequirementError, compare_versions, parse_min_version, parse_requirement,
 };
 pub(crate) use resolver::select_the_same_members;
 pub use resolver::{
@@ -45,7 +47,10 @@ pub use resolver::{
     resolve,
 };
 pub use version_axes::{
-    BuildableTargets, EditionPortability, EditionReport, RegistryRange, SemanticSensitiveFinding,
-    UnsupportedEntry, UnsupportedReason, VersionAxes, VersionFloor, compute_axes,
-    declared_version_floor,
+    BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, DroppedIntent,
+    EditionPortability, EditionReport, FloorDeclarer, FloorOrigin, FloorPart, RefusedTarget,
+    RegistryRange, SemanticSensitiveFinding, TargetRefusal, UnsupportedEntry, UnsupportedReason,
+    VersionAxes, VersionFloor, compute_axes, declared_version_floors, unscoped_version_floors,
+    versions_satisfying,
 };
+pub use version_order::{FloorPlacement, FloorVerdict, VersionOrder};

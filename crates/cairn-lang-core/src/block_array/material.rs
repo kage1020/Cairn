@@ -59,6 +59,34 @@ pub trait TargetRegistry {
     /// picking one on the caller's behalf would refuse ids that are fine on
     /// the version they actually compile against.
     fn block_ids(&self) -> Option<BlockIdSet<'_>>;
+
+    /// The ids **the pinned target declares** that name the same block as
+    /// `id`, in the registry's own order.
+    ///
+    /// This is the rename half of a refused id, and the one a distance
+    /// search cannot reach: `minecraft:light` and
+    /// `minecraft:light_block_0` are eight edits apart and the same block,
+    /// so no threshold that keeps `oak_plank` → `oak_planks` honest will
+    /// ever connect them. A registry answers from a table that says so
+    /// outright.
+    ///
+    /// Returning several is normal rather than exceptional — one old
+    /// spelling routinely splits into a family — and the order is the
+    /// registry's, since it is the one an author reads.
+    ///
+    /// Called only on the miss path, beside [`Self::known_tokens`] and on
+    /// the same terms: allocating per miss is intentional, because misses
+    /// are rare and the caller needs owned candidates anyway.
+    ///
+    /// The default is "this registry has no alias table", which is what a
+    /// pack shipping no `aliases` component amounts to and what every
+    /// registry did before the component existed. An implementation that
+    /// has one overrides it; one that does not is not obliged to say so.
+    fn aliases_for(&self, id: &str) -> Vec<String> {
+        // A registry with no alias table has the same answer for every id.
+        let _ = id;
+        Vec::new()
+    }
 }
 
 /// The block ids valid in one pinned `(edition, version)` target.
@@ -156,9 +184,9 @@ pub enum MaterialDeferred {
     /// lowering stays silent to avoid double-diagnosing the same span.
     AlreadyDiagnosed,
     /// The value resolved to a block id the pinned target does not declare.
-    /// Spec versioning-editions §10.4 makes this a hard error: writing the
-    /// id anyway produces a structure file the game loads as air, with no
-    /// diagnostic to explain the hole.
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+    /// makes this a hard error: writing the id anyway produces a structure
+    /// file the game loads as air, with no diagnostic to explain the hole.
     UnknownId(UnknownId),
 }
 
@@ -174,6 +202,18 @@ pub struct UnknownId {
     /// Closest id the target does declare, when one is within
     /// `nearest_match`'s edit cap.
     pub suggestion: Option<String>,
+    /// The ids this target declares for the same block, from the registry's
+    /// alias table. Empty when the pack has no alias table, no group names
+    /// the refused id, or the group's other spellings are all absent from
+    /// this target too.
+    ///
+    /// Kept apart from [`Self::suggestion`] rather than folded into it
+    /// because the two are different claims about the same span. A
+    /// suggestion is a guess from a string distance and can be wrong about
+    /// which block was meant; an alias is a statement out of the pack's
+    /// table that these names are one block. A consumer that offered them
+    /// as one list would be offering a quick-fix it cannot stand behind.
+    pub aliases: Vec<String>,
 }
 
 /// Who chose the id that turned out not to exist.
@@ -276,7 +316,7 @@ pub fn resolve_block_state(
                 unreachable!("classify_token reports Canonical only for ValueKind::Token");
             };
             let state = canonical_to_block_state(inner);
-            check_id(state, registry, &IdOrigin::Authored)
+            validated_id(state, registry, &IdOrigin::Authored)
         }
         TokenKind::Abstract => {
             let ValueKind::Token(inner) = &slot.value.kind else {
@@ -286,7 +326,7 @@ pub fn resolve_block_state(
                 return Err(MaterialDeferred::Abstract(inner.clone()));
             };
             if let Some(state) = registry.lookup(inner) {
-                return check_id(
+                return validated_id(
                     state,
                     Some(registry),
                     &IdOrigin::Catalog {
@@ -316,7 +356,7 @@ pub fn resolve_block_state(
 /// id reaches a palette: a member whose default material comes from the
 /// pack (`pressure_plate`) resolves outside [`resolve_block_state`] and
 /// would otherwise be the one id in the build that nothing checks.
-pub(crate) fn check_id(
+pub(crate) fn validated_id(
     state: BlockState,
     registry: Option<&dyn TargetRegistry>,
     origin: &IdOrigin,
@@ -327,8 +367,18 @@ pub(crate) fn check_id(
     if ids.contains(&state.id) {
         return Ok(state);
     }
+    // Both answers are collected, and neither stands in for the other: the
+    // alias table says what this target calls the block, the distance
+    // search guesses which block was meant. A rename has the first and a
+    // typo the second — `aliases_for` is group membership and nothing
+    // else, so a misspelling no group names can never carry an alias. Both
+    // are filled when a renamed id also happens to sit inside the edit cap
+    // of a spelling this target declares: `stone_bricks` on Bedrock 1.21.0
+    // is a group member *and* two edits from `stonebrick`.
+    let aliases = registry.map_or_else(Vec::new, |registry| registry.aliases_for(&state.id));
     Err(MaterialDeferred::UnknownId(UnknownId {
         suggestion: nearest_namespaced_id(&state.id, ids.iter()),
+        aliases,
         registry: ids.label().to_owned(),
         origin: origin.clone(),
         id: state.id,
@@ -339,20 +389,32 @@ pub(crate) fn check_id(
 /// `minecraft:cobblestone`) into a [`BlockState`].
 ///
 /// Recognises an optional `namespace:` prefix and a trailing `[k=v,...]`
-/// state literal. The state literal is parsed defensively because the
-/// surface parser does not currently mint bracketed tokens directly — but
-/// [`crate::resolve::classify_token`] documents the shape and other code
-/// paths (registry-pack lookups, future schematic ingestion) may.
+/// state literal, whose properties come back sorted by name: the palette
+/// is a set with a canonical rendering (`spec/compilation`), so the order
+/// a source spelled them in must reach neither the `Properties` a backend
+/// writes nor the lockfile's hash. Every other producer of a state —
+/// `roof::stair_state` — already inserts its keys in that order.
+///
+/// The parser refuses a malformed literal, so a token from source reaches
+/// here well formed, and a debug build asserts as much. A release build
+/// still reads the tail leniently, because [`resolve_block_state`] and
+/// [`ValueKind::Token`] are both public and a library caller can hand
+/// over any text at all.
 fn canonical_to_block_state(inner: &str) -> BlockState {
     let (head, properties_src) = match inner.find('[') {
         Some(i) => {
             let head = &inner[..i];
             let tail = &inner[i + 1..];
-            // Trim the matching `]` so a well-formed `oak_log[axis=x]`
-            // parses cleanly; an unterminated literal silently falls
-            // through with whatever the tail contained (still better than
-            // erroring at this layer — the surface lexer is the right
-            // place to reject malformed brackets).
+            debug_assert!(
+                tail.ends_with(']')
+                    && tail[..tail.len() - 1]
+                        .split(',')
+                        .all(|pair| !pair.is_empty() && pair.contains('=')),
+                "a state literal reaches the material layer as the parser folds it, \
+                 `[key=value,...]`, got `{inner}`"
+            );
+            // Trim the matching `]`; an unterminated literal falls
+            // through with whatever the tail contained.
             let trimmed = tail.strip_suffix(']').unwrap_or(tail);
             (head, trimmed)
         }
@@ -363,7 +425,8 @@ fn canonical_to_block_state(inner: &str) -> BlockState {
     } else {
         format!("{VANILLA_NAMESPACE}:{head}")
     };
-    let properties = parse_state_literal(properties_src);
+    let mut properties = parse_state_literal(properties_src);
+    properties.sort_unstable_keys();
     BlockState { id, properties }
 }
 
@@ -372,8 +435,10 @@ fn canonical_to_block_state(inner: &str) -> BlockState {
 /// Whitespace around keys and values is trimmed; empty segments (from a
 /// trailing comma or a stray `,,`) are skipped silently. The block-array IR
 /// is below the lint layer, so noisy parsing here would surface as
-/// diagnostics in the wrong place — the resolver-side
-/// `E_UNKNOWN_SLOT_TARGET` is the right gate for badly-shaped values.
+/// diagnostics in the wrong place; the parser, which refuses every one of
+/// those shapes in source, is the gate for them, and
+/// [`canonical_to_block_state`] asserts in a debug build that nothing
+/// else reached here.
 fn parse_state_literal(body: &str) -> IndexMap<String, String> {
     let mut out = IndexMap::new();
     if body.is_empty() {
@@ -415,6 +480,10 @@ mod tests {
         /// Sorted, fully namespaced ids the pinned target declares. Empty
         /// means "no target pinned", matching a `blocks`-less pack.
         ids: Vec<String>,
+        /// One alias group: every spelling of one block, as a pack's
+        /// `aliases` component declares it. Empty means "no alias table",
+        /// which is what a pack without the component amounts to.
+        group: Vec<String>,
     }
 
     impl FakeResolver {
@@ -422,6 +491,7 @@ mod tests {
             Self {
                 entries,
                 ids: Vec::new(),
+                group: Vec::new(),
             }
         }
 
@@ -429,6 +499,12 @@ mod tests {
         fn pinned(mut self, ids: &[&str]) -> Self {
             self.ids = ids.iter().map(|id| (*id).to_owned()).collect();
             self.ids.sort();
+            self
+        }
+
+        /// Declare one alias group, in the order a pack wrote it.
+        fn aliasing(mut self, group: &[&str]) -> Self {
+            self.group = group.iter().map(|id| (*id).to_owned()).collect();
             self
         }
     }
@@ -447,6 +523,17 @@ mod tests {
 
         fn block_ids(&self) -> Option<BlockIdSet<'_>> {
             (!self.ids.is_empty()).then(|| BlockIdSet::new("test 1.0", &self.ids))
+        }
+
+        fn aliases_for(&self, id: &str) -> Vec<String> {
+            if !self.group.iter().any(|spelling| spelling == id) {
+                return Vec::new();
+            }
+            self.group
+                .iter()
+                .filter(|spelling| self.ids.binary_search(spelling).is_ok())
+                .cloned()
+                .collect()
         }
     }
 
@@ -542,24 +629,145 @@ mod tests {
                 registry: "test 1.0".into(),
                 origin: IdOrigin::Authored,
                 suggestion: Some("minecraft:oak_planks".into()),
+                aliases: Vec::new(),
             }),
         );
     }
 
     #[test]
-    fn a_rename_is_refused_without_a_suggestion_because_it_is_not_a_typo() {
+    fn a_rename_is_answered_from_the_alias_table_and_not_by_distance() {
         // Bedrock 1.21.0 spells the Java `light` block `light_block`, six
         // edits away — past `nearest_match`'s cap. (From 1.21.40 it is
-        // `light_block_0` … `_15`, which is further still.) The suggestion
-        // is a typo finder, not a rename map, and claiming otherwise here
-        // would need per-edition id aliases the pack does not carry.
-        let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light_block"]);
+        // `light_block_0` … `_15`, which is further still.) No threshold
+        // that keeps `oak_plank` → `oak_planks` honest reaches it, so the
+        // answer has to come from a table that states the two are one
+        // block.
+        let registry = FakeResolver::new(vec![])
+            .pinned(&["minecraft:light_block"])
+            .aliasing(&["minecraft:light", "minecraft:light_block"]);
         let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
         match err {
             MaterialDeferred::UnknownId(unknown) => {
                 assert_eq!(unknown.id, "minecraft:light");
-                assert!(unknown.suggestion.is_none());
+                assert_eq!(unknown.aliases, ["minecraft:light_block".to_owned()]);
+                assert!(
+                    unknown.suggestion.is_none(),
+                    "the distance search still has nothing to say about a rename",
+                );
             }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// A group answers with every spelling the target declares, not with
+    /// one of them.
+    ///
+    /// Bedrock 1.21.40 split the single `light_block` into sixteen ids by
+    /// light level. Picking one on the author's behalf would be a silent
+    /// substitution of a light level they never chose; the closed set is
+    /// the honest answer, and choosing from it is theirs.
+    #[test]
+    fn a_split_answers_with_every_spelling_the_target_has() {
+        let registry = FakeResolver::new(vec![])
+            .pinned(&[
+                "minecraft:light_block_0",
+                "minecraft:light_block_1",
+                "minecraft:light_block_2",
+            ])
+            .aliasing(&[
+                "minecraft:light",
+                "minecraft:light_block_0",
+                "minecraft:light_block_1",
+                "minecraft:light_block_2",
+            ]);
+        let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => assert_eq!(
+                unknown.aliases,
+                [
+                    "minecraft:light_block_0".to_owned(),
+                    "minecraft:light_block_1".to_owned(),
+                    "minecraft:light_block_2".to_owned(),
+                ],
+            ),
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// An alias the target does not declare either is not an answer.
+    ///
+    /// The group is edition-wide and version-free by construction, so it
+    /// holds spellings from versions this compile is not building for.
+    /// Offering one of those would refuse an id and then suggest another
+    /// the same target also refuses.
+    #[test]
+    fn an_alias_the_target_lacks_is_not_offered() {
+        let registry = FakeResolver::new(vec![])
+            .pinned(&["minecraft:cobblestone"])
+            .aliasing(&["minecraft:light", "minecraft:light_block"]);
+        let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => assert!(
+                unknown.aliases.is_empty(),
+                "`light_block` is no more declared here than `light` is",
+            ),
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// A renamed id near its replacement carries both answers, and they
+    /// are different claims about it.
+    ///
+    /// The two agree here by coincidence: `stone_bricks` is a group member,
+    /// which is what fills `aliases`, and it is also two edits from
+    /// `stonebrick`, which is what fills `suggestion`. What matters is that
+    /// each field is filled by its own rule rather than one being derived
+    /// from the other. A misspelling *of* a renamed id — `stone_brick`,
+    /// which no group names — carries the second and never the first.
+    #[test]
+    fn a_renamed_id_near_its_replacement_carries_both_answers() {
+        let registry = FakeResolver::new(vec![])
+            .pinned(&["minecraft:stonebrick"])
+            .aliasing(&["minecraft:stone_bricks", "minecraft:stonebrick"]);
+        let err = resolve_block_state(&token("stone_bricks"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => {
+                assert_eq!(unknown.aliases, ["minecraft:stonebrick".to_owned()]);
+                assert_eq!(unknown.suggestion.as_deref(), Some("minecraft:stonebrick"));
+            }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// A misspelling no group names carries the distance guess alone.
+    ///
+    /// The other half of the test above: `aliases_for` is group membership
+    /// and nothing else, so a typo is never an alias however near a group
+    /// member it lands. `stone_brick` is one edit from the `stone_bricks`
+    /// the group does carry, and still gets nothing from it.
+    #[test]
+    fn a_misspelling_no_group_names_carries_no_alias() {
+        let registry = FakeResolver::new(vec![])
+            .pinned(&["minecraft:stonebrick"])
+            .aliasing(&["minecraft:stone_bricks", "minecraft:stonebrick"]);
+        let err = resolve_block_state(&token("stone_brick"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => {
+                assert!(unknown.aliases.is_empty());
+                assert_eq!(unknown.suggestion.as_deref(), Some("minecraft:stonebrick"));
+            }
+            other => panic!("expected UnknownId, got {other:?}"),
+        }
+    }
+
+    /// A registry with no alias table answers exactly as every registry
+    /// did before the component existed.
+    #[test]
+    fn a_registry_with_no_alias_table_answers_no_alias() {
+        let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light_block"]);
+        let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
+        match err {
+            MaterialDeferred::UnknownId(unknown) => assert!(unknown.aliases.is_empty()),
             other => panic!("expected UnknownId, got {other:?}"),
         }
     }
@@ -633,6 +841,7 @@ mod tests {
                     token: "floor.stone.smooth".into(),
                 },
                 suggestion: Some("minecraft:stonebrick".into()),
+                aliases: Vec::new(),
             }),
         );
     }

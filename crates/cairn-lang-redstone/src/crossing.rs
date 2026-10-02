@@ -1,103 +1,60 @@
 //! Delayed Placement IR → legalized Placement IR lowering (crossing
 //! legalization).
 //!
-//! Stage 4 of the five-stage place-and-route pipeline `spec/redstone`
-//! §14.5 lays out (Placement → Steiner routing → Delay insertion →
-//! Crossing legalization → Edition legalization). Walks every
-//! [`crate::placement_ir::PlacedCellNode`] in each scope's delayed
-//! Placement IR, rebuilds every net's Steiner tree through
-//! `net_trees` — the same call the routing
-//! and delay passes make, because the routing pass discards its
-//! per-scope occupancy set before yielding the routed IR and storing
-//! wire coords in the shared IR would bloat every JSON dump for every
-//! consumer — and legalizes the coord of every buffer repeater the
-//! delay pass counted.
+//! Stage 4 of the five-stage pipeline `spec/redstone` "Place-and-route"
+//! lays out. Rebuilds every net's Steiner tree through the same call the
+//! routing and delay passes make, and fills every cell's and actuator
+//! pad's [`crate::placement_ir::PlacedCellNode::buffer_coords`] with the
+//! coord of each implicit buffer repeater the delay pass counted.
 //!
-//! The wire itself needs no legalizing here. Two nets on one coord,
-//! or one step apart in one plane, are one strand of dust carrying two
-//! signals, and stage 2 is where that is prevented: each net is routed
-//! around the dust the nets before it laid and around the coords beside
-//! that dust, so a scope that reaches this pass has none to find.
+//! The wire itself needs no legalizing here: stage 2 lays each net round
+//! the dust of the nets before it and the coords beside that dust, so a
+//! scope that reaches this pass has no two signals on one strand. What
+//! is left is the crossing a *repeater* would make by standing on a
+//! coord it does not own. The delay pass chose those coords off the
+//! same routed tree, and this pass reads them back.
 //!
-//! What is left for stage 4 is the crossing a *repeater* would make by
-//! standing on a coord it does not own, which the delay pass could not
-//! see because it counts repeaters before anything knows where they go.
+//! A repeater refreshes the dust it stands on, so each one stands on its
+//! net's routed tree, where `crate::delay::repeater_sites` puts it. This
+//! pass builds its own set from the trees it rebuilt; it is the set the
+//! delay pass charged ticks from because that function is deterministic
+//! and nothing between the two stages moves a cell, not because one is
+//! handed to the other. Each segment records the repeaters on
+//! `route_to`, the routed path from the net's source to *this* sink.
 //!
-//! **Implicit buffer repeater coord assignment.** The delay pass
-//!    counted `floor((s - 1) / DUST_ATTENUATION_LIMIT)` buffer
-//!    repeaters per driver segment of length `s` and folded their tick
-//!    contribution into `delay_ticks`; this pass materialises the
-//!    concrete coord of each one into
-//!    [`crate::placement_ir::PlacedCellNode::buffer_coords`].
-//!
-//!    A repeater refreshes the dust it stands on, so each one is
-//!    picked off
-//!    `route_to` — the routed path
-//!    from the net's source to *this* sink — at
-//!    `k * DUST_ATTENUATION_LIMIT` (`k = 1..=buffer_count`), and the
-//!    count comes from that same path's length through
-//!    `buffer_count_for_segment`, the function the
-//!    delay pass charged ticks for. Walking the straight line between
-//!    the two instead is what used to put buffers on coords the net
-//!    does not own: the routed path hangs off the trunk laid for a
-//!    nearer sink and goes round whatever stands in its way, so a
-//!    repeater on the straight line stands either in mid-air or on a
-//!    neighbouring net's dust.
-//!
-//!    A candidate is never contested. It is a coord of its own net's
-//!    route, strictly between the two blocks the route runs between,
-//!    and stage 2 gives each net its dust alone — so there is no cell
-//!    body, no pad and no other net's wire for a repeater to land on,
-//!    and nothing for this pass to escape from.
-//!
-//!    Two segments of one net do reach the same candidate: the sinks
-//!    of one net share their prefix, so a coord 15 blocks along one
-//!    route is 15 blocks along the other. Both record it. One
-//!    repeater standing there refreshes both, and
-//!    [`crate::placement_ir::PlacedCellNode::buffer_coords`] is an
-//!    attribution list rather than a block list.
+//! A repeater is never contested, and never stands on a cell body or a
+//! pad. A site needs a parent and exactly one child, so it is never the
+//! source and never a leaf; every terminal is a leaf, because
+//! `block_sites` makes cells and pads obstacles and `Router::tree` keeps
+//! each path's far end out of the coords a later path may leave from.
+//! So a site is dust of its own net, and stage 2 gave that net its dust
+//! alone. Two segments of one net do pass the
+//! same repeater (their routes share a prefix); both record it, because
+//! `buffer_coords` is an attribution list rather than a block list.
 //!
 //! Neither [`crate::placement_ir::RouteLayer::Bridge`] nor
-//! [`crate::placement_ir::RouteLayer::Via`] has a producer in this
-//! pass. Bridge coords reach the legalized IR from the routing pass,
-//! whose wire climbs to get past a block or past another net; `Via`
-//! has no producer anywhere, because a climb is a step between two
-//! coords rather than a coord of its own. Both are kept in the enum
-//! for exhaustive matches against §14.5's full vocabulary.
+//! [`crate::placement_ir::RouteLayer::Via`] has a producer here: bridge
+//! coords reach the legalized IR from the routing pass, and `Via` has no
+//! producer anywhere.
 //!
-//! Failed scopes are elided from the output so a `stage 5` consumer
-//! never reads a partially-populated `buffer_coords` — the same
-//! fail-loud policy the routing and delay passes use.
-//!
-//! The crossing pass is one
+//! Failed scopes are elided from the output so a stage-5 consumer never
+//! reads a partially populated `buffer_coords`. The pass is one
 //! [`crate::placement_ir::PlacementPhase::legalize`] transition per
-//! cell, per the producer↔variant table on that enum, carrying the
-//! buffer coords it allocated (each stamped with a
-//! [`crate::placement_ir::CellCoord::layer`]); no new IR type is
-//! introduced, and
-//! [`crate::placement_ir::PlacedCellNode::buffer_coords`] is the
-//! read-only projection of the resulting variant. Both the layer and
-//! the coord vector
-//! serde-skip on their defaults, so a scope whose crossing pass
-//! writes nothing dumps as the JSON its delay-pass input did apart
-//! from the `stage` tag — which is exactly why that tag exists: it
-//! is the only thing telling a consumer this pass ran at all when
-//! there was nothing to legalize (see
-//! [`crate::placement_ir::PlacementStage`]).
+//! cell; no new IR type. Both the layer and the coord vector serde-skip
+//! on their defaults, so a scope with nothing to legalize dumps as its
+//! delay-pass input did apart from the `stage` tag — which is why that
+//! tag exists (see [`crate::placement_ir::PlacementStage`]).
 
-use std::collections::HashMap;
-
-use crate::delay::{DUST_ATTENUATION_LIMIT, buffer_count_for_segment};
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
-use crate::netlist_ir::NetRef;
+use crate::delay::{Fed, RepeaterSites, repeater_sites_of_scope};
+use crate::diagnostic::Diagnostic;
+use crate::pass::{
+    OpenScope, Skipped, lay_nets, lower_scopes, missing_region_diagnostic, open_scope,
+    source_of_net,
+};
 use crate::placement_ir::{
-    BufferCoord, BufferSegment, CellCoord, CellIdentity, PlacementIr, ScopedPlacementIr,
+    BufferCoord, BufferSegment, CellIdentity, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::{
-    NetTree, Router, block_sites, collect_nets, input_pad, net_trees, unroutable,
-};
-
 /// Output of a [`compile_crossing`] run.
 ///
 /// Mirrors [`crate::delay::DelayOutput`]'s shape so callers see a
@@ -106,16 +63,18 @@ use crate::routing_geometry::{
 /// non-failed scope's `buffer_coords` populated with one entry per
 /// implicit buffer repeater the delay pass counted, each carrying the
 /// [`RouteLayer`] of the route coord it stands on. No new IR type; the
-/// crossing
-/// pass is one [`crate::placement_ir::PlacementPhase::legalize`]
-/// transition per cell, per the producer↔variant table on that enum.
+/// crossing pass is one [`PlacementPhase::legalize`] transition per
+/// cell, per the producer↔variant table on that enum.
+///
+/// [`RouteLayer`]: crate::placement_ir::RouteLayer
+/// [`PlacementPhase::legalize`]: crate::placement_ir::PlacementPhase::legalize
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct CrossingOutput {
     /// Placement IR for every scope whose crossing legalization
     /// succeeded, with every cell's `buffer_coords` populated to match
     /// the buffer tick contribution the delay pass folded into
-    /// `delay_ticks`.
+    /// `local_delay_ticks`.
     pub scoped: ScopedPlacementIr,
     /// Findings raised by the pass, in scope order.
     pub diagnostics: Vec<Diagnostic>,
@@ -138,36 +97,39 @@ impl CrossingOutput {
 /// `IntentModule` dependency.
 ///
 /// One entry per non-empty [`PlacementIr`] whose legalization
-/// succeeded; a scope that raises [`DiagnosticCode::NoCircuitRegion`]
-/// or the routing re-check's [`DiagnosticCode::RouteCongestion`] is
+/// succeeded; a scope that raises [`DiagnosticCode::NoCircuitRegion`],
+/// either [`DiagnosticCode::RouteCongestion`] that
+/// `crate::pass::lay_nets` raises — a pad row the reservation cannot
+/// hold, or a sink no route reaches — or the
+/// [`DiagnosticCode::AttenuationLimit`] it raises for a sink further
+/// from its driver than the v1 cap in a straight line, or the one
+/// raised for a stretch of dust no repeater can stand on, is
 /// elided from the output so a partial `buffer_coords` set cannot
 /// pollute the downstream block-array voxel lowering. Every finding
 /// this pass makes refuses its scope, so there is no warning that
 /// outlives one.
+///
+/// [`CircuitRegionReservation`]: crate::placement_ir::CircuitRegionReservation
+/// [`DiagnosticCode::NoCircuitRegion`]: crate::DiagnosticCode::NoCircuitRegion
+/// [`DiagnosticCode::RouteCongestion`]: crate::DiagnosticCode::RouteCongestion
+/// [`DiagnosticCode::AttenuationLimit`]: crate::DiagnosticCode::AttenuationLimit
 #[must_use]
 pub fn compile_crossing(delayed: &ScopedPlacementIr) -> CrossingOutput {
-    let mut out = CrossingOutput::new();
-    for entry in &delayed.scopes {
-        match legalize_scope(entry) {
-            Ok(ir) => {
-                out.scoped.scopes.push(ScopedPlacementIrEntry {
-                    kind: entry.kind,
-                    name: entry.name.clone(),
-                    ir,
-                });
-            }
-            Err(diagnostic) => out.diagnostics.push(diagnostic),
-        }
-        debug_assert!(
-            out.diagnostics
-                .iter()
-                .all(|d| d.severity() == d.code.severity()),
-            "a diagnostic renders with its code's severity: every producer in \
-             this pass has to agree with `DiagnosticCode::severity`, including \
-             one written after the builders below",
-        );
+    let (scoped, diagnostics) = lower_scopes(delayed, |entry| {
+        legalize_scope(entry).map(|ir| (ir, Vec::new()))
+    });
+    debug_assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.severity() == d.code.severity()),
+        "a diagnostic renders with its code's severity: every producer in \
+         this pass has to agree with `DiagnosticCode::severity`, including \
+         one written after the builders below",
+    );
+    CrossingOutput {
+        scoped,
+        diagnostics,
     }
-    out
 }
 
 /// Result of legalizing one scope: the legalized IR on success, the
@@ -179,74 +141,46 @@ type ScopeLegalization = Result<PlacementIr, Diagnostic>;
 
 fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     let source = &entry.ir;
-    // Same missing-region policy as `delay::compile_delay`: the
-    // placement pass elides scopes with cells or output drivers but no
-    // region, so a hand-built IR reaching here in that shape is a
-    // caller-side bug — refuse loud with `E_NO_CIRCUIT_REGION` so
-    // downstream consumers see a consistent taxonomy. Scopes with
-    // neither cells nor outputs still pass through so a module
-    // without any redstone survives the crossing pipeline as-is.
-    let Some(region) = source.region.clone() else {
-        if source.cells.is_empty() && source.outputs.is_empty() {
-            return Ok(source.clone());
+    let OpenScope {
+        mut ir,
+        region,
+        cell_coords,
+        inputs,
+        column,
+        blocks,
+    } = match open_scope(entry) {
+        Err(Skipped::Empty) => return Ok(source.clone()),
+        // Same policy as the delay pass: this pass writes `buffer_coords`,
+        // which the phase table promises after stage 4.
+        Err(Skipped::MissingRegion) => {
+            return Err(missing_region_diagnostic(
+                entry,
+                "delayed",
+                "crossing legalization",
+            ));
         }
-        return Err(missing_region_diagnostic(entry));
-    };
-    if source.cells.is_empty() && source.outputs.is_empty() {
-        return Ok(source.clone());
-    }
-
-    let mut ir = source.clone();
-    let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
-
-    // Netlist synthesis guarantees the topological invariant
-    // (`NetRef::Cell(j)` inside `cells[i]` satisfies `j < i`), so
-    // panicking loud on an out-of-range access beats silently
-    // sinking into a fall-back coord. Same reasoning as the delay
-    // pass's stricter branch — this pass writes `buffer_coords`, and
-    // the producer↔variant table on `PlacementPhase` promises populated
-    // `buffer_coords` after stage 4, so a silent under-population
-    // would let the downstream voxel lowering read a stage-3 shape
-    // from a stage-4 output.
-    let source_of_net = |net: NetRef| -> CellCoord {
-        match net {
-            NetRef::Input(i) => input_pad(i as usize, &region),
-            NetRef::Cell(j) => *cell_coords.get(j as usize).unwrap_or_else(|| {
-                panic!(
-                    "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken by caller-side hand-built IR",
-                    cell_coords.len(),
-                )
-            }),
-        }
+        Ok(scope) => scope,
     };
 
-    let blocks = block_sites(&ir, &region);
-    let nets = collect_nets(&ir);
-    let router = Router::new(&region, &blocks);
-    let trees = net_trees(&nets, &router, source_of_net);
-    // Same re-check the delay pass makes, for the same reason: a
-    // stranded sink's route is one step, so it asks for no repeater and
-    // the legalized dump would claim a circuit that cannot be wired.
-    if let Some(diagnostic) = unroutable(&nets, &trees, entry, &region, source_of_net) {
-        return Err(diagnostic);
-    }
+    let nets = lay_nets(
+        &ir,
+        &blocks,
+        entry,
+        "delayed",
+        &region,
+        source_of_net(&region, column, &cell_coords, inputs),
+    )?;
 
-    // Every coord a repeater can be asked to stand on is a coord of
-    // its own net's route, and `net_trees` asserts as it builds that no
-    // net's dust stands on, or one step from, another's — in release,
-    // at the point the coord is claimed. That is what leaves this pass
-    // with a coord to record and no coord to contest, and re-deriving it
-    // here would be asking the same function the same question twice.
-    let allocation = allocate_buffer_coords(&ir, &trees);
+    // Every coord a repeater can be asked to stand on is a coord of its
+    // own net's route, and `net_trees` asserts as it builds that no
+    // net's dust stands on, or one step from, another's. That is what
+    // leaves this pass with a coord to record and no coord to contest.
+    let sites = repeater_sites_of_scope(&ir, entry, "delayed", &region, &nets.trees)?;
+    let allocation = allocate_buffer_coords(&ir, &sites);
 
     for (index, (cell, buffers)) in ir.cells.iter_mut().zip(allocation.per_cell).enumerate() {
-        // Loud in release too: `PlacementPhase::legalize_at` panics on
-        // any non-`Delayed` variant, so a caller who chained
-        // `compile_crossing(&legalized.scoped)` (or handed us a
-        // still-`Unrouted` / `Routed` cell) trips a release-panic here
-        // rather than silently producing a stale-but-plausible IR. The
-        // identity rides along so that panic names the offending cell
-        // rather than only the phase it tripped on.
+        // Loud in release too: `legalize_at` panics on any non-`Delayed`
+        // variant, naming the cell that tripped it.
         let identity = CellIdentity::new(index, cell.coord, entry);
         cell.phase.legalize_at(buffers, identity);
     }
@@ -262,41 +196,30 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
 /// Buffer coord allocation for one scope: every cell driver segment,
 /// then every actuator segment.
 ///
-/// The routed path is [`NetTree::route_to`] and the count is
-/// [`buffer_count_for_segment`] over its length — the same function the
-/// delay pass charged ticks with — so stage 3 and stage 4 describe one
-/// circuit. Split out of `legalize_scope` so the entry function stays
-/// under clippy's `too_many_lines` budget and the allocation strategy
-/// reads as a self-contained table.
-fn allocate_buffer_coords(ir: &PlacementIr, trees: &HashMap<NetRef, NetTree>) -> BufferAllocation {
+/// Each segment records the repeaters of `sites` its routed path runs
+/// through. `sites` is this pass's own, built as the delay pass built
+/// the one it charged ticks from, so stage 3 and stage 4 describe one
+/// circuit. Split out of `legalize_scope` so
+/// the entry function stays under clippy's `too_many_lines` budget and
+/// the allocation strategy reads as a self-contained table.
+fn allocate_buffer_coords(ir: &PlacementIr, sites: &RepeaterSites<'_>) -> BufferAllocation {
     let mut per_cell: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.cells.len());
     for (cell_index, cell) in ir.cells.iter().enumerate() {
-        let sink = cell.coord;
         let mut buffers_for_cell: Vec<BufferCoord> = Vec::new();
         for driver in &cell.drivers {
-            // `route_to` answers `None` only for a sink that is not a
-            // terminal of the net, which `collect_nets` makes
-            // unreachable — it built the tree's terminal list out of
-            // this very driver list. Loud rather than silent for the
-            // same reason `source_of_net` is: the alternative is a
-            // cell whose `buffer_coords` under-populate against the
-            // ticks stage 3 already charged.
-            let route = trees
-                .get(&driver.net)
-                .and_then(|tree| tree.route_to(sink))
-                .unwrap_or_else(|| {
-                    panic!(
-                        "cell #{cell_index} at ({x},{y},{z}) is not a terminal of the net driving its port — the driver list and the collected nets disagree",
-                        x = sink.x,
-                        y = sink.y,
-                        z = sink.z,
-                    )
-                });
-            buffers_for_cell.extend(buffers_along(
-                &route,
-                BufferSegment::Port(driver.port),
-                &format!("cell #{cell_index} driver"),
-            ));
+            // `along` is `None` for a sink that is not a terminal of
+            // the net, which `collect_nets` makes unreachable — it
+            // built the tree's terminal list out of this very driver
+            // list.
+            buffers_for_cell.extend(
+                sites
+                    .along(driver.net, cell.coord)
+                    .unwrap_or_else(|| {
+                        Fed::Cell(cell_index).is_not_a_terminal(driver.net, cell.coord)
+                    })
+                    .into_iter()
+                    .map(|coord| BufferCoord::new(BufferSegment::Port(driver.port), coord)),
+            );
         }
         // Producer-side contract on [`BufferCoord::port`]: every entry
         // must name a driver that actually exists on the owning cell.
@@ -322,27 +245,19 @@ fn allocate_buffer_coords(ir: &PlacementIr, trees: &HashMap<NetRef, NetTree>) ->
     // buffers coords or the two stages disagree about how many exist.
     //
     // An actuator's route leaves its driver along the same trunk a
-    // cell's does, so the two reach the same refresh points wherever
-    // they share a prefix — and record the same coord, because one
-    // repeater standing there refreshes both.
+    // cell's does, so the two pass the same repeaters wherever they
+    // share a prefix — and record the same coord, because one repeater
+    // standing there refreshes both.
     let mut per_output: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.outputs.len());
     for (output_index, output) in ir.outputs.iter().enumerate() {
-        let route = trees
-            .get(&output.driver)
-            .and_then(|tree| tree.route_to(output.pad))
+        let buffers_for_output: Vec<BufferCoord> = sites
+            .along(output.driver, output.pad)
             .unwrap_or_else(|| {
-                panic!(
-                    "output #{output_index} pad at ({x},{y},{z}) is not a terminal of the net driving it — the output list and the collected nets disagree",
-                    x = output.pad.x,
-                    y = output.pad.y,
-                    z = output.pad.z,
-                )
-            });
-        let buffers_for_output = buffers_along(
-            &route,
-            BufferSegment::Out,
-            &format!("output #{output_index}"),
-        );
+                Fed::Output(output_index).is_not_a_terminal(output.driver, output.pad)
+            })
+            .into_iter()
+            .map(|coord| BufferCoord::new(BufferSegment::Out, coord))
+            .collect();
         // The mirror of the cell-side contract: a buffer on the wire to
         // an actuator belongs to no input port, and saying otherwise
         // would group it under a driver of a cell it is not on.
@@ -361,46 +276,6 @@ fn allocate_buffer_coords(ir: &PlacementIr, trees: &HashMap<NetRef, NetTree>) ->
     }
 }
 
-/// A coord for every buffer repeater [`buffer_count_for_segment`]
-/// implies on `route`, attributed to `port`.
-///
-/// Candidates sit at `k * DUST_ATTENUATION_LIMIT` along the routed
-/// path — the dust the signal actually travels, so a repeater always
-/// stands on the wire it refreshes, strictly between the two blocks
-/// the route runs between. No coord has to be contested for: the
-/// route belongs to one net and stage 2 gave that net its coords
-/// alone.
-///
-/// The sinks of one net share their prefix, so two segments of one net
-/// compute the same candidates — two ports of one cell, two cells past
-/// the same 15-block point, a cell and an actuator. Each records the
-/// coord; the repeater standing there refreshes the signal for all of
-/// them, and [`BufferCoord`] is an attribution list rather than a
-/// block list. `subject` names the segment in the panic message that
-/// guards the index invariant.
-fn buffers_along(route: &[CellCoord], port: BufferSegment, subject: &str) -> Vec<BufferCoord> {
-    let segment = u32::try_from(route.len().saturating_sub(1)).unwrap_or(u32::MAX);
-    let mut claimed = Vec::new();
-    for k in 1..=buffer_count_for_segment(segment) {
-        // `route.len() == segment + 1` and `k * DUST_ATTENUATION_LIMIT
-        // <= buffer_count * DUST_ATTENUATION_LIMIT <= segment - 1`, so
-        // `idx` is always a valid index, and never the far end. Loud in
-        // release: a silent saturating fallback would place the buffer
-        // at the sink coord and let a caller-side bug (segment /
-        // buffer_count / route.len() drift) materialise a buffer on top
-        // of a component without any diagnostic.
-        let idx = (k as usize).saturating_mul(DUST_ATTENUATION_LIMIT as usize);
-        let candidate = *route.get(idx).unwrap_or_else(|| {
-            panic!(
-                "buffer index {idx} out of range (route.len()={}) for {subject} — segment / buffer_count / route.len() invariant broken by caller-side hand-built IR",
-                route.len(),
-            )
-        });
-        claimed.push(BufferCoord::new(port, candidate));
-    }
-    claimed
-}
-
 /// Where every implicit buffer repeater in one scope goes: one entry
 /// per cell, then one per actuator pad. Two vectors rather than one
 /// because the two commit into different nodes, and a single flat list
@@ -410,44 +285,11 @@ struct BufferAllocation {
     per_output: Vec<Vec<BufferCoord>>,
 }
 
-fn missing_region_diagnostic(entry: &ScopedPlacementIrEntry) -> Diagnostic {
-    let span = entry
-        .ir
-        .cells
-        .first()
-        .map(|c| c.span.clone())
-        .unwrap_or_default();
-    let primary = format!(
-        "delayed netlist for {kind} `{name}` reached crossing legalization carrying cells or output drivers but no `circuit region=<label> void=<N>` reservation — the placement pass should have elided this scope",
-        kind = entry.kind.label(),
-        name = entry.name,
-    );
-    let mut diag = Diagnostic::new(DiagnosticCode::NoCircuitRegion, span, primary);
-    diag = diag.with_footer(
-        "Fix: add a `circuit region=<label> void=<N>` line to the enclosing scope, or run `--stage placement` first to see the underlying error",
-    );
-    diag
-}
-
 #[cfg(test)]
 mod tests {
-    //! Crate-internal unit tests for crossing-legalization behaviours
-    //! that `tests/crossing.rs` cannot reach through synth fixtures
-    //! alone:
-    //! - buffer repeaters at all (needs a segment past 15 blocks,
-    //!   which no example `.crn` has room for);
-    //! - two nets whose shortest routes want one row, which is what
-    //!   stage 2 lays apart and what this pass therefore never has to
-    //!   legalize;
-    //! - the `E_NO_CIRCUIT_REGION` refusal;
-    //! - the topological invariant panic mirroring
-    //!   [`crate::delay::compile_delay`].
-    //!
-    //! Uses crate-internal struct construction (all `PlacedCellNode` /
-    //! `PlacementIr` / `CircuitRegionReservation` fields are `pub`;
-    //! `#[non_exhaustive]` blocks only external crates), keeping the
-    //! integration-test surface in `tests/crossing.rs` focused on
-    //! synth fixtures.
+    //! Crossing-legalization behaviours `tests/crossing.rs` cannot reach
+    //! through synth fixtures: shapes only a hand-built `PlacementIr`
+    //! produces, such as a segment long enough to need a buffer.
 
     use cairn_lang_core::Edition;
     use cairn_lang_core::error::Span;
@@ -462,31 +304,13 @@ mod tests {
     use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
     use crate::placement_ir::{BufferSegment, PlacedOutputNode};
     use crate::placement_ir::{
-        CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, PlacementPhase,
-        RouteLayer, ScopedPlacementIr, ScopedPlacementIrEntry,
+        CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, RouteLayer, ScopedPlacementIr,
     };
     use crate::routing::compile_routing;
-    use crate::routing_geometry::{Router, block_sites, collect_nets, input_pad, net_trees};
-
-    fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
-        CircuitRegionReservation {
-            label: "floor".to_owned(),
-            void,
-            width,
-            depth,
-            span: Span::default(),
-        }
-    }
-
-    fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlacementIr {
-        let mut scoped = ScopedPlacementIr::new();
-        scoped.scopes.push(ScopedPlacementIrEntry {
-            kind,
-            name: name.to_owned(),
-            ir,
-        });
-        scoped
-    }
+    use crate::routing_geometry::{
+        PadColumn, Router, block_sites, collect_nets, input_pad, net_trees,
+    };
+    use crate::test_fixtures::{reservation, scoped, staircase};
 
     fn placed_cell(
         cell: EditionCell,
@@ -499,7 +323,7 @@ mod tests {
             coord,
             phase: PlacementPhase::Delayed {
                 wire_length: 0,
-                delay_ticks: 0,
+                local_delay_ticks: 0,
             },
             span: Span::default(),
         }
@@ -541,16 +365,26 @@ mod tests {
             name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
             span: Span::default(),
         });
+        // `(1, 0, 1)` is what the placement pass stamps for the first
+        // cell of a scope. The pad column is `x = 0`, so a cell at the
+        // origin stands on input pad #0 — which every stage refuses,
+        // and which this fixture is not about. It would also make the
+        // assertion below vacuous: pad and cell on one coord is a
+        // zero-length net, which needs no buffer whatever the rule is.
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
-            CellCoord::new(0, 0, 0),
+            CellCoord::new(1, 0, 1),
             vec![CellPortDriver {
                 port: PortName::A,
                 net: NetRef::Input(0),
             }],
         ));
         let legalized = compile_crossing(&scoped(ScopeKind::Struct, "single", ir));
-        assert!(legalized.diagnostics.is_empty());
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "a two-block segment needs nothing: {:?}",
+            legalized.diagnostics,
+        );
         let cell = &legalized.scoped.scopes[0].ir.cells[0];
         assert!(
             cell.buffer_coords().is_empty(),
@@ -608,7 +442,7 @@ mod tests {
             "buffer preserves its driver port on the plane placement path",
         );
         // Pins the `PlacedCellNode` `Serialize` impl's widest path
-        // (stage + cell + drivers + coord + wire_length + delay_ticks
+        // (stage + cell + drivers + coord + wire_length + local_delay_ticks
         // + buffer_coords). Without this, no test would exercise the
         // full `Legalized { buffer_coords: <non-empty> }` JSON shape —
         // only the narrower `Legalized { buffer_coords: empty }` case
@@ -640,7 +474,7 @@ mod tests {
     /// straight line between them is 14 blocks and asks for no buffer
     /// repeater at all. A block at `(7,0,0)` sends the wire around it,
     /// and the two blocks that costs put the segment over the
-    /// attenuation limit: 16 blocks of dust, and a repeater 15 along.
+    /// attenuation limit: 16 blocks of dust, and one repeater on them.
     /// That gap between the straight line and the route is what every
     /// measurement in this pass has to be taken along.
     ///
@@ -675,13 +509,16 @@ mod tests {
     const WALLED_SINK: usize = 1;
 
     /// The buffer materialises on the dust the signal actually
-    /// travels, at 15 blocks along the 16-block route.
+    /// travels, on the 16-block route.
     ///
     /// The straight line from the pad to this sink is 14 blocks, so
     /// measuring it asks for no buffer at all: 16 blocks of dust with
     /// nothing refreshing it, which is the signal never arriving. The
     /// coord is pinned rather than derived so a change to the axis
-    /// order or the tie-break has to say so here.
+    /// order or the tie-break has to say so here. It is 14 blocks
+    /// along rather than 15: the route comes back along `z=1` and
+    /// turns into the sink at `(14,0,1)`, and a repeater on the turn
+    /// would face away from it.
     #[test]
     fn buffer_lands_on_the_routed_path_not_the_straight_line() {
         let legalized = compile_crossing(&walled_scope(2));
@@ -693,7 +530,7 @@ mod tests {
         let cells = &legalized.scoped.scopes[0].ir.cells;
         let buffers = cells[WALLED_SINK].buffer_coords();
         assert_eq!(buffers.len(), 1, "16 blocks of dust need one: {buffers:?}");
-        assert_eq!(buffers[0].coord, CellCoord::new(14, 0, 1));
+        assert_eq!(buffers[0].coord, CellCoord::new(13, 0, 1));
         assert_eq!(buffers[0].coord.layer, RouteLayer::Plane);
     }
 
@@ -753,7 +590,7 @@ mod tests {
         let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
         let router = Router::new(&region, &block_sites(ir, &region));
         let trees = net_trees(&nets, &router, |net| match net {
-            NetRef::Input(i) => input_pad(i as usize, &region),
+            NetRef::Input(i) => input_pad(i as usize, PadColumn::of(ir), &region),
             NetRef::Cell(j) => cell_coords[j as usize],
         });
         let owned: HashMap<NetRef, HashSet<CellCoord>> = trees
@@ -852,7 +689,7 @@ mod tests {
 
         for (index, cell) in legalized.scoped.scopes[0].ir.cells.iter().enumerate() {
             let charged = cell
-                .delay_ticks()
+                .local_delay_ticks()
                 .expect("stage 3 wrote the ticks")
                 .saturating_sub(cell.cell.base_delay_ticks());
             let blocks: HashSet<CellCoord> = cell.buffer_coords().iter().map(|b| b.coord).collect();
@@ -953,7 +790,7 @@ mod tests {
         let router = Router::new(&region, &block_sites(ir, &region));
         let nets = collect_nets(ir);
         let trees = net_trees(&nets, &router, |net| match net {
-            NetRef::Input(i) => input_pad(i as usize, &region),
+            NetRef::Input(i) => input_pad(i as usize, PadColumn::of(ir), &region),
             NetRef::Cell(j) => cell_coords[j as usize],
         });
 
@@ -961,7 +798,7 @@ mod tests {
             .iter()
             .map(|(net, sinks)| {
                 let source = match net {
-                    NetRef::Input(i) => input_pad(*i as usize, &region),
+                    NetRef::Input(i) => input_pad(*i as usize, PadColumn::of(ir), &region),
                     NetRef::Cell(j) => cell_coords[*j as usize],
                 };
                 router
@@ -1007,11 +844,13 @@ mod tests {
     /// A fan-out's shared prefix carries one repeater, and every sink
     /// past it is fed by that one.
     ///
-    /// The tree reaches the cells in the row through one another, so
-    /// the 15-step point of the route into each of them is the same
-    /// coord. A repeater standing there refreshes the signal for all
-    /// of them; a second sink asking for one is asking for a block
-    /// that is already in the layout.
+    /// The first cell ends the straight run at `(16,0,0)`, and the
+    /// route to every later one leaves the row at `(15,0,0)` to go
+    /// round it, so that coord is a fork. A repeater there would face
+    /// one branch and starve the other; the one on the trunk just
+    /// before it, at `(14,0,0)`, refreshes the signal for all of them,
+    /// and a second sink asking for one is asking for a block that is
+    /// already in the layout.
     ///
     /// The `void` column is what the rows are for. Escaping around
     /// the repeater needs a layer above the plane, so two sinks used
@@ -1058,8 +897,8 @@ mod tests {
                 );
                 assert_eq!(
                     buffers[0].coord,
-                    CellCoord::new(15, 0, 0),
-                    "cell #{index} of {sinks} at void={void} must name the repeater standing on the shared prefix",
+                    CellCoord::new(14, 0, 0),
+                    "cell #{index} of {sinks} at void={void} must name the repeater standing on the shared prefix, before the fork",
                 );
             }
         }
@@ -1140,7 +979,7 @@ mod tests {
     /// Threaded through routing → delay → crossing rather than handed
     /// a `Delayed` fixture, because the three numbers this pins are
     /// written by three different passes — `wire_length` by stage 2,
-    /// `delay_ticks` by stage 3, `buffer_coords` by stage 4 — and the
+    /// `local_delay_ticks` by stage 3, `buffer_coords` by stage 4 — and the
     /// defect was that each of them counted the one segment once per
     /// port.
     ///
@@ -1149,6 +988,114 @@ mod tests {
     /// `sig.s0 = sig.a and sig.a` is how a `.crn` reaches this shape —
     /// see `ports_sharing_a_net_are_measured_once` in
     /// `tests/routing.rs`.
+    /// A cell fed by two *distinct* nets is charged for every buffer
+    /// standing on both of them.
+    ///
+    /// `phase4_buffer_tick_invariant_holds` generates every cell from
+    /// one net, so on its cases a sum over the driving nets and a max
+    /// over them are the same number and the proptest cannot tell
+    /// them apart. This is the shape where they differ, and it is the
+    /// shape the stage-3 / stage-4 identity is actually load-bearing
+    /// on: `sig.a` reaches the comparator over 42 blocks of dust and
+    /// two buffers, the upstream cell over 20 blocks and one, so the
+    /// figure is `base + 3` where a max would write `base + 2` and
+    /// leave the block on the shorter segment standing under no tick
+    /// at all.
+    ///
+    /// Threaded through routing → delay → crossing rather than handed
+    /// a `Delayed` fixture, for the reason
+    /// `ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust`
+    /// is: the tick figure and the blocks it is checked against are
+    /// written by two different passes, and a fixture that skipped
+    /// one would check a pass against itself. `cells[0]` drives the
+    /// comparator without being driven itself, which is what makes
+    /// its segment short while `sig.a` runs the width of the region.
+    #[test]
+    fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(48, 3, 2));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: Vec::new(),
+            coord: CellCoord::new(20, 0, 2),
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        });
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaComparatorAnd,
+            drivers: vec![
+                CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Cell(0),
+                },
+                CellPortDriver {
+                    port: PortName::B,
+                    net: NetRef::Input(0),
+                },
+            ],
+            coord: CellCoord::new(40, 0, 2),
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        });
+        let routed = compile_routing(&scoped(ScopeKind::Struct, "two-nets", ir));
+        assert!(routed.diagnostics.is_empty(), "{:?}", routed.diagnostics);
+        let delayed = compile_delay(&routed.scoped);
+        assert!(delayed.diagnostics.is_empty(), "{:?}", delayed.diagnostics);
+        let legalized = compile_crossing(&delayed.scoped);
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "three repeaters on free wire need no escape: {:?}",
+            legalized.diagnostics,
+        );
+
+        let cell = &legalized.scoped.scopes[0].ir.cells[1];
+        let buffers = cell.buffer_coords();
+        let per_port = |port| {
+            buffers
+                .iter()
+                .filter(|b| b.port == BufferSegment::Port(port))
+                .count()
+        };
+        // The counts, not just the total: equal counts would make the
+        // sum and the max differ by an amount this fixture could not
+        // attribute to either net.
+        assert_eq!(
+            (per_port(PortName::A), per_port(PortName::B)),
+            (1, 2),
+            "one buffer on the cell segment, two on the sensor's: {buffers:?}",
+        );
+        let distinct: HashSet<CellCoord> = buffers.iter().map(|b| b.coord).collect();
+        assert_eq!(
+            distinct.len(),
+            3,
+            "two distinct nets share no repeater: {buffers:?}",
+        );
+
+        let base = EditionCell::JavaComparatorAnd.base_delay_ticks();
+        let ticks = cell
+            .local_delay_ticks()
+            .expect("legalized cells carry Some(local_delay_ticks)");
+        let blocks = u32::try_from(distinct.len()).expect("three blocks fit in u32");
+        assert_eq!(
+            ticks - base,
+            blocks * BUFFER_REPEATER_TICKS,
+            "every block stage 4 laid is a tick stage 3 charged",
+        );
+        // And the figure a max would have written, so the test fails
+        // rather than narrows if the fold ever changes.
+        let widest = u32::try_from(per_port(PortName::A).max(per_port(PortName::B)))
+            .expect("two buffers fit in u32");
+        assert_ne!(
+            ticks - base,
+            widest * BUFFER_REPEATER_TICKS,
+            "a max over the driving nets would drop the shorter segment's block",
+        );
+    }
+
     #[test]
     fn ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust() {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -1193,7 +1140,7 @@ mod tests {
             "one strand of dust, measured once",
         );
         assert_eq!(
-            cell.delay_ticks(),
+            cell.local_delay_ticks(),
             Some(1 + BUFFER_REPEATER_TICKS),
             "base 1 plus the one repeater the signal passes through",
         );
@@ -1219,14 +1166,19 @@ mod tests {
     ///
     /// One placer walks the cells and then the actuator pads, so this
     /// is the only direction the two segment kinds can meet: the cell
-    /// takes the plane coord, and the pad's route reaches it 15 blocks
+    /// takes the plane coord, and the pad's route reaches it 14 blocks
     /// along as well. The reverse cannot happen, because no cell is
     /// allocated after an output.
     ///
-    /// The pad's route is longer than the cell's by more than the four
+    /// The pad's route is longer than the cell's by more than the 13
     /// blocks between them, because the cell is a block on the row and
     /// the wire out now steps around it — so the pad's segment asks for
     /// a second repeater of its own past the shared one.
+    ///
+    /// The route forks at `(15,0,0)`, into the cell and round it, so the
+    /// shared repeater stands on the trunk one coord before the fork.
+    /// The second stands at `(28,0,1)`, the last straight coord before
+    /// the wire turns at `(29,0,1)` into the pad at `(29,0,0)`.
     #[test]
     fn an_actuator_segment_records_the_repeater_a_cell_segment_placed() {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -1263,7 +1215,7 @@ mod tests {
         );
 
         let ir = &legalized.scoped.scopes[0].ir;
-        let shared = CellCoord::new(15, 0, 0);
+        let shared = CellCoord::new(14, 0, 0);
         assert_eq!(
             ir.cells[0]
                 .buffer_coords()
@@ -1280,7 +1232,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (BufferSegment::Out, shared),
-                (BufferSegment::Out, CellCoord::new(29, 0, 1)),
+                (BufferSegment::Out, CellCoord::new(28, 0, 1)),
             ],
             "the wire to the pad names the block the cell segment put there",
         );
@@ -1294,15 +1246,19 @@ mod tests {
     /// are three routes rather than one shared prefix, and each port
     /// has to carry its own coord out.
     ///
-    /// The four nets contend for the rows across the region. `sig.sel`
-    /// is laid first — same fanout, lowest
-    /// [`crate::routing_geometry::net_ref_key`] — and takes the row at
-    /// `z=1`; each net after it is pushed a row further out, until
-    /// `sig.port_b` has no row left and climbs. Every repeater still
-    /// stands on its own port's route, and the one on
+    /// The four nets contend for the rows across the region. Their pads
+    /// stand at `z=0`, `2`, `3` and `4`, the column stepping over the
+    /// cell row. `sig.sel` is laid first — same fanout, lowest
+    /// [`crate::routing_geometry::net_ref_key`] — and runs out along
+    /// `z=0`; `sig.blocker` takes the row at `z=2`, and `sig.port_a`,
+    /// whose pad stands beside that row, has no row left and climbs at
+    /// its own pad; `sig.port_b` runs out along `z=4`. Every repeater
+    /// still stands on its own port's route, and the one on
     /// [`RouteLayer::Bridge`] is that rule holding through the escape —
     /// `CellCoord::new` decides the layer from the height, so the
-    /// comparison below carries it.
+    /// comparison below carries it. `sig.sel` turns off `z=0` at
+    /// `(14,0,0)` and back east at `(14,0,1)`, so its repeater stands
+    /// on `(13,0,0)`, the last straight coord before the first turn.
     #[test]
     fn mux_ports_each_keep_the_coord_their_own_segment_reaches() {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -1349,9 +1305,9 @@ mod tests {
         assert_eq!(
             bufs.iter().map(|b| (b.port, b.coord)).collect::<Vec<_>>(),
             vec![
-                (BufferSegment::Port(PortName::Sel), CellCoord::new(14, 0, 1),),
-                (BufferSegment::Port(PortName::A), CellCoord::new(14, 0, 3),),
-                (BufferSegment::Port(PortName::B), CellCoord::new(14, 1, 3),),
+                (BufferSegment::Port(PortName::Sel), CellCoord::new(13, 0, 0),),
+                (BufferSegment::Port(PortName::A), CellCoord::new(11, 1, 2),),
+                (BufferSegment::Port(PortName::B), CellCoord::new(15, 0, 4),),
             ],
             "each port keeps its own segment's coord across both push sites",
         );
@@ -1462,26 +1418,131 @@ mod tests {
         );
     }
 
+    /// Stage 4 refuses a stretch no repeater can stand on as stage 3
+    /// does, on the tree stage 2 laid.
+    ///
+    /// Stage 3 refuses the scope, so nothing hands stage 4 a delayed
+    /// staircase; the routed one is promoted by hand, which is the IR
+    /// `--stage crossing` would be given without stage 3 having run.
+    /// The two refusals agree word for word but for the netlist they
+    /// name.
+    #[test]
+    fn a_stretch_with_nowhere_for_a_repeater_is_refused() {
+        let routed = compile_routing(&staircase(&PlacementPhase::Unrouted));
+        assert_eq!(routed.diagnostics, Vec::new(), "stage 2 lays the staircase");
+        let delayed = compile_delay(&routed.scoped);
+        let [stage_3] = delayed.diagnostics.as_slice() else {
+            panic!("stage 3 refuses once: {:?}", delayed.diagnostics);
+        };
+
+        let mut promoted = routed.scoped.clone();
+        for entry in &mut promoted.scopes {
+            let phases = entry
+                .ir
+                .cells
+                .iter_mut()
+                .map(|cell| &mut cell.phase)
+                .chain(entry.ir.outputs.iter_mut().map(|output| &mut output.phase));
+            for phase in phases {
+                let PlacementPhase::Routed { wire_length } = *phase else {
+                    panic!("stage 2 leaves every node routed: {phase:?}");
+                };
+                *phase = PlacementPhase::Delayed {
+                    wire_length,
+                    local_delay_ticks: 0,
+                };
+            }
+        }
+        let legalized = compile_crossing(&promoted);
+        let codes: Vec<_> = legalized.diagnostics.iter().map(|d| d.code).collect();
+        assert_eq!(codes, vec![DiagnosticCode::AttenuationLimit]);
+        let primary = &legalized.diagnostics[0].primary;
+        assert!(
+            primary.contains("delayed netlist for struct `stairs` routes sig.a so that the signal leaving (0,0,0) runs out before (8,0,8)"),
+            "the refusal names the net and the stretch, got {primary:?}",
+        );
+        assert_eq!(
+            primary.replacen("delayed netlist", "routed netlist", 1),
+            stage_3.primary,
+            "stage 4 refuses the stretch stage 3 did",
+        );
+        assert_eq!(legalized.diagnostics[0].notes, stage_3.notes);
+        let survivors: Vec<_> = legalized.scoped.scopes.iter().map(|e| &e.name).collect();
+        assert_eq!(survivors, vec!["roomy"]);
+    }
+
+    /// A route that turns at the 15-step point takes a second repeater
+    /// its length alone does not ask for, and stage 3 charges for it.
+    ///
+    /// 30 blocks from `(0,0,0)` to `(15,0,15)`, east then south. The
+    /// corner is 15 blocks along, so the first repeater stands one short
+    /// of it; the 16 blocks it leaves ahead are one too many, and the
+    /// second stands on `(15,0,14)`, the last coord before the sink.
+    /// `(30 - 1) / 15` is 1, so a delay pass that still counted from the
+    /// length would charge one tick for two blocks.
+    #[test]
+    fn a_turn_at_the_limit_costs_the_route_a_second_repeater() {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(20, 17, 1));
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(PlacedCellNode {
+            cell: EditionCell::JavaRepeaterOr,
+            drivers: vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+            coord: CellCoord::new(15, 0, 15),
+            phase: PlacementPhase::Unrouted,
+            span: Span::default(),
+        });
+        let routed = compile_routing(&scoped(ScopeKind::Struct, "corner", ir));
+        assert!(routed.diagnostics.is_empty(), "{:?}", routed.diagnostics);
+        let delayed = compile_delay(&routed.scoped);
+        assert!(delayed.diagnostics.is_empty(), "{:?}", delayed.diagnostics);
+        let legalized = compile_crossing(&delayed.scoped);
+        assert!(
+            legalized.diagnostics.is_empty(),
+            "{:?}",
+            legalized.diagnostics
+        );
+
+        let cell = &legalized.scoped.scopes[0].ir.cells[0];
+        assert_eq!(
+            cell.wire_length(),
+            Some(30),
+            "the fixture is the 30-block L"
+        );
+        assert_eq!(
+            cell.buffer_coords()
+                .iter()
+                .map(|b| b.coord)
+                .collect::<Vec<_>>(),
+            vec![CellCoord::new(14, 0, 0), CellCoord::new(15, 0, 14)],
+        );
+        assert_eq!(
+            cell.local_delay_ticks(),
+            Some(EditionCell::JavaRepeaterOr.base_delay_ticks() + 2 * BUFFER_REPEATER_TICKS),
+            "stage 3 charges for both blocks stage 4 lays",
+        );
+    }
+
     #[test]
     fn buffer_coord_index_at_kth_boundary() {
-        // Pins the mapping `k → path_index = k * DUST_ATTENUATION_LIMIT`
-        // that `allocate_buffer_coords` inlines. A routed driver segment
-        // of 46 blocks trips the attenuation limit three times, so
-        // three buffer coords land at `k = 1, 2, 3`. The delay pass has
-        // a mirrored boundary-row test on the tick side of the same
-        // formula (`s → buffers`); this test is its structural mirror
-        // on the coord side — a slip in either pass's
-        // `(segment - 1) / DUST_ATTENUATION_LIMIT` derivation trips a
-        // dedicated row rather than the aggregate delay total.
+        // A routed driver segment of 46 blocks trips the attenuation
+        // limit three times, so three buffer coords land. The delay
+        // pass has a mirrored boundary-row test on the tick side
+        // (`s → buffers`); this is its mirror on the coord side.
         //
         // The route `(0, 0, 0) → (45, 0, 1)` walks x++ 45 steps then
-        // z++ 1 step, so `path[k * 15]` is `(k * 15, 0, 0)` for
-        // `k = 1, 2, 3` (path[45] is the last x-axis step before the
-        // final z++ to the sink). No collision → every buffer stays on
-        // plane, which is the invariant the boundary formula depends
-        // on: if a k-th buffer landed off-formula, the plane candidate
-        // would drift too and the layer assertion would trip alongside
-        // the coord assertion.
+        // z++ 1 step. The first two repeaters stand on the straight
+        // run at `path[15]` and `path[30]`. `path[45]` is `(45, 0, 0)`,
+        // where the wire turns towards the sink: a repeater there
+        // would drive into `(46, 0, 0)`, which is not the wire, so the
+        // third stands on `(44, 0, 0)`, the last straight coord before
+        // the turn. No collision → every buffer stays on plane.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(50, 3, 3));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -1504,24 +1565,13 @@ mod tests {
         );
         let bufs = legalized.scoped.scopes[0].ir.cells[0].buffer_coords();
         assert_eq!(
-            bufs.len(),
-            3,
-            "segment 46 → floor((46-1)/15) = 3 buffers, got {bufs:?}",
-        );
-        assert_eq!(
-            bufs[0].coord,
-            CellCoord::new(15, 0, 0),
-            "k=1 buffer sits at path[15]",
-        );
-        assert_eq!(
-            bufs[1].coord,
-            CellCoord::new(30, 0, 0),
-            "k=2 buffer sits at path[30]",
-        );
-        assert_eq!(
-            bufs[2].coord,
-            CellCoord::new(45, 0, 0),
-            "k=3 buffer sits at path[45] — the last x-axis step before the final z increment",
+            bufs.iter().map(|b| b.coord).collect::<Vec<_>>(),
+            vec![
+                CellCoord::new(15, 0, 0),
+                CellCoord::new(30, 0, 0),
+                CellCoord::new(44, 0, 0),
+            ],
+            "k=1, 2 at path[k * 15]; k=3 one short of the turn at path[45]",
         );
         for b in bufs {
             assert_eq!(
@@ -1534,13 +1584,12 @@ mod tests {
 
     #[test]
     fn buffer_coord_index_at_max_segment_boundary() {
-        // Companion to `buffer_coord_index_at_kth_boundary`: pins the
-        // formula against the far end of the range the delay pass's
-        // `MAX_ATTENUATION_SEGMENT = 256` sanity cap permits. A
-        // segment of exactly 256 blocks yields 17 buffers at
-        // `k * 15` for `k = 1..=17`, matching the tick-side boundary
-        // table row for that segment. Together the two tests bracket
-        // the piecewise formula at both boundaries on the coord side.
+        // Companion to `buffer_coord_index_at_kth_boundary`, at the far
+        // end of the range the delay pass's `MAX_ATTENUATION_SEGMENT =
+        // 256` sanity cap permits. A segment of exactly 256 blocks
+        // yields 17 buffers, matching the tick-side boundary table row
+        // for that segment: 16 at `k * 15` on the straight run, and
+        // the 17th one short of the turn at `path[255]`.
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(256, 3, 3));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -1562,14 +1611,15 @@ mod tests {
             legalized.diagnostics,
         );
         let bufs = legalized.scoped.scopes[0].ir.cells[0].buffer_coords();
-        assert_eq!(bufs.len(), 17, "segment 256 → 17 buffers, got {bufs:?}");
-        for k in 1..=17u32 {
-            assert_eq!(
-                bufs[(k - 1) as usize].coord,
-                CellCoord::new(k * 15, 0, 0),
-                "k={k} buffer must sit at path[k * 15]",
-            );
-        }
+        let expected: Vec<CellCoord> = (1..=16u32)
+            .map(|k| CellCoord::new(k * 15, 0, 0))
+            .chain([CellCoord::new(254, 0, 0)])
+            .collect();
+        assert_eq!(
+            bufs.iter().map(|b| b.coord).collect::<Vec<_>>(),
+            expected,
+            "segment 256 → 17 buffers",
+        );
     }
 
     #[test]
@@ -1616,11 +1666,224 @@ mod tests {
             placed_cell(EditionCell::JavaRepeaterOr, CellCoord::new(4, 0, 1), vec![]);
         already_legalized.phase = PlacementPhase::Legalized {
             wire_length: 0,
-            delay_ticks: 0,
+            local_delay_ticks: 0,
             buffer_coords: Vec::new(),
         };
         ir.cells.push(already_legalized);
         let _ = compile_crossing(&scoped(ScopeKind::Struct, "mixed", ir));
+    }
+
+    mod strand_invariant {
+        //! The attenuation limit holds along whole strands, across the
+        //! cells that pass strength on — checked by a walk written out
+        //! here rather than through the placer's own budgets, so a
+        //! placer that stopped carrying the dust across a cell fails.
+        //!
+        //! "Strand" here is the run of dust counted from the last block
+        //! that restored strength, which carries on through a cell that
+        //! passes strength on. It is not the physically contiguous dust
+        //! the rest of this module means when it keeps two signals off
+        //! one strand: a cell's body stands in the middle of this one.
+
+        use std::collections::HashMap;
+        use std::fmt::Write as _;
+
+        use cairn_lang_core::{Edition, lower, parse};
+
+        use super::{
+            CellCoord, HashSet, NetRef, PadColumn, PlacementIr, Router, block_sites, collect_nets,
+            compile_crossing, input_pad, net_trees,
+        };
+        use crate::delay::{DUST_ATTENUATION_LIMIT, compile_delay};
+        use crate::routing::compile_routing;
+        use crate::{compile_edition_netlist, compile_netlist, compile_placement, synthesize};
+
+        /// `source` through every stage to the legalized IR of its one
+        /// scope, each stage clean but for the cross-layer advisory.
+        fn legalized(source: &str, edition: Edition) -> PlacementIr {
+            let intent = lower(&parse(source).expect("the fixture parses"));
+            let synth = synthesize(&intent);
+            let netlist = compile_netlist(&synth.scoped);
+            let placed = compile_placement(&compile_edition_netlist(&netlist, edition), &intent);
+            assert!(placed.diagnostics.is_empty(), "{:?}", placed.diagnostics);
+            let routed = compile_routing(&placed.scoped);
+            assert!(
+                routed
+                    .diagnostics
+                    .iter()
+                    .all(|d| d.code == crate::DiagnosticCode::RouteCrossLayerClearance),
+                "{:?}",
+                routed.diagnostics,
+            );
+            let delayed = compile_delay(&routed.scoped);
+            assert!(delayed.diagnostics.is_empty(), "{:?}", delayed.diagnostics);
+            let legalized = compile_crossing(&delayed.scoped);
+            assert!(
+                legalized.diagnostics.is_empty(),
+                "{:?}",
+                legalized.diagnostics
+            );
+            legalized.scoped.scopes[0].ir.clone()
+        }
+
+        /// Walks every net in topological order, carrying the dust spent
+        /// since the last block that restores strength — a sensor pad, a
+        /// repeater, or a cell whose output is at full strength — across
+        /// the cells that pass it on, and asserts no coord is reached
+        /// over more than the limit. Returns how many buffer repeaters
+        /// it met, so a caller can tell the walk saw some.
+        fn assert_no_strand_runs_past_the_limit(ir: &PlacementIr, label: &str) -> usize {
+            let region = ir.region.clone().expect("the fixture carries a region");
+            let nets = collect_nets(ir);
+            let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
+            let router = Router::new(&region, &block_sites(ir, &region));
+            let trees = net_trees(&nets, &router, |net| match net {
+                NetRef::Input(i) => input_pad(i as usize, PadColumn::of(ir), &region),
+                NetRef::Cell(j) => cell_coords[j as usize],
+            });
+            let mut repeaters: HashMap<NetRef, HashSet<CellCoord>> = HashMap::new();
+            for cell in &ir.cells {
+                for buffer in cell.buffer_coords() {
+                    let crate::placement_ir::BufferSegment::Port(port) = buffer.port else {
+                        panic!("a cell's buffer names one of its ports");
+                    };
+                    let net = cell
+                        .drivers
+                        .iter()
+                        .find(|d| d.port == port)
+                        .expect("a driver of its own cell")
+                        .net;
+                    repeaters.entry(net).or_default().insert(buffer.coord);
+                }
+            }
+            for output in &ir.outputs {
+                for buffer in output.buffer_coords() {
+                    repeaters
+                        .entry(output.driver)
+                        .or_default()
+                        .insert(buffer.coord);
+                }
+            }
+
+            let mut order: Vec<NetRef> = trees.keys().copied().collect();
+            order.sort_by_key(|net| match net {
+                NetRef::Input(i) => (0, *i),
+                NetRef::Cell(j) => (1, *j),
+            });
+            let mut arrived: HashMap<(NetRef, CellCoord), u32> = HashMap::new();
+            let none = HashSet::new();
+            for net in order {
+                let at_source = match net {
+                    NetRef::Input(_) => 0,
+                    NetRef::Cell(j) => {
+                        let cell = &ir.cells[j as usize];
+                        if cell.cell.regenerates() {
+                            0
+                        } else {
+                            cell.drivers
+                                .iter()
+                                .map(|d| arrived[&(d.net, cell.coord)])
+                                .max()
+                                .unwrap_or(0)
+                        }
+                    }
+                };
+                let tree = &trees[&net];
+                let reps = repeaters.get(&net).unwrap_or(&none);
+                let mut spent: HashMap<CellCoord, u32> = HashMap::new();
+                let path = tree.wire_path();
+                spent.insert(path[0], at_source);
+                for coord in &path[1..] {
+                    let parent = tree.parent(*coord).expect("attached");
+                    let behind = if reps.contains(&parent) {
+                        0
+                    } else {
+                        spent[&parent]
+                    };
+                    let here = behind + 1;
+                    assert!(
+                        here <= DUST_ATTENUATION_LIMIT,
+                        "{label}: {net:?} reaches {coord:?} over {here} blocks of dust since the last block that restores strength",
+                    );
+                    spent.insert(*coord, here);
+                    arrived.insert((net, *coord), here);
+                }
+            }
+            repeaters.values().map(HashSet::len).sum()
+        }
+
+        /// Four plates combined into one door through three two-input
+        /// cells in a row: dust merges for `or` on Bedrock, comparators
+        /// for `and` on Java. Either way the dust from a plate to the
+        /// door is one strand. No single segment is past the limit —
+        /// the door's own is 15 — and the strand is.
+        fn four_plates(op: &str) -> String {
+            format!(
+                r"
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=20x5
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b
+  pressure_plate id=pc at=front.outside offset=2 y=0 -> sig.c
+  pressure_plate id=pd at=inside.front offset=2 y=0 -> sig.d
+  logic sig.open = sig.a {op} sig.b {op} sig.c {op} sig.d
+  door[id=d] opened_by=sig.open
+  circuit region=floor void=2
+"
+            )
+        }
+
+        /// Sixteen Java comparators in a chain, each also reading one
+        /// shared sensor: `sig.c{i} = sig.c{i-1} and sig.b`. The dust
+        /// from `sig.b` runs on through every comparator after the one it
+        /// taps into, as far as the door.
+        fn comparator_chain() -> String {
+            let mut source = String::from(
+                r"
+theme t:
+  slot wall -> @oak_planks
+
+struct chain size=60x5
+  floor mat_slot=wall
+  pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=pb at=inside.front offset=1 y=0 -> sig.b
+  logic sig.c0 = sig.a and sig.b
+",
+            );
+            for i in 1..16 {
+                writeln!(source, "  logic sig.c{i} = sig.c{} and sig.b", i - 1)
+                    .expect("writing to a String cannot fail");
+            }
+            source.push_str(
+                "  door id=d side=front at=center mat_slot=wall opened_by=sig.c15\n  circuit region=floor void=2\n",
+            );
+            source
+        }
+
+        #[test]
+        fn a_strand_through_cells_that_pass_strength_on_is_buffered_as_one() {
+            for (label, source, edition) in [
+                ("bedrock or", four_plates("or"), Edition::Bedrock),
+                ("java and", four_plates("and"), Edition::Java),
+                ("comparator chain", comparator_chain(), Edition::Java),
+            ] {
+                let ir = legalized(&source, edition);
+                assert!(
+                    ir.cells.iter().all(|c| !c.cell.regenerates()),
+                    "{label}: the fixture is a chain of cells that pass strength on",
+                );
+                let met = assert_no_strand_runs_past_the_limit(&ir, label);
+                assert!(
+                    met >= 1,
+                    "{label}: the strand is past the limit, so it needs a repeater"
+                );
+            }
+        }
     }
 
     mod phase4_invariant {
@@ -1633,17 +1896,19 @@ mod tests {
         use proptest::prelude::*;
 
         use super::{
-            BufferSegment, CellCoord, CellPortDriver, Edition, EditionCell, HashSet, NetRef,
-            PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer, Router, ScopeKind,
-            Span, block_sites, collect_nets, compile_crossing, input_pad, net_trees, placed_cell,
-            reservation, scoped,
+            BufferSegment, CellCoord, CellPortDriver, Edition, EditionCell, HashMap, HashSet,
+            NetRef, PadColumn, PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer,
+            Router, ScopeKind, ScopedPlacementIr, Span, block_sites, collect_nets,
+            compile_crossing, input_pad, net_trees, reservation, scoped,
         };
         use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
+        use crate::placement_ir::ScopedPlacementIrEntry;
         use crate::routing::compile_routing;
+        use crate::routing_geometry::NetTree;
 
         /// Strategy over sink positions for the phase-4 invariant
         /// property test. Each `(x, z)` in the returned `Vec` seeds one
-        /// cell at `(x, 0, z)` driven from `Input(0)` at `(0, 0, 1)`.
+        /// cell at `(x, 0, z)` driven from `Input(0)` at `(0, 0, 0)`.
         /// `x` in `1..=99` covers both the sub-limit segments (zero
         /// buffers) and the multi-boundary ones, so `buffer_total` is
         /// non-zero on most cases and the invariant discriminates.
@@ -1661,28 +1926,518 @@ mod tests {
         /// — which is how the invariant below could be stated in
         /// attributions and still hold.
         ///
-        /// Changing the tuple invalidates every persisted seed in
-        /// `proptest-regressions/crossing.txt`: a seed is an RNG
-        /// state, so it replays as an unrelated value under a
-        /// different shape rather than failing to load. Anything a
+        /// Duplicate `(x, z)` pairs are dropped, because two cells on
+        /// one coord is not a scope the placement pass can emit — it
+        /// derives a cell's column from its topological index — and
+        /// `collapsed_block` asserts on one. Before that assert
+        /// existed a repeated pair generated a degenerate scope, two
+        /// blocks on one voxel with a zero-length net between them,
+        /// and the invariant held over it without meaning much. The
+        /// first of each pair is kept, so at least one cell survives.
+        ///
+        /// The dedup is a `prop_map` over the same tuple rather than a
+        /// constrained strategy on purpose: changing the tuple
+        /// invalidates every persisted seed in
+        /// `proptest-regressions/crossing.txt`, because a seed is an
+        /// RNG state and replays as an unrelated value under a
+        /// different shape rather than failing to load. Mapping the
+        /// generated value leaves the draw identical, so the seeds
+        /// still replay the cases they were recorded for. Anything a
         /// retired seed was holding has to be written as a named test
-        /// before the shape changes.
+        /// before the shape itself changes.
         fn phase4_scope_strategy() -> impl Strategy<Value = Vec<(u32, u32, bool)>> {
-            prop::collection::vec((1u32..=99u32, 0u32..8u32, prop::bool::ANY), 1..=3)
+            prop::collection::vec((1u32..=99u32, 0u32..8u32, prop::bool::ANY), 1..=3).prop_map(
+                |mut cells| {
+                    let mut seen: HashSet<(u32, u32)> = HashSet::new();
+                    cells.retain(|(x, z, _)| seen.insert((*x, *z)));
+                    cells
+                },
+            )
         }
 
-        /// Placate an unused-import lint when the outer `mod tests`
-        /// re-exports items the inner `super::*` glob would otherwise
-        /// re-import; keeps `placed_cell` alive as an intentional
-        /// symbol import for future cases that want the shorter
-        /// helper.
-        #[allow(dead_code)]
-        fn _keep_placed_cell_alive() -> PlacedCellNode {
-            placed_cell(
-                EditionCell::JavaRepeaterOr,
-                CellCoord::new(0, 0, 0),
-                Vec::new(),
-            )
+        /// The scope one draw of [`phase4_scope_strategy`] stands for:
+        /// one cell at `(x, 0, z)` per entry, each driven from `sig.a`.
+        fn phase4_ir(xs: &[(u32, u32, bool)]) -> PlacementIr {
+            let mut ir = PlacementIr::new(Edition::Java);
+            ir.region = Some(reservation(200, 10, 3));
+            ir.inputs.push(crate::netlist_ir::NetlistInput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+                span: Span::default(),
+            });
+            for &(x, z, shared_port) in xs {
+                let mut drivers = vec![CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                }];
+                if shared_port {
+                    drivers.push(CellPortDriver {
+                        port: PortName::B,
+                        net: NetRef::Input(0),
+                    });
+                }
+                ir.cells.push(PlacedCellNode {
+                    cell: EditionCell::JavaRepeaterOr,
+                    drivers,
+                    coord: CellCoord::new(x, 0, z),
+                    phase: PlacementPhase::Unrouted,
+                    span: Span::default(),
+                });
+            }
+            ir
+        }
+
+        /// What `phase4_buffer_tick_invariant_holds` asserts, over one
+        /// draw of [`phase4_scope_strategy`]. A function of its own so
+        /// a named test can replay a draw that once failed without
+        /// leaning on the regressions file to keep it.
+        fn check_phase4_scope(xs: &[(u32, u32, bool)]) -> Result<(), TestCaseError> {
+            let case = format!("xs={xs:?}");
+            let legalized = legalize_phase4(phase4_ir(xs), &case)?;
+            for entry in &legalized.scopes {
+                check_buffer_sites(entry, &case)?;
+                check_cell_charges(entry, &case)?;
+            }
+            for entry in &legalized.scopes {
+                check_scope_total(entry, &case)?;
+            }
+            Ok(())
+        }
+
+        /// `compile_routing → compile_delay → compile_crossing` over
+        /// one scope, failing on a routing or delay diagnostic and
+        /// rejecting the case on a crossing one.
+        fn legalize_phase4(
+            ir: PlacementIr,
+            case: &str,
+        ) -> Result<ScopedPlacementIr, TestCaseError> {
+            let routing = compile_routing(&scoped(ScopeKind::Struct, "prop", ir));
+            prop_assert!(
+                routing.diagnostics.is_empty(),
+                "routing diagnostics for {}: {:?}",
+                case,
+                routing.diagnostics,
+            );
+            let delayed = compile_delay(&routing.scoped);
+            prop_assert!(
+                delayed.diagnostics.is_empty(),
+                "delay diagnostics for {}: {:?}",
+                case,
+                delayed.diagnostics,
+            );
+            let legalized = compile_crossing(&delayed.scoped);
+            // A refused scope is elided, and an elided scope
+            // carries no buffers to check. Off-axis terminals make
+            // two sinks share a route prefix often enough that
+            // `void=3` runs out of bridge layers, and refusing is
+            // the documented answer there — so the case is
+            // rejected rather than failed.
+            prop_assume!(legalized.diagnostics.is_empty());
+            Ok(legalized.scoped)
+        }
+
+        /// Where the buffers landed, not just how many. Totals alone
+        /// let a coord move anywhere as long as the count holds, which
+        /// is exactly the shape of the bug this suite missed.
+        fn check_buffer_sites(
+            entry: &ScopedPlacementIrEntry,
+            case: &str,
+        ) -> Result<(), TestCaseError> {
+            let (router, trees) = laid_trees(entry);
+            for cell in &entry.ir.cells {
+                for buffer in cell.buffer_coords() {
+                    let BufferSegment::Port(port) = buffer.port else {
+                        panic!("a cell's buffer must name one of its driver ports");
+                    };
+                    let driver = cell
+                        .drivers
+                        .iter()
+                        .find(|d| d.port == port)
+                        .expect("every buffer names a driver of its own cell");
+                    let tree = &trees[&driver.net];
+                    // `Router::dust`, not `wire_path`: the latter
+                    // holds the terminals too, and would accept a
+                    // repeater standing on a cell body.
+                    let dust: HashSet<CellCoord> = router.dust(tree).into_iter().collect();
+                    let on = Buffer {
+                        coord: buffer.coord,
+                        net: driver.net,
+                        case,
+                    };
+                    check_on_route(&on, tree, &dust, cell.coord)?;
+                    let (before, after) = check_straight_through(&on, tree)?;
+                    check_no_dust_beside(&on, &dust, before, &after)?;
+                }
+            }
+            Ok(())
+        }
+
+        /// The router and the trees it lays for one scope, rebuilt the
+        /// way the delay and crossing passes rebuild them.
+        fn laid_trees(entry: &ScopedPlacementIrEntry) -> (Router, HashMap<NetRef, NetTree>) {
+            let region = entry.ir.region.clone().expect("fixture carries a region");
+            let nets = collect_nets(&entry.ir);
+            let cell_coords: Vec<CellCoord> = entry.ir.cells.iter().map(|c| c.coord).collect();
+            let router = Router::new(&region, &block_sites(&entry.ir, &region));
+            let trees = net_trees(&nets, &router, |net| match net {
+                NetRef::Input(i) => input_pad(i as usize, PadColumn::of(&entry.ir), &region),
+                NetRef::Cell(j) => cell_coords[j as usize],
+            });
+            (router, trees)
+        }
+
+        /// One buffer coord under check: where it stands, the net it
+        /// stands on, and the case it came from, for the messages.
+        struct Buffer<'a> {
+            coord: CellCoord,
+            net: NetRef,
+            case: &'a str,
+        }
+
+        /// The buffer stands over dust its own net laid, on the route
+        /// into the cell it was charged to.
+        fn check_on_route(
+            on: &Buffer<'_>,
+            tree: &NetTree,
+            dust: &HashSet<CellCoord>,
+            sink: CellCoord,
+        ) -> Result<(), TestCaseError> {
+            // The whole coord, layer included. A repeater takes the
+            // layer of the route coord it stands on, so comparing
+            // footprints would accept one on the plane under wire
+            // that had climbed.
+            prop_assert!(
+                dust.contains(&on.coord),
+                "buffer {:?} is not over dust the routing pass laid for {:?} ({})",
+                on.coord,
+                on.net,
+                on.case,
+            );
+            // And on *this* segment's route, not just somewhere on
+            // the net. The two differ for an entry the placer took
+            // from a memo rather than from the route it was walking:
+            // `wire_path` is the whole net's dust and would accept a
+            // coord that refreshes a sibling sink instead of this
+            // one.
+            let route: HashSet<CellCoord> = tree
+                .route_to(sink)
+                .expect("every cell is a terminal of the net driving it")
+                .into_iter()
+                .collect();
+            prop_assert!(
+                route.contains(&on.coord),
+                "buffer {:?} is not over the route into this cell for {:?} ({})",
+                on.coord,
+                on.net,
+                on.case,
+            );
+            if on.coord.layer == RouteLayer::Plane {
+                prop_assert_eq!(on.coord.y, 0);
+            }
+            Ok(())
+        }
+
+        /// The wire runs straight through the buffer: one coord in,
+        /// exactly one out, all three on one line at one height.
+        /// Written out here rather than through the placer's own
+        /// check, so a placer that stopped asking it fails. Returns
+        /// the coord in and the coords out.
+        fn check_straight_through(
+            on: &Buffer<'_>,
+            tree: &NetTree,
+        ) -> Result<(Option<CellCoord>, Vec<CellCoord>), TestCaseError> {
+            let c = on.coord;
+            let before = tree.parent(c);
+            let after: Vec<CellCoord> = tree
+                .wire_path()
+                .into_iter()
+                .filter(|n| tree.parent(*n) == Some(c))
+                .collect();
+            let straight = match (before, after.as_slice()) {
+                (Some(b), [a]) => {
+                    b.y == c.y
+                        && a.y == c.y
+                        && i64::from(c.x) - i64::from(b.x) == i64::from(a.x) - i64::from(c.x)
+                        && i64::from(c.z) - i64::from(b.z) == i64::from(a.z) - i64::from(c.z)
+                }
+                _ => false,
+            };
+            prop_assert!(
+                straight,
+                "buffer {:?} does not have the wire straight through it: in from {:?}, out to {:?} ({})",
+                c,
+                before,
+                after,
+                on.case,
+            );
+            Ok((before, after))
+        }
+
+        /// The buffer touches no dust of its net but the two it joins.
+        /// A repeater severs every face but its front and back, so
+        /// dust of the same net on any other face would be cut off
+        /// even where the tree does not link the two — which is why
+        /// this is asked of the grid, not of the tree the placer
+        /// walked.
+        fn check_no_dust_beside(
+            on: &Buffer<'_>,
+            dust: &HashSet<CellCoord>,
+            before: Option<CellCoord>,
+            after: &[CellCoord],
+        ) -> Result<(), TestCaseError> {
+            let c = on.coord;
+            // Spelled with `with_layer` rather than `CellCoord::new`,
+            // so each layer is written out here instead of derived by
+            // the rule production uses: the four in-plane faces are on
+            // the buffer's own layer, the face above is a bridge, and
+            // the face below is the plane only under the first bridge
+            // layer.
+            let below = if c.y == 1 {
+                RouteLayer::Plane
+            } else {
+                RouteLayer::Bridge
+            };
+            let faces = [
+                c.x.checked_sub(1)
+                    .map(|x| CellCoord::with_layer(x, c.y, c.z, c.layer)),
+                c.x.checked_add(1)
+                    .map(|x| CellCoord::with_layer(x, c.y, c.z, c.layer)),
+                c.y.checked_sub(1)
+                    .map(|y| CellCoord::with_layer(c.x, y, c.z, below)),
+                c.y.checked_add(1)
+                    .map(|y| CellCoord::with_layer(c.x, y, c.z, RouteLayer::Bridge)),
+                c.z.checked_sub(1)
+                    .map(|z| CellCoord::with_layer(c.x, c.y, z, c.layer)),
+                c.z.checked_add(1)
+                    .map(|z| CellCoord::with_layer(c.x, c.y, z, c.layer)),
+            ];
+            let beside: HashSet<CellCoord> = faces
+                .into_iter()
+                .flatten()
+                .filter(|n| dust.contains(n))
+                .collect();
+            // A terminal it joins is a block, not dust, so it drops
+            // out of both sides.
+            let joined: HashSet<CellCoord> = before
+                .into_iter()
+                .chain(after.iter().copied())
+                .filter(|n| dust.contains(n))
+                .collect();
+            prop_assert_eq!(
+                &beside,
+                &joined,
+                "buffer {:?} has dust of its own net beside it that it does not join ({})",
+                c,
+                on.case,
+            );
+            Ok(())
+        }
+
+        /// Per cell as well as in total: an over-charged cell and an
+        /// under-charged neighbour cancel in a sum.
+        fn check_cell_charges(
+            entry: &ScopedPlacementIrEntry,
+            case: &str,
+        ) -> Result<(), TestCaseError> {
+            for cell in &entry.ir.cells {
+                let dt = cell
+                    .local_delay_ticks()
+                    .expect("legalized cells carry Some(local_delay_ticks)");
+                let base = cell.cell.base_delay_ticks();
+                // `checked_sub` here as well as in the scope total: a
+                // cell that regressed below its edition base would
+                // clamp to zero and match a cell with no buffers,
+                // which is the failure the per-cell check exists to
+                // name.
+                let delta = dt.checked_sub(base);
+                prop_assert!(
+                    delta.is_some(),
+                    "local_delay_ticks {} < base_delay_ticks {} for cell at {:?} ({})",
+                    dt,
+                    base,
+                    cell.coord,
+                    case,
+                );
+                let delta = delta.unwrap_or_default();
+                let blocks: HashSet<CellCoord> =
+                    cell.buffer_coords().iter().map(|b| b.coord).collect();
+                let placed = u32::try_from(blocks.len()).expect("buffer block count fits in u32");
+                prop_assert_eq!(
+                    delta,
+                    placed
+                        .checked_mul(BUFFER_REPEATER_TICKS)
+                        .expect("block count × BUFFER_REPEATER_TICKS fits in u32"),
+                    "cell at {:?} charged {} ticks of buffer but stands on {} block(s) ({})",
+                    cell.coord,
+                    delta,
+                    placed,
+                    case,
+                );
+            }
+            Ok(())
+        }
+
+        /// `Σ blocks × BUFFER_REPEATER_TICKS = Σ (local − base)` over
+        /// one scope's cells.
+        fn check_scope_total(
+            entry: &ScopedPlacementIrEntry,
+            case: &str,
+        ) -> Result<(), TestCaseError> {
+            let buffer_total: u32 = entry
+                .ir
+                .cells
+                .iter()
+                .map(|c| {
+                    let blocks: HashSet<CellCoord> =
+                        c.buffer_coords().iter().map(|b| b.coord).collect();
+                    u32::try_from(blocks.len()).expect("buffer block count fits in u32")
+                })
+                .sum();
+            let mut delta_total: u32 = 0;
+            for cell in &entry.ir.cells {
+                let dt = cell
+                    .local_delay_ticks()
+                    .expect("legalized cells carry Some(local_delay_ticks)");
+                let base = cell.cell.base_delay_ticks();
+                let delta = dt.checked_sub(base);
+                prop_assert!(
+                    delta.is_some(),
+                    "local_delay_ticks {} < base_delay_ticks {} for cell at {:?} — delay pass regressed below the edition base",
+                    dt,
+                    base,
+                    cell.coord,
+                );
+                delta_total = delta_total
+                    .checked_add(delta.unwrap())
+                    .expect("delta_total sum overflowed u32");
+            }
+            let lhs = buffer_total
+                .checked_mul(BUFFER_REPEATER_TICKS)
+                .expect("buffer_total × BUFFER_REPEATER_TICKS overflowed u32");
+            prop_assert_eq!(
+                lhs,
+                delta_total,
+                "buffer block count × BUFFER_REPEATER_TICKS ({}) must equal Σ(local_delay_ticks − base_delay_ticks) ({}) for scope `{}` with {}",
+                lhs,
+                delta_total,
+                entry.name,
+                case,
+            );
+            Ok(())
+        }
+
+        /// Replays a pinned shape. A rejected case has stopped reaching
+        /// the assertions at all, which is not the invariant breaking,
+        /// so it says so rather than reporting a failure.
+        fn replay(result: Result<(), TestCaseError>, case: &str) {
+            match result {
+                Ok(()) => {}
+                Err(TestCaseError::Reject(why)) => {
+                    panic!("{case}: this shape no longer exercises the bug ({why})")
+                }
+                Err(TestCaseError::Fail(why)) => panic!("{case}: {why}"),
+            }
+        }
+
+        /// Two sinks of one net in a column at `x = 58`, at `z = 2` and
+        /// `z = 4`. The trunk runs along `z = 0` and turns at
+        /// `(58, 0, 0)`; the branch to the far sink leaves the fork at
+        /// `(58, 0, 1)` and steps back to `x = 57` to get round the near
+        /// one, so `(57, 0, 1)` is dust of the net on a face of the
+        /// straight coord `(57, 0, 0)` without being linked to it in the
+        /// tree. The fourth repeater falls due on the branch, past the
+        /// turn, and walking back over the fork and the turn the first
+        /// coord that runs straight is `(57, 0, 0)`; a repeater there
+        /// would sever the branch, so it stands on `(56, 0, 0)`.
+        #[test]
+        fn a_buffer_walked_back_over_a_turn_stops_short_of_a_branch_beside_it() {
+            let xs = [(58, 4, false), (58, 2, false)];
+            replay(check_phase4_scope(&xs), &format!("xs={xs:?}"));
+        }
+
+        /// The column of `x = 58`'s shape moved to `x = 91`, with the
+        /// sinks one row apart. The same branch comes back beside
+        /// `(90, 0, 0)`, but here the sixth repeater falls due on that
+        /// coord itself, 15 blocks past the one on `(75, 0, 0)`: the
+        /// first coord the placer asks is the one beside the branch,
+        /// with no turn to walk back over. It stands on `(89, 0, 0)`.
+        #[test]
+        fn a_buffer_due_beside_a_branch_steps_back_off_it() {
+            let xs = [(91, 2, false), (91, 3, false)];
+            replay(check_phase4_scope(&xs), &format!("xs={xs:?}"));
+        }
+
+        /// The walk back of the `x = 58` shape on a trunk that is not
+        /// the pad's row. The cell at `(1, 5)` is the nearest sink, so
+        /// the net's first route runs up `x = 1`, and the trunk to the
+        /// column at `x = 25` leaves it at the fork `(1, 0, 4)` and runs
+        /// along `z = 4`, the count carried through that fork. The
+        /// branch to `(25, 7)` steps back through `(24, 0, 5)`, beside
+        /// `(24, 0, 4)`, so the second repeater stands on `(23, 0, 4)`.
+        #[test]
+        fn a_buffer_on_a_trunk_fed_through_a_fork_stops_short_of_a_branch_beside_it() {
+            let xs = [(25, 6, false), (25, 7, false), (1, 5, false)];
+            replay(check_phase4_scope(&xs), &format!("xs={xs:?}"));
+        }
+
+        /// The vertical faces. The near pair at `(44, 0)` and `(44, 1)`
+        /// is fed along `z = 0` and off the fork at `(43, 0, 0)`; the
+        /// route to the far sink at `(71, 0)` climbs at that fork and
+        /// runs on the bridge over the cell at `(44, 0, 0)`. Its third
+        /// repeater falls due on `(44, 1, 0)`, which runs straight
+        /// between `(43, 1, 0)` and `(45, 1, 0)` and has nothing of the
+        /// net on its four in-plane faces — only the sink under it. That
+        /// face is what keeps the repeater off it: the walk back passes
+        /// the climb and the fork and lands on `(42, 0, 0)`.
+        ///
+        /// What is under the coord is a terminal, not dust, so the
+        /// face check in [`check_no_dust_beside`] does not see it; the
+        /// sites are asserted here directly.
+        #[test]
+        fn a_buffer_never_stands_over_a_sink_of_its_own_net() {
+            let xs = [(71, 0, false), (44, 0, false), (44, 1, false)];
+            let case = format!("xs={xs:?}");
+            replay(check_phase4_scope(&xs), &case);
+            let legalized =
+                legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            let entry = &legalized.scopes[0];
+            let (_, trees) = laid_trees(entry);
+            let tree = &trees[&NetRef::Input(0)];
+            let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
+            let bridge = |x, z| CellCoord::with_layer(x, 1, z, RouteLayer::Bridge);
+            let over = bridge(44, 0);
+            let route = tree.route_to(plane(71, 0)).unwrap_or_default();
+            assert!(
+                route.contains(&over)
+                    && tree.parent(over) == Some(bridge(43, 0))
+                    && route.contains(&bridge(45, 0))
+                    && tree.route_to(plane(44, 0)).is_some(),
+                "{case}: this shape no longer exercises the bug: the route to (71, 0, 0) no \
+                 longer runs straight over the sink at (44, 0, 0): {route:?}",
+            );
+            let far = entry
+                .ir
+                .cells
+                .iter()
+                .find(|c| c.coord == plane(71, 0))
+                .expect("the far cell is in the scope");
+            let mut sites: Vec<CellCoord> = Vec::new();
+            for buffer in far.buffer_coords() {
+                if !sites.contains(&buffer.coord) {
+                    sites.push(buffer.coord);
+                }
+            }
+            assert_eq!(
+                sites,
+                vec![
+                    plane(15, 0),
+                    plane(30, 0),
+                    plane(42, 0),
+                    bridge(56, 0),
+                    bridge(70, 0),
+                ],
+                "{case}: the third repeater must step back off (44, 1, 0), over the sink at \
+                 (44, 0, 0), onto (42, 0, 0)",
+            );
         }
 
         proptest! {
@@ -1690,19 +2445,29 @@ mod tests {
 
             /// Crossing / delay agreement invariant: on every emitted
             /// scope, `Σ (blocks under cell.buffer_coords()) ×
-            /// BUFFER_REPEATER_TICKS` must equal `Σ (cell.delay_ticks()
+            /// BUFFER_REPEATER_TICKS` must equal `Σ (cell.local_delay_ticks()
             /// − cell.cell.base_delay_ticks())`, where the blocks under
             /// a cell are its buffer coords deduplicated: the vector
             /// attributes an entry per driver segment, and segments of
             /// one net share the repeater on their prefix. The sum is
             /// over cells rather than over the scope's blocks, because
-            /// what it adds up is per-cell latency — a repeater two
-            /// cells hang off delays both of them. A drift in either
+            /// what it adds up is the per-cell wire cost — a repeater
+            /// two cells hang off is charged to both of them. A drift in either
             /// pass's `(segment − 1) / DUST_ATTENUATION_LIMIT`
             /// derivation, in `BUFFER_REPEATER_TICKS`, or in the
             /// per-edition base-delay table trips this shared
             /// assertion rather than each pass's own boundary rows
             /// in isolation.
+            ///
+            /// Every cell this strategy builds is driven by one net
+            /// (`Input(0)`, sometimes on both ports), so a sum over
+            /// the driving nets and a max over them agree on every
+            /// case it generates and this proptest cannot tell them
+            /// apart — changing the fold to a max leaves it green.
+            /// `two_distinct_nets_charge_a_cell_for_every_buffer_under_it`
+            /// covers the multi-net shape, which is where the two
+            /// part company and where this identity is what keeps
+            /// stage 3 a sum.
             ///
             /// Uses hand-built `Unrouted` cells threaded through
             /// `compile_routing → compile_delay → compile_crossing`.
@@ -1713,200 +2478,7 @@ mod tests {
             /// `u32`).
             #[test]
             fn phase4_buffer_tick_invariant_holds(xs in phase4_scope_strategy()) {
-                let mut ir = PlacementIr::new(Edition::Java);
-                ir.region = Some(reservation(200, 10, 3));
-                ir.inputs.push(crate::netlist_ir::NetlistInput {
-                    name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
-                    span: Span::default(),
-                });
-                for &(x, z, shared_port) in &xs {
-                    let mut drivers = vec![CellPortDriver {
-                        port: PortName::A,
-                        net: NetRef::Input(0),
-                    }];
-                    if shared_port {
-                        drivers.push(CellPortDriver {
-                            port: PortName::B,
-                            net: NetRef::Input(0),
-                        });
-                    }
-                    ir.cells.push(PlacedCellNode {
-                        cell: EditionCell::JavaRepeaterOr,
-                        drivers,
-                        coord: CellCoord::new(x, 0, z),
-                        phase: PlacementPhase::Unrouted,
-                        span: Span::default(),
-                    });
-                }
-                let routed = compile_routing(&scoped(ScopeKind::Struct, "prop", ir));
-                prop_assert!(
-                    routed.diagnostics.is_empty(),
-                    "routing diagnostics for xs={:?}: {:?}",
-                    xs,
-                    routed.diagnostics,
-                );
-                let delayed = compile_delay(&routed.scoped);
-                prop_assert!(
-                    delayed.diagnostics.is_empty(),
-                    "delay diagnostics for xs={:?}: {:?}",
-                    xs,
-                    delayed.diagnostics,
-                );
-                let legalized = compile_crossing(&delayed.scoped);
-                // A refused scope is elided, and an elided scope
-                // carries no buffers to check. Off-axis terminals make
-                // two sinks share a route prefix often enough that
-                // `void=3` runs out of bridge layers, and refusing is
-                // the documented answer there — so the case is
-                // rejected rather than failed.
-                prop_assume!(legalized.diagnostics.is_empty());
-
-                for entry in &legalized.scoped.scopes {
-                    // Where the buffers landed, not just how many.
-                    // Totals alone let a coord move anywhere as long as
-                    // the count holds, which is exactly the shape of
-                    // the bug this suite missed.
-                    let region = entry.ir.region.clone().expect("fixture carries a region");
-                    let nets = collect_nets(&entry.ir);
-                    let cell_coords: Vec<CellCoord> =
-                        entry.ir.cells.iter().map(|c| c.coord).collect();
-                    let router = Router::new(&region, &block_sites(&entry.ir, &region));
-                    let trees = net_trees(&nets, &router, |net| match net {
-                        NetRef::Input(i) => input_pad(i as usize, &region),
-                        NetRef::Cell(j) => cell_coords[j as usize],
-                    });
-                    for cell in &entry.ir.cells {
-                        for buffer in cell.buffer_coords() {
-                            let BufferSegment::Port(port) = buffer.port else {
-                                panic!("a cell's buffer must name one of its driver ports");
-                            };
-                            let driver = cell
-                                .drivers
-                                .iter()
-                                .find(|d| d.port == port)
-                                .expect("every buffer names a driver of its own cell");
-                            let dust: HashSet<CellCoord> =
-                                trees[&driver.net].wire_path().into_iter().collect();
-                            // The whole coord, layer included. A
-                            // repeater takes the layer of the route
-                            // coord it stands on, so comparing
-                            // footprints would accept one on the plane
-                            // under wire that had climbed.
-                            prop_assert!(
-                                dust.contains(&buffer.coord),
-                                "buffer {:?} is not over dust the routing pass laid for {:?} (xs={:?})",
-                                buffer.coord,
-                                driver.net,
-                                xs,
-                            );
-                            // And on *this* segment's route, not just
-                            // somewhere on the net. The two differ for
-                            // an entry the placer took from a memo
-                            // rather than from the route it was
-                            // walking: `wire_path` is the whole net's
-                            // dust and would accept a coord that
-                            // refreshes a sibling sink instead of this
-                            // one.
-                            let route: HashSet<CellCoord> = trees[&driver.net]
-                                .route_to(cell.coord)
-                                .expect("every cell is a terminal of the net driving it")
-                                .into_iter()
-                                .collect();
-                            prop_assert!(
-                                route.contains(&buffer.coord),
-                                "buffer {:?} is not over the route into this cell for {:?} (xs={:?})",
-                                buffer.coord,
-                                driver.net,
-                                xs,
-                            );
-                            if buffer.coord.layer == RouteLayer::Plane {
-                                prop_assert_eq!(buffer.coord.y, 0);
-                            }
-                        }
-                    }
-                    // Per cell as well as in total: an over-charged
-                    // cell and an under-charged neighbour cancel in a
-                    // sum.
-                    for cell in &entry.ir.cells {
-                        let dt = cell
-                            .delay_ticks()
-                            .expect("legalized cells carry Some(delay_ticks)");
-                        let base = cell.cell.base_delay_ticks();
-                        // `checked_sub` here as well as in the scope
-                        // total: a cell that regressed below its
-                        // edition base would clamp to zero and match a
-                        // cell with no buffers, which is the failure
-                        // the per-cell loop exists to name.
-                        let delta = dt.checked_sub(base);
-                        prop_assert!(
-                            delta.is_some(),
-                            "delay_ticks {} < base_delay_ticks {} for cell at {:?} (xs={:?})",
-                            dt,
-                            base,
-                            cell.coord,
-                            xs,
-                        );
-                        let delta = delta.unwrap_or_default();
-                        let blocks: HashSet<CellCoord> =
-                            cell.buffer_coords().iter().map(|b| b.coord).collect();
-                        let placed = u32::try_from(blocks.len())
-                            .expect("buffer block count fits in u32");
-                        prop_assert_eq!(
-                            delta,
-                            placed.checked_mul(BUFFER_REPEATER_TICKS)
-                                .expect("block count × BUFFER_REPEATER_TICKS fits in u32"),
-                            "cell at {:?} charged {} ticks of buffer but stands on {} block(s) (xs={:?})",
-                            cell.coord,
-                            delta,
-                            placed,
-                            xs,
-                        );
-                    }
-                }
-
-                for entry in &legalized.scoped.scopes {
-                    let buffer_total: u32 = entry
-                        .ir
-                        .cells
-                        .iter()
-                        .map(|c| {
-                            let blocks: HashSet<CellCoord> =
-                                c.buffer_coords().iter().map(|b| b.coord).collect();
-                            u32::try_from(blocks.len())
-                                .expect("buffer block count fits in u32")
-                        })
-                        .sum();
-                    let mut delta_total: u32 = 0;
-                    for cell in &entry.ir.cells {
-                        let dt = cell
-                            .delay_ticks()
-                            .expect("legalized cells carry Some(delay_ticks)");
-                        let base = cell.cell.base_delay_ticks();
-                        let delta = dt.checked_sub(base);
-                        prop_assert!(
-                            delta.is_some(),
-                            "delay_ticks {} < base_delay_ticks {} for cell at {:?} — delay pass regressed below the edition base",
-                            dt,
-                            base,
-                            cell.coord,
-                        );
-                        delta_total = delta_total
-                            .checked_add(delta.unwrap())
-                            .expect("delta_total sum overflowed u32");
-                    }
-                    let lhs = buffer_total
-                        .checked_mul(BUFFER_REPEATER_TICKS)
-                        .expect("buffer_total × BUFFER_REPEATER_TICKS overflowed u32");
-                    prop_assert_eq!(
-                        lhs,
-                        delta_total,
-                        "buffer block count × BUFFER_REPEATER_TICKS ({}) must equal Σ(delay_ticks − base_delay_ticks) ({}) for scope `{}` with xs={:?}",
-                        lhs,
-                        delta_total,
-                        entry.name,
-                        xs,
-                    );
-                }
+                check_phase4_scope(&xs)?;
             }
         }
     }

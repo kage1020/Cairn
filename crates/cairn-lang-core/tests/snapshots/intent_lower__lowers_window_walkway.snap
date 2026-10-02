@@ -1,0 +1,123 @@
+---
+source: crates/cairn-lang-core/tests/intent_lower.rs
+expression: lower_source(&source)
+---
+semantic_level: grouped
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+themes:
+  - name: medieval
+    slots:
+      floor:
+        kind: Token
+        value: oak_planks
+      wall:
+        kind: Token
+        value: cobblestone
+      glass:
+        kind: Token
+        value: glass_pane
+    selectors: []
+defs:
+  - name: cottage
+    size:
+      w: 5
+      h: 5
+    args: {}
+    members:
+      - id: floor
+        role:
+          kind: Floor
+        mat_slot: floor
+        intent_state: {}
+      - id: walls
+        class: outer
+        role:
+          kind: Walls
+        mat_slot: wall
+        intent_state:
+          height:
+            kind: Int
+            value: 4
+      - id: entry
+        role:
+          kind: Door
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          at:
+            kind: Ident
+            value: center
+      - id: front
+        role:
+          kind: Window
+        mat_slot: glass
+        intent_state:
+          side:
+            kind: Ident
+            value: front
+          offset:
+            kind: Int
+            value: 2
+          y:
+            kind: Int
+            value: 3
+          size:
+            kind: Size
+            value:
+              w: 1
+              h: 1
+sites:
+  - name: pair
+    placements:
+      - id: home1
+        role:
+          kind: Place
+        intent_state:
+          use:
+            kind: Ident
+            value: cottage
+          theme:
+            kind: Ident
+            value: medieval
+          at:
+            kind: Ident
+            value: origin
+      - id: home2
+        role:
+          kind: Place
+        intent_state:
+          use:
+            kind: Ident
+            value: cottage
+          theme:
+            kind: Ident
+            value: medieval
+          east_of:
+            kind: Ident
+            value: home1
+          gap:
+            kind: Int
+            value: 4
+      - role:
+          kind: Connect
+        positional:
+          - kind: DotRef
+            value:
+              - home1
+              - entry
+          - kind: Ident
+            value: to
+          - kind: DotRef
+            value:
+              - home2
+              - front
+        intent_state:
+          path:
+            kind: Token
+            value: gravel
+structs: []

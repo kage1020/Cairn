@@ -24,6 +24,17 @@
 //! Comments (`#` to end-of-line), blank lines, and trailing whitespace are
 //! discarded silently; everything else either becomes a token or fails with a
 //! [`LexError`].
+//!
+//! Two kinds of failure, and [`lex`] reports both the same way. A failure in
+//! a line's *indentation* ends the scan, since every token after it would
+//! sit at a level nobody can name. A failure *inside* a line — a character
+//! no token starts with, an unterminated string, a malformed size or
+//! integer — does not end it in the parser's own pass: the stretch is kept
+//! as a [`TokenKind::Unlexed`] and the scan goes on, because the directives
+//! that take their value as raw text to end of line (`@cairn`, `@requires`,
+//! a part's `requires`) judge that text themselves and have a finding of
+//! their own for a value they cannot read. [`crate::parse()`] reports the
+//! deferred failure only when the stretch lands anywhere else.
 
 use crate::error::{IntContext, LexError, Position, Span};
 
@@ -58,11 +69,21 @@ pub struct Token {
 pub enum TokenKind {
     /// Bare identifier: `[A-Za-z_][A-Za-z0-9_]*`.
     Ident(String),
-    /// Integer literal, also used for bit patterns in truth-table rows.
-    /// The raw source lexeme is preserved so callers can distinguish e.g. `00` from `0`.
+    /// A run of decimal digits, carried verbatim.
+    ///
+    /// Not yet a number. The lexer cannot tell an integer literal from a
+    /// truth-table row's bit pattern — both are digits, and only the
+    /// grammar around them says which — so it does not decide: the token
+    /// holds the digits and whoever needs a value parses them into the
+    /// type that position actually takes (`i64` for a value, `u32` for a
+    /// `within` bound). Interpreting here would put an `i64` ceiling on
+    /// every digit run in the language, including the patterns that are
+    /// not numbers at all: a twenty-input truth table whose row reads
+    /// `11111111111111111111` is a legal table, not an overflow.
+    ///
+    /// The lexeme is the whole token for the same reason `01` and `1`
+    /// have to stay different rows: leading zeros are data here.
     Int {
-        /// Parsed integer value.
-        value: i64,
         /// Raw source lexeme (preserves leading zeros).
         lexeme: String,
     },
@@ -77,6 +98,19 @@ pub enum TokenKind {
     At,
     /// `->` arrow.
     Arrow,
+    /// `-` on its own.
+    ///
+    /// Two constructs read one, and neither is an operator. Both are in
+    /// a truth row: a `-` in the input pattern is a don't-care, which the
+    /// parser reassembles out of the run of `Int` and `Minus` tokens the
+    /// lexer split it into, and a `-` in the output position is the row
+    /// declining to constrain what it covers. Everywhere else the parser
+    /// reports it as an unexpected token, which names the `-` it found in
+    /// the position it found it.
+    ///
+    /// The lexer takes `->` greedily, so the last `-` of a run that ends
+    /// at a `>` is an [`TokenKind::Arrow`] and not one of these.
+    Minus,
     /// `=` (key/value or `logic =`).
     Eq,
     /// `>=`.
@@ -113,6 +147,16 @@ pub enum TokenKind {
     Indent,
     /// Indent termination (one DEDENT per nesting level exited).
     Dedent,
+    /// A stretch of a line that is no token: a character no token starts
+    /// with, an unterminated string, or a size or integer the lexer
+    /// refused.
+    ///
+    /// [`lex`] never returns one — it reports the failure as the
+    /// [`LexError`] it is. Only [`crate::parse()`]'s own pass sees these,
+    /// so that a directive whose value is raw text to end of line can take
+    /// the stretch into that text; anywhere else the parse reports the
+    /// same `LexError` `lex` would have.
+    Unlexed,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -125,6 +169,7 @@ impl std::fmt::Display for TokenKind {
             Self::Size(w, h) => write!(f, "size `{w}x{h}`"),
             Self::At => f.write_str("`@`"),
             Self::Arrow => f.write_str("`->`"),
+            Self::Minus => f.write_str("`-`"),
             Self::Eq => f.write_str("`=`"),
             Self::GreaterEq => f.write_str("`>=`"),
             Self::LessEq => f.write_str("`<=`"),
@@ -143,6 +188,11 @@ impl std::fmt::Display for TokenKind {
             Self::Newline => f.write_str("end of line"),
             Self::Indent => f.write_str("indent"),
             Self::Dedent => f.write_str("dedent"),
+            // Not expected to surface: `parse()` reports the deferred
+            // `LexError` ahead of anything the parse found, and a raw value
+            // takes an `Unlexed` as text. Kept for totality, not as wording
+            // a user reads.
+            Self::Unlexed => f.write_str("text that is no token"),
         }
     }
 }
@@ -152,6 +202,46 @@ impl std::fmt::Display for TokenKind {
 /// # Errors
 /// Returns the first [`LexError`] encountered.
 pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
+    let Lexed {
+        tokens,
+        deferred,
+        fatal,
+    } = lex_deferring(source);
+    // Every deferred failure was met before the scan stopped, so the first
+    // of them, if any, is the first failure in the file.
+    match (deferred.into_iter().next(), fatal) {
+        (Some(first), _) => Err(first.error),
+        (None, Some(fatal)) => Err(fatal),
+        (None, None) => Ok(tokens),
+    }
+}
+
+/// A failure inside a line, kept as the [`TokenKind::Unlexed`] at index
+/// `token` rather than ending the scan.
+pub(crate) struct Deferred {
+    /// Index of the `Unlexed` token in [`Lexed::tokens`], so valid only
+    /// against that vector as the scan built it.
+    pub(crate) token: usize,
+    /// What [`lex`] reports for it.
+    pub(crate) error: LexError,
+}
+
+/// The result of a scan that defers failures inside a line.
+pub(crate) struct Lexed {
+    /// Every token scanned, with a [`TokenKind::Unlexed`] for each
+    /// deferred failure. When `fatal` is set, the tokens stop where the
+    /// scan did.
+    pub(crate) tokens: Vec<Token>,
+    /// The failures inside lines, in source order.
+    pub(crate) deferred: Vec<Deferred>,
+    /// The indentation failure that ended the scan, if one did. It comes
+    /// after every entry of `deferred`.
+    pub(crate) fatal: Option<LexError>,
+}
+
+/// Tokenise the source, keeping each failure inside a line as a
+/// [`TokenKind::Unlexed`] token rather than stopping at it.
+pub(crate) fn lex_deferring(source: &str) -> Lexed {
     Lexer::new(source).run()
 }
 
@@ -163,6 +253,7 @@ struct Lexer<'src> {
     col: u32,
     indent_stack: Vec<u32>,
     out: Vec<Token>,
+    deferred: Vec<Deferred>,
 }
 
 /// U+FEFF, the byte-order mark, as it appears in UTF-8.
@@ -193,20 +284,31 @@ impl<'src> Lexer<'src> {
             col: if has_bom { 2 } else { 1 },
             indent_stack: vec![0],
             out: Vec::new(),
+            deferred: Vec::new(),
         }
     }
 
-    fn run(mut self) -> Result<Vec<Token>, LexError> {
+    fn run(mut self) -> Lexed {
         while self.pos < self.bytes.len() {
-            self.scan_line_start()?;
-            self.scan_line_body()?;
+            if let Err(fatal) = self.scan_line_start() {
+                return Lexed {
+                    tokens: self.out,
+                    deferred: self.deferred,
+                    fatal: Some(fatal),
+                };
+            }
+            self.scan_line_body();
         }
         // Close any open indentation when the file ends.
         while self.indent_stack.len() > 1 {
             self.indent_stack.pop();
             self.push_synthetic(TokenKind::Dedent);
         }
-        Ok(self.out)
+        Lexed {
+            tokens: self.out,
+            deferred: self.deferred,
+            fatal: None,
+        }
     }
 
     /// Inspect leading whitespace of a (potential) logical line and emit
@@ -296,14 +398,18 @@ impl<'src> Lexer<'src> {
 
     /// Scan the body of a logical line up to and including a single `Newline`
     /// (or EOF).
-    fn scan_line_body(&mut self) -> Result<(), LexError> {
+    ///
+    /// A token that fails to scan does not end the line: what it covered
+    /// becomes one [`TokenKind::Unlexed`] and the scan resumes where the
+    /// failure left off, which is always past at least one character.
+    fn scan_line_body(&mut self) {
         loop {
             self.skip_spaces();
             let Some(b) = self.peek() else {
                 if !self.last_is_newline() {
                     self.push_synthetic(TokenKind::Newline);
                 }
-                return Ok(());
+                return;
             };
             if b == b'\n' || b == b'\r' {
                 // Recorded before the break is consumed. A `Newline` is
@@ -317,7 +423,7 @@ impl<'src> Lexer<'src> {
                 let position = self.position();
                 self.consume_line_break();
                 self.push_at(TokenKind::Newline, start..self.pos, position);
-                return Ok(());
+                return;
             }
             if b == b'#' {
                 while let Some(c) = self.peek() {
@@ -328,7 +434,15 @@ impl<'src> Lexer<'src> {
                 }
                 continue;
             }
-            self.scan_token(b)?;
+            let start = self.pos;
+            let position = self.position();
+            if let Err(error) = self.scan_token(b) {
+                self.deferred.push(Deferred {
+                    token: self.out.len(),
+                    error,
+                });
+                self.push_at(TokenKind::Unlexed, start..self.pos, position);
+            }
         }
     }
 
@@ -344,6 +458,10 @@ impl<'src> Lexer<'src> {
                 self.advance();
                 self.advance();
                 self.push_at(TokenKind::Arrow, start..self.pos, position);
+            }
+            b'-' => {
+                self.advance();
+                self.push_at(TokenKind::Minus, start..self.pos, position);
             }
             b'=' => {
                 self.advance();
@@ -504,14 +622,15 @@ impl<'src> Lexer<'src> {
             self.push_at(TokenKind::Size(w, h), start..self.pos, position);
             return Ok(());
         }
+        // Digits only, no value: see `TokenKind::Int`. A `Size` above is
+        // the other way round because no production today reads
+        // digits-`x`-digits as anything but a size, so the lexer is
+        // entitled to build one. That is a fact about the current
+        // grammar rather than a guarantee — a truth-table don't-care bit
+        // spelled `x` would make `1x0 -> 1` a `Size(1, 0)`, and this is
+        // the branch that would have to learn about it.
         let lexeme = self.src[start..lexeme_end].to_owned();
-        let value = lexeme.parse::<i64>().map_err(|err| LexError::InvalidInt {
-            position,
-            context: IntContext::IntLiteral,
-            lexeme: lexeme.clone(),
-            kind: *err.kind(),
-        })?;
-        self.push_at(TokenKind::Int { value, lexeme }, start..self.pos, position);
+        self.push_at(TokenKind::Int { lexeme }, start..self.pos, position);
         Ok(())
     }
 

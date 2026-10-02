@@ -1,4 +1,5 @@
-//! Per-edition theme fallback end-to-end (spec versioning-editions §10.7).
+//! Per-edition theme fallback end-to-end (`spec/versioning-editions`
+//! "Java / Bedrock portability").
 //!
 //! Pins ACs on `examples/edition-fallback.crn`: the same source file
 //! resolves to `oak_sign` under `--edition java` and `oak_wall_sign` under
@@ -13,16 +14,8 @@ use std::process::Command;
 use flate2::read::GzDecoder;
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn examples_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-}
+mod common;
+use common::{cargo_bin, examples_dir, write_source};
 
 /// Copy `examples/edition-fallback.crn` into a fresh temp dir so a test can
 /// rely on the source's parent being writable and avoid polluting the repo
@@ -312,12 +305,6 @@ fn placed_source(reference: &str, variants: &[&str]) -> String {
     )
 }
 
-fn write_source(dir: &Path, name: &str, body: &str) -> PathBuf {
-    let path = dir.join(name);
-    fs::write(&path, body).expect("write source");
-    path
-}
-
 #[test]
 fn a_java_build_writes_the_java_variants_block_whatever_the_place_named() {
     // The defect, end to end: `theme=shop_bedrock` bound verbatim on the
@@ -453,8 +440,9 @@ fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
 
 #[test]
 fn a_place_naming_the_logical_theme_builds_under_both_editions() {
-    // The spelling §10.7 prescribes was the one spelling the site path
-    // rejected, because no theme is declared under the bare logical name.
+    // The spelling `spec/versioning-editions` "Java / Bedrock portability"
+    // prescribes was the one spelling the site path rejected, because no
+    // theme is declared under the bare logical name.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(
         tmp.path(),
@@ -530,10 +518,13 @@ fn a_misspelled_variant_is_a_diagnostic_and_not_a_crash() {
             .output()
             .expect("run cairn");
         let code = result.status.code();
-        assert_ne!(
-            code,
-            Some(101),
-            "`cairn {}` must not panic; stderr={}",
+        // Not `assert_ne!(code, Some(101))`: the release profile builds this
+        // binary with `panic = "abort"`, so a panic arrives as a signal and
+        // `code` is `None` — which that comparison would have accepted. Assert
+        // the process exited on its own terms, then that the code is not 101.
+        assert!(
+            matches!(code, Some(c) if c != 101),
+            "`cairn {}` must not panic; exit={code:?} stderr={}",
             args[0],
             String::from_utf8_lossy(&result.stderr),
         );

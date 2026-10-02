@@ -1,9 +1,10 @@
 //! Acceptance tests for the `connect_arity` pass of
 //! `cairn_lang_core::check`.
 //!
-//! `connect` rows have a fixed surface grammar: `connect FROM.PORT to
-//! TO.PORT [path=@MATERIAL]` (spec §9.3.5). The line-based parser
-//! accepts any number of positional values up to the next newline
+//! `connect` rows have a fixed surface grammar, `connect FROM.PORT to
+//! TO.PORT [path=@MATERIAL]`, per
+//! `spec/components-editing-sites` "Ports and `connect`". The line-based
+//! parser accepts any number of positional values up to the next newline
 //! without enforcing the arity, and `intent::lower` carries the
 //! positional list through verbatim. The resolver's `connect` arm
 //! short-circuits with no diagnostic when the row is incomplete, so a
@@ -19,23 +20,16 @@
 //! which drops it and lays no walkway. The endpoint cases below pin the
 //! diagnostic that keeps that drop from being silent.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, check, lower, parse};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
-fn diagnose(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}"));
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
+mod common;
+use common::{diagnose, slice};
 
 fn arity_only(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
     diagnostics
         .into_iter()
         .filter(|d| d.code == DiagnosticCode::ConnectArity)
         .collect()
-}
-
-fn slice<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
-    &source[diag.span.clone()]
 }
 
 const PROLOGUE: &str = "struct hut size=3x3\n  \
@@ -486,7 +480,7 @@ fn ca_17b_to_without_target_suppresses_endpoint_findings() {
 
 /// `connect a.entry "to" b.entry` used to render as ``expected `to`
 /// ... got `to` `` because the message printed a string literal's
-/// contents verbatim. `spec/lint.md` requires messages an author can
+/// contents verbatim. `spec/lint` requires messages an author can
 /// act on without re-reading the source; a message that asks for the
 /// thing it says it received cannot be acted on at all. The quotes now
 /// survive into the message, and the bare-keyword rendering stays
@@ -526,7 +520,7 @@ connect 1 to 2 path=@gravel\n";
 /// example: a bare identifier is missing its port, a quoted reference
 /// only has to lose its quotes, and an extra dot has to go. Each is a
 /// single edit the author can apply from the message alone, which is
-/// what `spec/lint.md` asks of a diagnostic.
+/// what `spec/lint` asks of a diagnostic.
 #[test]
 fn ca_20_endpoint_notes_name_the_repair_for_the_shape_at_hand() {
     let cases = [

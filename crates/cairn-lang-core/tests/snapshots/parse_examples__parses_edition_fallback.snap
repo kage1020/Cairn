@@ -1,0 +1,118 @@
+---
+source: crates/cairn-lang-core/tests/parse_examples.rs
+expression: module
+---
+headers:
+  - kind: Cairn
+    version: "2026.06"
+  - kind: Requires
+    requirement: version>=1.20
+items:
+  - kind: Theme
+    name: shop_java
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: floor.stone.smooth
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: wall.stone.cobble
+      - kind: Slot
+        slot: floating_text
+        value:
+          kind: Token
+          value: sign.oak
+  - kind: Theme
+    name: shop_bedrock
+    body:
+      - kind: Slot
+        slot: floor
+        value:
+          kind: Token
+          value: floor.stone.smooth
+      - kind: Slot
+        slot: wall
+        value:
+          kind: Token
+          value: wall.stone.cobble
+      - kind: Slot
+        slot: floating_text
+        value:
+          kind: Token
+          value: sign.oak_wall
+  - kind: Struct
+    name: shop
+    args:
+      - key: size
+        value:
+          kind: Size
+          value:
+            w: 5
+            h: 5
+    body:
+      - kind: Generic
+        keyword: floor
+        args:
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floor
+      - kind: Generic
+        keyword: walls
+        args:
+          - key: class
+            value:
+              kind: Ident
+              value: outer
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: wall
+          - key: height
+            value:
+              kind: Int
+              value: 3
+      - kind: Generic
+        keyword: door
+        args:
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: at
+            value:
+              kind: Ident
+              value: center
+      - kind: Generic
+        keyword: window
+        args:
+          - key: class
+            value:
+              kind: Ident
+              value: display
+          - key: side
+            value:
+              kind: Ident
+              value: front
+          - key: offset
+            value:
+              kind: Int
+              value: 2
+          - key: y
+            value:
+              kind: Int
+              value: 3
+          - key: size
+            value:
+              kind: Size
+              value:
+                w: 1
+                h: 1
+          - key: mat_slot
+            value:
+              kind: Ident
+              value: floating_text

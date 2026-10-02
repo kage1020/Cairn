@@ -9,6 +9,7 @@
 
 pub mod ast;
 pub mod block_array;
+pub mod calver;
 pub mod check;
 pub mod edition;
 pub mod error;
@@ -31,8 +32,8 @@ pub use check::{Diagnostic, DiagnosticCode, Severity, check};
 pub use edition::{Edition, UnknownEdition};
 pub use error::{LexError, ParseError, Position, Span};
 pub use ids::{
-    IdError, KeyConstructError, KeyParseError, PlaceId, PortId, SiteName, WalkwayEndpoint,
-    WalkwayScopeKey,
+    EndpointSegmentRole, IdError, KeyConstructError, KeyParseError, KeySegmentRole, PlaceId,
+    PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem,
 };
 pub use intent::{
     CircuitRegion, IntentModule, Member, MemberRole, ScopeKind, SemanticLevel, circuit_regions,

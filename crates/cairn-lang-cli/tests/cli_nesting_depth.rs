@@ -17,30 +17,13 @@
 //! reaches `std::process`. Asserting `Some(1)` rejects every one of these.)
 
 use std::fmt::Write as _;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH};
 use cairn_lang_redstone::synth::MAX_LOWERING_DEPTH;
 use tempfile::TempDir;
 
-fn cargo_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
-}
-
-fn run(args: &[&str]) -> std::process::Output {
-    Command::new(cargo_bin())
-        .args(args)
-        .output()
-        .expect("failed to invoke cairn binary")
-}
-
-fn write(dir: &Path, name: &str, source: &str) -> PathBuf {
-    let path = dir.join(name);
-    fs::write(&path, source).expect("write source");
-    path
-}
+mod common;
+use common::{cairn_argv, write_source};
 
 fn nested_list(depth: usize) -> String {
     format!(
@@ -117,7 +100,7 @@ struct chain size=8x6\n\
 \x20\x20walls class=outer mat_slot=wall height=3\n\
 \x20\x20door  id=front side=front at=center mat_slot=door\n\
 \x20\x20pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n\
-\x20\x20pressure_plate id=p2 at=inside.front  offset=0 y=0 -> sig.b\n";
+\x20\x20pressure_plate id=p2 at=inside.front  offset=1 y=0 -> sig.b\n";
 
 /// A `logic` chain of `stages` bindings under `prefix`, declared so that
 /// each binding references the next one to be written.
@@ -152,7 +135,7 @@ fn forward_chain(prefix: &str, stages: usize) -> String {
 fn depth_1_every_command_refuses_deep_nesting_instead_of_aborting() {
     let tmp = TempDir::new().expect("tempdir");
     for (shape, source) in over_limit_sources() {
-        let path = write(tmp.path(), &format!("{shape}.crn"), &source);
+        let path = write_source(tmp.path(), &format!("{shape}.crn"), &source);
         let file = path.to_str().unwrap();
         let out_dir = tmp.path().join(format!("out-{shape}"));
 
@@ -171,7 +154,7 @@ fn depth_1_every_command_refuses_deep_nesting_instead_of_aborting() {
             ],
             vec!["synth", file, "--experimental-logic-synth"],
         ] {
-            let out = run(&args);
+            let out = cairn_argv(&args);
             let code = out.status.code();
             assert_eq!(
                 code,
@@ -187,22 +170,43 @@ fn depth_1_every_command_refuses_deep_nesting_instead_of_aborting() {
 
 #[test]
 fn depth_2_the_refusal_says_what_the_limit_is() {
+    // Both renderings, because `parse` defaults to `--format json` and a
+    // refusal there is the failure document on stdout, not prose. The
+    // author needs the bound and the position either way.
     let tmp = TempDir::new().expect("tempdir");
     for (shape, source) in over_limit_sources() {
-        let path = write(tmp.path(), &format!("{shape}.crn"), &source);
-        let out = run(&["parse", path.to_str().unwrap()]);
-        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        let path = write_source(tmp.path(), &format!("{shape}.crn"), &source);
         let bound = if shape == "flat-or" {
             MAX_EXPR_DEPTH
         } else {
             MAX_NESTING_DEPTH
         };
+
+        let out = cairn_argv(&["parse", path.to_str().unwrap(), "--format", "debug"]);
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
         assert!(
             stderr.contains("nesting is limited to")
                 && stderr.contains(&bound.to_string())
                 && stderr.contains(&format!("{}:", path.display())),
             "{shape}: the message must name the bound it hit and the position so the \
              author can act on it; got {stderr}",
+        );
+
+        let out = cairn_argv(&["parse", path.to_str().unwrap()]);
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        let parsed: serde_json::Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|err| panic!("{shape}: stdout should be JSON, got {stdout:?}: {err}"));
+        let d = &parsed["diagnostics"][0];
+        assert_eq!(d["code"], "E_PARSE", "{shape}: {stdout}");
+        assert!(
+            d["primary"].as_str().is_some_and(
+                |p| p.contains("nesting is limited to") && p.contains(&bound.to_string())
+            ),
+            "{shape}: the document must name the bound too; got {stdout}",
+        );
+        assert!(
+            d["line"].as_u64().is_some_and(|line| line >= 1),
+            "{shape}: and the position; got {stdout}",
         );
     }
 }
@@ -213,8 +217,8 @@ fn depth_3_nesting_at_the_limit_still_parses() {
     // is legal, so both sides are pinned.
     let tmp = TempDir::new().expect("tempdir");
     for (shape, source) in at_limit_sources() {
-        let path = write(tmp.path(), &format!("ok-{shape}.crn"), &source);
-        let out = run(&["parse", path.to_str().unwrap()]);
+        let path = write_source(tmp.path(), &format!("ok-{shape}.crn"), &source);
+        let out = cairn_argv(&["parse", path.to_str().unwrap()]);
         assert_eq!(
             out.status.code(),
             Some(0),
@@ -239,8 +243,8 @@ fn depth_4_a_reverse_declared_logic_chain_is_refused_not_aborted() {
     source.push_str(&reverse_chain("s", stages));
     source.push_str("  circuit region=floor void=2\n");
 
-    let path = write(tmp.path(), "reverse_chain.crn", &source);
-    let out = run(&[
+    let path = write_source(tmp.path(), "reverse_chain.crn", &source);
+    let out = cairn_argv(&[
         "synth",
         path.to_str().unwrap(),
         "--experimental-logic-synth",
@@ -278,8 +282,8 @@ fn depth_5_a_forward_declared_chain_of_the_same_size_still_lowers() {
     let _ = writeln!(source, "  door[id=front] opened_by=sig.s{stages}");
     source.push_str("  circuit region=floor void=2\n");
 
-    let path = write(tmp.path(), "forward_chain.crn", &source);
-    let out = run(&[
+    let path = write_source(tmp.path(), "forward_chain.crn", &source);
+    let out = cairn_argv(&[
         "synth",
         path.to_str().unwrap(),
         "--experimental-logic-synth",
@@ -312,8 +316,8 @@ fn depth_6_each_independent_chain_reports_its_own_root_cause() {
     let _ = writeln!(source, "  door[id=back] opened_by=sig.q{stages}");
     source.push_str("  circuit region=floor void=2\n");
 
-    let path = write(tmp.path(), "two_chains.crn", &source);
-    let out = run(&[
+    let path = write_source(tmp.path(), "two_chains.crn", &source);
+    let out = cairn_argv(&[
         "synth",
         path.to_str().unwrap(),
         "--experimental-logic-synth",
@@ -342,8 +346,8 @@ fn depth_7_the_chain_length_the_message_quotes_is_the_real_one() {
         source.push_str(&reverse_chain("s", stages));
         source.push_str("  circuit region=floor void=2\n");
 
-        let path = write(tmp.path(), &format!("chain-{stages}.crn"), &source);
-        let out = run(&[
+        let path = write_source(tmp.path(), &format!("chain-{stages}.crn"), &source);
+        let out = cairn_argv(&[
             "synth",
             path.to_str().unwrap(),
             "--experimental-logic-synth",

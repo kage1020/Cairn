@@ -297,8 +297,8 @@ fn f9_output_filename_strips_struct_prefix() {
 fn output_filename_strips_site_and_name_prefixes_to_place_id() {
     // Site keys take the form `site::SITE::PLACE_ID`; the on-disk name
     // uses only the `place id=` so siblings share a flat output dir with
-    // structs. Multi-site flat-namespace collisions are deliberately out
-    // of scope for the initial site lowering.
+    // structs. Two sites placing one id therefore share a file name, which
+    // the resolver refuses as `E_OUTPUT_NAME_COLLISION`.
     assert_eq!(output_filename_nbt("site::hamlet::home1"), "home1.nbt");
     assert_eq!(
         output_filename_nbt("site::village::cottage_2"),

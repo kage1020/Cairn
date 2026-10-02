@@ -1,40 +1,26 @@
 //! Integration tests for `cairn_lang_redstone::compile_edition_netlist`.
 //!
 //! Locks the observable behaviours of the Edition Netlist IR slice
-//! (`spec/redstone` §14.6 `Logical Cell → Edition Cell → Physical Tile`,
-//! second tier): the `examples/redstone-door.crn` happy path, per-edition
-//! mapping for every reachable `LogicalCell` (`And` / `Or` / `Not`), the
+//! (`spec/redstone` "Edition differences", `Logical Cell → Edition Cell →
+//! Physical Tile`, second tier): the `examples/redstone-door.crn` happy
+//! path, per-edition mapping for every reachable `LogicalCell` (`And` /
+//! `Or` / `Not`), the
 //! canonical port order carried through from the Netlist IR, the
 //! per-edition `*Unpinned` placeholders that stand in for the
 //! parser-unreachable cells (`Xor` / `Nand` / `Nor` / `Mux`), the
 //! `edition` field on the JSON wire form, and empty-scope elision.
 
-use std::path::PathBuf;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::check::Severity;
-use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
     EditionCell, EditionCellNode, GateKind, GateNode, InputPort, LogicIr, NetRef, OutputPort,
     PortName, ScopeKind, ScopedLogicIr, ScopedLogicIrEntry, SignalRef, compile_edition_netlist,
-    compile_netlist, synthesize,
+    compile_netlist,
 };
 
-fn load_example(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()))
-}
-
-fn synth_source(source: &str) -> cairn_lang_redstone::SynthOutput {
-    let module = parse(source).expect("parse");
-    let intent = lower(&module);
-    synthesize(&intent)
-}
+mod common;
+use common::{load_example, synth_source};
 
 fn sig(name: &str) -> DottedRef {
     let mut parts = name.split('.').map(str::to_owned);
@@ -132,7 +118,7 @@ struct sim size=5x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.and_ab   = sig.a and sig.b
   logic sig.or_ab    = sig.a or sig.b
@@ -325,7 +311,7 @@ struct alpha size=5x5
 struct beta size=5x5
   floor mat_slot=wall
   pressure_plate id=q at=front.outside offset=0 y=0 -> sig.b1
-  pressure_plate id=r at=inside.front  offset=0 y=0 -> sig.b2
+  pressure_plate id=r at=inside.front  offset=1 y=0 -> sig.b2
   logic sig.both = sig.b1 and sig.b2
   door id=e side=front at=center mat_slot=wall opened_by=sig.both
 ";
@@ -363,7 +349,7 @@ struct sim size=5x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.both = sig.a and sig.b
   logic sig.na   = not sig.a
@@ -413,7 +399,7 @@ struct sim size=5x5
   floor mat_slot=wall
 
   pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=q at=inside.front  offset=0 y=0 -> sig.b
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
 
   logic sig.both = sig.a and sig.b
   logic sig.na   = not sig.a
