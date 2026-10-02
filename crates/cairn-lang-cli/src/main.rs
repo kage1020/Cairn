@@ -2772,18 +2772,16 @@ fn run_compile(
     // against the pinned version's table, and reported below rather than
     // here — see `resolve_target`. A target that does not resolve leaves
     // lowering with nothing to check against, which is the same "no target
-    // pinned" mode `cairn check` runs in.
+    // pinned" mode `cairn check` runs in. So does a target below a declared
+    // floor, so `E_VERSION_CAP` is not preceded by findings it makes moot;
+    // see `load_and_lower`.
     let resolved_target = resolve_target(edition, target);
-    let pinned = resolved_target
-        .as_ref()
-        .ok()
-        .map(ResolvedTarget::mc_version);
     let Lowered {
         source,
         block_ir,
         dropped_scopes,
         version_floors,
-    } = match load_and_lower(file, edition, pinned) {
+    } = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
         Ok(lowered) => lowered,
         Err(code) => return code,
     };
@@ -3001,12 +2999,26 @@ struct Lowered {
     version_floors: Vec<VersionFloor>,
 }
 
+/// `target` is the `--target` the run resolved, or `None` when it did not
+/// resolve. Lowering checks block ids against that target's table, except
+/// when the target sits below a floor the source declares: `run_compile`
+/// then refuses it with `E_VERSION_CAP`, and an `E_UNKNOWN_ID` for a block
+/// that version lacks — usually the very reason the floor was declared —
+/// would send the author to replace a block when the repair is
+/// `--target`. Lowered with no target pinned, the source is held to what
+/// `cairn check` without `--target` holds it to, so a finding that does not
+/// depend on the target, such as `E_INVALID_REQUIRES`, is still reported
+/// first.
 fn load_and_lower(
     file: &Path,
     edition: EditionArg,
-    mc_version: Option<&str>,
+    target: Option<&ResolvedTarget>,
 ) -> Result<Lowered, ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
+    let version_floors = declared_version_floors(&module, edition.as_edition());
+    let mc_version = target
+        .filter(|target| floor_below_target(&version_floors, edition, target).is_none())
+        .map(ResolvedTarget::mc_version);
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition.as_edition()));
     // The pack is edition-specific: an abstract `@token` resolves through
@@ -3031,10 +3043,10 @@ fn load_and_lower(
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     Ok(Lowered {
-        version_floors: declared_version_floors(&module, edition.as_edition()),
         source,
         block_ir,
         dropped_scopes,
+        version_floors,
     })
 }
 
@@ -3082,11 +3094,7 @@ fn enforce_version_floor(
         report_unplaceable_floor(file, source, floor, edition, &order);
         return Err(ExitCode::from(1));
     }
-    let target_key = i64::from(target.version_int());
-    let Some(floor) = floors
-        .iter()
-        .find(|floor| order.verdict(&floor.version, target_key) == FloorVerdict::Below)
-    else {
+    let Some(floor) = floor_below_target(floors, edition, target) else {
         return Ok(());
     };
     let position = LineStarts::new(source).position(source, floor.span.start);
@@ -3141,6 +3149,25 @@ fn enforce_version_floor(
         );
     }
     Err(ExitCode::from(1))
+}
+
+/// The first floor, in source order, that `target` sits below.
+///
+/// A floor the edition's table cannot place answers neither way, so it is
+/// never this floor; [`enforce_version_floor`] reports it on its own.
+fn floor_below_target<'a>(
+    floors: &'a [VersionFloor],
+    edition: EditionArg,
+    target: &ResolvedTarget,
+) -> Option<&'a VersionFloor> {
+    if floors.is_empty() {
+        return None;
+    }
+    let order = version_order(edition.registry_pack());
+    let target_key = i64::from(target.version_int());
+    floors
+        .iter()
+        .find(|floor| order.verdict(&floor.version, target_key) == FloorVerdict::Below)
 }
 
 /// Report a floor the target edition's table cannot place.

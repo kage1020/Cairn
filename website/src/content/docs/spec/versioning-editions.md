@@ -220,6 +220,12 @@ any artifact is prepared, so a refused build leaves no structure file and no loc
 matters: a lock records what was verified, and it must never say `verified: true` for a target the
 source itself rules out.
 
+A target below a floor usually also lacks a block the file uses, since a block introduced after the
+target is the common reason to declare one. Such a build is `E_VERSION_CAP` alone: the source's block
+ids are not checked against a target it disowns, so no `E_UNKNOWN_ID` tells the author to replace
+the block the floor was declared for. Findings that do not depend on the target, such as
+`E_INVALID_REQUIRES`, are still reported first.
+
 ### The hint is weighed against the floor
 
 `@intended_targets` ([§5.3](/spec/syntax/#53-headers)) is a wish rather than a verification record, and the
