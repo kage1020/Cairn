@@ -251,6 +251,65 @@ fn info_degraded_count_matches_compile_intent_degraded_warnings() {
 }
 
 #[test]
+fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
+    // `roof-hip`'s four degraded entries are four states of one id, and the
+    // build's warning named the id alone, so it printed two pairs of
+    // identical lines. Each warning now names the Java state, the way
+    // `info`'s note does, so the lines are distinct and each can be
+    // matched to the note about the same entry.
+    let axes = info_json("roof-hip.crn", "bedrock");
+    let entries = portability_entry(&axes, "bedrock")["degraded_entries"]
+        .as_array()
+        .expect("degraded_entries is a JSON array")
+        .clone();
+    assert!(entries.len() > 1, "premise: several entries degrade");
+
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let copied = tmp.path().join("roof-hip.crn");
+    std::fs::copy(examples_dir().join("roof-hip.crn"), &copied).expect("copy roof-hip");
+    let compile = Command::new(cargo_bin())
+        .args([
+            "compile",
+            copied.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--out",
+            tmp.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("run cairn");
+    let stderr = String::from_utf8_lossy(&compile.stderr);
+    assert!(compile.status.success(), "stderr={stderr}");
+    let warnings: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("W_INTENT_DEGRADED"))
+        .collect();
+    let distinct: std::collections::BTreeSet<&&str> = warnings.iter().collect();
+    assert_eq!(
+        distinct.len(),
+        warnings.len(),
+        "a warning repeats: {warnings:?}"
+    );
+    assert_eq!(
+        warnings.len(),
+        entries.len(),
+        "one warning per entry: {warnings:?}"
+    );
+    for entry in &entries {
+        let named = format!(
+            "`{}[{}]`",
+            entry["id"].as_str().expect("an id"),
+            entry["states"].as_str().expect("states"),
+        );
+        assert_eq!(
+            warnings.iter().filter(|line| line.contains(&named)).count(),
+            1,
+            "exactly one warning names {named}: {warnings:?}",
+        );
+    }
+}
+
+#[test]
 fn ac4_unknown_edition_rejected_with_exit_two() {
     // AC4: `--editions foo` fails before dry-run lowering runs (which
     // would otherwise silently produce a zero-fill row that a caller

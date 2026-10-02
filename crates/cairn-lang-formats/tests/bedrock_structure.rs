@@ -260,7 +260,8 @@ fn m4b_stair_states_map_to_bedrock_vocabulary() {
 #[test]
 fn m4c_non_straight_stair_shape_degrades() {
     // AC10: a non-straight stair shape has no Bedrock state; the build
-    // succeeds but raises exactly one W_INTENT_DEGRADED note naming the id.
+    // succeeds but raises exactly one W_INTENT_DEGRADED note, keyed by the
+    // id and naming the Java state the entry came from.
     let mut stairs = BlockState::bare("minecraft:oak_stairs");
     stairs
         .properties
@@ -282,7 +283,7 @@ fn m4c_non_straight_stair_shape_degrades() {
     assert_eq!(
         notes[0].message,
         degradation_message(
-            "minecraft:oak_stairs",
+            "minecraft:oak_stairs[facing=east,half=bottom,shape=outer_left]",
             &DroppedIntent::Shape {
                 value: "outer_left".to_owned(),
             },
@@ -352,4 +353,148 @@ fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
         ),
         "unexpected error: {err}"
     );
+}
+
+fn stair(facing: &str, shape: &str) -> BlockState {
+    let mut stairs = BlockState::bare("minecraft:oak_stairs");
+    for (key, value) in [("facing", facing), ("half", "bottom"), ("shape", shape)] {
+        stairs.properties.insert(key.to_owned(), value.to_owned());
+    }
+    stairs
+}
+
+/// The `block_palette` entries of a built root.
+fn block_palette(root: &Compound) -> &Vec<Tag> {
+    let structure = structure_compound(root);
+    let Some(Tag::Compound(palette)) = structure.entries.get("palette") else {
+        panic!("palette is not a Compound");
+    };
+    let Some(Tag::Compound(default)) = palette.entries.get("default") else {
+        panic!("palette.default is not a Compound");
+    };
+    let Some(Tag::List(entries)) = default.entries.get("block_palette") else {
+        panic!("block_palette is not a List");
+    };
+    &entries.items
+}
+
+/// Layer 0 of `block_indices`, as integers.
+fn block_layer(root: &Compound) -> Vec<i32> {
+    let Some(Tag::List(layers)) = structure_compound(root).entries.get("block_indices") else {
+        panic!("block_indices is not a List");
+    };
+    let Tag::List(layer) = &layers.items[0] else {
+        panic!("layer 0 is not a List");
+    };
+    layer
+        .items
+        .iter()
+        .map(|tag| match tag {
+            Tag::Int(slot) => *slot,
+            other => panic!("block index is not an Int: {other:?}"),
+        })
+        .collect()
+}
+
+/// Stairs that differ only in `shape` are distinct Java states and one
+/// Bedrock block once `shape` is dropped. The written palette is a set:
+/// they share one `block_palette` entry, and every voxel is written as
+/// the slot of the block it holds. Each degradation note names its own
+/// Java state, so no two read the same.
+#[test]
+fn stairs_that_differ_only_in_a_dropped_shape_share_one_palette_entry() {
+    let mut palette = Palette::new_with_air();
+    let java = [
+        stair("north", "outer_left"),
+        stair("north", "straight"),
+        stair("south", "outer_right"),
+        stair("north", "outer_right"),
+        stair("south", "outer_left"),
+    ];
+    let mut voxels = vec![PaletteIndex::AIR];
+    voxels.extend(java.iter().map(|state| palette.intern(state.clone())));
+    let ba = BlockArray {
+        dims: Dims { x: 1, y: 1, z: 6 },
+        palette,
+        voxels,
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: "struct::corners".to_owned(),
+    };
+    let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
+
+    let entries = block_palette(&root);
+    for (i, a) in entries.iter().enumerate() {
+        for b in &entries[i + 1..] {
+            assert_ne!(a, b, "block_palette holds one block twice: {entries:?}");
+        }
+    }
+    // Air, one north stair, one south stair.
+    assert_eq!(entries.len(), 3, "{entries:?}");
+    let Tag::Compound(air) = &entries[0] else {
+        panic!("slot 0 is not a Compound");
+    };
+    assert_eq!(
+        air.entries.get("name"),
+        Some(&Tag::String("minecraft:air".to_owned()))
+    );
+
+    // Every voxel is written as a slot the palette has, and that slot holds
+    // the block the voxel's own entry translates to.
+    let layer = block_layer(&root);
+    let direction = |slot: i32| {
+        let Tag::Compound(entry) = &entries[usize::try_from(slot).expect("slot")] else {
+            panic!("entry is not a Compound");
+        };
+        let Some(Tag::Compound(states)) = entry.entries.get("states") else {
+            panic!("states is not a Compound");
+        };
+        states.entries.get("weirdo_direction").cloned()
+    };
+    assert_eq!(layer[0], 0, "air stays at slot 0");
+    // `weirdo_direction` 3 is north and 2 is south.
+    let expected = [3, 3, 2, 3, 2];
+    for (z, want) in expected.into_iter().enumerate() {
+        assert_eq!(
+            direction(layer[z + 1]),
+            Some(Tag::Int(want)),
+            "voxel {}",
+            z + 1
+        );
+    }
+    assert_eq!(
+        layer[1], layer[2],
+        "north outer_left and north straight are one block"
+    );
+    assert_eq!(layer[1], layer[4]);
+    assert_eq!(layer[3], layer[5]);
+
+    // Four corner shapes degrade; `straight` drops losslessly.
+    let messages: Vec<&str> = notes.iter().map(|note| note.message.as_str()).collect();
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    for (i, a) in messages.iter().enumerate() {
+        for b in &messages[i + 1..] {
+            assert_ne!(a, b, "two notes read the same: {messages:?}");
+        }
+    }
+    assert_eq!(
+        messages[0],
+        degradation_message(
+            "minecraft:oak_stairs[facing=north,half=bottom,shape=outer_left]",
+            &DroppedIntent::Shape {
+                value: "outer_left".to_owned(),
+            },
+        ),
+    );
+    assert!(notes.iter().all(|note| note.id == "minecraft:oak_stairs"));
+
+    // The streamed writer writes the same merged structure as the tree.
+    let mut tree = Vec::new();
+    write_mcstructure(&mut tree, &root).expect("write tree");
+    let (prepared, _) =
+        cairn_lang_formats::bedrock_structure::prepare_mcstructure(&ba, &target_1_21_60())
+            .expect("prepare");
+    let mut streamed = Vec::new();
+    prepared.write(&mut streamed).expect("stream");
+    assert_eq!(streamed, tree);
 }

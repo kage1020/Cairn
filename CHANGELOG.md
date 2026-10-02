@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- *(formats)* A Bedrock build printed identical `W_INTENT_DEGRADED` lines, and its `.mcstructure`
+  palette held one block several times. `roof-hip`'s four degraded stairs differ only in `facing`,
+  which the warning left out, so lines 1 and 3 and lines 2 and 4 were byte-identical. Each warning
+  now names the Java state it came from, `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]`,
+  as `cairn info`'s note does. And once `shape` is dropped, several Java states translate to one
+  Bedrock state: those entries now share the first one's `block_palette` slot, with `block_indices`
+  written through the merge and air kept at `0`, so the written palette is a set like the one it is
+  built from. The Java palette and `info`'s per-entry counts are unchanged.
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added

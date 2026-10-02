@@ -212,14 +212,21 @@ pub fn degradation_detail(dropped: &DroppedIntent) -> String {
 /// [`degradation_detail`] with the block that carried the intent, as
 /// `W_INTENT_DEGRADED` reports it.
 ///
+/// `block` is how the entry is named, quoted as given. The `.mcstructure`
+/// writer passes the Java state the entry came from,
+/// `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]`,
+/// as `cairn info`'s note names it: degradation is a fact about the state
+/// combination, and one id reaches the palette once per combination, so a
+/// warning naming the id alone repeats itself word for word.
+///
 /// The family word comes out of the same `match` for the same reason the
 /// sentence does: `stair` is true of this variant, not of the type.
 #[must_use]
-pub fn degradation_message(id: &str, dropped: &DroppedIntent) -> String {
+pub fn degradation_message(block: &str, dropped: &DroppedIntent) -> String {
     let family = match dropped {
         DroppedIntent::Shape { .. } => "stair",
     };
-    format!("{family} `{id}` {}", degradation_detail(dropped))
+    format!("{family} `{block}` {}", degradation_detail(dropped))
 }
 
 fn translate_stair(

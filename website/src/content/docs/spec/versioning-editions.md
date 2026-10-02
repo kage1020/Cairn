@@ -517,7 +517,9 @@ entry is `{id, states, dropped}`:
 Two lists rather than one under a category tag, and `states` rather than the ID alone. Degradation
 is a fact about the *state combination*, not about the block: one ID reaches this list once per
 combination that loses something, and `roof-hip`'s four entries are four spellings of
-`minecraft:spruce_stairs`. A list keyed by the ID alone would print the same line four times.
+`minecraft:spruce_stairs`. A list keyed by the ID alone would print the same line four times. The
+build's `W_INTENT_DEGRADED` names each entry the same way, as `id[states]`, so each warning is
+distinct and matches the note about the same entry.
 
 `dropped` carries the property and the value rather than the sentence about them, for the reason the
 `unsupported` reasons do: a consumer that reads this should not have to parse English to learn which
