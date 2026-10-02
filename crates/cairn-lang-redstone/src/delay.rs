@@ -78,7 +78,7 @@ use crate::placement_ir::{
 };
 use std::collections::{HashMap, HashSet};
 
-use crate::routing_geometry::{NetTree, net_label, net_ref_key, sum_over_driving_nets};
+use crate::routing_geometry::{NetTree, faces, net_label, net_ref_key, sum_over_driving_nets};
 use crate::saturating_index;
 
 /// Signal-attenuation ceiling (`spec/redstone` "Place-and-route" —
@@ -742,7 +742,13 @@ fn last_full_strength(tree: &NetTree, sites: &HashSet<CellCoord>, coord: CellCoo
 
 /// Whether a repeater on `coord` would carry the signal on: one coord
 /// before it and exactly one after, all three at the same height and
-/// on one line.
+/// on one line, and no other coord of the net touching it.
+///
+/// The last is asked of the grid, not of the parent links. Dust joins
+/// the dust beside it whether or not the tree runs between them, and a
+/// repeater joins only the blocks at its back and front — so a strand
+/// of the same net beside it, which the tree reaches some other way,
+/// would be severed from the dust the repeater replaces.
 fn carries_straight_through(
     tree: &NetTree,
     children: &HashMap<CellCoord, Vec<CellCoord>>,
@@ -762,7 +768,11 @@ fn carries_straight_through(
         )
     };
     let (dx, dy, dz) = step(before, coord);
-    dy == 0 && (dx, dy, dz) == step(coord, *after)
+    // `route_to` answers for the source too, which has no parent.
+    let on_net = |face: CellCoord| tree.parent(face).is_some() || tree.route_to(face).is_some();
+    dy == 0
+        && (dx, dy, dz) == step(coord, *after)
+        && faces(coord).all(|face| face == before || face == *after || !on_net(face))
 }
 
 /// The fewest buffer repeaters that keep `segment` blocks of dust at

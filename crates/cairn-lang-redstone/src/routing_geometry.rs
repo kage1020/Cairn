@@ -297,6 +297,17 @@ fn stepped(from: CellCoord, (dx, dy, dz): (i64, i64, i64)) -> Option<CellCoord> 
     ))
 }
 
+/// The six coords one step from `coord`, every face of the block on
+/// it: [`beside`] and the two straight above and below.
+///
+/// What a block standing on `coord` touches, as against the dust on it
+/// joins, which is [`beside`]'s question.
+pub(crate) fn faces(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
+    STEPS
+        .into_iter()
+        .filter_map(move |delta| stepped(coord, delta))
+}
+
 /// The coords a strand of dust on `coord` reaches: the four steps that
 /// keep it in its own plane.
 ///
