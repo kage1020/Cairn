@@ -133,6 +133,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         region,
         cell_coords,
         inputs,
+        column,
         blocks,
     } = match open_scope(entry) {
         Err(Skipped::Empty) => return Ok((source.clone(), Vec::new())),
@@ -153,7 +154,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         entry,
         "placed",
         &region,
-        source_of_net(&region, &cell_coords, inputs),
+        source_of_net(&region, column, &cell_coords, inputs),
     )?;
 
     // Occupancy for the congestion figure below: the blocks, then the
@@ -311,7 +312,7 @@ mod tests {
         use cairn_lang_core::{lower, parse};
 
         use crate::routing_geometry::{
-            Router, block_sites, collect_nets, input_pad, manhattan, net_trees,
+            PadColumn, Router, block_sites, collect_nets, input_pad, manhattan, net_trees,
         };
 
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -357,7 +358,7 @@ mod tests {
                     let router = Router::new(&region, &blocks);
                     let nets = collect_nets(ir);
                     let trees = net_trees(&nets, &router, |net| match net {
-                        NetRef::Input(i) => input_pad(i as usize, &region),
+                        NetRef::Input(i) => input_pad(i as usize, PadColumn::of(ir), &region),
                         NetRef::Cell(j) => coords[j as usize],
                     });
                     let where_it_is = format!(
@@ -467,7 +468,7 @@ mod tests {
             name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
             span: Span::default(),
         });
-        // The pad lands at (0,0,1). Walling the row at (1,0,0) and the
+        // The pad lands at (0,0,0). Walling the row at (1,0,0) and the
         // course above the two sinks leaves them nothing to be fed
         // from, and `void=1` reserves no layer to come in over.
         for coord in [

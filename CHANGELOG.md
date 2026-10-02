@@ -1584,6 +1584,43 @@
   `spec/lint` "Machine-readable payload" is borrowed for the shape of a finding and otherwise
   untouched: this is a row of a report `info` writes on a run it does not refuse, not a diagnostic.
 
+- *(redstone)* Placement stood I/O pads face to face with cell bodies. The pads step along `z` from
+  `0`, so pad #1 stood on the cell row: in the input-pad column against the first cell at every
+  width, and in the actuator-pad column against the last cell whenever the row filled the region. A
+  pad is a terminal of one net, and the router's one-step rule keeps one net's dust away from
+  another's rather than a pad away from a cell, so nothing looked at it. Here the inverter reads
+  only `sig.a`, and both of `sig.b`'s pads stood against it — `--stage placement` and
+  `--stage crossing` both exited 0:
+
+  ```
+  struct s size=3x5
+    ...
+    logic sig.x = not sig.a
+    door[id=d0] opened_by=sig.x
+    door[id=d1] opened_by=sig.b
+  ```
+
+  ```
+  "outputs":[...,{"name":["sig","b"],"driver":{"kind":"input","index":1},"pad":{"x":2,"y":0,"z":1}}]
+  "cells":[{"cell":"java_inverter_torch",...,"coord":{"x":1,"y":0,"z":1}}]
+  ```
+
+  In a scope with cells the pads now skip the cell row — pad `i` stands at `z = i` below it and at
+  `z = i + 1` from it on — so no pad shares a face with a cell at any width the row check accepts. A
+  scope with no cells has no cell row, and its pads keep `z = i`. One decision, read by both the pad
+  coordinates and the pad-row refusal, says which applies. Skipping the row costs a row of depth
+  once an edge carries two pads: the refusal asks for `max(inputs, outputs) + 1` rows in a scope
+  with cells, so a region sized to exactly one row per pad is refused with `E_ROUTE_CONGESTION` and
+  needs one more. Routed lengths move with the pads: `examples/redstone-door.crn`'s cell is reached
+  over 4 blocks rather than 3, and `examples/crossbar.crn` leaves 12 pairs of dust within one step
+  across layers rather than 9.
+
+  Listed as a fix under `spec/compatibility` C.4, reading the spec's clearance promise as the
+  contract: `spec/redstone` "Place-and-route" promised a clear column between the row and the input
+  pads, and pad #1 stood against the first cell. The same sentence sized the row at `2n + 1`
+  columns, which leaves no room for that column. This change keeps the sizing, keeps the pads off
+  the cells by moving the pads instead, and rewrites the section to the layout as built.
+
 ### Breaking changes
 
 - *(core)* `cairn check` passed, and `cairn info` listed every supported version as buildable, for

@@ -136,8 +136,11 @@ impl Serialize for RouteLayer {
 /// by value. Cell coords stamped by [`crate::placement::compile_placement`]
 /// use `x = 1 + 2 * topological index`, `y = 0`, `z = 1`,
 /// [`RouteLayer::Plane`]. Pad coords derived by the routing pass at the
-/// reservation edges use `y = 0` on the plane with `z = i`
-/// (saturating at `depth-1` for pathological regions). Routed wire
+/// reservation edges use `y = 0` on the plane, and in a scope with cells
+/// `z = i` below the cell row and `z = i + 1` from it on, saturating at
+/// `depth-1`; in a scope with none, `z = i`. No pad the placement pass
+/// emits stands on the cell row: the saturation can put one there, but
+/// only in a region that pass refuses. Routed wire
 /// coords and buffer-repeater coords may use `y >= 1`, and take
 /// [`RouteLayer::Bridge`] when they do — see [`Self::new`].
 ///
@@ -176,9 +179,9 @@ pub struct CellCoord {
     pub y: u32,
     /// Row along the region's z-axis. `1` for cell coords stamped by
     /// the placement pass — one row in, so every cell has a clear lane
-    /// on each side; pad coords step from `z = i` (saturating at
-    /// `depth-1`), and buffer coords take the row of the wire they
-    /// stand on.
+    /// on each side; pad coords step from `z = 0` and skip the cell
+    /// row (saturating at `depth-1`), and buffer coords take the row of
+    /// the wire they stand on.
     pub z: u32,
     /// Pseudo-2.5D layer this coord lives on. Cell coords are
     /// [`RouteLayer::Plane`] by construction; wire the routing pass

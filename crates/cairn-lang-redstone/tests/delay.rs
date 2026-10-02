@@ -30,7 +30,7 @@ use common::{load_example, normalize_stage_tags, placement_from_source, routed_f
 /// AC1 — `examples/redstone-door.crn` compiled for Java: the sole
 /// `JavaRepeaterOr` cell picks up `local_delay_ticks = Some(1)` — base 1 tick
 /// from the repeater realisation, zero implicit buffer repeaters
-/// because both driver segments (1 and 2 blocks) sit under the
+/// because both driver segments (2 blocks each) sit under the
 /// dust-attenuation limit of 15. `wire_length` is preserved verbatim
 /// from routing.
 #[test]
@@ -62,15 +62,15 @@ fn redstone_door_java_local_delay_ticks_equal_base_repeater_delay() {
     );
     assert_eq!(
         cell.wire_length(),
-        Some(3),
+        Some(4),
         "routing's wire_length must survive the delay pass verbatim",
     );
 }
 
 /// AC2 — the same example compiled for Bedrock: the sole
 /// `BedrockTorchOr` cell picks up `local_delay_ticks = Some(0)` — dust-merge
-/// realisation carries no cell tick, and both driver segments (1 and
-/// 2 blocks) are under the attenuation limit so no buffer ticks
+/// realisation carries no cell tick, and both driver segments (2
+/// blocks each) are under the attenuation limit so no buffer ticks
 /// either. `wire_length` matches Java by the edition-agnostic routing
 /// invariant.
 #[test]
@@ -102,7 +102,7 @@ fn redstone_door_bedrock_local_delay_ticks_are_zero() {
     );
     assert_eq!(
         cell.wire_length(),
-        Some(3),
+        Some(4),
         "wire_length is edition-independent by construction",
     );
 }
@@ -112,7 +112,7 @@ fn redstone_door_bedrock_local_delay_ticks_are_zero() {
 /// fixture the routing suite pins: `sig.and_ab = sig.a and sig.b`,
 /// `sig.or_ab = sig.a or sig.b`, `sig.combined = sig.and_ab and
 /// sig.or_ab`. Cell coords are `x = 1, 3, 5` per the placement pass,
-/// input pads sit at `(0, 0, 1)` and `(0, 0, 2)`, so every driver
+/// input pads sit at `(0, 0, 0)` and `(0, 0, 2)`, so every driver
 /// segment is well under the dust limit and no cell needs an implicit
 /// buffer. Each cell's `local_delay_ticks` therefore equals its base tick
 /// count alone.
@@ -151,9 +151,9 @@ struct sim size=7x5
         .find(|e| e.name == "sim")
         .expect("sim scope");
     assert_eq!(entry.ir.cells.len(), 3);
-    // JavaComparatorAnd: base 1, segments [2, 1] → 0 buffers.
+    // JavaComparatorAnd: base 1, segments [2, 2] → 0 buffers.
     assert_eq!(entry.ir.cells[0].local_delay_ticks(), Some(1));
-    // JavaRepeaterOr: base 1, segments [4, 5] → 0 buffers.
+    // JavaRepeaterOr: base 1, segments [4, 4] → 0 buffers.
     assert_eq!(entry.ir.cells[1].local_delay_ticks(), Some(1));
     // JavaComparatorAnd: base 1, cell-to-cell segments [6, 2] → 0 buffers.
     assert_eq!(entry.ir.cells[2].local_delay_ticks(), Some(1));
@@ -169,7 +169,7 @@ struct sim size=7x5
             .iter()
             .map(PlacedCellNode::wire_length)
             .collect::<Vec<_>>(),
-        vec![Some(3), Some(9), Some(8)],
+        vec![Some(4), Some(8), Some(8)],
         "the routed lengths, unchanged",
     );
 }
