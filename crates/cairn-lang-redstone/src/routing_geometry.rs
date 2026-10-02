@@ -68,11 +68,12 @@
 //! [`RouteLayer::Bridge`]: crate::placement_ir::RouteLayer::Bridge
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt::Write as _;
 
 use cairn_lang_core::check::Severity;
 
+use crate::delay::MAX_ATTENUATION_SEGMENT;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::netlist_ir::{CellPortDriver, NetRef};
 use crate::placement_ir::{
@@ -462,16 +463,29 @@ impl Router {
     /// the trunk. The shortcut runs first, so the answer is one
     /// answer.
     ///
-    /// `None` when no target can be reached: every route out of the
-    /// tree is walled in by blocks or by the edge of the reservation.
+    /// [`GaveUp`] when no target is reached; why each one was not is
+    /// [`Self::unreached`]'s question.
+    ///
+    /// Only the search tier is bounded by [`MAX_ATTENUATION_SEGMENT`].
+    /// The straight tier has no cap check and can return a path longer
+    /// than it. Through [`crate::pass::lay_nets`] it does not: the gate
+    /// there refuses a sink further from its driver than the cap in a
+    /// straight line before any tree is grown, the driver is always a
+    /// seed, and the straight tier answers only for the closest
+    /// seed/target pair — so its path is no longer than the driver's
+    /// straight line to some target, which that gate held to the cap. A
+    /// caller of [`Self::tree`] that skips the gate can get an over-cap
+    /// path from this tier.
     fn reach(
         &self,
         seeds: &[CellCoord],
         targets: &[CellCoord],
         keep_out: &HashSet<CellCoord>,
-    ) -> Option<(usize, Vec<CellCoord>)> {
-        self.straight_run(seeds, targets, keep_out)
-            .or_else(|| self.search(seeds, targets, keep_out))
+    ) -> Result<(usize, Vec<CellCoord>), GaveUp> {
+        match self.straight_run(seeds, targets, keep_out) {
+            Some(found) => Ok(found),
+            None => self.search(seeds, targets, keep_out).0,
+        }
     }
 
     /// The closest seed/target pair, when the straight line between
@@ -545,12 +559,52 @@ impl Router {
     /// so no sink is ever expanded past. That is what makes every sink
     /// a leaf of the tree — the property a comparator has and a coil of
     /// dust does not.
+    ///
+    /// # Bounded by the attenuation cap
+    ///
+    /// A coord is not queued when `g + h` — the length of the cheapest
+    /// path through it from the tree to a target — is over
+    /// [`MAX_ATTENUATION_SEGMENT`]. The segment the delay pass measures
+    /// runs from the net's source through the seed a path leaves from, so
+    /// it is at least the path, and a path over the cap is one that pass
+    /// refuses. Without the bound a walled-in target was given up on only
+    /// once the frontier emptied, which is every free coord of the
+    /// reservation the tree can reach: work and memory set by
+    /// `width × depth × void` rather than by the distance to the target.
+    ///
+    /// No accepted route changes. `h` is the Manhattan distance to the
+    /// nearest target, which is consistent, so every coord on a cheapest
+    /// path of length `L` has `g + h <= L`, and the coords the bound
+    /// drops have `g + h` above the cap and so above `L` — the heap
+    /// would have returned before popping any of them.
+    ///
+    /// When no target has a face a path could arrive through — a free
+    /// coord, or a seed — there is nothing to search and the answer is
+    /// [`GaveUp::Exhausted`] at once. A target that has none while
+    /// another target does is not removed: it stays a goal and stays in
+    /// `h`. That costs nothing in soundness, because `h` is then at most
+    /// the distance to the nearest target that can be arrived at, and a
+    /// smaller `h` prunes less rather than more.
+    ///
+    /// On failure the answer is [`GaveUp`], which is about the search
+    /// and not about any one target; [`Router::tree`] turns it into a
+    /// verdict per sink.
+    ///
+    /// The second value is how many coords the search settled — popped
+    /// and not stale — the work the bound exists to limit, returned so a
+    /// test can hold it to that.
     fn search(
         &self,
         seeds: &[CellCoord],
         targets: &[CellCoord],
         keep_out: &HashSet<CellCoord>,
-    ) -> Option<(usize, Vec<CellCoord>)> {
+    ) -> (Result<(usize, Vec<CellCoord>), GaveUp>, usize) {
+        let arrivable = |target: &CellCoord| {
+            faces(*target).any(|face| seeds.contains(&face) || self.free(face, keep_out))
+        };
+        if !targets.iter().any(arrivable) {
+            return (Err(GaveUp::Exhausted), 0);
+        }
         let heuristic = |coord: CellCoord| -> u32 {
             targets
                 .iter()
@@ -562,6 +616,8 @@ impl Router {
         let mut cheapest: HashMap<CellCoord, u32> = HashMap::new();
         let mut parent: HashMap<CellCoord, CellCoord> = HashMap::new();
         let mut frontier: BinaryHeap<Frontier> = BinaryHeap::new();
+        let mut pruned = false;
+        let mut settled = 0_usize;
         for seed in seeds {
             if cheapest.insert(*seed, 0).is_some() {
                 continue;
@@ -583,8 +639,9 @@ impl Router {
                 // entry was pushed; the heap has no decrease-key.
                 continue;
             }
+            settled += 1;
             if let Some(index) = targets.iter().position(|t| *t == current.coord) {
-                return Some((index, walk_back(current.coord, &parent)));
+                return (Ok((index, walk_back(current.coord, &parent))), settled);
             }
             for (step, delta) in STEPS.iter().enumerate() {
                 let Some(next) = self.step(current.coord, *delta) else {
@@ -603,17 +660,106 @@ impl Router {
                 if cheapest.get(&next).is_some_and(|best| *best <= g) {
                     continue;
                 }
+                let f = g.saturating_add(heuristic(next));
+                if f > MAX_ATTENUATION_SEGMENT {
+                    pruned = true;
+                    continue;
+                }
                 cheapest.insert(next, g);
                 parent.insert(next, current.coord);
                 frontier.push(Frontier {
-                    f: g.saturating_add(heuristic(next)),
+                    f,
                     g,
                     step,
                     coord: next,
                 });
             }
         }
-        None
+        let gave_up = if pruned {
+            GaveUp::Pruned
+        } else {
+            GaveUp::Exhausted
+        };
+        (Err(gave_up), settled)
+    }
+
+    /// Why no path of at most [`MAX_ATTENUATION_SEGMENT`] blocks from
+    /// `seeds` reaches `sink`, asked once a search the cap pruned has
+    /// come back empty ([`GaveUp::Pruned`]), and how many coords
+    /// answering it visited.
+    ///
+    /// A breadth-first flood out of `sink`, through its faces and on
+    /// through free coords, no further than the cap from it. The search
+    /// cannot answer this itself: what it learns is that nothing within
+    /// the cap reaches *any* of its targets, and a coord it prunes says
+    /// nothing about which target is walled in — a real detour is pruned
+    /// too, once `h` has come down near the wall.
+    ///
+    /// - The flood runs out of coords before the cap: the free coords
+    ///   `sink` opens onto are a pocket the tree is not in, so no route
+    ///   of any length reaches it. [`Unreached::WalledIn`] is proved,
+    ///   and a sink with no free face at all is the pocket of size zero.
+    ///   So is a sink outside the reservation, which [`Self::step`]
+    ///   never enters and so no path arrives at, whatever is beside it.
+    /// - The flood is still going at the cap: [`Unreached::BeyondCap`],
+    ///   which claims only what the search proved. A sink walled off in
+    ///   a free region wider than the cap lands here too; the flood
+    ///   cannot tell it from a long way round without leaving the cap's
+    ///   neighbourhood, which is the work the bound exists to save.
+    ///
+    /// Reaching a seed within the cap would contradict the search — the
+    /// bound keeps every coord on such a path — so it is asserted
+    /// against in a debug build and answered as `BeyondCap` otherwise,
+    /// the verdict that claims less.
+    ///
+    /// Bounded by the pocket or by the cap's neighbourhood of `sink`,
+    /// whichever is smaller, so a refusal still costs nothing set by the
+    /// size of the reservation. Only ever asked on the way to a refusal.
+    fn unreached(
+        &self,
+        sink: CellCoord,
+        seeds: &[CellCoord],
+        keep_out: &HashSet<CellCoord>,
+    ) -> (Unreached, usize) {
+        if !self.inside(sink) {
+            return (Unreached::WalledIn, 1);
+        }
+        let seeds: HashSet<CellCoord> = seeds.iter().copied().collect();
+        let mut seen: HashSet<CellCoord> = HashSet::from([sink]);
+        let mut queue: VecDeque<(CellCoord, u32)> = VecDeque::from([(sink, 0)]);
+        let mut at_cap = false;
+        while let Some((coord, distance)) = queue.pop_front() {
+            for face in faces(coord) {
+                if seen.contains(&face) {
+                    continue;
+                }
+                let tree = seeds.contains(&face);
+                if !tree && !self.free(face, keep_out) {
+                    continue;
+                }
+                if distance >= MAX_ATTENUATION_SEGMENT {
+                    at_cap = true;
+                    continue;
+                }
+                debug_assert!(
+                    !tree,
+                    "the search gave up on a sink {} blocks from the tree, within the cap",
+                    distance + 1,
+                );
+                if tree {
+                    at_cap = true;
+                    continue;
+                }
+                seen.insert(face);
+                queue.push_back((face, distance + 1));
+            }
+        }
+        let why = if at_cap {
+            Unreached::BeyondCap
+        } else {
+            Unreached::WalledIn
+        };
+        (why, seen.len())
     }
 
     /// One net's routed tree: rooted at `source`, with every distinct
@@ -631,6 +777,12 @@ impl Router {
     /// their dust, and the coords [`beside`] it — see [`Self::dust`]
     /// and [`net_trees`]. Empty for the first net of a scope, and for a
     /// caller routing one net against nothing.
+    ///
+    /// When the search reaches none of the sinks still waiting, each of
+    /// them is stranded with its own [`Unreached`]: all walled in when
+    /// the search ran out of coords without the cap pruning any
+    /// ([`GaveUp::Exhausted`]), and otherwise whatever
+    /// [`Self::unreached`] proves of that sink alone.
     pub(crate) fn tree(
         &self,
         source: CellCoord,
@@ -662,11 +814,18 @@ impl Router {
             }
         }
         while !remaining.is_empty() {
-            let Some((index, path)) = self.reach(&emitters, &remaining, keep_out) else {
-                for sink in remaining.drain(..) {
-                    tree.strand(sink);
+            let (index, path) = match self.reach(&emitters, &remaining, keep_out) {
+                Ok(found) => found,
+                Err(gave_up) => {
+                    for sink in remaining.drain(..) {
+                        let why = match gave_up {
+                            GaveUp::Exhausted => Unreached::WalledIn,
+                            GaveUp::Pruned => self.unreached(sink, &emitters, keep_out).0,
+                        };
+                        tree.strand(sink, why);
+                    }
+                    break;
                 }
-                break;
             };
             remaining.remove(index);
             for pair in path.windows(2) {
@@ -737,6 +896,37 @@ fn walk_back(coord: CellCoord, parent: &HashMap<CellCoord, CellCoord>) -> Vec<Ce
     path
 }
 
+/// What a search that reached none of its targets knows about all of
+/// them at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GaveUp {
+    /// Nothing was left to search, and the cap pruned nothing on the
+    /// way: every free coord the tree can reach was settled, or no
+    /// target had a face to arrive through. No path of any length
+    /// reaches any target, so every one is [`Unreached::WalledIn`].
+    Exhausted,
+    /// The cap pruned at least one coord. That is a fact about the
+    /// search, not about any one target — a coord can be pruned from
+    /// an expensive predecessor and then queued from a cheap one, and a
+    /// target walled in near the tree is pruned round just as a far one
+    /// is — so [`Router::unreached`] asks each target on its own.
+    Pruned,
+}
+
+/// Why one sink was not reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unreached {
+    /// No path of any length reaches the sink: the free coords it opens
+    /// onto, if any, are a pocket closed by blocks, by other nets' dust
+    /// and the coords beside it, and by the edge of the reservation, and
+    /// the tree is not in it.
+    WalledIn,
+    /// No path of at most [`MAX_ATTENUATION_SEGMENT`] blocks reaches it.
+    /// One longer may or may not exist; nothing looks, because the delay
+    /// pass would refuse it.
+    BeyondCap,
+}
+
 /// One net's routed dust: every coord it occupies, each with the coord
 /// the signal reached it from.
 ///
@@ -750,6 +940,9 @@ pub(crate) struct NetTree {
     order: Vec<CellCoord>,
     parent: HashMap<CellCoord, CellCoord>,
     unreachable: Vec<CellCoord>,
+    /// Why each sink of [`Self::unreachable`] is there, asked of each
+    /// one on its own by [`Router::unreached`].
+    stranded_by: HashMap<CellCoord, Unreached>,
 }
 
 impl NetTree {
@@ -759,6 +952,7 @@ impl NetTree {
             order: vec![source],
             parent: HashMap::new(),
             unreachable: Vec::new(),
+            stranded_by: HashMap::new(),
         }
     }
 
@@ -784,11 +978,12 @@ impl NetTree {
     /// without stage 2 gets a deterministic answer rather than a
     /// panic. The number itself means nothing — [`Self::unreachable`]
     /// is what a caller asks.
-    fn strand(&mut self, sink: CellCoord) {
+    fn strand(&mut self, sink: CellCoord, why: Unreached) {
         let source = self.order[0];
         self.parent.insert(sink, source);
         self.order.push(sink);
         self.unreachable.push(sink);
+        self.stranded_by.insert(sink, why);
     }
 
     /// Every coord the net occupies, source first and then in the
@@ -880,6 +1075,12 @@ impl NetTree {
     /// stage 2 that refuses a layout the router cannot wire.
     pub(crate) fn unreachable(&self) -> &[CellCoord] {
         &self.unreachable
+    }
+
+    /// Why `sink` is one of [`Self::unreachable`], or `None` when it is
+    /// not one.
+    pub(crate) fn stranded_by(&self, sink: CellCoord) -> Option<Unreached> {
+        self.stranded_by.get(&sink).copied()
     }
 }
 
@@ -1003,12 +1204,21 @@ pub(crate) fn collapsed_block(blocks: &[BlockSite]) -> Option<&BlockSite> {
 /// The refusal a scope earns when the reservation cannot wire one of
 /// its sinks, or `None` when every sink has a clear path.
 ///
-/// `E_ROUTE_CONGESTION` with its own primary, so it does not read as the
-/// area arithmetic: the area can be ample and the one coord the wire
-/// needs still be taken. Reported in [`net_order`] so the anchor sink is
-/// the same every run, with the count of the rest so sizing is one
-/// decision, and naming the nets whose dust takes the sink's faces —
-/// the cause the author can act on.
+/// `E_ROUTE_CONGESTION` with its own primary, so it does not read as
+/// the area arithmetic: the area can be ample and the one coord the
+/// wire needs still be taken. For a sink [`Unreached::BeyondCap`]
+/// stranded it is `E_ATTENUATION_LIMIT` from [`beyond_cap_diagnostic`]
+/// instead. Either way it names the nets whose dust takes the sink's
+/// faces — the cause the author can act on — and counts the rest of
+/// the scope's stranded sinks, so sizing is one decision.
+///
+/// One sink anchors the message, and the code is that sink's. A
+/// [`Unreached::WalledIn`] sink is preferred when there is one: its
+/// wall is a cause the author can move, while "nothing within the cap"
+/// may only be a symptom of it. Among those of one reason the first in
+/// [`net_order`] and then in the net's own order is taken, so the
+/// anchor is the same every run. The count of the rest covers sinks of
+/// either reason, and says only that they cannot be reached.
 ///
 /// `netlist` is the noun the caller lays nets from — `placed`,
 /// `routed`, `delayed`. It is a parameter and not a constant because
@@ -1026,11 +1236,27 @@ where
     F: Fn(NetRef) -> CellCoord,
 {
     let order = net_order(nets);
-    let stranded: usize = order.iter().map(|net| trees[net].unreachable().len()).sum();
-    let (net, sink) = order
+    let stranded: Vec<(NetRef, CellCoord)> = order
         .iter()
-        .find_map(|net| trees[net].unreachable().first().map(|sink| (*net, *sink)))?;
+        .flat_map(|net| trees[net].unreachable().iter().map(|sink| (*net, *sink)))
+        .collect();
+    let (net, sink) = stranded
+        .iter()
+        .find(|(net, sink)| trees[net].stranded_by(*sink) == Some(Unreached::WalledIn))
+        .or_else(|| stranded.first())
+        .copied()?;
     let source = source_of_net(net);
+    let crowding = crowding_nets(nets, trees, &source_of_net, net, sink);
+    if trees[&net].stranded_by(sink) == Some(Unreached::BeyondCap) {
+        return Some(beyond_cap_diagnostic(
+            entry,
+            netlist,
+            region,
+            (source, sink),
+            &crowding,
+            stranded.len(),
+        ));
+    }
     let mut primary = format!(
         "{netlist} netlist for {kind} `{name}` cannot reach ({x},{y},{z}) from the driver at ({sx},{sy},{sz}) — every route between them is blocked by a cell body, an I/O pad, or another net's dust, on the coord or one step from it in the same plane, and a wire passes through none of the three",
         kind = entry.kind.label(),
@@ -1042,7 +1268,26 @@ where
         sy = source.y,
         sz = source.z,
     );
-    let crowding = crowding_nets(nets, trees, &source_of_net, net, sink);
+    crowded_and_the_rest(&mut primary, entry, &crowding, stranded.len());
+    Some(error_with_footer(
+        DiagnosticCode::RouteCongestion,
+        region.span.clone(),
+        primary,
+        format!(
+            "Fix: raise `void` above {void} so the wire has a layer to climb onto, enlarge `size=WxH`, or split into multiple `circuit` blocks",
+            void = region.void,
+        ),
+    ))
+}
+
+/// The crowding clause and the count of the other stranded sinks, which
+/// both of [`unroutable`]'s refusals end with.
+fn crowded_and_the_rest(
+    primary: &mut String,
+    entry: &ScopedPlacementIrEntry,
+    crowding: &[NetRef],
+    stranded: usize,
+) {
     if !crowding.is_empty() {
         write!(
             primary,
@@ -1063,15 +1308,49 @@ where
         )
         .expect("writing to a String cannot fail");
     }
-    Some(error_with_footer(
-        DiagnosticCode::RouteCongestion,
+}
+
+/// The refusal for a sink [`Unreached::BeyondCap`] stranded: the free
+/// coords round it run on past the cap, and no path within the cap
+/// reaches it.
+///
+/// `E_ATTENUATION_LIMIT`, the code the delay pass gave such a sink when
+/// the search still laid a detour out for it to measure. The sentence
+/// says what is known and stops: no route within the cap. It does not
+/// say a longer route exists, because nothing looked. The crowding
+/// clause stays, since a sink can be out of reach for both reasons at
+/// once and the nets on its faces are still something the author can
+/// move.
+fn beyond_cap_diagnostic(
+    entry: &ScopedPlacementIrEntry,
+    netlist: &str,
+    region: &CircuitRegionReservation,
+    (source, sink): (CellCoord, CellCoord),
+    crowding: &[NetRef],
+    stranded: usize,
+) -> Diagnostic {
+    let mut primary = format!(
+        "{netlist} netlist for {kind} `{name}` has no route from the driver at ({sx},{sy},{sz}) to ({x},{y},{z}) within the v1 attenuation limit of {cap} blocks",
+        kind = entry.kind.label(),
+        name = entry.name,
+        x = sink.x,
+        y = sink.y,
+        z = sink.z,
+        sx = source.x,
+        sy = source.y,
+        sz = source.z,
+        cap = MAX_ATTENUATION_SEGMENT,
+    );
+    crowded_and_the_rest(&mut primary, entry, crowding, stranded);
+    error_with_footer(
+        DiagnosticCode::AttenuationLimit,
         region.span.clone(),
         primary,
         format!(
-            "Fix: raise `void` above {void} so the wire has a layer to climb onto, enlarge `size=WxH`, or split into multiple `circuit` blocks",
+            "Fix: give the wire a shorter way round — raise `void` above {void} so it has a layer to climb onto, or enlarge `region=` — or split the logic across several `circuit` blocks",
             void = region.void,
         ),
-    ))
+    )
 }
 
 /// The other nets whose dust keeps a wire out of the faces of `sink`,
@@ -1099,9 +1378,7 @@ where
         terminals.insert(keyed(source_of_net(*net)));
         terminals.extend(sinks.iter().copied().map(keyed));
     }
-    let taken: HashSet<CellCoord> = STEPS
-        .iter()
-        .filter_map(|delta| stepped(sink, *delta))
+    let taken: HashSet<CellCoord> = faces(sink)
         .flat_map(|face| std::iter::once(face).chain(beside(face)))
         .collect();
     net_order(nets)
@@ -1789,6 +2066,494 @@ mod tests {
                 CellCoord::with_layer(2, 1, 0, RouteLayer::Bridge),
                 sink,
             ]),
+        );
+    }
+
+    /// A wall across a one-layer reservation from `x = 0` to
+    /// `x = width - 2`, between a source at `(0,0,0)` and a sink at
+    /// `(0,0,sink_z)`, with `sink_z` 3 or 4. The only way round is the gap
+    /// at `x = width - 1`, so the route is `2 * (width - 1) + sink_z`
+    /// blocks while the straight line stays `sink_z`. Both parities are
+    /// here because one alone builds only every other length.
+    fn detour(width: u32, sink_z: u32) -> (Router, CellCoord, CellCoord) {
+        let source = CellCoord::new(0, 0, 0);
+        let sink = CellCoord::new(0, 0, sink_z);
+        let mut blocks = vec![source, sink];
+        blocks.extend((0..width - 1).map(|x| CellCoord::new(x, 0, 2)));
+        (router(&region(width, sink_z + 1, 1), &blocks), source, sink)
+    }
+
+    /// The `sink_z` and width at which [`detour`] routes exactly
+    /// `length` blocks: 3 for an odd length, 4 for an even one.
+    fn detour_for(length: u32) -> (u32, u32) {
+        let sink_z = 3 + (length + 1) % 2;
+        (detour_width(length, sink_z), sink_z)
+    }
+
+    /// The width at which [`detour`] routes exactly `length` blocks
+    /// round to a sink at `sink_z`.
+    fn detour_width(length: u32, sink_z: u32) -> u32 {
+        assert_eq!((length - sink_z) % 2, 0, "{length} is the other parity");
+        (length - sink_z) / 2 + 1
+    }
+
+    /// The bound drops only what the delay pass would refuse. A detour
+    /// of exactly [`MAX_ATTENUATION_SEGMENT`] blocks is still laid; one
+    /// of a block more, and one of two more, are not, and what strands
+    /// them is the cap rather than a wall.
+    #[test]
+    fn a_detour_is_laid_up_to_the_cap_and_no_further() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        for length in [cap - 1, cap] {
+            let (width, sink_z) = detour_for(length);
+            let (router, source, sink) = detour(width, sink_z);
+            let tree = router.tree(source, &[sink], &nothing_in_the_way());
+            assert!(tree.unreachable().is_empty(), "{length} is within the cap");
+            let route = tree.route_to(sink).expect("the sink is on the net");
+            assert_eq!(route.len() - 1, length as usize);
+        }
+        for length in [cap + 1, cap + 2] {
+            let (width, sink_z) = detour_for(length);
+            let (router, source, sink) = detour(width, sink_z);
+            let tree = router.tree(source, &[sink], &nothing_in_the_way());
+            assert_eq!(tree.unreachable(), [sink], "{length} is over the cap");
+            assert_eq!(tree.stranded_by(sink), Some(Unreached::BeyondCap));
+        }
+    }
+
+    /// How wide [`pocket`]'s reservation is.
+    const POCKET_WIDTH: u32 = 20;
+
+    /// A pocket the sink opens onto, closed on every other side: the sink
+    /// has a free face, so it is searched for, and nothing reaches it.
+    fn pocket(depth: u32) -> (Router, CellCoord, CellCoord) {
+        let source = CellCoord::new(1, 0, 1);
+        let sink = CellCoord::new(10, 0, 10);
+        let blocks = [
+            source,
+            sink,
+            CellCoord::new(9, 0, 10),
+            CellCoord::new(10, 0, 9),
+            CellCoord::new(10, 0, 11),
+            // `(11,0,10)` is the pocket; these close it.
+            CellCoord::new(12, 0, 10),
+            CellCoord::new(11, 0, 9),
+            CellCoord::new(11, 0, 11),
+        ];
+        (
+            router(&region(POCKET_WIDTH, depth, 1), &blocks),
+            source,
+            sink,
+        )
+    }
+
+    /// Giving up on a sink costs the same whatever the size of the
+    /// reservation around it. Unbounded, the search gave up only once it
+    /// had settled every free coord it could reach, so the work grew with
+    /// `width × depth × void` rather than with the distance.
+    ///
+    /// The ceiling is the `g + h <= cap` diamond in a strip
+    /// [`POCKET_WIDTH`] wide, which a bound twice the cap would overrun.
+    /// The far reservation is millions of coords; [`Router`] holds only
+    /// its blocks, so that costs the test nothing but the search.
+    #[test]
+    fn giving_up_on_a_pocket_does_not_grow_with_the_reservation() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        let (near, source, sink) = pocket(cap);
+        let (far, _, _) = pocket(cap * 16_384);
+        let (near_found, near_settled) = near.search(&[source], &[sink], &nothing_in_the_way());
+        let (far_found, far_settled) = far.search(&[source], &[sink], &nothing_in_the_way());
+        assert_eq!(
+            (near_found, far_found),
+            (Err(GaveUp::Pruned), Err(GaveUp::Pruned)),
+        );
+        assert_eq!(
+            near_settled, far_settled,
+            "sixteen thousand times the reservation, the same search",
+        );
+        let ceiling = POCKET_WIDTH as usize * (cap as usize / 2 + 1);
+        assert!(
+            far_settled <= ceiling,
+            "settled {far_settled}, over the cap's diamond of {ceiling}",
+        );
+    }
+
+    /// Whether the search empties its frontier first or stops at the
+    /// cap first, the pocket is proved walled in: by the search itself
+    /// when it settled every coord the tree can reach, and otherwise by
+    /// the flood out of the sink, which runs out of coords after the one
+    /// pocket coord at any size of reservation. The verdict used to
+    /// follow whether anything had been pruned on the way, which is to
+    /// say the reservation's size.
+    #[test]
+    fn a_pocket_is_walled_in_whatever_the_reservation() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        // Small enough that the frontier empties before the cap is
+        // reached, then at and far past the cap's reach.
+        for (depth, gave_up) in [
+            (POCKET_WIDTH, GaveUp::Exhausted),
+            (cap, GaveUp::Pruned),
+            (cap * 16_384, GaveUp::Pruned),
+        ] {
+            let (router, source, sink) = pocket(depth);
+            assert_eq!(
+                router.search(&[source], &[sink], &nothing_in_the_way()).0,
+                Err(gave_up),
+                "depth {depth}",
+            );
+            let tree = router.tree(source, &[sink], &nothing_in_the_way());
+            assert_eq!(tree.unreachable(), [sink], "depth {depth}");
+            assert_eq!(
+                tree.stranded_by(sink),
+                Some(Unreached::WalledIn),
+                "depth {depth}",
+            );
+            assert_eq!(
+                router.unreached(sink, &[source], &nothing_in_the_way()),
+                (Unreached::WalledIn, 2),
+                "the sink and its one pocket coord, at depth {depth}",
+            );
+        }
+    }
+
+    /// The flood's budget is the cap, to the block. A sink at the end of
+    /// a dead-end corridor `length` coords long, in a one-wide
+    /// reservation that runs on past the corridor's closed end to the
+    /// source: a corridor as long as the cap is proved walled in, and
+    /// one a coord longer is not — the flood cannot see its end without
+    /// going past the cap, so all it can say is that nothing within the
+    /// cap reaches the sink.
+    #[test]
+    fn the_flood_sees_a_pocket_exactly_as_deep_as_the_cap() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        for (length, why) in [(cap, Unreached::WalledIn), (cap + 1, Unreached::BeyondCap)] {
+            let sink = CellCoord::new(0, 0, 0);
+            let end = CellCoord::new(0, 0, length + 1);
+            let source = CellCoord::new(0, 0, length + 2);
+            let router = router(&region(1, 4 * cap, 1), &[sink, end, source]);
+            let tree = router.tree(source, &[sink], &nothing_in_the_way());
+            assert_eq!(tree.stranded_by(sink), Some(why), "corridor of {length}");
+            let (_, seen) = router.unreached(sink, &[source], &nothing_in_the_way());
+            assert_eq!(
+                seen,
+                cap as usize + 1,
+                "the sink and the cap's worth of corridor"
+            );
+        }
+    }
+
+    /// When the free coords round a sink run on past the cap, the flood
+    /// stops there, so classifying it costs the cap's neighbourhood of
+    /// the sink and not the reservation.
+    #[test]
+    fn classifying_a_sink_beyond_the_cap_does_not_grow_with_the_reservation() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        let source = CellCoord::new(1, 0, 1);
+        let sink = CellCoord::new(1, 0, cap + 2);
+        let blocks = [source, sink];
+        let near = router(&region(POCKET_WIDTH, 4 * cap, 1), &blocks);
+        let far = router(&region(POCKET_WIDTH, cap * 16_384, 1), &blocks);
+        // No seed is within the cap of the sink, so the flood never
+        // touches the tree; that is the shape the search hands it.
+        let (near_why, near_seen) = near.unreached(sink, &[source], &nothing_in_the_way());
+        let (far_why, far_seen) = far.unreached(sink, &[source], &nothing_in_the_way());
+        assert_eq!(
+            (near_why, far_why),
+            (Unreached::BeyondCap, Unreached::BeyondCap)
+        );
+        assert_eq!(near_seen, far_seen);
+        assert!(
+            far_seen <= POCKET_WIDTH as usize * (2 * cap as usize + 1),
+            "visited {far_seen}",
+        );
+    }
+
+    /// A sink with no face a path could arrive through is walled in, and
+    /// when no target has one, that is known without searching.
+    #[test]
+    fn a_sink_with_no_free_face_is_walled_in_without_a_search() {
+        let source = CellCoord::new(1, 0, 1);
+        let sink = CellCoord::new(10, 0, 10);
+        let blocks = [
+            source,
+            sink,
+            CellCoord::new(9, 0, 10),
+            CellCoord::new(11, 0, 10),
+            CellCoord::new(10, 0, 9),
+            CellCoord::new(10, 0, 11),
+        ];
+        let router = router(&region(POCKET_WIDTH, 3_000, 1), &blocks);
+        assert_eq!(
+            router.search(&[source], &[sink], &nothing_in_the_way()),
+            (Err(GaveUp::Exhausted), 0),
+        );
+        let tree = router.tree(source, &[sink], &nothing_in_the_way());
+        assert_eq!(tree.stranded_by(sink), Some(Unreached::WalledIn));
+    }
+
+    /// A sink sealed on every face keeps its own verdict when the same
+    /// net has another sink the search has to look for. One arrivable
+    /// target is enough to run the search, and its one answer used to
+    /// overwrite the cause of every sink it stranded.
+    #[test]
+    fn a_sealed_sink_stays_walled_in_beside_a_sink_that_is_searched_for() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        let sealed = CellCoord::new(5, 0, 5);
+        let walls = [
+            sealed,
+            CellCoord::new(4, 0, 5),
+            CellCoord::new(6, 0, 5),
+            CellCoord::new(5, 0, 4),
+            CellCoord::new(5, 0, 6),
+        ];
+        // The pocket, and a sink beyond the cap round a wall: one sink
+        // the flood proves walled in, one it cannot.
+        for depth in [POCKET_WIDTH, cap + 44] {
+            let (pocket, source, pocketed) = pocket(depth);
+            let mut blocks: Vec<CellCoord> = pocket.blocked.iter().copied().collect();
+            blocks.extend(walls);
+            let router = router(&region(POCKET_WIDTH, depth, 1), &blocks);
+            let tree = router.tree(source, &[pocketed, sealed], &nothing_in_the_way());
+            assert_eq!(tree.unreachable(), [pocketed, sealed], "depth {depth}");
+            assert_eq!(tree.stranded_by(sealed), Some(Unreached::WalledIn));
+            assert_eq!(tree.stranded_by(pocketed), Some(Unreached::WalledIn));
+        }
+
+        let (width, sink_z) = detour_for(cap + 1);
+        let (detour, source, far) = detour(width, sink_z);
+        // Two rows more beyond the wall, and the sealed sink against the
+        // far edge of them, so the row the detour arrives along stays
+        // open.
+        let edge = sink_z + 2;
+        let sealed = CellCoord::new(width / 2, 0, edge);
+        let mut blocks: Vec<CellCoord> = detour.blocked.iter().copied().collect();
+        blocks.extend([
+            sealed,
+            CellCoord::new(width / 2 - 1, 0, edge),
+            CellCoord::new(width / 2 + 1, 0, edge),
+            CellCoord::new(width / 2, 0, edge - 1),
+        ]);
+        let region = region(width, edge + 1, 1);
+        let router = router(&region, &blocks);
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        // The sink beyond the cap first, so the net's own order would
+        // anchor on it.
+        nets.insert(NetRef::Input(0), vec![far, sealed]);
+        let trees = net_trees(&nets, &router, |_| source);
+        let tree = &trees[&NetRef::Input(0)];
+        assert_eq!(tree.unreachable(), [far, sealed]);
+        assert_eq!(tree.stranded_by(far), Some(Unreached::BeyondCap));
+        assert_eq!(tree.stranded_by(sealed), Some(Unreached::WalledIn));
+        let d = unroutable(
+            &nets,
+            &trees,
+            &entry_for(&nets, "s"),
+            "placed",
+            &region,
+            |_| source,
+        )
+        .expect("both sinks are stranded");
+        assert_eq!(d.code, DiagnosticCode::RouteCongestion, "{}", d.primary);
+        assert!(
+            d.primary.contains(&format!(
+                "cannot reach ({},0,{edge}) from the driver at (0,0,0)",
+                width / 2,
+            )),
+            "the sealed sink anchors the message: {}",
+            d.primary,
+        );
+        assert!(
+            d.primary
+                .ends_with("; 1 more of this scope's sinks cannot be reached either"),
+            "{}",
+            d.primary,
+        );
+    }
+
+    /// Across nets as well: a scope with one net stranded at the cap and
+    /// a later one walled in is refused for the wall. The count of the
+    /// rest takes in both, and says only that they cannot be reached.
+    #[test]
+    fn a_walled_in_net_anchors_the_refusal_over_one_beyond_the_cap() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        let (width, sink_z) = detour_for(cap + 1);
+        let (detour, source, far) = detour(width, sink_z);
+        // The second net beyond the wall too, on two rows more, so the
+        // row the detour arrives along stays open.
+        let edge = sink_z + 2;
+        let other_source = CellCoord::new(width - 1, 0, edge);
+        let sealed = CellCoord::new(width / 2, 0, edge);
+        let mut blocks: Vec<CellCoord> = detour.blocked.iter().copied().collect();
+        blocks.extend([
+            other_source,
+            sealed,
+            CellCoord::new(width / 2 - 1, 0, edge),
+            CellCoord::new(width / 2 + 1, 0, edge),
+            CellCoord::new(width / 2, 0, edge - 1),
+        ]);
+        let region = region(width, edge + 1, 1);
+        let router = router(&region, &blocks);
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![far]);
+        nets.insert(NetRef::Input(1), vec![sealed]);
+        let source_of = |net: NetRef| match net {
+            NetRef::Input(0) => source,
+            _ => other_source,
+        };
+        let trees = net_trees(&nets, &router, source_of);
+        assert_eq!(
+            trees[&NetRef::Input(0)].stranded_by(far),
+            Some(Unreached::BeyondCap),
+        );
+        assert_eq!(
+            trees[&NetRef::Input(1)].stranded_by(sealed),
+            Some(Unreached::WalledIn),
+        );
+        let d = unroutable(
+            &nets,
+            &trees,
+            &entry_for(&nets, "s"),
+            "placed",
+            &region,
+            source_of,
+        )
+        .expect("both sinks are stranded");
+        assert_eq!(d.code, DiagnosticCode::RouteCongestion, "{}", d.primary);
+        assert!(
+            d.primary.starts_with(&format!(
+                "placed netlist for struct `s` cannot reach ({},0,{edge}) from the driver at \
+                 ({},0,{edge})",
+                width / 2,
+                width - 1,
+            )),
+            "{}",
+            d.primary,
+        );
+        assert!(
+            d.primary
+                .ends_with("; 1 more of this scope's sinks cannot be reached either"),
+            "{}",
+            d.primary,
+        );
+    }
+
+    /// A face the tree itself stands on is a way in, though it is a
+    /// block: the search leaves from a seed without asking whether it is
+    /// free. Only the faces nothing could step off count against the
+    /// sink.
+    #[test]
+    fn a_sink_open_only_to_the_tree_is_not_walled_in() {
+        let source = CellCoord::new(1, 0, 1);
+        let sink = CellCoord::new(2, 0, 1);
+        let blocks = [
+            source,
+            sink,
+            CellCoord::new(3, 0, 1),
+            CellCoord::new(2, 0, 0),
+            CellCoord::new(2, 0, 2),
+        ];
+        let router = router(&region(5, 3, 1), &blocks);
+        let (found, _) = router.search(&[source], &[sink], &nothing_in_the_way());
+        assert_eq!(found, Ok((0, vec![source, sink])));
+    }
+
+    /// Stage 2 refuses a sink beyond the cap under the cap's own code,
+    /// which the delay pass gave it when the detour was laid for it to
+    /// measure. The sentence stops at the cap, the fix line is the one
+    /// for a long way round, and the count of the rest is kept.
+    #[test]
+    fn a_sink_beyond_the_cap_is_refused_as_the_attenuation_limit() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        // Both sinks beyond the wall, so neither reaches the other.
+        let width = cap;
+        let (detour, source, sink) = detour(width, 4);
+        let beside = CellCoord::new(0, 0, 3);
+        let mut blocks: Vec<CellCoord> = detour.blocked.iter().copied().collect();
+        blocks.push(beside);
+        let region = region(width, 5, 1);
+        let router = router(&region, &blocks);
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![sink, beside]);
+        let trees = net_trees(&nets, &router, |_| source);
+        let d = unroutable(
+            &nets,
+            &trees,
+            &entry_for(&nets, "s"),
+            "placed",
+            &region,
+            |_| source,
+        )
+        .expect("the sinks are stranded");
+        assert_eq!(d.code, DiagnosticCode::AttenuationLimit);
+        assert_eq!(
+            d.primary,
+            format!(
+                "placed netlist for struct `s` has no route from the driver at (0,0,0) to \
+                 (0,0,4) within the v1 attenuation limit of {cap} blocks; 1 more of this \
+                 scope's sinks cannot be reached either"
+            ),
+        );
+        let notes: Vec<&str> = d.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(
+            notes,
+            [
+                "Fix: give the wire a shorter way round — raise `void` above 1 so it has a \
+                 layer to climb onto, or enlarge `region=` — or split the logic across several \
+                 `circuit` blocks"
+            ],
+        );
+    }
+
+    /// The refusal at the cap still names the nets on the sink's faces:
+    /// a sink can be out of reach for both reasons, and the nets in the
+    /// way are something the author can move.
+    #[test]
+    fn a_sink_beyond_the_cap_keeps_the_nets_in_the_way() {
+        let cap = MAX_ATTENUATION_SEGMENT;
+        let (width, sink_z) = detour_for(cap + 1);
+        let (detour, source, far) = detour(width, sink_z);
+        // A second net laid on the face above the far sink, from a
+        // source past it to a sink beside that face.
+        let other_source = CellCoord::new(0, 0, sink_z + 2);
+        let other_sink = CellCoord::new(1, 0, sink_z + 1);
+        let mut blocks: Vec<CellCoord> = detour.blocked.iter().copied().collect();
+        blocks.extend([other_source, other_sink, CellCoord::new(1, 0, sink_z + 2)]);
+        let region = region(width, sink_z + 3, 1);
+        let router = router(&region, &blocks);
+        let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
+        nets.insert(NetRef::Input(0), vec![other_sink]);
+        nets.insert(NetRef::Input(1), vec![far]);
+        let source_of = |net: NetRef| match net {
+            NetRef::Input(0) => other_source,
+            _ => source,
+        };
+        let trees = net_trees(&nets, &router, source_of);
+        assert_eq!(
+            trees[&NetRef::Input(0)].wire_path(),
+            [other_source, CellCoord::new(0, 0, sink_z + 1), other_sink],
+            "the fixture lays the other net on the far sink's face",
+        );
+        assert_eq!(
+            trees[&NetRef::Input(1)].stranded_by(far),
+            Some(Unreached::BeyondCap),
+        );
+        let d = unroutable(
+            &nets,
+            &trees,
+            &entry_for(&nets, "s"),
+            "placed",
+            &region,
+            source_of,
+        )
+        .expect("the far sink is stranded");
+        assert_eq!(d.code, DiagnosticCode::AttenuationLimit);
+        assert!(
+            d.primary.ends_with(&format!(
+                "within the v1 attenuation limit of {cap} blocks; the faces it could arrive \
+                 through are taken by sig.a"
+            )),
+            "{}",
+            d.primary,
         );
     }
 
@@ -2880,7 +3645,7 @@ mod tests {
                 prop_assume!(!targets.is_empty());
                 while !targets.is_empty() {
                     let reference = breadth_first(&router, &seeds, &targets);
-                    let Some((index, path)) = router.reach(&seeds, &targets, &nothing_in_the_way()) else {
+                    let Ok((index, path)) = router.reach(&seeds, &targets, &nothing_in_the_way()) else {
                         prop_assert_eq!(
                             reference,
                             None,
@@ -2892,6 +3657,7 @@ mod tests {
                     prop_assert_eq!(Some(walked), reference, "path {:?}", path);
                     let searched = router
                         .search(&seeds, &targets, &nothing_in_the_way())
+                        .0
                         .expect("a path exists, so the search has to find one");
                     prop_assert_eq!(
                         searched.1.len(),

@@ -154,25 +154,32 @@ pub(crate) fn source_of_net<'a>(
 /// The router over this scope, every net and its routed tree, or the
 /// first refusal the reservation earns.
 ///
-/// Three refusals under two codes. `E_ROUTE_CONGESTION` for a
-/// reservation too shallow to hold its pad row and for a sink no route
-/// reaches; `E_ATTENUATION_LIMIT` for a sink further from its driver
-/// than [`MAX_ATTENUATION_SEGMENT`] in a straight line.
+/// Four refusals under two codes. `E_ROUTE_CONGESTION` for a
+/// reservation too shallow to hold its pad row and for a sink the
+/// router proves no route reaches; `E_ATTENUATION_LIMIT` for a sink
+/// further from its driver than [`MAX_ATTENUATION_SEGMENT`] in a
+/// straight line, and for one no route within that cap reaches, where
+/// the router cannot prove it walled in.
 ///
 /// Only one comes out, so the order is a decision rather than a race:
 ///
 /// 1. the collapsed pad row, because it is the cause the other two are
 ///    symptoms of — a pad landing on a cell body strands sinks, and no
 ///    distance the author changes makes it fit;
-/// 2. the over-cap sink, because its repair is the *opposite* of the
-///    stranded sink's. `E_ROUTE_CONGESTION` says to enlarge the
-///    reservation; a pair already too far apart in a straight line is
-///    not helped by room, and for the shape that raises this most often
-///    — a reservation as wide as the `size=` it came from — enlarging
-///    makes it worse. A scope carrying both faults gets the refusal
-///    whose fix line is true rather than the one that sends the author
-///    the wrong way;
-/// 3. the sink no route reaches.
+/// 2. the sink over the cap in a straight line, because its repair is
+///    the *opposite* of the stranded sink's. `E_ROUTE_CONGESTION` says
+///    to enlarge the reservation; a pair already too far apart in a
+///    straight line is not helped by room, and for the shape that
+///    raises this most often — a reservation as wide as the `size=` it
+///    came from — enlarging makes it worse. A scope carrying both faults
+///    gets the refusal whose fix line is true rather than the one that
+///    sends the author the wrong way;
+/// 3. the stranded sink: walled in, or with no route within the cap.
+///    The second shares the first's code with the straight-line gate,
+///    but not its repair — its fix line asks for a shorter way round,
+///    which room can give — so the argument in (2) is about the
+///    straight-line gate alone, and the two shapes of a stranded sink
+///    are one step, ordered among themselves by [`unroutable`].
 ///
 /// The pad row and the stranded sink are asked by all three passes for
 /// one reason. Stage 2 elides the scope that earns either, and the CLI
@@ -199,7 +206,7 @@ pub(crate) fn source_of_net<'a>(
 ///
 /// # The `netlist` noun
 ///
-/// All three refusals open with `<netlist> netlist for ...`, and
+/// All four refusals open with `<netlist> netlist for ...`, and
 /// `netlist` is a parameter — `placed`, `routed`, `delayed` — because
 /// all three passes arrive here and a constant would name the wrong one
 /// on two of the three paths, the common one (`--stage route` over any
@@ -258,8 +265,11 @@ where
 /// [`crate::delay`] does and replaces nothing: a route is as long as the
 /// straight line only where nothing stands in the way. A region 256
 /// wide puts its pad 255 blocks from the driver and routes 257 to get
-/// there, which is over the cap and not over this, and stage 3's check
-/// is what catches it.
+/// there, which is over the cap and not over this. The router's search,
+/// bounded by the same cap, refuses such a route when the path it lays
+/// from the net's wire is itself over the cap, and stage 3's check
+/// catches the rest: a branch within the cap on a trunk that carries it
+/// over.
 ///
 /// Walked as [`crate::delay`] walks it — every cell's drivers in index
 /// order, then every actuator pad — so that where both would refuse,

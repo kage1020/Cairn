@@ -781,6 +781,77 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
 }
 
 #[test]
+fn cli_synth_stage_route_refuses_a_detour_past_the_attenuation_cap() {
+    // `sig.a` drives the gate and the near door, so it is laid first and
+    // its dust runs the length of the front row. The gate's own wire to
+    // the far door's pad, one row back, then has to step round that
+    // dust: its straight line is `width - 2` and its route `width`. At
+    // `width = cap` the route is the cap and the scope routes; one wider
+    // it is one block over, and the router's search, bounded by the cap,
+    // refuses it at stage 2 — still within the cap in a straight line,
+    // so the straight-line gate lets it through to the router.
+    use cairn_lang_redstone::MAX_ATTENUATION_SEGMENT as CAP;
+    let dir = tempfile::tempdir().expect("temp dir");
+    for (width, refuses) in [(CAP, false), (CAP + 1, true)] {
+        let path = dir.path().join(format!("detour{width}.crn"));
+        let source = format!(
+            "@cairn 2026.06\n@requires version>=1.20\n\n\
+             theme t:\n  slot wall -> @oak_planks\n  slot door -> @oak_door\n\n\
+             struct s size={width}x6\n  \
+             floor mat_slot=wall\n  \
+             door id=d0 side=front at=center mat_slot=door\n  \
+             door id=d1 side=back at=center mat_slot=door\n  \
+             pressure_plate id=pa at=front.outside offset=0 y=0 -> sig.a\n  \
+             pressure_plate id=pb at=back.outside offset=0 y=0 -> sig.b\n  \
+             logic sig.g0 = sig.a and sig.b\n  \
+             door[id=d0] opened_by=sig.a\n  \
+             door[id=d1] opened_by=sig.g0\n  \
+             circuit region=floor void=1\n"
+        );
+        std::fs::write(&path, source).expect("write detour fixture");
+        let out = cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                "route",
+                "--edition",
+                "java",
+                path.to_str().unwrap(),
+            ],
+        );
+        let stderr = String::from_utf8(out.stderr).expect("utf-8");
+        if !refuses {
+            assert_eq!(out.status.code(), Some(0), "width {width}: {stderr}");
+            let stdout = String::from_utf8(out.stdout).expect("utf-8");
+            let value: serde_json::Value = serde_json::from_str(&stdout)
+                .unwrap_or_else(|err| panic!("stdout should parse as JSON: {err}\n{stdout}"));
+            let lengths: Vec<u64> = value[0]["ir"]["outputs"]
+                .as_array()
+                .expect("outputs array")
+                .iter()
+                .map(|output| output["wire_length"].as_u64().expect("routed"))
+                .collect();
+            assert_eq!(
+                lengths,
+                [u64::from(CAP - 1), u64::from(CAP)],
+                "the far door's wire is exactly the cap",
+            );
+            continue;
+        }
+        assert_eq!(out.status.code(), Some(1), "width {width}: {stderr}");
+        let expected = format!(
+            "error[E_ATTENUATION_LIMIT]: placed netlist for struct `s` has no route from the \
+             driver at (1,0,1) to ({},0,1) within the v1 attenuation limit of {CAP} blocks; the \
+             faces it could arrive through are taken by sig.a\n  note: Fix: give the wire a \
+             shorter way round",
+            width - 1,
+        );
+        assert!(stderr.contains(&expected), "width {width}: got {stderr}");
+    }
+}
+
+#[test]
 fn cli_synth_unparseable_source_exits_one() {
     // Parse-level failure follows the same exit-code convention as
     // `cairn parse` / `check`: exit 1 (build problem), position-anchored
