@@ -16,17 +16,19 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 
 | Item | Role |
 |---|---|
-| `java_structure::build_structure_tag` | `BlockArray` → `Compound` (Java vanilla shape). |
-| `java_structure::write_structure_gzip` | Build and gzip-write in one call. |
-| `java_structure::write_compound_gzip` | Gzip-write an already-built root under the empty root name vanilla expects. Split out so a caller can build every tree before touching the filesystem. |
+| `java_structure::prepare_structure` / `java_structure::JavaStructure` | Check a `BlockArray` against every refusal the Java backend and the NBT encoder have, without building anything; `JavaStructure::write_gzip` then writes the `.nbt`, encoding the per-voxel `blocks` list from the grid as it goes, and can fail only on I/O. What a caller holds to validate every structure before writing any. |
+| `java_structure::build_structure_tag` | `BlockArray` → `Compound` (Java vanilla shape). One compound per voxel, so for inspecting a structure rather than writing a large one. |
+| `java_structure::write_structure_gzip` | Check and gzip-write in one call, streaming. A refused array leaves the writer untouched. |
+| `java_structure::write_compound_gzip` | Gzip-write an already-built root under the empty root name vanilla expects. |
 | `java_structure::output_filename` | `struct::cottage` + `OutputExt::Nbt` → `cottage.nbt`; `OutputExt::Mcstructure` → `cottage.mcstructure`. |
 | `java_structure::OutputExt` | `Nbt` / `Mcstructure`. The only way to name an output extension, so no caller ends up with `.nbt.nbt`. |
-| `java_structure::JavaStructureError` | `Nbt`, `AbstractPaletteEntry`, `PaletteIndexOutOfRange`, `DimensionOverflow`. |
+| `java_structure::JavaStructureError` | `Nbt`, `AbstractPaletteEntry`, `PaletteIndexOutOfRange`, `DimensionOverflow`, `VolumeOverflow`, `ListTooLong`, `VoxelCountMismatch`, `UnencodablePaletteString`. `#[non_exhaustive]`. |
 | `java_structure::Compound` | [`cairn-lang-nbt`](../cairn-lang-nbt/README.md)'s tag compound, passed through so building a tag tree needs one dependency rather than two. |
-| `bedrock_structure::build_mcstructure_tag` | `BlockArray` → `(Compound, Vec<ParityNote>)` (Bedrock `.mcstructure` shape). |
+| `bedrock_structure::prepare_mcstructure` / `bedrock_structure::McStructure` | Check a `BlockArray` against the Bedrock backend and the NBT encoder and translate its palette, returning the parity notes alongside; `McStructure::write` then writes the `.mcstructure`, encoding both `block_indices` layers from the grid as it goes, and can fail only on I/O. |
+| `bedrock_structure::build_mcstructure_tag` | `BlockArray` → `(Compound, Vec<ParityNote>)` (Bedrock `.mcstructure` shape). Both per-voxel layers as tags, so for inspecting a structure rather than writing a large one. |
 | `bedrock_structure::write_mcstructure` | Uncompressed little-endian write of a built root. |
 | `bedrock_structure::ParityNote` | One degraded palette entry: its concrete id and the sentence the caller surfaces as `W_INTENT_DEGRADED`. The serializer has no source span, so attributing the note to a structure scope is the caller's job. |
-| `bedrock_structure::BedrockStructureError` | `Nbt`, `AbstractPaletteEntry`, `State`, `PaletteIndexOutOfRange`, `DimensionOverflow`. |
+| `bedrock_structure::BedrockStructureError` | `Nbt`, `AbstractPaletteEntry`, `State`, `PaletteIndexOutOfRange`, `DimensionOverflow`, `VolumeOverflow`, `ListTooLong`, `VoxelCountMismatch`, `UnencodablePaletteString`. `#[non_exhaustive]`. |
 | `bedrock_state::translate_states` | One Java blockstate → the Bedrock `states` compound, or the reason it cannot be one. |
 | `bedrock_state::StateTranslation` | A successful translation: the typed `states` compound, plus one entry per piece of intent Bedrock cannot express. Empty `degraded` means lossless. |
 | `bedrock_state::BedrockStateError` | `UnmappableBlock`, `UnknownStairState`, `UnknownStairKey` — each carrying the what-is-wrong / what-is-valid / suggested-fix triple the lint loop reads. |

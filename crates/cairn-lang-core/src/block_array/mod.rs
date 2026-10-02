@@ -224,6 +224,9 @@ impl Footprint {
 /// A structure at the bound already costs 32 MB for the index vector alone
 /// (`PaletteIndex` is two bytes), so the ceiling is well past where the
 /// output stops being useful and well below where the allocator gives up.
+/// That holds for writing the artifact too: `cairn-lang-formats` encodes a
+/// structure's per-voxel lists from this vector as it writes them, so the
+/// writer adds a fixed amount on top of it rather than a multiple of it.
 ///
 /// Per scope, not per module: a source declaring a thousand structs can
 /// still ask for a thousand times this. Bounding the total would need a
