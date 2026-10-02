@@ -27,7 +27,8 @@
 //!   attrs, selector bindings, header args of struct/def excluding size).
 //! - `E_DUPLICATE_ID`   — two members in the same immediate body scope
 //!   declare `id=NAME` for the same `NAME` (per-body scope; nested `level`
-//!   blocks have their own namespace).
+//!   blocks have their own namespace). Two `place` rows of one `site` are
+//!   left to the resolver's `E_DUPLICATE_PLACE_ID`; see [`ScopeKind`].
 //!
 //! Every scope here reports the *repeat* and points a note at the first
 //! declaration, so the anchor is the token the author would edit and the
@@ -40,7 +41,7 @@ use indexmap::IndexMap;
 
 use crate::ast::{Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind};
 use crate::error::Span;
-use crate::intent::{IntentModule, SelectorRule, ThemeIr};
+use crate::intent::{IntentModule, MemberRole, SelectorRule, ThemeIr, role_of};
 use crate::prose::{and_list, selector_text};
 use crate::resolve::select_the_same_members;
 
@@ -54,9 +55,9 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
             Item::Theme { body, .. } => check_theme_body(body, sink),
             Item::Def { args, body, .. } | Item::Struct { args, body, .. } => {
                 check_arg_keys(args, ArgScope::Header, sink);
-                check_body(body, sink);
+                check_body(body, ScopeKind::Members, sink);
             }
-            Item::Site { body, .. } => check_body(body, sink),
+            Item::Site { body, .. } => check_body(body, ScopeKind::Site, sink),
         }
     }
     // The one scope read off the IR rather than the surface AST, walked in
@@ -389,12 +390,28 @@ fn first_declaration_note(first_span: &Span) -> DiagnosticNote {
     }
 }
 
-fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
+/// Which kind of body [`check_body`] walks.
+///
+/// The one rule that differs is who owns a repeated `place id=`: in a
+/// `site` body that is `E_DUPLICATE_PLACE_ID`, which the resolver reports
+/// with the site named and which `spec/lint` "Sites and placements"
+/// documents the first-row-wins rule for. Reporting `E_DUPLICATE_ID` here
+/// as well would bill one repair twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScopeKind {
+    /// A `site` body.
+    Site,
+    /// A `struct` or `def` body, or any nested body.
+    Members,
+}
+
+fn check_body(body: &[Statement], kind: ScopeKind, sink: &mut DiagnosticSink) {
     // Per immediate body: collect `id=` values declared by `Statement::Generic`
     // at this depth, plus the `key=` arg list of each statement and selector.
     let mut seen_ids: IndexMap<String, Span> = IndexMap::new();
     for stmt in body {
         if let Statement::Generic {
+            keyword,
             args,
             selector,
             children,
@@ -408,7 +425,9 @@ fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
             // Hoist the id value (and its span) out of args / selector and
             // diagnose duplicates within this scope. Both kinds of id-bearing
             // attribute count.
-            if let Some((id, id_span)) = extract_id(stmt) {
+            let owned_by_resolver =
+                kind == ScopeKind::Site && matches!(role_of(keyword), MemberRole::Place);
+            if !owned_by_resolver && let Some((id, id_span)) = extract_id(stmt) {
                 if let Some(first_span) = seen_ids.get(&id) {
                     sink.push(Diagnostic {
                         code: DiagnosticCode::DuplicateId,
@@ -422,7 +441,7 @@ fn check_body(body: &[Statement], sink: &mut DiagnosticSink) {
                 }
             }
             // Nested body has its own scope — both for `id=` and for args.
-            check_body(children, sink);
+            check_body(children, ScopeKind::Members, sink);
         }
     }
 }

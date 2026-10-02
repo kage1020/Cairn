@@ -117,3 +117,33 @@ fn dup_7_duplicate_header_arg_other_than_size_is_arg_not_size() {
         "got {diags:#?}",
     );
 }
+
+#[test]
+fn dup_8_a_repeated_place_id_is_reported_once_as_duplicate_place_id() {
+    // `E_DUPLICATE_PLACE_ID` is the code `spec/lint` "Sites and
+    // placements" gives this case, and the one that names the site; the
+    // generic `E_DUPLICATE_ID` beside it billed one repair twice.
+    let src = "theme t:\n  slot floor -> @oak_planks\n\n\
+               def hut size=3x3:\n  floor mat_slot=floor\n\n\
+               site v:\n  place id=a use=hut theme=t at=origin\n  \
+               place id=a use=hut theme=t east_of=a gap=2\n";
+    let diags = diagnose(src);
+    assert_eq!(diags.len(), 1, "got {diags:#?}");
+    assert_eq!(diags[0].code, DiagnosticCode::DuplicatePlaceId);
+}
+
+#[test]
+fn dup_9_a_site_body_still_reports_a_repeated_id_on_rows_other_than_place() {
+    // Only `place` rows are left to the resolver. A member a `site` body has
+    // no reader for is `E_MISPLACED_MEMBER`, and the resolver never sees
+    // its `id=`, so a repeat of it is still this pass's to report.
+    let src = "site v:\n  door id=x\n  door id=x\n";
+    let diags = diagnose(src);
+    let dup: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DuplicateId)
+        .collect();
+    assert_eq!(dup.len(), 1, "got {diags:#?}");
+    assert_eq!(slice(src, dup[0]), "id=x");
+    assert_eq!(dup[0].span.start, src.rfind("id=x").expect("second id"));
+}

@@ -26,7 +26,7 @@ turn on.
 | `E_DUPLICATE_SIZE` | A header declares more than one `size=`. |
 | `E_DUPLICATE_SLOT` | A `theme` body declares the same slot twice. |
 | `E_DUPLICATE_ARG` | A `key=` is repeated in one argument list. |
-| `E_DUPLICATE_ID` | Two members share an `id=` in the same body scope. |
+| `E_DUPLICATE_ID` | Two members share an `id=` in the same body scope. Two `place` rows of one `site` are `E_DUPLICATE_PLACE_ID` instead ([Sites and placements](#sites-and-placements)). |
 | `E_DUPLICATE_SELECTOR` | Two selector rows in one `theme` select the same members and bind the same key. |
 | `E_DUPLICATE_ITEM` | Two top-level items of the same kind share a name. |
 | `E_DUPLICATE_HEADER` | A single-valued `@directive` is declared more than once. |

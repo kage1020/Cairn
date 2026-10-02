@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- *(core)* Two `place` rows of one `site` sharing an `id=` were reported twice, as
+  `E_DUPLICATE_PLACE_ID` and as `E_DUPLICATE_ID`, so an editor showed two squiggles on one line and a
+  consumer counting errors counted two. `E_DUPLICATE_PLACE_ID`, the code that names the site and that
+  the first-row-wins rule is documented for, now owns the case; `E_DUPLICATE_ID` still reports a
+  repeated `id=` on any other row of a `site` body.
+
 ## 2026.10.0 — 2026-10-01
 
 ### Added
