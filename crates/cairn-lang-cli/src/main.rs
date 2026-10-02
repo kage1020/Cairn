@@ -1166,8 +1166,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 ///
 /// A refused palette adds nothing to the list, in either format:
 /// [`invalid_palette_report`] renders prose rather than a `Diagnostic`,
-/// since no leak it names has a span in the source or a repair the author
-/// could make. So an error-severity finding from another edition can
+/// since no leak it names has a span in the source. So an error-severity finding from another edition can
 /// leave the list non-empty with that refusal invisible in it, and a run
 /// refused by the palette alone comes back as `Err` of an empty list —
 /// which under `--format json` is the `{"diagnostics": []}` the spec asks
@@ -1324,14 +1323,15 @@ fn edition_rows(
 /// There is no figure to print over such a palette — the counts would read
 /// as ordinary portability — so the edition contributes no row and the run
 /// exits 1. The refusal reports here, as prose: no leak it names has a
-/// span in the source or a repair the author could make, so it is a
-/// run-level refusal rather than a finding, the shape `spec/lint`
-/// "Machine-readable payload" gives one.
+/// span in the source, so it is a run-level refusal rather than a finding,
+/// the shape `spec/lint` "Machine-readable payload" gives one.
 ///
-/// Split out of [`edition_rows`] because the `Err` arm is the one branch
-/// no `.crn` reaches: the lowering it needs is built inside the walk, so
-/// the only way to raise the refusal is to intern the blockstate by hand.
-/// Taking the `Result` rather than computing it is what lets
+/// Split out of [`edition_rows`] so the `Err` arm can be driven without a
+/// source: a `.crn` reaches it only through a state literal on a stair — a
+/// `facing` or `half` value outside the Java domain, or a key other than
+/// `facing` / `half` / `shape` — and the pack and compiler bugs it also
+/// catches have no source at all. Taking the `Result` rather than
+/// computing it is what lets
 /// `a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is`
 /// drive the decision with the lowering it already builds.
 fn portability_figure(
@@ -1420,9 +1420,13 @@ fn unsupported_notes(edition: Edition, entries: &[UnsupportedEntry]) -> Vec<Stri
 ///
 /// Returned rather than printed, like [`unsupported_notes`]. The header
 /// says which edition lost its row and why; the entries are the
-/// translator's own sentences, unreworded; the closing note says whose bug
-/// it is, since no path from a `.crn` can mint the blockstate the `Fix:`
-/// lines address.
+/// translator's own sentences, unreworded; the closing note says where
+/// such a blockstate can come from. The one path from a `.crn` is a state
+/// literal on a stair — a `facing` or `half` value outside the Java
+/// domain (`@oak_stairs[facing=up]`), or a key other than `facing` /
+/// `half` / `shape` — since nothing checks a literal against the target
+/// yet; every other is a pack or compiler bug. A literal on any other
+/// block never gets here: the walk counts it `unsupported` instead.
 fn invalid_palette_report(edition: Edition, invalid: &InvalidPalette) -> Vec<String> {
     let mut lines = vec![format!(
         "error: the {} palette carries blockstates a registry pack is expected to refuse, so \
@@ -1436,9 +1440,11 @@ fn invalid_palette_report(edition: Edition, invalid: &InvalidPalette) -> Vec<Str
             .map(|leak| format!("  error: {leak}")),
     );
     lines.push(
-        "  note: none of that is the source's to repair — a validated pack cannot produce these, \
-         so the leak is the pack's or this compiler's. The figure is withheld rather than \
-         counting a validation gap as ordinary portability"
+        "  note: a validated pack cannot produce these, so each is either a state literal on a \
+         stair in the source — a `facing` or `half` value outside the Java domain, or a key \
+         other than `facing` / `half` / `shape`, which nothing checks against the target yet — \
+         or a leak in the pack or this compiler. The figure is withheld rather than counting a \
+         validation gap as ordinary portability"
             .to_owned(),
     );
     lines
@@ -4181,14 +4187,14 @@ mod tests {
     /// that a leaked blockstate refuses the report instead of landing in
     /// the `unsupported` figure beside the ordinary answers.
     ///
-    /// No `.crn` reaches this, which is why the entry is interned into a
-    /// real lowering rather than written in a source. `roof::stair_state`
-    /// builds stair properties from `Cardinal` and `StairShape`, so its
-    /// values are in domain by construction; an authored `@id[k=v]` token
-    /// would carry arbitrary ones and the lexer refuses the bracket; and a
-    /// registry pack answers `PackView::lookup` with `BlockState::bare`.
-    /// Injecting one is the only way to ask what the command prints when
-    /// the impossible happens.
+    /// The entry is interned into a real lowering rather than written in a
+    /// source, so the test asks about the leak a pack or the compiler
+    /// could make, which has no source. `roof::stair_state` builds stair
+    /// properties from `Cardinal` and `StairShape`, so its values are in
+    /// domain by construction, and a registry pack answers
+    /// `PackView::lookup` with `BlockState::bare`. An authored state
+    /// literal on a stair is the one way a source reaches the same report;
+    /// the CLI contract tests drive that one.
     #[test]
     fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
         use cairn_lang_core::block_array::BlockState;
@@ -4241,27 +4247,29 @@ mod tests {
             "the leak is quoted, not reworded",
         );
         assert!(
-            lines[2].contains("the source's to repair"),
-            "every leak ends on a `Fix:` the author cannot act on, so the block has to say so \
-             itself, got: {}",
+            lines[2].contains("a state literal on a stair in the source")
+                && lines[2].contains("a key other than `facing` / `half` / `shape`")
+                && lines[2].contains("a leak in the pack or this compiler"),
+            "the block names both places such a blockstate can come from, since the leak's own \
+             `Fix:` addresses only the first, got: {}",
             lines[2],
         );
     }
 
-    /// Each `unsupported` reason renders the repair it names, including
-    /// the one no `.crn` can reach.
+    /// Each `unsupported` reason renders the repair it names.
     ///
-    /// Two paths put blockstate properties on a palette entry, and neither
-    /// reaches the states branch. `roof::stair_state` builds them from
-    /// `Cardinal` and `StairShape` and only for a material the family
-    /// check already accepted, so its values are in domain by
-    /// construction; an authored `@id[k=v]` token would carry arbitrary
-    /// ones, and the lexer refuses the bracket. A registry pack cannot
-    /// supply them either — `PackView::lookup` answers with
-    /// `BlockState::bare`. So the end-to-end tests can only ever produce
-    /// the absent-id case. The rendering is a pure function of the reason,
-    /// so the other is asked here rather than left as the branch nothing
-    /// reads.
+    /// The rendering is a pure function of the reason, so every variant is
+    /// asked here in one place. `roof::stair_state` builds stair properties
+    /// only for a material the family check already accepted, and a
+    /// registry pack answers `PackView::lookup` with `BlockState::bare`,
+    /// so the states branch is reached from a source only through an
+    /// authored state literal on a block outside the stair family
+    /// (`@oak_log[axis=x]`); the CLI contract tests drive that one end to
+    /// end. A literal on a stair never lands here: a `facing` or `half`
+    /// value outside the Java domain, or a key other than `facing` /
+    /// `half` / `shape`, refuses the edition's row instead, which
+    /// `a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is`
+    /// asks about.
     #[test]
     fn every_unsupported_reason_renders_the_repair_it_names() {
         let bare = unsupported_reason(&UnsupportedReason::AbsentFromEdition {

@@ -141,6 +141,7 @@ version to compare.
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
+| `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since nothing checks its properties and values against the target until `E_STATE_DOMAIN` is implemented ([Versioning and Editions](/spec/versioning-editions/)). |
 | `W_NO_THEME_BOUND` | A scope has no theme bound to it, so every `mat_slot=` member in it lowers to air. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 
@@ -150,6 +151,13 @@ commands that lower report them: `cairn compile`, `cairn lower`, `cairn info`, a
 raise it are `cairn compile --target` and `cairn check --edition E --target V` — `info` and
 `lower` lower against no version. A `cairn check` with no `--target` runs no lowering at all and
 reaches neither code.
+
+`W_STATE_LITERAL_UNCHECKED` is raised by the same lowering, on every state literal it reads from a
+theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info` and `cairn check
+--edition E --target V` report it under either edition. It stands in for `E_STATE_DOMAIN`: until
+the compiler holds a table of each block's states, a property the block lacks or a value outside
+its domain is written into the structure file unchanged, and the warning is what keeps that from
+being silent.
 
 `cairn check --target` exists so a CI job can gate on the check command and still see the
 lowering-stage findings a compile would refuse on: an id the target does not declare passed
@@ -447,9 +455,13 @@ other failure reads that way — a source that does not parse is an array carryi
 file that cannot be read writes no document at all. Which of the two refusals it was, and what the
 build lost, is said only on stderr.
 
-One `info` refusal is a run-level refusal of the same kind: a registry pack whose palette carries a
-blockstate the pack was expected to refuse costs that edition its portability row, and names no span
-in the source and no repair its author could make. It reads as prose on stderr in both formats.
+One `info` refusal is a run-level refusal of the same kind: a palette carrying a blockstate a
+registry pack was expected to refuse costs that edition its portability row, and names no span in
+the source. Such a blockstate is either a leak in the pack or the compiler, which the author cannot
+repair, or a state literal on a stair in the source — a `facing` or `half` value outside the Java
+domain (`@oak_stairs[facing=up]`), or a key other than `facing` / `half` / `shape` — which nothing
+checks against the target until `E_STATE_DOMAIN` is implemented. The refusal names both. A literal
+on any other block is counted `unsupported` instead. It reads as prose on stderr in both formats.
 The document is still written — the promise is one document per input, not one element per
 refusal — so a run refused by nothing else writes `{"diagnostics": []}` and says the rest with its
 exit code.
