@@ -287,11 +287,13 @@ fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
         // Forward-compatibility guard: when a future code lands with a
         // documented payload, the fixture-and-fixture-only matcher above
         // is not enough — the JSON has to carry the matching `data.kind`.
-        // `W_WALKWAY_BLOCKED` is the first such code, and currently
-        // `cairn check` does not drive walkway lowering so this branch
-        // never fires on the `duplicate.crn` fixture. If a future wiring
-        // pipes walkway diagnostics through `check`, this assertion
-        // catches a payload-stripped regression at the CLI surface.
+        // `W_WALKWAY_BLOCKED` is the first such code. This run passes no
+        // `--target`, so `cairn check` lowers nothing and this branch
+        // never fires on the `duplicate.crn` fixture; a `check --target`
+        // run does lower walkways, and there the area-cap refusal emits
+        // the code with no payload, since it skipped no cells. If this
+        // run ever lowers, this assertion catches a payload-stripped
+        // regression at the CLI surface.
         if entry["code"].as_str() == Some("W_WALKWAY_BLOCKED") {
             assert_eq!(
                 entry["data"]["kind"].as_str(),

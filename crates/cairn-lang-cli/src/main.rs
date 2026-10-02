@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::ast::Header;
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
 use cairn_lang_core::check::{
     DiagnosticNote as Note, LineStarts, RenderedDiagnostic, weigh_intended_targets,
 };
@@ -842,7 +842,7 @@ fn check_lowering(
     let block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
     CheckLowering {
         dropped_scopes: dropped_scopes(&resolution, &block_ir),
-        built_scopes: block_ir.structures.len(),
+        built_scopes: built_scopes(&block_ir),
         diagnostics: block_ir.diagnostics,
         unsupported: resolved.err(),
     }
@@ -1166,8 +1166,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 ///
 /// A refused palette adds nothing to the list, in either format:
 /// [`invalid_palette_report`] renders prose rather than a `Diagnostic`,
-/// since no leak it names has a span in the source or a repair the author
-/// could make. So an error-severity finding from another edition can
+/// since no leak it names has a span in the source. So an error-severity finding from another edition can
 /// leave the list non-empty with that refusal invisible in it, and a run
 /// refused by the palette alone comes back as `Err` of an empty list —
 /// which under `--format json` is the `{"diagnostics": []}` the spec asks
@@ -1324,14 +1323,15 @@ fn edition_rows(
 /// There is no figure to print over such a palette — the counts would read
 /// as ordinary portability — so the edition contributes no row and the run
 /// exits 1. The refusal reports here, as prose: no leak it names has a
-/// span in the source or a repair the author could make, so it is a
-/// run-level refusal rather than a finding, the shape `spec/lint`
-/// "Machine-readable payload" gives one.
+/// span in the source, so it is a run-level refusal rather than a finding,
+/// the shape `spec/lint` "Machine-readable payload" gives one.
 ///
-/// Split out of [`edition_rows`] because the `Err` arm is the one branch
-/// no `.crn` reaches: the lowering it needs is built inside the walk, so
-/// the only way to raise the refusal is to intern the blockstate by hand.
-/// Taking the `Result` rather than computing it is what lets
+/// Split out of [`edition_rows`] so the `Err` arm can be driven without a
+/// source: a `.crn` reaches it only through a state literal on a stair — a
+/// `facing` or `half` value outside the Java domain, or a key other than
+/// `facing` / `half` / `shape` — and the pack and compiler bugs it also
+/// catches have no source at all. Taking the `Result` rather than
+/// computing it is what lets
 /// `a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is`
 /// drive the decision with the lowering it already builds.
 fn portability_figure(
@@ -1420,9 +1420,13 @@ fn unsupported_notes(edition: Edition, entries: &[UnsupportedEntry]) -> Vec<Stri
 ///
 /// Returned rather than printed, like [`unsupported_notes`]. The header
 /// says which edition lost its row and why; the entries are the
-/// translator's own sentences, unreworded; the closing note says whose bug
-/// it is, since no path from a `.crn` can mint the blockstate the `Fix:`
-/// lines address.
+/// translator's own sentences, unreworded; the closing note says where
+/// such a blockstate can come from. The one path from a `.crn` is a state
+/// literal on a stair — a `facing` or `half` value outside the Java
+/// domain (`@oak_stairs[facing=up]`), or a key other than `facing` /
+/// `half` / `shape` — since nothing checks a literal against the target
+/// yet; every other is a pack or compiler bug. A literal on any other
+/// block never gets here: the walk counts it `unsupported` instead.
 fn invalid_palette_report(edition: Edition, invalid: &InvalidPalette) -> Vec<String> {
     let mut lines = vec![format!(
         "error: the {} palette carries blockstates a registry pack is expected to refuse, so \
@@ -1436,9 +1440,11 @@ fn invalid_palette_report(edition: Edition, invalid: &InvalidPalette) -> Vec<Str
             .map(|leak| format!("  error: {leak}")),
     );
     lines.push(
-        "  note: none of that is the source's to repair — a validated pack cannot produce these, \
-         so the leak is the pack's or this compiler's. The figure is withheld rather than \
-         counting a validation gap as ordinary portability"
+        "  note: a validated pack cannot produce these, so each is either a state literal on a \
+         stair in the source — a `facing` or `half` value outside the Java domain, or a key \
+         other than `facing` / `half` / `shape`, which nothing checks against the target yet — \
+         or a leak in the pack or this compiler. The figure is withheld rather than counting a \
+         validation gap as ordinary portability"
             .to_owned(),
     );
     lines
@@ -1484,34 +1490,113 @@ fn unsupported_reason(reason: &UnsupportedReason) -> String {
     }
 }
 
-/// Scopes the resolver recorded (`struct::NAME`, `site::SITE::PLACE`) that
-/// the block-array pass did not turn into a structure, in resolver order.
+/// Scopes the source asked for that the block-array pass did not turn into
+/// a structure holding at least one block: first the resolver's
+/// (`struct::NAME`, `site::SITE::PLACE`) in resolver order, then one per
+/// `connect` pair that laid none, in row order.
 ///
 /// `def::` keys are excluded: a def is a template and lowers to voxels only
 /// through a `place` that instantiates it.
 ///
-/// One definition for the two readers. `run_compile` refuses a build that
-/// would leave any of these out, and `edition_rows` reports the same thing
-/// as "no target can build this" — a second copy could drift into
-/// disagreeing about which scopes count.
+/// Built means at least one non-air voxel, not an entry in
+/// `block_ir.structures`: lowering keeps an array for a scope whose every
+/// member deferred, and for a walkway whose every cell overlapped a
+/// placement, and both are all air. Writing that array out would certify
+/// a build that placed nothing the source asked for there, so either is a
+/// loss like a scope with no array at all.
+///
+/// A walkway is not in `resolution.scopes`, because its key is minted
+/// during lowering, so it is judged by its `connect` row instead: a row
+/// asks for the walkway between its two `(place, port)` endpoints, and
+/// that walkway is built when `block_ir.walkways` holds the same site and
+/// the same two endpoints, in either order, and its array holds a block.
+/// So a `W_DUPLICATE_WALKWAY` row, whose pair the earlier row laid, loses
+/// nothing, and two rows naming one pair that neither laid are one loss.
+/// The loss is named `site::SITE::FROM ↔ TO`, as the first row asking for
+/// the pair wrote its endpoints, rather than by the `walkway::` key it
+/// would have had: a row refused for its identifiers never got a key, and
+/// the key it would have spelled can be another row's.
+///
+/// Only the rows in `resolution.connects` are judged. A row the resolver
+/// dropped (`E_CONNECT_ARITY` and the other resolution errors) is not
+/// there, so it is neither in this list nor in the `M` of
+/// [`report_partial_build`]'s "N of M". Today each such drop comes with an
+/// error of its own, on the row or, under `W_DEFERRED_CONNECT`, on the
+/// `place` it names. One root cause can still raise `N` by more than one:
+/// a placement refused upstream loses its own scope and, through
+/// `W_DEFERRED_MEMBER`, every walkway with an endpoint on it.
+///
+/// One definition for the three callers, so no copy can drift into
+/// disagreeing about which scopes count. `check_lowering` and
+/// `load_and_lower` collect the list for the two refusal points, `run_check`
+/// (for the compile at its pinned target) and `run_compile`, which both
+/// print it through [`report_partial_build`] and exit 1. `edition_rows`
+/// reports the same list as "no target can build this", and `cairn info`
+/// still exits 0 over it, deliberately (`spec/versioning-editions`).
 fn dropped_scopes(
     resolution: &cairn_lang_core::Resolution,
     block_ir: &BlockArrayIr,
 ) -> Vec<String> {
-    resolution
+    let built = |key: &str| block_ir.structures.get(key).is_some_and(holds_a_block);
+    let mut dropped: Vec<String> = resolution
         .scopes
         .keys()
         .filter(|key| !key.starts_with("def::"))
-        .filter(|key| !block_ir.structures.contains_key(key.as_str()))
+        .filter(|key| !built(key))
         .cloned()
-        .collect()
+        .collect();
+    let pair = |site: &str, from: String, to: String| {
+        let (a, b) = if from <= to { (from, to) } else { (to, from) };
+        (site.to_owned(), a, b)
+    };
+    let mut accounted: HashSet<(String, String, String)> = block_ir
+        .walkways
+        .iter()
+        .filter(|(key, _)| built(key.as_str()))
+        .map(|(_, w)| pair(w.site.as_str(), w.from.to_string(), w.to.to_string()))
+        .collect();
+    for connect in &resolution.connects {
+        let (from, to) = (connect.from.to_string(), connect.to.to_string());
+        let key = format!("site::{}::{from} ↔ {to}", connect.site);
+        if accounted.insert(pair(connect.site.as_str(), from, to)) {
+            dropped.push(key);
+        }
+    }
+    dropped
+}
+
+/// How many structures hold at least one block — the scopes
+/// [`dropped_scopes`] counts as built, so the two add up to the `M` of
+/// [`report_partial_build`]'s "N of M".
+fn built_scopes(block_ir: &BlockArrayIr) -> usize {
+    block_ir
+        .structures
+        .values()
+        .filter(|array| holds_a_block(array))
+        .count()
+}
+
+/// Whether any voxel of `array` is something other than air.
+///
+/// Read through the palette rather than against index `0`: the palette
+/// keeps air at `0`, but the question is what the voxel is, and a palette
+/// assembled another way must not turn an all-air array into a built one.
+fn holds_a_block(array: &BlockArray) -> bool {
+    array.voxels.iter().any(|index| {
+        array
+            .palette
+            .entries
+            .get(usize::from(index.0))
+            .is_some_and(|state| state.id != BlockState::AIR_ID)
+    })
 }
 
 /// Report the scopes a lowering lost, as `E_PARTIAL_BUILD`.
 ///
-/// One message for the two commands that refuse over it, because the
-/// count and the per-scope notes are the part an author reads and two
-/// copies of them drift. `because` is the half that cannot be shared: a
+/// One message for the two refusal points, `run_check` and `run_compile`,
+/// because the count and the per-scope notes are the part an author reads
+/// and two copies of them drift. `built` is [`built_scopes`]'s count, so
+/// the "N of M" adds the losses to the scopes that hold a block. `because` is the half that cannot be shared: a
 /// compile refuses because a lockfile must not certify a build missing
 /// part of what the source asked for, and `cairn check --target` certifies
 /// nothing — it refuses because the compile at that pin would, which is
@@ -2713,7 +2798,7 @@ fn run_compile(
         report_partial_build(
             file,
             &dropped_scopes,
-            block_ir.structures.len(),
+            built_scopes(&block_ir),
             "refusing to certify a partial build",
         );
         return ExitCode::from(1);
@@ -2737,7 +2822,11 @@ fn run_compile(
 
     let prepared = match prepare_artifacts(&block_ir, &target, &out_dir) {
         Ok(p) => p,
-        Err(code) => return code,
+        Err(PrepareRefusal::Collision(collision)) => {
+            collision.report();
+            return ExitCode::from(1);
+        }
+        Err(PrepareRefusal::Other(code)) => return code,
     };
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
@@ -3282,7 +3371,7 @@ fn prepare_artifacts(
     block_ir: &BlockArrayIr,
     target: &ResolvedTarget,
     out_dir: &Path,
-) -> Result<Vec<(PathBuf, Compound)>, ExitCode> {
+) -> Result<Vec<(PathBuf, Compound)>, PrepareRefusal> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
     let mut seen_paths: std::collections::HashMap<
         (PathBuf, std::ffi::OsString),
@@ -3303,15 +3392,17 @@ fn prepare_artifacts(
             );
         }
         let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
-        // Place and port ids may carry `_`, and `output_filename` joins a
-        // walkway's place and port with `_` where its scope key has the
-        // place/port separator `.`, so two distinct walkways can fold into
-        // the same on-disk name (e.g. `a.b_c__d.e_f` vs `a_b.c__d_e.f`
-        // both → `..._a_b_c__d_e_f`). Detecting that
-        // here keeps the second walkway from silently overwriting the
-        // first. Keyed on the directory entry rather than the spelling:
-        // `home1` and `HOME1` are distinct ids but one file on macOS and
-        // Windows, and would destroy each other in the commit.
+        // Distinct scope keys can name one file, because
+        // `cairn_lang_core::artifact_stem` drops what keeps them apart: a
+        // placement is named after its `id=` without its site, so it
+        // meets a struct or another site's placement of that name, and a
+        // walkway joins place and port with the `_` an id may itself
+        // carry. The resolver refuses each such pair it counts as
+        // `E_OUTPUT_NAME_COLLISION`, but it counts the scopes it resolved,
+        // and these keys come from lowering, which is a different set. So
+        // this check is what is left if a future source of scope keys
+        // skips the resolver's, and it is the last point before the
+        // second file overwrites the first in the commit.
         let location = entry_location(&path).map_err(|err| {
             eprintln!(
                 "error: cannot resolve where artifact `{}` would be written: {err}",
@@ -3323,23 +3414,68 @@ fn prepare_artifacts(
         if let Some((first_path, first)) =
             seen_paths.insert(location, (path.clone(), scope.clone()))
         {
-            eprintln!(
-                "error: output filename `{}` collides between scopes `{first}` and `{scope}`",
-                path.display(),
-            );
-            if first_path != path {
-                eprintln!(
-                    "  note: `{}` and `{}` name one file on this file system; rename one of \
-                     the scopes so their names differ by more than case",
-                    first_path.display(),
-                    path.display(),
-                );
-            }
-            return Err(ExitCode::from(1));
+            let collision = ArtifactCollision {
+                first,
+                first_path,
+                scope: scope.clone(),
+                path,
+            };
+            return Err(PrepareRefusal::Collision(collision));
         }
         prepared.push((path, tag));
     }
     Ok(prepared)
+}
+
+/// Why [`prepare_artifacts`] refused.
+#[derive(Debug)]
+enum PrepareRefusal {
+    /// Two scopes name one directory entry. The caller prints it with
+    /// [`ArtifactCollision::report`].
+    Collision(ArtifactCollision),
+    /// Any other refusal, already printed, with its exit code.
+    Other(ExitCode),
+}
+
+/// Two scopes whose artifacts are one directory entry: the scope that
+/// claimed it first and its path, then the one that met it and its path.
+#[derive(Debug)]
+struct ArtifactCollision {
+    first: String,
+    first_path: PathBuf,
+    scope: String,
+    path: PathBuf,
+}
+
+impl ArtifactCollision {
+    /// Print the refusal. The note is for paths spelled differently, which
+    /// only a case-folding file system makes one entry.
+    fn report(&self) {
+        let Self {
+            first,
+            first_path,
+            scope,
+            path,
+        } = self;
+        eprintln!(
+            "error: output filename `{}` collides between scopes `{first}` and `{scope}`",
+            path.display(),
+        );
+        if first_path != path {
+            eprintln!(
+                "  note: `{}` and `{}` name one file on this file system; rename one of \
+                 the scopes so their names differ by more than case",
+                first_path.display(),
+                path.display(),
+            );
+        }
+    }
+}
+
+impl From<ExitCode> for PrepareRefusal {
+    fn from(code: ExitCode) -> Self {
+        Self::Other(code)
+    }
 }
 
 /// Why an artifact file name cannot be joined onto `--out`.
@@ -4149,14 +4285,14 @@ mod tests {
     /// that a leaked blockstate refuses the report instead of landing in
     /// the `unsupported` figure beside the ordinary answers.
     ///
-    /// No `.crn` reaches this, which is why the entry is interned into a
-    /// real lowering rather than written in a source. `roof::stair_state`
-    /// builds stair properties from `Cardinal` and `StairShape`, so its
-    /// values are in domain by construction; an authored `@id[k=v]` token
-    /// would carry arbitrary ones and the lexer refuses the bracket; and a
-    /// registry pack answers `PackView::lookup` with `BlockState::bare`.
-    /// Injecting one is the only way to ask what the command prints when
-    /// the impossible happens.
+    /// The entry is interned into a real lowering rather than written in a
+    /// source, so the test asks about the leak a pack or the compiler
+    /// could make, which has no source. `roof::stair_state` builds stair
+    /// properties from `Cardinal` and `StairShape`, so its values are in
+    /// domain by construction, and a registry pack answers
+    /// `PackView::lookup` with `BlockState::bare`. An authored state
+    /// literal on a stair is the one way a source reaches the same report;
+    /// the CLI contract tests drive that one.
     #[test]
     fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
         use cairn_lang_core::block_array::BlockState;
@@ -4209,27 +4345,29 @@ mod tests {
             "the leak is quoted, not reworded",
         );
         assert!(
-            lines[2].contains("the source's to repair"),
-            "every leak ends on a `Fix:` the author cannot act on, so the block has to say so \
-             itself, got: {}",
+            lines[2].contains("a state literal on a stair in the source")
+                && lines[2].contains("a key other than `facing` / `half` / `shape`")
+                && lines[2].contains("a leak in the pack or this compiler"),
+            "the block names both places such a blockstate can come from, since the leak's own \
+             `Fix:` addresses only the first, got: {}",
             lines[2],
         );
     }
 
-    /// Each `unsupported` reason renders the repair it names, including
-    /// the one no `.crn` can reach.
+    /// Each `unsupported` reason renders the repair it names.
     ///
-    /// Two paths put blockstate properties on a palette entry, and neither
-    /// reaches the states branch. `roof::stair_state` builds them from
-    /// `Cardinal` and `StairShape` and only for a material the family
-    /// check already accepted, so its values are in domain by
-    /// construction; an authored `@id[k=v]` token would carry arbitrary
-    /// ones, and the lexer refuses the bracket. A registry pack cannot
-    /// supply them either — `PackView::lookup` answers with
-    /// `BlockState::bare`. So the end-to-end tests can only ever produce
-    /// the absent-id case. The rendering is a pure function of the reason,
-    /// so the other is asked here rather than left as the branch nothing
-    /// reads.
+    /// The rendering is a pure function of the reason, so every variant is
+    /// asked here in one place. `roof::stair_state` builds stair properties
+    /// only for a material the family check already accepted, and a
+    /// registry pack answers `PackView::lookup` with `BlockState::bare`,
+    /// so the states branch is reached from a source only through an
+    /// authored state literal on a block outside the stair family
+    /// (`@oak_log[axis=x]`); the CLI contract tests drive that one end to
+    /// end. A literal on a stair never lands here: a `facing` or `half`
+    /// value outside the Java domain, or a key other than `facing` /
+    /// `half` / `shape`, refuses the edition's row instead, which
+    /// `a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is`
+    /// asks about.
     #[test]
     fn every_unsupported_reason_renders_the_repair_it_names() {
         let bare = unsupported_reason(&UnsupportedReason::AbsentFromEdition {
@@ -4498,5 +4636,103 @@ mod tests {
             .unwrap_or_else(|_| panic!("a plain id prepares"));
         let paths: Vec<&Path> = prepared.iter().map(|(path, _)| path.as_path()).collect();
         assert_eq!(paths, [out_dir.join("hut.nbt").as_path()]);
+    }
+
+    /// The probe's one lowered structure under each of `keys`, ready to
+    /// hand to `prepare_artifacts`. Rekeying a real lowering is the only
+    /// way to reach a refusal no source reaches.
+    fn rekeyed_probe(keys: &[&str]) -> BlockArrayIr {
+        let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, Some(Edition::Java));
+        let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+        let array = block_ir
+            .structures
+            .values()
+            .next()
+            .expect("the probe lowers to one structure")
+            .clone();
+        block_ir.structures = keys
+            .iter()
+            .map(|key| ((*key).to_owned(), array.clone()))
+            .collect();
+        block_ir
+    }
+
+    /// The paths `prepare_artifacts` would write, or its refusal, without
+    /// the tag trees that make a failure message unreadable.
+    fn prepared_paths(
+        result: Result<Vec<(PathBuf, Compound)>, PrepareRefusal>,
+    ) -> Result<Vec<PathBuf>, PrepareRefusal> {
+        result.map(|prepared| prepared.into_iter().map(|(path, _)| path).collect())
+    }
+
+    /// Two scopes that name one file are refused before any I/O.
+    ///
+    /// No source reaches this either: the resolver refuses the pair with
+    /// `E_OUTPUT_NAME_COLLISION`, so `cairn compile` stops before it lowers.
+    /// The check here is what is left if a future source of scope keys
+    /// skips that one. The two keys are the shape the resolver's own
+    /// finding is about, a struct and a placement of one name, and the
+    /// same structure under two names that do not meet prepares, so the
+    /// refusal is the collision's.
+    #[test]
+    fn two_scopes_that_name_one_file_are_refused_before_any_io() {
+        let target =
+            resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+        let out_dir = Path::new("out");
+        assert!(
+            prepare_artifacts(
+                &rekeyed_probe(&["struct::hut", "site::s::barn"]),
+                &target,
+                out_dir
+            )
+            .is_ok(),
+            "the control pair names two files",
+        );
+        match prepare_artifacts(
+            &rekeyed_probe(&["struct::hut", "site::s::hut"]),
+            &target,
+            out_dir,
+        ) {
+            Err(PrepareRefusal::Collision(collision)) => {
+                assert_eq!(
+                    (collision.first.as_str(), collision.scope.as_str()),
+                    ("struct::hut", "site::s::hut")
+                );
+            }
+            other => panic!(
+                "`struct::hut` and `site::s::hut` both write `hut.nbt`, so the collision check \
+                 must refuse them, got {:?}",
+                prepared_paths(other),
+            ),
+        }
+    }
+
+    /// Where the file system folds case, two keys whose stems differ only in
+    /// case are one directory entry, and the guard compares entries, not
+    /// spellings. On Linux `entry_location` does not fold, so the two are
+    /// two files there and this is not asserted.
+    #[cfg(any(target_os = "macos", windows))]
+    #[test]
+    fn two_scopes_whose_names_differ_only_in_case_are_refused_where_case_is_folded() {
+        let target =
+            resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+        match prepare_artifacts(
+            &rekeyed_probe(&["struct::hut", "struct::HUT"]),
+            &target,
+            Path::new("out"),
+        ) {
+            Err(PrepareRefusal::Collision(collision)) => {
+                assert_eq!(
+                    (collision.first.as_str(), collision.scope.as_str()),
+                    ("struct::hut", "struct::HUT")
+                );
+            }
+            other => panic!(
+                "`hut.nbt` and `HUT.nbt` are one file here, got {:?}",
+                prepared_paths(other),
+            ),
+        }
     }
 }

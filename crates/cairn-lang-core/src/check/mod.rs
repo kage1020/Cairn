@@ -184,6 +184,7 @@ mod tests {
             | C::UnresolvedPlaceRef
             | C::UnresolvedThemeRef
             | C::DuplicatePlaceId
+            | C::OutputNameCollision
             | C::InvalidPlaceOrigin
             | C::UnusedDef
             | C::UnresolvedPort
@@ -199,6 +200,7 @@ mod tests {
             | C::IgnoredArgument
             | C::NoThemeBound
             | C::AbstractTokenDeferred
+            | C::StateLiteralUnchecked
             | C::UnknownAbstractToken
             | C::UnknownId
             | C::IncompatibleMaterial

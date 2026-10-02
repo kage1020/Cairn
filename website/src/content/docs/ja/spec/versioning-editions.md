@@ -85,6 +85,10 @@ constraints:
 す。エラーはターゲットで有効な候補の閉集合、最小バージョン、推奨修正を返します。モデルを自身の記憶で
 はなくレジストリ由来の候補へ引き戻すためです。
 
+ドメイン外の状態はまだ強制されていません。コンパイラが各ブロックのステートの表を持たないため、下の
+`E_STATE_DOMAIN` は未実装です。それまでステートリテラル ([構文](/ja/spec/syntax/)) は書かれたまま
+出力され、どれにも代わりに `W_STATE_LITERAL_UNCHECKED` ([Lint](/ja/spec/lint/)) が付きます。
+
 ```text
 E_UNKNOWN_ID line 12: "minecraft:pale_oak_planks" not in 1.21.4 registry.
   Similar valid: minecraft:oak_planks, minecraft:dark_oak_planks, minecraft:cherry_planks
@@ -573,7 +577,7 @@ ID のケースは `E_UNKNOWN_ID` と同じ答え方を、同じ 2 つの半分�
 | フィールド | 持つもの | 作者が直す場所 |
 |---|---|---|
 | `unplaceable_floors` | floor | `@requires` の行。floor がこのエディションのどのリリースも名指していないので、どのバージョンとも突き合わせられず、どれも認証されません。 |
-| `dropped_scopes` | スコープキー | voxel を生まなかったメンバ。部分ビルドは認証されないので、どのバージョンも ID テーブルを見る前に拒否されます。 |
+| `dropped_scopes` | スコープキー、walkway は `site::SITE::FROM ↔ TO` | voxel を生まなかったメンバまたは `connect` 行。部分ビルドは認証されないので、どのバージョンも ID テーブルを見る前に拒否されます。 |
 | `versions` | 拒否されたターゲット | 自分自身の理由で拒否されたバージョンごとに 1 エントリ。 |
 
 どちらか一方ではなく両方が並びます。あるファイルが、このエディションが置けない floor を宣言し、

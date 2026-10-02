@@ -138,6 +138,7 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `E_INCOMPLETE_PLACE` | `place` 行が `id=` / `use=` / `theme=` のいずれかを欠いている ([§9.3](/ja/spec/components-editing-sites#93-site-による複数建築))。 |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | `mat_slot=` が、渡されたパックのカタログが宣言していない抽象マテリアルトークンに解決される ([マテリアルとテーマ](/ja/spec/materials-themes))。 |
 | `W_ABSTRACT_TOKEN_DEFERRED` | 同じトークンだが、そもそもカタログが渡されておらず、照合する相手がいない。 |
+| `W_STATE_LITERAL_UNCHECKED` | 正準トークンのステートリテラル (`@oak_log[axis=x]`) が書かれたまま使われた。`E_STATE_DOMAIN` が実装されるまで、そのプロパティと値をターゲットに照らして検査するものがない ([バージョンとエディション](/ja/spec/versioning-editions))。 |
 | `W_NO_THEME_BOUND` | スコープにテーマが束縛されていないので、その中の `mat_slot=` メンバはすべて空気になる。 |
 | `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定されたエディションは別のものを束縛した ([バージョンとエディション](/ja/spec/versioning-editions))。 |
 
@@ -147,6 +148,12 @@ lowering を走らせるコマンド — `cairn compile`、`cairn lower`、`cair
 とするので、実際に出せるのは `cairn compile --target` と `cairn check --edition E --target V` の 2
 つです (`info` と `lower` はバージョンを固定せずに lowering します)。`--target` なしの
 `cairn check` は lowering を走らせないので、どちらのコードにも到達しません。
+
+`W_STATE_LITERAL_UNCHECKED` も同じ lowering が出します。テーマのスロットや `connect … path=` から
+読むステートリテラルのそれぞれに付くので、`cairn compile`、`cairn lower`、`cairn info`、
+`cairn check --edition E --target V` がどちらのエディションでも報告します。これは `E_STATE_DOMAIN`
+の代わりです。コンパイラが各ブロックのステートの表を持つまで、ブロックにないプロパティやドメイン外
+の値はそのまま構造ファイルに書き出されるので、それを黙って済ませないのがこの警告です。
 
 `cairn check --target` があるのは、CI ジョブが check コマンドをゲートにしつつ、compile が拒否する
 lowering 段の指摘を見られるようにするためです。ターゲットが宣言していない ID は `check` を終了コード
@@ -255,6 +262,7 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 |---|---|
 | `E_INVALID_PLACE_ID` | `place id=` が空、または `.` / `:` / `/` / `\` / 空白を含む。 |
 | `E_DUPLICATE_PLACE_ID` | 同じ site の 2 つの `place` 行が `id=` を共有している。 |
+| `E_OUTPUT_NAME_COLLISION` | ビルドが書くはずの 2 つの成果物が、大文字小文字を無視して同じファイル名になる。同じ名前の `struct` と `place`、2 つの site に置かれた同じ `id=`、平坦化すると同じ名前になる 2 本の walkway など。 |
 | `E_INVALID_PLACE_ORIGIN` | `place` が `origin` 以外の `at=` を持つ、または `at=` と `east_of=` / `north_of=` を併用している ([§9.3](/ja/spec/components-editing-sites#93-site-による複数建築))。 |
 | `E_UNRESOLVED_PLACE_REF` | `place use=`、`east_of=` / `north_of=`、`connect` の端点が、存在しない place や def を名指している。 |
 | `E_UNRESOLVED_THEME_REF` | `place theme=` が、モジュールの宣言していないテーマを名指している。 |
@@ -269,6 +277,21 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 
 `E_DUPLICATE_PLACE_ID` は両方のスパンを示します。id を参照するものはすべて最初の行を採り、重複した
 方は落とされるので、「もう一方」に解決された参照が 2 つ目の指摘になることはありません。
+
+`E_OUTPUT_NAME_COLLISION` は成果物の名前の付け方から生じます
+([§9.3.4](/ja/spec/components-editing-sites#934-出力ファイル名))。`struct` はその名前、`place` は
+`id=` だけ、walkway は site とポートで名付けられます。どれも同じ出力ディレクトリに書かれるので、2 つが
+1 つのファイルを指すことがあり、両方がビルドされればその片方しか残せません。この検査は lowering の前に
+行われます。サイズのない `struct` と、サイズのない `def` を使う `place` は lowering が落とすので数えず、
+同じポートの組を結ぶ 2 行の `connect` は、向きによらず lowering が敷くとおり 1 本の walkway として数えます。
+`W_STRUCTURE_TOO_LARGE` が落とす struct や placement と、探索範囲がルーターの上限を超え
+`W_WALKWAY_BLOCKED` が報告して敷かない walkway は数えるので、指摘は 2 つが同じファイルに「書かれるはず」と
+述べます。名前は大文字小文字を無視して比べます。
+macOS と Windows が既定で使う大文字小文字を区別しないファイルシステムでは `Hut` と `hut` は 1 つの
+ファイルであり、ソースがビルドできるかどうかがビルドするホストに依存するべきではないからです。この指摘は
+他の site の指摘と同じく lowering の前に出るので、`cairn check` は `--target` なしで報告します。同じ名前を
+2 回宣言したものはこのコードではありません。2 つ目の `struct hut` は `E_DUPLICATE_ITEM`、同じ site の
+2 つ目の `id=` は `E_DUPLICATE_PLACE_ID` です。
 
 `E_UNRESOLVED_PLACE_REF` と `E_UNRESOLVED_THEME_REF` は、綴りの上限に収まる候補があれば最も近いもの
 を添えます ([did you mean](#did-you-mean))。どちらもエラーなのは、名前に何かを代入すればソースが
@@ -305,7 +328,8 @@ walkway は、ソース上では繋がって見える 2 棟を世界では繋が
 接し得ます。残りの四つの端、つまり place の末尾と port の先頭は、どちら向きに書いても `.` の隣にあり
 溶け込みませんが、規則を「place と port の識別子は `_` で始まることも終わることもできない」という
 一文に保つため、これらも拒否します。site は両隣と `::` で区切られるため、端の規則から外れます。
-行は落とされ、指摘は改名すべき区間を名指します。
+行は落とされ、指摘は改名すべき区間を名指します。その行が求めた walkway は失われるので、何も敷かなかった
+どの行とも同じく、`cairn compile` は `E_PARTIAL_BUILD` でビルドを拒否します。
 
 `W_DEFERRED_CONNECT` は `place` を拒否したもの — 欠けた行、打ち間違えたキー、失敗した原点セレクタ、
 解決できない `use=` や `theme=` — に従います。警告なのは、修理を持つ指摘が `place` 側のものであり、
@@ -320,7 +344,7 @@ walkway は、ソース上では繋がって見える 2 棟を世界では繋が
 | `W_DEF_NO_SIZE` | `def` での同じ事象。その def を使う `place use=` がすべて飛ばされる。 |
 | `W_STRUCTURE_TOO_LARGE` | スコープの導出範囲が、block-array パスが確保する体積を超えている。 |
 | `W_PHASE_CONFLICT` | 同じフェーズの 2 つのメンバが、1 つのボクセルに異なるブロックを書いた ([§4.4](/ja/spec/compilation))。 |
-| `E_PARTIAL_BUILD` | 要求されたスコープのうち少なくとも 1 つが lowering されず、求められたより少ないものしか作られなかった。 |
+| `E_PARTIAL_BUILD` | 要求されたスコープ、または `connect` 行が求めた walkway のうち少なくとも 1 つが lowering されず、求められたより少ないものしか作られなかった。 |
 
 `W_STRUCT_NO_SIZE` と `W_DEF_NO_SIZE` は 1 つの規則を、それを担っているものによって分けたものです。
 `code` で絞り込むフィルタが、建たない struct と、実体化されないテンプレートとを区別できます。
@@ -333,9 +357,11 @@ walkway は、ソース上では繋がって見える 2 棟を世界では繋が
 スコープの残りは lowering され、指摘は何が欠けているかを名指します。
 
 `E_PARTIAL_BUILD` はその実行単位版で、この表で唯一のエラーです。上の警告が「スコープはそれ抜きで
-建つ」と言うのに対し、こちらは「コマンドが求めたスコープが 1 つも建たなかった」と言います。実行ごと
-に 1 回、失われたスコープの数を名指して報告され、出すのは `cairn compile` と、同じ lowering パスを
-走らせる `cairn check --edition E --target V` です。
+建つ」と言うのに対し、こちらは「コマンドが求めたスコープが 1 つも建たなかった」と言います。空気だけ
+に lowering されたスコープも、何がそれを空にしたかによらず建たなかったスコープです。すべてのメンバ
+が見送られた、どのテーマもその `mat_slot=` メンバにブロックを与えなかった、メンバを 1 つも宣言してい
+ない、のいずれでも同じです。実行ごとに 1 回、失われたスコープの数を名指して報告され、出すのは
+`cairn compile` と、同じ lowering パスを走らせる `cairn check --edition E --target V` です。
 
 `W_PHASE_CONFLICT` は、拒否ではなく「後勝ち」を報告するものです。[コンパイルモデル](/ja/spec/compilation)
 は同一フェーズ内のローカルな上書きに後勝ちを認めていて、それは書き手がメンバを言い直した場合の話
@@ -441,10 +467,14 @@ stderr にしか書かれません。ほかの失敗がこう見えることは�
 
 `info` の拒否のうち 1 つは同じ種類の実行レベルの拒否です。レジストリパックが拒否するはずだった
 ブロックステートをパレットが抱えている場合、その edition は portability の行を失います。この拒否は
-ソース中のスパンにも、作者に可能な修正にも紐づきません。どちらの形式でも stderr にテキストで読め
-ます。それでもドキュメントは書かれます — 約束は「入力ごとに 1 ドキュメント」であって「拒否ごとに
-1 要素」ではないからです。この拒否のほかに拒否のない実行は `{"diagnostics": []}` を書き、残りは
-終了コードで伝えます。
+ソース中のスパンに紐づきません。そのようなブロックステートは、作者には直せないパックやコンパイラの
+漏れか、ソースで階段に書かれたステートリテラルのどちらかです。後者は Java のドメイン外の `facing`
+や `half` の値 (`@oak_stairs[facing=up]`) か、`facing` / `half` / `shape` 以外のキーで、
+`E_STATE_DOMAIN` が実装されるまでターゲットに照らして検査されません。拒否は両方を挙げます。ほかの
+ブロックに書かれたリテラルは、代わりに `unsupported` として数えられます。どちらの形式でも stderr に
+テキストで読めます。それでもドキュメントは書かれます — 約束は「入力ごとに 1 ドキュメント」であって
+「拒否ごとに 1 要素」ではないからです。この拒否のほかに拒否のない実行は `{"diagnostics": []}` を
+書き、残りは終了コードで伝えます。
 
 `parse` の成果物は AST、`lower` の成果物はブロック配列 IR です。ダンプはレポートではないので、失敗
 は「穴の空いたダンプ」にはなりません。どちらも `info` と同じ `{"diagnostics": [ ... ]}` を書き、

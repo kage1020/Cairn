@@ -407,6 +407,84 @@
   netlist input, though no sensor patch exists for the selector form. `check` now refuses it as
   `E_MISPLACED_BINDING`, so every command reports it.
 
+- *(core,tree-sitter,cli)* A canonical token with a block-state literal could not be written,
+  though `spec/materials-themes` "Canonical vocabulary" lists `@oak_log[axis=x]` as one and
+  everything past the parser already read that shape. Both parsers stopped at the `[`:
+
+  ```
+  theme t:
+    slot floor -> @oak_log[axis=x]
+  ```
+
+  ```
+  st.crn:2:25: error[E_PARSE]: expected end of line, got `[`
+  ```
+
+  A `[` that touches an undotted `@` token now opens its state literal: `property=value` pairs, each
+  value a word, a run of digits, or `true` / `false`, separated by one required comma. The literal
+  folds into the token's text, so the example builds a log lying along `x`. Its properties are
+  sorted by name, so `@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north, half=top]`
+  are one palette entry and write the same `.nbt` bytes and `resolved_ir_hash`. The parser is now
+  the only place a malformed literal is refused. That covers an empty literal, a missing `=` or
+  value, a trailing, doubled or missing comma, a string value, a missing `]`, and a property named
+  twice. A dotted token such as `@floor.wood` takes no literal, and a `[` touching one is read as
+  before, as is a `[` after a space.
+
+  A `[` touching an undotted token used to be whatever came next, so `mat=@a[1]`, `@a[1]` after a
+  member, `-> @a[1]` and `mat=[@a[1]]` parsed and are now refused. No program that ever passed
+  `check` is affected: a bare value on a line that reads none is `E_UNEXPECTED_POSITIONAL` and a
+  list in a member argument is `E_TYPE_MISMATCH_LABEL`, so only the parse tree of a source that
+  could not build changes. `spec/syntax` "Literals and separators" says the same.
+
+  Properties and values are not yet checked against the target (`E_STATE_DOMAIN` is not implemented,
+  and `spec/versioning-editions` now marks that rule as not yet enforced). Every literal the
+  lowering reads, from a theme slot or a `connect … path=`, earns the new warning
+  `W_STATE_LITERAL_UNCHECKED` on the token, so a Java build that writes `@oak_log[axis=q]` as given
+  no longer does so in silence.
+
+  Because a source can now reach it, `cairn info`'s refusal of a palette the pack was expected to
+  refuse no longer says that none of it is the source's to repair. It now names a state literal on a
+  stair as one possible origin: a `facing` or `half` value outside the Java domain, such as
+  `@oak_stairs[facing=up]` on Bedrock, or a key other than `facing` / `half` / `shape`. The Bedrock
+  backend's own refusal of such a value no longer suggests `--edition java`, which would write the
+  same value unchanged. `spec/lint` "Machine-readable payload" says the same.
+
+- *(core,cli)* A `connect` row that laid no walkway still let `cairn compile` certify the build.
+  The partial-build gate compared the scopes the resolver recorded with the structures lowering
+  built, and a walkway's scope is minted during lowering, so it was never on the first list. A site
+  whose only `connect` named `place id=a_` wrote `a_.nbt`, `b.nbt` and a lockfile with
+  `verified: true`, and exited 0. Each `connect` pair is now counted as a requested scope: when no
+  row laid it, `compile` refuses with `E_PARTIAL_BUILD`, `cairn check --edition E --target V`
+  refuses with it too, and `info` reports that no target can build the source. The loss is named
+  by the row's own ports:
+
+  ```
+  s.crn:11:3: warning[W_INVALID_WALKWAY_IDENT]: walkway `a_.p ↔ b.p` was dropped because the place id `a_` starts or ends with `_`
+    note: a walkway's place and port ids may not start or end with `_` in either position, so the rule does not depend on which way the row is written; rename the place so it neither starts nor ends with `_`
+  error[E_PARTIAL_BUILD]: s.crn: 1 of 3 requested scopes did not lower; refusing to certify a partial build
+    note: `site::s::a_.p ↔ b.p` produced no voxels
+  ```
+
+  A `W_DUPLICATE_WALKWAY` row loses nothing, because the earlier row laid its pair, and two rows
+  naming one pair that neither laid count as one loss. A walkway or scope counts as built only when
+  it holds a block. Two huts touching at `north_of=a gap=0`, each door port buried under the other's
+  floor, used to write a walkway `.nbt` of two air blocks, and a scope that lowered to air alone
+  (every member deferred, no theme bound for its `mat_slot=` members, or no member at all) wrote an
+  `.nbt` of air; both were certified at exit 0, and both are now refused as losses. One mistake can
+  now cost more than one note: a `place` whose def has no `size=` is lost, and so is every walkway
+  with an endpoint on it.
+
+  `spec/components-editing-sites` "Ports and `connect`" said each row writes one `.nbt`; it now says
+  which rows do and what the others cost, and its diagnostics table gains the missing
+  `W_INVALID_WALKWAY_IDENT` row. `spec/lint` and the `dropped_scopes` row in
+  `spec/versioning-editions` name the walkway case, with the ja mirror.
+
+- *(core)* `W_DUPLICATE_WALKWAY` could name a row a duplicate of a walkway that was never laid.
+  The pair was recorded as seen before the row's `path=` material, the area cap and its ids were
+  checked. Two rows for one pair can differ in their `path=`, so when the first row's material did
+  not resolve, the second was reported as a duplicate and dropped too, and the pair got no walkway
+  at all. The pair is now recorded only once its strip is laid, so the later row lays it.
+
 - *(core)* `north_of=ID` stepped back by the prior placement's depth instead of the new one's, so
   two buildings of different depths overlapped, or stood apart when `gap=0` asked them to touch,
   and nothing said so. With a 3x3 `a` and a 3x9 `b`:
@@ -1479,6 +1557,58 @@
 
 ### Breaking changes
 
+- *(core)* `cairn check` passed, and `cairn info` listed every supported version as buildable, for
+  a source whose artifacts share a file name, which `cairn compile` then refused at every target. A
+  `struct` and a `place` of one name both write `hut.nbt`:
+
+  ```
+  struct hut size=3x3
+    floor mat_slot=floor
+
+  site s:
+    place id=hut use=house theme=t at=origin
+  ```
+
+  ```
+  $ cairn check collide.crn --edition java --target 1.21.4; echo "exit=$?"
+  exit=0
+  $ cairn compile collide.crn --edition java --target 1.21.4 --out out; echo "exit=$?"
+  error: output filename `out/hut.nbt` collides between scopes `struct::hut` and `site::s::hut`
+  exit=1
+  ```
+
+  Only `compile` compared the names, after lowering, and its refusal carried no code for a
+  `--format json` consumer or a CI filter to match on. The names are now compared once the scopes
+  resolve, as `E_OUTPUT_NAME_COLLISION`, so `cairn check` reports it without a `--target`, `cairn
+  info` refuses the source instead of certifying it, and `cairn compile` refuses it with the code:
+
+  ```
+  $ cairn check collide.crn; echo "exit=$?"
+  collide.crn:13:3: error[E_OUTPUT_NAME_COLLISION]: `place id=hut` in site `s` would be written to the same file as `struct hut`
+  collide.crn:6:1:   note: `struct hut` is declared here
+    note: both would be written to `hut` in the output directory, with the edition's extension, and if both are built, a build can keep only one; rename one of them
+  exit=1
+  ```
+
+  The same code covers one `id=` placed in two sites, since a placement's file name leaves its site
+  out, and two walkways in one site whose names flatten alike (`x_y.entry to z.entry` and
+  `x.y_entry to z.entry`).
+
+  Two kinds of source that passed before are now refused. Names are compared ignoring case, so
+  `struct Hut` beside `struct hut`, which built as two files on Linux and was refused by `compile`
+  alone on macOS and Windows, whose default file systems make them one file, is now refused on every
+  host. And the names are compared before lowering, when not every scope lowering will drop is
+  known: a walkway whose search area is past the router's cap (`W_WALKWAY_BLOCKED`, not laid) and a
+  struct or placement past the volume budget (`W_STRUCTURE_TOO_LARGE`) still count. A source where
+  the name of such a scope matches another artifact's (`struct s_walkway_a_entry__c_entry` beside
+  `connect a.entry to c.entry` in site `s`) is now refused by `cairn check` with no `--target`,
+  which exited 0 on it. Its build is refused in this release either way, with `E_PARTIAL_BUILD` for
+  the lost scope, as the `Fixed` entry on a `connect` row that laid no walkway describes. The
+  finding says the two *would* be written to one file for this reason. A sizeless `struct`, a
+  `place` of a sizeless `def` and a walkway with an end on one are left out, since lowering drops
+  each before it writes a file, and two `connect` rows for one pair of ports, in either order, count
+  as the one walkway lowering lays.
+
 - *(core)* A `struct` / `def` header argument other than `size=` was read by nothing and checked by
   nothing, so a typo on the header was dropped in silence:
 
@@ -1542,13 +1672,13 @@
   cannot merge, and are refused so the rule stays one sentence (`KeyConstructError::UnderscoreAtEdge`
   gives the full argument). That reaches ids which never aliased: a
   source whose only edge-`_` id is `place id=a_` in `connect a_.p to b.p` used to lay that walkway,
-  and now drops it with the warning above while `compile` still exits 0. The site is exempt: `::`
-  separates it from both neighbours. A unit test builds every key over endpoint segments of `a` and
-  `_` up to three long and sites up to two, and parses each accepted one back to the parts it came
-  from. If two rows ever do encode to one key, a debug build asserts, and a release build reports
-  `W_INVALID_WALKWAY_IDENT` on the later row instead of losing the earlier walkway silently.
-  `spec/lint` "Connections and walkways" states the rule and why it covers every edge, with the
-  ja mirror.
+  and now drops it with the warning above; `compile` refuses a build that lost a walkway with
+  `E_PARTIAL_BUILD`. The site is exempt: `::` separates it from both neighbours. A unit test builds
+  every key over endpoint segments of `a` and `_` up to three long and sites up to two, and parses
+  each accepted one back to the parts it came from. If two rows ever do encode to one key, a debug
+  build asserts, and a release build reports `W_INVALID_WALKWAY_IDENT` on the later row instead of
+  losing the earlier walkway silently. `spec/lint` "Connections and walkways" states the rule and
+  why it covers every edge, with the ja mirror.
 
   The `__` finding's text changes too. It used to read ``contains `__`, which collides with the
   walkway scope key's `from`/`to` separator``, with the note ``rename the offending id (e.g.

@@ -480,18 +480,15 @@ fn lower_connects(
         };
 
         // Duplicate guard: pin on (site, from_place, from_port,
-        // to_place, to_port). Normalise the pair (sort the two ends)
-        // so `a.entry → b.entry` and `b.entry → a.entry` count as the
+        // to_place, to_port). `walkway_pair` sorts the two ends so
+        // `a.entry → b.entry` and `b.entry → a.entry` count as the
         // same walkway — laying the strip both ways would be a silent
-        // double-write.
-        let mut endpoints = [
-            (connect.from.place.clone(), connect.from.port.clone()),
-            (connect.to.place.clone(), connect.to.port.clone()),
-        ];
-        endpoints.sort_unstable();
-        let [(a_place, a_port), (b_place, b_port)] = endpoints;
-        let dedup_key = (connect.site.clone(), a_place, a_port, b_place, b_port);
-        if !seen_pairs.insert(dedup_key) {
+        // double-write. The pair is recorded only once its strip is
+        // laid, at the bottom of this loop: an earlier row with the same
+        // pair that the checks below refused laid nothing, so this row
+        // is not a duplicate of it.
+        let dedup_key = connect.walkway_pair();
+        if seen_pairs.contains(&dedup_key) {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::DuplicateWalkway,
                 span: connect.span.clone(),
@@ -512,7 +509,10 @@ fn lower_connects(
         }
 
         let material = match resolve_block_state(&connect.path, registry) {
-            Ok(state) => state,
+            Ok(state) => {
+                diagnostics.extend(diag_state_literal_unchecked(&connect.path, &state));
+                state
+            }
             Err(MaterialDeferred::Abstract(token)) => {
                 diagnostics.push(diag_abstract_token(
                     connect.path.span.clone(),
@@ -697,6 +697,7 @@ fn lower_connects(
                 data: None,
             });
         }
+        seen_pairs.insert(dedup_key);
         walkways.insert(
             scope_key,
             Walkway {
@@ -936,6 +937,51 @@ fn diag_unknown_abstract_token(
         notes,
         data: None,
     }
+}
+
+/// Say that a state literal was taken as written, when `value` carries one.
+///
+/// `spec/versioning-editions` "Fail-loud and minimum-version inference"
+/// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, and
+/// nothing raises it yet: no table this compiler holds says which
+/// properties a block has or which values each takes. Until one does, the
+/// literal reaches the palette and the structure file unchanged, right or
+/// wrong, and this warning is what keeps that from being silent. It
+/// anchors on the value the way `E_UNKNOWN_ID` does, so the mistake right
+/// of the `[` is pointed at from the same place as one left of it.
+///
+/// Only a canonical token folds a `[` into its text, so a state that came
+/// from anywhere else — a catalog lookup, a member default — is not one.
+fn diag_state_literal_unchecked(value: &ValueWithSpan, state: &BlockState) -> Option<Diagnostic> {
+    let ValueKind::Token(text) = &value.value.kind else {
+        return None;
+    };
+    if state.properties.is_empty() || !text.contains('[') {
+        return None;
+    }
+    let pairs = state
+        .properties
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(Diagnostic {
+        code: DiagnosticCode::StateLiteralUnchecked,
+        span: value.span.clone(),
+        primary: format!(
+            "`{id}` is written with `{pairs}` unchecked: nothing checks a state literal's \
+             properties or values against the target yet",
+            id = state.id,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "a property the block does not have, or a value outside its domain, \
+                      reaches the structure file unchanged; check each one against the \
+                      block's states in the target edition and version"
+                .to_owned(),
+        }],
+        data: None,
+    })
 }
 
 /// Report a block id the compile's target does not declare.
@@ -2337,7 +2383,10 @@ fn resolve_member_state(
     // first is reported by neither layer.
     let slot_value: &ValueWithSpan = binding.slot_value.as_ref()?;
     match resolve_block_state(slot_value, registry) {
-        Ok(state) => Some(state),
+        Ok(state) => {
+            diagnostics.extend(diag_state_literal_unchecked(slot_value, &state));
+            Some(state)
+        }
         Err(MaterialDeferred::Abstract(token)) => {
             diagnostics.push(diag_abstract_token(
                 member_or_slot_span(member, slot_value),
@@ -6054,10 +6103,8 @@ mod tests {
 
     #[test]
     fn state_literal_round_trips_through_palette() {
-        // Bracketed tokens are not yet emitted by the surface parser, so
-        // this exercises the palette/material path directly to lock the
-        // canonical-id and property-bag contract before the state-literal
-        // grammar lands.
+        // Exercises the palette/material path directly, below the parser,
+        // to lock the canonical-id and property-bag contract on its own.
         let mut palette = Palette::new_with_air();
         let token = ValueWithSpan::from_value(crate::ast::Value::new(
             ValueKind::Token("oak_log[axis=x]".to_owned()),
@@ -6422,13 +6469,14 @@ struct s size=9x7
 
     #[test]
     fn the_family_is_reported_before_the_properties_it_makes_moot() {
-        // Not reachable from source today, and the registry pack is not the
-        // way in either — `PackView::lookup` ends in `BlockState::bare`.
-        // The only producer is `canonical_to_block_state`'s bracket
-        // literal, which the grammar has no production for. Pinning the
-        // precedence anyway: once the id is refused it is not painted, and
-        // reporting that its unused properties were also dropped would ask
-        // the author to fix something that is not there.
+        // A source reaches this through a state literal on a block outside
+        // the stair family — `slot r -> @cobblestone[facing=north]` bound
+        // to a gable roof — and that literal is the only way in: the
+        // registry pack answers `PackView::lookup` with `BlockState::bare`.
+        // The state is built here rather than parsed so the test asks
+        // about the precedence alone: once the id is refused it is not
+        // painted, and reporting that its unused properties were also
+        // dropped would ask the author to fix something that is not there.
         let mut properties = IndexMap::new();
         properties.insert("facing".to_owned(), "north".to_owned());
         let state = BlockState {
@@ -7228,6 +7276,29 @@ struct s size=9x7
             1,
             "reversed row must not lay a second strip"
         );
+    }
+
+    #[test]
+    fn a_row_refused_after_the_dedup_check_leaves_its_pair_to_the_next_row() {
+        // The first row's `path=` is an abstract token, which lowers to
+        // nothing without a registry pack, so that row lays no strip. The
+        // second row names the same pair and a concrete block. It is not
+        // a duplicate of a walkway that was never laid: it lays the strip,
+        // and the only finding is the first row's own deferral.
+        let src = village_pair_source(
+            "  connect a.entry to b.entry path=@path.gravel\n  connect b.entry to a.entry path=@gravel\n",
+        );
+        let out = lowered(&src);
+        let codes: Vec<DiagnosticCode> = out.diagnostics.iter().map(|d| d.code).collect();
+        assert_eq!(
+            codes,
+            [DiagnosticCode::AbstractTokenDeferred],
+            "{:#?}",
+            out.diagnostics
+        );
+        let laid: Vec<&str> = out.walkways.keys().map(WalkwayScopeKey::as_str).collect();
+        assert_eq!(laid, ["walkway::s::b.entry__a.entry"]);
+        assert_eq!(out.walkways[0].path_material, "minecraft:gravel");
     }
 
     /// The `W_INVALID_WALKWAY_IDENT` findings on `out`, as `(primary, notes)`.
