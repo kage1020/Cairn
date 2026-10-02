@@ -3,12 +3,16 @@
 ## [Unreleased]
 
 ### Added
-- *(core)* add `rejected_circuit_regions`, which hands back each `circuit` line
-  `circuit_regions` leaves out, with its span and the reason
+- *(core)* `rejected_circuit_regions` hands back each `circuit` line `circuit_regions` leaves out,
+  with its span and a `CircuitRegionDefect` naming why it reserves nothing.
 
 ### Fixed
-- *(core,redstone)* refuse a one-column region for a scope with pads on both edges at placement,
-  in terms of width, and report an unusable `circuit` line on that line with its one reason
+- *(core,redstone)* An identity wire in a region one column wide passed placement with its sensor
+  and actuator pads on one voxel, and routing then asked for more depth, which does not help.
+  Placement now refuses it with an `E_ROUTE_CONGESTION` that asks for two columns.
+- *(core,redstone)* A scope whose `circuit` line was unusable got an `E_NO_CIRCUIT_REGION` on its
+  first `logic` line that listed every possible cause. It now stands on the `circuit` line and
+  names the one that applies, with a fix for it.
 
 ## 2026.10.0 — 2026-10-01
 
