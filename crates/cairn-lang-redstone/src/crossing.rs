@@ -2229,14 +2229,16 @@ struct chain size=60x5
         /// a block earlier.
         #[test]
         fn a_buffer_never_stands_beside_dust_of_its_own_net() {
-            // A sink two rows past the near one, and a sink on the very
-            // next row: both send a branch back beside the trunk's last
-            // straight coord before the turn.
-            for xs in [
-                [(58, 4, false), (58, 2, false)],
-                [(91, 2, false), (91, 3, false)],
-            ] {
-                if let Err(error) = check_phase4_scope(&xs) {
+            // Counterexamples the property test has drawn. In each, a
+            // branch comes back beside the trunk's last straight coord
+            // before a turn.
+            let shapes: [&[(u32, u32, bool)]; 3] = [
+                &[(58, 4, false), (58, 2, false)],
+                &[(91, 2, false), (91, 3, false)],
+                &[(25, 6, false), (25, 7, false), (1, 5, false)],
+            ];
+            for xs in shapes {
+                if let Err(error) = check_phase4_scope(xs) {
                     panic!("xs={xs:?}: {error}");
                 }
             }
