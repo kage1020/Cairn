@@ -516,7 +516,8 @@ pub enum DiagnosticCode {
     /// `use=` / `theme=` (`E_INCOMPLETE_PLACE`), a mistyped one
     /// (`E_TYPE_MISMATCH_LABEL`), a failed origin selector
     /// (`E_INVALID_PLACE_ORIGIN`, whose row registers before it is
-    /// validated), or a name that resolved to nothing
+    /// validated), an origin naming a row refused for its id
+    /// ([`Self::DeferredPlace`]), or a name that resolved to nothing
     /// (`E_UNRESOLVED_PLACE_REF` / `E_UNRESOLVED_THEME_REF`).
     ///
     /// The root cause is therefore reported elsewhere, and this is not a
@@ -526,6 +527,20 @@ pub enum DiagnosticCode {
     /// Mirrors the `W_DEFERRED_MEMBER` pattern used by walkway endpoint
     /// cascades in `block_array::lower`.
     DeferredConnect,
+    /// A `place` row's `east_of=` / `north_of=` names an earlier row in the
+    /// same site refused for its id (`E_INVALID_PLACE_ID`). The row naming
+    /// it is not placed, since what it is placed against has no position.
+    ///
+    /// The same cascade shape as [`Self::DeferredConnect`], one layer up:
+    /// the reference does name a row, so calling it `E_UNRESOLVED_PLACE_REF`
+    /// would send the author to look for a typo that is not there, and
+    /// saying nothing would leave a row that is not placed looking clean —
+    /// and a `connect` naming it would then point, through
+    /// `W_DEFERRED_CONNECT`'s note, at a row that prints nothing. The
+    /// finding with the repair is the one on the refused row, which this
+    /// one's note points at, so this is a warning: the build already fails
+    /// on that error.
+    DeferredPlace,
     /// A `connect` row whose site / place / port identifier contains the
     /// `__` substring, or whose place / port identifier starts or ends
     /// with `_`. The surface lexer permits `_` anywhere in identifiers,
@@ -701,6 +716,7 @@ impl DiagnosticCode {
             Self::WalkwayBlocked => "W_WALKWAY_BLOCKED",
             Self::DuplicateWalkway => "W_DUPLICATE_WALKWAY",
             Self::DeferredConnect => "W_DEFERRED_CONNECT",
+            Self::DeferredPlace => "W_DEFERRED_PLACE",
             Self::InvalidWalkwayIdent => "W_INVALID_WALKWAY_IDENT",
             Self::ConnectArity => "E_CONNECT_ARITY",
             Self::PhaseConflict => "W_PHASE_CONFLICT",
@@ -824,6 +840,7 @@ impl DiagnosticCode {
             | Self::WalkwayBlocked
             | Self::DuplicateWalkway
             | Self::DeferredConnect
+            | Self::DeferredPlace
             | Self::InvalidWalkwayIdent
             | Self::PhaseConflict
             | Self::TruthTableDuplicateRow
@@ -1508,6 +1525,7 @@ mod tests {
                 "W_ABSTRACT_TOKEN_DEFERRED",
                 "W_DEFERRED_CONNECT",
                 "W_DEFERRED_MEMBER",
+                "W_DEFERRED_PLACE",
                 "W_DEF_NO_SIZE",
                 "W_DUPLICATE_WALKWAY",
                 "W_FUTURE_CAIRN_VERSION",
@@ -1587,6 +1605,7 @@ mod tests {
                 "W_ABSTRACT_TOKEN_DEFERRED",
                 "W_DEFERRED_CONNECT",
                 "W_DEFERRED_MEMBER",
+                "W_DEFERRED_PLACE",
                 "W_DEF_NO_SIZE",
                 "W_DUPLICATE_WALKWAY",
                 "W_FUTURE_CAIRN_VERSION",
