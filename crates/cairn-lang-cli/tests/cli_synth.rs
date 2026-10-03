@@ -1339,13 +1339,33 @@ fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
     // holds whichever runs first. Here the source has a finding for each
     // pass the file goes through before synthesis — a parse error, and a
     // `check` error in a file that parses — and the usage error still has
-    // to be the one line, with the usage exit code.
+    // to be the one line, with the usage exit code. A third source carries
+    // a warning alone, which does not stop a run, and is held to the same
+    // one line: its warning is not printed ahead of the usage error.
+    //
+    // Each source is also run with `--edition java`, the CONTROL: without
+    // the usage error in the way, its finding is what surfaces, with the
+    // exit code its severity gives. A source that stopped carrying its
+    // finding would still pass the usage-error assertions, and this test
+    // would be a copy of `cli_synth_missing_edition_reports_only_the_usage_error`
+    // without saying so.
     let dir = tempfile::tempdir().expect("temp dir");
     let sources = [
-        ("parse.crn", "@cairn 2026.06\nstruct s size=3x3 size=\n"),
+        (
+            "parse.crn",
+            "@cairn 2026.06\nstruct s size=3x3 size=\n",
+            "E_PARSE",
+        ),
         (
             "check.crn",
             "@cairn 2026.06\nstruct s size=3x3\n  bogus a=1\n",
+            "E_UNKNOWN_KEYWORD",
+        ),
+        (
+            "warning.crn",
+            "@cairn 2026.06\nstruct s size=3x3\n  \
+             pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+            "W_LOGIC_UNUSED_SIGNAL",
         ),
     ];
     let mut gated = 0;
@@ -1354,7 +1374,7 @@ fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
             continue;
         }
         gated += 1;
-        for (name, text) in sources {
+        for (name, text, code) in sources {
             let path = dir.path().join(name);
             std::fs::write(&path, text).expect("write scratch file");
             let out = cairn(
@@ -1383,9 +1403,47 @@ fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
                     && lines[0].contains("--edition"),
                 "--stage {stage} on {name}: the usage error should be the one line, got: {stderr}",
             );
+
+            let out = cairn(
+                "synth",
+                &[
+                    "--experimental-logic-synth",
+                    "--stage",
+                    &stage,
+                    "--edition",
+                    "java",
+                    path.to_str().unwrap(),
+                ],
+            );
+            assert_reports_finding(
+                &out,
+                code,
+                &format!("--stage {stage} --edition java on {name}"),
+            );
         }
     }
     assert!(gated > 0, "no --stage value required --edition");
+}
+
+/// Assert that `out` reported the finding `code` with the exit code its
+/// severity gives: `error[E_…]` and exit 1, or `warning[W_…]` and exit 0,
+/// since a warning leaves the run its product.
+fn assert_reports_finding(out: &std::process::Output, code: &str, context: &str) {
+    let (severity, exit) = match code.split_once('_') {
+        Some(("E", _)) => ("error", 1),
+        Some(("W", _)) => ("warning", 0),
+        _ => panic!("`{code}` is neither an E_ nor a W_ code"),
+    };
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(exit),
+        "{context}: a source carrying {code} should exit {exit}, got stderr: {stderr}",
+    );
+    assert!(
+        stderr.contains(&format!("{severity}[{code}]")),
+        "{context}: stderr should carry {severity}[{code}], got: {stderr}",
+    );
 }
 
 #[test]
