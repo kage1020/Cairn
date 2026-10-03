@@ -647,29 +647,34 @@ same typo causes cannot name it, and is raised only where block-array lowering r
 the warning.
 
 `W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=`
-in the vocabulary whose value the pass cannot read is dropped and a default put in its place. An
-**unreached key**: a `key=` this specification defines that no pass reads yet — `window shape=` /
-`anchor=`, `roof footprint=` / `bounds=` and a header's `class=` are those keys today — is carried
-into the IR and never consulted. Every `key=value` on the right of a `theme` selector row whose
-keyword the compiler knows is one too, reported on the binding whatever its key or value, since no
-pass lowers a selector's bindings yet ([Materials and Themes](/spec/materials-themes/)). And a key
-**routed past**: one the keyword reads only under some ways of writing a sibling argument, on a
-member that writes it another way. The boundary is the keyword: a spec-defined key on a keyword the
-compiler knows is reported this way, while a spec-defined *keyword* it does not know is
-`E_UNKNOWN_KEYWORD` and its arguments are not judged at all. All three make the build differ from
-the source. The rule forbids *silent* substitution, and all three are announced. For the unreached
-key the gap is the compiler's rather than the source's, which is why it is not a refusal. Whether
-autofix is offered is up to the implementation.
+in the vocabulary whose value the pass cannot read is dropped and a default put in its place, or,
+where the key itself decides whether the member is built at all, the member is refused instead
+(`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
+[§5.4](/spec/syntax/#54-selectors)). An **unreached key**: a `key=` this specification defines that
+no pass reads yet — `window shape=` / `anchor=`, `roof footprint=` / `bounds=` and a header's
+`class=` are those keys today — is carried into the IR and never consulted. Every `key=value` on the
+right of a `theme` selector row whose keyword the compiler knows is one too, reported on the binding
+whatever its key or value, since no pass lowers a selector's bindings yet
+([Materials and Themes](/spec/materials-themes/)). And a key **routed past**: one the keyword reads
+only under some ways of writing a sibling argument, on a member that writes it another way. The
+boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this way,
+while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not
+judged at all. All three make the build differ from the source. The rule forbids *silent*
+substitution, and all three are announced. For the unreached key the gap is the compiler's rather
+than the source's, which is why it is not a refusal. Whether autofix is offered is up to the
+implementation.
 
 An unreadable value is reported whether or not its member is then built. The value is wrong
 wherever the member ends up, so it is a repair of its own, and holding the finding back until a
 refusal on the same line is repaired only costs the author another compile. The note says which
-happened: what the default did to a member that is built, or that the member is not built either
-way and the refusal beside it is why. A member dropped before its arguments are read — a `roof`
-under a raised `level` — is the exception today: its values are not read, so they are not reported
-beside the drop. Most values are read only during block-array lowering, so a `cairn check` with no
-`--edition` / `--target`, and the language server, report an unreadable value only for the keys the
-check passes read themselves ([§11.1](#111-diagnostic-codes)).
+of three things happened: what the default did to a member that is built; that the member is not
+built either way, and the refusal beside it is why; or that the member is refused instead of taking
+the default, and the refusal beside it is the one the value caused. A member dropped before its
+arguments are read — a `roof` under a raised `level` — is the exception today: its values are not
+read, so they are not reported beside the drop. Most values are read only during block-array
+lowering, so a `cairn check` with no `--edition` / `--target`, and the language server, report an
+unreadable value only for the keys the check passes read themselves
+([§11.1](#111-diagnostic-codes)).
 
 The routed-past shape is the vocabulary's second axis: closed per keyword *and* per the way the
 argument that selects the lowering rule is written. `roof slope_to=` is read by the `kind=shed`
