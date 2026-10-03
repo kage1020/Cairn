@@ -27,8 +27,10 @@
 //!   attrs, selector bindings, header args of struct/def excluding size).
 //! - `E_DUPLICATE_ID`   — two members in the same immediate body scope
 //!   declare `id=NAME` for the same `NAME` (per-body scope; nested `level`
-//!   blocks have their own namespace). Two `place` rows of one `site` are
-//!   left to the resolver's `E_DUPLICATE_PLACE_ID`; see [`ScopeKind`].
+//!   blocks have their own namespace). Two `place` rows of one `site` body
+//!   are left to the resolver, which compares only accepted ids and reports
+//!   a repeat as `E_DUPLICATE_PLACE_ID`. A `place` row indented under
+//!   another row is not in that body and stays here. See [`PlaceIdOwner`].
 //!
 //! Every scope here reports the *repeat* and points a note at the first
 //! declaration, so the anchor is the token the author would edit and the
@@ -55,9 +57,9 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
             Item::Theme { body, .. } => check_theme_body(body, sink),
             Item::Def { args, body, .. } | Item::Struct { args, body, .. } => {
                 check_arg_keys(args, ArgScope::Header, sink);
-                check_body(body, ScopeKind::Members, sink);
+                check_body(body, PlaceIdOwner::ThisPass, sink);
             }
-            Item::Site { body, .. } => check_body(body, ScopeKind::Site, sink),
+            Item::Site { body, .. } => check_body(body, PlaceIdOwner::Resolver, sink),
         }
     }
     // The one scope read off the IR rather than the surface AST, walked in
@@ -390,25 +392,77 @@ fn first_declaration_note(first_span: &Span) -> DiagnosticNote {
     }
 }
 
-/// Which kind of body [`check_body`] walks.
+/// Who reports two `place` rows of one body that share an `id=`: the
+/// resolver, or this pass.
 ///
-/// The one rule that differs is who owns a repeated `place id=`: in a
-/// `site` body that is `E_DUPLICATE_PLACE_ID`, which the resolver reports
-/// with the site named and which `spec/lint` "Sites and placements"
+/// The resolver does, for the one body its placement loop walks: the
+/// top-level body of a `site`, lowered into `SiteIr::placements`. There
+/// `usable_place_id` compares each `place` row's id with the `place` rows
+/// above it and reports a repeat as `E_DUPLICATE_PLACE_ID`. That code
+/// names the site, and it is the one `spec/lint` "Sites and placements"
 /// documents the first-row-wins rule for. Reporting `E_DUPLICATE_ID` here
 /// as well would bill one repair twice.
+///
+/// The resolver compares only accepted ids: a row whose id `PlaceId`
+/// refuses is reported as `E_INVALID_PLACE_ID`, and `usable_place_id`
+/// returns before comparing it. So two `place` rows sharing a refused id
+/// are reported by neither code until they are renamed to an id `PlaceId`
+/// accepts.
+///
+/// The resolver reads the id off `Member::id`, which `hoist_label` fills
+/// from the first `id=` whose value is an identifier or a string. That is
+/// the same argument [`id_declaration`] takes here, and the two have to
+/// agree. Were `hoist_label` to narrow, a `place id="a"` row left to the
+/// resolver would reach it with no id to compare; were `id_declaration` to
+/// narrow, the row would drop out of this pass's ledger, and a `connect`
+/// row repeating its id would go unreported.
+///
+/// Only `place` rows are the resolver's, because its ledgers hold nothing
+/// else. The placement loop reads a `connect` row but not its `id=`, and
+/// skips a row the body has no reader for (`E_MISPLACED_MEMBER`) whole.
+/// So a repeat between one of those and any other row, a `place` row
+/// included, is reported here. [`check_body`] records every row's id, and
+/// stays quiet about a repeat only when it and the row it repeats are
+/// both the resolver's.
+///
+/// The row it repeats is the first one to declare the id. That leaves one
+/// arrangement reported twice: after `connect id=a`, `place id=a`, `place
+/// id=a`, the third row repeats the `connect` row here and the second row
+/// in the resolver, so it carries `E_DUPLICATE_ID` and
+/// `E_DUPLICATE_PLACE_ID`, with notes on different rows.
+///
+/// The predicate is the exact body the placement loop walks, not the body
+/// kind. [`crate::intent::BodyKind`] says which roles a body has a reader
+/// for, and it does not change with depth: `check::member_scope` recurses
+/// with it unchanged, because nesting does not open a new body. Who
+/// compares a `place` row's id does change with depth. `lower_body` keeps
+/// an indented row in its parent's `Member::children`, and the placement
+/// loop walks `SiteIr::placements` one level deep, so a `place` row
+/// indented under any row of a `site` never reaches the resolver. Keyed on
+/// `BodyKind`, that row would be left to a pass that never sees it, and its
+/// repeat would go unreported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ScopeKind {
-    /// A `site` body.
-    Site,
-    /// A `struct` or `def` body, or any nested body.
-    Members,
+enum PlaceIdOwner {
+    /// The top-level body of a `site`, the list the placement loop walks.
+    Resolver,
+    /// A `struct` or `def` body, or any body indented under a row. No
+    /// `place` row in it reaches the resolver.
+    ThisPass,
 }
 
-fn check_body(body: &[Statement], kind: ScopeKind, sink: &mut DiagnosticSink) {
+/// The first row of a body to declare an `id=`, as [`check_body`] records
+/// it.
+struct FirstId {
+    /// The `id=` argument, which the note on a repeat points at.
+    span: Span,
+    /// Whether the resolver compares this row's id; see [`PlaceIdOwner`].
+    owned_by_resolver: bool,
+}
+
+fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut DiagnosticSink) {
     // Per immediate body: collect `id=` values declared by `Statement::Generic`
     // at this depth, plus the `key=` arg list of each statement and selector.
-    let mut seen_ids: IndexMap<String, Span> = IndexMap::new();
+    let mut seen_ids: IndexMap<String, FirstId> = IndexMap::new();
     for stmt in body {
         if let Statement::Generic {
             keyword,
@@ -422,26 +476,36 @@ fn check_body(body: &[Statement], kind: ScopeKind, sink: &mut DiagnosticSink) {
             if let Some(attrs) = selector {
                 check_arg_keys(attrs, ArgScope::List, sink);
             }
-            // Hoist the id value (and its span) out of args / selector and
-            // diagnose duplicates within this scope. Both kinds of id-bearing
-            // attribute count.
-            let owned_by_resolver =
-                kind == ScopeKind::Site && matches!(role_of(keyword), MemberRole::Place);
-            if !owned_by_resolver && let Some((id, id_span)) = extract_id(stmt) {
-                if let Some(first_span) = seen_ids.get(&id) {
-                    sink.push(Diagnostic {
-                        code: DiagnosticCode::DuplicateId,
-                        span: id_span,
-                        primary: format!("`id={id}` is declared more than once in this scope"),
-                        notes: vec![first_declaration_note(first_span)],
-                        data: None,
-                    });
+            // Take the id this row declares out of its args, and report it
+            // if an earlier row of this body declared it too, unless both
+            // rows are the resolver's. A selector `id=` references a member
+            // rather than declaring one, so it is not read; see `extract_id`.
+            if let Some((id, id_span)) = extract_id(stmt) {
+                let owned_by_resolver = place_ids == PlaceIdOwner::Resolver
+                    && matches!(role_of(keyword), MemberRole::Place);
+                if let Some(first) = seen_ids.get(&id) {
+                    if !(owned_by_resolver && first.owned_by_resolver) {
+                        sink.push(Diagnostic {
+                            code: DiagnosticCode::DuplicateId,
+                            span: id_span,
+                            primary: format!("`id={id}` is declared more than once in this scope"),
+                            notes: vec![first_declaration_note(&first.span)],
+                            data: None,
+                        });
+                    }
                 } else {
-                    seen_ids.insert(id, id_span);
+                    seen_ids.insert(
+                        id,
+                        FirstId {
+                            span: id_span,
+                            owned_by_resolver,
+                        },
+                    );
                 }
             }
-            // Nested body has its own scope — both for `id=` and for args.
-            check_body(children, ScopeKind::Members, sink);
+            // A nested body has its own scope, both for `id=` and for args,
+            // and none of its `place` rows reach the resolver.
+            check_body(children, PlaceIdOwner::ThisPass, sink);
         }
     }
 }
