@@ -58,7 +58,9 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
 ///
 /// Performs the `initialize` handshake, then processes messages until the
 /// `shutdown`/`exit` sequence completes. Returns an error only on transport
-/// or protocol failures — a clean client-driven exit returns `Ok(())`.
+/// or protocol failures — a clean client-driven exit returns `Ok(())`, and
+/// so does input that closes before `shutdown`, after one line on stderr
+/// saying so.
 ///
 /// # Errors
 ///
@@ -67,45 +69,59 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
 /// `lsp-server` (e.g. messages before `initialize`), and an `exit`
 /// notification arriving without a preceding `shutdown` request — the LSP
 /// spec requires that sequence to end the process with a non-zero code.
+///
+/// When the dispatch loop ends without an error of its own, the I/O
+/// threads are joined before anything is reported, and `lsp-server` joins
+/// the reader first. An unreadable frame ends the reader with an error and
+/// drops its sender, which the loop sees exactly as it sees the input
+/// closing; only the join tells the two apart. So a frame that could not be
+/// read comes back as that error, and is not also reported as the input
+/// closing. The join does not say whether the reader or the writer failed,
+/// so when the loop ended before `shutdown`, its error comes back with
+/// "the session ended without `shutdown`" appended, which is true of
+/// either.
 pub fn run() -> Result<(), DynError> {
     let (connection, io_threads) = Connection::stdio();
     let capabilities = serde_json::to_value(server_capabilities())?;
     connection.initialize(capabilities)?;
-    let end = main_loop(&connection)?;
+    let teardown = main_loop(&connection)?;
     // The writer thread only terminates once the outgoing channel closes,
     // which happens when the `Connection` (and with it `sender`) drops —
     // joining before that would deadlock the shutdown.
     drop(connection);
-    // The reader's own verdict comes first. An unreadable frame ends the
-    // reader with an error and drops its sender, and the loop sees that
-    // exactly as it sees end of input: only the join tells the two apart.
-    // A reader that failed is the one line the session gets, so a frame
-    // that could not be read is not also reported as the client going
-    // away.
-    io_threads.join()?;
-    // The input ended cleanly, i.e. the client shut stdin without saying
-    // anything — an editor that was killed rather than one that quit.
-    // There is nobody left to answer, so this is not an error, but it is
-    // not the orderly teardown either and the stream should say which one
-    // happened.
-    if end == LoopEnd::InputClosedBeforeShutdown {
-        eprintln!(
-            "cairn-lsp: client closed stdin without `{}`; the session ended abnormally",
-            Shutdown::METHOD,
-        );
+    match (io_threads.join(), teardown) {
+        (Ok(()), Teardown::AfterShutdown) => Ok(()),
+        (Ok(()), Teardown::WithoutShutdown) => {
+            // The reader returned `Ok`, so the input closed: the client
+            // shut stdin without saying anything — an editor that was
+            // killed rather than one that quit. There is nobody left to
+            // answer, so this is not an error, but it is not the orderly
+            // teardown either and the stream should say which one
+            // happened.
+            eprintln!(
+                "cairn-lsp: client closed stdin without `{}`; the session ended abnormally",
+                Shutdown::METHOD,
+            );
+            Ok(())
+        }
+        (Err(err), Teardown::AfterShutdown) => Err(err.into()),
+        (Err(err), Teardown::WithoutShutdown) => {
+            Err(format!("{err}; the session ended without `{}`", Shutdown::METHOD).into())
+        }
     }
-    Ok(())
 }
 
-/// How [`main_loop`] ended, when it ended without an error.
+/// How [`main_loop`] ended, when it ended without an error: the one bit the
+/// loop has is whether `shutdown` came first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LoopEnd {
-    /// `exit` after `shutdown`, or the input ending after `shutdown`.
-    Orderly,
-    /// The input ended before any `shutdown`: the client went away, or the
-    /// reader could not read a frame. Which of the two is the reader's to
-    /// say, and [`run`] asks it.
-    InputClosedBeforeShutdown,
+enum Teardown {
+    /// `shutdown` was requested before the loop ended, by `exit` or by its
+    /// receiver closing.
+    AfterShutdown,
+    /// The receiver closed before any `shutdown`: the input closed, or the
+    /// reader failed on a frame. Only joining the reader tells which, so
+    /// [`run`] reports it once it has.
+    WithoutShutdown,
 }
 
 /// Dispatch loop: requests are answered (`shutdown` and `completion` are
@@ -123,9 +139,10 @@ enum LoopEnd {
 /// the `exit` behind it was ever read, so the process died with code 1 and
 /// the editor reported the language server as crashed.
 ///
-/// The loop ends without an error on `exit` after `shutdown` or when the
-/// input ends; which of those it was comes back as a [`LoopEnd`].
-fn main_loop(connection: &Connection) -> Result<LoopEnd, DynError> {
+/// The loop ends without an error on `exit` after `shutdown` or when its
+/// receiver closes; whether `shutdown` came first comes back as a
+/// [`Teardown`].
+fn main_loop(connection: &Connection) -> Result<Teardown, DynError> {
     let mut store = DocumentStore::new();
     let mut shutdown_requested = false;
     for message in &connection.receiver {
@@ -156,7 +173,7 @@ fn main_loop(connection: &Connection) -> Result<LoopEnd, DynError> {
                 // `shutdown`: the spec requires an `exit` without one to
                 // terminate the process with a non-zero code.
                 return if shutdown_requested {
-                    Ok(LoopEnd::Orderly)
+                    Ok(Teardown::AfterShutdown)
                 } else {
                     Err("exit notification received before shutdown request".into())
                 };
@@ -175,13 +192,11 @@ fn main_loop(connection: &Connection) -> Result<LoopEnd, DynError> {
             }
         }
     }
-    // The loop also ends when the channel closes. `shutdown_requested` is
-    // the bit that tells an orderly end from an abrupt one, and `run`
-    // reports the abrupt one once it knows whether the reader failed.
+    // The receiver closed. `run` reports a `Teardown::WithoutShutdown`.
     Ok(if shutdown_requested {
-        LoopEnd::Orderly
+        Teardown::AfterShutdown
     } else {
-        LoopEnd::InputClosedBeforeShutdown
+        Teardown::WithoutShutdown
     })
 }
 

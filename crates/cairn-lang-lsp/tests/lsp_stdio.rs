@@ -1353,3 +1353,46 @@ fn lsp_37_a_refused_revision_keeps_none_of_its_events() {
     );
     server.shutdown();
 }
+
+#[test]
+fn lsp_38_a_writer_failure_before_shutdown_still_says_the_session_ended_without_it() {
+    // The editor is gone with a message in flight: the server's write to
+    // stdout fails, then stdin closes. `lsp-server` hands the writer's
+    // error back from the same join as the reader's, and without saying
+    // which thread it came from, so the one line the session gets has to
+    // say what is true of both: the error, and that `shutdown` never came.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn cairn-lsp");
+    // Closing the read end before sending anything makes the server's
+    // first write, the `initialize` response, fail.
+    drop(child.stdout.take());
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    for message in [
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": { "capabilities": {} },
+        }),
+        serde_json::json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }),
+    ] {
+        let body = serde_json::to_string(&message).expect("serialise message");
+        write!(stdin, "Content-Length: {}\r\n\r\n{}", body.len(), body)
+            .expect("write to server stdin");
+    }
+    drop(stdin);
+    let output = child.wait_with_output().expect("wait for server exit");
+    assert_eq!(output.status.code(), Some(1), "the transport failed");
+    let stderr = String::from_utf8(output.stderr).expect("utf-8 stderr");
+    let logged: Vec<&str> = stderr.lines().collect();
+    assert!(
+        logged.len() == 1
+            && logged[0].starts_with("error: ")
+            && logged[0].ends_with("; the session ended without `shutdown`"),
+        "the writer's error should be the one line, and say `shutdown` never came, got: {logged:?}",
+    );
+}

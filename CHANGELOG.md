@@ -54,8 +54,10 @@
 - *(core)* name what buries a walkway port and what stretched the router's search box past its cap ([#455](https://github.com/kage1020/Cairn/pull/455))
 
 - *(lsp)* An unreadable frame was logged as "client closed stdin without `shutdown`" before the
-  frame's own error, so the first line said the opposite of what happened. The session now reports
-  the abrupt end only once the reader has ended cleanly; when it failed, its error is the one line.
+  frame's own error, so the first line said the opposite of what happened. The session now says the
+  client closed stdin only once the reader has returned without an error. When the reader or the
+  writer failed before `shutdown`, that failure is the one line, and it ends "the session ended
+  without `shutdown`".
 
 - *(lsp)* A `didChange` event carrying a `range` was stored as the whole document, so `# note\n`
   inserted at `0:0` replaced the file and the server diagnosed and completed text nobody had. The
