@@ -93,11 +93,11 @@ unreadable value: the row is placed as `gap=0` places it, and the value is repor
 or the far edge of whose body, works out past that range is not placed at all and is reported as
 `W_DEFERRED_MEMBER`, as is every row placed relative to it. It is refused rather than clamped to the
 edge: a clamped origin is not the one the source asks for, two rows clamped to one edge land on one
-coordinate, and a cell past the range has no coordinate at all. Every refused row, including one
-refused because the row it is placed relative to was, still reports what its `def` body raises — an
-`E_INCOMPATIBLE_MATERIAL` or `W_NO_THEME_BOUND` is a defect in the `def` or the theme wherever the
-row lands — and an unreadable `gap=` on any row that is not placed is reported with a note saying
-so.
+coordinate, and a cell past the range has no coordinate at all. Every row refused for its origin or
+its far edge, including one refused because the row it is placed relative to was, still reports
+what its `def` body raises — an `E_INCOMPATIBLE_MATERIAL` or `W_NO_THEME_BOUND` is a defect in the
+`def` or the theme wherever the row lands — and an unreadable `gap=` on any row that is not placed
+is reported with a note saying so.
 
 ### 9.3.3 Cross-scope references
 

@@ -3,9 +3,11 @@
 //!
 //! `spec/lint` "Error vs warning" calls this an unreadable value. The pass
 //! drops the value and uses the default, which is a `W_IGNORED_ARGUMENT`:
-//! the rule forbids *silent* substitution. Five keys, read by three
-//! members, used to treat a value of the wrong shape as if the key were
-//! absent, building the default and reporting nothing:
+//! the rule forbids *silent* substitution. Where the key decides whether
+//! the member is built at all, as `sym=` does on a window whose `repeat=`
+//! is greater than 1, the member is refused instead. Five keys, read by
+//! three members, used to treat a value of the wrong shape as if the key
+//! were absent, building the default and reporting nothing:
 //!
 //! - window `sym=`, where anything but a bare `true` or `false` meant "no
 //!   mirror";
@@ -18,7 +20,13 @@
 //! the default really is what was used, and exactly one finding names the
 //! key and the value that was written. A member that is refused reports
 //! the unreadable value all the same, with a note saying it is not built
-//! either way, so the author learns about both in one compile.
+//! either way, or, when the value is why, that it is not built on the
+//! default, so the author learns about both in one compile.
+//!
+//! Two more keys, `side=` and shed `slope_to=`, always refused their
+//! member for a value that is not a side. The refusal now names the value
+//! written, so a quoted `"front"` reads as the string it is rather than as
+//! the side it spells.
 //!
 //! Separately, an origin that works out past `i32` used to saturate onto
 //! the range's edge, so two `place` rows could land on one coordinate. It
@@ -196,30 +204,44 @@ fn a_repeated_window_with_no_step_is_refused_for_the_step_first() {
 #[test]
 fn a_side_of_the_wrong_shape_is_refused_with_the_value_written() {
     // A quoted `"front"` names the side the author meant; the message has
-    // to show the quotes, or it reads as if `front` itself were refused.
-    let ir = lowered(&window("").replace("side=front", "side=\"front\""));
-    assert_eq!(
-        findings(&ir),
-        vec![(
-            "W_DEFERRED_MEMBER",
-            "`side=` must be one of front, back, left, right, not string `\"front\"`",
-        )],
-    );
-    let shed = lowered(
-        "struct s size=5x5\n  \
-         walls mat_slot=wall height=3\n  \
-         roof  kind=shed slope_to=\"front\" mat_slot=roof\n\n\
-         theme t:\n  \
-         slot wall -> @cobblestone\n  \
-         slot roof -> @oak_stairs\n",
-    );
-    assert_eq!(
-        findings(&shed),
-        vec![(
-            "W_DEFERRED_MEMBER",
-            "shed `slope_to=` must be one of front, back, left, right, not string `\"front\"`",
-        )],
-    );
+    // to show the quotes, or it reads as if `front` itself were refused. A
+    // list has no one surface form, so it is named by its kind alone.
+    for (written, described) in [
+        ("\"front\"", "string `\"front\"`"),
+        ("3", "integer `3`"),
+        ("true", "boolean `true`"),
+        ("[front]", "a list"),
+    ] {
+        let window = lowered(&window("").replace("side=front", &format!("side={written}")));
+        assert_eq!(
+            findings(&window),
+            vec![(
+                "W_DEFERRED_MEMBER",
+                format!("`side=` must be one of front, back, left, right, not {described}")
+                    .as_str(),
+            )],
+            "side={written}",
+        );
+        let shed = lowered(&format!(
+            "struct s size=5x5\n  \
+             walls mat_slot=wall height=3\n  \
+             roof  kind=shed slope_to={written} mat_slot=roof\n\n\
+             theme t:\n  \
+             slot wall -> @cobblestone\n  \
+             slot roof -> @oak_stairs\n"
+        ));
+        assert_eq!(
+            findings(&shed),
+            vec![(
+                "W_DEFERRED_MEMBER",
+                format!(
+                    "shed `slope_to=` must be one of front, back, left, right, not {described}"
+                )
+                .as_str(),
+            )],
+            "slope_to={written}",
+        );
+    }
 }
 
 // --- stair `facing=` / `half=` / `shape=` ----------------------------------
