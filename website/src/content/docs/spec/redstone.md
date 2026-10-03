@@ -253,16 +253,16 @@ The internal algorithm runs five stages:
 
    A repeater reads the block behind it and drives the one in front of it, at its own height, so it
    stands only where the wire runs straight through a coordinate at one height and nothing branches
-   off there, nor where dust of the same net that the route reaches some other way is on any of its
-   six faces, which a repeater there would cut off. On a straight run from a fresh source it stands
-   in place of every 16th block, with 15 blocks of dust behind it. Where that coordinate turns,
-   climbs or forks, the repeater stands on the last coordinate before it that runs straight, which
-   can leave a route one repeater more than its length alone implies. When the coordinate it steps
-   back from is a fork, the one it lands on is on the trunk, so one block serves every branch past
-   it; a fork further back than that gets a repeater on each branch. Repeaters are placed on each
-   net's routed tree rather than per sink, and a sink is charged for the ones on its route. A
-   stretch of dust past the limit with no coordinate a repeater can stand on is refused with
-   `E_ATTENUATION_LIMIT`.
+   off there, nor where any block of its net other than the two it joins — dust the route reaches
+   some other way, or one of the net's cells or pads — is on any of its six faces, which a repeater
+   there would cut off. On a straight run from a fresh source it stands in place of every 16th
+   block, with 15 blocks of dust behind it. Where that coordinate turns, climbs or forks, the
+   repeater stands on the last coordinate before it that runs straight, which can leave a route one
+   repeater more than its length alone implies. When the coordinate it steps back from is a fork,
+   the one it lands on is on the trunk, so one block serves every branch past it; a fork further
+   back than that gets a repeater on each branch. Repeaters are placed on each net's routed tree
+   rather than per sink, and a sink is charged for the ones on its route. A stretch of dust past the
+   limit with no coordinate a repeater can stand on is refused with `E_ATTENUATION_LIMIT`.
 
    The limit is counted from the last component that restores strength — a sensor pad, a repeater,
    a torch — not from the start of each segment. Two of the cells pass on the strength they
