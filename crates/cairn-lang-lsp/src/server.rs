@@ -115,8 +115,8 @@ pub fn run() -> Result<(), DynError> {
 /// loop has is whether `shutdown` came first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Teardown {
-    /// `shutdown` was requested before the loop ended, by `exit` or by its
-    /// receiver closing.
+    /// `shutdown` was requested, and the loop then ended on `exit` or on
+    /// its receiver closing.
     AfterShutdown,
     /// The receiver closed before any `shutdown`: the input closed, or the
     /// reader failed on a frame. Only joining the reader tells which, so
@@ -310,9 +310,9 @@ fn handle_notification(
             ) else {
                 return Ok(());
             };
-            // No events change nothing: `apply` would hand back the stored
-            // text as it is, and the publish below would repeat the last
-            // diagnostics under a new version. The notification is dropped
+            // An empty `contentChanges` changes nothing: `apply` would hand
+            // back the stored text as it is, and the publish below would
+            // repeat the last diagnostics under a new version. The notification is dropped
             // instead, with a line on stderr so a client that sends one
             // shows up in the log.
             if params.content_changes.is_empty() {
