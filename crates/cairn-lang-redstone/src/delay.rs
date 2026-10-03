@@ -812,11 +812,11 @@ enum Misfit {
 ///
 /// The last is asked of the grid, not of the parent links. Dust joins
 /// the dust beside it whether or not the tree runs between them, and a
-/// repeater joins only the blocks at its back and front — so a strand
-/// of the same net beside it, which the tree reaches some other way,
-/// would be severed from the dust the repeater replaces. The check
-/// takes all six faces, above and below too, as `spec/redstone`
-/// "Place-and-route" does.
+/// repeater joins only the blocks at its back and front — so any other
+/// block of the same net beside it, dust the tree reaches some other
+/// way or one of the net's cells or pads, would be severed from the
+/// dust the repeater replaces. The check takes all six faces, above
+/// and below too, as `spec/redstone` "Place-and-route" does.
 fn holds_repeater(
     tree: &NetTree,
     children: &HashMap<CellCoord, Vec<CellCoord>>,
