@@ -480,7 +480,7 @@ fn only_a_def_or_a_theme_may_declare_one() {
         "{nested}",
     );
     assert!(
-        format!("{nested}").contains("the `def` or `theme` body's own level"),
+        format!("{nested}").contains("the `def` body's own level"),
         "the repair is a dedent, not a different directive: {nested}",
     );
 }
