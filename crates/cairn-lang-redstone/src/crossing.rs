@@ -2120,7 +2120,7 @@ struct chain size=60x5
             // And on *this* segment's route, not just somewhere on
             // the net. The two differ for an entry the placer took
             // from a memo rather than from the route it was walking:
-            // `wire_path` is the whole net's dust and would accept a
+            // `wire_path` is every coord of the net and would accept a
             // coord that refreshes a sibling sink instead of this
             // one.
             let route: HashSet<CellCoord> = tree
