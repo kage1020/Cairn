@@ -571,6 +571,40 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 0 -> 01 }\n",
         Reject,
     ),
+    // An output ends where its digits do. Run into the next row with no
+    // space, `101` is one integer the reference lexer refuses as an
+    // output, not the two rows `00->1` and `01->0`.
+    (
+        "truth_output_run_into_the_next_row",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->101->0 }\n",
+        Reject,
+    ),
+    (
+        "truth_two_digit_output_run_into_the_next_row",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->11->0 }\n",
+        Reject,
+    ),
+    // A digit behind an output runs on into the same integer; anything
+    // else ends it, with no space needed: the `;` that separates rows and
+    // the `}` that closes the body.
+    (
+        "truth_output_ended_by_a_semicolon",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->1;01->0 }\n",
+        Accept,
+    ),
+    (
+        "truth_output_ended_by_the_brace",
+        "struct s size=3x3\n  assert truth(sig.a -> sig.c) { 0->1}\n",
+        Accept,
+    ),
+    // A `-` ends one too, and opens the next row's pattern as a
+    // don't-care: both parsers read `00->1-0->0` as the rows `00->1` and
+    // `-0->0`.
+    (
+        "truth_output_followed_by_a_dont_care_row",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->1-0->0 }\n",
+        Accept,
+    ),
     (
         "truth_leading_semicolon",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { ; 0 -> 1 }\n",
@@ -630,11 +664,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a, b, c -> z) { 00--> - }\n",
         Accept,
     ),
-    // The scanner skips a leading space before a pattern and nothing
-    // else. The reference lexer's `skip_spaces` reads `b' '` alone and
-    // refuses a tab outright, so a scanner that skipped one would take
-    // a row the reference parser rejects — the silent direction this
-    // file exists to hold shut.
+    // The scanner skips a leading space before a pattern or an output
+    // and nothing else. The reference lexer's `skip_spaces` reads `b' '`
+    // alone and refuses a tab outright, so a scanner that skipped one
+    // would take a row the reference parser rejects — the silent
+    // direction this file exists to hold shut.
     (
         "truth_tab_before_pattern",
         "struct s size=3x3\n  assert truth(a -> z) {\t1 -> 0 }\n",
@@ -643,6 +677,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "truth_tab_before_a_later_row",
         "struct s size=3x3\n  assert truth(a -> z) { 1 -> 0;\t0 -> 1 }\n",
+        Reject,
+    ),
+    (
+        "truth_tab_before_output",
+        "struct s size=3x3\n  assert truth(a -> z) { 1 ->\t0 }\n",
         Reject,
     ),
     // A pattern is the characters the source ran together, so a space
@@ -1099,9 +1138,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     // A jump of more than one level, inside a body. Declining the INDENT
     // alone would let the `/ +/` extra eat the spaces and land the line as
     // a sibling one level short. What refuses it is where the scanner
-    // declines: the `level != current + 1` return sits inside the
-    // `level > current` arm, so it withholds `_line_start` as well, and no
-    // construct can start on the line.
+    // declines: the more-than-one-level test returns from `scan()` before
+    // the `level > current` arm is reached, and so before the end of the
+    // layout section, where a line that keeps its level is granted
+    // `_line_start`. That is withheld as well, and no construct can start
+    // on the line.
     (
         "indent_jump_inside_a_body",
         "struct s size=3x3\n  level y=0\n      room\n",
@@ -1294,6 +1335,29 @@ fn both_parsers_reach_the_written_verdict() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// An indent too deep for the scanner's `uint16_t` levels is refused, not
+/// wrapped round to a shallow one.
+///
+/// 131072 spaces is level 65536, which narrowed to 16 bits before the
+/// comparison read as level 0, a second top-level declaration; 131074
+/// read as level 1, an ordinary body line. Built here rather than listed
+/// in `FIXTURES` because the source is 128 KiB of spaces.
+#[test]
+fn an_indent_past_sixteen_bits_of_levels_is_refused() {
+    let mut parser = new_parser();
+    for (spaces, line) in [(131_072, "struct t size=3x3"), (131_074, "floor a=1")] {
+        let source = format!("struct s size=3x3\n{}{line}\n", " ".repeat(spaces));
+        assert!(
+            cairn_lang_core::parse::parse(&source).is_err(),
+            "core accepted {spaces} spaces",
+        );
+        assert!(
+            !grammar_accepts(&mut parser, &source),
+            "the grammar accepted {spaces} spaces before `{line}`",
+        );
+    }
+}
+
 /// The scanner keeps its hands off the input during error recovery.
 ///
 /// `_error_sentinel` is in no rule, so tree-sitter marks it valid only
@@ -1406,7 +1470,7 @@ fn a_tab_indented_line_does_not_close_the_body_around_it() {
 /// `body()` and `source_file` in `grammar.js` put `_line_start` in front
 /// of every construct that starts a line, so the scanner is always asked
 /// at a content line's start, and there the odd-count and
-/// `level != current + 1` tests read the same predicate against the same
+/// more-than-one-level tests read the same predicate against the same
 /// indent stack the lookahead read one line earlier — nothing pops in
 /// between, and blank and comment lines answered `false` in the old
 /// check too. So only where the error sits could move, and on the break
