@@ -584,7 +584,9 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->11->0 }\n",
         Reject,
     ),
-    // A separator still ends one, with or without a space.
+    // A digit behind an output runs on into the same integer; anything
+    // else ends it, with no space needed: the `;` that separates rows and
+    // the `}` that closes the body.
     (
         "truth_output_ended_by_a_semicolon",
         "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->1;01->0 }\n",
@@ -593,6 +595,14 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "truth_output_ended_by_the_brace",
         "struct s size=3x3\n  assert truth(sig.a -> sig.c) { 0->1}\n",
+        Accept,
+    ),
+    // A `-` ends one too, and opens the next row's pattern as a
+    // don't-care: both parsers read `00->1-0->0` as the rows `00->1` and
+    // `-0->0`.
+    (
+        "truth_output_followed_by_a_dont_care_row",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.c) { 00->1-0->0 }\n",
         Accept,
     ),
     (
@@ -654,11 +664,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a, b, c -> z) { 00--> - }\n",
         Accept,
     ),
-    // The scanner skips a leading space before a pattern and nothing
-    // else. The reference lexer's `skip_spaces` reads `b' '` alone and
-    // refuses a tab outright, so a scanner that skipped one would take
-    // a row the reference parser rejects — the silent direction this
-    // file exists to hold shut.
+    // The scanner skips a leading space before a pattern or an output
+    // and nothing else. The reference lexer's `skip_spaces` reads `b' '`
+    // alone and refuses a tab outright, so a scanner that skipped one
+    // would take a row the reference parser rejects — the silent
+    // direction this file exists to hold shut.
     (
         "truth_tab_before_pattern",
         "struct s size=3x3\n  assert truth(a -> z) {\t1 -> 0 }\n",
@@ -667,6 +677,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     (
         "truth_tab_before_a_later_row",
         "struct s size=3x3\n  assert truth(a -> z) { 1 -> 0;\t0 -> 1 }\n",
+        Reject,
+    ),
+    (
+        "truth_tab_before_output",
+        "struct s size=3x3\n  assert truth(a -> z) { 1 ->\t0 }\n",
         Reject,
     ),
     // A pattern is the characters the source ran together, so a space
