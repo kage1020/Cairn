@@ -859,15 +859,16 @@ fn lsp_21_did_change_after_did_close_leaves_the_document_closed() {
         serde_json::json!(-32602),
         "the document is closed, so completion has nothing to answer from",
     );
-    // The drop is not silent: one line names the method and the URI.
-    // `read_stderr_until` returns the matching line last, so asserting on
-    // `last()` keeps both halves on the same line — `any()` would accept a
-    // URI mentioned by some earlier line about a different document.
-    let logged = server
-        .read_stderr_until("ignoring `textDocument/didChange` for a document that is not open");
+    // The drop is not silent: one line names the method, the URI and the
+    // reason. `read_stderr_until` returns the matching line last, so
+    // asserting on `last()` keeps all three on the same line — `any()`
+    // would accept a URI mentioned by some earlier line about a different
+    // document.
+    let logged = server.read_stderr_until("the document is not open");
     assert!(
-        logged.last().is_some_and(|line| line.contains(TEST_URI)),
-        "the reported line should name the URI, got: {logged:?}",
+        logged.last().is_some_and(|line| line
+            .contains(&format!("ignoring `textDocument/didChange` for {TEST_URI}: "))),
+        "the reported line should name the method and the URI, got: {logged:?}",
     );
     server.shutdown();
 }

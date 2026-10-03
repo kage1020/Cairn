@@ -31,6 +31,12 @@ type DynError = Box<dyn std::error::Error + Send + Sync>;
 /// token, `=` a `mat_slot` value, `.` a segment inside an abstract token).
 /// Everything else (hover, code actions) is intentionally absent until it
 /// is implemented.
+///
+/// FULL is what is advertised, but a `didChange` event that carries a
+/// `range` anyway is still applied as an edit to that range
+/// ([`DocumentStore::apply`]), not stored as the whole text: a client that
+/// sends ranges would otherwise leave the server diagnosing and completing
+/// text nobody has.
 fn server_capabilities() -> lsp_types::ServerCapabilities {
     lsp_types::ServerCapabilities {
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
@@ -289,6 +295,11 @@ fn handle_notification(
             ) else {
                 return Ok(());
             };
+            // No events change nothing: `apply` would hand back the stored
+            // text as it is, and the publish below would repeat the last
+            // diagnostics under a new version. The notification is dropped
+            // instead, with a line on stderr so a client that sends one
+            // shows up in the log.
             if params.content_changes.is_empty() {
                 eprintln!(
                     "cairn-lsp: ignoring `{}` notification with empty contentChanges",
@@ -297,30 +308,18 @@ fn handle_notification(
                 return Ok(());
             }
             let uri = params.text_document.uri;
-            // Ahead of the diagnostics run, not after it: a revision for a
-            // URI the store does not hold describes a document the client
-            // never opened, one it has already closed, or one whose
-            // `didOpen` this server dropped as malformed. Recording it
-            // would make the store outlive the client's open set;
-            // publishing for it would leave a squiggle on a file the editor
-            // has no buffer for and therefore no way to clear. Neither
-            // happens — the revision is dropped with a line on stderr, the
-            // way a malformed payload is, and the parse that would have
-            // been thrown away with it never runs.
-            let source = match store.apply(&uri, &params.content_changes) {
-                Some(Ok(source)) => source,
-                None => {
-                    eprintln!(
-                        "cairn-lsp: ignoring `{}` for a document that is not open: {}",
-                        DidChangeTextDocument::METHOD,
-                        uri.as_str(),
-                    );
-                    return Ok(());
-                }
-                // A ranged event the document cannot take. Dropped like a
-                // malformed payload: the stored text stays the last one
-                // that could be built, rather than becoming a guess.
-                Some(Err(refused)) => {
+            // Ahead of the diagnostics run, not after it: a refused
+            // revision is dropped with a line on stderr, the way a
+            // malformed payload is, and the parse that would have been
+            // thrown away with it never runs. Nothing is published for it
+            // either. For a document that is not open, a publish would
+            // leave a squiggle on a file the editor has no buffer for and
+            // therefore no way to clear; for a range the text does not
+            // have, the stored text stays the last one that could be
+            // built, rather than becoming a guess.
+            let source = match store.apply(&uri, params.content_changes) {
+                Ok(source) => source,
+                Err(refused) => {
                     eprintln!(
                         "cairn-lsp: ignoring `{}` for {}: {refused}",
                         DidChangeTextDocument::METHOD,
