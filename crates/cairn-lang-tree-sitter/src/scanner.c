@@ -10,6 +10,7 @@ enum TokenType {
   LINE_START,
   FILE_END,
   BIT_PATTERN,
+  BIT,
   ERROR_SENTINEL,
 };
 
@@ -289,10 +290,11 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   //
   // Declining here returns to the internal lexer rather than falling
   // through to the branches below, and no external token is lost by
-  // that: every one of them — FILE_START, NEWLINE, LINE_START,
-  // FILE_END, INDENT, DEDENT — is emitted at a line or file boundary,
-  // while `bit_pattern` appears only inside an `assert truth` body's
-  // `{ … }`, which the grammar gives no way to break across lines.
+  // that: `bit` is wanted only directly after a row's `->`, where no
+  // pattern can start, and every other one — FILE_START, NEWLINE,
+  // LINE_START, FILE_END, INDENT, DEDENT — is emitted at a line or file
+  // boundary, while `bit_pattern` appears only inside an `assert truth`
+  // body's `{ … }`, which the grammar gives no way to break across lines.
   if (valid_symbols[BIT_PATTERN]) {
     while (lexer->lookahead == ' ') skip(lexer);
     bool scanned = false;
@@ -319,6 +321,43 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
       return true;
     }
     return false;
+  }
+
+  // A truth row's output: one `0` or `1`. External for the reason the
+  // pattern above is, from the other side: a token regex cannot say where
+  // a run of digits ends. `/[01]/` took the first character of `101` and
+  // left the rest to start the next row's pattern, so `00->101->0` read
+  // as the two rows `00->1` and `01->0`, where the reference lexer reads
+  // `101` as one integer and refuses it as an output. One digit is taken
+  // here, and only when no digit follows it; declining leaves the
+  // internal lexer nothing it can match, since `bit` has no regex of its
+  // own, and the row fails where the reference parser's does. A `-`
+  // output is `dont_care`, an internal token this declines.
+  //
+  // What declines it is any digit behind it, `0` to `9` and not only `0`
+  // or `1`, because that is where the reference lexer's run ends:
+  // `cairn_lang_core::lex::Lexer::scan_number` reads every
+  // `is_ascii_digit()` byte into one integer, so `0 -> 12` has the output
+  // `12` there, and no `1` may be taken out of it here. Declining on `0`
+  // or `1` alone would move no verdict — taking the `1` of `12` leaves a
+  // `2`, which cannot start the next row's pattern, so the row fails all
+  // the same — and so no fixture in `tests/parser_parity.rs` can tell the
+  // two apart.
+  //
+  // Leading spaces are skipped as the pattern's are, and for the same
+  // reason a tab is not.
+  //
+  // Declining loses no other external token: the generated tables offer
+  // `bit` alone, and the one state that offers it beside others is the
+  // all-open one of error recovery, cut above by the `ERROR_SENTINEL`
+  // guard.
+  if (valid_symbols[BIT]) {
+    while (lexer->lookahead == ' ') skip(lexer);
+    if (lexer->lookahead != '0' && lexer->lookahead != '1') return false;
+    advance(lexer);
+    if (lexer->lookahead >= '0' && lexer->lookahead <= '9') return false;
+    lexer->result_symbol = BIT;
+    return true;
   }
 
   // The file's opening layout, consumed once at offset 0 by the
@@ -433,17 +472,17 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // The break is consumed and nothing else: the line behind it is not
   // read here. An illegal indent on that line is refused where it
   // stands, by the layout section below: an odd count returns before the
-  // level is compared, withholding LINE_START, INDENT and DEDENT alike,
-  // and a jump of more than one level returns inside the INDENT arm, so
-  // LINE_START is never reached either. No construct can start on the
-  // line, and the error lands on the offending row.
+  // level is compared, and a jump of more than one level returns as soon
+  // as it is, ahead of the INDENT and DEDENT arms and of the LINE_START
+  // that closes the section, so each withholds all three. No construct
+  // can start on the line, and the error lands on the offending row.
   //
   // This branch used to read the next line and withhold the NEWLINE in
   // front of such a line instead. That refused exactly the same files,
   // and not by sampling: `body()` and `source_file` in `grammar.js` put
   // `_line_start` in front of every construct that starts a line, so this
   // scanner is always consulted at a content line's start, and there the
-  // odd-count and `level != current + 1` tests read the same predicate
+  // odd-count and more-than-one-level tests read the same predicate
   // against the same stack the lookahead read one line earlier — nothing
   // pops in between, and blank and comment lines answered `false` there
   // too. What moved was only where the error sits: on the break, the
@@ -615,11 +654,18 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   if (lexer->lookahead == '\t') return false;
 
   if (spaces & 1u) return false; // odd indent, let LR surface an ERROR
-  uint16_t level = (uint16_t)(spaces / 2);
   uint16_t current = *array_back(&s->indent_stack);
+  // Compared at the width `spaces` was counted in, before any narrowing:
+  // the stack holds `uint16_t` levels, and a level of 65536 or more
+  // narrowed first wraps to a small one — 131072 spaces read as level 0,
+  // a new top-level line, and 131074 as level 1, an ordinary body line.
+  // A level more than one past the current one is refused here, so every
+  // level that reaches the cast below is at most `current + 1`, which
+  // `MAX_INDENT_DEPTH` keeps far inside `uint16_t`.
+  if (spaces / 2 > (uint32_t)current + 1) return false;
+  uint16_t level = (uint16_t)(spaces / 2);
 
   if (level > current) {
-    if (level != current + 1) return false;
     if (!valid_symbols[INDENT]) return false;
     // See `MAX_INDENT_DEPTH`'s comment: refuse rather than push past what
     // `serialize()` can represent.
@@ -631,9 +677,10 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
 
   if (level < current) {
     if (!valid_symbols[DEDENT]) return false;
-    // Levels only ever go up by one (see the INDENT branch above), so the
-    // stack holds every level between `level` and `current` and the line
-    // closes exactly that many.
+    // Levels only ever go up by one (the comparison above the cast refuses
+    // any larger step before the INDENT arm can push it), so the stack
+    // holds every level between `level` and `current` and the line closes
+    // exactly that many.
     s->pending_dedents = (uint16_t)(current - level);
     return emit_dedent(s, lexer);
   }
