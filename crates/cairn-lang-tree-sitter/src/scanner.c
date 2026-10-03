@@ -456,17 +456,17 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // The break is consumed and nothing else: the line behind it is not
   // read here. An illegal indent on that line is refused where it
   // stands, by the layout section below: an odd count returns before the
-  // level is compared, withholding LINE_START, INDENT and DEDENT alike,
-  // and a jump of more than one level returns inside the INDENT arm, so
-  // LINE_START is never reached either. No construct can start on the
-  // line, and the error lands on the offending row.
+  // level is compared, and a jump of more than one level returns as soon
+  // as it is, ahead of the INDENT and DEDENT arms and of the LINE_START
+  // that closes the section, so each withholds all three. No construct
+  // can start on the line, and the error lands on the offending row.
   //
   // This branch used to read the next line and withhold the NEWLINE in
   // front of such a line instead. That refused exactly the same files,
   // and not by sampling: `body()` and `source_file` in `grammar.js` put
   // `_line_start` in front of every construct that starts a line, so this
   // scanner is always consulted at a content line's start, and there the
-  // odd-count and `level != current + 1` tests read the same predicate
+  // odd-count and more-than-one-level tests read the same predicate
   // against the same stack the lookahead read one line earlier — nothing
   // pops in between, and blank and comment lines answered `false` there
   // too. What moved was only where the error sits: on the break, the
@@ -661,9 +661,10 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
 
   if (level < current) {
     if (!valid_symbols[DEDENT]) return false;
-    // Levels only ever go up by one (see the INDENT branch above), so the
-    // stack holds every level between `level` and `current` and the line
-    // closes exactly that many.
+    // Levels only ever go up by one (the comparison above the cast refuses
+    // any larger step before the INDENT arm can push it), so the stack
+    // holds every level between `level` and `current` and the line closes
+    // exactly that many.
     s->pending_dedents = (uint16_t)(current - level);
     return emit_dedent(s, lexer);
   }

@@ -1123,9 +1123,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     // A jump of more than one level, inside a body. Declining the INDENT
     // alone would let the `/ +/` extra eat the spaces and land the line as
     // a sibling one level short. What refuses it is where the scanner
-    // declines: the `level != current + 1` return sits inside the
-    // `level > current` arm, so it withholds `_line_start` as well, and no
-    // construct can start on the line.
+    // declines: the more-than-one-level test returns from `scan()` before
+    // the `level > current` arm is reached, and so before the end of the
+    // layout section, where a line that keeps its level is granted
+    // `_line_start`. That is withheld as well, and no construct can start
+    // on the line.
     (
         "indent_jump_inside_a_body",
         "struct s size=3x3\n  level y=0\n      room\n",
@@ -1453,7 +1455,7 @@ fn a_tab_indented_line_does_not_close_the_body_around_it() {
 /// `body()` and `source_file` in `grammar.js` put `_line_start` in front
 /// of every construct that starts a line, so the scanner is always asked
 /// at a content line's start, and there the odd-count and
-/// `level != current + 1` tests read the same predicate against the same
+/// more-than-one-level tests read the same predicate against the same
 /// indent stack the lookahead read one line earlier — nothing pops in
 /// between, and blank and comment lines answered `false` in the old
 /// check too. So only where the error sits could move, and on the break
