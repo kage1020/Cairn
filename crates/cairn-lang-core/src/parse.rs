@@ -43,11 +43,15 @@ const REQUIRES: &str = "requires";
 /// is written down once, and a body that did not pass through it would be a
 /// route around the rule.
 ///
-/// The refusing variants exist because they have different repairs, and
-/// one message for all of them asserts something false about the files
-/// that reach it. Neither refuses on the word alone: only a line whose
-/// expression reads as a version floor is refused, since `requires` is an
-/// ordinary identifier in a body that reads no floors.
+/// There are three refusing variants and two repairs between them:
+/// [`Self::MemberOfTheBuild`] is repaired the way [`Self::NotAPart`] is.
+/// They are still three messages, because one message for all of them
+/// asserts something false about the files it does not fit — a member of
+/// a `def` told its floor belongs at the top of the file, or a member of a
+/// `struct` told that a dedent would do. None of them refuses on the word
+/// alone: only a line whose expression reads as a version floor is
+/// refused, since `requires` is an ordinary identifier in a body that
+/// reads no floors.
 ///
 /// An accepting body is the other half of that, and takes the word whatever
 /// follows it: the line is lifted onto the item without the expression being
@@ -389,10 +393,12 @@ impl<'a> Parser<'a> {
                 let value = p
                     .parse_value()
                     .map_err(|err| err.rebased(value_start_pos))?;
-                // Reject trailing tokens — `@intended_targets [..] junk` should fail.
-                if !matches!(p.peek().map(|t| &t.kind), None | Some(TokenKind::Newline),) {
+                // Reject trailing tokens — `@intended_targets [..] junk`
+                // should fail, and at `junk`, the way the two refusals
+                // below point at the element that is wrong.
+                if let Some(trailing) = p.peek().filter(|t| t.kind != TokenKind::Newline) {
                     return Err(ParseError::Syntax {
-                        position: value_start_pos,
+                        position: trailing.position.rebased(value_start_pos),
                         message: "@intended_targets has trailing tokens after the list".into(),
                     });
                 }
@@ -1155,15 +1161,28 @@ impl<'a> Parser<'a> {
     /// no height, as in `size=9x`, or `None` when `key` is not one.
     ///
     /// The lexer builds a size only when a digit follows the `x`, so `9x`
-    /// arrives as an integer value and an `x` the next argument then has to
-    /// be keyed by — a split that is intended, since `size=2x 2` is three
-    /// arguments. What the split costs is the message: ``expected `=` ``
-    /// after an `x` names the reading the parser tried and not the literal
-    /// the author wrote. So the `x` is judged here, where the argument has
-    /// failed anyway: it is the size literal's when it touches the integer
-    /// before it. An argument's value is the only thing that can end in a
-    /// bare integer ahead of a key, so that integer is the value the size
-    /// was meant to be. `key` has just been consumed.
+    /// arrives as an integer value followed by an `x` that the parser reads
+    /// as the next argument's key. Which forms judge that `x` is decided by
+    /// who calls [`Self::parse_arg`]: it is reached unconditionally only
+    /// from the forms whose every argument is `key=value` — an item header
+    /// (`struct s size=9x`), a `[…]` list (`floor[size=9x]`) and a `theme`
+    /// binding (`block[a=1] -> size=9x`). A member command's own argument
+    /// list asks [`Self::is_at_key_eq`] first, so there a key with no `=`
+    /// is a positional value and never arrives here: `window size=9x`
+    /// parses, and the checks report the integer `size=` and the stray `x`
+    /// as they always did.
+    ///
+    /// Where it does arrive, the argument has failed anyway, and
+    /// ``expected `=` `` after an `x` names the reading the parser tried
+    /// rather than the literal the author wrote. So the `x` is judged here:
+    /// it is the size literal's when it touches the integer before it. An
+    /// argument's value is the only thing that can end in a bare integer
+    /// ahead of a key, so that integer is the value the size was meant to
+    /// be, whichever key it was given to — `lex.rs` reads digits-`x`-digits
+    /// as nothing but a size, so `struct s a=9x` is refused the same way.
+    /// `key` has just been consumed, and the caller has seen that no `=`
+    /// follows it: `size=9x=2` is an argument `x=2` after a `size=9`, which
+    /// the checks judge as they always did.
     fn size_with_no_height_before(&self, key: &str) -> Option<ParseError> {
         if key != "x" {
             return None;

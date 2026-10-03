@@ -1860,10 +1860,6 @@
       {
         "type": "STRING",
         "value": "or"
-      },
-      {
-        "type": "STRING",
-        "value": "not"
       }
     ]
   }

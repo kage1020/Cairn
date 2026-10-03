@@ -15,7 +15,7 @@
 #define EXTERNAL_TOKEN_COUNT 9
 #define FIELD_COUNT 18
 #define MAX_ALIAS_SEQUENCE_LENGTH 9
-#define MAX_RESERVED_WORD_SET_SIZE 5
+#define MAX_RESERVED_WORD_SET_SIZE 4
 #define PRODUCTION_ID_COUNT 35
 #define SUPERTYPE_COUNT 0
 
@@ -2247,7 +2247,6 @@ static const TSSymbol ts_reserved_words[3][MAX_RESERVED_WORD_SET_SIZE] = {
   [2] = {
     anon_sym_or,
     anon_sym_and,
-    anon_sym_not,
     anon_sym_true,
     anon_sym_false,
   },
@@ -6113,7 +6112,7 @@ TS_PUBLIC const TSLanguage *tree_sitter_cairn(void) {
     .primary_state_ids = ts_primary_state_ids,
     .name = "cairn",
     .reserved_words = &ts_reserved_words[0][0],
-    .max_reserved_word_set_size = 5,
+    .max_reserved_word_set_size = 4,
     .metadata = {
       .major_version = 234,
       .minor_version = 10,

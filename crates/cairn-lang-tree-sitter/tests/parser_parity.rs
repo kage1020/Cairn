@@ -507,6 +507,18 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  logic s.out = a.b and c.or\n",
         Accept,
     ),
+    // `not` is a keyword wherever an operand may start, so neither parser
+    // reads it as a name's head, and both read it as a name's tail.
+    (
+        "logic_not_heads_a_dotted_name",
+        "struct s size=3x3\n  logic s.out = a.b and not.x\n",
+        Reject,
+    ),
+    (
+        "logic_not_ends_a_dotted_name",
+        "struct s size=3x3\n  logic s.out = a.b and c.not\n",
+        Accept,
+    ),
     // -- assertions ---------------------------------------------------
     (
         "truth_rows",

@@ -21,13 +21,19 @@
     "goes at the body's own level" repair is for a member of a `def`, where it applies. A floor
     with an indented line under it is refused as a floor rather than read as a member whose `>=` is
     then unexpected.
-  - `size=9x` is ``size literal `9x` has no height; a size is two extents, as in `9x7` `` rather
-    than ``expected `=` ``. The lexer's split of `9x` is unchanged.
+  - `size=9x` in an item header, a `[…]` list or a `theme` binding, the forms where every argument
+    needs its `=`, is ``size literal `9x` has no height; a size is two extents, as in `9x7` ``
+    rather than ``expected `=` ``. A member command's own arguments read a key with no `=` as a
+    positional value, so `window size=9x` reaches the checks it always did. The lexer's split of
+    `9x` is unchanged.
   - `and` and `or` are no longer read as a signal's name where a `logic` expression expects a
     signal, so `logic sig.x = sig.a and or` is refused at the parse with
-    ``expected a signal after `and`, got the operator `or` `` rather than reaching synthesis as an
-    unbound signal called `or`. The tree-sitter grammar refuses it too. A dotted name may still
-    end in one (`c.or`).
+    ``expected a signal after `and`, got the operator `or` ``. Such an operand could never be read:
+    `spec/redstone` "Signal names" puts every readable signal in the `sig.` namespace, and a signal
+    named `or` (`-> sig.or`, read as `sig.or`) is untouched. But nothing before synthesis said so:
+    `cairn check`, `cairn info` and `cairn compile` exited 0 on such a file, and `compile` wrote its
+    artifacts and lockfile. That file now exits 1. The tree-sitter grammar refuses it too. A dotted
+    name may still end in one (`c.or`).
 
 ## 2026.10.0 — 2026-10-01
 

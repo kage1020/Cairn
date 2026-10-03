@@ -8,6 +8,9 @@
 
 use cairn_lang_core::parse::parse;
 
+mod common;
+use common::codes;
+
 /// The refusal for `source`, as `line:col: message`.
 fn refusal(source: &str) -> String {
     let error = parse(source).expect_err("the source should be refused");
@@ -92,6 +95,26 @@ fn an_intended_targets_refusal_quotes_and_points_at_the_offending_value() {
     }
 }
 
+/// Trailing text after the value is refused at that text, as the two
+/// refusals above point at their element, however the line is spaced.
+#[test]
+fn an_intended_targets_trailing_token_is_reported_at_the_token() {
+    for (source, expected) in [
+        ("@intended_targets [\"1.21\"] junk\n", "1:28"),
+        ("@intended_targets      [\"1.21\"]        junk\n", "1:40"),
+        (
+            "@cairn 2026.06\n@intended_targets [\"1.21\"] junk\n",
+            "2:28",
+        ),
+    ] {
+        assert_eq!(
+            refusal(source),
+            format!("{expected}: @intended_targets has trailing tokens after the list"),
+            "{source:?}",
+        );
+    }
+}
+
 // -- `requires` where no floor may stand ------------------------------------
 
 /// A member's children under a `struct` or a `site` get the `@requires`
@@ -127,6 +150,43 @@ fn a_floor_under_a_member_of_a_part_is_sent_one_level_up() {
     assert!(!message.contains("@requires"), "{message}");
 }
 
+/// A member's children hand their own children the same repair, however
+/// deep: a grandchild of a member is in the same body as the member, so
+/// the body decides, not the depth.
+#[test]
+fn a_floor_two_members_deep_gets_its_bodys_repair() {
+    for (source, to_the_file) in [
+        (
+            "struct s size=3x3\n  level y=0\n    walls x=1\n      requires version>=1.21\n",
+            true,
+        ),
+        (
+            "site p:\n  place use=d\n    walls x=1\n      requires version>=1.21\n",
+            true,
+        ),
+        (
+            "def d size=3x3\n  level y=0\n    walls x=1\n      requires version>=1.21\n",
+            false,
+        ),
+    ] {
+        let message = refusal(source);
+        assert!(
+            message.starts_with("4:7: a member may not declare"),
+            "{source:?}: {message}",
+        );
+        assert_eq!(
+            message.contains("written `@requires version>=X` at the top of the file"),
+            to_the_file,
+            "{source:?}: {message}",
+        );
+        assert_eq!(
+            message.contains("the `def` body's own level"),
+            !to_the_file,
+            "{source:?}: {message}",
+        );
+    }
+}
+
 /// A floor with an indented line under it is still recognised as a floor
 /// where it stands, not read as a member whose `>=` is then unexpected.
 #[test]
@@ -152,18 +212,45 @@ fn a_requires_member_with_a_body_still_parses_where_no_floor_may_stand() {
 
 // -- size literals ----------------------------------------------------------
 
-/// `9x` is an integer and an `x`, a split kept so `size=2x 2` reads as
-/// three arguments. The refusal names the literal rather than the `=` the
-/// `x` would need as a key.
+/// `9x` is an integer and an `x`. In the forms where every argument needs
+/// its `=` — an item header, a `[…]` list, a `theme` binding — the `x`
+/// would be a key with no `=`, and the refusal names the literal rather
+/// than the `=` such a key would need. Each form reaches the check, so
+/// moving it into one of them cannot pass.
 #[test]
 fn a_size_with_no_height_is_named_as_one() {
-    for source in ["struct s size=9x\n", "struct s size=9x 7\n"] {
+    for (source, at) in [
+        ("struct s size=9x\n", "1:15"),
+        ("struct s size=9x 7\n", "1:15"),
+        ("def d size=9x\n", "1:12"),
+        ("struct s size=3x3\n  floor[size=9x] mat=f\n", "2:14"),
+        ("theme t:\n  block[a=1] -> size=9x\n", "2:22"),
+    ] {
         assert_eq!(
             refusal(source),
-            "1:15: size literal `9x` has no height; a size is two extents, as in `9x7`",
+            format!("{at}: size literal `9x` has no height; a size is two extents, as in `9x7`"),
             "{source:?}",
         );
     }
+}
+
+/// The refusal is keyed off the glued `x`, not off `size=`: digits-`x`
+/// read as nothing but a size, under any key.
+#[test]
+fn a_size_with_no_height_is_named_under_any_key() {
+    assert_eq!(
+        refusal("struct s a=9x\n"),
+        "1:12: size literal `9x` has no height; a size is two extents, as in `9x7`",
+    );
+}
+
+/// An `x` that has its `=` is an argument of its own, so `size=9x=2` is a
+/// `size=9` and an `x=2`, judged by the checks as before. `codes` panics
+/// if the source does not parse.
+#[test]
+fn a_glued_x_with_its_own_value_is_an_argument() {
+    let found = codes("struct s size=9x=2\n");
+    assert!(found.contains(&"E_TYPE_MISMATCH_SIZE"), "{found:?}");
 }
 
 /// An `x` that is not glued to a value before it is an ordinary key, as
