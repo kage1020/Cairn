@@ -224,6 +224,18 @@ struct s size=3x3
 
 
 ==================
+An operator is not a signal's name
+:error
+==================
+
+struct s size=3x3
+  logic s.out = a.b and or
+
+---
+
+
+
+==================
 logic with and binding tighter than or
 ==================
 
