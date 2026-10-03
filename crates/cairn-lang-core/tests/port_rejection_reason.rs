@@ -199,9 +199,10 @@ fn a_window_outside_the_courses_is_refused_with_its_rows() {
 
 #[test]
 fn a_port_past_the_coordinate_range_is_refused_as_out_of_range() {
-    // `b` is placed so far east that its door does not fit an `i32`. The
-    // note has no member to point at: the member is fine, the `place` is
-    // what moved it.
+    // `b` is placed so far east that its last column is `i32::MAX`, so
+    // the cell outside its east door does not fit an `i32`. The note has
+    // no member to point at: the member is fine, the `place` is what moved
+    // it.
     let src = format!(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
@@ -213,7 +214,7 @@ fn a_port_past_the_coordinate_range_is_refused_as_out_of_range() {
          place id=a use=hut theme=t at=origin\n  \
          place id=b use=hut theme=t east_of=a gap={}\n  \
          connect a.e to b.e path=@gravel\n",
-        i32::MAX - 5,
+        i32::MAX - 9,
     );
     let out = lowered(&src);
     let notes = skip_notes(&out);

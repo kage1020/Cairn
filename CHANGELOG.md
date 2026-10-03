@@ -65,6 +65,31 @@
     comparing it with the indent stack; it now compares first, so the line is refused as an indent
     that opens more than one level.
 
+- *(core)* The "did you mean" search computed the full Damerau-Levenshtein distance between an
+  unknown id and every candidate, though no candidate more than three characters longer or shorter
+  can pass the cap. One unknown `@token` of 20,000 characters cost `compile --target` about 2 s and
+  `info` about 20 s in a release build, for an answer that was always "no suggestion". A candidate
+  outside the cap's length band is now skipped before its distance is computed, which changes no
+  suggestion.
+
+- *(core)* refuse a placement whose body runs past `i32` and a repeated window whose `sym=` is
+  unreadable, show the written `side=` / `slope_to=` value, and, for a row whose anchor did not
+  lower, report the findings its body raises ([#462](https://github.com/kage1020/Cairn/pull/462))
+
+- *(lsp)* An unreadable frame was logged as "client closed stdin without `shutdown`" before the
+  frame's own error, so the first line said the opposite of what happened. The session now says the
+  client closed stdin only once the reader has returned without an error. When the reader or the
+  writer failed before `shutdown`, that failure is the one line, and it ends "the session ended
+  without `shutdown`".
+
+- *(lsp)* A `didChange` event carrying a `range` was stored as the whole document, so `# note\n`
+  inserted at `0:0` replaced the file and the server diagnosed and completed text nobody had. The
+  server advertises full sync and a conforming client sends no range, but one that does now has
+  each event applied in order, ranged or not (`DocumentStore::apply`). A range on a line the
+  document does not have, or a range whose end resolves before its start, drops the revision with
+  a line on stderr and keeps the last text. A column past its line's end resolves to the line end
+  before the two ends are compared.
+
 - *(formats)* A Bedrock build printed identical `W_INTENT_DEGRADED` lines, and its `.mcstructure`
   palette held one block several times. `roof-hip`'s four degraded stairs differ only in `facing`,
   which the warning left out, so lines 1 and 3 and lines 2 and 4 were byte-identical. Each warning
@@ -94,6 +119,11 @@
   rather than the build being brought in line with what it already said.
 
 - *(core)* `RoutePathError::AreaCapExceeded` gains a `rect: SearchRect` field, the rectangle the area was measured on; `SearchRect` is new in `cairn_lang_core::block_array` ([#455](https://github.com/kage1020/Cairn/pull/455))
+
+- *(lsp)* `DocumentStore::change` is removed. It stored a `didChange` revision's text as the whole
+  document, and the server no longer calls it. `DocumentStore::apply` replaces it: it applies each
+  event of the notification's `contentChanges` and returns `Result<&str, store::ChangeRefused>`,
+  with `ChangeRefused::DocumentNotOpen` where `change` returned `None`.
 
 ## 2026.10.0 — 2026-10-01
 
