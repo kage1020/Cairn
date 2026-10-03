@@ -2283,8 +2283,8 @@ fn dispatch_synth_stage(
     // it, rather than on the answer alone. The two agree today, but only
     // the stage makes a stage added later get an arm of its own here (a
     // bare `Neutral` arm would hand it the Netlist payload, under the
-    // Netlist label, with exit 0), and only the stage stops an answer that
-    // disagrees with it here, naming the contract it broke, rather than
+    // Netlist label, with exit 0), and only the stage stops a `Tagged`
+    // answer for `Netlist` here, naming the contract it broke, rather than
     // after every later pass has run, at the `Crossing` guard below.
     let edition = match (stage, edition) {
         (SynthStage::Netlist, StageEdition::Neutral) => {

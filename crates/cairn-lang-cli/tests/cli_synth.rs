@@ -1396,12 +1396,12 @@ fn write_finding_sources(dir: &Path) -> Vec<(&'static str, PathBuf, &'static str
 #[test]
 fn cli_synth_experimental_gate_is_decided_ahead_of_the_edition_gate() {
     // `cli_synth_requires_experimental_flag` passes no `--stage`, and the
-    // default `logic` is edition-neutral, so that run gets `--edition`
-    // right by leaving it out and never meets the edition gate. Here every
-    // stage is named, the edition-tagged ones without `--edition` and the
-    // edition-neutral ones with it, so either `--edition` refusal would
-    // apply too; the opt-in gate stands first, and its line is the only
-    // one.
+    // default `logic` is edition-neutral, so leaving `--edition` out is
+    // right there and neither `--edition` refusal has anything to say.
+    // Here every stage is named, the edition-tagged ones without
+    // `--edition` and the edition-neutral ones with it, so an `--edition`
+    // refusal would apply too; the opt-in gate stands first, and its line
+    // is the only one.
     let path = examples_dir().join("redstone-door.crn");
     let tagged = edition_tagged_stages();
     for stage in stage_values() {
