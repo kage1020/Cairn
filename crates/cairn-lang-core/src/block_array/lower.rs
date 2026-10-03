@@ -5184,12 +5184,16 @@ fn cut_window(
     if sym == Some(true) {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
         // Reject overlapping mirrors: a `sym=true` window asks for a
-        // *pair*, not one wide span. If the two rectangles intersect the
-        // user almost certainly wrote a window that is more than half as
-        // wide as the wall — diagnose and skip the mirror so the primary
-        // is still emitted cleanly. A centred window's mirror is the same
-        // rectangle, the fullest overlap there is: the author still asked
-        // for two windows and got one, so it is reported like the rest.
+        // *pair*, not one wide span. The `span_end` guard above refused
+        // `offset + size_w > wall_length`, so neither subtraction
+        // saturates, and the two rectangles intersect exactly when the
+        // window straddles the wall's midpoint
+        // (2*offset < wall_length < 2*(offset + size_w)) — diagnose and
+        // skip the mirror so the primary is still emitted cleanly. A
+        // centred window (2*offset + size_w == wall_length) has a mirror
+        // that is the same rectangle, the fullest overlap there is: the
+        // author still asked for two windows and got one, so it is
+        // reported like the rest.
         let primary_end = offset.saturating_add(sw);
         let mirror_end = mirror_offset.saturating_add(sw);
         let overlap = offset < mirror_end && mirror_offset < primary_end;
