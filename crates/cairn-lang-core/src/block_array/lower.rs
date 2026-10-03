@@ -5469,13 +5469,26 @@ mod tests {
                 coord: i128::from(i32::MAX) + 1,
             }),
         );
+        let z_past = north((0, 0, i32::MAX), -2).origin(dims);
         assert_eq!(
-            north((0, 0, i32::MAX), -2).origin(dims),
+            z_past,
             Err(PlacementOutOfRange {
                 corner: PlacementCorner::FarEdge,
                 axis: 'z',
                 coord: i128::from(i32::MAX) + 1,
             }),
+        );
+        // No source renders the sentence with `z` in it, so it is rendered
+        // here.
+        assert_eq!(
+            z_past.map_err(PlacementOutOfRange::deferral),
+            Err(
+                "this placement's body reaches z=2147483648, past the -2147483648 to \
+                 2147483647 range a placement's cells are addressed in; shrink the body with \
+                 its `def`'s `size=` or a roof's `overhang=`, or shorten the `gap=` on this row \
+                 or on a row it is placed relative to"
+                    .to_owned()
+            ),
         );
     }
 

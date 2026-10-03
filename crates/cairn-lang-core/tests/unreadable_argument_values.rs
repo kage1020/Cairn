@@ -26,6 +26,7 @@
 //! refused row's body, or that of a row placed relative to a refused one,
 //! still reports what is wrong with its `def` and theme.
 
+use cairn_lang_core::Diagnostic;
 use cairn_lang_core::block_array::BlockArrayIr;
 
 mod common;
@@ -531,14 +532,18 @@ fn with_bad_body(row: &str) -> BlockArrayIr {
     ))
 }
 
+/// The `E_INCOMPATIBLE_MATERIAL` that `bad`'s stair raises, whole: its
+/// span, scope and wording, so a refused row reporting it differently from
+/// a placed one is caught as well as one not reporting it at all.
+fn incompatible(ir: &BlockArrayIr) -> Option<Diagnostic> {
+    ir.diagnostics
+        .iter()
+        .find(|d| d.code.as_str() == "E_INCOMPATIBLE_MATERIAL")
+        .cloned()
+}
+
 #[test]
 fn a_row_refused_for_its_origin_still_reports_its_body() {
-    let incompatible = |ir: &BlockArrayIr| {
-        ir.diagnostics
-            .iter()
-            .find(|d| d.code.as_str() == "E_INCOMPATIBLE_MATERIAL")
-            .cloned()
-    };
     // Guard: placed in range, `bad` reports its stair's material.
     let placed = with_bad_body("east_of=a gap=1");
     assert!(origin(&placed, "b").is_some());
@@ -573,12 +578,10 @@ fn a_row_refused_for_its_origin_still_reports_its_body() {
     assert_eq!(incompatible(&refused), incompatible(&placed));
 }
 
-#[test]
-fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
-    // `b` is refused for its origin, so `c`, placed east of it, has no
-    // anchor. `bad` is placed by `c` alone; its stair's material is a
-    // defect in the `def` and theme wherever `c` would have landed.
-    let ir = lowered(
+/// A site that places `bad` only as row `c`, east of row `b`, which is
+/// placed `gap` east of `a`.
+fn bad_body_behind(gap: &str) -> BlockArrayIr {
+    lowered(&format!(
         "def box size=5x5:\n  \
          floor id=f mat_slot=wall\n\n\
          def bad size=5x5:\n  \
@@ -589,9 +592,29 @@ fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
          slot wall -> @cobblestone\n\n\
          site s:\n  \
          place id=a use=box theme=t at=origin\n  \
-         place id=b use=box theme=t east_of=a gap=3000000000\n  \
-         place id=c use=bad theme=t east_of=b\n",
+         place id=b use=box theme=t east_of=a gap={gap}\n  \
+         place id=c use=bad theme=t east_of=b\n"
+    ))
+}
+
+#[test]
+fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
+    // Guard: with `b` in range, `c` is placed and reports its stair's
+    // material.
+    let placed = bad_body_behind("1");
+    assert!(origin(&placed, "c").is_some());
+    let codes: Vec<&str> = findings(&placed).iter().map(|(code, _)| *code).collect();
+    assert_eq!(
+        codes,
+        vec!["E_INCOMPATIBLE_MATERIAL"],
+        "{:#?}",
+        placed.diagnostics
     );
+
+    // `b` is refused for its origin, so `c` has no anchor. `bad`'s stair
+    // material is a defect in the `def` and theme wherever `c` would have
+    // landed, and it is reported as the placed row reports it.
+    let ir = bad_body_behind("3000000000");
     assert_eq!(origin(&ir, "c"), None);
     let codes: Vec<&str> = findings(&ir).iter().map(|(code, _)| *code).collect();
     assert_eq!(
@@ -608,6 +631,14 @@ fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
         ir.diagnostics[2].primary.contains("did not lower"),
         "{:?}",
         ir.diagnostics[2].primary,
+    );
+    assert_eq!(incompatible(&ir), incompatible(&placed));
+    // The body is lowered for its findings and then dropped: a structure
+    // with no placement would be an artifact the lockfile cannot place.
+    assert!(
+        !ir.structures.contains_key("site::s::c"),
+        "{:?}",
+        ir.structures.keys().collect::<Vec<_>>(),
     );
 }
 
