@@ -185,9 +185,11 @@ fn a_level_scoped_roofs_overhang_is_validated_exactly_once() {
 
 #[test]
 fn a_malformed_overhang_on_a_dropped_roof_is_not_read_at_all() {
-    // A member the pass drops costs nothing, and validating an argument
-    // nothing will use is a cost: it reports a mistake in a line that has
-    // no effect either way.
+    // The roof is dropped before its arguments are read, so its
+    // unreadable `overhang=` is not reported beside the drop. That is the
+    // exception `spec/lint` "Error vs warning" names to the rule that an
+    // unreadable value is reported whether or not its member is built;
+    // this pins the behaviour as it stands, not as the rule wants it.
     let ir = lowered(&source(
         "\n  level id=upper y=5\n    roof kind=gable mat_slot=roof overhang=nope\n",
     ));
