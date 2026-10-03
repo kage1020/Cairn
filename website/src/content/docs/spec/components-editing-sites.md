@@ -201,12 +201,15 @@ detour: the shortest route around the obstacle, and among equal-length routes th
 fewest turns, with deterministic tie-breaking so the same source always lays the same strip.
 
 The row falls back to the straight L, with the colliding cells skipped, only when no unobstructed
-route exists at all: a port buried under another placement's floor, a fully enclosed target, or a
-site past the router's search-area cap.
+route exists at all: a port buried under another placement's floor or under a block its own
+placement lays on the port cell, a fully enclosed target, or a search past the router's area cap.
+The router searches the box spanning both ports and every placement floor on the walk plane, so
+the cap can be reached by a distant pair of ports or by a widely spread floor plan.
 
 That earns one `W_WALKWAY_BLOCKED` naming the concrete cause and its remedy: move the buried door
-or window, widen the gap, or bring the structures closer. `--format json` carries
-`data: { kind: "walkway_blocked", skipped: N }`.
+or window (or the block on its port cell), widen the gap, bring the two structures closer, or bring
+the placements that stretch the box closer. `--format json` carries `data: { kind:
+"walkway_blocked", skipped: N }`.
 
 **Material.** `path=@TOKEN` lifts through the same `mat_slot=` pipeline as member materials.
 Concrete tokens like `@gravel` work without a registry pack; abstract tokens like `@path.gravel`

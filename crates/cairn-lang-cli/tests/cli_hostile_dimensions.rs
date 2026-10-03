@@ -595,6 +595,58 @@ fn a_detour_searched_along_the_edge_of_i32_answers_rather_than_panics() {
     }
 }
 
+/// A body placed so its last column is `i32::MAX`, whose port is blocked.
+///
+/// The floor plan used to saturate every column past the range onto the
+/// edge cell, so that cell read as laid where the body lays only air.
+/// The note naming what buries the port then found no owner, and an
+/// `assert!` there turned the warning into a crash in `lower`, `compile`
+/// and `check --target` alike. A body that runs past the range is now
+/// refused before its floor is laid, so this one ends on the edge cell
+/// itself, and the router's box runs from the origin out to it.
+#[test]
+fn a_blocked_port_on_a_body_at_the_i32_edge_answers_rather_than_panics() {
+    let src = source(
+        "def hut size=5x5:\n\
+         \x20\x20floor id=f mat_slot=wall\n\
+         \x20\x20walls id=w mat_slot=wall height=3\n\
+         \x20\x20roof  kind=flat mat_slot=wall overhang=1\n\
+         \x20\x20door  id=e  side=front at=center\n\
+         \x20\x20door  id=bk side=back  at=center\n\
+         \x20\x20pressure_plate id=pp at=front.outside offset=4 y=0\n\n\
+         site s:\n\
+         \x20\x20place id=a use=hut theme=t at=origin\n\
+         \x20\x20place id=b use=hut theme=t east_of=a gap=2147483634\n\
+         \x20\x20place id=c use=hut theme=t north_of=b gap=4\n\
+         \x20\x20connect b.e to c.bk path=@gravel\n",
+    );
+    let tmp = TempDir::new().expect("tempdir");
+    let dir = tmp.path().join("port-at-i32-edge");
+    fs::create_dir_all(&dir).expect("case dir");
+    let path = write(&dir, "port-at-i32-edge", &src);
+    let file = path.to_str().unwrap();
+    let out_dir = dir.join("out");
+    let out = out_dir.to_str().unwrap();
+    for args in [
+        vec!["check", file, "--edition", "java", "--target", "1.21.4"],
+        vec!["lower", file],
+        vec!["compile", file, "--edition", "java", "--out", out],
+    ] {
+        let (outcome, stderr, _) = run_bounded(&dir, &args);
+        assert_eq!(
+            outcome,
+            Outcome::Exited(0),
+            "`{}` must answer, not crash\nstderr={stderr}",
+            args[0],
+        );
+        assert!(
+            stderr.contains("warning[W_WALKWAY_BLOCKED]: walkway `b.e ↔ c.bk`"),
+            "`{}` must report the blocked walkway; got {stderr}",
+            args[0],
+        );
+    }
+}
+
 /// A hut with a door on its front and on its back, so a `north_of=` pair
 /// faces door to door along one column and the straight L between them
 /// is a z leg alone, crossing no floor.
