@@ -556,6 +556,13 @@ struct NoRepeaterSite {
     unpowered: CellCoord,
     /// What `unpowered` may be reached over.
     allowance: Allowance,
+    /// Whether the walk for a repeater site started on `unpowered`
+    /// itself: a block of dust past the limit, which a repeater could
+    /// stand in place of, reading the dust before it. The walk starts
+    /// on the coord before `unpowered` instead when `unpowered` is a
+    /// sink, which the repeater has to stand before, or when even the
+    /// block before it is reached over more than the limit.
+    starts_on_unpowered: bool,
     /// How far back the walk for a repeater site went before it gave
     /// up.
     blocked: Blocked,
@@ -585,16 +592,19 @@ impl Allowance {
     }
 }
 
-/// How far back a [`NoRepeaterSite`]'s walk went: which coords
-/// [`NoRepeaterSite::refused`] describes.
+/// How far back a [`NoRepeaterSite`]'s walk went. With where it
+/// started, [`NoRepeaterSite::starts_on_unpowered`], that is which
+/// coords [`NoRepeaterSite::refused`] describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Blocked {
-    /// It walked every coord between `from` and `unpowered`, and
-    /// reached `from` without finding one.
+    /// It walked every coord after `from` and before `unpowered` — and
+    /// `unpowered` itself, when it started there — and reached `from`
+    /// without finding one.
     NoneBetween,
-    /// It walked every coord within the allowance before `unpowered`
-    /// without finding one; a repeater on any coord further back would
-    /// leave the signal too weak to reach it.
+    /// It walked every coord within the allowance before `unpowered` —
+    /// and `unpowered` itself, when it started there — without finding
+    /// one; a repeater on any coord further back would leave the signal
+    /// too weak to reach it.
     NoneCloseEnough,
 }
 
@@ -714,10 +724,11 @@ fn repeater_sites(
         // depend on anything but the tree. The walk back from it either
         // refuses or stops on a coord within that allowance of it, so a
         // repeater there brings it within reach — every pass round the
-        // loop adds one site or returns `Err`.
+        // loop adds one site or returns `Err`. `first` holds its depth,
+        // its `order` index, the coord and the dust it is reached over.
         let mut walked: HashMap<CellCoord, (u32, u32)> = HashMap::with_capacity(order.len());
         walked.insert(source, (spent, 0));
-        let mut first: Option<(u32, usize, CellCoord)> = None;
+        let mut first: Option<(u32, usize, CellCoord, u32)> = None;
         for (index, coord) in order.iter().enumerate().skip(1) {
             let parent = tree
                 .parent(*coord)
@@ -729,12 +740,12 @@ fn repeater_sites(
             let here = (behind.saturating_add(1), depth.saturating_add(1));
             walked.insert(*coord, here);
             if here.0 > allowance(*coord, &sites)
-                && first.is_none_or(|(depth, at, _)| (here.1, index) < (depth, at))
+                && first.is_none_or(|(depth, at, _, _)| (here.1, index) < (depth, at))
             {
-                first = Some((here.1, index, *coord));
+                first = Some((here.1, index, *coord, here.0));
             }
         }
-        let Some((depth, _, unpowered)) = first else {
+        let Some((depth, _, unpowered, reached)) = first else {
             break;
         };
         let budget = allowance(unpowered, &sites);
@@ -742,17 +753,14 @@ fn repeater_sites(
         // which reads the dust before it, as long as that dust is
         // within the limit. A sink cannot: the repeater has to stand
         // before it.
-        let reached = walked
-            .get(&unpowered)
-            .expect("every coord of the tree was walked")
-            .0;
-        let mut candidate =
-            if children.contains_key(&unpowered) && reached <= DUST_ATTENUATION_LIMIT + 1 {
-                unpowered
-            } else {
-                tree.parent(unpowered)
-                    .expect("a coord past its allowance is never the source")
-            };
+        let starts_on_unpowered =
+            children.contains_key(&unpowered) && reached <= DUST_ATTENUATION_LIMIT + 1;
+        let mut candidate = if starts_on_unpowered {
+            unpowered
+        } else {
+            tree.parent(unpowered)
+                .expect("a coord past its allowance is never the source")
+        };
         let mut refused = Refused::default();
         loop {
             // `candidate` is `unpowered` or an ancestor of it, so it is
@@ -777,6 +785,7 @@ fn repeater_sites(
                     allowance: budgets
                         .get(&unpowered)
                         .map_or(Allowance::Limit, |budget| Allowance::Budget(*budget)),
+                    starts_on_unpowered,
                     blocked: if fresh {
                         Blocked::NoneBetween
                     } else {
@@ -920,8 +929,7 @@ fn no_repeater_site_diagnostic(
         spent,
         unpowered,
         allowance,
-        blocked,
-        refused,
+        ..
     } = stretch;
     let leaving = if spent == 0 {
         at(from)
@@ -963,7 +971,7 @@ fn no_repeater_site_diagnostic(
             spare = blocks(budget),
         ),
     };
-    let why = why_no_site(blocked, refused, allowance);
+    let why = why_no_site(&stretch);
     let primary = format!(
         "{netlist} netlist for {kind} `{name}` routes {net} so that the signal leaving {leaving} {reach}: {why}",
         kind = entry.kind.label(),
@@ -1000,12 +1008,28 @@ fn blocks(n: u32) -> String {
 }
 
 /// Why a [`NoRepeaterSite`] had nowhere for a repeater: the clause of
-/// its refusal after the colon.
-fn why_no_site(blocked: Blocked, refused: Refused, allowance: Allowance) -> String {
+/// its refusal after the colon. It names exactly the coords the walk
+/// asked about, `unpowered` among them when the walk started there.
+fn why_no_site(stretch: &NoRepeaterSite) -> String {
     const STRAIGHT: &str = "a buffer repeater carries a signal only where the wire runs straight through it at one height";
     const JOINS: &str = "joins only the blocks at its back and front";
+    let NoRepeaterSite {
+        from,
+        unpowered,
+        allowance,
+        starts_on_unpowered,
+        blocked,
+        refused,
+        ..
+    } = *stretch;
     let span = match blocked {
+        Blocked::NoneBetween if starts_on_unpowered => {
+            format!("after {} up to and including {}", at(from), at(unpowered))
+        }
         Blocked::NoneBetween => "between the two".to_owned(),
+        Blocked::NoneCloseEnough if starts_on_unpowered => {
+            format!("from it back to {} before it", blocks(allowance.blocks()))
+        }
         Blocked::NoneCloseEnough => format!("within {} before it", blocks(allowance.blocks())),
     };
     let touches = |touching: Touching| {
@@ -1548,6 +1572,7 @@ mod tests {
                 spent: 0,
                 unpowered: path[16],
                 allowance: Allowance::Limit,
+                starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
                     bends: true,
@@ -1583,6 +1608,7 @@ mod tests {
                 spent: 0,
                 unpowered: CellCoord::new(16, 0, 0),
                 allowance: Allowance::Limit,
+                starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
                     bends: false,
@@ -1621,7 +1647,7 @@ mod tests {
         );
         assert_eq!(
             diagnostic.primary,
-            "routed netlist for struct `beside` routes sig.a so that the signal leaving (0,0,0) runs out before (16,0,0), past the attenuation limit of 15 blocks of dust, and never reaches output pad #0: every coord between the two runs straight but touches another block of its own net on one of its faces, as (16,0,0) touches (16,0,1) — a buffer repeater, which joins only the blocks at its back and front, would cut that block off from the dust it replaces, so none can stand there",
+            "routed netlist for struct `beside` routes sig.a so that the signal leaving (0,0,0) runs out before (16,0,0), past the attenuation limit of 15 blocks of dust, and never reaches output pad #0: every coord after (0,0,0) up to and including (16,0,0) runs straight but touches another block of its own net on one of its faces, as (16,0,0) touches (16,0,1) — a buffer repeater, which joins only the blocks at its back and front, would cut that block off from the dust it replaces, so none can stand there",
         );
     }
 
@@ -1652,6 +1678,7 @@ mod tests {
                 spent: 0,
                 unpowered: trunk[16],
                 allowance: Allowance::Limit,
+                starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
                     bends: true,
@@ -1696,6 +1723,7 @@ mod tests {
                 spent: 0,
                 unpowered: CellCoord::new(12, 0, 4),
                 allowance: Allowance::Limit,
+                starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
                     bends: true,
@@ -1734,8 +1762,60 @@ mod tests {
         );
     }
 
-    /// Every way a walk can be blocked, crossed with every record of
-    /// what it refused, as the clause after the refusal's colon.
+    /// The clauses [`why_no_site`] builds its refusals from, as the
+    /// tables below spell them out.
+    const STRAIGHT_CLAUSE: &str = "a buffer repeater carries a signal only where the wire runs straight through it at one height";
+    const ON_A_FACE_CLAUSE: &str = "runs straight but touches another block of its own net on one of its faces, as (7,0,1) touches (7,0,0)";
+    const CUTS_CLAUSE: &str = "a buffer repeater, which joins only the blocks at its back and front, would cut that block off from the dust it replaces";
+    const TOO_WEAK_CLAUSE: &str =
+        "and one further back would leave too little strength to get there";
+
+    /// Every record of what a walk refused: nothing, bends, touches,
+    /// both. The touching coord is `(7,0,1)`, beside `(7,0,0)`.
+    fn refusals() -> [Refused; 4] {
+        let touching = Some(Touching {
+            at: CellCoord::new(7, 0, 1),
+            touching: CellCoord::new(7, 0, 0),
+        });
+        [
+            Refused::default(),
+            Refused {
+                bends: true,
+                touching: None,
+            },
+            Refused {
+                bends: false,
+                touching,
+            },
+            Refused {
+                bends: true,
+                touching,
+            },
+        ]
+    }
+
+    /// [`why_no_site`] for a walk that left `(0,0,0)` and gave up on
+    /// `(16,0,0)`.
+    fn why_from_origin(
+        blocked: Blocked,
+        starts_on_unpowered: bool,
+        refused: Refused,
+        allowance: Allowance,
+    ) -> String {
+        why_no_site(&NoRepeaterSite {
+            from: CellCoord::new(0, 0, 0),
+            spent: 0,
+            unpowered: CellCoord::new(16, 0, 0),
+            allowance,
+            starts_on_unpowered,
+            blocked,
+            refused,
+        })
+    }
+
+    /// Every way a walk that started on the coord before `unpowered` can
+    /// be blocked, crossed with every record of what it refused, as the
+    /// clause after the refusal's colon.
     ///
     /// Hand-built: [`why_no_site`] is asked directly, since no one tree
     /// reaches every pair. `NoneCloseEnough` with nothing refused is in
@@ -1743,27 +1823,13 @@ mod tests {
     /// for an allowance of zero, and every allowance is at least one.
     #[test]
     fn every_blocked_and_refused_pair_reads_as_one_clause() {
-        let touching = Touching {
-            at: CellCoord::new(7, 0, 1),
-            touching: CellCoord::new(7, 0, 0),
-        };
-        let nothing = Refused::default();
-        let bends = Refused {
-            bends: true,
-            touching: None,
-        };
-        let touches = Refused {
-            bends: false,
-            touching: Some(touching),
-        };
-        let both = Refused {
-            bends: true,
-            touching: Some(touching),
-        };
-        let straight = "a buffer repeater carries a signal only where the wire runs straight through it at one height";
-        let on_a_face = "runs straight but touches another block of its own net on one of its faces, as (7,0,1) touches (7,0,0)";
-        let cuts = "a buffer repeater, which joins only the blocks at its back and front, would cut that block off from the dust it replaces";
-        let too_weak = "and one further back would leave too little strength to get there";
+        let [nothing, bends, touches, both] = refusals();
+        let (straight, on_a_face, cuts, too_weak) = (
+            STRAIGHT_CLAUSE,
+            ON_A_FACE_CLAUSE,
+            CUTS_CLAUSE,
+            TOO_WEAK_CLAUSE,
+        );
         let cases = [
             (
                 Blocked::NoneBetween,
@@ -1827,7 +1893,82 @@ mod tests {
         ];
         for (blocked, refused, allowance, clause) in cases {
             assert_eq!(
-                why_no_site(blocked, refused, allowance),
+                why_from_origin(blocked, false, refused, allowance),
+                clause,
+                "{blocked:?} x {refused:?}",
+            );
+        }
+    }
+
+    /// A walk that started on `unpowered` itself, a block of dust a
+    /// repeater could stand in place of, names it among the coords it
+    /// walked: "between the two" would leave out the first coord it
+    /// asked about. Every way it can be blocked, crossed with every
+    /// record of what it can refuse — never nothing, since it asked
+    /// about `unpowered`.
+    ///
+    /// Hand-built, as the table above is.
+    #[test]
+    fn a_walk_that_starts_on_unpowered_names_it_among_the_coords() {
+        let [_, bends, touches, both] = refusals();
+        let (straight, on_a_face, cuts, too_weak) = (
+            STRAIGHT_CLAUSE,
+            ON_A_FACE_CLAUSE,
+            CUTS_CLAUSE,
+            TOO_WEAK_CLAUSE,
+        );
+        let through = "after (0,0,0) up to and including (16,0,0)";
+        let cases = [
+            (
+                Blocked::NoneBetween,
+                bends,
+                Allowance::Limit,
+                format!(
+                    "every coord {through} turns, climbs or branches — {straight}, so none can stand there"
+                ),
+            ),
+            (
+                Blocked::NoneBetween,
+                touches,
+                Allowance::Limit,
+                format!("every coord {through} {on_a_face} — {cuts}, so none can stand there"),
+            ),
+            (
+                Blocked::NoneBetween,
+                both,
+                Allowance::Limit,
+                format!(
+                    "every coord {through} turns, climbs or branches, or {on_a_face} — {straight} and joins only the blocks at its back and front, so none can stand there"
+                ),
+            ),
+            (
+                Blocked::NoneCloseEnough,
+                bends,
+                Allowance::Budget(1),
+                format!(
+                    "every coord from it back to 1 block before it turns, climbs or branches — {straight}, {too_weak}"
+                ),
+            ),
+            (
+                Blocked::NoneCloseEnough,
+                touches,
+                Allowance::Budget(2),
+                format!(
+                    "every coord from it back to 2 blocks before it {on_a_face} — {cuts}, {too_weak}"
+                ),
+            ),
+            (
+                Blocked::NoneCloseEnough,
+                both,
+                Allowance::Limit,
+                format!(
+                    "every coord from it back to 15 blocks before it turns, climbs or branches, or {on_a_face} — {straight} and joins only the blocks at its back and front, {too_weak}"
+                ),
+            ),
+        ];
+        for (blocked, refused, allowance, clause) in cases {
+            assert_eq!(
+                why_from_origin(blocked, true, refused, allowance),
                 clause,
                 "{blocked:?} x {refused:?}",
             );
@@ -1854,6 +1995,7 @@ mod tests {
                 spent: DUST_ATTENUATION_LIMIT + 1,
                 unpowered: CellCoord::new(1, 0, 0),
                 allowance: Allowance::Limit,
+                starts_on_unpowered: false,
                 blocked: Blocked::NoneBetween,
                 refused: Refused::default(),
             }),
@@ -1912,6 +2054,7 @@ mod tests {
                 spent: 0,
                 unpowered: path[19 + 16],
                 allowance: Allowance::Limit,
+                starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
                     bends: true,
@@ -1967,6 +2110,7 @@ mod tests {
                 spent: 0,
                 unpowered: sink,
                 allowance: Allowance::Budget(1),
+                starts_on_unpowered: false,
                 blocked: Blocked::NoneCloseEnough,
                 refused: Refused {
                     bends: true,
@@ -2084,7 +2228,7 @@ mod tests {
             );
             assert!(
                 refusal.primary.ends_with(
-                    "every coord between the two turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, so none can stand there",
+                    ": every coord after (0,0,0) up to and including (8,0,7) turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, so none can stand there",
                 ),
                 "{steps}-step staircase: {:?}",
                 refusal.primary,
