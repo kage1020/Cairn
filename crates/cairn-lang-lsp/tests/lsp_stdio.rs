@@ -866,8 +866,9 @@ fn lsp_21_did_change_after_did_close_leaves_the_document_closed() {
     // document.
     let logged = server.read_stderr_until("the document is not open");
     assert!(
-        logged.last().is_some_and(|line| line
-            .contains(&format!("ignoring `textDocument/didChange` for {TEST_URI}: "))),
+        logged.last().is_some_and(|line| line.contains(&format!(
+            "ignoring `textDocument/didChange` for {TEST_URI}: "
+        ))),
         "the reported line should name the method and the URI, got: {logged:?}",
     );
     server.shutdown();

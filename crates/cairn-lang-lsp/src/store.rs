@@ -257,7 +257,10 @@ mod tests {
     fn apply_stores_a_whole_text_event() {
         let mut store = DocumentStore::new();
         store.open(uri("file:///a.crn"), "old".to_owned());
-        assert_eq!(store.apply(&uri("file:///a.crn"), [whole("new")]), Ok("new"));
+        assert_eq!(
+            store.apply(&uri("file:///a.crn"), [whole("new")]),
+            Ok("new")
+        );
         assert_eq!(store.get(&uri("file:///a.crn")), Some("new"));
     }
 
