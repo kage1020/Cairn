@@ -142,26 +142,58 @@ impl Lockfile {
     /// format that adds a key would be reported as malformed rather than
     /// as newer — and the leading field would not mean what its doc says.
     pub fn from_yaml(body: &str) -> Result<Self, LockError> {
-        let found = schema::declared_schema_version(body)?;
-        if found > LOCK_SCHEMA_VERSION {
-            return Err(LockError::UnsupportedSchemaVersion {
-                found,
-                supported: LOCK_SCHEMA_VERSION,
-            });
-        }
+        gate_schema_version(body)?;
         Ok(serde_norway::from_str(body)?)
     }
 
-    /// The first identifier in `body` the current id rule refuses, with the
-    /// target and version-sensitive members the document records.
+    /// The first identifier in `body` the current id rule refuses, when that
+    /// is all that is wrong with `body`, with the target and
+    /// version-sensitive members the document records.
     ///
     /// For a caller whose [`Self::from_yaml`] failed: it tells a lock that
-    /// an earlier Cairn wrote under a looser identifier rule apart from one
-    /// that is corrupt, and recovers the target it was verified for. It
-    /// does not say the rest of `body` is valid. `None` when `body` records
-    /// no refused identifier, or does not carry a readable `target`.
-    #[must_use]
-    pub fn refused_identifier(body: &str) -> Option<RefusedIdentifierLock> {
-        schema::refused_identifier(body)
+    /// is valid under an earlier, looser identifier rule apart from one that
+    /// is broken, and recovers the target it was verified for. `body` is
+    /// read exactly as strictly as [`Self::from_yaml`] reads it — the same
+    /// schema-version gate, every field required where it is required
+    /// there, no undeclared key at any depth — except that the seven
+    /// identifier fields (`site` and `id` of each placement; `site`, and
+    /// the `place` and `port` of `from` and `to`, of each walkway) are read
+    /// as plain strings.
+    ///
+    /// Identifiers are checked in field order: every placement, each by
+    /// `site` then `id`, then every walkway, each by `site`, `from.place`,
+    /// `from.port`, `to.place`, `to.port`. The first one refused is
+    /// reported. That is the order this compiler writes them in, but not
+    /// necessarily the order of a document written by hand, so it need not
+    /// be the identifier the strict read stopped at.
+    ///
+    /// `Ok(None)` means `body` is valid and records no refused identifier,
+    /// which is a document [`Self::from_yaml`] reads.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LockError::UnsupportedSchemaVersion`] when `body` declares
+    /// a revision above [`LOCK_SCHEMA_VERSION`], and [`LockError::Yaml`]
+    /// when `body` is not a valid lockfile even with its identifiers read
+    /// as plain strings. That error names what is wrong besides the
+    /// identifiers, which is the reason to report: the strict read's own
+    /// error can be an identifier it happened to meet first.
+    pub fn refused_identifier(body: &str) -> Result<Option<RefusedIdentifierLock>, LockError> {
+        gate_schema_version(body)?;
+        Ok(schema::refused_identifier(body)?)
     }
+}
+
+/// Refuse a document that declares a schema revision this build does not
+/// read, before anything else in it is read. Shared by every reader of a
+/// whole document, so none of them can parse a later format as this one.
+fn gate_schema_version(body: &str) -> Result<(), LockError> {
+    let found = schema::declared_schema_version(body)?;
+    if found > LOCK_SCHEMA_VERSION {
+        return Err(LockError::UnsupportedSchemaVersion {
+            found,
+            supported: LOCK_SCHEMA_VERSION,
+        });
+    }
+    Ok(())
 }

@@ -1522,7 +1522,9 @@ fn unsupported_reason(reason: &UnsupportedReason) -> String {
 /// there, so it is neither in this list nor in the `M` of
 /// [`report_partial_build`]'s "N of M". Today each such drop comes with an
 /// error of its own, on the row or, under `W_DEFERRED_CONNECT`, on the
-/// `place` it names. One root cause can still raise `N` by more than one:
+/// `place` it names — or, where that `place` carries `W_DEFERRED_PLACE`, on
+/// the row refused for its id that the warning's note points at. One root
+/// cause can still raise `N` by more than one:
 /// a placement refused upstream loses its own scope and, through
 /// `W_DEFERRED_MEMBER`, every walkway with an endpoint on it.
 ///
@@ -2876,12 +2878,19 @@ fn check_and_write(
 /// different target is the moment that record stops describing what is on
 /// disk. Nothing here changes the build or the exit code — both lines are
 /// warnings, and a first compile or an unchanged target says nothing at
-/// all. A lockfile that cannot be read says so; only its absence is
-/// silent.
+/// all.
+///
+/// One lockfile the strict read refuses is still compared: one whose only
+/// fault is an identifier the rule has since refused, which an earlier
+/// Cairn's looser rule let through. [`Lockfile::refused_identifier`] reads
+/// it again with exactly the strict read's rules but for its identifiers,
+/// so the target it records is the one a valid document records. Any other
+/// lockfile that cannot be read says so; only its absence is silent.
 fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &ResolvedTarget) {
     // Read once, here, rather than through `Lockfile::read_from_path`: a
-    // document the strict read refuses is read a second time below, and the
-    // two reads must see the same bytes.
+    // document the strict read refuses is parsed a second time below, and
+    // reading the file again for it would let the two parses see different
+    // bytes.
     let body = match std::fs::read_to_string(lock_path) {
         Ok(body) => body,
         // No lockfile is the ordinary first-compile case, and the only one
@@ -2907,26 +2916,37 @@ fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &Resolv
             return;
         }
         Err(err) => {
-            // Nor is a document that records an identifier the rule has
-            // since refused: an earlier Cairn wrote it legitimately. The
-            // target it records is still read, so a target change is still
-            // reported.
-            if let Some(refused) = Lockfile::refused_identifier(&body) {
-                eprintln!(
-                    "warning: {}: the existing lockfile records an identifier this build \
-                     refuses ({}); it was written by an earlier Cairn and is being replaced",
-                    lock_path.display(),
-                    refused.error,
-                );
-                report_target_change(
-                    &refused.target,
-                    &refused.member_version_sensitivity,
-                    edition,
-                    target,
-                );
-                return;
+            match Lockfile::refused_identifier(&body) {
+                // Nor is a document valid in everything but an identifier
+                // the rule has since refused. The target it records is
+                // read as strictly as a valid document's, so a target
+                // change is still reported.
+                Ok(Some(refused)) => {
+                    eprintln!(
+                        "warning: {}: the existing lockfile records an identifier this build \
+                         refuses ({}) but is otherwise valid, as one an earlier Cairn wrote \
+                         would be; it is being replaced",
+                        lock_path.display(),
+                        refused.error,
+                    );
+                    report_target_change(
+                        &refused.target,
+                        &refused.member_version_sensitivity,
+                        edition,
+                        target,
+                    );
+                }
+                // The second parse names what is wrong besides any
+                // identifier; the strict read's own error can be an
+                // identifier it met first, which is not why this document
+                // cannot be read.
+                Err(cause) => warn_unreadable_lock(lock_path, &cause),
+                // The second parse took the whole document, so the strict
+                // read should have too. Unreachable while the probe mirrors
+                // the strict schema; if they drift, the strict read's error
+                // is the one there is to report.
+                Ok(None) => warn_unreadable_lock(lock_path, &err),
             }
-            warn_unreadable_lock(lock_path, &err);
             return;
         }
     };
@@ -2938,9 +2958,15 @@ fn report_previous_target(lock_path: &Path, edition: EditionArg, target: &Resolv
     );
 }
 
-/// Not an error: the compile is valid, and a corrupt file beside the source
-/// is no reason to refuse to build. But it was being overwritten in
-/// silence, which is how a tampered or stale lockfile went unnoticed.
+/// Say that the lockfile at `lock_path` is being replaced unread, because
+/// reading it failed with `err`: an I/O error (no permission, a directory
+/// at the path, bytes that are not UTF-8) or a document that is not a
+/// lockfile this build reads.
+///
+/// A warning, not an error: the compile is valid, and an unreadable file
+/// beside the source is no reason to refuse to build. Replacing it in
+/// silence is what it must not do, since that is how a tampered or stale
+/// lockfile would go unnoticed.
 fn warn_unreadable_lock(lock_path: &Path, err: &LockError) {
     eprintln!(
         "warning: {}: the existing lockfile could not be read ({err}); replacing it",
@@ -3596,8 +3622,16 @@ fn artifact_name_refusal(file_name: &str) -> Option<ArtifactNameRefusal> {
 /// name is checked rather than the joined path, because `Path::join` with
 /// an absolute argument discards `out_dir` and a relative one with a
 /// separator lands in a subdirectory. [`artifact_name_refusal`] refuses
-/// `/`, `\` and `:` textually, matching the identifier rule, so a name
-/// refused on one host is refused on every host.
+/// `/`, `\` and `:` textually, so a name refused on one host is refused on
+/// every host.
+///
+/// It is narrower than the identifier rule, and does not share its
+/// predicate, on purpose. That rule also refuses `.`, which every artifact
+/// name carries before its extension, and the characters a Windows file
+/// name cannot carry, which make the write fail rather than land somewhere
+/// else — and a failed write is reported. This line is about where the
+/// file goes, so it holds for those three characters only, and the rest of
+/// the identifier rule has one line, not two.
 fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf, ExitCode> {
     match artifact_name_refusal(file_name) {
         None => Ok(out_dir.join(file_name)),
