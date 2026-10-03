@@ -90,6 +90,15 @@
 //!     stay green, which is what the per-side edge cases in `openings.rs`'s
 //!     own tests are for. Release builds keep the one-voxel drop rather
 //!     than panic.
+//! 12. **An origin naming a row refused for its id** — the row whose
+//!     `east_of=` / `north_of=` names an id refused with
+//!     `E_INVALID_PLACE_ID` registers its own id but never reaches
+//!     `place_def.insert`, because what it is placed against has no
+//!     position. It is not silent: `W_DEFERRED_PLACE` sits on the
+//!     reference, with a note pointing at the refused row, so the
+//!     `W_DEFERRED_CONNECT` a `connect` naming it earns sends the author to a
+//!     row that prints something, and that row's note leads on to the one
+//!     with the repair.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -514,6 +523,71 @@ site duo:
         (placement.dims.x, placement.dims.z),
         (9, 9),
         "the first declaration is the one that binds",
+    );
+}
+
+/// A `place` whose `east_of=` names a row refused for its id is not placed,
+/// and says so on its own line: the cascade `W_DEFERRED_CONNECT` relies on
+/// for its note to be true.
+///
+/// The chain is three rows long and each link is pinned, since each is a
+/// place where the author could dead-end: the refused row carries the
+/// error, the row placed against it carries `W_DEFERRED_PLACE` with a note
+/// pointing back at the refused row, and the `connect` naming the second
+/// row carries `W_DEFERRED_CONNECT`. The total is pinned as well, so an
+/// `E_UNRESOLVED_PLACE_REF` (or anything else) sprouting on the middle row
+/// fails here rather than reading as one more finding.
+#[test]
+fn an_origin_naming_a_row_refused_for_its_id_reports_the_row_and_cascades() {
+    let src = format!(
+        "{PROLOGUE}\
+site duo:\n  \
+place id=anchor use=hut theme=plain at=origin\n  \
+place id=\"a/b\" use=hut theme=plain east_of=anchor gap=4\n  \
+place id=peer   use=hut theme=plain east_of=\"a/b\" gap=4\n  \
+connect anchor.entry to peer.entry path=@gravel\n"
+    );
+    let outcome = run(&src);
+    let codes: Vec<&str> = outcome
+        .diagnostics
+        .iter()
+        .map(|d| d.code.as_str())
+        .collect();
+    assert_eq!(
+        codes,
+        [
+            "E_INVALID_PLACE_ID",
+            "W_DEFERRED_PLACE",
+            "W_DEFERRED_CONNECT"
+        ],
+        "one finding per row of the chain and nothing else, got: {:#?}",
+        outcome.diagnostics,
+    );
+    assert_eq!(
+        outcome.walkways, 0,
+        "the walkway goes with the row that is not placed",
+    );
+
+    let deferred = &outcome.diagnostics[1];
+    let peer_row = src.find("place id=peer").expect("fixture has the row");
+    assert!(
+        deferred.span.start > peer_row && &src[deferred.span.clone()] == "\"a/b\"",
+        "the cascade sits on the reference, got {:?}",
+        &src[deferred.span.clone()],
+    );
+    let refused_row = src.find("place id=\"a/b\"").expect("fixture has the row");
+    let note = deferred
+        .notes
+        .first()
+        .and_then(|note| note.span.clone())
+        .expect("the note carries the refused row's span");
+    assert_eq!(
+        note.start, refused_row,
+        "the note points at the row that has the repair",
+    );
+    assert_eq!(
+        outcome.diagnostics[0].span.start, refused_row,
+        "and that row is the one carrying the error",
     );
 }
 

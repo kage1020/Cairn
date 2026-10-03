@@ -4,12 +4,51 @@
 
 ### Fixed
 
+- *(redstone)* A stretch with no coord for a buffer repeater, refused only because a coord touches
+  another block of its own net, was reported as though every coord turned. The refusal now says
+  which of the two applied, and names the coord nearest the dark end that touches its net and the
+  block it touches.
+
+- *(core)* A `place` row refused with `E_INVALID_PLACE_ID` drew a second error on every later row
+  whose `east_of=` / `north_of=` named it: `E_UNRESOLVED_PLACE_REF`, with a note telling the author
+  to declare the target above that line, which it already was. That row is now `W_DEFERRED_PLACE`,
+  a warning whose note points at the refused row, where the repair is, and a `connect` naming it
+  still gets `W_DEFERRED_CONNECT`. A reference above the refused row names no prior place and is
+  still `E_UNRESOLVED_PLACE_REF`.
+
+- *(core,cli)* A lockfile recording an identifier this build refuses, such as one an earlier Cairn
+  wrote before the identifier rule tightened, was reported as one that "could not be read", and the
+  target it recorded was not compared, so a target change went without
+  `W_PREVIOUSLY_VERIFIED_TARGET` or `W_SEMANTIC_SENSITIVITY`. When the document is valid in every
+  other respect, `compile` now says it records an identifier this build refuses, and still compares
+  the target; one broken in any other way is still reported as unreadable, with that cause.
+  `Lockfile::refused_identifier` makes the same reading.
+
 - *(cli)* `cairn compile --target` below a declared `@requires` floor was reported as `E_UNKNOWN_ID`
   instead of `E_VERSION_CAP` when the target also lacked one of the file's blocks, which is the usual
   reason to declare the floor. The author was told to replace the block and never that the target was
   below the floor. A target below a floor now lowers without checking block ids against it, so the
   build is refused with `E_VERSION_CAP` alone; findings that do not depend on the target still come
   first.
+
+### Breaking changes
+
+- *(core)* An identifier carrying `*`, `|`, `?`, `<`, `>`, `"` or a control character is now
+  refused on every host, as `.`, `:`, `/`, `\` and whitespace (a tab among them) already were. A
+  `place id=` carrying one of the newly refused characters other than `"` passed `check` and built
+  on Linux, and failed on Windows with a bare OS error when the artifact was written; it is now
+  `E_INVALID_PLACE_ID`. `"` never passed `check`, since a source string literal cannot carry one;
+  it reaches the rule through a lockfile. The rule is the one
+  `PlaceId`, `PortId` and `SiteName` share, so it covers port ids and site names too: a lockfile
+  recording one of them is reported as such, and `PortId::new` / `SiteName::new` refuse them. From
+  source only a `place id=` can carry these characters, since a port and a site are named by
+  identifier tokens. `*`, `|`, `?`, `<`, `>`, `"` and U+0000 to U+001F are what a Windows file name
+  cannot carry; U+007F to U+009F are refused because they print as nothing or move the cursor. A
+  control character, or whitespace other than a plain space, is quoted as its escape in the
+  message.
+
+  Listed here rather than as a fix under `spec/compatibility` C.4: the spec gained these characters,
+  rather than the build being brought in line with what it already said.
 
 ## 2026.10.0 — 2026-10-01
 
