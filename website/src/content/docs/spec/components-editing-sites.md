@@ -121,7 +121,8 @@ instead.
 ### 9.3.4 Output naming
 
 The compiler writes one `.nbt` per `place`, named after the `id=` (`home1.nbt`, `home2.nbt`), directly
-into the output directory. An id carrying `/` or `\` would name a path rather than a file, so it is
+into the output directory. An id carrying `/` or `\` would name a path rather than a file, and one
+carrying a character a Windows file name cannot hold could not be written there, so both are
 `E_INVALID_PLACE_ID` ([Lint](/spec/lint/)). The site is not part of the name, and the same
 directory holds every `struct`, written under its own name, and every walkway
 ([§9.3.5](#935-ports-and-connect)). Two artifacts that would share a file name, compared ignoring
