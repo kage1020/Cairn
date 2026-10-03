@@ -372,7 +372,7 @@ fn rejects_intended_targets_with_trailing_tokens() {
 #[test]
 fn rejects_intended_targets_with_non_string_element() {
     let err = parse("@intended_targets [42]\n").expect_err("non-string element");
-    assert!(err.user_message().contains("strings"));
+    assert!(err.user_message().contains("expects a string such as"));
 }
 
 #[test]
