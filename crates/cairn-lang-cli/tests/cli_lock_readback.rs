@@ -2,10 +2,10 @@
 //!
 //! `spec/versioning-editions` "Provenance and lock" says a recompile for a
 //! different target "shows the difference from the verified one as a loud
-//! warning", and prints the two lines this file pins. Until now
-//! `read_from_path` had no production caller at all: the previous lockfile
-//! was overwritten without being looked at, so neither warning could exist
-//! and a stale or tampered file was discarded in silence.
+//! warning", and prints the two lines this file pins. Before these tests,
+//! the compiler never read the previous lockfile at all: it was overwritten
+//! without being looked at, so neither warning could exist and a stale or
+//! tampered file was discarded in silence.
 
 use std::fs;
 use std::path::Path;
@@ -342,4 +342,205 @@ fn the_default_lock_path_is_read_back_too() {
         "the default path was not read back: {}",
         second.stderr,
     );
+}
+
+/// `village.crn` compiled for 1.20.4, its lock rewritten by `doctor`, then
+/// compiled again for 1.21.4 against that lock. Returns the second run and
+/// the lock it left behind.
+fn recompile_village_over(doctor: impl FnOnce(&str) -> String) -> (Run, String) {
+    let (_tmp_src, src) = example_in_tempdir("village.crn");
+    let out_dir = TempDir::new().expect("out");
+    let lock = out_dir.path().join("village.lock");
+    let first = compile(&src, out_dir.path(), "java", "1.20.4", Some(&lock));
+    assert_eq!(first.code, Some(0), "stderr={}", first.stderr);
+    let written = fs::read_to_string(&lock).expect("read lock");
+    let doctored = doctor(&written);
+    assert_ne!(doctored, written, "the fixture changed nothing");
+    fs::write(&lock, doctored).expect("write lock");
+    let run = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    let replaced = fs::read_to_string(&lock).expect("read lock");
+    (run, replaced)
+}
+
+/// `written` with the first `recorded` line replaced by `refused`.
+fn with_line(written: &str, recorded: &str, refused: &str) -> String {
+    let doctored = written.replacen(recorded, refused, 1);
+    assert_ne!(doctored, written, "`{recorded}` is not in the lock");
+    doctored
+}
+
+const PREVIOUS_TARGET: &str =
+    "W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.";
+
+/// A lock whose only fault is an identifier `id` the rule now refuses on
+/// `ch` is reported in its own words, its target is still compared, and it
+/// is replaced.
+fn assert_refused_but_read(run: &Run, replaced: &str, id: &str, ch: &str) {
+    assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
+    assert!(
+        run.stderr.contains(&format!(
+            "the existing lockfile records an identifier this build refuses \
+             (identifier `{id}` contains forbidden character `{ch}`) but is otherwise valid"
+        )),
+        "stderr should name the refused id in its own words: {}",
+        run.stderr,
+    );
+    assert!(
+        !run.stderr.contains("could not be read"),
+        "a lock with a refused id is not a corrupt one: {}",
+        run.stderr,
+    );
+    assert!(
+        run.stderr.contains(PREVIOUS_TARGET),
+        "the recorded target should still be compared: {}",
+        run.stderr,
+    );
+    assert!(
+        !replaced.contains(id),
+        "the lockfile should have been replaced: {replaced}",
+    );
+}
+
+// The identifier rule has tightened over releases, so a lock an earlier
+// Cairn wrote can record an id this build refuses. That lock is not
+// corrupt, and the target it was verified for is still compared. A
+// placement id and a walkway port are both covered, since they are read
+// by different arms of the probe, and so is each half of the rule's
+// reasons: a path separator, and a character Windows reserves.
+
+#[test]
+fn a_lock_recording_a_placement_id_the_rule_now_refuses_is_still_read() {
+    let id = "sub/home1";
+    let (run, replaced) = recompile_village_over(|written| {
+        with_line(written, "  id: home1\n", &format!("  id: {id}\n"))
+    });
+    assert_refused_but_read(&run, &replaced, id, "/");
+}
+
+#[test]
+fn a_lock_recording_a_walkway_port_the_rule_now_refuses_is_still_read() {
+    let id = "a*b";
+    let (run, replaced) = recompile_village_over(|written| {
+        with_line(written, "    port: entry\n", &format!("    port: {id}\n"))
+    });
+    assert_refused_but_read(&run, &replaced, id, "*");
+}
+
+#[test]
+fn a_lock_recording_a_no_break_space_quotes_it_as_its_escape() {
+    // It would print as a plain space, on an id that reads `a b`.
+    let id = "a\u{a0}b";
+    let (run, replaced) = recompile_village_over(|written| {
+        with_line(written, "    port: entry\n", &format!("    port: {id}\n"))
+    });
+    assert_refused_but_read(&run, &replaced, id, "\\u{a0}");
+}
+
+#[test]
+fn a_lock_with_a_refused_id_still_reports_the_sensitive_members_it_recorded() {
+    // `report_target_change` is called from both the strict path and this
+    // one, and the strict path's sensitivity tests go through `cottage.crn`.
+    // Passing an empty list here by mistake would fail nothing else.
+    let id = "sub/home1";
+    let (run, replaced) = recompile_village_over(|written| {
+        let sensitive = with_line(
+            written,
+            "member_version_sensitivity: []\n",
+            "member_version_sensitivity:\n- id: yard_water\n  reason: cauldron split at 1.17\n",
+        );
+        with_line(&sensitive, "  id: home1\n", &format!("  id: {id}\n"))
+    });
+    assert_refused_but_read(&run, &replaced, id, "/");
+    assert!(
+        run.stderr
+            .contains("W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: yard_water"),
+        "the recorded member should be reported: {}",
+        run.stderr,
+    );
+}
+
+/// A lock broken in some way besides its identifiers is reported as
+/// unreadable, with that cause, even when it also records a refused id:
+/// one refused id must not turn a tamper report into a reassurance. Nor is
+/// its target, which nothing vouches for, compared.
+fn assert_unreadable_despite_refused_id(run: &Run, cause: &str) {
+    assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
+    assert!(
+        run.stderr
+            .contains("the existing lockfile could not be read (lockfile YAML: ")
+            && run.stderr.contains(cause),
+        "stderr should report the lock unreadable because of {cause:?}: {}",
+        run.stderr,
+    );
+    assert!(
+        !run.stderr.contains("records an identifier"),
+        "a broken lock is not one an earlier Cairn wrote: {}",
+        run.stderr,
+    );
+    assert!(
+        !run.stderr.contains("W_PREVIOUSLY_VERIFIED_TARGET"),
+        "the target of an unreadable lock is not compared: {}",
+        run.stderr,
+    );
+}
+
+fn with_refused_id(written: &str) -> String {
+    with_line(written, "  id: home1\n", "  id: sub/home1\n")
+}
+
+#[test]
+fn a_lock_missing_a_required_field_is_unreadable_despite_a_refused_id() {
+    let (run, _) = recompile_village_over(|written| {
+        with_refused_id(&with_line(written, "member_version_sensitivity: []\n", ""))
+    });
+    assert_unreadable_despite_refused_id(&run, "missing field `member_version_sensitivity`");
+}
+
+#[test]
+fn a_lock_with_a_malformed_hash_is_unreadable_despite_a_refused_id() {
+    let (run, _) = recompile_village_over(|written| {
+        let source_hash = written
+            .lines()
+            .find(|line| line.starts_with("source_hash: "))
+            .expect("source_hash");
+        with_refused_id(&with_line(
+            written,
+            source_hash,
+            "source_hash: \"NOTAHASH:\"",
+        ))
+    });
+    assert_unreadable_despite_refused_id(&run, "hash is missing the `sha256:` prefix");
+}
+
+#[test]
+fn a_lock_whose_schema_version_does_not_parse_is_unreadable_despite_a_refused_id() {
+    // The worst of them: the schema version was never validated, so the
+    // target beside it (here a `DataVersion` no release has) is not one
+    // to print as fact.
+    let (run, _) = recompile_village_over(|written| {
+        let unversioned = with_line(
+            written,
+            "lock_schema_version: 1\n",
+            "lock_schema_version: \"1\"\n",
+        );
+        let unknown_target = with_line(
+            &unversioned,
+            "data_version: 3700\n",
+            "data_version: 31337\n",
+        );
+        with_refused_id(&unknown_target)
+    });
+    assert_unreadable_despite_refused_id(&run, "lock_schema_version: invalid type: string");
+}
+
+#[test]
+fn a_lock_carrying_an_unknown_key_is_unreadable_despite_a_refused_id() {
+    let (run, _) = recompile_village_over(|written| {
+        with_refused_id(&with_line(
+            written,
+            "  def: cottage\n",
+            "  def: cottage\n  tampered: true\n",
+        ))
+    });
+    assert_unreadable_despite_refused_id(&run, "unknown field `tampered`");
 }
