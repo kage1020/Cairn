@@ -3,9 +3,11 @@
 //!
 //! `spec/lint` "Error vs warning" calls this an unreadable value. The pass
 //! drops the value and uses the default, which is a `W_IGNORED_ARGUMENT`:
-//! the rule forbids *silent* substitution. Five keys, read by three
-//! members, used to treat a value of the wrong shape as if the key were
-//! absent, building the default and reporting nothing:
+//! the rule forbids *silent* substitution. Where the key decides whether
+//! the member is built at all, as `sym=` does on a window whose `repeat=`
+//! is greater than 1, the member is refused instead. Five keys, read by
+//! three members, used to treat a value of the wrong shape as if the key
+//! were absent, building the default and reporting nothing:
 //!
 //! - window `sym=`, where anything but a bare `true` or `false` meant "no
 //!   mirror";
@@ -18,13 +20,21 @@
 //! the default really is what was used, and exactly one finding names the
 //! key and the value that was written. A member that is refused reports
 //! the unreadable value all the same, with a note saying it is not built
-//! either way, so the author learns about both in one compile.
+//! either way, or, when the value is why, that it is not built on the
+//! default, so the author learns about both in one compile.
+//!
+//! Two more keys, `side=` and shed `slope_to=`, always refused their
+//! member for a value that is not a side. The refusal now names the value
+//! written, so a quoted `"front"` reads as the string it is rather than as
+//! the side it spells.
 //!
 //! Separately, an origin that works out past `i32` used to saturate onto
 //! the range's edge, so two `place` rows could land on one coordinate. It
-//! is refused now, and the refused row's body still reports what is wrong
-//! with its `def` and theme.
+//! is refused now, as is a body whose far edge is past the range, and a
+//! refused row's body, or that of a row placed relative to a refused one,
+//! still reports what is wrong with its `def` and theme.
 
+use cairn_lang_core::Diagnostic;
 use cairn_lang_core::block_array::BlockArrayIr;
 
 mod common;
@@ -117,6 +127,121 @@ fn an_unreadable_sym_on_a_window_that_is_not_cut_is_still_reported() {
         ir.diagnostics[1].notes[0].message,
         "this window is not cut either way — see the finding on the same line",
     );
+}
+
+#[test]
+fn an_unreadable_sym_on_a_repeated_window_cuts_nothing() {
+    // `sym=true` refuses a window with `repeat=` greater than 1, and
+    // `sym=false` builds this one. Reading an unreadable `sym=` as `false`
+    // would build three windows the source may have refused, so nothing
+    // is cut, as for `sym=true`.
+    let repeated = |sym: &str| window(&format!(" repeat=3 step=2{sym}"));
+    let refused = lowered(&repeated(" sym=true"));
+    let built = lowered(&repeated(" sym=false"));
+    assert_ne!(
+        only_structure(&refused),
+        only_structure(&built),
+        "guard: `sym=` decides whether this window is cut",
+    );
+    let ir = lowered(&repeated(" sym=yes"));
+    assert_eq!(only_structure(&ir), only_structure(&refused));
+    assert_eq!(
+        findings(&ir),
+        vec![
+            (
+                "W_DEFERRED_MEMBER",
+                "window with `repeat=` greater than 1 is not cut while its `sym=` is \
+                 unreadable: `sym=true` with such a `repeat=` is not yet supported, and \
+                 `sym=false` is not what was written",
+            ),
+            (
+                "W_IGNORED_ARGUMENT",
+                "`sym=` must be `true` or `false`, not identifier `yes`; the value was ignored",
+            ),
+        ],
+    );
+    assert_eq!(
+        ir.diagnostics[1].notes[0].message,
+        "this window has `repeat=` greater than 1, which `sym=true` does not yet support, so it \
+         is not cut on the `sym=false` default while `sym=` is unreadable — see the finding on \
+         the same line",
+    );
+}
+
+#[test]
+fn a_repeated_window_with_no_step_is_refused_for_the_step_first() {
+    // With no `step=`, the series is refused whatever `sym=` says. That is
+    // the refusal reported, and the unreadable `sym=` carries the note for
+    // a window that is not cut either way, not the one naming `sym=` as
+    // the reason.
+    const NO_STEP: &str =
+        "window `repeat=` requires a positive `step=` so instances do not overlap";
+    let ir = lowered(&window(" repeat=3 sym=yes"));
+    assert_eq!(
+        findings(&ir),
+        vec![
+            ("W_DEFERRED_MEMBER", NO_STEP),
+            (
+                "W_IGNORED_ARGUMENT",
+                "`sym=` must be `true` or `false`, not identifier `yes`; the value was ignored",
+            ),
+        ],
+    );
+    assert_eq!(
+        ir.diagnostics[1].notes[0].message,
+        "this window is not cut either way — see the finding on the same line",
+    );
+    // The same order for a readable `sym=true`, which refuses the series
+    // too.
+    assert_eq!(
+        findings(&lowered(&window(" repeat=3 sym=true"))),
+        vec![("W_DEFERRED_MEMBER", NO_STEP)],
+    );
+}
+
+// --- `side=` / shed `slope_to=` ---------------------------------------------
+
+#[test]
+fn a_side_of_the_wrong_shape_is_refused_with_the_value_written() {
+    // A quoted `"front"` names the side the author meant; the message has
+    // to show the quotes, or it reads as if `front` itself were refused. A
+    // list has no one surface form, so it is named by its kind alone.
+    for (written, described) in [
+        ("\"front\"", "string `\"front\"`"),
+        ("3", "integer `3`"),
+        ("true", "boolean `true`"),
+        ("[front]", "a list"),
+    ] {
+        let window = lowered(&window("").replace("side=front", &format!("side={written}")));
+        assert_eq!(
+            findings(&window),
+            vec![(
+                "W_DEFERRED_MEMBER",
+                format!("`side=` must be one of front, back, left, right, not {described}")
+                    .as_str(),
+            )],
+            "side={written}",
+        );
+        let shed = lowered(&format!(
+            "struct s size=5x5\n  \
+             walls mat_slot=wall height=3\n  \
+             roof  kind=shed slope_to={written} mat_slot=roof\n\n\
+             theme t:\n  \
+             slot wall -> @cobblestone\n  \
+             slot roof -> @oak_stairs\n"
+        ));
+        assert_eq!(
+            findings(&shed),
+            vec![(
+                "W_DEFERRED_MEMBER",
+                format!(
+                    "shed `slope_to=` must be one of front, back, left, right, not {described}"
+                )
+                .as_str(),
+            )],
+            "slope_to={written}",
+        );
+    }
 }
 
 // --- stair `facing=` / `half=` / `shape=` ----------------------------------
@@ -327,14 +452,14 @@ fn an_unreadable_gap_places_the_row_edge_to_edge_and_says_so() {
 }
 
 #[test]
-fn an_origin_past_i32_refuses_the_row_instead_of_saturating() {
-    // `a` is 3 wide, so `gap=2147483644` puts `b` at exactly `i32::MAX`
-    // and one more leaves the range.
+fn a_placement_past_i32_refuses_the_row_instead_of_saturating() {
+    // `a` and `b` are 3 wide, so `gap=2147483642` puts `b`'s last column
+    // at exactly `i32::MAX`, and one more leaves the range.
     let edge = lowered(&site(
-        "  place id=b use=box theme=t east_of=a gap=2147483644\n",
+        "  place id=b use=box theme=t east_of=a gap=2147483642\n",
     ));
     assert_eq!(findings(&edge), vec![]);
-    assert_eq!(origin(&edge, "b"), Some((i32::MAX, 0, 0)));
+    assert_eq!(origin(&edge, "b"), Some((i32::MAX - 2, 0, 0)));
     // `b` is 5 deep, so `gap=2147483643` puts it at exactly `i32::MIN`.
     let floor = lowered(&site(
         "  place id=b use=box theme=t north_of=a gap=2147483643\n",
@@ -342,24 +467,35 @@ fn an_origin_past_i32_refuses_the_row_instead_of_saturating() {
     assert_eq!(findings(&floor), vec![]);
     assert_eq!(origin(&floor, "b"), Some((0, 0, i32::MIN)));
 
-    for (row, reported) in [
-        ("east_of=a gap=2147483645", "x=2147483648"),
-        ("east_of=a gap=3000000000", "x=3000000003"),
-        ("north_of=a gap=2147483644", "z=-2147483649"),
+    let origin_past = |reported: &str| {
+        format!(
+            "this placement's origin works out to {reported}, past the -2147483648 to \
+             2147483647 range a placement's origin is recorded in; shorten the `gap=` on this \
+             row or on a row it is placed relative to"
+        )
+    };
+    // The origin is in range and the body is not: its cells would have no
+    // world coordinate, so the row is refused all the same.
+    let body_past = |reported: &str| {
+        format!(
+            "this placement's body reaches {reported}, past the -2147483648 to 2147483647 \
+             range a placement's cells are addressed in; shrink the body with its `def`'s \
+             `size=` or a roof's `overhang=`, or shorten the `gap=` on this row or on a row it \
+             is placed relative to"
+        )
+    };
+    for (row, primary) in [
+        ("east_of=a gap=2147483643", body_past("x=2147483648")),
+        ("east_of=a gap=2147483644", body_past("x=2147483649")),
+        ("east_of=a gap=2147483645", origin_past("x=2147483648")),
+        ("east_of=a gap=3000000000", origin_past("x=3000000003")),
+        ("north_of=a gap=2147483644", origin_past("z=-2147483649")),
     ] {
         let ir = lowered(&site(&format!("  place id=b use=box theme=t {row}\n")));
         assert_eq!(origin(&ir, "b"), None, "{row}");
         assert_eq!(
             findings(&ir),
-            vec![(
-                "W_DEFERRED_MEMBER",
-                format!(
-                    "this placement's origin works out to {reported}, past the -2147483648 to \
-                     2147483647 range a placement's origin is recorded in; shorten the `gap=` \
-                     on this row or on a row it is placed relative to"
-                )
-                .as_str(),
-            )],
+            vec![("W_DEFERRED_MEMBER", primary.as_str())],
             "{row}",
         );
     }
@@ -418,14 +554,18 @@ fn with_bad_body(row: &str) -> BlockArrayIr {
     ))
 }
 
+/// The `E_INCOMPATIBLE_MATERIAL` that `bad`'s stair raises, whole: its
+/// span, scope and wording, so a refused row reporting it differently from
+/// a placed one is caught as well as one not reporting it at all.
+fn incompatible(ir: &BlockArrayIr) -> Option<Diagnostic> {
+    ir.diagnostics
+        .iter()
+        .find(|d| d.code.as_str() == "E_INCOMPATIBLE_MATERIAL")
+        .cloned()
+}
+
 #[test]
 fn a_row_refused_for_its_origin_still_reports_its_body() {
-    let incompatible = |ir: &BlockArrayIr| {
-        ir.diagnostics
-            .iter()
-            .find(|d| d.code.as_str() == "E_INCOMPATIBLE_MATERIAL")
-            .cloned()
-    };
     // Guard: placed in range, `bad` reports its stair's material.
     let placed = with_bad_body("east_of=a gap=1");
     assert!(origin(&placed, "b").is_some());
@@ -460,17 +600,81 @@ fn a_row_refused_for_its_origin_still_reports_its_body() {
     assert_eq!(incompatible(&refused), incompatible(&placed));
 }
 
+/// A site that places `bad` only as row `c`, east of row `b`, which is
+/// placed `gap` east of `a`.
+fn bad_body_behind(gap: &str) -> BlockArrayIr {
+    lowered(&format!(
+        "def box size=5x5:\n  \
+         floor id=f mat_slot=wall\n\n\
+         def bad size=5x5:\n  \
+         walls mat_slot=wall height=3\n  \
+         roof  kind=flat mat_slot=wall overhang=1\n  \
+         stair kind=stairs side=front mat_slot=wall\n\n\
+         theme t:\n  \
+         slot wall -> @cobblestone\n\n\
+         site s:\n  \
+         place id=a use=box theme=t at=origin\n  \
+         place id=b use=box theme=t east_of=a gap={gap}\n  \
+         place id=c use=bad theme=t east_of=b\n"
+    ))
+}
+
+#[test]
+fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
+    // Guard: with `b` in range, `c` is placed and reports its stair's
+    // material.
+    let placed = bad_body_behind("1");
+    assert!(origin(&placed, "c").is_some());
+    let codes: Vec<&str> = findings(&placed).iter().map(|(code, _)| *code).collect();
+    assert_eq!(
+        codes,
+        vec!["E_INCOMPATIBLE_MATERIAL"],
+        "{:#?}",
+        placed.diagnostics
+    );
+
+    // `b` is refused for its origin, so `c` has no anchor. `bad`'s stair
+    // material is a defect in the `def` and theme wherever `c` would have
+    // landed, and it is reported as the placed row reports it.
+    let ir = bad_body_behind("3000000000");
+    assert_eq!(origin(&ir, "c"), None);
+    let codes: Vec<&str> = findings(&ir).iter().map(|(code, _)| *code).collect();
+    assert_eq!(
+        codes,
+        vec![
+            "E_INCOMPATIBLE_MATERIAL",
+            "W_DEFERRED_MEMBER",
+            "W_DEFERRED_MEMBER"
+        ],
+        "{:#?}",
+        ir.diagnostics
+    );
+    assert!(
+        ir.diagnostics[2].primary.contains("did not lower"),
+        "{:?}",
+        ir.diagnostics[2].primary,
+    );
+    assert_eq!(incompatible(&ir), incompatible(&placed));
+    // The body is lowered for its findings and then dropped: a structure
+    // with no placement would be an artifact the lockfile cannot place.
+    assert!(
+        !ir.structures.contains_key("site::s::c"),
+        "{:?}",
+        ir.structures.keys().collect::<Vec<_>>(),
+    );
+}
+
 #[test]
 fn an_unreadable_gap_on_a_row_refused_for_its_origin_is_still_reported() {
-    // `b` sits exactly on `i32::MAX`, so `c` leaves the range at the
-    // `gap=0` its unreadable `gap=` falls back to. The note names that
-    // value only: it does not say whether some other `gap=` would place
-    // the row.
+    // `b`'s last column sits exactly on `i32::MAX`, so `c` leaves the
+    // range at the `gap=0` its unreadable `gap=` falls back to. The note
+    // names that value only: it does not say whether some other `gap=`
+    // would place the row.
     let ir = lowered(&site(
-        "  place id=b use=box theme=t east_of=a gap=2147483644\n  \
+        "  place id=b use=box theme=t east_of=a gap=2147483642\n  \
          place id=c use=box theme=t east_of=b gap=wide\n",
     ));
-    assert_eq!(origin(&ir, "b"), Some((i32::MAX, 0, 0)));
+    assert_eq!(origin(&ir, "b"), Some((i32::MAX - 2, 0, 0)));
     assert_eq!(origin(&ir, "c"), None);
     let codes: Vec<&str> = findings(&ir).iter().map(|(code, _)| *code).collect();
     assert_eq!(
