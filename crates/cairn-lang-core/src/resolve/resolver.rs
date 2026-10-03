@@ -1065,18 +1065,22 @@ fn resolve_site_placements(
             continue;
         }
 
-        // A row that names a declared def references it, whatever happens to
-        // the row afterwards. `W_UNUSED_DEF` is "a `def` no `place use=`
-        // references"; a row refused for its id or origin still references
-        // one, and the finding with the repair is the one on that row —
-        // advising the author to delete the def would send them to a line
-        // that is correct.
-        if let Some(use_name) = member
+        // `use=` is read once, here, for both of its readers: the reference
+        // recorded just below and the def lookup further down, so the two
+        // cannot read it differently. A row whose `use=` names a declared
+        // def references it, whatever refuses the row; every refusal of a
+        // `place` row comes after this record. `W_UNUSED_DEF` is "a `def`
+        // no `place use=` references", and on a refused row the finding
+        // with the repair is the row's own — advising the author to delete
+        // the def would send them to a line that is correct. A `use=` that
+        // is not label-shaped (`use=3`) names no def, so it records
+        // nothing.
+        let use_target = member
             .intent_state
             .get("use")
-            .and_then(|v| v.value.as_label_str())
-            && let Some(def) = defs.iter().find(|d| d.name == use_name)
-        {
+            .and_then(|v| v.value.as_label_str());
+        let use_def = use_target.and_then(|name| defs.iter().find(|d| d.name == name));
+        if let Some(def) = use_def {
             used_defs.insert(def.name.clone());
         }
 
@@ -1107,10 +1111,6 @@ fn resolve_site_placements(
             continue;
         }
 
-        let use_target = member
-            .intent_state
-            .get("use")
-            .and_then(|v| v.value.as_label_str());
         let theme_target = member
             .intent_state
             .get("theme")
@@ -1130,7 +1130,7 @@ fn resolve_site_placements(
         let Some(use_name) = use_target else {
             continue;
         };
-        let Some(def) = defs.iter().find(|d| d.name == use_name) else {
+        let Some(def) = use_def else {
             ctx.diagnostics.push(unresolved_ref_diag(
                 DiagnosticCode::UnresolvedPlaceRef,
                 &format!("`use={use_name}` references an unknown def"),
