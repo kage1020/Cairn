@@ -992,7 +992,7 @@ fn buried_port_clause(
                 .and_then(|ba| ba.palette.entries.get(usize::from(owner.voxel.0)));
             if block.is_none() {
                 // INVARIANT: the voxel was read from this placement's own
-                // array, whose palette `Palette::intern` built. A miss is a
+                // array, whose palette `ScopePalette` built. A miss is a
                 // broken array; the clause still names the placement, just
                 // not the block.
                 debug_assert!(
