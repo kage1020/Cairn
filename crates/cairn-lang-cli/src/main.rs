@@ -2362,11 +2362,12 @@ fn stage_cli_name(stage: SynthStage) -> &'static str {
 /// Whether `--stage <stage>` reads the target-edition cell library and
 /// therefore needs `--edition <java|bedrock>` alongside it.
 ///
-/// One partition drives both halves of the flag's contract: `run_synth`
-/// refuses a stray `--edition` on the `false` stages, `dispatch_synth_stage`
-/// demands it on the `true` ones, and the stray-`--edition` message renders
-/// both lists from here. The exhaustive `match` makes a new variant a
-/// compile error rather than a silent default.
+/// One partition drives both halves of the flag's contract, and
+/// [`synth_edition`] applies both: it refuses a stray `--edition` on the
+/// `false` stages and demands the flag on the `true` ones, and the
+/// stray-`--edition` message it prints renders both lists from here. The
+/// exhaustive `match` makes a new variant a compile error rather than a
+/// silent default.
 ///
 /// The `--help` prose spells the same partition by hand: `synth`'s own
 /// description names the required stages and calls the rest "earlier",
