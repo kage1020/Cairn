@@ -41,7 +41,8 @@ pub use roof::is_stair;
 // which nothing outside this module holds. Exporting it invited the
 // second derivation the port used to carry.
 pub use walkway::{
-    BlockedIndex, RoutePathError, WalkwayLayout, build_walkway_array, l_path, route_path,
+    BlockedIndex, RoutePathError, SearchRect, WalkwayLayout, build_walkway_array, l_path,
+    route_path,
 };
 
 use crate::check::Diagnostic;
