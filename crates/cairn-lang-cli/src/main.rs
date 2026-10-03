@@ -295,9 +295,14 @@ enum Command {
     /// it accidentally.
     ///
     /// Exits 0 when the requested stage produced a well-formed IR
-    /// (warnings still allowed), 1 on parse failure, I/O error, or any
-    /// Error-severity synth diagnostic, and 2 when the file cannot be
-    /// located.
+    /// (warnings still allowed); 1 on a parse failure, on any
+    /// `Error`-severity diagnostic (from `check` or from a redstone pass
+    /// the stage runs), on a failure to serialise the IR as JSON, or on
+    /// any other I/O error (permission denied, non-UTF-8 contents); 2
+    /// when the file cannot be located, and refuses a run without
+    /// `--experimental-logic-synth`, a missing `--edition` on the stages
+    /// that require it and a stray one on the edition-neutral stages with
+    /// exit 2, before the file is read.
     Synth {
         /// Path to the .crn file to synthesise.
         file: PathBuf,
