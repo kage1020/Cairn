@@ -456,8 +456,9 @@ fn a_placement_past_i32_refuses_the_row_instead_of_saturating() {
     let body_past = |reported: &str| {
         format!(
             "this placement's body reaches {reported}, past the -2147483648 to 2147483647 \
-             range a placement's cells are addressed in; shorten the `gap=` on this row or on \
-             a row it is placed relative to"
+             range a placement's cells are addressed in; shrink the body with its `def`'s \
+             `size=` or a roof's `overhang=`, or shorten the `gap=` on this row or on a row it \
+             is placed relative to"
         )
     };
     for (row, primary) in [

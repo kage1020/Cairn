@@ -1483,8 +1483,8 @@ fn lower_site<'a>(
         // The anchor reads `placed` for prior-place lookups, so the lookup
         // has to happen before *this* placement is inserted. A lookup
         // misses when the prior place never reached `placed`, which is any
-        // `continue` arm of this loop: those above, the anchor deferral,
-        // or the volume refusal and the origin-range refusal below. Falling
+        // `continue` arm of this loop: those above, or, below, the anchor
+        // deferral, the volume refusal and the `i32` range refusal. Falling
         // back to `(0, 0, 0)` would silently stack the placement on top of
         // `home1`, so the row is deferred and skipped instead; only the
         // origin waits for the lowered dims.
@@ -1516,6 +1516,8 @@ fn lower_site<'a>(
             registry,
             diagnostics,
         );
+        // Below the body on purpose, not an early return above it: a row
+        // whose anchor did not lower still reports its body's findings.
         let Some(anchor) = anchor else {
             diagnostics.push(diag_deferred_member_reason(
                 member,
@@ -1540,9 +1542,9 @@ fn lower_site<'a>(
         // only now that the body has been sized.
         let origin = match anchor.origin(dims) {
             Ok(origin) => origin,
-            Err(far) => {
-                diagnostics.push(diag_deferred_member_reason(member, &far.deferral()));
-                report_unread_gap(gap_unread, GapOutcome::OriginOutOfRange, diagnostics);
+            Err(refusal) => {
+                diagnostics.push(diag_deferred_member_reason(member, &refusal.deferral()));
+                report_unread_gap(gap_unread, GapOutcome::OutOfRange, diagnostics);
                 continue;
             }
         };
@@ -2085,44 +2087,67 @@ enum PlaceAnchor {
 
 /// A placement [`PlaceAnchor::origin`] works out lies partly outside the
 /// `i32` range world coordinates are recorded and addressed in. `axis` is
-/// the one that left the range and `offset` the coordinate that did, for
-/// the message: the origin itself (a sum for `east_of`, a difference for
-/// `north_of`), or the body's far edge, `origin + dims − 1`.
+/// the one that left the range and `coord` the coordinate on it that did,
+/// for the message; `corner` says which coordinate that is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct OriginOutOfRange {
+struct PlacementOutOfRange {
     corner: PlacementCorner,
     axis: char,
-    offset: i128,
+    coord: i128,
 }
 
-/// Which corner of a placement's box [`OriginOutOfRange`] found outside
-/// the range.
+/// Which end of a placement's box [`PlacementOutOfRange`] found outside
+/// the range, and so what its `coord` holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PlacementCorner {
-    /// The low-`x`, low-`z` origin the placement records.
+    /// The low-`x`, low-`z` origin the placement records. `coord` is the
+    /// origin on the axis its selector moves along: a sum for `east_of`, a
+    /// difference for `north_of`.
     Origin,
-    /// The high corner, `origin + dims − 1`, where the body's last cell
-    /// sits.
+    /// The body's far edge, `origin + dims − 1`, where its last cell sits.
+    /// `coord` is that edge on the first of `x` and `z` that leaves the
+    /// range, not the whole high corner.
     FarEdge,
 }
 
-impl OriginOutOfRange {
+impl PlacementOutOfRange {
+    /// `coord` as the `i32` it has to fit in, or the refusal that says it
+    /// does not.
+    fn fit(corner: PlacementCorner, axis: char, coord: i128) -> Result<i32, Self> {
+        i32::try_from(coord).map_err(|_| Self {
+            corner,
+            axis,
+            coord,
+        })
+    }
+
     /// The `W_DEFERRED_MEMBER` reason for the row this refuses.
+    ///
+    /// The repair depends on which end left the range. The far edge also
+    /// moves with the body's own extent, and on a `north_of` row no `gap=`
+    /// on the row itself moves `x`, so its advice names the body's `size=`
+    /// and `overhang=` beside the `gap=`.
     fn deferral(self) -> String {
         let Self {
             corner,
             axis,
-            offset,
+            coord,
         } = self;
-        let (what, recorded) = match corner {
-            PlacementCorner::Origin => {
-                ("origin works out to", "a placement's origin is recorded in")
-            }
-            PlacementCorner::FarEdge => ("body reaches", "a placement's cells are addressed in"),
+        let (what, recorded, repair) = match corner {
+            PlacementCorner::Origin => (
+                "origin works out to",
+                "a placement's origin is recorded in",
+                "shorten the `gap=` on this row or on a row it is placed relative to",
+            ),
+            PlacementCorner::FarEdge => (
+                "body reaches",
+                "a placement's cells are addressed in",
+                "shrink the body with its `def`'s `size=` or a roof's `overhang=`, or shorten \
+                 the `gap=` on this row or on a row it is placed relative to",
+            ),
         };
         format!(
-            "this placement's {what} {axis}={offset}, past the {} to {} range {recorded}; \
-             shorten the `gap=` on this row or on a row it is placed relative to",
+            "this placement's {what} {axis}={coord}, past the {} to {} range {recorded}; {repair}",
             i32::MIN,
             i32::MAX,
         )
@@ -2143,49 +2168,46 @@ impl PlaceAnchor {
     /// saturated: a saturated origin put two placements on one coordinate,
     /// the second stacked inside the first, and nothing said so. The body's
     /// far edge, `origin + dims − 1` on `x` and `z`, is refused the same
-    /// way, since a cell past it has no world coordinate either.
-    fn origin(self, dims: Dims) -> Result<(i32, i32, i32), OriginOutOfRange> {
-        let (x, y, z) = self.origin_corner(dims)?;
-        for (axis, low, extent) in [('x', x, dims.x), ('z', z, dims.z)] {
-            let far = i128::from(low) + i128::from(extent.max(1)) - 1;
-            if i32::try_from(far).is_err() {
-                return Err(OriginOutOfRange {
-                    corner: PlacementCorner::FarEdge,
-                    axis,
-                    offset: far,
-                });
-            }
-        }
-        Ok((x, y, z))
-    }
-
-    /// [`Self::origin`]'s low corner alone.
-    fn origin_corner(self, dims: Dims) -> Result<(i32, i32, i32), OriginOutOfRange> {
-        let fit = |axis: char, offset: i128| {
-            i32::try_from(offset).map_err(|_| OriginOutOfRange {
-                corner: PlacementCorner::Origin,
-                axis,
-                offset,
-            })
-        };
-        match self {
-            Self::WorldOrigin => Ok((0, 0, 0)),
+    /// way, since a cell past it has no world coordinate either. `y` is not
+    /// checked, because every placement's `y` is the `0` of the `at=origin`
+    /// row its chain starts from (`east_of` and `north_of` carry the
+    /// prior's `y` through) and [`MAX_STRUCTURE_VOLUME`] keeps `dims.y` far
+    /// below `i32::MAX`; a selector that moves `y` has to join the check.
+    fn origin(self, dims: Dims) -> Result<(i32, i32, i32), PlacementOutOfRange> {
+        use PlacementCorner::{FarEdge, Origin};
+        let fit = PlacementOutOfRange::fit;
+        // The low corner first: the far edge is measured from it, so it
+        // has to be in range before the far edge means anything.
+        let (x, y, z) = match self {
+            Self::WorldOrigin => (0, 0, 0),
             Self::EastOf {
                 prior_origin: (x, y, z),
                 prior_dims_x,
                 gap,
             } => {
                 let next_x = i128::from(x) + i128::from(prior_dims_x) + i128::from(gap);
-                Ok((fit('x', next_x)?, y, z))
+                (fit(Origin, 'x', next_x)?, y, z)
             }
             Self::NorthOf {
                 prior_origin: (x, y, z),
                 gap,
             } => {
                 let next_z = i128::from(z) - i128::from(dims.z) - i128::from(gap);
-                Ok((x, y, fit('z', next_z)?))
+                (x, y, fit(Origin, 'z', next_z)?)
             }
+        };
+        // INVARIANT: a body's `x` and `z` extents are its `size=` (a
+        // `NonZeroU32`) plus twice its overhang, so neither is 0, and
+        // `origin + dims − 1` is the last cell rather than one before the
+        // origin.
+        debug_assert!(
+            dims.x > 0 && dims.z > 0,
+            "a placed body has a zero extent: {dims:?}",
+        );
+        for (axis, low, extent) in [('x', x, dims.x), ('z', z, dims.z)] {
+            fit(FarEdge, axis, i128::from(low) + i128::from(extent) - 1)?;
         }
+        Ok((x, y, z))
     }
 }
 
@@ -2257,10 +2279,10 @@ enum GapOutcome {
     /// Refused for a reason no `gap=` reaches: its anchor did not lower,
     /// or its body was refused.
     NotPlaced,
-    /// Refused because the origin worked out at `gap=0` leaves the `i32`
-    /// range. Only that value was tried, so the note claims nothing about
-    /// any other `gap=`.
-    OriginOutOfRange,
+    /// Refused because the placement worked out at `gap=0` leaves the
+    /// `i32` range: its origin, or its body's far edge. Only that value was
+    /// tried, so the note claims nothing about any other `gap=`.
+    OutOfRange,
 }
 
 /// Report a `place` row's unreadable `gap=`, if it had one, with the note
@@ -2279,7 +2301,7 @@ fn report_unread_gap(
             GapOutcome::NotPlaced => {
                 "this row is not placed either way — see the finding on the same line"
             }
-            GapOutcome::OriginOutOfRange => {
+            GapOutcome::OutOfRange => {
                 "this row is not placed at `gap=0`, the value its origin was worked out \
                  with — see the finding on the same line"
             }
@@ -4891,9 +4913,11 @@ fn fill_window(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // An unreadable `sym=` (`sym=yes`, `sym="true"`) draws the window
-    // unmirrored. Read before anything can refuse the window, so it is
-    // reported in the same compile as a refusal, with a note that says
-    // which of the two happened.
+    // unmirrored, except on a window with `repeat=` greater than 1, which
+    // `sym=true` refuses: that one is refused. Read before anything can
+    // refuse the window, so it is reported in the same compile as a
+    // refusal, with a note that says which of the three [`WindowCut`]
+    // outcomes happened.
     let (sym, sym_unread) = match read_or_ignore(
         member,
         "sym",
@@ -4926,12 +4950,12 @@ fn fill_window(
 
 /// What [`cut_window`] did with the window, which is what the note on an
 /// unreadable `sym=` has to say.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum WindowCut {
     /// The primary rectangle was cut.
     Cut,
-    /// The window was refused for a reason a readable `sym=` would not
-    /// change.
+    /// The window was refused, and another finding says why. When its
+    /// `sym=` is unreadable, that reason holds whatever `sym=` had said.
     Refused,
     /// The window has `repeat=` greater than 1, which `sym=true` refuses,
     /// and its `sym=` is unreadable: it was refused instead of carried on
@@ -5385,12 +5409,30 @@ fn member_or_slot_span(member: &Member, slot: &ValueWithSpan) -> Span {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::block_array::BlockState;
+    use crate::check::Severity;
+
+    /// [`PlaceAnchor::origin`] measures the far edge as `origin + dims − 1`,
+    /// which is one cell before the origin when an extent is 0. No body has
+    /// one, since `size=` is a `NonZeroU32`, so the only way to show that
+    /// the check fails loud rather than measuring from the wrong cell is to
+    /// hand it one. Debug-only because that is where `debug_assert!` lives.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "a placed body has a zero extent")]
+    fn a_zero_extent_is_not_measured_for_its_far_edge() {
+        let _ = PlaceAnchor::WorldOrigin.origin(Dims { x: 0, y: 1, z: 1 });
+    }
 
     #[test]
     fn a_placement_whose_far_edge_leaves_i32_is_refused_on_either_axis() {
-        // A source cannot yet reach the `z` case: `at=origin` is z=0 and
-        // `north_of` only steps back. The anchor is checked directly so the
-        // `z` half of the rule is held all the same.
+        // A source cannot reach the `z` case. The grammar has no negative
+        // integer literal in value position, so `gap=-1` is `E_PARSE`, and
+        // with a `gap=` of 0 or more no origin's `z` is above the `0` of
+        // `at=origin`: `east_of` keeps the prior's `z`, and `north_of`
+        // moves back from it by the new body's depth and the `gap=`. The
+        // anchor is checked directly, with a negative `gap`, so the `z`
+        // half of the rule is held all the same.
         let dims = Dims { x: 5, y: 1, z: 5 };
         let north = |prior_origin, gap| PlaceAnchor::NorthOf { prior_origin, gap };
         // In range: the last cell on each axis is `i32::MAX`.
@@ -5401,23 +5443,21 @@ mod tests {
         // One wider on `x`: a `north_of` row keeps the prior's `x`.
         assert_eq!(
             north((i32::MAX - 3, 0, 0), 0).origin(dims),
-            Err(OriginOutOfRange {
+            Err(PlacementOutOfRange {
                 corner: PlacementCorner::FarEdge,
                 axis: 'x',
-                offset: i128::from(i32::MAX) + 1,
+                coord: i128::from(i32::MAX) + 1,
             }),
         );
         assert_eq!(
             north((0, 0, i32::MAX), -2).origin(dims),
-            Err(OriginOutOfRange {
+            Err(PlacementOutOfRange {
                 corner: PlacementCorner::FarEdge,
                 axis: 'z',
-                offset: i128::from(i32::MAX) + 1,
+                coord: i128::from(i32::MAX) + 1,
             }),
         );
     }
-    use crate::block_array::BlockState;
-    use crate::check::Severity;
 
     /// The plate is the one hardcoded id a pack *can* redirect, and the
     /// list would be making a false promise if it carried it: the id is a
