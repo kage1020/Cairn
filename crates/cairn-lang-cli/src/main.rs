@@ -2219,12 +2219,12 @@ fn run_synth(
 
 /// The edition `stage` runs for, from the `--edition` the caller passed.
 ///
-/// `Ok(None)` for an edition-neutral stage, which refuses a stray
-/// `--edition` rather than silently ignoring it — a caller who passed the
-/// flag there almost certainly expected it to shape the output, and
-/// swallowing the mistake would make the CLI's stage-vs-edition axis
-/// ambiguous. `Ok(Some(_))` for an edition-tagged stage, which requires
-/// the flag.
+/// [`StageEdition::Neutral`] for an edition-neutral stage, which refuses a
+/// stray `--edition` rather than silently ignoring it — a caller who
+/// passed the flag there almost certainly expected it to shape the output,
+/// and swallowing the mistake would make the CLI's stage-vs-edition axis
+/// ambiguous. [`StageEdition::Tagged`] for an edition-tagged stage, which
+/// requires the flag.
 ///
 /// Must be called before `load_module`: both refusals are usage errors
 /// (exit 2) decided from argv alone, and a call any later would put them
@@ -2232,10 +2232,7 @@ fn run_synth(
 /// file ends the run before either refusal is reached and a warning is
 /// printed ahead of the refusal. Being ahead of the read also means a
 /// path that names nothing is reported only once `--edition` is right.
-fn synth_edition(
-    stage: SynthStage,
-    edition: Option<EditionArg>,
-) -> Result<Option<Edition>, ExitCode> {
+fn synth_edition(stage: SynthStage, edition: Option<EditionArg>) -> Result<StageEdition, ExitCode> {
     if !stage_requires_edition(stage) {
         if edition.is_some() {
             eprintln!(
@@ -2245,9 +2242,21 @@ fn synth_edition(
             );
             return Err(ExitCode::from(2));
         }
-        return Ok(None);
+        return Ok(StageEdition::Neutral);
     }
-    require_edition(edition, stage_cli_name(stage)).map(|edition| Some(edition.as_edition()))
+    require_edition(edition, stage_cli_name(stage))
+        .map(|edition| StageEdition::Tagged(edition.as_edition()))
+}
+
+/// [`synth_edition`]'s answer for a stage, which nothing else builds:
+/// which side of `stage_requires_edition`'s partition the stage is on, and
+/// for an edition-tagged stage the edition it runs for.
+#[derive(Clone, Copy)]
+enum StageEdition {
+    /// An edition-neutral stage, run without `--edition`.
+    Neutral,
+    /// An edition-tagged stage, and the edition `--edition` named for it.
+    Tagged(Edition),
 }
 
 /// Run the requested pipeline stage and return the JSON serialisation
@@ -2258,7 +2267,7 @@ fn synth_edition(
 /// are diagnostic-free by contract, so they carry no report call.
 fn dispatch_synth_stage(
     stage: SynthStage,
-    edition: Option<Edition>,
+    edition: StageEdition,
     synth: &cairn_lang_redstone::SynthOutput,
     ir: &cairn_lang_core::IntentModule,
     file: &Path,
@@ -2270,26 +2279,38 @@ fn dispatch_synth_stage(
     }
 
     let netlist = compile_netlist(&synth.scoped);
-    // The edition-neutral tail dispatches on the stage, not on "no
-    // edition was resolved". The two say the same thing today, but only
-    // the former makes a stage added later state its own answer here:
-    // the negative form would hand it the Netlist payload, under the
-    // Netlist label, with exit 0.
-    let edition = match (edition, stage) {
-        (Some(edition), _) => edition,
-        (None, SynthStage::Netlist) => {
+    // Dispatch on the stage, with `synth_edition`'s answer checked against
+    // it, rather than on the answer alone. The two agree today, but only
+    // the stage makes a stage added later get an arm of its own here (a
+    // bare `Neutral` arm would hand it the Netlist payload, under the
+    // Netlist label, with exit 0), and only the stage stops an answer that
+    // disagrees with it here, naming the contract it broke, rather than
+    // after every later pass has run, at the `Crossing` guard below.
+    let edition = match (stage, edition) {
+        (SynthStage::Netlist, StageEdition::Neutral) => {
             return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
         }
-        (None, SynthStage::Logic) => unreachable!("the Logic guard above returns"),
         (
-            None,
             SynthStage::Edition
             | SynthStage::Placement
             | SynthStage::Route
             | SynthStage::Delay
             | SynthStage::Crossing,
+            StageEdition::Tagged(edition),
+        ) => edition,
+        (SynthStage::Logic, _) => unreachable!("the Logic guard above returns"),
+        (SynthStage::Netlist, StageEdition::Tagged(_)) => unreachable!(
+            "stage_requires_edition is false here, so synth_edition answered Neutral or refused"
+        ),
+        (
+            SynthStage::Edition
+            | SynthStage::Placement
+            | SynthStage::Route
+            | SynthStage::Delay
+            | SynthStage::Crossing,
+            StageEdition::Neutral,
         ) => unreachable!(
-            "stage_requires_edition holds here, so synth_edition resolved an edition or refused"
+            "stage_requires_edition holds here, so synth_edition answered Tagged or refused"
         ),
     };
     let edition_netlist = compile_edition_netlist(&netlist, edition);
