@@ -239,3 +239,13 @@ struct s size=3x3
           (truth_row
             (bit_pattern)
             (dont_care)))))))
+
+==================
+Truth output run into the next row is rejected
+:error
+==================
+
+struct s size=3x3
+  assert truth(sig.a, sig.b -> sig.c) { 00->101->0 }
+
+---

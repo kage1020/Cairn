@@ -24,13 +24,33 @@ module.exports = grammar({
 
   externals: $ => [
     $._indent, $._dedent, $._newline, $._file_start, $._size_x, $._line_start,
-    $._file_end, $.bit_pattern, $._error_sentinel,
+    $._file_end, $.bit_pattern, $.bit, $._error_sentinel,
   ],
 
   word: $ => $.identifier,
 
+  // Reserved words, by set.
+  //
+  // `global` holds wherever a rule names no other set: `true` and `false`
+  // are boolean literals, never an identifier.
+  //
+  // `operand` is the set `_bool_expr` names for a signal, where a `logic`
+  // expression expects one. `and` and `or` are operators there, never a
+  // signal's name, so `a.b and or` is refused rather than read as a
+  // reference to a signal called `or`. The set is the lex state the
+  // reference starts in, so only its head is reserved and `c.or` still
+  // names a signal. A named set replaces `global` rather than extending
+  // it, so `true` and `false` are listed again, and they are load-bearing:
+  // without them `true and not false` reads as two signals (corpus case
+  // "A boolean literal is not a logic operand").
+  //
+  // `not` is not listed because it needs no reserving. Every position an
+  // operand can start is one `unary_expression` can start too, so the
+  // keyword `not` is valid there and the lexer always takes the word as
+  // the keyword: `a.b and not` and `a.b and not.x` are already refused.
   reserved: {
     global: _ => ['true', 'false'],
+    operand: _ => ['true', 'false', 'and', 'or'],
   },
 
   conflicts: $ => [
@@ -116,18 +136,21 @@ module.exports = grammar({
 
     _dotted_ref: $ => choice($.signal_ref, $.identifier),
 
-    // `bit_pattern` is external, and the only token in this grammar that
-    // is a plain run of characters. `-` is a don't-care input, and `-`
-    // and `->` share a character: the lexer takes the longest match it
-    // can, so `/[01-]+/` reads `11--` out of `11--> 0` and leaves a bare
-    // `>` this rule's arrow cannot use. The scanner chooses where the
-    // token ends instead of falling into it.
+    // `bit_pattern` is external. `-` is a don't-care input, and `-` and
+    // `->` share a character: the lexer takes the longest match it can,
+    // so `/[01-]+/` reads `11--` out of `11--> 0` and leaves a bare `>`
+    // this rule's arrow cannot use. The scanner chooses where the token
+    // ends instead of falling into it.
+    //
+    // `bit` is external too: an output ends where its digits do, and
+    // `/[01]/` took the `1` of `101` and left `01` to start another row.
+    // Saying "one digit, and no digit after it" needs lookahead a token
+    // regex does not have. See the scanner.
     truth_row: $ => seq(
       field('inputs', $.bit_pattern),
       '->',
       field('output', choice($.bit, $.dont_care)),
     ),
-    bit: $ => token(/[01]/),
     // A `-` output. The arrow has already been taken by the time this can
     // match, so unlike the input side there is no character to share.
     dont_care: $ => token('-'),
@@ -154,8 +177,8 @@ module.exports = grammar({
       $.binary_expression,
       $.unary_expression,
       $.parenthesized_expression,
-      $.signal_ref,
-      $.identifier,
+      reserved('operand', $.signal_ref),
+      reserved('operand', $.identifier),
     ),
 
     binary_expression: $ => choice(

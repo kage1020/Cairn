@@ -201,10 +201,14 @@ placement's own `theme=` instead.
 `struct` and `site` take no such line. Neither is instantiated by anything — each *is* the build —
 so a floor written inside one constrains exactly the file it is in, which is what `@requires`
 already says. The same goes for a member's own indented children: the floor belongs to the part, and
-a `walls` line is not a part. The two refusals are different messages, because the repairs differ:
-one points at `@requires`, the other at a dedent. Neither refuses on the word alone: `requires` is
-an ordinary keyword in a body that reads no floors, so a member line spelled that way parses in a
-`struct`, a `site`, or under a member exactly as it did before this line existed.
+a `walls` line is not a part. That is three refusals with three messages for two repairs: one
+points at `@requires`, the other at a dedent. A member's children inside a `def` get the dedent;
+inside a `struct` or a `site` a dedent lands the line in a body that refuses it too, so they get
+`@requires`, as the `struct` or `site` itself does. A floor is recognised by its expression before
+anything after the line is read, so one with an indented line under it is refused as a floor rather
+than read as a member. None of the three refuses on the word alone: `requires` is an ordinary
+keyword in a body that reads no floors, so a member line spelled that way parses in a `struct`, a
+`site`, or under a member exactly as it did before this line existed.
 
 A `def` or `theme` body is the other half of that, and takes the word whatever follows it: the line
 is a floor, and an expression that reads as none is `E_INVALID_REQUIRES` rather than a member. That
