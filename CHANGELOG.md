@@ -3,7 +3,10 @@
 ## [Unreleased]
 
 ### Fixed
-
+- *(redstone)* A stretch with no coord for a buffer repeater, refused only because a coord touches
+  another block of its own net, was reported as though every coord turned. The refusal now says
+  which of the two applied, and names the coord nearest the dark end that touches its net and the
+  block it touches.
 - *(core,tree-sitter)* Six parser refusals pointed past the text that was wrong or named the wrong
   problem. Each now points at the text and names the mistake:
   - A bad truth-table output (`{ 0 -> 7 }`) is reported at the output, not at the `}` or the row
