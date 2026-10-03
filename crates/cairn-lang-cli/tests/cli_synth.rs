@@ -1268,11 +1268,11 @@ fn possible_values(flag: &str, expected: usize) -> Vec<String> {
 /// Exit 2 is not taken on trust: a missing fixture exits 2 as well, so
 /// the refusal has to be that gate's own — no stdout (no partial IR
 /// dump escaped) and a single stderr line naming `--stage <stage>` and
-/// `--edition`. The pipeline passes are silent on this fixture today,
-/// so the single-line check is about ordering rather than about them:
-/// the day a pass upstream of the edition-tagged stages starts emitting
-/// a diagnostic, this is what catches the usage error being buried
-/// under it.
+/// `--edition`. The pipeline passes are silent on this fixture, so the
+/// single-line check holds wherever the gate stands among them; whether
+/// it stands ahead of a pass that does print is
+/// `cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings`'s
+/// to pin.
 fn stage_is_edition_neutral(stage: &str) -> bool {
     let path = examples_dir().join("redstone-door.crn");
     let out = cairn(
@@ -1392,7 +1392,7 @@ fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
 fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
     // The refusing half of `--edition`'s contract, which
     // `cli_synth_missing_edition_reports_only_the_usage_error` leaves
-    // out; why the flag is refused rather than ignored is `run_synth`'s
+    // out; why the flag is refused rather than ignored is `synth_edition`'s
     // to say. Walks every `--stage` value against every `--edition`
     // value, so a stage or edition landing later is covered the day it
     // lands.
