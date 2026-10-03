@@ -147,7 +147,11 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 | `chore` | 利用者に届かないその他すべて | いいえ |
 | `style` | 整形・lint だけの変更 | いいえ |
 
-**破壊的変更はコロンの直前に `!` を付けます** — type の後ろ、スコープを書くときはスコープの後ろです (`feat(core)!: replace lexer`、`fix!: …`)。`!` と CHANGELOG は対になっています。[CHANGELOG.md](CHANGELOG.md) の `## [Unreleased]` → `### Breaking changes` にエントリを足す PR はタイトルに `!` を付け、タイトルに `!` を付けた PR はそのエントリを足します。手書きのエントリは [compatibility「breaking はどう告知されるか」](https://cairn.kage1020.com/ja/spec/compatibility/) が求めるもので、`CHANGELOG.md` を読む人が目にするのはこちらです。`!` は同じ事実を `release-plz` が解析するコミットの側に書いたものです。片方だけの PR を見たレビュアーは、マージ前にもう片方を求めます。
+**破壊的変更はコロンの直前に `!` を付けます** — type の後ろ、スコープを書くときはスコープの後ろです (`feat(core)!: replace lexer`、`fix!: …`)。`!` と CHANGELOG は対になっています。`changelog.d/<slug>.breaking.md` のフラグメントを足す PR はタイトルに `!` を付け、タイトルに `!` を付けた PR はそのフラグメントを足します。手書きのエントリは [compatibility「breaking はどう告知されるか」](https://cairn.kage1020.com/ja/spec/compatibility/) が求めるもので、リリース時に `### Breaking changes` の下へ取り込まれた後、`CHANGELOG.md` を読む人が目にするのはこちらです。`!` は同じ事実を `release-plz` が解析するコミットの側に書いたものです。片方だけの PR は `Changelog` チェックが落とします。
+
+### CHANGELOG のエントリ
+
+PR は [CHANGELOG.md](CHANGELOG.md) を編集しません。代わりに [changelog.d/](changelog.d/README.md) にエントリ 1 つにつき 1 ファイルのフラグメントを足します。ファイル名は `<slug>.<kind>.md` で、kind が見出しを決めます (`breaking`、`deprecations`、`added`、`changed`、`fixed`、`performance`、`build`)。20 本の PR が同時に開いていて全員が同じ `[Unreleased]` の見出しを編集すると、マージのたびに互いに衝突していました。別々のファイルなら衝突しません。月次のリリース PR が、`release-plz` が新バージョン用に書いた節へフラグメントを取り込み、フラグメントを削除します。`Changelog` ワークフローは各フラグメントの名前と形を確かめ、issue 番号と `ci` だけをスコープにしたエントリを拒み、リリース PR 以外が `CHANGELOG.md` に行を足すことも拒みます。詳細とローカルで同じチェックを走らせるコマンドは [changelog.d/README.md](changelog.d/README.md) にあります。
 
 `!` はバージョンを決めません。semver ならメジャーバンプと読むところですが、ここではリリースワークフローが日付と既存タグから次の `YYYY.M.PATCH` を計算して `release-plz` の実行前に `Cargo.toml` へ書き込み、`release-plz` は公開済みのものと既に異なるバージョンには手を付けません。リリースの要否も決めません — それを決めるのは上の表の type です。変わるのは生成されるリリースノートです。`release-plz` はそのコミットの行の先頭に `[**breaking**]` を付け、`protect_breaking_commits` によって、普段は行が落とされる type (`docs!:`、`ci!:`) でもその行が残ります。
 
@@ -165,7 +169,7 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 固定は MSRV ではありません。ワークスペースマニフェストの `rust-version` は、利用者が Cairn をビルドするのに必要な下限であり、固定はつねにそれより新しいコンパイラです。安定化されたばかりの API に手を伸ばした変更は固定側では緑で、下限では壊れます。その一部は clippy が既に見ています。`clippy::incompatible_msrv` は `rust-version` を読んで、それより上で安定化された**標準ライブラリ**の項目を拒み、`-D warnings` がそれを致命的にします。ただしこれは lint なので `#[allow]` 一行で黙り、さらに**依存先**自身の `rust-version` が我々の下限より上である場合については何も言いません。後者は cargo のハードエラーで、固定側では決して現れません。両方を捕まえるのが、下限でコンパイルする CI の `MSRV` ジョブです。`cargo metadata` でマニフェストから `rust-version` を読み直し (古くなる二つ目のコピーを作らないため)、そのコンパイラを入れて `cargo check --workspace --locked --all-features` を回します。`test` ではなく `check` なのは、下限が問うているのが「利用者が依存するクレートがコンパイルできるか」だからです。dev-dependencies やテストハーネスは、ライブラリ本体より新しいコンパイラを要求してかまいません。`--all-features` を付けるのは、`rust-version` がパッケージごとに一つしか書けず、「この下限、ただしその feature を有効にした場合を除く」と cargo に伝える手段がないからです。`--locked` は、リポジトリをクローンした利用者が解決するのが、コミットされたロックファイルそのものだからで、壊れているのが Cairn のコードではなく依存先自身の下限であるとき、cargo がそのパッケージ名を挙げてくれます。
 
-`rust-version` を上げることは、誰が Cairn をビルドできるかを変えることなので、マニフェストを黙って書き換えて済ませません。コミットの type は `build` にし (パッチリリースが切られるので、新しい下限が crates.io まで届きます)、どのコンパイラが必要になり何がそれを要求したのかを `CHANGELOG.md` に書きます。新しい下限より下に固定している利用者は、どのみち cargo から知らされます。理由を伝えるのがこのエントリです。
+`rust-version` を上げることは、誰が Cairn をビルドできるかを変えることなので、マニフェストを黙って書き換えて済ませません。コミットの type は `build` にし (パッチリリースが切られるので、新しい下限が crates.io まで届きます)、どのコンパイラが必要になり何がそれを要求したのかを `changelog.d/<slug>.build.md` に書きます。新しい下限より下に固定している利用者は、どのみち cargo から知らされます。理由を伝えるのがこのエントリです。
 
 ## リリースプロファイルの変更
 

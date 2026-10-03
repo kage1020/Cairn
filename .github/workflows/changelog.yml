@@ -1,0 +1,32 @@
+name: Changelog
+
+# Its own workflow so that `edited` re-runs it when the title changes: the
+# `!` in the title and a `breaking` fragment have to agree, and retitling is
+# how a squash-merged PR fixes its commit message.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  fragments:
+    # Short and stable on purpose: a required status check is matched as a
+    # literal string, so renaming this job un-gates it silently.
+    name: Changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check every fragment
+        run: python3 .github/scripts/changelog.py check
+
+      - name: Check the title against the fragments this PR adds
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: python3 .github/scripts/changelog.py pr --title "$TITLE" --base "origin/$BASE" --head-ref "$HEAD_REF"
