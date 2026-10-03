@@ -24,6 +24,8 @@
   the target; one broken in any other way is still reported as unreadable, with that cause.
   `Lockfile::refused_identifier` makes the same reading.
 
+- *(core)* name what buries a walkway port and what stretched the router's search box past its cap ([#455](https://github.com/kage1020/Cairn/pull/455))
+
 - *(core)* Two `place` rows of one `site` sharing an `id=` were reported twice, as
   `E_DUPLICATE_PLACE_ID` and as `E_DUPLICATE_ID`, so an editor showed two squiggles on one line and a
   consumer counting errors counted two. `E_DUPLICATE_PLACE_ID`, the code that names the site and that
@@ -48,6 +50,8 @@
 
   Listed here rather than as a fix under `spec/compatibility` C.4: the spec gained these characters,
   rather than the build being brought in line with what it already said.
+
+- *(core)* `RoutePathError::AreaCapExceeded` gains a `rect: SearchRect` field, the rectangle the area was measured on; `SearchRect` is new in `cairn_lang_core::block_array` ([#455](https://github.com/kage1020/Cairn/pull/455))
 
 ## 2026.10.0 — 2026-10-01
 

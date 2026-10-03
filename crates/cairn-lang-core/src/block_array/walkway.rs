@@ -742,19 +742,38 @@ pub enum RoutePathError {
     /// The search exhausted the rectangle without reaching `to` — the
     /// target is fully enclosed by blocked cells.
     TargetUnreachable,
-    /// The search rectangle exceeds `ROUTE_AREA_CAP`; the site is too
-    /// spread out to route. Carries the offending area so the caller
-    /// can surface both numbers.
+    /// The search rectangle exceeds `ROUTE_AREA_CAP`: the two ports, or
+    /// the placement floors on the walk plane, are too spread out to
+    /// route. Carries the offending area so the caller can surface both
+    /// numbers, and the rectangle it measured so the caller can say what
+    /// set its edges.
     AreaCapExceeded {
         /// Cells the rectangle would cover (`u64::MAX` when the
         /// span product itself overflowed).
         area: u64,
         /// The cap it exceeded, i.e. `ROUTE_AREA_CAP`.
         cap: u64,
+        /// The rectangle `area` was measured on, margin included.
+        rect: SearchRect,
     },
     /// Inflating the search rectangle stepped past the `i32` coordinate
     /// space (an endpoint or obstacle at `i32::MIN` / `i32::MAX`).
     CoordinateOverflow,
+}
+
+/// An inclusive rectangle of ground-plane cells, as [`route_path`]
+/// searches it: bbox(blocked cells on the walk plane ∪ both endpoints),
+/// inflated by one cell on every side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchRect {
+    /// Lowest `x` in the rectangle.
+    pub min_x: i32,
+    /// Highest `x` in the rectangle.
+    pub max_x: i32,
+    /// Lowest `z` in the rectangle.
+    pub min_z: i32,
+    /// Highest `z` in the rectangle.
+    pub max_z: i32,
 }
 
 /// Pre-indexed view of the blocked-cell set, built **once** per
@@ -851,6 +870,12 @@ fn search_rect(
         return Err(RoutePathError::AreaCapExceeded {
             area,
             cap: ROUTE_AREA_CAP,
+            rect: SearchRect {
+                min_x,
+                max_x,
+                min_z,
+                max_z,
+            },
         });
     }
     Ok((min_x, max_x, min_z, max_z))
@@ -1631,7 +1656,7 @@ mod tests {
         blocked.insert((1, 0, 0));
         assert!(matches!(
             route((0, 0, 0), (10_000_000, 0, 10_000_000), &blocked),
-            Err(RoutePathError::AreaCapExceeded { area: _, cap }) if cap == ROUTE_AREA_CAP,
+            Err(RoutePathError::AreaCapExceeded { cap, .. }) if cap == ROUTE_AREA_CAP,
         ));
     }
 
@@ -1655,6 +1680,12 @@ mod tests {
             Err(RoutePathError::AreaCapExceeded {
                 area: 4_002_000,
                 cap: ROUTE_AREA_CAP,
+                rect: SearchRect {
+                    min_x: -1,
+                    max_x: 1999,
+                    min_z: -1,
+                    max_z: 1998,
+                },
             }),
         );
     }
