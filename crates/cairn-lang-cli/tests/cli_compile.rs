@@ -1271,11 +1271,12 @@ fn a_reference_to_an_empty_place_id_is_a_cascade_on_its_own_row() {
     assert_eq!(note_rows(&reported), [11], "reported={reported}");
 }
 
-/// One refused id written twice: each row is refused on its own line, and a
-/// reference to the id is one cascade whose note points at the first of the
-/// two rows, as `E_DUPLICATE_PLACE_ID`'s "first row wins" does for a usable
-/// id. The repeat itself is not a second finding: `E_DUPLICATE_ID` leaves
-/// `place` rows to `E_DUPLICATE_PLACE_ID`, which compares only accepted ids.
+/// One refused id written twice: each row is refused on its own line, the
+/// second is `E_DUPLICATE_PLACE_ID` against the first, and a reference to
+/// the id is one cascade whose note points at the first of the two rows, as
+/// `E_DUPLICATE_PLACE_ID`'s "first row wins" does for a usable id. The
+/// resolver compares refused ids too, so renaming both rows to one usable id
+/// raises no finding the author had not already seen.
 #[test]
 fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
     let (code, reported) = check_rows(&[
@@ -1290,14 +1291,15 @@ fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
         owned(&[
             (11, "E_INVALID_PLACE_ID"),
             (12, "E_INVALID_PLACE_ID"),
+            (12, "E_DUPLICATE_PLACE_ID"),
             (13, "W_DEFERRED_PLACE"),
         ]),
         "reported={reported}",
     );
     assert_eq!(
         note_rows(&reported),
-        [11],
-        "the cascade points at the first row; reported={reported}",
+        [11, 11],
+        "`E_DUPLICATE_PLACE_ID` and the cascade both point at the first row; reported={reported}",
     );
 }
 

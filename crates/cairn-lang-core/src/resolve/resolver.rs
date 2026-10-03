@@ -1027,7 +1027,9 @@ fn resolve_site_placements(
     // the first row refused under it. Such a row is never registered in
     // `seen_place_ids`, but a later `east_of=` / `north_of=` naming it still
     // means that row, so the reference is reported as the cascade
-    // `W_DEFERRED_PLACE`, pointing here, rather than as an unknown id.
+    // `W_DEFERRED_PLACE`, pointing here, rather than as an unknown id. A
+    // second row refused under an id already here is `E_DUPLICATE_PLACE_ID`,
+    // as a second row under an id in `seen_place_ids` is.
     // Filled in source order, like `seen_place_ids`: a reference *above* the
     // refused row names no prior place and is `E_UNRESOLVED_PLACE_REF`.
     //
@@ -1691,7 +1693,11 @@ fn unresolved_place_ref_diag_with_ordering_note<'a>(
 ///
 /// A row refused with `E_INVALID_PLACE_ID` has its id and span added to
 /// `refused_place_ids`, so a later row naming it is reported as the
-/// cascade `W_DEFERRED_PLACE` rather than as an id that names nothing.
+/// cascade `W_DEFERRED_PLACE` rather than as an id that names nothing. A
+/// second row refused under the same id is also `E_DUPLICATE_PLACE_ID`
+/// against the first, as it would be under a usable id, for the reason
+/// above: otherwise renaming both rows to one usable id would surface the
+/// duplicate for the first time on the lines the author had only now fixed.
 fn usable_place_id<'a>(
     member: &'a Member,
     site_name: &str,
@@ -1733,10 +1739,18 @@ fn usable_place_id<'a>(
             &err,
         ));
         // First wins, as for `seen_place_ids`: the note on a reference
-        // points at the row refused first under that id.
-        refused_place_ids
-            .entry(place_id.to_owned())
-            .or_insert_with(|| member.span.clone());
+        // points at the row refused first under that id, and a later row
+        // refused under it is a duplicate of that row.
+        if let Some(first) = refused_place_ids.get(place_id) {
+            diagnostics.push(duplicate_place_id_diag(
+                site_name,
+                place_id,
+                first,
+                &member.span,
+            ));
+        } else {
+            refused_place_ids.insert(place_id.to_owned(), member.span.clone());
+        }
         return None;
     }
     if let Some(first) = seen_place_ids.get(place_id) {

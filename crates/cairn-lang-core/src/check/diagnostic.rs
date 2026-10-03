@@ -97,7 +97,7 @@ pub enum DiagnosticCode {
     /// Two or more members in the same immediate body share an `id=`.
     ///
     /// Two `place` rows of one `site` body are left to the resolver, which
-    /// compares only accepted ids and reports a repeat as
+    /// compares refused ids as well as accepted ones and reports a repeat as
     /// [`Self::DuplicatePlaceId`]. A `place` row indented under another row
     /// is not in that body, so a repeat there is still this code, as is a
     /// `place` row sharing its id with any other row of the body.

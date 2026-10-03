@@ -328,3 +328,26 @@ fn dup_15_a_place_row_repeating_a_connect_row_and_a_place_row_is_reported_twice(
     let note = place.notes[0].span.as_ref().expect("note span");
     assert_eq!(note.start, nth(&src, "place id=a", 0));
 }
+
+#[test]
+fn dup_16_a_repeated_refused_place_id_is_still_duplicate_place_id() {
+    // The resolver compares an id `PlaceId` refuses with the refused ids
+    // above it, so the second row carries `E_DUPLICATE_PLACE_ID` beside its
+    // own `E_INVALID_PLACE_ID`, and renaming both rows to one usable id
+    // raises nothing new. This pass still leaves the pair alone.
+    let src = format!(
+        "{HUT}site v:\n  place id=anchor use=hut theme=t at=origin\n  \
+         place id=\"a.b\" use=hut theme=t east_of=anchor gap=2\n  \
+         place id=\"a.b\" use=hut theme=t east_of=anchor gap=8\n"
+    );
+    let diags = diagnose(&src);
+    let invalid = of_code(&diags, DiagnosticCode::InvalidPlaceId);
+    assert_eq!(invalid.len(), 2, "got {diags:#?}");
+    let dup = of_code(&diags, DiagnosticCode::DuplicatePlaceId);
+    assert_eq!(dup.len(), 1, "got {diags:#?}");
+    assert_eq!(diags.len(), 3, "got {diags:#?}");
+    assert_eq!(dup[0].primary, "duplicate `id=a.b` in site `v`");
+    assert_eq!(dup[0].span.start, nth(&src, "place id=\"a.b\"", 1));
+    let note = dup[0].notes[0].span.as_ref().expect("note span");
+    assert_eq!(note.start, nth(&src, "place id=\"a.b\"", 0));
+}

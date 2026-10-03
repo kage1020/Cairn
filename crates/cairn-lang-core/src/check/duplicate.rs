@@ -28,9 +28,10 @@
 //! - `E_DUPLICATE_ID`   — two members in the same immediate body scope
 //!   declare `id=NAME` for the same `NAME` (per-body scope; nested `level`
 //!   blocks have their own namespace). Two `place` rows of one `site` body
-//!   are left to the resolver, which compares only accepted ids and reports
-//!   a repeat as `E_DUPLICATE_PLACE_ID`. A `place` row indented under
-//!   another row is not in that body and stays here. See [`PlaceIdOwner`].
+//!   are left to the resolver, which compares refused ids as well as
+//!   accepted ones and reports a repeat as `E_DUPLICATE_PLACE_ID`. A `place`
+//!   row indented under another row is not in that body and stays here. See
+//!   [`PlaceIdOwner`].
 //!
 //! Every scope here reports the *repeat* and points a note at the first
 //! declaration, so the anchor is the token the author would edit and the
@@ -403,11 +404,12 @@ fn first_declaration_note(first_span: &Span) -> DiagnosticNote {
 /// documents the first-row-wins rule for. Reporting `E_DUPLICATE_ID` here
 /// as well would bill one repair twice.
 ///
-/// The resolver compares only accepted ids: a row whose id `PlaceId`
-/// refuses is reported as `E_INVALID_PLACE_ID`, and `usable_place_id`
-/// returns before comparing it. So two `place` rows sharing a refused id
-/// are reported by neither code until they are renamed to an id `PlaceId`
-/// accepts.
+/// The resolver compares refused ids as well as accepted ones: an id
+/// `PlaceId` accepts against the accepted ids above it, and an id it
+/// refuses against the refused ones, after reporting the row as
+/// `E_INVALID_PLACE_ID`. Whether `PlaceId` accepts an id depends on the id
+/// alone, so two rows sharing one land in the same ledger and are always
+/// compared.
 ///
 /// The resolver reads the id off `Member::id`, which `hoist_label` fills
 /// from the first `id=` whose value is an identifier or a string. That is
