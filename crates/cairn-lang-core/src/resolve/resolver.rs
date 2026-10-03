@@ -3733,6 +3733,120 @@ mod tests {
             .collect()
     }
 
+    /// A finding [`UNUSED_DEF_CASES`] expects: its code, and a fragment of
+    /// its primary message.
+    type Expected = (&'static str, &'static str);
+
+    const HUT_UNUSED: Expected = ("W_UNUSED_DEF", "def `hut` is never referenced");
+    const SHED_UNUSED: Expected = ("W_UNUSED_DEF", "def `shed` is never referenced");
+
+    /// The cases `a_def_named_by_a_refused_place_row_is_not_unused` runs:
+    /// a site's rows, and every finding `resolve` reports for them, in
+    /// report order.
+    const UNUSED_DEF_CASES: &[(&[&str], &[Expected])] = &[
+        (
+            &["place use=hut theme=t at=origin"],
+            &[("E_INCOMPLETE_PLACE", "is missing `id=`"), SHED_UNUSED],
+        ),
+        (&["place id=3 use=hut theme=t at=origin"], &[SHED_UNUSED]),
+        (
+            &["place id=\"a.b\" use=hut theme=t at=origin"],
+            &[("E_INVALID_PLACE_ID", "is not a usable id"), SHED_UNUSED],
+        ),
+        (
+            &[
+                "place id=a use=shed theme=t at=origin",
+                "place id=a use=hut theme=t at=origin",
+            ],
+            &[("E_DUPLICATE_PLACE_ID", "duplicate `id=a`")],
+        ),
+        (
+            &["place id=a use=hut theme=t"],
+            &[
+                ("E_INVALID_PLACE_ORIGIN", "missing an origin selector"),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t at=origin east_of=nowhere"],
+            &[
+                ("E_INVALID_PLACE_ORIGIN", "more than one origin selector"),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t at=front"],
+            &[
+                ("E_INVALID_PLACE_ORIGIN", "`at=` only accepts `origin`"),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t east_of=3"],
+            &[
+                (
+                    "E_INVALID_PLACE_ORIGIN",
+                    "`east_of=` expects a place id label",
+                ),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t east_of=nowhere"],
+            &[
+                (
+                    "E_UNRESOLVED_PLACE_REF",
+                    "`east_of=nowhere` in site `v` does not name a prior place id",
+                ),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t north_of=nowhere"],
+            &[
+                (
+                    "E_UNRESOLVED_PLACE_REF",
+                    "`north_of=nowhere` in site `v` does not name a prior place id",
+                ),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &[
+                "place id=\"a.b\" use=shed theme=t at=origin",
+                "place id=b use=hut theme=t east_of=\"a.b\"",
+            ],
+            &[
+                ("E_INVALID_PLACE_ID", "is not a usable id"),
+                ("W_DEFERRED_PLACE", "names a `place` row refused for its id"),
+            ],
+        ),
+        (&["place id=a use=hut theme=t at=origin"], &[SHED_UNUSED]),
+        (
+            &["place id=a use=\"hut\" theme=t at=origin"],
+            &[SHED_UNUSED],
+        ),
+        (
+            &["place id=a use=hutt theme=t at=origin"],
+            &[
+                (
+                    "E_UNRESOLVED_PLACE_REF",
+                    "`use=hutt` references an unknown def",
+                ),
+                HUT_UNUSED,
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=3 theme=t at=origin"],
+            &[HUT_UNUSED, SHED_UNUSED],
+        ),
+        (
+            &["place id=a use=@hut theme=t at=origin"],
+            &[HUT_UNUSED, SHED_UNUSED],
+        ),
+    ];
+
     /// A def named by a `place` row the resolver refuses is referenced, so
     /// `W_UNUSED_DEF` does not fire on it: the finding with the repair is
     /// on the row, and removing the def, as the warning would advise, only
@@ -3767,114 +3881,9 @@ mod tests {
     /// `check::type_mismatch`'s to report.
     #[test]
     fn a_def_named_by_a_refused_place_row_is_not_unused() {
-        const SHED_UNUSED: (&str, &str) = ("W_UNUSED_DEF", "def `shed` is never referenced");
-        const HUT_UNUSED: (&str, &str) = ("W_UNUSED_DEF", "def `hut` is never referenced");
-        let cases: &[(&[&str], &[(&str, &str)])] = &[
-            (
-                &["place use=hut theme=t at=origin"],
-                &[("E_INCOMPLETE_PLACE", "is missing `id=`"), SHED_UNUSED],
-            ),
-            (&["place id=3 use=hut theme=t at=origin"], &[SHED_UNUSED]),
-            (
-                &["place id=\"a.b\" use=hut theme=t at=origin"],
-                &[("E_INVALID_PLACE_ID", "is not a usable id"), SHED_UNUSED],
-            ),
-            (
-                &[
-                    "place id=a use=shed theme=t at=origin",
-                    "place id=a use=hut theme=t at=origin",
-                ],
-                &[("E_DUPLICATE_PLACE_ID", "duplicate `id=a`")],
-            ),
-            (
-                &["place id=a use=hut theme=t"],
-                &[
-                    ("E_INVALID_PLACE_ORIGIN", "missing an origin selector"),
-                    SHED_UNUSED,
-                ],
-            ),
-            (
-                &["place id=a use=hut theme=t at=origin east_of=nowhere"],
-                &[
-                    ("E_INVALID_PLACE_ORIGIN", "more than one origin selector"),
-                    SHED_UNUSED,
-                ],
-            ),
-            (
-                &["place id=a use=hut theme=t at=front"],
-                &[
-                    ("E_INVALID_PLACE_ORIGIN", "`at=` only accepts `origin`"),
-                    SHED_UNUSED,
-                ],
-            ),
-            (
-                &["place id=a use=hut theme=t east_of=3"],
-                &[
-                    (
-                        "E_INVALID_PLACE_ORIGIN",
-                        "`east_of=` expects a place id label",
-                    ),
-                    SHED_UNUSED,
-                ],
-            ),
-            (
-                &["place id=a use=hut theme=t east_of=nowhere"],
-                &[
-                    (
-                        "E_UNRESOLVED_PLACE_REF",
-                        "`east_of=nowhere` in site `v` does not name a prior place id",
-                    ),
-                    SHED_UNUSED,
-                ],
-            ),
-            (
-                &["place id=a use=hut theme=t north_of=nowhere"],
-                &[
-                    (
-                        "E_UNRESOLVED_PLACE_REF",
-                        "`north_of=nowhere` in site `v` does not name a prior place id",
-                    ),
-                    SHED_UNUSED,
-                ],
-            ),
-            (
-                &[
-                    "place id=\"a.b\" use=shed theme=t at=origin",
-                    "place id=b use=hut theme=t east_of=\"a.b\"",
-                ],
-                &[
-                    ("E_INVALID_PLACE_ID", "is not a usable id"),
-                    ("W_DEFERRED_PLACE", "names a `place` row refused for its id"),
-                ],
-            ),
-            (&["place id=a use=hut theme=t at=origin"], &[SHED_UNUSED]),
-            (
-                &["place id=a use=\"hut\" theme=t at=origin"],
-                &[SHED_UNUSED],
-            ),
-            (
-                &["place id=a use=hutt theme=t at=origin"],
-                &[
-                    (
-                        "E_UNRESOLVED_PLACE_REF",
-                        "`use=hutt` references an unknown def",
-                    ),
-                    HUT_UNUSED,
-                    SHED_UNUSED,
-                ],
-            ),
-            (
-                &["place id=a use=3 theme=t at=origin"],
-                &[HUT_UNUSED, SHED_UNUSED],
-            ),
-            (
-                &["place id=a use=@hut theme=t at=origin"],
-                &[HUT_UNUSED, SHED_UNUSED],
-            ),
-        ];
         // Every case is run before anything is asserted, so one failure
         // does not hide the rest.
-        let mismatches: Vec<String> = cases
+        let mismatches: Vec<String> = UNUSED_DEF_CASES
             .iter()
             .filter_map(|(rows, expected)| {
                 let found = unused_def_findings(rows);
