@@ -122,10 +122,10 @@ fn an_unreadable_sym_on_a_window_that_is_not_cut_is_still_reported() {
 
 #[test]
 fn an_unreadable_sym_on_a_repeated_window_cuts_nothing() {
-    // `sym=true` refuses a window with `repeat=`, and `sym=false` builds
-    // it. Reading an unreadable `sym=` as `false` would build three
-    // windows the source may have refused, so nothing is cut, as for
-    // `sym=true`.
+    // `sym=true` refuses a window with `repeat=` greater than 1, and
+    // `sym=false` builds this one. Reading an unreadable `sym=` as `false`
+    // would build three windows the source may have refused, so nothing
+    // is cut, as for `sym=true`.
     let repeated = |sym: &str| window(&format!(" repeat=3 step=2{sym}"));
     let refused = lowered(&repeated(" sym=true"));
     let built = lowered(&repeated(" sym=false"));
@@ -141,8 +141,9 @@ fn an_unreadable_sym_on_a_repeated_window_cuts_nothing() {
         vec![
             (
                 "W_DEFERRED_MEMBER",
-                "window with `repeat=` is not cut while its `sym=` is unreadable: `sym=true` \
-                 with `repeat=` is not yet supported, and `sym=false` is not what was written",
+                "window with `repeat=` greater than 1 is not cut while its `sym=` is \
+                 unreadable: `sym=true` with such a `repeat=` is not yet supported, and \
+                 `sym=false` is not what was written",
             ),
             (
                 "W_IGNORED_ARGUMENT",
@@ -152,8 +153,9 @@ fn an_unreadable_sym_on_a_repeated_window_cuts_nothing() {
     );
     assert_eq!(
         ir.diagnostics[1].notes[0].message,
-        "this window has `repeat=`, which builds only with `sym=false`, so it is not cut while \
-         `sym=` is unreadable — see the finding on the same line",
+        "this window has `repeat=` greater than 1, which `sym=true` does not yet support, so it \
+         is not cut on the `sym=false` default while `sym=` is unreadable — see the finding on \
+         the same line",
     );
 }
 

@@ -3075,16 +3075,19 @@ const NONNEG_U32: &str = "a non-negative integer that fits in u32";
 ///   and nothing is reported.
 /// - `Err(unread)`: the key was written and `read` refused it. This is the
 ///   unreadable value `spec/lint` "Error vs warning" reports as
-///   `W_IGNORED_ARGUMENT`, and the caller applies its default.
+///   `W_IGNORED_ARGUMENT`. The caller applies its default, or, where the
+///   key decides whether the member is built at all, refuses the member
+///   instead.
 ///
 /// Every caller reports the [`UnreadArgument`], whether or not the member
 /// then reaches the build: the value is unreadable wherever the member
 /// ends up, and holding the finding back until a later refusal is repaired
 /// only costs the author another compile to learn it. What differs is the
 /// note, which [`UnreadArgument::report`] takes from the caller once it
-/// knows: the default's effect on a member in the build, or that the
-/// member is not built either way. A member dropped before its reader runs
-/// at all (a level-scoped roof, say) is not read, and so reports nothing.
+/// knows: the default's effect on a member in the build, that the member
+/// is not built either way, or that it was refused instead of given the
+/// default. A member dropped before its reader runs at all (a level-scoped
+/// roof, say) is not read, and so reports nothing.
 ///
 /// `expected` completes "`key=` must be …".
 fn read_or_ignore<'m, T>(
@@ -3132,8 +3135,8 @@ fn ident_or_ignore<'m>(
 /// A `key=` written with a value its reader cannot use — the third outcome
 /// of [`read_or_ignore`], beside "read" and "not written".
 ///
-/// Not yet a [`Diagnostic`]: its note says what the default did to the
-/// output, and only the caller knows whether the member reached the build.
+/// Not yet a [`Diagnostic`]: its note says what became of the member, and
+/// only the caller knows whether it reached the build.
 #[derive(Debug)]
 struct UnreadArgument {
     /// The value's own span, so the finding underlines what was written,
@@ -3156,8 +3159,9 @@ impl UnreadArgument {
     /// The primary stops at "the value was ignored" because whether the
     /// member is in the build is not a fact the reader has. The note
     /// carries it instead, in the caller's words: what the default did to
-    /// the output when the member is built, or that it is not built either
-    /// way when a finding on the same line refused it.
+    /// the output when the member is built, that it is not built either way
+    /// when a finding on the same line refused it, or that the finding on
+    /// the same line refused it instead of giving it the default.
     fn report(self, consequence: &str) -> Diagnostic {
         let Self {
             span,
@@ -4912,8 +4916,9 @@ fn fill_window(
                 "this window is not cut either way — see the finding on the same line"
             }
             WindowCut::RefusedForUnreadSym => {
-                "this window has `repeat=`, which builds only with `sym=false`, so it is not \
-                 cut while `sym=` is unreadable — see the finding on the same line"
+                "this window has `repeat=` greater than 1, which `sym=true` does not yet \
+                 support, so it is not cut on the `sym=false` default while `sym=` is \
+                 unreadable — see the finding on the same line"
             }
         })
     }));
@@ -4928,15 +4933,16 @@ enum WindowCut {
     /// The window was refused for a reason a readable `sym=` would not
     /// change.
     Refused,
-    /// The window has `repeat=`, which `sym=true` refuses and `sym=false`
-    /// builds, and its `sym=` is unreadable: it was refused rather than
-    /// built on a default the source may not mean.
+    /// The window has `repeat=` greater than 1, which `sym=true` refuses,
+    /// and its `sym=` is unreadable: it was refused instead of carried on
+    /// with the `sym=false` default, which the source may not mean.
     RefusedForUnreadSym,
 }
 
 /// [`fill_window`]'s refusals and paint, with `sym=` already read: `None`
 /// when the value written is unreadable, in which case the window is
-/// painted unmirrored unless whether it is built at all turns on `sym=`.
+/// painted unmirrored, or refused if its `repeat=` is greater than 1, which
+/// `sym=true` refuses.
 #[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn cut_window(
     member: &Member,
@@ -5011,15 +5017,15 @@ fn cut_window(
                 ));
                 return WindowCut::Refused;
             }
-            // `sym=true` would refuse this window and `sym=false` would
-            // build it, so building it on the default would turn an
-            // unreadable value into a window the source may have refused.
+            // `sym=true` refuses a window with `repeat=` greater than 1, so
+            // carrying on with the `sym=false` default could build a window
+            // the source refused.
             None => {
                 diagnostics.push(diag_deferred_member_reason(
                     member,
-                    "window with `repeat=` is not cut while its `sym=` is unreadable: \
-                     `sym=true` with `repeat=` is not yet supported, and `sym=false` is not \
-                     what was written",
+                    "window with `repeat=` greater than 1 is not cut while its `sym=` is \
+                     unreadable: `sym=true` with such a `repeat=` is not yet supported, and \
+                     `sym=false` is not what was written",
                 ));
                 return WindowCut::RefusedForUnreadSym;
             }
