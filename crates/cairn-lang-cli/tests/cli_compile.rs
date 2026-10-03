@@ -1126,6 +1126,277 @@ fn c25_east_of_unknown_ref_errors_with_suggestion() {
     );
 }
 
+/// The source every refused-id test below runs: one `def hut`, one theme
+/// and a site whose rows are `rows`, the first of them on line 10.
+fn site_with_rows(rows: &[&str]) -> String {
+    let mut source = String::from(
+        "@cairn 2026.06\n\ndef hut size=3x3:\n  floor mat_slot=floor\n\n\
+         theme t:\n  slot floor -> @oak_planks\n\nsite s:\n",
+    );
+    for row in rows {
+        source.push_str("  ");
+        source.push_str(row);
+        source.push('\n');
+    }
+    source
+}
+
+/// `cairn check` over [`site_with_rows`]: the exit code and stderr.
+fn check_rows(rows: &[&str]) -> (Option<i32>, String) {
+    let tmp = TempDir::new().expect("tempdir");
+    let src = write_source(tmp.path(), "rows.crn", &site_with_rows(rows));
+    let result = cairn("check", &[src.to_str().unwrap()]);
+    let reported = String::from_utf8(result.stderr).expect("utf-8");
+    (result.status.code(), reported)
+}
+
+/// Every finding in `reported` as `(line, code)`, in print order, and
+/// nothing else: comparing the whole list is what bounds the total, so a
+/// finding sprouting on a row a test means to keep quiet fails it.
+fn findings(reported: &str) -> Vec<(usize, String)> {
+    reported
+        .lines()
+        .filter_map(|line| {
+            let (location, rest) = line.split_once(": ")?;
+            let code = rest
+                .strip_prefix("error[")
+                .or_else(|| rest.strip_prefix("warning["))?;
+            let (code, _) = code.split_once(']')?;
+            let row = location.rsplit(':').nth(1)?.parse().ok()?;
+            Some((row, code.to_owned()))
+        })
+        .collect()
+}
+
+/// The lines spanned notes point at, in print order.
+fn note_rows(reported: &str) -> Vec<usize> {
+    reported
+        .lines()
+        .filter_map(|line| {
+            let (location, rest) = line.split_once(": ")?;
+            rest.trim_start().strip_prefix("note:")?;
+            location.rsplit(':').nth(1)?.parse().ok()
+        })
+        .collect()
+}
+
+fn owned(pairs: &[(usize, &str)]) -> Vec<(usize, String)> {
+    pairs
+        .iter()
+        .map(|(row, code)| (*row, (*code).to_owned()))
+        .collect()
+}
+
+/// A row refused with `E_INVALID_PLACE_ID` is still the row a later
+/// `east_of=` / `north_of=` naming it means, so the reference is not
+/// `E_UNRESOLVED_PLACE_REF`, whose "declare the target above this line"
+/// would send the author to look for a typo. It is the cascade
+/// `W_DEFERRED_PLACE`, on the referencing row, with a note pointing at the
+/// refused one. A reference to an id no row declares is still unresolved,
+/// which the last row pins: without it, suppressing every reference would
+/// pass too.
+#[test]
+fn a_reference_to_a_place_refused_for_its_id_is_a_cascade_on_its_own_row() {
+    let (code, reported) = check_rows(&[
+        "place id=anchor use=hut theme=t at=origin",
+        "place id=\"sub/hut\" use=hut theme=t east_of=anchor gap=2",
+        "place id=b use=hut theme=t east_of=\"sub/hut\" gap=2",
+        "place id=\"x.y\" use=hut theme=t east_of=anchor gap=2",
+        "place id=c use=hut theme=t north_of=\"x.y\" gap=2",
+        "place id=d use=hut theme=t east_of=nowhere gap=2",
+    ]);
+    assert_eq!(code, Some(1), "reported={reported}");
+    assert_eq!(
+        findings(&reported),
+        owned(&[
+            (11, "E_INVALID_PLACE_ID"),
+            (12, "W_DEFERRED_PLACE"),
+            (13, "E_INVALID_PLACE_ID"),
+            (14, "W_DEFERRED_PLACE"),
+            (15, "E_UNRESOLVED_PLACE_REF"),
+        ]),
+        "reported={reported}",
+    );
+    assert_eq!(
+        note_rows(&reported),
+        [11, 13],
+        "each cascade points at the row refused under the id it names; reported={reported}",
+    );
+    assert!(
+        reported.contains("`east_of=nowhere`"),
+        "the one unresolved reference is the one naming no row; got: {reported}",
+    );
+}
+
+/// `refused_place_ids` fills in source order, like the ids it shadows, so a
+/// reference *above* the refused row names no prior place and is reported
+/// as any other forward reference is. A refactor that collects every
+/// refused id in one pass first would turn this into a cascade too, and
+/// the "declare the target above this line" note with it.
+#[test]
+fn a_reference_above_the_row_refused_for_its_id_names_no_prior_place() {
+    let (code, reported) = check_rows(&[
+        "place id=anchor use=hut theme=t at=origin",
+        "place id=b use=hut theme=t east_of=\"sub/hut\" gap=2",
+        "place id=\"sub/hut\" use=hut theme=t east_of=anchor gap=2",
+    ]);
+    assert_eq!(code, Some(1), "reported={reported}");
+    assert_eq!(
+        findings(&reported),
+        owned(&[(11, "E_UNRESOLVED_PLACE_REF"), (12, "E_INVALID_PLACE_ID")]),
+        "reported={reported}",
+    );
+    assert!(
+        reported.contains("declare the target above this line"),
+        "the forward reference keeps its ordering note; got: {reported}",
+    );
+}
+
+/// The `IdError::Empty` side of the same rule: `id=""` is refused for its
+/// id, and `east_of=""` names that row, so it is the cascade rather than a
+/// reference to nothing.
+#[test]
+fn a_reference_to_an_empty_place_id_is_a_cascade_on_its_own_row() {
+    let (code, reported) = check_rows(&[
+        "place id=anchor use=hut theme=t at=origin",
+        "place id=\"\" use=hut theme=t east_of=anchor gap=2",
+        "place id=b use=hut theme=t east_of=\"\" gap=2",
+    ]);
+    assert_eq!(code, Some(1), "reported={reported}");
+    assert_eq!(
+        findings(&reported),
+        owned(&[(11, "E_INVALID_PLACE_ID"), (12, "W_DEFERRED_PLACE")]),
+        "reported={reported}",
+    );
+    assert_eq!(note_rows(&reported), [11], "reported={reported}");
+}
+
+/// One refused id written twice: each row is refused on its own line, and a
+/// reference to the id is one cascade whose note points at the first of the
+/// two rows, as `E_DUPLICATE_PLACE_ID`'s "first row wins" does for a usable
+/// id. The repeat itself is not a second finding: `E_DUPLICATE_ID` leaves
+/// `place` rows to `E_DUPLICATE_PLACE_ID`, which compares only accepted ids.
+#[test]
+fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
+    let (code, reported) = check_rows(&[
+        "place id=anchor use=hut theme=t at=origin",
+        "place id=\"a/b\" use=hut theme=t east_of=anchor gap=2",
+        "place id=\"a/b\" use=hut theme=t east_of=anchor gap=8",
+        "place id=c use=hut theme=t east_of=\"a/b\" gap=2",
+    ]);
+    assert_eq!(code, Some(1), "reported={reported}");
+    assert_eq!(
+        findings(&reported),
+        owned(&[
+            (11, "E_INVALID_PLACE_ID"),
+            (12, "E_INVALID_PLACE_ID"),
+            (13, "W_DEFERRED_PLACE"),
+        ]),
+        "reported={reported}",
+    );
+    assert_eq!(
+        note_rows(&reported),
+        [11],
+        "the cascade points at the first row; reported={reported}",
+    );
+}
+
+/// `place id=ID` refused on `shown`, by `check` and by `compile`, which
+/// writes nothing. Run once per character, so one failing does not hide
+/// the rest.
+fn assert_place_id_refused(id: &str, shown: &str) {
+    let tmp = TempDir::new().expect("tempdir");
+    let out = tmp.path().join("out");
+    let src = write_source(
+        tmp.path(),
+        "refused.crn",
+        &site_with_rows(&[&format!("place id=\"{id}\" use=hut theme=t at=origin")]),
+    );
+    let refusal = format!("is not a usable id: it contains `{shown}`");
+
+    let checked = cairn("check", &[src.to_str().unwrap()]);
+    let check_err = String::from_utf8_lossy(&checked.stderr);
+    assert_eq!(checked.status.code(), Some(1), "stderr={check_err}");
+    assert!(
+        check_err.contains("error[E_INVALID_PLACE_ID]") && check_err.contains(&refusal),
+        "the id must be refused on `{shown}`, got: {check_err}",
+    );
+
+    let compiled = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    let compile_err = String::from_utf8_lossy(&compiled.stderr);
+    assert_eq!(compiled.status.code(), Some(1), "stderr={compile_err}");
+    assert!(
+        !out.exists(),
+        "compile must write nothing, got: {compile_err}"
+    );
+}
+
+// The characters a Windows file name cannot carry are refused like the path
+// separators, on every host: an id is the stem of the artifact's file name,
+// and an id Linux accepts used to fail on Windows with a bare OS error. `"`
+// is in the rule too, but a source string literal cannot carry one; the
+// lockfile reader is where it is reached. U+0001 is one of the controls
+// Windows reserves, and is quoted as its escape.
+
+#[test]
+fn a_place_id_carrying_a_star_is_refused_on_every_host() {
+    assert_place_id_refused("a*b", "*");
+}
+
+#[test]
+fn a_place_id_carrying_a_pipe_is_refused_on_every_host() {
+    assert_place_id_refused("a|b", "|");
+}
+
+#[test]
+fn a_place_id_carrying_a_question_mark_is_refused_on_every_host() {
+    assert_place_id_refused("a?b", "?");
+}
+
+#[test]
+fn a_place_id_carrying_a_less_than_sign_is_refused_on_every_host() {
+    assert_place_id_refused("a<b", "<");
+}
+
+#[test]
+fn a_place_id_carrying_a_greater_than_sign_is_refused_on_every_host() {
+    assert_place_id_refused("a>b", ">");
+}
+
+#[test]
+fn a_place_id_carrying_a_control_windows_reserves_is_refused_and_escaped() {
+    assert_place_id_refused("a\u{1}b", "\\u{1}");
+}
+
+// The controls past U+001F are legal in a Windows file name and are refused
+// on their own ground: they print as nothing, so the id could not be shown.
+// Whitespace other than a plain space would print as one, so it is quoted
+// as its escape for the same reason.
+
+#[test]
+fn a_place_id_carrying_a_control_windows_allows_is_refused_as_illegible() {
+    assert_place_id_refused("a\u{85}b", "\\u{85}");
+}
+
+#[test]
+fn a_place_id_carrying_a_no_break_space_is_refused_and_escaped() {
+    assert_place_id_refused("a\u{a0}b", "\\u{a0}");
+}
+
+#[test]
+fn a_place_id_carrying_an_ideographic_space_is_refused_and_escaped() {
+    assert_place_id_refused("a\u{3000}b", "\\u{3000}");
+}
+
 #[test]
 fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
     // A def that no site references is a noop (templates compile to no
