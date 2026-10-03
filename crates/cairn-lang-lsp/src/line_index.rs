@@ -39,6 +39,12 @@ impl LineIndex {
         }
     }
 
+    /// How many lines the text has, counting the empty line after a
+    /// trailing terminator: `"abc\n"` has 2, and `""` has 1.
+    pub(crate) fn line_count(&self) -> usize {
+        self.line_starts.len()
+    }
+
     /// Convert a byte offset into a 0-based line / UTF-16 code-unit column
     /// [`lsp_types::Position`]. Offsets past the end of `source` clamp to
     /// the final position.
