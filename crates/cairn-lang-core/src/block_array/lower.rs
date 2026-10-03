@@ -7440,9 +7440,11 @@ struct s size=9x7
         // `spec/syntax` "Selectors": a mirror overlapping the primary is
         // `W_DEFERRED_MEMBER`. A centred window's mirror is the same
         // rectangle, so the author asked for two windows and got one.
-        // Both centred shapes on a 5-wide wall: mirror_offset = 5 - 2 - 1
-        // = 2, and 5 - 1 - 3 = 1.
-        for (offset, width) in [(2, 1), (1, 3)] {
+        // All three centred shapes on a 5-wide wall, the solutions of
+        // 2*offset + width == 5: mirror_offset = 5 - 2 - 1 = 2,
+        // 5 - 1 - 3 = 1 and 5 - 0 - 5 = 0. The last puts `mirror_offset`
+        // at 0, the floor its `saturating_sub` clamps to.
+        for (offset, width) in [(2, 1), (1, 3), (0, 5)] {
             let src = format!(
                 "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\n\
                  struct s size=5x5\n  walls mat_slot=w height=3\n  \
