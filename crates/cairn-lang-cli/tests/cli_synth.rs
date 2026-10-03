@@ -1562,12 +1562,22 @@ fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
     // a warning-severity finding on the fixture would still exit 0 with
     // the flag accepted, and that is a lint's business rather than this
     // gate's.
+    //
+    // A refusing stage is also run over `FINDING_SOURCES`, where the
+    // stray-flag refusal has to be the one stderr line whatever the file
+    // holds, as the missing-flag refusal is in
+    // `cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings`.
+    // The CONTROL runs each source on that stage without `--edition`, where
+    // its finding is what surfaces.
     let path = examples_dir().join("redstone-door.crn");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let sources = write_finding_sources(dir.path());
+    let tagged = edition_tagged_stages();
     let editions = edition_values();
     let mut refused = 0;
     let mut accepted = 0;
     for stage in stage_values() {
-        let neutral = stage_is_edition_neutral(&stage);
+        let neutral = !tagged.contains(&stage);
         if neutral {
             refused += 1;
         } else {
@@ -1585,42 +1595,92 @@ fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
                     path.to_str().unwrap(),
                 ],
             );
-            let stderr = String::from_utf8(out.stderr).expect("utf-8");
             if neutral {
-                assert_eq!(
-                    out.status.code(),
-                    Some(2),
-                    "edition-neutral --stage {stage} should refuse --edition {edition}, \
-                     got stderr: {stderr}",
-                );
-                assert!(
-                    out.stdout.is_empty(),
-                    "--stage {stage} --edition {edition} must print no IR, got: {}",
-                    String::from_utf8_lossy(&out.stdout),
-                );
-                // The message lists the edition-neutral stages by bare
-                // name; the stage just refused has to be among them, or
-                // the caller is told a set the gate does not enforce.
-                assert!(
-                    stderr.contains("`--edition`")
-                        && stderr.contains("edition-neutral")
-                        && stderr.contains(&format!("`{stage}`")),
-                    "--stage {stage} --edition {edition} should be refused as a stray flag \
-                     naming `{stage}` among the edition-neutral stages, got: {stderr}",
-                );
+                assert_stray_edition_usage_error(&out, &stage, edition, "on redstone-door.crn");
             } else {
                 assert_eq!(
                     out.status.code(),
                     Some(0),
                     "edition-tagged --stage {stage} should accept --edition {edition}, \
-                     got stderr: {stderr}",
+                     got stderr: {}",
+                    String::from_utf8_lossy(&out.stderr),
                 );
             }
+        }
+        if !neutral {
+            continue;
+        }
+        for (name, source, code) in &sources {
+            for edition in &editions {
+                let out = cairn(
+                    "synth",
+                    &[
+                        "--experimental-logic-synth",
+                        "--stage",
+                        &stage,
+                        "--edition",
+                        edition,
+                        source.to_str().unwrap(),
+                    ],
+                );
+                assert_stray_edition_usage_error(&out, &stage, edition, &format!("on {name}"));
+            }
+
+            let out = cairn(
+                "synth",
+                &[
+                    "--experimental-logic-synth",
+                    "--stage",
+                    &stage,
+                    source.to_str().unwrap(),
+                ],
+            );
+            assert_reports_finding(&out, code, &format!("--stage {stage} on {name}"));
         }
     }
     assert!(
         refused > 0 && accepted > 0,
         "every --stage value fell on one side of the partition ({refused} stages refused \
          --edition, {accepted} accepted it), so this test pinned only half of it",
+    );
+}
+
+/// Assert that `out` is the stray-`--edition` usage error for
+/// `--stage <stage> --edition <edition>` and nothing else: exit 2, no
+/// stdout, and one stderr line, naming the flag and `<stage>` among the
+/// edition-neutral stages. `context` says which run it was, after the
+/// flags.
+fn assert_stray_edition_usage_error(out: &Output, stage: &str, edition: &str, context: &str) {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "edition-neutral --stage {stage} should refuse --edition {edition} {context}, \
+         got stderr: {stderr}",
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "--stage {stage} --edition {edition} {context} must print no IR, got: {}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "--stage {stage} --edition {edition} {context}: stderr should be the usage error \
+         alone, got: {stderr}",
+    );
+    assert!(
+        lines[0].contains("`--edition`") && lines[0].contains("edition-neutral"),
+        "--stage {stage} --edition {edition} {context} should be refused as a stray flag, \
+         got: {stderr}",
+    );
+    // The message lists the edition-neutral stages by bare name; the stage
+    // just refused has to be among them, or the caller is told a set the
+    // gate does not enforce.
+    assert!(
+        lines[0].contains(&format!("`{stage}`")),
+        "--stage {stage} --edition {edition} {context} should name `{stage}` among the \
+         edition-neutral stages, got: {stderr}",
     );
 }
