@@ -335,6 +335,10 @@ fn collect_floor_cells(
     let mut extents: IndexMap<String, FloorExtent> = IndexMap::new();
     for (index, (key, PlacedBody { placement, .. })) in placed.iter().enumerate() {
         let Some(ba) = structures.get(key) else {
+            // INVARIANT: `lower_site` inserts each key into `placed` and
+            // into `structures` together, first write winning in both, and
+            // nothing removes one before this runs.
+            debug_assert!(false, "placement `{key}` has no structure");
             continue;
         };
         // Only the y=0 plane matters: walkways sit at the ports' shared
@@ -344,6 +348,14 @@ fn collect_floor_cells(
         for z in 0..ba.dims.z {
             for x in 0..ba.dims.x {
                 let Some(i) = ba.dims.index(x, 0, z) else {
+                    // INVARIANT: the loop keeps `x` and `z` inside `dims`,
+                    // and a lowered body is at least one cell tall, so its
+                    // row 0 exists.
+                    debug_assert!(
+                        false,
+                        "cell ({x}, 0, {z}) of `{key}` is outside {:?}",
+                        ba.dims
+                    );
                     continue;
                 };
                 let voxel = ba.voxels[i];
@@ -355,13 +367,21 @@ fn collect_floor_cells(
                         .ok()
                         .and_then(|local| origin.checked_add(local))
                 };
-                // A cell past `i32` has no world coordinate, so no walkway
-                // cell can land on it either. Saturating folded every such
-                // column onto the edge cell, which then read as laid by
-                // whichever of them was not air.
+                // INVARIANT: `PlaceAnchor::origin` refuses a row whose body
+                // reaches past `i32`, so every cell of a placed body has a
+                // world coordinate. Loud in debug builds; a release build
+                // skips the cell. Saturating it instead would fold every
+                // column past the range onto the edge cell, which would then
+                // read as laid by whichever of them was not air.
                 let (Some(wx), Some(wz)) =
                     (world(placement.origin.0, x), world(placement.origin.2, z))
                 else {
+                    debug_assert!(
+                        false,
+                        "cell ({x}, 0, {z}) of `{key}` at {:?} has no world coordinate; \
+                         `PlaceAnchor::origin` should have refused the row",
+                        placement.origin,
+                    );
                     continue;
                 };
                 let cell = (wx, placement.origin.1, wz);
@@ -1483,36 +1503,27 @@ fn lower_site<'a>(
         // The anchor reads `placed` for prior-place lookups, so the lookup
         // has to happen before *this* placement is inserted. A lookup
         // misses when the prior place never reached `placed`, which is any
-        // `continue` arm of this loop: those above, this deferral, or the
-        // volume refusal and the origin-range refusal below. Falling back to
-        // `(0, 0, 0)` would silently stack the placement on top of `home1`,
-        // so the row is deferred and skipped instead, before its body is
-        // lowered; only the origin waits for the lowered dims.
+        // `continue` arm of this loop: those above, or, below, the anchor
+        // deferral, the volume refusal and the `i32` range refusal. Falling
+        // back to `(0, 0, 0)` would silently stack the placement on top of
+        // `home1`, so the row is deferred and skipped instead; only the
+        // origin waits for the lowered dims.
         //
         // An unreadable `gap=` is reported on every path out of this row,
         // placed or not, with a note that says which: see
         // [`read_or_ignore`] for why the finding is never held back.
         let (anchor, gap_unread) = resolve_place_anchor(member, placed, &site.name);
-        let Some(anchor) = anchor else {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
-            ));
-            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
-            continue;
-        };
 
         // The body's findings go straight out, whether or not the row is
-        // then placed. Lowering a body takes nothing from the row's
-        // origin — the voxels are local to the body, and the origin is
-        // worked out from them afterwards — so every finding it raises is
-        // one the row would have raised had it landed: a defect in the
-        // `def` or the theme, which the author has to fix wherever the row
-        // ends up. Holding them for a refused row only moved them one
-        // compile later. A row whose anchor did not lower, above, is the
-        // different case: it returns before the body is lowered, so its
-        // body's findings are never produced at all.
-        let Some(LoweredBody { array, walls, cut }) = lower_body_to_block_array(
+        // then placed — also when its anchor did not lower. Lowering a body
+        // takes nothing from the row's origin — the voxels are local to
+        // the body, and the origin is worked out from them afterwards — so
+        // every finding it raises is one the row would have raised had it
+        // landed: a defect in the `def` or the theme, which the author has
+        // to fix wherever the row ends up. Holding them for a refused row
+        // only moved them one compile later, and a `def` that only refused
+        // rows place would never have reported them at all.
+        let body = lower_body_to_block_array(
             BodyDescriptor {
                 kind: VoxelSource::Place,
                 scope_label: place_id,
@@ -1524,7 +1535,18 @@ fn lower_site<'a>(
             Some(scope),
             registry,
             diagnostics,
-        ) else {
+        );
+        // Below the body on purpose, not an early return above it: a row
+        // whose anchor did not lower still reports its body's findings.
+        let Some(anchor) = anchor else {
+            diagnostics.push(diag_deferred_member_reason(
+                member,
+                "the prior place referenced by `east_of=`/`north_of=` did not lower, so this placement's origin cannot be resolved",
+            ));
+            report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
+            continue;
+        };
+        let Some(LoweredBody { array, walls, cut }) = body else {
             // The extent was refused; the diagnostic names the scope, and
             // recording a placement for a structure that does not exist
             // would leave the lockfile pointing at nothing.
@@ -1540,9 +1562,9 @@ fn lower_site<'a>(
         // only now that the body has been sized.
         let origin = match anchor.origin(dims) {
             Ok(origin) => origin,
-            Err(far) => {
-                diagnostics.push(diag_deferred_member_reason(member, &far.deferral()));
-                report_unread_gap(gap_unread, GapOutcome::OriginOutOfRange, diagnostics);
+            Err(refusal) => {
+                diagnostics.push(diag_deferred_member_reason(member, &refusal.deferral()));
+                report_unread_gap(gap_unread, GapOutcome::OutOfRange, diagnostics);
                 continue;
             }
         };
@@ -2083,24 +2105,69 @@ enum PlaceAnchor {
     },
 }
 
-/// The origin [`PlaceAnchor::origin`] works out to lies outside the `i32`
-/// range a placement records its origin in. `axis` is the one the selector
-/// moves along and `offset` the value that left the range — a sum for
-/// `east_of`, a difference for `north_of` — for the message.
+/// A placement [`PlaceAnchor::origin`] works out lies partly outside the
+/// `i32` range world coordinates are recorded and addressed in. `axis` is
+/// the one that left the range and `coord` the coordinate on it that did,
+/// for the message; `corner` says which coordinate that is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct OriginOutOfRange {
+struct PlacementOutOfRange {
+    corner: PlacementCorner,
     axis: char,
-    offset: i128,
+    coord: i128,
 }
 
-impl OriginOutOfRange {
+/// Which end of a placement's box [`PlacementOutOfRange`] found outside
+/// the range, and so what its `coord` holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlacementCorner {
+    /// The low-`x`, low-`z` origin the placement records. `coord` is the
+    /// origin on the axis its selector moves along: a sum for `east_of`, a
+    /// difference for `north_of`.
+    Origin,
+    /// The body's far edge, `origin + dims − 1`, where its last cell sits.
+    /// `coord` is that edge on the first of `x` and `z` that leaves the
+    /// range, not the whole high corner.
+    FarEdge,
+}
+
+impl PlacementOutOfRange {
+    /// `coord` as the `i32` it has to fit in, or the refusal that says it
+    /// does not.
+    fn fit(corner: PlacementCorner, axis: char, coord: i128) -> Result<i32, Self> {
+        i32::try_from(coord).map_err(|_| Self {
+            corner,
+            axis,
+            coord,
+        })
+    }
+
     /// The `W_DEFERRED_MEMBER` reason for the row this refuses.
+    ///
+    /// The repair depends on which end left the range. The far edge also
+    /// moves with the body's own extent, and on a `north_of` row no `gap=`
+    /// on the row itself moves `x`, so its advice names the body's `size=`
+    /// and `overhang=` beside the `gap=`.
     fn deferral(self) -> String {
-        let Self { axis, offset } = self;
+        let Self {
+            corner,
+            axis,
+            coord,
+        } = self;
+        let (what, recorded, repair) = match corner {
+            PlacementCorner::Origin => (
+                "origin works out to",
+                "a placement's origin is recorded in",
+                "shorten the `gap=` on this row or on a row it is placed relative to",
+            ),
+            PlacementCorner::FarEdge => (
+                "body reaches",
+                "a placement's cells are addressed in",
+                "shrink the body with its `def`'s `size=` or a roof's `overhang=`, or shorten \
+                 the `gap=` on this row or on a row it is placed relative to",
+            ),
+        };
         format!(
-            "this placement's origin works out to {axis}={offset}, past the {} to {} range \
-             a placement's origin is recorded in; shorten the `gap=` on this row or on a \
-             row it is placed relative to",
+            "this placement's {what} {axis}={coord}, past the {} to {} range {recorded}; {repair}",
             i32::MIN,
             i32::MAX,
         )
@@ -2119,29 +2186,48 @@ impl PlaceAnchor {
     /// The sum is taken in `i128`, where no `i32` origin, `u32` extent and
     /// `i64` gap can overflow, and refused when it leaves `i32` rather than
     /// saturated: a saturated origin put two placements on one coordinate,
-    /// the second stacked inside the first, and nothing said so.
-    fn origin(self, dims: Dims) -> Result<(i32, i32, i32), OriginOutOfRange> {
-        let fit = |axis: char, offset: i128| {
-            i32::try_from(offset).map_err(|_| OriginOutOfRange { axis, offset })
-        };
-        match self {
-            Self::WorldOrigin => Ok((0, 0, 0)),
+    /// the second stacked inside the first, and nothing said so. The body's
+    /// far edge, `origin + dims − 1` on `x` and `z`, is refused the same
+    /// way, since a cell past it has no world coordinate either. `y` is not
+    /// checked, because every placement's `y` is the `0` of the `at=origin`
+    /// row its chain starts from (`east_of` and `north_of` carry the
+    /// prior's `y` through) and [`MAX_STRUCTURE_VOLUME`] keeps `dims.y` far
+    /// below `i32::MAX`; a selector that moves `y` has to join the check.
+    fn origin(self, dims: Dims) -> Result<(i32, i32, i32), PlacementOutOfRange> {
+        use PlacementCorner::{FarEdge, Origin};
+        let fit = PlacementOutOfRange::fit;
+        // The low corner first: the far edge is measured from it, so it
+        // has to be in range before the far edge means anything.
+        let (x, y, z) = match self {
+            Self::WorldOrigin => (0, 0, 0),
             Self::EastOf {
                 prior_origin: (x, y, z),
                 prior_dims_x,
                 gap,
             } => {
                 let next_x = i128::from(x) + i128::from(prior_dims_x) + i128::from(gap);
-                Ok((fit('x', next_x)?, y, z))
+                (fit(Origin, 'x', next_x)?, y, z)
             }
             Self::NorthOf {
                 prior_origin: (x, y, z),
                 gap,
             } => {
                 let next_z = i128::from(z) - i128::from(dims.z) - i128::from(gap);
-                Ok((x, y, fit('z', next_z)?))
+                (x, y, fit(Origin, 'z', next_z)?)
             }
+        };
+        // INVARIANT: a body's `x` and `z` extents are its `size=` (a
+        // `NonZeroU32`) plus twice its overhang, so neither is 0, and
+        // `origin + dims − 1` is the last cell rather than one before the
+        // origin.
+        debug_assert!(
+            dims.x > 0 && dims.z > 0,
+            "a placed body has a zero extent: {dims:?}",
+        );
+        for (axis, low, extent) in [('x', x, dims.x), ('z', z, dims.z)] {
+            fit(FarEdge, axis, i128::from(low) + i128::from(extent) - 1)?;
         }
+        Ok((x, y, z))
     }
 }
 
@@ -2213,10 +2299,10 @@ enum GapOutcome {
     /// Refused for a reason no `gap=` reaches: its anchor did not lower,
     /// or its body was refused.
     NotPlaced,
-    /// Refused because the origin worked out at `gap=0` leaves the `i32`
-    /// range. Only that value was tried, so the note claims nothing about
-    /// any other `gap=`.
-    OriginOutOfRange,
+    /// Refused because the placement worked out at `gap=0` leaves the
+    /// `i32` range: its origin, or its body's far edge. Only that value was
+    /// tried, so the note claims nothing about any other `gap=`.
+    OutOfRange,
 }
 
 /// Report a `place` row's unreadable `gap=`, if it had one, with the note
@@ -2235,7 +2321,7 @@ fn report_unread_gap(
             GapOutcome::NotPlaced => {
                 "this row is not placed either way — see the finding on the same line"
             }
-            GapOutcome::OriginOutOfRange => {
+            GapOutcome::OutOfRange => {
                 "this row is not placed at `gap=0`, the value its origin was worked out \
                  with — see the finding on the same line"
             }
@@ -3031,16 +3117,19 @@ const NONNEG_U32: &str = "a non-negative integer that fits in u32";
 ///   and nothing is reported.
 /// - `Err(unread)`: the key was written and `read` refused it. This is the
 ///   unreadable value `spec/lint` "Error vs warning" reports as
-///   `W_IGNORED_ARGUMENT`, and the caller applies its default.
+///   `W_IGNORED_ARGUMENT`. The caller applies its default, or, where the
+///   key decides whether the member is built at all, refuses the member
+///   instead.
 ///
 /// Every caller reports the [`UnreadArgument`], whether or not the member
 /// then reaches the build: the value is unreadable wherever the member
 /// ends up, and holding the finding back until a later refusal is repaired
 /// only costs the author another compile to learn it. What differs is the
 /// note, which [`UnreadArgument::report`] takes from the caller once it
-/// knows: the default's effect on a member in the build, or that the
-/// member is not built either way. A member dropped before its reader runs
-/// at all (a level-scoped roof, say) is not read, and so reports nothing.
+/// knows: the default's effect on a member in the build, that the member
+/// is not built either way, or that it was refused instead of given the
+/// default. A member dropped before its reader runs at all (a level-scoped
+/// roof, say) is not read, and so reports nothing.
 ///
 /// `expected` completes "`key=` must be …".
 fn read_or_ignore<'m, T>(
@@ -3088,8 +3177,8 @@ fn ident_or_ignore<'m>(
 /// A `key=` written with a value its reader cannot use — the third outcome
 /// of [`read_or_ignore`], beside "read" and "not written".
 ///
-/// Not yet a [`Diagnostic`]: its note says what the default did to the
-/// output, and only the caller knows whether the member reached the build.
+/// Not yet a [`Diagnostic`]: its note says what became of the member, and
+/// only the caller knows whether it reached the build.
 #[derive(Debug)]
 struct UnreadArgument {
     /// The value's own span, so the finding underlines what was written,
@@ -3112,8 +3201,9 @@ impl UnreadArgument {
     /// The primary stops at "the value was ignored" because whether the
     /// member is in the build is not a fact the reader has. The note
     /// carries it instead, in the caller's words: what the default did to
-    /// the output when the member is built, or that it is not built either
-    /// way when a finding on the same line refused it.
+    /// the output when the member is built, that it is not built either way
+    /// when a finding on the same line refused it, or that the finding on
+    /// the same line refused it instead of giving it the default.
     fn report(self, consequence: &str) -> Diagnostic {
         let Self {
             span,
@@ -3739,12 +3829,14 @@ fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option
 /// surfaces a `W_DEFERRED_MEMBER` warning.
 fn shed_slope_to(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSide> {
     let Some(raw) = member.ident_value("slope_to") else {
-        let reason = if member.intent_state.contains_key("slope_to") {
-            "shed `slope_to=` must be one of front, back, left, right"
-        } else {
-            "shed roof requires `slope_to=` (one of front, back, left, right)"
+        let reason = match member.intent_state.get("slope_to") {
+            Some(written) => format!(
+                "shed `slope_to=` must be one of front, back, left, right, not {}",
+                written.value.describe(),
+            ),
+            None => "shed roof requires `slope_to=` (one of front, back, left, right)".to_owned(),
         };
-        diagnostics.push(diag_deferred_member_reason(member, reason));
+        diagnostics.push(diag_deferred_member_reason(member, &reason));
         return None;
     };
     if let Some(side) = WallSide::from_ident(raw) {
@@ -4841,9 +4933,11 @@ fn fill_window(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // An unreadable `sym=` (`sym=yes`, `sym="true"`) draws the window
-    // unmirrored. Read before anything can refuse the window, so it is
-    // reported in the same compile as a refusal, with a note that says
-    // which of the two happened.
+    // unmirrored, except on a window with `repeat=` greater than 1, which
+    // `sym=true` refuses: that one is refused. Read before anything can
+    // refuse the window, so it is reported in the same compile as a
+    // refusal, with a note that says which of the three [`WindowCut`]
+    // outcomes happened.
     let (sym, sym_unread) = match read_or_ignore(
         member,
         "sym",
@@ -4853,34 +4947,58 @@ fn fill_window(
         },
         "`true` or `false`",
     ) {
-        Ok(sym) => (sym.unwrap_or(false), None),
-        Err(unread) => (false, Some(unread)),
+        Ok(sym) => (Some(sym.unwrap_or(false)), None),
+        Err(unread) => (None, Some(unread)),
     };
     let cut = cut_window(member, sym, y_offset, ctx, palette, canvas, diagnostics);
     diagnostics.extend(sym_unread.map(|unread| {
-        unread.report(if cut {
-            "the window is drawn without its mirror, as `sym=false` would draw it"
-        } else {
-            "this window is not cut either way — see the finding on the same line"
+        unread.report(match cut {
+            WindowCut::Cut => {
+                "the window is drawn without its mirror, as `sym=false` would draw it"
+            }
+            WindowCut::Refused => {
+                "this window is not cut either way — see the finding on the same line"
+            }
+            WindowCut::RefusedForUnreadSym => {
+                "this window has `repeat=` greater than 1, which `sym=true` does not yet \
+                 support, so it is not cut on the `sym=false` default while `sym=` is \
+                 unreadable — see the finding on the same line"
+            }
         })
     }));
 }
 
-/// [`fill_window`]'s refusals and paint, with `sym=` already read. Returns
-/// whether the primary rectangle was cut, which is what the note on an
+/// What [`cut_window`] did with the window, which is what the note on an
 /// unreadable `sym=` has to say.
+#[derive(Clone, Copy)]
+enum WindowCut {
+    /// The primary rectangle was cut.
+    Cut,
+    /// The window was refused, and another finding says why. When its
+    /// `sym=` is unreadable, that reason holds whatever `sym=` had said.
+    Refused,
+    /// The window has `repeat=` greater than 1, which `sym=true` refuses,
+    /// and its `sym=` is unreadable: it was refused instead of carried on
+    /// with the `sym=false` default, which the source may not mean.
+    RefusedForUnreadSym,
+}
+
+/// [`fill_window`]'s refusals and paint, with `sym=` already read: `None`
+/// when the value written is unreadable, in which case the window is
+/// painted unmirrored, or refused if its `repeat=` is greater than 1, which
+/// `sym=true` refuses.
 #[allow(clippy::too_many_lines)] // one linear parse-and-paint chain reads better than 6 tiny helpers
 fn cut_window(
     member: &Member,
-    sym: bool,
+    sym: Option<bool>,
     y_offset: u32,
     ctx: &StructCtx<'_>,
     palette: &mut Palette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
+) -> WindowCut {
     let Some(side) = side_of(member, diagnostics) else {
-        return false;
+        return WindowCut::Refused;
     };
     // `offset=` defaults to 0 (the wall-local axis origin) when absent, so a
     // decorative repeat=N series can be authored as `window ... repeat=N
@@ -4898,7 +5016,7 @@ fn cut_window(
         Ok(args) => args,
         Err(fault) => {
             diagnostics.push(diag_deferred_member_reason(member, &fault.deferral()));
-            return false;
+            return WindowCut::Refused;
         }
     };
     let y_start = y_start_local.saturating_add(y_offset);
@@ -4922,30 +5040,51 @@ fn cut_window(
                 member,
                 "window `repeat=0` would stamp no instances; drop the window instead",
             ));
-            return false;
+            return WindowCut::Refused;
         }
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 1,
-        NonNegRead::Deferred => return false,
+        NonNegRead::Deferred => return WindowCut::Refused,
     };
     let step = match nonneg_int_or_defer(member, "step", diagnostics) {
         NonNegRead::Valid(v) => v,
         NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return false,
+        NonNegRead::Deferred => return WindowCut::Refused,
     };
-    if repeat > 1 && sym {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "window with both `repeat=` and `sym=true` is not yet supported",
-        ));
-        return false;
-    }
+    // Before `sym=`: a series without a positive `step=` is refused
+    // whatever `sym=` says, so an unreadable `sym=` is not why it is not
+    // cut, and the author hears about `step=` now rather than after
+    // repairing `sym=`.
     if repeat > 1 && step == 0 {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "window `repeat=` requires a positive `step=` so instances do not overlap",
         ));
-        return false;
+        return WindowCut::Refused;
+    }
+    if repeat > 1 {
+        match sym {
+            Some(false) => {}
+            Some(true) => {
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    "window with both `repeat=` and `sym=true` is not yet supported",
+                ));
+                return WindowCut::Refused;
+            }
+            // `sym=true` refuses a window with `repeat=` greater than 1, so
+            // carrying on with the `sym=false` default could build a window
+            // the source refused.
+            None => {
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    "window with `repeat=` greater than 1 is not cut while its `sym=` is \
+                     unreadable: `sym=true` with such a `repeat=` is not yet supported, and \
+                     `sym=false` is not what was written",
+                ));
+                return WindowCut::RefusedForUnreadSym;
+            }
+        }
     }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let span_end = offset
@@ -4959,7 +5098,7 @@ fn cut_window(
                 side_name(side),
             ),
         ));
-        return false;
+        return WindowCut::Refused;
     }
     // A window is a rectangle cut into a wall, so every row it cuts has
     // to be a row some `walls` member painted — not merely a row below
@@ -4994,7 +5133,7 @@ fn cut_window(
             )
         };
         diagnostics.push(diag_deferred_member_reason(member, &reason));
-        return false;
+        return WindowCut::Refused;
     }
     // Resolved below the two geometry checks above, not before them: both
     // return without painting, and a palette entry claimed on the way to
@@ -5017,7 +5156,7 @@ fn cut_window(
             diagnostics,
             ctx.theme_missing,
         ) else {
-            return false;
+            return WindowCut::Refused;
         };
         idx
     } else {
@@ -5042,12 +5181,12 @@ fn cut_window(
             canvas,
         );
     }
-    if sym {
+    if sym == Some(true) {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
         if mirror_offset == offset {
             // The mirror sits exactly on top of the primary; emitting it
             // again would be a no-op so we silently coalesce.
-            return true;
+            return WindowCut::Cut;
         }
         // Reject overlapping mirrors: a `sym=true` window asks for a
         // *pair*, not one wide span. If the two rectangles intersect the
@@ -5065,7 +5204,7 @@ fn cut_window(
                     side_name(side),
                 ),
             ));
-            return true;
+            return WindowCut::Cut;
         }
         paint_window_rect(
             ctx,
@@ -5076,7 +5215,7 @@ fn cut_window(
             canvas,
         );
     }
-    true
+    WindowCut::Cut
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -5134,12 +5273,14 @@ fn side_of(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<WallSid
         // line lower to nothing without telling the author, which breaks
         // the module-level promise that every dropped member surfaces a
         // diagnostic.
-        let reason = if member.intent_state.contains_key("side") {
-            "`side=` must be one of front, back, left, right"
-        } else {
-            "missing `side=` (expected one of front, back, left, right)"
+        let reason = match member.intent_state.get("side") {
+            Some(written) => format!(
+                "`side=` must be one of front, back, left, right, not {}",
+                written.value.describe(),
+            ),
+            None => "missing `side=` (expected one of front, back, left, right)".to_owned(),
         };
-        diagnostics.push(diag_deferred_member_reason(member, reason));
+        diagnostics.push(diag_deferred_member_reason(member, &reason));
         return None;
     };
     if let Some(side) = WallSide::from_ident(raw) {
@@ -5291,6 +5432,173 @@ mod tests {
     use super::*;
     use crate::block_array::BlockState;
     use crate::check::Severity;
+
+    /// [`PlaceAnchor::origin`] measures the far edge as `origin + dims − 1`,
+    /// which is one cell before the origin when an extent is 0. No body has
+    /// one, since `size=` is a `NonZeroU32`, so the only way to show that
+    /// the check fails loud rather than measuring from the wrong cell is to
+    /// hand it one. Debug-only because that is where `debug_assert!` lives.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "a placed body has a zero extent")]
+    fn a_zero_extent_is_not_measured_for_its_far_edge() {
+        let _ = PlaceAnchor::WorldOrigin.origin(Dims { x: 0, y: 1, z: 1 });
+    }
+
+    #[test]
+    fn a_placement_whose_far_edge_leaves_i32_is_refused_on_either_axis() {
+        // A source cannot reach the `z` case. The grammar has no negative
+        // integer literal in value position, so `gap=-1` is `E_PARSE`, and
+        // with a `gap=` of 0 or more no origin's `z` is above the `0` of
+        // `at=origin`: `east_of` keeps the prior's `z`, and `north_of`
+        // moves back from it by the new body's depth and the `gap=`. The
+        // anchor is checked directly, with a negative `gap`, so the `z`
+        // half of the rule is held all the same.
+        let dims = Dims { x: 5, y: 1, z: 5 };
+        let north = |prior_origin, gap| PlaceAnchor::NorthOf { prior_origin, gap };
+        // In range: the last cell on each axis is `i32::MAX`.
+        assert_eq!(
+            north((i32::MAX - 4, 0, i32::MAX), -1).origin(dims),
+            Ok((i32::MAX - 4, 0, i32::MAX - 4)),
+        );
+        // One wider on `x`: a `north_of` row keeps the prior's `x`.
+        assert_eq!(
+            north((i32::MAX - 3, 0, 0), 0).origin(dims),
+            Err(PlacementOutOfRange {
+                corner: PlacementCorner::FarEdge,
+                axis: 'x',
+                coord: i128::from(i32::MAX) + 1,
+            }),
+        );
+        let z_past = north((0, 0, i32::MAX), -2).origin(dims);
+        assert_eq!(
+            z_past,
+            Err(PlacementOutOfRange {
+                corner: PlacementCorner::FarEdge,
+                axis: 'z',
+                coord: i128::from(i32::MAX) + 1,
+            }),
+        );
+        // No source renders the sentence with `z` in it, so it is rendered
+        // here.
+        assert_eq!(
+            z_past.map_err(PlacementOutOfRange::deferral),
+            Err(
+                "this placement's body reaches z=2147483648, past the -2147483648 to \
+                 2147483647 range a placement's cells are addressed in; shrink the body with \
+                 its `def`'s `size=` or a roof's `overhang=`, or shorten the `gap=` on this row \
+                 or on a row it is placed relative to"
+                    .to_owned()
+            ),
+        );
+    }
+
+    /// One placed row as `lower_site` leaves it in `structures` and
+    /// `placed`: a body `width` cells wide and one cell deep and tall, every
+    /// cell stone, at `origin`.
+    fn one_placed_row(
+        origin: (i32, i32, i32),
+        width: u32,
+    ) -> (IndexMap<String, BlockArray>, IndexMap<String, PlacedBody>) {
+        let key = "site::s::b".to_owned();
+        let dims = Dims {
+            x: width,
+            y: 1,
+            z: 1,
+        };
+        let mut palette = Palette::new_with_air();
+        let stone = palette.intern(BlockState::bare("minecraft:stone"));
+        let mut structures = IndexMap::new();
+        structures.insert(
+            key.clone(),
+            BlockArray {
+                dims,
+                palette,
+                voxels: vec![stone; width as usize],
+                block_entities: Vec::new(),
+                entities: Vec::new(),
+                source_scope: key.clone(),
+            },
+        );
+        let mut placed = IndexMap::new();
+        placed.insert(
+            key,
+            PlacedBody {
+                placement: Placement {
+                    site: SiteName::new("s").expect("a site name"),
+                    place_id: PlaceId::new("b").expect("a place id"),
+                    source_def: "hut".to_owned(),
+                    theme: "t".to_owned(),
+                    origin,
+                    dims,
+                },
+                walls: WallColumn::default(),
+                cut: HashSet::new(),
+            },
+        );
+        (structures, placed)
+    }
+
+    /// A body whose last column is `i32::MAX` lays each of its cells under
+    /// a column of its own, and its extent ends on the edge.
+    #[test]
+    fn a_body_ending_on_the_i32_edge_lays_every_cell_once() {
+        let (structures, placed) = one_placed_row((i32::MAX - 2, 0, 0), 3);
+        let plan = collect_floor_cells(&structures, &placed);
+        assert_eq!(
+            plan.cells,
+            HashSet::from([(i32::MAX - 2, 0, 0), (i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
+        );
+        assert!(
+            plan.owners.values().all(|owners| owners.len() == 1),
+            "{:?}",
+            plan.owners,
+        );
+        assert_eq!(plan.extents["site::s::b"].max_x, i32::MAX);
+    }
+
+    /// The guard behind the far-edge refusal, for a body that runs past
+    /// `i32` and reaches the floor plan anyway. No source can: the refusal
+    /// stops the row first, so the plan is built by hand. A debug build
+    /// stops at the guard. A release build lays the cells that have a
+    /// coordinate and folds none of the rest onto the edge, where a fold
+    /// would give the edge cell a second owner.
+    #[test]
+    #[cfg_attr(debug_assertions, should_panic(expected = "has no world coordinate"))]
+    fn a_body_past_the_i32_edge_folds_nothing_onto_it() {
+        let (structures, placed) = one_placed_row((i32::MAX - 1, 0, 0), 3);
+        let plan = collect_floor_cells(&structures, &placed);
+        assert_eq!(
+            plan.cells,
+            HashSet::from([(i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
+        );
+        assert!(
+            plan.owners.values().all(|owners| owners.len() == 1),
+            "{:?}",
+            plan.owners,
+        );
+        assert_eq!(plan.extents["site::s::b"].max_x, i32::MAX);
+    }
+
+    /// The other two guards in [`collect_floor_cells`]: a placement with no
+    /// structure, and a body with no row 0. `lower_site` produces neither,
+    /// so each is handed in, and each stops a debug build.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "has no structure")]
+    fn a_placement_with_no_structure_is_not_a_silent_skip() {
+        let (_, placed) = one_placed_row((0, 0, 0), 3);
+        let _ = collect_floor_cells(&IndexMap::new(), &placed);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "is outside")]
+    fn a_body_with_no_row_0_is_not_a_silent_skip() {
+        let (mut structures, placed) = one_placed_row((0, 0, 0), 3);
+        structures["site::s::b"].dims.y = 0;
+        let _ = collect_floor_cells(&structures, &placed);
+    }
 
     /// The plate is the one hardcoded id a pack *can* redirect, and the
     /// list would be making a false promise if it carried it: the id is a
