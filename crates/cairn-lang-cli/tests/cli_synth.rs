@@ -1394,6 +1394,49 @@ fn write_finding_sources(dir: &Path) -> Vec<(&'static str, PathBuf, &'static str
 }
 
 #[test]
+fn cli_synth_experimental_gate_is_decided_ahead_of_the_edition_gate() {
+    // `cli_synth_requires_experimental_flag` passes no `--stage`, and the
+    // default `logic` is edition-neutral, so that run gets `--edition`
+    // right by leaving it out and never meets the edition gate. Here every
+    // stage is named, the edition-tagged ones without `--edition` and the
+    // edition-neutral ones with it, so either `--edition` refusal would
+    // apply too; the opt-in gate stands first, and its line is the only
+    // one.
+    let path = examples_dir().join("redstone-door.crn");
+    let tagged = edition_tagged_stages();
+    for stage in stage_values() {
+        let mut args = vec!["--stage", stage.as_str()];
+        if !tagged.contains(&stage) {
+            args.extend(["--edition", "java"]);
+        }
+        args.push(path.to_str().unwrap());
+        let out = cairn("synth", &args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "synth {args:?} without the opt-in flag should exit 2, got stderr: {stderr}",
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "synth {args:?} without the opt-in flag must print no IR, got: {}",
+            String::from_utf8_lossy(&out.stdout),
+        );
+        let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(
+            lines.len(),
+            1,
+            "synth {args:?}: stderr should be the opt-in refusal alone, got: {stderr}",
+        );
+        assert!(
+            lines[0].contains("--experimental-logic-synth"),
+            "synth {args:?}: the one line should be the opt-in refusal, not an --edition one, \
+             got: {stderr}",
+        );
+    }
+}
+
+#[test]
 fn cli_synth_missing_edition_reports_only_the_usage_error() {
     // The per-stage tests above each pin their own exit code and hint
     // text; what this one pins is that a refused stage printed nothing
