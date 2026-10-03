@@ -588,13 +588,6 @@
         }
       ]
     },
-    "bit": {
-      "type": "TOKEN",
-      "content": {
-        "type": "PATTERN",
-        "value": "[01]"
-      }
-    },
     "dont_care": {
       "type": "TOKEN",
       "content": {
@@ -709,12 +702,20 @@
           "name": "parenthesized_expression"
         },
         {
-          "type": "SYMBOL",
-          "name": "signal_ref"
+          "type": "RESERVED",
+          "content": {
+            "type": "SYMBOL",
+            "name": "signal_ref"
+          },
+          "context_name": "operand"
         },
         {
-          "type": "SYMBOL",
-          "name": "identifier"
+          "type": "RESERVED",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          },
+          "context_name": "operand"
         }
       ]
     },
@@ -1820,6 +1821,10 @@
     },
     {
       "type": "SYMBOL",
+      "name": "bit"
+    },
+    {
+      "type": "SYMBOL",
       "name": "_error_sentinel"
     }
   ],
@@ -1834,6 +1839,24 @@
       {
         "type": "STRING",
         "value": "false"
+      }
+    ],
+    "operand": [
+      {
+        "type": "STRING",
+        "value": "true"
+      },
+      {
+        "type": "STRING",
+        "value": "false"
+      },
+      {
+        "type": "STRING",
+        "value": "and"
+      },
+      {
+        "type": "STRING",
+        "value": "or"
       }
     ]
   }
