@@ -1456,12 +1456,12 @@ fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
 }
 
 /// A def named by a `place` row the resolver refuses is not reported as
-/// `W_UNUSED_DEF`, run end to end. The table over every refusal is
-/// `a_def_named_by_a_refused_place_row_is_not_unused` in `cairn-lang-core`'s
-/// `resolve/resolver.rs`; this runs one refusal and the `use=3` control
-/// through `cairn check`, where `check::type_mismatch` adds
-/// `E_TYPE_MISMATCH_LABEL` to the resolver's findings. `def hut` is on
-/// line 3 of [`site_with_rows`], so a `W_UNUSED_DEF` there names `hut`.
+/// `W_UNUSED_DEF`, run end to end. The table over every refusal is the
+/// test of the same name in `cairn-lang-core`'s `resolve/resolver.rs`;
+/// this runs one refusal and the `use=3` control through `cairn check`,
+/// where `check::type_mismatch` adds `E_TYPE_MISMATCH_LABEL` to the
+/// resolver's findings. `def hut` is on line 3 of [`site_with_rows`], so
+/// a `W_UNUSED_DEF` there names `hut`.
 #[test]
 fn a_def_named_by_a_refused_place_row_is_not_unused() {
     for (row, expected) in [
