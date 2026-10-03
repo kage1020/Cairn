@@ -1227,18 +1227,19 @@ fn lsp_35_a_ranged_change_outside_the_document_is_dropped() {
         },
     }));
     // Nothing is published for the dropped revision: the next message is
-    // the completion response.
+    // the completion response. That the stored text is unchanged is
+    // `lsp_37`'s to show.
     server.send_completion(39, TEST_URI, 1, 0);
     let response = server.read_message();
     assert_eq!(
         response["id"], 39,
-        "nothing may be published first, got: {response}"
+        "a refused revision publishes nothing, got: {response}"
     );
     assert!(
         response["result"]
             .as_array()
             .is_some_and(|items| !items.is_empty()),
-        "the document is still the one opened, got: {response}",
+        "the refusal leaves the URI open, with a line 1 to complete on, got: {response}",
     );
     let logged = server.read_stderr_until("ignoring `textDocument/didChange`");
     assert!(
@@ -1246,6 +1247,109 @@ fn lsp_35_a_ranged_change_outside_the_document_is_dropped() {
             .last()
             .is_some_and(|line| line.contains("contentChanges[0]")),
         "the line should name the refused event, got: {logged:?}",
+    );
+    server.shutdown();
+}
+
+#[test]
+fn lsp_36_a_did_change_with_no_events_publishes_nothing() {
+    // The document is open, so the only thing that keeps this revision from
+    // being published is the guard on empty `contentChanges`: applied, it
+    // would hand back the stored text and republish the same diagnostics
+    // under version 2. `lsp_11` sends one too, but to a document whose
+    // `didOpen` was malformed, so it would pass without the guard.
+    let (mut server, _) = Server::start();
+    server.did_open(CLEAN, 1);
+    server.read_until_method("textDocument/publishDiagnostics");
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 2 },
+            "contentChanges": [],
+        },
+    }));
+    server.send_completion(40, TEST_URI, 0, 0);
+    let next = server.read_message();
+    assert_eq!(
+        next["id"], 40,
+        "a didChange with no events publishes nothing, got: {next}"
+    );
+    server.read_stderr_until("with empty contentChanges");
+    server.shutdown();
+}
+
+#[test]
+fn lsp_37_a_refused_revision_keeps_none_of_its_events() {
+    // Version 2 is a valid insert followed by a range on a line the text
+    // does not have. The whole revision is refused, the insert with it, so
+    // the store still holds version 1's text. Version 3 is a ranged edit
+    // that rewrites `struct` as itself: its diagnostics are version 1's
+    // only if version 2 left nothing behind, since the insert would have
+    // moved the parse error down a line.
+    let (mut server, _) = Server::start();
+    server.did_open("@cairn 2026.06\nstruct s size=3x3\n  bogus!!\n", 1);
+    let first = server.read_until_method("textDocument/publishDiagnostics");
+    assert_eq!(diagnostics_of(&first)[0]["code"], "E_PARSE");
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 2 },
+            "contentChanges": [
+                {
+                    "range": {
+                        "start": { "line": 0, "character": 0 },
+                        "end": { "line": 0, "character": 0 },
+                    },
+                    "text": "# note\n",
+                },
+                {
+                    "range": {
+                        "start": { "line": 9, "character": 0 },
+                        "end": { "line": 9, "character": 0 },
+                    },
+                    "text": "bogus!!",
+                },
+            ],
+        },
+    }));
+    server.send_completion(41, TEST_URI, 0, 0);
+    let next = server.read_message();
+    assert_eq!(
+        next["id"], 41,
+        "a refused revision publishes nothing, got: {next}"
+    );
+    // The first event was applied before the second was read, so the line
+    // count is the one the insert left: five lines, where the opened text
+    // has four.
+    let logged = server.read_stderr_until("ignoring `textDocument/didChange`");
+    assert!(
+        logged.last().is_some_and(|line| line.ends_with(
+            "contentChanges[1] edits 9:0..9:0, but the text it applies to has 5 lines (0 to 4)"
+        )),
+        "the line should name the refused event and the lines there were, got: {logged:?}",
+    );
+    server.send(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": { "uri": TEST_URI, "version": 3 },
+            "contentChanges": [{
+                "range": {
+                    "start": { "line": 1, "character": 0 },
+                    "end": { "line": 1, "character": 6 },
+                },
+                "text": "struct",
+            }],
+        },
+    }));
+    let third = server.read_until_method("textDocument/publishDiagnostics");
+    assert_eq!(third["params"]["version"], 3);
+    assert_eq!(
+        diagnostics_of(&third),
+        diagnostics_of(&first),
+        "version 3 is version 1's text, so it has version 1's diagnostics",
     );
     server.shutdown();
 }
