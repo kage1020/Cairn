@@ -193,6 +193,7 @@ mod tests {
             | C::InvalidPlaceId
             | C::IncompletePlace
             | C::DeferredConnect
+            | C::DeferredPlace
             | C::ThemeVariantMissing
             | C::ThemeVariantRebound => RaisedBy::Resolver,
             C::UnknownSlotTarget => RaisedBy::ResolverAndLowering,
