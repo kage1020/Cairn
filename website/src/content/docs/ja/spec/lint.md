@@ -26,10 +26,17 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `E_DUPLICATE_SIZE` | ヘッダに `size=` が 2 つ以上ある。 |
 | `E_DUPLICATE_SLOT` | `theme` 本体が同じスロットを 2 回宣言している。 |
 | `E_DUPLICATE_ARG` | 1 つの引数リストで `key=` が繰り返されている。 |
-| `E_DUPLICATE_ID` | 同一ボディスコープ内の 2 つのメンバが `id=` を共有している。1 つの `site` の 2 つの `place` 行の場合は代わりに `E_DUPLICATE_PLACE_ID` です ([site と配置](#site-と配置))。 |
+| `E_DUPLICATE_ID` | 同一ボディスコープ内の 2 つのメンバが `id=` を共有している。 |
 | `E_DUPLICATE_SELECTOR` | 1 つの `theme` 内の 2 つのセレクタ行が、同じメンバを選び同じキーを束縛している。 |
 | `E_DUPLICATE_ITEM` | 同じ種別のトップレベル項目 2 つが名前を共有している。 |
 | `E_DUPLICATE_HEADER` | 単一値の `@directive` が 2 回以上宣言されている。 |
+
+`E_DUPLICATE_ID` は、1 つの `site` のボディにある 2 つの `place` 行を、site を名指す
+`E_DUPLICATE_PLACE_ID` ([site と配置](#site-と配置)) に任せます。そのコードが比べるのは使える id
+だけなので、`E_INVALID_PLACE_ID` で拒否された id を共有する 2 行は、使える id に改名されるまで
+どちらのコードにもなりません。`place` 行がそのボディの他の行 (`connect` など) と `id=` を共有する
+場合は `E_DUPLICATE_ID` のままです。1 つの行の下にインデントされた 2 つの `place` 行も、そのボディの
+行ではないので `E_DUPLICATE_ID` です。
 
 `E_DUPLICATE_SELECTOR` はセレクタを字面ではなく意味で比較します。属性の順序は関係なく、`class=` /
 `id=` / `mat_slot=` はラベルテキストとして比較されるので `small` と `"small"` は同じ値です。
