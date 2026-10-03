@@ -2177,6 +2177,38 @@ struct chain size=60x5
             Ok((before, after))
         }
 
+        /// The coords on the six faces of a block on `c`, leaving out
+        /// one that would not fit a `u32`. Spelled with `with_layer`
+        /// rather than `CellCoord::new`, so each layer is written out
+        /// here instead of derived by the rule production uses: the
+        /// four in-plane faces are on `c`'s own layer, the face above
+        /// is a bridge, and the face below is the plane only under the
+        /// first bridge layer.
+        fn faces_of(c: CellCoord) -> Vec<CellCoord> {
+            let below = if c.y == 1 {
+                RouteLayer::Plane
+            } else {
+                RouteLayer::Bridge
+            };
+            [
+                c.x.checked_sub(1)
+                    .map(|x| CellCoord::with_layer(x, c.y, c.z, c.layer)),
+                c.x.checked_add(1)
+                    .map(|x| CellCoord::with_layer(x, c.y, c.z, c.layer)),
+                c.y.checked_sub(1)
+                    .map(|y| CellCoord::with_layer(c.x, y, c.z, below)),
+                c.y.checked_add(1)
+                    .map(|y| CellCoord::with_layer(c.x, y, c.z, RouteLayer::Bridge)),
+                c.z.checked_sub(1)
+                    .map(|z| CellCoord::with_layer(c.x, c.y, z, c.layer)),
+                c.z.checked_add(1)
+                    .map(|z| CellCoord::with_layer(c.x, c.y, z, c.layer)),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
+        }
+
         /// The buffer touches no block of its net but the two it
         /// joins: no dust, and no cell body or pad of the net either.
         /// A repeater severs every face but its front and back, so a
@@ -2192,34 +2224,8 @@ struct chain size=60x5
             after: &[CellCoord],
         ) -> Result<(), TestCaseError> {
             let c = on.coord;
-            // Spelled with `with_layer` rather than `CellCoord::new`,
-            // so each layer is written out here instead of derived by
-            // the rule production uses: the four in-plane faces are on
-            // the buffer's own layer, the face above is a bridge, and
-            // the face below is the plane only under the first bridge
-            // layer.
-            let below = if c.y == 1 {
-                RouteLayer::Plane
-            } else {
-                RouteLayer::Bridge
-            };
-            let faces = [
-                c.x.checked_sub(1)
-                    .map(|x| CellCoord::with_layer(x, c.y, c.z, c.layer)),
-                c.x.checked_add(1)
-                    .map(|x| CellCoord::with_layer(x, c.y, c.z, c.layer)),
-                c.y.checked_sub(1)
-                    .map(|y| CellCoord::with_layer(c.x, y, c.z, below)),
-                c.y.checked_add(1)
-                    .map(|y| CellCoord::with_layer(c.x, y, c.z, RouteLayer::Bridge)),
-                c.z.checked_sub(1)
-                    .map(|z| CellCoord::with_layer(c.x, c.y, z, c.layer)),
-                c.z.checked_add(1)
-                    .map(|z| CellCoord::with_layer(c.x, c.y, z, c.layer)),
-            ];
-            let beside: HashSet<CellCoord> = faces
+            let beside: HashSet<CellCoord> = faces_of(c)
                 .into_iter()
-                .flatten()
                 .filter(|n| net.contains(n))
                 .collect();
             let joined: HashSet<CellCoord> =
@@ -2391,11 +2397,12 @@ struct chain size=60x5
         /// face is what keeps the repeater off it: the walk back passes
         /// the climb and the fork and lands on `(42, 0, 0)`.
         ///
-        /// What is under the coord is a terminal, not dust, which
+        /// What is under `(44, 1, 0)` is a terminal, not dust, which
         /// [`check_nothing_of_its_net_beside`] counts as a block of the
-        /// net, so the replay fails there if the repeater stands on it.
-        /// The sites are asserted here as well, to pin where the walk
-        /// back lands.
+        /// net, so the replay fails on that check if the repeater
+        /// stands on `(44, 1, 0)`. [`assert_only_a_terminal_beside`]
+        /// pins that shape on the net as laid, and the sites are
+        /// asserted as well, to pin where the walk back lands.
         #[test]
         fn a_buffer_never_stands_over_a_sink_of_its_own_net() {
             let xs = [(71, 0, false), (44, 0, false), (44, 1, false)];
@@ -2404,19 +2411,17 @@ struct chain size=60x5
             let legalized =
                 legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
             let entry = &legalized.scopes[0];
-            let (_, trees) = laid_trees(entry);
+            let (router, trees) = laid_trees(entry);
             let tree = &trees[&NetRef::Input(0)];
             let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
             let bridge = |x, z| CellCoord::with_layer(x, 1, z, RouteLayer::Bridge);
-            let over = bridge(44, 0);
-            let route = tree.route_to(plane(71, 0)).unwrap_or_default();
-            assert!(
-                route.contains(&over)
-                    && tree.parent(over) == Some(bridge(43, 0))
-                    && route.contains(&bridge(45, 0))
-                    && tree.route_to(plane(44, 0)).is_some(),
-                "{case}: this shape no longer exercises the bug: the route to (71, 0, 0) no \
-                 longer runs straight over the sink at (44, 0, 0): {route:?}",
+            assert_only_a_terminal_beside(
+                &router,
+                tree,
+                plane(71, 0),
+                [bridge(43, 0), bridge(44, 0), bridge(45, 0)],
+                plane(44, 0),
+                &case,
             );
             let far = entry
                 .ir
@@ -2458,7 +2463,9 @@ struct chain size=60x5
         /// repeater stands on `(29, 0, 1)`. Unlike
         /// [`a_buffer_never_stands_over_a_sink_of_its_own_net`], the
         /// terminal is in the repeater's own plane, so no climb is
-        /// needed to reach this case.
+        /// needed to reach this case. [`assert_only_a_terminal_beside`]
+        /// pins the shape on the net as laid, and the sites pin where
+        /// the walk back lands.
         #[test]
         fn a_buffer_never_stands_beside_a_sink_of_its_own_net() {
             let xs = [(29, 0, false), (30, 0, false)];
@@ -2467,18 +2474,16 @@ struct chain size=60x5
             let legalized =
                 legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
             let entry = &legalized.scopes[0];
-            let (_, trees) = laid_trees(entry);
+            let (router, trees) = laid_trees(entry);
             let tree = &trees[&NetRef::Input(0)];
             let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
-            let due = plane(29, 1);
-            let route = tree.route_to(plane(30, 0)).unwrap_or_default();
-            assert!(
-                route.get(30) == Some(&due)
-                    && tree.parent(due) == Some(plane(28, 1))
-                    && route.contains(&plane(30, 1)),
-                "{case}: this shape no longer exercises the bug: the 30th coord of the route to \
-                 (30, 0, 0) is no longer (29, 0, 1), running straight beside the near sink: \
-                 {route:?}",
+            assert_only_a_terminal_beside(
+                &router,
+                tree,
+                plane(30, 0),
+                [plane(28, 1), plane(29, 1), plane(30, 1)],
+                plane(29, 0),
+                &case,
             );
             let far = entry
                 .ir
@@ -2497,6 +2502,71 @@ struct chain size=60x5
                 vec![plane(15, 0), plane(27, 0)],
                 "{case}: the second repeater must step back off (29, 0, 1), beside the sink at \
                  (29, 0, 0), onto (27, 0, 0)",
+            );
+        }
+
+        /// Pins the shape a named test about a terminal on a face
+        /// exists for, on the net as laid rather than through the
+        /// sites: the route into `sink` passes `due`, which the wire
+        /// reaches from `before` and leaves for `after`; the only block
+        /// of the net on `due`'s faces besides those two is `terminal`;
+        /// and `terminal` is a terminal, which [`Router::dust`] leaves
+        /// out, not dust. Dust of the net on a face of `due` would keep
+        /// the repeater off it just the same, and the replay and the
+        /// sites would still pass with the terminal no longer the
+        /// reason. Each premise fails on a message of its own.
+        fn assert_only_a_terminal_beside(
+            router: &Router,
+            tree: &NetTree,
+            sink: CellCoord,
+            [before, due, after]: [CellCoord; 3],
+            terminal: CellCoord,
+            case: &str,
+        ) {
+            let spelled = |c: CellCoord| format!("({}, {}, {})", c.x, c.y, c.z);
+            let gone = format!("{case}: this shape no longer exercises the bug");
+            let route = tree
+                .route_to(sink)
+                .expect("every cell is a terminal of the net driving it");
+            assert!(
+                route.contains(&due),
+                "{gone}: the route to {} no longer passes {}: {route:?}",
+                spelled(sink),
+                spelled(due),
+            );
+            assert_eq!(
+                tree.parent(due),
+                Some(before),
+                "{gone}: {} is no longer reached from {}",
+                spelled(due),
+                spelled(before),
+            );
+            assert_eq!(
+                tree.parent(after),
+                Some(due),
+                "{gone}: {} no longer runs on to {}",
+                spelled(due),
+                spelled(after),
+            );
+            let net: HashSet<CellCoord> = tree.wire_path().into_iter().collect();
+            let beside: HashSet<CellCoord> = faces_of(due)
+                .into_iter()
+                .filter(|n| net.contains(n) && *n != before && *n != after)
+                .collect();
+            assert_eq!(
+                beside,
+                HashSet::from([terminal]),
+                "{gone}: the blocks of the net on the faces of {} other than {} and {} are no \
+                 longer {} alone",
+                spelled(due),
+                spelled(before),
+                spelled(after),
+                spelled(terminal),
+            );
+            assert!(
+                !router.dust(tree).contains(&terminal),
+                "{gone}: {} is dust of the net, not one of its terminals",
+                spelled(terminal),
             );
         }
 
