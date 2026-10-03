@@ -76,10 +76,11 @@
   unreadable, show the written `side=` / `slope_to=` value, and, for a row whose anchor did not
   lower, report the findings its body raises ([#462](https://github.com/kage1020/Cairn/pull/462))
 
-- *(cli)* `cairn info --editions java,java` reported Java twice: a second row in `edition
-  portability` and `buildable targets`, in text and in the JSON document, and a second per-edition
-  dry-run. The per-edition rows now walk the same deduplicated list the diagnostics gate is weighed
-  against, so a repeated edition is reported once.
+- *(cli)* `cairn info --editions java,java` reported Java twice: a second entry in
+  `edition portability` and `buildable targets`, in text and in the JSON document, and every
+  per-edition note on stderr printed a second time, since the per-edition dry-run ran once per
+  name. That run now walks the deduplicated list the `@intended_targets` findings are weighed in,
+  so a repeated edition is reported once.
 
 ### Breaking changes
 
