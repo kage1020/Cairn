@@ -370,9 +370,9 @@ fn collect_floor_cells(
                 // INVARIANT: `PlaceAnchor::origin` refuses a row whose body
                 // reaches past `i32`, so every cell of a placed body has a
                 // world coordinate. Loud in debug builds; a release build
-                // skips the cell rather than saturating it, which folded
-                // every column past the range onto the edge cell, and that
-                // cell then read as laid by whichever of them was not air.
+                // skips the cell. Saturating it instead would fold every
+                // column past the range onto the edge cell, which would then
+                // read as laid by whichever of them was not air.
                 let (Some(wx), Some(wz)) =
                     (world(placement.origin.0, x), world(placement.origin.2, z))
                 else {
@@ -5051,9 +5051,10 @@ fn cut_window(
         NonNegRead::Absent => 0,
         NonNegRead::Deferred => return WindowCut::Refused,
     };
-    // Before `sym=`: a series with no positive `step=` is refused whatever
-    // `sym=` says, so an unreadable `sym=` is not why it is not cut, and
-    // the missing `step=` is reported in the same compile.
+    // Before `sym=`: a series without a positive `step=` is refused
+    // whatever `sym=` says, so an unreadable `sym=` is not why it is not
+    // cut, and the author hears about `step=` now rather than after
+    // repairing `sym=`.
     if repeat > 1 && step == 0 {
         diagnostics.push(diag_deferred_member_reason(
             member,
