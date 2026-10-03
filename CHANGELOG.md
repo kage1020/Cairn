@@ -65,6 +65,13 @@
     comparing it with the indent stack; it now compares first, so the line is refused as an indent
     that opens more than one level.
 
+- *(core)* The "did you mean" search computed the full Damerau-Levenshtein distance between an
+  unknown id and every candidate, though no candidate more than three characters longer or shorter
+  can pass the cap. One unknown `@token` of 20,000 characters cost `compile --target` about 2 s and
+  `info` about 20 s in a release build, for an answer that was always "no suggestion". A candidate
+  outside the cap's length band is now skipped before its distance is computed, which changes no
+  suggestion.
+
 - *(core)* A partial truth table whose first unassigned combination sat behind more combinations
   than the search for a sample would step through, such as two rows fixing one input each of
   fifteen, lost its `W_TRUTH_TABLE_PARTIAL` although the count was exact. The sample is now found
