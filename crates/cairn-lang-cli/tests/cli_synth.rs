@@ -1354,10 +1354,12 @@ fn edition_tagged_stages() -> &'static [String] {
 /// refusal ahead of whatever the file has to say: a file name, the text,
 /// and the code of the finding the text carries.
 ///
-/// The errors come from different passes, a parse error and a `check`
-/// error in a file that parses. The last source carries a warning alone,
-/// which does not stop a run.
-const FINDING_SOURCES: [(&str, &str, &str); 3] = [
+/// The errors come from the three passes `run_synth` reports from before
+/// it dispatches the stage: a parse error, a `check` error in a file that
+/// parses (`bogus` is no keyword), and a synthesis error in a file `check`
+/// passes (nothing in the scope emits `sig.nope`). The last source carries
+/// a warning alone, which does not stop a run.
+const FINDING_SOURCES: [(&str, &str, &str); 4] = [
     (
         "parse.crn",
         "@cairn 2026.06\nstruct s size=3x3 size=\n",
@@ -1367,6 +1369,12 @@ const FINDING_SOURCES: [(&str, &str, &str); 3] = [
         "check.crn",
         "@cairn 2026.06\nstruct s size=3x3\n  bogus a=1\n",
         "E_UNKNOWN_KEYWORD",
+    ),
+    (
+        "synth.crn",
+        "@cairn 2026.06\nstruct s size=3x3\n  \
+         door id=d side=front at=center opened_by=sig.nope\n",
+        "E_LOGIC_UNBOUND_SIGNAL",
     ),
     (
         "warning.crn",
