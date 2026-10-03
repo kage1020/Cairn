@@ -5007,6 +5007,16 @@ fn cut_window(
         NonNegRead::Absent => 0,
         NonNegRead::Deferred => return WindowCut::Refused,
     };
+    // Before `sym=`: a series with no positive `step=` is refused whatever
+    // `sym=` says, so an unreadable `sym=` is not why it is not cut, and
+    // the missing `step=` is reported in the same compile.
+    if repeat > 1 && step == 0 {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "window `repeat=` requires a positive `step=` so instances do not overlap",
+        ));
+        return WindowCut::Refused;
+    }
     if repeat > 1 {
         match sym {
             Some(false) => {}
@@ -5030,13 +5040,6 @@ fn cut_window(
                 return WindowCut::RefusedForUnreadSym;
             }
         }
-    }
-    if repeat > 1 && step == 0 {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "window `repeat=` requires a positive `step=` so instances do not overlap",
-        ));
-        return WindowCut::Refused;
     }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let span_end = offset

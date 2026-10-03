@@ -159,6 +159,37 @@ fn an_unreadable_sym_on_a_repeated_window_cuts_nothing() {
     );
 }
 
+#[test]
+fn a_repeated_window_with_no_step_is_refused_for_the_step_first() {
+    // With no `step=`, the series is refused whatever `sym=` says. That is
+    // the refusal reported, and the unreadable `sym=` carries the note for
+    // a window that is not cut either way, not the one naming `sym=` as
+    // the reason.
+    const NO_STEP: &str =
+        "window `repeat=` requires a positive `step=` so instances do not overlap";
+    let ir = lowered(&window(" repeat=3 sym=yes"));
+    assert_eq!(
+        findings(&ir),
+        vec![
+            ("W_DEFERRED_MEMBER", NO_STEP),
+            (
+                "W_IGNORED_ARGUMENT",
+                "`sym=` must be `true` or `false`, not identifier `yes`; the value was ignored",
+            ),
+        ],
+    );
+    assert_eq!(
+        ir.diagnostics[1].notes[0].message,
+        "this window is not cut either way — see the finding on the same line",
+    );
+    // The same order for a readable `sym=true`, which refuses the series
+    // too.
+    assert_eq!(
+        findings(&lowered(&window(" repeat=3 sym=true"))),
+        vec![("W_DEFERRED_MEMBER", NO_STEP)],
+    );
+}
+
 // --- `side=` / shed `slope_to=` ---------------------------------------------
 
 #[test]
