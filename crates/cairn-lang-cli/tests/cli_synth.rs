@@ -1425,6 +1425,76 @@ fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
     assert!(gated > 0, "no --stage value required --edition");
 }
 
+#[test]
+fn cli_synth_missing_edition_is_reported_ahead_of_a_missing_file() {
+    // A path that names nothing exits 2, as the usage error does, so the
+    // exit code cannot tell the two apart and only stderr can. The usage
+    // error is decided from argv alone, before the file is read, so it is
+    // the one a caller who got both wrong hears first, and the read is
+    // never attempted.
+    //
+    // The CONTROL runs the same path with `--edition java`, where the read
+    // is what fails. Without it, the first half would pass just as well on
+    // a path that exists.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("missing.crn");
+    let mut gated = 0;
+    for stage in stage_values() {
+        if stage_is_edition_neutral(&stage) {
+            continue;
+        }
+        gated += 1;
+        let out = cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                &stage,
+                path.to_str().unwrap(),
+            ],
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "--stage {stage} on a missing file without --edition: {stderr}",
+        );
+        assert!(
+            stderr.contains("--edition"),
+            "--stage {stage} on a missing file should report the missing --edition, got: {stderr}",
+        );
+        assert!(
+            !stderr.contains("cannot read"),
+            "--stage {stage} on a missing file without --edition read the file before \
+             refusing the flag, got: {stderr}",
+        );
+
+        let out = cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                &stage,
+                "--edition",
+                "java",
+                path.to_str().unwrap(),
+            ],
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "--stage {stage} --edition java on a missing file: {stderr}",
+        );
+        assert!(
+            stderr.contains("cannot read"),
+            "--stage {stage} --edition java on a missing file should report the read, \
+             got: {stderr}",
+        );
+    }
+    assert!(gated > 0, "no --stage value required --edition");
+}
+
 /// Assert that `out` reported the finding `code` with the exit code its
 /// severity gives: `error[E_…]` and exit 1, or `warning[W_…]` and exit 0,
 /// since a warning leaves the run its product.
