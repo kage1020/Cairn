@@ -335,6 +335,10 @@ fn collect_floor_cells(
     let mut extents: IndexMap<String, FloorExtent> = IndexMap::new();
     for (index, (key, PlacedBody { placement, .. })) in placed.iter().enumerate() {
         let Some(ba) = structures.get(key) else {
+            // INVARIANT: `lower_site` inserts each key into `placed` and
+            // into `structures` together, first write winning in both, and
+            // nothing removes one before this runs.
+            debug_assert!(false, "placement `{key}` has no structure");
             continue;
         };
         // Only the y=0 plane matters: walkways sit at the ports' shared
@@ -344,6 +348,14 @@ fn collect_floor_cells(
         for z in 0..ba.dims.z {
             for x in 0..ba.dims.x {
                 let Some(i) = ba.dims.index(x, 0, z) else {
+                    // INVARIANT: the loop keeps `x` and `z` inside `dims`,
+                    // and a lowered body is at least one cell tall, so its
+                    // row 0 exists.
+                    debug_assert!(
+                        false,
+                        "cell ({x}, 0, {z}) of `{key}` is outside {:?}",
+                        ba.dims
+                    );
                     continue;
                 };
                 let voxel = ba.voxels[i];
@@ -355,13 +367,21 @@ fn collect_floor_cells(
                         .ok()
                         .and_then(|local| origin.checked_add(local))
                 };
-                // A cell past `i32` has no world coordinate, so no walkway
-                // cell can land on it either. Saturating folded every such
-                // column onto the edge cell, which then read as laid by
-                // whichever of them was not air.
+                // INVARIANT: `PlaceAnchor::origin` refuses a row whose body
+                // reaches past `i32`, so every cell of a placed body has a
+                // world coordinate. Loud in debug builds; a release build
+                // skips the cell rather than saturating it, which folded
+                // every column past the range onto the edge cell, and that
+                // cell then read as laid by whichever of them was not air.
                 let (Some(wx), Some(wz)) =
                     (world(placement.origin.0, x), world(placement.origin.2, z))
                 else {
+                    debug_assert!(
+                        false,
+                        "cell ({x}, 0, {z}) of `{key}` at {:?} has no world coordinate; \
+                         `PlaceAnchor::origin` should have refused the row",
+                        placement.origin,
+                    );
                     continue;
                 };
                 let cell = (wx, placement.origin.1, wz);
@@ -5457,6 +5477,113 @@ mod tests {
                 coord: i128::from(i32::MAX) + 1,
             }),
         );
+    }
+
+    /// One placed row as `lower_site` leaves it in `structures` and
+    /// `placed`: a body `width` cells wide and one cell deep and tall, every
+    /// cell stone, at `origin`.
+    fn one_placed_row(
+        origin: (i32, i32, i32),
+        width: u32,
+    ) -> (IndexMap<String, BlockArray>, IndexMap<String, PlacedBody>) {
+        let key = "site::s::b".to_owned();
+        let dims = Dims {
+            x: width,
+            y: 1,
+            z: 1,
+        };
+        let mut palette = Palette::new_with_air();
+        let stone = palette.intern(BlockState::bare("minecraft:stone"));
+        let mut structures = IndexMap::new();
+        structures.insert(
+            key.clone(),
+            BlockArray {
+                dims,
+                palette,
+                voxels: vec![stone; width as usize],
+                block_entities: Vec::new(),
+                entities: Vec::new(),
+                source_scope: key.clone(),
+            },
+        );
+        let mut placed = IndexMap::new();
+        placed.insert(
+            key,
+            PlacedBody {
+                placement: Placement {
+                    site: SiteName::new("s").expect("a site name"),
+                    place_id: PlaceId::new("b").expect("a place id"),
+                    source_def: "hut".to_owned(),
+                    theme: "t".to_owned(),
+                    origin,
+                    dims,
+                },
+                walls: WallColumn::default(),
+                cut: HashSet::new(),
+            },
+        );
+        (structures, placed)
+    }
+
+    /// A body whose last column is `i32::MAX` lays each of its cells under
+    /// a column of its own, and its extent ends on the edge.
+    #[test]
+    fn a_body_ending_on_the_i32_edge_lays_every_cell_once() {
+        let (structures, placed) = one_placed_row((i32::MAX - 2, 0, 0), 3);
+        let plan = collect_floor_cells(&structures, &placed);
+        assert_eq!(
+            plan.cells,
+            HashSet::from([(i32::MAX - 2, 0, 0), (i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
+        );
+        assert!(
+            plan.owners.values().all(|owners| owners.len() == 1),
+            "{:?}",
+            plan.owners,
+        );
+        assert_eq!(plan.extents["site::s::b"].max_x, i32::MAX);
+    }
+
+    /// The guard behind the far-edge refusal, for a body that runs past
+    /// `i32` and reaches the floor plan anyway. No source can: the refusal
+    /// stops the row first, so the plan is built by hand. A debug build
+    /// stops at the guard. A release build lays the cells that have a
+    /// coordinate and folds none of the rest onto the edge, where a fold
+    /// would give the edge cell a second owner.
+    #[test]
+    #[cfg_attr(debug_assertions, should_panic(expected = "has no world coordinate"))]
+    fn a_body_past_the_i32_edge_folds_nothing_onto_it() {
+        let (structures, placed) = one_placed_row((i32::MAX - 1, 0, 0), 3);
+        let plan = collect_floor_cells(&structures, &placed);
+        assert_eq!(
+            plan.cells,
+            HashSet::from([(i32::MAX - 1, 0, 0), (i32::MAX, 0, 0)]),
+        );
+        assert!(
+            plan.owners.values().all(|owners| owners.len() == 1),
+            "{:?}",
+            plan.owners,
+        );
+        assert_eq!(plan.extents["site::s::b"].max_x, i32::MAX);
+    }
+
+    /// The other two guards in [`collect_floor_cells`]: a placement with no
+    /// structure, and a body with no row 0. `lower_site` produces neither,
+    /// so each is handed in, and each stops a debug build.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "has no structure")]
+    fn a_placement_with_no_structure_is_not_a_silent_skip() {
+        let (_, placed) = one_placed_row((0, 0, 0), 3);
+        let _ = collect_floor_cells(&IndexMap::new(), &placed);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "is outside")]
+    fn a_body_with_no_row_0_is_not_a_silent_skip() {
+        let (mut structures, placed) = one_placed_row((0, 0, 0), 3);
+        structures["site::s::b"].dims.y = 0;
+        let _ = collect_floor_cells(&structures, &placed);
     }
 
     /// The plate is the one hardcoded id a pack *can* redirect, and the

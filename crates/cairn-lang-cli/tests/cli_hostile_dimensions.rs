@@ -231,10 +231,11 @@ fn hostile_sources() -> Vec<(&'static str, String)> {
             ),
         ),
         // Walkway port resolution added `i32`s without checking, and the
-        // strip was materialised before anything measured it. The hut is 3
-        // wide, so this puts `b`'s last column at exactly `i32::MAX` and
-        // only the step out of its `+x` door to the port leaves the range.
-        // `the_port_case_reaches_port_resolution` holds it there.
+        // strip was materialised before anything measured it.
+        // `east_door_hut` is 3 wide, so this puts `b`'s last column at
+        // exactly `i32::MAX` and only the step out of its `+x` door to the
+        // port leaves the range. `the_port_case_reaches_port_resolution`
+        // holds it there.
         ("gap-port-past-i32", connected_east_doors("2147483642")),
         // The same on the `-z` side: `b`'s origin lands at `z = 0 - 3 -
         // 2147483645 = i32::MIN` exactly, and only the step out to its back
@@ -243,8 +244,13 @@ fn hostile_sources() -> Vec<(&'static str, String)> {
             "gap-port-past-i32-north",
             connected_back_to_back("2147483645"),
         ),
-        // Here the origin itself leaves the range. That saturated
-        // onto `i32::MAX` once; the row is refused now, before any port is
+        // `b`'s origin lands at 2147483646 and its last column one past
+        // `i32::MAX`. The floor plan once folded that column onto the edge
+        // cell; the row is refused now, before any port is resolved
+        // against it, and the build it is part of fails.
+        ("gap-body-past-i32", connected("2147483643")),
+        // Here the origin itself leaves the range. That saturated onto
+        // `i32::MAX` once; the row is refused now, before any port is
         // resolved against it.
         ("gap-origin-past-i32", connected("2147483647")),
         ("gap-large", connected("100000000")),
@@ -425,21 +431,30 @@ fn hostile_2_lowering_says_which_member_it_gave_up_on() {
 #[test]
 fn the_port_case_reaches_port_resolution() {
     // `hostile_2` only asks for some diagnostic code, which a row refused
-    // for its origin satisfies without ever resolving a port. Each case is
-    // held to the stage it is named for, so a change to either value that
-    // moves it to the other stage fails here rather than going inert.
+    // for its origin or its far edge satisfies without ever resolving a
+    // port. Each case is held to the stage it is named for, so a change to
+    // any of the values that moves it to another stage fails here rather
+    // than going inert.
     let tmp = TempDir::new().expect("tempdir");
     let sources = hostile_sources();
     for (name, reached, not_reached) in [
         (
             "gap-port-past-i32",
             &["port `b.east` could not be placed"][..],
-            "origin works out to",
+            &["origin works out to", "body reaches"][..],
         ),
         (
             "gap-port-past-i32-north",
             &["port `b.back` could not be placed"][..],
-            "origin works out to",
+            &["origin works out to", "body reaches"][..],
+        ),
+        (
+            "gap-body-past-i32",
+            &[
+                "body reaches x=2147483648",
+                "the `b.entry` placement did not lower",
+            ][..],
+            &["could not be placed", "origin works out to"][..],
         ),
         (
             "gap-origin-past-i32",
@@ -447,7 +462,7 @@ fn the_port_case_reaches_port_resolution() {
                 "origin works out to x=2147483650",
                 "the `b.entry` placement did not lower",
             ][..],
-            "could not be placed",
+            &["could not be placed", "body reaches"][..],
         ),
     ] {
         let (_, body) = sources
@@ -463,8 +478,9 @@ fn the_port_case_reaches_port_resolution() {
             "{name}: ended as {outcome:?}",
         );
         assert!(
-            reached.iter().all(|text| stderr.contains(text)) && !stderr.contains(not_reached),
-            "{name}: expected {reached:?} and not `{not_reached}`; got {stderr}",
+            reached.iter().all(|text| stderr.contains(text))
+                && !not_reached.iter().any(|text| stderr.contains(text)),
+            "{name}: expected {reached:?} and none of {not_reached:?}; got {stderr}",
         );
     }
 }
@@ -502,6 +518,46 @@ fn hostile_3_compile_refuses_rather_than_certifying_the_wreckage() {
                 "{name}: a refused compile must not certify the source\nstderr={stderr}",
             ),
             other => panic!("{name}: ended as {other:?}\nstderr={stderr}"),
+        }
+    }
+}
+
+/// A row refused for its far edge produces no voxels, so the build it is
+/// part of is partial, and `check --target` and `compile` refuse it rather
+/// than exit 0 without the row.
+#[test]
+fn a_body_past_i32_fails_the_build_it_is_part_of() {
+    let sources = hostile_sources();
+    let (name, body) = sources
+        .iter()
+        .find(|(case, _)| *case == "gap-body-past-i32")
+        .expect("the hostile source with a body past `i32`");
+    let tmp = TempDir::new().expect("tempdir");
+    let path = write(tmp.path(), name, body);
+    let file = path.to_str().unwrap();
+    let out_dir = tmp.path().join("out");
+    let out = out_dir.to_str().unwrap();
+    for args in [
+        vec!["check", file, "--edition", "java", "--target", "1.21.4"],
+        vec!["compile", file, "--edition", "java", "--out", out],
+    ] {
+        let (outcome, stderr, _) = run_bounded(tmp.path(), &args);
+        assert_eq!(
+            outcome,
+            Outcome::Exited(1),
+            "`{}` must refuse a build missing a row\nstderr={stderr}",
+            args[0],
+        );
+        for text in [
+            "this placement's body reaches x=2147483648",
+            "error[E_PARTIAL_BUILD]",
+            "`site::duo::b` produced no voxels",
+        ] {
+            assert!(
+                stderr.contains(text),
+                "`{}` must say `{text}`; got {stderr}",
+                args[0],
+            );
         }
     }
 }
