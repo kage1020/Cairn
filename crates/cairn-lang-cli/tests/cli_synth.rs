@@ -6,8 +6,12 @@
 //! parse failures exit 1 with a gcc-style diagnostic on stderr, and a
 //! missing file exits 2.
 
+use std::path::{Path, PathBuf};
+use std::process::Output;
+use std::sync::OnceLock;
+
 mod common;
-use common::{cairn, examples_dir};
+use common::{cairn, examples_dir, write_source};
 
 #[test]
 fn cli_synth_requires_experimental_flag() {
@@ -1266,11 +1270,10 @@ fn possible_values(flag: &str, expected: usize) -> Vec<String> {
 /// missing-`--edition` usage gate (edition-tagged).
 ///
 /// Exit 2 is not taken on trust: a missing fixture exits 2 as well, so
-/// the refusal has to be that gate's own — no stdout (no partial IR
-/// dump escaped) and a single stderr line naming `--stage <stage>` and
-/// `--edition`. The pipeline passes are silent on this fixture, so the
-/// single-line check holds wherever the gate stands among them; whether
-/// it stands ahead of a pass that does print is
+/// the refusal is held to [`assert_missing_edition_usage_error`]. The
+/// pipeline passes are silent on this fixture, so the single-line check
+/// holds wherever the gate stands among them; whether it stands ahead of
+/// a pass that does print is
 /// `cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings`'s
 /// to pin.
 fn stage_is_edition_neutral(stage: &str) -> bool {
@@ -1284,29 +1287,102 @@ fn stage_is_edition_neutral(stage: &str) -> bool {
             path.to_str().unwrap(),
         ],
     );
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
     match out.status.code() {
         Some(0) => true,
         Some(2) => {
-            assert!(
-                out.stdout.is_empty(),
-                "--stage {stage} must print no IR before the usage gate, got: {}",
-                String::from_utf8_lossy(&out.stdout),
-            );
-            let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
-            assert_eq!(
-                lines.len(),
-                1,
-                "--stage {stage} stderr should be the usage error alone, got: {stderr}",
-            );
-            assert!(
-                lines[0].contains(&format!("--stage {stage}")) && lines[0].contains("--edition"),
-                "--stage {stage} stderr line should be the missing-edition hint, got: {stderr}",
-            );
+            assert_missing_edition_usage_error(&out, stage, "on redstone-door.crn");
             false
         }
-        other => panic!("--stage {stage} without --edition exited {other:?}: {stderr}"),
+        other => panic!(
+            "--stage {stage} without --edition exited {other:?}: {}",
+            String::from_utf8_lossy(&out.stderr),
+        ),
     }
+}
+
+/// Assert that `out` is the missing-`--edition` usage error for
+/// `--stage <stage>` and nothing else: exit 2, no stdout (no partial IR
+/// dump escaped), and one stderr line, naming `--stage <stage>` and
+/// `--edition`. `context` says which run it was, after the stage.
+fn assert_missing_edition_usage_error(out: &Output, stage: &str, context: &str) {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "--stage {stage} {context} without --edition should exit 2, got stderr: {stderr}",
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "--stage {stage} {context} must print no IR before the usage gate, got: {}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "--stage {stage} {context}: stderr should be the usage error alone, got: {stderr}",
+    );
+    assert!(
+        lines[0].contains(&format!("--stage {stage}")),
+        "--stage {stage} {context}: the usage error should name the stage as typed, got: {stderr}",
+    );
+    assert!(
+        lines[0].contains("--edition"),
+        "--stage {stage} {context}: the usage error should name --edition, got: {stderr}",
+    );
+}
+
+/// The `--stage` values [`stage_is_edition_neutral`] finds refused without
+/// `--edition`, asked of the binary once per test process and shared by
+/// the sweeps over that side of the partition.
+fn edition_tagged_stages() -> &'static [String] {
+    static TAGGED: OnceLock<Vec<String>> = OnceLock::new();
+    TAGGED.get_or_init(|| {
+        let tagged: Vec<String> = stage_values()
+            .into_iter()
+            .filter(|stage| !stage_is_edition_neutral(stage))
+            .collect();
+        assert!(
+            !tagged.is_empty(),
+            "no --stage value required --edition, so a sweep over those stages asserts nothing",
+        );
+        tagged
+    })
+}
+
+/// Sources that each carry a finding, for the tests that pin a usage
+/// refusal ahead of whatever the file has to say: a file name, the text,
+/// and the code of the finding the text carries.
+///
+/// The errors come from different passes, a parse error and a `check`
+/// error in a file that parses. The last source carries a warning alone,
+/// which does not stop a run.
+const FINDING_SOURCES: [(&str, &str, &str); 3] = [
+    (
+        "parse.crn",
+        "@cairn 2026.06\nstruct s size=3x3 size=\n",
+        "E_PARSE",
+    ),
+    (
+        "check.crn",
+        "@cairn 2026.06\nstruct s size=3x3\n  bogus a=1\n",
+        "E_UNKNOWN_KEYWORD",
+    ),
+    (
+        "warning.crn",
+        "@cairn 2026.06\nstruct s size=3x3\n  \
+         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "W_LOGIC_UNUSED_SIGNAL",
+    ),
+];
+
+/// Write each of [`FINDING_SOURCES`] into `dir`, as its name, the path it
+/// was written to, and its code.
+fn write_finding_sources(dir: &Path) -> Vec<(&'static str, PathBuf, &'static str)> {
+    FINDING_SOURCES
+        .into_iter()
+        .map(|(name, text, code)| (name, write_source(dir, name, text), code))
+        .collect()
 }
 
 #[test]
@@ -1336,12 +1412,11 @@ fn cli_synth_missing_edition_reports_only_the_usage_error() {
 fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
     // `stage_is_edition_neutral` runs on a fixture with no findings, so an
     // earlier pass has nothing to print there and the ordering it checks
-    // holds whichever runs first. Here the source has a finding for each
-    // pass the file goes through before synthesis — a parse error, and a
-    // `check` error in a file that parses — and the usage error still has
-    // to be the one line, with the usage exit code. A third source carries
-    // a warning alone, which does not stop a run, and is held to the same
-    // one line: its warning is not printed ahead of the usage error.
+    // holds whichever runs first. Here each source has a finding (see
+    // `FINDING_SOURCES`), and the usage error still has to be the one
+    // line, with the usage exit code. That holds for the warning-only
+    // source too, which does not stop a run: its warning is not printed
+    // ahead of the usage error.
     //
     // Each source is also run with `--edition java`, the CONTROL: without
     // the usage error in the way, its finding is what surfaces, with the
@@ -1350,66 +1425,26 @@ fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
     // would be a copy of `cli_synth_missing_edition_reports_only_the_usage_error`
     // without saying so.
     let dir = tempfile::tempdir().expect("temp dir");
-    let sources = [
-        (
-            "parse.crn",
-            "@cairn 2026.06\nstruct s size=3x3 size=\n",
-            "E_PARSE",
-        ),
-        (
-            "check.crn",
-            "@cairn 2026.06\nstruct s size=3x3\n  bogus a=1\n",
-            "E_UNKNOWN_KEYWORD",
-        ),
-        (
-            "warning.crn",
-            "@cairn 2026.06\nstruct s size=3x3\n  \
-             pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
-            "W_LOGIC_UNUSED_SIGNAL",
-        ),
-    ];
-    let mut gated = 0;
-    for stage in stage_values() {
-        if stage_is_edition_neutral(&stage) {
-            continue;
-        }
-        gated += 1;
-        for (name, text, code) in sources {
-            let path = dir.path().join(name);
-            std::fs::write(&path, text).expect("write scratch file");
+    let sources = write_finding_sources(dir.path());
+    for stage in edition_tagged_stages() {
+        for (name, path, code) in &sources {
             let out = cairn(
                 "synth",
                 &[
                     "--experimental-logic-synth",
                     "--stage",
-                    &stage,
+                    stage,
                     path.to_str().unwrap(),
                 ],
             );
-            let stderr = String::from_utf8(out.stderr).expect("utf-8");
-            assert_eq!(
-                out.status.code(),
-                Some(2),
-                "--stage {stage} on {name} without --edition: {stderr}",
-            );
-            assert!(
-                out.stdout.is_empty(),
-                "--stage {stage} on {name} printed IR"
-            );
-            let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
-            assert!(
-                lines.len() == 1
-                    && lines[0].contains(&format!("--stage {stage}"))
-                    && lines[0].contains("--edition"),
-                "--stage {stage} on {name}: the usage error should be the one line, got: {stderr}",
-            );
+            assert_missing_edition_usage_error(&out, stage, &format!("on {name}"));
 
             let out = cairn(
                 "synth",
                 &[
                     "--experimental-logic-synth",
                     "--stage",
-                    &stage,
+                    stage,
                     "--edition",
                     "java",
                     path.to_str().unwrap(),
@@ -1422,7 +1457,6 @@ fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
             );
         }
     }
-    assert!(gated > 0, "no --stage value required --edition");
 }
 
 #[test]
@@ -1438,31 +1472,18 @@ fn cli_synth_missing_edition_is_reported_ahead_of_a_missing_file() {
     // a path that exists.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("missing.crn");
-    let mut gated = 0;
-    for stage in stage_values() {
-        if stage_is_edition_neutral(&stage) {
-            continue;
-        }
-        gated += 1;
+    for stage in edition_tagged_stages() {
         let out = cairn(
             "synth",
             &[
                 "--experimental-logic-synth",
                 "--stage",
-                &stage,
+                stage,
                 path.to_str().unwrap(),
             ],
         );
+        assert_missing_edition_usage_error(&out, stage, "on a missing file");
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert_eq!(
-            out.status.code(),
-            Some(2),
-            "--stage {stage} on a missing file without --edition: {stderr}",
-        );
-        assert!(
-            stderr.contains("--edition"),
-            "--stage {stage} on a missing file should report the missing --edition, got: {stderr}",
-        );
         assert!(
             !stderr.contains("cannot read"),
             "--stage {stage} on a missing file without --edition read the file before \
@@ -1474,7 +1495,7 @@ fn cli_synth_missing_edition_is_reported_ahead_of_a_missing_file() {
             &[
                 "--experimental-logic-synth",
                 "--stage",
-                &stage,
+                stage,
                 "--edition",
                 "java",
                 path.to_str().unwrap(),
@@ -1492,13 +1513,12 @@ fn cli_synth_missing_edition_is_reported_ahead_of_a_missing_file() {
              got: {stderr}",
         );
     }
-    assert!(gated > 0, "no --stage value required --edition");
 }
 
 /// Assert that `out` reported the finding `code` with the exit code its
 /// severity gives: `error[E_…]` and exit 1, or `warning[W_…]` and exit 0,
 /// since a warning leaves the run its product.
-fn assert_reports_finding(out: &std::process::Output, code: &str, context: &str) {
+fn assert_reports_finding(out: &Output, code: &str, context: &str) {
     let (severity, exit) = match code.split_once('_') {
         Some(("E", _)) => ("error", 1),
         Some(("W", _)) => ("warning", 0),
