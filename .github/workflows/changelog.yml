@@ -13,7 +13,8 @@ permissions:
 jobs:
   fragments:
     # Short and stable on purpose: a required status check is matched as a
-    # literal string, so renaming this job un-gates it silently.
+    # literal string, so renaming this job's `name` un-gates it silently. A
+    # new job gates nothing until its name is added to the branch ruleset.
     name: Changelog
     runs-on: ubuntu-latest
     steps:
@@ -21,12 +22,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check every fragment
-        run: python3 .github/scripts/changelog.py check
+      - name: Test the changelog script
+        run: python3 -m unittest discover -s .github/scripts
 
-      - name: Check the title against the fragments this PR adds
+      # One step, so a push sees every problem at once: the fragments this PR
+      # adds or edits, its title against them, and CHANGELOG.md left alone.
+      # Fragments already on the base are not this PR's to answer for.
+      - name: Check this PR's fragments and title
         env:
           TITLE: ${{ github.event.pull_request.title }}
           BASE: ${{ github.event.pull_request.base.ref }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        run: python3 .github/scripts/changelog.py pr --title "$TITLE" --base "origin/$BASE" --head-ref "$HEAD_REF"
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: >-
+          python3 .github/scripts/changelog.py pr
+          --base "$BASE" --head-ref "$HEAD_REF" --author "$AUTHOR" --title "$TITLE"

@@ -85,11 +85,11 @@ Rust のソース、仕様本文、サンプル、ドキュメントは、何年
 
 先送りされていたものが実装されたら、それを入れる PR の中で同時にコメントを更新します。
 
-例外は 3 つだけです。マイルストーンの語彙こそがその目的である面 — [CHANGELOG.md](CHANGELOG.md)、[ロードマップ](https://cairn.kage1020.com/ja/roadmap/)、[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)表のマイルストーン列。それ以外はレビュー時に次で確認できます。
+例外は 3 つだけです。マイルストーンの語彙こそがその目的である面 — [CHANGELOG.md](CHANGELOG.md) とその断片を置く [changelog.d/](changelog.d/README.md)、[ロードマップ](https://cairn.kage1020.com/ja/roadmap/)、[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)表のマイルストーン列。それ以外はレビュー時に次で確認できます。
 
 ```sh
 rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\b' \
-  --glob '!CHANGELOG*' --glob '!CONTRIBUTING*' \
+  --glob '!CHANGELOG*' --glob '!changelog.d/**' --glob '!CONTRIBUTING*' \
   --glob '!**/compatibility.md' --glob '!**/roadmap.md' --glob '!target/**'
 ```
 
@@ -107,7 +107,7 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 これは `cargo test --workspace` が `crates/`、`examples/`、`.github/` の 3 つの木に対して守ります。その中に `§` や "section 11.3" が残っていないこと、`spec/<章>` が実在する章を指していること、引用符で囲まれた見出しがその章に実在することの 3 点です。仕様を採番し直しても Rust 側は 1 行も動きません。節の見出しを変えた場合はテストが引用箇所をファイルと行番号で名指して落ちますが、それが狙いです。見出しの変更は意味の変更であり、それに寄りかかっていたコメントは読み直す価値があります。
 
-残りは人の目で見るしかありません。`website/` を読まないのは、そこが番号を定義している側だからです。仕様の隣に並ぶガイドページは今も番号を埋め込んだアンカーで節を参照しており、それをほどくのは見出しそのものを変える変更と一緒にやる仕事です。`editors/`、このファイル、CHANGELOG は単に走査範囲の外です。
+残りは人の目で見るしかありません。`website/` を読まないのは、そこが番号を定義している側だからです。仕様の隣に並ぶガイドページは今も番号を埋め込んだアンカーで節を参照しており、それをほどくのは見出しそのものを変える変更と一緒にやる仕事です。`editors/`、このファイル、`CHANGELOG.md` と `changelog.d/` は単に走査範囲の外です。
 
 ### クレートの README
 
@@ -147,15 +147,15 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 | `chore` | 利用者に届かないその他すべて | いいえ |
 | `style` | 整形・lint だけの変更 | いいえ |
 
-**破壊的変更はコロンの直前に `!` を付けます** — type の後ろ、スコープを書くときはスコープの後ろです (`feat(core)!: replace lexer`、`fix!: …`)。`!` と CHANGELOG は対になっています。`changelog.d/<slug>.breaking.md` のフラグメントを足す PR はタイトルに `!` を付け、タイトルに `!` を付けた PR はそのフラグメントを足します。手書きのエントリは [compatibility「breaking はどう告知されるか」](https://cairn.kage1020.com/ja/spec/compatibility/) が求めるもので、リリース時に `### Breaking changes` の下へ取り込まれた後、`CHANGELOG.md` を読む人が目にするのはこちらです。`!` は同じ事実を `release-plz` が解析するコミットの側に書いたものです。片方だけの PR は `Changelog` チェックが落とします。
-
-### CHANGELOG のエントリ
-
-PR は [CHANGELOG.md](CHANGELOG.md) を編集しません。代わりに [changelog.d/](changelog.d/README.md) にエントリ 1 つにつき 1 ファイルのフラグメントを足します。ファイル名は `<slug>.<kind>.md` で、kind が見出しを決めます (`breaking`、`deprecations`、`added`、`changed`、`fixed`、`performance`、`build`)。20 本の PR が同時に開いていて全員が同じ `[Unreleased]` の見出しを編集すると、マージのたびに互いに衝突していました。別々のファイルなら衝突しません。月次のリリース PR が、`release-plz` が新バージョン用に書いた節へフラグメントを取り込み、フラグメントを削除します。`Changelog` ワークフローは各フラグメントの名前と形を確かめ、issue 番号と `ci` だけをスコープにしたエントリを拒み、リリース PR 以外が `CHANGELOG.md` に行を足すことも拒みます。詳細とローカルで同じチェックを走らせるコマンドは [changelog.d/README.md](changelog.d/README.md) にあります。
+**破壊的変更はコロンの直前に `!` を付けます** — type の後ろ、スコープを書くときはスコープの後ろです (`feat(core)!: replace lexer`、`fix!: …`)。`!` と CHANGELOG は対になっています。`changelog.d/<slug>.breaking.md` のフラグメントを足す PR はタイトルに `!` を付け、タイトルに `!` を付けた PR はそのフラグメントを足します。手書きのエントリは [compatibility「breaking はどう告知されるか」](https://cairn.kage1020.com/ja/spec/compatibility/) が求めるもので、リリース時に `### Breaking changes` の下へ取り込まれた後、`CHANGELOG.md` を読む人が目にするのはこちらです。`!` は同じ事実を `release-plz` が解析するコミットの側に書いたものです。片方だけの PR は `Changelog` チェックが指摘します。それが必須チェックになるまでは、片方だけの PR を見たレビュアーがマージ前にもう片方を求めます。
 
 `!` はバージョンを決めません。semver ならメジャーバンプと読むところですが、ここではリリースワークフローが日付と既存タグから次の `YYYY.M.PATCH` を計算して `release-plz` の実行前に `Cargo.toml` へ書き込み、`release-plz` は公開済みのものと既に異なるバージョンには手を付けません。リリースの要否も決めません — それを決めるのは上の表の type です。変わるのは生成されるリリースノートです。`release-plz` はそのコミットの行の先頭に `[**breaking**]` を付け、`protect_breaking_commits` によって、普段は行が落とされる type (`docs!:`、`ci!:`) でもその行が残ります。
 
-自分で開く PR はすべて `canary` を対象にします。`main` 宛の PR はパイプラインの promote-to-main だけです。メンテナ 1 名の承認と CI のグリーンが必須です。リリース PR も同じルールで、これをマージすると公開が走り、`main` が fast-forward されます。
+自分で開く PR はすべて `canary` を対象にします。`main` 宛の PR はパイプラインの promote-to-main だけです。メンテナ 1 名の承認が必須で、マージ前に CI がグリーンであることを求めます。ブランチのルールセットはまだどのチェックも必須にしていません。リリース PR も同じルールで、これをマージすると公開が走り、`main` が fast-forward されます。
+
+## CHANGELOG のエントリ
+
+PR は [CHANGELOG.md](CHANGELOG.md) を編集しません。代わりに [changelog.d/](changelog.d/README.md) にエントリ 1 つにつき 1 ファイルのフラグメントを足します。ファイル名は `<slug>.<kind>.md` で、kind が見出しを決めます (`breaking`、`deprecations`、`added`、`changed`、`fixed`、`performance`、`build`)。20 本の PR が同時に開いていると、同じ `[Unreleased]` の見出しを編集する PR は次のマージのたびに衝突します。別々のファイルなら衝突しません。月次のリリース PR が、`release-plz` が新バージョン用に書いた節へフラグメントを取り込み、フラグメントを削除します。`Changelog` ワークフローは PR が足したり変えたりしたフラグメントの名前と形を確かめ、issue や PR の番号と、`ci` だけをスコープにしたエントリを指摘し、リリース PR 以外による `CHANGELOG.md` の変更も指摘します。詳細とローカルで同じチェックを走らせるコマンドは [changelog.d/README.md](changelog.d/README.md) にあります。対象はルートの `CHANGELOG.md` だけで、`editors/vscode/CHANGELOG.md` は拡張機能自身のもので、これまでどおり手で編集します。
 
 ## 決着した決定を蒸し返す
 

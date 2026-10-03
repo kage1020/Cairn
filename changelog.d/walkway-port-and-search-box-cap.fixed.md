@@ -1,1 +1,0 @@
-- *(core)* name what buries a walkway port and what stretched the router's search box past its cap ([#455](https://github.com/kage1020/Cairn/pull/455))
