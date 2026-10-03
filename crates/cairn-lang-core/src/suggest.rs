@@ -37,8 +37,8 @@ pub(crate) fn did_you_mean_note(suggested: &str) -> DiagnosticNote {
 /// and longer ones three — past which the suggestion reads as a different
 /// word entirely.
 fn max_distance(input_len: usize) -> usize {
-    // [`nearest_match`] returns early on an empty input, so 0 never reaches
-    // here; the lower bound is 1.
+    // [`nearest_match_by`] returns early on an empty input, so 0 never
+    // reaches here; the lower bound is 1.
     match input_len {
         1..=3 => 1,
         4..=6 => 2,
@@ -97,9 +97,9 @@ where
         // The distance is never smaller than the difference in length (each
         // extra character costs at least one insertion or deletion), so a
         // candidate further than `max_edits` away in length cannot pass the
-        // cap. Skipping it here changes no answer and spares the
-        // O(len(input) × len(cand)) distance, which is what an overlong
-        // unknown id paid once per id in a block table.
+        // cap. Skipping it here changes no answer, and a skipped candidate
+        // costs the count of its characters rather than the
+        // O(len(input) × len(cand)) distance.
         if cand.chars().count().abs_diff(input_len) > max_edits {
             continue;
         }
