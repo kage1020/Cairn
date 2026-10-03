@@ -2170,6 +2170,13 @@ fn run_synth(
         Err(code) => return code,
     };
 
+    // Every refusal from here on is prose on stderr, with no failure
+    // document on stdout. `run_lower` writes one under `--format json`
+    // because that flag commits a command to one JSON document per input,
+    // a refused one included (`spec/lint` "Machine-readable payload");
+    // `synth` takes no `--format` and has no such commitment to honour.
+    // Its stdout is the dump or nothing, so a redirect of a refused run
+    // holds zero bytes, which no JSON reader takes for an IR.
     let (source, module) = match load_module(file, FailureReport::Text) {
         Ok(loaded) => loaded,
         Err(code) => return code,
@@ -2219,10 +2226,12 @@ fn run_synth(
 /// ambiguous. `Ok(Some(_))` for an edition-tagged stage, which requires
 /// the flag.
 ///
-/// Called before the source is loaded, and so before the first pass:
-/// both refusals are usage errors (exit 2), and a usage error reported
-/// after parse, `check` and synthesis would be hidden by any finding
-/// those passes make in the file.
+/// Must be called before `load_module`: both refusals are usage errors
+/// (exit 2) decided from argv alone, and a call any later would put them
+/// behind the read and the passes after it, where an error found in the
+/// file ends the run before either refusal is reached and a warning is
+/// printed ahead of the refusal. Being ahead of the read also means a
+/// path that names nothing is reported only once `--edition` is right.
 fn synth_edition(
     stage: SynthStage,
     edition: Option<EditionArg>,
