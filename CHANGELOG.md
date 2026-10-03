@@ -65,7 +65,9 @@
     comparing it with the indent stack; it now compares first, so the line is refused as an indent
     that opens more than one level.
 
-- *(core)* refuse a placement whose body runs past `i32` and a repeated window whose `sym=` is unreadable, show the written `side=` / `slope_to=` value, and report the body of a row whose anchor did not lower ([#462](https://github.com/kage1020/Cairn/pull/462))
+- *(core)* refuse a placement whose body runs past `i32` and a repeated window whose `sym=` is
+  unreadable, show the written `side=` / `slope_to=` value, and, for a row whose anchor did not
+  lower, report the findings its body raises ([#462](https://github.com/kage1020/Cairn/pull/462))
 
 ### Breaking changes
 
