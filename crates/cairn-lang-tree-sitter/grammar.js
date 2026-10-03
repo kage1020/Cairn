@@ -29,8 +29,28 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
+  // Reserved words, by set.
+  //
+  // `global` holds wherever a rule names no other set: `true` and `false`
+  // are boolean literals, never an identifier.
+  //
+  // `operand` is the set `_bool_expr` names for a signal, where a `logic`
+  // expression expects one. `and` and `or` are operators there, never a
+  // signal's name, so `a.b and or` is refused rather than read as a
+  // reference to a signal called `or`. The set is the lex state the
+  // reference starts in, so only its head is reserved and `c.or` still
+  // names a signal. A named set replaces `global` rather than extending
+  // it, so `true` and `false` are listed again, and they are load-bearing:
+  // without them `true and not false` reads as two signals (corpus case
+  // "A boolean literal is not a logic operand").
+  //
+  // `not` is not listed because it needs no reserving. Every position an
+  // operand can start is one `unary_expression` can start too, so the
+  // keyword `not` is valid there and the lexer always takes the word as
+  // the keyword: `a.b and not` and `a.b and not.x` are already refused.
   reserved: {
     global: _ => ['true', 'false'],
+    operand: _ => ['true', 'false', 'and', 'or'],
   },
 
   conflicts: $ => [
@@ -154,8 +174,8 @@ module.exports = grammar({
       $.binary_expression,
       $.unary_expression,
       $.parenthesized_expression,
-      $.signal_ref,
-      $.identifier,
+      reserved('operand', $.signal_ref),
+      reserved('operand', $.identifier),
     ),
 
     binary_expression: $ => choice(
