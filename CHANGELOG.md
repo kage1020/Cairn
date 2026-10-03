@@ -72,6 +72,10 @@
   outside the cap's length band is now skipped before its distance is computed, which changes no
   suggestion.
 
+- *(core)* refuse a placement whose body runs past `i32` and a repeated window whose `sym=` is
+  unreadable, show the written `side=` / `slope_to=` value, and, for a row whose anchor did not
+  lower, report the findings its body raises ([#462](https://github.com/kage1020/Cairn/pull/462))
+
 - *(core)* A `def` whose only `place use=` row was refused for its id or its origin was also
   reported as `W_UNUSED_DEF`, with advice to remove the def. Every such refusal did this: a missing
   `id=` (`E_INCOMPLETE_PLACE`), one that is not an identifier or string (`id=3`,

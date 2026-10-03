@@ -216,7 +216,10 @@ low `z` and mirror the same way.
 rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. `sym=` takes a bare `true` or
 `false`, and a window without it is not mirrored. Any other value (`sym=yes`, `sym="true"`,
 `sym=1`) is an unreadable value: the window is drawn without its mirror, and the value is reported
-as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)). A window whose `repeat=`
+is greater than 1 is the exception: `sym=true` refuses it, so an unreadable `sym=` is not read as
+`false` there. The window is not cut, and is reported as `W_DEFERRED_MEMBER` beside the
+`W_IGNORED_ARGUMENT`.
 
 **`at=` door anchors.** A door's wall-local column comes from one of three named anchors:
 
