@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- *(redstone)* A stretch with no coord for a buffer repeater, refused only because a coord touches
+  another block of its own net, was reported as though every coord turned. The refusal now says
+  which of the two applied, and names the coord nearest the dark end that touches its net and the
+  block it touches.
+
 - *(core)* A `place` row refused with `E_INVALID_PLACE_ID` drew a second error on every later row
   whose `east_of=` / `north_of=` named it: `E_UNRESOLVED_PLACE_REF`, with a note telling the author to
   declare the target above that line, which it already was. The reference is now not reported; the
