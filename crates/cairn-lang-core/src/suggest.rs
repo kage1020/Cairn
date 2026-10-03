@@ -194,23 +194,39 @@ mod tests {
 
     const KEYWORDS: &[&str] = &["floor", "walls", "door", "window", "roof", "stair", "level"];
 
-    /// An unknown id far longer than any candidate costs one length
-    /// comparison per candidate: no distance is computed, since none of
-    /// them can be within the cap. The candidates stand in for a pinned
-    /// target's block table: a couple of thousand ids of block-id length.
+    /// No distance is computed for a candidate whose length differs from
+    /// the input's by more than the cap, whether the input is the longer or
+    /// the shorter of the two: an unknown id far longer than every
+    /// candidate, and one far shorter than every candidate, each answer
+    /// `None` with no candidate scored. The short candidates stand in for a
+    /// pinned target's block table: a couple of thousand ids of block-id
+    /// length.
     #[test]
     fn a_candidate_too_far_away_in_length_is_never_scored() {
-        let table: Vec<String> = (0..2_000).map(|i| format!("block_number_{i}")).collect();
-        let input = "w".repeat(1_000);
-        let mut scored = 0_usize;
-        let answer = nearest_match_by(&input, table.iter().map(String::as_str), |a, b| {
-            scored += 1;
-            damerau_levenshtein(a, b)
-        });
+        fn answer_and_scored<'a>(input: &str, table: &'a [String]) -> (Option<&'a str>, usize) {
+            let mut scored = 0_usize;
+            let answer = nearest_match_by(input, table.iter().map(String::as_str), |a, b| {
+                scored += 1;
+                damerau_levenshtein(a, b)
+            });
+            (answer, scored)
+        }
+        let block_ids: Vec<String> = (0..2_000).map(|i| format!("block_number_{i}")).collect();
+        let (answer, scored) = answer_and_scored(&"w".repeat(1_000), &block_ids);
         assert_eq!(answer, None);
         assert_eq!(
             scored, 0,
-            "a candidate outside the cap's length band was scored"
+            "a candidate far shorter than the input was scored"
+        );
+        let long_ids: Vec<String> = block_ids
+            .iter()
+            .map(|id| format!("{id}{}", "w".repeat(1_000)))
+            .collect();
+        let (answer, scored) = answer_and_scored("wall", &long_ids);
+        assert_eq!(answer, None);
+        assert_eq!(
+            scored, 0,
+            "a candidate far longer than the input was scored"
         );
     }
 
@@ -220,6 +236,9 @@ mod tests {
     /// candidate) where an off-by-one in the prune would drop a match.
     #[test]
     fn the_length_prune_agrees_with_scoring_every_candidate() {
+        /// Scores every candidate, with the same tie-break contract as
+        /// [`nearest_match_by`]: strict `<`, so the first of equally near
+        /// candidates wins.
         fn unpruned<'a>(input: &str, candidates: &[&'a str]) -> Option<&'a str> {
             if input.is_empty() {
                 return None;
@@ -253,6 +272,10 @@ mod tests {
             "window",
             "oak_planks",
             "stone_bricks",
+            // Three chars in nine bytes: a prune that measured the
+            // candidate in bytes would drop it where it is the answer, as
+            // it is for `日本語z`.
+            "日本語",
         ];
         let mut inputs: Vec<String> = Vec::new();
         for cand in candidates {
