@@ -24,6 +24,8 @@
   the target; one broken in any other way is still reported as unreadable, with that cause.
   `Lockfile::refused_identifier` makes the same reading.
 
+- *(core)* name what buries a walkway port and what stretched the router's search box past its cap ([#455](https://github.com/kage1020/Cairn/pull/455))
+
 - *(cli)* `cairn info --editions java,java` reported Java twice: a second row in `edition
   portability` and `buildable targets`, in text and in the JSON document, and a second per-edition
   dry-run. The per-edition rows now walk the same deduplicated list the diagnostics gate is weighed
@@ -47,6 +49,8 @@
 
   Listed here rather than as a fix under `spec/compatibility` C.4: the spec gained these characters,
   rather than the build being brought in line with what it already said.
+
+- *(core)* `RoutePathError::AreaCapExceeded` gains a `rect: SearchRect` field, the rectangle the area was measured on; `SearchRect` is new in `cairn_lang_core::block_array` ([#455](https://github.com/kage1020/Cairn/pull/455))
 
 ## 2026.10.0 — 2026-10-01
 
