@@ -62,7 +62,8 @@ use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::ids::{
-    IdError, PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem,
+    FORBIDDEN_IDENT_PUNCTUATION, IdError, PlaceId, PortId, SiteName, WalkwayEndpoint,
+    WalkwayScopeKey, artifact_stem, shown_char,
 };
 use crate::intent::{
     ConnectEnd, DefIr, IntentModule, Member, MemberBody, MemberRole, SelectorRule, SiteIr,
@@ -1022,6 +1023,18 @@ fn resolve_site_placements(
     // lookup would be quadratic and would also let a later place forward-
     // reference an earlier one's mistakes.
     let mut seen_place_ids: IndexMap<String, Span> = IndexMap::new();
+    // Rows refused with `E_INVALID_PLACE_ID`, by id, each with the span of
+    // the first row refused under it. Such a row is never registered in
+    // `seen_place_ids`, but a later `east_of=` / `north_of=` naming it still
+    // means that row, so the reference is reported as the cascade
+    // `W_DEFERRED_PLACE`, pointing here, rather than as an unknown id.
+    // Filled in source order, like `seen_place_ids`: a reference *above* the
+    // refused row names no prior place and is `E_UNRESOLVED_PLACE_REF`.
+    //
+    // A `connect` endpoint needs no such lookup: it is a `DotRef` whose head
+    // is a lexer `Ident`, which no refused id is, so it cannot name one. If
+    // `connect` ever takes a string, it needs this map too.
+    let mut refused_place_ids: IndexMap<String, Span> = IndexMap::new();
     // `place_id` → `use=DEF_NAME` so `connect` rows can find the def whose
     // body exposes the named port without re-walking the placement list.
     let mut place_def: IndexMap<String, String> = IndexMap::new();
@@ -1067,8 +1080,13 @@ fn resolve_site_placements(
             used_defs.insert(def.name.clone());
         }
 
-        let Some(place_id) = usable_place_id(member, &site.name, &seen_place_ids, ctx.diagnostics)
-        else {
+        let Some(place_id) = usable_place_id(
+            member,
+            &site.name,
+            &seen_place_ids,
+            &mut refused_place_ids,
+            ctx.diagnostics,
+        ) else {
             continue;
         };
         seen_place_ids.insert(place_id.to_owned(), member.span.clone());
@@ -1083,6 +1101,7 @@ fn resolve_site_placements(
             &site.name,
             Some(place_id),
             &seen_place_ids,
+            &refused_place_ids,
             ctx.diagnostics,
         ) {
             continue;
@@ -1382,7 +1401,9 @@ fn validate_port(
         // `resolve_site_placements` that skips the insert reports the row
         // itself: an absent `use=` / `theme=` (`E_INCOMPLETE_PLACE`), a
         // mistyped one (`E_TYPE_MISMATCH_LABEL`), a failed origin selector
-        // (`E_INVALID_PLACE_ORIGIN`), a `use=` naming an unknown def
+        // (`E_INVALID_PLACE_ORIGIN`), an `east_of=` / `north_of=` naming
+        // no prior place (`E_UNRESOLVED_PLACE_REF`) or one refused for its
+        // id (`W_DEFERRED_PLACE`), a `use=` naming an unknown def
         // (`E_UNRESOLVED_PLACE_REF`), a `theme=` naming an unknown theme
         // (`E_UNRESOLVED_THEME_REF`). There is no silent camp left.
         //
@@ -1492,19 +1513,27 @@ fn validate_port(
 /// Returns `true` when the placement passes every origin-selector check, in
 /// which case `resolve_site_placements` may proceed with the cross-scope
 /// def / theme resolution and register a scope. `false` means at least one
-/// `E_INVALID_PLACE_ORIGIN` or `E_UNRESOLVED_PLACE_REF` (target reference)
-/// was emitted — the caller must skip the rest of the placement so the
-/// lowering pass does not voxelise a structurally rejected `place`.
+/// `E_INVALID_PLACE_ORIGIN`, `E_UNRESOLVED_PLACE_REF` (target reference) or
+/// `W_DEFERRED_PLACE` was emitted — the caller must skip the rest of the
+/// placement so the lowering pass does not voxelise a structurally rejected
+/// `place`.
 /// `place_id` is `None` for a row that declared no `id=`. Such a row is
 /// already reported as incomplete and can never be referenced, but its
 /// origin selector is checked anyway so every problem on the line surfaces
 /// together — the same reason the missing-key finding lists all three keys
 /// at once.
+///
+/// A target in `refused_place_ids` names a prior row already refused with
+/// `E_INVALID_PLACE_ID`. That row has no position to step from, so the
+/// answer is `false`, and the reference is reported as `W_DEFERRED_PLACE`
+/// rather than `E_UNRESOLVED_PLACE_REF`: the id does name a row, and the
+/// repair is on that row.
 fn validate_place_origin(
     member: &Member,
     site_name: &str,
     place_id: Option<&str>,
     seen_place_ids: &IndexMap<String, Span>,
+    refused_place_ids: &IndexMap<String, Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
     let at = member.intent_state.get("at");
@@ -1557,6 +1586,17 @@ fn validate_place_origin(
             origin_is_usable = false;
             continue;
         };
+        if let Some(refused) = refused_place_ids.get(target) {
+            diagnostics.push(deferred_place_diag(
+                key,
+                target,
+                site_name,
+                value.span.clone(),
+                refused,
+            ));
+            origin_is_usable = false;
+            continue;
+        }
         if !seen_place_ids.contains_key(target) || Some(target) == place_id {
             // Suggestion pool is *prior* place ids only — pointing at a
             // later place would let cycles slip in. The same-site exclusion
@@ -1662,10 +1702,15 @@ fn unresolved_place_ref_diag_with_ordering_note<'a>(
 /// that, adding the `id=` this function just asked for would surface a
 /// *new* error on the line the author had only now fixed, which is the
 /// re-run cycle listing all three keys at once exists to avoid.
+///
+/// A row refused with `E_INVALID_PLACE_ID` has its id and span added to
+/// `refused_place_ids`, so a later row naming it is reported as the
+/// cascade `W_DEFERRED_PLACE` rather than as an id that names nothing.
 fn usable_place_id<'a>(
     member: &'a Member,
     site_name: &str,
     seen_place_ids: &IndexMap<String, Span>,
+    refused_place_ids: &mut IndexMap<String, Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<&'a str> {
     if let Some(diagnostic) = incomplete_place_diag(member, site_name) {
@@ -1677,7 +1722,14 @@ fn usable_place_id<'a>(
     // dot-ref needs a name on the left side), so there is nothing further to
     // do with it once its own line has been judged.
     let Some(place_id) = member.id.as_deref() else {
-        validate_place_origin(member, site_name, None, seen_place_ids, diagnostics);
+        validate_place_origin(
+            member,
+            site_name,
+            None,
+            seen_place_ids,
+            refused_place_ids,
+            diagnostics,
+        );
         return None;
     };
 
@@ -1694,6 +1746,11 @@ fn usable_place_id<'a>(
             member.span.clone(),
             &err,
         ));
+        // First wins, as for `seen_place_ids`: the note on a reference
+        // points at the row refused first under that id.
+        refused_place_ids
+            .entry(place_id.to_owned())
+            .or_insert_with(|| member.span.clone());
         return None;
     }
     if let Some(first) = seen_place_ids.get(place_id) {
@@ -1818,8 +1875,14 @@ fn duplicate_place_id_diag(
 fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdError) -> Diagnostic {
     let reason = match err {
         IdError::Empty => "it is empty".to_owned(),
-        IdError::ForbiddenChar { ch, .. } => format!("it contains `{ch}`"),
+        IdError::ForbiddenChar { ch, .. } => format!("it contains `{}`", shown_char(*ch)),
     };
+    // Built from the list the rule itself reads, so the advice cannot name a
+    // character the rule lets through or leave out one it refuses.
+    let marks: Vec<String> = FORBIDDEN_IDENT_PUNCTUATION
+        .iter()
+        .map(|mark| format!("`{mark}`"))
+        .collect();
     Diagnostic {
         code: DiagnosticCode::InvalidPlaceId,
         span,
@@ -1828,10 +1891,44 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "a place id becomes part of the `site::<site>::<place>` scope key and \
-                      the stem of the artifact file written into `--out`, so it must be \
-                      non-empty and free of `.`, `:`, `/`, `\\`, and whitespace; \
-                      rename it with letters, digits, and `_` (`home1`, `north_tower`)"
+            message: format!(
+                "a place id becomes part of the `site::<site>::<place>` scope key and \
+                 the stem of the artifact file written into `--out`, so it must be \
+                 non-empty and free of {marks}, whitespace, and control characters; \
+                 rename it with letters, digits, and `_` (`home1`, `north_tower`)",
+                marks = marks.join(", "),
+            ),
+        }],
+        data: None,
+    }
+}
+
+/// `W_DEFERRED_PLACE`: `key=target` names a row refused for its id.
+///
+/// The cascade shape `W_DEFERRED_CONNECT` uses, one layer up: the row
+/// naming the refused id is correct as written and is not placed only
+/// because what it is placed against has no position. The note carries the
+/// refused row's span, so the author is sent to the row that has the
+/// repair. Renaming that row's id renames what this reference has to say,
+/// which the note says too rather than promising the row places on its own.
+fn deferred_place_diag(
+    key: &str,
+    target: &str,
+    site_name: &str,
+    span: Span,
+    refused: &Span,
+) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::DeferredPlace,
+        span,
+        primary: format!(
+            "`{key}={target}` in site `{site_name}` names a `place` row refused for its id, \
+             so this row is not placed"
+        ),
+        notes: vec![DiagnosticNote {
+            span: Some(refused.clone()),
+            message: "that row carries its own diagnostic saying what is wrong with its id; \
+                      renaming it, and this reference with it, places this row too"
                 .to_owned(),
         }],
         data: None,

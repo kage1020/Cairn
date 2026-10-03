@@ -262,12 +262,13 @@ author means, so with both in scope the question has not been asked.
 
 | Code | Meaning |
 |---|---|
-| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:`, `/`, `\` or whitespace. |
+| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:`, `/`, `\`, `*`, `\|`, `?`, `<`, `>`, `"`, whitespace or a control character. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
+| `W_DEFERRED_PLACE` | An `east_of=` / `north_of=` names a `place` refused for its id, so the row naming it is not placed either. |
 | `W_UNUSED_DEF` | A `def` no `place use=` references. |
 
 `E_INVALID_PLACE_ID` is about round-tripping rather than taste. The scope key
@@ -275,9 +276,22 @@ author means, so with both in scope the question has not been asked.
 separators, so an id carrying one cannot be read back. The id is also the name of the file the
 placement is written to in the output directory, and a `/` or `\` would make that name a path: a
 relative id with one lands in a subdirectory, and an absolute id replaces the output directory
-altogether. Both separators are refused on every platform, so whether an id is accepted does not
-depend on the host that checks it. `id=` accepts a string literal, which is what let the value
-through.
+altogether. `*`, `|`, `?`, `<`, `>`, `"` and the control characters U+0000 to U+001F cannot appear
+in a Windows file name, so an id carrying one would build on Linux and fail to be written on
+Windows. They are refused on every platform, so whether an id is refused for a character Windows
+reserves in a file name does not depend on the host that checks it. The other control characters,
+U+007F to U+009F, are legal in a Windows file name and are refused on their own ground: they print
+as nothing or move the terminal cursor, so a finding that quotes the id could not show it. `id=`
+accepts a string literal, which is what let the value through.
+
+A later `east_of=` / `north_of=` naming the id of a row refused with `E_INVALID_PLACE_ID` still
+means that row, so it is not `E_UNRESOLVED_PLACE_REF`, which would send the author looking for a
+typo. It is `W_DEFERRED_PLACE`: the row naming the refused one is not placed either, since what it
+is placed against has no position, and the note points at the refused row, where the repair is.
+Renaming that row's id means renaming the reference with it. It is a warning for the reason
+`W_DEFERRED_CONNECT` is: the build already fails on the refused row, and a second error would send
+the author to a line that names the row it means. A reference above the refused row names no prior
+place, as it would for any other id, and is `E_UNRESOLVED_PLACE_REF`.
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
@@ -341,9 +355,10 @@ names the segment to rename. The walkway it asked for is lost, so `cairn compile
 with `E_PARTIAL_BUILD`, as it does for every row that lays nothing.
 
 `W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
-failed origin selector, an unresolved `use=` or `theme=`. It is a warning because the finding that
-has the repair is the one on the `place`, and reporting the `connect` as a second error would send
-the author to a line that is correct.
+failed origin selector, an origin naming a row refused for its id (`W_DEFERRED_PLACE`, whose note
+leads on to that row), an unresolved `use=` or `theme=`. It is a warning because the finding that
+has the repair is the one on the `place`, or the one its note points at, and reporting the
+`connect` as a second error would send the author to a line that is correct.
 
 ### Lowering
 

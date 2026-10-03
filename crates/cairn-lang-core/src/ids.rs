@@ -1,13 +1,38 @@
 //! Newtype wrappers for Cairn identifiers shared across the resolver, the
 //! block-array IR, and the lockfile DTOs.
 //!
-//! Each newtype carries the invariants the surface lexer already
-//! establishes (non-empty, no `.`, no `:`, no whitespace) so downstream
-//! layers cannot accidentally pass a connect endpoint such as
-//! `home.1.entry` and have the walkway scope key silently re-parse as a
-//! different `(place, port)` pair. The path separators `/` and `\` are
-//! refused as well: an identifier becomes an artifact's file name, and a
-//! separator in it would move the artifact out of the output directory.
+//! # What an identifier may not carry
+//!
+//! This section is the one place the rule and its reasons are written; the
+//! constructors, [`IdError::ForbiddenChar`] and the `E_INVALID_PLACE_ID`
+//! note follow it rather than restating it. An identifier is non-empty and
+//! carries none of:
+//!
+//! - `.` and `:`, the scope-key separators. A connect endpoint such as
+//!   `home.1.entry` would otherwise have its walkway scope key re-parse as a
+//!   different `(place, port)` pair.
+//! - `/` and `\`, the path separators. An identifier is the stem of the
+//!   artifact file the compiler writes into `--out`, so either would put
+//!   that file in another directory, and an absolute id would replace
+//!   `--out` altogether.
+//! - `*`, `|`, `?`, `<`, `>`, `"` and the control characters U+0000 to
+//!   U+001F, which a Windows file name cannot carry: an identifier with one
+//!   would check and build on Linux and then fail to be written on Windows.
+//!   They are refused on every host, so whether an identifier is refused for
+//!   a character Windows reserves in a file name does not depend on the host
+//!   that checks it.
+//! - The other control characters, U+007F to U+009F. A Windows file name
+//!   may carry them; they are refused on their own ground, because they
+//!   print as nothing or move the terminal cursor, so a message quoting the
+//!   identifier could not show it.
+//! - Whitespace. A `connect` endpoint is lexed as an identifier token, which
+//!   cannot carry any, so a place id with a space in it could never be
+//!   connected; and quoted in a message, it reads as two names.
+//!
+//! None of this is established before a newtype is built: `place id=`
+//! takes a string literal, so the constructor is where the rule is first
+//! applied, and the lockfile reader applies it again to what it reads back.
+//!
 //! The wire format is unchanged: every newtype is `#[serde(transparent)]`
 //! over its internal `String`, so any YAML / JSON consumer keeps seeing the
 //! same scalar string it used to.
@@ -30,11 +55,15 @@ pub enum IdError {
     /// Construction was attempted with an empty string.
     #[error("identifier is empty")]
     Empty,
-    /// Construction was attempted with a string containing a character
-    /// that is reserved as a structural separator (`.`, `:`), a path
-    /// separator (`/`, `\`), or a character the surface lexer would not
-    /// have produced (whitespace).
-    #[error("identifier `{ident}` contains forbidden character `{ch}`")]
+    /// Construction was attempted with a string containing a character no
+    /// identifier may carry; the [module docs](crate::ids) list them and say
+    /// why. The message quotes the character as [`char::escape_debug`] does
+    /// when it would not read as itself: a control character, or whitespace
+    /// other than a plain space.
+    #[error(
+        "identifier `{ident}` contains forbidden character `{}`",
+        shown_char(*ch)
+    )]
     ForbiddenChar {
         /// The full offending string.
         ident: String,
@@ -43,16 +72,29 @@ pub enum IdError {
     },
 }
 
-/// The characters no identifier may carry.
-///
-/// `.` and `:` are the scope-key separators. `/` and `\` are the path
-/// separators: an identifier is the stem of the artifact file the compiler
-/// writes into `--out`, so either one would put that file in another
-/// directory, and an absolute id would replace `--out` altogether. Both are
-/// refused on every platform, so whether an identifier is accepted does not
-/// depend on the host that checks it.
+/// The punctuation no identifier may carry, in the order a message lists
+/// it. Whitespace and the control characters are the other two classes;
+/// the [module docs](crate::ids) say why each is refused.
+pub(crate) const FORBIDDEN_IDENT_PUNCTUATION: [char; 10] =
+    ['.', ':', '/', '\\', '*', '|', '?', '<', '>', '"'];
+
+/// Whether an identifier may not carry `c`, per the [module docs](crate::ids).
 fn is_forbidden_ident_char(c: char) -> bool {
-    matches!(c, '.' | ':' | '/' | '\\') || c.is_whitespace()
+    FORBIDDEN_IDENT_PUNCTUATION.contains(&c) || c.is_whitespace() || c.is_control()
+}
+
+/// `c` as a message quotes it: itself, or its escape when it would not read
+/// as itself. A control character prints as nothing or moves the cursor,
+/// and whitespace other than a plain space prints as a space, so an
+/// identifier refused for a no-break space would otherwise read as refused
+/// for the space everyone can see. A plain space is recognisable as itself.
+#[must_use]
+pub(crate) fn shown_char(c: char) -> String {
+    if c.is_control() || (c.is_whitespace() && c != ' ') {
+        c.escape_debug().to_string()
+    } else {
+        c.to_string()
+    }
 }
 
 fn validate_ident(s: &str) -> Result<(), IdError> {
@@ -173,16 +215,14 @@ macro_rules! ident_newtype {
         pub struct $Name(String);
 
         impl $Name {
-            /// Build a new identifier, validating the surface invariants.
+            /// Build a new identifier, refusing what the
+            /// [module docs](crate::ids) say no identifier may carry.
             ///
             /// # Errors
             ///
             /// Returns [`IdError::Empty`] for the empty string, or
-            /// [`IdError::ForbiddenChar`] if the input contains a `.`,
-            /// `:`, or whitespace character (any of which would break
-            /// the structural separators downstream lookups rely on), or
-            /// a `/` or `\` (which would make the artifact file name
-            /// a path).
+            /// [`IdError::ForbiddenChar`] naming the first character the
+            /// rule refuses.
             pub fn new<S: Into<String>>(s: S) -> Result<Self, IdError> {
                 let s = s.into();
                 validate_ident(&s)?;
@@ -775,6 +815,85 @@ mod tests {
                     "`{ident}` must be refused on `{ch}`",
                 );
             }
+        }
+    }
+
+    #[test]
+    fn ident_new_rejects_what_a_windows_file_name_cannot_carry() {
+        // Each newtype is checked, since all three become file-name
+        // segments, and the rule must not depend on the host. U+0000 to
+        // U+001F are the controls Windows reserves; both ends are pinned.
+        for ch in ['*', '|', '?', '<', '>', '"', '\u{0}', '\u{1}', '\u{1f}'] {
+            assert_refused_by_every_newtype(ch);
+        }
+    }
+
+    #[test]
+    fn ident_new_rejects_the_controls_a_windows_file_name_allows_as_illegible() {
+        // U+007F to U+009F are legal in a Windows file name. They are
+        // refused because they print as nothing, which is a different
+        // reason and so a different test: dropping the Windows half of the
+        // rule must not take these with it, nor the other way round.
+        for ch in ['\u{7f}', '\u{80}', '\u{85}', '\u{9f}'] {
+            assert_refused_by_every_newtype(ch);
+        }
+    }
+
+    fn assert_refused_by_every_newtype(ch: char) {
+        let ident = format!("a{ch}b");
+        for result in [
+            PlaceId::new(ident.as_str()).map(|_| ()),
+            PortId::new(ident.as_str()).map(|_| ()),
+            SiteName::new(ident.as_str()).map(|_| ()),
+        ] {
+            assert_eq!(
+                result,
+                Err(IdError::ForbiddenChar {
+                    ident: ident.clone(),
+                    ch,
+                }),
+                "`{}` must be refused",
+                ch.escape_debug(),
+            );
+        }
+    }
+
+    #[test]
+    fn every_listed_punctuation_mark_is_refused() {
+        // The list is what the `E_INVALID_PLACE_ID` note is built from, so
+        // a mark listed and not refused would be advice the rule does not
+        // follow.
+        for ch in FORBIDDEN_IDENT_PUNCTUATION {
+            assert_refused_by_every_newtype(ch);
+        }
+    }
+
+    #[test]
+    fn an_illegible_forbidden_character_is_quoted_as_its_escape() {
+        for (ch, shown) in [
+            ('\u{1}', "\\u{1}"),
+            ('\u{7f}', "\\u{7f}"),
+            ('\t', "\\t"),
+            ('\u{a0}', "\\u{a0}"),
+            ('\u{2007}', "\\u{2007}"),
+            ('\u{3000}', "\\u{3000}"),
+        ] {
+            let ident = format!("a{ch}b");
+            let err = PlaceId::new(ident.as_str()).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("identifier `{ident}` contains forbidden character `{shown}`"),
+            );
+        }
+        // A character that reads as itself is quoted as itself: the
+        // separators, and the plain space, which nobody mistakes for
+        // anything else.
+        for (ident, shown) in [("a\\b", "\\"), ("a b", " ")] {
+            let err = PlaceId::new(ident).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                format!("identifier `{ident}` contains forbidden character `{shown}`"),
+            );
         }
     }
 
