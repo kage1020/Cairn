@@ -85,11 +85,11 @@ Rust source, spec body, examples, and docs have to read on their own years from 
 
 When the deferred thing lands, update the comment in the same PR.
 
-Three surfaces are exempt, because milestone vocabulary is what they are *for*: [CHANGELOG.md](CHANGELOG.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the milestone columns of the [compatibility](https://cairn.kage1020.com/spec/compatibility/) table. Reviewers can check the rest with:
+Three surfaces are exempt, because milestone vocabulary is what they are *for*: [CHANGELOG.md](CHANGELOG.md) with its fragments in [changelog.d/](changelog.d/README.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the milestone columns of the [compatibility](https://cairn.kage1020.com/spec/compatibility/) table. Reviewers can check the rest with:
 
 ```sh
 rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\b' \
-  --glob '!CHANGELOG*' --glob '!CONTRIBUTING*' \
+  --glob '!CHANGELOG*' --glob '!changelog.d/**' --glob '!CONTRIBUTING*' \
   --glob '!**/compatibility.md' --glob '!**/roadmap.md' --glob '!target/**'
 ```
 
@@ -107,7 +107,7 @@ Write the chapter as its file stem without the extension (`spec/redstone`, `spec
 
 `cargo test --workspace` holds this over `crates/`, `examples/` and `.github/`: no `§` or "section 11.3" in any of them, every `spec/<chapter>` names a chapter that exists, and every quoted title is a real heading in it. Renumbering the spec now touches no Rust at all. Retitling a section fails the test at each citation by file and line, which is the point — a title change is a change of meaning, and the comment that leaned on it deserves a re-read.
 
-The rest of the repository is on you. `website/` is unread because that is where the numbers are defined, and the guide pages beside the spec still link to sections by an anchor that bakes the number into the slug — untangling that belongs with a change to the headings themselves. `editors/`, this file, and the changelog are simply outside the scan.
+The rest of the repository is on you. `website/` is unread because that is where the numbers are defined, and the guide pages beside the spec still link to sections by an anchor that bakes the number into the slug — untangling that belongs with a change to the headings themselves. `editors/`, this file, `CHANGELOG.md` and `changelog.d/` are simply outside the scan.
 
 ### Crate READMEs
 
@@ -147,11 +147,15 @@ Name the branch after the Conventional Commits type the work will land under: `f
 | `chore` | Anything that doesn't ship to users | No |
 | `style` | Formatting or lint-only changes | No |
 
-**A breaking change puts `!` before the colon** — after the type, or after the scope when one is written: `feat(core)!: replace lexer`, `fix!: …`. The `!` and the changelog go together: a PR that adds an entry under `## [Unreleased]` → `### Breaking changes` in [CHANGELOG.md](CHANGELOG.md) titles itself with `!`, and a PR titled with `!` adds that entry. The hand-written entry is what [compatibility "How a break is communicated"](https://cairn.kage1020.com/spec/compatibility/) requires and what a reader of `CHANGELOG.md` sees; the `!` is the same fact in the commit `release-plz` parses. A reviewer who sees one without the other asks for the missing half before merging.
+**A breaking change puts `!` before the colon** — after the type, or after the scope when one is written: `feat(core)!: replace lexer`, `fix!: …`. The `!` and the changelog go together: a PR that adds a `changelog.d/<slug>.breaking.md` fragment titles itself with `!`, and a PR titled with `!` adds that fragment. The hand-written entry is what [compatibility "How a break is communicated"](https://cairn.kage1020.com/spec/compatibility/) requires and what a reader of `CHANGELOG.md` sees once the release folds it in under `### Breaking changes`; the `!` is the same fact in the commit `release-plz` parses. The `Changelog` check reports a PR with one and not the other; until it is a required check, a reviewer who sees one without the other asks for the missing half before merging.
 
 The `!` does not choose the version. Semver would read it as a major bump; here the release workflow computes the next `YYYY.M.PATCH` from the date and the existing tags and writes it into `Cargo.toml` before `release-plz` runs, and `release-plz` leaves a version that already differs from the published one as it is. Nor does it decide whether a release is due — the type does, per the table above. What it changes is the generated release notes: `release-plz` prefixes the commit's line with `[**breaking**]`, and `protect_breaking_commits` keeps that line even for a type whose lines are otherwise dropped (`docs!:`, `ci!:`).
 
-Every PR you open targets `canary`; the only PR against `main` is the pipeline's own promote-to-main. One maintainer approval and green CI are required. The release PR follows the same rules — merging it publishes and fast-forwards `main`.
+Every PR you open targets `canary`; the only PR against `main` is the pipeline's own promote-to-main. One maintainer approval is required, and green CI is expected before merging; the branch rulesets do not require any check yet. The release PR follows the same rules — merging it publishes and fast-forwards `main`.
+
+## Changelog entries
+
+A PR does not edit [CHANGELOG.md](CHANGELOG.md). It adds a fragment, one file per entry under [changelog.d/](changelog.d/README.md), named `<slug>.<kind>.md` where the kind is the heading (`breaking`, `deprecations`, `added`, `changed`, `fixed`, `performance`, `build`). With twenty PRs open at once, every one that edits the same `[Unreleased]` heading conflicts with the next merge; separate files never do. The monthly release PR folds the fragments into the section `release-plz` writes for the new version and deletes them. The `Changelog` workflow checks the name and shape of each fragment a PR adds or edits, reports an issue or PR number and an entry scoped to `ci` alone, and reports any change to `CHANGELOG.md` outside the release PR; [changelog.d/README.md](changelog.d/README.md) has the details and the commands to run it locally. This is the root `CHANGELOG.md` only: `editors/vscode/CHANGELOG.md` is the extension's own and is still edited by hand.
 
 ## Revisiting a settled decision
 
@@ -165,7 +169,7 @@ Change `channel`, run the CI commands above (a new compiler can produce a *rustc
 
 The pin is not the MSRV. `rust-version` in the workspace manifest is the floor a consumer needs to build Cairn, and the pin is always newer. A change reaching for a recently stabilised API is green at the pin and broken at the floor. Clippy sees some of that already — `clippy::incompatible_msrv` reads `rust-version` and refuses a *standard library* item stabilised above it, and `-D warnings` makes that fatal — but it is a lint, so one `#[allow]` silences it, and it says nothing about a **dependency** whose own `rust-version` is above ours, which is a hard cargo error nothing at the pin ever sees. CI's `MSRV` job is what compiles at the floor and so catches both: it reads `rust-version` back out of the manifest with `cargo metadata` — no second copy to go stale — installs that compiler, and runs `cargo check --workspace --locked --all-features` at it. `check` rather than `test`, because the floor is about compiling the crates a consumer depends on and dev-dependencies are free to want a newer compiler than the library does; `--all-features`, because `rust-version` is one declaration per package and cargo has no way to say "this floor, unless you enable that feature"; `--locked`, because the committed lockfile is what a consumer cloning the repo resolves to, and when the failure is a dependency's own floor rather than Cairn's code cargo names the package.
 
-Raising `rust-version` changes who can build the crates, so it is not a quiet manifest edit. Type the commit `build` — which cuts a patch release, so the new floor reaches crates.io — and add a `CHANGELOG.md` entry saying which compiler is now required and what needed it. A consumer pinned below the new floor learns about it from cargo either way; the entry is what tells them why.
+Raising `rust-version` changes who can build the crates, so it is not a quiet manifest edit. Type the commit `build` — which cuts a patch release, so the new floor reaches crates.io — and add a `changelog.d/<slug>.build.md` entry saying which compiler is now required and what needed it. A consumer pinned below the new floor learns about it from cargo either way; the entry is what tells them why.
 
 ## Changing the release profile
 
