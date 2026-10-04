@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry};
 use cairn_lang_core::lock::HashHex;
+use cairn_lang_core::resolve::compare_versions;
 use cairn_lang_core::suggest::nearest_match;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
@@ -354,12 +355,29 @@ impl From<AliasError> for RegistryError {
 /// rather than running it, the silent-substitution hazard
 /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
 /// forbids.
+///
+/// A row is named by any label equal to its own under the comparison
+/// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+/// uses. That doc states the rule in full, and the two lookups have to
+/// keep agreeing, so a change to either belongs in both. `1.21.0` names
+/// Java's `1.21`, `1.21` names Bedrock's `1.21.0` and `1.021` names Java's
+/// `1.21`, while `1.21.4` is not Bedrock's `1.21.40`, and neither
+/// `1.21.0-rc1` nor `1.21.` is Java's `1.21`. [`compare_versions`] warns
+/// that it is not the ordering key, and `.is_eq()` asks it no ordering
+/// question, so this stays a lookup. `spec/versioning-editions`
+/// "The target is a compile-time parameter" defines the same version this
+/// way for `--target`, `@requires` and `@intended_targets` alike.
+///
+/// The pair carries the row's own label, so the target and the lockfile
+/// name the version the way the table does. `validate_version_order`
+/// refuses a table carrying two spellings of one version, so at most one
+/// row matches.
 fn targetable_row_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
     table
         .versions
         .iter()
         .filter(|e| e.targetable)
-        .find(|e| e.mc_version == mc_version)
+        .find(|e| compare_versions(&e.mc_version, mc_version).is_eq())
         .map(|e| (e.mc_version.clone(), e.data_version))
 }
 
@@ -373,7 +391,10 @@ impl RegistryPack {
     /// # Errors
     ///
     /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor an exact `mc_version` match.
+    /// the `"latest"` alias nor a label equal to a targetable `mc_version`
+    /// under the comparison
+    /// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+    /// uses.
     ///
     /// # Panics
     ///
@@ -419,7 +440,10 @@ impl RegistryPack {
     /// # Errors
     ///
     /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor an exact `mc_version` match.
+    /// the `"latest"` alias nor a label equal to a targetable `mc_version`
+    /// under the comparison
+    /// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+    /// uses.
     ///
     /// # Panics
     ///
@@ -445,7 +469,10 @@ impl RegistryPack {
     /// # Errors
     ///
     /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor an exact `mc_version` match.
+    /// the `"latest"` alias nor a label equal to a targetable `mc_version`
+    /// under the comparison
+    /// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+    /// uses.
     ///
     /// # Panics
     ///
@@ -465,9 +492,10 @@ impl RegistryPack {
 
     /// Closest supported version for the matching field of
     /// [`crate::data_version::UnsupportedTarget`], or `None` when no version
-    /// is close enough. Candidate pool is every `mc_version` plus the
-    /// `"latest"` alias, since the alias is just as legitimate a `--target`
-    /// value as any version string.
+    /// is close enough. Candidate pool is every targetable `mc_version` plus
+    /// the `"latest"` alias, since the alias is just as legitimate a
+    /// `--target` value as any version string. The rows the pack only orders
+    /// against are left out: no spelling of one resolves.
     fn suggestion_for(&self, requested: &str) -> Option<String> {
         let pool = self
             .data_versions
@@ -986,8 +1014,6 @@ fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError>
 /// the lookup treats them as the same row, and a table carrying both
 /// would evaluate a floor against whichever came first.
 fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError> {
-    use cairn_lang_core::resolve::compare_versions;
-
     let mut previous: Option<&super::data_versions::DataVersionEntry> = None;
     for entry in &table.versions {
         if let Some(previous) = previous {
@@ -1685,6 +1711,105 @@ mod tests {
         assert_eq!(err.suggestion.as_deref(), Some("1.21.4"));
     }
 
+    /// `--target` reads a version label the way `@requires` and
+    /// `@intended_targets` do, and the target carries the row's own label.
+    /// Both editions are covered, since they spell the same release in
+    /// opposite ways (`1.21` on Java, `1.21.0` on Bedrock).
+    #[test]
+    fn either_spelling_of_a_version_names_its_row() {
+        let java = load_builtin_java().expect("java pack");
+        let named = java
+            .resolve_java_target("1.21")
+            .expect("the row's own label");
+        let padded = java
+            .resolve_java_target("1.21.0")
+            .expect("the padded spelling");
+        assert_eq!(padded, named);
+        assert_eq!(padded.mc_version, "1.21");
+
+        let bedrock = load_builtin_bedrock().expect("bedrock pack");
+        let named = bedrock
+            .resolve_bedrock_target("1.21.0")
+            .expect("the row's own label");
+        let trimmed = bedrock
+            .resolve_bedrock_target("1.21")
+            .expect("the trimmed spelling");
+        assert_eq!(trimmed, named);
+        assert_eq!(trimmed.mc_version, "1.21.0");
+    }
+
+    /// A leading zero in a numeric component is padding, as the comparison
+    /// reads it, so `1.021` names Java's `1.21`. Pinned so that tightening
+    /// `compare_versions` later shows up here as a change to the
+    /// `--target` contract rather than as an unrelated regression.
+    #[test]
+    fn a_leading_zero_in_a_target_is_padding() {
+        let java = load_builtin_java().expect("java pack");
+        let padded = java.resolve_java_target("1.021").expect("1.021 is 1.21");
+        assert_eq!(padded, java.resolve_java_target("1.21").expect("1.21"));
+        assert_eq!(padded.mc_version, "1.21");
+    }
+
+    /// A non-zero trailing component is a different version, and a zero
+    /// digit at the end of a component is part of its number. Bedrock
+    /// numbers its patch releases in tens, so a rule that stripped trailing
+    /// `0` characters before comparing would build Bedrock's `1.21.40` for
+    /// `--target 1.21.4`, another release's palette version.
+    #[test]
+    fn a_nonzero_trailing_component_names_a_different_version() {
+        let bedrock = load_builtin_bedrock().expect("bedrock pack");
+        bedrock
+            .resolve_bedrock_target("1.21.4")
+            .expect_err("1.21.4 is not 1.21.40");
+        let java = load_builtin_java().expect("java pack");
+        java.resolve_java_target("1.21.40")
+            .expect_err("1.21.40 is not 1.21.4");
+        java.resolve_java_target("1.2")
+            .expect_err("1.2 is neither 1.20.4 nor 1.21");
+    }
+
+    /// A row the pack only orders against is not a target in any spelling:
+    /// resolving `--target` to one would pin a compile to a version with no
+    /// id table. The premise is asserted first, so the test cannot pass on
+    /// a pack that dropped the row or made it targetable.
+    #[test]
+    fn an_ordering_only_row_is_not_a_target_in_any_spelling() {
+        let java = load_builtin_java().expect("java pack");
+        let bedrock = load_builtin_bedrock().expect("bedrock pack");
+        for (pack, label) in [(&java, "1.21.1"), (&bedrock, "1.21.20")] {
+            assert!(
+                pack.data_versions
+                    .versions
+                    .iter()
+                    .any(|e| e.mc_version == label && !e.targetable),
+                "`{label}` must be an ordering-only row",
+            );
+        }
+        for spelling in ["1.21.1", "1.21.1.0"] {
+            let err = java
+                .resolve_java_target(spelling)
+                .expect_err("an ordering-only java row");
+            assert_eq!(err.requested, spelling);
+        }
+        for spelling in ["1.21.20", "1.21.20.0"] {
+            let err = bedrock
+                .resolve_bedrock_target(spelling)
+                .expect_err("an ordering-only bedrock row");
+            assert_eq!(err.requested, spelling);
+        }
+    }
+
+    /// A pre-release is not its release, and an empty component is not a
+    /// zero one: both stay unequal to the `1.21` row under the comparison.
+    #[test]
+    fn a_pre_release_or_an_empty_component_is_not_the_release() {
+        let java = load_builtin_java().expect("java pack");
+        java.resolve_java_target("1.21.0-rc1")
+            .expect_err("a pre-release of 1.21");
+        java.resolve_java_target("1.21.")
+            .expect_err("an empty trailing component");
+    }
+
     #[test]
     fn pack_hash_is_deterministic() {
         let a = load_builtin_java().expect("a");
@@ -1805,7 +1930,9 @@ mod tests {
 
     /// Row order in `data_versions.json` is part of the schema, as the
     /// `DataVersionTable::versions` doc says: a table whose keys or labels
-    /// do not ascend row by row is refused at load.
+    /// do not ascend row by row is refused at load. Two labels that compare
+    /// equal do not ascend, which is what lets `targetable_row_for` find at
+    /// most one row.
     #[test]
     fn data_versions_rows_out_of_order_are_refused() {
         let keys_descend = r#"{
@@ -1833,6 +1960,24 @@ mod tests {
         }"#;
         let err = load_from_dir_err("order-labels", |dir| {
             write_pack(dir, good_manifest(), labels_descend);
+        });
+        let RegistryError::VersionOrderBroken { reason } = &err else {
+            panic!("expected VersionOrderBroken, got {err}");
+        };
+        assert!(reason.contains("does not sort above"), "{reason}");
+        // Two spellings of one version. The keys are distinct and ascend, so
+        // the key check passes and the label check is the one that refuses:
+        // equal keys would trip the key check first.
+        let labels_equal = r#"{
+            "schema_version": 1,
+            "latest": "1.21",
+            "versions": [
+                { "mc_version": "1.21", "data_version": 3953 },
+                { "mc_version": "1.21.0", "data_version": 3954 }
+            ]
+        }"#;
+        let err = load_from_dir_err("order-labels-equal", |dir| {
+            write_pack(dir, good_manifest(), labels_equal);
         });
         let RegistryError::VersionOrderBroken { reason } = &err else {
             panic!("expected VersionOrderBroken, got {err}");

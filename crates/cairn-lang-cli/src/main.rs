@@ -159,6 +159,8 @@ enum Command {
         edition: Option<EditionArg>,
         /// Optional Minecraft version pin, resolved against the pinned
         /// edition's data table exactly as `cairn compile --target` is.
+        /// A version may be spelled with or without trailing `.0`
+        /// components: `1.21` and `1.21.0` name the same version.
         /// `latest` aliases the version that table names as its `latest`
         /// row, which is not necessarily the newest row it carries (see
         /// `DataVersionTable::latest`).
@@ -246,7 +248,9 @@ enum Command {
         edition: EditionArg,
         /// Minecraft version string. Resolved against the backend's data
         /// table; opaque label per `spec/versioning-editions`
-        /// "The target is a compile-time parameter". `latest` aliases the
+        /// "The target is a compile-time parameter". A version may be
+        /// spelled with or without trailing `.0` components: `1.21` and
+        /// `1.21.0` name the same version. `latest` aliases the
         /// version that table names as its `latest` row, which is not
         /// necessarily the newest row it carries (see
         /// `DataVersionTable::latest`).
