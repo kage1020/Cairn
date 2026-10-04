@@ -400,13 +400,18 @@ resolution the spec mandates still happens — the finding says which voxel it h
 | Code | Meaning |
 |---|---|
 | `E_TRUTH_TABLE_EMPTY` | An `assert truth(...)` with no rows, or none whose output is `0` or `1`. |
+| `E_TRUTH_TABLE_DUPLICATE_INPUT` | An `assert truth(...)` lists one signal as two or more of its inputs. |
 | `E_TRUTH_TABLE_CONFLICT` | Two rows assign the same input combination different outputs. |
 | `W_TRUTH_TABLE_DUPLICATE_ROW` | Two rows cover the same input combination without contradicting each other. |
 | `W_TRUTH_TABLE_PARTIAL` | The rows leave input combinations unassigned. |
 
-Both codes are reported on the later row. A row is compared with every earlier row that shares a
-combination with it, so whether a table is refused does not depend on the order its rows are
-written in: `0- -> 1` after `00 -> 1; 01 -> 0` is `E_TRUTH_TABLE_CONFLICT`, though it agrees with
+`E_TRUTH_TABLE_DUPLICATE_INPUT` is reported on the whole `assert`, once per repeated signal, and no
+other truth-table code is raised for that table: the others count combinations of positions, and a
+signal listed twice has positions no combination of signals fills.
+
+`E_TRUTH_TABLE_CONFLICT` and `W_TRUTH_TABLE_DUPLICATE_ROW` are reported on the later row. A row is
+compared with every earlier row that shares a combination with it, so whether a table is refused
+does not depend on the order its rows are written in: `0- -> 1` after `00 -> 1; 01 -> 0` is `E_TRUTH_TABLE_CONFLICT`, though it agrees with
 the first of the two. A conflict takes precedence over a duplicate on the same row, and its note is
 at the first row assigning the combination it names the other output. Any other finding's note is
 at the first row assigning the combination it names, so every finding about one combination points

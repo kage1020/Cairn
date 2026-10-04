@@ -366,6 +366,53 @@ fn the_total_becomes_a_power_before_it_stops_fitting_an_integer() {
     }
 }
 
+// -- the input list -------------------------------------------------------
+
+/// A signal listed twice is one input written twice. The rows that give
+/// its two positions different values describe combinations no circuit
+/// sees, so the table is refused for the list, and the coverage finding
+/// that would ask for exactly those rows is not raised beside it.
+#[test]
+fn a_signal_listed_twice_is_refused_and_not_asked_for_impossible_rows() {
+    let found = only(&table("sig.a, sig.a", "00 -> 0; 11 -> 1"));
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_DUPLICATE_INPUT");
+    assert_eq!(found.severity(), Severity::Error);
+    assert!(
+        found.primary.contains("lists `sig.a` as inputs 1 and 2"),
+        "the finding names the signal and where it repeats: {:?}",
+        found.primary,
+    );
+    assert_eq!(
+        found.notes[0].message,
+        "Fix: list `sig.a` once and drop its other columns from every row, or name the signal \
+         you meant in its place",
+    );
+}
+
+/// Each repeated signal is its own finding, in the order the signals
+/// first appear, and a table with no rows is refused for its list alone.
+#[test]
+fn each_repeated_signal_is_reported_once_in_list_order() {
+    let found = diagnose(&table("sig.b, sig.a, sig.b, sig.a, sig.a", ""));
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        [
+            "E_TRUTH_TABLE_DUPLICATE_INPUT",
+            "E_TRUTH_TABLE_DUPLICATE_INPUT"
+        ],
+    );
+    assert!(
+        found[0].primary.contains("`sig.b` as inputs 1 and 3"),
+        "{:?}",
+        found[0]
+    );
+    assert!(
+        found[1].primary.contains("`sig.a` as inputs 2, 4, and 5"),
+        "{:?}",
+        found[1]
+    );
+}
+
 // -- where the table sits -------------------------------------------------
 
 /// The findings are about the statement, so indentation does not change
