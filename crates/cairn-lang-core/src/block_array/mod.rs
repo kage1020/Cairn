@@ -438,7 +438,9 @@ impl Palette {
     }
 
     /// [`Self::try_intern`] against a capacity of `capacity` entries, never
-    /// more than [`PALETTE_CAPACITY`]. Lowering's tests pass a small one so
+    /// more than [`PALETTE_CAPACITY`]. Lowering paints through this at the
+    /// capacity passed down to it: [`PALETTE_CAPACITY`] from
+    /// [`lower_to_block_array`], or a small one from lowering's tests, so
     /// the refusal can be reached without painting 65,536 states.
     pub(crate) fn try_intern_within(
         &mut self,

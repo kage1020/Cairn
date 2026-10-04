@@ -164,8 +164,29 @@ pub fn lower_to_block_array(
     resolution: &Resolution,
     registry: Option<&dyn TargetRegistry>,
 ) -> BlockArrayIr {
+    lower_to_block_array_within(intent, resolution, registry, PALETTE_CAPACITY)
+}
+
+/// [`lower_to_block_array`], with each body's palette refusing a new
+/// state once it holds `palette_capacity` entries, air included, rather
+/// than [`PALETTE_CAPACITY`]; a larger capacity is clamped to that one.
+///
+/// [`lower_to_block_array`] passes [`PALETTE_CAPACITY`], the only capacity
+/// the compiler lowers at. This module's tests pass one small enough to
+/// reach `W_PALETTE_TOO_LARGE` without painting 65,536 states, and so run
+/// the same code the public entry point does.
+fn lower_to_block_array_within(
+    intent: &IntentModule,
+    resolution: &Resolution,
+    registry: Option<&dyn TargetRegistry>,
+    palette_capacity: usize,
+) -> BlockArrayIr {
     let mut structures: IndexMap<String, BlockArray> = IndexMap::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    let bodies = BodyInputs {
+        registry,
+        palette_capacity,
+    };
 
     for s in &intent.structs {
         let key = format!("struct::{}", s.name);
@@ -174,7 +195,7 @@ pub fn lower_to_block_array(
         // diagnostic (no `size=`, etc.), so the skip here is silent on
         // purpose — diagnosing twice would teach a reader the struct had
         // two unrelated problems instead of one.
-        if let Some(ba) = lower_struct(s, scope, registry, &mut diagnostics) {
+        if let Some(ba) = lower_struct(s, scope, bodies, &mut diagnostics) {
             // First-write-wins on a duplicate name, matching
             // `resolve`'s `FIRST_BINDING_WINS`. `resolution.scopes` has
             // already bound the first body; taking the last here would
@@ -191,7 +212,7 @@ pub fn lower_to_block_array(
             site,
             &intent.defs,
             resolution,
-            registry,
+            bodies,
             &mut structures,
             &mut placed,
             &mut diagnostics,
@@ -1447,7 +1468,7 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
 fn lower_struct<'a>(
     s: &StructIr,
     scope: Option<&'a ScopeResolution>,
-    registry: Option<&'a dyn TargetRegistry>,
+    bodies: BodyInputs<'a>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<BlockArray> {
     let Some(size) = s.size.as_ref() else {
@@ -1466,7 +1487,7 @@ fn lower_struct<'a>(
             source_scope: format!("struct::{}", s.name),
         },
         scope,
-        registry,
+        bodies,
         diagnostics,
     )?;
     Some(lowered.array)
@@ -1495,7 +1516,7 @@ fn lower_site<'a>(
     site: &SiteIr,
     defs: &[DefIr],
     resolution: &'a Resolution,
-    registry: Option<&'a dyn TargetRegistry>,
+    bodies: BodyInputs<'a>,
     structures: &mut IndexMap<String, BlockArray>,
     placed: &mut IndexMap<String, PlacedBody>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -1613,7 +1634,7 @@ fn lower_site<'a>(
                 source_scope: key,
             },
             Some(scope),
-            registry,
+            bodies,
             diagnostics,
         );
         // Below the body on purpose, not an early return above it: a row
@@ -1701,6 +1722,18 @@ enum VoxelSource {
     Place,
 }
 
+/// What every body of one run is lowered against, whether a `struct` or
+/// a `place`'s `def`: threaded unchanged from
+/// [`lower_to_block_array_within`] down to [`lower_body_to_block_array`].
+#[derive(Clone, Copy)]
+struct BodyInputs<'a> {
+    /// The compile target's registry view; see [`lower_to_block_array`].
+    registry: Option<&'a dyn TargetRegistry>,
+    /// The entries each body's palette may hold, air included:
+    /// [`PALETTE_CAPACITY`] from [`lower_to_block_array`].
+    palette_capacity: usize,
+}
+
 /// Inputs shared by the struct and place lowering paths.
 struct BodyDescriptor<'a> {
     kind: VoxelSource,
@@ -1742,9 +1775,13 @@ struct LoweredBody {
 fn lower_body_to_block_array<'a>(
     body: BodyDescriptor<'a>,
     scope: Option<&'a ScopeResolution>,
-    registry: Option<&'a dyn TargetRegistry>,
+    bodies: BodyInputs<'a>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<LoweredBody> {
+    let BodyInputs {
+        registry,
+        palette_capacity,
+    } = bodies;
     let interior_w = body.size.w.get();
     let interior_h = body.size.h.get();
 
@@ -1795,7 +1832,7 @@ fn lower_body_to_block_array<'a>(
         diagnostics.push(diag_structure_too_large(&body, dims));
         return None;
     }
-    let mut palette = ScopePalette::new();
+    let mut palette = ScopePalette::with_capacity(palette_capacity);
 
     let ctx = StructCtx {
         scope,
@@ -2147,7 +2184,8 @@ fn prune_unreferenced(palette: &mut Palette, canvas: &Canvas) -> (Vec<PaletteInd
 }
 
 /// The palette one body is painted against, refusing rather than
-/// panicking once it holds [`PALETTE_CAPACITY`] states.
+/// panicking once it holds its capacity: [`PALETTE_CAPACITY`] entries
+/// from [`lower_to_block_array`].
 ///
 /// Every paint interns its state, including one a later member then
 /// covers, so what fills the palette is the states *written*, not the
@@ -2167,10 +2205,13 @@ struct ScopePalette {
 }
 
 impl ScopePalette {
-    fn new() -> Self {
+    /// Air at index `0`, and room for `capacity` entries in all, air's
+    /// among them; [`Palette::try_intern_within`] clamps a larger one to
+    /// [`PALETTE_CAPACITY`].
+    fn with_capacity(capacity: usize) -> Self {
         Self {
             palette: Palette::new_with_air(),
-            capacity: scope_palette_capacity(),
+            capacity,
             overflow: None,
         }
     }
@@ -2198,39 +2239,6 @@ impl ScopePalette {
             None => Ok(self.palette),
             Some(full) => Err(full),
         }
-    }
-}
-
-/// The capacity a body's palette is painted against: [`PALETTE_CAPACITY`],
-/// or, in this crate's tests, what the test set.
-#[cfg(not(test))]
-fn scope_palette_capacity() -> usize {
-    PALETTE_CAPACITY
-}
-
-#[cfg(test)]
-fn scope_palette_capacity() -> usize {
-    test_capacity::get()
-}
-
-/// Lets an in-crate test refuse a body at a capacity it can reach. Per
-/// thread, so tests running in parallel do not see each other's.
-#[cfg(test)]
-mod test_capacity {
-    use std::cell::Cell;
-
-    use super::PALETTE_CAPACITY;
-
-    thread_local! {
-        static CAPACITY: Cell<usize> = const { Cell::new(PALETTE_CAPACITY) };
-    }
-
-    pub(super) fn get() -> usize {
-        CAPACITY.with(Cell::get)
-    }
-
-    pub(super) fn set(capacity: usize) {
-        CAPACITY.with(|cell| cell.set(capacity));
     }
 }
 
@@ -5842,6 +5850,15 @@ mod tests {
         lower_to_block_array(&ir, &resolution, None)
     }
 
+    /// [`lowered`], with every body's palette holding `palette_capacity`
+    /// entries rather than [`PALETTE_CAPACITY`].
+    fn lowered_within(source: &str, palette_capacity: usize) -> BlockArrayIr {
+        let module = parse(source).expect("parse");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, None);
+        lower_to_block_array_within(&ir, &resolution, None, palette_capacity)
+    }
+
     /// A 1x1 struct whose `walls` members each paint the one ring cell
     /// with a block of their own, so `states` members write `states`
     /// distinct states and the finished body keeps one of them.
@@ -5867,9 +5884,7 @@ mod tests {
     /// why the refused body would have kept a single state.
     #[test]
     fn a_body_painting_more_states_than_its_palette_holds_is_refused() {
-        test_capacity::set(4);
-
-        let fits = lowered(&overwriting_walls(3));
+        let fits = lowered_within(&overwriting_walls(3), 4);
         assert!(
             !fits
                 .diagnostics
@@ -5888,7 +5903,7 @@ mod tests {
             "air and the last wall's state: the covered ones are pruned after painting",
         );
 
-        let over = lowered(&overwriting_walls(4));
+        let over = lowered_within(&overwriting_walls(4), 4);
         let refused: Vec<&Diagnostic> = over
             .diagnostics
             .iter()
@@ -5907,8 +5922,6 @@ mod tests {
             !over.structures.contains_key("struct::s"),
             "the refused body must not reach a writer",
         );
-
-        test_capacity::set(PALETTE_CAPACITY);
     }
 
     fn lowered_with_resolver(source: &str, resolver: &dyn TargetRegistry) -> BlockArrayIr {
