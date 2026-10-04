@@ -547,13 +547,13 @@ fn stairs_of_two_ids_with_equal_states_keep_an_entry_each() {
     let (root, _) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
 
     let entries = block_palette(&root);
+    let names: Vec<&str> = entries.iter().map(name_of).collect();
+    assert_eq!(names, ["minecraft:air", ids[0], ids[1]], "one entry per id");
     assert_eq!(
         states_of(&entries[1]),
         states_of(&entries[2]),
         "premise: both translate to the same states: {entries:?}"
     );
-    let names: Vec<&str> = entries.iter().map(name_of).collect();
-    assert_eq!(names, ["minecraft:air", ids[0], ids[1]]);
     let layer = block_layer(&root);
     for (voxel, id) in ids.into_iter().enumerate() {
         assert_eq!(
