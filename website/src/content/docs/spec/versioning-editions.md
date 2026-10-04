@@ -115,10 +115,13 @@ of [§10.3](#103-backend--data-tables).
 
 The check therefore runs where a version is pinned and nowhere else: on `cairn compile --target`,
 and on `cairn check --edition E --target V`, which pins the same pair to run the same pass without
-writing anything. `cairn info` and `cairn lower` do lower, but pin no version, since `info` reports
-across the whole range by design. They skip the comparison rather than pick a version on the
-author's behalf. A `cairn check` with no `--target` does not run block-array lowering at all, so no
-lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN` included.
+writing anything. A `compile` whose target the file's floors refuse pins none: it checks no id and
+is refused on the floor instead ([§10.4](#the-declared-floor-is-enforced)), while `check --target`
+is not held to the floors and pins the target regardless. `cairn info` and `cairn lower` do lower,
+but pin no version, since `info` reports across the whole range by design. They skip the comparison
+rather than pick a version on the author's behalf. A `cairn check` with no `--target` does not run
+block-array lowering at all, so no lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN`
+included.
 
 Checking against *every* version the edition ships and refusing only the ids valid in none of them
 would need no flag, and would answer a different question: `stone_bricks` is valid somewhere on
@@ -225,10 +228,17 @@ matters: a lock records what was verified, and it must never say `verified: true
 source itself rules out.
 
 A target below a floor usually also lacks a block the file uses, since a block introduced after the
-target is the common reason to declare one. Such a build is `E_VERSION_CAP` alone: the source's block
-ids are not checked against a target it disowns, so no `E_UNKNOWN_ID` tells the author to replace
-the block the floor was declared for. Findings that do not depend on the target, such as
-`E_INVALID_REQUIRES`, are still reported first.
+target is the common reason to declare one. So `cairn compile` pins no version for a target the
+floors refuse: one below a floor, and every target when a floor names a version this edition's
+table cannot place ([§10.4](#ordering-is-by-dataversion-per-edition)). Any id the source names goes
+unchecked, including one no version declares, until the target clears every floor. The build is
+refused on the floor instead, with `E_VERSION_CAP` or `E_REQUIRES_UNORDERABLE`, and no
+`E_UNKNOWN_ID` tells the author to replace the block the floor was declared for. What needs no
+version is still reported ahead of that refusal: the check pass's findings, such as
+`E_INVALID_REQUIRES`, and lowering's, such as `E_UNKNOWN_ABSTRACT_TOKEN`. An error among them stops
+the build before the refusal is reached. `cairn check --edition E --target V` is not held to the
+floors, so at a target they refuse it reports the ids that target lacks, where `compile` reports
+the floor ([Lint](/spec/lint/#materials-and-targets)).
 
 ### The hint is weighed against the floor
 
@@ -742,13 +752,15 @@ that is. Being scoped, it is inert on the Java build ([§10.4](#a-floor-may-name
 which the other branch serves.
 
 Leaving the floor off is loud rather than wrong: `light_block_15` against Bedrock 1.21.0 is
-`E_UNKNOWN_ID`, since the check is per version. What the floor adds is not a different refusal but
-a declaration — the version half of what the branch is for, written where the rest of the file's
-constraints are, and the half the other headers can be read against. A file floored at 1.21.40
-whose `@intended_targets` names 1.21.0 is `E_INTENDED_TARGET_CAP` at `cairn check`
-([§10.4](#the-hint-is-weighed-against-the-floor)), before any target is picked; the same file
-without the floor says nothing until one is. A build that must serve both spellings is two builds:
-there is no version conditional to pair with `@edition`.
+`E_UNKNOWN_ID`, since the check is per version. The floor adds two things. One is a different
+refusal: with it, the same command is `E_VERSION_CAP`, which points at `--target` and the floor
+rather than at the block, since a compile checks no id at a target its floors refuse
+([§10.4](#the-declared-floor-is-enforced)). The other is a declaration — the version half of what
+the branch is for, written where the rest of the file's constraints are, and the half the other
+headers can be read against. A file floored at 1.21.40 whose `@intended_targets` names 1.21.0 is
+`E_INTENDED_TARGET_CAP` at `cairn check` ([§10.4](#the-hint-is-weighed-against-the-floor)), before
+any target is picked; the same file without the floor says nothing until one is. A build that must
+serve both spellings is two builds: there is no version conditional to pair with `@edition`.
 
 ### The build picks the variant, not the source
 
