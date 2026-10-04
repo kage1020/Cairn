@@ -388,7 +388,7 @@ mod tests {
         let cell = &legalized.scoped.scopes[0].ir.cells[0];
         assert!(
             cell.buffer_coords().is_empty(),
-            "segment <= 15 blocks needs no buffer, got {:?}",
+            "a segment of at most 16 steps needs no buffer, got {:?}",
             cell.buffer_coords(),
         );
         assert_eq!(
@@ -1688,8 +1688,9 @@ mod tests {
         use cairn_lang_core::{Edition, lower, parse};
 
         use super::{
-            CellCoord, HashSet, NetRef, PadColumn, PlacementIr, Router, block_sites, collect_nets,
-            compile_crossing, input_pad, net_trees,
+            CellCoord, CellPortDriver, EditionCell, HashSet, NetRef, PadColumn, PlacedCellNode,
+            PlacedOutputNode, PlacementIr, PlacementPhase, PortName, Router, ScopeKind, Span,
+            block_sites, collect_nets, compile_crossing, input_pad, net_trees, reservation, scoped,
         };
         use crate::delay::{DUST_ATTENUATION_LIMIT, compile_delay};
         use crate::routing::compile_routing;
@@ -1730,6 +1731,24 @@ mod tests {
         /// is past the limit, and no sink or repeater is reached over
         /// more than the limit's worth of dust. Returns how many buffer
         /// repeaters it met, so a caller can tell the walk saw some.
+        ///
+        /// What it catches: it reads the repeaters out of the IR and
+        /// never calls the placer, so a repeater missing where the dust
+        /// runs past the limit fails it, and so does a placer that stops
+        /// carrying the count across a cell. What it does not:
+        ///
+        /// - It tells dust from a sink or a repeater by the same rule as
+        ///   the placer: a coord the tree runs on past, unless a repeater
+        ///   stands there. So it holds the placer to the placer's own
+        ///   idea of which coords are dust, and were that idea off by one
+        ///   — as counting the sink as a block of dust once was — the two
+        ///   would agree and it would not notice.
+        /// - It is one-sided. It asserts that no strand runs too far, not
+        ///   that every repeater is needed, so a placer that stood a
+        ///   repeater on every coord that could hold one would pass it.
+        ///   [`a_strand_through_a_dust_merge_steps_back_off_a_turn_once`]
+        ///   and [`a_strand_through_a_comparator_steps_back_off_a_fork_once`]
+        ///   pin that side, by exact equality, on a turn and on a fork.
         fn assert_no_strand_runs_past_the_limit(ir: &PlacementIr, label: &str) -> usize {
             let region = ir.region.clone().expect("the fixture carries a region");
             let nets = collect_nets(ir);
@@ -1876,6 +1895,120 @@ struct chain size=60x5
                 "  door id=d side=front at=center mat_slot=wall opened_by=sig.c15\n  circuit region=floor void=2\n",
             );
             source
+        }
+
+        /// A scope built by hand rather than from source, so the shape of
+        /// every wire is known: the sensor pad, at `(0, 0, 0)`, drives one
+        /// `kind` cell on `cell`, and that cell drives an actuator pad on
+        /// each of `pads`. Through routing, delay and crossing, each
+        /// clean.
+        fn one_cell_by_hand(
+            edition: Edition,
+            kind: EditionCell,
+            cell: CellCoord,
+            pads: &[CellCoord],
+        ) -> PlacementIr {
+            let mut ir = PlacementIr::new(edition);
+            ir.region = Some(reservation(20, 4, 1));
+            ir.inputs.push(crate::netlist_ir::NetlistInput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+                span: Span::default(),
+            });
+            ir.cells.push(PlacedCellNode {
+                cell: kind,
+                drivers: vec![CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                }],
+                coord: cell,
+                phase: PlacementPhase::Unrouted,
+                span: Span::default(),
+            });
+            for (index, pad) in pads.iter().enumerate() {
+                ir.outputs.push(PlacedOutputNode::new(
+                    cairn_lang_core::ast::DottedRef::new("sig".into(), vec![format!("out{index}")]),
+                    NetRef::Cell(0),
+                    *pad,
+                    Span::default(),
+                ));
+            }
+            let routed = compile_routing(&scoped(ScopeKind::Struct, "by_hand", ir));
+            assert!(routed.diagnostics.is_empty(), "{:?}", routed.diagnostics);
+            let delayed = compile_delay(&routed.scoped);
+            assert!(delayed.diagnostics.is_empty(), "{:?}", delayed.diagnostics);
+            let legalized = compile_crossing(&delayed.scoped);
+            assert!(
+                legalized.diagnostics.is_empty(),
+                "{:?}",
+                legalized.diagnostics
+            );
+            legalized.scoped.scopes[0].ir.clone()
+        }
+
+        /// Every cell's buffer coords, then every actuator pad's, in IR
+        /// order.
+        fn every_buffer(ir: &PlacementIr) -> (Vec<Vec<CellCoord>>, Vec<Vec<CellCoord>>) {
+            let coords = |buffers: &[crate::placement_ir::BufferCoord]| {
+                buffers.iter().map(|b| b.coord).collect::<Vec<_>>()
+            };
+            (
+                ir.cells.iter().map(|c| coords(c.buffer_coords())).collect(),
+                ir.outputs
+                    .iter()
+                    .map(|o| coords(o.buffer_coords()))
+                    .collect(),
+            )
+        }
+
+        /// The upper bound the strand walk does not pin, on a turn. A
+        /// Bedrock OR, a dust merge, stands 6 steps from the sensor and
+        /// drives a pad at `(16, 0, 2)`, which its wire reaches by running
+        /// east to `(16, 0, 0)` and turning south. The strand runs on
+        /// through the merge, its 6th block of dust, so its 16th is the
+        /// corner, and the repeater steps back to `(15, 0, 0)`. That is
+        /// the only one in the scope: the strand walk passes this, and
+        /// would pass it as well with a repeater on every straight coord;
+        /// the count and the exact lists are what would not.
+        #[test]
+        fn a_strand_through_a_dust_merge_steps_back_off_a_turn_once() {
+            let ir = one_cell_by_hand(
+                Edition::Bedrock,
+                EditionCell::BedrockTorchOr,
+                CellCoord::new(6, 0, 0),
+                &[CellCoord::new(16, 0, 2)],
+            );
+            assert_eq!(assert_no_strand_runs_past_the_limit(&ir, "turn"), 1);
+            assert_eq!(
+                every_buffer(&ir),
+                (vec![Vec::new()], vec![vec![CellCoord::new(15, 0, 0)]]),
+                "nothing on the wire into the merge, and one repeater off the corner",
+            );
+        }
+
+        /// The upper bound on a fork. A Java comparator AND stands 3 steps
+        /// from the sensor and drives two pads: `(16, 0, 0)`, straight down
+        /// the row, and `(16, 0, 1)`, which its wire reaches by leaving the
+        /// row at `(15, 0, 0)`. The strand runs on through the comparator
+        /// with the 3 blocks it spent to get there, so the near pad reads
+        /// the 15 blocks before it and the branch's `(15, 0, 1)`, which
+        /// turns, is its 16th block of dust. The repeater steps back over
+        /// the fork onto the trunk, to `(14, 0, 0)`, and that one block
+        /// serves both pads.
+        #[test]
+        fn a_strand_through_a_comparator_steps_back_off_a_fork_once() {
+            let ir = one_cell_by_hand(
+                Edition::Java,
+                EditionCell::JavaComparatorAnd,
+                CellCoord::new(3, 0, 0),
+                &[CellCoord::new(16, 0, 0), CellCoord::new(16, 0, 1)],
+            );
+            assert_eq!(assert_no_strand_runs_past_the_limit(&ir, "fork"), 1);
+            let trunk = vec![CellCoord::new(14, 0, 0)];
+            assert_eq!(
+                every_buffer(&ir),
+                (vec![Vec::new()], vec![trunk.clone(), trunk]),
+                "nothing on the wire into the comparator, and one repeater on the trunk for both pads",
+            );
         }
 
         #[test]
@@ -2370,10 +2503,34 @@ struct chain size=60x5
         /// and the turn the first coord that runs straight is
         /// `(61, 0, 0)`; a repeater there would sever the branch, so it
         /// stands on `(60, 0, 0)`.
+        ///
+        /// [`assert_a_branch_beside`] pins the branch on the net as laid,
+        /// and the far sink's sites pin where the walk back lands: the
+        /// replay alone would pass a column at which no repeater falls
+        /// due near the branch.
         #[test]
         fn a_buffer_walked_back_over_a_turn_stops_short_of_a_branch_beside_it() {
             let xs = [(62, 4, false), (62, 2, false)];
-            replay(check_phase4_scope(&xs), &format!("xs={xs:?}"));
+            let case = format!("xs={xs:?}");
+            replay(check_phase4_scope(&xs), &case);
+            let legalized =
+                legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            let entry = &legalized.scopes[0];
+            let (router, trees) = laid_trees(entry);
+            let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
+            assert_a_branch_beside(
+                &router,
+                &trees[&NetRef::Input(0)],
+                plane(61, 0),
+                plane(61, 1),
+                &case,
+            );
+            assert_eq!(
+                sites_of(entry, plane(62, 4)),
+                vec![plane(16, 0), plane(32, 0), plane(48, 0), plane(60, 0)],
+                "{case}: the fourth repeater must walk back off (61, 0, 1), over the fork and \
+                 the turn and past (61, 0, 0), onto (60, 0, 0)",
+            );
         }
 
         /// The column of `x = 62`'s shape moved to `x = 97`, with the
@@ -2382,10 +2539,38 @@ struct chain size=60x5
         /// coord itself, 16 steps past the one on `(80, 0, 0)`: the
         /// first coord the placer asks is the one beside the branch,
         /// with no turn to walk back over. It stands on `(95, 0, 0)`.
+        ///
+        /// The branch and the sites are pinned as for the `x = 62` shape.
         #[test]
         fn a_buffer_due_beside_a_branch_steps_back_off_it() {
             let xs = [(97, 2, false), (97, 3, false)];
-            replay(check_phase4_scope(&xs), &format!("xs={xs:?}"));
+            let case = format!("xs={xs:?}");
+            replay(check_phase4_scope(&xs), &case);
+            let legalized =
+                legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            let entry = &legalized.scopes[0];
+            let (router, trees) = laid_trees(entry);
+            let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
+            assert_a_branch_beside(
+                &router,
+                &trees[&NetRef::Input(0)],
+                plane(96, 0),
+                plane(96, 1),
+                &case,
+            );
+            assert_eq!(
+                sites_of(entry, plane(97, 3)),
+                vec![
+                    plane(16, 0),
+                    plane(32, 0),
+                    plane(48, 0),
+                    plane(64, 0),
+                    plane(80, 0),
+                    plane(95, 0),
+                ],
+                "{case}: the sixth repeater must step back off (96, 0, 0), beside the branch, \
+                 onto (95, 0, 0)",
+            );
         }
 
         /// The walk back of the `x = 62` shape on a trunk that is not
@@ -2396,10 +2581,86 @@ struct chain size=60x5
         /// second repeater falls due on the fork `(27, 0, 5)`, and the
         /// branch to `(27, 7)` steps back through `(26, 0, 5)`, beside
         /// `(26, 0, 4)`, so it stands on `(25, 0, 4)`.
+        ///
+        /// The branch and the sites are pinned as for the `x = 62` shape.
         #[test]
         fn a_buffer_on_a_trunk_fed_through_a_fork_stops_short_of_a_branch_beside_it() {
             let xs = [(27, 6, false), (27, 7, false), (1, 5, false)];
-            replay(check_phase4_scope(&xs), &format!("xs={xs:?}"));
+            let case = format!("xs={xs:?}");
+            replay(check_phase4_scope(&xs), &case);
+            let legalized =
+                legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            let entry = &legalized.scopes[0];
+            let (router, trees) = laid_trees(entry);
+            let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
+            assert_a_branch_beside(
+                &router,
+                &trees[&NetRef::Input(0)],
+                plane(26, 4),
+                plane(26, 5),
+                &case,
+            );
+            assert_eq!(
+                sites_of(entry, plane(27, 7)),
+                vec![plane(12, 4), plane(25, 4)],
+                "{case}: the second repeater must walk back off the fork (27, 0, 5), over the \
+                 turn and past (26, 0, 4), onto (25, 0, 4)",
+            );
+        }
+
+        /// The coords the buffers of the cell on `sink` stand on, each
+        /// once, in the order its `buffer_coords` first names them.
+        fn sites_of(entry: &ScopedPlacementIrEntry, sink: CellCoord) -> Vec<CellCoord> {
+            let cell = entry
+                .ir
+                .cells
+                .iter()
+                .find(|c| c.coord == sink)
+                .expect("the sink is a cell of the scope");
+            let mut sites: Vec<CellCoord> = Vec::new();
+            for buffer in cell.buffer_coords() {
+                if !sites.contains(&buffer.coord) {
+                    sites.push(buffer.coord);
+                }
+            }
+            sites
+        }
+
+        /// Pins the shape a named test about a branch beside the wire
+        /// exists for, on the net as laid: `branch` and `beside` are both
+        /// dust of the net, and the tree joins neither to the other, so a
+        /// repeater on `beside` would cut `branch` off. (`branch` is on a
+        /// face of `beside` by the coords the caller passes.) Each
+        /// premise fails on a message of its own.
+        fn assert_a_branch_beside(
+            router: &Router,
+            tree: &NetTree,
+            beside: CellCoord,
+            branch: CellCoord,
+            case: &str,
+        ) {
+            let spelled = |c: CellCoord| format!("({}, {}, {})", c.x, c.y, c.z);
+            let gone = format!("{case}: this shape no longer exercises the bug");
+            assert!(
+                faces_of(beside).contains(&branch),
+                "{gone}: {} is not on a face of {}",
+                spelled(branch),
+                spelled(beside),
+            );
+            let dust: HashSet<CellCoord> = router.dust(tree).into_iter().collect();
+            for coord in [beside, branch] {
+                assert!(
+                    dust.contains(&coord),
+                    "{gone}: {} is not dust of the net",
+                    spelled(coord),
+                );
+            }
+            assert!(
+                tree.parent(branch) != Some(beside) && tree.parent(beside) != Some(branch),
+                "{gone}: the tree joins {} and {}",
+                spelled(beside),
+                spelled(branch),
+            );
         }
 
         /// The vertical faces. The near pair at `(47, 0)` and `(47, 1)`
@@ -2438,20 +2699,8 @@ struct chain size=60x5
                 plane(47, 0),
                 &case,
             );
-            let far = entry
-                .ir
-                .cells
-                .iter()
-                .find(|c| c.coord == plane(74, 0))
-                .expect("the far cell is in the scope");
-            let mut sites: Vec<CellCoord> = Vec::new();
-            for buffer in far.buffer_coords() {
-                if !sites.contains(&buffer.coord) {
-                    sites.push(buffer.coord);
-                }
-            }
             assert_eq!(
-                sites,
+                sites_of(entry, plane(74, 0)),
                 vec![plane(16, 0), plane(32, 0), plane(45, 0), bridge(60, 0)],
                 "{case}: the third repeater must step back off (47, 1, 0), over the sink at \
                  (47, 0, 0), onto (45, 0, 0)",
@@ -2494,20 +2743,8 @@ struct chain size=60x5
                 plane(31, 0),
                 &case,
             );
-            let far = entry
-                .ir
-                .cells
-                .iter()
-                .find(|c| c.coord == plane(32, 0))
-                .expect("the far cell is in the scope");
-            let mut sites: Vec<CellCoord> = Vec::new();
-            for buffer in far.buffer_coords() {
-                if !sites.contains(&buffer.coord) {
-                    sites.push(buffer.coord);
-                }
-            }
             assert_eq!(
-                sites,
+                sites_of(entry, plane(32, 0)),
                 vec![plane(16, 0), plane(29, 0)],
                 "{case}: the second repeater must step back off (31, 0, 1), beside the sink at \
                  (31, 0, 0), onto (29, 0, 0)",

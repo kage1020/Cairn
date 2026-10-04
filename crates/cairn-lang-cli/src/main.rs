@@ -274,7 +274,9 @@ enum Command {
     /// over the routed IR and fills every cell's `local_delay_ticks` with
     /// the sum of the cell's base delay and each implicit buffer
     /// repeater's `BUFFER_REPEATER_TICKS` contribution over every
-    /// driving net's segment beyond the `DUST_ATTENUATION_LIMIT`;
+    /// driving net's segment that carries more than
+    /// `DUST_ATTENUATION_LIMIT` blocks of dust — from a fresh source, a
+    /// segment of more than `DUST_ATTENUATION_LIMIT + 1` steps;
     /// `--stage crossing` runs crossing legalization over the delayed
     /// IR and fills every cell's `buffer_coords` with the coord of the
     /// buffer repeater each driver segment passes through (a repeater
@@ -365,10 +367,12 @@ enum SynthStage {
     /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
     /// each implicit buffer repeater's
     /// [`cairn_lang_redstone::BUFFER_REPEATER_TICKS`] contribution
-    /// implied by each driving net's segment beyond
-    /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`]; refuses with
-    /// `E_ATTENUATION_LIMIT` when a segment's routed length exceeds
-    /// the v1 sanity cap
+    /// implied by each driving net's segment that carries more than
+    /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`] blocks of dust —
+    /// from a fresh source, a segment of more than
+    /// `DUST_ATTENUATION_LIMIT + 1` steps; refuses with
+    /// `E_ATTENUATION_LIMIT` when a segment's routed length in steps
+    /// exceeds the v1 sanity cap
     /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], or when a
     /// stretch of dust past the limit has no coord a repeater can stand
     /// on.

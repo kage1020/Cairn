@@ -82,13 +82,13 @@ use crate::routing_geometry::{NetTree, faces, net_label, net_ref_key, sum_over_d
 use crate::saturating_index;
 
 /// Signal-attenuation ceiling (`spec/redstone` "Place-and-route" —
-/// "signal attenuation limit of 15"): the most blocks of dust a signal
-/// crosses since the last block that restored its strength. A fresh
-/// source starts at strength 15 and dust decays one unit per block, so
-/// this many blocks of dust carry its signal, the last at strength 1,
-/// which still drives the block after it: a sink, or a repeater that
-/// restores the signal. A segment from a fresh source to its sink is
-/// one step longer than its dust, so one of up to
+/// "the attenuation limit of 15 blocks"): the most blocks of dust a
+/// signal crosses since the last block that restored its strength. A
+/// fresh source starts at strength 15 and dust decays one unit per
+/// block, so this many blocks of dust carry its signal, the last at
+/// strength 1, which still drives the block after it: a sink, or a
+/// repeater that restores the signal. A segment from a fresh source to
+/// its sink is one step longer than its dust, so one of up to
 /// `DUST_ATTENUATION_LIMIT + 1` steps needs no buffer repeater. From a
 /// cell that passes on the strength it reads, the dust into the cell
 /// counts too, and a shorter segment can need one.
@@ -112,14 +112,16 @@ const _: () = assert!(
     "BUFFER_REPEATER_TICKS must be at least 1 — a default repeater delays by one tick",
 );
 
-/// Compile-time guard on the sanity cap: it must sit above the
-/// attenuation limit, otherwise the "beyond attenuation limit but
-/// within cap" band that [`repeater_sites`] fills with implicit
-/// buffers would be empty and every segment past 15 blocks would
-/// refuse instead of being absorbed by buffers.
+/// Compile-time guard on the sanity cap: it must sit above the longest
+/// segment a fresh source carries without a buffer, which is
+/// `DUST_ATTENUATION_LIMIT + 1` steps. Otherwise the band that
+/// [`repeater_sites`] fills with implicit buffers — past those 16
+/// steps, within the cap — would be empty for a segment from a fresh
+/// source, and every such segment past 16 steps would refuse instead of
+/// being absorbed by buffers.
 const _: () = assert!(
-    MAX_ATTENUATION_SEGMENT > DUST_ATTENUATION_LIMIT,
-    "MAX_ATTENUATION_SEGMENT must exceed DUST_ATTENUATION_LIMIT so implicit buffers have a band to cover",
+    MAX_ATTENUATION_SEGMENT > DUST_ATTENUATION_LIMIT + 1,
+    "MAX_ATTENUATION_SEGMENT must exceed DUST_ATTENUATION_LIMIT + 1 steps so implicit buffers have a band to cover on a segment from a fresh source",
 );
 
 /// v1 sanity cap on the routed length of a single driver segment. A
@@ -147,8 +149,8 @@ const _: () = assert!(
 ///
 /// 256 steps is at least 15 buffer repeaters from a fresh source
 /// (`(256 - 1) / 16`); anything past that in a single segment reads as
-/// a placement mistake rather
-/// than a routing corner case in every fixture the crate ships today.
+/// a placement mistake rather than a routing corner case in every
+/// fixture the crate ships today.
 pub const MAX_ATTENUATION_SEGMENT: u32 = 256;
 
 /// Output of a [`compile_delay`] run.
@@ -450,9 +452,17 @@ pub(crate) fn repeater_sites_of_scope<'t>(
         if cell.cell.regenerates() {
             continue;
         }
-        // A cell that drives nothing can be reached with any strength
-        // at all, which is the limit the budget defaults to.
+        // A cell that drives nothing has no wire out to spare any of the
+        // limit for, so its budget is the whole limit. A budget counts
+        // the cell's own coord as a block of dust, so that is what lets
+        // a dust merge, which is one, stay lit; with no entry the cell
+        // would get a sink's allowance, one block more. A comparator,
+        // which reads the dust before it, could take that one more;
+        // every comparator's budget is conservative the same way. No
+        // `.crn` reaches this: a `logic` binding nothing consumes draws
+        // `W_LOGIC_UNUSED_SIGNAL` and its cell is dropped.
         let Some(tree) = trees.get(&cell_net(index)) else {
+            budgets.insert(cell.coord, DUST_ATTENUATION_LIMIT);
             continue;
         };
         // One block spent is tried last, so when no budget fits, the
@@ -556,6 +566,14 @@ struct NoRepeaterSite {
     unpowered: CellCoord,
     /// What `unpowered` may be reached over.
     allowance: Allowance,
+    /// How many steps before `unpowered` a repeater may stand and still
+    /// bring `unpowered` within its allowance, which is as far back as
+    /// the walk for a repeater site may go: the allowance the walk held
+    /// `unpowered` to. That is [`DUST_ATTENUATION_LIMIT`] for a block of
+    /// dust, one more for a sink with no budget, and the budget for a
+    /// sink with one. A refusal that ran out of coords close enough
+    /// names this number.
+    reach: u32,
     /// Whether the walk for a repeater site started on `unpowered`
     /// itself: a block of dust past the limit, which a repeater could
     /// stand in place of, reading the dust before it. The walk starts
@@ -581,15 +599,6 @@ pub(crate) enum Allowance {
     /// needs the rest of the limit, so it may be reached over only
     /// this much.
     Budget(u32),
-}
-
-impl Allowance {
-    fn blocks(self) -> u32 {
-        match self {
-            Self::Limit => DUST_ATTENUATION_LIMIT,
-            Self::Budget(budget) => budget,
-        }
-    }
 }
 
 /// How far back a [`NoRepeaterSite`]'s walk went. With where it
@@ -671,13 +680,14 @@ impl Refused {
 /// the source that is past its allowance, and puts a repeater on the
 /// last coord, on the way back towards the source or the repeater
 /// before, that can hold one and is close enough — on that coord
-/// itself, when it is dust; then walks again. On a straight run from a
-/// fresh source that is every `DUST_ATTENUATION_LIMIT + 1`th coord, the
-/// count [`buffer_count_for_segment`] gives. Where a coord cannot hold one
-/// the repeater moves earlier, which only shortens the dust behind it,
-/// and the run past it can need one repeater more than its length
-/// alone implies. On a fork it moves onto the trunk, where one block
-/// serves every branch past it.
+/// itself, when it is dust and the block before it, which a repeater
+/// there reads, is within the limit; then walks again. On a straight
+/// run from a fresh source that is every `DUST_ATTENUATION_LIMIT + 1`th
+/// coord, the count [`buffer_count_for_segment`] gives. Where a coord
+/// cannot hold one the repeater moves earlier, which only shortens the
+/// dust behind it, and the run past it can need one repeater more than
+/// its length alone implies. On a fork it moves onto the trunk, where
+/// one block serves every branch past it.
 ///
 /// `Err` when a coord past its allowance has no coord behind it, since
 /// the last full-strength block, that can hold a repeater close enough.
@@ -748,7 +758,7 @@ fn repeater_sites(
         let Some((depth, _, unpowered, reached)) = first else {
             break;
         };
-        let budget = allowance(unpowered, &sites);
+        let reach = allowance(unpowered, &sites);
         // Dust past the limit can be replaced by the repeater itself,
         // which reads the dust before it, as long as that dust is
         // within the limit. A sink cannot: the repeater has to stand
@@ -770,7 +780,7 @@ fn repeater_sites(
                 .expect("every coord of the tree was walked")
                 .1;
             debug_assert!(candidate_depth <= depth, "the walk back only climbs");
-            let too_far = depth.saturating_sub(candidate_depth) > budget;
+            let too_far = depth.saturating_sub(candidate_depth) > reach;
             let fresh = candidate == source || sites.contains(&candidate);
             if fresh || too_far {
                 let from = last_full_strength(tree, &sites, candidate);
@@ -785,6 +795,7 @@ fn repeater_sites(
                     allowance: budgets
                         .get(&unpowered)
                         .map_or(Allowance::Limit, |budget| Allowance::Budget(*budget)),
+                    reach,
                     starts_on_unpowered,
                     blocked: if fresh {
                         Blocked::NoneBetween
@@ -886,7 +897,7 @@ fn holds_repeater(
     }
 }
 
-/// The fewest buffer repeaters on a segment `steps` blocks long from a
+/// The fewest buffer repeaters on a segment of `steps` steps from a
 /// fresh source to its sink.
 ///
 /// The segment holds `steps - 1` blocks of dust: its two ends are the
@@ -929,6 +940,7 @@ fn no_repeater_site_diagnostic(
         spent,
         unpowered,
         allowance,
+        reach: near,
         ..
     } = stretch;
     let leaving = if spent == 0 {
@@ -979,14 +991,17 @@ fn no_repeater_site_diagnostic(
         net = net_label(net, ir),
     );
     let footer = match allowance {
+        // A repeater stands in place of the block of dust past the
+        // limit at the latest, reading the 15 before it, so the wire
+        // needs a straight coord among every 16 blocks it runs on.
         Allowance::Limit => format!(
             "Fix: leave the wire room to run straight at least once in every {} — a larger `region=` is one way, moving what walls it in is another — or split the logic across several `circuit` blocks",
-            blocks(DUST_ATTENUATION_LIMIT),
+            blocks(DUST_ATTENUATION_LIMIT + 1),
         ),
-        Allowance::Budget(budget) => format!(
+        Allowance::Budget(_) => format!(
             "Fix: leave the wire into {cell} room to run straight within {near} of it, or shorten the wire out of it so it can spare more — a larger `region=` is one way to do either — or drive {cell} from a cell that restores strength, or split the logic across several `circuit` blocks",
             cell = budget_cell(ir, unpowered),
-            near = blocks(budget),
+            near = blocks(near),
         ),
     };
     error_with_footer(
@@ -1016,7 +1031,7 @@ fn why_no_site(stretch: &NoRepeaterSite) -> String {
     let NoRepeaterSite {
         from,
         unpowered,
-        allowance,
+        reach,
         starts_on_unpowered,
         blocked,
         refused,
@@ -1028,9 +1043,9 @@ fn why_no_site(stretch: &NoRepeaterSite) -> String {
         }
         Blocked::NoneBetween => "between the two".to_owned(),
         Blocked::NoneCloseEnough if starts_on_unpowered => {
-            format!("from it back to {} before it", blocks(allowance.blocks()))
+            format!("from it back to {} before it", blocks(reach))
         }
-        Blocked::NoneCloseEnough => format!("within {} before it", blocks(allowance.blocks())),
+        Blocked::NoneCloseEnough => format!("within {} before it", blocks(reach)),
     };
     let touches = |touching: Touching| {
         format!(
@@ -1094,7 +1109,7 @@ fn attenuation_diagnostic(
     segment: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into cell #{cell_index} port #{driver_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need at least {buffers} buffer repeaters to materialize)",
+        "routed netlist for {kind} `{name}` has a driver segment of {segment} steps into cell #{cell_index} port #{driver_index} — exceeds the v1 attenuation limit of {cap} steps (dust decays 1/block, so this segment would need at least {buffers} buffer repeaters to materialize)",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
@@ -1115,7 +1130,7 @@ fn attenuation_output_diagnostic(
     segment: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "routed netlist for {kind} `{name}` has a driver segment of {segment} blocks into output pad #{output_index} — exceeds the v1 attenuation limit of {cap} blocks (dust decays 1/block, so this segment would need at least {buffers} buffer repeaters to materialize)",
+        "routed netlist for {kind} `{name}` has a driver segment of {segment} steps into output pad #{output_index} — exceeds the v1 attenuation limit of {cap} steps (dust decays 1/block, so this segment would need at least {buffers} buffer repeaters to materialize)",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
@@ -1134,7 +1149,7 @@ mod tests {
     //! Delay-pass behaviours `tests/delay.rs` cannot reach through synth
     //! fixtures: shapes only a hand-built `PlacementIr` produces.
 
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeSet, HashMap, HashSet};
 
     use cairn_lang_core::Edition;
     use cairn_lang_core::error::Span;
@@ -1183,7 +1198,7 @@ mod tests {
             let fired = delayed.diagnostics.iter().any(|d| {
                 d.code == DiagnosticCode::AttenuationLimit
                     && d.primary.contains(&format!(
-                        "has a driver segment of {} blocks into output pad #0",
+                        "has a driver segment of {} steps into output pad #0",
                         2 * width - 2,
                     ))
             });
@@ -1234,7 +1249,7 @@ mod tests {
             let delayed = compile_delay(&scoped(ScopeKind::Struct, "wide", ir));
             let refusal = format!(
                 "has no route from the driver at (0,0,0) to ({},0,0) within the v1 attenuation \
-                 limit of {cap} blocks",
+                 limit of {cap} steps",
                 width - 1,
             );
             let fired = delayed.diagnostics.iter().any(|d| {
@@ -1506,19 +1521,27 @@ mod tests {
     /// not one it can carry.
     #[test]
     fn a_repeater_steps_back_off_a_climb() {
-        // 14 east, 2 up, 2 east. (14,1,0) has the wire straight through
-        // it, but vertically; (14,0,0) is where it turns upward.
+        // 14 east, 2 up, 2 east. The repeater falls due on (14,2,0), the
+        // 16th block of dust, where the wire turns east off the top of
+        // the climb. (14,1,0) has the wire straight through it, but
+        // vertically; (14,0,0) is where it turns upward.
         let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 14), (UP, 2), (EAST, 2)])]);
         assert_eq!(
             repeater_sites(&tree, 0, &HashMap::new()),
             Ok(vec![CellCoord::new(13, 0, 0)]),
-            "neither the vertical run nor the foot of the climb holds a repeater",
+            "neither the top of the climb, nor the vertical run, nor its foot holds a repeater",
         );
     }
 
     /// Nor on a fork: one repeater faces one branch. The one on the
     /// trunk before the fork refreshes both, so the two branches share
     /// it rather than each getting one.
+    ///
+    /// The trunk's sink at (16,0,0) reads the 15 blocks of dust before
+    /// it and needs nothing, so the repeater falls due on the branch,
+    /// on (15,0,1), its 16th block of dust, where it turns. The walk
+    /// back starts there, passes the fork at (15,0,0) and lands on
+    /// (14,0,0).
     ///
     /// This is the shape of two actuators on one sensor, one straight
     /// down the row and one a row over past the first one's pad.
@@ -1572,6 +1595,7 @@ mod tests {
                 spent: 0,
                 unpowered: path[16],
                 allowance: Allowance::Limit,
+                reach: DUST_ATTENUATION_LIMIT,
                 starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
@@ -1608,6 +1632,7 @@ mod tests {
                 spent: 0,
                 unpowered: CellCoord::new(16, 0, 0),
                 allowance: Allowance::Limit,
+                reach: DUST_ATTENUATION_LIMIT,
                 starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
@@ -1678,6 +1703,7 @@ mod tests {
                 spent: 0,
                 unpowered: trunk[16],
                 allowance: Allowance::Limit,
+                reach: DUST_ATTENUATION_LIMIT,
                 starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
@@ -1723,6 +1749,7 @@ mod tests {
                 spent: 0,
                 unpowered: CellCoord::new(12, 0, 4),
                 allowance: Allowance::Limit,
+                reach: DUST_ATTENUATION_LIMIT,
                 starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
@@ -1795,18 +1822,19 @@ mod tests {
     }
 
     /// [`why_no_site`] for a walk that left `(0,0,0)` and gave up on
-    /// `(16,0,0)`.
+    /// `(16,0,0)`, held to `allowance` and able to go `reach` steps back.
     fn why_from_origin(
         blocked: Blocked,
         starts_on_unpowered: bool,
         refused: Refused,
-        allowance: Allowance,
+        (allowance, reach): (Allowance, u32),
     ) -> String {
         why_no_site(&NoRepeaterSite {
             from: CellCoord::new(0, 0, 0),
             spent: 0,
             unpowered: CellCoord::new(16, 0, 0),
             allowance,
+            reach,
             starts_on_unpowered,
             blocked,
             refused,
@@ -1818,9 +1846,24 @@ mod tests {
     /// clause after the refusal's colon.
     ///
     /// Hand-built: [`why_no_site`] is asked directly, since no one tree
-    /// reaches every pair. `NoneCloseEnough` with nothing refused is in
-    /// the table for completeness: [`repeater_sites`] only builds it
-    /// for an allowance of zero, and every allowance is at least one.
+    /// reaches every pair. Two rows are in the table for completeness,
+    /// since [`repeater_sites`] never builds them:
+    ///
+    /// - `NoneCloseEnough` with nothing refused, which it would only
+    ///   build for an allowance of zero, and every allowance is at least
+    ///   one.
+    /// - `NoneCloseEnough` for a sink with no budget, held to the limit
+    ///   and so reachable from 16 steps back. Such a sink is past its
+    ///   allowance only when the block before it is too: a block of
+    ///   dust past the limit, which is nearer the source and so is the
+    ///   one the walk is for, or a source with more than the limit
+    ///   already spent, where the walk ends at once as `NoneBetween`.
+    ///
+    /// That second row is the one whose `reach`, 16, is not the limit's
+    /// 15, so it is the row that tells a clause rendered from
+    /// [`NoRepeaterSite::reach`] from one rendered from the limit.
+    /// [`repeater_sites_builds_two_pairs_of_allowance_and_start`] pins
+    /// the pairs the walk does build.
     #[test]
     fn every_blocked_and_refused_pair_reads_as_one_clause() {
         let [nothing, bends, touches, both] = refusals();
@@ -1830,18 +1873,21 @@ mod tests {
             CUTS_CLAUSE,
             TOO_WEAK_CLAUSE,
         );
+        // A sink with no budget: held to the limit, and reading the dust
+        // before it, so a repeater 16 steps back still reaches it.
+        let sink = (Allowance::Limit, DUST_ATTENUATION_LIMIT + 1);
         let cases = [
             (
                 Blocked::NoneBetween,
                 nothing,
-                Allowance::Limit,
+                sink,
                 "no coord stands between the two, so there is nowhere for a buffer repeater"
                     .to_owned(),
             ),
             (
                 Blocked::NoneBetween,
                 bends,
-                Allowance::Limit,
+                sink,
                 format!(
                     "every coord between the two turns, climbs or branches — {straight}, so none can stand there"
                 ),
@@ -1849,7 +1895,7 @@ mod tests {
             (
                 Blocked::NoneBetween,
                 touches,
-                Allowance::Limit,
+                sink,
                 format!(
                     "every coord between the two {on_a_face} — {cuts}, so none can stand there"
                 ),
@@ -1857,7 +1903,7 @@ mod tests {
             (
                 Blocked::NoneBetween,
                 both,
-                Allowance::Limit,
+                sink,
                 format!(
                     "every coord between the two turns, climbs or branches, or {on_a_face} — {straight} and joins only the blocks at its back and front, so none can stand there"
                 ),
@@ -1865,13 +1911,13 @@ mod tests {
             (
                 Blocked::NoneCloseEnough,
                 nothing,
-                Allowance::Budget(3),
+                (Allowance::Budget(3), 3),
                 format!("no coord stands within 3 blocks before it, {too_weak}"),
             ),
             (
                 Blocked::NoneCloseEnough,
                 bends,
-                Allowance::Budget(1),
+                (Allowance::Budget(1), 1),
                 format!(
                     "every coord within 1 block before it turns, climbs or branches — {straight}, {too_weak}"
                 ),
@@ -1879,21 +1925,21 @@ mod tests {
             (
                 Blocked::NoneCloseEnough,
                 touches,
-                Allowance::Budget(2),
+                (Allowance::Budget(2), 2),
                 format!("every coord within 2 blocks before it {on_a_face} — {cuts}, {too_weak}"),
             ),
             (
                 Blocked::NoneCloseEnough,
                 both,
-                Allowance::Limit,
+                sink,
                 format!(
-                    "every coord within 15 blocks before it turns, climbs or branches, or {on_a_face} — {straight} and joins only the blocks at its back and front, {too_weak}"
+                    "every coord within 16 blocks before it turns, climbs or branches, or {on_a_face} — {straight} and joins only the blocks at its back and front, {too_weak}"
                 ),
             ),
         ];
-        for (blocked, refused, allowance, clause) in cases {
+        for (blocked, refused, held, clause) in cases {
             assert_eq!(
-                why_from_origin(blocked, false, refused, allowance),
+                why_from_origin(blocked, false, refused, held),
                 clause,
                 "{blocked:?} x {refused:?}",
             );
@@ -1907,7 +1953,17 @@ mod tests {
     /// record of what it can refuse — never nothing, since it asked
     /// about `unpowered`.
     ///
-    /// Hand-built, as the table above is.
+    /// Hand-built, as the table above is, and the `NoneCloseEnough` rows
+    /// are in it for completeness: [`repeater_sites`] never builds them.
+    /// It starts a walk on `unpowered` only when the block before it is
+    /// within the limit, so the block that last restored strength is at
+    /// most `DUST_ATTENUATION_LIMIT + 1` steps back, and the walk
+    /// reaches it, which makes the record `NoneBetween`, no later than
+    /// it runs out of coords close enough. Nor is a block of dust ever
+    /// held to a budget, as two of those rows have it:
+    /// [`repeater_sites_of_scope`] gives budgets only to cells.
+    /// [`repeater_sites_builds_two_pairs_of_allowance_and_start`] pins
+    /// the pairs the walk does build.
     #[test]
     fn a_walk_that_starts_on_unpowered_names_it_among_the_coords() {
         let [_, bends, touches, both] = refusals();
@@ -1918,11 +1974,14 @@ mod tests {
             TOO_WEAK_CLAUSE,
         );
         let through = "after (0,0,0) up to and including (16,0,0)";
+        // A block of dust: held to the limit, and stood in place of, so a
+        // repeater no more than 15 steps back reaches it.
+        let dust = (Allowance::Limit, DUST_ATTENUATION_LIMIT);
         let cases = [
             (
                 Blocked::NoneBetween,
                 bends,
-                Allowance::Limit,
+                dust,
                 format!(
                     "every coord {through} turns, climbs or branches — {straight}, so none can stand there"
                 ),
@@ -1930,13 +1989,13 @@ mod tests {
             (
                 Blocked::NoneBetween,
                 touches,
-                Allowance::Limit,
+                dust,
                 format!("every coord {through} {on_a_face} — {cuts}, so none can stand there"),
             ),
             (
                 Blocked::NoneBetween,
                 both,
-                Allowance::Limit,
+                dust,
                 format!(
                     "every coord {through} turns, climbs or branches, or {on_a_face} — {straight} and joins only the blocks at its back and front, so none can stand there"
                 ),
@@ -1944,7 +2003,7 @@ mod tests {
             (
                 Blocked::NoneCloseEnough,
                 bends,
-                Allowance::Budget(1),
+                (Allowance::Budget(1), 1),
                 format!(
                     "every coord from it back to 1 block before it turns, climbs or branches — {straight}, {too_weak}"
                 ),
@@ -1952,7 +2011,7 @@ mod tests {
             (
                 Blocked::NoneCloseEnough,
                 touches,
-                Allowance::Budget(2),
+                (Allowance::Budget(2), 2),
                 format!(
                     "every coord from it back to 2 blocks before it {on_a_face} — {cuts}, {too_weak}"
                 ),
@@ -1960,19 +2019,78 @@ mod tests {
             (
                 Blocked::NoneCloseEnough,
                 both,
-                Allowance::Limit,
+                dust,
                 format!(
                     "every coord from it back to 15 blocks before it turns, climbs or branches, or {on_a_face} — {straight} and joins only the blocks at its back and front, {too_weak}"
                 ),
             ),
         ];
-        for (blocked, refused, allowance, clause) in cases {
+        for (blocked, refused, held, clause) in cases {
             assert_eq!(
-                why_from_origin(blocked, true, refused, allowance),
+                why_from_origin(blocked, true, refused, held),
                 clause,
                 "{blocked:?} x {refused:?}",
             );
         }
+    }
+
+    /// The records [`repeater_sites`] builds from the walks a scope can
+    /// hand it — `spent` within the limit, and a budget only on a sink,
+    /// as [`repeater_sites_of_scope`] gives them — come in two pairs of
+    /// allowance and start. A walk that starts on `unpowered` does so on
+    /// a block of dust, held to the limit, and reaches the block that
+    /// last restored strength before it runs out of coords close enough.
+    /// A walk held to a budget starts before the sink, and can end
+    /// either way. Each record's `reach` is the allowance it was held
+    /// to.
+    ///
+    /// Swept over a straight run into a staircase, every coord of which
+    /// turns, with the run's length, the staircase's, `spent` and the
+    /// sink's budget varied. The set of what it meets is asserted equal
+    /// to the three below, so the sweep is shown to reach each of them.
+    #[test]
+    fn repeater_sites_builds_two_pairs_of_allowance_and_start() {
+        let mut met = BTreeSet::new();
+        for run in [0, 1, 2, 5, 15, 16, 17] {
+            for stairs in 1..=10 {
+                let mut moves = vec![(EAST, run)];
+                for _ in 0..stairs {
+                    moves.push((SOUTH, 1));
+                    moves.push((EAST, 1));
+                }
+                let path = walk((0, 0, 0), &moves);
+                let tree = NetTree::from_paths(&[&path]);
+                let sink = *path.last().expect("a walk has an end");
+                for spent in 0..=DUST_ATTENUATION_LIMIT {
+                    for budget in [None, Some(1), Some(2), Some(3), Some(8), Some(15)] {
+                        let budgets: HashMap<CellCoord, u32> =
+                            budget.map(|budget| (sink, budget)).into_iter().collect();
+                        let Err(stretch) = repeater_sites(&tree, spent, &budgets) else {
+                            continue;
+                        };
+                        let case = format!("run {run}, {stairs} stairs, {spent} spent, {budget:?}");
+                        let (held, reach) = match stretch.allowance {
+                            Allowance::Limit => ("limit", DUST_ATTENUATION_LIMIT),
+                            Allowance::Budget(budget) => ("budget", budget),
+                        };
+                        assert_eq!(stretch.reach, reach, "{case}: {stretch:?}");
+                        let ended = match stretch.blocked {
+                            Blocked::NoneBetween => "none between",
+                            Blocked::NoneCloseEnough => "none close enough",
+                        };
+                        met.insert((held, stretch.starts_on_unpowered, ended));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            met,
+            BTreeSet::from([
+                ("budget", false, "none between"),
+                ("budget", false, "none close enough"),
+                ("limit", true, "none between"),
+            ]),
+        );
     }
 
     /// A coord past its allowance one step from the block that last
@@ -1995,6 +2113,7 @@ mod tests {
                 spent: DUST_ATTENUATION_LIMIT + 1,
                 unpowered: CellCoord::new(1, 0, 0),
                 allowance: Allowance::Limit,
+                reach: DUST_ATTENUATION_LIMIT + 1,
                 starts_on_unpowered: false,
                 blocked: Blocked::NoneBetween,
                 refused: Refused::default(),
@@ -2033,6 +2152,36 @@ mod tests {
         );
     }
 
+    /// Dust past the limit whose block before it is past the limit too
+    /// is not stood in place of: a repeater there would read that block,
+    /// which the signal no longer lights. The walk starts on the coord
+    /// before it, as for a sink, and here that is the source.
+    ///
+    /// Hand-built with one block more spent than the limit, as
+    /// [`a_stretch_with_no_coord_in_it_says_so`] is: the budget search
+    /// never hands a walk more than the limit, so no scope gets here.
+    /// Unlike that test's, `unpowered` is dust with straight wire on both
+    /// sides, so a walk that started on it would stand a repeater there,
+    /// and then refuse on that repeater.
+    #[test]
+    fn dust_whose_block_before_is_past_the_limit_is_walked_back_from() {
+        let path = walk((0, 0, 0), &[(EAST, 6)]);
+        let tree = NetTree::from_paths(&[&path]);
+        assert_eq!(
+            repeater_sites(&tree, DUST_ATTENUATION_LIMIT + 1, &HashMap::new()),
+            Err(NoRepeaterSite {
+                from: CellCoord::new(0, 0, 0),
+                spent: DUST_ATTENUATION_LIMIT + 1,
+                unpowered: CellCoord::new(1, 0, 0),
+                allowance: Allowance::Limit,
+                reach: DUST_ATTENUATION_LIMIT,
+                starts_on_unpowered: false,
+                blocked: Blocked::NoneBetween,
+                refused: Refused::default(),
+            }),
+        );
+    }
+
     /// The stretch a refusal names starts at the last repeater, not at
     /// the source: the wire before that repeater is already refreshed,
     /// and a coord on it cannot stand in for one past it.
@@ -2054,6 +2203,7 @@ mod tests {
                 spent: 0,
                 unpowered: path[19 + 16],
                 allowance: Allowance::Limit,
+                reach: DUST_ATTENUATION_LIMIT,
                 starts_on_unpowered: true,
                 blocked: Blocked::NoneBetween,
                 refused: Refused {
@@ -2110,6 +2260,7 @@ mod tests {
                 spent: 0,
                 unpowered: sink,
                 allowance: Allowance::Budget(1),
+                reach: 1,
                 starts_on_unpowered: false,
                 blocked: Blocked::NoneCloseEnough,
                 refused: Refused {
@@ -2305,6 +2456,57 @@ mod tests {
         }
     }
 
+    /// A cell that passes strength on and drives nothing is held to the
+    /// whole limit, counting its own coord as a block of dust, so a dust
+    /// merge stays lit — not to the allowance of a sink, which reads the
+    /// dust before it and would let the merge be the block past the
+    /// limit.
+    ///
+    /// The sensor is 16 steps from the cell along a straight run: 15
+    /// blocks of dust, which bring a sink the signal with no repeater
+    /// and leave a dust merge on the 16th. Hand-built, since no `.crn`
+    /// keeps a cell that drives nothing: a `logic` binding nothing
+    /// consumes draws `W_LOGIC_UNUSED_SIGNAL` and its cell is dropped.
+    #[test]
+    fn a_cell_that_passes_strength_on_and_drives_nothing_is_held_to_the_limit() {
+        let cell = CellCoord::new(16, 0, 0);
+        let into = walk((0, 0, 0), &[(EAST, 16)]);
+        assert_eq!(into.last(), Some(&cell));
+        let trees = HashMap::from([(NetRef::Input(0), NetTree::from_paths(&[&into]))]);
+        for (kind, expected) in [
+            (EditionCell::BedrockTorchOr, vec![CellCoord::new(15, 0, 0)]),
+            (EditionCell::BedrockInverterTorch, Vec::new()),
+        ] {
+            let mut ir = PlacementIr::new(Edition::Bedrock);
+            ir.region = Some(reservation(20, 3, 1));
+            ir.inputs.push(crate::netlist_ir::NetlistInput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+                span: Span::default(),
+            });
+            ir.cells.push(placed_cell(
+                kind,
+                cell,
+                vec![CellPortDriver {
+                    port: PortName::A,
+                    net: NetRef::Input(0),
+                }],
+            ));
+            let entry = ScopedPlacementIrEntry {
+                kind: ScopeKind::Struct,
+                name: "unused".to_owned(),
+                ir: ir.clone(),
+            };
+            let region = ir.region.clone().expect("set above");
+            let sites = repeater_sites_of_scope(&ir, &entry, "routed", &region, &trees)
+                .unwrap_or_else(|d| panic!("{kind:?}: {d:?}"));
+            assert_eq!(
+                sites.along(NetRef::Input(0), cell),
+                Some(expected),
+                "{kind:?}: the wire into a cell that drives nothing",
+            );
+        }
+    }
+
     /// Every cell, and whether its output is at full strength whatever
     /// reached it: the two pinned cells that pass strength on are the
     /// ones the delay pass measures across, and every `*Unpinned`
@@ -2388,7 +2590,7 @@ mod tests {
         );
         let footer = &delayed.diagnostics[0].notes[0].message;
         assert!(
-            footer.contains("run straight at least once in every 15 blocks"),
+            footer.contains("run straight at least once in every 16 blocks"),
             "the fix is room to run straight, got {footer:?}",
         );
         let survivors: Vec<_> = delayed.scoped.scopes.iter().map(|e| &e.name).collect();
@@ -2484,7 +2686,7 @@ mod tests {
             .expect("cell-driver segment past cap must fire E_ATTENUATION_LIMIT");
         assert!(
             attenuation.primary.contains(&format!(
-                "has a driver segment of {} blocks into cell #2",
+                "has a driver segment of {} steps into cell #2",
                 2 * OVER_CAP_TRUNK - 2,
             )),
             "primary must name the failing cell index and the trunk-plus-branch \

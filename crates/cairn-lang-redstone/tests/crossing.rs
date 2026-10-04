@@ -60,7 +60,7 @@ fn errors(
 /// columns long and the far half of it is past the second refresh
 /// point.
 ///
-/// They stand 14 blocks apart rather than 16. Each cell is a Java
+/// They stand 14 steps apart rather than 16. Each cell is a Java
 /// comparator, which passes on the strength it reads rather than
 /// restoring it, so the dust from the trunk runs on through the chain
 /// of comparators after the tap. Every comparator but the last has a
@@ -68,9 +68,9 @@ fn errors(
 /// and the first coord on it that runs straight — where a repeater can
 /// refresh the rest — is 2 blocks out, reading the one block of dust
 /// before it, so a tap may arrive with at most `16 - 2` spent. That
-/// budget, not the limit, is what the trunk's repeaters are spaced by. The chain's own nets carry
-/// repeaters of their own for the same reason, which is why this
-/// counts the trunk's alone.
+/// budget, not the limit, is what the trunk's repeaters are spaced by.
+/// The chain's own nets carry repeaters of their own for the same
+/// reason, which is why this counts the trunk's alone.
 ///
 /// That the tree reaches the far cells along a trunk beside the row
 /// and not *through* the near ones is what makes this a small number

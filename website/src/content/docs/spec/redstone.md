@@ -247,7 +247,7 @@ The internal algorithm runs five stages:
    the attenuation limit of 15 blocks: a source at strength 15 carries 15 blocks of dust, the last
    at strength 1, which still drives the sink after it. The segment is measured along the **routed**
    path from driver to sink, and the buffer stands on that path, so the straight line between the
-   two is not always wire. A segment past the v1 cap of 256 blocks is refused rather than buffered,
+   two is not always wire. A segment past the v1 cap of 256 steps is refused rather than buffered,
    under the same `E_ATTENUATION_LIMIT` stage 2 raises — what differs is that this pass measures the
    wire that was actually laid.
 
@@ -270,9 +270,12 @@ The internal algorithm runs five stages:
    than its rear input carries. The wire into either of them and the wire out of it therefore count
    as one run of dust, though the cell stands between them, measured from the input that has spent
    the most: the pass does not track which input of a comparator is its rear, so it takes the one
-   that has spent the most. The repeater the run needs goes where the running total would pass 15:
-   on the wire out of the cell, or on the wire into it when the wire out has no coordinate near
-   enough to the cell to take one.
+   that has spent the most. The repeater the run needs goes where the running total would pass 15,
+   or, on the wire into such a cell, what the cell can spare of it, since the wire out needs the
+   rest. Where that is a block of dust, the repeater stands in its place and reads the dust before
+   it, as on a straight run. Where it is a sink — such a cell is one — the repeater cannot stand in
+   its place and stands on the wire before it. It lands on the wire out of the cell, or on the wire
+   into it when the wire out has no coordinate near enough to the cell to take one.
 4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
    wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
    path belongs to that net alone, and no other net runs within a step of it, so there is no
@@ -305,8 +308,8 @@ pipeline the shape was measured.
 
 ```text
 E_ATTENUATION_LIMIT line 13 circuit=floor:
-  placed netlist for struct `wide_pack` puts output pad #0 299 blocks from its driver in a
-  straight line — exceeds the v1 attenuation limit of 256 blocks, and no route between two coords
+  placed netlist for struct `wide_pack` puts output pad #0 299 steps from its driver in a
+  straight line — exceeds the v1 attenuation limit of 256 steps, and no route between two coords
   is shorter than the straight line between them.
   Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column
   sits within the cap of the cells it serves — a larger reservation cannot help, because the

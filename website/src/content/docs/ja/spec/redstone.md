@@ -232,7 +232,7 @@ circuit region=basement void=3       # 高さ 3 のサービス層を確保し�
 3. **ディレイ挿入**: ダストが減衰限界の 15 ブロックを超えて続くセグメントにのみ、バッファとして
    リピータを入れます。強度 15 の信号源のダストは、15 ブロック目でも強度 1 でシンクを駆動します。
    セグメントはドライバからそのシンクまでの **実配線** 経路で測り、バッファはその経路上に立ちます。
-   2 点間の直線が常に配線とは限りません。v1 の上限 256 ブロックを超えるセグメントはバッファでは
+   2 点間の直線が常に配線とは限りません。v1 の上限 256 歩を超えるセグメントはバッファでは
    なく拒否で、コードは段階 2 が上げるのと同じ `E_ATTENUATION_LIMIT` です。違うのは、この
    パスが実際に敷かれた配線を測っている点です。
 
@@ -254,8 +254,12 @@ circuit region=basement void=3       # 高さ 3 のサービス層を確保し�
    OR はダストの合流で、Java のコンパレータ AND は後ろの入力が運ぶ強度より強く出力しません。これらへ
    入る配線と出る配線は、間にセルが立っていても 1 続きのダストとして数え、最も多く消費した入力から
    測ります。このパスはコンパレータのどの入力が後ろかを追っていないので、最も多く消費したものを
-   取ります。その 1 続きに要るリピータは、累計が 15 を超える手前に置きます。セルから出る配線の上か、
-   セルに近い位置で立てられる座標がそこに無ければセルへ入る配線の上です。
+   取ります。その 1 続きに要るリピータは、累計が 15 を超える所に置きます。そうしたセルへ入る配線の
+   上では、出る配線が残りを使うので、セルが割ける分を累計が超える所です。そこがダストのブロック
+   なら、リピータはその代わりに立ち、手前のダストを読みます。直線の区間と同じです。そこがシンク
+   なら — そうしたセルもシンクです — リピータはその代わりには立てず、手前の配線に立ちます。
+   リピータが立つのはセルから出る配線の上か、セルに近い位置で立てられる座標がそこに無ければセルへ
+   入る配線の上です。
 4. **交差の合法化**: 段階 3 が数えたバッファのリピータに座標を割り当てます。この時点で配線を
    合法化する必要はありません。リピータは自分のネットの実配線経路の上に立ち、その経路はその
    ネットだけのもので、他のどのネットも 1 歩以内には走っていないので、持ち上げるべきショートも、
@@ -287,8 +291,8 @@ E_ROUTE_CONGESTION line 21 circuit=basement:
 
 ```text
 E_ATTENUATION_LIMIT line 13 circuit=floor:
-  placed netlist for struct `wide_pack` puts output pad #0 299 blocks from its driver in a
-  straight line — exceeds the v1 attenuation limit of 256 blocks, and no route between two coords
+  placed netlist for struct `wide_pack` puts output pad #0 299 steps from its driver in a
+  straight line — exceeds the v1 attenuation limit of 256 steps, and no route between two coords
   is shorter than the straight line between them.
   Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column
   sits within the cap of the cells it serves — a larger reservation cannot help, because the
