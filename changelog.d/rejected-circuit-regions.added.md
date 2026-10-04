@@ -1,2 +1,4 @@
-- *(core)* `rejected_circuit_regions` hands back each `circuit` line `circuit_regions` leaves out,
-  with its span and a `CircuitRegionDefect` naming why it reserves nothing.
+- *(core)* `circuit_lines` reads every `circuit` line of every `struct` and `def`, including one
+  under a `level`, into the `CircuitRegion` it reserves or a `RejectedCircuitRegion` whose
+  `CircuitRegionDefect` says why it reserves nothing; the defect's `Display` is that reason as a
+  clause. `circuit_regions` returns the same reservations as before, out of the same walk.
