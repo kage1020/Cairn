@@ -236,6 +236,11 @@ struct tiny size=3x3
             footer.message,
         );
     }
+    assert!(
+        !footer.message.contains("`circuit` blocks"),
+        "footer must not advise a second `circuit` line, which `check` refuses, got {:?}",
+        footer.message,
+    );
 
     assert!(
         out.scoped.scopes.iter().all(|e| e.name != "tiny"),
