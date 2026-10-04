@@ -303,6 +303,12 @@ place, as it would for any other id, and is `E_UNRESOLVED_PLACE_REF`.
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
 
+`W_UNUSED_DEF` counts every `place` row in a `site` body whose `use=` names the def, including a row
+refused for its id or its origin. That row does reference the def, and the finding with the repair
+is the one on the row: removing the def, as the warning would advise, only brings it back as
+`E_UNRESOLVED_PLACE_REF` once the row is fixed. A `use=` that is not an identifier or string
+(`use=3`) names no def, so it is not counted.
+
 `E_OUTPUT_NAME_COLLISION` follows from how artifacts are named
 ([§9.3.4](/spec/components-editing-sites/#934-output-naming)): a `struct` by its name, a `place` by
 its `id=` alone, and a walkway by its site and ports. Every one of them lands in the same output

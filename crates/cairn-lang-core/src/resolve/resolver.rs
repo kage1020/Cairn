@@ -1067,6 +1067,25 @@ fn resolve_site_placements(
             continue;
         }
 
+        // `use=` is read once, here, for both of its readers: the reference
+        // recorded just below and the def lookup further down, so the two
+        // cannot read it differently. A row whose `use=` names a declared
+        // def references it, whatever refuses the row; every refusal of a
+        // `place` row comes after this record. `W_UNUSED_DEF` is "a `def`
+        // no `place use=` references", and on a refused row the finding
+        // with the repair is the row's own — advising the author to delete
+        // the def would send them to a line that is correct. A `use=` that
+        // is not label-shaped (`use=3`) names no def, so it records
+        // nothing.
+        let use_target = member
+            .intent_state
+            .get("use")
+            .and_then(|v| v.value.as_label_str());
+        let use_def = use_target.and_then(|name| defs.iter().find(|d| d.name == name));
+        if let Some(def) = use_def {
+            used_defs.insert(def.name.clone());
+        }
+
         let Some(place_id) = usable_place_id(
             member,
             &site.name,
@@ -1094,10 +1113,6 @@ fn resolve_site_placements(
             continue;
         }
 
-        let use_target = member
-            .intent_state
-            .get("use")
-            .and_then(|v| v.value.as_label_str());
         let theme_target = member
             .intent_state
             .get("theme")
@@ -1117,7 +1132,7 @@ fn resolve_site_placements(
         let Some(use_name) = use_target else {
             continue;
         };
-        let Some(def) = defs.iter().find(|d| d.name == use_name) else {
+        let Some(def) = use_def else {
             ctx.diagnostics.push(unresolved_ref_diag(
                 DiagnosticCode::UnresolvedPlaceRef,
                 &format!("`use={use_name}` references an unknown def"),
@@ -1127,7 +1142,6 @@ fn resolve_site_placements(
             ));
             continue;
         };
-        used_defs.insert(def.name.clone());
 
         // Same split as `use=` above: absent is `incomplete_place_diag`'s,
         // mistyped is `check::type_mismatch`'s. The single-theme heuristic
@@ -3706,5 +3720,196 @@ mod tests {
                 "the recommended id `{id}` cannot be placed and connected: {errors:?}",
             );
         }
+    }
+
+    // ------------------------------------------------------------------
+    // What a `place` row's `use=` references, whatever refuses the row.
+    // ------------------------------------------------------------------
+
+    /// Every finding `resolve` reports for a site whose rows are `rows`, as
+    /// `(code, primary)` in report order. The module declares two defs,
+    /// `hut` and then `shed`, and only a row's `use=` references either.
+    fn unused_def_findings(rows: &[&str]) -> Vec<(&'static str, String)> {
+        let mut src = String::from(
+            "theme t:\n  slot floor -> @oak_planks\n\n\
+             def hut size=3x3:\n  floor mat_slot=floor\n\n\
+             def shed size=3x3:\n  floor mat_slot=floor\n\nsite v:\n",
+        );
+        for row in rows {
+            src.push_str("  ");
+            src.push_str(row);
+            src.push('\n');
+        }
+        resolve(&ir(&src), None)
+            .diagnostics
+            .into_iter()
+            .map(|d| (d.code.as_str(), d.primary))
+            .collect()
+    }
+
+    /// A finding [`UNUSED_DEF_CASES`] expects: its code, and a fragment of
+    /// its primary message.
+    type Expected = (&'static str, &'static str);
+
+    const HUT_UNUSED: Expected = ("W_UNUSED_DEF", "def `hut` is never referenced");
+    const SHED_UNUSED: Expected = ("W_UNUSED_DEF", "def `shed` is never referenced");
+
+    /// The cases `a_def_named_by_a_refused_place_row_is_not_unused` runs:
+    /// a site's rows, and every finding `resolve` reports for them, in
+    /// report order.
+    const UNUSED_DEF_CASES: &[(&[&str], &[Expected])] = &[
+        (
+            &["place use=hut theme=t at=origin"],
+            &[("E_INCOMPLETE_PLACE", "is missing `id=`"), SHED_UNUSED],
+        ),
+        (&["place id=3 use=hut theme=t at=origin"], &[SHED_UNUSED]),
+        (
+            &["place id=\"a.b\" use=hut theme=t at=origin"],
+            &[("E_INVALID_PLACE_ID", "is not a usable id"), SHED_UNUSED],
+        ),
+        (
+            &[
+                "place id=a use=shed theme=t at=origin",
+                "place id=a use=hut theme=t at=origin",
+            ],
+            &[("E_DUPLICATE_PLACE_ID", "duplicate `id=a`")],
+        ),
+        (
+            &["place id=a use=hut theme=t"],
+            &[
+                ("E_INVALID_PLACE_ORIGIN", "missing an origin selector"),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t at=origin east_of=nowhere"],
+            &[
+                ("E_INVALID_PLACE_ORIGIN", "more than one origin selector"),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t at=front"],
+            &[
+                ("E_INVALID_PLACE_ORIGIN", "`at=` only accepts `origin`"),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t east_of=3"],
+            &[
+                (
+                    "E_INVALID_PLACE_ORIGIN",
+                    "`east_of=` expects a place id label",
+                ),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t east_of=nowhere"],
+            &[
+                (
+                    "E_UNRESOLVED_PLACE_REF",
+                    "`east_of=nowhere` in site `v` does not name a prior place id",
+                ),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=hut theme=t north_of=nowhere"],
+            &[
+                (
+                    "E_UNRESOLVED_PLACE_REF",
+                    "`north_of=nowhere` in site `v` does not name a prior place id",
+                ),
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &[
+                "place id=\"a.b\" use=shed theme=t at=origin",
+                "place id=b use=hut theme=t east_of=\"a.b\"",
+            ],
+            &[
+                ("E_INVALID_PLACE_ID", "is not a usable id"),
+                ("W_DEFERRED_PLACE", "names a `place` row refused for its id"),
+            ],
+        ),
+        (&["place id=a use=hut theme=t at=origin"], &[SHED_UNUSED]),
+        (
+            &["place id=a use=\"hut\" theme=t at=origin"],
+            &[SHED_UNUSED],
+        ),
+        (
+            &["place id=a use=hutt theme=t at=origin"],
+            &[
+                (
+                    "E_UNRESOLVED_PLACE_REF",
+                    "`use=hutt` references an unknown def",
+                ),
+                HUT_UNUSED,
+                SHED_UNUSED,
+            ],
+        ),
+        (
+            &["place id=a use=3 theme=t at=origin"],
+            &[HUT_UNUSED, SHED_UNUSED],
+        ),
+        (
+            &["place id=a use=@hut theme=t at=origin"],
+            &[HUT_UNUSED, SHED_UNUSED],
+        ),
+    ];
+
+    /// A def named by a `place` row the resolver refuses is referenced, so
+    /// `W_UNUSED_DEF` does not fire on it: the finding with the repair is
+    /// on the row, and removing the def, as the warning would advise, only
+    /// brings it back as `E_UNRESOLVED_PLACE_REF` once the row is fixed.
+    ///
+    /// Every way out of `usable_place_id` and `validate_place_origin` that
+    /// refuses the row has a case. Out of `usable_place_id`: the
+    /// unnamed-placement return, reached both by a missing `id=` and by
+    /// `id=3` (not label-shaped, so never hoisted onto `Member::id`;
+    /// `check::type_mismatch` reports it, so `resolve` says nothing), an id
+    /// `PlaceId` refuses, and an id already placed. Out of
+    /// `validate_place_origin`: no origin selector, two, an `at=` other
+    /// than `origin`, a non-label `east_of=`, an `east_of=` and a
+    /// `north_of=` naming no prior place, and an `east_of=` naming a row
+    /// refused for its id, the one refusal that is a warning alone.
+    ///
+    /// The whole list is compared, so each case also pins which def every
+    /// `W_UNUSED_DEF` names and, by a fragment of its message, which arm
+    /// each refusal came from. That is what tells the two
+    /// `E_UNRESOLVED_PLACE_REF`s apart: the origin lookup's "does not name
+    /// a prior place id" and the def lookup's "references an unknown def".
+    /// No row but the one under test names `hut`, and `shed`, where no row
+    /// names it, is the standing control that the check still runs.
+    ///
+    /// The last five cases are controls. An accepted row references its
+    /// def, whether its `use=` is an identifier or a string. A `use=`
+    /// naming no def references nothing, so `hut` is still unused. A
+    /// `use=` that is neither an identifier nor a string names no def
+    /// either, since `as_label_str` reads nothing from it, so the warning
+    /// still fires rather than guess which def was meant: `use=3`, and
+    /// `use=@hut`, whose text spells the def. The value itself is
+    /// `check::type_mismatch`'s to report.
+    #[test]
+    fn a_def_named_by_a_refused_place_row_is_not_unused() {
+        // Every case is run before anything is asserted, so one failure
+        // does not hide the rest.
+        let mismatches: Vec<String> = UNUSED_DEF_CASES
+            .iter()
+            .filter_map(|(rows, expected)| {
+                let found = unused_def_findings(rows);
+                let matches = found.len() == expected.len()
+                    && found.iter().zip(expected.iter()).all(
+                        |((code, primary), (want, fragment))| {
+                            code == want && primary.contains(fragment)
+                        },
+                    );
+                (!matches).then(|| format!("{rows:?}: expected {expected:?}, got {found:#?}"))
+            })
+            .collect();
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
     }
 }
