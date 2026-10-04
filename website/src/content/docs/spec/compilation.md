@@ -264,4 +264,8 @@ The sort is over the resolved state, so it is stable across editions and version
 matters: it does not consult source spans, member ids, phases, or paint order. It is not a claim
 that two targets agree on the palette, because two targets need not agree on the ids in it.
 
+The `.mcstructure` palette is written from this one and stays a set. Translating to Bedrock can map
+several entries to one Bedrock block — stairs that differ only in `shape`, once `shape` is dropped —
+and those share the first one's slot, so air stays at `0` and no Bedrock block is listed twice.
+
 A walkway's array is laid by the `connect` pass rather than by the phases, and is not covered here.

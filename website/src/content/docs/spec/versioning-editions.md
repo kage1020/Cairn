@@ -521,7 +521,9 @@ entry is `{id, states, dropped}`:
 Two lists rather than one under a category tag, and `states` rather than the ID alone. Degradation
 is a fact about the *state combination*, not about the block: one ID reaches this list once per
 combination that loses something, and `roof-hip`'s four entries are four spellings of
-`minecraft:spruce_stairs`. A list keyed by the ID alone would print the same line four times.
+`minecraft:spruce_stairs`. A list keyed by the ID alone would print the same line four times. The
+build's `W_INTENT_DEGRADED` names each entry the same way, as `id[states]`, so each warning is
+distinct and matches the note about the same entry.
 
 `dropped` carries the property and the value rather than the sentence about them, for the reason the
 `unsupported` reasons do: a consumer that reads this should not have to parse English to learn which
@@ -674,12 +676,12 @@ resolved_state:
   bedrock: { weirdo_direction: 1, upside_down_bit: false }              # no shape → corners don't join
 ```
 
-When a resolved difference becomes a visual or functional one, lint says so:
+When a resolved difference becomes a visual or functional one, the build says so. `themed-tower`'s
+eave stair is `shape=outer_left`:
 
 ```text
-W_INTENT_DEGRADED line 12 id=roof_corner:
-  shape=inner_left cannot be resolved in Bedrock (stairs have no shape state).
-  Bedrock stairs render straight; visual gaps at corners.
+$ cairn compile examples/themed-tower.crn --edition bedrock
+warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs: stair `minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]` shape=outer_left has no Bedrock state; Bedrock stairs render straight, so corners show visual gaps
 ```
 
 The canonical vocabulary absorbs only ID, state, and serialization differences. **Concept absence

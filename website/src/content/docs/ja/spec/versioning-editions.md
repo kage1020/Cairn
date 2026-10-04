@@ -515,7 +515,8 @@ ID のケースは `E_UNKNOWN_ID` と同じ答え方を、同じ 2 つの半分�
 す。degraded はブロックについての事実ではなく *ステートの組み合わせ* についての事実だからです。1 つ
 の ID は、詳細を失う組み合わせの数だけこのリストに現れます。`roof-hip` の 4 件は
 `minecraft:spruce_stairs` の 4 通りの綴りで、ID だけを鍵にしたリストは同じ行を 4 回出すことになりま
-す。
+す。ビルドの `W_INTENT_DEGRADED` も各エントリを同じく `id[states]` で名指すので、警告はそれぞれ異な
+り、同じエントリについての note と対応します。
 
 `dropped` はそれについての文ではなくプロパティと値を持ちます。`unsupported` の理由と同じ理由です。
 これを読む消費側が、どのステートが失われたかを知るために英文を解析する必要はありません。エディション
@@ -665,12 +666,12 @@ resolved_state:
   bedrock: { weirdo_direction: 1, upside_down_bit: false }              # shape が無く角がつながらない
 ```
 
-解決結果の差が見た目や機能の差になるとき、lint が知らせます。
+解決結果の差が見た目や機能の差になるとき、ビルドが知らせます。`themed-tower` の軒の階段は
+`shape=outer_left` です。
 
 ```text
-W_INTENT_DEGRADED line 12 id=roof_corner:
-  shape=inner_left cannot be resolved in Bedrock (stairs have no shape state).
-  Bedrock stairs render straight; visual gaps at corners.
+$ cairn compile examples/themed-tower.crn --edition bedrock
+warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs: stair `minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]` shape=outer_left has no Bedrock state; Bedrock stairs render straight, so corners show visual gaps
 ```
 
 正準語彙が吸収できるのは ID / ステート / シリアライズの差だけです。**概念の不在とゲーム挙動の差は吸

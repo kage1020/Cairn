@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, Palett
 use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_state::{BedrockStateError, degradation_message};
 use cairn_lang_formats::bedrock_structure::{
-    BedrockStructureError, build_mcstructure_tag, write_mcstructure,
+    BedrockStructureError, build_mcstructure_tag, prepare_mcstructure, write_mcstructure,
 };
 use cairn_lang_formats::data_version::{BedrockTarget, resolve_bedrock_target};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
@@ -260,7 +260,8 @@ fn m4b_stair_states_map_to_bedrock_vocabulary() {
 #[test]
 fn m4c_non_straight_stair_shape_degrades() {
     // AC10: a non-straight stair shape has no Bedrock state; the build
-    // succeeds but raises exactly one W_INTENT_DEGRADED note naming the id.
+    // succeeds but raises exactly one W_INTENT_DEGRADED note, keyed by the
+    // id and naming the Java state the entry came from.
     let mut stairs = BlockState::bare("minecraft:oak_stairs");
     stairs
         .properties
@@ -282,7 +283,7 @@ fn m4c_non_straight_stair_shape_degrades() {
     assert_eq!(
         notes[0].message,
         degradation_message(
-            "minecraft:oak_stairs",
+            "minecraft:oak_stairs[facing=east,half=bottom,shape=outer_left]",
             &DroppedIntent::Shape {
                 value: "outer_left".to_owned(),
             },
@@ -352,4 +353,214 @@ fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
         ),
         "unexpected error: {err}"
     );
+}
+
+/// A bottom-half stair of `id`, its properties in the order the lowering
+/// interns them.
+fn stair(id: &str, facing: &str, shape: &str) -> BlockState {
+    let mut stairs = BlockState::bare(id);
+    for (key, value) in [("facing", facing), ("half", "bottom"), ("shape", shape)] {
+        stairs.properties.insert(key.to_owned(), value.to_owned());
+    }
+    stairs
+}
+
+/// A row along z: air, then one voxel per state in `states`, each naming
+/// its own palette entry.
+fn row_of(states: &[BlockState]) -> BlockArray {
+    let mut palette = Palette::new_with_air();
+    let mut voxels = vec![PaletteIndex::AIR];
+    voxels.extend(states.iter().map(|state| palette.intern(state.clone())));
+    BlockArray {
+        dims: Dims {
+            x: 1,
+            y: 1,
+            z: u32::try_from(voxels.len()).expect("a short row"),
+        },
+        palette,
+        voxels,
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: "struct::row".to_owned(),
+    }
+}
+
+/// The `block_palette` entries of a built root.
+fn block_palette(root: &Compound) -> &[Tag] {
+    let palette = match structure_compound(root).entries.get("palette") {
+        Some(Tag::Compound(palette)) => palette,
+        other => panic!("palette is not a Compound: {other:?}"),
+    };
+    let default = match palette.entries.get("default") {
+        Some(Tag::Compound(default)) => default,
+        other => panic!("palette.default is not a Compound: {other:?}"),
+    };
+    match default.entries.get("block_palette") {
+        Some(Tag::List(entries)) => &entries.items,
+        other => panic!("block_palette is not a List: {other:?}"),
+    }
+}
+
+/// Layer 0 of `block_indices`, as integers.
+fn block_layer(root: &Compound) -> Vec<i32> {
+    let layers = match structure_compound(root).entries.get("block_indices") {
+        Some(Tag::List(layers)) => layers,
+        other => panic!("block_indices is not a List: {other:?}"),
+    };
+    let layer = match layers.items.first() {
+        Some(Tag::List(layer)) => layer,
+        other => panic!("layer 0 is not a List: {other:?}"),
+    };
+    layer
+        .items
+        .iter()
+        .map(|tag| match tag {
+            Tag::Int(slot) => *slot,
+            other => panic!("block index is not an Int: {other:?}"),
+        })
+        .collect()
+}
+
+/// The `block_palette` entry a layer-0 value names. A writer that wrote
+/// the Java palette index rather than the slot names one past the list
+/// once entries have merged, so that is refused here rather than indexed.
+fn written_entry(entries: &[Tag], slot: i32) -> &Tag {
+    match usize::try_from(slot)
+        .ok()
+        .and_then(|slot| entries.get(slot))
+    {
+        Some(entry) => entry,
+        None => panic!(
+            "a voxel is written as slot {slot}, past the {}-entry block_palette",
+            entries.len()
+        ),
+    }
+}
+
+/// A `block_palette` entry's `name`.
+fn name_of(entry: &Tag) -> &str {
+    match entry {
+        Tag::Compound(entry) => match entry.entries.get("name") {
+            Some(Tag::String(name)) => name,
+            other => panic!("name is not a String: {other:?}"),
+        },
+        other => panic!("block_palette entry is not a Compound: {other:?}"),
+    }
+}
+
+/// A `block_palette` entry's `states`.
+fn states_of(entry: &Tag) -> &Compound {
+    match entry {
+        Tag::Compound(entry) => match entry.entries.get("states") {
+            Some(Tag::Compound(states)) => states,
+            other => panic!("states is not a Compound: {other:?}"),
+        },
+        other => panic!("block_palette entry is not a Compound: {other:?}"),
+    }
+}
+
+/// Stairs that differ only in `shape` are distinct Java states and one
+/// Bedrock block once `shape` is dropped. The written palette is a set:
+/// they share one `block_palette` entry, and every voxel is written as
+/// the slot of the block it holds. Each degradation note names its own
+/// Java state, so no two read the same.
+#[test]
+fn stairs_that_differ_only_in_a_dropped_shape_share_one_palette_entry() {
+    let oak = "minecraft:oak_stairs";
+    let ba = row_of(&[
+        stair(oak, "north", "outer_left"),
+        stair(oak, "north", "straight"),
+        stair(oak, "south", "outer_right"),
+        stair(oak, "north", "outer_right"),
+        stair(oak, "south", "outer_left"),
+    ]);
+    let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
+
+    let entries = block_palette(&root);
+    for (i, a) in entries.iter().enumerate() {
+        for b in &entries[i + 1..] {
+            assert_ne!(a, b, "block_palette holds one block twice: {entries:?}");
+        }
+    }
+    // Air, one north stair, one south stair.
+    assert_eq!(entries.len(), 3, "{entries:?}");
+    assert_eq!(name_of(&entries[0]), "minecraft:air");
+
+    // Every voxel is written as a slot the palette has, and that slot holds
+    // the block the voxel's own entry translates to.
+    let layer = block_layer(&root);
+    assert_eq!(layer[0], 0, "air stays at slot 0");
+    // `weirdo_direction` 3 is north and 2 is south.
+    let expected = [3, 3, 2, 3, 2];
+    for (z, want) in expected.into_iter().enumerate() {
+        let entry = written_entry(entries, layer[z + 1]);
+        assert_eq!(
+            states_of(entry).entries.get("weirdo_direction"),
+            Some(&Tag::Int(want)),
+            "voxel {}",
+            z + 1
+        );
+    }
+    assert_eq!(
+        layer[1], layer[2],
+        "north outer_left and north straight are one block"
+    );
+    assert_eq!(layer[1], layer[4]);
+    assert_eq!(layer[3], layer[5]);
+
+    // Four corner shapes degrade; `straight` drops losslessly.
+    let messages: Vec<&str> = notes.iter().map(|note| note.message.as_str()).collect();
+    assert_eq!(messages.len(), 4, "{messages:?}");
+    for (i, a) in messages.iter().enumerate() {
+        for b in &messages[i + 1..] {
+            assert_ne!(a, b, "two notes read the same: {messages:?}");
+        }
+    }
+    assert_eq!(
+        messages[0],
+        degradation_message(
+            "minecraft:oak_stairs[facing=north,half=bottom,shape=outer_left]",
+            &DroppedIntent::Shape {
+                value: "outer_left".to_owned(),
+            },
+        ),
+    );
+    assert!(notes.iter().all(|note| note.id == oak));
+
+    // The streamed writer writes the same merged structure as the tree.
+    let mut tree = Vec::new();
+    write_mcstructure(&mut tree, &root).expect("write tree");
+    let (prepared, _) = prepare_mcstructure(&ba, &target_1_21_60()).expect("prepare");
+    let mut streamed = Vec::new();
+    prepared.write(&mut streamed).expect("stream");
+    assert_eq!(streamed, tree);
+}
+
+/// Two ids whose states translate equal are still two blocks. `name` is
+/// what keeps their `block_palette` entries apart, so a merge that
+/// compared `states` alone would write one material's voxels as the
+/// other's.
+#[test]
+fn stairs_of_two_ids_with_equal_states_keep_an_entry_each() {
+    let ids = ["minecraft:oak_stairs", "minecraft:spruce_stairs"];
+    let ba = row_of(&ids.map(|id| stair(id, "north", "straight")));
+    let (root, _) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
+
+    let entries = block_palette(&root);
+    let names: Vec<&str> = entries.iter().map(name_of).collect();
+    assert_eq!(names, ["minecraft:air", ids[0], ids[1]], "one entry per id");
+    assert_eq!(
+        states_of(&entries[1]),
+        states_of(&entries[2]),
+        "premise: both translate to the same states: {entries:?}"
+    );
+    let layer = block_layer(&root);
+    for (voxel, id) in ids.into_iter().enumerate() {
+        assert_eq!(
+            name_of(written_entry(entries, layer[voxel + 1])),
+            id,
+            "voxel {}",
+            voxel + 1
+        );
+    }
 }
