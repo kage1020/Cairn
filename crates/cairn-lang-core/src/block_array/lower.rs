@@ -83,7 +83,10 @@ use super::walkway::{
     port_world_position, read_window_args, route_path,
 };
 use super::wall_column::WallColumn;
-use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
+use super::{
+    BlockArray, BlockArrayIr, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteFull,
+    PaletteIndex,
+};
 
 /// Catalog token a `pressure_plate` member's default material comes from.
 ///
@@ -161,8 +164,29 @@ pub fn lower_to_block_array(
     resolution: &Resolution,
     registry: Option<&dyn TargetRegistry>,
 ) -> BlockArrayIr {
+    lower_to_block_array_within(intent, resolution, registry, PALETTE_CAPACITY)
+}
+
+/// [`lower_to_block_array`], with each body's palette refusing a new
+/// state once it holds `palette_capacity` entries, air included, rather
+/// than [`PALETTE_CAPACITY`]; a larger capacity is clamped to that one.
+///
+/// [`lower_to_block_array`] passes [`PALETTE_CAPACITY`], the only capacity
+/// the compiler lowers at. This module's tests pass one small enough to
+/// reach `W_PALETTE_TOO_LARGE` without painting 65,536 states, and so run
+/// the same code the public entry point does.
+fn lower_to_block_array_within(
+    intent: &IntentModule,
+    resolution: &Resolution,
+    registry: Option<&dyn TargetRegistry>,
+    palette_capacity: usize,
+) -> BlockArrayIr {
     let mut structures: IndexMap<String, BlockArray> = IndexMap::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    let bodies = BodyInputs {
+        registry,
+        palette_capacity,
+    };
 
     for s in &intent.structs {
         let key = format!("struct::{}", s.name);
@@ -171,7 +195,7 @@ pub fn lower_to_block_array(
         // diagnostic (no `size=`, etc.), so the skip here is silent on
         // purpose — diagnosing twice would teach a reader the struct had
         // two unrelated problems instead of one.
-        if let Some(ba) = lower_struct(s, scope, registry, &mut diagnostics) {
+        if let Some(ba) = lower_struct(s, scope, bodies, &mut diagnostics) {
             // First-write-wins on a duplicate name, matching
             // `resolve`'s `FIRST_BINDING_WINS`. `resolution.scopes` has
             // already bound the first body; taking the last here would
@@ -188,7 +212,7 @@ pub fn lower_to_block_array(
             site,
             &intent.defs,
             resolution,
-            registry,
+            bodies,
             &mut structures,
             &mut placed,
             &mut diagnostics,
@@ -1009,7 +1033,7 @@ fn buried_port_clause(
                 .and_then(|ba| ba.palette.entries.get(usize::from(owner.voxel.0)));
             if block.is_none() {
                 // INVARIANT: the voxel was read from this placement's own
-                // array, whose palette `Palette::intern` built. A miss is a
+                // array, whose palette `ScopePalette` built. A miss is a
                 // broken array; the clause still names the placement, just
                 // not the block.
                 debug_assert!(
@@ -1444,7 +1468,7 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
 fn lower_struct<'a>(
     s: &StructIr,
     scope: Option<&'a ScopeResolution>,
-    registry: Option<&'a dyn TargetRegistry>,
+    bodies: BodyInputs<'a>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<BlockArray> {
     let Some(size) = s.size.as_ref() else {
@@ -1463,7 +1487,7 @@ fn lower_struct<'a>(
             source_scope: format!("struct::{}", s.name),
         },
         scope,
-        registry,
+        bodies,
         diagnostics,
     )?;
     Some(lowered.array)
@@ -1492,7 +1516,7 @@ fn lower_site<'a>(
     site: &SiteIr,
     defs: &[DefIr],
     resolution: &'a Resolution,
-    registry: Option<&'a dyn TargetRegistry>,
+    bodies: BodyInputs<'a>,
     structures: &mut IndexMap<String, BlockArray>,
     placed: &mut IndexMap<String, PlacedBody>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -1610,7 +1634,7 @@ fn lower_site<'a>(
                 source_scope: key,
             },
             Some(scope),
-            registry,
+            bodies,
             diagnostics,
         );
         // Below the body on purpose, not an early return above it: a row
@@ -1624,9 +1648,10 @@ fn lower_site<'a>(
             continue;
         };
         let Some(LoweredBody { array, walls, cut }) = body else {
-            // The extent was refused; the diagnostic names the scope, and
-            // recording a placement for a structure that does not exist
-            // would leave the lockfile pointing at nothing.
+            // The body was refused, for its extent or for its palette; the
+            // diagnostic names the scope, and recording a placement for a
+            // structure that does not exist would leave the lockfile
+            // pointing at nothing.
             report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
@@ -1698,6 +1723,18 @@ enum VoxelSource {
     Place,
 }
 
+/// What every body of one run is lowered against, whether a `struct` or
+/// a `place`'s `def`: threaded unchanged from
+/// [`lower_to_block_array_within`] down to [`lower_body_to_block_array`].
+#[derive(Clone, Copy)]
+struct BodyInputs<'a> {
+    /// The compile target's registry view; see [`lower_to_block_array`].
+    registry: Option<&'a dyn TargetRegistry>,
+    /// The entries each body's palette may hold, air included:
+    /// [`PALETTE_CAPACITY`] from [`lower_to_block_array`].
+    palette_capacity: usize,
+}
+
 /// Inputs shared by the struct and place lowering paths.
 struct BodyDescriptor<'a> {
     kind: VoxelSource,
@@ -1733,15 +1770,21 @@ struct LoweredBody {
 
 /// Lower one struct or place body into voxels.
 ///
-/// `None` means the extent the body asks for is past
-/// [`MAX_STRUCTURE_VOLUME`]; the diagnostic has already been pushed and the
-/// caller drops the scope.
+/// `None` means the body was refused, and the diagnostic saying why has
+/// already been pushed: the extent it asks for is past
+/// [`MAX_STRUCTURE_VOLUME`] (`W_STRUCTURE_TOO_LARGE`), or it paints more
+/// states than its palette holds (`W_PALETTE_TOO_LARGE`). The caller drops
+/// the scope.
 fn lower_body_to_block_array<'a>(
     body: BodyDescriptor<'a>,
     scope: Option<&'a ScopeResolution>,
-    registry: Option<&'a dyn TargetRegistry>,
+    bodies: BodyInputs<'a>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<LoweredBody> {
+    let BodyInputs {
+        registry,
+        palette_capacity,
+    } = bodies;
     let interior_w = body.size.w.get();
     let interior_h = body.size.h.get();
 
@@ -1792,7 +1835,7 @@ fn lower_body_to_block_array<'a>(
         diagnostics.push(diag_structure_too_large(&body, dims));
         return None;
     }
-    let mut palette = Palette::new_with_air();
+    let mut palette = ScopePalette::with_capacity(palette_capacity);
 
     let ctx = StructCtx {
         scope,
@@ -1808,6 +1851,16 @@ fn lower_body_to_block_array<'a>(
 
     let buckets = bucket_members(&flattened, diagnostics);
     let canvas = paint_phases(buckets, &ctx, &mut palette, diagnostics);
+    // Before anything reads the grid: a voxel painted after the palette
+    // filled up holds air rather than its state, so the array is not the
+    // body the source describes.
+    let mut palette = match palette.into_palette() {
+        Ok(palette) => palette,
+        Err(full) => {
+            diagnostics.push(diag_palette_too_large(&body, full));
+            return None;
+        }
+    };
 
     for ((overridden, overriding), voxels) in &canvas.conflicts {
         diagnostics.push(diag_phase_conflict(
@@ -1884,7 +1937,7 @@ fn lower_body_to_block_array<'a>(
 fn paint_phases(
     buckets: PhaseBuckets<'_>,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Canvas {
     let PhaseBuckets {
@@ -2020,12 +2073,12 @@ fn run_phase(
         &Member,
         u32,
         &StructCtx<'_>,
-        &mut Palette,
+        &mut ScopePalette,
         &mut MemberCanvas<'_>,
         &mut Vec<Diagnostic>,
     ),
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut Canvas,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2131,6 +2184,91 @@ fn prune_unreferenced(palette: &mut Palette, canvas: &Canvas) -> (Vec<PaletteInd
         .map(|v| remap[usize::from(v.0)])
         .collect();
     (voxels, never_painted)
+}
+
+/// The palette one body is painted against, refusing rather than
+/// panicking once it holds its capacity: [`PALETTE_CAPACITY`] entries
+/// from [`lower_to_block_array`].
+///
+/// Every paint interns its state, including one a later member then
+/// covers, so what fills the palette is the states *written*, not the
+/// states the finished body keeps, and the overflow has to be caught at
+/// paint time. A paint past the capacity gets air in place of its state
+/// and records the refusal; [`Self::into_palette`] then answers with it,
+/// and the body is refused with `W_PALETTE_TOO_LARGE` before its grid is
+/// read. Holding the refusal here, rather than threading a `Result` out
+/// of every generator, is what lets the generators keep their infallible
+/// `intern`, and the type is what keeps them off the panicking
+/// [`Palette::intern`].
+struct ScopePalette {
+    palette: Palette,
+    capacity: usize,
+    /// The refusal that overflowed the palette, once one has.
+    overflow: Option<PaletteFull>,
+}
+
+impl ScopePalette {
+    /// Air at index `0`, and room for `capacity` entries in all, air's
+    /// among them; [`Palette::try_intern_within`] clamps a larger one to
+    /// [`PALETTE_CAPACITY`].
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            palette: Palette::new_with_air(),
+            capacity,
+            overflow: None,
+        }
+    }
+
+    fn intern(&mut self, state: BlockState) -> PaletteIndex {
+        // Once a paint has overflowed, `into_palette` discards the palette
+        // and the body is refused, so which states the palette holds from
+        // here on, and which index a later paint gets, is never read. Air
+        // without the scan, which would otherwise walk every entry on each
+        // remaining paint of an already refused body.
+        if self.overflow.is_some() {
+            return PaletteIndex::AIR;
+        }
+        self.palette
+            .try_intern_within(state, self.capacity)
+            .unwrap_or_else(|full| {
+                self.overflow = Some(full);
+                PaletteIndex::AIR
+            })
+    }
+
+    /// The palette, or the refusal that overflowed it.
+    fn into_palette(self) -> Result<Palette, PaletteFull> {
+        match self.overflow {
+            None => Ok(self.palette),
+            Some(full) => Err(full),
+        }
+    }
+}
+
+/// A body painted more distinct block states than its palette holds.
+///
+/// The number is `full`'s, the capacity that was in force, less the slot
+/// air holds from the start.
+fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::PaletteTooLarge,
+        span: body.header_span.clone(),
+        primary: format!(
+            "`{}` paints more than {} distinct non-air block states, past what one palette \
+             can index; block-array lowering skipped it",
+            body.scope_label,
+            full.capacity.saturating_sub(1),
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "every state a member writes counts, including one a later member \
+                      covers; a vanilla registry has far fewer, so check the block ids with \
+                      `--edition` and `--target`, and each state literal by hand, since no \
+                      target checks its properties (`W_STATE_LITERAL_UNCHECKED`)"
+                .to_owned(),
+        }],
+        data: None,
+    }
 }
 
 /// The scope asked for more voxels than [`MAX_STRUCTURE_VOLUME`] allows.
@@ -2639,7 +2777,7 @@ fn lower_massing_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2698,7 +2836,7 @@ fn lower_envelope_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2730,7 +2868,7 @@ fn lower_opening_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2760,7 +2898,7 @@ fn lower_fixture_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2895,7 +3033,7 @@ fn palette_index_for(
     member: &Member,
     scope: Option<&ScopeResolution>,
     registry: Option<&dyn TargetRegistry>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
 ) -> Option<PaletteIndex> {
@@ -3557,7 +3695,7 @@ fn fill_walls(
 fn fill_roof(
     member: &Member,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -3751,7 +3889,7 @@ fn diag_incompatible_material(
 
 fn fill_roof_gable(
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     base_id: &str,
 ) {
@@ -3789,7 +3927,7 @@ fn fill_roof_gable(
 fn fill_roof_shed(
     member: &Member,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
     base_id: &str,
@@ -3820,7 +3958,7 @@ fn fill_roof_shed(
 
 fn fill_roof_hip(
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     base_id: &str,
 ) {
@@ -3850,7 +3988,7 @@ fn fill_roof_hip(
 
 fn fill_roof_flat(
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     base_id: &str,
 ) {
@@ -4053,7 +4191,7 @@ fn fill_stair(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -4110,7 +4248,7 @@ fn draw_eave_band(
     states: EaveStates<'_>,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
@@ -4383,7 +4521,7 @@ fn fill_pressure_plate(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -5016,7 +5154,7 @@ fn fill_window(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -5081,7 +5219,7 @@ fn cut_window(
     sym: Option<bool>,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> WindowCut {
@@ -5713,6 +5851,201 @@ mod tests {
         let ir = lower(&module);
         let resolution = resolve(&ir, None);
         lower_to_block_array(&ir, &resolution, None)
+    }
+
+    /// [`lowered`], with every body's palette holding `palette_capacity`
+    /// entries rather than [`PALETTE_CAPACITY`].
+    fn lowered_within(source: &str, palette_capacity: usize) -> BlockArrayIr {
+        let module = parse(source).expect("parse");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, None);
+        lower_to_block_array_within(&ir, &resolution, None, palette_capacity)
+    }
+
+    /// `theme t`, binding `states` slots, `s0` up, each to a block of its
+    /// own, and a 1x1 `body` header followed by one `walls` row per slot.
+    /// Every row paints the body's one ring cell, so the body writes
+    /// `states` distinct states and the finished body keeps the last.
+    fn overwriting_walls_in(body: &str, states: usize) -> String {
+        use std::fmt::Write as _;
+
+        let mut source = String::from("theme t:\n");
+        for i in 0..states {
+            writeln!(source, "  slot s{i} -> @b{i}").expect("writing to a String");
+        }
+        writeln!(source, "\n{body}").expect("writing to a String");
+        for i in 0..states {
+            writeln!(source, "  walls mat_slot=s{i} height=1").expect("writing to a String");
+        }
+        source
+    }
+
+    /// [`overwriting_walls_in`] a `struct s`.
+    fn overwriting_walls(states: usize) -> String {
+        overwriting_walls_in("struct s size=1x1", states)
+    }
+
+    /// [`overwriting_walls_in`] a `def d`, placed once as `a`.
+    fn placed_overwriting_walls(states: usize) -> String {
+        let mut source = overwriting_walls_in("def d size=1x1:", states);
+        source.push_str("\nsite v:\n  place id=a use=d theme=t at=origin\n");
+        source
+    }
+
+    /// The findings of `code` in `ir`.
+    fn findings(ir: &BlockArrayIr, code: DiagnosticCode) -> Vec<&Diagnostic> {
+        ir.diagnostics.iter().filter(|d| d.code == code).collect()
+    }
+
+    /// The three properties `tests/diagnostic_text.rs` holds every string
+    /// its corpus renders to. That corpus lowers at [`PALETTE_CAPACITY`],
+    /// so it cannot reach `W_PALETTE_TOO_LARGE`, and its text is checked
+    /// here instead.
+    fn assert_reads_as_prose(origin: &str, text: &str) {
+        assert!(
+            !text.contains("  "),
+            "{origin} renders a run of spaces, which is a dropped `\\` line \
+             continuation in the literal: {text:?}",
+        );
+        assert!(
+            !text.contains('\n') && !text.contains('\t'),
+            "{origin} embeds its own line break: {text:?}",
+        );
+        assert!(!text.trim().is_empty(), "{origin} renders nothing");
+        assert_eq!(text.trim(), text, "{origin} has leading or trailing space");
+    }
+
+    /// A body that paints more states than its palette can hold is refused
+    /// with `W_PALETTE_TOO_LARGE` rather than panicking. Run at a capacity
+    /// of four (air and three states) so the refusal is reachable without
+    /// painting 65,536 states; the boundary itself is pinned on
+    /// `Palette::try_intern`. States a later member covers count, which is
+    /// why the refused body would have kept a single state.
+    ///
+    /// The refusal comes before the phase conflicts are reported: a body
+    /// that is not built has no conflict to resolve, and at the real
+    /// capacity a body one state short of it reports 65,534 of them.
+    #[test]
+    fn a_body_painting_more_states_than_its_palette_holds_is_refused() {
+        let fits = lowered_within(&overwriting_walls(3), 4);
+        assert!(
+            findings(&fits, DiagnosticCode::PaletteTooLarge).is_empty(),
+            "three states fit: {:#?}",
+            fits.diagnostics,
+        );
+        let array = fits
+            .structures
+            .get("struct::s")
+            .expect("three states build");
+        assert_eq!(
+            array.palette.entries.len(),
+            2,
+            "air and the last wall's state: the covered ones are pruned after painting",
+        );
+        assert!(
+            !findings(&fits, DiagnosticCode::PhaseConflict).is_empty(),
+            "a built body reports the walls that overwrite one another: {:#?}",
+            fits.diagnostics,
+        );
+
+        let over = lowered_within(&overwriting_walls(4), 4);
+        let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
+        assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
+        assert_eq!(refused[0].severity(), Severity::Warning);
+        assert!(
+            refused[0]
+                .primary
+                .starts_with("`s` paints more than 3 distinct non-air block states"),
+            "{}",
+            refused[0].primary,
+        );
+        assert!(
+            !over.structures.contains_key("struct::s"),
+            "the refused body must not reach a writer",
+        );
+        assert_eq!(
+            findings(&over, DiagnosticCode::PhaseConflict),
+            Vec::<&Diagnostic>::new(),
+            "a refused body is not built, so it has no conflict to report",
+        );
+    }
+
+    /// The rendered text of the refusal reads as prose: a dropped `\`
+    /// continuation in the primary's or the note's literal is caught here.
+    #[test]
+    fn the_palette_refusal_renders_as_prose() {
+        let over = lowered_within(&overwriting_walls(4), 4);
+        let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
+        assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
+        assert_reads_as_prose("W_PALETTE_TOO_LARGE primary", &refused[0].primary);
+        assert_eq!(refused[0].notes.len(), 1, "{:#?}", refused[0].notes);
+        assert_reads_as_prose("W_PALETTE_TOO_LARGE note 0", &refused[0].notes[0].message);
+    }
+
+    /// The `def` path to the same refusal, as `tests/structure_volume.rs`
+    /// covers it for the extent: a `place` paints its `def` through the body
+    /// lowering a `struct` uses, and a refused body places nothing. The
+    /// finding names the row and anchors on it.
+    #[test]
+    fn a_place_whose_def_paints_more_states_than_its_palette_holds_is_refused() {
+        let fits = lowered_within(&placed_overwriting_walls(3), 4);
+        assert!(
+            findings(&fits, DiagnosticCode::PaletteTooLarge).is_empty(),
+            "three states fit: {:#?}",
+            fits.diagnostics,
+        );
+        assert!(
+            fits.placements.contains_key("site::v::a"),
+            "{:?}",
+            fits.placements.keys(),
+        );
+
+        let source = placed_overwriting_walls(4);
+        let over = lowered_within(&source, 4);
+        let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
+        assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
+        assert!(
+            refused[0]
+                .primary
+                .starts_with("`a` paints more than 3 distinct non-air block states"),
+            "{}",
+            refused[0].primary,
+        );
+        assert!(
+            source[refused[0].span.clone()].starts_with("place id=a"),
+            "anchored on the row, not the def: {:?}",
+            &source[refused[0].span.clone()],
+        );
+        assert!(over.structures.is_empty(), "{:?}", over.structures.keys());
+        assert!(over.placements.is_empty(), "{:?}", over.placements.keys());
+        assert_eq!(
+            findings(&over, DiagnosticCode::PhaseConflict),
+            Vec::<&Diagnostic>::new(),
+        );
+    }
+
+    /// Once a paint has overflowed, `intern` answers air for every later
+    /// state, one the palette already holds included, without looking it
+    /// up: the body is refused, so nothing reads what a later paint gets.
+    #[test]
+    fn a_scope_palette_looks_nothing_up_once_it_has_overflowed() {
+        let mut palette = ScopePalette::with_capacity(2);
+        let kept = BlockState::bare("test:kept");
+        assert_eq!(palette.intern(kept.clone()), PaletteIndex(1));
+        assert_eq!(
+            palette.intern(BlockState::bare("test:refused")),
+            PaletteIndex::AIR,
+        );
+        assert_eq!(
+            palette.intern(kept),
+            PaletteIndex::AIR,
+            "a state the palette holds is not looked up after the overflow",
+        );
+        assert_eq!(
+            palette.into_palette(),
+            Err(PaletteFull { capacity: 2 }),
+            "the refusal kept is the one at the capacity in force",
+        );
     }
 
     fn lowered_with_resolver(source: &str, resolver: &dyn TargetRegistry) -> BlockArrayIr {
