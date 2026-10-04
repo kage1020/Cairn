@@ -5,9 +5,11 @@
 //! `examples/redstone-door.crn` happy path (per edition), 1D topological
 //! coordinate assignment across a multi-cell scope, `E_ROUTE_CONGESTION`
 //! when the netlist exceeds the reservation, `E_NO_CIRCUIT_REGION` when
-//! a scope has cells but no `circuit region=` line (or no `size=` on
-//! the enclosing scope), empty-scope elision, the JSON wire form, and
-//! per-scope independence when a module carries more than one scope.
+//! a scope has cells but no usable `circuit region=` line (on the line
+//! that reserves nothing, with its reason, or on what needed the
+//! reservation when there is no line), empty-scope elision, the JSON
+//! wire form, and per-scope independence when a module carries more than
+//! one scope.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
@@ -337,13 +339,11 @@ fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
     );
 }
 
-/// `AC5b` — a scope that DECLARED a `circuit region=` line but whose
-/// enclosing struct is missing a `size=WxH` header cannot be placed:
+/// `AC5b` — a scope that DECLARED a `circuit region=` line but has no
+/// `size=WxH` header (here a `def`) cannot be placed:
 /// there is no reservation footprint to budget against, so the pass
-/// falls back to `E_NO_CIRCUIT_REGION`. The primary message must
-/// name the missing-`size=` cause so an author who sees the error on
-/// a source line that clearly declares `circuit region=...` can
-/// still identify the fix.
+/// falls back to `E_NO_CIRCUIT_REGION`. The finding stands on that
+/// `circuit` line and names the missing `size=` as its one cause.
 #[test]
 fn missing_size_falls_through_to_no_circuit_region() {
     let source = r"
@@ -372,24 +372,42 @@ def gadget
         "expected exactly one E_NO_CIRCUIT_REGION for the size-less def, got {:?}",
         out.diagnostics,
     );
+    assert_eq!(
+        &source[missing[0].span.clone()],
+        "circuit region=floor void=2",
+        "the finding stands on the `circuit` line",
+    );
     assert!(
-        missing[0].primary.contains("size=")
-            || missing[0].notes.iter().any(|n| n.message.contains("size=")),
-        "diagnostic must name the missing `size=` cause, got primary={:?} notes={:?}",
+        missing[0]
+            .primary
+            .ends_with("the enclosing scope has no `size=WxH` header for it to reserve within"),
+        "diagnostic must name the missing `size=` cause and no other: {:?}",
         missing[0].primary,
-        missing[0].notes,
+    );
+    assert_eq!(
+        fix_line(missing[0]),
+        "Fix: give the enclosing scope a `size=WxH` header",
     );
 }
 
-/// `AC5c` — a scope that declared `circuit region=floor void=0` (an
-/// explicitly malformed reservation the parser rejects as unusable)
-/// must not silently look like "no reservation declared". The
-/// `E_NO_CIRCUIT_REGION` message therefore has to enumerate the
-/// malformed-`void=` cause alongside the missing-line and missing-`size=`
-/// cases, so an author staring at an obvious `void=0` on the line above
-/// can still connect the error to their input.
+/// The `Fix:` footer of a diagnostic.
+fn fix_line(diagnostic: &cairn_lang_redstone::Diagnostic) -> &str {
+    &diagnostic
+        .notes
+        .iter()
+        .find(|n| n.message.starts_with("Fix:"))
+        .unwrap_or_else(|| panic!("no Fix line: {:?}", diagnostic.notes))
+        .message
+}
+
+/// `AC5c` — a scope that declared `circuit region=floor void=0` must
+/// not silently look like "no reservation declared". The parser accepts
+/// the line; the intent lift (`circuit_lines`) is what finds `void=0`
+/// reserves nothing. The `E_NO_CIRCUIT_REGION` finding stands on the
+/// `void=0` line, not on the first `logic` line, and names `void=0` as
+/// its one cause.
 #[test]
-fn void_zero_surfaces_no_circuit_region_with_malformed_hint() {
+fn void_zero_is_refused_on_its_circuit_line_for_that_reason() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -410,11 +428,16 @@ struct simple size=5x5
         .iter()
         .find(|d| d.code == DiagnosticCode::NoCircuitRegion)
         .expect("void=0 must surface as E_NO_CIRCUIT_REGION");
-    assert!(
-        d.primary.contains("malformed") || d.primary.contains("void"),
-        "diagnostic must name the malformed-`void=` cause, got {:?}",
-        d.primary,
+    assert_eq!(
+        &source[d.span.clone()],
+        "circuit region=floor void=0",
+        "the finding stands on the `circuit` line, not the first `logic` line",
     );
+    assert_eq!(
+        d.primary,
+        "this `circuit` line reserves no room for the scope's redstone cells or actuator pads: its `void=0` reserves no service layer",
+    );
+    assert_eq!(fix_line(d), "Fix: set `void=` to an integer >= 1");
 }
 
 /// A scope whose Edition Netlist IR carries inputs and outputs but no
@@ -462,6 +485,339 @@ struct wire size=5x5
     assert!(
         !scope.ir.signal_defs.is_empty(),
         "the signal table survives so a consumer can join the pad back to `sig.a`",
+    );
+}
+
+/// An identity wire in a one-column region: the sensor pad column
+/// `x = 0` and the actuator pad column `x = width - 1` are one column,
+/// so the two pads stand on one voxel. Placement refuses it in terms of
+/// width, whatever the depth, rather than passing it on for routing to
+/// blame on depth.
+#[test]
+fn an_identity_wire_in_a_one_column_region_is_refused_for_its_width() {
+    for depth in [5, 50] {
+        let source = format!(
+            "
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=1x{depth}
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door[id=d] opened_by=sig.a
+  circuit region=floor void=2
+"
+        );
+        let out = placement_of(&source);
+
+        assert!(
+            out.scoped.scopes.is_empty(),
+            "one column cannot hold both pad columns: {:?}",
+            out.scoped.scopes,
+        );
+        let diagnostic = out
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::RouteCongestion)
+            .expect("the shared column must surface as E_ROUTE_CONGESTION");
+        assert_eq!(diagnostic.severity(), Severity::Error);
+        assert_eq!(
+            &source[diagnostic.span.clone()],
+            "circuit region=floor void=2",
+        );
+        assert!(
+            diagnostic.primary.contains("needs 2 columns")
+                && diagnostic.primary.contains(&format!(
+                    "only 1 wide, so the two are one column (region 1x{depth}, void=2)"
+                )),
+            "the refusal names the width: {}",
+            diagnostic.primary,
+        );
+        let fix = fix_line(diagnostic);
+        assert!(
+            fix.starts_with("Fix: widen the enclosing `size=WxH` to at least two columns.")
+                && !fix.contains("depth >="),
+            "the fix asks for width, not depth: {fix}",
+        );
+    }
+    let wide = placement_of(
+        "
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=2x5
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door[id=d] opened_by=sig.a
+  circuit region=floor void=2
+",
+    );
+    assert!(
+        wide.diagnostics.is_empty(),
+        "two columns hold both pad columns: {:?}",
+        wide.diagnostics,
+    );
+}
+
+/// One `circuit` line that reserves nothing, and the finding the pass
+/// makes of it.
+struct RejectedLine {
+    /// `size=` header of the scope, or empty for none.
+    size: &'static str,
+    /// How many `level` blocks the line is nested under.
+    levels: usize,
+    line: &'static str,
+    /// The primary after `this ``circuit`` line reserves no room ...: `.
+    reason: &'static str,
+    fix: &'static str,
+}
+
+/// One case per `CircuitRegionDefect` variant, and a second `level`
+/// deep for the one that is about nesting.
+fn rejected_lines() -> [RejectedLine; 10] {
+    let sized = " size=5x5";
+    let nested = RejectedLine {
+        size: sized,
+        levels: 1,
+        line: "circuit region=floor void=2",
+        reason: "it is written under a `level`, and only a `circuit` line at the scope's top level is read as a reservation",
+        fix: "Fix: move the `circuit` line out of the `level` to the scope's top level. That changes nothing else about it: a reservation spans the scope's `size=WxH`, and no pass reads a `level`'s `y=` for a `circuit` line",
+    };
+    [
+        RejectedLine {
+            levels: 2,
+            ..nested
+        },
+        nested,
+        RejectedLine {
+            size: "",
+            levels: 0,
+            line: "circuit region=floor void=2",
+            reason: "the enclosing scope has no `size=WxH` header for it to reserve within",
+            fix: "Fix: give the enclosing scope a `size=WxH` header",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit void=2",
+            reason: "it has no `region=`",
+            fix: "Fix: add `region=<label>` naming the reservation (`region=floor`, `region=basement`)",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=3 void=2",
+            reason: "its `region=` must be an identifier or string label, got integer",
+            fix: "Fix: write `region=` as an identifier or a string (`region=floor`, `region=basement`)",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=\"\" void=2",
+            reason: "its `region=` is an empty label",
+            fix: "Fix: give `region=` a non-empty label (`region=floor`, `region=basement`)",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=floor",
+            reason: "it has no `void=`",
+            fix: "Fix: add `void=<N>`, the height of the service layer, an integer >= 1",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=floor void=deep",
+            reason: "its `void=` must be an integer, got identifier",
+            fix: "Fix: write `void=` as an integer >= 1",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=floor void=0",
+            reason: "its `void=0` reserves no service layer",
+            fix: "Fix: set `void=` to an integer >= 1",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=floor void=4294967296",
+            reason: "its `void=4294967296` is over the limit of 4294967295",
+            fix: "Fix: set `void=` to an integer from 1 to 4294967295",
+        },
+    ]
+}
+
+/// A two-sensor `or` gate on a door in `keyword s{size}`, then `lines`,
+/// each at the top level of the body.
+fn gate_with_lines(keyword: &str, size: &str, lines: &str) -> String {
+    format!(
+        "
+theme t:
+  slot wall -> @oak_planks
+
+{keyword} s{size}
+  floor mat_slot=wall
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
+  logic sig.open = sig.a or sig.b
+  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+{lines}"
+    )
+}
+
+/// Every way a `circuit` line can reserve nothing, through the real
+/// pass: the finding stands on that line, its primary is the line's
+/// reason in the words of `CircuitRegionDefect`'s `Display`, and its
+/// `Fix:` line is the one repair for that reason.
+///
+/// Whole sentences rather than fragments, so a reason that reads
+/// ungrammatically once interpolated fails here. Each case runs under a
+/// `struct` and under a `def`, since the walk reads the two in separate
+/// loops.
+#[test]
+fn each_circuit_line_that_reserves_nothing_is_refused_on_that_line_with_its_reason() {
+    for case in &rejected_lines() {
+        for keyword in ["struct", "def"] {
+            let mut lines = String::new();
+            let mut indent = String::from("  ");
+            for y in 0..case.levels {
+                let _ = writeln!(lines, "{indent}level y={y}");
+                indent.push_str("  ");
+            }
+            let _ = writeln!(lines, "{indent}{}", case.line);
+            let source = gate_with_lines(keyword, case.size, &lines);
+            let out = placement_of(&source);
+
+            assert!(out.scoped.scopes.is_empty(), "{source}");
+            let [diagnostic] = out.diagnostics.as_slice() else {
+                panic!("one finding:\n{source}{:?}", out.diagnostics);
+            };
+            assert_eq!(diagnostic.code, DiagnosticCode::NoCircuitRegion, "{source}");
+            assert_eq!(diagnostic.severity(), Severity::Error, "{source}");
+            assert_eq!(&source[diagnostic.span.clone()], case.line, "{source}");
+            assert_eq!(
+                diagnostic.primary,
+                format!(
+                    "this `circuit` line reserves no room for the scope's redstone cells or actuator pads: {}",
+                    case.reason,
+                ),
+                "{source}",
+            );
+            assert_eq!(fix_line(diagnostic), case.fix, "{source}");
+        }
+    }
+}
+
+/// Two rejected lines in one scope: the finding stands on the first and
+/// names its reason, and says nothing of the second.
+#[test]
+fn the_first_of_two_rejected_lines_is_the_one_reported() {
+    let source = gate_with_lines(
+        "struct",
+        " size=5x5",
+        "  circuit void=2\n  circuit region=floor void=0\n",
+    );
+    let out = placement_of(&source);
+
+    let [diagnostic] = out.diagnostics.as_slice() else {
+        panic!("one finding: {:?}", out.diagnostics);
+    };
+    assert_eq!(diagnostic.code, DiagnosticCode::NoCircuitRegion);
+    assert_eq!(&source[diagnostic.span.clone()], "circuit void=2");
+    assert!(
+        diagnostic.primary.ends_with(": it has no `region=`"),
+        "the first line's reason: {}",
+        diagnostic.primary,
+    );
+}
+
+/// A usable line beside a rejected one, in either order, places against
+/// the usable line with no finding: the usable line wins, and the
+/// rejected one is dropped silently, as a second usable line is.
+#[test]
+fn a_usable_circuit_line_beside_a_rejected_one_places_with_no_finding() {
+    for lines in [
+        "  circuit region=floor void=0\n  circuit region=basement void=2\n",
+        "  circuit region=basement void=2\n  circuit region=3 void=0\n",
+    ] {
+        let out = placement_of(&gate_with_lines("struct", " size=5x5", lines));
+
+        assert!(out.diagnostics.is_empty(), "{lines}{:?}", out.diagnostics);
+        let [scope] = out.scoped.scopes.as_slice() else {
+            panic!("the scope places: {lines}{:?}", out.scoped.scopes);
+        };
+        let region = scope
+            .ir
+            .region
+            .as_ref()
+            .expect("a placed scope has a region");
+        assert_eq!(
+            (region.label.as_str(), region.void),
+            ("basement", 2),
+            "{lines}"
+        );
+    }
+}
+
+/// A scope with no `circuit` line it reads is told what is true for its
+/// kind: a `struct` or `def` to add one, and a `site`, which has no
+/// `size=` and whose rows the walk never reads, to move the redstone out
+/// rather than to add a header it cannot have.
+#[test]
+fn a_scope_with_no_circuit_line_is_told_what_its_kind_can_do() {
+    let structure = gate_with_lines("struct", " size=5x5", "");
+    let out = placement_of(&structure);
+    let [diagnostic] = out.diagnostics.as_slice() else {
+        panic!("one finding: {:?}", out.diagnostics);
+    };
+    assert_eq!(diagnostic.code, DiagnosticCode::NoCircuitRegion);
+    assert_eq!(
+        &structure[diagnostic.span.clone()],
+        "logic sig.open = sig.a or sig.b"
+    );
+    assert_eq!(
+        diagnostic.primary,
+        "this scope has redstone cells or actuator pads to place but no `circuit` line at its top level to reserve room for them",
+    );
+    assert_eq!(
+        fix_line(diagnostic),
+        "Fix: add a `circuit region=<label> void=<N>` line at the top level of the scope, with a non-empty label naming the reservation (`region=floor`, `region=basement`) and an integer `void=` >= 1. It reserves within the footprint the scope's `size=WxH` header declares",
+    );
+
+    // `check` refuses every one of these rows in a `site` body; the
+    // placement pass is reached without it by a library caller.
+    let site = "
+theme t:
+  slot wall -> @oak_planks
+
+site s
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=q at=inside.front  offset=1 y=0 -> sig.b
+  logic sig.open = sig.a or sig.b
+  door id=d side=front at=center mat_slot=wall opened_by=sig.open
+  circuit region=floor void=2
+";
+    let out = placement_of(site);
+    let [diagnostic] = out.diagnostics.as_slice() else {
+        panic!("one finding: {:?}", out.diagnostics);
+    };
+    assert_eq!(diagnostic.code, DiagnosticCode::NoCircuitRegion);
+    assert_eq!(
+        &site[diagnostic.span.clone()],
+        "logic sig.open = sig.a or sig.b"
+    );
+    assert_eq!(
+        diagnostic.primary,
+        "this `site` has redstone cells or actuator pads to place, and a `site` has no `size=WxH` header to reserve room for them within",
+    );
+    assert_eq!(
+        fix_line(diagnostic),
+        "Fix: move the redstone into a `struct` or `def` with a `size=WxH` header and a `circuit region=<label> void=<N>` line at its top level",
     );
 }
 
@@ -726,6 +1082,33 @@ fn one_cell_more_than_the_row_holds_is_refused() {
     );
 }
 
+/// A scope with cells in a one-column region is refused on its row, which
+/// is the first thing it runs out of, and not on its pad columns.
+///
+/// The pad-column check sits after the row check and is reached only by
+/// a scope with no cells. Nothing else in the suite has cells and a
+/// one-column region, so without this case the two could swap and every
+/// test stay green, while a one-cell scope was told its pads collide
+/// rather than that its row does not fit.
+#[test]
+fn a_scope_with_cells_in_one_column_is_refused_on_its_row() {
+    let out = placement_of(&source_with_cells(1, 1, 5, 2));
+
+    assert!(out.scoped.scopes.is_empty());
+    let [diagnostic] = out.diagnostics.as_slice() else {
+        panic!("one finding: {:?}", out.diagnostics);
+    };
+    assert_eq!(diagnostic.code, DiagnosticCode::RouteCongestion);
+    assert!(
+        diagnostic
+            .primary
+            .contains("needs 3 columns for a row of 1 cells")
+            && !diagnostic.primary.contains("sensor pads"),
+        "refused on the row, not on the pad columns: {}",
+        diagnostic.primary,
+    );
+}
+
 /// The two ways of not fitting are separate resources: this netlist has
 /// a row long enough and a volume too small, and must still be told
 /// about the volume.
@@ -868,10 +1251,10 @@ struct wire size=9x2
 /// accepting side — `n` pads, `n >= 2`, in a scope with cells fit a
 /// region `n + 1` deep, because they start at `z = 0` and skip the cell
 /// row — and nothing else in the suite straddles it for a scope with
-/// cells. The primary is asserted too: all four refusals in this pass
-/// share `E_ROUTE_CONGESTION` and the row-depth check runs first, so a
-/// fixture that drifts out of this branch's window would stay green
-/// while measuring a different one.
+/// cells. The primary is asserted too: the other footprint refusals in
+/// this pass share `E_ROUTE_CONGESTION` and the row-depth check runs
+/// first, so a fixture that drifts out of this branch's window would
+/// stay green while measuring a different one.
 #[test]
 fn more_actuators_than_rows_is_refused_before_their_pads_collide() {
     let source = |depth: u32| {
@@ -914,7 +1297,7 @@ struct four size=8x{depth}
             && diagnostic.primary.contains("needs 5 rows")
             && diagnostic.primary.contains("only 4 deep"),
         "the refusal must name the resource that ran out, so it cannot be \
-         confused with the three that share its code: {}",
+         confused with the others that share its code: {}",
         diagnostic.primary,
     );
 

@@ -381,13 +381,23 @@ fn unreachable_sink_diagnostic(
 ///   sensors and actuators. The sensor column is `x = 0` and the
 ///   actuator column `x = width - 1`, so at `width == 1` they are one
 ///   column and pad #0 of each stands at `(0,0,0)` at any depth. The
-///   placement pass does not refuse this one; a scope with cells cannot
+///   placement pass refuses this one too, with
+///   `placement::pad_column_diagnostic`; a scope with cells cannot
 ///   reach it, because its row needs three columns or more.
 ///
 /// The fix line names the width when the second applies and the depth
 /// rule always. A hand-built IR can put a cell anywhere and collide in
 /// ways neither names; it gets the same fix line, since a reservation
 /// is still what an author can edit.
+///
+/// The width branch (`one_column` below) is unreachable through `cairn`:
+/// the CLI always runs the placement pass first, and its
+/// `pad_column_diagnostic` refuses a one-column region with pads on both
+/// edges before any stage here sees one. It is kept as a defensive layer
+/// for a library caller that hands a stage a Placement IR it built
+/// itself, which that guard never saw. Neither check makes the other
+/// redundant: the placement guard is what the CLI meets, and this one is
+/// what a hand-built IR meets.
 fn pad_overlap_diagnostic(
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
@@ -661,9 +671,10 @@ mod tests {
     ///
     /// The region is four rows deep, and one pad on each edge wants one.
     /// A fix line that named only the depth rule would send the author
-    /// to deepen a region whose depth is not the problem. The placement
-    /// pass places this scope, so stage 2 is the first to refuse it, and
-    /// the CLI reaches it through `size=1x4`.
+    /// to deepen a region whose depth is not the problem.
+    ///
+    /// Hand-built, because the placement pass refuses a region this
+    /// small one stage earlier and the CLI always runs it.
     #[test]
     fn every_stage_asks_a_one_column_identity_wire_for_a_second_column() {
         let region = reservation(1, 4, 2);
