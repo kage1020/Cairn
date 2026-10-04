@@ -647,7 +647,7 @@ mod tests {
 
     /// The last index a palette can name is still given out, the one past
     /// it is refused rather than panicking, and a state already present is
-    /// found however full the palette is.
+    /// still found once every index is taken.
     #[test]
     fn try_intern_refuses_only_a_new_state_once_every_index_is_taken() {
         let mut palette = filled(PALETTE_CAPACITY - 1);
