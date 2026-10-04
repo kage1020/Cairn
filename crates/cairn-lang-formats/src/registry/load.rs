@@ -356,13 +356,20 @@ impl From<AliasError> for RegistryError {
 /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
 /// forbids.
 ///
-/// A row is named by any spelling of its version, with trailing zeros
-/// ignored (`1.21.0` names Java's `1.21`, `1.21` names Bedrock's
-/// `1.21.0`): the rule `@requires` and `@intended_targets` read a label by,
-/// and what `spec/versioning-editions` "The target is a compile-time
-/// parameter" means by "`--target` accepts either spelling of the same
-/// version". The pair carries the row's own label, so the target and the
-/// lockfile name the version the way the table does. `validate_version_order`
+/// A row is named by any label equal to its own under the comparison
+/// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+/// uses. That doc states the rule in full, and the two lookups have to
+/// keep agreeing, so a change to either belongs in both. `1.21.0` names
+/// Java's `1.21`, `1.21` names Bedrock's `1.21.0` and `1.021` names Java's
+/// `1.21`, while `1.21.4` is not Bedrock's `1.21.40`, and neither
+/// `1.21.0-rc1` nor `1.21.` is Java's `1.21`. [`compare_versions`] warns
+/// that it is not the ordering key, and `.is_eq()` asks it no ordering
+/// question, so this stays a lookup. `spec/versioning-editions`
+/// "The target is a compile-time parameter" defines the same version this
+/// way for `--target`, `@requires` and `@intended_targets` alike.
+///
+/// The pair carries the row's own label, so the target and the lockfile
+/// name the version the way the table does. `validate_version_order`
 /// refuses a table carrying two spellings of one version, so at most one
 /// row matches.
 fn targetable_row_for(table: &DataVersionTable, mc_version: &str) -> Option<(String, i32)> {
@@ -384,7 +391,10 @@ impl RegistryPack {
     /// # Errors
     ///
     /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor a spelling of a targetable `mc_version`.
+    /// the `"latest"` alias nor a label equal to a targetable `mc_version`
+    /// under the comparison
+    /// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+    /// uses.
     ///
     /// # Panics
     ///
@@ -430,7 +440,10 @@ impl RegistryPack {
     /// # Errors
     ///
     /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor a spelling of a targetable `mc_version`.
+    /// the `"latest"` alias nor a label equal to a targetable `mc_version`
+    /// under the comparison
+    /// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+    /// uses.
     ///
     /// # Panics
     ///
@@ -456,7 +469,10 @@ impl RegistryPack {
     /// # Errors
     ///
     /// Returns [`UnsupportedTarget`] when the requested string is neither
-    /// the `"latest"` alias nor a spelling of a targetable `mc_version`.
+    /// the `"latest"` alias nor a label equal to a targetable `mc_version`
+    /// under the comparison
+    /// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+    /// uses.
     ///
     /// # Panics
     ///
@@ -476,9 +492,10 @@ impl RegistryPack {
 
     /// Closest supported version for the matching field of
     /// [`crate::data_version::UnsupportedTarget`], or `None` when no version
-    /// is close enough. Candidate pool is every `mc_version` plus the
-    /// `"latest"` alias, since the alias is just as legitimate a `--target`
-    /// value as any version string.
+    /// is close enough. Candidate pool is every targetable `mc_version` plus
+    /// the `"latest"` alias, since the alias is just as legitimate a
+    /// `--target` value as any version string. The rows the pack only orders
+    /// against are left out: no spelling of one resolves.
     fn suggestion_for(&self, requested: &str) -> Option<String> {
         let pool = self
             .data_versions
