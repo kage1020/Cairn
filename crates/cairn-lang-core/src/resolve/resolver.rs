@@ -1453,13 +1453,31 @@ fn validate_port(
         return false;
     };
 
+    // Only the def body's own members are ports. Three things on the
+    // lowering side read a port's member as one no `level y=N` has shifted,
+    // and would go wrong without an error if a level-scoped one resolved
+    // here: `walkway::DOOR_PORT_BASE_V` is `carve_door`'s `y_offset + 1`
+    // only at `y_offset = 0`; a window port's `contains_rows(y, ..)`
+    // asks `fill_window`'s `contains_rows(y + y_offset, ..)` only at the
+    // same offset; and `PortRejection::UnknownMember` is documented as
+    // unreachable because this lookup refuses a miss first. Widening it
+    // means carrying the member's offset into `port_world_position`.
     let matches: Vec<&Member> = def
         .members
         .iter()
         .filter(|m| m.id.as_deref() == Some(port.port.as_str()))
         .collect();
-    match matches.len() {
-        0 => {
+    let nested = if matches.is_empty() {
+        level_holding(&def.members, port.port.as_str())
+    } else {
+        None
+    };
+    match (matches.len(), nested) {
+        (0, Some(level)) => {
+            diagnostics.push(diag_level_scoped_port(port, def_name, level));
+            false
+        }
+        (0, None) => {
             let pool: Vec<&str> = def.members.iter().filter_map(|m| m.id.as_deref()).collect();
             let mut notes = Vec::with_capacity(2);
             notes.extend(
@@ -1488,8 +1506,8 @@ fn validate_port(
             });
             false
         }
-        1 => true,
-        n => {
+        (1, _) => true,
+        (n, _) => {
             diagnostics.push(Diagnostic {
                 code: DiagnosticCode::AmbiguousPort,
                 span: port.span.clone(),
@@ -1508,6 +1526,49 @@ fn validate_port(
             false
         }
     }
+}
+
+/// `E_UNRESOLVED_PORT` for a port whose `id=` is on a member nested
+/// under `level`, which is not in the def body a port is looked up in.
+fn diag_level_scoped_port(port: &PortRef, def_name: &str, level: &Member) -> Diagnostic {
+    let level_label = level
+        .id
+        .as_deref()
+        .map_or_else(|| "a `level`".to_owned(), |id| format!("`level id={id}`"));
+    Diagnostic {
+        code: DiagnosticCode::UnresolvedPort,
+        span: port.span.clone(),
+        primary: format!(
+            "port `{port_id}` of `def {def_name}` (used by `place {place_id}`) is declared under \
+             {level_label}, and a member under a `level` cannot be a port yet",
+            port_id = port.port,
+            place_id = port.place,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!(
+                "a port has to be a door or window declared directly in the body of \
+                 `def {def_name}`"
+            ),
+        }],
+        data: None,
+    }
+}
+
+/// The first `level` among `members` that holds a member with `id=`
+/// `port_id`, directly or in a `level` nested inside it.
+fn level_holding<'m>(members: &'m [Member], port_id: &str) -> Option<&'m Member> {
+    members
+        .iter()
+        .filter(|m| matches!(m.role, MemberRole::Level))
+        .find(|level| {
+            level
+                .children
+                .members
+                .iter()
+                .any(|m| m.id.as_deref() == Some(port_id))
+                || level_holding(&level.children.members, port_id).is_some()
+        })
 }
 
 /// Returns `true` when the placement passes every origin-selector check, in
@@ -2609,6 +2670,45 @@ mod tests {
         // The failed connect must not surface as resolved — walkway
         // voxelisation only sees rows it can lay safely.
         assert!(r.connects.is_empty(), "broken connect must not resolve");
+    }
+
+    #[test]
+    fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
+        // A `level` may go without `id=`, so the refusal names it by its
+        // keyword. `tests/door_wall_fit.rs` pins the named case.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=front side=front at=center\n",
+            "  level y=0\n",
+            "    door id=entry side=back at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+            "  connect a.entry to b.front path=@gravel\n",
+        );
+        let r = resolve(&ir(src), None);
+        let refusals: Vec<&str> = r
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::UnresolvedPort)
+            .map(|d| d.primary.as_str())
+            .collect();
+        assert_eq!(
+            refusals,
+            [
+                "port `entry` of `def cottage` (used by `place a`) is declared under a `level`, \
+              and a member under a `level` cannot be a port yet"
+            ],
+        );
+        assert!(
+            r.connects.is_empty(),
+            "the refused connect must not resolve"
+        );
     }
 
     #[test]
