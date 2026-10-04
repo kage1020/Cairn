@@ -213,14 +213,15 @@ x so a `sym=true` opening looks symmetric from either side. The `left` and `righ
 low `z` and mirror the same way.
 
 `sym=true` mirrors the opening across the wall's midpoint
-(`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle is
-rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. `sym=` takes a bare `true` or
-`false`, and a window without it is not mirrored. Any other value (`sym=yes`, `sym="true"`,
-`sym=1`) is an unreadable value: the window is drawn without its mirror, and the value is reported
-as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)). A window whose `repeat=`
-is greater than 1 is the exception: `sym=true` refuses it, so an unreadable `sym=` is not read as
-`false` there. The window is not cut, and is reported as `W_DEFERRED_MEMBER` beside the
-`W_IGNORED_ARGUMENT`.
+(`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle
+is rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. That includes the
+mirror of a window centred on the wall's midpoint (`2 * offset + size_w = wall_length`), which
+coincides with the primary. `sym=` takes a bare `true` or `false`, and a window without it
+is not mirrored. Any other value (`sym=yes`, `sym="true"`, `sym=1`) is an unreadable value:
+the window is drawn without its mirror, and the value is reported as `W_IGNORED_ARGUMENT`
+([Lint §11.3](/spec/lint/#113-error-vs-warning)). A window whose `repeat=` is greater than 1 is the
+exception: `sym=true` refuses it, so an unreadable `sym=` is not read as `false` there. The window
+is not cut, and is reported as `W_DEFERRED_MEMBER` beside the `W_IGNORED_ARGUMENT`.
 
 **`at=` door anchors.** A door's wall-local column comes from one of three named anchors:
 
