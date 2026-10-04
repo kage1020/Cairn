@@ -15,9 +15,11 @@ transition.
 
 The backend holds a "version string ↔ DataVersion" table, so `--target` accepts either spelling of
 the same version. Bedrock resolves its version strings to an internal monotonic key the same way.
-Two labels are the same version when they differ only by trailing zeros (`1.21.0` is Java's `1.21`,
-and `1.21` is Bedrock's `1.21.0`), the rule `@requires` and `@intended_targets` read a label by too.
-The build and its lockfile name the version as the table spells it.
+Two labels are the same version when they differ only in ways that carry no information: a missing
+trailing component is zero, and a leading zero in a numeric component is padding rather than a
+digit. So `1.21`, `1.21.0` and `1.021` are one version (`1.21.0` is Java's `1.21`, and `1.21` is
+Bedrock's `1.21.0`). `@requires` and `@intended_targets` read a label by the same rule. The build
+and its lockfile name the version as the table spells it.
 
 ## 10.2 Language contract: recompile, don't transcode
 
@@ -303,7 +305,7 @@ answers, and only the first is exact:
 
 | The floor | Placed as | Because |
 |---|---|---|
-| Names a row (trailing zeros ignored: `1.21` is Bedrock's `1.21.0`) | That row's `DataVersion` | Exact. |
+| Names a row (a missing trailing component is zero, and a leading zero in a numeric component is padding: `1.21` is Bedrock's `1.21.0`, `1.020` is Java's `1.20`) | That row's `DataVersion` | Exact. |
 | Names a pre-release of a row (`1.21.4-rc1`) | That row's `DataVersion` | Nothing ships between a release candidate and its release, so no supported target lies between them either. |
 | Sits below every row, or above every one | Met by every target, or by none | Reached by comparing the floor's label against the first and last rows' *labels*, while which rows those are is decided by their *keys* — so it holds exactly when the table's labels sort the same way by text as by key. The registry pack loader checks that at load time. The floor's own label must be a dotted decimal to be compared at all. |
 | Anything else — inside the table's span, naming no row | Not placed at all | It has no `DataVersion`, and there is none to give it. `E_REQUIRES_UNORDERABLE`. |
