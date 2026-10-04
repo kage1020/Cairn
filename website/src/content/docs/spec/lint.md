@@ -233,14 +233,21 @@ declares more than one — or none at all — no theme binds to the def's own sc
 
 `E_UNKNOWN_ABSTRACT_TOKEN` and `W_ABSTRACT_TOKEN_DEFERRED` differ on whether anything could have
 answered. A pack was offered and does not declare the token, so the build stops with a suggestion
-towards the closest one it does declare; no pack was offered, so nothing was asked and the cell
-degrades to air with a warning. The second is the path a library caller reaches — LSP highlighting,
-or a `cairn check` with no pack — and it is a warning for that reason: refusing there would refuse
-every source read without a pack.
+towards the closest one it does declare; no pack was offered, so nothing was asked and the member
+degrades with a warning. The second is the path a library caller reaches — LSP highlighting, or a
+`cairn check` with no pack — and it is a warning for that reason: refusing there would refuse every
+source read without a pack.
+
+The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave `stair`
+or `pressure_plate` is built from its default block. A `walls` is not built and takes up no rows, so
+a `door` or `window` cut into it is refused. A `window` is not cut, so its wall stays, and a port on
+it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
-all has no slot map to read, so the member contributes no voxel. A module that binds no theme and
-reads no `mat_slot=` is not reported.
+all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built,
+so every `door` and `window` is refused for want of a wall; a `floor` leaves its cells air, and a
+`roof`, eave `stair` or `pressure_plate` is still built from its default block. A module that binds
+no theme and reads no `mat_slot=` is not reported.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A version
