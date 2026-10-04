@@ -404,8 +404,10 @@ build is unaffected.
 a member writes counts, including one a later member covers, so the limit is on the states written
 rather than the states the finished scope keeps. A vanilla registry has far fewer states, so a source
 reaches it only through block ids or state-literal properties no pinned target checks. Block ids go
-unchecked wherever lowering runs with no version pinned: `cairn lower`, `cairn info`, and a `cairn
-compile` or `cairn check --edition E --target V` naming a version the edition does not ship. A state
+unchecked wherever lowering runs with no version pinned: in `cairn lower` and `cairn info`, in a
+`cairn compile` or `cairn check --edition E --target V` naming a version the edition does not ship,
+and in a `cairn compile` whose target the file's floors refuse
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A state
 literal's properties go unchecked under every target, as `W_STATE_LITERAL_UNCHECKED` says
 ([Materials and targets](#materials-and-targets)), so every command that lowers can reach the limit,
 `cairn compile` with a target that resolves among them. A warning, for the reason above.
