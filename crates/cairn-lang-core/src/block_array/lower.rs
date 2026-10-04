@@ -5234,24 +5234,30 @@ fn cut_window(
     }
     if sym == Some(true) {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
-        if mirror_offset == offset {
-            // The mirror sits exactly on top of the primary; emitting it
-            // again would be a no-op so we silently coalesce.
-            return WindowCut::Cut;
-        }
         // Reject overlapping mirrors: a `sym=true` window asks for a
-        // *pair*, not one wide span. If the two rectangles intersect the
-        // user almost certainly wrote a window that is more than half as
-        // wide as the wall — diagnose and skip the mirror so the primary
-        // is still emitted cleanly.
+        // *pair*, not one wide span. The `span_end` guard above refused
+        // `offset + size_w > wall_length`, so neither subtraction
+        // saturates, and the two rectangles intersect exactly when the
+        // window straddles the wall's midpoint
+        // (2*offset < wall_length < 2*(offset + size_w)) — diagnose and
+        // skip the mirror so the primary is still emitted cleanly. A
+        // centred window (2*offset + size_w == wall_length) has a mirror
+        // that is the same rectangle, the fullest overlap there is: the
+        // author still asked for two windows and got one, so it is
+        // reported like the rest.
         let primary_end = offset.saturating_add(sw);
         let mirror_end = mirror_offset.saturating_add(sw);
         let overlap = offset < mirror_end && mirror_offset < primary_end;
         if overlap {
+            let relation = if mirror_offset == offset {
+                "coincides with"
+            } else {
+                "would overlap"
+            };
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 &format!(
-                    "`sym=true` window at offset={offset} size={sw}x{sh} on the `{}` wall would overlap its mirror (wall length={len}); the mirror was skipped",
+                    "`sym=true` window at offset={offset} size={sw}x{sh} on the `{}` wall {relation} its mirror (wall length={len}); the mirror was skipped",
                     side_name(side),
                 ),
             ));
@@ -7551,6 +7557,46 @@ struct s size=9x7
         }
         // Mirror cells outside the primary stay cobblestone (x=1).
         assert_eq!(block_id(ba, 1, 2, 4), "minecraft:cobblestone");
+    }
+
+    #[test]
+    fn a_sym_window_that_coincides_with_its_mirror_is_reported() {
+        // `spec/syntax` "Selectors": a mirror overlapping the primary is
+        // `W_DEFERRED_MEMBER`. A centred window's mirror is the same
+        // rectangle, so the author asked for two windows and got one.
+        // All three centred shapes on a 5-wide wall, the solutions of
+        // 2*offset + width == 5: mirror_offset = 5 - 2 - 1 = 2,
+        // 5 - 1 - 3 = 1 and 5 - 0 - 5 = 0. The last puts `mirror_offset`
+        // at 0, the floor its `saturating_sub` clamps to.
+        for (offset, width) in [(2, 1), (1, 3), (0, 5)] {
+            let src = format!(
+                "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\n\
+                 struct s size=5x5\n  walls mat_slot=w height=3\n  \
+                 window side=front offset={offset} y=1 size={width}x1 sym=true mat_slot=g\n"
+            );
+            let out = lowered(&src);
+            let found: Vec<_> = out
+                .diagnostics
+                .iter()
+                .map(|d| (d.code, d.primary.as_str()))
+                .collect();
+            assert_eq!(
+                found,
+                vec![(
+                    DiagnosticCode::DeferredMember,
+                    format!(
+                        "`sym=true` window at offset={offset} size={width}x1 on the `front` wall \
+                         coincides with its mirror (wall length=5); the mirror was skipped"
+                    )
+                    .as_str(),
+                )],
+            );
+            // The primary is still painted.
+            let ba = out.structures.get("struct::s").unwrap();
+            for x in offset..offset + width {
+                assert_eq!(block_id(ba, x, 1, 4), "minecraft:glass_pane", "x={x}");
+            }
+        }
     }
 
     // The one-row course under a roof, and the struct with no walls at
