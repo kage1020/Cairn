@@ -95,6 +95,12 @@ pub enum DiagnosticCode {
     /// statement args, selector attrs / bindings).
     DuplicateArg,
     /// Two or more members in the same immediate body share an `id=`.
+    ///
+    /// Two `place` rows of one `site` body are left to the resolver, which
+    /// compares refused ids as well as accepted ones and reports a repeat as
+    /// [`Self::DuplicatePlaceId`]. A `place` row indented under another row
+    /// is not in that body, so a repeat there is still this code, as is a
+    /// `place` row sharing its id with any other row of the body.
     DuplicateId,
     /// Two or more top-level items of the same kind share a name.
     ///
@@ -483,11 +489,19 @@ pub enum DiagnosticCode {
     /// surfacing because an unused def is usually a typo on the
     /// `place use=` side.
     UnusedDef,
-    /// A `connect A.PORT to B.PORT` row names a port id (`PORT`) that the
-    /// referenced def does not expose. The place id sides are reported by
+    /// A `connect A.PORT to B.PORT` row names a port id (`PORT`) that no
+    /// member of the referenced def's body carries. A port is looked up
+    /// among the body's own members only, not the ones indented under a
+    /// `level` or any other member. The place id sides are reported by
     /// `E_UNRESOLVED_PLACE_REF` instead — this code is specifically for the
-    /// port half of the `place.port` shape. Carries a nearest-match
-    /// suggestion when one fits the standard spell cap.
+    /// port half of the `place.port` shape.
+    ///
+    /// The notes take one of two shapes. When a member under a `level`
+    /// carries the id, the primary says so, naming the `level` the member
+    /// sits directly under, and one note points at the member and says
+    /// what a port has to be. Otherwise the notes are a nearest-match
+    /// suggestion when one of the body's ids fits the standard spell cap,
+    /// then a note to add the `id=`.
     UnresolvedPort,
     /// A `connect A.PORT to B.PORT` row whose port id matches more than one
     /// member of the referenced def. The first match is taken for downstream

@@ -31,6 +31,13 @@ turn on.
 | `E_DUPLICATE_ITEM` | Two top-level items of the same kind share a name. |
 | `E_DUPLICATE_HEADER` | A single-valued `@directive` is declared more than once. |
 
+`E_DUPLICATE_ID` leaves two `place` rows of one `site` body to `E_DUPLICATE_PLACE_ID`
+([Sites and placements](#sites-and-placements)), which names the site. That holds for an id
+refused as `E_INVALID_PLACE_ID` too: the second row sharing it gets `E_DUPLICATE_PLACE_ID` beside
+its own `E_INVALID_PLACE_ID`, so renaming both rows to one usable id raises nothing new. A `place`
+row sharing its `id=` with any other row of that body, such as a `connect`, is still
+`E_DUPLICATE_ID`. So are two `place` rows indented under one row, which are not in that body.
+
 `E_DUPLICATE_SELECTOR` compares selectors by meaning, not by text: attribute order does not count,
 and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.
 Rows that bind *different* keys compose and are not reported. Neither are rows whose attributes
@@ -149,8 +156,9 @@ version to compare.
 commands that lower report them: `cairn compile`, `cairn lower`, `cairn info`, and `cairn check
 --edition E --target V`. `E_UNKNOWN_ID` further needs a pinned target, so the two commands that
 raise it are `cairn compile --target` and `cairn check --edition E --target V` — `info` and
-`lower` lower against no version. A `cairn check` with no `--target` runs no lowering at all and
-reaches neither code.
+`lower` lower against no version, and so does a `compile` whose target the file's floors refuse
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A
+`cairn check` with no `--target` runs no lowering at all and reaches neither code.
 
 `W_STATE_LITERAL_UNCHECKED` is raised by the same lowering, on every state literal it reads from a
 theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info` and `cairn check
@@ -164,11 +172,15 @@ lowering-stage findings a compile would refuse on: an id the target does not dec
 `check` at exit 0 and stopped `cairn compile` at exit 1, and the information that decides it — the
 one `(edition, version)` pair — was not on `check`'s command line. It requires `--edition` for the
 reason [Compilation Model §4.2](/spec/compilation/#42-target-axes) refuses `--target` alone, and runs the
-same lowering pass against the same table `compile` does, so a lost scope earns the same
-`E_PARTIAL_BUILD`. What it does not do is anything `compile` writes: no artifact, no lockfile, and
-no `@requires` floor enforcement — a lock certifies a build, and only the command that produces
-one holds `--target` to the floors (`E_VERSION_CAP`). Leaving the flag off is unchanged behaviour,
-so no source that passes today starts failing. See
+same lowering pass against the same table `compile` does at any target the file's floors let
+through, so a lost scope earns the same `E_PARTIAL_BUILD`. What it does not do is anything
+`compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement — a lock certifies
+a build, and only the command that produces one holds `--target` to the floors (`E_VERSION_CAP`).
+So at a target the floors refuse, the two commands name different causes: `check` pins the target
+and reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing ids leave empty, while
+`compile` checks no id and reports the floor
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Leaving the
+flag off is unchanged behaviour, so no source that passes today starts failing. See
 [Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
@@ -226,14 +238,21 @@ declares more than one — or none at all — no theme binds to the def's own sc
 
 `E_UNKNOWN_ABSTRACT_TOKEN` and `W_ABSTRACT_TOKEN_DEFERRED` differ on whether anything could have
 answered. A pack was offered and does not declare the token, so the build stops with a suggestion
-towards the closest one it does declare; no pack was offered, so nothing was asked and the cell
-degrades to air with a warning. The second is the path a library caller reaches — LSP highlighting,
-or a `cairn check` with no pack — and it is a warning for that reason: refusing there would refuse
-every source read without a pack.
+towards the closest one it does declare; no pack was offered, so nothing was asked and the member
+degrades with a warning. The second is the path a library caller reaches — LSP highlighting, or a
+`cairn check` with no pack — and it is a warning for that reason: refusing there would refuse every
+source read without a pack.
+
+The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave `stair`
+or `pressure_plate` is built from its default block. A `walls` is not built and takes up no rows, so
+a `door` or `window` cut into it is refused. A `window` is not cut, so its wall stays, and a port on
+it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
-all has no slot map to read, so the member contributes no voxel. A module that binds no theme and
-reads no `mat_slot=` is not reported.
+all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built,
+so every `door` and `window` is refused for want of a wall; a `floor` leaves its cells air, and a
+`roof`, eave `stair` or `pressure_plate` is still built from its default block. A module that binds
+no theme and reads no `mat_slot=` is not reported.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A version
@@ -325,7 +344,7 @@ something for the name would build a site the source did not describe.
 
 | Code | Meaning |
 |---|---|
-| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port the referenced def does not expose. |
+| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member declared directly in the referenced def's body carries. A member under a `level` cannot be a port yet, and the finding says so when the id is on one. |
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
 | `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, so the walkway has no material to lay. |
 | `W_DUPLICATE_WALKWAY` | A `connect` repeats a `(from, to)` pair an earlier row in the same site already laid. |
