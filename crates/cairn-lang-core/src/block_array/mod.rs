@@ -360,6 +360,18 @@ impl BlockArray {
     }
 }
 
+/// The most entries one [`Palette`] holds, air included: one per value a
+/// [`PaletteIndex`] can name.
+pub const PALETTE_CAPACITY: usize = u16::MAX as usize + 1;
+
+/// [`Palette::try_intern`] was asked for a new state while the palette
+/// already held [`PALETTE_CAPACITY`] entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the palette already holds {PALETTE_CAPACITY} block states, every index a palette can name"
+)]
+pub struct PaletteFull;
+
 /// Deduplicating palette. [`Palette::intern`] appends, so the order while
 /// a body is being painted is insertion order; [`Palette::canonicalize`]
 /// then rewrites it into the order the artifact carries. The slot at index
@@ -388,21 +400,53 @@ impl Palette {
     /// (cottage = 3 distinct states) that a hash side-table would cost more
     /// than it saves.
     ///
+    /// For a caller whose states are bounded by construction. Lowering a
+    /// source is not one: ids are checked only against a pinned target's
+    /// table, so `cairn lower`, `cairn info` and a `check --target` that
+    /// does not resolve lower whatever ids a source invents, and its paint
+    /// path uses the fallible form instead.
+    ///
     /// # Panics
     ///
-    /// Panics if the palette would exceed `u16::MAX` entries. That cap
-    /// matches [`PaletteIndex`]'s width and is far beyond any vanilla
-    /// block-state count (~20k) intentionally lowered into one volume.
+    /// Panics if `state` is new and the palette already holds
+    /// [`PALETTE_CAPACITY`] entries.
     pub fn intern(&mut self, state: BlockState) -> PaletteIndex {
+        self.try_intern(state)
+            .expect("palette grew past PALETTE_CAPACITY entries; widen PaletteIndex first")
+    }
+
+    /// [`Self::intern`], answering [`PaletteFull`] instead of panicking
+    /// when `state` is new and the palette already holds
+    /// [`PALETTE_CAPACITY`] entries. A state already present is found
+    /// however full the palette is.
+    ///
+    /// # Errors
+    ///
+    /// [`PaletteFull`] when there is no index left to give `state`.
+    pub fn try_intern(&mut self, state: BlockState) -> Result<PaletteIndex, PaletteFull> {
+        self.try_intern_within(state, PALETTE_CAPACITY)
+    }
+
+    /// [`Self::try_intern`] against a capacity of `capacity` entries, never
+    /// more than [`PALETTE_CAPACITY`]. Lowering's tests pass a small one so
+    /// the refusal can be reached without painting 65,536 states.
+    pub(crate) fn try_intern_within(
+        &mut self,
+        state: BlockState,
+        capacity: usize,
+    ) -> Result<PaletteIndex, PaletteFull> {
         if let Some(i) = self.entries.iter().position(|s| s == &state) {
-            return PaletteIndex(
+            return Ok(PaletteIndex(
                 u16::try_from(i).expect("palette index fits in u16 by construction"),
-            );
+            ));
+        }
+        if self.entries.len() >= capacity.min(PALETTE_CAPACITY) {
+            return Err(PaletteFull);
         }
         let idx = u16::try_from(self.entries.len())
-            .expect("palette grew past u16::MAX entries; widen PaletteIndex first");
+            .expect("a palette below PALETTE_CAPACITY has an index left");
         self.entries.push(state);
-        PaletteIndex(idx)
+        Ok(PaletteIndex(idx))
     }
 
     /// Reorder the entries into the canonical order and return the
@@ -428,8 +472,9 @@ impl Palette {
     ///
     /// # Panics
     ///
-    /// Panics on a palette longer than 65536 entries. [`Self::intern`]
-    /// cannot build one — it refuses the 65537th — so this is reachable
+    /// Panics on a palette longer than [`PALETTE_CAPACITY`] entries.
+    /// [`Self::try_intern`] cannot build one — it refuses the 65537th — so
+    /// this is reachable
     /// only from a palette assembled by hand past the width
     /// [`PaletteIndex`] can name.
     #[must_use]
@@ -569,6 +614,42 @@ pub struct Entity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A palette with `len` entries: air and `len - 1` distinct states.
+    fn filled(len: usize) -> Palette {
+        let mut palette = Palette::new_with_air();
+        palette
+            .entries
+            .extend((1..len).map(|i| BlockState::bare(format!("test:b{i}"))));
+        palette
+    }
+
+    /// The last index a palette can name is still given out, the one past
+    /// it is refused rather than panicking, and a state already present is
+    /// found however full the palette is.
+    #[test]
+    fn try_intern_refuses_only_a_new_state_once_every_index_is_taken() {
+        let mut palette = filled(PALETTE_CAPACITY - 1);
+        assert_eq!(
+            palette.try_intern(BlockState::bare("test:last")),
+            Ok(PaletteIndex(u16::MAX)),
+        );
+        assert_eq!(palette.entries.len(), PALETTE_CAPACITY);
+        assert_eq!(
+            palette.try_intern(BlockState::bare("test:one_too_many")),
+            Err(PaletteFull),
+        );
+        assert_eq!(
+            palette.entries.len(),
+            PALETTE_CAPACITY,
+            "a refusal appends nothing"
+        );
+        assert_eq!(
+            palette.try_intern(BlockState::bare("test:b1")),
+            Ok(PaletteIndex(1)),
+        );
+        assert_eq!(palette.try_intern(BlockState::air()), Ok(PaletteIndex::AIR));
+    }
 
     #[test]
     fn dims_index_round_trips() {
