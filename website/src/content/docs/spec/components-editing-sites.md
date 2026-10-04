@@ -138,8 +138,8 @@ re-running the coordinate solver.
 placements within the same `site`.
 
 **What a port is.** A port is the `(place, member_id)` pair that `PLACE.PORT` resolves to. Ports are
-exposed on `door` and `window` members of the referenced `def`; stair and roof ports are reserved
-for a future extension.
+exposed on `door` and `window` members declared directly in the body of the referenced `def`; stair
+and roof ports, and ports on level-scoped members, are reserved for a future extension.
 
 **Where a port sits.** One block outside the member's `side=` wall, at the placement's ground row (`place_origin.1`).
 `front` / `back` / `left` / `right` map to `+z` / `-z` / `-x` / `+x` ([§9.3.1](#931-coordinate-convention)).
@@ -238,7 +238,7 @@ one to the count of scopes that did not lower.
 | Code | Cause |
 |---|---|
 | `E_CONNECT_ARITY` | The row's shape is not `FROM.PORT to TO.PORT`. Enforced before resolution, since an unreadable endpoint costs the row its walkway. |
-| `E_UNRESOLVED_PORT` | The right-of-dot port id does not name a member of the referenced def's body. Carries a nearest-match note, or, when the id belongs to a member nested under a `level`, says so: a level-scoped member cannot be a port yet. |
+| `E_UNRESOLVED_PORT` | The right-of-dot port id does not name a member of the referenced def's body. Carries a nearest-match note when one fits the spell cap, or, when the id belongs to a member nested under a `level`, says so instead, with a note at that member: a level-scoped member cannot be a port yet. |
 | `E_AMBIGUOUS_PORT` | The def exposes the same `id=` on more than one member. Rename the collision. |
 | `E_MISSING_PATH_MATERIAL` | The row omits `path=`, so walkway lowering has nothing to lay. |
 | `E_UNRESOLVED_PLACE_REF` | The head place id does not name a prior place in this site (shared with [§9.3.3](#933-cross-scope-references)). |

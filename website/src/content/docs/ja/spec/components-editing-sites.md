@@ -130,8 +130,9 @@ placement のワールド原点と `(site, def, theme)` の provenance は `buil
 `connect FROM.PORT to TO.PORT path=@MATERIAL` は、同じ `site` 内の 2 つの placement の名前付きポート
 の間に幅 1 ブロックの walkway を敷きます。
 
-**ポートとは。** `PLACE.PORT` が解決する `(place, member_id)` の組です。ポートは参照先 `def` の
-`door` と `window` メンバで公開されます。stair と roof のポートは将来の拡張用に予約されています。
+**ポートとは。** `PLACE.PORT` が解決する `(place, member_id)` の組です。ポートは参照先 `def` の本体に
+直接宣言された `door` と `window` メンバで公開されます。stair と roof のポート、および level スコープの
+メンバのポートは将来の拡張用に予約されています。
 
 **ポートの位置。** メンバの `side=` の壁の 1 ブロック外、placement の地面の段 (`place_origin.1`) で
 す。 `front` / `back` / `left` / `right` は `+z` / `-z` / `-x` / `+x` に対応します ([§9.3.1](#931-座標規約))。
@@ -225,7 +226,7 @@ walkway は `site::SITE::FROM ↔ TO` と、行が書いたとおりのポート
 | コード | 原因 |
 |---|---|
 | `E_CONNECT_ARITY` | 行の形が `FROM.PORT to TO.PORT` でない。読めない端点はその行の walkway を失わせるので、解決の前に検査します。 |
-| `E_UNRESOLVED_PORT` | ドットの右のポート id が、参照先 def の本体のメンバを指していない。最近傍候補の note 付き。その id が `level` の下に入れ子になったメンバのものなら、そう告げます。level スコープのメンバは、まだポートになれません。 |
+| `E_UNRESOLVED_PORT` | ドットの右のポート id が、参照先 def の本体のメンバを指していない。綴りの上限に収まる候補があれば最近傍候補の note を付けます。その id が `level` の下に入れ子になったメンバのものなら、代わりにそう告げ、そのメンバを指す note を付けます。level スコープのメンバは、まだポートになれません。 |
 | `E_AMBIGUOUS_PORT` | def が同じ `id=` を複数のメンバで公開している。衝突をリネームしてください。 |
 | `E_MISSING_PATH_MATERIAL` | 行が `path=` を欠いており、walkway の lowering に敷くものが無い。 |
 | `E_UNRESOLVED_PLACE_REF` | 先頭の place id が、この site の先行する place を指していない ([§9.3.3](#933-スコープ跨ぎ参照) と共通)。 |

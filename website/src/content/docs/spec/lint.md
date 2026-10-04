@@ -339,7 +339,7 @@ something for the name would build a site the source did not describe.
 
 | Code | Meaning |
 |---|---|
-| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port the referenced def does not expose. |
+| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member declared directly in the referenced def's body carries. A member under a `level` cannot be a port yet, and the finding says so when the id is on one. |
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
 | `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, so the walkway has no material to lay. |
 | `W_DUPLICATE_WALKWAY` | A `connect` repeats a `(from, to)` pair an earlier row in the same site already laid. |
