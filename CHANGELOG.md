@@ -90,6 +90,16 @@
   a line on stderr and keeps the last text. A column past its line's end resolves to the line end
   before the two ends are compared.
 
+- *(core)* A `def` whose only `place use=` row was refused for its id or its origin was also
+  reported as `W_UNUSED_DEF`, with advice to remove the def. Every such refusal did this: a missing
+  `id=` (`E_INCOMPLETE_PLACE`), one that is not an identifier or string (`id=3`,
+  `E_TYPE_MISMATCH_LABEL`), `E_INVALID_PLACE_ID`, `E_DUPLICATE_PLACE_ID`, `E_INVALID_PLACE_ORIGIN`
+  (no origin selector, more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=`
+  that is not an identifier or string), an `east_of=` / `north_of=` naming no prior place
+  (`E_UNRESOLVED_PLACE_REF`), and one naming a row refused for its id (`W_DEFERRED_PLACE`).
+  Following the advice brought the def back as `E_UNRESOLVED_PLACE_REF` once the row was fixed. A
+  row whose `use=` names a declared def now references it, whatever refuses the row.
+
 - *(formats)* A Bedrock build printed identical `W_INTENT_DEGRADED` lines, and its `.mcstructure`
   palette held one block several times. `roof-hip`'s four degraded stairs differ only in `facing`,
   which the warning left out, so lines 1 and 3 and lines 2 and 4 were byte-identical. Each warning
