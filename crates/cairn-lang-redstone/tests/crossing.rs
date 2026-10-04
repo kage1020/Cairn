@@ -60,17 +60,17 @@ fn errors(
 /// columns long and the far half of it is past the second refresh
 /// point.
 ///
-/// They stand 12 blocks apart rather than 15. Each cell is a Java
+/// They stand 14 steps apart rather than 16. Each cell is a Java
 /// comparator, which passes on the strength it reads rather than
 /// restoring it, so the dust from the trunk runs on through the chain
 /// of comparators after the tap. Every comparator but the last has a
-/// budget of 13: its wire out to the next cell goes round in 4 blocks,
+/// budget of 14: its wire out to the next cell goes round in 4 blocks,
 /// and the first coord on it that runs straight — where a repeater can
-/// refresh the rest — is 2 blocks out, so a tap may arrive over at most
-/// `15 - 2` blocks of dust. That budget, not the limit, is what the
-/// trunk's repeaters are spaced by. The chain's own nets carry
-/// repeaters of their own for the same reason, which is why this
-/// counts the trunk's alone.
+/// refresh the rest — is 2 blocks out, reading the one block of dust
+/// before it, so a tap may arrive with at most `16 - 2` spent. That
+/// budget, not the limit, is what the trunk's repeaters are spaced by.
+/// The chain's own nets carry repeaters of their own for the same
+/// reason, which is why this counts the trunk's alone.
 ///
 /// That the tree reaches the far cells along a trunk beside the row
 /// and not *through* the near ones is what makes this a small number
@@ -104,7 +104,7 @@ fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
         cells.iter().flat_map(on_the_bus).collect();
     assert_eq!(
         blocks,
-        [(12, 0, 2), (24, 0, 2)].into_iter().collect(),
+        [(14, 0, 2), (28, 0, 2)].into_iter().collect(),
         "two blocks on the bus, on the plane, beside the row rather than over it — one \
          per refresh point and not one per cell",
     );
@@ -221,7 +221,7 @@ fn cells_that_pass_strength_on_share_one_strand_with_their_inputs() {
                 .iter()
                 .map(|b| (b.coord.x, b.coord.y, b.coord.z))
                 .collect::<Vec<_>>(),
-            vec![(11, 0, 1)],
+            vec![(12, 0, 1)],
             "{op}: one repeater on the wire out to the door",
         );
         assert_eq!(
@@ -804,7 +804,7 @@ struct reach size=40x6
     // The premise: the outward segment is long and the inward ones are
     // not, so any buffer here belongs to the wire this test is about.
     assert!(
-        output.wire_length().expect("routed") > 15,
+        output.wire_length().expect("routed") > 16,
         "the fixture only means something while the outward segment is past the dust limit",
     );
     assert_eq!(
@@ -858,14 +858,14 @@ struct pair size=40x6
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
     let output = scope.ir.outputs.first().expect("the actuator");
 
-    // `buffer_count_for_segment` is `(s - 1) / 15`, the exact count on
+    // `buffer_count_for_segment` is `(s - 1) / 16`, the exact count on
     // a route that runs straight and unbranched through every point a
     // repeater refreshes it — as this one does — and only a floor on
     // any other. Asserting the pass's figure against that formula
     // rather than against a literal keeps the two from being
     // re-derived from each other.
     let segment = output.wire_length().expect("routed");
-    let expected = (segment - 1) / 15;
+    let expected = (segment - 1) / 16;
     assert_eq!(
         output.buffer_coords().len(),
         expected as usize,

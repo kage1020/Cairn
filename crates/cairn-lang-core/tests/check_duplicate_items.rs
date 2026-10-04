@@ -26,22 +26,13 @@ use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, lower, parse, resolve};
 
 mod common;
-use common::{codes, diagnose, slice};
+use common::{codes, diagnose, nth, slice};
 
 fn of_code(source: &str, code: DiagnosticCode) -> Vec<Diagnostic> {
     diagnose(source)
         .into_iter()
         .filter(|d| d.code == code)
         .collect()
-}
-
-/// Byte offset of the `n`th (0-based) occurrence of `needle`.
-fn nth(source: &str, needle: &str, n: usize) -> usize {
-    source
-        .match_indices(needle)
-        .nth(n)
-        .unwrap_or_else(|| panic!("occurrence {n} of `{needle}` not found in:\n{source}"))
-        .0
 }
 
 const THEME: &str = "theme t:\n  slot floor -> @oak_planks\n\n";
