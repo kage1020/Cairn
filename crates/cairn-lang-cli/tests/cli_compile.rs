@@ -174,6 +174,59 @@ fn c7_lockfile_records_target_triple() {
     assert_eq!(lf.target.data_version, 4189);
 }
 
+/// `--target` accepts either spelling of a version, as `@requires` and
+/// `@intended_targets` read one: Java's `1.21` row is reached as `1.21.0`,
+/// and Bedrock's `1.21.0` row as `1.21`. Each lockfile target is compared
+/// against the one written by the build that spells the row as the table
+/// does; `LockTarget` compares whole, so the integer is covered along with
+/// the label.
+#[test]
+fn c7b_either_spelling_of_a_target_builds_the_row_it_names() {
+    let (_tmp_src, src) = example_in_tempdir("roof-flat.crn");
+    let lock_target = |edition: &str, target: &str| {
+        let out_dir = TempDir::new().expect("out tempdir");
+        let lock_path = out_dir.path().join("spelling.lock");
+        let result = cairn(
+            "compile",
+            &[
+                src.to_str().unwrap(),
+                "--edition",
+                edition,
+                "--target",
+                target,
+                "--out",
+                out_dir.path().to_str().unwrap(),
+                "--lock",
+                lock_path.to_str().unwrap(),
+            ],
+        );
+        assert!(
+            result.status.success(),
+            "{edition} `--target {target}`: {}",
+            String::from_utf8_lossy(&result.stderr),
+        );
+        Lockfile::read_from_path(&lock_path)
+            .expect("read lock")
+            .target
+    };
+
+    let java_as_table = lock_target("java", "1.21");
+    let java_padded = lock_target("java", "1.21.0");
+    assert_eq!(
+        java_padded, java_as_table,
+        "java `1.21.0` must build the `1.21` row"
+    );
+    assert_eq!(java_padded.mc_version, "1.21");
+
+    let bedrock_as_table = lock_target("bedrock", "1.21.0");
+    let bedrock_trimmed = lock_target("bedrock", "1.21");
+    assert_eq!(
+        bedrock_trimmed, bedrock_as_table,
+        "bedrock `1.21` must build the `1.21.0` row"
+    );
+    assert_eq!(bedrock_trimmed.mc_version, "1.21.0");
+}
+
 #[test]
 fn c8_bedrock_compiles_stateless_example_to_mcstructure() {
     // roof-flat.crn resolves entirely to bare (stateless) block ids —
@@ -1272,9 +1325,11 @@ fn a_reference_to_an_empty_place_id_is_a_cascade_on_its_own_row() {
 }
 
 /// One refused id written twice: each row is refused on its own line, the
-/// pre-resolve pass reports the repeat as `E_DUPLICATE_ID`, and a reference
-/// to the id is one cascade whose note points at the first of the two rows,
-/// as `E_DUPLICATE_PLACE_ID`'s "first row wins" does for a usable id.
+/// second is `E_DUPLICATE_PLACE_ID` against the first, and a reference to
+/// the id is one cascade whose note points at the first of the two rows, as
+/// `E_DUPLICATE_PLACE_ID`'s "first row wins" does for a usable id. The
+/// resolver compares refused ids too, so renaming both rows to one usable id
+/// raises no finding the author had not already seen.
 #[test]
 fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
     let (code, reported) = check_rows(&[
@@ -1289,7 +1344,7 @@ fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
         owned(&[
             (11, "E_INVALID_PLACE_ID"),
             (12, "E_INVALID_PLACE_ID"),
-            (12, "E_DUPLICATE_ID"),
+            (12, "E_DUPLICATE_PLACE_ID"),
             (13, "W_DEFERRED_PLACE"),
         ]),
         "reported={reported}",
@@ -1297,7 +1352,7 @@ fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
     assert_eq!(
         note_rows(&reported),
         [11, 11],
-        "`E_DUPLICATE_ID` and the cascade both point at the first row; reported={reported}",
+        "`E_DUPLICATE_PLACE_ID` and the cascade both point at the first row; reported={reported}",
     );
 }
 

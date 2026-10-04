@@ -611,3 +611,70 @@ fn declared_edge_and_refusals(stdout: &str) -> (String, Vec<&str>) {
     assert!(!refused.is_empty(), "premise: something refuses: {stdout}");
     (edge, refused)
 }
+
+/// An edition named twice in `--editions` is asked about once: stdout and
+/// stderr come out exactly as they do for the list with the repeat
+/// removed, in both formats, and the JSON document has one
+/// `edition_portability` and one `buildable_targets` entry per distinct
+/// edition, in the order the list first names them.
+///
+/// The Java-scoped floor is what gives stderr something to compare. It
+/// raises one note saying the edition-neutral row leaves it out, printed
+/// once per run, and, for each Java walk, one naming the versions it
+/// refuses, which a `java` walked twice would print twice.
+#[test]
+fn info_4b_an_edition_named_twice_is_reported_once() {
+    let path = tempfile_with_contents(
+        "repeated_edition",
+        &format!("@requires java version>=1.21.4\n{PAINTED_STRUCT}"),
+    );
+    let path = path.to_str().unwrap();
+    for (repeated, distinct) in [
+        ("java,java", "java"),
+        ("java,bedrock,java", "java,bedrock"),
+        ("bedrock,bedrock", "bedrock"),
+        ("bedrock,java,bedrock", "bedrock,java"),
+    ] {
+        for format in ["text", "json"] {
+            let run = |editions: &str| {
+                let out = cairn("info", &[path, "--editions", editions, "--format", format]);
+                assert!(
+                    out.status.success(),
+                    "--editions {editions} --format {format}: {}",
+                    String::from_utf8_lossy(&out.stderr),
+                );
+                (
+                    String::from_utf8(out.stdout).expect("utf-8"),
+                    String::from_utf8(out.stderr).expect("utf-8"),
+                )
+            };
+            let (stdout, stderr) = run(distinct);
+            assert!(
+                !stderr.is_empty(),
+                "premise: the floor puts a note on stderr: {stderr}",
+            );
+            if format == "json" {
+                let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
+                for axis in ["edition_portability", "buildable_targets"] {
+                    let listed: Option<Vec<&str>> = parsed[axis].as_array().map(|entries| {
+                        entries
+                            .iter()
+                            .map(|entry| entry["edition"].as_str().unwrap_or_default())
+                            .collect()
+                    });
+                    assert_eq!(
+                        listed,
+                        Some(distinct.split(',').collect()),
+                        "one {axis} entry per distinct edition asked, in the order typed: {parsed}",
+                    );
+                }
+            }
+            assert_eq!(
+                run(repeated),
+                (stdout, stderr),
+                "--editions {repeated} should report what --editions {distinct} does \
+                 (--format {format})",
+            );
+        }
+    }
+}

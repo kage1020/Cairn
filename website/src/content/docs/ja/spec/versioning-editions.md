@@ -15,6 +15,10 @@ title: "10. バージョンとエディション戦略"
 
 バックエンドは「バージョン文字列 ↔ DataVersion」表を持つので、`--target` には同じバージョンのどちら
 の綴りを渡してもかまいません。Bedrock も同様に、バージョン文字列を内部の単調キーに解決します。
+情報を持たない違いしかない 2 つのラベルは同じバージョンです。欠けた末尾の成分は 0、数値の成分の先頭の
+ゼロは桁ではなく桁合わせなので、`1.21`、`1.21.0`、`1.021` は 1 つのバージョンです (`1.21.0` は Java の
+`1.21`、`1.21` は Bedrock の `1.21.0`)。`@requires` と `@intended_targets` がラベルを読む規則と同じです。
+ビルドとそのロックファイルは、表の綴りでバージョンを記録します。
 
 ## 10.2 言語の契約: recompile であり transcode ではない
 
@@ -296,7 +300,7 @@ cap コードを報告し、それぞれが対象としているエディショ�
 
 | 下限 | 位置づけ | 理由 |
 |---|---|---|
-| 表の行を名指す (末尾のゼロは無視: `1.21` は Bedrock の `1.21.0`) | その行の `DataVersion` | 厳密。 |
+| 表の行を名指す (欠けた末尾の成分は 0、数値の成分の先頭のゼロは桁合わせ: `1.21` は Bedrock の `1.21.0`、`1.020` は Java の `1.20`) | その行の `DataVersion` | 厳密。 |
 | 表の行のプレリリースを名指す (`1.21.4-rc1`) | その行の `DataVersion` | リリース候補とそのリリースの間には何も出荷されないので、対応ターゲットもその間には存在しない。 |
 | 全行より下、または全行より上に位置する | 全ターゲットが満たす / どのターゲットも満たさない | 下限のラベルを先頭行・末尾行の *ラベル* と比較して得る答えだが、どの行が先頭・末尾かを決めるのは *キー* である。したがって「表のラベルがテキスト順とキー順で一致する」ときにちょうど成り立つ。レジストリパックのローダがロード時にこれを検査する。下限のラベル自体はドット区切り 10 進でなければ比較対象にならない。 |
 | それ以外 — 表の範囲の内側にありながらどの行でもない | 位置づけない | `DataVersion` を持たず、与えることもできない。`E_REQUIRES_UNORDERABLE`。 |
@@ -515,7 +519,8 @@ ID のケースは `E_UNKNOWN_ID` と同じ答え方を、同じ 2 つの半分�
 す。degraded はブロックについての事実ではなく *ステートの組み合わせ* についての事実だからです。1 つ
 の ID は、詳細を失う組み合わせの数だけこのリストに現れます。`roof-hip` の 4 件は
 `minecraft:spruce_stairs` の 4 通りの綴りで、ID だけを鍵にしたリストは同じ行を 4 回出すことになりま
-す。
+す。ビルドの `W_INTENT_DEGRADED` も各エントリを同じく `id[states]` で名指すので、警告はそれぞれ異な
+り、同じエントリについての note と対応します。
 
 `dropped` はそれについての文ではなくプロパティと値を持ちます。`unsupported` の理由と同じ理由です。
 これを読む消費側が、どのステートが失われたかを知るために英文を解析する必要はありません。エディション
@@ -665,12 +670,12 @@ resolved_state:
   bedrock: { weirdo_direction: 1, upside_down_bit: false }              # shape が無く角がつながらない
 ```
 
-解決結果の差が見た目や機能の差になるとき、lint が知らせます。
+解決結果の差が見た目や機能の差になるとき、ビルドが知らせます。`themed-tower` の軒の階段は
+`shape=outer_left` です。
 
 ```text
-W_INTENT_DEGRADED line 12 id=roof_corner:
-  shape=inner_left cannot be resolved in Bedrock (stairs have no shape state).
-  Bedrock stairs render straight; visual gaps at corners.
+$ cairn compile examples/themed-tower.crn --edition bedrock
+warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs: stair `minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]` shape=outer_left has no Bedrock state; Bedrock stairs render straight, so corners show visual gaps
 ```
 
 正準語彙が吸収できるのは ID / ステート / シリアライズの差だけです。**概念の不在とゲーム挙動の差は吸
