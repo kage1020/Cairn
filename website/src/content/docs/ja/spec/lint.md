@@ -31,6 +31,14 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `E_DUPLICATE_ITEM` | 同じ種別のトップレベル項目 2 つが名前を共有している。 |
 | `E_DUPLICATE_HEADER` | 単一値の `@directive` が 2 回以上宣言されている。 |
 
+`E_DUPLICATE_ID` は、1 つの `site` のボディにある 2 つの `place` 行を、site を名指す
+`E_DUPLICATE_PLACE_ID` ([site と配置](#site-と配置)) に任せます。`E_INVALID_PLACE_ID` で
+拒否された id でも同じで、それを共有する 2 行目は自身の `E_INVALID_PLACE_ID` に加えて
+`E_DUPLICATE_PLACE_ID` になるので、両方の行を 1 つの使える id に改名しても新しい指摘は出ません。
+`place` 行がそのボディの他の行 (`connect` など) と `id=` を共有する場合は `E_DUPLICATE_ID` の
+ままです。1 つの行の下にインデントされた 2 つの `place` 行も、そのボディの行ではないので
+`E_DUPLICATE_ID` です。
+
 `E_DUPLICATE_SELECTOR` はセレクタを字面ではなく意味で比較します。属性の順序は関係なく、`class=` /
 `id=` / `mat_slot=` はラベルテキストとして比較されるので `small` と `"small"` は同じ値です。
 *違う* キーを束縛する行は合成されるので報告されません。属性が部分的に重なるだけの行も同様です
