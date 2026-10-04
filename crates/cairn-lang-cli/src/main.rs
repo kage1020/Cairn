@@ -956,12 +956,17 @@ fn run_check(
     // A lost scope first, in `run_compile`'s order: it is a fact about the
     // file, and the target that could not be resolved is a fact about the
     // command line.
+    //
+    // The verdict, and not the reason, is `compile`'s: this run is not held
+    // to the floors, and a `compile` whose floors refuse the target checks
+    // no id, so it can refuse on the floor without losing this scope.
     if !dropped_scopes.is_empty() {
         report_partial_build(
             file,
             &dropped_scopes,
             built_scopes,
-            "`cairn compile` at this target would refuse the build",
+            "`cairn compile` at this target would refuse the build, for this or for a \
+             `@requires` floor that refuses the target",
         );
         return ExitCode::from(1);
     }
@@ -2862,19 +2867,18 @@ fn run_compile(
     // Resolved before lowering because lowering checks every block id
     // against the pinned version's table, and reported below rather than
     // here — see `resolve_target`. A target that does not resolve leaves
-    // lowering with nothing to check against, which is the same "no target
-    // pinned" mode `cairn check` runs in.
+    // lowering with nothing to check against, which is the same "no version
+    // pinned" mode `cairn lower` runs in. So does a target the declared
+    // floors refuse, so the refusal `enforce_version_floor` reports for it
+    // is not preceded by an id finding that refusal makes moot; see
+    // `load_and_lower`.
     let resolved_target = resolve_target(edition, target);
-    let pinned = resolved_target
-        .as_ref()
-        .ok()
-        .map(ResolvedTarget::mc_version);
     let Lowered {
         source,
         block_ir,
         dropped_scopes,
         version_floors,
-    } = match load_and_lower(file, edition, pinned) {
+    } = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
         Ok(lowered) => lowered,
         Err(code) => return code,
     };
@@ -2915,7 +2919,9 @@ fn run_compile(
             return ExitCode::from(1);
         }
     };
-    if let Err(code) = enforce_version_floor(file, &source, &version_floors, edition, &target) {
+    if let Some(floors) = &version_floors
+        && let Err(code) = enforce_version_floor(file, &source, floors, edition, &target)
+    {
         return code;
     }
 
@@ -3150,30 +3156,76 @@ struct Lowered {
     dropped_scopes: Vec<String>,
     /// The `@requires` floors this edition's build is held to, carried out
     /// of the parse so `compile` can hold `--target` to them without
-    /// reading the file a second time. Empty when the source declares
+    /// reading the file a second time. `None` when the source declares
     /// none, which is the ordinary case.
+    version_floors: Option<DeclaredFloors>,
+}
+
+/// The `@requires` floors one edition's build is held to, with that
+/// edition's version order to weigh them by.
+///
+/// Built only for a source that declares a floor, so a floor-less compile
+/// never builds the order, and built once, so the id-check gate in
+/// [`load_and_lower`] and the report in [`enforce_version_floor`] ask
+/// [`floor_refusing_target`] of the same floors against the same order.
+struct DeclaredFloors {
+    /// Never empty.
     ///
     /// Every applicable floor rather than the strictest of them: picking
     /// the strictest means ordering two floors against each other, and the
     /// order is the target edition's `DataVersion` table — which the
     /// enforcement below already consults once per floor, reaching the
     /// same answer without the extra comparison.
-    version_floors: Vec<VersionFloor>,
+    floors: Vec<VersionFloor>,
+    /// The target edition's `DataVersion` table, as [`version_order`]
+    /// builds it.
+    order: VersionOrder,
 }
 
+/// Read, parse, resolve and lower `file` for `edition`'s build.
+///
+/// `target` is the `--target` the run resolved, or `None` when it did not
+/// resolve. Lowering checks block ids against that target's table unless
+/// the floors the source declares refuse it ([`floor_refusing_target`]).
+/// `run_compile` then refuses the build on the version axis, with
+/// `E_VERSION_CAP` or `E_REQUIRES_UNORDERABLE`, and an `E_UNKNOWN_ID` for a
+/// block that version lacks — usually the very reason the floor was
+/// declared — would send the author to replace a block when the repair is
+/// `--target` or the floor's own line. Such a target is lowered against no
+/// version, as `cairn lower` and `cairn info` lower: no id is checked at
+/// all, a typo no version declares included, and every lowering-stage
+/// finding that does not need the version, such as
+/// `E_UNKNOWN_ABSTRACT_TOKEN`, still comes out. Those and the check pass's
+/// findings are reported before the refusal is reached, and an error among
+/// them stops the build there. A malformed `@requires`
+/// (`E_INVALID_REQUIRES`) declares no floor, so it never suspends the
+/// check.
 fn load_and_lower(
     file: &Path,
     edition: EditionArg,
-    mc_version: Option<&str>,
+    target: Option<&ResolvedTarget>,
 ) -> Result<Lowered, ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
+    let floors = declared_version_floors(&module, edition.as_edition());
+    let version_floors = (!floors.is_empty()).then(|| DeclaredFloors {
+        floors,
+        order: version_order(edition.registry_pack()),
+    });
+    let mc_version = target
+        .filter(|target| {
+            version_floors.as_ref().is_none_or(|declared| {
+                floor_refusing_target(&declared.floors, &declared.order, target).is_none()
+            })
+        })
+        .map(ResolvedTarget::mc_version);
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition.as_edition()));
     // The pack is edition-specific: an abstract `@token` resolves through
     // the pack whose backend will serialise it, and the id table it is
     // checked against belongs to the one version that pack was pinned to.
-    // `mc_version: None` (no `--target` resolved) leaves the id check off
-    // rather than running it against a version nobody chose.
+    // `mc_version: None` leaves the id check off rather than running it
+    // against a version nobody chose (no `--target` resolved) or one the
+    // source disowns (the floors refuse it).
     let registry = edition.registry_pack().view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     // The check pass is the gate `cairn check` exposes; running it here is
@@ -3191,10 +3243,10 @@ fn load_and_lower(
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     Ok(Lowered {
-        version_floors: declared_version_floors(&module, edition.as_edition()),
         source,
         block_ir,
         dropped_scopes,
+        version_floors,
     })
 }
 
@@ -3210,9 +3262,9 @@ fn load_and_lower(
 /// ([versioning-editions](https://cairn-lang.dev/spec/versioning-editions)
 /// "The target is a compile-time parameter"): Java and Bedrock number their
 /// releases differently, so a floor the table cannot place is refused as its
-/// own failure rather than compared by its text. Every applicable floor is
-/// weighed and the first in source order that refuses the target is
-/// reported.
+/// own failure rather than compared by its text. Which floor is reported,
+/// and as which failure, is [`floor_refusing_target`]'s answer: the same
+/// answer that kept [`load_and_lower`] from pinning the target.
 ///
 /// # Errors
 ///
@@ -3221,33 +3273,18 @@ fn load_and_lower(
 fn enforce_version_floor(
     file: &Path,
     source: &str,
-    floors: &[VersionFloor],
+    declared: &DeclaredFloors,
     edition: EditionArg,
     target: &ResolvedTarget,
 ) -> Result<(), ExitCode> {
-    if floors.is_empty() {
-        return Ok(());
-    }
-    let order = version_order(edition.registry_pack());
-    // The unplaceable floor comes first even when a later one also refuses
-    // the target, for the reason `E_INVALID_REQUIRES` precedes
-    // `E_VERSION_CAP`: it is the line the author can act on, and a cap
-    // reported beside it would tell them to raise `--target` when the
-    // mistake is that the floor names no version of what they are
-    // building.
-    if let Some(floor) = floors
-        .iter()
-        .find(|floor| order.place(&floor.version) == FloorPlacement::Unplaceable)
-    {
-        report_unplaceable_floor(file, source, floor, edition, &order);
-        return Err(ExitCode::from(1));
-    }
-    let target_key = i64::from(target.version_int());
-    let Some(floor) = floors
-        .iter()
-        .find(|floor| order.verdict(&floor.version, target_key) == FloorVerdict::Below)
-    else {
-        return Ok(());
+    let DeclaredFloors { floors, order } = declared;
+    let floor = match floor_refusing_target(floors, order, target) {
+        None => return Ok(()),
+        Some(FloorRefusal::Unplaceable(floor)) => {
+            report_unplaceable_floor(file, source, floor, edition, order);
+            return Err(ExitCode::from(1));
+        }
+        Some(FloorRefusal::Below(floor)) => floor,
     };
     let position = LineStarts::new(source).position(source, floor.span.start);
     eprintln!(
@@ -3277,7 +3314,7 @@ fn enforce_version_floor(
     // against, and offering one of those sends the author to `unsupported
     // target` — the second error this list exists to prevent.
     let buildable = supported_versions(edition.registry_pack());
-    let usable = versions_satisfying(&order, floors, &buildable);
+    let usable = versions_satisfying(order, floors, &buildable);
     if usable.is_empty() {
         eprintln!(
             "  no supported {} target satisfies it: {}",
@@ -3301,6 +3338,55 @@ fn enforce_version_floor(
         );
     }
     Err(ExitCode::from(1))
+}
+
+/// The floor that refuses a target, and on which ground.
+///
+/// Two grounds because they send the author to different lines, under
+/// different codes: a target below a floor is `E_VERSION_CAP`, repaired by
+/// `--target` or by lowering the floor, and a floor the edition's table
+/// cannot place is `E_REQUIRES_UNORDERABLE` at every target, repaired on
+/// the floor's own line.
+#[derive(Debug, Clone, Copy)]
+enum FloorRefusal<'a> {
+    /// The edition's version table cannot place this floor, so no target
+    /// satisfies it and none violates it.
+    Unplaceable(&'a VersionFloor),
+    /// The target sits below this floor.
+    Below(&'a VersionFloor),
+}
+
+/// The floor that refuses `target`, and why, or `None` when every floor
+/// lets it through.
+///
+/// The one predicate both halves of a compile's version check ask:
+/// [`load_and_lower`] pins no version for a target this refuses, and
+/// [`enforce_version_floor`] reports the floor it names. So the id check is
+/// suspended for exactly the targets the build is then refused on the
+/// version axis, and a run that suspended it never writes.
+///
+/// An unplaceable floor is named ahead of a below-target one wherever the
+/// two sit in the source, for the reason `E_INVALID_REQUIRES` precedes
+/// `E_VERSION_CAP`: it is the line the author can act on, and a cap
+/// reported beside it would tell them to raise `--target` when the mistake
+/// is that the floor names no version of what they are building. Among the
+/// floors on one ground, the first in source order is named.
+fn floor_refusing_target<'a>(
+    floors: &'a [VersionFloor],
+    order: &VersionOrder,
+    target: &ResolvedTarget,
+) -> Option<FloorRefusal<'a>> {
+    if let Some(floor) = floors
+        .iter()
+        .find(|floor| order.place(&floor.version) == FloorPlacement::Unplaceable)
+    {
+        return Some(FloorRefusal::Unplaceable(floor));
+    }
+    let target_key = i64::from(target.version_int());
+    floors
+        .iter()
+        .find(|floor| order.verdict(&floor.version, target_key) == FloorVerdict::Below)
+        .map(FloorRefusal::Below)
 }
 
 /// Report a floor the target edition's table cannot place.

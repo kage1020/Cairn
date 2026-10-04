@@ -645,6 +645,12 @@ fn parity_8_a_pinned_check_reports_exactly_what_the_compile_reports() {
     // `--target latest` on the check side because `compile --target`
     // defaults to `latest`; naming a version here would compare two
     // different pins and call the difference parity.
+    //
+    // A target the file's floors refuse is outside the equality: `compile`
+    // pins no version there and reports the floor, while `check`, which is
+    // not held to the floors, pins it and reports the ids it lacks. No
+    // fixture here reaches that case: the only floor any of them declares
+    // is `version>=1.20`, the one `PROLOGUE` carries, which `latest` clears.
     let tmp = TempDir::new().expect("tempdir");
     for (index, (code, body)) in all_fixtures().enumerate() {
         let path = write_fixture(tmp.path(), index, body);
