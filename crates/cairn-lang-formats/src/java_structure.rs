@@ -48,13 +48,15 @@ pub enum JavaStructureError {
     },
     /// A voxel named a palette slot the palette does not have.
     ///
-    /// Unreachable through the compiler, where [`Palette::intern`] is the
-    /// only source of a [`PaletteIndex`] — but [`BlockArray`]'s fields are
-    /// public and so is this builder, so a consumer of the crate can hand
-    /// over a grid and a palette that disagree. Writing the index anyway
-    /// produces a file that names a slot the reader has to invent.
+    /// Unreachable through the compiler, where interning
+    /// ([`Palette::intern`], [`Palette::try_intern`]) is the only source of
+    /// a [`PaletteIndex`] — but [`BlockArray`]'s fields are public and so is
+    /// this builder, so a consumer of the crate can hand over a grid and a
+    /// palette that disagree. Writing the index anyway produces a file that
+    /// names a slot the reader has to invent.
     ///
     /// [`Palette::intern`]: cairn_lang_core::block_array::Palette::intern
+    /// [`Palette::try_intern`]: cairn_lang_core::block_array::Palette::try_intern
     /// [`PaletteIndex`]: cairn_lang_core::block_array::PaletteIndex
     #[error("voxel palette index {index} is outside the {len}-entry palette")]
     PaletteIndexOutOfRange {
