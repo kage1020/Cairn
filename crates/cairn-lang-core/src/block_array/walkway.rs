@@ -182,7 +182,7 @@ impl WindowArgFault {
         }
     }
 
-    /// The reason `super::lower::fill_window` defers the window.
+    /// The reason `super::lower::cut_window` defers the window.
     pub(super) fn deferral(self) -> String {
         format!("window {}", self.clause())
     }
@@ -204,8 +204,9 @@ pub(super) struct WindowArgs {
 /// Read a window's `offset=`, `y=` and `size=`, in that order, refusing
 /// at the first one that cannot be used.
 ///
-/// `super::lower::fill_window` and [`port_world_position`] both call this,
-/// so the cut and the port accept one set and name one first fault.
+/// `super::lower::cut_window` and [`window_center_offset`], which
+/// [`port_world_position`] asks for a window port, both call this, so the
+/// cut and the port accept one set and name one first fault.
 /// `repeat=`, `step=` and `sym=` are not read here: only the cut uses them,
 /// and a window they defer is refused as a port by
 /// [`PortRejection::NotCut`] rather than by a reason of its own.
@@ -1239,7 +1240,7 @@ fn door_world_xz(
 /// out-of-range world coordinate.
 ///
 /// `offset=`, `y=` and `size=` are read by [`read_window_args`], the
-/// function `super::lower::fill_window` reads them with, so the two
+/// function `super::lower::cut_window` reads them with, so the two
 /// accept the same values and refuse the same first one. `repeat=`,
 /// `step=` and `sym=` are not read: a window they defer is refused by the
 /// caller's `cut` check instead.
@@ -1259,7 +1260,7 @@ fn door_world_xz(
 /// [`super::lower`] cuts the window with, called on the column that pass
 /// builds.
 ///
-/// Horizontal before vertical, the order `fill_window` asks in, so a
+/// Horizontal before vertical, the order `cut_window` asks in, so a
 /// window wrong both ways is refused for the reason its own line gives.
 fn window_center_offset(
     member: &Member,
@@ -2657,7 +2658,7 @@ mod tests {
 
     #[test]
     fn port_world_position_window_without_offset_anchors_at_the_origin_like_the_cut() {
-        // `fill_window` reads an absent `offset=` as `0` and cuts the
+        // `cut_window` reads an absent `offset=` as `0` and cuts the
         // window; the port used to refuse the same member, so the strip
         // was dropped beside a window that was there.
         assert_eq!(
@@ -2764,7 +2765,7 @@ mod tests {
     #[test]
     fn port_world_position_asks_the_window_horizontal_fit_before_the_masonry() {
         // `offset=4 size=3x2` runs past a 5-long wall and `y=9` is above a
-        // 3-high course: both wrong. `fill_window` asks the horizontal
+        // 3-high course: both wrong. `cut_window` asks the horizontal
         // fit first, so the port does too, and the two lines give one
         // reason.
         assert!(matches!(

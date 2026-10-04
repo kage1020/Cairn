@@ -31,6 +31,14 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `E_DUPLICATE_ITEM` | 同じ種別のトップレベル項目 2 つが名前を共有している。 |
 | `E_DUPLICATE_HEADER` | 単一値の `@directive` が 2 回以上宣言されている。 |
 
+`E_DUPLICATE_ID` は、1 つの `site` のボディにある 2 つの `place` 行を、site を名指す
+`E_DUPLICATE_PLACE_ID` ([site と配置](#site-と配置)) に任せます。`E_INVALID_PLACE_ID` で
+拒否された id でも同じで、それを共有する 2 行目は自身の `E_INVALID_PLACE_ID` に加えて
+`E_DUPLICATE_PLACE_ID` になるので、両方の行を 1 つの使える id に改名しても新しい指摘は出ません。
+`place` 行がそのボディの他の行 (`connect` など) と `id=` を共有する場合は `E_DUPLICATE_ID` の
+ままです。1 つの行の下にインデントされた 2 つの `place` 行も、そのボディの行ではないので
+`E_DUPLICATE_ID` です。
+
 `E_DUPLICATE_SELECTOR` はセレクタを字面ではなく意味で比較します。属性の順序は関係なく、`class=` /
 `id=` / `mat_slot=` はラベルテキストとして比較されるので `small` と `"small"` は同じ値です。
 *違う* キーを束縛する行は合成されるので報告されません。属性が部分的に重なるだけの行も同様です
@@ -146,8 +154,9 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 lowering を走らせるコマンド — `cairn compile`、`cairn lower`、`cairn info`、
 `cairn check --edition E --target V` — だけです。さらに `E_UNKNOWN_ID` は固定されたターゲットを必要
 とするので、実際に出せるのは `cairn compile --target` と `cairn check --edition E --target V` の 2
-つです (`info` と `lower` はバージョンを固定せずに lowering します)。`--target` なしの
-`cairn check` は lowering を走らせないので、どちらのコードにも到達しません。
+つです (`info` と `lower` はバージョンを固定せずに lowering します。ファイルの下限がターゲットを拒否
+する `compile` も同じです。[バージョンとエディション](/ja/spec/versioning-editions/#宣言された下限は強制する)
+を参照)。`--target` なしの `cairn check` は lowering を走らせないので、どちらのコードにも到達しません。
 
 `W_STATE_LITERAL_UNCHECKED` も同じ lowering が出します。テーマのスロットや `connect … path=` から
 読むステートリテラルのそれぞれに付くので、`cairn compile`、`cairn lower`、`cairn info`、
@@ -160,10 +169,14 @@ lowering 段の指摘を見られるようにするためです。ターゲッ�
 0 で通過し、`cairn compile` を終了コード 1 で止めていました。それを決める情報 — ただ 1 つの
 `(edition, version)` の組 — が `check` のコマンドラインになかったからです。このフラグは
 [コンパイルモデル §4.2](/ja/spec/compilation/#42-ターゲット軸) が `--target` 単独を拒否するのと同じ理由で
-`--edition` を必要とし、compile と同じテーブルに対して同じ lowering パスを走らせるので、スコープを
-失えば同じ `E_PARTIAL_BUILD` を出します。行わないのは `compile` が書くことすべてです。成果物もロック
-ファイルも作らず、`@requires` の下限の強制も行いません — ロックはビルドを保証する記録であり、
-`--target` を下限に突き合わせるのはそれを生成するコマンドだけの仕事だからです (`E_VERSION_CAP`)。
+`--edition` を必要とし、ファイルの下限が通すターゲットでは compile と同じテーブルに対して同じ
+lowering パスを走らせるので、スコープを失えば同じ `E_PARTIAL_BUILD` を出します。行わないのは
+`compile` が書くことすべてです。成果物もロックファイルも作らず、`@requires` の下限の強制も行いません —
+ロックはビルドを保証する記録であり、`--target` を下限に突き合わせるのはそれを生成するコマンドだけの仕事
+だからです (`E_VERSION_CAP`)。そのため下限が拒否するターゲットでは、2 つのコマンドが名指す原因は異なり
+ます。`check` はターゲットを固定してそのターゲットに無い ID を報告し、それでスコープが空になれば
+`E_PARTIAL_BUILD` も出します。`compile` は ID を照合せず、下限を報告します
+([バージョンとエディション](/ja/spec/versioning-editions/#宣言された下限は強制する))。
 フラグを付けなければ従来どおりの挙動なので、今日通っているソースが落ち始めることはありません
 ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。
 
@@ -223,14 +236,21 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 
 `E_UNKNOWN_ABSTRACT_TOKEN` と `W_ABSTRACT_TOKEN_DEFERRED` は、答えられる相手がいたかどうかで分かれ
 ます。パックが渡されていてそのトークンを宣言していないなら、最も近い既知のトークンへの示唆を添えて
-ビルドを止めます。パックが渡されていないなら、そもそも問うていないので、セルは警告付きで空気に
-なります。後者はライブラリ呼び出し側が到達する経路 — LSP のハイライトや、パック無しの `cairn check`
+ビルドを止めます。パックが渡されていないなら、そもそも問うていないので、メンバは警告付きで縮退し
+ます。後者はライブラリ呼び出し側が到達する経路 — LSP のハイライトや、パック無しの `cairn check`
 — であり、警告なのはそのためです。そこで拒否すると、パック無しで読まれたソースをすべて拒否すること
 になります。
 
+警告は、メンバがどう縮退するかを告げます。`floor` はセルを空気のまま残し、`roof`、軒の `stair`、
+`pressure_plate` は既定ブロックで作られます。`walls` は建てられず行も占めないので、そこに切り抜く
+`door` や `window` は拒否されます。`window` は切り抜かれないので壁が残り、そのポートも一緒に拒否
+されます ([§9.3.5](/ja/spec/components-editing-sites/#935-ポートと-connect))。
+
 `W_NO_THEME_BOUND` は 1 段上の同じ形です。どのテーマにも解決されない `mat_slot=` は読むスロット表を
-持たないので、そのメンバはボクセルを 1 つも置きません。テーマを束縛せず `mat_slot=` も読まない
-モジュールは報告されません。
+持たないので、メンバは同じように縮退します。テーマが無ければ `walls` は 1 つも建たないので、
+`door` と `window` はすべて壁が無いために拒否されます。`floor` はセルを空気のまま残し、`roof`、
+軒の `stair`、`pressure_plate` はそれでも既定ブロックで作られます。テーマを束縛せず `mat_slot=`
+も読まないモジュールは報告されません。
 
 `@intended_targets` の 3 つのコードは、ファイルが表明した意図を、そのファイル自身の下限に照らします
 ([versioning-editions §10.4](/ja/spec/versioning-editions#ヒントは下限に照らされる))。そのエディション
@@ -320,7 +340,7 @@ macOS と Windows が既定で使う大文字小文字を区別しないファ�
 
 | コード | 意味 |
 |---|---|
-| `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def が公開していないポートを名指している。 |
+| `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def の本体に直接宣言されたどのメンバも持たないポート id を名指している。`level` の下のメンバはまだポートになれず、id がそうしたメンバのものなら、この診断はそう告げます。 |
 | `E_AMBIGUOUS_PORT` | そのポート id が、参照先の def の複数のメンバに一致する。 |
 | `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` が無く、walkway を敷くマテリアルがない。 |
 | `W_DUPLICATE_WALKWAY` | 同じ site の先行する行が既に敷いた `(from, to)` の組を、`connect` が繰り返している。 |
@@ -363,6 +383,7 @@ id を理由に拒否された行を名指す原点 (`W_DEFERRED_PLACE`。その
 | `W_STRUCT_NO_SIZE` | `struct` が `size=WxH` を宣言していないので、lowering は範囲を導けず飛ばす。 |
 | `W_DEF_NO_SIZE` | `def` での同じ事象。その def を使う `place use=` がすべて飛ばされる。 |
 | `W_STRUCTURE_TOO_LARGE` | スコープの導出範囲が、block-array パスが確保する体積を超えている。 |
+| `W_PALETTE_TOO_LARGE` | スコープが空気以外に 65,535 を超える異なるブロックステートを塗り、1 つのパレットで添字付けできる数を超えている。 |
 | `W_PHASE_CONFLICT` | 同じフェーズの 2 つのメンバが、1 つのボクセルに異なるブロックを書いた ([§4.4](/ja/spec/compilation))。 |
 | `E_PARTIAL_BUILD` | 要求されたスコープ、または `connect` 行が求めた walkway のうち少なくとも 1 つが lowering されず、求められたより少ないものしか作られなかった。 |
 
@@ -372,6 +393,19 @@ id を理由に拒否された行を名指す原点 (`W_DEFERRED_PLACE`。その
 `W_STRUCTURE_TOO_LARGE` は「組み合わせ」で発火します。`size=`、`walls height=`、`roof overhang=`、
 `level y=` はそれぞれ単独で範囲検査されていて、これはその積が届かないところにある場合です。上の 2 つ
 と同じく、エラーではなく警告です。そのスコープが飛ばされるだけで、ビルドの残りには影響しません。
+
+`W_PALETTE_TOO_LARGE` は、どこに塗るかではなく何を塗るかについての同種の上限です。後のメンバが覆う
+ものも含め、メンバが書いたすべてのブロックステートが数えられるので、上限は完成したスコープに残るもの
+ではなく書かれたものにかかります。バニラのレジストリのブロックステートははるかに少ないので、ソースが
+この上限に届くのは、固定されたターゲットが照合しないブロック ID かステートリテラルのプロパティを通じて
+だけです。ブロック ID は、バージョンを固定せずに lowering が走るところでは照合されません。`cairn lower`
+と `cairn info`、エディションが出荷していないバージョンを名指す `cairn compile` と
+`cairn check --edition E --target V`、そしてファイルの下限が拒否するターゲットを渡した `cairn compile`
+([バージョンとエディション](/ja/spec/versioning-editions/#宣言された下限は強制する)) がそれです。
+ステートリテラルのプロパティは、`W_STATE_LITERAL_UNCHECKED` が述べるとおり
+([マテリアルとターゲット](#マテリアルとターゲット)) どのターゲットでも照合されないので、lowering を
+走らせるどのコマンドもこの上限に届き得ます。解決されるターゲットを渡した `cairn compile` もその 1 つ
+です。上と同じ理由で警告です。
 
 `W_DEFERRED_MEMBER` は、モジュールごと失敗させるのではなく、部分的なビルドを見られる状態に保ちます。
 スコープの残りは lowering され、指摘は何が欠けているかを名指します。

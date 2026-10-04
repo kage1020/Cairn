@@ -210,6 +210,7 @@ mod tests {
             | C::WalkwayBlocked
             | C::DuplicateWalkway
             | C::StructureTooLarge
+            | C::PaletteTooLarge
             | C::InvalidWalkwayIdent
             | C::PhaseConflict => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {

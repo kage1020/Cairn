@@ -83,7 +83,10 @@ use super::walkway::{
     port_world_position, read_window_args, route_path,
 };
 use super::wall_column::WallColumn;
-use super::{BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex};
+use super::{
+    BlockArray, BlockArrayIr, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteFull,
+    PaletteIndex,
+};
 
 /// Catalog token a `pressure_plate` member's default material comes from.
 ///
@@ -161,8 +164,29 @@ pub fn lower_to_block_array(
     resolution: &Resolution,
     registry: Option<&dyn TargetRegistry>,
 ) -> BlockArrayIr {
+    lower_to_block_array_within(intent, resolution, registry, PALETTE_CAPACITY)
+}
+
+/// [`lower_to_block_array`], with each body's palette refusing a new
+/// state once it holds `palette_capacity` entries, air included, rather
+/// than [`PALETTE_CAPACITY`]; a larger capacity is clamped to that one.
+///
+/// [`lower_to_block_array`] passes [`PALETTE_CAPACITY`], the only capacity
+/// the compiler lowers at. This module's tests pass one small enough to
+/// reach `W_PALETTE_TOO_LARGE` without painting 65,536 states, and so run
+/// the same code the public entry point does.
+fn lower_to_block_array_within(
+    intent: &IntentModule,
+    resolution: &Resolution,
+    registry: Option<&dyn TargetRegistry>,
+    palette_capacity: usize,
+) -> BlockArrayIr {
     let mut structures: IndexMap<String, BlockArray> = IndexMap::new();
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    let bodies = BodyInputs {
+        registry,
+        palette_capacity,
+    };
 
     for s in &intent.structs {
         let key = format!("struct::{}", s.name);
@@ -171,7 +195,7 @@ pub fn lower_to_block_array(
         // diagnostic (no `size=`, etc.), so the skip here is silent on
         // purpose — diagnosing twice would teach a reader the struct had
         // two unrelated problems instead of one.
-        if let Some(ba) = lower_struct(s, scope, registry, &mut diagnostics) {
+        if let Some(ba) = lower_struct(s, scope, bodies, &mut diagnostics) {
             // First-write-wins on a duplicate name, matching
             // `resolve`'s `FIRST_BINDING_WINS`. `resolution.scopes` has
             // already bound the first body; taking the last here would
@@ -188,7 +212,7 @@ pub fn lower_to_block_array(
             site,
             &intent.defs,
             resolution,
-            registry,
+            bodies,
             &mut structures,
             &mut placed,
             &mut diagnostics,
@@ -1009,7 +1033,7 @@ fn buried_port_clause(
                 .and_then(|ba| ba.palette.entries.get(usize::from(owner.voxel.0)));
             if block.is_none() {
                 // INVARIANT: the voxel was read from this placement's own
-                // array, whose palette `Palette::intern` built. A miss is a
+                // array, whose palette `ScopePalette` built. A miss is a
                 // broken array; the clause still names the placement, just
                 // not the block.
                 debug_assert!(
@@ -1164,34 +1188,111 @@ fn diag_walkway_endpoint_skipped(
 }
 
 /// Where an `@token` was read from, for the prose of the abstract-token
-/// diagnostics.
-#[derive(Clone, Copy)]
+/// diagnostics. [`Self::MemberSlot`] also carries what gets built without
+/// the material, which [`Self::consequence`] words.
+///
+/// Only `W_ABSTRACT_TOKEN_DEFERRED` reads that payload.
+/// [`diag_unknown_abstract_token`] reads [`Self::token_noun`] and
+/// [`Self::catalog_note`] alone, because `E_UNKNOWN_ABSTRACT_TOKEN` stops the
+/// build and there is no fallback to describe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenSite {
     /// A `connect` row's `path=`.
     WalkwayPath,
-    /// A member's `mat_slot=` binding.
-    MemberSlot,
+    /// A member's `mat_slot=` binding, with what becomes of that member
+    /// when the binding resolves to nothing.
+    MemberSlot(MemberFallback),
+}
+
+/// What becomes of a member whose `mat_slot=` resolves to no material.
+///
+/// A property of the role's painter, so it is derived from the role by
+/// [`Self::for_role`] rather than handed in by each caller of
+/// [`resolve_member_state`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemberFallback {
+    /// A `floor`: [`fill_floor`] is not reached, so its cells stay air.
+    Air,
+    /// A `walls`: it paints no row, and [`painting_walls`] drops it, so it
+    /// claims none in the volume either ([`max_wall_top`]) and a `door` or
+    /// `window` cut into it is refused.
+    Absent,
+    /// A `window`: [`cut_window`] refuses it, so the wall it would have cut
+    /// stays, and a port anchored on it is refused with it.
+    WallStays,
+    /// A `roof`, an eave `stair` or a `pressure_plate`: built from its
+    /// default block.
+    ///
+    /// A `roof` or eave `stair` also gets [`geometry_material_id`]'s
+    /// `W_DEFERRED_MEMBER`, which names the concrete id: only the geometry
+    /// side knows it, since a roof's depends on its `kind`.
+    /// [`plate_id_for_member`] deliberately does not echo; its doc says why.
+    DefaultBlock,
+}
+
+impl MemberFallback {
+    /// The consequence for a member of this role.
+    ///
+    /// Only the six roles whose painters call [`resolve_member_state`] reach
+    /// here. The rest are spelled out with no wildcard, as in the four
+    /// `lower_*_member` matches, so a role added later fails the compile
+    /// here rather than borrowing another role's sentence: a `door` is
+    /// carved and reads no material, a `circuit` reserves a region, a
+    /// `place` or `connect` is a site row, `Other` is a keyword the role
+    /// table does not know, and a `level` is flattened before any painter
+    /// runs.
+    fn for_role(role: &MemberRole) -> Self {
+        match role {
+            MemberRole::Floor => Self::Air,
+            MemberRole::Walls => Self::Absent,
+            MemberRole::Window => Self::WallStays,
+            MemberRole::Roof | MemberRole::Stair | MemberRole::PressurePlate => Self::DefaultBlock,
+            MemberRole::Door
+            | MemberRole::Level
+            | MemberRole::Circuit
+            | MemberRole::Place
+            | MemberRole::Connect
+            | MemberRole::Other(_) => {
+                unreachable!(
+                    "no painter resolves the `mat_slot=` of a `{}`",
+                    MemberRole::keyword(role)
+                )
+            }
+        }
+    }
 }
 
 impl TokenSite {
     fn token_noun(self) -> &'static str {
         match self {
             Self::WalkwayPath => "abstract path token",
-            Self::MemberSlot => "abstract token",
+            Self::MemberSlot(_) => "abstract token",
         }
     }
 
-    fn fallback_subject(self) -> &'static str {
+    /// What the build does instead, worded to follow "cannot be lowered
+    /// without the registry pack; ".
+    fn consequence(self) -> &'static str {
         match self {
-            Self::WalkwayPath => "the walkway",
-            Self::MemberSlot => "the cell",
+            Self::WalkwayPath => "the walkway falls back to air",
+            Self::MemberSlot(MemberFallback::Air) => "the cell falls back to air",
+            Self::MemberSlot(MemberFallback::Absent) => {
+                "the walls are not built and take up no rows, so a door or window cut into them \
+                 is refused"
+            }
+            Self::MemberSlot(MemberFallback::WallStays) => {
+                "the window is not cut, and the wall stays"
+            }
+            Self::MemberSlot(MemberFallback::DefaultBlock) => {
+                "the member is built from its default block"
+            }
         }
     }
 
     fn canonical_example(self) -> &'static str {
         match self {
             Self::WalkwayPath => "path=@gravel",
-            Self::MemberSlot => "@oak_planks",
+            Self::MemberSlot(_) => "@oak_planks",
         }
     }
 
@@ -1200,7 +1301,7 @@ impl TokenSite {
             Self::WalkwayPath => {
                 "abstract path tokens must be declared in the pack's `materials` catalog"
             }
-            Self::MemberSlot => {
+            Self::MemberSlot(_) => {
                 "abstract material tokens must be declared in the pack's `materials` catalog \
                  (see `spec/materials-themes` \"Canonical vocabulary\")"
             }
@@ -1213,9 +1314,9 @@ fn diag_abstract_token(span: Span, token: &str, site: TokenSite) -> Diagnostic {
         code: DiagnosticCode::AbstractTokenDeferred,
         span,
         primary: format!(
-            "{} `@{token}` cannot be lowered without the registry pack; {} falls back to air",
+            "{} `@{token}` cannot be lowered without the registry pack; {}",
             site.token_noun(),
-            site.fallback_subject(),
+            site.consequence(),
         ),
         notes: vec![DiagnosticNote {
             span: None,
@@ -1367,7 +1468,7 @@ fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
 fn lower_struct<'a>(
     s: &StructIr,
     scope: Option<&'a ScopeResolution>,
-    registry: Option<&'a dyn TargetRegistry>,
+    bodies: BodyInputs<'a>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<BlockArray> {
     let Some(size) = s.size.as_ref() else {
@@ -1386,7 +1487,7 @@ fn lower_struct<'a>(
             source_scope: format!("struct::{}", s.name),
         },
         scope,
-        registry,
+        bodies,
         diagnostics,
     )?;
     Some(lowered.array)
@@ -1415,7 +1516,7 @@ fn lower_site<'a>(
     site: &SiteIr,
     defs: &[DefIr],
     resolution: &'a Resolution,
-    registry: Option<&'a dyn TargetRegistry>,
+    bodies: BodyInputs<'a>,
     structures: &mut IndexMap<String, BlockArray>,
     placed: &mut IndexMap<String, PlacedBody>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -1533,7 +1634,7 @@ fn lower_site<'a>(
                 source_scope: key,
             },
             Some(scope),
-            registry,
+            bodies,
             diagnostics,
         );
         // Below the body on purpose, not an early return above it: a row
@@ -1547,9 +1648,10 @@ fn lower_site<'a>(
             continue;
         };
         let Some(LoweredBody { array, walls, cut }) = body else {
-            // The extent was refused; the diagnostic names the scope, and
-            // recording a placement for a structure that does not exist
-            // would leave the lockfile pointing at nothing.
+            // The body was refused, for its extent or for its palette; the
+            // diagnostic names the scope, and recording a placement for a
+            // structure that does not exist would leave the lockfile
+            // pointing at nothing.
             report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
@@ -1621,6 +1723,18 @@ enum VoxelSource {
     Place,
 }
 
+/// What every body of one run is lowered against, whether a `struct` or
+/// a `place`'s `def`: threaded unchanged from
+/// [`lower_to_block_array_within`] down to [`lower_body_to_block_array`].
+#[derive(Clone, Copy)]
+struct BodyInputs<'a> {
+    /// The compile target's registry view; see [`lower_to_block_array`].
+    registry: Option<&'a dyn TargetRegistry>,
+    /// The entries each body's palette may hold, air included:
+    /// [`PALETTE_CAPACITY`] from [`lower_to_block_array`].
+    palette_capacity: usize,
+}
+
 /// Inputs shared by the struct and place lowering paths.
 struct BodyDescriptor<'a> {
     kind: VoxelSource,
@@ -1656,15 +1770,21 @@ struct LoweredBody {
 
 /// Lower one struct or place body into voxels.
 ///
-/// `None` means the extent the body asks for is past
-/// [`MAX_STRUCTURE_VOLUME`]; the diagnostic has already been pushed and the
-/// caller drops the scope.
+/// `None` means the body was refused, and the diagnostic saying why has
+/// already been pushed: the extent it asks for is past
+/// [`MAX_STRUCTURE_VOLUME`] (`W_STRUCTURE_TOO_LARGE`), or it paints more
+/// states than its palette holds (`W_PALETTE_TOO_LARGE`). The caller drops
+/// the scope.
 fn lower_body_to_block_array<'a>(
     body: BodyDescriptor<'a>,
     scope: Option<&'a ScopeResolution>,
-    registry: Option<&'a dyn TargetRegistry>,
+    bodies: BodyInputs<'a>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<LoweredBody> {
+    let BodyInputs {
+        registry,
+        palette_capacity,
+    } = bodies;
     let interior_w = body.size.w.get();
     let interior_h = body.size.h.get();
 
@@ -1715,7 +1835,7 @@ fn lower_body_to_block_array<'a>(
         diagnostics.push(diag_structure_too_large(&body, dims));
         return None;
     }
-    let mut palette = Palette::new_with_air();
+    let mut palette = ScopePalette::with_capacity(palette_capacity);
 
     let ctx = StructCtx {
         scope,
@@ -1731,6 +1851,16 @@ fn lower_body_to_block_array<'a>(
 
     let buckets = bucket_members(&flattened, diagnostics);
     let canvas = paint_phases(buckets, &ctx, &mut palette, diagnostics);
+    // Before anything reads the grid: a voxel painted after the palette
+    // filled up holds air rather than its state, so the array is not the
+    // body the source describes.
+    let mut palette = match palette.into_palette() {
+        Ok(palette) => palette,
+        Err(full) => {
+            diagnostics.push(diag_palette_too_large(&body, full));
+            return None;
+        }
+    };
 
     for ((overridden, overriding), voxels) in &canvas.conflicts {
         diagnostics.push(diag_phase_conflict(
@@ -1807,7 +1937,7 @@ fn lower_body_to_block_array<'a>(
 fn paint_phases(
     buckets: PhaseBuckets<'_>,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Canvas {
     let PhaseBuckets {
@@ -1943,12 +2073,12 @@ fn run_phase(
         &Member,
         u32,
         &StructCtx<'_>,
-        &mut Palette,
+        &mut ScopePalette,
         &mut MemberCanvas<'_>,
         &mut Vec<Diagnostic>,
     ),
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut Canvas,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2054,6 +2184,91 @@ fn prune_unreferenced(palette: &mut Palette, canvas: &Canvas) -> (Vec<PaletteInd
         .map(|v| remap[usize::from(v.0)])
         .collect();
     (voxels, never_painted)
+}
+
+/// The palette one body is painted against, refusing rather than
+/// panicking once it holds its capacity: [`PALETTE_CAPACITY`] entries
+/// from [`lower_to_block_array`].
+///
+/// Every paint interns its state, including one a later member then
+/// covers, so what fills the palette is the states *written*, not the
+/// states the finished body keeps, and the overflow has to be caught at
+/// paint time. A paint past the capacity gets air in place of its state
+/// and records the refusal; [`Self::into_palette`] then answers with it,
+/// and the body is refused with `W_PALETTE_TOO_LARGE` before its grid is
+/// read. Holding the refusal here, rather than threading a `Result` out
+/// of every generator, is what lets the generators keep their infallible
+/// `intern`, and the type is what keeps them off the panicking
+/// [`Palette::intern`].
+struct ScopePalette {
+    palette: Palette,
+    capacity: usize,
+    /// The refusal that overflowed the palette, once one has.
+    overflow: Option<PaletteFull>,
+}
+
+impl ScopePalette {
+    /// Air at index `0`, and room for `capacity` entries in all, air's
+    /// among them; [`Palette::try_intern_within`] clamps a larger one to
+    /// [`PALETTE_CAPACITY`].
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            palette: Palette::new_with_air(),
+            capacity,
+            overflow: None,
+        }
+    }
+
+    fn intern(&mut self, state: BlockState) -> PaletteIndex {
+        // Once a paint has overflowed, `into_palette` discards the palette
+        // and the body is refused, so which states the palette holds from
+        // here on, and which index a later paint gets, is never read. Air
+        // without the scan, which would otherwise walk every entry on each
+        // remaining paint of an already refused body.
+        if self.overflow.is_some() {
+            return PaletteIndex::AIR;
+        }
+        self.palette
+            .try_intern_within(state, self.capacity)
+            .unwrap_or_else(|full| {
+                self.overflow = Some(full);
+                PaletteIndex::AIR
+            })
+    }
+
+    /// The palette, or the refusal that overflowed it.
+    fn into_palette(self) -> Result<Palette, PaletteFull> {
+        match self.overflow {
+            None => Ok(self.palette),
+            Some(full) => Err(full),
+        }
+    }
+}
+
+/// A body painted more distinct block states than its palette holds.
+///
+/// The number is `full`'s, the capacity that was in force, less the slot
+/// air holds from the start.
+fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::PaletteTooLarge,
+        span: body.header_span.clone(),
+        primary: format!(
+            "`{}` paints more than {} distinct non-air block states, past what one palette \
+             can index; block-array lowering skipped it",
+            body.scope_label,
+            full.capacity.saturating_sub(1),
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "every state a member writes counts, including one a later member \
+                      covers; a vanilla registry has far fewer, so check the block ids with \
+                      `--edition` and `--target`, and each state literal by hand, since no \
+                      target checks its properties (`W_STATE_LITERAL_UNCHECKED`)"
+                .to_owned(),
+        }],
+        data: None,
+    }
 }
 
 /// The scope asked for more voxels than [`MAX_STRUCTURE_VOLUME`] allows.
@@ -2562,7 +2777,7 @@ fn lower_massing_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2621,7 +2836,7 @@ fn lower_envelope_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2653,7 +2868,7 @@ fn lower_opening_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2683,7 +2898,7 @@ fn lower_fixture_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -2770,7 +2985,7 @@ fn resolve_member_state(
             diagnostics.push(diag_abstract_token(
                 member_or_slot_span(member, slot_value),
                 &token,
-                TokenSite::MemberSlot,
+                TokenSite::MemberSlot(MemberFallback::for_role(&member.role)),
             ));
             None
         }
@@ -2779,7 +2994,7 @@ fn resolve_member_state(
                 member_or_slot_span(member, slot_value),
                 &token,
                 suggestion.as_deref(),
-                TokenSite::MemberSlot,
+                TokenSite::MemberSlot(MemberFallback::for_role(&member.role)),
             ));
             None
         }
@@ -2818,7 +3033,7 @@ fn palette_index_for(
     member: &Member,
     scope: Option<&ScopeResolution>,
     registry: Option<&dyn TargetRegistry>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
 ) -> Option<PaletteIndex> {
@@ -3480,13 +3695,24 @@ fn fill_walls(
 fn fill_roof(
     member: &Member,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let Some(kind) = parse_roof_kind(member, diagnostics) else {
         return;
     };
+    // Resolved behind [`roof_draws`], the gate the volume goes through, and
+    // not before it. A `shed` with no usable `slope_to=` draws nothing, and
+    // resolving it anyway reported a material for a roof that is not there:
+    // `W_ABSTRACT_TOKEN_DEFERRED` saying it is built from its default block,
+    // and `geometry_material_id`'s `W_DEFERRED_MEMBER` naming that block.
+    // `parse_roof_kind` has read a kind, so that shed is the one roof turned
+    // away here, and [`shed_slope_to`] is what says why.
+    if roof_draws(member).is_none() {
+        shed_slope_to(member, diagnostics);
+        return;
+    }
     let resolved = resolve_member_state(
         member,
         ctx.scope,
@@ -3663,7 +3889,7 @@ fn diag_incompatible_material(
 
 fn fill_roof_gable(
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     base_id: &str,
 ) {
@@ -3701,7 +3927,7 @@ fn fill_roof_gable(
 fn fill_roof_shed(
     member: &Member,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
     base_id: &str,
@@ -3732,7 +3958,7 @@ fn fill_roof_shed(
 
 fn fill_roof_hip(
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     base_id: &str,
 ) {
@@ -3762,7 +3988,7 @@ fn fill_roof_hip(
 
 fn fill_roof_flat(
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     base_id: &str,
 ) {
@@ -3965,7 +4191,7 @@ fn fill_stair(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -4022,7 +4248,7 @@ fn draw_eave_band(
     states: EaveStates<'_>,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
@@ -4295,7 +4521,7 @@ fn fill_pressure_plate(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -4928,7 +5154,7 @@ fn fill_window(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -4993,7 +5219,7 @@ fn cut_window(
     sym: Option<bool>,
     y_offset: u32,
     ctx: &StructCtx<'_>,
-    palette: &mut Palette,
+    palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> WindowCut {
@@ -5183,24 +5409,30 @@ fn cut_window(
     }
     if sym == Some(true) {
         let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
-        if mirror_offset == offset {
-            // The mirror sits exactly on top of the primary; emitting it
-            // again would be a no-op so we silently coalesce.
-            return WindowCut::Cut;
-        }
         // Reject overlapping mirrors: a `sym=true` window asks for a
-        // *pair*, not one wide span. If the two rectangles intersect the
-        // user almost certainly wrote a window that is more than half as
-        // wide as the wall — diagnose and skip the mirror so the primary
-        // is still emitted cleanly.
+        // *pair*, not one wide span. The `span_end` guard above refused
+        // `offset + size_w > wall_length`, so neither subtraction
+        // saturates, and the two rectangles intersect exactly when the
+        // window straddles the wall's midpoint
+        // (2*offset < wall_length < 2*(offset + size_w)) — diagnose and
+        // skip the mirror so the primary is still emitted cleanly. A
+        // centred window (2*offset + size_w == wall_length) has a mirror
+        // that is the same rectangle, the fullest overlap there is: the
+        // author still asked for two windows and got one, so it is
+        // reported like the rest.
         let primary_end = offset.saturating_add(sw);
         let mirror_end = mirror_offset.saturating_add(sw);
         let overlap = offset < mirror_end && mirror_offset < primary_end;
         if overlap {
+            let relation = if mirror_offset == offset {
+                "coincides with"
+            } else {
+                "would overlap"
+            };
             diagnostics.push(diag_deferred_member_reason(
                 member,
                 &format!(
-                    "`sym=true` window at offset={offset} size={sw}x{sh} on the `{}` wall would overlap its mirror (wall length={len}); the mirror was skipped",
+                    "`sym=true` window at offset={offset} size={sw}x{sh} on the `{}` wall {relation} its mirror (wall length={len}); the mirror was skipped",
                     side_name(side),
                 ),
             ));
@@ -5621,6 +5853,201 @@ mod tests {
         lower_to_block_array(&ir, &resolution, None)
     }
 
+    /// [`lowered`], with every body's palette holding `palette_capacity`
+    /// entries rather than [`PALETTE_CAPACITY`].
+    fn lowered_within(source: &str, palette_capacity: usize) -> BlockArrayIr {
+        let module = parse(source).expect("parse");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, None);
+        lower_to_block_array_within(&ir, &resolution, None, palette_capacity)
+    }
+
+    /// `theme t`, binding `states` slots, `s0` up, each to a block of its
+    /// own, and a 1x1 `body` header followed by one `walls` row per slot.
+    /// Every row paints the body's one ring cell, so the body writes
+    /// `states` distinct states and the finished body keeps the last.
+    fn overwriting_walls_in(body: &str, states: usize) -> String {
+        use std::fmt::Write as _;
+
+        let mut source = String::from("theme t:\n");
+        for i in 0..states {
+            writeln!(source, "  slot s{i} -> @b{i}").expect("writing to a String");
+        }
+        writeln!(source, "\n{body}").expect("writing to a String");
+        for i in 0..states {
+            writeln!(source, "  walls mat_slot=s{i} height=1").expect("writing to a String");
+        }
+        source
+    }
+
+    /// [`overwriting_walls_in`] a `struct s`.
+    fn overwriting_walls(states: usize) -> String {
+        overwriting_walls_in("struct s size=1x1", states)
+    }
+
+    /// [`overwriting_walls_in`] a `def d`, placed once as `a`.
+    fn placed_overwriting_walls(states: usize) -> String {
+        let mut source = overwriting_walls_in("def d size=1x1:", states);
+        source.push_str("\nsite v:\n  place id=a use=d theme=t at=origin\n");
+        source
+    }
+
+    /// The findings of `code` in `ir`.
+    fn findings(ir: &BlockArrayIr, code: DiagnosticCode) -> Vec<&Diagnostic> {
+        ir.diagnostics.iter().filter(|d| d.code == code).collect()
+    }
+
+    /// The three properties `tests/diagnostic_text.rs` holds every string
+    /// its corpus renders to. That corpus lowers at [`PALETTE_CAPACITY`],
+    /// so it cannot reach `W_PALETTE_TOO_LARGE`, and its text is checked
+    /// here instead.
+    fn assert_reads_as_prose(origin: &str, text: &str) {
+        assert!(
+            !text.contains("  "),
+            "{origin} renders a run of spaces, which is a dropped `\\` line \
+             continuation in the literal: {text:?}",
+        );
+        assert!(
+            !text.contains('\n') && !text.contains('\t'),
+            "{origin} embeds its own line break: {text:?}",
+        );
+        assert!(!text.trim().is_empty(), "{origin} renders nothing");
+        assert_eq!(text.trim(), text, "{origin} has leading or trailing space");
+    }
+
+    /// A body that paints more states than its palette can hold is refused
+    /// with `W_PALETTE_TOO_LARGE` rather than panicking. Run at a capacity
+    /// of four (air and three states) so the refusal is reachable without
+    /// painting 65,536 states; the boundary itself is pinned on
+    /// `Palette::try_intern`. States a later member covers count, which is
+    /// why the refused body would have kept a single state.
+    ///
+    /// The refusal comes before the phase conflicts are reported: a body
+    /// that is not built has no conflict to resolve, and at the real
+    /// capacity a body one state short of it reports 65,534 of them.
+    #[test]
+    fn a_body_painting_more_states_than_its_palette_holds_is_refused() {
+        let fits = lowered_within(&overwriting_walls(3), 4);
+        assert!(
+            findings(&fits, DiagnosticCode::PaletteTooLarge).is_empty(),
+            "three states fit: {:#?}",
+            fits.diagnostics,
+        );
+        let array = fits
+            .structures
+            .get("struct::s")
+            .expect("three states build");
+        assert_eq!(
+            array.palette.entries.len(),
+            2,
+            "air and the last wall's state: the covered ones are pruned after painting",
+        );
+        assert!(
+            !findings(&fits, DiagnosticCode::PhaseConflict).is_empty(),
+            "a built body reports the walls that overwrite one another: {:#?}",
+            fits.diagnostics,
+        );
+
+        let over = lowered_within(&overwriting_walls(4), 4);
+        let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
+        assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
+        assert_eq!(refused[0].severity(), Severity::Warning);
+        assert!(
+            refused[0]
+                .primary
+                .starts_with("`s` paints more than 3 distinct non-air block states"),
+            "{}",
+            refused[0].primary,
+        );
+        assert!(
+            !over.structures.contains_key("struct::s"),
+            "the refused body must not reach a writer",
+        );
+        assert_eq!(
+            findings(&over, DiagnosticCode::PhaseConflict),
+            Vec::<&Diagnostic>::new(),
+            "a refused body is not built, so it has no conflict to report",
+        );
+    }
+
+    /// The rendered text of the refusal reads as prose: a dropped `\`
+    /// continuation in the primary's or the note's literal is caught here.
+    #[test]
+    fn the_palette_refusal_renders_as_prose() {
+        let over = lowered_within(&overwriting_walls(4), 4);
+        let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
+        assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
+        assert_reads_as_prose("W_PALETTE_TOO_LARGE primary", &refused[0].primary);
+        assert_eq!(refused[0].notes.len(), 1, "{:#?}", refused[0].notes);
+        assert_reads_as_prose("W_PALETTE_TOO_LARGE note 0", &refused[0].notes[0].message);
+    }
+
+    /// The `def` path to the same refusal, as `tests/structure_volume.rs`
+    /// covers it for the extent: a `place` paints its `def` through the body
+    /// lowering a `struct` uses, and a refused body places nothing. The
+    /// finding names the row and anchors on it.
+    #[test]
+    fn a_place_whose_def_paints_more_states_than_its_palette_holds_is_refused() {
+        let fits = lowered_within(&placed_overwriting_walls(3), 4);
+        assert!(
+            findings(&fits, DiagnosticCode::PaletteTooLarge).is_empty(),
+            "three states fit: {:#?}",
+            fits.diagnostics,
+        );
+        assert!(
+            fits.placements.contains_key("site::v::a"),
+            "{:?}",
+            fits.placements.keys(),
+        );
+
+        let source = placed_overwriting_walls(4);
+        let over = lowered_within(&source, 4);
+        let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
+        assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
+        assert!(
+            refused[0]
+                .primary
+                .starts_with("`a` paints more than 3 distinct non-air block states"),
+            "{}",
+            refused[0].primary,
+        );
+        assert!(
+            source[refused[0].span.clone()].starts_with("place id=a"),
+            "anchored on the row, not the def: {:?}",
+            &source[refused[0].span.clone()],
+        );
+        assert!(over.structures.is_empty(), "{:?}", over.structures.keys());
+        assert!(over.placements.is_empty(), "{:?}", over.placements.keys());
+        assert_eq!(
+            findings(&over, DiagnosticCode::PhaseConflict),
+            Vec::<&Diagnostic>::new(),
+        );
+    }
+
+    /// Once a paint has overflowed, `intern` answers air for every later
+    /// state, one the palette already holds included, without looking it
+    /// up: the body is refused, so nothing reads what a later paint gets.
+    #[test]
+    fn a_scope_palette_looks_nothing_up_once_it_has_overflowed() {
+        let mut palette = ScopePalette::with_capacity(2);
+        let kept = BlockState::bare("test:kept");
+        assert_eq!(palette.intern(kept.clone()), PaletteIndex(1));
+        assert_eq!(
+            palette.intern(BlockState::bare("test:refused")),
+            PaletteIndex::AIR,
+        );
+        assert_eq!(
+            palette.intern(kept),
+            PaletteIndex::AIR,
+            "a state the palette holds is not looked up after the overflow",
+        );
+        assert_eq!(
+            palette.into_palette(),
+            Err(PaletteFull { capacity: 2 }),
+            "the refusal kept is the one at the capacity in force",
+        );
+    }
+
     fn lowered_with_resolver(source: &str, resolver: &dyn TargetRegistry) -> BlockArrayIr {
         let module = parse(source).expect("parse");
         let ir = lower(&module);
@@ -5970,6 +6397,14 @@ mod tests {
             .iter()
             .filter(|d| d.code == DiagnosticCode::DeferredMember)
             .count()
+    }
+
+    fn primaries_of(out: &BlockArrayIr, code: DiagnosticCode) -> Vec<&str> {
+        out.diagnostics
+            .iter()
+            .filter(|d| d.code == code)
+            .map(|d| d.primary.as_str())
+            .collect()
     }
 
     #[test]
@@ -6658,6 +7093,171 @@ mod tests {
         let ba = out.structures.get("struct::s").unwrap();
         assert_eq!(block_id(ba, 1, 0, 1), "minecraft:oak_planks");
         assert_eq!(block_id(ba, 0, 1, 0), "minecraft:cobblestone");
+    }
+
+    /// One arm of the abstract-token deferral tests: members that read
+    /// `@wood.dark` from slot `trim` (slot `wall` is `@cobblestone`), what
+    /// `W_ABSTRACT_TOKEN_DEFERRED` says the member does instead, and a check
+    /// that the voxels say the same. `None` is a member turned away before it
+    /// asks for its material, which earns no such warning at all.
+    struct DeferralArm {
+        members: &'static str,
+        consequence: Option<&'static str>,
+        voxels: fn(&BlockArrayIr),
+    }
+
+    fn check_deferral_arms(arms: &[DeferralArm]) {
+        for arm in arms {
+            let members = arm.members;
+            let out = lowered(&format!(
+                "theme t:\n  slot wall -> @cobblestone\n  slot trim -> @wood.dark\n\n\
+                 struct s size=5x5\n  {members}\n"
+            ));
+            let expected: Vec<String> = arm
+                .consequence
+                .map(|c| {
+                    format!(
+                        "abstract token `@wood.dark` cannot be lowered without the registry \
+                         pack; {c}"
+                    )
+                })
+                .into_iter()
+                .collect();
+            assert_eq!(
+                primaries_of(&out, DiagnosticCode::AbstractTokenDeferred),
+                expected,
+                "{members}",
+            );
+            (arm.voxels)(&out);
+        }
+    }
+
+    fn struct_s(out: &BlockArrayIr) -> &BlockArray {
+        out.structures.get("struct::s").expect("struct::s lowered")
+    }
+
+    fn has_id(out: &BlockArrayIr, id: &str) -> bool {
+        struct_s(out).palette.entries.iter().any(|e| e.id == id)
+    }
+
+    fn refused_for_no_wall(out: &BlockArrayIr) -> bool {
+        primaries_of(out, DiagnosticCode::DeferredMember)
+            .iter()
+            .any(|p| p.contains("has no wall to cut into"))
+    }
+
+    #[test]
+    fn abstract_token_deferral_says_what_each_member_does_instead() {
+        let default_block = Some("the member is built from its default block");
+        check_deferral_arms(&[
+            // The issue's example: the window is not cut, so its wall stays.
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          window side=front offset=1 y=1 size=1x2 mat_slot=trim",
+                consequence: Some("the window is not cut, and the wall stays"),
+                voxels: |out| {
+                    for y in 1..=2 {
+                        assert_eq!(block_id(struct_s(out), 1, y, 4), "minecraft:cobblestone");
+                    }
+                },
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  floor mat_slot=trim",
+                consequence: Some("the cell falls back to air"),
+                voxels: |out| assert_eq!(block_id(struct_s(out), 1, 0, 1), BlockState::AIR_ID),
+            },
+            // The walls' rows are absent rather than air, and a window cut
+            // into them is refused.
+            DeferralArm {
+                members: "floor mat_slot=wall\n  \
+                          walls mat_slot=trim height=3\n  \
+                          window side=front offset=1 y=1 size=1x2 mat_slot=wall",
+                consequence: Some(
+                    "the walls are not built and take up no rows, so a door or window cut into \
+                     them is refused",
+                ),
+                voxels: |out| {
+                    assert_eq!(struct_s(out).dims.y, 1);
+                    assert!(refused_for_no_wall(out));
+                },
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  roof kind=gable mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, STAIR_BASE_ID)),
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  roof kind=flat mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, FLAT_BASE_ID)),
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          roof kind=shed slope_to=front mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, STAIR_BASE_ID)),
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          roof kind=flat mat_slot=wall overhang=1\n  \
+                          stair kind=stairs side=front mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, STAIR_BASE_ID)),
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          pressure_plate at=front.outside offset=2 y=0 mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, PRESSURE_PLATE_BASE_ID)),
+            },
+        ]);
+    }
+
+    #[test]
+    fn a_member_refused_before_its_material_defers_no_abstract_token() {
+        check_deferral_arms(&[
+            // `cut_window` refuses a window with no wall before it resolves
+            // the material.
+            DeferralArm {
+                members: "floor mat_slot=wall\n  \
+                          window side=front offset=1 y=1 size=1x2 mat_slot=trim",
+                consequence: None,
+                voxels: |out| {
+                    assert_eq!(struct_s(out).dims.y, 1);
+                    assert!(refused_for_no_wall(out));
+                },
+            },
+            // A shed with no usable `slope_to=` draws nothing, so it claims no
+            // material either: the one finding is the one that says why.
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  roof kind=shed mat_slot=trim",
+                consequence: None,
+                voxels: |out| {
+                    assert_eq!(struct_s(out).dims.y, 4);
+                    assert!(!has_id(out, STAIR_BASE_ID));
+                    assert_eq!(
+                        primaries_of(out, DiagnosticCode::DeferredMember),
+                        vec!["shed roof requires `slope_to=` (one of front, back, left, right)"],
+                    );
+                },
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          roof kind=shed slope_to=sideways mat_slot=trim",
+                consequence: None,
+                voxels: |out| {
+                    assert_eq!(struct_s(out).dims.y, 4);
+                    assert!(!has_id(out, STAIR_BASE_ID));
+                    assert_eq!(
+                        primaries_of(out, DiagnosticCode::DeferredMember),
+                        vec![
+                            "unknown shed `slope_to=sideways` (expected one of front, back, left, \
+                             right)"
+                        ],
+                    );
+                },
+            },
+        ]);
     }
 
     #[test]
@@ -7427,6 +8027,46 @@ struct s size=9x7
         }
         // Mirror cells outside the primary stay cobblestone (x=1).
         assert_eq!(block_id(ba, 1, 2, 4), "minecraft:cobblestone");
+    }
+
+    #[test]
+    fn a_sym_window_that_coincides_with_its_mirror_is_reported() {
+        // `spec/syntax` "Selectors": a mirror overlapping the primary is
+        // `W_DEFERRED_MEMBER`. A centred window's mirror is the same
+        // rectangle, so the author asked for two windows and got one.
+        // All three centred shapes on a 5-wide wall, the solutions of
+        // 2*offset + width == 5: mirror_offset = 5 - 2 - 1 = 2,
+        // 5 - 1 - 3 = 1 and 5 - 0 - 5 = 0. The last puts `mirror_offset`
+        // at 0, the floor its `saturating_sub` clamps to.
+        for (offset, width) in [(2, 1), (1, 3), (0, 5)] {
+            let src = format!(
+                "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\n\
+                 struct s size=5x5\n  walls mat_slot=w height=3\n  \
+                 window side=front offset={offset} y=1 size={width}x1 sym=true mat_slot=g\n"
+            );
+            let out = lowered(&src);
+            let found: Vec<_> = out
+                .diagnostics
+                .iter()
+                .map(|d| (d.code, d.primary.as_str()))
+                .collect();
+            assert_eq!(
+                found,
+                vec![(
+                    DiagnosticCode::DeferredMember,
+                    format!(
+                        "`sym=true` window at offset={offset} size={width}x1 on the `front` wall \
+                         coincides with its mirror (wall length=5); the mirror was skipped"
+                    )
+                    .as_str(),
+                )],
+            );
+            // The primary is still painted.
+            let ba = out.structures.get("struct::s").unwrap();
+            for x in offset..offset + width {
+                assert_eq!(block_id(ba, x, 1, 4), "minecraft:glass_pane", "x={x}");
+            }
+        }
     }
 
     // The one-row course under a roof, and the struct with no walls at
