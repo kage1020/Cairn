@@ -7,7 +7,10 @@
 //! layout. These tests hold them to the same bytes over every structure the
 //! shipped examples lower to, on both editions, and over the shapes the
 //! examples do not reach: an array with a different extent on each axis, and
-//! empty ones, whose lists must declare `TAG_End`.
+//! empty ones, whose lists must declare `TAG_End`. Each Bedrock structure's
+//! `block_palette` is held to listing no block twice, the set
+//! `spec/compilation` "Within-phase conflicts and the palette" says it
+//! stays.
 //!
 //! The write path indexes the grid and declares list lengths without
 //! re-checking them, so the last tests hold `prepare_*` to refusing every
@@ -30,6 +33,7 @@ use cairn_lang_formats::java_structure::{
 };
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use cairn_lang_nbt::NbtIoError;
+use cairn_lang_nbt::tag::{Compound, Tag};
 
 mod common;
 use common::examples;
@@ -84,13 +88,36 @@ fn assert_java_streams_the_tree(label: &str, array: &BlockArray) {
     assert_same_bytes(label, "write_structure_gzip", &one_step, &tree);
 }
 
+/// The `block_palette` entries of a built `.mcstructure` root.
+fn block_palette(root: &Compound) -> &[Tag] {
+    let structure = match root.entries.get("structure") {
+        Some(Tag::Compound(structure)) => structure,
+        other => panic!("structure is not a Compound: {other:?}"),
+    };
+    let palette = match structure.entries.get("palette") {
+        Some(Tag::Compound(palette)) => palette,
+        other => panic!("palette is not a Compound: {other:?}"),
+    };
+    let default = match palette.entries.get("default") {
+        Some(Tag::Compound(default)) => default,
+        other => panic!("palette.default is not a Compound: {other:?}"),
+    };
+    match default.entries.get("block_palette") {
+        Some(Tag::List(entries)) => &entries.items,
+        other => panic!("block_palette is not a List: {other:?}"),
+    }
+}
+
 /// Assert the Bedrock write path agrees with the tree for `array`, and
-/// return the parity notes `prepare_mcstructure` raised.
+/// that the `block_palette` it writes lists no block twice. Returns the
+/// parity notes `prepare_mcstructure` raised and how many palette entries
+/// translation merged into an earlier one.
 ///
 /// The tree builder takes its notes from `prepare_mcstructure`, so
 /// comparing the two would compare one function with itself; the sweep
-/// below checks the notes are raised at all instead.
-fn assert_bedrock_streams_the_tree(label: &str, array: &BlockArray) -> Vec<ParityNote> {
+/// below checks the notes are raised at all instead, and that some
+/// palette has a merge for the set check to hold.
+fn assert_bedrock_streams_the_tree(label: &str, array: &BlockArray) -> (Vec<ParityNote>, usize) {
     let target = resolve_bedrock_target("latest").expect("latest");
     let (root, _) = build_mcstructure_tag(array, &target).expect("build");
     let mut tree = Vec::new();
@@ -99,7 +126,14 @@ fn assert_bedrock_streams_the_tree(label: &str, array: &BlockArray) -> Vec<Parit
     let mut streamed = Vec::new();
     prepared.write(&mut streamed).expect("stream write");
     assert_same_bytes(label, "streamed .mcstructure", &streamed, &tree);
-    notes
+    let written = block_palette(&root);
+    for (i, entry) in written.iter().enumerate() {
+        assert!(
+            !written[..i].contains(entry),
+            "{label}: block_palette lists {entry:?} twice"
+        );
+    }
+    (notes, array.palette.entries.len() - written.len())
 }
 
 #[test]
@@ -110,6 +144,7 @@ fn every_shipped_structure_streams_the_bytes_its_tree_writes() {
     ] {
         let mut compared = 0;
         let mut notes = 0;
+        let mut merged = 0;
         for (name, source) in examples() {
             let ir = lower_latest(&source, edition, pack);
             for (scope, array) in &ir.structures {
@@ -117,7 +152,9 @@ fn every_shipped_structure_streams_the_bytes_its_tree_writes() {
                 match edition {
                     Edition::Java => assert_java_streams_the_tree(&label, array),
                     Edition::Bedrock => {
-                        notes += assert_bedrock_streams_the_tree(&label, array).len();
+                        let (raised, folded) = assert_bedrock_streams_the_tree(&label, array);
+                        notes += raised.len();
+                        merged += folded;
                     }
                 }
                 compared += 1;
@@ -126,11 +163,18 @@ fn every_shipped_structure_streams_the_bytes_its_tree_writes() {
         assert!(compared > 0, "{edition:?}: the examples lowered to nothing");
         // A stair with a corner `shape` degrades on Bedrock (`themed-tower`
         // has one), so the sweep passes notes through `prepare_mcstructure`
-        // rather than only structures that raise none.
+        // rather than only structures that raise none. Dropping that
+        // `shape` folds two stairs into one Bedrock block (`roof-hip`'s
+        // corners do), so the set check above holds a merge too, rather
+        // than only palettes with nothing to merge.
         if matches!(edition, Edition::Bedrock) {
             assert!(
                 notes > 0,
                 "no shipped example raised a parity note on Bedrock"
+            );
+            assert!(
+                merged > 0,
+                "no shipped example merged two palette entries on Bedrock"
             );
         }
     }
