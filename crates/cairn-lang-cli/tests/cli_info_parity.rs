@@ -14,7 +14,7 @@ use cairn_lang_formats::bedrock_state::degradation_detail;
 use serde_json::Value;
 
 mod common;
-use common::{cargo_bin, examples_dir};
+use common::{cargo_bin, example_in_tempdir, examples_dir};
 
 fn info_json(file: &str, editions: &str) -> Value {
     info_json_at(&examples_dir().join(file), editions)
@@ -199,6 +199,34 @@ fn ac3_the_java_axis_is_pure_portable_for_a_source_java_can_build() {
     }
 }
 
+/// Compile a copy of `examples/<example>` for Bedrock in a temp dir, so the
+/// lockfile lands beside the copy rather than in `examples/`, and return
+/// the `W_INTENT_DEGRADED` lines it printed.
+fn degraded_warnings(example: &str) -> Vec<String> {
+    let (tmp, copied) = example_in_tempdir(example);
+    let compile = Command::new(cargo_bin())
+        .args([
+            "compile",
+            copied.to_str().unwrap(),
+            "--edition",
+            "bedrock",
+            "--out",
+            tmp.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("run cairn");
+    let stderr = String::from_utf8_lossy(&compile.stderr);
+    assert!(
+        compile.status.success(),
+        "compile {example} failed; stderr={stderr}"
+    );
+    stderr
+        .lines()
+        .filter(|line| line.contains("W_INTENT_DEGRADED"))
+        .map(str::to_owned)
+        .collect()
+}
+
 #[test]
 fn info_degraded_count_matches_compile_intent_degraded_warnings() {
     // Info↔compile cross-consistency: `portability_for_bedrock` and
@@ -210,7 +238,7 @@ fn info_degraded_count_matches_compile_intent_degraded_warnings() {
     // a degradation source to `translate_states` in the compile path but
     // not the info path (or vice versa) would let the parity table
     // undercount vs. what the writer actually degrades.
-    let src_repo = examples_dir().join("themed-tower.crn");
+
     // 1. Info-side degraded count.
     let axes = info_json("themed-tower.crn", "bedrock");
     let degraded = as_u64(portability_entry(&axes, "bedrock"), "degraded");
@@ -219,34 +247,12 @@ fn info_degraded_count_matches_compile_intent_degraded_warnings() {
         "expected themed-tower Bedrock degraded >= 1 for cross-consistency check, got {degraded}",
     );
 
-    // 2. Compile-side warning count. Copy the source into a tempdir so
-    //    the lockfile doesn't land next to the repo copy.
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let copied = tmp.path().join("themed-tower.crn");
-    std::fs::copy(&src_repo, &copied).expect("copy themed-tower");
-    let out_dir = tempfile::TempDir::new().expect("out tempdir");
-    let compile = Command::new(cargo_bin())
-        .args([
-            "compile",
-            copied.to_str().unwrap(),
-            "--edition",
-            "bedrock",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-        ])
-        .output()
-        .expect("run cairn");
+    // 2. Compile-side warning count.
+    let warnings = degraded_warnings("themed-tower.crn");
     assert!(
-        compile.status.success(),
-        "compile failed; stderr={}",
-        String::from_utf8_lossy(&compile.stderr),
-    );
-    let stderr = String::from_utf8_lossy(&compile.stderr);
-    let warning_count = stderr.matches("W_INTENT_DEGRADED").count();
-    assert!(
-        warning_count >= 1,
+        !warnings.is_empty(),
         "info reported degraded >= 1 but compile emitted no W_INTENT_DEGRADED; \
-         info and compile paths must share `translate_states` as source of truth; stderr={stderr}",
+         info and compile paths must share `translate_states` as source of truth",
     );
 }
 
@@ -260,31 +266,11 @@ fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
     let axes = info_json("roof-hip.crn", "bedrock");
     let entries = portability_entry(&axes, "bedrock")["degraded_entries"]
         .as_array()
-        .expect("degraded_entries is a JSON array")
-        .clone();
+        .expect("degraded_entries is a JSON array");
     assert!(entries.len() > 1, "premise: several entries degrade");
 
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let copied = tmp.path().join("roof-hip.crn");
-    std::fs::copy(examples_dir().join("roof-hip.crn"), &copied).expect("copy roof-hip");
-    let compile = Command::new(cargo_bin())
-        .args([
-            "compile",
-            copied.to_str().unwrap(),
-            "--edition",
-            "bedrock",
-            "--out",
-            tmp.path().to_str().unwrap(),
-        ])
-        .output()
-        .expect("run cairn");
-    let stderr = String::from_utf8_lossy(&compile.stderr);
-    assert!(compile.status.success(), "stderr={stderr}");
-    let warnings: Vec<&str> = stderr
-        .lines()
-        .filter(|line| line.contains("W_INTENT_DEGRADED"))
-        .collect();
-    let distinct: std::collections::BTreeSet<&&str> = warnings.iter().collect();
+    let warnings = degraded_warnings("roof-hip.crn");
+    let distinct: std::collections::BTreeSet<&String> = warnings.iter().collect();
     assert_eq!(
         distinct.len(),
         warnings.len(),
@@ -295,7 +281,7 @@ fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
         entries.len(),
         "one warning per entry: {warnings:?}"
     );
-    for entry in &entries {
+    for entry in entries {
         let named = format!(
             "`{}[{}]`",
             entry["id"].as_str().expect("an id"),
