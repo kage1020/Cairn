@@ -454,9 +454,9 @@ fn a_dont_care_row_stands_for_the_rows_it_replaces() {
 
 /// And a row of nothing but don't-cares closes the table on its own.
 ///
-/// The case the coverage walk must never be handed: a pattern that fixes
-/// nothing assigns every combination, so there is no lowest missing one
-/// to step towards.
+/// The case the sample search must never be handed: a pattern that
+/// fixes nothing assigns every combination, so there is no lowest missing
+/// one to find.
 #[test]
 fn a_row_of_only_dont_cares_completes_the_table() {
     assert!(codes(&table("sig.a, sig.b, sig.c", "--- -> 1")).is_empty());
@@ -566,17 +566,17 @@ fn a_row_inside_another_still_leaves_the_coverage_finding() {
     );
 }
 
-/// The walk for a missing combination steps over a row rather than
+/// The search for a missing combination passes over a row rather than
 /// through it.
 ///
-/// Nineteen don't-cares stand for half a million combinations. A walk
+/// Nineteen don't-cares stand for half a million combinations. A search
 /// that visited them one at a time would still return the right answer,
 /// which is why the assertion is on the answer *and* on the finding being
 /// the only one: the sample has to be the four lowest combinations the
 /// row does not assign, and those all sit above every combination it
 /// does.
 #[test]
-fn the_walk_steps_over_a_row_rather_than_through_it() {
+fn the_sample_search_passes_over_a_row_rather_than_through_it() {
     let names: Vec<String> = (0..20).map(|i| format!("sig.a{i}")).collect();
     let pattern = format!("0{}", "-".repeat(19));
     let found = only(&table(&names.join(", "), &format!("{pattern} -> 1")));
@@ -598,6 +598,67 @@ fn the_walk_steps_over_a_row_rather_than_through_it() {
             format!("1{}11", "0".repeat(17)),
         ],
     );
+}
+
+/// Two rows fixing one input or two each, with the free inputs *above*
+/// the fixed ones: the shape that hides its first missing combination
+/// behind every combination the first row assigns. The count is exact and
+/// so is the sample, at fifteen inputs and at forty — the finding does not
+/// depend on how many combinations sit in front of the first one missing.
+#[test]
+fn a_two_row_table_reports_its_gap_however_many_combinations_precede_it() {
+    for arity in [15usize, 40] {
+        let names: Vec<String> = (0..arity).map(|i| format!("sig.i{i}")).collect();
+        let rows = format!(
+            "{}0 -> 0; 0{}1 -> 1",
+            "-".repeat(arity - 1),
+            "-".repeat(arity - 2),
+        );
+        let found = only(&table(&names.join(", "), &rows));
+        let Some(DiagnosticData::TruthTablePartial {
+            inputs,
+            covered,
+            missing,
+        }) = found.data.clone()
+        else {
+            panic!("{arity} inputs should carry the partial payload, got {found:?}");
+        };
+        let half = 1u64 << (arity - 1);
+        assert_eq!(
+            (inputs, covered),
+            (u32::try_from(arity).expect("small"), half + half / 2),
+            "{arity} inputs",
+        );
+        assert_eq!(
+            missing,
+            vec![
+                format!("1{}1", "0".repeat(arity - 2)),
+                format!("1{}11", "0".repeat(arity - 3)),
+                format!("1{}101", "0".repeat(arity - 4)),
+                format!("1{}111", "0".repeat(arity - 4)),
+            ],
+            "{arity} inputs: the four lowest combinations neither row assigns",
+        );
+    }
+}
+
+/// Fewer combinations missing than the sample holds, scattered so that
+/// each sits under a different prefix: the search finds every one, in
+/// ascending order, and stops there.
+#[test]
+fn a_sample_smaller_than_the_cap_names_every_missing_combination() {
+    let found = only(&table(
+        "sig.a, sig.b, sig.c",
+        "000 -> 0; 01- -> 0; 101 -> 1; 110 -> 1",
+    ));
+    let Some(DiagnosticData::TruthTablePartial {
+        covered, missing, ..
+    }) = found.data.clone()
+    else {
+        panic!("the partial finding should carry its payload, got {found:?}");
+    };
+    assert_eq!(covered, 5);
+    assert_eq!(missing, ["001", "100", "111"]);
 }
 
 // -- don't-care outputs ---------------------------------------------------

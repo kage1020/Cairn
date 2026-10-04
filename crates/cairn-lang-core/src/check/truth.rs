@@ -37,6 +37,8 @@
 //! `children.asserts` — so a table under a `level` is checked against its
 //! signal names today and would be the one place a shape went unreported.
 
+use std::collections::BTreeMap;
+
 use crate::ast::TruthRow;
 use crate::error::Span;
 use crate::intent::{AssertIr, IntentModule, Member, MemberBody};
@@ -52,21 +54,6 @@ use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, Diagnost
 /// twenty-input table from building a million strings to describe a
 /// one-row mistake.
 const MISSING_SAMPLE: usize = 4;
-
-/// How many steps the walk for a missing combination may take before it
-/// gives the finding up.
-///
-/// Generous on purpose: it is a backstop against a table no one writes,
-/// not a budget any real table comes near.
-///
-/// A step leaves a row behind only when [`fill_free_tail`] can jump to
-/// the row's last combination, and it fills only the positions *below*
-/// the row's lowest fixed one. Don't-cares above that are re-entered one
-/// combination at a time, so the cost is nearer
-/// `rows × 2^(don't-cares above the lowest fixed position) ×
-/// MISSING_SAMPLE`. `{ --00; --01; --10 }` is three rows and sixteen
-/// steps for its four missing combinations, not three.
-const MISSING_WALK_STEPS: usize = 10_000;
 
 /// Past this many inputs the number of combinations is written `2^n`.
 ///
@@ -496,13 +483,12 @@ fn finding(
 /// The combinations no accepted row assigns, or `None` when there is
 /// nothing to report.
 ///
-/// `None` covers three cases, and only the first is "the table is
-/// complete". The other two are counts the compiler cannot state: a
-/// covered total past `u64`, which the payload carries, and a walk that
-/// ran out of steps before it found a missing combination. Both need an
-/// input list far past anything written by hand, and a finding whose
-/// numbers are guesses is worse than one that is missing — so the finding
-/// is withheld rather than approximated.
+/// `None` covers two cases, and only the first is "the table is
+/// complete". The other is a count the compiler cannot state: a covered
+/// total past `u64`, which the payload carries. That needs 64 or more
+/// don't-cares in one row, an input list far past anything written by
+/// hand, and a finding whose numbers are guesses is worse than one that
+/// is missing — so the finding is withheld rather than approximated.
 ///
 /// `accepted` is pairwise non-overlapping, which is what `check_table`
 /// drops a row to keep, so the covered total is the sum of the rows'
@@ -514,7 +500,7 @@ fn unassigned_combinations(span: &Span, arity: u32, accepted: &[&TruthRow]) -> O
         return None;
     }
     let covered_count = u64::try_from(covered).ok()?;
-    let sample = missing_sample(arity, accepted)?;
+    let sample = missing_sample(arity, accepted);
     if sample.is_empty() {
         return None;
     }
@@ -574,87 +560,90 @@ fn pattern_size(pattern: &str) -> Option<u128> {
 }
 
 /// The lowest few combinations no accepted row assigns, in ascending
-/// order, or `None` when the walk ran out of steps.
+/// order: up to [`MISSING_SAMPLE`], fewer only when fewer are missing.
 ///
-/// Counting up and skipping what is covered, rather than building the
-/// space and subtracting. The skip is what keeps that affordable: landing
-/// inside a row, the walk does not step through the row one combination
-/// at a time but jumps to the last one it assigns without leaving it, so
-/// a row standing for a million combinations costs one step rather than a
-/// million.
-///
-/// [`MISSING_WALK_STEPS`] is the backstop. A step either yields a missing
-/// combination or advances past one the rows cover, and only the second
-/// of those leaves a row behind for good — see the constant for what
-/// that costs a row whose don't-cares sit above its fixed positions. A
-/// table that runs the budget out is one whose sample would not help
-/// anyone read it.
-fn missing_sample(arity: u32, accepted: &[&TruthRow]) -> Option<Vec<String>> {
+/// Found by descending through prefixes rather than by counting up
+/// through combinations. A prefix stands for every combination that
+/// starts with it, and the rows assign all of those exactly when the
+/// combinations they assign under the prefix add up to that many — a
+/// sum, because no two accepted rows share a combination. The descent
+/// tries `0` before `1` and passes over a prefix the rows fill, so every
+/// prefix it enters has a missing combination below it: it never backs
+/// out of one empty-handed. That bounds the work by the sample, the
+/// width and the rows, whatever the number of combinations — two rows
+/// fixing one input each of forty leave half of `2^40` missing, and the
+/// first of those is forty steps down.
+fn missing_sample(arity: u32, accepted: &[&TruthRow]) -> Vec<String> {
     let width = usize::try_from(arity).expect("an input list is bounded by the source length");
-    let mut combination = vec![b'0'; width];
+    let mut prefix = Vec::with_capacity(width);
     let mut sample = Vec::new();
-    let mut steps = 0usize;
-    while sample.len() < MISSING_SAMPLE {
-        steps += 1;
-        if steps > MISSING_WALK_STEPS {
-            return None;
-        }
-        match accepted
-            .iter()
-            .find(|row| assigns(&row.inputs, &combination))
-        {
-            None => sample.push(
-                String::from_utf8(combination.clone()).expect("the walk writes `0` and `1` only"),
-            ),
-            Some(row) => fill_free_tail(&row.inputs, &mut combination),
-        }
-        if !increment(&mut combination) {
-            break;
-        }
-    }
-    Some(sample)
+    descend(&mut prefix, width, accepted, &mut sample);
+    sample
 }
 
-/// Whether `pattern` assigns this combination: every position it fixes
-/// agrees, and the rest are its don't-cares.
-fn assigns(pattern: &str, combination: &[u8]) -> bool {
-    pattern
-        .bytes()
-        .zip(combination)
-        .all(|(p, c)| p == b'-' || p == *c)
-}
-
-/// Raise a combination the row assigns to the last one it assigns before
-/// the row's lowest fixed position has to change.
-///
-/// Every position below that one is a don't-care, so setting them all to
-/// `1` skips only combinations this row already assigns, and the
-/// increment that follows carries into the fixed position and leaves the
-/// row. A row that fixes nothing assigns everything, so the walk is never
-/// called on one — it would mean a complete table, which returns earlier.
-fn fill_free_tail(pattern: &str, combination: &mut [u8]) {
-    let Some(lowest_fixed) = pattern.bytes().rposition(|b| b != b'-') else {
+/// Add to `sample` the lowest combinations under `prefix` that no row
+/// assigns, until it holds [`MISSING_SAMPLE`]. `under` is the rows that
+/// assign some combination starting with `prefix`.
+fn descend(prefix: &mut Vec<u8>, width: usize, under: &[&TruthRow], sample: &mut Vec<String>) {
+    if prefix.len() == width {
+        sample
+            .push(String::from_utf8(prefix.clone()).expect("the descent writes `0` and `1` only"));
         return;
-    };
-    for (slot, _) in combination
-        .iter_mut()
-        .zip(pattern.bytes())
-        .skip(lowest_fixed + 1)
-    {
-        *slot = b'1';
+    }
+    for value in *b"01" {
+        if sample.len() == MISSING_SAMPLE {
+            return;
+        }
+        prefix.push(value);
+        let at = prefix.len() - 1;
+        let still: Vec<&TruthRow> = under
+            .iter()
+            .copied()
+            .filter(|row| {
+                row.inputs
+                    .as_bytes()
+                    .get(at)
+                    .is_some_and(|fixed| *fixed == b'-' || *fixed == value)
+            })
+            .collect();
+        if !fills(&still, prefix.len(), width) {
+            descend(prefix, width, &still, sample);
+        }
+        prefix.pop();
     }
 }
 
-/// Step to the next combination, or report there is none left.
-fn increment(combination: &mut [u8]) -> bool {
-    for slot in combination.iter_mut().rev() {
-        if *slot == b'0' {
-            *slot = b'1';
-            return true;
-        }
-        *slot = b'0';
+/// Whether `rows`, every one of which assigns some combination starting
+/// with a prefix `len` long, assign every combination starting with it.
+///
+/// Under the prefix a row assigns `2^d` combinations, `d` its
+/// don't-cares past the prefix, and no two rows share one, so they fill
+/// the `2^(width - len)` combinations there exactly when those powers
+/// add up to it. Added in binary, one carry at a time, so no width
+/// overflows an integer.
+fn fills(rows: &[&TruthRow], len: usize, width: usize) -> bool {
+    let mut bits: BTreeMap<usize, usize> = BTreeMap::new();
+    for row in rows {
+        let dashes = row
+            .inputs
+            .get(len..)
+            .unwrap_or_default()
+            .matches('-')
+            .count();
+        *bits.entry(dashes).or_default() += 1;
     }
-    false
+    let mut carry = 0;
+    let mut position = 0;
+    let mut sum = Vec::new();
+    while carry > 0 || bits.range(position..).next().is_some() {
+        let here = carry + bits.get(&position).copied().unwrap_or(0);
+        if here % 2 == 1 {
+            sum.push(position);
+        }
+        carry = here / 2;
+        position += 1;
+    }
+    sum == [width - len]
 }
 
 /// `2^arity`, or `None` when no integer the compiler carries holds it.
