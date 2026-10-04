@@ -168,7 +168,9 @@ pub enum DiagnosticCode {
     /// that references it. Past the limit the native stack would overflow,
     /// which aborts the process instead of producing a diagnostic.
     /// Reported on the outermost binding of the chain, with the number of
-    /// bindings the lowering was inside and a note on the first few.
+    /// bindings the lowering was inside, a note on each of the next few,
+    /// and a count of any past those. Once per binding the lowering stops
+    /// in, so two chains that start from one binding are two findings.
     /// Fix: declare the chain in dependency order — the same graph written
     /// that way lowers at any length, because each reference is already
     /// resolved when it is reached.

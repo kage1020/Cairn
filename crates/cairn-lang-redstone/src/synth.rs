@@ -366,6 +366,12 @@ fn collect_body<'a>(
     // scope's own, and `check_assert_refs` reports each unbound name once,
     // at the first assert in this list that uses it — which is only the
     // first in the file once the list is in source order.
+    //
+    // That moves which `assert` the finding stands on and nothing else:
+    // `finish_scope` already sorts the scope's diagnostics by span, so the
+    // order they are printed in does not change. `check_assert_refs` is the
+    // one reader of this list that depends on its order;
+    // `audit_unused_signals` folds the same asserts into a set.
     out.asserts.extend(asserts);
     out.asserts.sort_by_key(|a| (a.span().start, a.span().end));
 }
@@ -1580,7 +1586,8 @@ struct LoweringCtx<'a> {
     /// The bindings being lowered, as indices into [`Self::bindings`],
     /// outermost first: each one is being lowered from inside the
     /// expression of the one before it. What `E_LOGIC_NESTING_TOO_DEEP`
-    /// counts and points at.
+    /// counts, stands on and notes; its last entry is the binding
+    /// [`Self::depth_reported`] keys on.
     chain: Vec<usize>,
     /// Signal names whose resolution already failed. Every downstream
     /// reference (RHS or actuator) checks this set before emitting a fresh
@@ -1597,9 +1604,13 @@ struct LoweringCtx<'a> {
     /// it costs depth only through the [`lower_expr`] it calls.
     depth: usize,
     /// Bindings that already reported the limit, keyed by the span of the
-    /// outermost binding in the chain. Two independent chains in one scope
-    /// each get their diagnostic, while the several branches of one chain
-    /// that all hit the wall share one — `lower_binary` deliberately keeps
+    /// one the lowering was in when it stopped: the deepest of its chain,
+    /// not the outermost the finding stands on. The several branches of
+    /// one binding that all hit the wall share one finding, while two
+    /// chains that stop in different bindings each get their own, even when
+    /// both start from the same one — `logic sig.top = sig.p1 or sig.q1`
+    /// over two reverse chains reports twice, and keying on `sig.top` would
+    /// leave the second chain unreported. `lower_binary` deliberately keeps
     /// every root cause on a single pass, and a bare flag broke that for
     /// the second chain.
     depth_reported: HashSet<(usize, usize)>,
@@ -1711,47 +1722,61 @@ fn lower_expr<'a>(
     result
 }
 
-/// How many of a chain's bindings after the first
-/// `E_LOGIC_NESTING_TOO_DEEP` notes by line. A chain long enough to reach
-/// the limit with one-operator bindings is over a hundred lines, and the
-/// first few show the shape; the count says how many more there are.
+/// How many bindings `E_LOGIC_NESTING_TOO_DEEP` notes by line after the
+/// first, the one it stands on. A chain long enough to reach the limit
+/// with one-operator bindings is over a hundred lines, and the first few
+/// show the shape. The primary counts the whole chain, and a footer says
+/// how many more there are past the noted ones.
 const CHAIN_NOTES: usize = 3;
 
 /// `E_LOGIC_NESTING_TOO_DEEP` for the chain `ctx` is inside, or `None`
-/// when that chain has already reported it.
+/// when the binding the lowering stopped in has already reported it.
 ///
 /// Anchored on the outermost binding of the chain, the one the pass set
 /// out to lower: bindings are lowered in declaration order, so every
 /// binding it reaches through a reference is declared after it, and that
-/// is the line to move. The rest of the chain is noted in the order it was
-/// entered.
+/// is where the reordering has to start. The next `CHAIN_NOTES` are noted
+/// in the order they were entered, and the remainder is a count in the
+/// footer.
+///
+/// Entry order is a choice. It is the order the bindings reference one
+/// another in, so each note names the binding the one before it refers
+/// to; a chain entered 13 -> 15 -> 14 notes line 15 before line 14. That
+/// makes the notes the one place `finish_scope`'s sort by span does not
+/// reach, since it orders the findings and not the notes inside one.
+///
+/// Deduplicated on the deepest binding rather than on the anchor, so two
+/// chains that start from one binding get a finding each;
+/// [`LoweringCtx::depth_reported`] says why.
 fn nesting_too_deep(ctx: &mut LoweringCtx<'_>) -> Option<Diagnostic> {
-    let spans: Vec<Span> = ctx
-        .chain
-        .iter()
-        .map(|&index| ctx.bindings[index].span.clone())
-        .collect();
-    let anchor = spans
-        .first()
-        .expect("an expression is lowered only inside `lower_binding`, which opens the chain")
-        .clone();
-    if !ctx.depth_reported.insert((anchor.start, anchor.end)) {
+    let (Some(&outermost), Some(&deepest)) = (ctx.chain.first(), ctx.chain.last()) else {
+        unreachable!("an expression is lowered only inside `lower_binding`, which opens the chain")
+    };
+    let deepest = &ctx.bindings[deepest].span;
+    if !ctx.depth_reported.insert((deepest.start, deepest.end)) {
         return None;
     }
-    let count = spans.len();
+    let count = ctx.chain.len();
+    // The `const _` assertion under `MAX_LOWERING_DEPTH` keeps a single
+    // expression from reaching the bound on its own, so no chain of one
+    // binding gets here and the primary needs no singular.
+    debug_assert!(
+        count >= 2,
+        "one expression cannot exhaust the lowering budget, so a chain that does holds two \
+         bindings or more",
+    );
     let label = ctx.scope.label();
     let mut diagnostic = Diagnostic::new(
         DiagnosticCode::LogicNestingTooDeep,
-        anchor,
+        ctx.bindings[outermost].span.clone(),
         format!(
             "{label} `logic` lowering nested past {MAX_LOWERING_DEPTH} levels inside {count} \
-             chained binding{plural}, starting with this one",
-            plural = if count == 1 { "" } else { "s" },
+             chained bindings, starting with this one",
         ),
     );
-    for (position, span) in spans.iter().enumerate().skip(1).take(CHAIN_NOTES) {
+    for (position, &index) in ctx.chain.iter().enumerate().skip(1).take(CHAIN_NOTES) {
         diagnostic = diagnostic.with_note(
-            span.clone(),
+            ctx.bindings[index].span.clone(),
             format!(
                 "chained binding {} of {count}, declared after the first",
                 position + 1
@@ -1759,10 +1784,11 @@ fn nesting_too_deep(ctx: &mut LoweringCtx<'_>) -> Option<Diagnostic> {
         );
     }
     let unnoted = count.saturating_sub(1 + CHAIN_NOTES);
-    if unnoted > 0 {
+    if unnoted == 1 {
+        diagnostic = diagnostic.with_footer("and 1 more chained binding, declared after the first");
+    } else if unnoted > 1 {
         diagnostic = diagnostic.with_footer(format!(
-            "and {unnoted} more chained binding{}, each declared after the first",
-            if unnoted == 1 { "" } else { "s" },
+            "and {unnoted} more chained bindings, each declared after the first"
         ));
     }
     Some(diagnostic.with_footer(

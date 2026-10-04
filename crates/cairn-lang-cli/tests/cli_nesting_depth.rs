@@ -353,12 +353,17 @@ fn depth_7_a_chain_of_one_operator_bindings_reaches_the_limit_where_the_doc_says
             path.to_str().unwrap(),
             "--experimental-logic-synth",
         ]);
-        let refused = out.status.code() == Some(1);
+        // Both legs name the exit code they want, as the tests above do. A
+        // child that overflowed its stack has a code of `None` or
+        // `Some(-1073741571)` (the table at the top of this file), which is
+        // neither, so it cannot pass for a chain that lowered.
+        let code = out.status.code();
+        let want = if want_refusal { Some(1) } else { Some(0) };
         assert_eq!(
-            refused,
-            want_refusal,
+            code,
+            want,
             "a reverse chain of {stages} bindings should {} — the doc puts the limit \
-             at {quoted}; stderr={}",
+             at {quoted}; got {code:?} (see the table at the top of this file)\nstderr={}",
             if want_refusal { "be refused" } else { "lower" },
             String::from_utf8_lossy(&out.stderr),
         );
