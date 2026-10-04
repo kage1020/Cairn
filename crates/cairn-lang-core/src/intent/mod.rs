@@ -23,6 +23,7 @@ mod member;
 mod patch;
 mod semantic_level;
 
+use std::fmt;
 use std::num::NonZeroU32;
 
 use indexmap::IndexMap;
@@ -278,9 +279,10 @@ pub enum ScopeKind {
 /// entry point for looking up the reserved area of each scope instead of
 /// walking [`Member`]s and re-decoding `intent_state` at every caller.
 /// The block-array pass's [`crate::block_array`] recogniser owns the
-/// shape validation and per-shape diagnostics; this lift function
-/// silently filters out any malformed or size-less fixture so the two
-/// sides cannot both fire diagnostics for the same source line.
+/// shape validation and per-shape diagnostics; [`circuit_regions`]
+/// leaves out every `circuit` line that reserves nothing, and
+/// [`circuit_lines`] hands each of those back with the reason, for a
+/// caller that needs to say why a scope has no reservation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct CircuitRegion {
@@ -304,25 +306,51 @@ pub struct CircuitRegion {
 /// Lift every well-formed `circuit region=<label> void=<N>` fixture out
 /// of `module`, tagged with the enclosing scope's footprint.
 ///
-/// Walks `module.structs` / `module.defs` at the top level (children
-/// under `level` blocks are not descended into for v1 — a circuit
-/// member nested inside a `level` stays a follow-up for the routing
-/// pass that actually needs it). Sites are skipped because they carry
-/// no `size` for the routing pass to budget against. Any circuit member
-/// whose `region=` value is missing, non-label, or empty, or whose
-/// `void=` is missing, non-integer, or zero, is dropped silently —
-/// downstream passes see the same "no reservation for this scope" state
-/// they would on a truly missing line and are expected to surface a
-/// diagnostic that names the malformed-fixture case alongside the
-/// missing-line one. (`cairn check` still reports each malformed shape
-/// individually via the block-array pass's `recognize_circuit_region`;
-/// this function is called from paths that skip the block-array lower,
-/// so it cannot rely on that pass firing.)
+/// The reservations among [`circuit_lines`], in the same order: a
+/// `circuit` line at the top level of a `struct` or `def` body whose
+/// scope has a `size=WxH` header and whose `region=` and `void=` are
+/// usable. Every other line that walk finds, a line under a `level`
+/// among them, is left out here. (`cairn check --edition E --target V`
+/// reports each malformed shape individually via the block-array pass's
+/// `recognize_circuit_region`; `cairn check` lowers only when given
+/// both flags, and this function is called from paths that skip the
+/// block-array lower, so it cannot rely on that pass firing.)
 #[must_use]
 pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
+    circuit_lines(module)
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect()
+}
+
+/// Every `circuit` line at the top level of a `struct` or `def` body or
+/// under a `level` in one, in source order within each scope, read into
+/// the reservation it makes or the [`CircuitRegionDefect`] that keeps it
+/// from making one.
+///
+/// One walk, so [`circuit_regions`] and a caller that also needs the
+/// rejected lines cannot disagree about which lines are usable: each
+/// line lands on exactly one side.
+///
+/// Reads the top-level members of each body, and descends into every
+/// `level` among them and into any `level` nested in one. A `circuit`
+/// line found under a `level` comes back as
+/// [`CircuitRegionDefect::NestedUnderLevel`] whatever else it says: v1
+/// reserves nothing from one, and naming that lets a pass point at the
+/// line rather than tell the author the scope has none. An indented
+/// body under any other member is not descended into; `cairn check`
+/// reports that body as never reaching the build.
+///
+/// Sites are not walked: [`SiteIr`] has no `size` and no `members` (its
+/// rows are `placements`), and this function reads `module.structs` and
+/// `module.defs` only, so a `circuit` line in a `site` body comes back on
+/// neither side. A `struct` or `def` with no `size=` is walked, and its
+/// lines come back as [`CircuitRegionDefect::NoSize`].
+#[must_use]
+pub fn circuit_lines(module: &IntentModule) -> Vec<Result<CircuitRegion, RejectedCircuitRegion>> {
     let mut out = Vec::new();
     for s in &module.structs {
-        collect_circuit_regions(
+        collect_circuit_lines(
             ScopeKind::Struct,
             &s.name,
             s.size.as_ref(),
@@ -331,7 +359,7 @@ pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
         );
     }
     for d in &module.defs {
-        collect_circuit_regions(
+        collect_circuit_lines(
             ScopeKind::Def,
             &d.name,
             d.size.as_ref(),
@@ -342,55 +370,217 @@ pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
     out
 }
 
-fn collect_circuit_regions(
+/// A `circuit` line that reserves nothing, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RejectedCircuitRegion {
+    /// Which scope family the circuit member was declared under.
+    pub scope_kind: ScopeKind,
+    /// Source-level name of the scope.
+    pub scope_name: String,
+    /// What is wrong with the line.
+    pub defect: CircuitRegionDefect,
+    /// Byte range of the originating `circuit ...` line.
+    pub span: Span,
+}
+
+/// Why a `circuit` line is not a usable reservation. The first that
+/// applies, in the order listed.
+///
+/// The [`fmt::Display`] form is the reason clause a pass prints after
+/// naming the line, so no two passes can describe the same line
+/// differently. It states what is wrong and stops there: the repair
+/// depends on what the caller can offer the author, so each caller
+/// writes its own.
+///
+/// `#[non_exhaustive]` on the enum and on every variant, as on
+/// [`PatchTargetError`]. That costs no exhaustiveness checking: the match
+/// that has to name every variant is the `Display` below, in this crate,
+/// where the attribute does not apply, so a new variant does not compile
+/// until it has a sentence. A caller in another crate matches only to
+/// choose its repair, and keeps a `_` arm for a variant it has none for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CircuitRegionDefect {
+    /// The line sits under a `level` (at any depth). v1 reads a
+    /// reservation only from a `circuit` line at the top level of a
+    /// `struct` or `def` body, so this one reserves nothing whatever its
+    /// `region=` and `void=` say.
+    #[non_exhaustive]
+    NestedUnderLevel,
+    /// The enclosing scope has no `size=WxH` header to reserve within.
+    #[non_exhaustive]
+    NoSize,
+    /// No `region=` key.
+    #[non_exhaustive]
+    RegionMissing,
+    /// `region=` holds a value that is not an identifier or a string;
+    /// `found` is the kind of value it is.
+    #[non_exhaustive]
+    RegionNotLabel {
+        /// The value kind, as [`crate::ast::Value::kind_name`] names it.
+        found: &'static str,
+    },
+    /// `region=` is an empty string.
+    #[non_exhaustive]
+    RegionEmpty,
+    /// No `void=` key.
+    #[non_exhaustive]
+    VoidMissing,
+    /// `void=` holds a value that is not an integer; `found` is the
+    /// kind of value it is.
+    #[non_exhaustive]
+    VoidNotInteger {
+        /// The value kind, as [`crate::ast::Value::kind_name`] names it.
+        found: &'static str,
+    },
+    /// `void=` is an integer below 1, which reserves no service layer.
+    #[non_exhaustive]
+    VoidBelowOne {
+        /// The integer written.
+        value: i64,
+    },
+    /// `void=` is an integer above [`u32::MAX`], the largest height a
+    /// [`CircuitRegion`] holds.
+    #[non_exhaustive]
+    VoidTooLarge {
+        /// The integer written.
+        value: i64,
+    },
+}
+
+impl fmt::Display for CircuitRegionDefect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NestedUnderLevel => f.write_str(
+                "it is written under a `level`, and only a `circuit` line at the scope's top \
+                 level is read as a reservation",
+            ),
+            Self::NoSize => {
+                f.write_str("the enclosing scope has no `size=WxH` header for it to reserve within")
+            }
+            Self::RegionMissing => f.write_str("it has no `region=`"),
+            Self::RegionNotLabel { found } => write!(
+                f,
+                "its `region=` must be an identifier or string label, got {found}",
+            ),
+            Self::RegionEmpty => f.write_str("its `region=` is an empty label"),
+            Self::VoidMissing => f.write_str("it has no `void=`"),
+            Self::VoidNotInteger { found } => {
+                write!(f, "its `void=` must be an integer, got {found}")
+            }
+            Self::VoidBelowOne { value } => {
+                write!(f, "its `void={value}` reserves no service layer")
+            }
+            Self::VoidTooLarge { value } => write!(
+                f,
+                "its `void={value}` is over the limit of {limit}",
+                limit = u32::MAX,
+            ),
+        }
+    }
+}
+
+/// Push each `circuit` line among `members` onto `out`, and every
+/// `circuit` line under a `level` among them as
+/// [`CircuitRegionDefect::NestedUnderLevel`].
+fn collect_circuit_lines(
     scope_kind: ScopeKind,
     scope_name: &str,
     size: Option<&Size>,
     members: &[Member],
-    out: &mut Vec<CircuitRegion>,
+    out: &mut Vec<Result<CircuitRegion, RejectedCircuitRegion>>,
 ) {
-    let Some(size) = size else {
-        return;
-    };
     for m in members {
-        if !matches!(m.role, MemberRole::Circuit) {
-            continue;
+        match m.role {
+            MemberRole::Circuit => {
+                let read = size.ok_or(CircuitRegionDefect::NoSize).and_then(|size| {
+                    parse_circuit_region_fixture(m).map(|fixture| (size, fixture))
+                });
+                out.push(match read {
+                    Ok((size, (label, void))) => Ok(CircuitRegion {
+                        scope_kind,
+                        scope_name: scope_name.to_owned(),
+                        label,
+                        void,
+                        width: size.w.get(),
+                        depth: size.h.get(),
+                        span: m.span.clone(),
+                    }),
+                    Err(defect) => Err(RejectedCircuitRegion {
+                        scope_kind,
+                        scope_name: scope_name.to_owned(),
+                        defect,
+                        span: m.span.clone(),
+                    }),
+                });
+            }
+            MemberRole::Level => {
+                collect_nested_circuit_lines(scope_kind, scope_name, &m.children.members, out);
+            }
+            _ => {}
         }
-        let Some((label, void)) = parse_circuit_region_fixture(m) else {
-            continue;
-        };
-        out.push(CircuitRegion {
-            scope_kind,
-            scope_name: scope_name.to_owned(),
-            label,
-            void,
-            width: size.w.get(),
-            depth: size.h.get(),
-            span: m.span.clone(),
-        });
+    }
+}
+
+/// Push every `circuit` line among a `level`'s `members`, and under any
+/// `level` nested among them, as
+/// [`CircuitRegionDefect::NestedUnderLevel`].
+fn collect_nested_circuit_lines(
+    scope_kind: ScopeKind,
+    scope_name: &str,
+    members: &[Member],
+    out: &mut Vec<Result<CircuitRegion, RejectedCircuitRegion>>,
+) {
+    for m in members {
+        match m.role {
+            MemberRole::Circuit => out.push(Err(RejectedCircuitRegion {
+                scope_kind,
+                scope_name: scope_name.to_owned(),
+                defect: CircuitRegionDefect::NestedUnderLevel,
+                span: m.span.clone(),
+            })),
+            MemberRole::Level => {
+                collect_nested_circuit_lines(scope_kind, scope_name, &m.children.members, out);
+            }
+            _ => {}
+        }
     }
 }
 
 /// Parse the `region=<label>` / `void=<N>` payload of a `circuit`
-/// [`Member`] into `(label, void)` when both sides are well-formed.
-/// Returns `None` for any missing or malformed key so callers cannot
-/// silently accept a partial fixture. Callers that surface a
-/// diagnostic on `None` should mention every rejection cause the
-/// block-array pass's `recognize_circuit_region` distinguishes
-/// (`region=` absent / non-label / empty; `void=` absent / non-integer
-/// / zero) because this function is called from paths that skip
-/// `cairn check` and cannot rely on the per-shape `W_DEFERRED_MEMBER`
-/// stream to disambiguate.
-fn parse_circuit_region_fixture(member: &Member) -> Option<(String, u32)> {
-    let raw_region = member.intent_state.get("region")?;
-    let label = raw_region.value.as_label_str()?;
+/// [`Member`] into `(label, void)` when both sides are well-formed, or
+/// the first defect when not, so callers cannot silently accept a
+/// partial fixture.
+fn parse_circuit_region_fixture(member: &Member) -> Result<(String, u32), CircuitRegionDefect> {
+    let raw_region = member
+        .intent_state
+        .get("region")
+        .ok_or(CircuitRegionDefect::RegionMissing)?;
+    let label = raw_region
+        .value
+        .as_label_str()
+        .ok_or(CircuitRegionDefect::RegionNotLabel {
+            found: raw_region.value.kind_name(),
+        })?;
     if label.is_empty() {
-        return None;
+        return Err(CircuitRegionDefect::RegionEmpty);
     }
-    let raw_void = member.intent_state.get("void")?;
+    let raw_void = member
+        .intent_state
+        .get("void")
+        .ok_or(CircuitRegionDefect::VoidMissing)?;
     let void = match &raw_void.value.kind {
-        ValueKind::Int(v) if *v >= 1 => u32::try_from(*v).ok()?,
-        _ => return None,
+        ValueKind::Int(value) if *value < 1 => {
+            return Err(CircuitRegionDefect::VoidBelowOne { value: *value });
+        }
+        ValueKind::Int(value) => u32::try_from(*value)
+            .map_err(|_| CircuitRegionDefect::VoidTooLarge { value: *value })?,
+        _ => {
+            return Err(CircuitRegionDefect::VoidNotInteger {
+                found: raw_void.value.kind_name(),
+            });
+        }
     };
-    Some((label.to_owned(), void))
+    Ok((label.to_owned(), void))
 }

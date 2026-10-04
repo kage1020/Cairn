@@ -179,8 +179,9 @@ The internal algorithm runs five stages:
    face, and that scope is refused rather than shorted. A region that cannot hold the row —
    `2n + 1` columns for `n` cells, and three rows — or the rows its pads stand in — a row per
    sensor or actuator on the busier edge, and, in a scope with cells, one more for the cell row
-   once that edge carries two — is refused here rather than left to fail as an unreachable sink
-   two stages later.
+   once that edge carries two — or, in a scope with both sensors and actuators, two columns for
+   its two pad columns, which at one column are the same column — is refused here rather than
+   left to fail as an unreachable sink two stages later.
 2. **Steiner routing.** Manhattan, around what is already standing — and around the dust of the
    nets already laid. Cell bodies and I/O pads are reserved: dust cannot be drawn on one, and a
    signal cannot pass *through* one, since a component either emits or consumes. Every sink is

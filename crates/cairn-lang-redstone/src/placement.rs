@@ -41,14 +41,18 @@
 //!
 //! Two diagnostic codes join the pass:
 //! - [`crate::DiagnosticCode::NoCircuitRegion`] when a scope has cells or
-//!   actuator pads to place but no usable `circuit region=` reservation.
-//!   Sites always fall here because they carry no `size`.
+//!   actuator pads to place but no usable `circuit region=` reservation:
+//!   on the scope's first `circuit` line that reserves nothing, with the
+//!   reason, or, when the scope has no `circuit` line the walk finds, on
+//!   what needed the reservation. A site is always the second kind:
+//!   [`intent::circuit_lines`] reads `module.structs` and `module.defs`
+//!   only, and an [`intent::SiteIr`] has no `size` and no `members`.
 //! - [`crate::DiagnosticCode::RouteCongestion`] when the netlist does not
-//!   fit the reservation, in any of four ways, checked in this order and
+//!   fit the reservation, in any of five ways, checked in this order and
 //!   each explained in its own terms: the volume (a pessimistic
 //!   [`CELL_FOOTPRINT`] per cell, so a placement that fits is unlikely to
-//!   flip to a routing failure), the row length, the rows beside the row,
-//!   and the rows the I/O pads stand in.
+//!   flip to a routing failure), the row length, the two pad columns,
+//!   the rows beside the row, and the rows the I/O pads stand in.
 //!
 //! Scopes whose placement fires an Error-severity diagnostic are elided
 //! from the output (the diagnostic still surfaces), so a downstream pass
@@ -133,7 +137,7 @@ impl PlacementOutput {
 
 /// Lower a [`ScopedEditionNetlistIr`] to a [`ScopedPlacementIr`] against
 /// `module`, which provides the `circuit region=<label> void=<N>`
-/// catalogue via [`intent::circuit_regions`].
+/// catalogue via [`intent::circuit_lines`].
 ///
 /// One [`PlacementIr`] entry per non-empty [`EditionNetlistIr`] whose
 /// placement succeeded; scopes whose placement raises an
@@ -145,12 +149,23 @@ pub fn compile_placement(
     module: &IntentModule,
 ) -> PlacementOutput {
     let mut out = PlacementOutput::new();
-    let region_index = build_region_index(module);
+    // One walk of the `circuit` lines, and both indexes read from it, so
+    // the two cannot disagree about which line is usable.
+    let lines = intent::circuit_lines(module);
+    let region_index = build_region_index(&lines);
+    let rejected_index = build_rejected_index(&lines);
 
     for entry in &scoped.scopes {
         let key = (map_scope_kind(entry.kind), entry.name.clone());
-        let region = region_index.get(&key);
-        match compile_scope(&entry.ir, region) {
+        // The rejected index is asked only when the region index has no
+        // entry, so a usable line wins over a rejected one in the same
+        // scope (see `build_rejected_index`).
+        let region = match (region_index.get(&key), rejected_index.get(&key)) {
+            (Some(&region), _) => ScopeRegion::Reserved(region),
+            (None, Some(&rejected)) => ScopeRegion::Rejected(rejected),
+            (None, None) => ScopeRegion::Absent,
+        };
+        match compile_scope(entry.kind, &entry.ir, region) {
             Ok(ir) => out.scoped.push(entry.kind, entry.name.clone(), ir),
             Err(diagnostic) => out.diagnostics.push(diagnostic),
         }
@@ -163,9 +178,29 @@ pub fn compile_placement(
 /// Error-severity diagnostic on failure.
 type ScopePlacement = Result<PlacementIr, Diagnostic>;
 
+/// What one scope's `circuit` lines come to, as [`compile_placement`]
+/// reads them out of [`intent::circuit_lines`].
+///
+/// Three answers, none of them an error, so a named type rather than a
+/// `Result` nested around an `Option`: [`compile_scope`] matches all
+/// three, and each failing one picks its own diagnostic.
+#[derive(Clone, Copy)]
+enum ScopeRegion<'a> {
+    /// The scope's first usable `circuit` line.
+    Reserved(&'a intent::CircuitRegion),
+    /// No usable line; the scope's first `circuit` line that reserves
+    /// nothing.
+    Rejected(&'a intent::RejectedCircuitRegion),
+    /// No `circuit` line the walk found for the scope: none at its top
+    /// level or under a `level`, or the scope is a site, which the walk
+    /// does not read.
+    Absent,
+}
+
 fn compile_scope(
+    kind: ScopeKind,
     source: &EditionNetlistIr,
-    region: Option<&intent::CircuitRegion>,
+    region: ScopeRegion<'_>,
 ) -> ScopePlacement {
     // An identity wire (outputs but no cells) is a layout too: its
     // actuator pad needs the reservation as a cell does. A sensor nothing
@@ -178,8 +213,10 @@ fn compile_scope(
     ir.inputs.clone_from(&source.inputs);
     ir.signal_defs.clone_from(&source.signal_defs);
 
-    let Some(region) = region else {
-        return Err(missing_region_diagnostic(source));
+    let region = match region {
+        ScopeRegion::Reserved(region) => region,
+        ScopeRegion::Rejected(rejected) => return Err(rejected_region_diagnostic(rejected)),
+        ScopeRegion::Absent => return Err(missing_region_diagnostic(kind, source)),
     };
 
     // `saturating_index` only clamps when the scope holds more than
@@ -211,6 +248,13 @@ fn compile_scope(
         .saturating_add(1);
     if row_columns > u64::from(reservation.width) {
         return Err(row_overflow_diagnostic(&reservation, cell_count));
+    }
+    // The sensor pads stand in column `x = 0` and the actuator pads in
+    // `x = width - 1`. A scope with cells has already been held to
+    // three columns by the row; an identity wire has no row, and at one
+    // column its two pad columns are the same one.
+    if !source.inputs.is_empty() && !source.outputs.is_empty() && reservation.width < 2 {
+        return Err(pad_column_diagnostic(&reservation));
     }
     // A clear row either side of the cell row, whatever the cell count.
     // Only where there is a row: an identity wire has pads and no cells,
@@ -264,7 +308,24 @@ fn compile_scope(
     Ok(ir)
 }
 
-fn missing_region_diagnostic(source: &EditionNetlistIr) -> Diagnostic {
+/// `E_NO_CIRCUIT_REGION` for a scope with something to place and no
+/// `circuit` line [`intent::circuit_lines`] found for it.
+///
+/// A scope whose `circuit` line reserves nothing does not come here:
+/// [`build_rejected_index`] holds that line, read out of the same walk
+/// as the reservations, and [`rejected_region_diagnostic`] reports on
+/// it. Two kinds of scope do:
+///
+/// - a `struct` or `def` with no `circuit` line at its top level or
+///   under a `level`;
+/// - a `site`, whatever it says. The walk reads `module.structs` and
+///   `module.defs` only, and an [`intent::SiteIr`] has no `size` and no
+///   `members`, so a site has nothing to reserve within. Its message
+///   says that rather than asking for a `size=WxH` header a site cannot
+///   have.
+///
+/// Anchored on what needed the reservation.
+fn missing_region_diagnostic(kind: ScopeKind, source: &EditionNetlistIr) -> Diagnostic {
     // An identity-wire scope has no cell to point at, so fall through to
     // the actuator binding that made the scope need a reservation in the
     // first place. A default span would render the finding at byte 0,
@@ -276,14 +337,67 @@ fn missing_region_diagnostic(source: &EditionNetlistIr) -> Diagnostic {
         .map(|c| c.span.clone())
         .or_else(|| source.outputs.first().map(|o| o.span.clone()))
         .unwrap_or_default();
-    Diagnostic::new(
+    let (primary, fix) = match kind {
+        ScopeKind::Struct | ScopeKind::Def => (
+            "this scope has redstone cells or actuator pads to place but no `circuit` line at its top level to reserve room for them",
+            "Fix: add a `circuit region=<label> void=<N>` line at the top level of the scope, with a non-empty label naming the reservation (`region=floor`, `region=basement`) and an integer `void=` >= 1. It reserves within the footprint the scope's `size=WxH` header declares",
+        ),
+        ScopeKind::Site => (
+            "this `site` has redstone cells or actuator pads to place, and a `site` has no `size=WxH` header to reserve room for them within",
+            "Fix: move the redstone into a `struct` or `def` with a `size=WxH` header and a `circuit region=<label> void=<N>` line at its top level",
+        ),
+    };
+    error_with_footer(
         DiagnosticCode::NoCircuitRegion,
         span,
-        "this scope has redstone cells or actuator pads to place but no usable `circuit region=<label> void=<N>` reservation is in scope (missing line, malformed `region=` / `void=`, or the enclosing scope has no `size=WxH` header)"
-            .to_owned(),
+        primary.to_owned(),
+        fix,
     )
-    .with_footer(
-        "add a `circuit region=<label> void=<N>` line whose `region=` is a non-empty label naming the reservation (`region=floor`, `region=basement` — the name is the author's to choose and is echoed back in diagnostics) and whose `void=` is an integer >= 1, and give the enclosing scope a `size=WxH` header",
+}
+
+/// `E_NO_CIRCUIT_REGION` on the `circuit` line that reserves nothing.
+///
+/// The primary carries [`intent::CircuitRegionDefect`]'s reason clause,
+/// so what is wrong with the line is worded once, beside the type, in
+/// core. The match here only picks the `Fix:` line, the repair this pass
+/// can offer: one arm per defect, and a `_` arm, which the type's
+/// `#[non_exhaustive]` asks for, for one added in core before this pass
+/// has a repair for it.
+fn rejected_region_diagnostic(rejected: &intent::RejectedCircuitRegion) -> Diagnostic {
+    use intent::CircuitRegionDefect as Defect;
+    let fix = match &rejected.defect {
+        Defect::NestedUnderLevel { .. } => "Fix: move the `circuit` line out of the `level` to the scope's top level. That changes nothing else about it: a reservation spans the scope's `size=WxH`, and no pass reads a `level`'s `y=` for a `circuit` line".to_owned(),
+        Defect::NoSize { .. } => "Fix: give the enclosing scope a `size=WxH` header".to_owned(),
+        Defect::RegionMissing { .. } => {
+            "Fix: add `region=<label>` naming the reservation (`region=floor`, `region=basement`)"
+                .to_owned()
+        }
+        Defect::RegionNotLabel { .. } => {
+            "Fix: write `region=` as an identifier or a string (`region=floor`, `region=basement`)"
+                .to_owned()
+        }
+        Defect::RegionEmpty { .. } => {
+            "Fix: give `region=` a non-empty label (`region=floor`, `region=basement`)".to_owned()
+        }
+        Defect::VoidMissing { .. } => {
+            "Fix: add `void=<N>`, the height of the service layer, an integer >= 1".to_owned()
+        }
+        Defect::VoidNotInteger { .. } => "Fix: write `void=` as an integer >= 1".to_owned(),
+        Defect::VoidBelowOne { .. } => "Fix: set `void=` to an integer >= 1".to_owned(),
+        Defect::VoidTooLarge { .. } => format!(
+            "Fix: set `void=` to an integer from 1 to {limit}",
+            limit = u32::MAX,
+        ),
+        _ => "Fix: write the line as `circuit region=<label> void=<N>` at the top level of a `struct` or `def` with a `size=WxH` header, with a non-empty label and an integer `void=` >= 1".to_owned(),
+    };
+    error_with_footer(
+        DiagnosticCode::NoCircuitRegion,
+        rejected.span.clone(),
+        format!(
+            "this `circuit` line reserves no room for the scope's redstone cells or actuator pads: {reason}",
+            reason = rejected.defect,
+        ),
+        fix,
     )
 }
 
@@ -341,12 +455,38 @@ fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u
     )
 }
 
+/// The reservation is one column wide, and the scope has pads on both
+/// edges.
+///
+/// The sensor pads stand in column `x = 0` and the actuator pads in
+/// `x = width - 1`; at one column those are the same column, and the
+/// first sensor and the first actuator collide at `(0,0,0)` at any
+/// depth. Kept apart from the other refusals for their reason: the
+/// numbers that explain it are columns, not area or rows. Shares
+/// [`DiagnosticCode::RouteCongestion`] with them, per the single
+/// fail-loud for "routing does not fit the region" in `spec/redstone`
+/// "Place-and-route".
+fn pad_column_diagnostic(reservation: &CircuitRegionReservation) -> Diagnostic {
+    let primary = format!(
+        "synthesized netlist needs 2 columns, one for its sensor pads at `x = 0` and one for its actuator pads at `x = width - 1`, but the reserved region is only {width} wide, so the two are one column (region {width}x{depth}, void={void})",
+        width = reservation.width,
+        depth = reservation.depth,
+        void = reservation.void,
+    );
+    error_with_footer(
+        DiagnosticCode::RouteCongestion,
+        reservation.span.clone(),
+        primary,
+        "Fix: widen the enclosing `size=WxH` to at least two columns. Raising `void` or deepening the region does not help — the pads collide in that one column at any height or depth",
+    )
+}
+
 /// The reservation has the row but not the rows beside it.
 ///
-/// Kept apart from the two footprint refusals for the reason they are
-/// kept apart from each other: the resource is a different one, and the
-/// numbers that explain a row with nothing beside it say nothing about
-/// a region short of volume. [`DiagnosticCode::RouteCongestion`] is
+/// Kept apart from the refusals checked before it for the reason they
+/// are kept apart from each other: the resource is a different one, and
+/// the numbers that explain a row with nothing beside it say nothing
+/// about a region short of volume. [`DiagnosticCode::RouteCongestion`] is
 /// shared with them, per the single fail-loud for "routing does not fit
 /// the region" in `spec/redstone` "Place-and-route".
 fn row_depth_diagnostic(reservation: &CircuitRegionReservation) -> Diagnostic {
@@ -367,12 +507,13 @@ fn row_depth_diagnostic(reservation: &CircuitRegionReservation) -> Diagnostic {
 
 /// The reservation has no room for the I/O pads the scope needs.
 ///
-/// Separate from the other three because the resource is a different
-/// one again: `void` buys height, the row buys length, the rows beside
-/// the row buy the lanes, and this buys the rows the pads stand in. Sharing
-/// [`DiagnosticCode::RouteCongestion`] with them keeps the single
-/// fail-loud for "routing does not fit the region" in `spec/redstone`
-/// "Place-and-route".
+/// Separate from the other footprint refusals because the resource is a
+/// different one again: `void` buys height, the row buys length, a
+/// second column buys the sensor and actuator pads a column each, the
+/// rows beside the row buy the lanes, and this buys the rows the pads
+/// stand in. Sharing [`DiagnosticCode::RouteCongestion`] with them keeps
+/// the single fail-loud for "routing does not fit the region" in
+/// `spec/redstone` "Place-and-route".
 fn pad_row_diagnostic(
     reservation: &CircuitRegionReservation,
     column: PadColumn,
@@ -395,17 +536,44 @@ fn pad_row_diagnostic(
     )
 }
 
+/// The first usable `circuit` line of each scope, out of the one walk
+/// [`compile_placement`] reads.
 fn build_region_index(
-    module: &IntentModule,
-) -> HashMap<(intent::ScopeKind, String), intent::CircuitRegion> {
-    let mut index: HashMap<(intent::ScopeKind, String), intent::CircuitRegion> = HashMap::new();
-    for region in intent::circuit_regions(module) {
+    lines: &[Result<intent::CircuitRegion, intent::RejectedCircuitRegion>],
+) -> HashMap<(intent::ScopeKind, String), &intent::CircuitRegion> {
+    let mut index = HashMap::new();
+    for region in lines.iter().filter_map(|line| line.as_ref().ok()) {
         // Multiple `circuit region=` lines in one scope: `check` refuses
-        // the second (`E_DUPLICATE_CIRCUIT`), and a caller that places a
-        // module without `check` gets the first one `circuit_regions`
-        // kept.
+        // each line after the first (`E_DUPLICATE_CIRCUIT`), and a caller
+        // that places a module without `check` gets the first usable one.
         let key = (region.scope_kind, region.scope_name.clone());
         index.entry(key).or_insert(region);
+    }
+    index
+}
+
+/// The first `circuit` line of each scope that reserves nothing, out of
+/// the same walk.
+///
+/// Not filtered against [`build_region_index`]: a scope can have a
+/// usable line and a rejected one, and both indexes then hold it. It is
+/// [`compile_placement`] that asks this index only after the region
+/// index came up empty, so a pass that read this one on its own would
+/// find scopes that do have a reservation.
+fn build_rejected_index(
+    lines: &[Result<intent::CircuitRegion, intent::RejectedCircuitRegion>],
+) -> HashMap<(intent::ScopeKind, String), &intent::RejectedCircuitRegion> {
+    let mut index = HashMap::new();
+    for rejected in lines.iter().filter_map(|line| line.as_ref().err()) {
+        // Several rejected lines in one scope: first wins, as in
+        // `build_region_index`. The finding names the first and says
+        // nothing of the rest, and a rejected line beside a usable one
+        // is not reported here, since the usable line wins. `check`
+        // refuses each top-level line after the first as
+        // `E_DUPLICATE_CIRCUIT`; a line under a `level` is in that
+        // level's body, which it does not count.
+        let key = (rejected.scope_kind, rejected.scope_name.clone());
+        index.entry(key).or_insert(rejected);
     }
     index
 }
@@ -566,8 +734,7 @@ mod tests {
     /// that skipped a row it does not have would be refused or would
     /// stack its last two pads. A cell-less scope starts at two columns:
     /// at one, the sensor and actuator columns are the same column, which
-    /// this pass places and stage 2 refuses (see
-    /// `pass::pad_overlap_diagnostic`).
+    /// this pass refuses (see [`super::pad_column_diagnostic`]).
     #[test]
     fn no_pad_stands_against_a_cell() {
         // Reported with this source, where `sig.b`'s sensor pad and its
