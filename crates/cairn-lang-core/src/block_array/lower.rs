@@ -3523,6 +3523,17 @@ fn fill_roof(
     let Some(kind) = parse_roof_kind(member, diagnostics) else {
         return;
     };
+    // Resolved behind [`roof_draws`], the gate the volume goes through, and
+    // not before it. A `shed` with no usable `slope_to=` draws nothing, and
+    // resolving it anyway reported a material for a roof that is not there:
+    // `W_ABSTRACT_TOKEN_DEFERRED` saying it is built from its default block,
+    // and `geometry_material_id`'s `W_DEFERRED_MEMBER` naming that block.
+    // `parse_roof_kind` has read a kind, so that shed is the one roof turned
+    // away here, and [`shed_slope_to`] is what says why.
+    if roof_draws(member).is_none() {
+        shed_slope_to(member, diagnostics);
+        return;
+    }
     let resolved = resolve_member_state(
         member,
         ctx.scope,
