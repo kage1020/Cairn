@@ -482,10 +482,17 @@ impl RegistryPack {
     /// The view of this pack that block-array lowering consults.
     ///
     /// `mc_version` is the target the run pinned, or `None` for a run that
-    /// pinned none (`cairn info`, `cairn lower`; `cairn check` does not
-    /// lower at all). Passing `None` leaves [`TargetRegistry::block_ids`]
-    /// empty, so id validation is skipped rather than run against a version
-    /// the caller never chose.
+    /// pinned none: `cairn info` and `cairn lower`, which take no target;
+    /// a `cairn compile` or `cairn check --target` whose target did not
+    /// resolve; and a `cairn compile --target` whose `@requires` floors
+    /// refuse the target. The two `cairn compile` runs are the only `None`
+    /// callers in a command that writes artifacts and a lock, and neither
+    /// writes: the unresolved target and the floor each refuse the build
+    /// before any artifact is prepared. A `cairn check` without `--target`
+    /// does not lower at all. Passing `None` leaves
+    /// [`TargetRegistry::block_ids`] empty, so id validation is skipped
+    /// rather than run against a version the caller never chose or one the
+    /// source disowns.
     ///
     /// # Panics
     ///

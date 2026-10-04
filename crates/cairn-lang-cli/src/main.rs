@@ -952,12 +952,17 @@ fn run_check(
     // A lost scope first, in `run_compile`'s order: it is a fact about the
     // file, and the target that could not be resolved is a fact about the
     // command line.
+    //
+    // The verdict, and not the reason, is `compile`'s: this run is not held
+    // to the floors, and a `compile` whose floors refuse the target checks
+    // no id, so it can refuse on the floor without losing this scope.
     if !dropped_scopes.is_empty() {
         report_partial_build(
             file,
             &dropped_scopes,
             built_scopes,
-            "`cairn compile` at this target would refuse the build",
+            "`cairn compile` at this target would refuse the build, for this or for a \
+             `@requires` floor that refuses the target",
         );
         return ExitCode::from(1);
     }
