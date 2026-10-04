@@ -1648,9 +1648,10 @@ fn lower_site<'a>(
             continue;
         };
         let Some(LoweredBody { array, walls, cut }) = body else {
-            // The extent was refused; the diagnostic names the scope, and
-            // recording a placement for a structure that does not exist
-            // would leave the lockfile pointing at nothing.
+            // The body was refused, for its extent or for its palette; the
+            // diagnostic names the scope, and recording a placement for a
+            // structure that does not exist would leave the lockfile
+            // pointing at nothing.
             report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
@@ -1769,9 +1770,11 @@ struct LoweredBody {
 
 /// Lower one struct or place body into voxels.
 ///
-/// `None` means the extent the body asks for is past
-/// [`MAX_STRUCTURE_VOLUME`]; the diagnostic has already been pushed and the
-/// caller drops the scope.
+/// `None` means the body was refused, and the diagnostic saying why has
+/// already been pushed: the extent it asks for is past
+/// [`MAX_STRUCTURE_VOLUME`] (`W_STRUCTURE_TOO_LARGE`), or it paints more
+/// states than its palette holds (`W_PALETTE_TOO_LARGE`). The caller drops
+/// the scope.
 fn lower_body_to_block_array<'a>(
     body: BodyDescriptor<'a>,
     scope: Option<&'a ScopeResolution>,

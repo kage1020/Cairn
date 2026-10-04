@@ -342,13 +342,13 @@ impl BlockArray {
     /// The first voxel whose index is not a slot of [`Self::palette`], as
     /// `(index, palette length)`.
     ///
-    /// [`Palette::intern`] is the only source of a [`PaletteIndex`] inside
-    /// the compiler, so a lowered array always satisfies this — but the
-    /// fields above are public, so a caller assembling one by hand can
-    /// have the grid and the palette disagree. A serialiser that writes
-    /// the index anyway produces a file naming a slot the reader has to
-    /// invent, which is why both backends ask this before they assemble
-    /// anything.
+    /// Interning ([`Palette::intern`], [`Palette::try_intern`]) is the only
+    /// source of a [`PaletteIndex`] inside the compiler, so a lowered array
+    /// always satisfies this — but the fields above are public, so a caller
+    /// assembling one by hand can have the grid and the palette disagree.
+    /// A serialiser that writes the index anyway produces a file naming a
+    /// slot the reader has to invent, which is why both backends ask this
+    /// before they assemble anything.
     #[must_use]
     pub fn first_index_outside_palette(&self) -> Option<(u16, usize)> {
         let len = self.palette.entries.len();
@@ -418,8 +418,9 @@ impl Palette {
     ///
     /// # Panics
     ///
-    /// Panics if `state` is new and the palette already holds
-    /// [`PALETTE_CAPACITY`] entries.
+    /// Panics where [`Self::try_intern`] answers [`PaletteFull`], when
+    /// `state` is new and the palette already holds [`PALETTE_CAPACITY`]
+    /// entries, and wherever [`Self::try_intern`] panics.
     pub fn intern(&mut self, state: BlockState) -> PaletteIndex {
         self.try_intern(state)
             .expect("palette grew past PALETTE_CAPACITY entries; widen PaletteIndex first")
@@ -427,12 +428,20 @@ impl Palette {
 
     /// [`Self::intern`], answering [`PaletteFull`] instead of panicking
     /// when `state` is new and the palette already holds
-    /// [`PALETTE_CAPACITY`] entries. A state already present is found
-    /// however full the palette is.
+    /// [`PALETTE_CAPACITY`] entries. A state already present answers its
+    /// index, never [`PaletteFull`], however full the palette is.
     ///
     /// # Errors
     ///
-    /// [`PaletteFull`] when there is no index left to give `state`.
+    /// [`PaletteFull`] when `state` is new and there is no index left to
+    /// give it. Nothing is appended.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the first entry equal to `state` sits past index
+    /// `u16::MAX`, the last a [`PaletteIndex`] can name. Interning never
+    /// grows a palette that long, so only [`Self::entries`] assembled by
+    /// hand past [`PALETTE_CAPACITY`] entries can hold one there.
     pub fn try_intern(&mut self, state: BlockState) -> Result<PaletteIndex, PaletteFull> {
         self.try_intern_within(state, PALETTE_CAPACITY)
     }
@@ -487,9 +496,8 @@ impl Palette {
     ///
     /// Panics on a palette longer than [`PALETTE_CAPACITY`] entries.
     /// [`Self::try_intern`] cannot build one — it refuses the 65537th — so
-    /// this is reachable
-    /// only from a palette assembled by hand past the width
-    /// [`PaletteIndex`] can name.
+    /// this is reachable only from a palette assembled by hand past the
+    /// width [`PaletteIndex`] can name.
     #[must_use]
     pub fn canonicalize(&mut self) -> Vec<PaletteIndex> {
         // Slot 0 is reserved rather than guaranteed: `new_with_air` seeds

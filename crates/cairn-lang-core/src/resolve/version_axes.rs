@@ -639,9 +639,9 @@ pub fn compute_axes(
 ///
 /// The only place either figure is decided, so "the figure is the list's
 /// length" is a property of the code rather than of every caller. The
-/// cap is `Palette::intern`'s: a palette holds at most `u16::MAX`
-/// entries, four orders of magnitude below where this saturates, so the
-/// clamp is unreachable rather than lossy.
+/// cap is [`PALETTE_CAPACITY`](crate::block_array::PALETTE_CAPACITY): a
+/// palette holds at most 65,536 entries, four orders of magnitude below
+/// where this saturates, so the clamp is unreachable rather than lossy.
 fn named_count(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }
