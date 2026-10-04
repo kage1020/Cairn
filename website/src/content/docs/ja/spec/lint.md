@@ -154,8 +154,9 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 lowering を走らせるコマンド — `cairn compile`、`cairn lower`、`cairn info`、
 `cairn check --edition E --target V` — だけです。さらに `E_UNKNOWN_ID` は固定されたターゲットを必要
 とするので、実際に出せるのは `cairn compile --target` と `cairn check --edition E --target V` の 2
-つです (`info` と `lower` はバージョンを固定せずに lowering します)。`--target` なしの
-`cairn check` は lowering を走らせないので、どちらのコードにも到達しません。
+つです (`info` と `lower` はバージョンを固定せずに lowering します。ファイルの下限がターゲットを拒否
+する `compile` も同じです。[バージョンとエディション](/ja/spec/versioning-editions/#宣言された下限は強制する)
+を参照)。`--target` なしの `cairn check` は lowering を走らせないので、どちらのコードにも到達しません。
 
 `W_STATE_LITERAL_UNCHECKED` も同じ lowering が出します。テーマのスロットや `connect … path=` から
 読むステートリテラルのそれぞれに付くので、`cairn compile`、`cairn lower`、`cairn info`、
@@ -168,10 +169,14 @@ lowering 段の指摘を見られるようにするためです。ターゲッ�
 0 で通過し、`cairn compile` を終了コード 1 で止めていました。それを決める情報 — ただ 1 つの
 `(edition, version)` の組 — が `check` のコマンドラインになかったからです。このフラグは
 [コンパイルモデル §4.2](/ja/spec/compilation/#42-ターゲット軸) が `--target` 単独を拒否するのと同じ理由で
-`--edition` を必要とし、compile と同じテーブルに対して同じ lowering パスを走らせるので、スコープを
-失えば同じ `E_PARTIAL_BUILD` を出します。行わないのは `compile` が書くことすべてです。成果物もロック
-ファイルも作らず、`@requires` の下限の強制も行いません — ロックはビルドを保証する記録であり、
-`--target` を下限に突き合わせるのはそれを生成するコマンドだけの仕事だからです (`E_VERSION_CAP`)。
+`--edition` を必要とし、ファイルの下限が通すターゲットでは compile と同じテーブルに対して同じ
+lowering パスを走らせるので、スコープを失えば同じ `E_PARTIAL_BUILD` を出します。行わないのは
+`compile` が書くことすべてです。成果物もロックファイルも作らず、`@requires` の下限の強制も行いません —
+ロックはビルドを保証する記録であり、`--target` を下限に突き合わせるのはそれを生成するコマンドだけの仕事
+だからです (`E_VERSION_CAP`)。そのため下限が拒否するターゲットでは、2 つのコマンドが名指す原因は異なり
+ます。`check` はターゲットを固定してそのターゲットに無い ID を報告し、それでスコープが空になれば
+`E_PARTIAL_BUILD` も出します。`compile` は ID を照合せず、下限を報告します
+([バージョンとエディション](/ja/spec/versioning-editions/#宣言された下限は強制する))。
 フラグを付けなければ従来どおりの挙動なので、今日通っているソースが落ち始めることはありません
 ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#104-fail-loud-と最小バージョン推定))。
 
@@ -335,7 +340,7 @@ macOS と Windows が既定で使う大文字小文字を区別しないファ�
 
 | コード | 意味 |
 |---|---|
-| `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def が公開していないポートを名指している。 |
+| `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def の本体に直接宣言されたどのメンバも持たないポート id を名指している。`level` の下のメンバはまだポートになれず、id がそうしたメンバのものなら、この診断はそう告げます。 |
 | `E_AMBIGUOUS_PORT` | そのポート id が、参照先の def の複数のメンバに一致する。 |
 | `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` が無く、walkway を敷くマテリアルがない。 |
 | `W_DUPLICATE_WALKWAY` | 同じ site の先行する行が既に敷いた `(from, to)` の組を、`connect` が繰り返している。 |
