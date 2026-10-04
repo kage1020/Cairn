@@ -47,6 +47,8 @@ use cairn_lang_redstone::{
 };
 use clap::{Parser, Subcommand, ValueEnum};
 
+use requested::{RequestedEditions, requested_editions};
+
 /// `println!` for everything the commands write to stdout, except that a
 /// reader who has closed the pipe (`cairn lower f.crn | head -1`) is not
 /// a failure: the line is dropped and the command carries on to the exit
@@ -195,8 +197,9 @@ enum Command {
         /// Path to the .crn file to inspect.
         file: PathBuf,
         /// Comma-separated editions to evaluate portability against. Each
-        /// edition produces one entry in the output's `edition portability`
-        /// section.
+        /// distinct edition produces one entry in the output's
+        /// `edition portability` and `buildable targets` sections; a
+        /// repeated name is reported once.
         #[arg(long, value_delimiter = ',', default_values_t = vec!["java".to_owned(), "bedrock".to_owned()])]
         editions: Vec<String>,
         /// Output format for the report.
@@ -295,9 +298,14 @@ enum Command {
     /// it accidentally.
     ///
     /// Exits 0 when the requested stage produced a well-formed IR
-    /// (warnings still allowed), 1 on parse failure, I/O error, or any
-    /// Error-severity synth diagnostic, and 2 when the file cannot be
-    /// located.
+    /// (warnings still allowed); 1 on a parse failure, on any
+    /// `Error`-severity diagnostic (from `check` or from a redstone pass
+    /// the stage runs), on a failure to serialise the IR as JSON, or on
+    /// any other I/O error (permission denied, non-UTF-8 contents); 2
+    /// when the file cannot be located, and refuses a run without
+    /// `--experimental-logic-synth`, a missing `--edition` on the stages
+    /// that require it and a stray one on the edition-neutral stages with
+    /// exit 2, before the file is read.
     Synth {
         /// Path to the .crn file to synthesise.
         file: PathBuf,
@@ -1071,12 +1079,12 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     // reaches would refuse the command before a single row was computed.
     // The resolver stays unpinned regardless — that gate is edition-neutral
     // by design, and the strict per-edition pass runs inside the dry-run.
-    let asked: Vec<Edition> = requested_editions(editions);
+    let asked: RequestedEditions = requested_editions(editions);
     let combined = build_diagnostics(
         &module,
         &ir,
         None,
-        &asked,
+        asked.as_slice(),
         std::mem::take(&mut block_ir.diagnostics),
     );
 
@@ -1100,7 +1108,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         lines: &lines,
         report: format.failure_report(),
     };
-    let rows = match edition_rows(reporting, &module, &ir, editions, &combined) {
+    let rows = match edition_rows(reporting, &module, &ir, &asked, &combined) {
         Ok(rows) => rows,
         // The same refusal the edition-neutral gate above gets, one pass
         // later: which pass raised the finding does not decide whether a
@@ -1129,6 +1137,12 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 
 /// One dry-run lower per requested edition, plus one per supported
 /// version of that edition, folded into that edition's report row.
+///
+/// Each edition in `editions` is walked once, in the order `--editions`
+/// first names it: [`requested_editions`] is the only way to build a
+/// [`RequestedEditions`]. [`run_info`] hands the same list to
+/// [`build_diagnostics`], where it reaches only
+/// [`intended_target_findings`].
 ///
 /// The per-edition pass is strict where the caller's neutral pass is
 /// soft: a slot only one variant declares resolves there and not here, and
@@ -1180,19 +1194,18 @@ fn edition_rows(
     }: Reporting<'_>,
     module: &Module,
     ir: &cairn_lang_core::intent::IntentModule,
-    editions: &[String],
+    editions: &RequestedEditions,
     already_reported: &[Diagnostic],
 ) -> Result<Vec<EditionReport>, Vec<Diagnostic>> {
     let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
         .iter()
         .map(|d| (d.code.as_str(), d.span.start, d.span.end))
         .collect();
-    let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.len());
+    let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.as_slice().len());
     let mut edition_specific_error = false;
     let mut refused: Vec<Diagnostic> = Vec::new();
 
-    for e in editions {
-        let edition: Edition = e.parse().expect("validated by the caller");
+    for &edition in editions.as_slice() {
         let resolution = resolve(ir, Some(edition));
         let pack = builtin_pack(edition);
         // Same reason as the pass above: no single version, so the lowering
@@ -2157,20 +2170,21 @@ fn run_synth(
         return ExitCode::from(2);
     }
 
-    // Reject `--edition` on the edition-neutral stages loud instead of
-    // silently ignoring it — a caller who passed the flag on an
-    // edition-neutral stage almost certainly expected it to shape the
-    // output, and swallowing the mistake would make the CLI's
-    // stage-vs-edition axis ambiguous.
-    if !stage_requires_edition(stage) && edition.is_some() {
-        eprintln!(
-            "error: `--edition` is only meaningful with {}; the {} stages are edition-neutral",
-            edition_required_stage_list(),
-            edition_neutral_stage_list(),
-        );
-        return ExitCode::from(2);
-    }
+    // Both halves of the stage-vs-edition rule are argv-only, so both are
+    // decided before the file is read: a caller who got the flag wrong
+    // hears about the flag, not about whatever the source has to say.
+    let edition = match synth_edition(stage, edition) {
+        Ok(edition) => edition,
+        Err(code) => return code,
+    };
 
+    // Every refusal from here on is prose on stderr, with no failure
+    // document on stdout. `run_lower` writes one under `--format json`
+    // because that flag commits a command to one JSON document per input,
+    // a refused one included (`spec/lint` "Machine-readable payload");
+    // `synth` takes no `--format` and has no such commitment to honour.
+    // Its stdout is the dump or nothing, so a redirect of a refused run
+    // holds zero bytes, which no JSON reader takes for an IR.
     let (source, module) = match load_module(file, FailureReport::Text) {
         Ok(loaded) => loaded,
         Err(code) => return code,
@@ -2211,17 +2225,57 @@ fn run_synth(
     }
 }
 
+/// The edition `stage` runs for, from the `--edition` the caller passed.
+///
+/// [`StageEdition::Neutral`] for an edition-neutral stage, which refuses a
+/// stray `--edition` rather than silently ignoring it — a caller who
+/// passed the flag there almost certainly expected it to shape the output,
+/// and swallowing the mistake would make the CLI's stage-vs-edition axis
+/// ambiguous. [`StageEdition::Tagged`] for an edition-tagged stage, which
+/// requires the flag.
+///
+/// Must be called before `load_module`: both refusals are usage errors
+/// (exit 2) decided from argv alone, and a call any later would put them
+/// behind the read and the passes after it, where an error found in the
+/// file ends the run before either refusal is reached and a warning is
+/// printed ahead of the refusal. Being ahead of the read also means a
+/// path that names nothing is reported only once `--edition` is right.
+fn synth_edition(stage: SynthStage, edition: Option<EditionArg>) -> Result<StageEdition, ExitCode> {
+    if !stage_requires_edition(stage) {
+        if edition.is_some() {
+            eprintln!(
+                "error: `--edition` is only meaningful with {}; the {} stages are edition-neutral",
+                edition_required_stage_list(),
+                edition_neutral_stage_list(),
+            );
+            return Err(ExitCode::from(2));
+        }
+        return Ok(StageEdition::Neutral);
+    }
+    require_edition(edition, stage_cli_name(stage))
+        .map(|edition| StageEdition::Tagged(edition.as_edition()))
+}
+
+/// [`synth_edition`]'s answer for a stage, which nothing else builds:
+/// which side of `stage_requires_edition`'s partition the stage is on, and
+/// for an edition-tagged stage the edition it runs for.
+#[derive(Clone, Copy)]
+enum StageEdition {
+    /// An edition-neutral stage, run without `--edition`.
+    Neutral,
+    /// An edition-tagged stage, and the edition `--edition` named for it.
+    Tagged(Edition),
+}
+
 /// Run the requested pipeline stage and return the JSON serialisation
 /// plus a human-facing label.
 ///
-/// The `--edition` gate runs before the first pass rather than where the
-/// value is first consumed: a caller who forgot the flag hears about the
-/// flag, not about whatever an earlier pass had to say. `compile_netlist`
-/// and `compile_edition_netlist` are diagnostic-free by contract, so they
-/// carry no report call.
+/// `edition` is [`synth_edition`]'s answer for `stage`, resolved before
+/// the source was read. `compile_netlist` and `compile_edition_netlist`
+/// are diagnostic-free by contract, so they carry no report call.
 fn dispatch_synth_stage(
     stage: SynthStage,
-    edition: Option<EditionArg>,
+    edition: StageEdition,
     synth: &cairn_lang_redstone::SynthOutput,
     ir: &cairn_lang_core::IntentModule,
     file: &Path,
@@ -2232,36 +2286,39 @@ fn dispatch_synth_stage(
         return Ok((serde_json::to_string_pretty(&synth.scoped), "Logic IR"));
     }
 
-    // Resolved ahead of `compile_netlist`: a missing `--edition` is a
-    // usage mistake, and a usage mistake is worth reporting before any
-    // synthesis work is paid for, not after.
-    let edition = if stage_requires_edition(stage) {
-        Some(require_edition(edition, stage_cli_name(stage))?.as_edition())
-    } else {
-        None
-    };
-
     let netlist = compile_netlist(&synth.scoped);
-    // The edition-neutral tail dispatches on the stage, not on "no
-    // edition was resolved". The two say the same thing today, but only
-    // the former makes a stage added later state its own answer here:
-    // the negative form would hand it the Netlist payload, under the
-    // Netlist label, with exit 0.
-    let edition = match (edition, stage) {
-        (Some(edition), _) => edition,
-        (None, SynthStage::Netlist) => {
+    // Dispatch on the stage, with `synth_edition`'s answer checked against
+    // it, rather than on the answer alone. The two agree today, but only
+    // the stage makes a stage added later get an arm of its own here (a
+    // bare `Neutral` arm would hand it the Netlist payload, under the
+    // Netlist label, with exit 0), and only the stage stops a `Tagged`
+    // answer for `Netlist` here, naming the contract it broke, rather than
+    // after every later pass has run, at the `Crossing` guard below.
+    let edition = match (stage, edition) {
+        (SynthStage::Netlist, StageEdition::Neutral) => {
             return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
         }
-        (None, SynthStage::Logic) => unreachable!("the Logic guard above returns"),
         (
-            None,
             SynthStage::Edition
             | SynthStage::Placement
             | SynthStage::Route
             | SynthStage::Delay
             | SynthStage::Crossing,
+            StageEdition::Tagged(edition),
+        ) => edition,
+        (SynthStage::Logic, _) => unreachable!("the Logic guard above returns"),
+        (SynthStage::Netlist, StageEdition::Tagged(_)) => unreachable!(
+            "stage_requires_edition is false here, so synth_edition answered Neutral or refused"
+        ),
+        (
+            SynthStage::Edition
+            | SynthStage::Placement
+            | SynthStage::Route
+            | SynthStage::Delay
+            | SynthStage::Crossing,
+            StageEdition::Neutral,
         ) => unreachable!(
-            "stage_requires_edition holds here, so the gate above resolved an edition or returned"
+            "stage_requires_edition holds here, so synth_edition answered Tagged or refused"
         ),
     };
     let edition_netlist = compile_edition_netlist(&netlist, edition);
@@ -2348,11 +2405,12 @@ fn stage_cli_name(stage: SynthStage) -> &'static str {
 /// Whether `--stage <stage>` reads the target-edition cell library and
 /// therefore needs `--edition <java|bedrock>` alongside it.
 ///
-/// One partition drives both halves of the flag's contract: `run_synth`
-/// refuses a stray `--edition` on the `false` stages, `dispatch_synth_stage`
-/// demands it on the `true` ones, and the stray-`--edition` message renders
-/// both lists from here. The exhaustive `match` makes a new variant a
-/// compile error rather than a silent default.
+/// One partition drives both halves of the flag's contract, and
+/// [`synth_edition`] applies both: it refuses a stray `--edition` on the
+/// `false` stages and demands the flag on the `true` ones, and the
+/// stray-`--edition` message it prints renders both lists from here. The
+/// exhaustive `match` makes a new variant a compile error rather than a
+/// silent default.
 ///
 /// The `--help` prose spells the same partition by hand: `synth`'s own
 /// description names the required stages and calls the rest "earlier",
@@ -2553,28 +2611,47 @@ fn intended_target_findings(
     findings
 }
 
-/// The distinct editions an `--editions` list names, in the order it
-/// names them.
-///
-/// Deduplicated because the list is a user's, and `--editions java,java`
-/// asks about Java once: a repeat that reached the fanout would report
-/// one header's finding twice, and would make `--editions java,java` read
-/// as two editions in scope, which is what decides whether
-/// `W_INTENDED_TARGET_UNSUPPORTED` has been asked for at all.
-///
-/// # Panics
-///
-/// If an entry does not parse. The caller validates the list and exits 2
-/// before reaching here.
-fn requested_editions(editions: &[String]) -> Vec<Edition> {
-    let mut asked: Vec<Edition> = Vec::with_capacity(editions.len());
-    for name in editions {
-        let edition: Edition = name.parse().expect("validated by the caller");
-        if !asked.contains(&edition) {
-            asked.push(edition);
+/// The editions `cairn info --editions` reports on, in a module of their
+/// own for the reason [`staging`] is one: [`RequestedEditions`]' field is
+/// private to it, so [`requested_editions`] is the only way to build one,
+/// and a function taking one is handed a list with no repeat in it.
+mod requested {
+    use cairn_lang_core::Edition;
+
+    /// The distinct editions an `--editions` list names, in the order it
+    /// first names them.
+    pub(super) struct RequestedEditions(Vec<Edition>);
+
+    impl RequestedEditions {
+        pub(super) fn as_slice(&self) -> &[Edition] {
+            &self.0
         }
     }
-    asked
+
+    /// Read an `--editions` list as the editions it asks about.
+    ///
+    /// Deduplicated because the list is a user's, and `--editions java,java`
+    /// asks about Java once. A repeat would walk the edition twice, giving
+    /// it a second entry in `edition portability` and `buildable targets`
+    /// and printing its notes a second time, and would make
+    /// `--editions java,java` read as two editions in scope, which is what
+    /// decides whether `W_INTENDED_TARGET_UNSUPPORTED` has been asked for
+    /// at all.
+    ///
+    /// # Panics
+    ///
+    /// If an entry does not parse. The caller validates the list and exits
+    /// 2 before reaching here.
+    pub(super) fn requested_editions(editions: &[String]) -> RequestedEditions {
+        let mut asked: Vec<Edition> = Vec::with_capacity(editions.len());
+        for name in editions {
+            let edition: Edition = name.parse().expect("validated by the caller");
+            if !asked.contains(&edition) {
+                asked.push(edition);
+            }
+        }
+        RequestedEditions(asked)
+    }
 }
 
 /// The editions a command with a single optional pin is about.
@@ -3854,8 +3931,8 @@ fn write_artifacts_and_lock(
 /// A module rather than loose functions so the invariant that makes the
 /// commit recoverable — a staged file is only ever reachable through the
 /// scratch path this code chose — is enforced by privacy instead of by
-/// convention. `main.rs` has no other modules, so without one the fields
-/// below would be visible to every line in the file.
+/// convention. Without one the fields below would be visible to every
+/// line in `main.rs`.
 mod staging {
     use std::fmt;
     use std::fs;

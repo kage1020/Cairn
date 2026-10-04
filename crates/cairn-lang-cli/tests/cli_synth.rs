@@ -6,8 +6,12 @@
 //! parse failures exit 1 with a gcc-style diagnostic on stderr, and a
 //! missing file exits 2.
 
+use std::path::{Path, PathBuf};
+use std::process::Output;
+use std::sync::OnceLock;
+
 mod common;
-use common::{cairn, examples_dir};
+use common::{cairn, examples_dir, write_source};
 
 #[test]
 fn cli_synth_requires_experimental_flag() {
@@ -1266,13 +1270,12 @@ fn possible_values(flag: &str, expected: usize) -> Vec<String> {
 /// missing-`--edition` usage gate (edition-tagged).
 ///
 /// Exit 2 is not taken on trust: a missing fixture exits 2 as well, so
-/// the refusal has to be that gate's own — no stdout (no partial IR
-/// dump escaped) and a single stderr line naming `--stage <stage>` and
-/// `--edition`. The pipeline passes are silent on this fixture today,
-/// so the single-line check is about ordering rather than about them:
-/// the day a pass upstream of the edition-tagged stages starts emitting
-/// a diagnostic, this is what catches the usage error being buried
-/// under it.
+/// the refusal is held to [`assert_missing_edition_usage_error`]. The
+/// pipeline passes are silent on this fixture, so the single-line check
+/// holds wherever the gate stands among them; whether it stands ahead of
+/// a pass that does print is
+/// `cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings`'s
+/// to pin.
 fn stage_is_edition_neutral(stage: &str) -> bool {
     let path = examples_dir().join("redstone-door.crn");
     let out = cairn(
@@ -1284,38 +1287,163 @@ fn stage_is_edition_neutral(stage: &str) -> bool {
             path.to_str().unwrap(),
         ],
     );
-    let stderr = String::from_utf8(out.stderr).expect("utf-8");
     match out.status.code() {
         Some(0) => true,
         Some(2) => {
-            assert!(
-                out.stdout.is_empty(),
-                "--stage {stage} must print no IR before the usage gate, got: {}",
-                String::from_utf8_lossy(&out.stdout),
-            );
-            let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
-            assert_eq!(
-                lines.len(),
-                1,
-                "--stage {stage} stderr should be the usage error alone, got: {stderr}",
-            );
-            assert!(
-                lines[0].contains(&format!("--stage {stage}")) && lines[0].contains("--edition"),
-                "--stage {stage} stderr line should be the missing-edition hint, got: {stderr}",
-            );
+            assert_missing_edition_usage_error(&out, stage, "on redstone-door.crn");
             false
         }
-        other => panic!("--stage {stage} without --edition exited {other:?}: {stderr}"),
+        other => panic!(
+            "--stage {stage} without --edition exited {other:?}: {}",
+            String::from_utf8_lossy(&out.stderr),
+        ),
+    }
+}
+
+/// Assert that `out` is the missing-`--edition` usage error for
+/// `--stage <stage>` and nothing else: exit 2, no stdout (no partial IR
+/// dump escaped), and one stderr line, naming `--stage <stage>` and
+/// `--edition`. `context` says which run it was, after the stage.
+fn assert_missing_edition_usage_error(out: &Output, stage: &str, context: &str) {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "--stage {stage} {context} without --edition should exit 2, got stderr: {stderr}",
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "--stage {stage} {context} must print no IR before the usage gate, got: {}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "--stage {stage} {context}: stderr should be the usage error alone, got: {stderr}",
+    );
+    assert!(
+        lines[0].contains(&format!("--stage {stage}")),
+        "--stage {stage} {context}: the usage error should name the stage as typed, got: {stderr}",
+    );
+    assert!(
+        lines[0].contains("--edition"),
+        "--stage {stage} {context}: the usage error should name --edition, got: {stderr}",
+    );
+}
+
+/// The `--stage` values [`stage_is_edition_neutral`] finds refused without
+/// `--edition`, asked of the binary once per test process and shared by
+/// the sweeps over that side of the partition.
+fn edition_tagged_stages() -> &'static [String] {
+    static TAGGED: OnceLock<Vec<String>> = OnceLock::new();
+    TAGGED.get_or_init(|| {
+        let tagged: Vec<String> = stage_values()
+            .into_iter()
+            .filter(|stage| !stage_is_edition_neutral(stage))
+            .collect();
+        assert!(
+            !tagged.is_empty(),
+            "no --stage value required --edition, so a sweep over those stages asserts nothing",
+        );
+        tagged
+    })
+}
+
+/// Sources that each carry a finding, for the tests that pin a usage
+/// refusal ahead of whatever the file has to say: a file name, the text,
+/// and the code of the finding the text carries.
+///
+/// The errors come from the three passes `run_synth` reports from before
+/// it dispatches the stage: a parse error, a `check` error in a file that
+/// parses (`bogus` is no keyword), and a synthesis error in a file `check`
+/// passes (nothing in the scope emits `sig.nope`). The last source carries
+/// a warning alone, which does not stop a run.
+const FINDING_SOURCES: [(&str, &str, &str); 4] = [
+    (
+        "parse.crn",
+        "@cairn 2026.06\nstruct s size=3x3 size=\n",
+        "E_PARSE",
+    ),
+    (
+        "check.crn",
+        "@cairn 2026.06\nstruct s size=3x3\n  bogus a=1\n",
+        "E_UNKNOWN_KEYWORD",
+    ),
+    (
+        "synth.crn",
+        "@cairn 2026.06\nstruct s size=3x3\n  \
+         door id=d side=front at=center opened_by=sig.nope\n",
+        "E_LOGIC_UNBOUND_SIGNAL",
+    ),
+    (
+        "warning.crn",
+        "@cairn 2026.06\nstruct s size=3x3\n  \
+         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
+        "W_LOGIC_UNUSED_SIGNAL",
+    ),
+];
+
+/// Write each of [`FINDING_SOURCES`] into `dir`, as its name, the path it
+/// was written to, and its code.
+fn write_finding_sources(dir: &Path) -> Vec<(&'static str, PathBuf, &'static str)> {
+    FINDING_SOURCES
+        .into_iter()
+        .map(|(name, text, code)| (name, write_source(dir, name, text), code))
+        .collect()
+}
+
+#[test]
+fn cli_synth_experimental_gate_is_decided_ahead_of_the_edition_gate() {
+    // `cli_synth_requires_experimental_flag` passes no `--stage`, and the
+    // default `logic` is edition-neutral, so leaving `--edition` out is
+    // right there and neither `--edition` refusal has anything to say.
+    // Here every stage is named, the edition-tagged ones without
+    // `--edition` and the edition-neutral ones with it, so an `--edition`
+    // refusal would apply too; the opt-in gate stands first, and its line
+    // is the only one.
+    let path = examples_dir().join("redstone-door.crn");
+    let tagged = edition_tagged_stages();
+    for stage in stage_values() {
+        let mut args = vec!["--stage", stage.as_str()];
+        if !tagged.contains(&stage) {
+            args.extend(["--edition", "java"]);
+        }
+        args.push(path.to_str().unwrap());
+        let out = cairn("synth", &args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "synth {args:?} without the opt-in flag should exit 2, got stderr: {stderr}",
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "synth {args:?} without the opt-in flag must print no IR, got: {}",
+            String::from_utf8_lossy(&out.stdout),
+        );
+        let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(
+            lines.len(),
+            1,
+            "synth {args:?}: stderr should be the opt-in refusal alone, got: {stderr}",
+        );
+        assert!(
+            lines[0].contains("--experimental-logic-synth"),
+            "synth {args:?}: the one line should be the opt-in refusal, not an --edition one, \
+             got: {stderr}",
+        );
     }
 }
 
 #[test]
 fn cli_synth_missing_edition_reports_only_the_usage_error() {
     // The per-stage tests above each pin their own exit code and hint
-    // text; what this one pins is that nothing else runs first. A
-    // missing `--edition` is a usage mistake, so the gate stands ahead
-    // of every synthesis pass: `stage_is_edition_neutral` asserts that
-    // a refused stage printed nothing and said that one line.
+    // text; what this one pins is that a refused stage printed nothing
+    // and said that one line. The fixture has no findings, so whether
+    // the gate stands ahead of the passes that could print one is
+    // `cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings`'s
+    // to pin.
     //
     // Driven off every `--stage` value rather than the edition-tagged
     // ones: which side a stage falls on is the binary's own business
@@ -1332,10 +1460,138 @@ fn cli_synth_missing_edition_reports_only_the_usage_error() {
 }
 
 #[test]
+fn cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings() {
+    // `stage_is_edition_neutral` runs on a fixture with no findings, so an
+    // earlier pass has nothing to print there and the ordering it checks
+    // holds whichever runs first. Here each source has a finding (see
+    // `FINDING_SOURCES`), and the usage error still has to be the one
+    // line, with the usage exit code. That holds for the warning-only
+    // source too, which does not stop a run: its warning is not printed
+    // ahead of the usage error.
+    //
+    // Each source is also run with `--edition java`, the CONTROL: without
+    // the usage error in the way, its finding is what surfaces, with the
+    // exit code its severity gives. A source that stopped carrying its
+    // finding would still pass the usage-error assertions, and this test
+    // would be a copy of `cli_synth_missing_edition_reports_only_the_usage_error`
+    // without saying so.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let sources = write_finding_sources(dir.path());
+    for stage in edition_tagged_stages() {
+        for (name, path, code) in &sources {
+            let out = cairn(
+                "synth",
+                &[
+                    "--experimental-logic-synth",
+                    "--stage",
+                    stage,
+                    path.to_str().unwrap(),
+                ],
+            );
+            assert_missing_edition_usage_error(&out, stage, &format!("on {name}"));
+
+            let out = cairn(
+                "synth",
+                &[
+                    "--experimental-logic-synth",
+                    "--stage",
+                    stage,
+                    "--edition",
+                    "java",
+                    path.to_str().unwrap(),
+                ],
+            );
+            assert_reports_finding(
+                &out,
+                code,
+                &format!("--stage {stage} --edition java on {name}"),
+            );
+        }
+    }
+}
+
+#[test]
+fn cli_synth_missing_edition_is_reported_ahead_of_a_missing_file() {
+    // A path that names nothing exits 2, as the usage error does, so the
+    // exit code cannot tell the two apart and only stderr can. The usage
+    // error is decided from argv alone, before the file is read, so it is
+    // the one a caller who got both wrong hears first, and the read is
+    // never attempted.
+    //
+    // The CONTROL runs the same path with `--edition java`, where the read
+    // is what fails. Without it, the first half would pass just as well on
+    // a path that exists.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("missing.crn");
+    for stage in edition_tagged_stages() {
+        let out = cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                stage,
+                path.to_str().unwrap(),
+            ],
+        );
+        assert_missing_edition_usage_error(&out, stage, "on a missing file");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("cannot read"),
+            "--stage {stage} on a missing file without --edition read the file before \
+             refusing the flag, got: {stderr}",
+        );
+
+        let out = cairn(
+            "synth",
+            &[
+                "--experimental-logic-synth",
+                "--stage",
+                stage,
+                "--edition",
+                "java",
+                path.to_str().unwrap(),
+            ],
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "--stage {stage} --edition java on a missing file: {stderr}",
+        );
+        assert!(
+            stderr.contains("cannot read"),
+            "--stage {stage} --edition java on a missing file should report the read, \
+             got: {stderr}",
+        );
+    }
+}
+
+/// Assert that `out` reported the finding `code` with the exit code its
+/// severity gives: `error[E_…]` and exit 1, or `warning[W_…]` and exit 0,
+/// since a warning leaves the run its product.
+fn assert_reports_finding(out: &Output, code: &str, context: &str) {
+    let (severity, exit) = match code.split_once('_') {
+        Some(("E", _)) => ("error", 1),
+        Some(("W", _)) => ("warning", 0),
+        _ => panic!("`{code}` is neither an E_ nor a W_ code"),
+    };
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(exit),
+        "{context}: a source carrying {code} should exit {exit}, got stderr: {stderr}",
+    );
+    assert!(
+        stderr.contains(&format!("{severity}[{code}]")),
+        "{context}: stderr should carry {severity}[{code}], got: {stderr}",
+    );
+}
+
+#[test]
 fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
     // The refusing half of `--edition`'s contract, which
     // `cli_synth_missing_edition_reports_only_the_usage_error` leaves
-    // out; why the flag is refused rather than ignored is `run_synth`'s
+    // out; why the flag is refused rather than ignored is `synth_edition`'s
     // to say. Walks every `--stage` value against every `--edition`
     // value, so a stage or edition landing later is covered the day it
     // lands.
@@ -1349,12 +1605,22 @@ fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
     // a warning-severity finding on the fixture would still exit 0 with
     // the flag accepted, and that is a lint's business rather than this
     // gate's.
+    //
+    // A refusing stage is also run over `FINDING_SOURCES`, where the
+    // stray-flag refusal has to be the one stderr line whatever the file
+    // holds, as the missing-flag refusal is in
+    // `cli_synth_missing_edition_is_reported_ahead_of_the_sources_findings`.
+    // The CONTROL runs each source on that stage without `--edition`, where
+    // its finding is what surfaces.
     let path = examples_dir().join("redstone-door.crn");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let sources = write_finding_sources(dir.path());
+    let tagged = edition_tagged_stages();
     let editions = edition_values();
     let mut refused = 0;
     let mut accepted = 0;
     for stage in stage_values() {
-        let neutral = stage_is_edition_neutral(&stage);
+        let neutral = !tagged.contains(&stage);
         if neutral {
             refused += 1;
         } else {
@@ -1372,42 +1638,92 @@ fn cli_synth_stray_edition_is_refused_on_exactly_the_edition_neutral_stages() {
                     path.to_str().unwrap(),
                 ],
             );
-            let stderr = String::from_utf8(out.stderr).expect("utf-8");
             if neutral {
-                assert_eq!(
-                    out.status.code(),
-                    Some(2),
-                    "edition-neutral --stage {stage} should refuse --edition {edition}, \
-                     got stderr: {stderr}",
-                );
-                assert!(
-                    out.stdout.is_empty(),
-                    "--stage {stage} --edition {edition} must print no IR, got: {}",
-                    String::from_utf8_lossy(&out.stdout),
-                );
-                // The message lists the edition-neutral stages by bare
-                // name; the stage just refused has to be among them, or
-                // the caller is told a set the gate does not enforce.
-                assert!(
-                    stderr.contains("`--edition`")
-                        && stderr.contains("edition-neutral")
-                        && stderr.contains(&format!("`{stage}`")),
-                    "--stage {stage} --edition {edition} should be refused as a stray flag \
-                     naming `{stage}` among the edition-neutral stages, got: {stderr}",
-                );
+                assert_stray_edition_usage_error(&out, &stage, edition, "on redstone-door.crn");
             } else {
                 assert_eq!(
                     out.status.code(),
                     Some(0),
                     "edition-tagged --stage {stage} should accept --edition {edition}, \
-                     got stderr: {stderr}",
+                     got stderr: {}",
+                    String::from_utf8_lossy(&out.stderr),
                 );
             }
+        }
+        if !neutral {
+            continue;
+        }
+        for (name, source, code) in &sources {
+            for edition in &editions {
+                let out = cairn(
+                    "synth",
+                    &[
+                        "--experimental-logic-synth",
+                        "--stage",
+                        &stage,
+                        "--edition",
+                        edition,
+                        source.to_str().unwrap(),
+                    ],
+                );
+                assert_stray_edition_usage_error(&out, &stage, edition, &format!("on {name}"));
+            }
+
+            let out = cairn(
+                "synth",
+                &[
+                    "--experimental-logic-synth",
+                    "--stage",
+                    &stage,
+                    source.to_str().unwrap(),
+                ],
+            );
+            assert_reports_finding(&out, code, &format!("--stage {stage} on {name}"));
         }
     }
     assert!(
         refused > 0 && accepted > 0,
         "every --stage value fell on one side of the partition ({refused} stages refused \
          --edition, {accepted} accepted it), so this test pinned only half of it",
+    );
+}
+
+/// Assert that `out` is the stray-`--edition` usage error for
+/// `--stage <stage> --edition <edition>` and nothing else: exit 2, no
+/// stdout, and one stderr line, naming the flag and `<stage>` among the
+/// edition-neutral stages. `context` says which run it was, after the
+/// flags.
+fn assert_stray_edition_usage_error(out: &Output, stage: &str, edition: &str, context: &str) {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "edition-neutral --stage {stage} should refuse --edition {edition} {context}, \
+         got stderr: {stderr}",
+    );
+    assert!(
+        out.stdout.is_empty(),
+        "--stage {stage} --edition {edition} {context} must print no IR, got: {}",
+        String::from_utf8_lossy(&out.stdout),
+    );
+    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "--stage {stage} --edition {edition} {context}: stderr should be the usage error \
+         alone, got: {stderr}",
+    );
+    assert!(
+        lines[0].contains("`--edition`") && lines[0].contains("edition-neutral"),
+        "--stage {stage} --edition {edition} {context} should be refused as a stray flag, \
+         got: {stderr}",
+    );
+    // The message lists the edition-neutral stages by bare name; the stage
+    // just refused has to be among them, or the caller is told a set the
+    // gate does not enforce.
+    assert!(
+        lines[0].contains(&format!("`{stage}`")),
+        "--stage {stage} --edition {edition} {context} should name `{stage}` among the \
+         edition-neutral stages, got: {stderr}",
     );
 }
