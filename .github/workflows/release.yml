@@ -116,7 +116,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Align the non-Cargo manifests with the version release-plz chose
+      - name: Align the non-Cargo manifests and fold in the changelog fragments
         if: steps.release_pr.outputs.prs_created == 'true'
         env:
           PR: ${{ steps.release_pr.outputs.pr }}
@@ -155,14 +155,20 @@ jobs:
           pnpm run generate
           cd ../..
 
+          # Fold changelog.d/ into the section release-plz just wrote, and
+          # delete the fragments, so the merged release PR carries the whole
+          # entry and the release body is read from it.
+          # `release-patch` refuses to publish if this never ran.
+          python3 .github/scripts/changelog.py assemble --version "$version" --delete
+
           if [ -z "$(git status --porcelain)" ]; then
-            echo "manifests already agreed with $version; nothing to push"
+            echo "manifests and CHANGELOG.md already agreed with $version; nothing to push"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -qm "chore: align the non-Cargo manifests with $version"
+          git commit -qm "chore: align the non-Cargo manifests and generated parser with $version, and fold in changelog.d"
           git push origin "$branch"
 
   release-patch:
@@ -218,6 +224,13 @@ jobs:
             echo 'Refusing to publish: the artefacts would carry different numbers.' >&2
             exit 1
           fi
+
+      # The fold happens in the release PR, and that PR's own checks do not run
+      # on commits this workflow pushes with GITHUB_TOKEN. For a version not yet
+      # tagged, this is the last point at which a missed fold can stop the
+      # release instead of shipping a month without its entries.
+      - name: Assert the changelog fragments were folded into this version
+        run: python3 .github/scripts/changelog.py verify-release
 
       - name: Install Rust toolchain
         run: rustup show
