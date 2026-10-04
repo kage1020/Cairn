@@ -2748,9 +2748,12 @@ impl ResolvedTarget {
     /// writes.
     ///
     /// [`ParityNote`] is threaded verbatim rather than flattened to a message
-    /// string so the CLI can key the warning by the palette id that
-    /// degraded, keeping the (`id`, `message`) pair machine-parsable for
-    /// downstream tools.
+    /// string so the CLI can print the block id that degraded as a field of
+    /// its own on the warning line. That field groups the warnings by
+    /// block, not by entry: one id has a note per state combination that
+    /// degrades, and only the message, which names the entry as
+    /// `id[states]`, tells those apart. A tool that wants the entries structured reads
+    /// `cairn info`'s `edition_portability[].degraded_entries` instead.
     fn prepare<'a>(
         &self,
         array: &'a BlockArray,
@@ -3537,8 +3540,9 @@ fn prepare_artifacts<'a>(
             ExitCode::from(1)
         })?;
         for note in degraded {
-            // Keep `id` on the warning line so tools can group by the
-            // degraded palette entry, not just by scope.
+            // `id` is the block id, so a tool can group the warnings by
+            // block as well as by scope. The message names the entry itself,
+            // as `id[states]`, so the id is on the line twice.
             eprintln!(
                 "warning[W_INTENT_DEGRADED]: {scope}: {id}: {message}",
                 id = note.id,
