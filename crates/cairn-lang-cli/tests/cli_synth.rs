@@ -848,7 +848,7 @@ fn cli_synth_stage_route_refuses_a_detour_past_the_attenuation_cap() {
         assert_eq!(out.status.code(), Some(1), "width {width}: {stderr}");
         let expected = format!(
             "error[E_ATTENUATION_LIMIT]: placed netlist for struct `s` has no route from the \
-             driver at (0,0,3) to ({},0,2) within the v1 attenuation limit of {CAP} blocks; the \
+             driver at (0,0,3) to ({},0,2) within the v1 attenuation limit of {CAP} steps; the \
              faces it could arrive through are taken by cell #0\n  note: Fix: give the wire a \
              shorter way round",
             width - 1,
