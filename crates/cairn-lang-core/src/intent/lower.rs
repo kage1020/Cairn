@@ -11,8 +11,8 @@ use indexmap::IndexMap;
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 
 use super::{
-    AssertIr, DefIr, IntentModule, IntentState, LogicBinding, Member, MemberBody, SelectorRule,
-    SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan, role_of,
+    AssertIr, DefIr, IntentModule, IntentState, Label, LogicBinding, Member, MemberBody,
+    SelectorRule, SemanticLevel, SiteIr, Size, StructIr, ThemeIr, ValueWithSpan, role_of,
 };
 
 /// Lower a parsed [`Module`] into its [`IntentModule`] form.
@@ -271,7 +271,6 @@ fn lower_member(stmt: &Statement) -> Member {
     let mut id = None;
     let mut class = None;
     let mut mat_slot = None;
-    let mut mat_slot_span = None;
     let mut intent_state = IntentState::new();
 
     for arg in args {
@@ -282,13 +281,7 @@ fn lower_member(stmt: &Statement) -> Member {
         let hoisted = match arg.key.as_str() {
             "id" => hoist_label(&arg.value, &mut id),
             "class" => hoist_label(&arg.value, &mut class),
-            "mat_slot" => {
-                let hoisted = hoist_label(&arg.value, &mut mat_slot);
-                if hoisted {
-                    mat_slot_span = Some(arg.value.span.clone());
-                }
-                hoisted
-            }
+            "mat_slot" => hoist_label(&arg.value, &mut mat_slot),
             _ => false,
         };
         if !hoisted {
@@ -303,11 +296,13 @@ fn lower_member(stmt: &Statement) -> Member {
     let lowered_children = lower_body(children);
 
     Member {
-        id,
-        class,
+        // `id` and `class` stay the plain names `Member` has always carried;
+        // `mat_slot` keeps its position because `check::arguments` reports
+        // it where it was written, on a role that reads no slot.
+        id: id.map(|label| label.name),
+        class: class.map(|label| label.name),
         role,
         mat_slot,
-        mat_slot_span,
         selector: lowered_selector,
         positional: positional.clone(),
         binding: binding.clone(),
@@ -330,7 +325,6 @@ fn placeholder_member_carrying(body: MemberBody, span: crate::error::Span) -> Me
         class: None,
         role: super::MemberRole::Other(String::new()),
         mat_slot: None,
-        mat_slot_span: None,
         selector: None,
         positional: Vec::new(),
         binding: None,
@@ -363,16 +357,22 @@ fn args_to_map(args: &[Arg]) -> IndexMap<String, ValueWithSpan> {
 /// `type_mismatch` pass (`crate::check`) to flag rather than silently
 /// coerced.
 ///
+/// The [`Label`] carries the value's own span, so a field holding a name
+/// holds where it was written too and the two cannot be set apart.
+///
 /// Returns `true` when the value was consumed; `false` keeps the argument
 /// in [`IntentState`] (non-label value, or a duplicate key).
-fn hoist_label(value: &Value, slot: &mut Option<String>) -> bool {
+fn hoist_label(value: &Value, slot: &mut Option<Label>) -> bool {
     if slot.is_some() {
         return false;
     }
-    let label = match &value.kind {
+    let name = match &value.kind {
         ValueKind::Ident(s) | ValueKind::Str(s) => s.clone(),
         _ => return false,
     };
-    *slot = Some(label);
+    *slot = Some(Label {
+        name,
+        span: value.span().clone(),
+    });
     true
 }

@@ -52,7 +52,11 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
 /// value to be a plain label. A second occurrence of the key, or a value of
 /// any other shape, stays in `intent_state`, where an argument check would
 /// otherwise read it as a word nobody knows. `check::type_mismatch` already
-/// reports the value; the key is not the mistake.
+/// reports a value of another shape, and `check::duplicate` a second
+/// occurrence; the key is not the mistake. For the same reason one left in
+/// `intent_state` is not reported as unread on a role whose
+/// [`MemberRole::unread_arguments`] lists it: the hoisted occurrence, when
+/// there is one, is reported from its field instead.
 ///
 /// [`Member`]: super::Member
 pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
@@ -208,6 +212,37 @@ impl SelectorValue {
     }
 }
 
+/// Why a key a role accepts is read by nothing on that role.
+///
+/// Both kinds build the member as though the key were not written, and
+/// both are `W_IGNORED_ARGUMENT` on the value. They differ in what is owed
+/// and so in what the author is told, which is why the reason is a value on
+/// each [`UnreadArgument`] rather than a second list beside
+/// [`MemberRole::unread_arguments`] that could drift from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unread {
+    /// The specification defines the key on this role, and no lowering
+    /// rule reads it yet. The gap is the compiler's: the key is accepted so
+    /// that the rule landing is not a change from error to legal, and an
+    /// author may keep it and expect no effect until then.
+    Unreached,
+    /// The key is one of [`UNIVERSAL_ARGUMENTS`], accepted on this role
+    /// only because every role accepts it, and nothing the role puts down
+    /// would read it. No lowering rule is owed, so the repair is to remove
+    /// the argument.
+    Inapplicable,
+}
+
+/// One entry of [`MemberRole::unread_arguments`]: a key, and why nothing on
+/// the role reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnreadArgument {
+    /// The key, as written before its `=`.
+    pub key: &'static str,
+    /// Which of the two kinds of unread key it is.
+    pub why: Unread,
+}
+
 impl MemberRole {
     /// The `key=` arguments this role's vocabulary contains, in the order
     /// the spec introduces them.
@@ -223,12 +258,14 @@ impl MemberRole {
     /// what `stair y=` did between two commits of the branch that added
     /// this table; `the_table_and_the_sweep_agree_key_for_key` in
     /// `tests/check_arguments.rs` walks every keyword and compares this
-    /// list against a line that writes it, in both directions. A key
-    /// listed here that nothing reads is the other direction, and it is
-    /// deliberate: the specification defines arguments the implementation
-    /// has not reached, and refusing them would make a future lowering
-    /// rule a change from error to legal. They are accepted and reported
-    /// as ignored — see [`Self::unread_arguments`].
+    /// list against a line that writes it, in both directions. A key this
+    /// role accepts that nothing reads is the other direction, and it is
+    /// deliberate. One listed here is a key the specification defines and
+    /// the implementation has not reached, and refusing it would make a
+    /// future lowering rule a change from error to legal; one of the
+    /// [`UNIVERSAL_ARGUMENTS`] is accepted on every role, whether or not the
+    /// role has a use for it. Both are accepted and reported as ignored —
+    /// see [`Self::unread_arguments`].
     ///
     /// Membership here is per keyword and says nothing about the line the
     /// key is written on: a key this list contains can still be read by
@@ -274,13 +311,26 @@ impl MemberRole {
         })
     }
 
-    /// Arguments in [`Self::accepted_arguments`] that no pass reads yet.
+    /// Keys in [`Self::accepted_arguments`] that no pass reads on this
+    /// role, each with the [`Unread`] reason why.
     ///
     /// Spelled out rather than derived, because "nothing reads it" is not a
-    /// fact any table can compute about itself. Each of these is a key the
-    /// specification defines and the implementation has not reached: the
-    /// value is carried into the IR and dropped, so the member builds
-    /// without it and the author is told so rather than left to notice.
+    /// fact any table can compute about itself. The value is carried into
+    /// the IR and dropped, so the member builds without it and the author
+    /// is told so rather than left to notice. The two kinds of entry are
+    /// two different facts: an [`Unread::Unreached`] key is one the
+    /// specification defines and the implementation has not reached, so a
+    /// lowering rule is owed; an [`Unread::Inapplicable`] key is a
+    /// universal one on a role that puts down nothing it would be read
+    /// for, so none is. Each entry says which it is, and the finding's note
+    /// is worded from that.
+    ///
+    /// Every `mat_slot` entry is also a key the resolver does not look up:
+    /// the slot lookup asks this table first, so a name the theme lacks is
+    /// not a refusal over an argument that changes nothing. What holds the
+    /// `mat_slot` entries to the lowering is `tests/unread_mat_slot.rs`,
+    /// which builds each of those roles under two slot names that resolve
+    /// to different blocks and compares the builds.
     ///
     /// Where the boundary runs: a spec'd key on a keyword the role table
     /// knows belongs here. A spec'd keyword the table does *not* know —
@@ -289,32 +339,68 @@ impl MemberRole {
     /// `E_UNKNOWN_KEYWORD` owns the whole line, the way it does for any
     /// other unknown word.
     #[must_use]
-    pub fn unread_arguments(&self) -> &'static [&'static str] {
+    pub fn unread_arguments(&self) -> &'static [UnreadArgument] {
         match self {
             // `spec/entities` "Anchor conventions" writes both on a `window`
             // member line; `spec/components-editing-sites` "Editing model"
             // also sets `shape=` through the edit DSL. `fill_window` reads
             // side, y, offset, size, sym, repeat and step, and consults
             // neither of these.
-            Self::Window => &["shape", "anchor"],
+            Self::Window => &[
+                UnreadArgument {
+                    key: "shape",
+                    why: Unread::Unreached,
+                },
+                UnreadArgument {
+                    key: "anchor",
+                    why: Unread::Unreached,
+                },
+            ],
             // `spec/entities` "Anchor conventions", on the same `roof` line.
             // `fill_roof` reads kind, overhang and slope_to.
-            Self::Roof => &["footprint", "bounds"],
-            // The universal `mat_slot=` on a role no painter asks for a
-            // material: `carve_door` only removes blocks, a `level` groups
-            // members that carry their own, a `circuit` reserves a volume
-            // the redstone phases paint, and a `place` instantiates a def
-            // whose members carry theirs. The resolver skips the slot
-            // lookup for these too, so a name the theme lacks is not a
-            // refusal over an argument that changes nothing.
-            Self::Door | Self::Level | Self::Circuit | Self::Place => &["mat_slot"],
-            Self::Floor
-            | Self::Walls
-            | Self::Stair
-            | Self::PressurePlate
-            | Self::Connect
-            | Self::Other(_) => &[],
+            Self::Roof => &[
+                UnreadArgument {
+                    key: "footprint",
+                    why: Unread::Unreached,
+                },
+                UnreadArgument {
+                    key: "bounds",
+                    why: Unread::Unreached,
+                },
+            ],
+            // A door's material is the material of the door block, whose
+            // `hinge` / `open` states `spec/blockstate` "Derive by default,
+            // promote on override" keeps overridable, and that block is not
+            // placed yet: `block_array::lower`'s `carve_door` cuts the
+            // opening and records the block as deferred along with
+            // per-theme door materials. The day it lands, this entry is the
+            // one to remove.
+            Self::Door => &[UnreadArgument {
+                key: "mat_slot",
+                why: Unread::Unreached,
+            }],
+            // None of these puts down a block a slot would choose. Why, for
+            // each, is written once, in `check::material`'s
+            // `without_a_material`, where `level`, `circuit` and `place`
+            // are `PutsNothingDown` and `connect` is
+            // `NamesItsMaterialElsewhere`.
+            Self::Level | Self::Circuit | Self::Place | Self::Connect => &[UnreadArgument {
+                key: "mat_slot",
+                why: Unread::Inapplicable,
+            }],
+            Self::Floor | Self::Walls | Self::Stair | Self::PressurePlate | Self::Other(_) => &[],
         }
+    }
+
+    /// Why nothing on this role reads `key`, or `None` when something does
+    /// — or when the role does not accept `key` at all, which
+    /// [`Self::accepted_arguments`] answers.
+    #[must_use]
+    pub fn unread_argument(&self, key: &str) -> Option<Unread> {
+        self.unread_arguments()
+            .iter()
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.why)
     }
 
     /// The axes on which one of this role's arguments is read by one

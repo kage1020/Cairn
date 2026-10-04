@@ -206,10 +206,13 @@ pub struct ResolvedMemberBinding {
     /// The value bound to this member's `mat_slot=` via the applied theme,
     /// when both ends matched.
     ///
-    /// `None` covers four different situations, each reported by someone
+    /// `None` covers five different situations, each reported by someone
     /// else: the member carries no `mat_slot=` at all
     /// (`E_MISSING_MATERIAL`, from `check::material`, for the roles that
-    /// paint nothing without one); no theme was bound to the scope
+    /// paint nothing without one); it carries one on a role whose
+    /// [`crate::intent::MemberRole::unread_arguments`] lists `mat_slot`,
+    /// which is not looked up (`W_IGNORED_ARGUMENT`, from
+    /// `check::arguments`); no theme was bound to the scope
     /// (`W_NO_THEME_BOUND`); the slot was not declared in the theme
     /// (`E_UNRESOLVED_SLOT`); or only a sibling edition variant declares
     /// it, which is deferred until a pin picks one. A reader that treats
@@ -857,14 +860,21 @@ fn bind_place_theme(
 }
 
 /// The `mat_slot=` name `member` asks a theme for: its hoisted slot, unless
-/// its role is one no painter asks for a material
-/// ([`crate::intent::MemberRole::unread_arguments`]), where the name
-/// changes nothing in the build and is not looked up.
-fn read_slot(member: &Member) -> Option<&String> {
+/// its role's [`crate::intent::MemberRole::unread_arguments`] lists
+/// `mat_slot`, where the name changes nothing in the build and is not
+/// looked up.
+///
+/// The predicate is that table and nothing wider. An unknown keyword
+/// ([`crate::intent::MemberRole::Other`]) lists nothing there, so its slot
+/// is still looked up: the line is refused with `E_UNKNOWN_KEYWORD` either
+/// way, and a misspelt slot on it is one the author will need once the
+/// keyword is repaired.
+fn read_slot(member: &Member) -> Option<&str> {
     member
         .mat_slot
         .as_ref()
-        .filter(|_| !member.role.unread_arguments().contains(&"mat_slot"))
+        .filter(|_| member.role.unread_argument("mat_slot").is_none())
+        .map(|slot| slot.name.as_str())
 }
 
 /// Whether any struct or def member anywhere in the module reads a
@@ -873,7 +883,18 @@ fn read_slot(member: &Member) -> Option<&String> {
 /// The module-level auto-pick binds a theme for every struct and def scope,
 /// but a scope only *needs* one to read a slot from. Without this, declaring
 /// a `_bedrock` theme and never using it made `--edition java` a hard error
-/// on a module whose output does not contain a single block of air.
+/// on a module whose output does not contain a single block of air. A
+/// member reads a slot through [`read_slot`], so a `mat_slot=` on a role
+/// that reads none does not count.
+///
+/// Sites are not walked, and [`bind_place_theme`] has no such gate. A
+/// `place` names its theme with its own `theme=`, and the theme a placement
+/// binds is more than its slots: the lockfile records it for the placement
+/// (`Placement::theme`), and its version floor applies once it is bound
+/// whether or not a slot is read (`spec/versioning-editions` "A part may
+/// declare its own floor"). Building the placement with no theme under a
+/// pin that binds none would record a theme the artifact was not built
+/// from, so such a `place` is refused whatever its def reads.
 fn any_member_reads_a_slot(ir: &IntentModule) -> bool {
     fn any(members: &[Member]) -> bool {
         members
@@ -2192,9 +2213,15 @@ fn resolve_members(
         //    `slot_value` stays `None` in that case — the concrete binding is
         //    edition-specific and comes into scope only once the compile picks
         //    a variant.
-        //    A role that reads no `mat_slot=` (`MemberRole::unread_arguments`)
-        //    is not looked up at all: `check::arguments` reports the key as
-        //    ignored, and a slot name the theme lacks changes nothing there.
+        //
+        //    INVARIANT(upstream-diagnosed): a `mat_slot=` on a role whose
+        //    `MemberRole::unread_arguments` lists it is not looked up at
+        //    all, and nothing is pushed for it here. Inside the top-level
+        //    `check` pipeline, `check::arguments` has already pushed
+        //    `W_IGNORED_ARGUMENT` for it into the same sink, and a slot name
+        //    the theme lacks changes nothing on such a role. A library
+        //    caller that runs `resolve` without `check` gets no signal;
+        //    `tests/silent_skip_arms.rs` carries the arm in its matrix.
         if let Some(slot_name) = read_slot(member)
             && let Some((tname, slots)) = bound
         {
@@ -2210,7 +2237,7 @@ fn resolve_members(
                 // carries it in the matrix of resolver arms that drop
                 // something without reporting it.
                 None => {
-                    let said = (member.span.start, slot_name.clone(), tname.to_owned());
+                    let said = (member.span.start, slot_name.to_owned(), tname.to_owned());
                     if ctx.diagnosed.insert(said) {
                         ctx.diagnostics
                             .push(unresolved_slot_diag(slot_name, tname, member, slots));
@@ -2360,7 +2387,9 @@ type LabelField = fn(&Member) -> Option<&str>;
 const LABEL_ATTRS: [(&str, LabelField); 3] = [
     ("id", |member| member.id.as_deref()),
     ("class", |member| member.class.as_deref()),
-    ("mat_slot", |member| member.mat_slot.as_deref()),
+    ("mat_slot", |member| {
+        member.mat_slot.as_ref().map(|slot| slot.name.as_str())
+    }),
 ];
 
 /// The accessor for `key`, or `None` when `key` is an ordinary

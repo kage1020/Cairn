@@ -33,13 +33,13 @@ use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
 pub use self::keyword_table::{
-    SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue, UNIVERSAL_ARGUMENTS, known_keywords,
-    role_of,
+    SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue, UNIVERSAL_ARGUMENTS, Unread,
+    UnreadArgument, known_keywords, role_of,
 };
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;
 pub use self::member::{
-    BodyKind, IntentState, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan,
+    BodyKind, IntentState, Label, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan,
 };
 pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub use self::semantic_level::SemanticLevel;

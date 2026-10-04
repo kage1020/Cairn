@@ -31,15 +31,16 @@ pub struct Member {
     /// keyword via [`super::keyword_table::role_of`]; unknown keywords land
     /// in [`MemberRole::Other`].
     pub role: MemberRole,
-    /// Explicit `mat_slot=` reference into the theme's slot table, if any.
+    /// Explicit `mat_slot=` slot name, if any, with where its value was
+    /// written.
+    ///
+    /// On a role that reads one, the name the resolver looks up in the
+    /// bound theme's slot table. On a role whose
+    /// [`MemberRole::unread_arguments`] lists `mat_slot` it refers to
+    /// nothing: the resolver does not look it up, and `check::arguments`
+    /// reports it as ignored, at the position this carries.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mat_slot: Option<String>,
-    /// Byte range of the [`Self::mat_slot`] value in the source, set exactly
-    /// when that field is. Hoisting takes the key out of
-    /// [`Self::intent_state`], whose entries carry their own spans, so a pass
-    /// that reports on the value reads its position here.
-    #[serde(skip)]
-    pub mat_slot_span: Option<Span>,
+    pub mat_slot: Option<Label>,
     /// `[attr=value]` selector immediately after the keyword
     /// (`door[id=front] ...`). Carried through verbatim; later passes decide
     /// whether the selector is binding a fresh id or referencing an existing
@@ -425,6 +426,28 @@ impl ValueWithSpan {
         let span = value.span().clone();
         Self { value, span }
     }
+}
+
+/// A label-shaped value — an identifier or a string — hoisted out of a
+/// member's arguments into a dedicated field, with where it was written.
+///
+/// Hoisting takes the key out of [`IntentState`], whose entries carry their
+/// own spans, so the position travels with the name rather than in a field
+/// beside it that has to be kept in step. `#[serde(transparent)]` over the
+/// name, with the span skipped as [`ValueWithSpan`]'s is, so the IR
+/// serialises to the bare string it did before the span was carried.
+/// [`ValueWithSpan`] itself does not fit: it serialises the value's kind,
+/// and a hoisted label has already been reduced to its text.
+///
+/// Equality includes the span, as [`Member`]'s own does.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Label {
+    /// The text of the label, without quotes for a string.
+    pub name: String,
+    /// Byte range of the value in the original source.
+    #[serde(skip)]
+    pub span: Span,
 }
 
 /// Resolved, per-edition blockstate for a [`Member`].

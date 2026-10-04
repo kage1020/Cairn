@@ -78,13 +78,21 @@ fn unknown_keyword_lands_in_member_role_other_without_failing() {
 
 #[test]
 fn id_class_and_mat_slot_hoist_into_typed_fields() {
-    let ir = lower_source(
-        "struct s size=1x1\n  walls id=outer_wall class=outer mat_slot=wall height=4\n",
-    );
+    let src = "struct s size=1x1\n  walls id=outer_wall class=outer mat_slot=\"wall\" height=4\n";
+    let ir = lower_source(src);
     let member = &ir.structs[0].members[0];
     assert_eq!(member.id.as_deref(), Some("outer_wall"));
     assert_eq!(member.class.as_deref(), Some("outer"));
-    assert_eq!(member.mat_slot.as_deref(), Some("wall"));
+    let slot = member
+        .mat_slot
+        .as_ref()
+        .expect("a label-shaped `mat_slot=` is hoisted");
+    assert_eq!(slot.name, "wall", "the name is the string's text");
+    assert_eq!(
+        &src[slot.span.clone()],
+        "\"wall\"",
+        "the span is the value as written, carried from the hoist itself",
+    );
     assert!(
         !member.intent_state.fields.contains_key("id")
             && !member.intent_state.fields.contains_key("class")
@@ -191,7 +199,7 @@ fn token_and_dotref_are_not_hoisted_into_label_fields() {
         "dotted refs must not coerce into a string class"
     );
     assert_eq!(
-        member.mat_slot.as_deref(),
+        member.mat_slot.as_ref().map(|slot| slot.name.as_str()),
         Some("wall"),
         "plain idents still hoist"
     );
