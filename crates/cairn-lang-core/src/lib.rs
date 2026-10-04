@@ -37,7 +37,7 @@ pub use ids::{
 };
 pub use intent::{
     CircuitRegion, CircuitRegionDefect, IntentModule, Member, MemberRole, RejectedCircuitRegion,
-    ScopeKind, SemanticLevel, circuit_regions, lower, rejected_circuit_regions,
+    ScopeKind, SemanticLevel, circuit_lines, circuit_regions, lower,
 };
 pub use lex::{Token, TokenKind, lex};
 pub use parse::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, diagnose_parse_failure, parse};
