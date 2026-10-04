@@ -402,7 +402,8 @@ fn build_region_index(
     for region in intent::circuit_regions(module) {
         // Multiple `circuit region=` lines in one scope: `check` refuses
         // the second (`E_DUPLICATE_CIRCUIT`), and a caller that places a
-        // module without it gets the first.
+        // module without `check` gets the first one `circuit_regions`
+        // kept.
         let key = (region.scope_kind, region.scope_name.clone());
         index.entry(key).or_insert(region);
     }

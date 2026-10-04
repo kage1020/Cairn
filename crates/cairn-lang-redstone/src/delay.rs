@@ -1119,7 +1119,7 @@ fn attenuation_diagnostic(
         DiagnosticCode::AttenuationLimit,
         reservation.span.clone(),
         primary,
-        "Fix: enlarge `region=` so no driver→cell segment exceeds the cap, split the logic across several scopes, each with its own `circuit` line, or pin cell placement closer to its drivers",
+        "Fix: enlarge `region=` so no driver→cell segment exceeds the cap, pin cell placement closer to its drivers, or split the logic across several scopes, each with its own `circuit` line",
     )
 }
 
@@ -1140,7 +1140,7 @@ fn attenuation_output_diagnostic(
         DiagnosticCode::AttenuationLimit,
         reservation.span.clone(),
         primary,
-        "Fix: enlarge `region=` so no driver→sink segment exceeds the cap, split the logic across several scopes, each with its own `circuit` line, or pin actuator placement closer to its drivers",
+        "Fix: enlarge `region=` so no driver→sink segment exceeds the cap, pin actuator placement closer to its drivers, or split the logic across several scopes, each with its own `circuit` line",
     )
 }
 

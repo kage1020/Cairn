@@ -85,19 +85,18 @@ pub enum DiagnosticCode {
     /// confined to the reserved region, so the pass fails loud with the
     /// self-correction triple ("increase `void`", "enlarge region", "split
     /// the logic across several scopes, each with its own `circuit`
-    /// line"). Six shapes reach it — the
-    /// reserved volume is short of the netlist's estimated footprint; the
-    /// reserved row is shorter than the spaced single-row layout needs,
-    /// which is twice the cell count and one more; the reservation is too
-    /// shallow for the cell row to have a clear row either side of it;
-    /// too shallow for the I/O pads, which stand one per row and, in a
-    /// scope with cells, skip the cell row; one column wide in a scope
-    /// with no cells and both sensors and actuators, whose two pad
-    /// columns are then one; or a sink has no route from its driver that
-    /// runs through neither a component nor another net's dust — nor
-    /// within one step of that dust in its own plane. The router says so
-    /// of a sink only when it has proved it: when no face of the sink can
-    /// be arrived through, when its search ran out of coords before the
+    /// line"). Six shapes reach it — the reserved volume is short of the
+    /// netlist's estimated footprint; the reserved row is shorter than the
+    /// spaced single-row layout needs, which is twice the cell count and
+    /// one more; the reservation is too shallow for the cell row to have a
+    /// clear row either side of it; too shallow for the I/O pads, which
+    /// stand one per row and, in a scope with cells, skip the cell row; one
+    /// column wide in a scope with no cells and both sensors and actuators,
+    /// whose two pad columns are then one; or a sink has no route from its
+    /// driver that runs through neither a component nor another net's dust
+    /// — nor within one step of that dust in its own plane. The router says
+    /// so of a sink only when it has proved it: when no face of the sink
+    /// can be arrived through, when its search ran out of coords before the
     /// attenuation cap pruned any, or when the free coords the sink opens
     /// onto run out within the cap of it without reaching the net's wire.
     /// A sink none of those proves, with no route within the cap, is
@@ -142,9 +141,9 @@ pub enum DiagnosticCode {
     /// output-pad segments — a wide `circuit region=` reservation can
     /// trip either edge depending on which side sits farther from the
     /// driver. Fix: enlarge the `circuit region=` footprint so no
-    /// driver segment exceeds the cap, split the logic across several
-    /// scopes, each with its own `circuit` line, or pin cell / actuator placement closer to
-    /// its drivers.
+    /// driver segment exceeds the cap, pin cell / actuator placement
+    /// closer to its drivers, or split the logic across several scopes,
+    /// each with its own `circuit` line.
     ///
     /// Also fires when a run of dust would pass its allowance — 15
     /// blocks since the last block that restored strength, or less on
