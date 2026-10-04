@@ -340,10 +340,8 @@ fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
 /// `AC5b` — a scope that DECLARED a `circuit region=` line but whose
 /// enclosing struct is missing a `size=WxH` header cannot be placed:
 /// there is no reservation footprint to budget against, so the pass
-/// falls back to `E_NO_CIRCUIT_REGION`. The primary message must
-/// name the missing-`size=` cause so an author who sees the error on
-/// a source line that clearly declares `circuit region=...` can
-/// still identify the fix.
+/// falls back to `E_NO_CIRCUIT_REGION`. The finding stands on that
+/// `circuit` line and names the missing `size=` as its one cause.
 #[test]
 fn missing_size_falls_through_to_no_circuit_region() {
     let source = r"
@@ -372,22 +370,39 @@ def gadget
         "expected exactly one E_NO_CIRCUIT_REGION for the size-less def, got {:?}",
         out.diagnostics,
     );
-    assert!(
-        missing[0].primary.contains("size=")
-            || missing[0].notes.iter().any(|n| n.message.contains("size=")),
-        "diagnostic must name the missing `size=` cause, got primary={:?} notes={:?}",
-        missing[0].primary,
-        missing[0].notes,
+    assert_eq!(
+        &source[missing[0].span.clone()],
+        "circuit region=floor void=2",
+        "the finding stands on the `circuit` line",
     );
+    assert!(
+        missing[0]
+            .primary
+            .ends_with("the enclosing scope has no `size=WxH` header for it to reserve within"),
+        "diagnostic must name the missing `size=` cause and no other: {:?}",
+        missing[0].primary,
+    );
+    assert_eq!(
+        fix_line(missing[0]),
+        "Fix: give the enclosing scope a `size=WxH` header",
+    );
+}
+
+/// The `Fix:` footer of a diagnostic.
+fn fix_line(diagnostic: &cairn_lang_redstone::Diagnostic) -> &str {
+    &diagnostic
+        .notes
+        .iter()
+        .find(|n| n.message.starts_with("Fix:"))
+        .unwrap_or_else(|| panic!("no Fix line: {:?}", diagnostic.notes))
+        .message
 }
 
 /// `AC5c` — a scope that declared `circuit region=floor void=0` (an
 /// explicitly malformed reservation the parser rejects as unusable)
 /// must not silently look like "no reservation declared". The
-/// `E_NO_CIRCUIT_REGION` message therefore has to enumerate the
-/// malformed-`void=` cause alongside the missing-line and missing-`size=`
-/// cases, so an author staring at an obvious `void=0` on the line above
-/// can still connect the error to their input.
+/// `E_NO_CIRCUIT_REGION` finding stands on the `void=0` line, not on
+/// the first `logic` line, and names `void=0` as the cause.
 #[test]
 fn void_zero_surfaces_no_circuit_region_with_malformed_hint() {
     let source = r"
@@ -410,11 +425,16 @@ struct simple size=5x5
         .iter()
         .find(|d| d.code == DiagnosticCode::NoCircuitRegion)
         .expect("void=0 must surface as E_NO_CIRCUIT_REGION");
-    assert!(
-        d.primary.contains("malformed") || d.primary.contains("void"),
-        "diagnostic must name the malformed-`void=` cause, got {:?}",
-        d.primary,
+    assert_eq!(
+        &source[d.span.clone()],
+        "circuit region=floor void=0",
+        "the finding stands on the `circuit` line, not the first `logic` line",
     );
+    assert_eq!(
+        d.primary,
+        "this `circuit` line reserves no room for the scope's redstone cells or actuator pads: its `void=0` reserves no service layer",
+    );
+    assert_eq!(fix_line(d), "Fix: set `void=` to an integer >= 1");
 }
 
 /// A scope whose Edition Netlist IR carries inputs and outputs but no
@@ -462,6 +482,81 @@ struct wire size=5x5
     assert!(
         !scope.ir.signal_defs.is_empty(),
         "the signal table survives so a consumer can join the pad back to `sig.a`",
+    );
+}
+
+/// An identity wire in a one-column region: the sensor pad column
+/// `x = 0` and the actuator pad column `x = width - 1` are one column,
+/// so the two pads stand on one voxel. Placement refuses it in terms of
+/// width, whatever the depth, rather than passing it on for routing to
+/// blame on depth.
+#[test]
+fn an_identity_wire_in_a_one_column_region_is_refused_for_its_width() {
+    for depth in [5, 50] {
+        let source = format!(
+            "
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=1x{depth}
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door[id=d] opened_by=sig.a
+  circuit region=floor void=2
+"
+        );
+        let out = placement_of(&source);
+
+        assert!(
+            out.scoped.scopes.is_empty(),
+            "one column cannot hold both pad columns: {:?}",
+            out.scoped.scopes,
+        );
+        let diagnostic = out
+            .diagnostics
+            .iter()
+            .find(|d| d.code == DiagnosticCode::RouteCongestion)
+            .expect("the shared column must surface as E_ROUTE_CONGESTION");
+        assert_eq!(diagnostic.severity(), Severity::Error);
+        assert_eq!(
+            &source[diagnostic.span.clone()],
+            "circuit region=floor void=2",
+        );
+        assert!(
+            diagnostic.primary.contains("needs 2 columns")
+                && diagnostic.primary.contains(&format!(
+                    "only 1 wide, so the two are one column (region 1x{depth}, void=2)"
+                )),
+            "the refusal names the width: {}",
+            diagnostic.primary,
+        );
+        let fix = fix_line(diagnostic);
+        assert!(
+            fix.starts_with("Fix: widen the enclosing `size=WxH` to at least two columns.")
+                && !fix.contains("depth >="),
+            "the fix asks for width, not depth: {fix}",
+        );
+    }
+    let wide = placement_of(
+        "
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct s size=2x5
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door[id=d] opened_by=sig.a
+  circuit region=floor void=2
+",
+    );
+    assert!(
+        wide.diagnostics.is_empty(),
+        "two columns hold both pad columns: {:?}",
+        wide.diagnostics,
     );
 }
 
