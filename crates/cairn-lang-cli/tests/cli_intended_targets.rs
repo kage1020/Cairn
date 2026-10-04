@@ -339,3 +339,23 @@ fn info_across_both_editions_does_not_name_an_unbuildable_version() {
         "got: {stderr}",
     );
 }
+
+/// A name repeated in `--editions` is still one edition in scope, so
+/// `--editions bedrock,bedrock` names the version Bedrock cannot build, as
+/// `--editions bedrock` does. Counted as two editions, the list would leave
+/// that version unnamed, as the two-edition default above does.
+#[test]
+fn info_naming_one_edition_twice_still_names_an_unbuildable_version() {
+    let fixture = fixture("repeated", "@intended_targets [\"1.20.4\"]\n");
+    let (code, stdout, stderr) = run("info", &fixture, &["--editions", "bedrock,bedrock"]);
+    assert!(
+        stderr.contains("W_INTENDED_TARGET_UNSUPPORTED"),
+        "one edition named twice is one edition asked, so the version \
+         Bedrock cannot build is named: {stderr}",
+    );
+    assert_eq!(
+        (code, stdout, stderr),
+        run("info", &fixture, &["--editions", "bedrock"]),
+        "--editions bedrock,bedrock should report what --editions bedrock does",
+    );
+}
