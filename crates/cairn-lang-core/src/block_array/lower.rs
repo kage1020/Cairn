@@ -1164,28 +1164,78 @@ fn diag_walkway_endpoint_skipped(
 }
 
 /// Where an `@token` was read from, for the prose of the abstract-token
-/// diagnostics.
-#[derive(Clone, Copy)]
+/// diagnostics. [`Self::MemberSlot`] also carries what gets built without
+/// the material, which [`Self::consequence`] words.
+///
+/// Only `W_ABSTRACT_TOKEN_DEFERRED` reads that payload.
+/// [`diag_unknown_abstract_token`] reads [`Self::token_noun`] and
+/// [`Self::catalog_note`] alone, because `E_UNKNOWN_ABSTRACT_TOKEN` stops the
+/// build and there is no fallback to describe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenSite {
     /// A `connect` row's `path=`.
     WalkwayPath,
-    /// A member's `mat_slot=` binding, with what that member does when the
-    /// binding resolves to nothing.
+    /// A member's `mat_slot=` binding, with what becomes of that member
+    /// when the binding resolves to nothing.
     MemberSlot(MemberFallback),
 }
 
-/// What a member does in place of the material its `mat_slot=` did not
-/// resolve to. Each caller of [`resolve_member_state`] names its own, since
-/// only the caller knows what it paints without one.
+/// What becomes of a member whose `mat_slot=` resolves to no material.
+///
+/// A property of the role's painter, so it is derived from the role by
+/// [`Self::for_role`] rather than handed in by each caller of
+/// [`resolve_member_state`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MemberFallback {
-    /// The member paints nothing, so its cells stay air (`floor`, `walls`).
+    /// A `floor`: [`fill_floor`] is not reached, so its cells stay air.
     Air,
-    /// The window is not cut, so the wall it would have cut stays.
+    /// A `walls`: it paints no row, and [`painting_walls`] drops it, so it
+    /// claims none in the volume either ([`max_wall_top`]) and a `door` or
+    /// `window` cut into it is refused.
+    Absent,
+    /// A `window`: [`cut_window`] refuses it, so the wall it would have cut
+    /// stays, and a port anchored on it is refused with it.
     WallStays,
-    /// The member is built from its own default material (a roof or eave
-    /// stair's built-in stair id, a pressure plate's default plate).
-    DefaultMaterial,
+    /// A `roof`, an eave `stair` or a `pressure_plate`: built from its
+    /// default block.
+    ///
+    /// A `roof` or eave `stair` also gets [`geometry_material_id`]'s
+    /// `W_DEFERRED_MEMBER`, which names the concrete id: only the geometry
+    /// side knows it, since a roof's depends on its `kind`.
+    /// [`plate_id_for_member`] deliberately does not echo; its doc says why.
+    DefaultBlock,
+}
+
+impl MemberFallback {
+    /// The consequence for a member of this role.
+    ///
+    /// Only the six roles whose painters call [`resolve_member_state`] reach
+    /// here. The rest are spelled out with no wildcard, as in the four
+    /// `lower_*_member` matches, so a role added later fails the compile
+    /// here rather than borrowing another role's sentence: a `door` is
+    /// carved and reads no material, a `circuit` reserves a region, a
+    /// `place` or `connect` is a site row, `Other` is a keyword the role
+    /// table does not know, and a `level` is flattened before any painter
+    /// runs.
+    fn for_role(role: &MemberRole) -> Self {
+        match role {
+            MemberRole::Floor => Self::Air,
+            MemberRole::Walls => Self::Absent,
+            MemberRole::Window => Self::WallStays,
+            MemberRole::Roof | MemberRole::Stair | MemberRole::PressurePlate => Self::DefaultBlock,
+            MemberRole::Door
+            | MemberRole::Level
+            | MemberRole::Circuit
+            | MemberRole::Place
+            | MemberRole::Connect
+            | MemberRole::Other(_) => {
+                unreachable!(
+                    "no painter resolves the `mat_slot=` of a `{}`",
+                    MemberRole::keyword(role)
+                )
+            }
+        }
+    }
 }
 
 impl TokenSite {
@@ -1198,15 +1248,19 @@ impl TokenSite {
 
     /// What the build does instead, worded to follow "cannot be lowered
     /// without the registry pack; ".
-    fn fallback(self) -> &'static str {
+    fn consequence(self) -> &'static str {
         match self {
             Self::WalkwayPath => "the walkway falls back to air",
             Self::MemberSlot(MemberFallback::Air) => "the cell falls back to air",
+            Self::MemberSlot(MemberFallback::Absent) => {
+                "the walls are not built and take up no rows, so a door or window cut into them \
+                 is refused"
+            }
             Self::MemberSlot(MemberFallback::WallStays) => {
                 "the window is not cut, and the wall stays"
             }
-            Self::MemberSlot(MemberFallback::DefaultMaterial) => {
-                "the member is built from its default material"
+            Self::MemberSlot(MemberFallback::DefaultBlock) => {
+                "the member is built from its default block"
             }
         }
     }
@@ -1238,7 +1292,7 @@ fn diag_abstract_token(span: Span, token: &str, site: TokenSite) -> Diagnostic {
         primary: format!(
             "{} `@{token}` cannot be lowered without the registry pack; {}",
             site.token_noun(),
-            site.fallback(),
+            site.consequence(),
         ),
         notes: vec![DiagnosticNote {
             span: None,
@@ -2600,7 +2654,6 @@ fn lower_massing_member(
                 palette,
                 diagnostics,
                 ctx.theme_missing,
-                MemberFallback::Air,
             ) else {
                 return;
             };
@@ -2617,7 +2670,6 @@ fn lower_massing_member(
                 palette,
                 diagnostics,
                 ctx.theme_missing,
-                MemberFallback::Air,
             ) else {
                 return;
             };
@@ -2764,7 +2816,6 @@ fn resolve_member_state(
     registry: Option<&dyn TargetRegistry>,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
-    fallback: MemberFallback,
 ) -> Option<BlockState> {
     if theme_missing {
         return None;
@@ -2796,7 +2847,7 @@ fn resolve_member_state(
             diagnostics.push(diag_abstract_token(
                 member_or_slot_span(member, slot_value),
                 &token,
-                TokenSite::MemberSlot(fallback),
+                TokenSite::MemberSlot(MemberFallback::for_role(&member.role)),
             ));
             None
         }
@@ -2805,7 +2856,7 @@ fn resolve_member_state(
                 member_or_slot_span(member, slot_value),
                 &token,
                 suggestion.as_deref(),
-                TokenSite::MemberSlot(fallback),
+                TokenSite::MemberSlot(MemberFallback::for_role(&member.role)),
             ));
             None
         }
@@ -2847,17 +2898,9 @@ fn palette_index_for(
     palette: &mut Palette,
     diagnostics: &mut Vec<Diagnostic>,
     theme_missing: bool,
-    fallback: MemberFallback,
 ) -> Option<PaletteIndex> {
-    resolve_member_state(
-        member,
-        scope,
-        registry,
-        diagnostics,
-        theme_missing,
-        fallback,
-    )
-    .map(|state| palette.intern(state))
+    resolve_member_state(member, scope, registry, diagnostics, theme_missing)
+        .map(|state| palette.intern(state))
 }
 
 /// Will this member put a block anywhere?
@@ -2874,14 +2917,12 @@ fn member_will_paint(
     theme_missing: bool,
 ) -> bool {
     let mut ignored_diagnostics = Vec::new();
-    // The fallback only words a diagnostic, and these are dropped.
     resolve_member_state(
         member,
         scope,
         registry,
         &mut ignored_diagnostics,
         theme_missing,
-        MemberFallback::Air,
     )
     .is_some()
 }
@@ -3540,7 +3581,6 @@ fn fill_roof(
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-        MemberFallback::DefaultMaterial,
     );
     let base_id = geometry_material_id(
         member,
@@ -4166,7 +4206,6 @@ fn draw_eave_band(
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-        MemberFallback::DefaultMaterial,
     );
     let stair_id = geometry_material_id(
         member,
@@ -4631,7 +4670,6 @@ fn plate_id_for_member(
         ctx.registry,
         diagnostics,
         ctx.theme_missing,
-        MemberFallback::DefaultMaterial,
     );
     if let Some(state) = &resolved
         && !state.properties.is_empty()
@@ -5205,7 +5243,6 @@ fn cut_window(
             palette,
             diagnostics,
             ctx.theme_missing,
-            MemberFallback::WallStays,
         ) else {
             return WindowCut::Refused;
         };
@@ -6029,6 +6066,14 @@ mod tests {
             .count()
     }
 
+    fn primaries_of(out: &BlockArrayIr, code: DiagnosticCode) -> Vec<&str> {
+        out.diagnostics
+            .iter()
+            .filter(|d| d.code == code)
+            .map(|d| d.primary.as_str())
+            .collect()
+    }
+
     #[test]
     fn floor_only_fills_y_zero_plane() {
         let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n";
@@ -6717,77 +6762,169 @@ mod tests {
         assert_eq!(block_id(ba, 0, 1, 0), "minecraft:cobblestone");
     }
 
-    #[test]
-    fn abstract_token_deferral_says_what_each_member_does_instead() {
-        // With no registry, each member reading `@wood.dark` reports what
-        // it builds in place of the material, and that has to match the
-        // voxels: a window is not cut, so its wall stays.
-        let src = "theme t:\n  \
-                   slot wall -> @cobblestone\n  \
-                   slot trim -> @wood.dark\n\n\
-                   struct s size=5x5\n  \
-                   walls mat_slot=wall height=3\n  \
-                   window side=front offset=1 y=1 size=1x2 mat_slot=trim\n";
-        let out = lowered(src);
-        let deferred: Vec<&str> = out
-            .diagnostics
-            .iter()
-            .filter(|d| d.code == DiagnosticCode::AbstractTokenDeferred)
-            .map(|d| d.primary.as_str())
-            .collect();
-        assert_eq!(
-            deferred,
-            vec![
-                "abstract token `@wood.dark` cannot be lowered without the registry pack; the \
-                 window is not cut, and the wall stays"
-            ],
-        );
-        let ba = out.structures.get("struct::s").unwrap();
-        for y in 1..=2 {
-            assert_eq!(block_id(ba, 1, y, 4), "minecraft:cobblestone", "y={y}");
-        }
+    /// One arm of the abstract-token deferral tests: members that read
+    /// `@wood.dark` from slot `trim` (slot `wall` is `@cobblestone`), what
+    /// `W_ABSTRACT_TOKEN_DEFERRED` says the member does instead, and a check
+    /// that the voxels say the same. `None` is a member turned away before it
+    /// asks for its material, which earns no such warning at all.
+    struct DeferralArm {
+        members: &'static str,
+        consequence: Option<&'static str>,
+        voxels: fn(&BlockArrayIr),
+    }
 
-        // A floor paints nothing, so its cells stay air; a roof or an eave
-        // stair is built from its own stair id, and a plate from the
-        // default plate.
-        for (member, consequence) in [
-            ("floor mat_slot=trim", "the cell falls back to air"),
-            (
-                "roof kind=gable mat_slot=trim",
-                "the member is built from its default material",
-            ),
-            (
-                "roof kind=flat mat_slot=wall overhang=1\n  stair kind=stairs side=front mat_slot=trim",
-                "the member is built from its default material",
-            ),
-            (
-                "pressure_plate at=front.outside offset=2 y=0 mat_slot=trim",
-                "the member is built from its default material",
-            ),
-        ] {
-            let src = format!(
+    fn check_deferral_arms(arms: &[DeferralArm]) {
+        for arm in arms {
+            let members = arm.members;
+            let out = lowered(&format!(
                 "theme t:\n  slot wall -> @cobblestone\n  slot trim -> @wood.dark\n\n\
-                 struct s size=5x5\n  walls mat_slot=wall height=3\n  {member}\n"
-            );
-            let out = lowered(&src);
-            let deferred: Vec<&str> = out
-                .diagnostics
-                .iter()
-                .filter(|d| d.code == DiagnosticCode::AbstractTokenDeferred)
-                .map(|d| d.primary.as_str())
-                .collect();
-            assert_eq!(
-                deferred,
-                vec![
+                 struct s size=5x5\n  {members}\n"
+            ));
+            let expected: Vec<String> = arm
+                .consequence
+                .map(|c| {
                     format!(
                         "abstract token `@wood.dark` cannot be lowered without the registry \
-                         pack; {consequence}"
+                         pack; {c}"
                     )
-                    .as_str()
-                ],
-                "{member}",
+                })
+                .into_iter()
+                .collect();
+            assert_eq!(
+                primaries_of(&out, DiagnosticCode::AbstractTokenDeferred),
+                expected,
+                "{members}",
             );
+            (arm.voxels)(&out);
         }
+    }
+
+    fn struct_s(out: &BlockArrayIr) -> &BlockArray {
+        out.structures.get("struct::s").expect("struct::s lowered")
+    }
+
+    fn has_id(out: &BlockArrayIr, id: &str) -> bool {
+        struct_s(out).palette.entries.iter().any(|e| e.id == id)
+    }
+
+    fn refused_for_no_wall(out: &BlockArrayIr) -> bool {
+        primaries_of(out, DiagnosticCode::DeferredMember)
+            .iter()
+            .any(|p| p.contains("has no wall to cut into"))
+    }
+
+    #[test]
+    fn abstract_token_deferral_says_what_each_member_does_instead() {
+        let default_block = Some("the member is built from its default block");
+        check_deferral_arms(&[
+            // The issue's example: the window is not cut, so its wall stays.
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          window side=front offset=1 y=1 size=1x2 mat_slot=trim",
+                consequence: Some("the window is not cut, and the wall stays"),
+                voxels: |out| {
+                    for y in 1..=2 {
+                        assert_eq!(block_id(struct_s(out), 1, y, 4), "minecraft:cobblestone");
+                    }
+                },
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  floor mat_slot=trim",
+                consequence: Some("the cell falls back to air"),
+                voxels: |out| assert_eq!(block_id(struct_s(out), 1, 0, 1), BlockState::AIR_ID),
+            },
+            // The walls' rows are absent rather than air, and a window cut
+            // into them is refused.
+            DeferralArm {
+                members: "floor mat_slot=wall\n  \
+                          walls mat_slot=trim height=3\n  \
+                          window side=front offset=1 y=1 size=1x2 mat_slot=wall",
+                consequence: Some(
+                    "the walls are not built and take up no rows, so a door or window cut into \
+                     them is refused",
+                ),
+                voxels: |out| {
+                    assert_eq!(struct_s(out).dims.y, 1);
+                    assert!(refused_for_no_wall(out));
+                },
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  roof kind=gable mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, STAIR_BASE_ID)),
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  roof kind=flat mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, FLAT_BASE_ID)),
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          roof kind=shed slope_to=front mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, STAIR_BASE_ID)),
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          roof kind=flat mat_slot=wall overhang=1\n  \
+                          stair kind=stairs side=front mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, STAIR_BASE_ID)),
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          pressure_plate at=front.outside offset=2 y=0 mat_slot=trim",
+                consequence: default_block,
+                voxels: |out| assert!(has_id(out, PRESSURE_PLATE_BASE_ID)),
+            },
+        ]);
+    }
+
+    #[test]
+    fn a_member_refused_before_its_material_defers_no_abstract_token() {
+        check_deferral_arms(&[
+            // `cut_window` refuses a window with no wall before it resolves
+            // the material.
+            DeferralArm {
+                members: "floor mat_slot=wall\n  \
+                          window side=front offset=1 y=1 size=1x2 mat_slot=trim",
+                consequence: None,
+                voxels: |out| {
+                    assert_eq!(struct_s(out).dims.y, 1);
+                    assert!(refused_for_no_wall(out));
+                },
+            },
+            // A shed with no usable `slope_to=` draws nothing, so it claims no
+            // material either: the one finding is the one that says why.
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  roof kind=shed mat_slot=trim",
+                consequence: None,
+                voxels: |out| {
+                    assert_eq!(struct_s(out).dims.y, 4);
+                    assert!(!has_id(out, STAIR_BASE_ID));
+                    assert_eq!(
+                        primaries_of(out, DiagnosticCode::DeferredMember),
+                        vec!["shed roof requires `slope_to=` (one of front, back, left, right)"],
+                    );
+                },
+            },
+            DeferralArm {
+                members: "walls mat_slot=wall height=3\n  \
+                          roof kind=shed slope_to=sideways mat_slot=trim",
+                consequence: None,
+                voxels: |out| {
+                    assert_eq!(struct_s(out).dims.y, 4);
+                    assert!(!has_id(out, STAIR_BASE_ID));
+                    assert_eq!(
+                        primaries_of(out, DiagnosticCode::DeferredMember),
+                        vec![
+                            "unknown shed `slope_to=sideways` (expected one of front, back, left, \
+                             right)"
+                        ],
+                    );
+                },
+            },
+        ]);
     }
 
     #[test]
