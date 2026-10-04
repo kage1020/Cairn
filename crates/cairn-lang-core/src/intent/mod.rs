@@ -322,9 +322,10 @@ pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
         .collect()
 }
 
-/// Every `circuit` line of every `struct` and `def`, in source order
-/// within each scope, read into the reservation it makes or the
-/// [`CircuitRegionDefect`] that keeps it from making one.
+/// Every `circuit` line at the top level of a `struct` or `def` body or
+/// under a `level` in one, in source order within each scope, read into
+/// the reservation it makes or the [`CircuitRegionDefect`] that keeps it
+/// from making one.
 ///
 /// One walk, so [`circuit_regions`] and a caller that also needs the
 /// rejected lines cannot disagree about which lines are usable: each
