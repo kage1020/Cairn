@@ -70,15 +70,19 @@ fn cottage_roof_stairs_carry_bedrock_states() {
         .iter()
         .find(|(_, ba)| ba.palette.entries.iter().any(|e| e.id.ends_with("_stairs")))
         .expect("cottage has a stair in its palette");
-    let stair_index = ba
+    let stair_id = &ba
         .palette
         .entries
         .iter()
-        .position(|e| e.id.ends_with("_stairs"))
-        .expect("stair present");
+        .find(|e| e.id.ends_with("_stairs"))
+        .expect("stair present")
+        .id;
     let (root, _notes) = build_mcstructure_tag(ba, &target).expect("build");
 
-    // Walk root.structure.palette.default.block_palette[stair_index].states.
+    // Walk root.structure.palette.default.block_palette to the entry named
+    // `stair_id`, then to its states. Found by `name` rather than by the
+    // Java palette index: translation can merge Java entries into one
+    // `block_palette` entry, so the two lists need not line up.
     let structure = match root.entries.get("structure") {
         Some(Tag::Compound(c)) => c,
         other => panic!("structure: {other:?}"),
@@ -93,12 +97,20 @@ fn cottage_roof_stairs_carry_bedrock_states() {
         },
         other => panic!("palette: {other:?}"),
     };
-    let states = match &block_palette[stair_index] {
-        Tag::Compound(c) => match c.entries.get("states") {
-            Some(Tag::Compound(s)) => s,
-            other => panic!("states: {other:?}"),
-        },
-        other => panic!("palette entry: {other:?}"),
+    let stair = block_palette
+        .iter()
+        .find_map(|entry| match entry {
+            Tag::Compound(c) => match c.entries.get("name") {
+                Some(Tag::String(name)) if name == stair_id => Some(c),
+                Some(Tag::String(_)) => None,
+                other => panic!("name: {other:?}"),
+            },
+            other => panic!("palette entry: {other:?}"),
+        })
+        .unwrap_or_else(|| panic!("no block_palette entry is named {stair_id}: {block_palette:?}"));
+    let states = match stair.entries.get("states") {
+        Some(Tag::Compound(s)) => s,
+        other => panic!("states: {other:?}"),
     };
     assert!(
         states.entries.contains_key("weirdo_direction"),

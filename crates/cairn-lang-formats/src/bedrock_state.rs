@@ -185,7 +185,7 @@ pub fn translate_states(
 /// pieces so this is the only place they are put into words.
 ///
 /// Without the id because the two callers introduce the entry
-/// differently. [`degradation_message`] makes the block the sentence's
+/// differently. [`degradation_message`] makes the entry the sentence's
 /// subject, because a [`ParityNote`](crate::bedrock_structure::ParityNote)
 /// has to read on its own — the CLI happens to prefix the id again when
 /// it renders one, which is that renderer's wart and not a reason for
@@ -209,17 +209,26 @@ pub fn degradation_detail(dropped: &DroppedIntent) -> String {
     }
 }
 
-/// [`degradation_detail`] with the block that carried the intent, as
+/// [`degradation_detail`] with the entry that carried the intent, as
 /// `W_INTENT_DEGRADED` reports it.
+///
+/// `state` is how the entry is named, quoted as given. The `.mcstructure`
+/// writer passes the Java state the entry came from,
+/// `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]`,
+/// as `cairn info`'s note names it. Degradation is a fact about the state
+/// combination, and one id reaches the palette once per combination. Two
+/// of those combinations can drop the same value — `roof-hip`'s north and
+/// south corners both drop `shape=outer_left` — and then a warning naming
+/// the id alone repeats itself word for word.
 ///
 /// The family word comes out of the same `match` for the same reason the
 /// sentence does: `stair` is true of this variant, not of the type.
 #[must_use]
-pub fn degradation_message(id: &str, dropped: &DroppedIntent) -> String {
+pub fn degradation_message(state: &str, dropped: &DroppedIntent) -> String {
     let family = match dropped {
         DroppedIntent::Shape { .. } => "stair",
     };
-    format!("{family} `{id}` {}", degradation_detail(dropped))
+    format!("{family} `{state}` {}", degradation_detail(dropped))
 }
 
 fn translate_stair(
@@ -301,6 +310,14 @@ pub(crate) fn join_properties(properties: &IndexMap<String, String>) -> String {
         .map(|(k, v)| format!("{k}={v}"))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+/// A Java palette entry named as its state, `id[key=value,...]`: the
+/// spelling `cairn info` prints a degraded entry in, with the properties
+/// joined by the same [`join_properties`]. A bare block comes out as
+/// `id[]`, as `info`'s spelling would give it.
+pub(crate) fn java_state(id: &str, properties: &IndexMap<String, String>) -> String {
+    format!("{id}[{}]", join_properties(properties))
 }
 
 #[cfg(test)]
@@ -392,15 +409,21 @@ mod tests {
             }],
         );
         // The sentence is written once, from those pieces, and the
-        // warning's form is the note's with the block named.
+        // warning's form is the note's with the entry's Java state named.
         let detail = degradation_detail(&t.degraded[0]);
         assert!(
             detail.starts_with("shape=outer_left has no Bedrock state"),
             "got: {detail}"
         );
+        let state = java_state(
+            "minecraft:oak_stairs",
+            &stair_props("south", "top", "outer_left"),
+        );
         assert_eq!(
-            degradation_message("minecraft:oak_stairs", &t.degraded[0]),
-            format!("stair `minecraft:oak_stairs` {detail}"),
+            degradation_message(&state, &t.degraded[0]),
+            format!(
+                "stair `minecraft:oak_stairs[facing=south,half=top,shape=outer_left]` {detail}"
+            ),
         );
 
         // `straight` produces no note.

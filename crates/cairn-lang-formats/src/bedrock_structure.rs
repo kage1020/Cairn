@@ -32,7 +32,7 @@
 //! portability". A block with properties outside a mapped family is still a
 //! hard error.
 
-use cairn_lang_core::block_array::BlockArray;
+use cairn_lang_core::block_array::{BlockArray, PaletteIndex};
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{
@@ -41,7 +41,7 @@ use cairn_lang_nbt::{
 };
 use thiserror::Error;
 
-use crate::bedrock_state::{BedrockStateError, degradation_message, translate_states};
+use crate::bedrock_state::{BedrockStateError, degradation_message, java_state, translate_states};
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
 use crate::java_structure::is_concrete_id;
@@ -55,7 +55,9 @@ use crate::java_structure::is_concrete_id;
 pub struct ParityNote {
     /// Concrete id of the palette entry whose intent degraded.
     pub id: String,
-    /// Human-readable degradation message.
+    /// Human-readable degradation message. It already names the entry, as
+    /// its Java state `id[key=value,...]`, so a caller that prefixes
+    /// [`Self::id`] to it prints the id twice.
     pub message: String,
 }
 
@@ -173,11 +175,12 @@ impl From<VolumeError> for BedrockStructureError {
 /// Holding one means every refusal [`build_mcstructure_tag`] can raise has
 /// already been ruled out, and so has every refusal the NBT encoder could
 /// raise on this structure: each palette string is encodable, the voxel
-/// count fits a list's length prefix and is the grid's length, and the
-/// palette fits one too. [`Self::write`] can therefore fail only on I/O,
-/// and has no panic of its own to reach. The two per-voxel
-/// `block_indices` layers are encoded straight from the grid as they are
-/// written.
+/// count fits a list's length prefix and is the grid's length, and
+/// `block_palette`, measured once translated duplicates are merged, fits
+/// one too. [`Self::write`] can therefore fail only on I/O, and has no
+/// panic of its own to reach. The two per-voxel `block_indices` layers are
+/// encoded from the grid as they are written, each voxel through `slots`
+/// to the `block_palette` slot its palette entry was written to.
 #[derive(Clone)]
 pub struct McStructure<'a> {
     block_array: &'a BlockArray,
@@ -186,9 +189,20 @@ pub struct McStructure<'a> {
     /// checked to fit `i32` and to equal `block_array.voxels.len()`.
     volume: usize,
     /// The finished `palette` compound: one `block_palette` entry per
-    /// palette entry, in palette order, with its translated `states`.
-    /// Built once here so writing it needs no copy.
+    /// distinct translated block, in the order each first appears in the
+    /// palette, with its translated `states`. Built once here so writing it
+    /// needs no copy.
     palette: Compound,
+    /// How many entries `block_palette` holds: the palette's, less those
+    /// translation merged into an earlier one.
+    block_palette_len: usize,
+    /// The `block_palette` slot each palette entry was written to, indexed
+    /// by the entry's [`PaletteIndex`].
+    ///
+    /// Translation can map several palette entries to one Bedrock block —
+    /// stairs differing only in `shape` do, once `shape` is dropped — and
+    /// those share the first one's slot.
+    slots: Vec<u16>,
 }
 
 /// The dims and palette size rather than the grid, which can hold millions
@@ -200,6 +214,7 @@ impl std::fmt::Debug for McStructure<'_> {
             .field("size", &self.size)
             .field("volume", &self.volume)
             .field("palette_len", &self.block_array.palette.entries.len())
+            .field("block_palette_len", &self.block_palette_len)
             .finish_non_exhaustive()
     }
 }
@@ -223,12 +238,20 @@ impl std::fmt::Debug for McStructure<'_> {
 /// NBT string, [`BedrockStructureError::DimensionOverflow`] when a
 /// dimension does not fit the wire width,
 /// [`BedrockStructureError::VolumeOverflow`] when the voxel count overflows
-/// `usize`, [`BedrockStructureError::ListTooLong`] when the voxel count or
-/// the palette is past an NBT list's length limit,
+/// `usize`, [`BedrockStructureError::ListTooLong`] when the voxel count is
+/// past an NBT list's length limit or `block_palette` is (measured, and
+/// reported as `len`, once translated duplicates are merged),
 /// [`BedrockStructureError::VoxelCountMismatch`] when the grid's length is
 /// not the voxel count, and
 /// [`BedrockStructureError::PaletteIndexOutOfRange`] when a voxel names a
 /// slot the palette does not have.
+///
+/// # Panics
+///
+/// Panics if `block_palette` would need a slot past `u16::MAX`. A slot is
+/// never past its entry's palette index, so that takes a palette longer
+/// than [`Palette::intern`](cairn_lang_core::block_array::Palette::intern)
+/// builds: one assembled by hand.
 pub fn prepare_mcstructure<'a>(
     block_array: &'a BlockArray,
     target: &BedrockTarget,
@@ -239,6 +262,7 @@ pub fn prepare_mcstructure<'a>(
     // with a half-translated palette.
     let entries = &block_array.palette.entries;
     let mut block_palette: Vec<Compound> = Vec::with_capacity(entries.len());
+    let mut slots: Vec<u16> = Vec::with_capacity(entries.len());
     let mut notes: Vec<ParityNote> = Vec::new();
     for entry in entries {
         if !is_concrete_id(&entry.id) {
@@ -248,22 +272,48 @@ pub fn prepare_mcstructure<'a>(
         }
         let translated = translate_states(&entry.id, &entry.properties)?;
         check_palette_strings(&entry.id, &translated.states)?;
-        for dropped in &translated.degraded {
-            notes.push(ParityNote {
-                id: entry.id.clone(),
-                message: degradation_message(&entry.id, dropped),
-            });
+        // Only an entry with properties degrades, so `state` is never a
+        // bare block's. It is named by the Java state it came from, as
+        // `cairn info` names it: the Bedrock state is what remains once
+        // the intent is dropped, so two entries that differ only in what
+        // was dropped would read the same by it.
+        if !translated.degraded.is_empty() {
+            let state = java_state(&entry.id, &entry.properties);
+            for dropped in &translated.degraded {
+                notes.push(ParityNote {
+                    id: entry.id.clone(),
+                    message: degradation_message(&state, dropped),
+                });
+            }
         }
-        block_palette.push(palette_entry(
-            &entry.id,
-            translated.states,
-            target.block_version,
-        ));
+        let compound = palette_entry(&entry.id, translated.states, target.block_version);
+        // The palette is a set (`spec/compilation` "Within-phase conflicts
+        // and the palette"), and translation can fold distinct Java states
+        // into one Bedrock block. The first entry keeps its slot and the
+        // rest are written to it, so air stays at 0. A linear scan, as in
+        // `Palette::intern`: `Compound` can hold a float, so it has no
+        // `Hash`, and these palettes are small.
+        let slot = block_palette
+            .iter()
+            .position(|written| *written == compound)
+            .unwrap_or_else(|| {
+                block_palette.push(compound);
+                block_palette.len() - 1
+            });
+        // A slot is never past its entry's palette index, so it fits a
+        // `u16` for every palette `Palette::intern` builds. Only a longer
+        // one, assembled by hand, can fail the `expect`, which panics as
+        // `intern` does rather than write a slot no voxel could name.
+        slots.push(
+            u16::try_from(slot)
+                .expect("block_palette grew past u16::MAX slots; widen PaletteIndex first"),
+        );
     }
-    if !fits_list_limit(entries.len()) {
+    let block_palette_len = block_palette.len();
+    if !fits_list_limit(block_palette_len) {
         return Err(BedrockStructureError::ListTooLong {
             list: "block_palette",
-            len: entries.len(),
+            len: block_palette_len,
         });
     }
     let size = dims_to_i32(&block_array.dims)?;
@@ -277,6 +327,8 @@ pub fn prepare_mcstructure<'a>(
         size,
         volume,
         palette: palette_compound(block_palette),
+        block_palette_len,
+        slots,
     };
     Ok((prepared, notes))
 }
@@ -303,6 +355,15 @@ fn check_palette_strings(id: &str, states: &Compound) -> Result<(), BedrockStruc
 }
 
 impl McStructure<'_> {
+    /// The `block_palette` slot a voxel is written as.
+    ///
+    /// Indexing `slots` is panic-free only because it has one entry per
+    /// palette entry and [`prepare_mcstructure`] runs
+    /// `first_index_outside_palette` before it builds a `McStructure`.
+    fn slot(&self, voxel: PaletteIndex) -> i32 {
+        i32::from(self.slots[usize::from(voxel.0)])
+    }
+
     /// Write the structure under the empty root name the game expects, as
     /// raw (uncompressed) little-endian NBT. The bytes are the ones
     /// [`write_mcstructure`] writes for the tree [`build_mcstructure_tag`]
@@ -328,7 +389,7 @@ impl McStructure<'_> {
         })
     }
 
-    /// The two `block_indices` layers, streamed in [`block_indices`]'s
+    /// The two `block_indices` layers, streamed in [`Self::block_indices`]'s
     /// order and shape.
     fn write_block_indices<W: std::io::Write>(
         &self,
@@ -347,7 +408,7 @@ impl McStructure<'_> {
                                 .dims
                                 .index(x, y, z)
                                 .expect("voxel coordinate in dims by construction");
-                            layer0.item(&Tag::Int(i32::from(block_array.voxels[i].0)))?;
+                            layer0.item(&Tag::Int(self.slot(block_array.voxels[i])))?;
                         }
                     }
                 }
@@ -360,6 +421,39 @@ impl McStructure<'_> {
                 Ok(())
             })
         })
+    }
+
+    /// The two `block_indices` layers. Layer 0 is the `block_palette` slot
+    /// per voxel, which is not its palette index once translation has
+    /// merged entries; layer 1 is the co-located (waterlog) layer,
+    /// `-1`-filled because Cairn's lowering never authors co-located blocks
+    /// today.
+    fn block_indices(&self) -> List {
+        let block_array = self.block_array;
+        let volume = self.volume;
+        let mut layer0: Vec<Tag> = Vec::with_capacity(volume);
+        for x in 0..block_array.dims.x {
+            for y in 0..block_array.dims.y {
+                for z in 0..block_array.dims.z {
+                    let i = block_array
+                        .dims
+                        .index(x, y, z)
+                        .expect("voxel coordinate in dims by construction");
+                    layer0.push(Tag::Int(self.slot(block_array.voxels[i])));
+                }
+            }
+        }
+        let layer1: Vec<Tag> = vec![Tag::Int(-1); volume];
+        // The outer list always has two items, so a literal is safe; each
+        // layer goes through `List::of_tags` because an empty one must
+        // declare `TAG_End` rather than `3`.
+        List {
+            element_type_id: 9,
+            items: vec![
+                Tag::List(List::of_tags(3, layer0)),
+                Tag::List(List::of_tags(3, layer1)),
+            ],
+        }
     }
 }
 
@@ -381,7 +475,7 @@ pub fn build_mcstructure_tag(
     let (prepared, notes) = prepare_mcstructure(block_array, target)?;
 
     let mut structure = Compound::new();
-    structure.insert("block_indices", Tag::List(block_indices(block_array)));
+    structure.insert("block_indices", Tag::List(prepared.block_indices()));
     structure.insert("entities", Tag::List(List::empty()));
     structure.insert("palette", Tag::Compound(prepared.palette));
 
@@ -410,36 +504,6 @@ pub fn write_mcstructure<W: std::io::Write>(
     root: &Compound,
 ) -> Result<(), NbtIoError> {
     write_bedrock_uncompressed(writer, "", root)
-}
-
-/// The two `block_indices` layers. Layer 0 is the palette index per
-/// voxel; layer 1 is the co-located (waterlog) layer, `-1`-filled because
-/// Cairn's lowering never authors co-located blocks today.
-fn block_indices(block_array: &BlockArray) -> List {
-    let volume = block_array.dims.volume();
-    let mut layer0: Vec<Tag> = Vec::with_capacity(volume);
-    for x in 0..block_array.dims.x {
-        for y in 0..block_array.dims.y {
-            for z in 0..block_array.dims.z {
-                let i = block_array
-                    .dims
-                    .index(x, y, z)
-                    .expect("voxel coordinate in dims by construction");
-                layer0.push(Tag::Int(i32::from(block_array.voxels[i].0)));
-            }
-        }
-    }
-    let layer1: Vec<Tag> = vec![Tag::Int(-1); volume];
-    // The outer list always has two items, so a literal is safe; each layer
-    // goes through `List::of_tags` because an empty one must declare
-    // `TAG_End` rather than `3`.
-    List {
-        element_type_id: 9,
-        items: vec![
-            Tag::List(List::of_tags(3, layer0)),
-            Tag::List(List::of_tags(3, layer1)),
-        ],
-    }
 }
 
 /// One `block_palette` entry: the id, its Bedrock `states` (an empty
