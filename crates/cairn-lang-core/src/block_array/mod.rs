@@ -666,6 +666,29 @@ mod tests {
         assert_eq!(palette.try_intern(BlockState::air()), Ok(PaletteIndex::AIR));
     }
 
+    /// A capacity past [`PALETTE_CAPACITY`] is clamped to it: a full
+    /// palette refuses a new state rather than reaching for an index a
+    /// [`PaletteIndex`] cannot name, and the refusal carries the capacity
+    /// that was in force, not the one asked for. Caught rather than left to
+    /// fail the test, so the clamp's absence is reported as this assertion
+    /// and not as the panic it would cause.
+    #[test]
+    fn try_intern_within_clamps_a_capacity_past_what_an_index_can_name() {
+        let mut palette = filled(PALETTE_CAPACITY);
+        let answered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            palette.try_intern_within(BlockState::bare("test:one_too_many"), PALETTE_CAPACITY + 1)
+        }));
+        assert_eq!(
+            answered.ok(),
+            Some(Err(PaletteFull {
+                capacity: PALETTE_CAPACITY
+            })),
+            "a capacity of {} refuses at {PALETTE_CAPACITY}",
+            PALETTE_CAPACITY + 1,
+        );
+        assert_eq!(palette.entries.len(), PALETTE_CAPACITY);
+    }
+
     #[test]
     fn dims_index_round_trips() {
         let d = Dims { x: 3, y: 2, z: 4 };

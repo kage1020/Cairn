@@ -5859,21 +5859,57 @@ mod tests {
         lower_to_block_array_within(&ir, &resolution, None, palette_capacity)
     }
 
-    /// A 1x1 struct whose `walls` members each paint the one ring cell
-    /// with a block of their own, so `states` members write `states`
-    /// distinct states and the finished body keeps one of them.
-    fn overwriting_walls(states: usize) -> String {
+    /// `theme t`, binding `states` slots, `s0` up, each to a block of its
+    /// own, and a 1x1 `body` header followed by one `walls` row per slot.
+    /// Every row paints the body's one ring cell, so the body writes
+    /// `states` distinct states and the finished body keeps the last.
+    fn overwriting_walls_in(body: &str, states: usize) -> String {
         use std::fmt::Write as _;
 
         let mut source = String::from("theme t:\n");
         for i in 0..states {
             writeln!(source, "  slot s{i} -> @b{i}").expect("writing to a String");
         }
-        source.push_str("\nstruct s size=1x1\n");
+        writeln!(source, "\n{body}").expect("writing to a String");
         for i in 0..states {
             writeln!(source, "  walls mat_slot=s{i} height=1").expect("writing to a String");
         }
         source
+    }
+
+    /// [`overwriting_walls_in`] a `struct s`.
+    fn overwriting_walls(states: usize) -> String {
+        overwriting_walls_in("struct s size=1x1", states)
+    }
+
+    /// [`overwriting_walls_in`] a `def d`, placed once as `a`.
+    fn placed_overwriting_walls(states: usize) -> String {
+        let mut source = overwriting_walls_in("def d size=1x1:", states);
+        source.push_str("\nsite v:\n  place id=a use=d theme=t at=origin\n");
+        source
+    }
+
+    /// The findings of `code` in `ir`.
+    fn findings(ir: &BlockArrayIr, code: DiagnosticCode) -> Vec<&Diagnostic> {
+        ir.diagnostics.iter().filter(|d| d.code == code).collect()
+    }
+
+    /// The three properties `tests/diagnostic_text.rs` holds every string
+    /// its corpus renders to. That corpus lowers at [`PALETTE_CAPACITY`],
+    /// so it cannot reach `W_PALETTE_TOO_LARGE`, and its text is checked
+    /// here instead.
+    fn assert_reads_as_prose(origin: &str, text: &str) {
+        assert!(
+            !text.contains("  "),
+            "{origin} renders a run of spaces, which is a dropped `\\` line \
+             continuation in the literal: {text:?}",
+        );
+        assert!(
+            !text.contains('\n') && !text.contains('\t'),
+            "{origin} embeds its own line break: {text:?}",
+        );
+        assert!(!text.trim().is_empty(), "{origin} renders nothing");
+        assert_eq!(text.trim(), text, "{origin} has leading or trailing space");
     }
 
     /// A body that paints more states than its palette can hold is refused
@@ -5882,14 +5918,15 @@ mod tests {
     /// painting 65,536 states; the boundary itself is pinned on
     /// `Palette::try_intern`. States a later member covers count, which is
     /// why the refused body would have kept a single state.
+    ///
+    /// The refusal comes before the phase conflicts are reported: a body
+    /// that is not built has no conflict to resolve, and at the real
+    /// capacity a body one state short of it reports 65,534 of them.
     #[test]
     fn a_body_painting_more_states_than_its_palette_holds_is_refused() {
         let fits = lowered_within(&overwriting_walls(3), 4);
         assert!(
-            !fits
-                .diagnostics
-                .iter()
-                .any(|d| d.code == DiagnosticCode::PaletteTooLarge),
+            findings(&fits, DiagnosticCode::PaletteTooLarge).is_empty(),
             "three states fit: {:#?}",
             fits.diagnostics,
         );
@@ -5902,13 +5939,14 @@ mod tests {
             2,
             "air and the last wall's state: the covered ones are pruned after painting",
         );
+        assert!(
+            !findings(&fits, DiagnosticCode::PhaseConflict).is_empty(),
+            "a built body reports the walls that overwrite one another: {:#?}",
+            fits.diagnostics,
+        );
 
         let over = lowered_within(&overwriting_walls(4), 4);
-        let refused: Vec<&Diagnostic> = over
-            .diagnostics
-            .iter()
-            .filter(|d| d.code == DiagnosticCode::PaletteTooLarge)
-            .collect();
+        let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
         assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
         assert_eq!(refused[0].severity(), Severity::Warning);
         assert!(
@@ -5921,6 +5959,89 @@ mod tests {
         assert!(
             !over.structures.contains_key("struct::s"),
             "the refused body must not reach a writer",
+        );
+        assert_eq!(
+            findings(&over, DiagnosticCode::PhaseConflict),
+            Vec::<&Diagnostic>::new(),
+            "a refused body is not built, so it has no conflict to report",
+        );
+    }
+
+    /// The rendered text of the refusal reads as prose: a dropped `\`
+    /// continuation in the primary's or the note's literal is caught here.
+    #[test]
+    fn the_palette_refusal_renders_as_prose() {
+        let over = lowered_within(&overwriting_walls(4), 4);
+        let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
+        assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
+        assert_reads_as_prose("W_PALETTE_TOO_LARGE primary", &refused[0].primary);
+        assert_eq!(refused[0].notes.len(), 1, "{:#?}", refused[0].notes);
+        assert_reads_as_prose("W_PALETTE_TOO_LARGE note 0", &refused[0].notes[0].message);
+    }
+
+    /// The `def` path to the same refusal, as `tests/structure_volume.rs`
+    /// covers it for the extent: a `place` paints its `def` through the body
+    /// lowering a `struct` uses, and a refused body places nothing. The
+    /// finding names the row and anchors on it.
+    #[test]
+    fn a_place_whose_def_paints_more_states_than_its_palette_holds_is_refused() {
+        let fits = lowered_within(&placed_overwriting_walls(3), 4);
+        assert!(
+            findings(&fits, DiagnosticCode::PaletteTooLarge).is_empty(),
+            "three states fit: {:#?}",
+            fits.diagnostics,
+        );
+        assert!(
+            fits.placements.contains_key("site::v::a"),
+            "{:?}",
+            fits.placements.keys(),
+        );
+
+        let source = placed_overwriting_walls(4);
+        let over = lowered_within(&source, 4);
+        let refused = findings(&over, DiagnosticCode::PaletteTooLarge);
+        assert_eq!(refused.len(), 1, "{:#?}", over.diagnostics);
+        assert!(
+            refused[0]
+                .primary
+                .starts_with("`a` paints more than 3 distinct non-air block states"),
+            "{}",
+            refused[0].primary,
+        );
+        assert!(
+            source[refused[0].span.clone()].starts_with("place id=a"),
+            "anchored on the row, not the def: {:?}",
+            &source[refused[0].span.clone()],
+        );
+        assert!(over.structures.is_empty(), "{:?}", over.structures.keys());
+        assert!(over.placements.is_empty(), "{:?}", over.placements.keys());
+        assert_eq!(
+            findings(&over, DiagnosticCode::PhaseConflict),
+            Vec::<&Diagnostic>::new(),
+        );
+    }
+
+    /// Once a paint has overflowed, `intern` answers air for every later
+    /// state, one the palette already holds included, without looking it
+    /// up: the body is refused, so nothing reads what a later paint gets.
+    #[test]
+    fn a_scope_palette_looks_nothing_up_once_it_has_overflowed() {
+        let mut palette = ScopePalette::with_capacity(2);
+        let kept = BlockState::bare("test:kept");
+        assert_eq!(palette.intern(kept.clone()), PaletteIndex(1));
+        assert_eq!(
+            palette.intern(BlockState::bare("test:refused")),
+            PaletteIndex::AIR,
+        );
+        assert_eq!(
+            palette.intern(kept),
+            PaletteIndex::AIR,
+            "a state the palette holds is not looked up after the overflow",
+        );
+        assert_eq!(
+            palette.into_palette(),
+            Err(PaletteFull { capacity: 2 }),
+            "the refusal kept is the one at the capacity in force",
         );
     }
 
