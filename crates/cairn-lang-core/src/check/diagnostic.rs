@@ -482,10 +482,14 @@ pub enum DiagnosticCode {
     /// mutually exclusive per `spec/components-editing-sites` "Multi-building
     /// with `site`" so the placement coordinate is unambiguous.
     InvalidPlaceOrigin,
-    /// A `def NAME` is never referenced by any `place use=NAME`. The def
-    /// itself lowers to no voxels (defs are templates), so this is advisory
-    /// rather than fatal — but worth surfacing because an unused def is
-    /// usually a typo on the `place use=` side.
+    /// A `def NAME` is never referenced by any `place use=NAME`. Every
+    /// `place` row in a `site` body whose `use=` is a label (an identifier
+    /// or string) naming the def counts as a reference, whether or not the
+    /// row is refused; a `use=` that is not a label (`use=3`) names no def
+    /// and does not count. The def itself lowers to no voxels (defs are
+    /// templates), so this is advisory rather than fatal — but worth
+    /// surfacing because an unused def is usually a typo on the
+    /// `place use=` side.
     UnusedDef,
     /// A `connect A.PORT to B.PORT` row names a port id (`PORT`) that the
     /// referenced def does not expose. The place id sides are reported by
