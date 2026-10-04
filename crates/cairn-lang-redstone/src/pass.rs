@@ -349,7 +349,7 @@ fn unreachable_sink_diagnostic(
     straight: u32,
 ) -> Diagnostic {
     let primary = format!(
-        "{netlist} netlist for {kind} `{name}` puts {sink} {straight} blocks from its driver in a straight line — exceeds the v1 attenuation limit of {cap} blocks, and no route between two coords is shorter than the straight line between them",
+        "{netlist} netlist for {kind} `{name}` puts {sink} {straight} steps from its driver in a straight line — exceeds the v1 attenuation limit of {cap} steps, and no route between two coords is shorter than the straight line between them",
         kind = entry.kind.label(),
         name = entry.name,
         cap = MAX_ATTENUATION_SEGMENT,
@@ -973,10 +973,10 @@ mod tests {
                     });
                 assert!(
                     refusal.primary.contains(which.label())
-                        && refusal.primary.contains(&format!("{} blocks", width - 1))
+                        && refusal.primary.contains(&format!("{} steps", width - 1))
                         && refusal
                             .primary
-                            .contains(&format!("limit of {MAX_ATTENUATION_SEGMENT} blocks")),
+                            .contains(&format!("limit of {MAX_ATTENUATION_SEGMENT} steps")),
                     "the {stage} pass names the sink, the distance and the cap: {}",
                     refusal.primary,
                 );

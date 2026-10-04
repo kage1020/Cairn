@@ -1427,7 +1427,7 @@ fn beyond_cap_diagnostic(
     stranded: usize,
 ) -> Diagnostic {
     let mut primary = format!(
-        "{netlist} netlist for {kind} `{name}` has no route from the driver at ({sx},{sy},{sz}) to ({x},{y},{z}) within the v1 attenuation limit of {cap} blocks",
+        "{netlist} netlist for {kind} `{name}` has no route from the driver at ({sx},{sy},{sz}) to ({x},{y},{z}) within the v1 attenuation limit of {cap} steps",
         kind = entry.kind.label(),
         name = entry.name,
         x = sink.x,
@@ -2653,7 +2653,7 @@ mod tests {
             d.primary,
             format!(
                 "placed netlist for struct `s` has no route from the driver at (0,0,0) to \
-                 (0,0,4) within the v1 attenuation limit of {cap} blocks; 1 more of this \
+                 (0,0,4) within the v1 attenuation limit of {cap} steps; 1 more of this \
                  scope's sinks cannot be reached either"
             ),
         );
@@ -2713,7 +2713,7 @@ mod tests {
         assert_eq!(d.code, DiagnosticCode::AttenuationLimit);
         assert!(
             d.primary.ends_with(&format!(
-                "within the v1 attenuation limit of {cap} blocks; the faces it could arrive \
+                "within the v1 attenuation limit of {cap} steps; the faces it could arrive \
                  through are taken by sig.a"
             )),
             "{}",
