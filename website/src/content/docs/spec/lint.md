@@ -134,7 +134,7 @@ version to compare.
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
-| `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
+| `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
 | `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
 | `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member in the file. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
@@ -650,10 +650,12 @@ in the vocabulary whose value the pass cannot read is dropped and a default put 
 where the key itself decides whether the member is built at all, the member is refused instead
 (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
 [§5.4](/spec/syntax/#54-selectors)). An **unreached key**: a `key=` this specification defines that
-no pass reads yet — `window shape=` / `anchor=`, `roof footprint=` / `bounds=` and a header's
-`class=` are those keys today — is carried into the IR and never consulted. Every `key=value` on the
-right of a `theme` selector row whose keyword the compiler knows is one too, reported on the binding
-whatever its key or value, since no pass lowers a selector's bindings yet
+no pass reads yet — `window shape=` / `anchor=`, `roof footprint=` / `bounds=`, a header's `class=`,
+and `mat_slot=` on a `door`, `level`, `circuit` or `place` are those keys today — is carried into
+the IR and never consulted. A `mat_slot=` of the four is not looked up in the theme either, so a
+slot name the theme does not declare is this warning rather than `E_UNRESOLVED_SLOT`. Every
+`key=value` on the right of a `theme` selector row whose keyword the compiler knows is one too,
+reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
 ([Materials and Themes](/spec/materials-themes/)). And a key **routed past**: one the keyword reads
 only under some ways of writing a sibling argument, on a member that writes it another way. The
 boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this way,

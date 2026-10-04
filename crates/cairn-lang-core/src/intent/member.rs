@@ -34,6 +34,12 @@ pub struct Member {
     /// Explicit `mat_slot=` reference into the theme's slot table, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mat_slot: Option<String>,
+    /// Byte range of the [`Self::mat_slot`] value in the source, set exactly
+    /// when that field is. Hoisting takes the key out of
+    /// [`Self::intent_state`], whose entries carry their own spans, so a pass
+    /// that reports on the value reads its position here.
+    #[serde(skip)]
+    pub mat_slot_span: Option<Span>,
     /// `[attr=value]` selector immediately after the keyword
     /// (`door[id=front] ...`). Carried through verbatim; later passes decide
     /// whether the selector is binding a fresh id or referencing an existing

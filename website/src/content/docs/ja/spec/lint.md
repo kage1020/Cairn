@@ -131,7 +131,7 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` が、そのエディションのどの `--target` でもビルドできないバージョンを名指す。 |
 | `E_INCOMPATIBLE_MATERIAL` | ブロックステートを付けるジオメトリを持つメンバが、それを保持できないマテリアルに束縛されている。 |
 | `E_MISSING_MATERIAL` | ブロックへの唯一の経路が `mat_slot=` であるメンバが、それを持たずに書かれている。 |
-| `E_UNRESOLVED_SLOT` | メンバの `mat_slot=` が、束縛されたテーマの宣言していないスロットを指している。 |
+| `E_UNRESOLVED_SLOT` | `mat_slot=` を読むロールのメンバの `mat_slot=` が、束縛されたテーマの宣言していないスロットを指している。 |
 | `E_UNKNOWN_SLOT_TARGET` | `slot NAME -> VALUE` の値が、正規トークンでも抽象マテリアルトークンでもない ([マテリアルとテーマ](/ja/spec/materials-themes))。 |
 | `E_THEME_SELECTOR_UNMATCHED` | `theme` のセレクタ行が、ファイル中のどのメンバにも一致しない。 |
 | `E_THEME_VARIANT_MISSING` | 固定されたエディションが、テーマのどのエディション別バリアントも束縛できない。 |
@@ -636,7 +636,9 @@ theme に `window[tags=...]` と書けば `tags=` は window で何かが読む�
 かを決める場合は、代わりにメンバが拒否されます (今日それに当たるのは、`repeat=` が 1 より大きい
 `window` の `sym=` です。[§5.4](/ja/spec/syntax/#54-セレクタ))。**まだ届いていないキー**: 本仕様が
 定義していてまだどのパスも読まない `key=` (今日それに当たるのは `window shape=` / `anchor=`、
-`roof footprint=` / `bounds=`、ヘッダの `class=` です) は IR まで運ばれて一度も参照されません。コン
+`roof footprint=` / `bounds=`、ヘッダの `class=`、そして `door` / `level` / `circuit` / `place` の
+`mat_slot=` です) は IR まで運ばれて一度も参照されません。この 4 つの `mat_slot=` はテーマでの引き当
+ても行われないため、テーマが宣言していないスロット名は `E_UNRESOLVED_SLOT` ではなくこの警告になります。コン
 パイラが知るキーワードの `theme` セレクタ行で矢印の右にある `key=value` もすべてこれに当たり、キーや
 値が何であってもそのバインディングの位置で報告されます。セレクタのバインディングを下げるパスはまだな
 いからです ([マテリアルとテーマ](/ja/spec/materials-themes/))。**素通りされたキー**: 同じ行の別の引

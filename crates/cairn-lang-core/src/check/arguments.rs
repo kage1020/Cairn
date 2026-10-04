@@ -251,6 +251,15 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             sink.push(finding);
         }
     }
+    // A label-shaped `mat_slot=` was hoisted out of the fields above, so
+    // the one branch that can apply to it — the key is universal, hence
+    // always accepted — is asked here. One that stayed in the fields was
+    // judged with them.
+    if let Some(span) = &member.mat_slot_span
+        && member.role.unread_arguments().contains(&"mat_slot")
+    {
+        sink.push(unread_argument(keyword, "mat_slot", span));
+    }
     // The member's own `[key=value]`, against the same vocabulary. Only
     // the two branches about the *word* apply: the other two ask what a
     // lowering rule does with a value, and a selector filters rather than

@@ -274,7 +274,7 @@ impl MemberRole {
         })
     }
 
-    /// Arguments in [`Self::arguments`] that no pass reads yet.
+    /// Arguments in [`Self::accepted_arguments`] that no pass reads yet.
     ///
     /// Spelled out rather than derived, because "nothing reads it" is not a
     /// fact any table can compute about itself. Each of these is a key the
@@ -284,9 +284,10 @@ impl MemberRole {
     ///
     /// Where the boundary runs: a spec'd key on a keyword the role table
     /// knows belongs here. A spec'd keyword the table does *not* know —
-    /// `painting`, in the same worked example the three below come from —
-    /// has no row for its arguments to sit in, and `E_UNKNOWN_KEYWORD`
-    /// owns the whole line, the way it does for any other unknown word.
+    /// `painting`, in the same worked example the window and roof keys
+    /// below come from — has no row for its arguments to sit in, and
+    /// `E_UNKNOWN_KEYWORD` owns the whole line, the way it does for any
+    /// other unknown word.
     #[must_use]
     pub fn unread_arguments(&self) -> &'static [&'static str] {
         match self {
@@ -299,14 +300,18 @@ impl MemberRole {
             // `spec/entities` "Anchor conventions", on the same `roof` line.
             // `fill_roof` reads kind, overhang and slope_to.
             Self::Roof => &["footprint", "bounds"],
+            // The universal `mat_slot=` on a role no painter asks for a
+            // material: `carve_door` only removes blocks, a `level` groups
+            // members that carry their own, a `circuit` reserves a volume
+            // the redstone phases paint, and a `place` instantiates a def
+            // whose members carry theirs. The resolver skips the slot
+            // lookup for these too, so a name the theme lacks is not a
+            // refusal over an argument that changes nothing.
+            Self::Door | Self::Level | Self::Circuit | Self::Place => &["mat_slot"],
             Self::Floor
             | Self::Walls
-            | Self::Door
             | Self::Stair
-            | Self::Level
             | Self::PressurePlate
-            | Self::Circuit
-            | Self::Place
             | Self::Connect
             | Self::Other(_) => &[],
         }
