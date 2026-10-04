@@ -126,10 +126,11 @@ pub enum DiagnosticCode {
     /// A `struct` or `def` body holds more than one `circuit` line.
     ///
     /// A scope has one reservation for its redstone: place-and-route
-    /// reads one region per scope and assigns nothing to a second, so a
-    /// later line would be dropped without a word. Refused as a repeated
-    /// `size=` is, rather than picking one, since either line could be
-    /// the one the author means.
+    /// reads the first usable line and assigns no logic to any other, so
+    /// every other line would be dropped without a word. Refused rather
+    /// than resolved by keeping that line, because nothing in the source
+    /// says which line the author meant, and the first usable one is a
+    /// guess.
     DuplicateCircuit,
     /// A member carries an indented body that nothing reads.
     ///

@@ -1,5 +1,6 @@
 //! `duplicate` pass — flags a `key=` / `slot` / `id=` / item name repeated
-//! in the same scope, and a `theme` selector row repeated as a whole.
+//! in the same scope, a `theme` selector row repeated as a whole, and a
+//! second `circuit` line in a `struct` / `def` body.
 //!
 //! Walks the surface AST rather than the IR because the IR's
 //! [`IntentState`](crate::intent::IntentState) and `args` maps are
@@ -403,10 +404,11 @@ fn first_declaration_note(first_span: &Span) -> DiagnosticNote {
 /// Every `circuit` member of the body counts, well-formed or not and
 /// with or without a `[...]` selector: each states the scope's
 /// reservation, and [`crate::circuit_regions`] keeps every well-formed
-/// one, of which place-and-route uses the first. Only the body's own
-/// members: [`crate::circuit_regions`] does not descend into a `level`,
-/// so a `circuit` there is not a second reservation for this check to
-/// report.
+/// one of a sized scope, of which place-and-route uses the first.
+///
+/// This check counts the body's own members and nothing below them. A
+/// `circuit` line under a `level` is in that level's body, not this
+/// one, so it is neither a first line here nor a second.
 fn check_circuit_lines(body: &[Statement], sink: &mut DiagnosticSink) {
     let mut first: Option<&Span> = None;
     for stmt in body {
@@ -421,7 +423,13 @@ fn check_circuit_lines(body: &[Statement], sink: &mut DiagnosticSink) {
                 code: DiagnosticCode::DuplicateCircuit,
                 span: span.clone(),
                 primary: "this scope already has a `circuit` line, and a scope reserves one region for its redstone".into(),
-                notes: vec![first_declaration_note(first_span)],
+                notes: vec![
+                    first_declaration_note(first_span),
+                    DiagnosticNote {
+                        span: None,
+                        message: "delete one of the two lines, or split the logic across several scopes, each with its own `circuit` line".into(),
+                    },
+                ],
                 data: None,
             }),
             None => first = Some(span),
