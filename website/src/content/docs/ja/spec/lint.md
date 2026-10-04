@@ -340,7 +340,7 @@ macOS と Windows が既定で使う大文字小文字を区別しないファ�
 
 | コード | 意味 |
 |---|---|
-| `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def が公開していないポートを名指している。 |
+| `E_UNRESOLVED_PORT` | `connect A.PORT to B.PORT` が、参照先の def の本体に直接宣言されたどのメンバも持たないポート id を名指している。`level` の下のメンバはまだポートになれず、id がそうしたメンバのものなら、この診断はそう告げます。 |
 | `E_AMBIGUOUS_PORT` | そのポート id が、参照先の def の複数のメンバに一致する。 |
 | `E_MISSING_PATH_MATERIAL` | `connect` 行に `path=` が無く、walkway を敷くマテリアルがない。 |
 | `W_DUPLICATE_WALKWAY` | 同じ site の先行する行が既に敷いた `(from, to)` の組を、`connect` が繰り返している。 |
