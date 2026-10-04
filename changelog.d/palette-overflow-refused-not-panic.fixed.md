@@ -6,5 +6,5 @@
   paint counts, including one a later member covers. The scope is now skipped with a new warning,
   `W_PALETTE_TOO_LARGE`, and the other scopes still lower; `cairn compile` and `cairn check
   --edition E --target V` then refuse the partial build with `E_PARTIAL_BUILD`, as they do for
-  `W_STRUCTURE_TOO_LARGE`. `Palette::try_intern` and `PaletteFull` are the fallible form of
-  `Palette::intern`, and `PALETTE_CAPACITY` is the cap.
+  `W_STRUCTURE_TOO_LARGE`. `Palette::try_intern` is the fallible form of `Palette::intern`, its
+  `PaletteFull` error carries the capacity it refused at, and `PALETTE_CAPACITY` is the cap.

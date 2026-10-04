@@ -364,13 +364,23 @@ impl BlockArray {
 /// [`PaletteIndex`] can name.
 pub const PALETTE_CAPACITY: usize = u16::MAX as usize + 1;
 
-/// [`Palette::try_intern`] was asked for a new state while the palette
-/// already held [`PALETTE_CAPACITY`] entries.
+/// A new block state was refused because the palette already held
+/// [`Self::capacity`] entries.
+///
+/// [`Palette::try_intern`] refuses at [`PALETTE_CAPACITY`]. Lowering's own
+/// tests paint against a smaller capacity so the refusal is reachable,
+/// which is why the error carries the capacity that was in force rather
+/// than leaving a reader to assume it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error(
-    "the palette already holds {PALETTE_CAPACITY} block states, every index a palette can name"
+    "the palette already holds {capacity} entries, its capacity, and refuses a new block state"
 )]
-pub struct PaletteFull;
+#[non_exhaustive]
+pub struct PaletteFull {
+    /// The most entries the palette could hold, air's slot among them:
+    /// [`PALETTE_CAPACITY`] from [`Palette::try_intern`], and never more.
+    pub capacity: usize,
+}
 
 /// Deduplicating palette. [`Palette::intern`] appends, so the order while
 /// a body is being painted is insertion order; [`Palette::canonicalize`]
@@ -440,8 +450,9 @@ impl Palette {
                 u16::try_from(i).expect("palette index fits in u16 by construction"),
             ));
         }
-        if self.entries.len() >= capacity.min(PALETTE_CAPACITY) {
-            return Err(PaletteFull);
+        let capacity = capacity.min(PALETTE_CAPACITY);
+        if self.entries.len() >= capacity {
+            return Err(PaletteFull { capacity });
         }
         let idx = u16::try_from(self.entries.len())
             .expect("a palette below PALETTE_CAPACITY has an index left");
@@ -637,7 +648,9 @@ mod tests {
         assert_eq!(palette.entries.len(), PALETTE_CAPACITY);
         assert_eq!(
             palette.try_intern(BlockState::bare("test:one_too_many")),
-            Err(PaletteFull),
+            Err(PaletteFull {
+                capacity: PALETTE_CAPACITY
+            }),
         );
         assert_eq!(
             palette.entries.len(),

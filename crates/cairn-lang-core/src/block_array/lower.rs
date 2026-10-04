@@ -1814,9 +1814,12 @@ fn lower_body_to_block_array<'a>(
     // Before anything reads the grid: a voxel painted after the palette
     // filled up holds air rather than its state, so the array is not the
     // body the source describes.
-    let Some(mut palette) = palette.into_palette() else {
-        diagnostics.push(diag_palette_too_large(&body));
-        return None;
+    let mut palette = match palette.into_palette() {
+        Ok(palette) => palette,
+        Err(full) => {
+            diagnostics.push(diag_palette_too_large(&body, full));
+            return None;
+        }
     };
 
     for ((overridden, overriding), voxels) in &canvas.conflicts {
@@ -2150,16 +2153,17 @@ fn prune_unreferenced(palette: &mut Palette, canvas: &Canvas) -> (Vec<PaletteInd
 /// covers, so what fills the palette is the states *written*, not the
 /// states the finished body keeps, and the overflow has to be caught at
 /// paint time. A paint past the capacity gets air in place of its state
-/// and marks the palette overflowed; [`Self::into_palette`] then answers
-/// `None`, and the body is refused with `W_PALETTE_TOO_LARGE` before its
-/// grid is read. Holding the flag here, rather than threading a `Result`
-/// out of every generator, is what lets the generators keep their
-/// infallible `intern`, and the type is what keeps them off the
-/// panicking [`Palette::intern`].
+/// and records the refusal; [`Self::into_palette`] then answers with it,
+/// and the body is refused with `W_PALETTE_TOO_LARGE` before its grid is
+/// read. Holding the refusal here, rather than threading a `Result` out
+/// of every generator, is what lets the generators keep their infallible
+/// `intern`, and the type is what keeps them off the panicking
+/// [`Palette::intern`].
 struct ScopePalette {
     palette: Palette,
     capacity: usize,
-    overflowed: bool,
+    /// The refusal that overflowed the palette, once one has.
+    overflow: Option<PaletteFull>,
 }
 
 impl ScopePalette {
@@ -2167,22 +2171,25 @@ impl ScopePalette {
         Self {
             palette: Palette::new_with_air(),
             capacity: scope_palette_capacity(),
-            overflowed: false,
+            overflow: None,
         }
     }
 
     fn intern(&mut self, state: BlockState) -> PaletteIndex {
         self.palette
             .try_intern_within(state, self.capacity)
-            .unwrap_or_else(|PaletteFull| {
-                self.overflowed = true;
+            .unwrap_or_else(|full| {
+                self.overflow = Some(full);
                 PaletteIndex::AIR
             })
     }
 
-    /// The palette, or `None` when a paint overflowed it.
-    fn into_palette(self) -> Option<Palette> {
-        (!self.overflowed).then_some(self.palette)
+    /// The palette, or the refusal that overflowed it.
+    fn into_palette(self) -> Result<Palette, PaletteFull> {
+        match self.overflow {
+            None => Ok(self.palette),
+            Some(full) => Err(full),
+        }
     }
 }
 
@@ -2219,8 +2226,11 @@ mod test_capacity {
     }
 }
 
-/// A body painted more distinct block states than one palette can hold.
-fn diag_palette_too_large(body: &BodyDescriptor<'_>) -> Diagnostic {
+/// A body painted more distinct block states than its palette holds.
+///
+/// The number is `full`'s, the capacity that was in force, less the slot
+/// air holds from the start.
+fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::PaletteTooLarge,
         span: body.header_span.clone(),
@@ -2228,7 +2238,7 @@ fn diag_palette_too_large(body: &BodyDescriptor<'_>) -> Diagnostic {
             "`{}` paints more than {} distinct non-air block states, past what one palette \
              can index; block-array lowering skipped it",
             body.scope_label,
-            scope_palette_capacity() - 1,
+            full.capacity.saturating_sub(1),
         ),
         notes: vec![DiagnosticNote {
             span: None,
