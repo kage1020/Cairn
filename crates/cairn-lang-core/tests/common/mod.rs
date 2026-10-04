@@ -92,6 +92,17 @@ pub fn slice<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
     &source[diag.span.clone()]
 }
 
+/// Byte offset of the `n`th (0-based) occurrence of `needle`, so a test
+/// says which of several equal tokens a span starts at rather than relying
+/// on "first" or "last".
+pub fn nth(source: &str, needle: &str, n: usize) -> usize {
+    source
+        .match_indices(needle)
+        .nth(n)
+        .unwrap_or_else(|| panic!("occurrence {n} of `{needle}` not found in:\n{source}"))
+        .0
+}
+
 /// The messages of `diag`'s notes, in order.
 pub fn notes(diag: &Diagnostic) -> Vec<&str> {
     diag.notes.iter().map(|n| n.message.as_str()).collect()

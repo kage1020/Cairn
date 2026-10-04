@@ -31,6 +31,13 @@ turn on.
 | `E_DUPLICATE_ITEM` | Two top-level items of the same kind share a name. |
 | `E_DUPLICATE_HEADER` | A single-valued `@directive` is declared more than once. |
 
+`E_DUPLICATE_ID` leaves two `place` rows of one `site` body to `E_DUPLICATE_PLACE_ID`
+([Sites and placements](#sites-and-placements)), which names the site. That holds for an id
+refused as `E_INVALID_PLACE_ID` too: the second row sharing it gets `E_DUPLICATE_PLACE_ID` beside
+its own `E_INVALID_PLACE_ID`, so renaming both rows to one usable id raises nothing new. A `place`
+row sharing its `id=` with any other row of that body, such as a `connect`, is still
+`E_DUPLICATE_ID`. So are two `place` rows indented under one row, which are not in that body.
+
 `E_DUPLICATE_SELECTOR` compares selectors by meaning, not by text: attribute order does not count,
 and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.
 Rows that bind *different* keys compose and are not reported. Neither are rows whose attributes
@@ -226,15 +233,22 @@ declares more than one — or none at all — no theme binds to the def's own sc
 
 `E_UNKNOWN_ABSTRACT_TOKEN` and `W_ABSTRACT_TOKEN_DEFERRED` differ on whether anything could have
 answered. A pack was offered and does not declare the token, so the build stops with a suggestion
-towards the closest one it does declare; no pack was offered, so nothing was asked and the cell
-degrades to air with a warning. The second is the path a library caller reaches — LSP highlighting,
-or a `cairn check` with no pack — and it is a warning for that reason: refusing there would refuse
-every source read without a pack.
+towards the closest one it does declare; no pack was offered, so nothing was asked and the member
+degrades with a warning. The second is the path a library caller reaches — LSP highlighting, or a
+`cairn check` with no pack — and it is a warning for that reason: refusing there would refuse every
+source read without a pack.
+
+The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave `stair`
+or `pressure_plate` is built from its default block. A `walls` is not built and takes up no rows, so
+a `door` or `window` cut into it is refused. A `window` is not cut, so its wall stays, and a port on
+it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
-all has no slot map to read, so the member contributes no voxel. It is judged per scope: a scope
-with no theme bound that reads no `mat_slot=` is not reported, whatever the rest of the module
-reads, and a member a `level` drops does not count as reading one.
+all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built,
+so every `door` and `window` is refused for want of a wall; a `floor` leaves its cells air, and a
+`roof`, eave `stair` or `pressure_plate` is still built from its default block. It is judged per
+scope: a scope with no theme bound that reads no `mat_slot=` is not reported, whatever the rest of
+the module reads, and a member a `level` drops does not count as reading one.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A version
