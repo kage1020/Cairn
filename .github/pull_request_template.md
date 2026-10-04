@@ -39,9 +39,10 @@ See CONTRIBUTING.md for the full convention.
 <!--
 If this touches a Stable surface (see spec/compatibility):
   - Did you add a `W_DEPRECATED` warning for the previous release? (link the PR)
-  - Did you update CHANGELOG `Deprecations` / `Breaking changes` accordingly?
+  - Did you add a `changelog.d/<slug>.deprecations.md` / `.breaking.md` fragment accordingly?
 If this is `feat!:` / `fix!:` etc., explain the migration path. A `!` title and a
-`Breaking changes` entry under CHANGELOG `[Unreleased]` come together: one without the
-other is incomplete (CONTRIBUTING.md, "Branches and pull requests").
+`changelog.d/<slug>.breaking.md` fragment come together: one without the other is
+incomplete, and the `Changelog` check reports it (changelog.d/README.md). Do not edit
+CHANGELOG.md itself.
 Delete this section if the change is purely internal.
 -->
