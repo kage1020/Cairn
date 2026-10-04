@@ -967,18 +967,36 @@ fn a_floor_on_an_unplaced_def_refuses_nothing() {
     );
 }
 
-/// A block only the floor's version declares is the usual reason for
-/// declaring the floor, so a target below it lacks that block too. The cap
-/// is the finding the author can act on; an `E_UNKNOWN_ID` for the block
-/// would tell them to replace the block they declared the floor for.
+/// A struct painted with pale moss under `floors`, one directive per line.
+///
+/// Of the pack's Java tables, 1.21.4's is the first to declare pale moss,
+/// so it is the block a `version>=1.21.4` floor is there for. Java 1.20.4
+/// and Bedrock 1.21.40 both lack it.
+fn pale_moss_under(floors: &str) -> String {
+    format!(
+        "{floors}theme t:\n  slot floor -> @pale_moss_block\n\
+         struct s size=2x2\n  floor mat_slot=floor\n"
+    )
+}
+
+/// The block the floor's version is the first to declare is the usual
+/// reason for declaring the floor, so a target below it lacks that block
+/// too. The cap is the finding the author can act on; an `E_UNKNOWN_ID` for
+/// the block would tell them to replace the block they declared the floor
+/// for. So the id check is suspended for that target, and a suspended run
+/// is refused and writes nothing.
+///
+/// The missing `E_UNKNOWN_ID` only means something if 1.20.4 lacks pale
+/// moss, and this test does not show that: the build at 1.21.4 below shows
+/// the floor's version declares the block, which is a different fact. The
+/// control, `a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks`,
+/// is what supplies the premise.
 #[test]
 fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks() {
     let fixture = Fixture::new(
         "cairn-version-cap",
         "floor-block",
-        "@requires version>=1.21.4\n\
-         theme t:\n  slot floor -> @pale_moss_block\n\
-         struct s size=2x2\n  floor mat_slot=floor\n",
+        &pale_moss_under("@requires version>=1.21.4\n"),
     );
     let out = compile(&fixture, "1.20.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
@@ -991,6 +1009,12 @@ fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks()
         !stderr.contains("E_UNKNOWN_ID"),
         "a block the refused target lacks is moot, got: {stderr}",
     );
+    // Before the build below, which writes into this same fixture.
+    assert_eq!(
+        fixture.artifacts(),
+        Vec::<String>::new(),
+        "a suspended run is refused and writes nothing",
+    );
 
     let built = compile(&fixture, "1.21.4");
     let stderr = String::from_utf8(built.stderr).expect("utf-8");
@@ -1001,17 +1025,22 @@ fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks()
     );
 }
 
-/// The block-id check is suspended only for a target the floor refuses. At
-/// a target that clears every floor, a block that version lacks is still
-/// `E_UNKNOWN_ID`.
+/// The control for the test above, and the test that supplies its premise:
+/// 1.20.4 has no pale moss.
+///
+/// The id check runs at a `--target` that resolves and that every floor
+/// lets through. It is off at one that does not resolve, which leaves no
+/// version to check against, and at one the floors refuse — one below a
+/// floor, or any target while a floor names a version the edition's table
+/// cannot place — where the build is refused on the floor instead. Here the
+/// target resolves and clears the only floor, so the block it lacks is
+/// still `E_UNKNOWN_ID`.
 #[test]
 fn a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks() {
     let fixture = Fixture::new(
         "cairn-version-cap",
         "cleared-block",
-        "@requires version>=1.20.4\n\
-         theme t:\n  slot floor -> @pale_moss_block\n\
-         struct s size=2x2\n  floor mat_slot=floor\n",
+        &pale_moss_under("@requires version>=1.20.4\n"),
     );
     let out = compile(&fixture, "1.20.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
@@ -1021,4 +1050,105 @@ fn a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks() {
         "1.20.4 has no pale moss, got: {stderr}",
     );
     assert!(!stderr.contains("E_VERSION_CAP"), "got: {stderr}");
+}
+
+/// A floor the edition's table cannot place refuses every target, as
+/// `E_REQUIRES_UNORDERABLE`, so it suspends the id check as a cap does.
+///
+/// Pinned instead, Bedrock 1.21.40 reported the pale moss as `E_UNKNOWN_ID`,
+/// and the advice to compile against a target that declares the block led
+/// to a build refused on the `@requires` line, which was the repair all
+/// along. The second half takes the refusal's own advice: scoped to the
+/// numbering it is written in, the floor is inert on Bedrock, the target is
+/// pinned, and the block 1.21.40 lacks is reported. That is also the
+/// premise the first half's missing `E_UNKNOWN_ID` rests on.
+#[test]
+fn an_unplaceable_floor_suspends_the_block_id_check_too() {
+    let fixture = Fixture::new(
+        "cairn-version-cap",
+        "unplaceable-block",
+        &pale_moss_under("@requires version>=1.21.4\n"),
+    );
+    let out = compile_as(&fixture, "bedrock", "1.21.40");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        stderr.contains("E_REQUIRES_UNORDERABLE"),
+        "the floor names no bedrock release, got: {stderr}",
+    );
+    assert!(
+        !stderr.contains("E_UNKNOWN_ID"),
+        "the repair is on the `@requires` line, not the block, got: {stderr}",
+    );
+    assert_eq!(
+        fixture.artifacts(),
+        Vec::<String>::new(),
+        "a suspended run is refused and writes nothing",
+    );
+
+    let scoped = Fixture::new(
+        "cairn-version-cap",
+        "unplaceable-block-scoped",
+        &pale_moss_under("@requires java version>=1.21.4\n"),
+    );
+    let out = compile_as(&scoped, "bedrock", "1.21.40");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("E_UNKNOWN_ID"),
+        "premise: bedrock 1.21.40 has no pale moss, got: {stderr}",
+    );
+    assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        !stderr.contains("E_REQUIRES_UNORDERABLE"),
+        "a java-scoped floor is inert on a bedrock build, got: {stderr}",
+    );
+}
+
+/// Compile `floors` — Java's `1.21.4`, which Bedrock's table cannot place,
+/// and Bedrock's `1.21.60`, above the target, in the order given — against
+/// Bedrock 1.21.40, and require the unplaceable one to be what is reported.
+///
+/// The report puts any unplaceable floor ahead of a below-target one,
+/// wherever each sits, and the id-check gate asks the same question. Both
+/// orders are run because the order is what a helper answering "the first
+/// floor in source order that refuses" gets wrong: it names the cap when
+/// the cap comes first.
+fn assert_the_unplaceable_floor_is_reported_beside_a_cap(label: &str, floors: &str) {
+    let fixture = Fixture::new("cairn-version-cap", label, &pale_moss_under(floors));
+    let out = compile_as(&fixture, "bedrock", "1.21.40");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        stderr.contains("E_REQUIRES_UNORDERABLE"),
+        "the floor no target can satisfy is the line to fix, got: {stderr}",
+    );
+    assert!(
+        !stderr.contains("E_VERSION_CAP"),
+        "raising `--target` cannot clear the unplaceable floor, got: {stderr}",
+    );
+    assert!(
+        !stderr.contains("E_UNKNOWN_ID"),
+        "a block checked against a target the floors refuse is moot, got: {stderr}",
+    );
+    assert_eq!(
+        fixture.artifacts(),
+        Vec::<String>::new(),
+        "a suspended run is refused and writes nothing",
+    );
+}
+
+#[test]
+fn an_unplaceable_floor_before_a_cap_is_reported_as_unplaceable() {
+    assert_the_unplaceable_floor_is_reported_beside_a_cap(
+        "unplaceable-then-cap",
+        "@requires version>=1.21.4\n@requires version>=1.21.60\n",
+    );
+}
+
+#[test]
+fn an_unplaceable_floor_after_a_cap_is_reported_as_unplaceable() {
+    assert_the_unplaceable_floor_is_reported_beside_a_cap(
+        "cap-then-unplaceable",
+        "@requires version>=1.21.60\n@requires version>=1.21.4\n",
+    );
 }
