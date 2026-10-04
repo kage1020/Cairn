@@ -400,11 +400,11 @@ impl Palette {
     /// (cottage = 3 distinct states) that a hash side-table would cost more
     /// than it saves.
     ///
-    /// For a caller whose states are bounded by construction. Lowering a
-    /// source is not one: ids are checked only against a pinned target's
-    /// table, so `cairn lower`, `cairn info` and a `check --target` that
-    /// does not resolve lower whatever ids a source invents, and its paint
-    /// path uses the fallible form instead.
+    /// For a caller whose states are bounded by construction, such as a
+    /// walkway's. The body paint path is not one: a source reaches any
+    /// number of distinct states there through block ids or state-literal
+    /// properties no pinned target checks (`W_STATE_LITERAL_UNCHECKED`), so
+    /// that path interns through the fallible form instead.
     ///
     /// # Panics
     ///

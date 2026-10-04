@@ -429,12 +429,15 @@ pub enum DiagnosticCode {
     /// index ([`crate::block_array::PALETTE_CAPACITY`] entries, air
     /// included), so the pass skips it rather than panicking.
     ///
-    /// Every paint counts, including one a later member covers. Reachable
-    /// only with made-up block ids lowered without a pinned target — a
-    /// vanilla registry has far fewer states — but a source must not be
-    /// able to crash the compiler. Warning severity, matching
-    /// `StructureTooLarge`: the scope is skipped, and `cairn compile`
-    /// refuses the partial build separately.
+    /// Every paint counts, including one a later member covers. A vanilla
+    /// registry has far fewer states, so a source reaches this only
+    /// through block ids or state-literal properties no pinned target
+    /// checks: an id goes unchecked wherever lowering runs with no version
+    /// pinned, and a state literal's properties under every target
+    /// (`W_STATE_LITERAL_UNCHECKED`). Every command that lowers can reach
+    /// it, `cairn compile` with a target that resolves among them. Warning
+    /// severity, matching `StructureTooLarge`: the scope is skipped, and
+    /// `cairn compile` refuses the partial build separately.
     PaletteTooLarge,
     /// A `place` row omits a key it cannot become a placement without:
     /// `id=`, `use=`, or `theme=`.

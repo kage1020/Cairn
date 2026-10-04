@@ -2233,8 +2233,9 @@ fn diag_palette_too_large(body: &BodyDescriptor<'_>) -> Diagnostic {
         notes: vec![DiagnosticNote {
             span: None,
             message: "every state a member writes counts, including one a later member \
-                      covers; a vanilla registry has far fewer, so check the block ids \
-                      against a `--target`"
+                      covers; a vanilla registry has far fewer, so check the block ids with \
+                      `--edition` and `--target`, and each state literal by hand, since no \
+                      target checks its properties (`W_STATE_LITERAL_UNCHECKED`)"
                 .to_owned(),
         }],
         data: None,
