@@ -2176,6 +2176,14 @@ impl ScopePalette {
     }
 
     fn intern(&mut self, state: BlockState) -> PaletteIndex {
+        // Once a paint has overflowed, `into_palette` discards the palette
+        // and the body is refused, so which states the palette holds from
+        // here on, and which index a later paint gets, is never read. Air
+        // without the scan, which would otherwise walk every entry on each
+        // remaining paint of an already refused body.
+        if self.overflow.is_some() {
+            return PaletteIndex::AIR;
+        }
         self.palette
             .try_intern_within(state, self.capacity)
             .unwrap_or_else(|full| {
