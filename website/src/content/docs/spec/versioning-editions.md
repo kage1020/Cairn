@@ -676,12 +676,12 @@ resolved_state:
   bedrock: { weirdo_direction: 1, upside_down_bit: false }              # no shape → corners don't join
 ```
 
-When a resolved difference becomes a visual or functional one, lint says so:
+When a resolved difference becomes a visual or functional one, the build says so. `themed-tower`'s
+eave stair is `shape=outer_left`:
 
 ```text
-W_INTENT_DEGRADED line 12 id=roof_corner:
-  shape=inner_left cannot be resolved in Bedrock (stairs have no shape state).
-  Bedrock stairs render straight; visual gaps at corners.
+$ cairn compile examples/themed-tower.crn --edition bedrock
+warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs: stair `minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]` shape=outer_left has no Bedrock state; Bedrock stairs render straight, so corners show visual gaps
 ```
 
 The canonical vocabulary absorbs only ID, state, and serialization differences. **Concept absence

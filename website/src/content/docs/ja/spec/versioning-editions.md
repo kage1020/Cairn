@@ -666,12 +666,12 @@ resolved_state:
   bedrock: { weirdo_direction: 1, upside_down_bit: false }              # shape が無く角がつながらない
 ```
 
-解決結果の差が見た目や機能の差になるとき、lint が知らせます。
+解決結果の差が見た目や機能の差になるとき、ビルドが知らせます。`themed-tower` の軒の階段は
+`shape=outer_left` です。
 
 ```text
-W_INTENT_DEGRADED line 12 id=roof_corner:
-  shape=inner_left cannot be resolved in Bedrock (stairs have no shape state).
-  Bedrock stairs render straight; visual gaps at corners.
+$ cairn compile examples/themed-tower.crn --edition bedrock
+warning[W_INTENT_DEGRADED]: struct::keep: minecraft:dark_oak_stairs: stair `minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]` shape=outer_left has no Bedrock state; Bedrock stairs render straight, so corners show visual gaps
 ```
 
 正準語彙が吸収できるのは ID / ステート / シリアライズの差だけです。**概念の不在とゲーム挙動の差は吸
