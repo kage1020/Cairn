@@ -13,7 +13,8 @@ cc 039865256bba38ce5f4e545660791dd29075cde264920cd883dcff2022e52f9d # shrinks to
 # Two sinks one row apart: a buffer repeater stood beside a branch of
 # its own net that it does not join. Kept because it replays, through
 # `phase4_buffer_tick_invariant_holds` itself, the draw that property
-# failed on when it was recorded. The shape it shrank to is held by
-# `a_buffer_due_beside_a_branch_steps_back_off_it`, which does not
-# depend on this seed still decoding to it.
+# failed on when it was recorded. The same shape is held by
+# `a_buffer_due_beside_a_branch_steps_back_off_it`, at the column where
+# the repeaters' spacing still puts one due beside the branch; that
+# test does not depend on this seed still decoding to it.
 cc 4c8103a0abe2e37b73fab0d48ce0a51b57c81f1696fe6f6301b5fc8c67a2325d # shrinks to xs = [(91, 2, false), (91, 3, false)]

@@ -243,25 +243,26 @@ The internal algorithm runs five stages:
    walled-in one. The bound is what keeps giving up on a sink proportional to the cap rather than
    to the reservation: without it, the search visited every free coordinate the net could reach
    before it refused.
-3. **Delay insertion.** A repeater goes in as a buffer only where a segment exceeds the attenuation
-   limit of 15. The segment is measured along the **routed** path from driver to sink, and the
-   buffer stands on that path, so the straight line between the two is not always wire. A segment
-   past the v1 cap of 256 blocks is refused rather than buffered, under the same
-   `E_ATTENUATION_LIMIT` stage 2 raises — what differs is that this pass measures the wire that
-   was actually laid.
+3. **Delay insertion.** A repeater goes in as a buffer only where a segment carries more dust than
+   the attenuation limit of 15 blocks: a source at strength 15 carries 15 blocks of dust, the last
+   at strength 1, which still drives the sink after it. The segment is measured along the **routed**
+   path from driver to sink, and the buffer stands on that path, so the straight line between the
+   two is not always wire. A segment past the v1 cap of 256 steps is refused rather than buffered,
+   under the same `E_ATTENUATION_LIMIT` stage 2 raises — what differs is that this pass measures the
+   wire that was actually laid.
 
    A repeater reads the block behind it and drives the one in front of it, at its own height, so it
    stands only where the wire runs straight through a coordinate at one height and nothing branches
    off there, nor where any block of its net other than the two it joins — dust the route reaches
    some other way, or one of the net's cells or pads — is on any of its six faces, which a repeater
-   there would cut off. On a straight run that is every 15 blocks. Where
-   that coordinate turns, climbs or forks, the repeater stands on the last coordinate before it that
-   runs straight, which can leave a route one repeater more than its length alone implies. When the
-   coordinate it steps back from is a fork, the one it lands on is on the trunk, so one block serves
-   every branch past it; a fork further back than that gets a repeater on each branch. Repeaters are
-   placed on each net's routed tree rather than per sink, and a sink is charged for the ones on its
-   route. A stretch of dust past the limit with no coordinate a repeater can stand on is refused
-   with `E_ATTENUATION_LIMIT`.
+   there would cut off. On a straight run from a fresh source it stands in place of every 16th
+   block, with 15 blocks of dust behind it. Where that coordinate turns, climbs or forks, the
+   repeater stands on the last coordinate before it that runs straight, which can leave a route one
+   repeater more than its length alone implies. When the coordinate it steps back from is a fork,
+   the one it lands on is on the trunk, so one block serves every branch past it; a fork further
+   back than that gets a repeater on each branch. Repeaters are placed on each net's routed tree
+   rather than per sink, and a sink is charged for the ones on its route. A stretch of dust past the
+   limit with no coordinate a repeater can stand on is refused with `E_ATTENUATION_LIMIT`.
 
    The limit is counted from the last component that restores strength — a sensor pad, a repeater,
    a torch — not from the start of each segment. Two of the cells pass on the strength they
@@ -269,9 +270,12 @@ The internal algorithm runs five stages:
    than its rear input carries. The wire into either of them and the wire out of it therefore count
    as one run of dust, though the cell stands between them, measured from the input that has spent
    the most: the pass does not track which input of a comparator is its rear, so it takes the one
-   that has spent the most. The repeater the run needs goes where the running total would pass 15:
-   on the wire out of the cell, or on the wire into it when the wire out has no coordinate near
-   enough to the cell to take one.
+   that has spent the most. The repeater the run needs goes where the running total would pass 15,
+   or, on the wire into such a cell, what the cell can spare of it, since the wire out needs the
+   rest. Where that is a block of dust, the repeater stands in its place and reads the dust before
+   it, as on a straight run. Where it is a sink — such a cell is one — the repeater cannot stand in
+   its place and stands on the wire before it. It lands on the wire out of the cell, or on the wire
+   into it when the wire out has no coordinate near enough to the cell to take one.
 4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
    wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
    path belongs to that net alone, and no other net runs within a step of it, so there is no
@@ -304,8 +308,8 @@ pipeline the shape was measured.
 
 ```text
 E_ATTENUATION_LIMIT line 13 circuit=floor:
-  placed netlist for struct `wide_pack` puts output pad #0 299 blocks from its driver in a
-  straight line — exceeds the v1 attenuation limit of 256 blocks, and no route between two coords
+  placed netlist for struct `wide_pack` puts output pad #0 299 steps from its driver in a
+  straight line — exceeds the v1 attenuation limit of 256 steps, and no route between two coords
   is shorter than the straight line between them.
   Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column
   sits within the cap of the cells it serves — a larger reservation cannot help, because the
