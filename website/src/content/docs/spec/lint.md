@@ -438,17 +438,17 @@ resolution the spec mandates still happens — the finding says which voxel it h
 | `W_TRUTH_TABLE_PARTIAL` | The rows leave input combinations unassigned. |
 
 `E_TRUTH_TABLE_DUPLICATE_INPUT` is reported on the whole `assert`, once per repeated signal, and no
-other truth-table code is raised for that table: the others count combinations of positions, and a
-signal listed twice has positions no combination of signals fills.
+other truth-table code is raised for that table: every other one reads the rows against an input
+list that is wrong, so the rest of the table is left until the list names each signal once.
 
 `E_TRUTH_TABLE_CONFLICT` and `W_TRUTH_TABLE_DUPLICATE_ROW` are reported on the later row. A row is
 compared with every earlier row that shares a combination with it, so whether a table is refused
-does not depend on the order its rows are written in: `0- -> 1` after `00 -> 1; 01 -> 0` is `E_TRUTH_TABLE_CONFLICT`, though it agrees with
-the first of the two. A conflict takes precedence over a duplicate on the same row, and its note is
-at the first row assigning the combination it names the other output. Any other finding's note is
-at the first row assigning the combination it names, so every finding about one combination points
-at the same row. The spec does not say which of two conflicting rows an evaluator would read,
-because the repair is to decide which row is wrong.
+does not depend on the order its rows are written in: `0- -> 1` after `00 -> 1; 01 -> 0` is
+`E_TRUTH_TABLE_CONFLICT`, though it agrees with the first of the two. A conflict takes precedence
+over a duplicate on the same row, and its note is at the first row assigning the combination it
+names the other output. Any other finding's note is at the first row assigning the combination it
+names, so every finding about one combination points at the same row. The spec does not say which of
+two conflicting rows an evaluator would read, because the repair is to decide which row is wrong.
 
 A `-` makes the same combination reachable from rows that do not look alike, so both codes are
 about the combination rather than about the pattern: `0-` and `-1` both assign `01`. The fix

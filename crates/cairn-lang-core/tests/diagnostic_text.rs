@@ -198,6 +198,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_MISPLACED_MEMBER",
         "E_THEME_SELECTOR_UNMATCHED",
         "E_TRUTH_TABLE_CONFLICT",
+        "E_TRUTH_TABLE_DUPLICATE_INPUT",
         "E_TRUTH_TABLE_EMPTY",
         "E_UNEXPECTED_POSITIONAL",
         "E_UNKNOWN_ARGUMENT",
