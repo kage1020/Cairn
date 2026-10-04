@@ -84,7 +84,8 @@ pub enum DiagnosticCode {
     /// failure of `spec/redstone` "Place-and-route": routing cannot be
     /// confined to the reserved region, so the pass fails loud with the
     /// self-correction triple ("increase `void`", "enlarge region", "split
-    /// into multiple `circuit` blocks"). Six shapes reach it — the
+    /// the logic across several scopes, each with its own `circuit`
+    /// line"). Six shapes reach it — the
     /// reserved volume is short of the netlist's estimated footprint; the
     /// reserved row is shorter than the spaced single-row layout needs,
     /// which is twice the cell count and one more; the reservation is too
@@ -141,8 +142,8 @@ pub enum DiagnosticCode {
     /// output-pad segments — a wide `circuit region=` reservation can
     /// trip either edge depending on which side sits farther from the
     /// driver. Fix: enlarge the `circuit region=` footprint so no
-    /// driver segment exceeds the cap, split the logic across multiple
-    /// `circuit` blocks, or pin cell / actuator placement closer to
+    /// driver segment exceeds the cap, split the logic across several
+    /// scopes, each with its own `circuit` line, or pin cell / actuator placement closer to
     /// its drivers.
     ///
     /// Also fires when a run of dust would pass its allowance — 15

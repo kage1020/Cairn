@@ -1371,7 +1371,7 @@ where
         region.span.clone(),
         primary,
         format!(
-            "Fix: raise `void` above {void} so the wire has a layer to climb onto, enlarge `size=WxH`, or split into multiple `circuit` blocks",
+            "Fix: raise `void` above {void} so the wire has a layer to climb onto, enlarge `size=WxH`, or split the logic across several scopes, each with its own `circuit` line",
             void = region.void,
         ),
     ))
@@ -1444,7 +1444,7 @@ fn beyond_cap_diagnostic(
         region.span.clone(),
         primary,
         format!(
-            "Fix: give the wire a shorter way round — raise `void` above {void} so it has a layer to climb onto, or enlarge `region=` — or split the logic across several `circuit` blocks",
+            "Fix: give the wire a shorter way round — raise `void` above {void} so it has a layer to climb onto, or enlarge `region=` — or split the logic across several scopes, each with its own `circuit` line",
             void = region.void,
         ),
     )
@@ -2663,7 +2663,7 @@ mod tests {
             [
                 "Fix: give the wire a shorter way round — raise `void` above 1 so it has a \
                  layer to climb onto, or enlarge `region=` — or split the logic across several \
-                 `circuit` blocks"
+                 scopes, each with its own `circuit` line"
             ],
         );
     }

@@ -162,6 +162,7 @@ mod tests {
             | C::DuplicateId
             | C::DuplicateItem
             | C::DuplicateHeader
+            | C::DuplicateCircuit
             | C::UnsupportedNesting
             | C::MisplacedMember
             | C::UnknownKeyword
@@ -242,6 +243,7 @@ mod tests {
             [
                 "E_CONNECT_ARITY",
                 "E_DUPLICATE_ARG",
+                "E_DUPLICATE_CIRCUIT",
                 "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",

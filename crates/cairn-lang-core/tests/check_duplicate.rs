@@ -117,3 +117,66 @@ fn dup_7_duplicate_header_arg_other_than_size_is_arg_not_size() {
         "got {diags:#?}",
     );
 }
+
+/// The `circuit` findings among `diags`.
+fn circuit_findings(
+    diags: &[cairn_lang_core::check::Diagnostic],
+) -> Vec<&cairn_lang_core::check::Diagnostic> {
+    diags
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DuplicateCircuit)
+        .collect()
+}
+
+/// A second `circuit` line in a scope is refused on that line, with a
+/// note on the first, rather than dropped: place-and-route reads one
+/// reservation per scope. A third is refused too, against the same
+/// first line.
+#[test]
+fn a_second_circuit_line_in_a_scope_is_refused_against_the_first() {
+    let src = "struct s size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
+               circuit region=basement void=2\n  circuit region=attic void=3\n";
+    let diags = diagnose(src);
+    let found = circuit_findings(&diags);
+    assert_eq!(found.len(), 2, "{diags:#?}");
+    for (finding, line) in found.iter().zip([
+        "circuit region=basement void=2",
+        "circuit region=attic void=3",
+    ]) {
+        assert_eq!(slice(src, finding), line);
+        assert_eq!(
+            finding.primary,
+            "this scope already has a `circuit` line, and a scope reserves one region for its redstone",
+        );
+        let first = finding.notes[0]
+            .span
+            .as_ref()
+            .expect("the note points at the first line");
+        assert_eq!(&src[first.clone()], "circuit region=floor void=1");
+    }
+}
+
+/// Every `circuit` line counts, whether or not it is a usable
+/// reservation and in a `def` as in a `struct`: the first line here is
+/// not usable, and the second is still a second line.
+#[test]
+fn a_circuit_line_after_an_unusable_one_is_still_a_second_line() {
+    let src = "def d size=7x5\n  floor mat_slot=m\n  circuit region=floor void=0\n  \
+               circuit region=floor void=2\n";
+    let diags = diagnose(src);
+    let found = circuit_findings(&diags);
+    assert_eq!(found.len(), 1, "{diags:#?}");
+    assert_eq!(slice(src, found[0]), "circuit region=floor void=2");
+}
+
+/// One `circuit` line per scope is not a duplicate across scopes, and a
+/// `circuit` inside a `level` is not one of its scope's own lines, which
+/// is all place-and-route reads.
+#[test]
+fn one_circuit_line_per_scope_is_not_a_duplicate() {
+    let src = "struct a size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n\n\
+               struct b size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
+               level y=1\n    circuit region=floor void=1\n";
+    let diags = diagnose(src);
+    assert!(circuit_findings(&diags).is_empty(), "{diags:#?}");
+}
