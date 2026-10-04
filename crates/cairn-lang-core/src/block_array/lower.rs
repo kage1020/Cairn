@@ -2225,8 +2225,8 @@ fn diag_palette_too_large(body: &BodyDescriptor<'_>) -> Diagnostic {
         code: DiagnosticCode::PaletteTooLarge,
         span: body.header_span.clone(),
         primary: format!(
-            "`{}` paints more than {} distinct block states, past what one palette can \
-             index; block-array lowering skipped it",
+            "`{}` paints more than {} distinct non-air block states, past what one palette \
+             can index; block-array lowering skipped it",
             body.scope_label,
             scope_palette_capacity() - 1,
         ),
@@ -5881,7 +5881,7 @@ mod tests {
         assert!(
             refused[0]
                 .primary
-                .starts_with("`s` paints more than 3 distinct block states"),
+                .starts_with("`s` paints more than 3 distinct non-air block states"),
             "{}",
             refused[0].primary,
         );
