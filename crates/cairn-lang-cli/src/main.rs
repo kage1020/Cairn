@@ -2752,8 +2752,9 @@ impl ResolvedTarget {
     /// its own on the warning line. That field groups the warnings by
     /// block, not by entry: one id has a note per state combination that
     /// degrades, and only the message, which names the entry as
-    /// `id[states]`, tells those apart. A tool that wants the entries structured reads
-    /// `cairn info`'s `edition_portability[].degraded_entries` instead.
+    /// `id[states]`, tells those apart. A tool that wants the entries
+    /// structured reads `cairn info`'s
+    /// `edition_portability[].degraded_entries` instead.
     fn prepare<'a>(
         &self,
         array: &'a BlockArray,

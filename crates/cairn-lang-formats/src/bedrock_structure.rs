@@ -302,7 +302,7 @@ pub fn prepare_mcstructure<'a>(
             });
         // A slot is never past its entry's palette index, so it fits a
         // `u16` for every palette `Palette::intern` builds. Only a longer
-        // one, assembled by hand, reaches the `expect`, which panics as
+        // one, assembled by hand, can fail the `expect`, which panics as
         // `intern` does rather than write a slot no voxel could name.
         slots.push(
             u16::try_from(slot)
@@ -357,7 +357,7 @@ fn check_palette_strings(id: &str, states: &Compound) -> Result<(), BedrockStruc
 impl McStructure<'_> {
     /// The `block_palette` slot a voxel is written as.
     ///
-    /// The indexing cannot panic only because `slots` has one entry per
+    /// Indexing `slots` is panic-free only because it has one entry per
     /// palette entry and [`prepare_mcstructure`] runs
     /// `first_index_outside_palette` before it builds a `McStructure`.
     fn slot(&self, voxel: PaletteIndex) -> i32 {
