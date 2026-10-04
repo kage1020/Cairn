@@ -20,6 +20,13 @@ fn info_json(file: &str, editions: &str) -> Value {
     info_json_at(&examples_dir().join(file), editions)
 }
 
+/// Run `cairn info --format json` and hand back the document, after
+/// checking that each per-edition axis has one entry per distinct edition
+/// in `editions`.
+///
+/// [`buildable_entry`] and [`portability_entry`] find an edition's entry by
+/// name, which cannot see a second one, so without the count here a test
+/// reading through them would pass with an edition listed twice.
 fn info_json_at(path: &std::path::Path, editions: &str) -> Value {
     let out = Command::new(cargo_bin())
         .args([
@@ -39,7 +46,21 @@ fn info_json_at(path: &std::path::Path, editions: &str) -> Value {
         String::from_utf8_lossy(&out.stderr),
     );
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
-    serde_json::from_str(&stdout).expect("valid JSON")
+    let axes: Value = serde_json::from_str(&stdout).expect("valid JSON");
+    let mut distinct: Vec<&str> = Vec::new();
+    for name in editions.split(',') {
+        if !distinct.contains(&name) {
+            distinct.push(name);
+        }
+    }
+    for axis in ["edition_portability", "buildable_targets"] {
+        assert_eq!(
+            axes[axis].as_array().map(Vec::len),
+            Some(distinct.len()),
+            "one {axis} entry per distinct edition in `--editions {editions}`: {axes}",
+        );
+    }
+    axes
 }
 
 /// Run `cairn info` and hand back the exit code with both streams, for the

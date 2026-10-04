@@ -47,6 +47,8 @@ use cairn_lang_redstone::{
 };
 use clap::{Parser, Subcommand, ValueEnum};
 
+use requested::{RequestedEditions, requested_editions};
+
 /// `println!` for everything the commands write to stdout, except that a
 /// reader who has closed the pipe (`cairn lower f.crn | head -1`) is not
 /// a failure: the line is dropped and the command carries on to the exit
@@ -195,8 +197,9 @@ enum Command {
         /// Path to the .crn file to inspect.
         file: PathBuf,
         /// Comma-separated editions to evaluate portability against. Each
-        /// edition produces one entry in the output's `edition portability`
-        /// section.
+        /// distinct edition produces one entry in the output's
+        /// `edition portability` and `buildable targets` sections; a
+        /// repeated name is reported once.
         #[arg(long, value_delimiter = ',', default_values_t = vec!["java".to_owned(), "bedrock".to_owned()])]
         editions: Vec<String>,
         /// Output format for the report.
@@ -1076,12 +1079,12 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     // reaches would refuse the command before a single row was computed.
     // The resolver stays unpinned regardless — that gate is edition-neutral
     // by design, and the strict per-edition pass runs inside the dry-run.
-    let asked: Vec<Edition> = requested_editions(editions);
+    let asked: RequestedEditions = requested_editions(editions);
     let combined = build_diagnostics(
         &module,
         &ir,
         None,
-        &asked,
+        asked.as_slice(),
         std::mem::take(&mut block_ir.diagnostics),
     );
 
@@ -1105,7 +1108,7 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
         lines: &lines,
         report: format.failure_report(),
     };
-    let rows = match edition_rows(reporting, &module, &ir, editions, &combined) {
+    let rows = match edition_rows(reporting, &module, &ir, &asked, &combined) {
         Ok(rows) => rows,
         // The same refusal the edition-neutral gate above gets, one pass
         // later: which pass raised the finding does not decide whether a
@@ -1134,6 +1137,12 @@ fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
 
 /// One dry-run lower per requested edition, plus one per supported
 /// version of that edition, folded into that edition's report row.
+///
+/// Each edition in `editions` is walked once, in the order `--editions`
+/// first names it: [`requested_editions`] is the only way to build a
+/// [`RequestedEditions`]. [`run_info`] hands the same list to
+/// [`build_diagnostics`], where it reaches only
+/// [`intended_target_findings`].
 ///
 /// The per-edition pass is strict where the caller's neutral pass is
 /// soft: a slot only one variant declares resolves there and not here, and
@@ -1185,19 +1194,18 @@ fn edition_rows(
     }: Reporting<'_>,
     module: &Module,
     ir: &cairn_lang_core::intent::IntentModule,
-    editions: &[String],
+    editions: &RequestedEditions,
     already_reported: &[Diagnostic],
 ) -> Result<Vec<EditionReport>, Vec<Diagnostic>> {
     let already: std::collections::HashSet<(&str, usize, usize)> = already_reported
         .iter()
         .map(|d| (d.code.as_str(), d.span.start, d.span.end))
         .collect();
-    let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.len());
+    let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.as_slice().len());
     let mut edition_specific_error = false;
     let mut refused: Vec<Diagnostic> = Vec::new();
 
-    for e in editions {
-        let edition: Edition = e.parse().expect("validated by the caller");
+    for &edition in editions.as_slice() {
         let resolution = resolve(ir, Some(edition));
         let pack = builtin_pack(edition);
         // Same reason as the pass above: no single version, so the lowering
@@ -2603,28 +2611,47 @@ fn intended_target_findings(
     findings
 }
 
-/// The distinct editions an `--editions` list names, in the order it
-/// names them.
-///
-/// Deduplicated because the list is a user's, and `--editions java,java`
-/// asks about Java once: a repeat that reached the fanout would report
-/// one header's finding twice, and would make `--editions java,java` read
-/// as two editions in scope, which is what decides whether
-/// `W_INTENDED_TARGET_UNSUPPORTED` has been asked for at all.
-///
-/// # Panics
-///
-/// If an entry does not parse. The caller validates the list and exits 2
-/// before reaching here.
-fn requested_editions(editions: &[String]) -> Vec<Edition> {
-    let mut asked: Vec<Edition> = Vec::with_capacity(editions.len());
-    for name in editions {
-        let edition: Edition = name.parse().expect("validated by the caller");
-        if !asked.contains(&edition) {
-            asked.push(edition);
+/// The editions `cairn info --editions` reports on, in a module of their
+/// own for the reason [`staging`] is one: [`RequestedEditions`]' field is
+/// private to it, so [`requested_editions`] is the only way to build one,
+/// and a function taking one is handed a list with no repeat in it.
+mod requested {
+    use cairn_lang_core::Edition;
+
+    /// The distinct editions an `--editions` list names, in the order it
+    /// first names them.
+    pub(super) struct RequestedEditions(Vec<Edition>);
+
+    impl RequestedEditions {
+        pub(super) fn as_slice(&self) -> &[Edition] {
+            &self.0
         }
     }
-    asked
+
+    /// Read an `--editions` list as the editions it asks about.
+    ///
+    /// Deduplicated because the list is a user's, and `--editions java,java`
+    /// asks about Java once. A repeat would walk the edition twice, giving
+    /// it a second entry in `edition portability` and `buildable targets`
+    /// and printing its notes a second time, and would make
+    /// `--editions java,java` read as two editions in scope, which is what
+    /// decides whether `W_INTENDED_TARGET_UNSUPPORTED` has been asked for
+    /// at all.
+    ///
+    /// # Panics
+    ///
+    /// If an entry does not parse. The caller validates the list and exits
+    /// 2 before reaching here.
+    pub(super) fn requested_editions(editions: &[String]) -> RequestedEditions {
+        let mut asked: Vec<Edition> = Vec::with_capacity(editions.len());
+        for name in editions {
+            let edition: Edition = name.parse().expect("validated by the caller");
+            if !asked.contains(&edition) {
+                asked.push(edition);
+            }
+        }
+        RequestedEditions(asked)
+    }
 }
 
 /// The editions a command with a single optional pin is about.
@@ -3909,8 +3936,8 @@ fn write_artifacts_and_lock(
 /// A module rather than loose functions so the invariant that makes the
 /// commit recoverable — a staged file is only ever reachable through the
 /// scratch path this code chose — is enforced by privacy instead of by
-/// convention. `main.rs` has no other modules, so without one the fields
-/// below would be visible to every line in the file.
+/// convention. Without one the fields below would be visible to every
+/// line in `main.rs`.
 mod staging {
     use std::fmt;
     use std::fs;
