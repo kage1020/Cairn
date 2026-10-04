@@ -966,3 +966,59 @@ fn a_floor_on_an_unplaced_def_refuses_nothing() {
         String::from_utf8_lossy(&out.stderr),
     );
 }
+
+/// A block only the floor's version declares is the usual reason for
+/// declaring the floor, so a target below it lacks that block too. The cap
+/// is the finding the author can act on; an `E_UNKNOWN_ID` for the block
+/// would tell them to replace the block they declared the floor for.
+#[test]
+fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks() {
+    let fixture = Fixture::new(
+        "cairn-version-cap",
+        "floor-block",
+        "@requires version>=1.21.4\n\
+         theme t:\n  slot floor -> @pale_moss_block\n\
+         struct s size=2x2\n  floor mat_slot=floor\n",
+    );
+    let out = compile(&fixture, "1.20.4");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        stderr.contains("E_VERSION_CAP"),
+        "the floor should refuse the target, got: {stderr}",
+    );
+    assert!(
+        !stderr.contains("E_UNKNOWN_ID"),
+        "a block the refused target lacks is moot, got: {stderr}",
+    );
+
+    let built = compile(&fixture, "1.21.4");
+    let stderr = String::from_utf8(built.stderr).expect("utf-8");
+    assert_eq!(
+        built.status.code(),
+        Some(0),
+        "premise: the floor's version declares the block, stderr={stderr}",
+    );
+}
+
+/// The block-id check is suspended only for a target the floor refuses. At
+/// a target that clears every floor, a block that version lacks is still
+/// `E_UNKNOWN_ID`.
+#[test]
+fn a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks() {
+    let fixture = Fixture::new(
+        "cairn-version-cap",
+        "cleared-block",
+        "@requires version>=1.20.4\n\
+         theme t:\n  slot floor -> @pale_moss_block\n\
+         struct s size=2x2\n  floor mat_slot=floor\n",
+    );
+    let out = compile(&fixture, "1.20.4");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
+    assert!(
+        stderr.contains("E_UNKNOWN_ID"),
+        "1.20.4 has no pale moss, got: {stderr}",
+    );
+    assert!(!stderr.contains("E_VERSION_CAP"), "got: {stderr}");
+}
