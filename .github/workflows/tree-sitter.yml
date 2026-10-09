@@ -6,22 +6,10 @@ on:
     tags: ["v*"]
     paths:
       - "crates/cairn-lang-tree-sitter/**"
-      # Two checks read `examples/` and this workflow is the only place either
-      # of them runs, so a file added or reshaped there is its business even
-      # when the crate itself is untouched. `packed-tarball` copies
-      # `examples/cottage.crn` and highlights it through the npm-packed
-      # grammar, which is the one check that an editor installing from npm
-      # resolves `.crn` at all. And `cottage_highlight_golden_is_stable` in
-      # `tests/examples.rs` needs the `tree-sitter` CLI that `pnpm install`
-      # puts in `node_modules/.bin`; without it the test prints `skip:` and
-      # returns, asserting nothing. That is what `ci.yml` gets — it runs
-      # `cargo test --workspace` on every push with no path filter, but sets up
-      # no Node, so the golden passes there whatever `cottage.crn` says.
       - "examples/**"
       - "Cargo.toml"
       - ".github/workflows/tree-sitter.yml"
   pull_request:
-    # Mirrors the `push` filter above, reasons included; keep the two in sync.
     paths:
       - "crates/cairn-lang-tree-sitter/**"
       - "examples/**"
@@ -119,7 +107,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -140,7 +128,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -156,7 +144,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [22]
+        node: [24]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -187,7 +175,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile

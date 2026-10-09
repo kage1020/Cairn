@@ -22,9 +22,6 @@ publish = true
 git_tag_enable = true
 git_release_enable = true
 git_tag_name = "v{{ version }}"
-# GitHub refuses a release body over 125,000 characters with a bare 422, after
-# the crates are already on crates.io. A month whose entry outgrows that links
-# to the CHANGELOG at the tag instead of failing the release.
 git_release_body = """
 {%- if changelog | length > 120000 -%}
 This release's changelog entry is too long for a GitHub release body.

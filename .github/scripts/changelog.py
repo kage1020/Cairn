@@ -1,25 +1,4 @@
 #!/usr/bin/env python3
-"""Check and assemble the per-PR changelog fragments in `changelog.d/`.
-
-A pull request that has something to tell a reader of CHANGELOG.md adds one
-file, `changelog.d/<slug>.<kind>.md`, instead of editing CHANGELOG.md. Two PRs
-never touch the same file, so they never conflict over the changelog. The
-release workflow folds every fragment into the section release-plz wrote for
-the new version, and deletes them, in the release PR itself.
-
-    changelog.py check
-        every fragment in the tree is well formed
-    changelog.py pr --base BRANCH --head-ref BRANCH --author LOGIN --title TITLE
-        what CI runs on a PR: the fragments it adds or edits are well formed,
-        its title and its fragments agree, and it leaves CHANGELOG.md alone
-    changelog.py assemble --version VERSION [--delete]
-        fold the fragments into the section release-plz wrote for VERSION
-    changelog.py verify-release
-        before publishing: an untagged version has its section and no
-        fragment is left behind
-
-Standard library only: it runs on a bare `ubuntu-latest` runner.
-"""
 
 from __future__ import annotations
 
@@ -35,16 +14,6 @@ ROOT = Path(__file__).resolve().parents[2]
 FRAGMENT_DIR = ROOT / "changelog.d"
 CHANGELOG = ROOT / "CHANGELOG.md"
 
-# Kind to heading, in the order the headings appear in a release section.
-# `Added` to `Build` are the five groups `commit_parsers` in release-plz.toml
-# does not skip, spelled as its `group | upper_first` renders them, so a
-# fragment lands under the heading release-plz already opened for the same
-# PR's title. release-plz can write other headings too: `Other` for a title
-# no parser types, and `Docs`, `Ci` and the rest when `protect_breaking_commits`
-# keeps a `!` line from a skipped group. `assemble` carries those after these.
-# `Breaking changes` and `Deprecations` are the two sections
-# `spec/compatibility` "How a break is communicated" requires; no commit type
-# produces them, so only a fragment can.
 KINDS = {
     "breaking": "Breaking changes",
     "deprecations": "Deprecations",
@@ -164,8 +133,6 @@ def release_problems() -> list[str]:
 
 
 def pr(args: argparse.Namespace) -> int:
-    # The promote PR moves `main` to a canary that already went through every
-    # check; its diff is a month of release sections and folded fragments.
     if args.base == "main" and args.head_ref == "canary" and args.author == RELEASE_BOT:
         print("promote-to-main PR: nothing here was not already checked on canary")
         return 0
@@ -174,8 +141,6 @@ def pr(args: argparse.Namespace) -> int:
     changed = git("diff", "--name-status", "--no-renames", f"{base}...HEAD").stdout.splitlines()
     status = {name: code for code, name in (line.split("\t", 1) for line in changed)}
     release_pr = args.author == RELEASE_BOT and args.head_ref.startswith(RELEASE_BRANCH_PREFIX)
-    # The PR that introduced changelog.d/ moved the `[Unreleased]` entries into
-    # it; its base has no directory to compare against. Unreachable after it.
     bootstrap = git("cat-file", "-e", f"{base}:changelog.d/README.md",
                     ok_codes=(0, 128)).returncode != 0
 
@@ -237,8 +202,6 @@ def assemble(args: argparse.Namespace) -> int:
         return 1
     end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
 
-    # The section as release-plz wrote it: one `### Group` per commit group,
-    # each followed by one title line per PR.
     sections: dict[str, list[str]] = {}
     current = None
     for number, line in enumerate(lines[start + 1:end], start=start + 2):

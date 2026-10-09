@@ -53,7 +53,7 @@ jobs:
           package_json_file: editors/vscode/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
 
@@ -75,18 +75,10 @@ jobs:
           package_json_file: website/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: website/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
 
-      # Three checks, none of which subsumes another. `astro check` type-checks
-      # `astro.config.mjs` and everything under `src`, which the build does not
-      # do at all. The build renders every page, so a content-collection
-      # frontmatter violation and a sidebar `slug:` pointing at a missing page
-      # fail there. Link validation runs as a build hook, after the pages
-      # exist, and resolves every internal link and `#anchor` fragment in both
-      # the `en` and `ja` trees — a relative link is refused outright, because
-      # on this site a relative link is a broken link (see `astro.config.mjs`).
       - run: pnpm run check
       - run: pnpm run build

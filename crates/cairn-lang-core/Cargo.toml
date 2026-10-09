@@ -22,10 +22,6 @@ strsim = "0.11.1"
 thiserror = "2.0.18"
 
 [dev-dependencies]
-# Default features off: that drops `rayon` (parallel analysis after a
-# run), `plotters` (plot rendering) and `cargo_bench_support`, which 0.8.2
-# declares but never reads, so `cargo bench` and saved baselines work
-# unchanged.
 criterion = { version = "0.8.2", default-features = false }
 insta = { version = "1.48.0", features = ["yaml"] }
 strum = { version = "0.28.0", features = ["derive"] }
