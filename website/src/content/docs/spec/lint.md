@@ -30,6 +30,7 @@ turn on.
 | `E_DUPLICATE_SELECTOR` | Two selector rows in one `theme` select the same members and bind the same key. |
 | `E_DUPLICATE_ITEM` | Two top-level items of the same kind share a name. |
 | `E_DUPLICATE_HEADER` | A single-valued `@directive` is declared more than once. |
+| `E_DUPLICATE_CIRCUIT` | A `struct` or `def` body has more than one `circuit` line. |
 
 `E_DUPLICATE_ID` leaves two `place` rows of one `site` body to `E_DUPLICATE_PLACE_ID`
 ([Sites and placements](#sites-and-placements)), which names the site. That holds for an id

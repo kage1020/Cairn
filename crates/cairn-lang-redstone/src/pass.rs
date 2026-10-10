@@ -358,7 +358,7 @@ fn unreachable_sink_diagnostic(
         DiagnosticCode::AttenuationLimit,
         reservation.span.clone(),
         primary,
-        "Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column sits within the cap of the cells it serves — a larger reservation cannot help, because the straight line between these two is already over the cap",
+        "Fix: split the logic across several scopes, each with its own `circuit` line, or reserve a `region=` whose pad column sits within the cap of the cells it serves — a larger reservation cannot help, because the straight line between these two is already over the cap",
     )
 }
 
@@ -422,10 +422,12 @@ fn pad_overlap_diagnostic(
     let one_column = reservation.width < 2 && !ir.inputs.is_empty() && !ir.outputs.is_empty();
     let fix = if one_column {
         format!(
-            "Fix: widen `size=WxH` to at least two columns — at one, the sensor and actuator pads share a column and collide at any depth — and keep {rule}, or split into multiple `circuit` blocks"
+            "Fix: widen `size=WxH` to at least two columns — at one, the sensor and actuator pads share a column and collide at any depth — and keep {rule}, or split the logic across several scopes, each with its own `circuit` line"
         )
     } else {
-        format!("Fix: enlarge `size=WxH` so {rule}, or split into multiple `circuit` blocks")
+        format!(
+            "Fix: enlarge `size=WxH` so {rule}, or split the logic across several scopes, each with its own `circuit` line"
+        )
     };
     error_with_footer(
         DiagnosticCode::RouteCongestion,

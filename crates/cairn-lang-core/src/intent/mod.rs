@@ -310,10 +310,11 @@ pub struct CircuitRegion {
 /// `circuit` line at the top level of a `struct` or `def` body whose
 /// scope has a `size=WxH` header and whose `region=` and `void=` are
 /// usable. Every other line that walk finds, a line under a `level`
-/// among them, is left out here. (`cairn check` still reports each
-/// malformed shape individually via the block-array pass's
-/// `recognize_circuit_region`; this function is called from paths that
-/// skip the block-array lower, so it cannot rely on that pass firing.)
+/// among them, is left out here. (`cairn check --edition E --target V`
+/// reports each malformed shape individually via the block-array pass's
+/// `recognize_circuit_region`; `cairn check` lowers only when given
+/// both flags, and this function is called from paths that skip the
+/// block-array lower, so it cannot rely on that pass firing.)
 #[must_use]
 pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
     circuit_lines(module)

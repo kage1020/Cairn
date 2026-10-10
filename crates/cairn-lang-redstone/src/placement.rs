@@ -103,8 +103,7 @@ pub(crate) const CELL_ROW: u32 = 1;
 
 /// The `Fix:` footer every area-budget refusal carries, here and in the
 /// routing pass's post-routing re-check.
-pub(crate) const CONGESTION_FIX: &str =
-    "Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks";
+pub(crate) const CONGESTION_FIX: &str = "Fix: increase `void`, enlarge region, or split the logic across several scopes, each with its own `circuit` line";
 
 /// `used / reserved` to one decimal place, as `(whole, tenths)`, for the
 /// congestion primaries. `reserved` must be non-zero.
@@ -452,7 +451,7 @@ fn row_overflow_diagnostic(reservation: &CircuitRegionReservation, cell_count: u
         DiagnosticCode::RouteCongestion,
         reservation.span.clone(),
         primary,
-        "Fix: widen the enclosing `size=WxH` past twice the cell count, or split into multiple `circuit` blocks. Raising `void` does not help — cells are laid in one row and `void` buys height, not length",
+        "Fix: widen the enclosing `size=WxH` past twice the cell count, or split the logic across several scopes, each with its own `circuit` line. Raising `void` does not help — cells are laid in one row and `void` buys height, not length",
     )
 }
 
@@ -502,7 +501,7 @@ fn row_depth_diagnostic(reservation: &CircuitRegionReservation) -> Diagnostic {
         DiagnosticCode::RouteCongestion,
         reservation.span.clone(),
         primary,
-        "Fix: deepen the enclosing `size=WxH` to at least three rows, or split into multiple `circuit` blocks. Raising `void` does not help — a wire reaches a cell through a face in the cell's own plane, and `void` buys height above it",
+        "Fix: deepen the enclosing `size=WxH` to at least three rows, or split the logic across several scopes, each with its own `circuit` line. Raising `void` does not help — a wire reaches a cell through a face in the cell's own plane, and `void` buys height above it",
     )
 }
 
@@ -531,7 +530,7 @@ fn pad_row_diagnostic(
         reservation.span.clone(),
         primary,
         format!(
-            "Fix: deepen the enclosing `size=WxH` so {rule}, or split into multiple `circuit` blocks. Raising `void` does not help — the pads stand at `y = 0`, and `void` buys layers above them",
+            "Fix: deepen the enclosing `size=WxH` so {rule}, or split the logic across several scopes, each with its own `circuit` line. Raising `void` does not help — the pads stand at `y = 0`, and `void` buys layers above them",
             rule = column.depth_rule(),
         ),
     )
@@ -544,8 +543,9 @@ fn build_region_index(
 ) -> HashMap<(intent::ScopeKind, String), &intent::CircuitRegion> {
     let mut index = HashMap::new();
     for region in lines.iter().filter_map(|line| line.as_ref().ok()) {
-        // Multiple `circuit region=` lines in one scope: first wins,
-        // silently — a warning would need a policy no code defines yet.
+        // Multiple `circuit region=` lines in one scope: `check` refuses
+        // each line after the first (`E_DUPLICATE_CIRCUIT`), and a caller
+        // that places a module without `check` gets the first usable one.
         let key = (region.scope_kind, region.scope_name.clone());
         index.entry(key).or_insert(region);
     }
@@ -565,11 +565,13 @@ fn build_rejected_index(
 ) -> HashMap<(intent::ScopeKind, String), &intent::RejectedCircuitRegion> {
     let mut index = HashMap::new();
     for rejected in lines.iter().filter_map(|line| line.as_ref().err()) {
-        // Several rejected lines in one scope: first wins, silently, as
-        // in `build_region_index`. The finding names the first and says
+        // Several rejected lines in one scope: first wins, as in
+        // `build_region_index`. The finding names the first and says
         // nothing of the rest, and a rejected line beside a usable one
-        // is not reported at all, since the usable line wins. A warning
-        // for either would need a policy no code defines yet.
+        // is not reported here, since the usable line wins. `check`
+        // refuses each top-level line after the first as
+        // `E_DUPLICATE_CIRCUIT`; a line under a `level` is in that
+        // level's body, which it does not count.
         let key = (rejected.scope_kind, rejected.scope_name.clone());
         index.entry(key).or_insert(rejected);
     }

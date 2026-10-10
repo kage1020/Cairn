@@ -30,6 +30,7 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `E_DUPLICATE_SELECTOR` | 1 つの `theme` 内の 2 つのセレクタ行が、同じメンバを選び同じキーを束縛している。 |
 | `E_DUPLICATE_ITEM` | 同じ種別のトップレベル項目 2 つが名前を共有している。 |
 | `E_DUPLICATE_HEADER` | 単一値の `@directive` が 2 回以上宣言されている。 |
+| `E_DUPLICATE_CIRCUIT` | `struct` または `def` の本体に `circuit` 行が 2 つ以上ある。 |
 
 `E_DUPLICATE_ID` は、1 つの `site` のボディにある 2 つの `place` 行を、site を名指す
 `E_DUPLICATE_PLACE_ID` ([site と配置](#site-と配置)) に任せます。`E_INVALID_PLACE_ID` で
