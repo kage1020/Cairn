@@ -1789,6 +1789,7 @@ fn lower_body_to_block_array<'a>(
     let interior_h = body.size.h.get();
 
     let theme_missing = scope.is_none_or(|sc| sc.bound_theme.is_none());
+
     // Flatten `level y=N` grouping once, here. The result is the set of
     // members this body paints, and everything below reads it: the dim math
     // (which has to size a volume that holds them) and the phase buckets
@@ -1799,10 +1800,12 @@ fn lower_body_to_block_array<'a>(
     let flattened = flatten_members(body.members, diagnostics);
     // `spec/lint` "Materials and targets": a scope that reads no
     // `mat_slot=` has nothing to lower to air, so a missing theme costs it
-    // nothing and is not reported. Asked of the flattened list because a
-    // `level` is where the only reader can sit, and a member it drops
-    // paints nothing whatever the theme.
-    if theme_missing && flattened.iter().any(|(_, m)| m.mat_slot.is_some()) {
+    // nothing and is not reported. "Reads" is `Member::read_slot`, so a
+    // `mat_slot=` on a role that reads none, such as a `door`'s, does not
+    // count. Asked of the flattened list because a `level` is where the only
+    // reader can sit, and a member it drops paints nothing whatever the
+    // theme.
+    if theme_missing && flattened.iter().any(|(_, m)| m.read_slot().is_some()) {
         diagnostics.push(diag_no_theme_bound_generic(
             body.kind,
             body.scope_label,
@@ -2934,12 +2937,17 @@ fn lower_fixture_member(
 /// without touching the palette.
 ///
 /// Returns `None` (and emits at most one diagnostic) when:
-/// - the scope had no theme bound (`theme_missing` short-circuits silently;
-///   the `W_NO_THEME_BOUND` warning was already emitted once per struct),
+/// - the scope had no theme bound (`theme_missing` short-circuits
+///   silently). Every caller passes a member of the list
+///   `flatten_members` returned for the body, so a member that reads its
+///   slot ([`Member::read_slot`]) sits in a scope
+///   `lower_body_to_block_array` pushed `W_NO_THEME_BOUND` for. One that
+///   reads none has a `None` `slot_value` whether or not a theme is bound,
+///   and is reported as the third item says,
 /// - there is no resolution for the scope, or none for the member in it
 ///   (silently, and not always reported elsewhere; see the comment above
 ///   the `slot_value` read),
-/// - the binding's `slot_value` is `None` (silently). That has the five
+/// - the binding's `slot_value` is `None` (silently). That has the six
 ///   causes [`crate::resolve::ResolvedMemberBinding::slot_value`] lists,
 ///   with who reports each; among them, the member never carried a
 ///   `mat_slot=`, carries one on a role that reads none
@@ -2979,7 +2987,7 @@ fn resolve_member_state(
     // pushed from *inside* this pass, and the CLI runs lowering before it
     // merges `check`'s findings in, so "reported first" would be false in
     // two different ways. `ResolvedMemberBinding::slot_value` names the
-    // five causes and who owns each; the one that used to have no owner is
+    // six causes and who owns each; the one that used to have no owner is
     // a member carrying no `mat_slot=` at all, now `check::material`'s for
     // the roles that paint nothing without one.
     //
@@ -3780,7 +3788,7 @@ struct GeometryMemberDescription {
 /// - no `mat_slot=` at all — silent, the member asked for nothing;
 /// - a `mat_slot=` that resolved to nothing — the resolver already said why
 ///   (`E_UNRESOLVED_SLOT`, `E_UNKNOWN_ABSTRACT_TOKEN`, …) or the theme is
-///   missing entirely (`W_NO_THEME_BOUND` fired against the struct), and the
+///   missing entirely (`W_NO_THEME_BOUND` fired against the scope), and the
 ///   `W_DEFERRED_MEMBER` here anchors the consequence to the member that
 ///   wears the fallback;
 /// - a `mat_slot=` that resolved outside the stair family, when this member
@@ -4797,12 +4805,14 @@ fn inside_plate_refusal(
 /// returned no state.
 ///
 /// `resolve_member_state` already emits `W_ABSTRACT_TOKEN_DEFERRED` /
-/// `E_UNKNOWN_ABSTRACT_TOKEN` for abstract-token failures and the
-/// struct-level `W_NO_THEME_BOUND` for a missing theme, so a `None`
-/// return here is already diagnosed upstream — echoing the failure
-/// with another `W_DEFERRED_MEMBER` would just double up on the same
-/// root cause. Falling back to `PRESSURE_PLATE_BASE_ID` keeps the
-/// fixture visible in-game so authors can still read the artefact.
+/// `E_UNKNOWN_ABSTRACT_TOKEN` for abstract-token failures, and a missing
+/// theme is the scope's `W_NO_THEME_BOUND`: a `pressure_plate` reads its
+/// `mat_slot=`, so `lower_body_to_block_array` pushed one for the body a
+/// plate carrying one sits in. A `None` return here is therefore already
+/// diagnosed upstream — echoing the failure with another
+/// `W_DEFERRED_MEMBER` would just double up on the same root cause.
+/// Falling back to `PRESSURE_PLATE_BASE_ID` keeps the fixture visible
+/// in-game so authors can still read the artefact.
 ///
 /// A resolved state with non-empty `properties` still defers *and*
 /// skips the paint: the block-array IR has no handling for bracketed
@@ -7060,13 +7070,38 @@ mod tests {
         }
     }
 
-    /// The primary of each `W_NO_THEME_BOUND` finding `src` raises.
-    fn no_theme_bound(src: &str) -> Vec<String> {
-        lowered(src)
-            .diagnostics
+    /// The `W_NO_THEME_BOUND` a themeless `struct s` that reads a slot
+    /// earns.
+    const S_HAS_NO_THEME: &str =
+        "struct `s` has no theme bound; every `mat_slot=` will lower to air";
+
+    /// `src`'s `cairn check` findings, and its lowering: the two streams
+    /// `cairn check --edition E --target V` prints together.
+    fn checked_and_lowered(src: &str) -> (Vec<Diagnostic>, BlockArrayIr) {
+        let module = parse(src).expect("parse");
+        let ir = lower(&module);
+        let resolution = resolve(&ir, None);
+        (
+            crate::check::check(&module, &ir, None),
+            lower_to_block_array(&ir, &resolution, None),
+        )
+    }
+
+    /// The array `struct name` lowered to. A silence about a scope means
+    /// something only when lowering built that scope: a source that lowered
+    /// nothing says nothing about any of them.
+    fn lowered_struct<'a>(out: &'a BlockArrayIr, name: &str, src: &str) -> &'a BlockArray {
+        out.structures
+            .get(&format!("struct::{name}"))
+            .unwrap_or_else(|| panic!("`struct {name}` did not lower\n{src}{:#?}", out.diagnostics))
+    }
+
+    /// The ids `ba` paints, air left out.
+    fn painted_ids(ba: &BlockArray) -> std::collections::BTreeSet<&str> {
+        ba.voxels
             .iter()
-            .filter(|d| d.code == DiagnosticCode::NoThemeBound)
-            .map(|d| d.primary.clone())
+            .filter(|index| index.0 != 0)
+            .map(|index| ba.palette.entries[usize::from(index.0)].id.as_str())
             .collect()
     }
 
@@ -7074,37 +7109,244 @@ mod tests {
     fn a_scope_that_reads_no_slot_is_not_told_its_slots_lower_to_air() {
         // `spec/lint` "Materials and targets": a scope that reads no
         // `mat_slot=` is not reported. An empty struct, and one whose only
-        // member takes its material from the roof fallback.
-        for src in [
-            "struct s size=3x3\n",
-            "struct s size=3x3\n  roof kind=flat\n",
-        ] {
-            assert_eq!(no_theme_bound(src), Vec::<String>::new(), "{src}");
-        }
+        // member takes its material from the roof fallback. Each struct
+        // lowered, and the roof's painted, so the silence is lowering's
+        // answer about a scope it built.
+        let src = "struct s size=3x3\n";
+        let out = lowered(src);
+        lowered_struct(&out, "s", src);
+        assert_eq!(
+            primaries_of(&out, DiagnosticCode::NoThemeBound),
+            Vec::<&str>::new(),
+            "{src}",
+        );
+
+        let src = "struct s size=3x3\n  roof kind=flat\n";
+        let out = lowered(src);
+        assert_eq!(
+            painted_ids(lowered_struct(&out, "s", src)),
+            [FLAT_BASE_ID].into(),
+            "{src}",
+        );
+        assert_eq!(
+            primaries_of(&out, DiagnosticCode::NoThemeBound),
+            Vec::<&str>::new(),
+            "{src}",
+        );
+
         // Per scope, not per module: the reader beside it does not make
         // the roof's struct a reader.
         let src = "struct a size=3x3\n  roof kind=flat\n\n\
                    struct b size=3x3\n  floor mat_slot=f\n";
+        let out = lowered(src);
         assert_eq!(
-            no_theme_bound(src),
+            painted_ids(lowered_struct(&out, "a", src)),
+            [FLAT_BASE_ID].into(),
+            "{src}",
+        );
+        assert_eq!(
+            primaries_of(&out, DiagnosticCode::NoThemeBound),
             ["struct `b` has no theme bound; every `mat_slot=` will lower to air"],
+            "{src}",
+        );
+    }
+
+    /// One themeless struct per keyword whose role reads a `mat_slot=`
+    /// ([`Member::read_slot`]), in which that keyword's member is the only
+    /// reader. Every one is reported.
+    ///
+    /// [`every_keyword_is_a_case_on_the_side_its_role_reads`] ties the rows
+    /// to the role table, so a role that starts reading a slot arrives as a
+    /// missing row rather than as a gate nothing measured for it.
+    const SLOT_READERS: &[(&str, &str)] = &[
+        ("floor", "struct s size=3x3\n  floor mat_slot=f\n"),
+        ("walls", "struct s size=3x3\n  walls mat_slot=w height=2\n"),
+        (
+            "window",
+            "struct s size=5x5\n  window side=front y=1 offset=1 size=1x1 mat_slot=g\n",
+        ),
+        ("roof", "struct s size=3x3\n  roof kind=flat mat_slot=r\n"),
+        // An eave band sits on a roof that draws an overhang, and that roof
+        // reads no slot.
+        (
+            "stair",
+            "struct s size=3x3\n  roof kind=gable overhang=1\n  \
+             stair kind=stairs side=front half=bottom facing=out shape=straight mat_slot=s\n",
+        ),
+        (
+            "pressure_plate",
+            "struct s size=3x3\n  pressure_plate at=inside.front offset=1 mat_slot=p\n",
+        ),
+    ];
+
+    /// One themeless struct per keyword whose role reads no `mat_slot=`,
+    /// with a `mat_slot=d` on that keyword's member and on nothing else.
+    /// None is reported, and `cairn check` reports the slot instead, as
+    /// `W_IGNORED_ARGUMENT`.
+    ///
+    /// The `level`'s children read no slot either, so the struct paints
+    /// from the roof fallback. A `place` and a `connect` are misplaced in a
+    /// struct body (`E_MISPLACED_MEMBER`), and are rows here because that
+    /// is how one reaches the list the gate reads.
+    const SLOT_IGNORERS: &[(&str, &str)] = &[
+        (
+            "door",
+            "struct s size=3x3\n  door id=front side=front at=center mat_slot=d\n",
+        ),
+        (
+            "level",
+            "struct s size=3x3\n  level y=0 mat_slot=d\n    roof kind=flat\n",
+        ),
+        (
+            "circuit",
+            "struct s size=3x3\n  circuit region=floor void=2 mat_slot=d\n",
+        ),
+        (
+            "place",
+            "struct s size=3x3\n  place id=a use=hut theme=t at=origin mat_slot=d\n",
+        ),
+        (
+            "connect",
+            "struct s size=3x3\n  connect a.entry to b.entry path=@gravel mat_slot=d\n",
+        ),
+    ];
+
+    #[test]
+    fn a_scope_whose_only_reader_is_any_reading_role_is_told() {
+        for (keyword, src) in SLOT_READERS {
+            let out = lowered(src);
+            lowered_struct(&out, "s", src);
+            assert_eq!(
+                primaries_of(&out, DiagnosticCode::NoThemeBound),
+                [S_HAS_NO_THEME],
+                "`{keyword}`\n{src}",
+            );
+        }
+        // An unknown keyword's slot reads too, as `Member::read_slot` says:
+        // the line is `E_UNKNOWN_KEYWORD` either way, and the theme the slot
+        // will need once the keyword is repaired is missing.
+        let src = "struct s size=3x3\n  torch mat_slot=t\n";
+        assert_eq!(
+            primaries_of(&lowered(src), DiagnosticCode::NoThemeBound),
+            [S_HAS_NO_THEME],
+            "{src}",
         );
     }
 
     #[test]
+    fn a_mat_slot_on_a_role_that_reads_none_does_not_make_its_scope_a_reader() {
+        for (keyword, src) in SLOT_IGNORERS {
+            let (checked, out) = checked_and_lowered(src);
+            lowered_struct(&out, "s", src);
+            assert_eq!(
+                primaries_of(&out, DiagnosticCode::NoThemeBound),
+                Vec::<&str>::new(),
+                "`{keyword}`\n{src}",
+            );
+            // `check` owns the slot instead: one `W_IGNORED_ARGUMENT`, on
+            // its value, saying the name is not looked up. A
+            // `W_NO_THEME_BOUND` beside it would say the same name lowers
+            // to air.
+            let ignored: Vec<(&str, &str)> = checked
+                .iter()
+                .filter(|d| d.code == DiagnosticCode::IgnoredArgument)
+                .map(|d| (&src[d.span.start..d.span.end], d.primary.as_str()))
+                .collect();
+            assert!(
+                matches!(
+                    ignored.as_slice(),
+                    [("d", primary)]
+                        if primary.starts_with("`mat_slot=` ")
+                            && primary.contains(&format!("`{keyword}`"))
+                ),
+                "`{keyword}`: {ignored:#?}\n{src}",
+            );
+        }
+    }
+
+    /// Every keyword the role table knows is a row above, on the side its
+    /// role reads.
+    ///
+    /// Asked of [`Member::read_slot`] on a member written with each
+    /// keyword, so a role that starts or stops reading a slot is a row on
+    /// the wrong side here, whichever table it was in.
+    #[test]
+    fn every_keyword_is_a_case_on_the_side_its_role_reads() {
+        let reads = |keyword: &str| {
+            let src = format!("struct s size=3x3\n  {keyword} mat_slot=x\n");
+            let ir = lower(&parse(&src).expect("parse"));
+            ir.structs[0].members[0].read_slot().is_some()
+        };
+        let (mut readers, mut ignorers): (Vec<&str>, Vec<&str>) = crate::intent::known_keywords()
+            .iter()
+            .copied()
+            .partition(|keyword| reads(keyword));
+        readers.sort_unstable();
+        ignorers.sort_unstable();
+        let rows = |table: &[(&'static str, &str)]| {
+            let mut keywords: Vec<&'static str> =
+                table.iter().map(|(keyword, _)| *keyword).collect();
+            keywords.sort_unstable();
+            keywords
+        };
+        assert_eq!(rows(SLOT_READERS), readers);
+        assert_eq!(rows(SLOT_IGNORERS), ignorers);
+    }
+
+    #[test]
     fn a_slot_read_under_a_level_still_warns_and_one_the_level_drops_does_not() {
-        // A `level` is where the only reader in a scope can sit.
-        let src = "struct s size=3x3\n  level y=1\n    walls mat_slot=f height=2\n";
-        assert_eq!(
-            no_theme_bound(src).len(),
-            1,
-            "{:#?}",
-            lowered(src).diagnostics
-        );
-        // A `floor` above `y=0` is dropped with its own deferral, so it
-        // paints nothing whatever the theme and is not a reader.
-        let src = "struct s size=3x3\n  level y=1\n    floor mat_slot=f\n";
-        assert_eq!(no_theme_bound(src), Vec::<String>::new());
+        // A `level` is where the only reader in a scope can sit, at the
+        // base plane and above it.
+        for src in [
+            "struct s size=3x3\n  level y=0\n    floor mat_slot=f\n",
+            "struct s size=3x3\n  level y=1\n    walls mat_slot=f height=2\n",
+        ] {
+            assert_eq!(
+                primaries_of(&lowered(src), DiagnosticCode::NoThemeBound),
+                [S_HAS_NO_THEME],
+                "{src}",
+            );
+        }
+        // Every way `flatten_members` drops a reader: by its role above
+        // `y=0`, or with the whole `level` it sits under. The member paints
+        // nothing whatever the theme, so it does not count as a reader, and
+        // the deferral is what says it went.
+        for (src, deferral) in [
+            (
+                "struct s size=3x3\n  level y=1\n    floor mat_slot=f\n",
+                "level-scoped `floor` is not yet supported",
+            ),
+            (
+                "struct s size=3x3\n  level y=1\n    roof kind=flat mat_slot=r\n",
+                "level-scoped `roof` is not yet supported",
+            ),
+            (
+                "struct s size=3x3\n  level\n    walls mat_slot=f height=2\n",
+                "level requires `y=N` (non-negative integer) to place its children",
+            ),
+            (
+                "struct s size=3x3\n  level y=top\n    walls mat_slot=f height=2\n",
+                "`y=` must be a non-negative integer that fits in u32",
+            ),
+            (
+                "struct s size=3x3\n  level y=0\n    level y=1\n      walls mat_slot=f height=2\n",
+                "nested `level` blocks are not yet supported; this level and every member \
+                 declared under it were dropped",
+            ),
+        ] {
+            let out = lowered(src);
+            lowered_struct(&out, "s", src);
+            assert_eq!(
+                primaries_of(&out, DiagnosticCode::NoThemeBound),
+                Vec::<&str>::new(),
+                "{src}",
+            );
+            assert_eq!(
+                primaries_of(&out, DiagnosticCode::DeferredMember),
+                [deferral],
+                "{src}",
+            );
+        }
     }
 
     #[test]

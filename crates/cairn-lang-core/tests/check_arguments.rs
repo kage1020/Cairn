@@ -1176,10 +1176,10 @@ fn a_slot_name_the_theme_lacks_on_a_role_that_reads_it_is_still_refused() {
 
 #[test]
 fn an_unknown_keyword_still_has_its_slot_looked_up() {
-    // `read_slot` asks `unread_arguments`, which lists nothing for a word
-    // the role table does not know. The line is refused for the keyword
-    // either way, and the slot finding is one the author needs once the
-    // keyword is repaired.
+    // `Member::read_slot` asks `unread_arguments`, which lists nothing for
+    // a word the role table does not know. The line is refused for the
+    // keyword either way, and the slot finding is one the author needs once
+    // the keyword is repaired.
     let src = format!("{SLOTS}struct s size=7x5\n  floor mat_slot=wall\n  torch mat_slot=nosuch\n");
     assert_eq!(
         codes(&src),

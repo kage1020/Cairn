@@ -148,7 +148,7 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `E_UNKNOWN_ABSTRACT_TOKEN` | `mat_slot=` が、渡されたパックのカタログが宣言していない抽象マテリアルトークンに解決される ([マテリアルとテーマ](/ja/spec/materials-themes))。 |
 | `W_ABSTRACT_TOKEN_DEFERRED` | 同じトークンだが、そもそもカタログが渡されておらず、照合する相手がいない。 |
 | `W_STATE_LITERAL_UNCHECKED` | 正準トークンのステートリテラル (`@oak_log[axis=x]`) が書かれたまま使われた。`E_STATE_DOMAIN` が実装されるまで、そのプロパティと値をターゲットに照らして検査するものがない ([バージョンとエディション](/ja/spec/versioning-editions))。 |
-| `W_NO_THEME_BOUND` | スコープにテーマが束縛されていないので、その中の `mat_slot=` メンバはすべて空気になる。 |
+| `W_NO_THEME_BOUND` | `mat_slot=` を読むスコープにテーマが束縛されていないので、そこで読む `mat_slot=` はすべて空気になる。 |
 | `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定されたエディションは別のものを束縛した ([バージョンとエディション](/ja/spec/versioning-editions))。 |
 
 `E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は block-array lowering 段で発生するので、報告するのは
@@ -260,7 +260,11 @@ placement が同じテーマを束縛しながら 1 つのスロットについ�
 `door` と `window` はすべて壁が無いために拒否されます。`floor` はセルを空気のまま残し、`roof`、
 軒の `stair`、`pressure_plate` はそれでも既定ブロックで作られます。判定はスコープごとです。テー
 マが束縛されておらず `mat_slot=` も読まないスコープは、モジュールのほかの部分が何を読んでいても報
-告されず、`level` が落としたメンバは読んだことに数えません。
+告されません。`door` のものなど、`mat_slot=` を読まないキーワードに書かれた `mat_slot=` は読んだこ
+とになりません。この警告では、`level` が落としたメンバ
+([コンパイルモデル §4.7](/ja/spec/compilation/#47-level-グループ化と体積の導出)) のものも読んだこ
+とになりません。そのメンバはテーマが何であれ何も塗らないからです。`y=0` より上の `floor` や
+`roof`、ボディが `E_UNSUPPORTED_NESTING` になる `level` のメンバがそれにあたります。
 
 `@intended_targets` の 3 つのコードは、ファイルが表明した意図を、そのファイル自身の下限に照らします
 ([versioning-editions §10.4](/ja/spec/versioning-editions#ヒントは下限に照らされる))。そのエディション

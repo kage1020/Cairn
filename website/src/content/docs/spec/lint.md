@@ -150,7 +150,7 @@ version to compare.
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since nothing checks its properties and values against the target until `E_STATE_DOMAIN` is implemented ([Versioning and Editions](/spec/versioning-editions/)). |
-| `W_NO_THEME_BOUND` | A scope has no theme bound to it, so every `mat_slot=` member in it lowers to air. |
+| `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so every `mat_slot=` it reads lowers to air. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only the
@@ -263,7 +263,11 @@ all has no slot map to read, so the member degrades the same way. With no theme 
 so every `door` and `window` is refused for want of a wall; a `floor` leaves its cells air, and a
 `roof`, eave `stair` or `pressure_plate` is still built from its default block. It is judged per
 scope: a scope with no theme bound that reads no `mat_slot=` is not reported, whatever the rest of
-the module reads, and a member a `level` drops does not count as reading one.
+the module reads. A `mat_slot=` on a keyword that reads none, such as a `door`'s, is not a read.
+Nor, for this warning, is one on a member a `level` drops
+([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which
+paints nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level`
+whose body is `E_UNSUPPORTED_NESTING`.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A version

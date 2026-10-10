@@ -206,17 +206,31 @@ pub struct ResolvedMemberBinding {
     /// The value bound to this member's `mat_slot=` via the applied theme,
     /// when both ends matched.
     ///
-    /// `None` covers five different situations, each reported by someone
-    /// else: the member carries no `mat_slot=` at all
-    /// (`E_MISSING_MATERIAL`, from `check::material`, for the roles that
-    /// paint nothing without one); it carries one on a role whose
-    /// [`crate::intent::MemberRole::unread_arguments`] lists `mat_slot`,
-    /// which is not looked up (`W_IGNORED_ARGUMENT`, from
-    /// `check::arguments`); no theme was bound to the scope
-    /// (`W_NO_THEME_BOUND`); the slot was not declared in the theme
-    /// (`E_UNRESOLVED_SLOT`); or only a sibling edition variant declares
-    /// it, which is deferred until a pin picks one. A reader that treats
-    /// them as one case will report a member twice or not at all.
+    /// `None` covers six different situations, each reported by someone
+    /// else:
+    ///
+    /// - the member carries no `mat_slot=` at all: `E_MISSING_MATERIAL`,
+    ///   from `check::material`, for the roles that paint nothing without
+    ///   one;
+    /// - it carries one on a role whose
+    ///   [`crate::intent::MemberRole::unread_arguments`] lists `mat_slot`,
+    ///   which is not looked up ([`crate::intent::Member::read_slot`]):
+    ///   `W_IGNORED_ARGUMENT`, from `check::arguments`;
+    /// - no theme was bound to the scope, and the member reads its slot and
+    ///   survives `block_array`'s `level` flattening: `W_NO_THEME_BOUND`,
+    ///   which `block_array` pushes once for the scope. A `def`'s own scope
+    ///   is not one it lowers: each `place` of the def is lowered under the
+    ///   placement's scope instead, so nothing paints from the def's own;
+    /// - no theme was bound to the scope, and the member is one a `level`
+    ///   drops: the `W_DEFERRED_MEMBER` `block_array` pushes as it drops it.
+    ///   It paints nothing whatever the theme, so on its own it does not
+    ///   earn its scope a `W_NO_THEME_BOUND`;
+    /// - the slot was not declared in the theme: `E_UNRESOLVED_SLOT`;
+    /// - only a sibling edition variant declares it, which is deferred
+    ///   until a pin picks one.
+    ///
+    /// A reader that treats them as one case will report a member twice or
+    /// not at all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slot_value: Option<ValueWithSpan>,
     /// Extra `key=value` bindings injected by a matching theme selector,
@@ -859,24 +873,6 @@ fn bind_place_theme(
     }
 }
 
-/// The `mat_slot=` name `member` asks a theme for: its hoisted slot, unless
-/// its role's [`crate::intent::MemberRole::unread_arguments`] lists
-/// `mat_slot`, where the name changes nothing in the build and is not
-/// looked up.
-///
-/// The predicate is that table and nothing wider. An unknown keyword
-/// ([`crate::intent::MemberRole::Other`]) lists nothing there, so its slot
-/// is still looked up: the line is refused with `E_UNKNOWN_KEYWORD` either
-/// way, and a misspelt slot on it is one the author will need once the
-/// keyword is repaired.
-fn read_slot(member: &Member) -> Option<&str> {
-    member
-        .mat_slot
-        .as_ref()
-        .filter(|_| member.role.unread_argument("mat_slot").is_none())
-        .map(|slot| slot.name.as_str())
-}
-
 /// Whether any struct or def member anywhere in the module reads a
 /// `mat_slot=`.
 ///
@@ -884,8 +880,8 @@ fn read_slot(member: &Member) -> Option<&str> {
 /// but a scope only *needs* one to read a slot from. Without this, declaring
 /// a `_bedrock` theme and never using it made `--edition java` a hard error
 /// on a module whose output does not contain a single block of air. A
-/// member reads a slot through [`read_slot`], so a `mat_slot=` on a role
-/// that reads none does not count.
+/// member reads a slot through [`Member::read_slot`], so a `mat_slot=` on a
+/// role that reads none does not count.
 ///
 /// Sites are not walked, and [`bind_place_theme`] has no such gate. A
 /// `place` names its theme with its own `theme=`, and the theme a placement
@@ -899,7 +895,7 @@ fn any_member_reads_a_slot(ir: &IntentModule) -> bool {
     fn any(members: &[Member]) -> bool {
         members
             .iter()
-            .any(|m| read_slot(m).is_some() || any(&m.children.members))
+            .any(|m| m.read_slot().is_some() || any(&m.children.members))
     }
     ir.structs.iter().any(|s| any(&s.members)) || ir.defs.iter().any(|d| any(&d.members))
 }
@@ -2222,7 +2218,7 @@ fn resolve_members(
         //    the theme lacks changes nothing on such a role. A library
         //    caller that runs `resolve` without `check` gets no signal;
         //    `tests/silent_skip_arms.rs` carries the arm in its matrix.
-        if let Some(slot_name) = read_slot(member)
+        if let Some(slot_name) = member.read_slot()
             && let Some((tname, slots)) = bound
         {
             match slots.get(slot_name) {
