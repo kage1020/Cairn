@@ -1,6 +1,6 @@
 //! `arguments` pass — flags every `key=value` whose key is outside the
-//! vocabulary of the member's role, every key in that vocabulary no pass
-//! reads yet, every key a sibling argument's value routed past, and every
+//! vocabulary of the member's role, every key the role accepts that no pass
+//! reads, every key a sibling argument's value routed past, and every
 //! binding a theme selector carries, which no pass reads either. A
 //! member's own `[key=value]` selector answers to the same vocabulary.
 //! The `struct` / `def` header line answers to a vocabulary of its own,
@@ -95,7 +95,10 @@ use std::collections::{BTreeSet, HashMap};
 use indexmap::IndexMap;
 
 use crate::ast::ValueKind;
-use crate::intent::{IntentModule, Member, MemberRole, SelectorValue, ValueWithSpan, role_of};
+use crate::intent::{
+    IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS, Unread, ValueWithSpan,
+    role_of,
+};
 use crate::prose::or_list;
 use crate::suggest::{did_you_mean_note, nearest_match};
 
@@ -238,18 +241,46 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
                     &own,
                 ));
             }
-        } else if member.role.unread_arguments().contains(&key.as_str()) {
-            // A key the specification defines and nothing reads. A theme
-            // selecting on it does not change that: the selector's match
-            // hands the member bindings no pass lowers, so the build is the
-            // same with the argument or without it.
-            sink.push(unread_argument(keyword, key, &value.span));
+        } else if let Some(why) = member.role.unread_argument(key) {
+            // A key nothing on this role reads. A theme selecting on it
+            // does not change that: the selector's match hands the member
+            // bindings no pass lowers, so the build is the same with the
+            // argument or without it.
+            //
+            // Not for a universal key, though. One still in the fields is
+            // one `intent::lower` could not hoist — a value that is not a
+            // label, which `check::type_mismatch` reports, or a second
+            // occurrence, which `check::duplicate` does — and the key is not
+            // the mistake (`UNIVERSAL_ARGUMENTS`). Reporting it here too put
+            // "write a label" and "drop it, nothing reads it" on one span.
+            // The hoisted occurrence, if there is one, is judged below.
+            if !UNIVERSAL_ARGUMENTS.contains(&key.as_str()) {
+                sink.push(unread_argument(keyword, key, &value.span, why));
+            }
         } else if let Some(finding) = routed_past(member, key, &value.span) {
             // A key some lowering rule reads, on a member whose sibling
             // argument picked a rule that does not — selected on or not,
             // for the same reason.
             sink.push(finding);
         }
+    }
+    // A label-shaped `mat_slot=` was hoisted out of the fields above, so
+    // the one branch that can apply to it — the key is universal, hence
+    // always accepted — is asked here, and this is the only place it is
+    // reported as unread.
+    if let Some(slot) = &member.mat_slot
+        && let Some(why) = member.role.unread_argument("mat_slot")
+    {
+        let mut finding = unread_argument(keyword, "mat_slot", &slot.span, why);
+        // What the role gives up by not reading it: the resolver skips the
+        // lookup too, so the name is not checked against the theme.
+        finding.notes.push(DiagnosticNote {
+            span: None,
+            message: "the slot name is not looked up in the theme, so a misspelling of it is \
+                      not caught"
+                .to_owned(),
+        });
+        sink.push(finding);
     }
     // The member's own `[key=value]`, against the same vocabulary. Only
     // the two branches about the *word* apply: the other two ask what a
@@ -528,18 +559,40 @@ fn coined_near_miss(
     }
 }
 
-fn unread_argument(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
+/// A key the role accepts and nothing on it reads, worded by [`Unread`].
+///
+/// The two kinds differ in what is owed. An unreached key waits on a
+/// lowering rule, so keeping it is a choice the author may make; an
+/// inapplicable one waits on nothing, so the note asks for its removal and
+/// mentions no rule.
+fn unread_argument(keyword: &str, key: &str, span: &crate::error::Span, why: Unread) -> Diagnostic {
+    let (primary, note) = match why {
+        Unread::Unreached => (
+            format!(
+                "`{key}=` is an argument `{keyword}` takes and no pass reads yet; the value was \
+                 ignored",
+            ),
+            "the member is built without it — remove the argument, or keep it and expect no \
+             effect until the lowering rule lands"
+                .to_owned(),
+        ),
+        Unread::Inapplicable => (
+            format!(
+                "`{key}=` is accepted on every member, and nothing a `{keyword}` builds reads it; \
+                 the value was ignored",
+            ),
+            format!(
+                "the `{keyword}` is built the same with it or without it — remove the argument"
+            ),
+        ),
+    };
     Diagnostic {
         code: DiagnosticCode::IgnoredArgument,
         span: span.clone(),
-        primary: format!(
-            "`{key}=` is an argument `{keyword}` takes and no pass reads yet; the value was ignored",
-        ),
+        primary,
         notes: vec![DiagnosticNote {
             span: None,
-            message: "the member is built without it — remove the argument, or keep it and \
-                      expect no effect until the lowering rule lands"
-                .to_owned(),
+            message: note,
         }],
         data: None,
     }

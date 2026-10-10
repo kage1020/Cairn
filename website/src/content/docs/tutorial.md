@@ -106,7 +106,7 @@ Instead of placing dust and repeaters, you declare what depends on what.
 struct gatehouse size=7x5
   floor mat_slot=wall
   walls class=outer mat_slot=wall height=3
-  door  id=front side=front at=center mat_slot=door
+  door  id=front side=front at=center
 
   pressure_plate id=plate at=front.outside offset=0 y=0 -> sig.step
   pressure_plate id=inner at=inside.front  offset=1 y=0 -> sig.exit

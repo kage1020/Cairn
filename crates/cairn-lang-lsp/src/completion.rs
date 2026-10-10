@@ -22,7 +22,7 @@
 use std::collections::HashSet;
 
 use cairn_lang_core::Span;
-use cairn_lang_core::intent::BodyKind;
+use cairn_lang_core::intent::{BodyKind, role_of};
 use cairn_lang_formats::{builtin_bedrock, builtin_java};
 
 use crate::line_index::LineIndex;
@@ -213,7 +213,19 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     }
     if let Some(head) = before_token.strip_suffix('=') {
         return match &head[token_start_of(head)..] {
-            "mat_slot" => Some(Context::SlotName { replace }),
+            // Not on a keyword whose `mat_slot=` nothing reads
+            // (`MemberRole::unread_arguments`): the name is not looked up
+            // there, so every slot offered would be an argument `check`
+            // reports as ignored the moment it was accepted. A theme
+            // selector row opens with the keyword it selects, so the same
+            // first word answers for `door[mat_slot=` there.
+            "mat_slot"
+                if role_of(line_keyword(before_token))
+                    .unread_argument("mat_slot")
+                    .is_none() =>
+            {
+                Some(Context::SlotName { replace })
+            }
             // Other keys take free-form or not-yet-tabled values; offering
             // anything would be an invented vocabulary.
             _ => None,
@@ -249,6 +261,16 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     }
 }
 
+/// The word `line` opens with, after its indent: the command keyword, on a
+/// member line or a theme selector row.
+fn line_keyword(line: &str) -> &str {
+    let trimmed = line.trim_start();
+    let end = trimmed
+        .find(|c: char| !is_token_char(c))
+        .unwrap_or(trimmed.len());
+    &trimmed[..end]
+}
+
 /// First word of the nearest non-blank, non-comment indent-0 line above
 /// `line_start` — the top-level item whose body the cursor line sits in.
 ///
@@ -265,12 +287,7 @@ fn enclosing_item_keyword(source: &str, line_start: usize) -> Option<&str> {
             Some((line.len() - trimmed.len(), trimmed))
         })
         .find(|(line_indent, _)| *line_indent == 0)
-        .map(|(_, trimmed)| {
-            let end = trimmed
-                .find(|c: char| !is_token_char(c))
-                .unwrap_or(trimmed.len());
-            &trimmed[..end]
-        })
+        .map(|(_, trimmed)| line_keyword(trimmed))
 }
 
 /// Scan the whole document for `slot NAME -> TARGET` lines, tracking the
@@ -651,10 +668,10 @@ mod tests {
         // by UTF-16 units, not bytes or scalars (same discrimination as the
         // diagnostics range test).
         let source = "theme a:\n  slot walls -> @cobblestone\n\
-                      struct s size=2x2\n  door id=\"😀\" mat_slot=wa";
+                      struct s size=2x2\n  window id=\"😀\" mat_slot=wa";
         let items = complete(source, "mat_slot=wa");
         assert_eq!(labels(&items), vec!["walls"]);
-        let line = "  door id=\"😀\" mat_slot=wa";
+        let line = "  window id=\"😀\" mat_slot=wa";
         let byte_col = line.find("wa").expect("partial token");
         let utf16_col = u32::try_from(line[..byte_col].encode_utf16().count()).expect("fits u32");
         assert_ne!(u32::try_from(byte_col).expect("fits"), utf16_col);
@@ -709,7 +726,7 @@ mod tests {
         // key check read the two characters in front of the cursor and
         // offered the theme's slots inside a name.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  door id=\"mat_slot=";
+                      struct s size=2x2\n  window id=\"mat_slot=";
         assert_eq!(
             completions(source, at_end_of(source, "id=\"mat_slot=")),
             Some(vec![]),
@@ -725,7 +742,7 @@ mod tests {
         // the wrong line this test passes because `slot ` precedes the
         // cursor, with nothing to do with the string it is named for.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  door label=\"pick mat_slot=fl";
+                      struct s size=2x2\n  window label=\"pick mat_slot=fl";
         assert_eq!(
             completions(source, at_end_of(source, "pick mat_slot=fl")),
             Some(vec![]),
@@ -738,7 +755,7 @@ mod tests {
         // quote anywhere before the cursor": the string is closed, so the
         // argument that follows it is an argument again.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  door id=\"front\" mat_slot=";
+                      struct s size=2x2\n  window id=\"front\" mat_slot=";
         let items = complete(source, "mat_slot=");
         assert_eq!(labels(&items), vec!["floor"]);
     }
@@ -758,11 +775,49 @@ mod tests {
     fn hash_inside_a_string_literal_is_not_a_comment() {
         // The lexer scans strings atomically (a `#` between quotes is
         // string content, not a comment opener), so completion must not go
-        // dark on a line like `door id="#front" mat_slot=`.
+        // dark on a line like `window id="#front" mat_slot=`.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
-                      struct s size=2x2\n  door id=\"#front\" mat_slot=";
+                      struct s size=2x2\n  window id=\"#front\" mat_slot=";
         let items = complete(source, "mat_slot=");
         assert_eq!(labels(&items), vec!["floor"]);
+    }
+
+    #[test]
+    fn mat_slot_offers_no_slot_on_a_keyword_that_reads_none() {
+        // A `door` reads no `mat_slot=` (`MemberRole::unread_arguments`),
+        // so the name is not looked up and any slot accepted there is
+        // `W_IGNORED_ARGUMENT` at once; a `window` reads one. A theme
+        // selector row opens with the keyword it selects, so it is asked
+        // the same question.
+        let theme = "theme a:\n  slot floor -> @oak_planks\n";
+        for (rest, expected) in [
+            ("struct s size=2x2\n  door side=front mat_slot=", vec![]),
+            ("struct s size=2x2\n  door side=front mat_slot=fl", vec![]),
+            (
+                "struct s size=2x2\n  window side=front mat_slot=",
+                vec!["floor"],
+            ),
+            ("theme b:\n  door[mat_slot=", vec![]),
+            ("theme b:\n  window[mat_slot=", vec!["floor"]),
+        ] {
+            let source = format!("{theme}{rest}");
+            let items = completions(&source, at_end_of(&source, rest)).expect("in the document");
+            assert_eq!(labels(&items), expected, "{rest:?}");
+        }
+        // And every keyword the table answers for, so a role that joins the
+        // `mat_slot` entries is asked here without a line of its own.
+        for keyword in cairn_lang_core::intent::known_keywords() {
+            let rest = format!("struct s size=2x2\n  {keyword} mat_slot=");
+            let source = format!("{theme}{rest}");
+            let items = completions(&source, at_end_of(&source, &rest)).expect("in the document");
+            let unread = role_of(keyword).unread_argument("mat_slot").is_some();
+            assert_eq!(
+                labels(&items).is_empty(),
+                unread,
+                "`{keyword}`: unread = {unread}, offered {:?}",
+                labels(&items),
+            );
+        }
     }
 
     #[test]

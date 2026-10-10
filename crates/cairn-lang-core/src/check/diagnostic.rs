@@ -247,10 +247,16 @@ pub enum DiagnosticCode {
     /// without one, so it paints nothing.
     ///
     /// The absent half of the split [`Self::UnresolvedSlot`] owns the other
-    /// end of: a `mat_slot=` naming a slot no theme declares is that code's,
-    /// and no member earns both.
+    /// end of: on a role that reads a `mat_slot=`, one naming a slot no
+    /// theme declares is that code's, and no member earns both. On a role
+    /// that reads none the split does not arise — this code never applies
+    /// there, and a `mat_slot=` written on one is [`Self::IgnoredArgument`]
+    /// whatever it names.
     MissingMaterial,
-    /// `mat_slot=NAME` references a slot the applied theme does not declare.
+    /// `mat_slot=NAME` references a slot the applied theme does not
+    /// declare, on a member whose role's
+    /// `crate::intent::MemberRole::unread_arguments` does not list
+    /// `mat_slot`. On one that does, the name is not looked up.
     UnresolvedSlot,
     /// `slot NAME -> VALUE` whose VALUE is neither a canonical nor an
     /// abstract material token (see `spec/materials-themes` "Canonical
@@ -279,19 +285,25 @@ pub enum DiagnosticCode {
     ///
     /// Three shapes, one finding. **Unreadable value**: the lowering pass
     /// could not read it, dropped it, and put the default in its place.
-    /// **Unreached key**: no pass reads it yet. On a member that is a key
-    /// the specification defines, listed in
+    /// **Unread key**: nothing reads it where it is written, for one of two
+    /// reasons (`crate::intent::Unread`). An *unreached* key is one the
+    /// specification defines and no pass reads yet, so a lowering rule is
+    /// owed: on a member, an `Unreached` entry of
     /// `crate::intent::MemberRole::unread_arguments`; on a `struct` / `def`
-    /// header it is a key the specification writes there, listed in
+    /// header, a key the specification writes there, listed in
     /// `crate::check::arguments::UNREAD_HEADER_ARGUMENTS` — today `class=`;
-    /// on a `theme` selector row whose keyword names a role it is every
+    /// on a `theme` selector row whose keyword names a role, every
     /// `key=value` right of the arrow, defined anywhere or not (`fram=42`
-    /// included), since no pass lowers a selector's bindings. **Routed
-    /// past**: a sibling argument picked a lowering rule that does not
-    /// consult it, which `crate::intent::MemberRole::conditional_arguments`
-    /// records and `roof kind=gable slope_to=front` is the instance of —
-    /// that one has no default to substitute, and fires whether or not the
-    /// member went on to build. The build differs from the source in all
+    /// included), since no pass lowers a selector's bindings. An
+    /// *inapplicable* key is a universal one on a role that puts down
+    /// nothing it would be read for — an `Inapplicable` entry of the same
+    /// table, `mat_slot=` on a `level` — where no rule is owed and the note
+    /// asks for the argument's removal. **Routed past**: a sibling argument
+    /// picked a lowering rule that does not consult it, which
+    /// `crate::intent::MemberRole::conditional_arguments` records and
+    /// `roof kind=gable slope_to=front` is the instance of — that one has no
+    /// default to substitute, and fires whether or not the member went on to
+    /// build. The build differs from the source in all
     /// three, and the difference is announced rather than silent.
     ///
     /// Distinct from [`Self::DeferredMember`], which says the member did
@@ -802,6 +814,12 @@ impl DiagnosticCode {
     /// key a sibling routed past names something real, and the repair is
     /// either argument — the rule the author meant, or the leftover key.
     /// Refusing would pick one of them.
+    ///
+    /// Its inapplicable-key shape is not a gap in the compiler at all, so
+    /// it rests on its own argument: the key is one every role accepts, and
+    /// its value changes nothing in the build. Refusing it would make a
+    /// universal key one that some roles reject, over an argument that
+    /// does nothing; the warning asks for its removal instead.
     ///
     /// Two codes sit close to the line and are decided in their variant
     /// docs: `E_UNKNOWN_SLOT_TARGET` is an error because the members

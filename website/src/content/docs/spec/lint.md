@@ -142,7 +142,7 @@ version to compare.
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
-| `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
+| `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
 | `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
 | `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member in the file. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
@@ -189,8 +189,13 @@ family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules))
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
-placement naming it is still refused. A module that declares such a theme but never reads a
-`mat_slot=` from it is not reported: the build is byte-identical with or without the pin.
+placement naming it is still refused, whatever its `def` reads: a `place`'s `theme=` binds the
+theme, the lockfile records the bound theme for the placement, and the theme's floor applies once it
+is bound ([Versioning and Editions](/spec/versioning-editions/#a-part-may-declare-its-own-floor)).
+A module that names such a theme in no `place`, and whose `struct` and `def` members read no
+`mat_slot=` from it, is not reported: the build is byte-identical with or without the pin. A
+`mat_slot=` on a keyword that reads none, such as a `door`'s, is not such a read
+([§11.3](#113-error-vs-warning)).
 
 `E_THEME_SELECTOR_UNMATCHED` is a warning despite its prefix. A rule that matches nothing overrides
 nothing, so every member keeps the material it would have had with the rule deleted; the finding is
@@ -205,15 +210,19 @@ the requested extent at exit 0.
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member
 earns both: the key is absent for the first and present-but-unusable for the second. They have
 different repairs, which is why they are different codes — the same division `E_INCOMPLETE_PLACE`
-and `E_TYPE_MISMATCH_LABEL` draw on a `place` row.
+and `E_TYPE_MISMATCH_LABEL` draw on a `place` row. The split is drawn on the keywords that read a
+`mat_slot=`. On one that reads none, neither half applies: nothing would read the key, so its
+absence is not reported, and its name is not looked up, so a label written there is
+`W_IGNORED_ARGUMENT` whatever slot it names ([§11.3](#113-error-vs-warning)).
 
-`E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor` and
-`walls` reach the palette through the applied theme's slot map and have no default block, so a
-bare one contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air,
-and is not reported — that is how a narrow slit is punched through a wall without choosing a
-species for it; a `door` is always a carve and reads no material at all. A `roof`, `stair` or
-`pressure_plate` paints a default block and is not reported either. `cairn check` raises it, before any lowering, and it needs no theme: a module
-that declares none is still told which of its members name no material.
+`E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor` and `walls`
+reach the palette through the applied theme's slot map and have no default block, so a bare one
+contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
+reported — that is how a narrow slit is punched through a wall without choosing a species for it; a
+`door` carves its opening and reads no material, since its own block is not placed yet. A `roof`,
+`stair` or `pressure_plate` paints a default block and is not reported either. `cairn check` raises
+it, before any lowering, and it needs no theme: a module that declares none is still told which of
+its members name no material.
 
 `E_UNRESOLVED_SLOT` is reported **at most once per member per bound theme**. A `def` body is
 resolved once as its own scope and once again for every `place` that instantiates it, and each of
@@ -682,19 +691,27 @@ the warning.
 in the vocabulary whose value the pass cannot read is dropped and a default put in its place, or,
 where the key itself decides whether the member is built at all, the member is refused instead
 (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
-[§5.4](/spec/syntax/#54-selectors)). An **unreached key**: a `key=` this specification defines that
-no pass reads yet — `window shape=` / `anchor=`, `roof footprint=` / `bounds=` and a header's
-`class=` are those keys today — is carried into the IR and never consulted. Every `key=value` on the
-right of a `theme` selector row whose keyword the compiler knows is one too, reported on the binding
-whatever its key or value, since no pass lowers a selector's bindings yet
-([Materials and Themes](/spec/materials-themes/)). And a key **routed past**: one the keyword reads
-only under some ways of writing a sibling argument, on a member that writes it another way. The
-boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this way,
-while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not
-judged at all. All three make the build differ from the source. The rule forbids *silent*
-substitution, and all three are announced. For the unreached key the gap is the compiler's rather
-than the source's, which is why it is not a refusal. Whether autofix is offered is up to the
-implementation.
+[§5.4](/spec/syntax/#54-selectors)). An **unread key**: a `key=` the keyword accepts and nothing
+reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
+*unreached* key is one this specification defines that no pass reads yet — `window shape=` /
+`anchor=`, `roof footprint=` / `bounds=`, a header's `class=`, and a `door`'s `mat_slot=`, which
+waits on the door block itself, are those keys today. Every `key=value` on the right of a `theme`
+selector row whose keyword the compiler knows is one too, reported on the binding whatever its key
+or value, since no pass lowers a selector's bindings yet
+([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
+accepts, on a keyword that puts down nothing it would be read for — `mat_slot=` on a `level`,
+`circuit`, `place` or `connect` is that key today. A `mat_slot=` of either kind is not looked up in
+the theme, so a slot name the theme does not declare is this warning rather than
+`E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the keyword
+reads only under some ways of writing a sibling argument, on a member that writes it another way.
+The boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this
+way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are
+not judged at all. All three make the build differ from the source. The rule forbids *silent*
+substitution, and all three are announced. For an unreached key the gap is the compiler's rather
+than the source's, which is why it is not a refusal. An inapplicable key is no gap at all: the key
+is one every member accepts and its value changes nothing in the build, so the warning asks for
+its removal, where a refusal would make a key every member accepts one that some refuse. Whether
+autofix is offered is up to the implementation.
 
 An unreadable value is reported whether or not its member is then built. The value is wrong
 wherever the member ends up, so it is a repair of its own, and holding the finding back until a

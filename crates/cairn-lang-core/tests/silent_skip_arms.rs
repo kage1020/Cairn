@@ -99,10 +99,20 @@
 //!     `W_DEFERRED_CONNECT` a `connect` naming it earns sends the author to a
 //!     row that prints something, and that row's note leads on to the one
 //!     with the repair.
+//! 13. **A `mat_slot=` on a role that reads none** — `resolve_members` does
+//!     not look the name up when the role's `unread_arguments` lists
+//!     `mat_slot` (`read_slot`), so a slot the theme lacks is not
+//!     `E_UNRESOLVED_SLOT` and the binding's `slot_value` stays `None`.
+//!     `check::arguments` owns the signal, `W_IGNORED_ARGUMENT` on the
+//!     value, and every CLI command and the language server reach it
+//!     through `check`. A library caller that resolves and lowers without
+//!     `check` gets nothing for the line — the same division of labour as
+//!     9, pinned the same way. The build is the same with the argument or
+//!     without it, which `tests/unread_mat_slot.rs` measures.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
-use cairn_lang_core::{lower, parse, resolve};
+use cairn_lang_core::{check, lower, parse, resolve};
 
 struct Outcome {
     walkways: usize,
@@ -684,4 +694,52 @@ fn a_refused_requirement_is_skipped_silently_by_the_floor_derivation() {
             "a warning would let a compile proceed with no floor at all",
         );
     }
+}
+
+/// A `mat_slot=` on a role that reads none is not looked up, and the
+/// resolver-only path says nothing about it.
+///
+/// `check::arguments` owns `W_IGNORED_ARGUMENT` for it, and every CLI
+/// command and the language server run `check`. A library caller that
+/// resolves and lowers without it reaches the skip and no signal, which is
+/// the shape this file writes down — next to the signal it relies on.
+#[test]
+fn a_slot_on_a_role_that_reads_none_is_skipped_silently_through_resolve() {
+    let src = "theme plain:\n  slot wall -> @cobblestone\n\n\
+               struct s size=5x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+               door side=front at=center mat_slot=nosuch\n";
+    let module = parse(src).expect("parse");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, None);
+    assert_eq!(
+        resolution.diagnostics.len(),
+        0,
+        "the slot is not looked up, so no `E_UNRESOLVED_SLOT`, got: {:#?}",
+        resolution.diagnostics,
+    );
+    let door = src.find("door side").expect("the door is in the source");
+    let binding = resolution.scopes["struct::s"]
+        .members
+        .get(&door)
+        .expect("the door is resolved");
+    assert!(
+        binding.slot_value.is_none(),
+        "nothing was looked up, so nothing is bound",
+    );
+    let out: BlockArrayIr = lower_to_block_array(&ir, &resolution, None);
+    assert_eq!(
+        out.diagnostics.len(),
+        0,
+        "lowering has nothing to say about it either, got: {:#?}",
+        out.diagnostics,
+    );
+
+    // And the signal the skip depends on, from the pass the CLI runs.
+    let reported = check(&module, &ir, None);
+    assert_eq!(
+        reported.iter().map(|d| d.code).collect::<Vec<_>>(),
+        [DiagnosticCode::IgnoredArgument],
+        "{reported:#?}",
+    );
+    assert_eq!(&src[reported[0].span.clone()], "nosuch");
 }

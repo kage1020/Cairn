@@ -2932,14 +2932,22 @@ fn lower_fixture_member(
 /// Returns `None` (and emits at most one diagnostic) when:
 /// - the scope had no theme bound (`theme_missing` short-circuits silently;
 ///   the `W_NO_THEME_BOUND` warning was already emitted once per struct),
-/// - the member never carried a `mat_slot=`,
-/// - the resolver already flagged the slot via `E_UNRESOLVED_SLOT` (the
-///   binding has `slot_value == None`),
+/// - there is no resolution for the scope, or none for the member in it
+///   (silently, and not always reported elsewhere; see the comment above
+///   the `slot_value` read),
+/// - the binding's `slot_value` is `None` (silently). That has the five
+///   causes [`crate::resolve::ResolvedMemberBinding::slot_value`] lists,
+///   with who reports each; among them, the member never carried a
+///   `mat_slot=`, carries one on a role that reads none
+///   (`W_IGNORED_ARGUMENT`), or names a slot the resolver flagged via
+///   `E_UNRESOLVED_SLOT`,
 /// - the value lowered as an abstract token and no `registry` resolver was
 ///   offered (a `W_ABSTRACT_TOKEN_DEFERRED` warning is emitted),
 /// - the value lowered as an abstract token the offered `registry` resolver
 ///   does not declare (an `E_UNKNOWN_ABSTRACT_TOKEN` error is emitted with
 ///   the nearest declared candidate, when one exists),
+/// - the value lowered as a canonical id the offered `registry` does not
+///   declare (an `E_UNKNOWN_ID` error is emitted),
 /// - the value was not a token at all (`E_UNKNOWN_SLOT_TARGET` already
 ///   fired during resolve, so no second diagnostic here).
 ///
@@ -2967,7 +2975,7 @@ fn resolve_member_state(
     // pushed from *inside* this pass, and the CLI runs lowering before it
     // merges `check`'s findings in, so "reported first" would be false in
     // two different ways. `ResolvedMemberBinding::slot_value` names the
-    // four causes and who owns each; the one that used to have no owner is
+    // five causes and who owns each; the one that used to have no owner is
     // a member carrying no `mat_slot=` at all, now `check::material`'s for
     // the roles that paint nothing without one.
     //
@@ -3861,7 +3869,8 @@ fn diag_incompatible_material(
         notes.push(DiagnosticNote {
             span: None,
             message: format!(
-                "reached through `mat_slot={slot}`, so every member reading that slot has it too",
+                "reached through `mat_slot={}`, so every member reading that slot has it too",
+                slot.name,
             ),
         });
     }
@@ -3876,7 +3885,7 @@ fn diag_incompatible_material(
         data: Some(DiagnosticData::IncompatibleMaterial {
             id: state.id.clone(),
             required: "stair".to_owned(),
-            slot: member.mat_slot.clone(),
+            slot: member.mat_slot.as_ref().map(|slot| slot.name.clone()),
             token: slot_value.and_then(|v| match &v.value.kind {
                 ValueKind::Token(token) => Some(token.clone()),
                 // Anything else here was already refused upstream
@@ -4134,7 +4143,9 @@ fn carve_door(
     };
     // The door block itself (`oak_door`, hinge / half / facing / open) is
     // not yet placed; that landed deferred along with per-theme door
-    // materials.
+    // materials. A door's `mat_slot=` is the material that block would
+    // read, which is why `MemberRole::unread_arguments` lists it as
+    // unreached on a `door`: placing the block is the day that entry goes.
     let door_height = course_top
         .saturating_sub(base_row)
         .saturating_add(1)
