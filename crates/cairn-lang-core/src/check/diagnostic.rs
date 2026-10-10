@@ -123,6 +123,15 @@ pub enum DiagnosticCode {
     /// strictest across every line, so a second one adds a constraint
     /// rather than displacing the first.
     DuplicateHeader,
+    /// A `struct` or `def` body holds more than one `circuit` line.
+    ///
+    /// A scope has one reservation for its redstone: place-and-route
+    /// reads the first usable line and assigns no logic to any other, so
+    /// every other line would be dropped without a word. Refused rather
+    /// than resolved by keeping that line, because nothing in the source
+    /// says which line the author meant, and the first usable one is a
+    /// guess.
+    DuplicateCircuit,
     /// A member carries an indented body that nothing reads.
     ///
     /// The surface grammar hangs a body off every command, but only
@@ -694,6 +703,7 @@ impl DiagnosticCode {
             Self::DuplicateId => "E_DUPLICATE_ID",
             Self::DuplicateItem => "E_DUPLICATE_ITEM",
             Self::DuplicateHeader => "E_DUPLICATE_HEADER",
+            Self::DuplicateCircuit => "E_DUPLICATE_CIRCUIT",
             Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
@@ -811,6 +821,7 @@ impl DiagnosticCode {
             | Self::DuplicateSelector
             | Self::DuplicateArg
             | Self::DuplicateId
+            | Self::DuplicateCircuit
             | Self::MisplacedMember
             | Self::UnknownKeyword
             | Self::UnknownArgument
@@ -1505,6 +1516,7 @@ mod tests {
                 "E_AMBIGUOUS_PORT",
                 "E_CONNECT_ARITY",
                 "E_DUPLICATE_ARG",
+                "E_DUPLICATE_CIRCUIT",
                 "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",
@@ -1580,6 +1592,7 @@ mod tests {
                 "E_AMBIGUOUS_PORT",
                 "E_CONNECT_ARITY",
                 "E_DUPLICATE_ARG",
+                "E_DUPLICATE_CIRCUIT",
                 "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",

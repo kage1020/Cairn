@@ -1,5 +1,6 @@
 //! `duplicate` pass — flags a `key=` / `slot` / `id=` / item name repeated
-//! in the same scope, and a `theme` selector row repeated as a whole.
+//! in the same scope, a `theme` selector row repeated as a whole, and a
+//! second `circuit` line in a `struct` / `def` body.
 //!
 //! Walks the surface AST rather than the IR because the IR's
 //! [`IntentState`](crate::intent::IntentState) and `args` maps are
@@ -32,6 +33,9 @@
 //!   accepted ones and reports a repeat as `E_DUPLICATE_PLACE_ID`. A `place`
 //!   row indented under another row is not in that body and stays here. See
 //!   [`PlaceIdOwner`].
+//! - `E_DUPLICATE_CIRCUIT` — a `struct` / `def` body has two `circuit`
+//!   lines among its own members, the ones place-and-route reads a
+//!   scope's reservation from.
 //!
 //! Every scope here reports the *repeat* and points a note at the first
 //! declaration, so the anchor is the token the author would edit and the
@@ -58,6 +62,7 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
             Item::Theme { body, .. } => check_theme_body(body, sink),
             Item::Def { args, body, .. } | Item::Struct { args, body, .. } => {
                 check_arg_keys(args, ArgScope::Header, sink);
+                check_circuit_lines(body, sink);
                 check_body(body, PlaceIdOwner::ThisPass, sink);
             }
             Item::Site { body, .. } => check_body(body, PlaceIdOwner::Resolver, sink),
@@ -390,6 +395,45 @@ fn first_declaration_note(first_span: &Span) -> DiagnosticNote {
     DiagnosticNote {
         span: Some(first_span.clone()),
         message: "first declaration here".into(),
+    }
+}
+
+/// Scope reservation: a `struct` or `def` body may hold one `circuit`
+/// line.
+///
+/// Every `circuit` member of the body counts, well-formed or not and
+/// with or without a `[...]` selector: each states the scope's
+/// reservation, and [`crate::circuit_regions`] keeps every well-formed
+/// one of a sized scope, of which place-and-route uses the first.
+///
+/// This check counts the body's own members and nothing below them. A
+/// `circuit` line under a `level` is in that level's body, not this
+/// one, so it is neither a first line here nor a second.
+fn check_circuit_lines(body: &[Statement], sink: &mut DiagnosticSink) {
+    let mut first: Option<&Span> = None;
+    for stmt in body {
+        let Statement::Generic { keyword, span, .. } = stmt else {
+            continue;
+        };
+        if keyword != "circuit" {
+            continue;
+        }
+        match first {
+            Some(first_span) => sink.push(Diagnostic {
+                code: DiagnosticCode::DuplicateCircuit,
+                span: span.clone(),
+                primary: "this scope already has a `circuit` line, and a scope reserves one region for its redstone".into(),
+                notes: vec![
+                    first_declaration_note(first_span),
+                    DiagnosticNote {
+                        span: None,
+                        message: "delete one of the two lines, or split the logic across several scopes, each with its own `circuit` line".into(),
+                    },
+                ],
+                data: None,
+            }),
+            None => first = Some(span),
+        }
     }
 }
 

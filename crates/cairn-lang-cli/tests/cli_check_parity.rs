@@ -105,6 +105,13 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  floor id=a id=b mat_slot=floor\n"),
     ),
     (
+        "E_DUPLICATE_CIRCUIT",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n  \
+             circuit region=floor void=1\n  circuit region=floor void=2\n",
+        ),
+    ),
+    (
         "E_DUPLICATE_ID",
         Source::WithPrologue(
             "struct s size=5x5\n  floor id=x mat_slot=floor\n\
