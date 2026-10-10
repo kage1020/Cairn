@@ -2,24 +2,36 @@
 //!
 //! Row-level checks live in the parser, where the input arity is in hand:
 //! a row's digits and its width are refused there (`parse_truth_rows.rs`).
-//! What no row can see is the table around it — that it has no rows at
-//! all, that another row already assigned the same inputs, or that the
-//! combinations it leaves out are the ones a bug would hide in. All three
-//! read, in a diff, exactly like a table that verifies something.
+//! What no row can see is the header read against itself, and the table
+//! around it. The header can list one signal twice, which is a fault in
+//! the header: the table then has more than one column for one input, and
+//! its rows describe combinations the circuit does not have. The table can
+//! have no rows at all, a row can assign inputs another row already did,
+//! or the combinations it leaves out can be the ones a bug would hide in.
+//! Those three read, in a diff, exactly like a table that verifies
+//! something.
 //!
-//! Severity follows what is provable. A table with no rows can never
-//! assert anything, whatever is written later around it, so it is an
-//! error. A table missing rows asserts everything its rows say — the
-//! finding is about coverage, not about the statement being void — so it
-//! is a warning. Two rows that assign the same inputs different outputs
-//! describe a circuit that cannot exist, so that is an error again, while
-//! two that agree cost nothing but the line.
+//! Severity follows what is provable. A repeated input is an error, since
+//! the header alone shows the table is written for combinations the
+//! circuit does not have, and it is the only finding its table gets: every
+//! other one reads the rows against that list. A table with no rows can
+//! never assert anything, whatever is written around it, so it is an
+//! error — reported as the repeated input when its list has one. A table
+//! missing rows asserts everything its rows say — the finding is about
+//! coverage, not about the statement being void — so it is a warning. Two
+//! rows that assign the same inputs different outputs describe a circuit
+//! that cannot exist, so that is an error again, while two that agree cost
+//! nothing but the line.
 
 use cairn_lang_core::Diagnostic;
 use cairn_lang_core::check::{DiagnosticData, Severity};
 
 mod common;
 use common::{codes, diagnose};
+
+/// How many missing combinations a coverage finding names: the lowest
+/// this many, fewer only when fewer are missing.
+const SAMPLE_CAP: usize = 4;
 
 fn table(inputs: &str, rows: &str) -> String {
     format!("struct s size=3x3\n  assert truth({inputs} -> sig.o) {{ {rows} }}\n")
@@ -366,6 +378,153 @@ fn the_total_becomes_a_power_before_it_stops_fitting_an_integer() {
     }
 }
 
+// -- the input list -------------------------------------------------------
+
+/// A signal listed twice is one input written twice, so the table has two
+/// columns for it and its rows describe combinations the circuit does not
+/// have. The table is refused for the list, and the coverage finding that
+/// would ask for `01` and `10` is not raised beside it.
+#[test]
+fn a_signal_listed_twice_is_refused_and_not_asked_for_impossible_rows() {
+    let found = only(&table("sig.a, sig.a", "00 -> 0; 11 -> 1"));
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_DUPLICATE_INPUT");
+    assert_eq!(found.severity(), Severity::Error);
+    assert_eq!(
+        found.primary,
+        "this `assert truth` lists `sig.a` as inputs 1 and 2, and one signal is one input, so \
+         the table has 2 columns for it and its rows describe combinations the circuit does not \
+         have",
+    );
+    assert_eq!(
+        found.notes[0].message,
+        "Fix: list `sig.a` once and drop its other columns from every row, or name the signal \
+         you meant in its place",
+    );
+}
+
+/// A table whose rows raise nothing when its columns are read as separate
+/// inputs: `-0` and `-1` share no combination, and between them they
+/// assign all four. Its meaning still depends on which of the two columns
+/// is read as `sig.a`, so it is refused for the list like any other.
+#[test]
+fn a_repeated_input_is_refused_where_its_rows_raise_nothing() {
+    let source = table("sig.a, sig.a", "-0 -> 0; -1 -> 1");
+    assert!(
+        codes(&table("sig.a, sig.b", "-0 -> 0; -1 -> 1")).is_empty(),
+        "read as two inputs, these rows are complete and agree",
+    );
+    assert_eq!(only(&source).code.as_str(), "E_TRUTH_TABLE_DUPLICATE_INPUT");
+}
+
+/// Each repeated signal is its own finding, in the order the signals
+/// first appear, and a table with no rows is refused for its list alone.
+#[test]
+fn each_repeated_signal_is_reported_once_in_list_order() {
+    let found = diagnose(&table("sig.b, sig.a, sig.b, sig.a, sig.a", ""));
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        [
+            "E_TRUTH_TABLE_DUPLICATE_INPUT",
+            "E_TRUTH_TABLE_DUPLICATE_INPUT"
+        ],
+    );
+    assert!(
+        found[0].primary.contains("`sig.b` as inputs 1 and 3"),
+        "{:?}",
+        found[0]
+    );
+    assert!(
+        found[1].primary.contains("`sig.a` as inputs 2, 4, and 5"),
+        "{:?}",
+        found[1]
+    );
+}
+
+/// The input list carries no span of its own, so the finding stands on
+/// the whole statement, and the sentence names the positions instead.
+/// Nothing else holds the span: the finding is the only one its table
+/// gets, so no sibling's order would notice it moving.
+#[test]
+fn a_repeated_input_stands_on_the_whole_statement() {
+    let source = table("sig.a, sig.a", "00 -> 0; 11 -> 1");
+    let found = only(&source);
+    assert_eq!(
+        underlined(&source, &found.span),
+        "assert truth(sig.a, sig.a -> sig.o) { 00 -> 0; 11 -> 1 }",
+        "the finding stands on the whole statement, since the input list has no span",
+    );
+}
+
+/// Every other finding reads the rows against the input list, so a table
+/// that repeats a signal gets the repeat and nothing else, whatever its
+/// rows: a conflict on a combination the circuit does see, no rows at all,
+/// and coverage short of reachable combinations as well as impossible
+/// ones. Each table raises its own code once the list is repaired, which
+/// the second half asserts so the first is not passing on a table that was
+/// quiet anyway.
+#[test]
+fn a_repeated_input_is_the_only_finding_its_table_gets() {
+    for (inputs, rows, repaired_inputs, repaired_rows, deferred) in [
+        (
+            "sig.a, sig.a",
+            "00 -> 0; 00 -> 1",
+            "sig.a",
+            "0 -> 0; 0 -> 1",
+            "E_TRUTH_TABLE_CONFLICT",
+        ),
+        ("sig.a, sig.a", "", "sig.a", "", "E_TRUTH_TABLE_EMPTY"),
+        (
+            "sig.a, sig.a, sig.b",
+            "000 -> 0",
+            "sig.a, sig.b",
+            "00 -> 0",
+            "W_TRUTH_TABLE_PARTIAL",
+        ),
+    ] {
+        let found = only(&table(inputs, rows));
+        assert_eq!(
+            found.code.as_str(),
+            "E_TRUTH_TABLE_DUPLICATE_INPUT",
+            "`{inputs}` over `{{ {rows} }}`",
+        );
+        assert!(
+            codes(&table(repaired_inputs, repaired_rows)).contains(&deferred),
+            "`{repaired_inputs}` over `{{ {repaired_rows} }}` should raise {deferred}",
+        );
+    }
+}
+
+/// A signal listed many times names its first few positions and counts
+/// the rest, the shape the coverage finding's sample takes, so a long
+/// list does not become a long sentence. The column count stays whole.
+#[test]
+fn a_repeated_input_names_four_positions_and_counts_the_rest() {
+    for (times, listed) in [
+        (4, "inputs 1, 2, 3, and 4,"),
+        (5, "inputs 1, 2, 3, 4, and 1 more,"),
+        (2000, "inputs 1, 2, 3, 4, and 1996 more,"),
+    ] {
+        let found = only(&table(&vec!["sig.a"; times].join(", "), ""));
+        assert!(
+            found.primary.contains(listed),
+            "{times} positions: {:?}",
+            found.primary,
+        );
+        assert!(
+            found
+                .primary
+                .contains(&format!("the table has {times} columns for it")),
+            "{times} positions: {:?}",
+            found.primary,
+        );
+        assert!(
+            found.primary.len() < 300,
+            "{times} positions: the sentence should not grow with the list, got {} bytes",
+            found.primary.len(),
+        );
+    }
+}
+
 // -- where the table sits -------------------------------------------------
 
 /// The findings are about the statement, so indentation does not change
@@ -454,9 +613,9 @@ fn a_dont_care_row_stands_for_the_rows_it_replaces() {
 
 /// And a row of nothing but don't-cares closes the table on its own.
 ///
-/// The case the coverage walk must never be handed: a pattern that fixes
-/// nothing assigns every combination, so there is no lowest missing one
-/// to step towards.
+/// A complete table, so no sample is wanted: the count returns before the
+/// search is called, and a pattern that fixes nothing fills every prefix,
+/// so the descent would pass over the whole space even if it were.
 #[test]
 fn a_row_of_only_dont_cares_completes_the_table() {
     assert!(codes(&table("sig.a, sig.b, sig.c", "--- -> 1")).is_empty());
@@ -566,17 +725,15 @@ fn a_row_inside_another_still_leaves_the_coverage_finding() {
     );
 }
 
-/// The walk for a missing combination steps over a row rather than
-/// through it.
-///
-/// Nineteen don't-cares stand for half a million combinations. A walk
-/// that visited them one at a time would still return the right answer,
-/// which is why the assertion is on the answer *and* on the finding being
-/// the only one: the sample has to be the four lowest combinations the
-/// row does not assign, and those all sit above every combination it
-/// does.
+/// One row whose nineteen don't-cares stand for half a million
+/// combinations, every one of them below the first one missing. What this
+/// pins is the exact payload: the count, and the four lowest combinations
+/// the row does not assign, in order. It does not pin how they are found.
+/// A search that stepped through the row one combination at a time would
+/// return the same payload, only visibly slower at this width, and nothing
+/// here times it.
 #[test]
-fn the_walk_steps_over_a_row_rather_than_through_it() {
+fn the_payload_above_a_row_of_half_a_million_combinations_is_exact() {
     let names: Vec<String> = (0..20).map(|i| format!("sig.a{i}")).collect();
     let pattern = format!("0{}", "-".repeat(19));
     let found = only(&table(&names.join(", "), &format!("{pattern} -> 1")));
@@ -598,6 +755,114 @@ fn the_walk_steps_over_a_row_rather_than_through_it() {
             format!("1{}11", "0".repeat(17)),
         ],
     );
+}
+
+/// Two rows fixing one input or two each, with don't-cares above the
+/// lowest position each row fixes: the shape the step-capped search lost
+/// its finding on. The first missing combination is `10…01`, and in front
+/// of it sits every combination up to and including the first of the
+/// upper half, `2^(n-1) + 1` of them, each assigned by one row or the
+/// other — at fifteen inputs 16 385, past that search's 10 000 steps. The
+/// count is exact and so is the sample, at fifteen inputs and at forty:
+/// the finding does not depend on how many combinations sit in front of
+/// the first one missing.
+///
+/// The forty is the witness that no step cap can come back, and it fails
+/// by hanging. A check for a filled prefix that stops recognising one the
+/// two rows fill between them does not fail this test with a wrong
+/// sample: at fifteen inputs the descent still reaches the right four,
+/// through every combination in front of them, and at forty it does not
+/// finish. Nothing bounds a test's time here, so that lands as a CI run
+/// that hangs rather than as a failed assertion.
+#[test]
+fn a_two_row_table_reports_its_gap_however_many_combinations_precede_it() {
+    for arity in [15usize, 40] {
+        let names: Vec<String> = (0..arity).map(|i| format!("sig.i{i}")).collect();
+        let rows = format!(
+            "{}0 -> 0; 0{}1 -> 1",
+            "-".repeat(arity - 1),
+            "-".repeat(arity - 2),
+        );
+        let found = only(&table(&names.join(", "), &rows));
+        let Some(DiagnosticData::TruthTablePartial {
+            inputs,
+            covered,
+            missing,
+        }) = found.data.clone()
+        else {
+            panic!("{arity} inputs should carry the partial payload, got {found:?}");
+        };
+        let half = 1u64 << (arity - 1);
+        assert_eq!(
+            (inputs, covered),
+            (u32::try_from(arity).expect("small"), half + half / 2),
+            "{arity} inputs",
+        );
+        assert_eq!(
+            missing,
+            vec![
+                format!("1{}1", "0".repeat(arity - 2)),
+                format!("1{}11", "0".repeat(arity - 3)),
+                format!("1{}101", "0".repeat(arity - 4)),
+                format!("1{}111", "0".repeat(arity - 4)),
+            ],
+            "{arity} inputs: the four lowest combinations neither row assigns",
+        );
+    }
+}
+
+/// Fewer combinations missing than the sample holds, scattered so that
+/// each sits under a different prefix: the search finds every one, in
+/// ascending order, and stops there.
+#[test]
+fn a_sample_smaller_than_the_cap_names_every_missing_combination() {
+    let found = only(&table(
+        "sig.a, sig.b, sig.c",
+        "000 -> 0; 01- -> 0; 101 -> 1; 110 -> 1",
+    ));
+    let Some(DiagnosticData::TruthTablePartial {
+        covered, missing, ..
+    }) = found.data.clone()
+    else {
+        panic!("the partial finding should carry its payload, got {found:?}");
+    };
+    assert_eq!(covered, 5);
+    assert_eq!(missing, ["001", "100", "111"]);
+}
+
+/// One row fixing every one of thirty-two thousand inputs: the search for
+/// a sample holds its place on the heap, so its depth on the call stack
+/// does not grow with the width.
+///
+/// A search that recursed once per input fails this without failing an
+/// assertion. A stack overflow aborts the process, so it takes the whole
+/// test binary down, the way it takes every pass's findings for the file
+/// in `cairn check` and the server itself in the language server.
+/// Measured on such a recursion in a debug build, a libtest thread's
+/// 2 MiB ran out near 4 500 inputs and an 8 MiB thread, the usual size
+/// of a Linux main thread's, near 18 000, so thirty-two thousand is past
+/// both.
+#[test]
+fn a_table_thirty_two_thousand_inputs_wide_is_searched_without_recursing() {
+    const WIDTH: usize = 32_000;
+    let names: Vec<String> = (0..WIDTH).map(|i| format!("sig.i{i}")).collect();
+    let source = table(&names.join(", "), &format!("{} -> 1", "0".repeat(WIDTH)));
+    let found = diagnose(&source);
+    // Not `only`, whose message quotes the source: 400 KB of it here.
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_PARTIAL"],
+    );
+    let Some(DiagnosticData::TruthTablePartial {
+        inputs,
+        covered,
+        missing,
+    }) = &found[0].data
+    else {
+        panic!("the partial finding should carry its payload");
+    };
+    assert_eq!((*inputs, *covered), (32_000, 1));
+    assert_eq!(missing, &[1, 2, 3, 4].map(|k: u8| format!("{k:0WIDTH$b}")));
 }
 
 // -- don't-care outputs ---------------------------------------------------
@@ -628,13 +893,23 @@ fn a_dash_output_answers_the_coverage_finding() {
 }
 
 /// A `-` output covers its combinations without asserting anything about
-/// them, so it moves the coverage count and nothing else.
+/// them, so it moves the coverage finding and nothing else: the two
+/// combinations `01-` stands for join the count and leave the sample.
 #[test]
 fn a_dash_output_counts_toward_coverage_like_any_other_row() {
     let without = only(&table("sig.a, sig.b, sig.c", "00- -> 0"));
     let with = only(&table("sig.a, sig.b, sig.c", "00- -> 0; 01- -> -"));
     assert_eq!(found_covers(&without), "assigns 2 of the 8");
     assert_eq!(found_covers(&with), "assigns 4 of the 8");
+    for (found, expected) in [
+        (&without, ["010", "011", "100", "101"]),
+        (&with, ["100", "101", "110", "111"]),
+    ] {
+        let Some(DiagnosticData::TruthTablePartial { missing, .. }) = &found.data else {
+            panic!("the partial finding should carry its payload, got {found:?}");
+        };
+        assert_eq!(missing, &expected);
+    }
 }
 
 /// A table of nothing but `-` outputs is the empty table written at
@@ -1195,6 +1470,14 @@ fn assert_table_findings_are_sound(
         .collect();
     let total = 1usize << arity;
     let all_dash = rows.iter().all(|(_, output)| *output == '-');
+    // `assigned` holds every row's combinations, a `-` output row's
+    // included, and written as binary digits the combinations sort as their
+    // numbers do, so these are the lowest ones no row assigns.
+    let lowest_missing: Vec<String> = (0..total)
+        .map(|n| format!("{n:0arity$b}"))
+        .filter(|combination| !assigned.contains(combination))
+        .take(SAMPLE_CAP)
+        .collect();
     for finding in table_findings {
         match &finding.data {
             None => {
@@ -1215,15 +1498,23 @@ fn assert_table_findings_are_sound(
                     assigned.len(),
                     "the coverage count is the true count: {source}",
                 );
-                for combination in missing {
-                    assert!(
-                        !assigned.contains(combination),
-                        "`{combination}` is named missing but a row assigns it: {source}",
-                    );
-                }
+                assert_eq!(
+                    missing, &lowest_missing,
+                    "the sample is the lowest combinations no row assigns, up to \
+                     {SAMPLE_CAP}, in ascending order: {source}",
+                );
             }
             Some(other) => panic!("unexpected payload {other:?}: {source}"),
         }
+    }
+    // The loop above only asks whether the findings it was given are sound.
+    // A table no row finding was raised on has no dropped rows, so its count
+    // is countable, and an incomplete one has to be reported.
+    if !all_dash && row_findings == 0 && assigned.len() < total {
+        assert_eq!(
+            partial_findings, 1,
+            "an incomplete table whose rows do not overlap is partial, once: {source}",
+        );
     }
     if all_dash {
         assert!(
@@ -1245,7 +1536,9 @@ fn assert_table_findings_are_sound(
 /// Every other finding is about the table, and has to be one the
 /// enumeration allows: the empty-table error exactly when no row has a
 /// concrete output, and a coverage warning only with the true count and
-/// only naming combinations no row assigns.
+/// naming the lowest combinations no row assigns, up to [`SAMPLE_CAP`]
+/// of them, in order. A table with no row finding and a combination left
+/// over gets that warning exactly once.
 #[test]
 fn every_row_verdict_matches_an_enumeration_of_its_combinations() {
     let mut state: u64 = 0x9E37_79B9_7F4A_7C15;

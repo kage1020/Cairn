@@ -126,18 +126,18 @@ fn nl_4_a_nested_geometry_member_still_takes_a_theme_binding() {
     let src = format!(
         "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n    \
-         door id=d side=front at=center mat_slot=wall\n"
+         window id=w side=front offset=1 y=1 size=1x1 mat_slot=wall\n"
     );
     let module = parse(&src).expect("parse");
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     let scope = &resolution.scopes["struct::s"];
-    let nested_start = src
-        .find("door id=d")
-        .expect("the nested door is in the source");
+    let nested_window = src
+        .find("window id=w")
+        .expect("the nested window is in the source");
     let binding = scope
         .members
-        .get(&nested_start)
+        .get(&nested_window)
         .expect("the nested member is resolved");
     assert!(
         binding.slot_value.is_some(),

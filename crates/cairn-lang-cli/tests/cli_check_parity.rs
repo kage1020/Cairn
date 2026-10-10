@@ -105,6 +105,13 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  floor id=a id=b mat_slot=floor\n"),
     ),
     (
+        "E_DUPLICATE_CIRCUIT",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n  \
+             circuit region=floor void=1\n  circuit region=floor void=2\n",
+        ),
+    ),
+    (
         "E_DUPLICATE_ID",
         Source::WithPrologue(
             "struct s size=5x5\n  floor id=x mat_slot=floor\n\
@@ -214,6 +221,13 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
              \nsite s:\n  place id=a use=hut theme=t at=origin\n\
              \x20\x20place id=b use=hut theme=t east_of=a gap=4\n\
              \x20\x20connect a.entry b.entry path=@gravel\n",
+        ),
+    ),
+    (
+        "E_TRUTH_TABLE_DUPLICATE_INPUT",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n\
+             \x20\x20assert truth(sig.a, sig.a -> sig.o) { 00 -> 0; 11 -> 1 }\n",
         ),
     ),
     (
@@ -645,6 +659,12 @@ fn parity_8_a_pinned_check_reports_exactly_what_the_compile_reports() {
     // `--target latest` on the check side because `compile --target`
     // defaults to `latest`; naming a version here would compare two
     // different pins and call the difference parity.
+    //
+    // A target the file's floors refuse is outside the equality: `compile`
+    // pins no version there and reports the floor, while `check`, which is
+    // not held to the floors, pins it and reports the ids it lacks. No
+    // fixture here reaches that case: the only floor any of them declares
+    // is `version>=1.20`, the one `PROLOGUE` carries, which `latest` clears.
     let tmp = TempDir::new().expect("tempdir");
     for (index, (code, body)) in all_fixtures().enumerate() {
         let path = write_fixture(tmp.path(), index, body);

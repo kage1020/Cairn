@@ -26,13 +26,12 @@
 
 theme cross:
   slot wall -> @oak_planks
-  slot door -> @oak_door
 
 struct crossbar size=6x4
   floor mat_slot=wall
   walls class=outer mat_slot=wall height=3
-  door  id=front side=front at=center mat_slot=door
-  door  id=back  side=back  at=center mat_slot=door
+  door  id=front side=front at=center
+  door  id=back  side=back  at=center
 
   pressure_plate id=plate1 at=front.outside offset=0 y=0 -> sig.a
   pressure_plate id=plate2 at=inside.front  offset=1 y=0 -> sig.b

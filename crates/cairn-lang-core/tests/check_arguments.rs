@@ -5,8 +5,10 @@
 //! author eventually saw was a `W_DEFERRED_MEMBER` naming the argument that
 //! is now absent rather than the one that is wrong.
 
-use cairn_lang_core::Diagnostic;
-use cairn_lang_core::intent::{MemberRole, UNIVERSAL_ARGUMENTS, known_keywords, role_of};
+use cairn_lang_core::intent::{
+    MemberRole, UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
+};
+use cairn_lang_core::{Diagnostic, Edition, check, lower, parse};
 
 mod common;
 use common::{codes, diagnose};
@@ -442,7 +444,7 @@ const SWEEP: &[(&str, &str)] = &[
     ("walls", "  walls id=w class=outer mat_slot=m height=3\n"),
     (
         "door",
-        "  door id=d class=c mat_slot=m side=front at=center opened_by=sig.a\n",
+        "  door id=d class=c side=front at=center opened_by=sig.a\n",
     ),
     (
         "window",
@@ -456,22 +458,19 @@ const SWEEP: &[(&str, &str)] = &[
         "stair",
         "  stair id=s class=c mat_slot=m kind=stairs side=front half=top facing=out shape=straight y=0\n",
     ),
-    ("level", "  level id=l class=c mat_slot=m y=0\n"),
+    ("level", "  level id=l class=c y=0\n"),
     (
         "pressure_plate",
         "  pressure_plate id=p class=c mat_slot=m at=front.outside offset=0 y=0\n",
     ),
-    (
-        "circuit",
-        "  circuit id=c class=c mat_slot=m region=r void=2\n",
-    ),
+    ("circuit", "  circuit id=c class=c region=r void=2\n"),
     (
         "place",
-        "  place id=a class=c mat_slot=m use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=1\n  place id=c use=hut theme=t north_of=a gap=1\n",
+        "  place id=a class=c use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=1\n  place id=c use=hut theme=t north_of=a gap=1\n",
     ),
     (
         "connect",
-        "  connect id=e class=c mat_slot=m a.entry to b.entry path=@gravel\n",
+        "  connect id=e class=c a.entry to b.entry path=@gravel\n",
     ),
 ];
 
@@ -511,10 +510,10 @@ fn the_table_and_the_sweep_agree_key_for_key() {
             .unwrap_or_else(|| panic!("`{keyword}` is in the table, so it has a vocabulary"));
         let mut expected: Vec<&str> = vocabulary
             .iter()
+            .chain(UNIVERSAL_ARGUMENTS)
             .copied()
-            .filter(|key| !role.unread_arguments().contains(key))
+            .filter(|key| role.unread_argument(key).is_none())
             .collect();
-        expected.extend_from_slice(UNIVERSAL_ARGUMENTS);
         expected.sort_unstable();
 
         let mut written = keys_written(line);
@@ -662,9 +661,10 @@ fn every_argument_in_every_role_vocabulary_is_written_by_some_clean_source() {
 }
 
 /// The invariants the vocabulary tables hold about each other: `unread` is a
-/// subset of the vocabulary, no role restates a universal key, the
-/// conditional table's selectors and keys are arguments the role accepts,
-/// and only an unknown keyword declines to answer.
+/// subset of what the role accepts and an inapplicable entry is a universal
+/// key, no role restates a universal key, the conditional table's selectors
+/// and keys are arguments the role accepts, and only an unknown keyword
+/// declines to answer.
 #[test]
 fn the_vocabulary_tables_are_consistent_with_each_other() {
     for keyword in known_keywords() {
@@ -672,10 +672,18 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
         let vocabulary = role
             .arguments()
             .unwrap_or_else(|| panic!("`{keyword}` is in the table, so it has a vocabulary"));
-        for unread in role.unread_arguments() {
+        for UnreadArgument { key, why } in role.unread_arguments() {
             assert!(
-                vocabulary.contains(unread),
-                "`{keyword}` calls `{unread}` unread but does not list it",
+                vocabulary.contains(key) || UNIVERSAL_ARGUMENTS.contains(key),
+                "`{keyword}` calls `{key}` unread but does not accept it",
+            );
+            // `Unread::Inapplicable` is defined as a key the role accepts
+            // only because every role does. A key from the role's own
+            // vocabulary is there because the specification wrote it on
+            // this keyword, so nothing reading it is a gap, not a design.
+            assert!(
+                *why != Unread::Inapplicable || UNIVERSAL_ARGUMENTS.contains(key),
+                "`{keyword}` calls its own `{key}` inapplicable",
             );
         }
         // The universal keys are added by `accepted_arguments`, so listing
@@ -725,7 +733,7 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
                     // key cannot be both: `unread_arguments` says no rule
                     // consults it, and an arm here says one does.
                     assert!(
-                        !role.unread_arguments().contains(key),
+                        role.unread_argument(key).is_none(),
                         "`{keyword}` calls `{key}` unread and has {spelled} read it",
                     );
                 }
@@ -969,5 +977,257 @@ fn a_selector_row_with_an_unknown_keyword_answers_only_for_the_keyword() {
         codes(src).contains(&"E_UNKNOWN_KEYWORD"),
         "got {:?}",
         codes(src)
+    );
+}
+
+/// A theme declaring `wall` and `door`, for the fixtures below. `door` is
+/// there so a fixture can name a slot the theme does declare and still be
+/// told it is ignored.
+const SLOTS: &str = "theme t:\n  slot wall -> @oak_planks\n  slot door -> @iron_door\n\n";
+
+/// Where a fixture's `mat_slot=` value goes.
+const SLOT: &str = "%SLOT%";
+
+/// One role whose `mat_slot=` nothing reads, written so that the line
+/// carrying [`SLOT`] is the only thing in the source anything reports.
+struct UnreadSlot {
+    keyword: &'static str,
+    /// Everything after [`SLOTS`].
+    body: &'static str,
+    /// The kind of unread key the note is worded for. Written here by hand
+    /// rather than read from the table, so a table that moves a role to the
+    /// other kind fails [`every_role_whose_mat_slot_is_unread_has_a_fixture`]
+    /// instead of rewording the note under a test that agrees with it.
+    why: Unread,
+}
+
+impl UnreadSlot {
+    fn source(&self, value: &str) -> String {
+        format!("{SLOTS}{}", self.body.replace(SLOT, value))
+    }
+}
+
+const UNREAD_SLOTS: &[UnreadSlot] = &[
+    UnreadSlot {
+        keyword: "door",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door side=front at=center mat_slot=%SLOT%\n",
+        why: Unread::Unreached,
+    },
+    UnreadSlot {
+        keyword: "level",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  level y=0 mat_slot=%SLOT%\n    walls mat_slot=wall height=3\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "circuit",
+        body: "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  circuit region=floor void=2 mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "place",
+        body: "def d size=5x5:\n  floor mat_slot=wall\n\nsite v:\n  place id=a use=d theme=t at=origin mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+    UnreadSlot {
+        keyword: "connect",
+        body: "def hut size=3x3:\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door id=entry side=front at=center\n\nsite v:\n  place id=a use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=4\n  connect a.entry to b.entry path=@gravel mat_slot=%SLOT%\n",
+        why: Unread::Inapplicable,
+    },
+];
+
+/// What the finding says, by kind: the sentence, and the note that carries
+/// the repair. Spelled out in full so a note worded for the other kind
+/// fails on its text.
+fn expected_wording(keyword: &str, why: Unread) -> (String, String) {
+    match why {
+        Unread::Unreached => (
+            format!(
+                "`mat_slot=` is an argument `{keyword}` takes and no pass reads yet; the value \
+                 was ignored"
+            ),
+            "the member is built without it — remove the argument, or keep it and expect no \
+             effect until the lowering rule lands"
+                .to_owned(),
+        ),
+        Unread::Inapplicable => (
+            format!(
+                "`mat_slot=` is accepted on every member, and nothing a `{keyword}` builds reads \
+                 it; the value was ignored"
+            ),
+            format!(
+                "the `{keyword}` is built the same with it or without it — remove the argument"
+            ),
+        ),
+    }
+}
+
+/// The note every one of these carries, whichever kind it is: what not
+/// looking the name up costs.
+const NOT_LOOKED_UP: &str =
+    "the slot name is not looked up in the theme, so a misspelling of it is not caught";
+
+#[test]
+fn a_slot_name_on_a_role_that_reads_none_is_ignored_and_not_looked_up() {
+    // `spec/lint` "Error vs warning": the key is carried and never
+    // consulted, so the author is told so, and the name is not looked up,
+    // so a slot the theme lacks refuses nothing — and one it declares is
+    // ignored all the same. The whole finding list is asserted, so an
+    // `E_UNRESOLVED_SLOT` beside the warning, or a second warning on the
+    // same value, fails here.
+    for fixture in UNREAD_SLOTS {
+        for name in ["nosuch", "door"] {
+            let src = fixture.source(name);
+            let keyword = fixture.keyword;
+            let found = diagnose(&src);
+            assert_eq!(
+                found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+                ["W_IGNORED_ARGUMENT"],
+                "{keyword} mat_slot={name}: {found:#?}",
+            );
+            let finding = &found[0];
+            assert_eq!(&src[finding.span.clone()], name, "{keyword}: on the value");
+            let (primary, note) = expected_wording(keyword, fixture.why);
+            assert_eq!(finding.primary, primary, "{keyword}");
+            assert_eq!(
+                finding
+                    .notes
+                    .iter()
+                    .map(|n| n.message.as_str())
+                    .collect::<Vec<_>>(),
+                [note.as_str(), NOT_LOOKED_UP],
+                "{keyword}",
+            );
+        }
+    }
+}
+
+#[test]
+fn a_slot_value_that_is_no_label_is_the_type_mismatch_alone() {
+    // `UNIVERSAL_ARGUMENTS`: a `mat_slot=` that could not be hoisted stays
+    // in the fields, where `check::type_mismatch` reports the value and
+    // the key is not the mistake. Reporting it as ignored too put "write a
+    // label" and "drop it" on one span.
+    for fixture in UNREAD_SLOTS {
+        let src = fixture.source("3");
+        assert_eq!(
+            codes(&src),
+            ["E_TYPE_MISMATCH_LABEL"],
+            "{}: {:#?}",
+            fixture.keyword,
+            diagnose(&src),
+        );
+    }
+}
+
+#[test]
+fn a_repeated_slot_is_ignored_once_beside_the_duplicate() {
+    // The first occurrence is hoisted and reported as ignored; the second
+    // stays in the fields, where `E_DUPLICATE_ARG` is its finding. One
+    // warning, not one per occurrence — the same count a repeated key that
+    // is not hoisted gets, since the second write overwrites the first.
+    for fixture in UNREAD_SLOTS {
+        let src = fixture.source("a mat_slot=b");
+        let found = diagnose(&src);
+        assert_eq!(
+            found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+            ["W_IGNORED_ARGUMENT", "E_DUPLICATE_ARG"],
+            "{}: {found:#?}",
+            fixture.keyword,
+        );
+        assert_eq!(&src[found[0].span.clone()], "a", "{}", fixture.keyword);
+    }
+}
+
+/// [`UNREAD_SLOTS`] is the `mat_slot` column of
+/// `MemberRole::unread_arguments`, kind for kind, and nothing else.
+///
+/// The same device as `check_missing_material.rs`'s
+/// `every_role_is_either_measured_here_or_paints_nothing`: a role that
+/// joins the table without a fixture fails here, and so does one that moves
+/// from one kind to the other without its fixture moving with it.
+#[test]
+fn every_role_whose_mat_slot_is_unread_has_a_fixture() {
+    let mut from_table: Vec<(&str, Unread)> = known_keywords()
+        .iter()
+        .filter_map(|keyword| {
+            role_of(keyword)
+                .unread_argument("mat_slot")
+                .map(|why| (*keyword, why))
+        })
+        .collect();
+    from_table.sort_unstable_by_key(|(keyword, _)| *keyword);
+    let mut from_fixtures: Vec<(&str, Unread)> = UNREAD_SLOTS
+        .iter()
+        .map(|fixture| (fixture.keyword, fixture.why))
+        .collect();
+    from_fixtures.sort_unstable_by_key(|(keyword, _)| *keyword);
+    assert_eq!(from_fixtures, from_table);
+}
+
+#[test]
+fn a_slot_name_the_theme_lacks_on_a_role_that_reads_it_is_still_refused() {
+    // The control: not looking the name up is per role, not for every
+    // member.
+    let src = format!(
+        "{SLOTS}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  window side=front y=2 offset=2 size=2x1 mat_slot=nosuch\n"
+    );
+    assert_eq!(codes(&src), ["E_UNRESOLVED_SLOT"], "{:#?}", diagnose(&src));
+}
+
+#[test]
+fn an_unknown_keyword_still_has_its_slot_looked_up() {
+    // `read_slot` asks `unread_arguments`, which lists nothing for a word
+    // the role table does not know. The line is refused for the keyword
+    // either way, and the slot finding is one the author needs once the
+    // keyword is repaired.
+    let src = format!("{SLOTS}struct s size=7x5\n  floor mat_slot=wall\n  torch mat_slot=nosuch\n");
+    assert_eq!(
+        codes(&src),
+        ["E_UNKNOWN_KEYWORD", "E_UNRESOLVED_SLOT"],
+        "{:#?}",
+        diagnose(&src),
+    );
+}
+
+/// The full finding list `source` raises under `--edition java`.
+fn codes_under_java(source: &str) -> Vec<&'static str> {
+    let module = parse(source).expect("parse");
+    check(&module, &lower(&module), Some(Edition::Java))
+        .iter()
+        .map(|d| d.code.as_str())
+        .collect()
+}
+
+#[test]
+fn a_slot_nothing_reads_does_not_starve_a_struct_of_a_theme_but_a_place_still_binds_one() {
+    // A theme with only a Bedrock variant, under a Java pin. In a `struct`
+    // whose only `mat_slot=` is one nothing reads, no slot is starved, so
+    // the missing variant costs the build nothing and is not reported.
+    let theme = "theme t_bedrock:\n  slot wall -> @oak_planks\n\n";
+    let in_a_struct = format!(
+        "{theme}struct s size=5x5\n  pressure_plate at=front.outside offset=0 y=0\n  circuit region=floor void=2 mat_slot=wall\n"
+    );
+    assert_eq!(
+        codes_under_java(&in_a_struct),
+        ["W_IGNORED_ARGUMENT"],
+        "source:\n{in_a_struct}",
+    );
+    // A `place` binds its theme through its own `theme=`, and a bound theme
+    // is more than its slots: the lockfile records it and its version
+    // floor applies. So the placement is refused under the pin whatever
+    // its def reads — with the ignored `mat_slot=` and without it.
+    let def = "def d size=5x5:\n  pressure_plate at=front.outside offset=0 y=0\n\n";
+    let with_slot =
+        format!("{theme}{def}site v:\n  place id=a use=d theme=t at=origin mat_slot=wall\n");
+    assert_eq!(
+        codes_under_java(&with_slot),
+        ["E_THEME_VARIANT_MISSING", "W_IGNORED_ARGUMENT"],
+        "source:\n{with_slot}",
+    );
+    let without_slot = format!("{theme}{def}site v:\n  place id=a use=d theme=t at=origin\n");
+    assert_eq!(
+        codes_under_java(&without_slot),
+        ["E_THEME_VARIANT_MISSING"],
+        "source:\n{without_slot}",
     );
 }

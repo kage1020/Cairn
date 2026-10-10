@@ -7,6 +7,8 @@
 //! per primitive, topological ordering across out-of-order declarations,
 //! and cascade-suppression so a single root cause fires one diagnostic.
 
+use std::fmt::Write as _;
+
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef};
 
@@ -556,4 +558,238 @@ struct s size=1x1
     let primaries: String = unbound.iter().map(|d| d.primary.as_str()).collect();
     assert!(primaries.contains("sig.undef1"), "sig.undef1 must be named");
     assert!(primaries.contains("sig.undef2"), "sig.undef2 must be named");
+}
+
+/// A name an `assert` uses unbound is reported once, at the first
+/// `assert` in the file that uses it — not at one nested under a `level`
+/// further down, which the walk over members reaches before the scope's
+/// own `assert`s.
+#[test]
+fn an_unbound_assert_signal_is_reported_at_its_first_use_in_the_file() {
+    let source = "\
+struct s size=5x5
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  logic sig.o = not sig.a
+  assert truth(sig.zz -> sig.o) { 0 -> 1; 1 -> 0 }
+  level y=0
+    assert truth(sig.zz -> sig.o) { 0 -> 1; 1 -> 0 }
+";
+    let out = synth_source(source);
+    let unbound: Vec<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicUnboundSignal)
+        .collect();
+    assert_eq!(
+        unbound.len(),
+        1,
+        "one name, one finding: {:?}",
+        out.diagnostics
+    );
+    assert_eq!(
+        common::line_of(source, unbound[0].span.start),
+        4,
+        "the first `assert` naming `sig.zz` is on line 4: {:?}",
+        unbound[0],
+    );
+}
+
+/// The `Fix:` footer every `E_LOGIC_NESTING_TOO_DEEP` ends with.
+const NESTING_FIX: &str = "Fix: declare each `logic` binding after the ones it references. A \
+                           binding is lowered by descending into whatever it names, so a chain \
+                           written in reverse nests each binding's expression inside the one \
+                           that references it, while the same graph in dependency order nests \
+                           none.";
+
+/// One `E_LOGIC_NESTING_TOO_DEEP` as the author reads it: the line it
+/// stands on, its primary, each note that carries a span as its line and
+/// message, and the footers in order.
+#[derive(Debug)]
+struct NestingRefusal {
+    line: usize,
+    primary: String,
+    noted: Vec<(usize, String)>,
+    footers: Vec<String>,
+}
+
+/// Every `E_LOGIC_NESTING_TOO_DEEP` a source raises, in the order
+/// `synthesize` returns them.
+fn nesting_refusals(source: &str) -> Vec<NestingRefusal> {
+    synth_source(source)
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::LogicNestingTooDeep)
+        .map(|d| NestingRefusal {
+            line: common::line_of(source, d.span.start),
+            primary: d.primary.clone(),
+            noted: d
+                .notes
+                .iter()
+                .filter_map(|n| {
+                    n.span
+                        .as_ref()
+                        .map(|span| (common::line_of(source, span.start), n.message.clone()))
+                })
+                .collect(),
+            footers: d
+                .notes
+                .iter()
+                .filter(|n| n.span.is_none())
+                .map(|n| n.message.clone())
+                .collect(),
+        })
+        .collect()
+}
+
+/// A scope holding one unrelated `logic` line on line 3 and then a chain
+/// of `stages` bindings of `ands` `and`s each, declared in reverse
+/// dependency order from line 4: `sig.x1` references `sig.x2` on the line
+/// below it, and so on down to one that references only the plate. The
+/// unrelated line makes the scope's bindings and the refused chain two
+/// different lists, so a count or an anchor read from the wrong one shows.
+fn reverse_chain_after_an_unrelated_binding(stages: usize, ands: usize) -> String {
+    let tail = " and sig.a".repeat(ands);
+    let mut source = String::from(
+        "struct s size=5x5\n  \
+         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+         logic sig.u = not sig.a\n",
+    );
+    for stage in 1..stages {
+        let _ = writeln!(source, "  logic sig.x{stage} = sig.x{}{tail}", stage + 1);
+    }
+    let _ = writeln!(source, "  logic sig.x{stages} = sig.a{tail}");
+    source.push_str("  door id=d side=front at=center\n  door[id=d] opened_by=sig.x1\n");
+    source
+}
+
+/// `E_LOGIC_NESTING_TOO_DEEP` counts the bindings the lowering was inside
+/// and stands on the outermost, the one whose reference to a binding
+/// declared after it started the descent. Three bindings of 90 `and`s
+/// each, in reverse dependency order, so the chain is shorter than
+/// `CHAIN_NOTES + 1` and every binding after the first gets a note; a
+/// longer chain ends in a count instead, which the test below pins.
+#[test]
+fn a_nesting_refusal_counts_its_chain_and_stands_on_where_it_starts() {
+    let found = nesting_refusals(&reverse_chain_after_an_unrelated_binding(3, 90));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0]
+            .primary
+            .contains("inside 3 chained bindings, starting with this one"),
+        "the count is the chain's own: {}",
+        found[0].primary,
+    );
+    assert_eq!(found[0].line, 4, "on `sig.x1`, not on `sig.u`");
+    assert_eq!(
+        found[0].noted,
+        [
+            (
+                5,
+                "chained binding 2 of 3, declared after the first".to_owned()
+            ),
+            (
+                6,
+                "chained binding 3 of 3, declared after the first".to_owned()
+            ),
+        ],
+    );
+    assert_eq!(found[0].footers, [NESTING_FIX]);
+}
+
+/// Past `CHAIN_NOTES` bindings after the first, the rest of the chain is a
+/// count in a footer rather than a note each. The three lengths sit on
+/// both sides of where the count starts: four bindings of 84 `and`s leave
+/// none over, five of 55 leave one, and six of 50 leave two, so the
+/// singular and the plural both render.
+#[test]
+fn a_nesting_refusal_notes_three_bindings_and_counts_the_rest() {
+    for (stages, ands, more) in [
+        (4, 84, None),
+        (
+            5,
+            55,
+            Some("and 1 more chained binding, declared after the first"),
+        ),
+        (
+            6,
+            50,
+            Some("and 2 more chained bindings, each declared after the first"),
+        ),
+    ] {
+        let found = nesting_refusals(&reverse_chain_after_an_unrelated_binding(stages, ands));
+        assert_eq!(found.len(), 1, "{stages} x {ands}: {found:?}");
+        let found = &found[0];
+        assert!(
+            found.primary.contains(&format!(
+                "inside {stages} chained bindings, starting with this one"
+            )),
+            "{stages} x {ands}: the count is the chain's, not the scope's: {}",
+            found.primary,
+        );
+        assert_eq!(found.line, 4, "{stages} x {ands}: on `sig.x1`");
+        assert_eq!(
+            found.noted,
+            (2..=4)
+                .map(|position| (
+                    position + 3,
+                    format!("chained binding {position} of {stages}, declared after the first"),
+                ))
+                .collect::<Vec<_>>(),
+            "{stages} x {ands}: a note on each of the next three, in the order entered",
+        );
+        let footers: Vec<&str> = found.footers.iter().map(String::as_str).collect();
+        let expected: Vec<&str> = more.into_iter().chain([NESTING_FIX]).collect();
+        assert_eq!(footers, expected, "{stages} x {ands}");
+    }
+}
+
+/// Two reverse chains that start from one binding are two misorderings,
+/// and each gets its finding: `sig.top` references both `sig.p1` and
+/// `sig.q1`, and each chain is five bindings of 63 `and`s, so the lowering
+/// stops once in `sig.p4` and once in `sig.q4`. Both stand on `sig.top`,
+/// where the reordering starts, and each one's notes name its own branch.
+#[test]
+fn two_chains_from_one_binding_are_two_nesting_refusals() {
+    let tail = " and sig.a".repeat(63);
+    let mut source = String::from(
+        "struct s size=5x5\n  \
+         pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
+         logic sig.top = sig.p1 or sig.q1\n",
+    );
+    for branch in ["p", "q"] {
+        for stage in 1..5 {
+            let _ = writeln!(
+                source,
+                "  logic sig.{branch}{stage} = sig.{branch}{}{tail}",
+                stage + 1
+            );
+        }
+        let _ = writeln!(source, "  logic sig.{branch}5 = sig.a{tail}");
+    }
+    source.push_str("  door id=d side=front at=center\n  door[id=d] opened_by=sig.top\n");
+
+    let found = nesting_refusals(&source);
+    assert_eq!(found.len(), 2, "one finding per chain: {found:?}");
+    for (refusal, first_line) in found.iter().zip([4, 9]) {
+        assert_eq!(refusal.line, 3, "on `sig.top`: {refusal:?}");
+        assert!(
+            refusal
+                .primary
+                .contains("inside 5 chained bindings, starting with this one"),
+            "{refusal:?}",
+        );
+        assert_eq!(
+            refusal
+                .noted
+                .iter()
+                .map(|(line, _)| *line)
+                .collect::<Vec<_>>(),
+            [first_line, first_line + 1, first_line + 2],
+            "each finding notes its own branch: {refusal:?}",
+        );
+        assert_eq!(
+            refusal.footers[0],
+            "and 1 more chained binding, declared after the first"
+        );
+    }
 }

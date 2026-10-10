@@ -123,6 +123,15 @@ pub enum DiagnosticCode {
     /// strictest across every line, so a second one adds a constraint
     /// rather than displacing the first.
     DuplicateHeader,
+    /// A `struct` or `def` body holds more than one `circuit` line.
+    ///
+    /// A scope has one reservation for its redstone: place-and-route
+    /// reads the first usable line and assigns no logic to any other, so
+    /// every other line would be dropped without a word. Refused rather
+    /// than resolved by keeping that line, because nothing in the source
+    /// says which line the author meant, and the first usable one is a
+    /// guess.
+    DuplicateCircuit,
     /// A member carries an indented body that nothing reads.
     ///
     /// The surface grammar hangs a body off every command, but only
@@ -238,10 +247,16 @@ pub enum DiagnosticCode {
     /// without one, so it paints nothing.
     ///
     /// The absent half of the split [`Self::UnresolvedSlot`] owns the other
-    /// end of: a `mat_slot=` naming a slot no theme declares is that code's,
-    /// and no member earns both.
+    /// end of: on a role that reads a `mat_slot=`, one naming a slot no
+    /// theme declares is that code's, and no member earns both. On a role
+    /// that reads none the split does not arise — this code never applies
+    /// there, and a `mat_slot=` written on one is [`Self::IgnoredArgument`]
+    /// whatever it names.
     MissingMaterial,
-    /// `mat_slot=NAME` references a slot the applied theme does not declare.
+    /// `mat_slot=NAME` references a slot the applied theme does not
+    /// declare, on a member whose role's
+    /// `crate::intent::MemberRole::unread_arguments` does not list
+    /// `mat_slot`. On one that does, the name is not looked up.
     UnresolvedSlot,
     /// `slot NAME -> VALUE` whose VALUE is neither a canonical nor an
     /// abstract material token (see `spec/materials-themes` "Canonical
@@ -270,19 +285,25 @@ pub enum DiagnosticCode {
     ///
     /// Three shapes, one finding. **Unreadable value**: the lowering pass
     /// could not read it, dropped it, and put the default in its place.
-    /// **Unreached key**: no pass reads it yet. On a member that is a key
-    /// the specification defines, listed in
+    /// **Unread key**: nothing reads it where it is written, for one of two
+    /// reasons (`crate::intent::Unread`). An *unreached* key is one the
+    /// specification defines and no pass reads yet, so a lowering rule is
+    /// owed: on a member, an `Unreached` entry of
     /// `crate::intent::MemberRole::unread_arguments`; on a `struct` / `def`
-    /// header it is a key the specification writes there, listed in
+    /// header, a key the specification writes there, listed in
     /// `crate::check::arguments::UNREAD_HEADER_ARGUMENTS` — today `class=`;
-    /// on a `theme` selector row whose keyword names a role it is every
+    /// on a `theme` selector row whose keyword names a role, every
     /// `key=value` right of the arrow, defined anywhere or not (`fram=42`
-    /// included), since no pass lowers a selector's bindings. **Routed
-    /// past**: a sibling argument picked a lowering rule that does not
-    /// consult it, which `crate::intent::MemberRole::conditional_arguments`
-    /// records and `roof kind=gable slope_to=front` is the instance of —
-    /// that one has no default to substitute, and fires whether or not the
-    /// member went on to build. The build differs from the source in all
+    /// included), since no pass lowers a selector's bindings. An
+    /// *inapplicable* key is a universal one on a role that puts down
+    /// nothing it would be read for — an `Inapplicable` entry of the same
+    /// table, `mat_slot=` on a `level` — where no rule is owed and the note
+    /// asks for the argument's removal. **Routed past**: a sibling argument
+    /// picked a lowering rule that does not consult it, which
+    /// `crate::intent::MemberRole::conditional_arguments` records and
+    /// `roof kind=gable slope_to=front` is the instance of — that one has no
+    /// default to substitute, and fires whether or not the member went on to
+    /// build. The build differs from the source in all
     /// three, and the difference is announced rather than silent.
     ///
     /// Distinct from [`Self::DeferredMember`], which says the member did
@@ -425,6 +446,20 @@ pub enum DiagnosticCode {
     /// `cairn compile` refuses separately rather than certifying a build
     /// missing one of the scopes its source asked for.
     StructureTooLarge,
+    /// A scope paints more distinct block states than one palette can
+    /// index ([`crate::block_array::PALETTE_CAPACITY`] entries, air
+    /// included), so the pass skips it rather than panicking.
+    ///
+    /// Every paint counts, including one a later member covers. A vanilla
+    /// registry has far fewer states, so a source reaches this only
+    /// through block ids or state-literal properties no pinned target
+    /// checks: an id goes unchecked wherever lowering runs with no version
+    /// pinned, and a state literal's properties under every target
+    /// (`W_STATE_LITERAL_UNCHECKED`). Every command that lowers can reach
+    /// it, `cairn compile` with a target that resolves among them. Warning
+    /// severity, matching `StructureTooLarge`: the scope is skipped, and
+    /// `cairn compile` refuses the partial build separately.
+    PaletteTooLarge,
     /// A `place` row omits a key it cannot become a placement without:
     /// `id=`, `use=`, or `theme=`.
     ///
@@ -489,11 +524,19 @@ pub enum DiagnosticCode {
     /// surfacing because an unused def is usually a typo on the
     /// `place use=` side.
     UnusedDef,
-    /// A `connect A.PORT to B.PORT` row names a port id (`PORT`) that the
-    /// referenced def does not expose. The place id sides are reported by
+    /// A `connect A.PORT to B.PORT` row names a port id (`PORT`) that no
+    /// member of the referenced def's body carries. A port is looked up
+    /// among the body's own members only, not the ones indented under a
+    /// `level` or any other member. The place id sides are reported by
     /// `E_UNRESOLVED_PLACE_REF` instead — this code is specifically for the
-    /// port half of the `place.port` shape. Carries a nearest-match
-    /// suggestion when one fits the standard spell cap.
+    /// port half of the `place.port` shape.
+    ///
+    /// The notes take one of two shapes. When a member under a `level`
+    /// carries the id, the primary says so, naming the `level` the member
+    /// sits directly under, and one note points at the member and says
+    /// what a port has to be. Otherwise the notes are a nearest-match
+    /// suggestion when one of the body's ids fits the standard spell cap,
+    /// then a note to add the `id=`.
     UnresolvedPort,
     /// A `connect A.PORT to B.PORT` row whose port id matches more than one
     /// member of the referenced def. The first match is taken for downstream
@@ -591,8 +634,24 @@ pub enum DiagnosticCode {
     /// verify anything. That is the argument `E_INVALID_REQUIRES` makes
     /// for a `@requires` the compiler cannot read, and the reason this is
     /// an error rather than a note: in a diff an empty table reads exactly
-    /// like one that passes.
+    /// like one that passes. A table whose input list repeats a signal is
+    /// reported as [`Self::TruthTableDuplicateInput`] instead.
     TruthTableEmpty,
+    /// An `assert truth(...)` lists one signal as two or more of its
+    /// inputs.
+    ///
+    /// One signal is one input, so the table has more than one column for
+    /// it, and its rows describe combinations the circuit does not have.
+    /// The coverage finding would count combinations that give those
+    /// columns different values among the ones missing, and a row written
+    /// to answer it would state an output for a combination that cannot
+    /// occur. Refused rather than read as one input, which would give the
+    /// rows a meaning the author did not write — the shape
+    /// `E_DUPLICATE_ARG` refuses for a `key=`. No other truth-table
+    /// finding is raised beside it: every other one reads the rows against
+    /// an input list that is wrong, so the rest of the table is left until
+    /// the list names each signal once.
+    TruthTableDuplicateInput,
     /// Two rows of one `assert truth(...)` assign the same inputs
     /// different outputs. No circuit satisfies both, so whatever the table
     /// was written to verify, it cannot. Reported on the later row with a
@@ -672,6 +731,7 @@ impl DiagnosticCode {
             Self::DuplicateId => "E_DUPLICATE_ID",
             Self::DuplicateItem => "E_DUPLICATE_ITEM",
             Self::DuplicateHeader => "E_DUPLICATE_HEADER",
+            Self::DuplicateCircuit => "E_DUPLICATE_CIRCUIT",
             Self::UnsupportedNesting => "E_UNSUPPORTED_NESTING",
             Self::MisplacedMember => "E_MISPLACED_MEMBER",
             Self::UnknownKeyword => "E_UNKNOWN_KEYWORD",
@@ -702,6 +762,7 @@ impl DiagnosticCode {
             Self::ThemeVariantMissing => "E_THEME_VARIANT_MISSING",
             Self::ThemeVariantRebound => "W_THEME_VARIANT_REBOUND",
             Self::StructureTooLarge => "W_STRUCTURE_TOO_LARGE",
+            Self::PaletteTooLarge => "W_PALETTE_TOO_LARGE",
             Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
@@ -719,6 +780,7 @@ impl DiagnosticCode {
             Self::ConnectArity => "E_CONNECT_ARITY",
             Self::PhaseConflict => "W_PHASE_CONFLICT",
             Self::TruthTableEmpty => "E_TRUTH_TABLE_EMPTY",
+            Self::TruthTableDuplicateInput => "E_TRUTH_TABLE_DUPLICATE_INPUT",
             Self::TruthTableConflict => "E_TRUTH_TABLE_CONFLICT",
             Self::TruthTableDuplicateRow => "W_TRUTH_TABLE_DUPLICATE_ROW",
             Self::TruthTablePartial => "W_TRUTH_TABLE_PARTIAL",
@@ -770,6 +832,12 @@ impl DiagnosticCode {
     /// either argument — the rule the author meant, or the leftover key.
     /// Refusing would pick one of them.
     ///
+    /// Its inapplicable-key shape is not a gap in the compiler at all, so
+    /// it rests on its own argument: the key is one every role accepts, and
+    /// its value changes nothing in the build. Refusing it would make a
+    /// universal key one that some roles reject, over an argument that
+    /// does nothing; the warning asks for its removal instead.
+    ///
     /// Two codes sit close to the line and are decided in their variant
     /// docs: `E_UNKNOWN_SLOT_TARGET` is an error because the members
     /// bound to the slot lower to air, and `E_THEME_SELECTOR_UNMATCHED`
@@ -788,6 +856,7 @@ impl DiagnosticCode {
             | Self::DuplicateSelector
             | Self::DuplicateArg
             | Self::DuplicateId
+            | Self::DuplicateCircuit
             | Self::MisplacedMember
             | Self::UnknownKeyword
             | Self::UnknownArgument
@@ -818,11 +887,13 @@ impl DiagnosticCode {
             | Self::DuplicateHeader
             | Self::UnsupportedNesting
             | Self::TruthTableEmpty
+            | Self::TruthTableDuplicateInput
             | Self::IntendedTargetCap
             | Self::TruthTableConflict => Severity::Error,
             Self::InvalidCairnVersion
             | Self::FutureCairnVersion
             | Self::StructureTooLarge
+            | Self::PaletteTooLarge
             | Self::ThemeSelectorUnmatched
             | Self::ThemeVariantRebound
             | Self::DeferredMember
@@ -1481,6 +1552,7 @@ mod tests {
                 "E_AMBIGUOUS_PORT",
                 "E_CONNECT_ARITY",
                 "E_DUPLICATE_ARG",
+                "E_DUPLICATE_CIRCUIT",
                 "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",
@@ -1503,6 +1575,7 @@ mod tests {
                 "E_THEME_SELECTOR_UNMATCHED",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
@@ -1530,6 +1603,7 @@ mod tests {
                 "W_INVALID_CAIRN_VERSION",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
+                "W_PALETTE_TOO_LARGE",
                 "W_PHASE_CONFLICT",
                 "W_STATE_LITERAL_UNCHECKED",
                 "W_STRUCTURE_TOO_LARGE",
@@ -1555,6 +1629,7 @@ mod tests {
                 "E_AMBIGUOUS_PORT",
                 "E_CONNECT_ARITY",
                 "E_DUPLICATE_ARG",
+                "E_DUPLICATE_CIRCUIT",
                 "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",
@@ -1576,6 +1651,7 @@ mod tests {
                 "E_PARSE",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
@@ -1609,6 +1685,7 @@ mod tests {
                 "W_INVALID_CAIRN_VERSION",
                 "W_INVALID_WALKWAY_IDENT",
                 "W_NO_THEME_BOUND",
+                "W_PALETTE_TOO_LARGE",
                 "W_PHASE_CONFLICT",
                 "W_STATE_LITERAL_UNCHECKED",
                 "W_STRUCTURE_TOO_LARGE",

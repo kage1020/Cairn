@@ -162,6 +162,7 @@ mod tests {
             | C::DuplicateId
             | C::DuplicateItem
             | C::DuplicateHeader
+            | C::DuplicateCircuit
             | C::UnsupportedNesting
             | C::MisplacedMember
             | C::UnknownKeyword
@@ -175,6 +176,7 @@ mod tests {
             | C::TypeMismatchSize
             | C::ConnectArity
             | C::TruthTableEmpty
+            | C::TruthTableDuplicateInput
             | C::TruthTableConflict
             | C::TruthTableDuplicateRow
             | C::TruthTablePartial
@@ -210,6 +212,7 @@ mod tests {
             | C::WalkwayBlocked
             | C::DuplicateWalkway
             | C::StructureTooLarge
+            | C::PaletteTooLarge
             | C::InvalidWalkwayIdent
             | C::PhaseConflict => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
@@ -242,6 +245,7 @@ mod tests {
             [
                 "E_CONNECT_ARITY",
                 "E_DUPLICATE_ARG",
+                "E_DUPLICATE_CIRCUIT",
                 "E_DUPLICATE_HEADER",
                 "E_DUPLICATE_ID",
                 "E_DUPLICATE_ITEM",
@@ -253,6 +257,7 @@ mod tests {
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
                 "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",

@@ -36,8 +36,10 @@
 //! `connect` rows resolve at the same layer: the `from.port` / `to.port`
 //! `DotRef`s on either side of the `to` keyword are matched against the
 //! referenced placement's `def` body, producing one [`ValidatedConnect`]
-//! per row. Missing port ids fail loud with `E_UNRESOLVED_PORT` (with a
-//! nearest-match note); a `def` exposing the same `id=` on more than one
+//! per row. A port id that names no member of that body fails loud with
+//! `E_UNRESOLVED_PORT`, which says so when the id is on a member under a
+//! `level` and otherwise carries a nearest-match note when one fits the
+//! spell cap; a `def` exposing the same `id=` on more than one
 //! member raises `E_AMBIGUOUS_PORT`; an absent `path=` triggers
 //! `E_MISSING_PATH_MATERIAL`. The walkway voxeliser (under
 //! `block_array`) consumes the resolved connects without re-walking the
@@ -204,10 +206,13 @@ pub struct ResolvedMemberBinding {
     /// The value bound to this member's `mat_slot=` via the applied theme,
     /// when both ends matched.
     ///
-    /// `None` covers four different situations, each reported by someone
+    /// `None` covers five different situations, each reported by someone
     /// else: the member carries no `mat_slot=` at all
     /// (`E_MISSING_MATERIAL`, from `check::material`, for the roles that
-    /// paint nothing without one); no theme was bound to the scope
+    /// paint nothing without one); it carries one on a role whose
+    /// [`crate::intent::MemberRole::unread_arguments`] lists `mat_slot`,
+    /// which is not looked up (`W_IGNORED_ARGUMENT`, from
+    /// `check::arguments`); no theme was bound to the scope
     /// (`W_NO_THEME_BOUND`); the slot was not declared in the theme
     /// (`E_UNRESOLVED_SLOT`); or only a sibling edition variant declares
     /// it, which is deferred until a pin picks one. A reader that treats
@@ -854,18 +859,47 @@ fn bind_place_theme(
     }
 }
 
+/// The `mat_slot=` name `member` asks a theme for: its hoisted slot, unless
+/// its role's [`crate::intent::MemberRole::unread_arguments`] lists
+/// `mat_slot`, where the name changes nothing in the build and is not
+/// looked up.
+///
+/// The predicate is that table and nothing wider. An unknown keyword
+/// ([`crate::intent::MemberRole::Other`]) lists nothing there, so its slot
+/// is still looked up: the line is refused with `E_UNKNOWN_KEYWORD` either
+/// way, and a misspelt slot on it is one the author will need once the
+/// keyword is repaired.
+fn read_slot(member: &Member) -> Option<&str> {
+    member
+        .mat_slot
+        .as_ref()
+        .filter(|_| member.role.unread_argument("mat_slot").is_none())
+        .map(|slot| slot.name.as_str())
+}
+
 /// Whether any struct or def member anywhere in the module reads a
 /// `mat_slot=`.
 ///
 /// The module-level auto-pick binds a theme for every struct and def scope,
 /// but a scope only *needs* one to read a slot from. Without this, declaring
 /// a `_bedrock` theme and never using it made `--edition java` a hard error
-/// on a module whose output does not contain a single block of air.
+/// on a module whose output does not contain a single block of air. A
+/// member reads a slot through [`read_slot`], so a `mat_slot=` on a role
+/// that reads none does not count.
+///
+/// Sites are not walked, and [`bind_place_theme`] has no such gate. A
+/// `place` names its theme with its own `theme=`, and the theme a placement
+/// binds is more than its slots: the lockfile records it for the placement
+/// (`Placement::theme`), and its version floor applies once it is bound
+/// whether or not a slot is read (`spec/versioning-editions` "A part may
+/// declare its own floor"). Building the placement with no theme under a
+/// pin that binds none would record a theme the artifact was not built
+/// from, so such a `place` is refused whatever its def reads.
 fn any_member_reads_a_slot(ir: &IntentModule) -> bool {
     fn any(members: &[Member]) -> bool {
         members
             .iter()
-            .any(|m| m.mat_slot.is_some() || any(&m.children.members))
+            .any(|m| read_slot(m).is_some() || any(&m.children.members))
     }
     ir.structs.iter().any(|s| any(&s.members)) || ir.defs.iter().any(|d| any(&d.members))
 }
@@ -1193,9 +1227,13 @@ fn resolve_site_placements(
 ///
 /// - `E_UNRESOLVED_PLACE_REF` — `from.place_id` or `to.place_id` does
 ///   not name a prior `place` in the same site;
-/// - `E_UNRESOLVED_PORT` — the `port_id` half is not declared by any
-///   member of the referenced def, with a nearest-match note when one
-///   sits within the spell cap;
+/// - `W_DEFERRED_CONNECT` — `from.place_id` or `to.place_id` names a
+///   prior `place` whose own row did not resolve, so there is no def to
+///   look the port up in;
+/// - `E_UNRESOLVED_PORT` — the `port_id` half names no member of the
+///   referenced def's body. When a member under a `level` carries it, the
+///   diagnostic says so, with a note at that member; otherwise it carries
+///   a nearest-match note when one sits within the spell cap;
 /// - `E_AMBIGUOUS_PORT` — multiple members of the referenced def share
 ///   that `id=`; downstream lowering would have to pick one arbitrarily;
 /// - `E_MISSING_PATH_MATERIAL` — the row has no `path=` argument so
@@ -1384,12 +1422,26 @@ fn port_ref_from_value(
     })
 }
 
-/// Walk the referenced def's members and decide whether `port.port_id`
-/// is a valid port id, emitting the matching `E_UNRESOLVED_PORT` /
-/// `E_AMBIGUOUS_PORT` diagnostic when not. The port-id ambient pool for
-/// the suggestion is the def's set of member ids — pointing the user at
-/// an id from a sibling def would just send them down a different broken
-/// path.
+/// Look `port.port` up among the `id=`s of the referenced def's body — its
+/// own members, not the ones indented under a `level` or any other member
+/// — and return `true` when exactly one carries it. Otherwise push one
+/// diagnostic and return `false`:
+///
+/// - the `place` row did not resolve, so there is no def to look in:
+///   `W_DEFERRED_CONNECT`;
+/// - no body member carries the id and a member under a `level` does
+///   ([`level_holding`]): `E_UNRESOLVED_PORT` saying so, with a note at
+///   that member ([`diag_level_scoped_port`]);
+/// - no body member carries it otherwise: `E_UNRESOLVED_PORT` with a
+///   did-you-mean note when one of the body's ids fits the spell cap, and
+///   a note to add the `id=`. The pool is the body's ids, not the whole
+///   file's — pointing the author at an id from a sibling def would send
+///   them down a different broken path;
+/// - more than one body member carries it: `E_AMBIGUOUS_PORT`.
+///
+/// The one `false` that pushes nothing is a `place_def` entry naming a def
+/// missing from `defs`, which `resolve_site_placements` rules out and a
+/// debug build asserts against.
 fn validate_port(
     port: &PortRef,
     defs: &[DefIr],
@@ -1455,39 +1507,35 @@ fn validate_port(
         return false;
     };
 
-    let matches: Vec<&Member> = def
+    // Only the def body's own members are ports: this lookup does not
+    // descend into a `level`, or into any other member. Widening the
+    // lookup takes more than a change here. `port_world_position` looks
+    // the port up in the body again, so a level-scoped id that resolved
+    // here would first reach `PortRejection::UnknownMember`, which that
+    // variant's doc calls unreachable because this lookup refuses the
+    // miss. Past that, the lowering side reads a port's member as one no
+    // `level y=N` has shifted, and each of these would go wrong without an
+    // error: `walkway::DOOR_PORT_BASE_V` is `carve_door`'s `y_offset + 1`
+    // only at `y_offset = 0`; a window port's `contains_rows(y, ..)` asks
+    // about the rows `cut_window`'s `contains_rows(y + y_offset, ..)` cuts
+    // only at `y_offset = 0` too; and the strip itself lies on the
+    // placement's ground row, not on the base row of the member's
+    // `level`: `port_world_position` returns `place_origin.1` for every
+    // port, and `walkway::PORT_GROUND_V`, the `v` the window path maps
+    // with, is the constant whose doc names it as the place a raised port
+    // re-binds.
+    let count = def
         .members
         .iter()
         .filter(|m| m.id.as_deref() == Some(port.port.as_str()))
-        .collect();
-    match matches.len() {
+        .count();
+    match count {
         0 => {
-            let pool: Vec<&str> = def.members.iter().filter_map(|m| m.id.as_deref()).collect();
-            let mut notes = Vec::with_capacity(2);
-            notes.extend(
-                nearest_match(port.port.as_str(), pool.iter().copied())
-                    .map(|suggested| did_you_mean_note(&format!("{}.{suggested}", port.place))),
-            );
-            notes.push(DiagnosticNote {
-                span: None,
-                message: format!(
-                    "add `id={port_id}` to a member of `def {def_name}` (e.g. `door id={port_id} ...`)",
-                    port_id = port.port,
-                    def_name = def_name,
-                ),
-            });
-            diagnostics.push(Diagnostic {
-                code: DiagnosticCode::UnresolvedPort,
-                span: port.span.clone(),
-                primary: format!(
-                    "port `{port_id}` is not declared by `def {def_name}` (used by `place {place_id}`)",
-                    port_id = port.port,
-                    def_name = def_name,
-                    place_id = port.place,
-                ),
-                notes,
-                data: None,
-            });
+            let refusal = match level_holding(&def.members, port.port.as_str()) {
+                Some(scoped) => diag_level_scoped_port(port, def, scoped),
+                None => diag_undeclared_port(port, def),
+            };
+            diagnostics.push(refusal);
             false
         }
         1 => true,
@@ -1510,6 +1558,119 @@ fn validate_port(
             false
         }
     }
+}
+
+/// `E_UNRESOLVED_PORT` for a port id that no member of the def's body
+/// carries and no member under a `level` carries either: a did-you-mean
+/// note when one of the body's ids fits the spell cap, then a note to add
+/// the `id=`.
+fn diag_undeclared_port(port: &PortRef, def: &DefIr) -> Diagnostic {
+    let pool: Vec<&str> = def.members.iter().filter_map(|m| m.id.as_deref()).collect();
+    let mut notes = Vec::with_capacity(2);
+    notes.extend(
+        nearest_match(port.port.as_str(), pool.iter().copied())
+            .map(|suggested| did_you_mean_note(&format!("{}.{suggested}", port.place))),
+    );
+    notes.push(DiagnosticNote {
+        span: None,
+        message: format!(
+            "add `id={port_id}` to a member of `def {def_name}` (e.g. `door id={port_id} ...`)",
+            port_id = port.port,
+            def_name = def.name,
+        ),
+    });
+    Diagnostic {
+        code: DiagnosticCode::UnresolvedPort,
+        span: port.span.clone(),
+        primary: format!(
+            "port `{port_id}` is not declared by `def {def_name}` (used by `place {place_id}`)",
+            port_id = port.port,
+            def_name = def.name,
+            place_id = port.place,
+        ),
+        notes,
+        data: None,
+    }
+}
+
+/// A member a port id names that is not in the def's body, because it
+/// is indented under a `level`.
+#[derive(Clone, Copy)]
+struct LevelScoped<'m> {
+    /// The `level` the member sits directly under.
+    level: &'m Member,
+    /// The member that carries the port's `id=`.
+    member: &'m Member,
+}
+
+/// `E_UNRESOLVED_PORT` for a port whose `id=` is on a member under a
+/// `level`, which is not in the def body a port is looked up in.
+///
+/// The primary names the `level` the member sits directly under. The note
+/// points at the member itself and says what a port has to be and what to
+/// name instead. It does not suggest moving the member out of the
+/// `level`, which would change where it is built.
+fn diag_level_scoped_port(port: &PortRef, def: &DefIr, scoped: LevelScoped<'_>) -> Diagnostic {
+    let level_label = scoped
+        .level
+        .id
+        .as_deref()
+        .map_or_else(|| "a `level`".to_owned(), |id| format!("`level id={id}`"));
+    Diagnostic {
+        code: DiagnosticCode::UnresolvedPort,
+        span: port.span.clone(),
+        primary: format!(
+            "port `{port_id}` of `def {def_name}` (used by `place {place_id}`) is declared under \
+             {level_label}, and a member under a `level` cannot be a port yet",
+            port_id = port.port,
+            def_name = def.name,
+            place_id = port.place,
+        ),
+        notes: vec![DiagnosticNote {
+            span: Some(scoped.member.span.clone()),
+            message: format!(
+                "a port has to be a door or window declared directly in the body of \
+                 `def {def_name}`: use one of those as the endpoint; level-scoped ports are a \
+                 future extension",
+                def_name = def.name,
+            ),
+        }],
+        data: None,
+    }
+}
+
+/// A member with `id=` `port_id` directly under a `level` in `members`, or
+/// under a `level` nested in one at any depth, with the `level` it sits
+/// directly under.
+///
+/// The search goes through `members` in source order and, inside each
+/// `level`, asks the `level`s nested in it before its own members. So for
+/// a member under a `level` that is itself under a `level`, the inner one
+/// comes back: the one `E_UNSUPPORTED_NESTING` reports as "`level`
+/// declared here", so the two findings send the reader to the same line.
+///
+/// Two choices about what this does not look at:
+///
+/// - The member's role. A `walls` under a `level` comes back too, so its
+///   refusal says a member there "cannot be a port yet", though a `walls`
+///   in the body is not a port either (`PortRejection::ReservedRole`).
+/// - Nesting under anything but a `level`. A `door` indented under a
+///   `circuit` is not found, so its port gets [`diag_undeclared_port`]'s
+///   "not declared" message and its note to add the `id=`.
+fn level_holding<'m>(members: &'m [Member], port_id: &str) -> Option<LevelScoped<'m>> {
+    members
+        .iter()
+        .filter(|m| matches!(m.role, MemberRole::Level))
+        .find_map(|level| {
+            level_holding(&level.children.members, port_id).or_else(|| {
+                level
+                    .children
+                    .members
+                    .iter()
+                    .find(|m| m.id.as_deref() == Some(port_id))
+                    .map(|member| LevelScoped { level, member })
+            })
+        })
 }
 
 /// Returns `true` when the placement passes every origin-selector check, in
@@ -2052,7 +2213,16 @@ fn resolve_members(
         //    `slot_value` stays `None` in that case — the concrete binding is
         //    edition-specific and comes into scope only once the compile picks
         //    a variant.
-        if let Some(slot_name) = &member.mat_slot
+        //
+        //    INVARIANT(upstream-diagnosed): a `mat_slot=` on a role whose
+        //    `MemberRole::unread_arguments` lists it is not looked up at
+        //    all, and nothing is pushed for it here. Inside the top-level
+        //    `check` pipeline, `check::arguments` has already pushed
+        //    `W_IGNORED_ARGUMENT` for it into the same sink, and a slot name
+        //    the theme lacks changes nothing on such a role. A library
+        //    caller that runs `resolve` without `check` gets no signal;
+        //    `tests/silent_skip_arms.rs` carries the arm in its matrix.
+        if let Some(slot_name) = read_slot(member)
             && let Some((tname, slots)) = bound
         {
             match slots.get(slot_name) {
@@ -2067,7 +2237,7 @@ fn resolve_members(
                 // carries it in the matrix of resolver arms that drop
                 // something without reporting it.
                 None => {
-                    let said = (member.span.start, slot_name.clone(), tname.to_owned());
+                    let said = (member.span.start, slot_name.to_owned(), tname.to_owned());
                     if ctx.diagnosed.insert(said) {
                         ctx.diagnostics
                             .push(unresolved_slot_diag(slot_name, tname, member, slots));
@@ -2217,7 +2387,9 @@ type LabelField = fn(&Member) -> Option<&str>;
 const LABEL_ATTRS: [(&str, LabelField); 3] = [
     ("id", |member| member.id.as_deref()),
     ("class", |member| member.class.as_deref()),
-    ("mat_slot", |member| member.mat_slot.as_deref()),
+    ("mat_slot", |member| {
+        member.mat_slot.as_ref().map(|slot| slot.name.as_str())
+    }),
 ];
 
 /// The accessor for `key`, or `None` when `key` is an ordinary
@@ -2623,6 +2795,188 @@ mod tests {
         // The failed connect must not surface as resolved — walkway
         // voxelisation only sees rows it can lay safely.
         assert!(r.connects.is_empty(), "broken connect must not resolve");
+    }
+
+    /// The `E_UNRESOLVED_PORT` findings `r` carries, in emission order.
+    fn unresolved_ports(r: &Resolution) -> Vec<&Diagnostic> {
+        r.diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::UnresolvedPort)
+            .collect()
+    }
+
+    /// The byte range of the first occurrence of `needle` in `src`.
+    fn span_of(src: &str, needle: &str) -> Span {
+        let start = src
+            .find(needle)
+            .unwrap_or_else(|| panic!("`{needle}` is not in the source"));
+        start..start + needle.len()
+    }
+
+    #[test]
+    fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
+        // A `level` may go without `id=`, so the refusal names it by its
+        // keyword. `tests/door_wall_fit.rs` pins the named case. The
+        // refusal underlines the endpoint, as the "not declared" one does,
+        // and its note points at the nested door.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def cottage size=3x3:\n",
+            "  walls mat_slot=wall height=2\n",
+            "  door id=front side=front at=center\n",
+            "  level y=0\n",
+            "    door id=entry side=back at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=cottage theme=t at=origin\n",
+            "  place id=b use=cottage theme=t east_of=a gap=2\n",
+            "  connect a.entry to b.front path=@gravel\n",
+        );
+        let r = resolve(&ir(src), None);
+        let [refusal] = unresolved_ports(&r)[..] else {
+            panic!("expected one E_UNRESOLVED_PORT, got {:?}", r.diagnostics);
+        };
+        assert_eq!(
+            refusal.primary,
+            "port `entry` of `def cottage` (used by `place a`) is declared under a `level`, \
+             and a member under a `level` cannot be a port yet",
+        );
+        assert_eq!(refusal.span, span_of(src, "a.entry"));
+        let notes: Vec<(Option<Span>, &str)> = refusal
+            .notes
+            .iter()
+            .map(|n| (n.span.clone(), n.message.as_str()))
+            .collect();
+        assert_eq!(
+            notes,
+            [(
+                Some(span_of(src, "door id=entry side=back at=center")),
+                "a port has to be a door or window declared directly in the body of \
+                 `def cottage`: use one of those as the endpoint; level-scoped ports are a \
+                 future extension",
+            )],
+        );
+        assert!(
+            r.connects.is_empty(),
+            "the refused connect must not resolve"
+        );
+    }
+
+    #[test]
+    fn a_port_under_a_level_inside_a_level_names_the_inner_level() {
+        // The door hangs off `inner`, which is also the `level`
+        // `E_UNSUPPORTED_NESTING` notes for this input, so the refusal
+        // names `inner` rather than `outer`.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def tower size=3x3:\n",
+            "  walls mat_slot=wall height=4\n",
+            "  door id=front side=front at=center\n",
+            "  level y=0 id=outer\n",
+            "    level y=1 id=inner\n",
+            "      door id=up_entry side=back at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=tower theme=t at=origin\n",
+            "  place id=b use=tower theme=t east_of=a gap=2\n",
+            "  connect a.up_entry to b.front path=@gravel\n",
+        );
+        let r = resolve(&ir(src), None);
+        let [refusal] = unresolved_ports(&r)[..] else {
+            panic!("expected one E_UNRESOLVED_PORT, got {:?}", r.diagnostics);
+        };
+        assert_eq!(
+            refusal.primary,
+            "port `up_entry` of `def tower` (used by `place a`) is declared under \
+             `level id=inner`, and a member under a `level` cannot be a port yet",
+        );
+        let note_spans: Vec<Option<Span>> = refusal.notes.iter().map(|n| n.span.clone()).collect();
+        assert_eq!(
+            note_spans,
+            [Some(span_of(src, "door id=up_entry side=back at=center"))],
+        );
+        assert!(
+            r.connects.is_empty(),
+            "the refused connect must not resolve"
+        );
+    }
+
+    #[test]
+    fn a_body_port_resolves_when_a_level_carries_the_same_id() {
+        // The body's `front` is the port. The `front` under the `level` is
+        // not looked at, since the body lookup found one: a refusal here
+        // would drop a walkway the source asks for.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def tower size=3x3:\n",
+            "  walls mat_slot=wall height=4\n",
+            "  door id=front side=front at=center\n",
+            "  level y=0 id=up\n",
+            "    door id=front side=back at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=tower theme=t at=origin\n",
+            "  place id=b use=tower theme=t east_of=a gap=2\n",
+            "  connect a.front to b.front path=@gravel\n",
+        );
+        let r = resolve(&ir(src), None);
+        assert_eq!(
+            unresolved_ports(&r).len(),
+            0,
+            "a body member carries `front`: {:?}",
+            r.diagnostics,
+        );
+        assert_eq!(r.connects.len(), 1, "{:?}", r.diagnostics);
+    }
+
+    #[test]
+    fn a_typo_in_a_def_with_a_level_is_still_not_declared() {
+        // `frnt` is on no member, in the body or under the `level`, so the
+        // refusal is the "not declared" one, with its did-you-mean note
+        // from the body's ids and its note to add the `id=` — not the
+        // level-scoped one, which would send the author to the `level`.
+        let src = concat!(
+            "theme t:\n",
+            "  slot wall -> @cobblestone\n",
+            "\n",
+            "def tower size=3x3:\n",
+            "  walls mat_slot=wall height=4\n",
+            "  door id=front side=front at=center\n",
+            "  level y=0 id=up\n",
+            "    door id=up_entry side=back at=center\n",
+            "\n",
+            "site s:\n",
+            "  place id=a use=tower theme=t at=origin\n",
+            "  place id=b use=tower theme=t east_of=a gap=2\n",
+            "  connect a.frnt to b.front path=@gravel\n",
+        );
+        let r = resolve(&ir(src), None);
+        let [refusal] = unresolved_ports(&r)[..] else {
+            panic!("expected one E_UNRESOLVED_PORT, got {:?}", r.diagnostics);
+        };
+        assert_eq!(
+            refusal.primary,
+            "port `frnt` is not declared by `def tower` (used by `place a`)",
+        );
+        assert_eq!(refusal.span, span_of(src, "a.frnt"));
+        let notes: Vec<&str> = refusal.notes.iter().map(|n| n.message.as_str()).collect();
+        assert_eq!(
+            notes,
+            [
+                "did you mean `a.front`?",
+                "add `id=frnt` to a member of `def tower` (e.g. `door id=frnt ...`)",
+            ],
+        );
+        assert!(
+            r.connects.is_empty(),
+            "the refused connect must not resolve"
+        );
     }
 
     #[test]
@@ -3667,6 +4021,37 @@ mod tests {
         let r = resolve(&intent, Some(Edition::Java));
         assert!(
             r.diagnostics
+                .iter()
+                .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
+            "got {:?}",
+            r.diagnostics,
+        );
+    }
+
+    #[test]
+    fn a_slot_named_on_a_role_that_reads_none_does_not_count_as_reading_one() {
+        // A door carves an opening and paints nothing from its
+        // `mat_slot=`, so the build is the same whichever theme the pin
+        // leaves bound; refusing it over the missing variant would be the
+        // refusal over nothing the slot lookup itself no longer makes.
+        let src = [
+            "theme shop_bedrock:",
+            "  slot door -> @dark_oak_door",
+            "",
+            "struct s size=7x5",
+            "  door side=front at=center mat_slot=door",
+            "",
+        ]
+        .join("\n");
+        let module = crate::parse(&src).expect("parses");
+        let intent = crate::lower(&module);
+        assert!(
+            !any_member_reads_a_slot(&intent),
+            "the door's `mat_slot=` is not a read",
+        );
+        let r = resolve(&intent, Some(Edition::Java));
+        assert!(
+            !r.diagnostics
                 .iter()
                 .any(|d| d.code == DiagnosticCode::ThemeVariantMissing),
             "got {:?}",

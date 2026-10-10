@@ -995,11 +995,11 @@ fn no_repeater_site_diagnostic(
         // limit at the latest, reading the 15 before it, so the wire
         // needs a straight coord among every 16 blocks it runs on.
         Allowance::Limit => format!(
-            "Fix: leave the wire room to run straight at least once in every {} — a larger `region=` is one way, moving what walls it in is another — or split the logic across several `circuit` blocks",
+            "Fix: leave the wire room to run straight at least once in every {} — a larger `region=` is one way, moving what walls it in is another — or split the logic across several scopes, each with its own `circuit` line",
             blocks(DUST_ATTENUATION_LIMIT + 1),
         ),
         Allowance::Budget(_) => format!(
-            "Fix: leave the wire into {cell} room to run straight within {near} of it, or shorten the wire out of it so it can spare more — a larger `region=` is one way to do either — or drive {cell} from a cell that restores strength, or split the logic across several `circuit` blocks",
+            "Fix: leave the wire into {cell} room to run straight within {near} of it, or shorten the wire out of it so it can spare more — a larger `region=` is one way to do either — or drive {cell} from a cell that restores strength, or split the logic across several scopes, each with its own `circuit` line",
             cell = budget_cell(ir, unpowered),
             near = blocks(near),
         ),
@@ -1119,7 +1119,7 @@ fn attenuation_diagnostic(
         DiagnosticCode::AttenuationLimit,
         reservation.span.clone(),
         primary,
-        "Fix: enlarge `region=` so no driver→cell segment exceeds the cap, split into multiple `circuit` blocks, or pin cell placement closer to its drivers",
+        "Fix: enlarge `region=` so no driver→cell segment exceeds the cap, pin cell placement closer to its drivers, or split the logic across several scopes, each with its own `circuit` line",
     )
 }
 
@@ -1140,7 +1140,7 @@ fn attenuation_output_diagnostic(
         DiagnosticCode::AttenuationLimit,
         reservation.span.clone(),
         primary,
-        "Fix: enlarge `region=` so no driver→sink segment exceeds the cap, split into multiple `circuit` blocks, or pin actuator placement closer to its drivers",
+        "Fix: enlarge `region=` so no driver→sink segment exceeds the cap, pin actuator placement closer to its drivers, or split the logic across several scopes, each with its own `circuit` line",
     )
 }
 
@@ -2305,7 +2305,7 @@ mod tests {
         );
         assert_eq!(
             diagnostic.notes[0].message,
-            "Fix: leave the wire into cell #0 room to run straight within 1 block of it, or shorten the wire out of it so it can spare more — a larger `region=` is one way to do either — or drive cell #0 from a cell that restores strength, or split the logic across several `circuit` blocks",
+            "Fix: leave the wire into cell #0 room to run straight within 1 block of it, or shorten the wire out of it so it can spare more — a larger `region=` is one way to do either — or drive cell #0 from a cell that restores strength, or split the logic across several scopes, each with its own `circuit` line",
         );
     }
 

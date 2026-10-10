@@ -141,6 +141,10 @@ DSL が見せるのは 2D のメンタルモデルです。純粋な 2D のフ�
 circuit region=basement void=3       # 高さ 3 のサービス層を確保し、ここに回路を配線する
 ```
 
+この行は `struct` または `def` に 1 つです。同じ本体にある 2 つ目は `E_DUPLICATE_CIRCUIT` です
+([Lint §11.1](/ja/spec/lint/#111-診断コード))。2 つ以上の確保が要るロジックは、2 つ以上の
+スコープに分けます。
+
 内部アルゴリズムは 5 段階です。
 
 1. **配置**: トポロジカル順、左から右へ。セル同士の間に 1 列の空きを置きます。行は
@@ -168,8 +172,9 @@ circuit region=basement void=3       # 高さ 3 のサービス層を確保し�
    通りすがりのネットが最後の 1 面を取ることはあり、そのスコープはショートさせずに拒否されます。
    行が収まらない領域 — `n` 個のセルに `2n + 1` 列、そして 3 行 — や、パッドの立つ行が
    足りない領域 — パッドの多い側の辺でセンサーかアクチュエータ 1 つにつき 1 行、
-   セルのあるスコープではその辺に 2 つ以上あればセルの行の分をもう 1 行 — は、2 段階先で
-   到達不能なシンクとして落ちる前に、ここで拒否されます。
+   セルのあるスコープではその辺に 2 つ以上あればセルの行の分をもう 1 行 — や、センサーと
+   アクチュエータを両方持つスコープで 2 つのパッド列の分の 2 列 — 1 列では両者が同じ列になる —
+   がない領域は、2 段階先で到達不能なシンクとして落ちる前に、ここで拒否されます。
 2. **Steiner 配線**: Manhattan で、既に立っているもの、そして既に敷かれたネットのダストを避けて。
    セル本体と I/O パッドは予約されており、その上にダストは引けず、信号がその中を *通過* することも
    できません。コンポーネントは信号を発するか消費するかのどちらかだからです。したがってすべての
@@ -275,7 +280,8 @@ circuit region=basement void=3       # 高さ 3 のサービス層を確保し�
 ```text
 E_ROUTE_CONGESTION line 21 circuit=basement:
   synthesized netlist needs ~3.2x the reserved area (void=3, region 9x7).
-  Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks.
+  Fix: increase `void`, enlarge region, or split the logic across several scopes, each with its
+  own `circuit` line.
 ```
 
 これらのパスが上げるもう 1 つの拒否が `E_ATTENUATION_LIMIT` で、4 つの形に対して上がります。
@@ -294,9 +300,9 @@ E_ATTENUATION_LIMIT line 13 circuit=floor:
   placed netlist for struct `wide_pack` puts output pad #0 299 steps from its driver in a
   straight line — exceeds the v1 attenuation limit of 256 steps, and no route between two coords
   is shorter than the straight line between them.
-  Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column
-  sits within the cap of the cells it serves — a larger reservation cannot help, because the
-  straight line between these two is already over the cap.
+  Fix: split the logic across several scopes, each with its own `circuit` line, or reserve a
+  `region=` whose pad column sits within the cap of the cells it serves — a larger reservation
+  cannot help, because the straight line between these two is already over the cap.
 ```
 
 ## 14.6 エディション差

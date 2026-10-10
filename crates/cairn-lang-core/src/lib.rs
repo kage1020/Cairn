@@ -36,8 +36,8 @@ pub use ids::{
     PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem,
 };
 pub use intent::{
-    CircuitRegion, IntentModule, Member, MemberRole, ScopeKind, SemanticLevel, circuit_regions,
-    lower,
+    CircuitRegion, CircuitRegionDefect, IntentModule, Member, MemberRole, RejectedCircuitRegion,
+    ScopeKind, SemanticLevel, circuit_lines, circuit_regions, lower,
 };
 pub use lex::{Token, TokenKind, lex};
 pub use parse::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, diagnose_parse_failure, parse};

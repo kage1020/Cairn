@@ -30,6 +30,7 @@ turn on.
 | `E_DUPLICATE_SELECTOR` | Two selector rows in one `theme` select the same members and bind the same key. |
 | `E_DUPLICATE_ITEM` | Two top-level items of the same kind share a name. |
 | `E_DUPLICATE_HEADER` | A single-valued `@directive` is declared more than once. |
+| `E_DUPLICATE_CIRCUIT` | A `struct` or `def` body has more than one `circuit` line. |
 
 `E_DUPLICATE_ID` leaves two `place` rows of one `site` body to `E_DUPLICATE_PLACE_ID`
 ([Sites and placements](#sites-and-placements)), which names the site. That holds for an id
@@ -141,7 +142,7 @@ version to compare.
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
-| `E_UNRESOLVED_SLOT` | A member's `mat_slot=` names a slot the bound theme does not declare. |
+| `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
 | `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
 | `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member in the file. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
@@ -156,8 +157,9 @@ version to compare.
 commands that lower report them: `cairn compile`, `cairn lower`, `cairn info`, and `cairn check
 --edition E --target V`. `E_UNKNOWN_ID` further needs a pinned target, so the two commands that
 raise it are `cairn compile --target` and `cairn check --edition E --target V` — `info` and
-`lower` lower against no version. A `cairn check` with no `--target` runs no lowering at all and
-reaches neither code.
+`lower` lower against no version, and so does a `compile` whose target the file's floors refuse
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A
+`cairn check` with no `--target` runs no lowering at all and reaches neither code.
 
 `W_STATE_LITERAL_UNCHECKED` is raised by the same lowering, on every state literal it reads from a
 theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info` and `cairn check
@@ -171,11 +173,15 @@ lowering-stage findings a compile would refuse on: an id the target does not dec
 `check` at exit 0 and stopped `cairn compile` at exit 1, and the information that decides it — the
 one `(edition, version)` pair — was not on `check`'s command line. It requires `--edition` for the
 reason [Compilation Model §4.2](/spec/compilation/#42-target-axes) refuses `--target` alone, and runs the
-same lowering pass against the same table `compile` does, so a lost scope earns the same
-`E_PARTIAL_BUILD`. What it does not do is anything `compile` writes: no artifact, no lockfile, and
-no `@requires` floor enforcement — a lock certifies a build, and only the command that produces
-one holds `--target` to the floors (`E_VERSION_CAP`). Leaving the flag off is unchanged behaviour,
-so no source that passes today starts failing. See
+same lowering pass against the same table `compile` does at any target the file's floors let
+through, so a lost scope earns the same `E_PARTIAL_BUILD`. What it does not do is anything
+`compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement — a lock certifies
+a build, and only the command that produces one holds `--target` to the floors (`E_VERSION_CAP`).
+So at a target the floors refuse, the two commands name different causes: `check` pins the target
+and reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing ids leave empty, while
+`compile` checks no id and reports the floor
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Leaving the
+flag off is unchanged behaviour, so no source that passes today starts failing. See
 [Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
@@ -183,8 +189,13 @@ family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules))
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
-placement naming it is still refused. A module that declares such a theme but never reads a
-`mat_slot=` from it is not reported: the build is byte-identical with or without the pin.
+placement naming it is still refused, whatever its `def` reads: a `place`'s `theme=` binds the
+theme, the lockfile records the bound theme for the placement, and the theme's floor applies once it
+is bound ([Versioning and Editions](/spec/versioning-editions/#a-part-may-declare-its-own-floor)).
+A module that names such a theme in no `place`, and whose `struct` and `def` members read no
+`mat_slot=` from it, is not reported: the build is byte-identical with or without the pin. A
+`mat_slot=` on a keyword that reads none, such as a `door`'s, is not such a read
+([§11.3](#113-error-vs-warning)).
 
 `E_THEME_SELECTOR_UNMATCHED` is a warning despite its prefix. A rule that matches nothing overrides
 nothing, so every member keeps the material it would have had with the rule deleted; the finding is
@@ -199,15 +210,19 @@ the requested extent at exit 0.
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member
 earns both: the key is absent for the first and present-but-unusable for the second. They have
 different repairs, which is why they are different codes — the same division `E_INCOMPLETE_PLACE`
-and `E_TYPE_MISMATCH_LABEL` draw on a `place` row.
+and `E_TYPE_MISMATCH_LABEL` draw on a `place` row. The split is drawn on the keywords that read a
+`mat_slot=`. On one that reads none, neither half applies: nothing would read the key, so its
+absence is not reported, and its name is not looked up, so a label written there is
+`W_IGNORED_ARGUMENT` whatever slot it names ([§11.3](#113-error-vs-warning)).
 
-`E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor` and
-`walls` reach the palette through the applied theme's slot map and have no default block, so a
-bare one contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air,
-and is not reported — that is how a narrow slit is punched through a wall without choosing a
-species for it; a `door` is always a carve and reads no material at all. A `roof`, `stair` or
-`pressure_plate` paints a default block and is not reported either. `cairn check` raises it, before any lowering, and it needs no theme: a module
-that declares none is still told which of its members name no material.
+`E_MISSING_MATERIAL` applies to the roles that put nothing anywhere without one. `floor` and `walls`
+reach the palette through the applied theme's slot map and have no default block, so a bare one
+contributes no voxel. A `window` without a `mat_slot=` is an **opening**, carved to air, and is not
+reported — that is how a narrow slit is punched through a wall without choosing a species for it; a
+`door` carves its opening and reads no material, since its own block is not placed yet. A `roof`,
+`stair` or `pressure_plate` paints a default block and is not reported either. `cairn check` raises
+it, before any lowering, and it needs no theme: a module that declares none is still told which of
+its members name no material.
 
 `E_UNRESOLVED_SLOT` is reported **at most once per member per bound theme**. A `def` body is
 resolved once as its own scope and once again for every `place` that instantiates it, and each of
@@ -340,7 +355,7 @@ something for the name would build a site the source did not describe.
 
 | Code | Meaning |
 |---|---|
-| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port the referenced def does not expose. |
+| `E_UNRESOLVED_PORT` | A `connect A.PORT to B.PORT` names a port id that no member declared directly in the referenced def's body carries. A member under a `level` cannot be a port yet, and the finding says so when the id is on one. |
 | `E_AMBIGUOUS_PORT` | The port id matches more than one member of the referenced def. |
 | `E_MISSING_PATH_MATERIAL` | A `connect` row carries no `path=`, so the walkway has no material to lay. |
 | `W_DUPLICATE_WALKWAY` | A `connect` repeats a `(from, to)` pair an earlier row in the same site already laid. |
@@ -384,6 +399,7 @@ has the repair is the one on the `place`, or the one its note points at, and rep
 | `W_STRUCT_NO_SIZE` | A `struct` declares no `size=WxH`, so lowering can derive no extent and skips it. |
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
+| `W_PALETTE_TOO_LARGE` | A scope paints more than 65,535 distinct block states besides air, past what one palette can index. |
 | `W_PHASE_CONFLICT` | Two members in one phase wrote one voxel to different blocks ([§4.4](/spec/compilation/)). |
 | `E_PARTIAL_BUILD` | At least one requested scope, or a walkway a `connect` row asked for, did not lower, so the run produced less than was asked for. |
 
@@ -394,6 +410,18 @@ on `code` can tell a struct that will not build from a template that will not in
 `level y=` are each range-checked on their own, and this is the product of them being out of reach.
 A warning rather than an error, matching the two above — the scope is skipped and the rest of the
 build is unaffected.
+
+`W_PALETTE_TOO_LARGE` is the same kind of limit on what a scope paints rather than where. Every state
+a member writes counts, including one a later member covers, so the limit is on the states written
+rather than the states the finished scope keeps. A vanilla registry has far fewer states, so a source
+reaches it only through block ids or state-literal properties no pinned target checks. Block ids go
+unchecked wherever lowering runs with no version pinned: in `cairn lower` and `cairn info`, in a
+`cairn compile` or `cairn check --edition E --target V` naming a version the edition does not ship,
+and in a `cairn compile` whose target the file's floors refuse
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A state
+literal's properties go unchecked under every target, as `W_STATE_LITERAL_UNCHECKED` says
+([Materials and targets](#materials-and-targets)), so every command that lowers can reach the limit,
+`cairn compile` with a target that resolves among them. A warning, for the reason above.
 
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it.
@@ -415,18 +443,23 @@ resolution the spec mandates still happens — the finding says which voxel it h
 | Code | Meaning |
 |---|---|
 | `E_TRUTH_TABLE_EMPTY` | An `assert truth(...)` with no rows, or none whose output is `0` or `1`. |
+| `E_TRUTH_TABLE_DUPLICATE_INPUT` | An `assert truth(...)` lists one signal as two or more of its inputs. |
 | `E_TRUTH_TABLE_CONFLICT` | Two rows assign the same input combination different outputs. |
 | `W_TRUTH_TABLE_DUPLICATE_ROW` | Two rows cover the same input combination without contradicting each other. |
 | `W_TRUTH_TABLE_PARTIAL` | The rows leave input combinations unassigned. |
 
-Both codes are reported on the later row. A row is compared with every earlier row that shares a
-combination with it, so whether a table is refused does not depend on the order its rows are
-written in: `0- -> 1` after `00 -> 1; 01 -> 0` is `E_TRUTH_TABLE_CONFLICT`, though it agrees with
-the first of the two. A conflict takes precedence over a duplicate on the same row, and its note is
-at the first row assigning the combination it names the other output. Any other finding's note is
-at the first row assigning the combination it names, so every finding about one combination points
-at the same row. The spec does not say which of two conflicting rows an evaluator would read,
-because the repair is to decide which row is wrong.
+`E_TRUTH_TABLE_DUPLICATE_INPUT` is reported on the whole `assert`, once per repeated signal, and no
+other truth-table code is raised for that table: every other one reads the rows against an input
+list that is wrong, so the rest of the table is left until the list names each signal once.
+
+`E_TRUTH_TABLE_CONFLICT` and `W_TRUTH_TABLE_DUPLICATE_ROW` are reported on the later row. A row is
+compared with every earlier row that shares a combination with it, so whether a table is refused
+does not depend on the order its rows are written in: `0- -> 1` after `00 -> 1; 01 -> 0` is
+`E_TRUTH_TABLE_CONFLICT`, though it agrees with the first of the two. A conflict takes precedence
+over a duplicate on the same row, and its note is at the first row assigning the combination it
+names the other output. Any other finding's note is at the first row assigning the combination it
+names, so every finding about one combination points at the same row. The spec does not say which of
+two conflicting rows an evaluator would read, because the repair is to decide which row is wrong.
 
 A `-` makes the same combination reachable from rows that do not look alike, so both codes are
 about the combination rather than about the pattern: `0-` and `-1` both assign `01`. The fix
@@ -664,19 +697,27 @@ the warning.
 in the vocabulary whose value the pass cannot read is dropped and a default put in its place, or,
 where the key itself decides whether the member is built at all, the member is refused instead
 (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
-[§5.4](/spec/syntax/#54-selectors)). An **unreached key**: a `key=` this specification defines that
-no pass reads yet — `window shape=` / `anchor=`, `roof footprint=` / `bounds=` and a header's
-`class=` are those keys today — is carried into the IR and never consulted. Every `key=value` on the
-right of a `theme` selector row whose keyword the compiler knows is one too, reported on the binding
-whatever its key or value, since no pass lowers a selector's bindings yet
-([Materials and Themes](/spec/materials-themes/)). And a key **routed past**: one the keyword reads
-only under some ways of writing a sibling argument, on a member that writes it another way. The
-boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this way,
-while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are not
-judged at all. All three make the build differ from the source. The rule forbids *silent*
-substitution, and all three are announced. For the unreached key the gap is the compiler's rather
-than the source's, which is why it is not a refusal. Whether autofix is offered is up to the
-implementation.
+[§5.4](/spec/syntax/#54-selectors)). An **unread key**: a `key=` the keyword accepts and nothing
+reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
+*unreached* key is one this specification defines that no pass reads yet — `window shape=` /
+`anchor=`, `roof footprint=` / `bounds=`, a header's `class=`, and a `door`'s `mat_slot=`, which
+waits on the door block itself, are those keys today. Every `key=value` on the right of a `theme`
+selector row whose keyword the compiler knows is one too, reported on the binding whatever its key
+or value, since no pass lowers a selector's bindings yet
+([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
+accepts, on a keyword that puts down nothing it would be read for — `mat_slot=` on a `level`,
+`circuit`, `place` or `connect` is that key today. A `mat_slot=` of either kind is not looked up in
+the theme, so a slot name the theme does not declare is this warning rather than
+`E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key **routed past**: one the keyword
+reads only under some ways of writing a sibling argument, on a member that writes it another way.
+The boundary is the keyword: a spec-defined key on a keyword the compiler knows is reported this
+way, while a spec-defined *keyword* it does not know is `E_UNKNOWN_KEYWORD` and its arguments are
+not judged at all. All three make the build differ from the source. The rule forbids *silent*
+substitution, and all three are announced. For an unreached key the gap is the compiler's rather
+than the source's, which is why it is not a refusal. An inapplicable key is no gap at all: the key
+is one every member accepts and its value changes nothing in the build, so the warning asks for
+its removal, where a refusal would make a key every member accepts one that some refuse. Whether
+autofix is offered is up to the implementation.
 
 An unreadable value is reported whether or not its member is then built. The value is wrong
 wherever the member ends up, so it is a repair of its own, and holding the finding back until a

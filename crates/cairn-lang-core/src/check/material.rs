@@ -142,6 +142,10 @@ enum WithoutAMaterial {
 /// [`WithoutAMaterial::PaintsAFallback`], and
 /// `tests/check_missing_material.rs` measures the pairing against the
 /// lowered structure rather than trusting either list.
+///
+/// The `level`, `circuit`, `place` and `connect` reasons below are also the
+/// ones `MemberRole::unread_arguments` points at for those roles' `mat_slot`
+/// entries, rather than writing them a second time.
 fn without_a_material(role: &MemberRole) -> WithoutAMaterial {
     match role {
         MemberRole::Floor | MemberRole::Walls => WithoutAMaterial::PaintsNothing,

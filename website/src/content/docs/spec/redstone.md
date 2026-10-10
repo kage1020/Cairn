@@ -146,6 +146,10 @@ observer chain.
 circuit region=basement void=3       # reserve a 3-high service layer; route the circuit here
 ```
 
+A `struct` or `def` has one such line: a second one in the same body is `E_DUPLICATE_CIRCUIT`
+([Lint §11.1](/spec/lint/#111-diagnostic-codes)). Logic that needs more than one reservation goes
+in more than one scope.
+
 The internal algorithm runs five stages:
 
 1. **Placement.** Topological order, left to right, one clear column between each pair of cells.
@@ -175,8 +179,9 @@ The internal algorithm runs five stages:
    face, and that scope is refused rather than shorted. A region that cannot hold the row —
    `2n + 1` columns for `n` cells, and three rows — or the rows its pads stand in — a row per
    sensor or actuator on the busier edge, and, in a scope with cells, one more for the cell row
-   once that edge carries two — is refused here rather than left to fail as an unreachable sink
-   two stages later.
+   once that edge carries two — or, in a scope with both sensors and actuators, two columns for
+   its two pad columns, which at one column are the same column — is refused here rather than
+   left to fail as an unreachable sink two stages later.
 2. **Steiner routing.** Manhattan, around what is already standing — and around the dust of the
    nets already laid. Cell bodies and I/O pads are reserved: dust cannot be drawn on one, and a
    signal cannot pass *through* one, since a component either emits or consumes. Every sink is
@@ -292,7 +297,8 @@ the message says which two coordinates it could not join and which nets took the
 ```text
 E_ROUTE_CONGESTION line 21 circuit=basement:
   synthesized netlist needs ~3.2x the reserved area (void=3, region 9x7).
-  Fix: increase `void`, enlarge region, or split into multiple `circuit` blocks.
+  Fix: increase `void`, enlarge region, or split the logic across several scopes, each with its
+  own `circuit` line.
 ```
 
 `E_ATTENUATION_LIMIT` is the other refusal these passes raise, for four shapes. Stages 2, 3 and 4
@@ -311,9 +317,9 @@ E_ATTENUATION_LIMIT line 13 circuit=floor:
   placed netlist for struct `wide_pack` puts output pad #0 299 steps from its driver in a
   straight line — exceeds the v1 attenuation limit of 256 steps, and no route between two coords
   is shorter than the straight line between them.
-  Fix: split the logic across several `circuit` blocks, or reserve a `region=` whose pad column
-  sits within the cap of the cells it serves — a larger reservation cannot help, because the
-  straight line between these two is already over the cap.
+  Fix: split the logic across several scopes, each with its own `circuit` line, or reserve a
+  `region=` whose pad column sits within the cap of the cells it serves — a larger reservation
+  cannot help, because the straight line between these two is already over the cap.
 ```
 
 ## 14.6 Edition differences

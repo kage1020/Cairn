@@ -7,6 +7,7 @@
 //!    `mat_slot`, size, nested children, unknown-keyword fallback) without
 //!    depending on a snapshot file.
 
+use std::fmt::Write as _;
 use std::num::NonZeroU32;
 
 use cairn_lang_core::ast::ValueKind;
@@ -77,13 +78,21 @@ fn unknown_keyword_lands_in_member_role_other_without_failing() {
 
 #[test]
 fn id_class_and_mat_slot_hoist_into_typed_fields() {
-    let ir = lower_source(
-        "struct s size=1x1\n  walls id=outer_wall class=outer mat_slot=wall height=4\n",
-    );
+    let src = "struct s size=1x1\n  walls id=outer_wall class=outer mat_slot=\"wall\" height=4\n";
+    let ir = lower_source(src);
     let member = &ir.structs[0].members[0];
     assert_eq!(member.id.as_deref(), Some("outer_wall"));
     assert_eq!(member.class.as_deref(), Some("outer"));
-    assert_eq!(member.mat_slot.as_deref(), Some("wall"));
+    let slot = member
+        .mat_slot
+        .as_ref()
+        .expect("a label-shaped `mat_slot=` is hoisted");
+    assert_eq!(slot.name, "wall", "the name is the string's text");
+    assert_eq!(
+        &src[slot.span.clone()],
+        "\"wall\"",
+        "the span is the value as written, carried from the hoist itself",
+    );
     assert!(
         !member.intent_state.fields.contains_key("id")
             && !member.intent_state.fields.contains_key("class")
@@ -190,7 +199,7 @@ fn token_and_dotref_are_not_hoisted_into_label_fields() {
         "dotted refs must not coerce into a string class"
     );
     assert_eq!(
-        member.mat_slot.as_deref(),
+        member.mat_slot.as_ref().map(|slot| slot.name.as_str()),
         Some("wall"),
         "plain idents still hoist"
     );
@@ -213,4 +222,201 @@ fn pressure_plate_binding_arrow_is_kept_separate_from_intent_state() {
         !member.intent_state.fields.contains_key("->"),
         "the arrow tail must never become a synthetic intent_state key"
     );
+}
+
+/// One `circuit` line that reserves nothing: where it is written, and
+/// what [`cairn_lang_core::circuit_lines`] says about it.
+struct RejectedLine {
+    /// `size=` header of the scope, or empty for none.
+    size: &'static str,
+    /// How many `level` blocks the line is nested under.
+    levels: usize,
+    line: &'static str,
+    is: fn(&cairn_lang_core::CircuitRegionDefect) -> bool,
+    /// The defect's `Display` form, the reason clause a pass prints.
+    reason: &'static str,
+}
+
+/// `keyword s{size}` with a `floor` and `line` at the given depth of
+/// `level` nesting.
+fn scope_with_line(keyword: &str, size: &str, levels: usize, line: &str) -> String {
+    let mut src = format!("{keyword} s{size}\n  floor\n");
+    let mut indent = String::from("  ");
+    for y in 0..levels {
+        let _ = writeln!(src, "{indent}level y={y}");
+        indent.push_str("  ");
+    }
+    let _ = writeln!(src, "{indent}{line}");
+    src
+}
+
+/// One case per [`cairn_lang_core::CircuitRegionDefect`] variant, and
+/// a second `level` deep for the one that is about nesting.
+fn rejected_lines() -> [RejectedLine; 10] {
+    use cairn_lang_core::CircuitRegionDefect as Defect;
+
+    let sized = " size=5x5";
+    [
+        RejectedLine {
+            size: sized,
+            levels: 1,
+            line: "circuit region=floor void=2",
+            is: |d| matches!(d, Defect::NestedUnderLevel { .. }),
+            reason: "it is written under a `level`, and only a `circuit` line at the scope's top level is read as a reservation",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 2,
+            line: "circuit region=floor void=2",
+            is: |d| matches!(d, Defect::NestedUnderLevel { .. }),
+            reason: "it is written under a `level`, and only a `circuit` line at the scope's top level is read as a reservation",
+        },
+        RejectedLine {
+            size: "",
+            levels: 0,
+            line: "circuit region=floor void=2",
+            is: |d| matches!(d, Defect::NoSize { .. }),
+            reason: "the enclosing scope has no `size=WxH` header for it to reserve within",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit void=2",
+            is: |d| matches!(d, Defect::RegionMissing { .. }),
+            reason: "it has no `region=`",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=3 void=2",
+            is: |d| {
+                matches!(
+                    d,
+                    Defect::RegionNotLabel {
+                        found: "integer",
+                        ..
+                    }
+                )
+            },
+            reason: "its `region=` must be an identifier or string label, got integer",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=\"\" void=2",
+            is: |d| matches!(d, Defect::RegionEmpty { .. }),
+            reason: "its `region=` is an empty label",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=floor",
+            is: |d| matches!(d, Defect::VoidMissing { .. }),
+            reason: "it has no `void=`",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=floor void=deep",
+            is: |d| {
+                matches!(
+                    d,
+                    Defect::VoidNotInteger {
+                        found: "identifier",
+                        ..
+                    }
+                )
+            },
+            reason: "its `void=` must be an integer, got identifier",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=floor void=0",
+            is: |d| matches!(d, Defect::VoidBelowOne { value: 0, .. }),
+            reason: "its `void=0` reserves no service layer",
+        },
+        RejectedLine {
+            size: sized,
+            levels: 0,
+            line: "circuit region=floor void=4294967296",
+            is: |d| {
+                matches!(
+                    d,
+                    Defect::VoidTooLarge {
+                        value: 4_294_967_296,
+                        ..
+                    }
+                )
+            },
+            reason: "its `void=4294967296` is over the limit of 4294967295",
+        },
+    ]
+}
+
+/// Every `circuit` line that reserves nothing comes back as rejected,
+/// with the reason it does not, the sentence that reason prints as, and
+/// its own line as the span, so a pass that finds a scope with no
+/// reservation can point at the line that was meant to be one.
+///
+/// Each case runs under a `struct` and under a `def`: the two are walked
+/// by separate loops, and a table that put `size=` on one keyword only
+/// would exercise `NoSize` on one and every other defect on the other.
+#[test]
+fn each_circuit_line_that_reserves_nothing_is_handed_back_with_its_reason() {
+    use cairn_lang_core::{ScopeKind, circuit_lines, circuit_regions};
+
+    for case in &rejected_lines() {
+        for (keyword, kind) in [("struct", ScopeKind::Struct), ("def", ScopeKind::Def)] {
+            let src = scope_with_line(keyword, case.size, case.levels, case.line);
+            let ir = lower_source(&src);
+
+            assert!(
+                circuit_regions(&ir).is_empty(),
+                "reserves nothing:\n{src}{:?}",
+                circuit_regions(&ir),
+            );
+            let lines = circuit_lines(&ir);
+            let [Err(rejected)] = lines.as_slice() else {
+                panic!("handed back once, as rejected:\n{src}{lines:?}");
+            };
+            assert!((case.is)(&rejected.defect), "{src}{:?}", rejected.defect);
+            assert_eq!(rejected.defect.to_string(), case.reason, "{src}");
+            assert_eq!(rejected.scope_kind, kind, "{src}");
+            assert_eq!(rejected.scope_name, "s", "{src}");
+            assert_eq!(
+                &src[rejected.span.clone()],
+                case.line,
+                "the span is the line:\n{src}"
+            );
+        }
+    }
+}
+
+/// A usable `circuit` line is a reservation and is not handed back as a
+/// rejected one, while a rejected line beside it still is, each in its
+/// place in source order.
+#[test]
+fn a_usable_circuit_line_is_not_handed_back_as_rejected() {
+    use cairn_lang_core::{CircuitRegionDefect, circuit_lines, circuit_regions};
+
+    let ir = lower_source(
+        "struct s size=5x5\n  floor\n  circuit region=floor void=0\n  circuit region=floor void=2\n",
+    );
+    let regions = circuit_regions(&ir);
+    assert_eq!(regions.len(), 1, "{regions:?}");
+    assert_eq!(regions[0].void, 2);
+    let lines = circuit_lines(&ir);
+    let [Err(rejected), Ok(region)] = lines.as_slice() else {
+        panic!("the rejected line, then the usable one: {lines:?}");
+    };
+    assert!(
+        matches!(
+            rejected.defect,
+            CircuitRegionDefect::VoidBelowOne { value: 0, .. }
+        ),
+        "{:?}",
+        rejected.defect,
+    );
+    assert_eq!(region, &regions[0]);
 }

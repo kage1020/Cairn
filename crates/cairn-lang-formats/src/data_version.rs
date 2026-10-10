@@ -42,7 +42,13 @@ pub struct BedrockTarget {
     pub block_version: i32,
 }
 
-/// `--target` value did not match any version in the registry pack.
+/// `--target` value equal to no targetable version in the registry pack,
+/// and not the `latest` alias.
+///
+/// Equal as versions rather than as strings: the comparison is the one
+/// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+/// uses. The rows the pack only orders against, having no block data, are
+/// never candidates.
 #[derive(Debug)]
 pub struct UnsupportedTarget {
     /// Which edition's version table was consulted (`"java"` /
@@ -83,8 +89,10 @@ impl std::error::Error for UnsupportedTarget {}
 ///
 /// # Errors
 ///
-/// Returns [`UnsupportedTarget`] when the requested string is neither an
-/// exact `mc_version` match nor the `"latest"` alias.
+/// Returns [`UnsupportedTarget`] when the requested string is neither a
+/// label equal to a targetable `mc_version` under the comparison
+/// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+/// uses, nor the `"latest"` alias.
 pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
     builtin_java().resolve_java_target(requested)
 }
@@ -95,8 +103,10 @@ pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTar
 ///
 /// # Errors
 ///
-/// Returns [`UnsupportedTarget`] when the requested string is neither an
-/// exact `mc_version` match nor the `"latest"` alias.
+/// Returns [`UnsupportedTarget`] when the requested string is neither a
+/// label equal to a targetable `mc_version` under the comparison
+/// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+/// uses, nor the `"latest"` alias.
 pub fn resolve_bedrock_target(requested: &str) -> Result<BedrockTarget, UnsupportedTarget> {
     builtin_bedrock().resolve_bedrock_target(requested)
 }

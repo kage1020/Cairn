@@ -3,7 +3,7 @@
 use cairn_lang_core::{Diagnostic, DiagnosticCode};
 
 mod common;
-use common::{diagnose, exactly_one, nth, slice};
+use common::{diagnose, exactly_one, notes, nth, slice};
 
 #[test]
 fn dup_1_duplicate_size_flags_second_occurrence_only() {
@@ -127,10 +127,20 @@ fn of_code(diags: &[Diagnostic], code: DiagnosticCode) -> Vec<&Diagnostic> {
     diags.iter().filter(|d| d.code == code).collect()
 }
 
-/// The text the note of `diag` points at. Every duplicate finding carries
-/// exactly one note, on the declaration that stands.
+/// The text the first note of `diag` points at, the declaration that
+/// stands. Every duplicate finding read here carries that one note, and
+/// `E_DUPLICATE_CIRCUIT` one more after it, spanless, on the repair.
 fn note_text<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
-    assert_eq!(diag.notes.len(), 1, "got {diag:#?}");
+    let expected = if diag.code == DiagnosticCode::DuplicateCircuit {
+        2
+    } else {
+        1
+    };
+    assert_eq!(diag.notes.len(), expected, "got {diag:#?}");
+    assert!(
+        diag.notes[1..].iter().all(|n| n.span.is_none()),
+        "got {diag:#?}"
+    );
     let span = diag.notes[0]
         .span
         .as_ref()
@@ -350,4 +360,117 @@ fn dup_16_a_repeated_refused_place_id_is_still_duplicate_place_id() {
     assert_eq!(dup[0].span.start, nth(&src, "place id=\"a.b\"", 1));
     let note = dup[0].notes[0].span.as_ref().expect("note span");
     assert_eq!(note.start, nth(&src, "place id=\"a.b\"", 0));
+}
+
+/// The primary every `E_DUPLICATE_CIRCUIT` carries.
+const DUPLICATE_CIRCUIT_PRIMARY: &str =
+    "this scope already has a `circuit` line, and a scope reserves one region for its redstone";
+
+/// The repair note every `E_DUPLICATE_CIRCUIT` carries after the note on
+/// the first line.
+const DUPLICATE_CIRCUIT_REPAIR: &str = "delete one of the two lines, or split the logic across \
+                                        several scopes, each with its own `circuit` line";
+
+/// A second `circuit` line in a scope is refused on that line, with a
+/// note on the first and a note on the repair, rather than dropped:
+/// place-and-route reads one reservation per scope. A third is refused
+/// too, against the same first line.
+#[test]
+fn dup_17_a_second_circuit_line_in_a_scope_is_refused_against_the_first() {
+    let src = "struct s size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
+               circuit region=basement void=2\n  circuit region=attic void=3\n";
+    let diags = diagnose(src);
+    let found = of_code(&diags, DiagnosticCode::DuplicateCircuit);
+    assert_eq!(found.len(), 2, "{diags:#?}");
+    for (finding, line) in found.iter().zip([
+        "circuit region=basement void=2",
+        "circuit region=attic void=3",
+    ]) {
+        assert_eq!(slice(src, finding), line);
+        assert_eq!(finding.primary, DUPLICATE_CIRCUIT_PRIMARY);
+        assert_eq!(
+            notes(finding),
+            ["first declaration here", DUPLICATE_CIRCUIT_REPAIR]
+        );
+        assert_eq!(note_text(src, finding), "circuit region=floor void=1");
+    }
+}
+
+/// Every `circuit` line counts, whether or not it is a usable
+/// reservation and in a `def` as in a `struct`: the first line here is
+/// not usable, and the second is still a second line.
+#[test]
+fn dup_18_a_circuit_line_after_an_unusable_one_is_still_a_second_line() {
+    let src = "def d size=7x5\n  floor mat_slot=m\n  circuit region=floor void=0\n  \
+               circuit region=floor void=2\n";
+    let diags = diagnose(src);
+    let found = of_code(&diags, DiagnosticCode::DuplicateCircuit);
+    assert_eq!(found.len(), 1, "{diags:#?}");
+    assert_eq!(slice(src, found[0]), "circuit region=floor void=2");
+    assert_eq!(note_text(src, found[0]), "circuit region=floor void=0");
+}
+
+/// One `circuit` line per scope is not a duplicate across scopes, and a
+/// `circuit` line under a `level` is in that level's body, not among the
+/// scope's own members, which are all this check counts. The source
+/// raises nothing else either, so a finding of any code here fails.
+#[test]
+fn dup_19_one_circuit_line_per_scope_is_not_a_duplicate() {
+    let src = "struct a size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n\n\
+               struct b size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
+               level y=1\n    circuit region=floor void=1\n";
+    let diags = diagnose(src);
+    assert!(diags.is_empty(), "{diags:#?}");
+}
+
+/// A `circuit` line written with a `[...]` selector is a `circuit` line
+/// all the same: it reserves the scope's region as the bare form does,
+/// so it counts as a second line after one.
+#[test]
+fn dup_20_a_circuit_line_with_a_selector_counts() {
+    let src = "struct s size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
+               circuit[id=x] region=basement void=2\n";
+    let diags = diagnose(src);
+    let found = of_code(&diags, DiagnosticCode::DuplicateCircuit);
+    assert_eq!(found.len(), 1, "{diags:#?}");
+    assert_eq!(diags.len(), 1, "{diags:#?}");
+    assert_eq!(slice(src, found[0]), "circuit[id=x] region=basement void=2");
+    assert_eq!(note_text(src, found[0]), "circuit region=floor void=1");
+}
+
+/// A scope with no `size=` reserves nothing from any of its `circuit`
+/// lines, and two of them are refused all the same: adding the header
+/// would leave the scope two reservations. The missing header is
+/// `W_STRUCT_NO_SIZE`, which block-array lowering raises and `check`
+/// does not, so this is the only finding here.
+#[test]
+fn dup_21_two_circuit_lines_in_a_scope_with_no_size_are_refused() {
+    let src = "struct s\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
+               circuit region=basement void=2\n";
+    let diags = diagnose(src);
+    let found = of_code(&diags, DiagnosticCode::DuplicateCircuit);
+    assert_eq!(found.len(), 1, "{diags:#?}");
+    assert_eq!(diags.len(), 1, "{diags:#?}");
+    assert_eq!(slice(src, found[0]), "circuit region=basement void=2");
+    assert_eq!(note_text(src, found[0]), "circuit region=floor void=1");
+}
+
+/// A second `circuit` line that carries an indented body is refused as a
+/// second line, and the body under it is refused on its own as
+/// `E_UNSUPPORTED_NESTING`: the two findings are separate repairs, and
+/// the span of this one is the keyword line, not the body.
+#[test]
+fn dup_22_a_second_circuit_line_with_an_indented_body_is_refused_beside_the_nesting() {
+    let src = "struct s size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
+               circuit region=basement void=2\n    floor mat_slot=m\n";
+    let diags = diagnose(src);
+    let codes: Vec<_> = diags.iter().map(|d| d.code.as_str()).collect();
+    assert_eq!(
+        codes,
+        ["E_DUPLICATE_CIRCUIT", "E_UNSUPPORTED_NESTING"],
+        "{diags:#?}"
+    );
+    let found = of_code(&diags, DiagnosticCode::DuplicateCircuit);
+    assert_eq!(slice(src, found[0]), "circuit region=basement void=2");
+    assert_eq!(note_text(src, found[0]), "circuit region=floor void=1");
 }
