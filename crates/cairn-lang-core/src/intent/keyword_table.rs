@@ -325,9 +325,12 @@ impl MemberRole {
     /// for, so none is. Each entry says which it is, and the finding's note
     /// is worded from that.
     ///
-    /// Every `mat_slot` entry is also a key the resolver does not look up:
-    /// the slot lookup asks this table first, so a name the theme lacks is
-    /// not a refusal over an argument that changes nothing. What holds the
+    /// Every `mat_slot` entry is also a slot no member of the role reads:
+    /// [`super::Member::read_slot`] defines reading one from this table, and
+    /// the passes that need the answer ask it. The resolver does not look
+    /// the name up, so a name the theme lacks is not a refusal over an
+    /// argument that changes nothing, and the member alone does not earn a
+    /// scope with no theme bound a `W_NO_THEME_BOUND`. What holds the
     /// `mat_slot` entries to the lowering is `tests/unread_mat_slot.rs`,
     /// which builds each of those roles under two slot names that resolve
     /// to different blocks and compares the builds.

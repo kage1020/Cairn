@@ -101,7 +101,7 @@
 //!     with the repair.
 //! 13. **A `mat_slot=` on a role that reads none** — `resolve_members` does
 //!     not look the name up when the role's `unread_arguments` lists
-//!     `mat_slot` (`read_slot`), so a slot the theme lacks is not
+//!     `mat_slot` (`Member::read_slot`), so a slot the theme lacks is not
 //!     `E_UNRESOLVED_SLOT` and the binding's `slot_value` stays `None`.
 //!     `check::arguments` owns the signal, `W_IGNORED_ARGUMENT` on the
 //!     value, and every CLI command and the language server reach it

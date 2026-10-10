@@ -267,7 +267,9 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
     // A label-shaped `mat_slot=` was hoisted out of the fields above, so
     // the one branch that can apply to it — the key is universal, hence
     // always accepted — is asked here, and this is the only place it is
-    // reported as unread.
+    // reported as unread. It fires exactly on a hoisted slot
+    // `Member::read_slot` answers `None` for; the table is asked directly
+    // because the finding needs the reason, which that answer drops.
     if let Some(slot) = &member.mat_slot
         && let Some(why) = member.role.unread_argument("mat_slot")
     {
