@@ -7289,8 +7289,17 @@ mod tests {
             keywords.sort_unstable();
             keywords
         };
-        assert_eq!(rows(SLOT_READERS), readers);
-        assert_eq!(rows(SLOT_IGNORERS), ignorers);
+        assert_eq!(
+            rows(SLOT_READERS),
+            readers,
+            "every keyword whose role reads a `mat_slot=` needs a row in SLOT_READERS, and only those",
+        );
+        assert_eq!(
+            rows(SLOT_IGNORERS),
+            ignorers,
+            "every keyword whose role reads no `mat_slot=` needs a row in SLOT_IGNORERS, and only \
+             those",
+        );
     }
 
     #[test]
