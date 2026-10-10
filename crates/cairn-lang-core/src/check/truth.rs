@@ -5,24 +5,34 @@
 //! `0`/`1`, and a pattern whose width is not the number of signals left of
 //! the arrow. Both are properties of one row against the header, which is
 //! why they live where the header is in hand. What no row can see is the
-//! table around it, and three shapes of table verify nothing while reading
-//! — in a diff, in a review — exactly like one that passes:
+//! header read against itself, and the table around it.
+//!
+//! The header can list one signal twice. That is a fault in the header
+//! rather than a shape of table: one signal is one input, so the table has
+//! more than one column for it, and its rows describe combinations the
+//! circuit does not have. Past that, three shapes of table verify nothing
+//! while reading — in a diff, in a review — exactly like one that passes:
 //!
 //! * no rows at all;
 //! * a pattern assigned twice, the two rows disagreeing;
 //! * combinations left unassigned, which are the ones a bug hides in.
 //!
 //! Severity follows what is provable, the split [`super::diagnostic`]
-//! records per code. A table with no rows can never assert anything — no
-//! context around it and no pass written later changes that — so it is an
-//! error, the same argument `E_INVALID_REQUIRES` makes for a `@requires`
-//! the compiler cannot read. Two rows that assign one input combination
+//! records per code. A repeated input is an error: the header alone shows
+//! the table is written for combinations the circuit does not have, and
+//! reading the list as one input instead would give the rows a meaning the
+//! author did not write. Every other finding reads the rows against that
+//! list, so the repeat is checked first and reported alone. A table with no
+//! rows can never assert anything, whatever is written around it, so it is
+//! an error, the same argument `E_INVALID_REQUIRES` makes for a `@requires`
+//! the compiler cannot read; one whose list also repeats a signal is
+//! reported for that instead. Two rows that assign one input combination
 //! different outputs describe a circuit that cannot exist, so that is an
 //! error too. A table merely short of rows still asserts everything its
 //! rows say, and a four-input table is sixteen rows an author part way
 //! through should not be blocked on, so that is a warning — as is a row
-//! that repeats one already written and agrees with it, where the repair
-//! is to delete a line and nothing else moves.
+//! that repeats one already written and agrees with it, where the repair is
+//! to delete a line and nothing else moves.
 //!
 //! Nothing evaluates a truth table yet — the tick simulator is unbuilt
 //! — and none of this waits on it. Which of
@@ -37,9 +47,10 @@
 //! `children.asserts` — so a table under a `level` is checked against its
 //! signal names today and would be the one place a shape went unreported.
 
-use std::collections::BTreeMap;
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap};
 
-use crate::ast::TruthRow;
+use crate::ast::{DottedRef, TruthRow};
 use crate::error::Span;
 use crate::intent::{AssertIr, IntentModule, Member, MemberBody};
 use crate::prose::and_list;
@@ -54,6 +65,15 @@ use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, Diagnost
 /// twenty-input table from building a million strings to describe a
 /// one-row mistake.
 const MISSING_SAMPLE: usize = 4;
+
+/// How many of a repeated signal's positions an
+/// `E_TRUTH_TABLE_DUPLICATE_INPUT` names before it counts the rest.
+///
+/// The positions are there to find the columns in the list, and a few do
+/// that. The cap is what keeps a signal listed two thousand times from
+/// putting kilobytes into one sentence, the same reason
+/// [`MISSING_SAMPLE`] caps the combinations a coverage finding names.
+const POSITION_SAMPLE: usize = 4;
 
 /// Past this many inputs the number of combinations is written `2^n`.
 ///
@@ -96,6 +116,16 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     else {
         return;
     };
+    let repeated = repeated_inputs(inputs, span);
+    if !repeated.is_empty() {
+        // And nothing else: every other finding reads the rows against an
+        // input list that is wrong, so the rest of the table is left until
+        // the list names each signal once.
+        for finding in repeated {
+            sink.push(finding);
+        }
+        return;
+    }
     let arity = u32::try_from(inputs.len()).expect("an input list is bounded by the source length");
     // Every pattern is as wide as the input list: the parser refuses a row
     // of any other width, and lowering copies rows as they are. The rest of
@@ -206,6 +236,65 @@ fn check_table(assertion: &AssertIr, sink: &mut DiagnosticSink) {
     {
         sink.push(finding);
     }
+}
+
+/// One `E_TRUTH_TABLE_DUPLICATE_INPUT` per signal the input list names
+/// more than once, in the order the signals first appear.
+///
+/// On the whole `assert`, since the input list carries no span of its
+/// own; the sentence names the signal and the positions it holds, which
+/// is what the author looks for in the list. Past [`POSITION_SAMPLE`]
+/// positions the rest are a count.
+///
+/// One pass over the list. Each signal's positions sit in a vector in
+/// the order the signals first appear, and a map from the signal to its
+/// slot finds them in one lookup, so the cost is linear in the length of
+/// the list rather than in its square.
+fn repeated_inputs(inputs: &[DottedRef], span: &Span) -> Vec<Diagnostic> {
+    let mut positions: Vec<(&DottedRef, Vec<usize>)> = Vec::new();
+    let mut slots: HashMap<&DottedRef, usize> = HashMap::with_capacity(inputs.len());
+    for (index, input) in inputs.iter().enumerate() {
+        match slots.entry(input) {
+            Entry::Occupied(slot) => positions[*slot.get()].1.push(index + 1),
+            Entry::Vacant(slot) => {
+                slot.insert(positions.len());
+                positions.push((input, vec![index + 1]));
+            }
+        }
+    }
+    positions
+        .into_iter()
+        .filter(|(_, at)| at.len() > 1)
+        .map(|(name, at)| {
+            let shown: Vec<String> = at
+                .iter()
+                .take(POSITION_SAMPLE)
+                .map(ToString::to_string)
+                .collect();
+            let listed = match at.len().checked_sub(POSITION_SAMPLE) {
+                Some(more) if more > 0 => format!("{}, and {more} more", shown.join(", ")),
+                _ => and_list(&shown).expect("a repeated input holds two positions or more"),
+            };
+            Diagnostic {
+                code: DiagnosticCode::TruthTableDuplicateInput,
+                span: span.clone(),
+                primary: format!(
+                    "this `assert truth` lists `{name}` as inputs {listed}, and one signal is \
+                     one input, so the table has {columns} columns for it and its rows \
+                     describe combinations the circuit does not have",
+                    columns = at.len(),
+                ),
+                notes: vec![DiagnosticNote {
+                    span: None,
+                    message: format!(
+                        "Fix: list `{name}` once and drop its other columns from every row, or \
+                         name the signal you meant in its place"
+                    ),
+                }],
+                data: None,
+            }
+        })
+        .collect()
 }
 
 /// Whether two patterns assign a combination in common.

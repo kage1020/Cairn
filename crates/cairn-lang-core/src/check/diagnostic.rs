@@ -634,8 +634,24 @@ pub enum DiagnosticCode {
     /// verify anything. That is the argument `E_INVALID_REQUIRES` makes
     /// for a `@requires` the compiler cannot read, and the reason this is
     /// an error rather than a note: in a diff an empty table reads exactly
-    /// like one that passes.
+    /// like one that passes. A table whose input list repeats a signal is
+    /// reported as [`Self::TruthTableDuplicateInput`] instead.
     TruthTableEmpty,
+    /// An `assert truth(...)` lists one signal as two or more of its
+    /// inputs.
+    ///
+    /// One signal is one input, so the table has more than one column for
+    /// it, and its rows describe combinations the circuit does not have.
+    /// The coverage finding would count combinations that give those
+    /// columns different values among the ones missing, and a row written
+    /// to answer it would state an output for a combination that cannot
+    /// occur. Refused rather than read as one input, which would give the
+    /// rows a meaning the author did not write — the shape
+    /// `E_DUPLICATE_ARG` refuses for a `key=`. No other truth-table
+    /// finding is raised beside it: every other one reads the rows against
+    /// an input list that is wrong, so the rest of the table is left until
+    /// the list names each signal once.
+    TruthTableDuplicateInput,
     /// Two rows of one `assert truth(...)` assign the same inputs
     /// different outputs. No circuit satisfies both, so whatever the table
     /// was written to verify, it cannot. Reported on the later row with a
@@ -764,6 +780,7 @@ impl DiagnosticCode {
             Self::ConnectArity => "E_CONNECT_ARITY",
             Self::PhaseConflict => "W_PHASE_CONFLICT",
             Self::TruthTableEmpty => "E_TRUTH_TABLE_EMPTY",
+            Self::TruthTableDuplicateInput => "E_TRUTH_TABLE_DUPLICATE_INPUT",
             Self::TruthTableConflict => "E_TRUTH_TABLE_CONFLICT",
             Self::TruthTableDuplicateRow => "W_TRUTH_TABLE_DUPLICATE_ROW",
             Self::TruthTablePartial => "W_TRUTH_TABLE_PARTIAL",
@@ -870,6 +887,7 @@ impl DiagnosticCode {
             | Self::DuplicateHeader
             | Self::UnsupportedNesting
             | Self::TruthTableEmpty
+            | Self::TruthTableDuplicateInput
             | Self::IntendedTargetCap
             | Self::TruthTableConflict => Severity::Error,
             Self::InvalidCairnVersion
@@ -1557,6 +1575,7 @@ mod tests {
                 "E_THEME_SELECTOR_UNMATCHED",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",
@@ -1632,6 +1651,7 @@ mod tests {
                 "E_PARSE",
                 "E_THEME_VARIANT_MISSING",
                 "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_DUPLICATE_INPUT",
                 "E_TRUTH_TABLE_EMPTY",
                 "E_TYPE_MISMATCH_LABEL",
                 "E_TYPE_MISMATCH_SIZE",

@@ -224,6 +224,13 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
+        "E_TRUTH_TABLE_DUPLICATE_INPUT",
+        Source::WithPrologue(
+            "struct s size=5x5\n  floor mat_slot=floor\n\
+             \x20\x20assert truth(sig.a, sig.a -> sig.o) { 00 -> 0; 11 -> 1 }\n",
+        ),
+    ),
+    (
         "E_TRUTH_TABLE_EMPTY",
         Source::WithPrologue(
             "struct s size=5x5\n  floor mat_slot=floor\n\

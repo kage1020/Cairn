@@ -2,18 +2,26 @@
 //!
 //! Row-level checks live in the parser, where the input arity is in hand:
 //! a row's digits and its width are refused there (`parse_truth_rows.rs`).
-//! What no row can see is the table around it — that it has no rows at
-//! all, that another row already assigned the same inputs, or that the
-//! combinations it leaves out are the ones a bug would hide in. All three
-//! read, in a diff, exactly like a table that verifies something.
+//! What no row can see is the header read against itself, and the table
+//! around it. The header can list one signal twice, which is a fault in
+//! the header: the table then has more than one column for one input, and
+//! its rows describe combinations the circuit does not have. The table can
+//! have no rows at all, a row can assign inputs another row already did,
+//! or the combinations it leaves out can be the ones a bug would hide in.
+//! Those three read, in a diff, exactly like a table that verifies
+//! something.
 //!
-//! Severity follows what is provable. A table with no rows can never
-//! assert anything, whatever is written later around it, so it is an
-//! error. A table missing rows asserts everything its rows say — the
-//! finding is about coverage, not about the statement being void — so it
-//! is a warning. Two rows that assign the same inputs different outputs
-//! describe a circuit that cannot exist, so that is an error again, while
-//! two that agree cost nothing but the line.
+//! Severity follows what is provable. A repeated input is an error, since
+//! the header alone shows the table is written for combinations the
+//! circuit does not have, and it is the only finding its table gets: every
+//! other one reads the rows against that list. A table with no rows can
+//! never assert anything, whatever is written around it, so it is an
+//! error — reported as the repeated input when its list has one. A table
+//! missing rows asserts everything its rows say — the finding is about
+//! coverage, not about the statement being void — so it is a warning. Two
+//! rows that assign the same inputs different outputs describe a circuit
+//! that cannot exist, so that is an error again, while two that agree cost
+//! nothing but the line.
 
 use cairn_lang_core::Diagnostic;
 use cairn_lang_core::check::{DiagnosticData, Severity};
@@ -366,6 +374,153 @@ fn the_total_becomes_a_power_before_it_stops_fitting_an_integer() {
         assert!(
             text.contains(expected) && !text.contains(absent),
             "{arity} inputs should have their total written as {expected}: {text:?}",
+        );
+    }
+}
+
+// -- the input list -------------------------------------------------------
+
+/// A signal listed twice is one input written twice, so the table has two
+/// columns for it and its rows describe combinations the circuit does not
+/// have. The table is refused for the list, and the coverage finding that
+/// would ask for `01` and `10` is not raised beside it.
+#[test]
+fn a_signal_listed_twice_is_refused_and_not_asked_for_impossible_rows() {
+    let found = only(&table("sig.a, sig.a", "00 -> 0; 11 -> 1"));
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_DUPLICATE_INPUT");
+    assert_eq!(found.severity(), Severity::Error);
+    assert_eq!(
+        found.primary,
+        "this `assert truth` lists `sig.a` as inputs 1 and 2, and one signal is one input, so \
+         the table has 2 columns for it and its rows describe combinations the circuit does not \
+         have",
+    );
+    assert_eq!(
+        found.notes[0].message,
+        "Fix: list `sig.a` once and drop its other columns from every row, or name the signal \
+         you meant in its place",
+    );
+}
+
+/// A table whose rows raise nothing when its columns are read as separate
+/// inputs: `-0` and `-1` share no combination, and between them they
+/// assign all four. Its meaning still depends on which of the two columns
+/// is read as `sig.a`, so it is refused for the list like any other.
+#[test]
+fn a_repeated_input_is_refused_where_its_rows_raise_nothing() {
+    let source = table("sig.a, sig.a", "-0 -> 0; -1 -> 1");
+    assert!(
+        codes(&table("sig.a, sig.b", "-0 -> 0; -1 -> 1")).is_empty(),
+        "read as two inputs, these rows are complete and agree",
+    );
+    assert_eq!(only(&source).code.as_str(), "E_TRUTH_TABLE_DUPLICATE_INPUT");
+}
+
+/// Each repeated signal is its own finding, in the order the signals
+/// first appear, and a table with no rows is refused for its list alone.
+#[test]
+fn each_repeated_signal_is_reported_once_in_list_order() {
+    let found = diagnose(&table("sig.b, sig.a, sig.b, sig.a, sig.a", ""));
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        [
+            "E_TRUTH_TABLE_DUPLICATE_INPUT",
+            "E_TRUTH_TABLE_DUPLICATE_INPUT"
+        ],
+    );
+    assert!(
+        found[0].primary.contains("`sig.b` as inputs 1 and 3"),
+        "{:?}",
+        found[0]
+    );
+    assert!(
+        found[1].primary.contains("`sig.a` as inputs 2, 4, and 5"),
+        "{:?}",
+        found[1]
+    );
+}
+
+/// The input list carries no span of its own, so the finding stands on
+/// the whole statement, and the sentence names the positions instead.
+/// Nothing else holds the span: the finding is the only one its table
+/// gets, so no sibling's order would notice it moving.
+#[test]
+fn a_repeated_input_stands_on_the_whole_statement() {
+    let source = table("sig.a, sig.a", "00 -> 0; 11 -> 1");
+    let found = only(&source);
+    assert_eq!(
+        underlined(&source, &found.span),
+        "assert truth(sig.a, sig.a -> sig.o) { 00 -> 0; 11 -> 1 }",
+        "the finding stands on the whole statement, since the input list has no span",
+    );
+}
+
+/// Every other finding reads the rows against the input list, so a table
+/// that repeats a signal gets the repeat and nothing else, whatever its
+/// rows: a conflict on a combination the circuit does see, no rows at all,
+/// and coverage short of reachable combinations as well as impossible
+/// ones. Each table raises its own code once the list is repaired, which
+/// the second half asserts so the first is not passing on a table that was
+/// quiet anyway.
+#[test]
+fn a_repeated_input_is_the_only_finding_its_table_gets() {
+    for (inputs, rows, repaired_inputs, repaired_rows, deferred) in [
+        (
+            "sig.a, sig.a",
+            "00 -> 0; 00 -> 1",
+            "sig.a",
+            "0 -> 0; 0 -> 1",
+            "E_TRUTH_TABLE_CONFLICT",
+        ),
+        ("sig.a, sig.a", "", "sig.a", "", "E_TRUTH_TABLE_EMPTY"),
+        (
+            "sig.a, sig.a, sig.b",
+            "000 -> 0",
+            "sig.a, sig.b",
+            "00 -> 0",
+            "W_TRUTH_TABLE_PARTIAL",
+        ),
+    ] {
+        let found = only(&table(inputs, rows));
+        assert_eq!(
+            found.code.as_str(),
+            "E_TRUTH_TABLE_DUPLICATE_INPUT",
+            "`{inputs}` over `{{ {rows} }}`",
+        );
+        assert!(
+            codes(&table(repaired_inputs, repaired_rows)).contains(&deferred),
+            "`{repaired_inputs}` over `{{ {repaired_rows} }}` should raise {deferred}",
+        );
+    }
+}
+
+/// A signal listed many times names its first few positions and counts
+/// the rest, the shape the coverage finding's sample takes, so a long
+/// list does not become a long sentence. The column count stays whole.
+#[test]
+fn a_repeated_input_names_four_positions_and_counts_the_rest() {
+    for (times, listed) in [
+        (4, "inputs 1, 2, 3, and 4,"),
+        (5, "inputs 1, 2, 3, 4, and 1 more,"),
+        (2000, "inputs 1, 2, 3, 4, and 1996 more,"),
+    ] {
+        let found = only(&table(&vec!["sig.a"; times].join(", "), ""));
+        assert!(
+            found.primary.contains(listed),
+            "{times} positions: {:?}",
+            found.primary,
+        );
+        assert!(
+            found
+                .primary
+                .contains(&format!("the table has {times} columns for it")),
+            "{times} positions: {:?}",
+            found.primary,
+        );
+        assert!(
+            found.primary.len() < 300,
+            "{times} positions: the sentence should not grow with the list, got {} bytes",
+            found.primary.len(),
         );
     }
 }

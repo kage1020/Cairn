@@ -331,12 +331,13 @@ fn depth_6_each_independent_chain_reports_its_own_root_cause() {
 }
 
 #[test]
-fn depth_7_the_chain_length_the_message_quotes_is_the_real_one() {
-    // The message translates the internal frame budget into bindings, which
-    // is the unit the author counts in. That translation is a factor of two
-    // — an operand descent plus the referenced binding's own expression —
-    // and nothing else pins it, so a change to the recursion shape would
-    // leave the message quoting a number that matches nothing on screen.
+fn depth_7_a_chain_of_one_operator_bindings_reaches_the_limit_where_the_doc_says() {
+    // `MAX_LOWERING_DEPTH`'s doc translates the internal frame budget into
+    // bindings, the unit the author counts in: a binding of one operator
+    // costs two frames — an operand descent plus the referenced binding's
+    // own expression — so such a chain reaches the bound at half of it.
+    // Nothing else pins that factor, so a change to the recursion shape
+    // would leave the doc describing a limit no file meets.
     let quoted = MAX_LOWERING_DEPTH / 2;
     let tmp = TempDir::new().expect("tempdir");
 
@@ -352,12 +353,17 @@ fn depth_7_the_chain_length_the_message_quotes_is_the_real_one() {
             path.to_str().unwrap(),
             "--experimental-logic-synth",
         ]);
-        let refused = out.status.code() == Some(1);
+        // Both legs name the exit code they want, as the tests above do. A
+        // child that overflowed its stack has a code of `None` or
+        // `Some(-1073741571)` (the table at the top of this file), which is
+        // neither, so it cannot pass for a chain that lowered.
+        let code = out.status.code();
+        let want = if want_refusal { Some(1) } else { Some(0) };
         assert_eq!(
-            refused,
-            want_refusal,
-            "a reverse chain of {stages} bindings should {} — the message promises \
-             about {quoted}; stderr={}",
+            code,
+            want,
+            "a reverse chain of {stages} bindings should {} — the doc puts the limit \
+             at {quoted}; got {code:?} (see the table at the top of this file)\nstderr={}",
             if want_refusal { "be refused" } else { "lower" },
             String::from_utf8_lossy(&out.stderr),
         );
