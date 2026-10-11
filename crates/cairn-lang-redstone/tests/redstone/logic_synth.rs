@@ -1,7 +1,5 @@
-//! `synthesize`: each scope's Logic IR, with gates in topological order
-//! whatever order the source declares them in, common subexpressions
-//! shared, and one diagnostic per root cause for an unbound, duplicate,
-//! cyclic or unused signal.
+//! `synthesize`: gates in topological order, common subexpressions shared, and one finding per
+//! root cause.
 
 use std::fmt::Write as _;
 
@@ -189,14 +187,8 @@ struct s size=1x1
     );
 }
 
-/// Signals reach synthesis from a body `check::nesting` reports as
-/// unsupported, which is why `E_UNSUPPORTED_NESTING` says the members
-/// produce no *blocks* rather than that they are gone.
-///
-/// `collect_member` recurses through every member, not only `level`, so
-/// this holds for any parent. The claim lives in that diagnostic's note,
-/// so something outside `cairn-lang-core` has to hold it — the note
-/// would otherwise be prose no test can contradict.
+/// `E_UNSUPPORTED_NESTING`'s note says these members produce no blocks, not that they are gone;
+/// this holds the note to that.
 #[test]
 fn ac6b_signals_reach_synthesis_from_a_body_that_produces_no_blocks() {
     let source = "@cairn 2026.06
@@ -284,9 +276,6 @@ struct s size=1x1
 
 #[test]
 fn commutative_cse_shares_a_gate_when_operand_order_flips() {
-    // `sig.a or sig.b` and `sig.b or sig.a` denote the same
-    // combinational function; CSE must recognise it or downstream
-    // placement pays for a redundant gate.
     let source = "\
 @cairn 2026.06
 
@@ -317,7 +306,6 @@ struct s size=1x1
 
 #[test]
 fn and_gate_lowers_with_two_inputs() {
-    // The operand shape `And2 { a, b }` is asserted too, so a vec-based encoding fails here.
     let source = "\
 @cairn 2026.06
 
@@ -345,7 +333,6 @@ struct s size=1x1
 
 #[test]
 fn not_gate_lowers_with_one_input() {
-    // The arity-1 encoding is asserted at the type layer too.
     let source = "\
 @cairn 2026.06
 
@@ -371,10 +358,6 @@ struct s size=1x1
 
 #[test]
 fn topologically_ordered_multi_gate_dag() {
-    // `sig.out = sig.mid and sig.tail` where `mid` and `tail` are
-    // both driven by earlier `logic` lines. Every gate's operands must
-    // reference an earlier index or an input; the DAG is a strict
-    // topological order regardless of source declaration order.
     let source = "\
 @cairn 2026.06
 
@@ -418,10 +401,6 @@ struct s size=1x1
 
 #[test]
 fn cascade_suppression_reports_single_root_cause_for_shared_unbound() {
-    // `logic sig.x = sig.undef` and `door opened_by=sig.undef` both
-    // reference the missing signal. After cascade suppression the author
-    // sees exactly one E_LOGIC_UNBOUND_SIGNAL naming `sig.undef` — not
-    // one per consumer.
     let source = "\
 @cairn 2026.06
 
@@ -441,7 +420,6 @@ struct s size=1x1
 
 #[test]
 fn actuator_side_unbound_signal_flags_the_driver_arg() {
-    // The actuator-only path: no `logic` line names the signal at all.
     let source = "\
 @cairn 2026.06
 
@@ -470,10 +448,6 @@ struct s size=1x1
 
 #[test]
 fn sensor_and_logic_lhs_collision_reports_e_logic_multiple_drivers() {
-    // a sensor already drives sig.step; a `logic sig.step = ...`
-    // line trying to redefine it collides. The finding must fire the same
-    // E_LOGIC_MULTIPLE_DRIVERS code with a `sensor emits this signal
-    // here` note, not silently drop the `logic` line.
     let source = "\
 @cairn 2026.06
 
@@ -502,9 +476,6 @@ struct s size=1x1
 
 #[test]
 fn self_referential_binding_reports_e_logic_cycle() {
-    // `logic sig.a = sig.a` — the shortest cycle. Distinct code
-    // path from the mutual-recursion test (`resolve_ref` sees `dr` in
-    // `in_progress` immediately, without a second `lower_binding` call).
     let source = "\
 @cairn 2026.06
 
@@ -523,9 +494,6 @@ struct s size=1x1
 
 #[test]
 fn multiple_independent_unbound_refs_in_one_rhs_all_reported() {
-    // `sig.undef1 or sig.undef2` — both operands are independent
-    // root causes. A short-circuit on the first would leave the second
-    // hidden until the author fixed the first and re-ran.
     let source = "\
 @cairn 2026.06
 
@@ -551,10 +519,7 @@ struct s size=1x1
     assert!(primaries.contains("sig.undef2"), "sig.undef2 must be named");
 }
 
-/// A name an `assert` uses unbound is reported once, at the first
-/// `assert` in the file that uses it — not at one nested under a `level`
-/// further down, which the walk over members reaches before the scope's
-/// own `assert`s.
+/// The walk reaches the `level`-nested `assert` first, though it is written below.
 #[test]
 fn an_unbound_assert_signal_is_reported_at_its_first_use_in_the_file() {
     let source = "\
@@ -585,16 +550,12 @@ struct s size=5x5
     );
 }
 
-/// The `Fix:` footer every `E_LOGIC_NESTING_TOO_DEEP` ends with.
 const NESTING_FIX: &str = "Fix: declare each `logic` binding after the ones it references. A \
                            binding is lowered by descending into whatever it names, so a chain \
                            written in reverse nests each binding's expression inside the one \
                            that references it, while the same graph in dependency order nests \
                            none.";
 
-/// One `E_LOGIC_NESTING_TOO_DEEP` as the author reads it: the line it
-/// stands on, its primary, each note that carries a span as its line and
-/// message, and the footers in order.
 #[derive(Debug)]
 struct NestingRefusal {
     line: usize,
@@ -603,8 +564,6 @@ struct NestingRefusal {
     footers: Vec<String>,
 }
 
-/// Every `E_LOGIC_NESTING_TOO_DEEP` a source raises, in the order
-/// `synthesize` returns them.
 fn nesting_refusals(source: &str) -> Vec<NestingRefusal> {
     synth_source(source)
         .diagnostics
@@ -632,12 +591,8 @@ fn nesting_refusals(source: &str) -> Vec<NestingRefusal> {
         .collect()
 }
 
-/// A scope holding one unrelated `logic` line on line 3 and then a chain
-/// of `stages` bindings of `ands` `and`s each, declared in reverse
-/// dependency order from line 4: `sig.x1` references `sig.x2` on the line
-/// below it, and so on down to one that references only the plate. The
-/// unrelated line makes the scope's bindings and the refused chain two
-/// different lists, so a count or an anchor read from the wrong one shows.
+/// `stages` bindings of `ands` `and`s each, in reverse dependency order from line 4, after an
+/// unrelated binding on line 3 that the chain's count and anchor must leave out.
 fn reverse_chain_after_an_unrelated_binding(stages: usize, ands: usize) -> String {
     let tail = " and sig.a".repeat(ands);
     let mut source = String::from(
@@ -653,12 +608,6 @@ fn reverse_chain_after_an_unrelated_binding(stages: usize, ands: usize) -> Strin
     source
 }
 
-/// `E_LOGIC_NESTING_TOO_DEEP` counts the bindings the lowering was inside
-/// and stands on the outermost, the one whose reference to a binding
-/// declared after it started the descent. Three bindings of 90 `and`s
-/// each, in reverse dependency order, so the chain is shorter than
-/// `CHAIN_NOTES + 1` and every binding after the first gets a note; a
-/// longer chain ends in a count instead, which the test below pins.
 #[test]
 fn a_nesting_refusal_counts_its_chain_and_stands_on_where_it_starts() {
     let found = nesting_refusals(&reverse_chain_after_an_unrelated_binding(3, 90));
@@ -687,11 +636,6 @@ fn a_nesting_refusal_counts_its_chain_and_stands_on_where_it_starts() {
     assert_eq!(found[0].footers, [NESTING_FIX]);
 }
 
-/// Past `CHAIN_NOTES` bindings after the first, the rest of the chain is a
-/// count in a footer rather than a note each. The three lengths sit on
-/// both sides of where the count starts: four bindings of 84 `and`s leave
-/// none over, five of 55 leave one, and six of 50 leave two, so the
-/// singular and the plural both render.
 #[test]
 fn a_nesting_refusal_notes_three_bindings_and_counts_the_rest() {
     for (stages, ands, more) in [
@@ -734,11 +678,6 @@ fn a_nesting_refusal_notes_three_bindings_and_counts_the_rest() {
     }
 }
 
-/// Two reverse chains that start from one binding are two misorderings,
-/// and each gets its finding: `sig.top` references both `sig.p1` and
-/// `sig.q1`, and each chain is five bindings of 63 `and`s, so the lowering
-/// stops once in `sig.p4` and once in `sig.q4`. Both stand on `sig.top`,
-/// where the reordering starts, and each one's notes name its own branch.
 #[test]
 fn two_chains_from_one_binding_are_two_nesting_refusals() {
     let tail = " and sig.a".repeat(63);

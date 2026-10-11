@@ -1,12 +1,5 @@
-//! The synth walk comes out in the order the file reads.
-//!
-//! `LogicIr`'s node list reads top-to-bottom the way the source does, and
-//! `ScopedLogicIr` holds its scopes in source order across the whole
-//! module, although `IntentModule` files scopes into three vectors by
-//! kind and a body into a members vector and a logic vector. The order is
-//! what `E_LOGIC_MULTIPLE_DRIVERS` leans on to report at the redefinition
-//! and note "first declared here" at the original, including for a
-//! `level`-nested binding written below a top-level one.
+//! The synth walk follows the file's order, not the vectors `IntentModule` files scopes into.
+//! Each test has a mirror, so no fixed-order rule passes both.
 
 use cairn_lang_redstone::{DiagnosticCode, ScopeKind, SignalRef};
 
@@ -52,15 +45,12 @@ fn a_nested_binding_below_a_top_level_one_is_the_redefinition() {
             line_of(NESTED_AFTER_TOP_LEVEL, d.span.start),
         ),
         (6, 8),
-        "the binding on line 6 is the first declaration and the one on \
-         line 8, inside the `level`, is the redefinition",
+        "line 6 is the first declaration and line 8 the redefinition",
     );
 }
 
 #[test]
 fn a_nested_binding_above_a_top_level_one_is_the_first_declaration() {
-    // The mirror. Without it the test above would also pass under a rule
-    // that always blames whichever binding is nested.
     let source = "\
 @cairn 2026.06
 
@@ -93,10 +83,7 @@ struct s size=1x1
 
 #[test]
 fn permuting_a_nested_and_a_top_level_binding_swaps_which_one_is_reported() {
-    // Two independent signals, so nothing is a redefinition and the only
-    // thing left to observe is the node order. `sig.x` is written first at
-    // the top level and `sig.y` second inside a `level`; the dump must
-    // agree with the file rather than with the nesting.
+    // No redefinition here, so only the node order is observed.
     let source = "\
 @cairn 2026.06
 
@@ -111,9 +98,6 @@ struct s size=1x1
 ";
     let out = synth_source(source);
     let entry = out.scoped.scopes.first().expect("one scope");
-    // `signal_defs` is the map documented as reading "top-to-bottom the
-    // same way the source does", and its values are the node indices, so
-    // it pins both the listing order and the numbering at once.
     let defs: Vec<(String, SignalRef)> = entry
         .ir
         .signal_defs
@@ -158,14 +142,12 @@ struct tower size=1x1
     assert_eq!(
         order,
         [(ScopeKind::Def, "hut"), (ScopeKind::Struct, "tower")],
-        "the walk follows the file, not the three vectors the module files \
-         scopes into",
+        "the walk follows the file",
     );
 }
 
 #[test]
 fn a_struct_written_above_a_def_is_still_walked_first() {
-    // The mirror of the test above, which alone would pass under "always structs last".
     let source = "\
 @cairn 2026.06
 
@@ -194,9 +176,6 @@ def hut size=1x1:
 
 #[test]
 fn findings_from_two_scopes_come_out_in_line_order() {
-    // The dump order is one reader; the diagnostics are the other, and they
-    // are what an author reads first. A `def` above a `struct` must have
-    // its finding reported above the struct's.
     let source = "\
 @cairn 2026.06
 
@@ -217,20 +196,13 @@ struct tower size=1x1
     assert_eq!(
         lines,
         [5, 9],
-        "the def's unused-signal warning is on line 5 and the struct's on \
-         line 9: {:?}",
+        "one finding per scope, in line order: {:?}",
         out.diagnostics,
     );
 }
 
-/// A module with all three scope kinds, written in an order none of the three vectors
-/// reproduces: `def`, then `site`, then `struct`. A walk over the vectors in turn emits struct,
-/// then def, then site, so this order puts every pair the wrong way round at once.
-///
-/// Each scope carries exactly one finding, on a line of its own. The two
-/// body scopes leave a signal nothing consumes; the site names one nothing
-/// declares, which is all a site body can do — it has no sensor to bind
-/// one.
+/// One scope of each kind, in an order no walk over the per-kind vectors reproduces. The site's
+/// `sig.q` is unbound on purpose: a site body has no sensor to bind it.
 const DEF_SITE_STRUCT: &str = concat!(
     "@cairn 2026.06
 ",
@@ -266,7 +238,6 @@ const DEF_SITE_STRUCT: &str = concat!(
 ",
 );
 
-/// The mirror: the same three scopes, reversed.
 const STRUCT_SITE_DEF: &str = concat!(
     "@cairn 2026.06
 ",
@@ -315,11 +286,6 @@ fn finding_scopes(source: &str) -> Vec<String> {
 
 #[test]
 fn three_scope_kinds_are_walked_in_the_order_the_file_writes_them() {
-    // A `site` body carries no sensor, so its `logic` line can only name
-    // an unbound signal — which is exactly what makes it observable here:
-    // one finding per scope, and the site's has to land between the other
-    // two. The scope list cannot show this, because a scope whose
-    // collection failed is elided from it by design.
     assert_eq!(
         finding_scopes(DEF_SITE_STRUCT),
         ["def=hut@8", "site=plaza@12", "struct=tower@16"],
@@ -328,8 +294,6 @@ fn three_scope_kinds_are_walked_in_the_order_the_file_writes_them() {
 
 #[test]
 fn reversing_the_three_scopes_reverses_the_walk() {
-    // Without the mirror, a rule that happened to emit def, then site,
-    // then struct would satisfy the test above.
     assert_eq!(
         finding_scopes(STRUCT_SITE_DEF),
         ["struct=tower@8", "site=plaza@12", "def=hut@16"],

@@ -1,8 +1,5 @@
-//! `compile_placement`, stage 1 of the pipeline `spec/redstone`
-//! "Place-and-route": cell coordinates inside each scope's
-//! `circuit region=` reservation, `E_ROUTE_CONGESTION` for a netlist the
-//! reservation cannot hold, and `E_NO_CIRCUIT_REGION` for a scope with no
-//! usable reservation.
+//! `compile_placement`: cell coordinates inside each scope's `circuit region=` reservation, or
+//! `E_ROUTE_CONGESTION` / `E_NO_CIRCUIT_REGION` when the reservation cannot hold them.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
@@ -11,12 +8,6 @@ use cairn_lang_redstone::{DiagnosticCode, EditionCell, ScopedEditionNetlistIr, c
 
 use crate::common::{edition_netlist_from_source, load_example};
 
-/// `examples/redstone-door.crn` compiled for Java places its lone
-/// `JavaRepeaterOr` cell one column in from the pad column of its
-/// `circuit region=floor void=2` reservation, and the reservation
-/// copies the enclosing struct's `size=7x5` footprint. `wire_length`
-/// and `local_delay_ticks` are absent at `--stage placement`, which
-/// runs neither routing nor delay insertion.
 #[test]
 fn redstone_door_java_places_or_cell_beside_the_pad_column() {
     let source = load_example("redstone-door.crn");
@@ -56,9 +47,6 @@ fn redstone_door_java_places_or_cell_beside_the_pad_column() {
     );
 }
 
-/// The same example compiled for Bedrock places its `BedrockTorchOr`
-/// cell at the same coordinate against the same reservation; only the
-/// `cell` tag and the `edition` field differ from the Java layout.
 #[test]
 fn redstone_door_bedrock_matches_java_layout_apart_from_cell_tag() {
     let source = load_example("redstone-door.crn");
@@ -89,9 +77,6 @@ fn redstone_door_bedrock_matches_java_layout_apart_from_cell_tag() {
     }
 }
 
-/// A scope whose logic produces three distinct cells lays them
-/// out at `x = 1, 3, 5` in the same topological order the Netlist IR
-/// carried through, on the one row at `y = 0`, `z = 1` (1D placement).
 #[test]
 fn multi_cell_scope_places_in_topological_order() {
     let source = r"
@@ -128,10 +113,6 @@ struct sim size=7x5
         .expect("sim scope")
         .ir;
     assert_eq!(ir.cells.len(), 3);
-    // `1 + 2i`: one column in from the pad column, one clear column
-    // between each pair, on the row one row in from the near edge.
-    // Spelled out rather than computed, so the convention is written
-    // somewhere other than in the pass that implements it.
     for (i, (cell, expected)) in ir.cells.iter().zip([1u32, 3, 5]).enumerate() {
         assert_eq!(
             cell.coord.x, expected,
@@ -142,17 +123,9 @@ struct sim size=7x5
     }
 }
 
-/// A scope whose synthesised netlist needs more area than its
-/// reservation offers fires `E_ROUTE_CONGESTION`, anchors the primary
-/// span at the `circuit region=` line, quotes the ratio in the primary
-/// prose per `spec/redstone` "Place-and-route", carries the three-fix
-/// footer, and drops the failed scope so a downstream pass cannot consume
-/// a partially-placed layout.
 #[test]
 fn congestion_fires_route_congestion_and_elides_scope() {
-    // 3 cells × 4 blocks each = 12 required blocks vs 3 × 3 × 1 = 9 reserved blocks: ~1.3× over
-    // budget, well under the ~3.2× the spec example shows, leaving headroom for a footprint
-    // change.
+    // 12 blocks of cells in 9 reserved: about 1.3 times over budget.
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -202,10 +175,6 @@ struct tiny size=3x3
         "primary should quote the region footprint, got {:?}",
         d.primary,
     );
-    // The primary span must anchor to the `circuit region=` line so an
-    // LSP quick-fix or editor jump lands on the reservation declaration,
-    // not the first cell's source offset. The example diagnostic in
-    // `spec/redstone` "Place-and-route" anchors at the region.
     let source_at_span = &source[d.span.clone()];
     assert!(
         source_at_span.starts_with("circuit region="),
@@ -216,9 +185,7 @@ struct tiny size=3x3
         .iter()
         .find(|n| n.span.is_none())
         .expect("congestion has a fix footer");
-    // The canonical fix triple in `spec/redstone` "Place-and-route":
-    // increase `void`, enlarge region, or split the logic across several
-    // scopes, each with its own `circuit` line.
+    // The fix triple from `spec/redstone` "Place-and-route".
     for phrase in ["increase", "void", "enlarge", "region", "split", "circuit"] {
         assert!(
             footer.message.contains(phrase),
@@ -239,10 +206,6 @@ struct tiny size=3x3
     );
 }
 
-/// A scope with cells to place but no `circuit region=` line
-/// fires `E_NO_CIRCUIT_REGION`. Same elision policy as congestion: the failed
-/// scope drops out so a caller cannot mistake a partial layout for a
-/// finished one.
 #[test]
 fn missing_region_fires_no_circuit_region() {
     let source = r"
@@ -280,8 +243,6 @@ struct nomarker size=7x5
     );
 }
 
-/// A scope whose Edition Netlist IR was empty stays elided in
-/// the Placement IR (nothing to place, nothing to say).
 #[test]
 fn empty_edition_netlist_produces_no_placement_entry() {
     let module = parse("").expect("empty parses");
@@ -293,9 +254,6 @@ fn empty_edition_netlist_produces_no_placement_entry() {
     assert!(out.scoped.scopes.is_empty());
 }
 
-/// The JSON dump carries `edition`, a `region` object with the four reservation fields, a
-/// per-cell `coord` object, and the `stage` tag naming the pass that produced it. `wire_length`
-/// and `local_delay_ticks` are absent, since the phase this stage stamps carries neither.
 #[test]
 fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
     let source = load_example("redstone-door.crn");
@@ -331,11 +289,6 @@ fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
     );
 }
 
-/// A scope that DECLARED a `circuit region=` line but has no
-/// `size=WxH` header (here a `def`) cannot be placed:
-/// there is no reservation footprint to budget against, so the pass
-/// falls back to `E_NO_CIRCUIT_REGION`. The finding stands on that
-/// `circuit` line and names the missing `size=` as its one cause.
 #[test]
 fn missing_size_falls_through_to_no_circuit_region() {
     let source = r"
@@ -382,7 +335,6 @@ def gadget
     );
 }
 
-/// The `Fix:` footer of a diagnostic.
 fn fix_line(diagnostic: &cairn_lang_redstone::Diagnostic) -> &str {
     &diagnostic
         .notes
@@ -392,12 +344,6 @@ fn fix_line(diagnostic: &cairn_lang_redstone::Diagnostic) -> &str {
         .message
 }
 
-/// A scope that declared `circuit region=floor void=0` must
-/// not silently look like "no reservation declared". The parser accepts
-/// the line; the intent lift (`circuit_lines`) is what finds `void=0`
-/// reserves nothing. The `E_NO_CIRCUIT_REGION` finding stands on the
-/// `void=0` line, not on the first `logic` line, and names `void=0` as
-/// its one cause.
 #[test]
 fn void_zero_is_refused_on_its_circuit_line_for_that_reason() {
     let source = r"
@@ -432,11 +378,6 @@ struct simple size=5x5
     assert_eq!(fix_line(d), "Fix: set `void=` to an integer >= 1");
 }
 
-/// A scope whose Edition Netlist IR carries inputs and outputs but no cells (a
-/// `pressure_plate -> sig.a` bound straight to `door opened_by=sig.a`, which `spec/redstone`
-/// "Signal binding" permits) still has a layout: the wire from the sensor pad to the actuator
-/// pad. Dropping it would print `[]` at exit 0 from `--stage placement` onward for a scope the
-/// netlist stage describes in full.
 #[test]
 fn identity_wire_scope_places_its_actuator_pad() {
     let source = r"
@@ -479,11 +420,6 @@ struct wire size=5x5
     );
 }
 
-/// An identity wire in a one-column region: the sensor pad column
-/// `x = 0` and the actuator pad column `x = width - 1` are one column,
-/// so the two pads stand on one voxel. Placement refuses it in terms of
-/// width, whatever the depth, rather than passing it on for routing to
-/// blame on depth.
 #[test]
 fn an_identity_wire_in_a_one_column_region_is_refused_for_its_width() {
     for depth in [5, 50] {
@@ -554,8 +490,7 @@ struct s size=2x5
     );
 }
 
-/// One `circuit` line that reserves nothing, and the finding the pass
-/// makes of it.
+/// One `circuit` line that reserves nothing, and the finding the pass makes of it.
 struct RejectedLine {
     /// `size=` header of the scope, or empty for none.
     size: &'static str,
@@ -567,8 +502,7 @@ struct RejectedLine {
     fix: &'static str,
 }
 
-/// One case per `CircuitRegionDefect` variant, and a second `level`
-/// deep for the one that is about nesting.
+/// One case per `CircuitRegionDefect` variant, plus a second `level` for the nesting one.
 fn rejected_lines() -> [RejectedLine; 10] {
     let sized = " size=5x5";
     let nested = RejectedLine {
@@ -643,8 +577,7 @@ fn rejected_lines() -> [RejectedLine; 10] {
     ]
 }
 
-/// A two-sensor `or` gate on a door in `keyword s{size}`, then `lines`,
-/// each at the top level of the body.
+/// A two-sensor `or` gate on a door in `keyword s{size}`, then `lines` at the body's top level.
 fn gate_with_lines(keyword: &str, size: &str, lines: &str) -> String {
     format!(
         "
@@ -661,15 +594,7 @@ theme t:
     )
 }
 
-/// Every way a `circuit` line can reserve nothing, through the real
-/// pass: the finding stands on that line, its primary is the line's
-/// reason in the words of `CircuitRegionDefect`'s `Display`, and its
-/// `Fix:` line is the one repair for that reason.
-///
-/// Whole sentences rather than fragments, so a reason that reads
-/// ungrammatically once interpolated fails here. Each case runs under a
-/// `struct` and under a `def`, since the walk reads the two in separate
-/// loops.
+/// Each case runs under a `struct` and a `def`, since the walk reads the two in separate loops.
 #[test]
 fn each_circuit_line_that_reserves_nothing_is_refused_on_that_line_with_its_reason() {
     for case in &rejected_lines() {
@@ -704,8 +629,6 @@ fn each_circuit_line_that_reserves_nothing_is_refused_on_that_line_with_its_reas
     }
 }
 
-/// Two rejected lines in one scope: the finding stands on the first and
-/// names its reason, and says nothing of the second.
 #[test]
 fn the_first_of_two_rejected_lines_is_the_one_reported() {
     let source = gate_with_lines(
@@ -727,10 +650,7 @@ fn the_first_of_two_rejected_lines_is_the_one_reported() {
     );
 }
 
-/// A usable line beside a rejected one, in either order, places against
-/// the usable line with no finding from this pass: the usable line wins.
-/// Refusing the second line is `check`'s (`E_DUPLICATE_CIRCUIT`), as it
-/// is for two usable lines.
+/// Refusing the second line is `check`'s `E_DUPLICATE_CIRCUIT`.
 #[test]
 fn a_usable_circuit_line_beside_a_rejected_one_places_with_no_finding() {
     for lines in [
@@ -756,10 +676,6 @@ fn a_usable_circuit_line_beside_a_rejected_one_places_with_no_finding() {
     }
 }
 
-/// A scope with no `circuit` line it reads is told what is true for its
-/// kind: a `struct` or `def` to add one, and a `site`, which has no
-/// `size=` and whose rows the walk never reads, to move the redstone out
-/// rather than to add a header it cannot have.
 #[test]
 fn a_scope_with_no_circuit_line_is_told_what_its_kind_can_do() {
     let structure = gate_with_lines("struct", " size=5x5", "");
@@ -781,8 +697,7 @@ fn a_scope_with_no_circuit_line_is_told_what_its_kind_can_do() {
         "Fix: add a `circuit region=<label> void=<N>` line at the top level of the scope, with a non-empty label naming the reservation (`region=floor`, `region=basement`) and an integer `void=` >= 1. It reserves within the footprint the scope's `size=WxH` header declares",
     );
 
-    // `check` refuses every one of these rows in a `site` body; the
-    // placement pass is reached without it by a library caller.
+    // `check` refuses these rows in a `site`; a library caller reaches placement without it.
     let site = "
 theme t:
   slot wall -> @oak_planks
@@ -813,10 +728,7 @@ site s
     );
 }
 
-/// A scope with two `circuit region=` lines is refused by `check`
-/// (`E_DUPLICATE_CIRCUIT`). Placement, which a library caller can run
-/// without `check`, keeps the first and raises nothing of its own, so
-/// the finding is reported once, by the pass that names both lines.
+/// `check` refuses the second line; placement, run without it, keeps the first.
 #[test]
 fn duplicate_circuit_region_placement_keeps_the_first() {
     let source = r"
@@ -856,9 +768,6 @@ struct dup size=7x5
     assert_eq!(region.void, 2);
 }
 
-/// Two non-empty scopes are placed independently: each looks up
-/// its own reservation, one scope's failure does not poison the other,
-/// and per-scope contents do not bleed across.
 #[test]
 fn multiple_scopes_place_independently() {
     let source = r"
@@ -882,7 +791,6 @@ struct beta size=7x5
     let (edition_netlist, intent) = edition_netlist_from_source(source, Edition::Bedrock);
     let out = compile_placement(&edition_netlist, &intent);
 
-    // alpha placed cleanly.
     let alpha = out
         .scoped
         .scopes
@@ -892,7 +800,6 @@ struct beta size=7x5
     assert_eq!(alpha.ir.cells[0].cell, EditionCell::BedrockInverterTorch);
     assert_eq!(alpha.ir.cells[0].coord.x, 1);
 
-    // beta has cells but no circuit region → elided with a diagnostic.
     assert!(
         out.scoped.scopes.iter().all(|e| e.name != "beta"),
         "beta must elide because it declares no circuit region",
@@ -907,22 +814,11 @@ struct beta size=7x5
 }
 
 // ---- the row has to hold the cells (`spec/redstone` "Place-and-route") ----
-//
-// The layout stamps `x = 1 + 2i`, so the reservation's *width* is the resource the cells
-// consume, twice their count and one column more, and the area budget cannot see it. A
-// `size=2x8` scope reserving `void=3` offers 48 cells' worth of volume and a row two columns
-// long, so a three-cell netlist passes the volume test and overruns the row. Every later pass
-// reads these coordinates, and `output_pad` sits at `width - 1`, so a cell past the edge drives
-// a pad standing behind it.
+// Cells stand at `x = 1 + 2i`, so the row wants `2n + 1` columns, which volume cannot see.
 
 use std::fmt::Write as _;
 
-/// A scope whose netlist synthesises exactly `cells` cells inside a
-/// `size={width}x{depth}` footprint reserving `void`.
-///
-/// Each `logic` line becomes one cell: the chain is written in
-/// dependency order and every link takes the previous signal plus a
-/// second sensor, which is the shape that keeps one cell per line.
+/// A chain of exactly `cells` cells in a `size={width}x{depth}` footprint reserving `void`.
 fn source_with_cells(cells: usize, width: u32, depth: u32, void: u32) -> String {
     let mut source = String::from(
         "theme t:\n  \
@@ -952,8 +848,6 @@ fn placement_of(source: &str) -> cairn_lang_redstone::PlacementOutput {
     compile_placement(&edition_netlist, &intent)
 }
 
-/// `size=2x8 void=3` with three cells: the volume test passes (12 <= 48) and the row, which wants
-/// seven columns, is overrun by five.
 #[test]
 fn a_netlist_wider_than_the_reserved_row_is_refused() {
     let out = placement_of(&source_with_cells(3, 2, 8, 3));
@@ -978,15 +872,6 @@ fn a_netlist_wider_than_the_reserved_row_is_refused() {
     assert_eq!(diagnostic.severity(), Severity::Error);
 }
 
-/// A region wide enough for the cells and not for the spacing between
-/// them is refused here, not two passes later.
-///
-/// Three cells want seven columns; four is more than enough to stand
-/// them in and three short of the row they are laid in. If the check
-/// counted cells rather than columns this would pass placement, put
-/// the last cell outside the reservation, and surface at stage 2 as a
-/// sink no route can reach — of a coord no route could enter, with a
-/// message about components and dust that names nothing true.
 #[test]
 fn a_row_wide_enough_for_the_cells_and_not_the_spacing_is_refused() {
     let out = placement_of(&source_with_cells(3, 4, 8, 3));
@@ -1010,16 +895,7 @@ fn a_row_wide_enough_for_the_cells_and_not_the_spacing_is_refused() {
     );
 }
 
-/// The exact-fit boundary, with its neighbour one column down.
-///
-/// A row of `n` cells wants `2n + 1` columns: one for each cell, one beside each, and the last
-/// for the actuator pads. At `2n` the last cell would stand at `x = width - 1`, inside the
-/// actuator-pad column, face to face with the pads at `z = 0` and `z = 2`.
-///
-/// Both sides, because only a pair that straddles the threshold pins it. That no pad touches a
-/// cell once the row fits is held by `placement::tests::no_pad_stands_against_a_cell` in the
-/// crate, and the depth guard that keeps the pads off each other by
-/// `more_actuators_than_rows_is_refused_before_their_pads_collide` below.
+/// A row of `n` cells wants `2n + 1` columns; at `2n` the last cell stands in the pad column.
 #[test]
 fn a_row_of_twice_the_cell_count_plus_one_places_every_cell() {
     assert!(
@@ -1046,8 +922,6 @@ fn a_row_of_twice_the_cell_count_plus_one_places_every_cell() {
     );
 }
 
-/// One over the boundary, holding everything else fixed against the
-/// exact-fit case above.
 #[test]
 fn one_cell_more_than_the_row_holds_is_refused() {
     let out = placement_of(&source_with_cells(5, 4, 8, 3));
@@ -1065,14 +939,6 @@ fn one_cell_more_than_the_row_holds_is_refused() {
     );
 }
 
-/// A scope with cells in a one-column region is refused on its row, which
-/// is the first thing it runs out of, and not on its pad columns.
-///
-/// The pad-column check sits after the row check and is reached only by
-/// a scope with no cells. Nothing else in the suite has cells and a
-/// one-column region, so without this case the two could swap and every
-/// test stay green, while a one-cell scope was told its pads collide
-/// rather than that its row does not fit.
 #[test]
 fn a_scope_with_cells_in_one_column_is_refused_on_its_row() {
     let out = placement_of(&source_with_cells(1, 1, 5, 2));
@@ -1092,13 +958,9 @@ fn a_scope_with_cells_in_one_column_is_refused_on_its_row() {
     );
 }
 
-/// The two ways of not fitting are separate resources: this netlist has
-/// a row long enough and a volume too small, and must still be told
-/// about the volume.
 #[test]
 fn a_netlist_short_of_volume_but_not_of_row_still_reports_the_area() {
-    // width 40 holds 11 cells in a row; `40 * 1 * 1` reserves 40 cells'
-    // worth of volume against the 44 the estimate asks for.
+    // 11 cells fit a 40-wide row, but 40 blocks of volume is short of the 44 asked.
     let out = placement_of(&source_with_cells(11, 40, 1, 1));
 
     let diagnostic = out
@@ -1113,10 +975,6 @@ fn a_netlist_short_of_volume_but_not_of_row_still_reports_the_area() {
     );
 }
 
-/// A sensor nothing reads is not a layout. Elision keys on the predicate routing, delay and
-/// crossing use, not on `EditionNetlistIr::is_empty`, which wants inputs, outputs and cells all
-/// empty and would have a lone `pressure_plate -> sig.step` claim a reservation for nothing to
-/// place, and refuse at byte 0 when there was none.
 #[test]
 fn a_sensor_nothing_reads_is_not_something_to_place() {
     let source = r"
@@ -1138,12 +996,6 @@ struct sens size=8x5
     assert!(out.scoped.scopes.is_empty(), "and must not be emitted");
 }
 
-/// The cell row needs a clear row on either side of it, which neither the volume budget nor the
-/// row length can see.
-///
-/// Both sides of the threshold in one test, since only a straddling pair pins a number. The
-/// region is wide and its `void` ample in both, so only the depth changes between the refusal
-/// and the layout.
 #[test]
 fn a_region_too_shallow_for_a_lane_either_side_of_the_row_is_refused() {
     let refused = placement_of(&source_with_cells(1, 9, 2, 4));
@@ -1171,16 +1023,6 @@ fn a_region_too_shallow_for_a_lane_either_side_of_the_row_is_refused() {
     );
 }
 
-/// The lanes belong to the cell row, so a scope with no row does not
-/// want them.
-///
-/// An identity wire — a sensor bound straight to an actuator, with no
-/// `logic` line between them — reaches this pass with pads and no
-/// cells. Refusing it for want of a clear row on either side of a row
-/// it does not have would be the pass contradicting itself, which is
-/// the shape the pad-row refusal below exists to avoid. Both sides at
-/// one depth, so the only thing that differs between the refusal and
-/// the layout is whether there is a cell to make a row of.
 #[test]
 fn a_scope_with_no_cell_row_wants_no_lanes_beside_it() {
     let refused = placement_of(&source_with_cells(1, 9, 2, 4));
@@ -1222,19 +1064,8 @@ struct wire size=9x2
     assert_eq!(ir.outputs.len(), 1, "and an actuator pad to route out to");
 }
 
-/// Pads stand one per row down the edge columns, stepping over the cell
-/// row, so the guard is about their count rather than about a depth the
-/// row check would already have refused: the refused region below is
-/// four rows deep, more than the cell row and its two lanes want.
-///
-/// Both sides of the count in one test. Rows needed `== depth` is the
-/// accepting side — `n` pads, `n >= 2`, in a scope with cells fit a
-/// region `n + 1` deep, because they start at `z = 0` and skip the cell
-/// row — and nothing else in the suite straddles it for a scope with
-/// cells. The primary is asserted too: the other footprint refusals in
-/// this pass share `E_ROUTE_CONGESTION` and the row-depth check runs
-/// first, so a fixture that drifts out of this branch's window would
-/// stay green while measuring a different one.
+/// `n` pads beside a cell row fit a region `n + 1` deep. The primary is pinned because the other
+/// footprint refusals share `E_ROUTE_CONGESTION`.
 #[test]
 fn more_actuators_than_rows_is_refused_before_their_pads_collide() {
     let source = |depth: u32| {
@@ -1290,22 +1121,7 @@ struct four size=8x{depth}
     );
 }
 
-/// A scope with no cells has no cell row, so its pads step over
-/// nothing: `n` pads on an edge fit a region exactly `n` deep, and stand
-/// at `z = 0..n`.
-///
-/// Two sensors and two doors with no `logic` line between them — two
-/// pads on each edge — at two rows. Were the pads to skip a row the
-/// scope does not have, the pass would refuse this region for want of
-/// a third row, and at three rows leave `z = 1` empty for nobody. Three
-/// doors at three rows is the case where the refusal and the
-/// coordinates have to agree: a refusal that did not count the cell row
-/// over coordinates that still skipped it would accept the region and
-/// put the last two pads on one coord.
-///
-/// The refused side is asserted too, so the count is pinned from both
-/// sides, and its fix line must not ask for a cell row the scope does
-/// not have.
+/// With no cell row to skip, `n` pads on an edge fit a region exactly `n` deep, at `z = 0..n`.
 #[test]
 fn a_scope_with_no_cell_row_gives_its_pads_every_row() {
     let source = |doors: usize, depth: u32| {
@@ -1386,9 +1202,6 @@ struct wire size=9x{depth}
     );
 }
 
-/// The `E_NO_CIRCUIT_REGION` span for a scope with no cells. Deleting
-/// the fallback leaves it at byte 0, which is a position in the file
-/// that has nothing to do with the binding that needs the reservation.
 #[test]
 fn a_cell_less_scope_reports_its_missing_region_at_the_actuator() {
     let source = r"

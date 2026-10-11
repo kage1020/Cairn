@@ -1,6 +1,4 @@
-//! The redstone integration tests, one module per behaviour under test,
-//! built as one binary so the helpers in [`common`] compile once and
-//! every one of them is used.
+//! The redstone integration tests, one module per behaviour.
 
 mod common;
 

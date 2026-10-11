@@ -1,7 +1,5 @@
-//! `compile_edition_netlist`, the second tier of `spec/redstone` "Edition
-//! differences" (`Logical Cell → Edition Cell → Physical Tile`): every
-//! Logical Cell mapped to its realisation for the target edition, the
-//! nets carried over verbatim, and the `edition` the JSON dump records.
+//! `compile_edition_netlist`: the Logical Cell to Edition Cell tier of `spec/redstone` "Edition
+//! differences", with the nets copied verbatim.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
@@ -21,9 +19,6 @@ fn find_cell_port(cell: &EditionCellNode, port: PortName) -> NetRef {
         .net
 }
 
-/// `examples/redstone-door.crn` compiled for Java tags its lone
-/// `Or` cell as `JavaRepeaterOr` and carries the same `[A, B]` driver
-/// shape through from the Netlist IR.
 #[test]
 fn redstone_door_java_maps_or_to_java_repeater_or() {
     let source = load_example("redstone-door.crn");
@@ -70,9 +65,6 @@ fn redstone_door_java_maps_or_to_java_repeater_or() {
     );
 }
 
-/// The same example compiled for Bedrock picks the Bedrock
-/// realisation, `BedrockTorchOr`. The rest of the IR shape (inputs,
-/// outputs, driver arity) is edition-independent and stays put.
 #[test]
 fn redstone_door_bedrock_maps_or_to_bedrock_torch_or() {
     let source = load_example("redstone-door.crn");
@@ -89,10 +81,6 @@ fn redstone_door_bedrock_maps_or_to_bedrock_torch_or() {
     assert_eq!(entry.ir.cells[0].drivers[1].port, PortName::B);
 }
 
-/// Every `NetRef` / `CellPortDriver` from the source Netlist IR is
-/// copied verbatim into the Edition Netlist IR: driver arrays, inputs,
-/// outputs, and `signal_defs` all round-trip byte-for-byte. Pins the
-/// "structural rewrite only" contract.
 #[test]
 fn edition_pass_copies_nets_verbatim_from_netlist() {
     let source = r"
@@ -129,9 +117,6 @@ struct sim size=5x5
     }
 }
 
-/// The reachable `LogicalCell` variants (`And`, `Or`, `Not`) each pick their Java realisation,
-/// and the cells the parser cannot reach (`Xor` / `Nand` / `Nor` / `Mux`) fall through to their
-/// `Java*Unpinned` placeholders, so none of them can come out as a cell of the wrong edition.
 #[test]
 fn java_mapping_is_exhaustive_over_logical_cells() {
     let two_input =
@@ -180,11 +165,6 @@ fn java_mapping_is_exhaustive_over_logical_cells() {
     );
 }
 
-/// Bedrock realisations pick their own edition-tagged variants for
-/// every reachable cell; the unreachable cells fall through to
-/// `Bedrock*Unpinned` — the container edition tag is baked into the
-/// variant name, so a downstream consumer cannot mistake a Java placeholder
-/// for a Bedrock one.
 #[test]
 fn bedrock_mapping_is_exhaustive_over_logical_cells() {
     let two_input =
@@ -233,8 +213,6 @@ fn bedrock_mapping_is_exhaustive_over_logical_cells() {
     );
 }
 
-/// Scopes whose Netlist IR was empty produce no Edition Netlist IR
-/// entry, matching the Logic IR / Netlist IR elision contract.
 #[test]
 fn empty_netlist_scopes_produce_no_edition_entry() {
     let scoped = cairn_lang_redstone::ScopedNetlistIr::new();
@@ -243,10 +221,6 @@ fn empty_netlist_scopes_produce_no_edition_entry() {
     assert!(out.scopes.is_empty());
 }
 
-/// The JSON dump carries an `edition` key on every scope entry
-/// (canonical lowercase name, `"java"` / `"bedrock"`) and the `cell`
-/// values render as `snake_case` so downstream tooling has one stable
-/// vocabulary to key off.
 #[test]
 fn json_dump_carries_edition_and_snake_case_cells() {
     let source = load_example("redstone-door.crn");
@@ -276,9 +250,6 @@ fn json_dump_carries_edition_and_snake_case_cells() {
     );
 }
 
-/// Two non-empty scopes are compiled independently — their `edition`
-/// tags all match the pass argument and their per-scope contents do not
-/// bleed across.
 #[test]
 fn multiple_scopes_compile_independently() {
     let source = r"
@@ -315,10 +286,6 @@ struct beta size=5x5
     assert!(beta.ir.signal_defs.get(&sig("sig.b1")).is_some());
 }
 
-/// The Java and Bedrock runs of the same Netlist IR differ *only* in the container's `edition`
-/// field and each cell's `cell` tag: every other structural byte (inputs, outputs, driver arity
-/// and port order, span, `signal_defs`) is edition-independent, so an edition pass that reorders
-/// or drops non-cell state, or forgets `signal_defs`, fails here.
 #[test]
 fn java_and_bedrock_edition_netlists_differ_only_in_edition_and_cell_tags() {
     let source = r"
@@ -364,8 +331,6 @@ struct sim size=5x5
     }
 }
 
-/// The Netlist IR's `outputs` list can carry more than one entry, a scope with two actuators, and
-/// every entry is copied verbatim, not just the first.
 #[test]
 fn compile_edition_netlist_copies_all_outputs_verbatim() {
     let source = r"
@@ -397,8 +362,6 @@ struct sim size=5x5
     assert_eq!(src_outputs, dst_outputs);
 }
 
-/// The `*Unpinned` placeholders serialise as their `snake_case` name, so a downstream consumer
-/// cannot read a placeholder as, say, a `JavaXor` cell.
 #[test]
 fn unpinned_variants_serialise_as_snake_case() {
     let mut logic = LogicIr::new();
@@ -446,10 +409,6 @@ fn unpinned_variants_serialise_as_snake_case() {
     );
 }
 
-/// Build a single-gate Netlist IR around `kind`, run
-/// `compile_edition_netlist` for `edition`, and return the resulting cell
-/// tag. Lets the exhaustive mapping tests hit the `*Unpinned` variants
-/// without going through the surface parser.
 fn edition_cell_for(kind: GateKind, edition: Edition) -> EditionCell {
     let mut ir = LogicIr::new();
     let mut input_count = 0u32;

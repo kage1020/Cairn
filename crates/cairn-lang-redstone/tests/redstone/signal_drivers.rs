@@ -1,11 +1,5 @@
-//! A signal carries one driver, and the finding names both of them.
-//!
-//! A signal is driven by a sensor's `-> sig.X` tail or by a `logic`
-//! line's left-hand side, and every pairing is checked — sensor against
-//! sensor, `logic` against `logic`, and one against the other — with the
-//! driver written first in the file named as the original. These tests
-//! come in mirrored pairs because a rule that always blames the sensor,
-//! or always blames the `logic` line, would satisfy either half alone.
+//! A signal carries one driver, and the finding names both, the one written first as the original.
+//! The tests come in mirrored pairs: a rule that always blames one kind of driver passes one half.
 
 use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput};
 
@@ -51,8 +45,6 @@ fn a_second_sensor_on_one_signal_is_refused_rather_than_dropped() {
         "{}",
         found[0].primary,
     );
-    // The fix is not "delete one" — two plates opening one door is a
-    // circuit, and the note says how to write it.
     assert!(
         found[0]
             .notes
@@ -65,19 +57,13 @@ fn a_second_sensor_on_one_signal_is_refused_rather_than_dropped() {
 
 #[test]
 fn the_refused_sensor_leaves_no_input_port_behind() {
-    // The scope is dropped on the error, so what this pins is that the source is not accepted
-    // silently, with one input port and a single pad for a build that contains two plates.
+    // The scope is dropped on the error, so no input port survives either.
     let out = synth_source(TWO_SENSORS);
     assert!(
         out.scoped.scopes.is_empty(),
         "a refused driver drops its scope: {:#?}",
         out.scoped,
     );
-    // And the refusal is the whole of what this source earns. A losing
-    // sensor that reached `signal_defs` anyway would take the name from
-    // the winner, and the passes downstream would go on to report against
-    // the wrong definition — those findings reach the user even though the
-    // scope does not.
     assert_eq!(
         out.diagnostics
             .iter()
@@ -91,8 +77,7 @@ fn the_refused_sensor_leaves_no_input_port_behind() {
 
 #[test]
 fn a_sensor_and_two_logic_lines_report_the_sensor_as_the_first_driver() {
-    // The masking case. Two `logic` lines make the `logic`-versus-`logic` pair fire first, and
-    // the sensor, the thing the author has to look at, must still be named.
+    // The `logic`-versus-`logic` pair must not mask the sensor.
     let source = concat!(
         "@cairn 2026.06\n",
         "\n",
@@ -110,8 +95,7 @@ fn a_sensor_and_two_logic_lines_report_the_sensor_as_the_first_driver() {
     assert_eq!(
         anchor_and_note(source, found[0]),
         (6, 4),
-        "the first `logic` line is reported against the sensor above it, \
-         and the second is suppressed",
+        "the first `logic` line is reported against the sensor above it",
     );
     assert!(
         found[0].primary.contains("conflicts with a sensor"),
@@ -122,8 +106,6 @@ fn a_sensor_and_two_logic_lines_report_the_sensor_as_the_first_driver() {
 
 #[test]
 fn a_logic_line_above_the_sensor_is_the_first_driver() {
-    // The mirror of the pair above: the file's order, not the kind of driver, decides which line
-    // is accused.
     let source = concat!(
         "@cairn 2026.06\n",
         "\n",
@@ -140,8 +122,7 @@ fn a_logic_line_above_the_sensor_is_the_first_driver() {
     assert_eq!(
         anchor_and_note(source, found[0]),
         (6, 5),
-        "the `logic` line on line 5 is written first, so the sensor below \
-         it is the redefinition",
+        "the `logic` line is written first, so the sensor is the redefinition",
     );
     assert!(
         found[0]
@@ -162,8 +143,6 @@ fn a_logic_line_above_the_sensor_is_the_first_driver() {
 
 #[test]
 fn a_third_driver_adds_no_second_finding() {
-    // "Report the root cause once" is the crate's own rule, and it has to
-    // survive a signal with three sources rather than two.
     let source = concat!(
         "@cairn 2026.06\n",
         "\n",
@@ -204,8 +183,6 @@ fn two_logic_lines_on_one_signal_say_the_signal_is_redefined() {
 
 #[test]
 fn one_sensor_per_signal_still_lowers_untouched() {
-    // The guard every test above needs: the rule refuses a second driver,
-    // not a second sensor.
     let source = concat!(
         "@cairn 2026.06\n",
         "\n",
@@ -225,10 +202,7 @@ fn one_sensor_per_signal_still_lowers_untouched() {
 
 #[test]
 fn a_nested_binding_above_a_sensor_is_still_the_first_driver() {
-    // The strongest available evidence for "first means first in the
-    // file": collection is depth-first, so a `logic` line inside a `level`
-    // is collected *after* the members below it, and the span sort is the
-    // only thing that puts it back where the author wrote it.
+    // Collection is depth-first, so only the span sort puts the nested line first.
     let source = concat!(
         "@cairn 2026.06
 ",
@@ -255,18 +229,13 @@ fn a_nested_binding_above_a_sensor_is_still_the_first_driver() {
     assert_eq!(
         anchor_and_note(source, found[0]),
         (7, 6),
-        "the nested `logic` line on line 6 is written above the sensor on \
-         line 7, so the sensor is the redefinition",
+        "the nested `logic` line is written first, so the sensor is the redefinition",
     );
 }
 
 #[test]
 fn a_binding_that_lost_its_name_is_not_lowered() {
-    // Losing the name has to mean losing the lowering, or the pass goes on
-    // to report the RHS of a line it has already told the author to
-    // delete. The sensor and the binding are each the first of their own
-    // list, so a `Winners` that mixed the two index spaces would map
-    // `sig.a` to index 0 and match this binding by accident.
+    // The sensor and the binding are both index 0 of their own lists.
     let source = concat!(
         "@cairn 2026.06
 ",
@@ -290,8 +259,7 @@ fn a_binding_that_lost_its_name_is_not_lowered() {
             .map(|d| d.code.as_str())
             .collect::<Vec<_>>(),
         ["E_LOGIC_MULTIPLE_DRIVERS"],
-        "`sig.undef` belongs to the line that lost, so it is never looked \
-         at: {:#?}",
+        "the losing line's right-hand side is never checked: {:#?}",
         out.diagnostics,
     );
 }

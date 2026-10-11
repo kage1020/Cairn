@@ -1,9 +1,5 @@
-//! Reading a dumped Placement IR back: every placed cell the pipeline produces, at each of the
-//! four stages `cairn synth --stage <s>` can stop at, serialises to the flat wire form,
-//! deserialises to the same cell with its span emptied (the one field the wire form does not
-//! carry), and re-serialises to the same JSON text. Driven by real output: both redstone examples
-//! for both editions, plus a shared bus, since neither example materialises buffer coords and
-//! without it the `buffer_coords` key would never be read back.
+//! A dumped Placement IR reads back to the same cells, span emptied, at every stage. The shared
+//! bus is there because neither example produces `buffer_coords`.
 
 use cairn_lang_core::Edition;
 use cairn_lang_redstone::{PlacedCellNode, PlacementStage, ScopedPlacementIr};
@@ -13,10 +9,6 @@ use crate::common::{
     routed_from_source, shared_bus_source,
 };
 
-/// The Placement IR of `source` after each of the four place-and-route
-/// stages, paired with the stage tag its cells must carry. Each is one
-/// rung of the fixture ladder in `common`, so each stage is held to what
-/// "ran clean" means there.
 fn every_stage(source: &str, edition: Edition) -> [(PlacementStage, ScopedPlacementIr); 4] {
     [
         (
@@ -32,10 +24,7 @@ fn every_stage(source: &str, edition: Edition) -> [(PlacementStage, ScopedPlacem
     ]
 }
 
-/// Dump every cell of `ir`, read the dump back, and require the cells
-/// to equal the originals and to re-dump to the same JSON text. Returns
-/// how many cells were read back and how many of them carried buffer
-/// coords.
+/// Returns how many cells read back and how many of those carry buffer coords.
 fn assert_cells_round_trip(
     label: &str,
     stage: PlacementStage,
@@ -45,8 +34,7 @@ fn assert_cells_round_trip(
     let mut read = 0;
     let mut buffered = 0;
     for (scope, entry) in ir.scopes.iter().enumerate() {
-        // `cells` is left out of a scope that placed none, so an absent
-        // key is an empty scope rather than a value that fails to read.
+        // A scope that placed no cells has no `cells` key.
         let back: Vec<PlacedCellNode> = match dump[scope]["ir"].get("cells") {
             None => Vec::new(),
             Some(cells_json) => serde_json::from_value(cells_json.clone()).unwrap_or_else(|err| {
@@ -102,21 +90,13 @@ fn every_example_cell_reads_back_equal_at_every_stage() {
                     "{label}: the example must place at least one cell"
                 );
                 if stage == PlacementStage::Crossing {
-                    assert_eq!(
-                        buffered, 0,
-                        "{label}: the module doc says neither example has anything to \
-                         legalize, which is why the bus test exists",
-                    );
+                    assert_eq!(buffered, 0, "{label}: neither example should need buffers");
                 }
             }
         }
     }
 }
 
-/// The 16-cell bus `common::shared_bus_source` builds: every cell reads
-/// `sig.b` off one trunk, which is long enough to need repeaters, so
-/// the crossing-stage dump carries `buffer_coords` and the read-back
-/// has to fill [`PlacedCellNode::buffer_coords`] from it.
 #[test]
 fn a_legalized_dump_with_buffer_coords_reads_back_equal() {
     let source = shared_bus_source();
@@ -127,8 +107,7 @@ fn a_legalized_dump_with_buffer_coords_reads_back_equal() {
         if stage == PlacementStage::Crossing {
             assert!(
                 buffered >= 2,
-                "{label}: the bus must put buffer coords in the dump for this to test \
-                 reading them back: {buffered}",
+                "{label}: expected buffer coords in the dump: {buffered}",
             );
         }
     }

@@ -1,9 +1,5 @@
-//! An actuator binding drives one physical component, and the netlist carries a port only for a
-//! binding that does (`spec/redstone` "Signal binding"). Refused here: a selector-form patch whose
-//! `[id=]` names no physical door, and a second binding on one door, which would be a wired OR
-//! the logic layer never states. A `->` tail on a sensor keyword in the selector form is
-//! `check`'s `E_MISPLACED_BINDING` (`cairn-lang-core/tests/check/binding.rs`); this pass owes
-//! such a line only the input it does not register.
+//! An actuator binding drives exactly one physical door (`spec/redstone` "Signal binding"): a
+//! patch that picks no door, or a second binding on one door, is refused.
 
 use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput};
 
@@ -47,7 +43,6 @@ fn inputs(out: &SynthOutput) -> Option<Vec<String>> {
 
 // --- a patch that picks no door ---------------------------------------
 
-/// Unrefused, the patch would be an output port with a placed pad and no door behind it.
 #[test]
 fn a_patch_on_an_id_no_door_carries_is_refused_and_gets_no_port() {
     let src = source("  door[id=nope] opened_by=sig.a\n");
@@ -62,7 +57,6 @@ fn a_patch_on_an_id_no_door_carries_is_refused_and_gets_no_port() {
         "got: {}",
         d.primary,
     );
-    // The id is what the author corrects, so the finding underlines it.
     assert_eq!(slice(&src, d), "nope");
     assert_eq!(
         outputs(&out),
@@ -85,9 +79,6 @@ fn lowering_deferrals(src: &str) -> Vec<String> {
         .collect()
 }
 
-/// Each reason a patch picks no door is the sentence block-array lowering defers the same line
-/// with, read from the same lookup, so the two passes cannot give one line two accounts. One row
-/// per reason, so an edit to any of them on one side alone fails here.
 #[test]
 fn every_reason_is_the_one_lowering_gives() {
     let cases = [
@@ -107,9 +98,7 @@ fn every_reason_is_the_one_lowering_gives() {
             "must be an identifier or string label, got integer",
         ),
         (
-            // The second `front` sits under a `level`, which lowering's
-            // flattened view merges with the top level and
-            // `check::duplicate` (per scope body) does not flag.
+            // Under a `level`, so `check` does not flag the duplicate id.
             "ambiguous",
             concat!(
                 "  level y=1\n",
@@ -142,10 +131,7 @@ fn every_reason_is_the_one_lowering_gives() {
     }
 }
 
-/// The one line the two passes describe differently, on purpose: a selector key a `door` carries
-/// but a patch does not read. Lowering refuses the key before it looks for a door, while this
-/// pass, which leaves the selector's other keys to lowering, finds only that there is no `id=` to
-/// look up by.
+/// The passes describe this line differently on purpose.
 #[test]
 fn a_selector_key_other_than_id_is_where_the_passes_diverge() {
     let src = source("  door[side=front] opened_by=sig.a\n");
@@ -167,8 +153,6 @@ fn a_selector_key_other_than_id_is_where_the_passes_diverge() {
     assert!(!d.primary.contains(&deferred[0]), "got: {}", d.primary);
 }
 
-/// An id two doors carry already names a declared door, so the repair is
-/// to tell the two apart, not to name one.
 #[test]
 fn an_ambiguous_id_is_told_to_give_the_doors_distinct_ids() {
     let src = source(concat!(
@@ -189,8 +173,6 @@ fn an_ambiguous_id_is_told_to_give_the_doors_distinct_ids() {
     );
 }
 
-/// A door declared without an `id=` is still a door. The finding counts
-/// it rather than saying none is declared, and the repair is to label it.
 #[test]
 fn a_patch_beside_an_unlabelled_door_is_told_to_add_the_id() {
     let src = concat!(
@@ -221,8 +203,6 @@ fn a_patch_beside_an_unlabelled_door_is_told_to_add_the_id() {
     );
 }
 
-/// Beside a labelled door, the unlabelled one is named after the known ids
-/// and the repair offers both edits.
 #[test]
 fn a_patch_beside_labelled_and_unlabelled_doors_mentions_both() {
     let src = source(concat!(
@@ -244,8 +224,6 @@ fn a_patch_beside_labelled_and_unlabelled_doors_mentions_both() {
     );
 }
 
-/// A door written under a `level` is a door the patch can pick, so the
-/// lookup is not the top level alone.
 #[test]
 fn a_patch_picks_a_door_declared_under_a_level() {
     let src = source(concat!(
@@ -258,8 +236,6 @@ fn a_patch_picks_a_door_declared_under_a_level() {
     assert_eq!(outputs(&out), Some(vec!["sig.a".to_owned()]));
 }
 
-/// The refused binding still read its signal, so the sensor feeding it
-/// is not also told that nothing consumes it — the author did wire it.
 #[test]
 fn a_refused_patch_still_counts_its_signal_as_consumed() {
     let out = synth_source(&source("  door[id=nope] opened_by=sig.a\n"));
@@ -302,8 +278,6 @@ fn a_second_patch_on_one_door_is_refused_with_a_note_at_the_first() {
     );
 }
 
-/// The door's own line is a binding too, so a patch after it is the
-/// second one, whichever form each is written in.
 #[test]
 fn a_patch_on_a_door_bound_on_its_own_line_is_refused() {
     let src = concat!(
@@ -327,8 +301,6 @@ fn a_patch_on_a_door_bound_on_its_own_line_is_refused() {
     );
 }
 
-/// The door's own line is the first binding wherever the patch is written, so a patch above it is
-/// the one refused and the note points at the declaring line.
 #[test]
 fn a_patch_above_a_bound_door_is_the_binding_refused() {
     let src = concat!(
@@ -376,13 +348,9 @@ fn a_patch_above_a_bound_door_is_the_binding_refused() {
             .message
             .contains("`logic sig.<name> = sig.a or sig.b`"),
     );
-    // The refused patch's signal was still wired by the author.
     assert!(!codes(&out).contains(&"W_LOGIC_UNUSED_SIGNAL"));
 }
 
-/// Two bindings to the same signal are one wire written twice. Combining
-/// them in the logic layer would be `sig.a or sig.a`, a gate that does
-/// nothing, so the repair is to delete the second line.
 #[test]
 fn a_second_binding_to_the_same_signal_is_told_to_delete_the_line() {
     let src = source("  door[id=front] opened_by=sig.a\n");
@@ -406,8 +374,6 @@ fn a_second_binding_to_the_same_signal_is_told_to_delete_the_line() {
     assert!(!footer.contains(" or "), "got: {footer}");
 }
 
-/// One binding on each of two doors is two ports — the duplicate is
-/// per door, not per key.
 #[test]
 fn one_binding_on_each_of_two_doors_is_two_ports() {
     let src = source(concat!(
@@ -425,10 +391,7 @@ fn one_binding_on_each_of_two_doors_is_two_ports() {
 
 // --- a sensor tail on a selector line ---------------------------------
 
-/// `pressure_plate[id=nope] -> sig.b` is refused by `check`, which
-/// `cairn synth` runs first. Here that means no input port — the plate
-/// it would stand for was never declared — and no second finding about
-/// `sig.b` on the door reading it.
+/// `check` refuses this line first, so synth owes it only the missing input port.
 #[test]
 fn a_tail_on_a_selector_line_registers_no_input() {
     let src = source(concat!(

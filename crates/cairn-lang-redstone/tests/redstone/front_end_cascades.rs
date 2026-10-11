@@ -1,20 +1,12 @@
-//! What each refusal takes away, and what it must not take away with it. The front end declines
-//! a binding in four ways (a sensor tail on a member that cannot emit, which `check::binding`
-//! already refuses as `E_MISPLACED_BINDING`; an actuator key on the wrong component; a
-//! signal-valued key nothing reads; a `logic` left-hand side outside the `sig.` namespace) and
-//! skips a member whose keyword the role table does not know, which is `E_UNKNOWN_KEYWORD`'s.
-//! Each takes a driver or consumer out of the scope that a downstream pass would otherwise report
-//! as a hole of its own, so every fixture asserts the *whole* finding list: one finding per root
-//! cause.
+//! A refused binding or unknown member takes its driver or consumer with it, and no later pass
+//! reports the hole: each fixture asserts the whole finding list, one finding per root cause.
 
 use cairn_lang_redstone::ScopeKind;
 
 use crate::common::{codes, gate_source, synth_source};
 
-/// A sensor and a `logic` line over it, so a fixture below can hang a
-/// binding off a *derived* signal rather than off the sensor's own — the
-/// unused audit only walks `logic` names, so a sensor-driven signal makes
-/// every suppression test pass whether the suppression works or not.
+/// A `logic`-derived `sig.x`: the unused audit walks only `logic` names, so a sensor's own signal
+/// would let every suppression test pass whether it works or not.
 const DERIVED: &str = concat!(
     "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
     "  logic sig.x = not sig.a\n",
@@ -24,10 +16,6 @@ const DERIVED: &str = concat!(
 
 #[test]
 fn an_unknown_keyword_that_would_have_consumed_a_signal_leaves_no_unused_warning() {
-    // `lamp` is not a keyword, so the member is `E_UNKNOWN_KEYWORD` and
-    // this pass says nothing about it. But the author *did* wire `sig.x`,
-    // and telling them it is unconsumed on top of telling them `lamp` does
-    // not exist is the same mistake reported twice.
     let out = synth_source(&gate_source(&format!(
         "{DERIVED}  lamp id=l1 lit_by=sig.x\n"
     )));
@@ -36,10 +24,7 @@ fn an_unknown_keyword_that_would_have_consumed_a_signal_leaves_no_unused_warning
 
 #[test]
 fn an_unknown_keyword_that_would_have_driven_a_signal_leaves_no_unbound_error() {
-    // The mirror on the driver side: `lever` is one of the sensors in
-    // `spec/redstone` "Signal binding" and not a keyword, so the tail is
-    // skipped — and the `logic` line reading `sig.w` must not be told the
-    // signal does not exist.
+    // `lever` is a sensor in `spec/redstone` "Signal binding" but not a keyword.
     let out = synth_source(&gate_source(concat!(
         "  lever id=v side=front offset=1 y=1 -> sig.w\n",
         "  logic sig.x = not sig.w\n",
@@ -53,9 +38,6 @@ fn an_unknown_keyword_that_would_have_driven_a_signal_leaves_no_unbound_error() 
 
 #[test]
 fn a_misplaced_actuator_on_a_derived_signal_leaves_no_unused_warning() {
-    // `opened_by=` on a `window` is refused, and `sig.x` — a `logic` name,
-    // so the unused audit does walk it — must not then be reported as
-    // unconsumed.
     let out = synth_source(&gate_source(&format!(
         "{DERIVED}  window side=front y=1 offset=1 size=1x1 mat_slot=wall opened_by=sig.x\n",
     )));
@@ -69,12 +51,7 @@ fn a_misplaced_actuator_on_a_derived_signal_leaves_no_unused_warning() {
 
 #[test]
 fn an_actuator_reading_a_signal_a_refused_tail_would_have_driven_is_not_reported() {
-    // The actuator path has its own unbound check, separate from the one
-    // `resolve_ref` walks, and this is the fixture that reaches it: the
-    // door is well formed and reads a signal the declined `walls` tail
-    // would have emitted. The tail itself is `check`'s
-    // `E_MISPLACED_BINDING`, so the whole list here is what the cascade
-    // would have added, and it is empty.
+    // The `walls` tail is `check`'s `E_MISPLACED_BINDING`, so synth itself adds nothing.
     let out = synth_source(&gate_source(concat!(
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
         "  door id=front side=front at=center\n",
@@ -85,8 +62,6 @@ fn an_actuator_reading_a_signal_a_refused_tail_would_have_driven_is_not_reported
 
 #[test]
 fn a_refused_logic_line_still_counts_as_reading_its_right_hand_side() {
-    // The left-hand side is what `foo.bar` gets wrong; `sig.a` on the
-    // right is a signal this line reads either way.
     let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic foo.bar = not sig.a\n",
@@ -103,8 +78,6 @@ fn a_refused_logic_line_still_counts_as_reading_its_right_hand_side() {
 
 #[test]
 fn a_scope_whose_only_content_is_an_assert_is_still_checked() {
-    // A scope with no sensor, no actuator and no `logic` line still reaches the finish step:
-    // there an `assert` is the only redstone content, and it is still checked.
     let out = synth_source(&gate_source(
         "  assert always(sig.zzz -> eventually sig.qqq within 3)\n",
     ));
@@ -131,11 +104,6 @@ fn an_assert_naming_one_signal_twice_reports_it_once() {
 
 #[test]
 fn an_assert_over_a_binding_that_failed_to_lower_adds_nothing() {
-    // `sig.x` *is* defined by a `logic` line — it failed to lower, which
-    // is already reported. Saying "no `logic` line defines it" would be
-    // false as well as second, and the candidate list would then offer
-    // `sig.x` as a valid signal in the same finding that called it
-    // undefined.
     let out = synth_source(&gate_source(concat!(
         "  logic sig.x = not sig.undef\n",
         "  assert always(sig.x -> eventually sig.x within 3)\n",
@@ -155,15 +123,7 @@ fn an_assert_over_a_binding_that_failed_to_lower_adds_nothing() {
 
 #[test]
 fn a_candidate_list_never_offers_a_signal_the_pass_has_refused() {
-    // `sig.x` fails to lower, and the actuator below then names a signal
-    // nothing defines. Its finding offers the signals in scope — and a
-    // name whose binding failed is not one: renaming to it lands the
-    // author on the finding they already have.
-    //
-    // The `sig.x` line's *own* finding still lists it, because at that
-    // moment `sig.x` is a binding like any other; the contradiction the
-    // filter closes is a later reader being offered a name the pass has
-    // since refused.
+    // `sig.x`'s own finding still lists it; only later findings drop it.
     let source = gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.undef\n",
@@ -190,9 +150,6 @@ fn a_candidate_list_never_offers_a_signal_the_pass_has_refused() {
 
 #[test]
 fn an_assert_counts_as_a_consumer() {
-    // A property observes a wire. Checking the references an `assert`
-    // names and then not counting them would warn that a signal is unused
-    // in the one place the author wrote down what it is for.
     let out = synth_source(&gate_source(&format!(
         "{DERIVED}  assert always(sig.a -> eventually sig.x within 2)\n",
     )));
@@ -217,10 +174,6 @@ fn an_assert_inside_a_level_is_collected_with_the_rest() {
 
 #[test]
 fn a_sensor_whose_signal_nothing_reads_is_reported() {
-    // The result-side sweep. A scope that lowers to one input and no
-    // output is a plate in the build wired to nothing, which is the
-    // silence this whole pass exists to break — and it is the shape every
-    // "the value is not a `sig.` reference" hole ends up in.
     let out = synth_source(&gate_source(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
     ));
@@ -261,8 +214,6 @@ fn a_def_scope_carries_its_own_label_through_synth() {
 
 #[test]
 fn a_site_scope_carries_its_own_label_through_synth() {
-    // A `site` body feeds `placements` in as members, which is the one
-    // scope kind whose member list is not a geometry body.
     let out = synth_source(concat!(
         "@cairn 2026.06\n",
         "\n",
@@ -300,9 +251,6 @@ fn a_site_scope_carries_its_own_label_through_synth() {
 
 #[test]
 fn findings_from_two_collection_phases_come_out_in_line_order() {
-    // Collection raises its findings before the phases run, so without a
-    // sort a refusal on the last line precedes a driver collision on the
-    // first.
     let source = gate_source(concat!(
         "  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n",
         "  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.a\n",

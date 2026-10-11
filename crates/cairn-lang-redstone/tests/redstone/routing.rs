@@ -1,8 +1,5 @@
-//! `compile_routing`, stage 2 of the pipeline `spec/redstone`
-//! "Place-and-route": each cell's `wire_length` from its routed Steiner
-//! trees, `E_ROUTE_CONGESTION` when the routed footprint outgrows the
-//! reservation, and a wire form that differs from the placed IR only in
-//! `wire_length` and the `stage` tag.
+//! `compile_routing`: each cell's `wire_length` from its routed nets, and `E_ROUTE_CONGESTION` when
+//! the routed footprint outgrows the reservation.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
@@ -10,15 +7,6 @@ use cairn_lang_redstone::{DiagnosticCode, PlacedCellNode, ScopedPlacementIr, com
 
 use crate::common::{load_example, normalize_stage_tags, placement_from_source, strip_int_field};
 
-/// `examples/redstone-door.crn` compiled for Java routes its
-/// sole `JavaRepeaterOr` cell with `wire_length = Some(4)`: the sum of
-/// the routed lengths from each input pad into the cell coord
-/// `(1, 0, 1)`. The pads step along `z` from `0` and skip the cell row,
-/// so `sig.step`'s stands at `(0, 0, 0)` and `sig.exit`'s at
-/// `(0, 0, 2)`, one a row either side of the cell's: each comes in round
-/// the corner for two, through the lane on its own side.
-/// `local_delay_ticks` stays `None` (routing does not insert delay per
-/// `spec/redstone` "Time model"; that is stage 3).
 #[test]
 fn redstone_door_java_fills_wire_length_from_input_pads() {
     let source = load_example("redstone-door.crn");
@@ -50,10 +38,6 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
     );
 }
 
-/// The same example compiled for Bedrock produces the same
-/// `wire_length` because the pad and cell coordinates are
-/// edition-independent by the placement-pass layout contract. Only
-/// the cell tag and edition field differ from the Java run.
 #[test]
 fn redstone_door_bedrock_matches_java_wire_length() {
     let source = load_example("redstone-door.crn");
@@ -76,39 +60,8 @@ fn redstone_door_bedrock_matches_java_wire_length() {
     }
 }
 
-/// A scope whose logic produces three cascaded cells fills every cell's `wire_length` with a
-/// pinned routed sum, so a change to the input-pad coordinate convention, the cell-row spacing or
-/// the per-driver attribution walk trips this test. Placement lays cells at
-/// `x = 1 + 2i, y = 0, z = 1`, and input pad `i` lands at `(0, 0, i)` below the cell row and
-/// `(0, 0, i + 1)` from it on.
-///
-/// That it routes at all is the first thing this fixture pins. A cell
-/// body is a block, so a net reaches it through a free neighbouring
-/// coord, and cell[1] has three distinct nets touching it — two
-/// drivers and its own output. Packed at `x = i` it would have two
-/// free neighbours, its siblings holding the rest, and no region size
-/// would give the third back: this chain is unroutable at every width
-/// under that convention, and compiles at every width under this one.
-///
-/// The pads step over the cell row, so `sig.a`'s stands at `(0,0,0)`
-/// and `sig.b`'s at `(0,0,2)`, each at the head of the lane on its own
-/// side of the row. What the sums are worth reading for:
-///
-/// - cell[0] `sig.and_ab = sig.a and sig.b`: each pad comes in round
-///   the corner for two, from either side: `2 + 2 = 4`.
-/// - cell[1] `sig.or_ab = sig.a or sig.b`: the same two nets carrying
-///   on down the row, `sig.a` along the lane at `z=0` and `sig.b` along
-///   the lane at `z=2`, which are not beside each other: `4 + 4 = 8`.
-/// - cell[2] `sig.combined = sig.and_ab and sig.or_ab`: cell-to-cell
-///   drivers. cell[1] is two columns away with a clear run between it
-///   and cell[2]. cell[0] has a lane taken on either side of it and
-///   the row itself is one strand wide, so its output climbs to `y=1`
-///   at its own doorstep, runs the length of the row up there and
-///   drops in: `6 + 2 = 8`. That is the escape `spec/redstone`
-///   "Place-and-route" specifies, and it is why the fixture reserves
-///   `void=3`.
-///
-/// `local_delay_ticks` stays `None` at every cell.
+/// cell[0]'s output climbs to `y=1` past the lanes either side of it, the escape `spec/redstone`
+/// "Place-and-route" specifies; `void=3` leaves room for it.
 #[test]
 fn multi_cell_scope_pins_wire_length_including_detours() {
     let source = r"
@@ -131,13 +84,6 @@ struct sim size=7x5
 ";
     let placement = placement_from_source(source, Edition::Java);
     let routed = compile_routing(&placement);
-    // Its nets climb past each other, so it carries the advisory that
-    // names the pairs for the physical tile layer — exactly one of
-    // them, and nothing else. What this fixture is about is the
-    // lengths that climb is charged into, and those are only read off
-    // a scope the pass kept; asserting the code rather than the
-    // severity is what keeps the advisory itself from going missing
-    // here, since no other test measures this scope.
     assert_eq!(
         routed
             .diagnostics
@@ -164,8 +110,7 @@ struct sim size=7x5
             .map(PlacedCellNode::wire_length)
             .collect::<Vec<_>>(),
         vec![Some(4), Some(8), Some(8)],
-        "each cell is charged for the dust into it, detours and climbs \
-         included",
+        "each cell is charged for the dust into it, climbs included",
     );
     for cell in &entry.ir.cells {
         assert!(
@@ -176,15 +121,7 @@ struct sim size=7x5
     }
 }
 
-/// A cell whose two ports read one signal is fed by one strand of dust, and `wire_length` reports
-/// that strand once.
-///
-/// `sig.a and sig.a` is how a `.crn` reaches the shape: logic synth keeps both operands, so the
-/// cell arrives at the routing pass with `a` and `b` both driven by `Input(0)`. The routed length
-/// from the pad at `(0,0,0)` to the cell at `(1,0,1)` is two blocks; a per-port fold would report
-/// four, twice the dust the layout has. The per-net rule is not "one segment per cell":
-/// `multi_cell_scope_pins_wire_length_including_detours` drives its cells from two distinct pads
-/// and pins the sums.
+/// `sig.a and sig.a` keeps both operands, so both ports arrive driven by one net.
 #[test]
 fn ports_sharing_a_net_are_measured_once() {
     let source = r"
@@ -236,20 +173,10 @@ struct dup size=20x5
     );
 }
 
-/// A netlist within placement's cell-only budget (`cells.len() * CELL_FOOTPRINT <=
-/// reserved_area`) passes placement but gets `E_ROUTE_CONGESTION` once routing adds its wire:
-/// the post-routing accounting is stricter than placement's estimate. The primary quotes the
-/// ratio, the scope name and the reservation shape in the "routed netlist for struct `<name>`
-/// occupies ~N.Mx..." form, and the failed scope is elided.
 #[test]
 fn post_routing_congestion_fires_route_congestion_and_elides_scope() {
-    // 2 cells × 4 blocks = 8 required cell area vs 5 × 3 × 1 = 15
-    // reserved blocks — placement passes with seven coords to spare,
-    // and the wire spends more than seven: the sensor feeds both cells
-    // and the second cell's own driver runs the length of the row
-    // between them. One sensor rather than two so the chain routes:
-    // this fixture is about the budget, and a stranded sink would
-    // refuse it one step earlier for a different reason.
+    // The cells fit placement's budget with seven blocks to spare, and the wire spends more. One
+    // sensor, since a second would strand a sink and refuse the scope for a different reason.
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -315,8 +242,7 @@ struct pack size=5x3
     for phrase in ["increase", "void", "enlarge", "region", "split", "circuit"] {
         assert!(
             footer.message.contains(phrase),
-            "footer should carry the `spec/redstone` \"Place-and-route\" triple \
-             (missing {phrase:?}), got {:?}",
+            "footer is missing {phrase:?}: {:?}",
             footer.message,
         );
     }
@@ -326,9 +252,6 @@ struct pack size=5x3
     );
 }
 
-/// An empty `ScopedPlacementIr` (no scopes) routes to an empty
-/// `ScopedPlacementIr` with zero diagnostics: routing is a
-/// per-scope map, so no scopes ⇒ no work ⇒ no findings.
 #[test]
 fn empty_placement_ir_produces_empty_routing_output() {
     let scoped = ScopedPlacementIr::new();
@@ -337,10 +260,6 @@ fn empty_placement_ir_produces_empty_routing_output() {
     assert!(routed.scoped.scopes.is_empty());
 }
 
-/// A scope whose Placement IR carries inputs and outputs but no
-/// cells (a pressure-plate wired straight to a door via `sig.a`) has
-/// one segment to route: sensor pad to actuator pad. Its length is the
-/// number the delay pass charges buffer repeaters against.
 #[test]
 fn identity_wire_routes_its_sensor_to_actuator_segment() {
     let source = r"
@@ -375,9 +294,6 @@ struct wire size=5x5
     );
 }
 
-/// The JSON dump of a routed Placement IR carries `"wire_length": N` on every cell object while
-/// `local_delay_ticks` stays elided: the wire-form difference between `--stage placement` and
-/// `--stage route` output.
 #[test]
 fn json_dump_carries_wire_length_and_omits_local_delay_ticks() {
     let source = load_example("redstone-door.crn");
@@ -397,8 +313,6 @@ fn json_dump_carries_wire_length_and_omits_local_delay_ticks() {
         !json.contains("\"local_delay_ticks\""),
         "local_delay_ticks must be elided at this stage: {json}",
     );
-    // Sanity: the region and coord shapes carried across from
-    // placement stay intact after routing.
     assert!(
         json.contains("\"region\":{"),
         "region object should still be present: {json}",
@@ -409,11 +323,6 @@ fn json_dump_carries_wire_length_and_omits_local_delay_ticks() {
     );
 }
 
-/// Routing perturbs no Placement IR field but `wire_length` and the `stage` tag. The placement
-/// and routing outputs, as compact JSON with the routing side's `,"wire_length":<int>` entries
-/// stripped and both stage tags normalised, are byte-identical, so field reordering, added or
-/// removed fields, or key-name typos in unrelated structs trip here even when the JSON parses
-/// equivalently.
 #[test]
 fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_stage() {
     let source = load_example("redstone-door.crn");
@@ -428,8 +337,7 @@ fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_sta
     );
     let routed_json = serde_json::to_string(&routed.scoped).expect("serialise routed");
 
-    // `wire_length` follows `coord` in `PlacedCellNode`'s emission order, so in compact JSON it
-    // always reads `,"wire_length":<int>`.
+    // `wire_length` is never the first key, so it always reads `,"wire_length":<int>`.
     let stripped_routed = normalize_stage_tags(&strip_int_field(&routed_json, "wire_length"));
     assert_eq!(
         stripped_routed,
@@ -438,10 +346,6 @@ fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_sta
     );
 }
 
-/// Two non-empty scopes route independently. A clean scope
-/// passes through with `wire_length` populated; a scope that fails
-/// congestion elides without poisoning the sibling. The scope order
-/// on the output matches the input order for the survivors.
 #[test]
 fn multiple_scopes_route_independently() {
     let source = r"
@@ -469,7 +373,6 @@ struct beta size=8x3
     let placement = placement_from_source(source, Edition::Java);
     let routed = compile_routing(&placement);
 
-    // alpha routes cleanly.
     let alpha = routed
         .scoped
         .scopes
@@ -481,8 +384,6 @@ struct beta size=8x3
         "every alpha cell must carry a routed wire_length",
     );
 
-    // beta hits congestion (the post-routing congestion shape) → elided with a
-    // diagnostic without shifting alpha.
     assert!(
         routed.scoped.scopes.iter().all(|e| e.name != "beta"),
         "beta must elide because routing exceeds the reservation",
@@ -499,9 +400,6 @@ struct beta size=8x3
     );
 }
 
-/// Placement gives Java and Bedrock the same per-cell coordinates for the same source, so routing
-/// produces the same `wire_length` values on both editions; only the cell tag and edition field
-/// differ. Coupling `wire_length` to edition-specific cell footprints fails here.
 #[test]
 fn edition_parity_wire_length_matches_across_java_and_bedrock() {
     let source = load_example("redstone-door.crn");
@@ -516,10 +414,6 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
     }
 }
 
-/// Chaining `compile_routing(&routed.scoped)` is forbidden by the producer↔variant table on
-/// `PlacementPhase`, and the panic names the cell that tripped it. `#[track_caller]` alone would
-/// put only the pass's `.rs:line` in the backtrace, leaving an operator to walk the IR for the
-/// cell already routed.
 #[test]
 #[should_panic(
     expected = "for cell #0 at (1,0,1) in struct `gatehouse` — routing must run exactly once per placement"
@@ -530,37 +424,7 @@ fn re_running_routing_pass_panics_loudly() {
     let _twice = compile_routing(&routed.scoped);
 }
 
-/// `examples/crossbar.crn` earns
-/// `W_ROUTE_CROSS_LAYER_CLEARANCE`, and the finding names the pairs
-/// the physical tile layer has to separate.
-///
-/// The router keeps two nets one step apart in one plane, and the
-/// escape that enforces it is what puts a strand a layer above
-/// another: `spec/redstone` "Place-and-route" leaves separating *those*
-/// to the physical tile layer, because whether the upper one reads the
-/// lower depends on what is standing between them and the pseudo-2.5D
-/// model carries no answer. What this pass owes is saying which pairs
-/// carry that obligation rather than leaving it owed by nobody.
-///
-/// Advisory, so the scope is routed rather than elided — a refusal
-/// here would be the router applying a rule it cannot check. Both
-/// editions, because the shape is the placement's and the cell library
-/// does not change it: two stacked pairs and ten staircases, the
-/// second being the one that shorts by the same mechanism an in-plane
-/// pair does. Ten to two rather than a near-even split because
-/// `cell #0`'s run climbed to clear the two sensor lanes and then
-/// travels *alongside* them, one step across from each, for three
-/// columns — six staircases — before it passes over `cell #1`'s output,
-/// which runs the last two blocks of the cell row beneath it out to its
-/// pad: two stacked pairs where it crosses over, and four staircases
-/// either side of them.
-///
-/// The notes are pinned whole rather than searched. What the finding
-/// says is the whole of what this pass hands the tile layer, so the
-/// cap on how many pairs are named, the tally of the rest, the order
-/// they come in — which is a sort over what is otherwise `HashMap`
-/// order — and which net is named as the upper of each pair are all
-/// part of the contract, and none of them fails an `any(...)` search.
+/// `spec/redstone` "Place-and-route" leaves these pairs to the physical tile layer.
 #[test]
 fn crossbar_names_the_pairs_the_tile_layer_has_to_separate() {
     let source = load_example("crossbar.crn");
@@ -608,8 +472,7 @@ fn crossbar_names_the_pairs_the_tile_layer_has_to_separate() {
                  enlarging the region is not a remedy: where a net has to climb at its own \
                  doorstep, more room only lengthens the run it then makes on the upper layer",
             ],
-            "{edition:?}: both shapes named, the rest tallied, the coords in a settled order, \
-             and each pair read upper-first",
+            "{edition:?}: the notes, in order",
         );
         assert!(
             routed.scoped.scopes.iter().any(|e| e.name == "crossbar"),
