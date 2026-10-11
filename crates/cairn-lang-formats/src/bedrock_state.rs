@@ -30,7 +30,7 @@
 //! portability example uses different `weirdo_direction` values; the
 //! wiki listing is authoritative for the on-disk mapping.
 
-use cairn_lang_core::block_array::is_stair;
+use cairn_lang_core::block_array::{BlockState, is_stair};
 use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::Tag;
@@ -154,10 +154,8 @@ const STAIR_KEYS_HANDLED: &str = "facing, half, shape";
 ///   value outside the Java domain.
 /// - [`BedrockStateError::UnknownStairKey`] — a stair property key other than
 ///   `facing` / `half` / `shape`.
-pub fn translate_states(
-    id: &str,
-    properties: &IndexMap<String, String>,
-) -> Result<StateTranslation, BedrockStateError> {
+pub fn translate_states(state: &BlockState) -> Result<StateTranslation, BedrockStateError> {
+    let (id, properties) = (state.id.as_str(), &state.properties);
     if properties.is_empty() {
         return Ok(StateTranslation {
             states: Compound::new(),
@@ -170,7 +168,7 @@ pub fn translate_states(
     } else {
         Err(BedrockStateError::UnmappableBlock {
             id: id.to_owned(),
-            properties: join_properties(properties),
+            properties: state.properties_text(),
             mapped: MAPPED_FAMILIES,
         })
     }
@@ -304,20 +302,11 @@ fn upside_down_bit(id: &str, half: &str) -> Result<i8, BedrockStateError> {
     }
 }
 
-pub(crate) fn join_properties(properties: &IndexMap<String, String>) -> String {
-    properties
-        .iter()
-        .map(|(k, v)| format!("{k}={v}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
 /// A Java palette entry named as its state, `id[key=value,...]`: the
-/// spelling `cairn info` prints a degraded entry in, with the properties
-/// joined by the same [`join_properties`]. A bare block comes out as
-/// `id[]`, as `info`'s spelling would give it.
-pub(crate) fn java_state(id: &str, properties: &IndexMap<String, String>) -> String {
-    format!("{id}[{}]", join_properties(properties))
+/// spelling `cairn info` prints a degraded entry in. A bare block comes out
+/// as `id[]`, as `info`'s spelling would give it.
+pub(crate) fn java_state(state: &BlockState) -> String {
+    format!("{}[{}]", state.id, state.properties_text())
 }
 
 #[cfg(test)]

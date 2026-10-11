@@ -1,5 +1,15 @@
 use super::*;
 
+fn translate(
+    id: &str,
+    properties: &IndexMap<String, String>,
+) -> Result<StateTranslation, BedrockStateError> {
+    translate_states(&BlockState {
+        id: id.to_owned(),
+        properties: properties.clone(),
+    })
+}
+
 fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
     pairs
         .into_iter()
@@ -16,14 +26,14 @@ fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String
 
 #[test]
 fn bare_block_has_empty_states_and_no_degradation() {
-    let t = translate_states("minecraft:oak_planks", &IndexMap::new()).expect("bare");
+    let t = translate("minecraft:oak_planks", &IndexMap::new()).expect("bare");
     assert!(t.states.entries.is_empty());
     assert!(t.degraded.is_empty());
 }
 
 #[test]
 fn stair_maps_facing_and_half_straight_is_lossless() {
-    let t = translate_states(
+    let t = translate(
         "minecraft:dark_oak_stairs",
         &stair_props("north", "bottom", "straight"),
     )
@@ -39,7 +49,7 @@ fn stair_maps_facing_and_half_straight_is_lossless() {
 fn all_four_facings_map_to_distinct_weirdo_directions() {
     let expected = [("east", 0), ("west", 1), ("south", 2), ("north", 3)];
     for (facing, weirdo) in expected {
-        let t = translate_states(
+        let t = translate(
             "minecraft:oak_stairs",
             &stair_props(facing, "bottom", "straight"),
         )
@@ -54,7 +64,7 @@ fn all_four_facings_map_to_distinct_weirdo_directions() {
 
 #[test]
 fn half_top_sets_upside_down_bit() {
-    let t = translate_states(
+    let t = translate(
         "minecraft:spruce_stairs",
         &stair_props("east", "top", "straight"),
     )
@@ -64,7 +74,7 @@ fn half_top_sets_upside_down_bit() {
 
 #[test]
 fn non_straight_shape_drops_as_the_property_and_the_value() {
-    let t = translate_states(
+    let t = translate(
         "minecraft:oak_stairs",
         &stair_props("south", "top", "outer_left"),
     )
@@ -89,17 +99,17 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
         detail.starts_with("shape=outer_left has no Bedrock state"),
         "got: {detail}"
     );
-    let state = java_state(
-        "minecraft:oak_stairs",
-        &stair_props("south", "top", "outer_left"),
-    );
+    let state = java_state(&BlockState {
+        id: "minecraft:oak_stairs".to_owned(),
+        properties: stair_props("south", "top", "outer_left"),
+    });
     assert_eq!(
         degradation_message(&state, &t.degraded[0]),
         format!("stair `minecraft:oak_stairs[facing=south,half=top,shape=outer_left]` {detail}"),
     );
 
     // `straight` produces no note.
-    let straight = translate_states(
+    let straight = translate(
         "minecraft:oak_stairs",
         &stair_props("south", "top", "straight"),
     )
@@ -119,7 +129,7 @@ fn the_family_test_agrees_with_the_one_that_decided_to_paint_it() {
     //
     // Pinned on behaviour rather than by calling the predicate, so the
     // test still means something if the two ever stop sharing one.
-    let err = translate_states(
+    let err = translate(
         "minecraft:mystairs",
         &stair_props("south", "top", "straight"),
     )
@@ -132,7 +142,7 @@ fn the_family_test_agrees_with_the_one_that_decided_to_paint_it() {
 
 #[test]
 fn non_stair_with_properties_fails_loud() {
-    let err = translate_states("minecraft:oak_door", &props([("facing", "north")]))
+    let err = translate("minecraft:oak_door", &props([("facing", "north")]))
         .expect_err("stateful non-stair");
     assert!(matches!(
         err,
@@ -152,7 +162,7 @@ fn non_stair_with_properties_fails_loud() {
 
 #[test]
 fn unknown_stair_facing_value_fails_loud() {
-    let err = translate_states(
+    let err = translate(
         "minecraft:oak_stairs",
         &stair_props("up", "bottom", "straight"),
     )
@@ -182,7 +192,7 @@ fn unknown_stair_half_value_fails_loud() {
     // `upside_down_bit()` refactor that silently maps unknown values to
     // `0` — a silent drop that `spec/versioning-editions` "Fail-loud and
     // minimum-version inference" forbids.
-    let err = translate_states(
+    let err = translate(
         "minecraft:oak_stairs",
         &stair_props("north", "middle", "straight"),
     )
@@ -206,7 +216,7 @@ fn unknown_stair_half_value_fails_loud() {
 
 #[test]
 fn unknown_stair_key_fails_loud() {
-    let err = translate_states("minecraft:oak_stairs", &props([("waterlogged", "true")]))
+    let err = translate("minecraft:oak_stairs", &props([("waterlogged", "true")]))
         .expect_err("unknown key");
     assert!(matches!(
         err,

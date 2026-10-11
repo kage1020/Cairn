@@ -238,14 +238,15 @@ fn an_absent_id_with_unsupported_states_is_counted_once() {
     // palette it was computed from.
     let mut properties = IndexMap::new();
     properties.insert("facing".to_owned(), "north".to_owned());
-    assert!(
-        translate_states("minecraft:spruce_door", &properties).is_err(),
-        "premise: the states alone would already be unsupported",
-    );
-    let ir = one_state_ir(vec![BlockState {
+    let door = BlockState {
         id: "minecraft:spruce_door".to_owned(),
         properties,
-    }]);
+    };
+    assert!(
+        translate_states(&door).is_err(),
+        "premise: the states alone would already be unsupported",
+    );
+    let ir = one_state_ir(vec![door]);
     let counts = bedrock_report(&ir, &table(), &no_aliases()).counts();
     assert_eq!(
         counts,
@@ -265,17 +266,16 @@ fn an_absent_id_whose_states_would_degrade_is_still_unsupported() {
     // files the entry as `degraded`, which reads as "builds, looks
     // slightly wrong" for something that does not build at all — and
     // `total()` is identical either way, so no parity assertion notices.
-    let properties = stair_props("south", "top", "outer_left");
-    let translated = translate_states("minecraft:spruce_stairs", &properties)
-        .expect("premise: the states translate");
+    let stair = BlockState {
+        id: "minecraft:spruce_stairs".to_owned(),
+        properties: stair_props("south", "top", "outer_left"),
+    };
+    let translated = translate_states(&stair).expect("premise: the states translate");
     assert!(
         !translated.degraded.is_empty(),
         "premise: the states translate with loss, so `degraded` is the competing answer",
     );
-    let ir = one_state_ir(vec![BlockState {
-        id: "minecraft:spruce_stairs".to_owned(),
-        properties,
-    }]);
+    let ir = one_state_ir(vec![stair]);
     assert_eq!(
         bedrock_report(&ir, &table(), &no_aliases()).counts(),
         PortabilityCounts {

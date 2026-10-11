@@ -92,9 +92,7 @@ use cairn_lang_core::suggest::nearest_namespaced_id;
 
 use thiserror::Error;
 
-use crate::bedrock_state::{
-    BedrockStateError, StateTranslation, join_properties, translate_states,
-};
+use crate::bedrock_state::{BedrockStateError, StateTranslation, translate_states};
 use crate::registry::{AliasIndex, BlocksIndex};
 
 /// One edition's portability answer: the counts, and the entries behind
@@ -325,7 +323,7 @@ pub fn portability_for_bedrock(
         // three refusals do not describe the same kind of failure, and a
         // fourth added later must be classified here rather than joining
         // whichever bucket a `_` arm points at.
-        match translate_states(&entry.id, &entry.properties) {
+        match translate_states(entry) {
             // Destructured without `..` for the reason the wildcard is
             // refused above: reading `degraded` alone would make these two
             // arms an effective wildcard over `StateTranslation`, and a
@@ -349,7 +347,7 @@ pub fn portability_for_bedrock(
             }) => {
                 report.push_degraded(DegradedEntry {
                     id: entry.id.clone(),
-                    states: join_properties(&entry.properties),
+                    states: entry.properties_text(),
                     dropped: degraded,
                 });
             }

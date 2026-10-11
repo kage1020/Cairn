@@ -98,13 +98,11 @@ fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
             if state.properties.is_empty() {
                 outln!("    [{i:>3}] {glyph}  {}", state.id);
             } else {
-                let props = state
-                    .properties
-                    .iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                outln!("    [{i:>3}] {glyph}  {}[{props}]", state.id);
+                outln!(
+                    "    [{i:>3}] {glyph}  {}[{}]",
+                    state.id,
+                    state.properties_text()
+                );
             }
         }
         for y in 0..array.dims.y {

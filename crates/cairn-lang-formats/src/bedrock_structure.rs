@@ -270,7 +270,7 @@ pub fn prepare_mcstructure<'a>(
                 id: entry.id.clone(),
             });
         }
-        let translated = translate_states(&entry.id, &entry.properties)?;
+        let translated = translate_states(entry)?;
         check_palette_strings(&entry.id, &translated.states)?;
         // Only an entry with properties degrades, so `state` is never a
         // bare block's. It is named by the Java state it came from, as
@@ -278,7 +278,7 @@ pub fn prepare_mcstructure<'a>(
         // the intent is dropped, so two entries that differ only in what
         // was dropped would read the same by it.
         if !translated.degraded.is_empty() {
-            let state = java_state(&entry.id, &entry.properties);
+            let state = java_state(entry);
             for dropped in &translated.degraded {
                 notes.push(ParityNote {
                     id: entry.id.clone(),
