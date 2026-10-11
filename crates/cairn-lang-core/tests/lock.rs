@@ -134,9 +134,8 @@ fn lockfile_with_walkways_roundtrips_through_yaml() {
     let parsed: Lockfile = serde_norway::from_str(&body).expect("decode");
     assert_eq!(lf, parsed);
     assert_eq!(parsed.walkways.len(), 1);
-    // Assert through the typed structure rather than a substring of the
-    // YAML body so an indentation tweak in `serde_norway` cannot turn a
-    // green test into a silent regression on the wire shape.
+    // Through the typed structure: a substring of the YAML body could keep
+    // matching while the wire shape changed.
     let w = &parsed.walkways[0];
     assert_eq!(w.from.place.as_str(), "home1");
     assert_eq!(w.from.port.as_str(), "entry");
@@ -209,8 +208,8 @@ fn hash_parse_rejects_non_hex_char() {
 
 #[test]
 fn hash_parse_accepts_uppercase_hex() {
-    // Lockfiles written by hand may use uppercase. We round-trip the
-    // exact bytes given so the user's choice survives `read → write`.
+    // A hand-written lockfile may use uppercase, and its exact bytes
+    // survive `read → write`.
     let body = "A".repeat(64);
     let parsed = HashHex::parse(&format!("sha256:{body}")).expect("uppercase ok");
     assert_eq!(parsed.as_str(), format!("sha256:{body}"));
