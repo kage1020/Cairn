@@ -22,7 +22,7 @@ use super::data_versions::DataVersionTable;
 use super::hash::pack_hash;
 use super::manifest::{PackEdition, PackManifest};
 use super::materials::{MaterialsError, MaterialsIndex};
-use crate::data_version::UnsupportedTarget;
+use crate::data_version::{BedrockTarget, JavaTarget, UnsupportedTarget};
 
 /// One embedded pack's files, included at compile time so the Cairn
 /// binary never has to find a data file at runtime.
@@ -451,12 +451,9 @@ impl RegistryPack {
     /// edition's `data_version` column would return a meaningful-but-wrong
     /// integer, so it is a hard caller-bug guard rather than a recoverable
     /// error.
-    pub fn resolve_java_target(
-        &self,
-        requested: &str,
-    ) -> Result<crate::data_version::JavaTarget, UnsupportedTarget> {
+    pub fn resolve_java_target(&self, requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
         let (mc_version, data_version) = self.resolve_target_row(PackEdition::Java, requested)?;
-        Ok(crate::data_version::JavaTarget {
+        Ok(JavaTarget {
             mc_version,
             data_version,
         })
@@ -481,10 +478,10 @@ impl RegistryPack {
     pub fn resolve_bedrock_target(
         &self,
         requested: &str,
-    ) -> Result<crate::data_version::BedrockTarget, UnsupportedTarget> {
+    ) -> Result<BedrockTarget, UnsupportedTarget> {
         let (mc_version, block_version) =
             self.resolve_target_row(PackEdition::Bedrock, requested)?;
-        Ok(crate::data_version::BedrockTarget {
+        Ok(BedrockTarget {
             mc_version,
             block_version,
         })
@@ -617,6 +614,35 @@ pub fn builtin_java() -> &'static RegistryPack {
 /// build-invariant reason as [`builtin_java`].
 pub fn builtin_bedrock() -> &'static RegistryPack {
     builtin(PackEdition::Bedrock)
+}
+
+/// Resolve a `--target` string against the built-in registry pack. The
+/// literal `"latest"` aliases the row named by `data_versions.latest`,
+/// matching the working assumption that "no explicit `--target`" means
+/// "the newest supported".
+///
+/// # Errors
+///
+/// Returns [`UnsupportedTarget`] when the requested string is neither a
+/// label equal to a targetable `mc_version` under the comparison
+/// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+/// uses, nor the `"latest"` alias.
+pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
+    builtin_java().resolve_java_target(requested)
+}
+
+/// Resolve a `--target` string against the built-in Bedrock registry pack.
+/// The literal `"latest"` aliases the row named by `data_versions.latest`,
+/// matching [`resolve_java_target`].
+///
+/// # Errors
+///
+/// Returns [`UnsupportedTarget`] when the requested string is neither a
+/// label equal to a targetable `mc_version` under the comparison
+/// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
+/// uses, nor the `"latest"` alias.
+pub fn resolve_bedrock_target(requested: &str) -> Result<BedrockTarget, UnsupportedTarget> {
+    builtin_bedrock().resolve_bedrock_target(requested)
 }
 
 fn builtin(edition: PackEdition) -> &'static RegistryPack {

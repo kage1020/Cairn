@@ -3,9 +3,9 @@
 //! Java structure NBT carries a `DataVersion` integer that the loading
 //! client uses to know whether and how to run DFU upgrades. The mapping
 //! between human-facing `1.21.4` and the integer `4189` is sourced from
-//! the built-in registry pack at `registry-data/java/data_versions.json`
-//! (see [`crate::registry`]). The hardcoded table that used to live in
-//! this module was removed when the registry pack ingest landed.
+//! the built-in registry pack at `registry-data/java/data_versions.json`,
+//! so the lookup lives with the pack in [`crate::registry`] and is
+//! re-exported here beside the types it returns.
 //!
 //! Bedrock `.mcstructure` palettes carry an analogous `version` integer
 //! per block: the block-state version the release writes, packed as
@@ -15,7 +15,7 @@
 
 use std::fmt;
 
-use crate::registry::{builtin_bedrock, builtin_java};
+pub use crate::registry::{resolve_bedrock_target, resolve_java_target};
 
 /// Resolved Minecraft target. `mc_version` is owned (cloned from the
 /// registry pack) so a future `--registry-pack <dir>` flow can drop
@@ -82,41 +82,12 @@ impl fmt::Display for UnsupportedTarget {
 
 impl std::error::Error for UnsupportedTarget {}
 
-/// Resolve a `--target` string against the built-in registry pack. The
-/// literal `"latest"` aliases the row named by `data_versions.latest`,
-/// matching the working assumption that "no explicit `--target`" means
-/// "the newest supported".
-///
-/// # Errors
-///
-/// Returns [`UnsupportedTarget`] when the requested string is neither a
-/// label equal to a targetable `mc_version` under the comparison
-/// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
-/// uses, nor the `"latest"` alias.
-pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
-    builtin_java().resolve_java_target(requested)
-}
-
-/// Resolve a `--target` string against the built-in Bedrock registry pack.
-/// The literal `"latest"` aliases the row named by `data_versions.latest`,
-/// matching [`resolve_java_target`].
-///
-/// # Errors
-///
-/// Returns [`UnsupportedTarget`] when the requested string is neither a
-/// label equal to a targetable `mc_version` under the comparison
-/// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
-/// uses, nor the `"latest"` alias.
-pub fn resolve_bedrock_target(requested: &str) -> Result<BedrockTarget, UnsupportedTarget> {
-    builtin_bedrock().resolve_bedrock_target(requested)
-}
-
 /// Human-readable list of supported `mc_version` strings (built-in pack),
 /// joined for error messages. Public so the CLI can print the same list
 /// in `--help`-style contexts without re-deriving it.
 #[must_use]
 pub fn supported_list() -> String {
-    builtin_java().supported_list()
+    crate::registry::builtin_java().supported_list()
 }
 
 #[cfg(test)]
