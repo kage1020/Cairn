@@ -143,12 +143,7 @@ pub(super) fn diag_state_literal_unchecked(
     if state.properties.is_empty() || !text.contains('[') {
         return None;
     }
-    let pairs = state
-        .properties
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join(",");
+    let pairs = state.properties_text();
     Some(Diagnostic {
         code: DiagnosticCode::StateLiteralUnchecked,
         span: value.span.clone(),

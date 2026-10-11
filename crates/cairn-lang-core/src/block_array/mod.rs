@@ -565,10 +565,7 @@ impl BlockState {
     /// share an [`IndexMap`] allocation across palettes.
     #[must_use]
     pub fn air() -> Self {
-        Self {
-            id: Self::AIR_ID.to_owned(),
-            properties: IndexMap::new(),
-        }
+        Self::bare(Self::AIR_ID)
     }
 
     /// Construct a property-free state. Shorthand for the common case where
@@ -605,6 +602,18 @@ impl BlockState {
             .collect();
         properties.sort_unstable();
         (self.id.as_str(), properties)
+    }
+
+    /// The properties as a state literal writes them between the brackets:
+    /// `key=value` pairs joined by commas, in insertion order, such as
+    /// `facing=east,half=top`. Empty for a state with no properties.
+    #[must_use]
+    pub fn properties_text(&self) -> String {
+        self.properties
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 

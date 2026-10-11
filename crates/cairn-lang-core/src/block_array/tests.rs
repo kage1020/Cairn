@@ -237,3 +237,14 @@ fn canonicalizing_leaves_an_index_the_palette_does_not_have_alone() {
     array.canonicalize_palette();
     assert_eq!(array.first_index_outside_palette(), Some((7, 1)));
 }
+
+#[test]
+fn properties_text_joins_the_pairs_in_insertion_order() {
+    let mut state = BlockState::bare("minecraft:oak_stairs");
+    assert_eq!(state.properties_text(), "");
+    state.properties.insert("half".to_owned(), "top".to_owned());
+    state
+        .properties
+        .insert("facing".to_owned(), "east".to_owned());
+    assert_eq!(state.properties_text(), "half=top,facing=east");
+}

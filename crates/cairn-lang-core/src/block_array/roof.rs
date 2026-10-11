@@ -793,10 +793,7 @@ pub const fn flat_extra_height() -> u32 {
 /// Build the [`BlockState`] for a flat roof's deck.
 #[must_use]
 pub fn flat_block_state() -> BlockState {
-    BlockState {
-        id: FLAT_BASE_ID.to_owned(),
-        properties: IndexMap::new(),
-    }
+    BlockState::bare(FLAT_BASE_ID)
 }
 
 /// Generate every voxel position for a flat roof's deck layer.
