@@ -292,13 +292,11 @@ place id=a use=hut theme=shop_java east_of=b gap=5\n"
     }
 }
 
-/// The `--edition` path, which is what every build command runs and what
-/// the report was filed against.
+/// The `--edition` path, which is what every build command runs.
 ///
-/// A pin removes sibling softening on both routes (the module-level pick
-/// and the `place` row's theme agree on that), so the module
-/// and the placement both have grounds to report — which is exactly the
-/// "once per placement plus once more" shape.
+/// A pin removes sibling softening on both routes, the module-level pick and
+/// the `place` row's theme, so the module and the placement both have
+/// grounds to report.
 #[test]
 fn the_count_holds_under_an_edition_pin() {
     const VARIANTS: &str = "theme shop_java:\n  slot floor -> @oak_planks\n\n\
@@ -383,14 +381,11 @@ floor mat_slot=missing\n",
 /// A theme applied only through a `place`, carrying one selector that
 /// matches and one that does not.
 ///
-/// Nothing else in the repository takes this route — every other selector
-/// test uses the `struct` shape, which the module-level pick binds. Both
-/// halves matter to the rule here, and the second more than the first:
-/// unmatched selectors are judged only for a theme some scope applied, so a
-/// rewrite that resolved each `(def, theme)` pair once and reused the
-/// result would have to keep marking the theme applied on the reused path
-/// or `E_THEME_SELECTOR_UNMATCHED` would stop firing for it — a finding
-/// disappearing with nothing else in the suite to notice.
+/// Every other selector test uses the `struct` shape, which the
+/// module-level pick binds. Unmatched selectors are judged only for a theme
+/// some scope applied, so a resolver that reused one resolution per
+/// `(def, theme)` pair must still mark the theme applied on the reused path,
+/// or `E_THEME_SELECTOR_UNMATCHED` stops firing for it.
 #[test]
 fn a_theme_applied_only_through_a_placement_still_judges_its_selectors() {
     // Two logical themes, so the module-level pick binds nothing and the
@@ -505,8 +500,7 @@ place id=b use=hut theme=plain east_of=a gap=8\n"
         );
     }
 
-    /// Two is the count the report was filed on; three is what says the rule
-    /// is a rule and not an off-by-one.
+    /// Three placements, so the rule cannot be an off-by-one at two.
     #[test]
     fn the_count_does_not_scale_with_the_placement_list() {
         let found = incompatible(&format!(

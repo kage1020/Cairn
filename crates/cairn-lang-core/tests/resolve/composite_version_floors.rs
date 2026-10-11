@@ -306,9 +306,9 @@ fn the_neutral_row_reads_the_inherited_floors_too() {
 ///
 /// The row is one row for a file it may be reporting against both editions
 /// at once, so a floor only one of them inherits cannot feed it. Picking a
-/// variant by the unpinned order instead put a floor no build is held to
-/// into the row — and, worse, left `0.0` on a file a Java build *is* held
-/// to, which `--format json` carries as `registry_compat.min`.
+/// variant by the unpinned order would put a floor no build is held to into
+/// the row, or leave `0.0` on a file a Java build *is* held to, which
+/// `--format json` carries as `registry_compat.min`.
 #[test]
 fn the_neutral_row_leaves_out_a_theme_the_two_editions_bind_differently() {
     // Over-reporting: Java falls back to the unsuffixed `shop` and
@@ -477,8 +477,8 @@ fn only_a_def_or_a_theme_may_declare_one() {
 
 /// The word is only reserved where it declares something. A member line
 /// whose keyword happens to be `requires` parses in the bodies that cannot
-/// hold a floor, and lands in the body as the member it always was — parse
-/// success alone would not say the second half.
+/// hold a floor, and lands in the body as a member, which parse success
+/// alone would not show.
 #[test]
 fn the_word_is_an_ordinary_keyword_where_no_floor_may_stand() {
     for source in [
@@ -499,9 +499,9 @@ fn the_word_is_an_ordinary_keyword_where_no_floor_may_stand() {
 /// Every body of the language goes through one policy, `theme` included.
 ///
 /// A `theme` body accepts the line, so the visible half is that its rules
-/// are otherwise untouched — and that a `requires` *selector* row, which
-/// `check::keyword_allowlist` already refused on either side of this
-/// change, still parses rather than becoming a syntax error.
+/// are otherwise untouched, and that a `requires` *selector* row, which
+/// `check::keyword_allowlist` refuses, still parses rather than becoming a
+/// syntax error.
 #[test]
 fn a_theme_body_reads_the_line_through_the_same_policy() {
     let source = "\

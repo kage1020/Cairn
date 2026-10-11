@@ -21,9 +21,7 @@ fn errors(diagnostics: &[Diagnostic]) -> usize {
         .count()
 }
 
-/// Site prologue with a single def and theme. Names are test-local to
-/// avoid collision with `examples/cottage.crn` (which declares its own
-/// `cottage` struct under a slightly different role schema).
+/// Site prologue with a single def and theme.
 const PROLOGUE: &str = "@cairn 2026.06\n\n\
 def hut size=3x3:\n  \
 floor id=floor mat_slot=floor\n  \
@@ -155,14 +153,10 @@ place           use=hut theme=plain east_of=anchor gap=4\n"
     );
 }
 
-/// A `connect` row missing its `to` half short-circuits silently at the
-/// resolver: the cross-layer diagnostic (`E_CONNECT_ARITY`) is owned by
-/// `check::connect_arity`, which runs ahead of `resolve` inside the
-/// top-level `check` pipeline. This test exercises `resolve(ir)`
-/// directly, so it pins the resolver-only contract that library
-/// callers bypassing `check` continue to see the defensive return
-/// rather than a panic. The user-facing diagnostic is covered in
-/// `tests/check/connect_arity.rs`.
+/// A `connect` row missing its `to` half returns early at the resolver
+/// without a finding: `E_CONNECT_ARITY` is `check::connect_arity`'s, which
+/// runs ahead of `resolve`. A library caller bypassing `check` sees the
+/// early return rather than a panic.
 #[test]
 fn connect_with_missing_positional_silently_returns_without_diagnostics() {
     let src = format!(
@@ -191,9 +185,9 @@ connect anchor.entry\n"
 }
 
 /// `connect FROM.PORT to` (the `to` keyword present but no target port)
-/// takes the same silent return as the row with no `to` half. Both shapes
-/// are pinned, so a resolver that starts treating them differently (say,
-/// panicking when `to` is present) shows up as a deliberate test change.
+/// takes the same silent return as the row with no `to` half, so a
+/// resolver that treats them differently (say, panicking when `to` is
+/// present) shows up as a deliberate test change.
 #[test]
 fn connect_with_to_keyword_only_silently_returns_without_diagnostics() {
     let src = format!(

@@ -71,11 +71,9 @@ fn multi_theme_unbound_scope_gets_no_selector_extras() {
 
 #[test]
 fn unmatched_selector_warning_is_suppressed_for_unapplied_themes() {
-    // In a multi-theme file no theme is applied to the struct or def, so
-    // warning on every theme selector would be noise.
-    // A theme is picked at the `place ... theme=X` boundary; until
-    // that binding runs, the selectors are not "unmatched", they're
-    // "not yet bound".
+    // In a multi-theme file the theme is picked at the `place ... theme=X`
+    // boundary, so a struct's or def's selectors are not unmatched, only
+    // not yet bound.
     let src = "theme a:\n  walls[class=outer] -> trim=@a\ntheme b:\n  walls[class=outer] -> trim=@b\n\nstruct s size=4x4\n  walls class=outer height=3\n";
     let r = resolve(&ir(src), None);
     assert!(
@@ -146,9 +144,7 @@ fn unmatched_selector_names_the_attributes_it_filtered_on() {
 
 #[test]
 fn unresolved_slot_attaches_did_you_mean_note() {
-    // `mat_slot=wal` is one deletion away from the declared `wall` slot;
-    // the resolver must surface that as a targeted suggestion so the
-    // fix is unambiguous.
+    // `mat_slot=wal` is one deletion away from the declared `wall` slot.
     let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=wal height=3\n";
     let r = resolve(&ir(src), None);
     let diag = r
@@ -167,8 +163,7 @@ fn unresolved_slot_attaches_did_you_mean_note() {
 
 #[test]
 fn unresolved_slot_skips_suggestion_when_pool_is_far_away() {
-    // No theme slot is close to `quartz` — the resolver must not invent
-    // a guess. The remediation note stays as the lone follow-up.
+    // No theme slot is close to `quartz`.
     let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=quartz height=3\n";
     let r = resolve(&ir(src), None);
     let diag = r
@@ -188,10 +183,6 @@ fn unresolved_slot_skips_suggestion_when_pool_is_far_away() {
 
 #[test]
 fn connect_resolves_to_port_refs_with_path_material() {
-    // Two cottages connected by gravel — the canonical village shape.
-    // The resolver must build one `ValidatedConnect` carrying both
-    // `(place, port)` pairs plus the `path=@gravel` value, with
-    // no diagnostics.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -224,9 +215,6 @@ fn connect_resolves_to_port_refs_with_path_material() {
 
 #[test]
 fn connect_unknown_port_emits_e_unresolved_port() {
-    // Port `entry` is exposed by the def, but the user mistyped it.
-    // The resolver must surface E_UNRESOLVED_PORT with a nearest-
-    // match note pointing at the correct `place.port` shape.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -252,9 +240,7 @@ fn connect_unknown_port_emits_e_unresolved_port() {
         "expected nearest-match note pointing at a.entry, got {:?}",
         diag.notes,
     );
-    // Anchor: the span must point at the `a.entr` DotRef, not at
-    // the whole `connect` row. Mirrors the to-side assertion in
-    // `connect_unknown_port_on_to_side_emits_e_unresolved_port`.
+    // The span is the `a.entr` reference, not the whole `connect` row.
     let typo_start = src.find("a.entr").expect("typo present");
     let typo_end = typo_start + "a.entr".len();
     assert_eq!(diag.span.start, typo_start);
@@ -448,9 +434,7 @@ fn a_typo_in_a_def_with_a_level_is_still_not_declared() {
 
 #[test]
 fn connect_ambiguous_port_emits_e_ambiguous_port() {
-    // Two members of the def carry `id=entry`. The reference is
-    // ambiguous; the resolver must say so loudly rather than picking
-    // one silently.
+    // Two members of the def carry `id=entry`.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -503,11 +487,9 @@ fn connect_missing_path_emits_e_missing_path_material() {
 
 #[test]
 fn connect_non_token_path_emits_e_missing_path_material() {
-    // `path=plain_ident` and `path="gravel"` slip through the
-    // material resolver as `MaterialDeferred::AlreadyDiagnosed` (the
-    // theme-slot path). The resolver must surface that as
-    // E_MISSING_PATH_MATERIAL with a "must be an @ token" note,
-    // otherwise the row drops silently in the walkway voxeliser.
+    // A non-token `path=` reaches the material resolver as
+    // `MaterialDeferred::AlreadyDiagnosed`, the theme-slot path, so without
+    // this finding the walkway voxeliser would drop the row in silence.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -538,10 +520,8 @@ fn connect_non_token_path_emits_e_missing_path_material() {
 
 #[test]
 fn connect_unknown_place_emits_e_unresolved_place_ref() {
-    // `ghost` is not a known place id. Re-uses the existing
-    // E_UNRESOLVED_PLACE_REF code so a single diagnostic family
-    // covers every "unknown place" path, origin selectors and connect
-    // refs alike.
+    // One code covers every unknown place, origin selectors and `connect`
+    // references alike.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -565,7 +545,6 @@ fn connect_unknown_place_emits_e_unresolved_place_ref() {
                 r.diagnostics,
             )
         });
-    // Anchor: span underlines the `ghost.entry` reference itself.
     let bad_start = src.find("ghost.entry").expect("bad ref present");
     let bad_end = bad_start + "ghost.entry".len();
     assert_eq!(diag.span.start, bad_start);
@@ -574,11 +553,7 @@ fn connect_unknown_place_emits_e_unresolved_place_ref() {
 
 #[test]
 fn connect_with_both_endpoints_unknown_emits_both_e_unresolved_place_ref() {
-    // Pin the "fail both halves" contract: a row whose `from` and
-    // `to` both name absent places must surface *two* diagnostics
-    // (one per offending DotRef), not just the first one. Catches a
-    // regression where short-circuit on the `from` half would let
-    // the `to` typo slip through silently.
+    // Short-circuiting on the `from` half would lose the `to` typo.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -610,10 +585,6 @@ fn connect_with_both_endpoints_unknown_emits_both_e_unresolved_place_ref() {
 
 #[test]
 fn connect_unknown_port_on_to_side_emits_e_unresolved_port() {
-    // Symmetric to `connect_unknown_port_emits_e_unresolved_port`: the
-    // bad port is on the `to` half (`b.entr`) instead of the `from`
-    // half. The diagnostic must anchor at the offending token, not at
-    // the whole `connect` line.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -639,8 +610,6 @@ fn connect_unknown_port_on_to_side_emits_e_unresolved_port() {
         "expected nearest-match note pointing at b.entry, got {:?}",
         diag.notes,
     );
-    // The span must point at the `b.entr` token itself so a renderer
-    // can underline the typo rather than the whole `connect` row.
     let typo_start = src.find("b.entr").expect("typo present");
     let typo_end = typo_start + "b.entr".len();
     assert_eq!(
@@ -658,10 +627,6 @@ fn connect_unknown_port_on_to_side_emits_e_unresolved_port() {
 
 #[test]
 fn connect_unknown_place_on_from_side_emits_e_unresolved_place_ref() {
-    // Symmetric to `connect_unknown_place_emits_e_unresolved_place_ref`:
-    // the unknown place id is on the `from` half instead of the `to`
-    // half. A single E_UNRESOLVED_PLACE_REF code must continue to
-    // cover both directions.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -685,8 +650,6 @@ fn connect_unknown_place_on_from_side_emits_e_unresolved_place_ref() {
                 r.diagnostics,
             )
         });
-    // The span must underline the `ghost.entry` reference so the
-    // renderer points at the bad token rather than the whole row.
     let bad_start = src.find("ghost.entry").expect("bad ref present");
     let bad_end = bad_start + "ghost.entry".len();
     assert_eq!(
@@ -716,9 +679,8 @@ fn unknown_slot_target_emits_error() {
 
 // ------------------------------------------------------------------
 // Per-edition theme fallback (`spec/versioning-editions` "Java / Bedrock
-// portability", #2).
-// The following tests pin the AC set that keeps the resolver honest
-// about which variant it bound and when the sibling-slot union kicks in.
+// portability"): which variant the resolver binds, and when the
+// sibling-slot union applies.
 // ------------------------------------------------------------------
 
 fn per_edition_variants_src() -> String {
@@ -793,8 +755,6 @@ fn per_edition_variant_binds_only_its_own_slot_under_compile() {
 
 #[test]
 fn per_edition_check_unions_slots_across_variants() {
-    // resolve(ir, None) on a file with `_java` + `_bedrock` variants
-    // must accept a `mat_slot=X` when X is declared by *either* variant.
     let src = [
         "theme t_java:",
         "  slot floor -> @oak_planks",
@@ -849,9 +809,8 @@ fn per_edition_check_still_errors_on_slot_absent_from_all_variants() {
 
 #[test]
 fn per_edition_falls_back_to_unsuffixed_when_variant_missing() {
-    // `theme t:` (no variant suffix) is the shared-default form used
-    // by every existing example. It must resolve for both editions so
-    // the current corpus keeps compiling untouched.
+    // `theme t:`, with no variant suffix, is the shared default every
+    // shipped example uses.
     let src = [
         "theme t:",
         "  slot floor -> @oak_planks",
@@ -953,8 +912,7 @@ fn per_edition_java_does_not_fall_back_to_bedrock_variant() {
     // correctly, and that message has to name the theme the slot is
     // missing from — of which there is none, because the pin refused
     // the only one. The theme is what cannot be honoured, so the
-    // finding names the theme. Reporting nothing at all is what let a
-    // build write the requested extent out of air at exit 0.
+    // finding names the theme.
     assert!(
         !r.diagnostics
             .iter()
@@ -995,7 +953,7 @@ fn per_edition_bedrock_does_not_fall_back_to_java_variant() {
 }
 
 // ------------------------------------------------------------------
-// A pin the module cannot satisfy, and a pin the site path ignored.
+// A pin the module cannot satisfy, and a pin on the site path.
 // ------------------------------------------------------------------
 
 /// One logical theme `shop` in the given variants, plus a def and a
@@ -1182,10 +1140,8 @@ fn a_place_naming_this_editions_variant_binds_it_without_comment() {
 
 #[test]
 fn a_place_naming_the_logical_theme_binds_the_pinned_variant() {
-    // The spelling `spec/versioning-editions` "Java / Bedrock
-    // portability" asks for. Before the reference went through variant
-    // selection it was the one spelling that did not resolve, because no
-    // theme is named plain `shop`.
+    // The spelling `spec/versioning-editions` "Java / Bedrock portability"
+    // asks for, though no theme is named plain `shop`.
     let src = placed_under("shop", &["_java", "_bedrock"]);
     for (edition, expected) in [
         (Edition::Java, "shop_java"),
@@ -1281,9 +1237,8 @@ fn placed_reading_a_bedrock_only_slot(reference: &str) -> String {
 
 #[test]
 fn a_logical_place_theme_is_softened_by_its_siblings_without_a_pin() {
-    // Opening the site path to logical names re-opens the door the
-    // sibling union exists to hold: with no edition picked, a slot only
-    // one variant declares must not error, or a file that compiles
+    // With no edition picked, a slot only one variant declares must not
+    // error through a logical `theme=` either, or a file that compiles
     // cleanly for Bedrock fails `cairn check`.
     let r = resolve(&ir(&placed_reading_a_bedrock_only_slot("shop")), None);
     // The logical name has to bind first, or "no unresolved slot" would
@@ -1331,12 +1286,8 @@ fn naming_a_variant_explicitly_keeps_its_slots_strict_without_a_pin() {
 fn a_variant_the_module_does_not_declare_is_unresolved_without_a_pin() {
     // The spelling and the declaration set disagree, and no edition is
     // named to settle it. Re-picking a sibling here would swap a variant
-    // on `cairn lower`'s say-so — the very thing the pinned path is
-    // written to stop doing silently — so the answer is the one a
-    // misspelled theme has always had.
-    //
-    // This shape was missing from the helpers entirely: every source
-    // they built spelled a reference that the variant list contained.
+    // on `cairn lower`'s say-so, so the answer is the one a misspelled
+    // theme gets.
     for (reference, variants) in [
         ("shop_java", ["_bedrock"].as_slice()),
         ("shop_bedrock", ["_java"].as_slice()),
@@ -1397,8 +1348,8 @@ fn a_pin_prefers_the_unsuffixed_theme_over_the_other_editions_variant() {
 #[test]
 fn one_unbindable_theme_is_one_finding_however_many_places_read_it() {
     // The module-level pick and both placements ask for the same edit in
-    // the same `theme` block, and the three messages were byte-identical
-    // apart from their span.
+    // the same `theme` block, so three messages would differ only in their
+    // span.
     let src = concat!(
         "theme shop_bedrock:\n  slot floor -> @dark_oak_planks\n\n",
         "def hut size=4x4:\n  floor mat_slot=floor\n\n",
@@ -1652,12 +1603,11 @@ const UNUSED_DEF_CASES: &[(&[&str], &[Expected])] = &[
 /// brings it back as `E_UNRESOLVED_PLACE_REF` once the row is fixed.
 ///
 /// Every way the resolver refuses the row has a case. For its id: the
-/// unnamed placement, reached both by a missing `id=` and by
-/// `id=3` (not label-shaped, so never hoisted onto `Member::id`;
-/// `check::type_mismatch` reports it, so `resolve` says nothing), an id
-/// `PlaceId` refuses, and an id already placed. For its origin: no
-/// origin selector, two, an `at=` other
-/// than `origin`, a non-label `east_of=`, an `east_of=` and a
+/// unnamed placement, reached both by a missing `id=` and by `id=3` (not
+/// label-shaped, so never hoisted onto `Member::id`; `check::type_mismatch`
+/// reports it, so `resolve` says nothing), an id `PlaceId` refuses, and an
+/// id already placed. For its origin: no origin selector, two, an `at=`
+/// other than `origin`, a non-label `east_of=`, an `east_of=` and a
 /// `north_of=` naming no prior place, and an `east_of=` naming a row
 /// refused for its id, the one refusal that is a warning alone.
 ///

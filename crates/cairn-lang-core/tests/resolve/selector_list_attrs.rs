@@ -48,7 +48,7 @@ fn a_list_valued_selector_attribute_matches_the_member_that_carries_it() {
 fn the_binding_that_selector_carries_actually_reaches_the_member() {
     // The absence of `E_THEME_SELECTOR_UNMATCHED` is not the contract — a
     // selector that matches is a selector whose bindings land. Reading
-    // `selector_extras` is what distinguishes "matched" from "no longer
+    // `selector_extras` is what distinguishes "matched" from "not
     // complained about".
     let extras = selector_extras(MATCHING);
     assert_eq!(
