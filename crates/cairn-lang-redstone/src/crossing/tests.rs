@@ -523,7 +523,7 @@ fn a_buffer_candidate_is_never_a_cell_body() {
     assert_ne!(
         buffers[0].coord,
         CellCoord::new(15, 0, 1),
-        "the coord it used to want is the cell body",
+        "the straight-line 15-step point is the cell body",
     );
 }
 
@@ -1510,7 +1510,7 @@ struct chain size=60x5
     }
 }
 
-mod phase4_invariant {
+mod buffer_delay_invariant {
     //! Property tests for the crossing and delay agreement, here rather than in
     //! `tests/redstone/crossing.rs` because the strategy hand-builds `Unrouted`
     //! [`PlacedCellNode`]s through the `pub(crate)` `phase` field.
@@ -1527,7 +1527,7 @@ mod phase4_invariant {
     use crate::routing::compile_routing;
     use crate::routing_geometry::NetTree;
 
-    /// Sink positions for the stage-4 invariant: each `(x, z)` seeds a cell at `(x, 0, z)` driven
+    /// Sink positions for the buffer-tick invariant: each `(x, z)` seeds a cell at `(x, 0, z)` driven
     /// from `Input(0)` at `(0, 0, 0)`. `x` in `1..=99` spans sub-limit segments and several
     /// boundaries, so most cases carry buffers.
     ///
@@ -1540,7 +1540,7 @@ mod phase4_invariant {
     /// the same tuple so every seed in `proptest-regressions/crossing.txt` still replays the case
     /// it was recorded for; a seed is an RNG state and replays as an unrelated value under a
     /// different shape.
-    fn phase4_scope_strategy() -> impl Strategy<Value = Vec<(u32, u32, bool)>> {
+    fn scope_strategy() -> impl Strategy<Value = Vec<(u32, u32, bool)>> {
         prop::collection::vec((1u32..=99u32, 0u32..8u32, prop::bool::ANY), 1..=3).prop_map(
             |mut cells| {
                 let mut seen: HashSet<(u32, u32)> = HashSet::new();
@@ -1550,9 +1550,9 @@ mod phase4_invariant {
         )
     }
 
-    /// The scope one draw of [`phase4_scope_strategy`] stands for:
+    /// The scope one draw of [`scope_strategy`] stands for:
     /// one cell at `(x, 0, z)` per entry, each driven from `sig.a`.
-    fn phase4_ir(xs: &[(u32, u32, bool)]) -> PlacementIr {
+    fn scope_ir(xs: &[(u32, u32, bool)]) -> PlacementIr {
         let mut ir = PlacementIr::new(Edition::Java);
         ir.region = Some(reservation(200, 10, 3));
         ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -1581,12 +1581,12 @@ mod phase4_invariant {
         ir
     }
 
-    /// What `phase4_buffer_tick_invariant_holds` asserts, over one draw of
-    /// [`phase4_scope_strategy`], as a function so a named test can replay a draw without the
+    /// What `a_cell_waits_its_base_delay_plus_its_buffer_ticks` asserts, over one draw of
+    /// [`scope_strategy`], as a function so a named test can replay a draw without the
     /// regressions file.
-    fn check_phase4_scope(xs: &[(u32, u32, bool)]) -> Result<(), TestCaseError> {
+    fn check_scope(xs: &[(u32, u32, bool)]) -> Result<(), TestCaseError> {
         let case = format!("xs={xs:?}");
-        let legalized = legalize_phase4(phase4_ir(xs), &case)?;
+        let legalized = legalize_scope(scope_ir(xs), &case)?;
         for entry in &legalized.scopes {
             check_buffer_sites(entry, &case)?;
             check_cell_charges(entry, &case)?;
@@ -1600,7 +1600,7 @@ mod phase4_invariant {
     /// `compile_routing → compile_delay → compile_crossing` over
     /// one scope, failing on a routing or delay diagnostic and
     /// rejecting the case on a crossing one.
-    fn legalize_phase4(ir: PlacementIr, case: &str) -> Result<ScopedPlacementIr, TestCaseError> {
+    fn legalize_scope(ir: PlacementIr, case: &str) -> Result<ScopedPlacementIr, TestCaseError> {
         let routing = compile_routing(&scoped(ScopeKind::Struct, "prop", ir));
         prop_assert!(
             routing.diagnostics.is_empty(),
@@ -1871,7 +1871,7 @@ mod phase4_invariant {
             let delta = dt.checked_sub(base);
             prop_assert!(
                 delta.is_some(),
-                "local_delay_ticks {} < base_delay_ticks {} for cell at {:?} — delay pass regressed below the edition base",
+                "local_delay_ticks {} < base_delay_ticks {} for cell at {:?} — the delay pass charged less than the edition base",
                 dt,
                 base,
                 cell.coord,
@@ -1927,9 +1927,9 @@ mod phase4_invariant {
     fn a_buffer_walked_back_over_a_turn_stops_short_of_a_branch_beside_it() {
         let xs = [(62, 4, false), (62, 2, false)];
         let case = format!("xs={xs:?}");
-        replay(check_phase4_scope(&xs), &case);
+        replay(check_scope(&xs), &case);
         let legalized =
-            legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
@@ -1960,9 +1960,9 @@ mod phase4_invariant {
     fn a_buffer_due_beside_a_branch_steps_back_off_it() {
         let xs = [(97, 2, false), (97, 3, false)];
         let case = format!("xs={xs:?}");
-        replay(check_phase4_scope(&xs), &case);
+        replay(check_scope(&xs), &case);
         let legalized =
-            legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
@@ -2002,9 +2002,9 @@ mod phase4_invariant {
     fn a_buffer_on_a_trunk_fed_through_a_fork_stops_short_of_a_branch_beside_it() {
         let xs = [(27, 6, false), (27, 7, false), (1, 5, false)];
         let case = format!("xs={xs:?}");
-        replay(check_phase4_scope(&xs), &case);
+        replay(check_scope(&xs), &case);
         let legalized =
-            legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
@@ -2098,9 +2098,9 @@ mod phase4_invariant {
     fn a_buffer_never_stands_over_a_sink_of_its_own_net() {
         let xs = [(74, 0, false), (47, 0, false), (47, 1, false)];
         let case = format!("xs={xs:?}");
-        replay(check_phase4_scope(&xs), &case);
+        replay(check_scope(&xs), &case);
         let legalized =
-            legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let tree = &trees[&NetRef::Input(0)];
@@ -2143,9 +2143,9 @@ mod phase4_invariant {
     fn a_buffer_never_stands_beside_a_sink_of_its_own_net() {
         let xs = [(31, 0, false), (32, 0, false)];
         let case = format!("xs={xs:?}");
-        replay(check_phase4_scope(&xs), &case);
+        replay(check_scope(&xs), &case);
         let legalized =
-            legalize_phase4(phase4_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let tree = &trees[&NetRef::Input(0)];
@@ -2247,8 +2247,8 @@ mod phase4_invariant {
         /// `checked_sub` and `checked_mul` refuse to clamp a delay below the edition base or a
         /// count past `u32`.
         #[test]
-        fn phase4_buffer_tick_invariant_holds(xs in phase4_scope_strategy()) {
-            check_phase4_scope(&xs)?;
+        fn a_cell_waits_its_base_delay_plus_its_buffer_ticks(xs in scope_strategy()) {
+            check_scope(&xs)?;
         }
     }
 }

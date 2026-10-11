@@ -49,13 +49,10 @@ fn redstone_door_java_places_or_cell_beside_the_pad_column() {
     assert_eq!(cell.coord.x, 1);
     assert_eq!(cell.coord.y, 0);
     assert_eq!(cell.coord.z, 1);
-    assert!(
-        cell.wire_length().is_none(),
-        "wire_length is a follow-up pass output",
-    );
+    assert!(cell.wire_length().is_none(), "routing fills wire_length");
     assert!(
         cell.local_delay_ticks().is_none(),
-        "local_delay_ticks is a follow-up pass output",
+        "the delay pass fills local_delay_ticks",
     );
 }
 
@@ -956,7 +953,7 @@ fn placement_of(source: &str) -> cairn_lang_redstone::PlacementOutput {
 }
 
 /// `size=2x8 void=3` with three cells: the volume test passes (12 <= 48) and the row, which wants
-/// six columns, is overrun by four.
+/// seven columns, is overrun by five.
 #[test]
 fn a_netlist_wider_than_the_reserved_row_is_refused() {
     let out = placement_of(&source_with_cells(3, 2, 8, 3));
@@ -971,10 +968,12 @@ fn a_netlist_wider_than_the_reserved_row_is_refused() {
         .iter()
         .find(|d| d.code == DiagnosticCode::RouteCongestion)
         .expect("the overrun must surface as E_ROUTE_CONGESTION");
-    assert!(
-        diagnostic.primary.contains("only 2 wide"),
-        "the refusal must name the row, not an area ratio: {}",
+    assert_eq!(
         diagnostic.primary,
+        "synthesized netlist needs 7 columns for a row of 3 cells, a clear column beside each \
+         and one past the end of the row, but the reserved region is only 2 wide (region 2x8, \
+         void=3)",
+        "the refusal names the row, not an area ratio",
     );
     assert_eq!(diagnostic.severity(), Severity::Error);
 }
@@ -1002,13 +1001,12 @@ fn a_row_wide_enough_for_the_cells_and_not_the_spacing_is_refused() {
         .iter()
         .find(|d| d.code == DiagnosticCode::RouteCongestion)
         .expect("the overrun must surface as E_ROUTE_CONGESTION");
-    assert!(
-        diagnostic
-            .primary
-            .contains("needs 7 columns for a row of 3 cells"),
-        "the refusal must name the columns the row wants, not the cells it \
-         holds: {}",
+    assert_eq!(
         diagnostic.primary,
+        "synthesized netlist needs 7 columns for a row of 3 cells, a clear column beside each \
+         and one past the end of the row, but the reserved region is only 4 wide (region 4x8, \
+         void=3)",
+        "the refusal names the columns the row wants, not the cells it holds",
     );
 }
 

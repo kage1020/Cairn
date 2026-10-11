@@ -46,7 +46,7 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
     );
     assert!(
         cell.local_delay_ticks().is_none(),
-        "local_delay_ticks stays None: Stage 3 (delay insertion) is a follow-up",
+        "the delay pass fills local_delay_ticks",
     );
 }
 

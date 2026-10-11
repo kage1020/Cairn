@@ -181,8 +181,7 @@ fn a_third_driver_adds_no_second_finding() {
 }
 
 #[test]
-fn two_logic_lines_on_one_signal_keep_the_wording_they_had() {
-    // The `logic`-versus-`logic` message is the one authors know, so it stays word for word.
+fn two_logic_lines_on_one_signal_say_the_signal_is_redefined() {
     let source = concat!(
         "@cairn 2026.06\n",
         "\n",
@@ -197,12 +196,9 @@ fn two_logic_lines_on_one_signal_keep_the_wording_they_had() {
     let found = drivers_findings(&out);
     assert_eq!(found.len(), 1, "{found:#?}");
     assert_eq!(anchor_and_note(source, found[0]), (6, 5));
-    assert!(
-        found[0]
-            .primary
-            .contains("redefines a signal already driven earlier in this scope"),
-        "{}",
+    assert_eq!(
         found[0].primary,
+        "struct=gate: `logic sig.a = ...` redefines a signal already driven earlier in this scope",
     );
 }
 

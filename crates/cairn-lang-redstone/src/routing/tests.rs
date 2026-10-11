@@ -90,8 +90,8 @@ fn no_example_draws_dust_inside_a_component() {
     }
     assert_eq!(
         routed_scopes, placed_scopes,
-        "routing refused a scope the corpus used to lay out, and this walk \
-         cannot see what it no longer visits",
+        "routing refused a scope placement laid out, and this walk cannot see \
+         the scopes it skips",
     );
     assert!(
         routed_scopes >= 4,

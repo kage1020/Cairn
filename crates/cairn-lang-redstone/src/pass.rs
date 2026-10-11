@@ -117,22 +117,22 @@ fn source_of_net<'a>(
     cell_coords: &'a [CellCoord],
     inputs: usize,
 ) -> impl Fn(NetRef) -> CellCoord + Copy + 'a {
-    move |net| {
-        match net {
+    move |net| match net {
         NetRef::Input(i) => {
             assert!(
                 (i as usize) < inputs,
-                "NetRef::Input({i}) out of range (inputs.len()={inputs}) — netlist invariant broken by caller-side hand-built IR",
+                "NetRef::Input({i}) out of range (inputs.len()={inputs}) — netlist invariant \
+                 broken by caller-side hand-built IR",
             );
             input_pad(i as usize, column, region)
         }
         NetRef::Cell(j) => *cell_coords.get(j as usize).unwrap_or_else(|| {
             panic!(
-                "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken by caller-side hand-built IR",
+                "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken \
+                 by caller-side hand-built IR",
                 cell_coords.len(),
             )
         }),
-    }
     }
 }
 

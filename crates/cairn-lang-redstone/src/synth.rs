@@ -1518,11 +1518,11 @@ fn lower_expr_inner<'a>(
                     DiagnosticCode::LogicUnsupportedPrimitive,
                     binding_span.clone(),
                     format!(
-                        "{label} logic expression uses a boolean primitive this synth pass does not yet lower",
+                        "{label} logic expression uses a boolean primitive the combinational lowering has no gate for",
                     ),
                 )
                 .with_footer(
-                    "Fix: rewrite using `and` / `or` / `not`, or wait for a follow-up change that lands the missing primitive.",
+                    "Fix: rewrite the expression with `and`, `or` and `not`",
                 ),
             );
             Err(LoweringFailed)
@@ -1714,20 +1714,9 @@ struct ScopeRef<'a> {
 }
 
 impl ScopeRef<'_> {
-    /// `struct=gatehouse:` — the prefix every finding in this pass opens
-    /// with.
+    /// `struct=gatehouse:`, the prefix of every finding's primary message, so a multi-scope
+    /// module's findings say which scope they are in.
     fn label(self) -> String {
-        scope_label(self.kind, self.name)
+        format!("{}={}:", self.kind.label(), self.name)
     }
-}
-
-/// The prefix of every finding's primary message, so a multi-scope module's findings say which
-/// scope they are in.
-fn scope_label(kind: ScopeKind, name: &str) -> String {
-    let label = match kind {
-        ScopeKind::Struct => "struct",
-        ScopeKind::Def => "def",
-        ScopeKind::Site => "site",
-    };
-    format!("{label}={name}:")
 }
