@@ -1,27 +1,13 @@
-//! Edition Netlist IR — edition-specific realisation of each Netlist IR cell.
+//! Edition Netlist IR: the target-edition realisation of each Netlist IR cell.
 //!
-//! Sits one lowering step above the [Netlist IR](crate::netlist_ir) and one
-//! below the Placement IR that later passes will grow on top. The edition
-//! pass ([`crate::edition_netlist::compile_edition_netlist`]) walks every
-//! [`crate::netlist_ir::ScopedNetlistIrEntry`] once and rewrites each
-//! [`crate::netlist_ir::CellNode`] into an [`EditionCellNode`] whose
-//! [`EditionCell`] tag names the target-edition realisation of the source
-//! [`crate::netlist_ir::LogicalCell`] — the middle rung of the three-tier
-//! cell library documented in `spec/redstone` "Edition differences"
-//! (`Logical Cell → Edition Cell → Physical Tile`).
+//! The edition pass ([`crate::edition_netlist::compile_edition_netlist`]) rewrites each
+//! [`crate::netlist_ir::CellNode`] into an [`EditionCellNode`] whose [`EditionCell`] names the
+//! realisation of its [`crate::netlist_ir::LogicalCell`], the middle tier of the cell library
+//! (`spec/redstone` "Edition differences"). Drivers, ports and `signal_defs` are copied unchanged,
+//! and delay is still not carried.
 //!
-//! The pass is structural only: driver arrays, net references, input /
-//! output ports, and `signal_defs` are copied verbatim from the source
-//! Netlist IR. Delay is still not carried — per `spec/redstone`
-//! "Time model" and "Connection to the IR and phases" delay is first
-//! determined in the Placement IR, one step further down the pipeline.
-//!
-//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, from `spec/redstone`
-//! "Edition differences") is not scaffolded here because none of the
-//! currently reachable [`crate::netlist_ir::LogicalCell`] variants
-//! (`And` / `Or` / `Not`) require update-order semantics; the diagnostic
-//! joins the pass alongside the first cell that needs it
-//! (sequential-macro or observer families).
+//! Nothing here refuses with `E_NO_PORTABLE_IMPL` (QC / BUD, `spec/redstone` "Edition
+//! differences"), because no reachable cell (`And`, `Or`, `Not`) depends on update order.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
@@ -32,32 +18,17 @@ use serde::{Deserialize, Serialize};
 use crate::logic_ir::{ScopeKind, Scoped, ScopedEntry};
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 
-/// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`]
-/// (`spec/redstone` "Edition differences"). Each variant carries both a
-/// target edition and a physical implementation family, so pairing a Java
-/// AND cell with a Bedrock torch tile is a type error, not a runtime
-/// mishap.
+/// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`] (`spec/redstone` "Edition
+/// differences").
 ///
-/// The variant set covers *every* `(Edition, LogicalCell)` combination.
-/// The pinned pairs (`ComparatorAnd` / `TorchAnd` / `RepeaterOr` /
-/// `TorchOr` / `InverterTorch`) name the physical implementation the
-/// downstream placer will materialise. The `*Unpinned` pairs are named
-/// placeholders for the parser-unreachable cells (`Xor` / `Nand` / `Nor`
-/// / `Mux`) whose Java / Bedrock realisations have not been chosen yet —
-/// keeping them as concrete per-edition variants (rather than one
-/// edition-agnostic `Reserved`) makes container/cell edition parity a
-/// pure naming invariant, and makes the eventual pinning a rename in the
-/// one match arm that produces the variant instead of a fresh enum
-/// entry. No wildcard fall-through arm exists in
-/// [`crate::edition_netlist::compile_edition_netlist`], so a future
-/// third `Edition` variant (Education) triggers a compile error at every
-/// mapping site rather than silently degrading to the wrong realisation.
+/// Each variant names both an edition and a physical family, so pairing a Java cell with a Bedrock
+/// tile is a type error. Every `(Edition, LogicalCell)` pair has a variant. The `*Unpinned` ones
+/// stand for the reserved cells (`Xor`, `Nand`, `Nor`, `Mux`), whose realisations are not chosen;
+/// they are per edition rather than one `Reserved`, so a cell's edition is always its variant's
+/// and pinning one is a rename. [`crate::edition_netlist::compile_edition_netlist`] has no
+/// wildcard arm, so a new `Edition` is a compile error at every mapping site.
 ///
-/// `#[non_exhaustive]` for the same reason [`crate::netlist_ir::LogicalCell`]
-/// carries the attribute — adding a sequential-macro cell (`latch` /
-/// `pulse` / `delay` / `edge_*` / `counter`, from `spec/redstone`
-/// "Two tiers, and the v1 boundary") later should not be a breaking
-/// change for downstream exhaustive matches.
+/// `#[non_exhaustive]` for the same reason as [`crate::netlist_ir::LogicalCell`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -75,19 +46,13 @@ pub enum EditionCell {
     /// because Bedrock's redstone signal propagation matches this shape
     /// directly.
     BedrockTorchOr,
-    /// Java NOT — a single inverter torch. Structurally shared with
-    /// Bedrock but kept edition-tagged so a later placer can pick the
-    /// correct tile orientation without re-deriving the edition
-    /// (`spec/redstone` "Edition differences" lists orientation among the
-    /// edition-absorbed differences).
+    /// Java NOT — a single inverter torch. The same structure as on Bedrock, but edition-tagged
+    /// because tile orientation is an edition difference (`spec/redstone` "Edition differences").
     JavaInverterTorch,
     /// Bedrock NOT — a single inverter torch, edition-tagged for the same
     /// reason as [`EditionCell::JavaInverterTorch`].
     BedrockInverterTorch,
-    /// Java XOR — unpinned placeholder. Reachable only via hand-built IR
-    /// today (the surface parser cannot emit `xor`); the mapping arm in
-    /// [`crate::edition_netlist::compile_edition_netlist`] will rename this
-    /// variant to its pinned form the same time the parser change lands.
+    /// Java XOR — unpinned placeholder, reachable only through hand-built IR.
     JavaXorUnpinned,
     /// Bedrock XOR — unpinned placeholder; pair of
     /// [`EditionCell::JavaXorUnpinned`].
@@ -107,13 +72,7 @@ pub enum EditionCell {
 }
 
 impl EditionCell {
-    /// The target edition this variant realises. Used by
-    /// [`crate::edition_netlist::compile_edition_netlist`] to
-    /// `debug_assert!` that every cell in an [`EditionNetlistIr`]
-    /// agrees with its container's [`EditionNetlistIr::edition`].
-    /// `const` so a downstream table lookup that pairs this variant
-    /// with [`Self::base_delay_ticks`] stays evaluable at compile
-    /// time.
+    /// The edition this variant realises.
     #[must_use]
     pub const fn edition(self) -> Edition {
         match self {
@@ -134,42 +93,18 @@ impl EditionCell {
         }
     }
 
-    /// Base tick delay contributed by this cell's physical realisation,
-    /// exclusive of any implicit buffer repeaters the delay-insertion
-    /// pass adds for segments beyond the dust attenuation limit.
+    /// Base tick delay of this cell's physical realisation, excluding the buffer repeaters delay
+    /// insertion adds to the nets feeding it.
     ///
-    /// `spec/redstone` "Time model" ties tick counts to the cell
-    /// selection plus the routed wire length. This method exposes the
-    /// first half — the constant tick contribution of the physical tile —
-    /// so [`crate::delay::compile_delay`] can compose it with the
-    /// per-net buffer count without re-deriving the edition split
-    /// each time.
+    /// Per `spec/redstone` "Time model", ticks come from the cell selection plus the routed wire
+    /// length; this is the cell half, which [`crate::delay::compile_delay`] adds to the wire half.
+    /// A subtract-mode comparator, a repeater at `delay=1` and a torch take 1 tick each and a dust
+    /// merge none, so the two-torch Bedrock AND (two inversions in series) takes 2 and the Bedrock
+    /// OR 0.
     ///
-    /// The canonical numbers follow Minecraft's baseline redstone
-    /// physics: a comparator in subtract mode delays 1 tick, a
-    /// repeater on its default `delay=1` setting delays 1 tick, a
-    /// redstone torch inverter delays 1 tick, and a bare dust merge
-    /// carries no cell-level tick. The two-torch Bedrock AND is
-    /// therefore 2 ticks (NAND→NAND stacked in series), and the
-    /// Bedrock OR is a bare dust merge with no cell tick (matching
-    /// the [`Self::BedrockTorchOr`] doc-comment's "no repeater
-    /// necessary" note).
-    ///
-    /// The `*Unpinned` variants are parser-unreachable placeholders
-    /// today (Xor / Nand / Nor / Mux); they return
-    /// `UNPINNED_BASE_DELAY_TICKS`, a pessimistic sentinel that
-    /// sits **strictly above** every pinned base delay so a future
-    /// pinning that lands new physics without touching this table
-    /// would over-estimate rather than under-estimate — the same
-    /// "reserved but not yet pinned" pattern
-    /// [`crate::edition_netlist::compile_edition_netlist`] uses for
-    /// their variants. Keeping the sentinel distinct from any real
-    /// value also makes the pinning migration observable in delay
-    /// dumps: an `_Unpinned` cell with `local_delay_ticks =
-    /// UNPINNED_BASE_DELAY_TICKS` is visibly different from a pinned
-    /// 2-tick cell, so pinning `JavaXorUnpinned` to
-    /// `JavaXorComparatorPair` with a hard-coded 2 ticks will shift every
-    /// downstream regression that was silently accepting the sentinel.
+    /// The `*Unpinned` placeholders return a sentinel strictly above every pinned delay, so a
+    /// pinning that forgets this table over-estimates rather than under-estimates, and a dump
+    /// shows an unpinned cell's delay as unlike any real one.
     #[must_use]
     pub const fn base_delay_ticks(self) -> u32 {
         match self {
@@ -207,14 +142,10 @@ impl EditionCell {
     /// one run for the limit, though the cell stands between them, and
     /// the delay pass measures them as one.
     ///
-    /// The `*Unpinned` placeholders answer `false`: until a realisation
-    /// is chosen, the pessimistic answer is the one that never lets a
-    /// run of dust go unmeasured. Unlike [`Self::base_delay_ticks`]'
-    /// sentinel it is not distinguishable from a pinned cell's `false`,
-    /// and it does more than add a repeater: it puts the cell into the
-    /// delay pass's budget walk, which can refuse the scope with
-    /// `E_ATTENUATION_LIMIT`. Parser-unreachable today, so neither
-    /// shows in a compile.
+    /// The `*Unpinned` placeholders answer `false`, the pessimistic answer that never leaves a run
+    /// of dust unmeasured. Unlike [`Self::base_delay_ticks`]' sentinel it does not show in a dump,
+    /// and it can make the delay pass refuse the scope with `E_ATTENUATION_LIMIT`; no surface
+    /// syntax reaches them.
     #[must_use]
     pub const fn regenerates(self) -> bool {
         match self {
@@ -236,25 +167,11 @@ impl EditionCell {
     }
 }
 
-/// Pessimistic base-delay sentinel returned by
-/// [`EditionCell::base_delay_ticks`] for every parser-unreachable
-/// `*Unpinned` variant. Strictly above every pinned base delay in the
-/// table (currently 2 ticks for `BedrockTorchAnd`) so a future rename
-/// that lands new physics without touching the table over-estimates
-/// rather than silently inheriting a real value; distinct from any
-/// pinned tick so an `_Unpinned` cell's delay is visibly different in
-/// a JSON dump. Not `pub` — external callers cannot construct
-/// `_Unpinned` cells via the parser today, so the sentinel is a
-/// crate-internal invariant.
+/// The base delay [`EditionCell::base_delay_ticks`] gives every `*Unpinned` cell.
 const UNPINNED_BASE_DELAY_TICKS: u32 = 3;
 
-/// Compile-time guard on the sentinel's core invariant: pinned base
-/// delays currently top out at 2 ticks (`BedrockTorchAnd`), so the
-/// sentinel must exceed that. If a future pinning bumps a real cell
-/// to 3 ticks without also bumping this sentinel, delay dumps could
-/// silently blend the sentinel value into a legitimate pinned delay
-/// — this const assert forces the ambiguity to be resolved at build
-/// time.
+/// 2 is the largest pinned base delay (`BedrockTorchAnd`). A pinned cell that reaches the sentinel
+/// must raise it, and this bound with it, or a dump cannot tell the two apart.
 const _: () = assert!(
     UNPINNED_BASE_DELAY_TICKS > 2,
     "UNPINNED_BASE_DELAY_TICKS must sit strictly above every pinned base_delay_ticks value",
@@ -262,38 +179,28 @@ const _: () = assert!(
 
 /// One cell in the DAG, tagged with its edition-specific realisation.
 ///
-/// Drivers and span are copied verbatim from the source
-/// [`crate::netlist_ir::CellNode`]; the pass is a pure structural rewrite,
-/// so downstream consumers can index by position (`[A, B]` for two-input
-/// gates, `[A]` for `Not`, `[Sel, A, B]` for `Mux`) exactly as they do on
-/// the Netlist IR.
+/// Drivers and span are the source [`crate::netlist_ir::CellNode`]'s, in the same port order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EditionCellNode {
     /// Edition-specific realisation chosen for this cell.
     pub cell: EditionCell,
-    /// Port → net drivers, in canonical port order carried across from
-    /// the Netlist IR.
+    /// Port → net drivers, in the Netlist IR's port order.
     pub drivers: Vec<CellPortDriver>,
-    /// Byte range of the originating `logic ...` sub-expression, inherited
-    /// from the source [`crate::netlist_ir::CellNode`] (and originally from
-    /// the [`crate::logic_ir::GateNode`] behind it).
+    /// Byte range inherited from the source [`crate::netlist_ir::CellNode`].
     #[serde(skip)]
     pub span: Span,
 }
 
-/// The Edition Netlist IR for one struct/def/site body.
-///
-/// One instance per [`crate::netlist_ir::NetlistIr`] handed to the pass;
-/// the target edition is pinned on the entry so a JSON dump makes clear
-/// which library the cells were selected from.
+/// The Edition Netlist IR for one struct/def/site body, one per
+/// [`crate::netlist_ir::NetlistIr`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EditionNetlistIr {
-    /// Edition this IR was compiled for.
+    /// Edition this IR was compiled for, which every cell's [`EditionCell::edition`] matches.
     pub edition: Edition,
-    /// Sensor-driven nets, copied verbatim from the source Netlist IR.
+    /// Sensor-driven nets, copied from the source Netlist IR.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<NetlistInput>,
-    /// Actuator-driven nets, copied verbatim from the source Netlist IR.
+    /// Actuator-driven nets, copied from the source Netlist IR.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<NetlistOutput>,
     /// Edition-tagged cells, in the same topological order as the source
@@ -301,12 +208,8 @@ pub struct EditionNetlistIr {
     /// `cells[i]` still satisfies `j < i`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cells: Vec<EditionCellNode>,
-    /// `sig.NAME` → the net that defines it, copied verbatim from the
-    /// source Netlist IR.
-    ///
-    /// Serialises as a JSON object keyed by the flattened dotted name —
-    /// the same custom serialisation the Logic IR and Netlist IR use — so
-    /// consumers see a uniform shape across all three IRs.
+    /// `sig.NAME` → the net that defines it, copied from the source Netlist IR and serialised the
+    /// same way.
     #[serde(
         skip_serializing_if = "IndexMap::is_empty",
         serialize_with = "crate::logic_ir::serialize_signal_defs"
@@ -315,8 +218,7 @@ pub struct EditionNetlistIr {
 }
 
 impl EditionNetlistIr {
-    /// Empty Edition Netlist IR for the given edition — no inputs, no
-    /// outputs, no cells.
+    /// An empty Edition Netlist IR for `edition`.
     #[must_use]
     pub fn new(edition: Edition) -> Self {
         Self {
@@ -328,9 +230,7 @@ impl EditionNetlistIr {
         }
     }
 
-    /// `true` when this scope produced zero inputs, zero outputs, and
-    /// zero cells. Matches [`crate::netlist_ir::NetlistIr::is_empty`] so
-    /// scope elision behaves the same across both IRs.
+    /// `true` when the IR has no inputs, outputs or cells.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inputs.is_empty() && self.outputs.is_empty() && self.cells.is_empty()
@@ -346,9 +246,7 @@ pub type ScopedEditionNetlistIr = Scoped<EditionNetlistIr>;
 pub type ScopedEditionNetlistIrEntry = ScopedEntry<EditionNetlistIr>;
 
 impl ScopedEditionNetlistIr {
-    /// Append one scope's Edition Netlist IR. Empty scopes are elided so
-    /// a module without any redstone renders as `[]`, matching the
-    /// Netlist IR's elision.
+    /// Appends one scope's Edition Netlist IR, skipping an empty one.
     pub fn push(&mut self, kind: ScopeKind, name: String, ir: EditionNetlistIr) {
         if ir.is_empty() {
             debug_assert!(

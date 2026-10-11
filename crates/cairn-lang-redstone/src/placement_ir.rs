@@ -1,46 +1,25 @@
-//! Placement IR — edition-tagged cells laid out inside their scope's
-//! `circuit region` reservation.
+//! Placement IR: edition-tagged cells laid out inside their scope's `circuit region` reservation.
 //!
-//! Sits one lowering step above the [Edition Netlist IR](crate::edition_netlist_ir)
-//! and one below the routed block-array IR that later passes will grow
-//! on top. The placement pass ([`crate::placement::compile_placement`])
-//! walks every [`crate::edition_netlist_ir::ScopedEditionNetlistIrEntry`]
-//! once, looks up the scope's [`cairn_lang_core::CircuitRegion`], and
-//! assigns each [`crate::edition_netlist_ir::EditionCellNode`] an
-//! integer [`CellCoord`] inside the reservation — the first stage of
-//! the five-stage pipeline `spec/redstone` "Place-and-route" lays out
-//! (Placement → Steiner routing → Delay insertion → Crossing
-//! legalization → Edition legalization).
+//! The placement pass ([`crate::placement::compile_placement`]) looks up each scope's
+//! [`cairn_lang_core::CircuitRegion`] and gives every
+//! [`crate::edition_netlist_ir::EditionCellNode`] a [`CellCoord`] inside it, the first of the five
+//! stages of `spec/redstone` "Place-and-route" (placement, Steiner routing, delay insertion,
+//! crossing legalization, edition legalization). The next three passes fill in the same IR:
+//! routing writes [`PlacedCellNode::wire_length`], delay insertion
+//! [`PlacedCellNode::local_delay_ticks`] (per `spec/redstone` "Time model", delay is first
+//! determined here, once wire length is known), and crossing legalization
+//! [`PlacedCellNode::buffer_coords`]. They are optional fields rather than new ones, so a JSON
+//! consumer sees one shape.
 //!
-//! Delay is not carried at the placement stage itself. Per
-//! `spec/redstone` "Time model" delay is determined "for the first
-//! time in the Placement IR" once wire length is known; wire length is
-//! the output of the routing pass (Steiner routing, stage 2 of that
-//! pipeline) and is folded into `local_delay_ticks` by the
-//! delay-insertion pass
-//! ([`crate::delay::compile_delay`], stage 3), so
-//! [`PlacedCellNode::wire_length`] and [`PlacedCellNode::local_delay_ticks`]
-//! are reserved as `Option`s that the placement pass leaves `None`.
-//! Adding values in a follow-up pass is a field-write, not a schema
-//! change, so downstream JSON consumers see a stable wire shape. Which
-//! pass a given dump came out of is named outright by the `stage` tag
-//! every cell carries ([`PlacementStage`]) rather than inferred from
-//! which optional keys are present, because that inference cannot
-//! separate a stage-4 dump with nothing to legalize from its stage-3
-//! input. The tag is also what makes a dumped cell readable again:
-//! [`PlacedCellNode`]'s [`Deserialize`] picks the phase by it and
-//! refuses a cell whose keys disagree with it.
+//! Every cell names the last pass to touch it with a [`PlacementStage`] tag, by which
+//! [`PlacedCellNode`]'s [`Deserialize`] picks the phase and refuses a cell whose keys disagree
+//! with it.
 //!
-//! `circuit region=... void=N` congestion detection (`E_ROUTE_CONGESTION`)
-//! and missing-reservation refusal (`E_NO_CIRCUIT_REGION`) fire here —
-//! this is the first pass with a physical footprint to measure against.
-//! Attenuation limits are measured later and in two places, both
-//! against [`crate::delay::MAX_ATTENUATION_SEGMENT`]:
-//! [`crate::delay::compile_delay`], stage 3, fires `E_ATTENUATION_LIMIT`
-//! against the routed segment length, and `crate::pass::lay_nets`,
-//! which every place-and-route pass calls, fires the same code against
-//! the straight line between a driver and its sink before routing to
-//! it.
+//! Placement refuses a missing reservation (`E_NO_CIRCUIT_REGION`) and an over-full one
+//! (`E_ROUTE_CONGESTION`). `E_ATTENUATION_LIMIT` is checked against
+//! [`crate::delay::MAX_ATTENUATION_SEGMENT`] twice: on the straight line from a driver to its sink
+//! before routing to it, in every place-and-route pass, and on the routed segment in
+//! [`crate::delay::compile_delay`].
 
 use std::fmt;
 
@@ -61,64 +40,38 @@ mod phase;
 pub(crate) use phase::CellIdentity;
 pub use phase::{PlacementPhase, PlacementPhaseTransitionError, PlacementStage};
 
-/// Which of the three pseudo-2.5D layers in `spec/redstone`
-/// "Place-and-route" a coordinate lives on. `Plane` is the ground
-/// layer every cell coord and every pad sits on; `Bridge` is the
-/// horizontal escape layer above it; `Via` is the vertical tap between
-/// the two.
+/// Which of the three pseudo-2.5D layers of `spec/redstone` "Place-and-route" a coordinate lives
+/// on: `Plane` the ground layer, `Bridge` the escape layer above it, `Via` the vertical tap
+/// between them.
 ///
-/// Cell coords are `Plane` by construction — the placement pass never
-/// stamps `Bridge` / `Via` on a cell body. Everything else the
-/// pipeline puts inside the reservation takes its layer from its
-/// height through [`CellCoord::new`]: routed wire that climbs to get
-/// past a block, or past another net's dust. One rule, so two things
-/// at one voxel are one map key rather than two.
-/// Serialising as the enum's stable lowercase string (`plane` /
-/// `bridge` / `via`) keeps the JSON wire form small and matches the
-/// vocabulary `spec/redstone` "Place-and-route" uses. Both directions
-/// are derived from the variant names in snake case — the words
+/// A cell is always on `Plane`. Everything else takes its layer from its height through
+/// [`CellCoord::new`], so two things at one voxel are one map key. Serialised as the words
 /// [`Self::as_str`] spells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(strum::EnumIter))]
 pub enum RouteLayer {
-    /// Ground layer — every cell coord, every pad, and every coord
-    /// the router did not have to climb to sits here. Default so that
-    /// any code path which forgets to set the layer explicitly
-    /// defaults to the ground layer rather than an escape layer.
+    /// Ground layer: every cell, every pad, and every wire coord the router did not climb to. The
+    /// default, so a forgotten layer lands on the ground rather than an escape layer.
     #[default]
     Plane,
-    /// Escape layer above the ground: wire the routing pass had to
-    /// climb to get past a block or past the dust of a net laid before
-    /// it. A buffer repeater standing on such a coord carries the
-    /// layer with it, rather than choosing one of its own.
+    /// Escape layer above the ground: wire the router climbed to get past a block or past the dust
+    /// of an earlier net, and the buffer repeaters standing on it.
     Bridge,
-    /// Reserved for the vertical `Plane` ↔ `Bridge` tap. No producer
-    /// materialises `Via` in v1: a climb is a step between two coords
-    /// rather than a coord of its own, so there is no ramp to name.
-    /// Kept in the enum so a downstream consumer can match exhaustively
-    /// against the full `spec/redstone` "Place-and-route" vocabulary; a
-    /// subsequent pass that grows `Via` producers is
-    /// `#[non_exhaustive]`-safe.
+    /// The vertical `Plane` ↔ `Bridge` tap, which nothing produces: a climb is a step between two
+    /// coords rather than a coord of its own. Kept so the enum names the whole vocabulary of
+    /// `spec/redstone` "Place-and-route".
     Via,
 }
 
 impl RouteLayer {
-    /// `true` for the default [`Self::Plane`] layer. Used by the
-    /// `serde(skip_serializing_if = "…")` attribute on
-    /// [`CellCoord::layer`] so the JSON wire form of a `Plane` coord
-    /// omits the `layer` field entirely — the routed / delayed IR
-    /// shape is an additive subset of the legalized IR shape apart
-    /// from the `stage` tag ([`PlacementStage`]).
+    /// `true` for [`Self::Plane`], whose coords omit `layer` from the JSON.
     #[must_use]
     pub const fn is_plane(&self) -> bool {
         matches!(self, Self::Plane)
     }
 
-    /// Stable lowercase string form used in the JSON wire format and
-    /// matched by downstream tooling. Mirrors the vocabulary
-    /// `spec/redstone` "Place-and-route" uses when it introduces the
-    /// three concepts.
+    /// The layer's word in the JSON form and in `spec/redstone` "Place-and-route".
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -131,63 +84,32 @@ impl RouteLayer {
 
 /// Coordinate inside a scope's `circuit region` reservation.
 ///
-/// `Copy` because a coordinate is a value type consumers pass around
-/// by value. Cell coords stamped by [`crate::placement::compile_placement`]
-/// use `x = 1 + 2 * topological index`, `y = 0`, `z = 1`,
-/// [`RouteLayer::Plane`]. Pad coords derived by the routing pass at the
-/// reservation edges use `y = 0` on the plane, and in a scope with cells
-/// `z = i` below the cell row and `z = i + 1` from it on, saturating at
-/// `depth-1`; in a scope with none, `z = i`. No pad the placement pass
-/// emits stands on the cell row: the saturation can put one there, but
-/// only in a region that pass refuses. Routed wire
-/// coords and buffer-repeater coords may use `y >= 1`, and take
-/// [`RouteLayer::Bridge`] when they do — see [`Self::new`].
+/// Placement puts the cell with topological index `i` at `x = 1 + 2i`, `y = 0`, `z = 1`. Pads sit
+/// on the plane at the reservation edges: in a scope with cells at `z = i` below the cell row and
+/// `z = i + 1` from it on, saturating at `depth - 1`, and in a scope without at `z = i`. The
+/// saturation can put a pad on the cell row only in a region placement refuses. Wire and buffer
+/// coords may have `y >= 1`, and are then on [`RouteLayer::Bridge`].
 ///
-/// The `layer` field participates in `Eq` and `Hash`, so
-/// `(x, y, z, Plane)` and `(x, y, z, Bridge)` are distinct map keys.
-/// Nothing the pipeline builds is ever both: [`Self::new`] derives the
-/// layer from the height, so one voxel has one spelling and `Eq` is
-/// voxel identity for every coord a pass produces. The fields are
-/// public, though, so a struct literal can still write a coord the
-/// constructor would not — which is why the geometry module puts
-/// everything it holds through that same rule before comparing it.
+/// `layer` takes part in `Eq` and `Hash`, but [`Self::new`] derives it from the height, so for
+/// every coord a pass builds `Eq` is voxel identity. The fields are public, so a struct literal
+/// can still spell a coord `new` would not; the geometry module puts everything it holds through
+/// `new` before comparing.
 ///
-/// `layer` serialises only when it differs from [`RouteLayer::Plane`]
-/// so a placement / routing / delay JSON dump omits the `layer` key
-/// entirely: the legalized IR shape is an additive superset of the
-/// earlier stages' shape apart from the `stage` tag
-/// ([`PlacementStage`]), whose value changes rather than appears.
-///
-/// Reading a coord back goes through [`Self::new`] too, so a read-back
-/// coord is one the pipeline could have built: an absent `layer` is the
-/// one the height gives, an explicit `layer` that agrees with it is
-/// accepted, and one that disagrees is refused rather than read as a
-/// second spelling of the voxel. That refuses every explicit `via`,
-/// deliberately: no producer writes it and [`Self::new`] cannot spell
-/// it, so the reader grows it when the rule does. A key the wire form
-/// does not have is refused as well.
+/// `layer` is serialised only off [`RouteLayer::Plane`]. Reading a coord back goes through
+/// [`Self::new`] too: an absent `layer` is the one the height gives, an explicit one must agree
+/// with it (which refuses every explicit `via`), and an unknown key is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "CellCoordWire")]
 pub struct CellCoord {
     /// Column along the region's x-axis. Zero at the region's origin.
     pub x: u32,
-    /// Row along the region's y-axis. `0` for `Plane` coords; the
-    /// routing pass sets `y >= 1` for wire that climbs onto a `Bridge`
-    /// layer inside the reservation's `void=<N>` budget, and a buffer
-    /// repeater standing on that wire carries the height with it.
+    /// Height along the region's y-axis: `0` on the plane, `>= 1` within the `void=<N>` budget for
+    /// wire lifted onto a bridge and the buffers standing on it.
     pub y: u32,
-    /// Row along the region's z-axis. `1` for cell coords stamped by
-    /// the placement pass — one row in, so every cell has a clear lane
-    /// on each side; pad coords step from `z = 0` and skip the cell
-    /// row (saturating at `depth-1`), and buffer coords take the row of
-    /// the wire they stand on.
+    /// Row along the region's z-axis. Cells sit at `1`, one row in, so every cell has a clear lane
+    /// on each side.
     pub z: u32,
-    /// Pseudo-2.5D layer this coord lives on. Cell coords are
-    /// [`RouteLayer::Plane`] by construction; wire the routing pass
-    /// climbs above the ground layer carries [`RouteLayer::Bridge`],
-    /// by the one rule [`Self::new`] holds.
-    /// Serialised only when it differs from the default so a
-    /// `Plane` coord's JSON omits the `layer` field.
+    /// Pseudo-2.5D layer, derived from `y` by [`Self::new`].
     #[serde(skip_serializing_if = "RouteLayer::is_plane")]
     pub layer: RouteLayer,
 }
@@ -222,19 +144,12 @@ impl TryFrom<CellCoordWire> for CellCoord {
 }
 
 impl CellCoord {
-    /// The coord at `(x, y, z)`: [`RouteLayer::Plane`] on the ground
-    /// layer, [`RouteLayer::Bridge`] above it.
+    /// The coord at `(x, y, z)`: [`RouteLayer::Plane`] at `y == 0`, [`RouteLayer::Bridge`] above.
     ///
-    /// The only constructor, and the one a coord read back from a dump
-    /// goes through, so the layer is a function of the height for
-    /// everything the pipeline builds. One rule rather than one
-    /// per producer, because `(x, 1, z, Plane)` and
-    /// `(x, 1, z, Bridge)` are distinct map keys and one voxel: two
-    /// producers with two rules would key past each other and put two
-    /// things in the same place. The lifted coords are the routing
-    /// pass's, whose wire climbs to get past a block or past another
-    /// net; a buffer repeater takes the layer of the route coord it
-    /// stands on rather than choosing one.
+    /// The only constructor, and the one a read-back coord goes through, so the layer is a
+    /// function of the height. One rule rather than one per producer, because `(x, 1, z, Plane)`
+    /// and `(x, 1, z, Bridge)` are distinct map keys for one voxel, and two rules would put two
+    /// things in one place.
     #[must_use]
     pub const fn new(x: u32, y: u32, z: u32) -> Self {
         let layer = if y == 0 {
@@ -245,11 +160,8 @@ impl CellCoord {
         Self { x, y, z, layer }
     }
 
-    /// Coord with an explicit [`RouteLayer`]. Test-only: production
-    /// code reaches a non-`Plane` layer through [`Self::routed`], which
-    /// derives it from the height, and an assertion written with that
-    /// same rule would agree with a broken rule. This is the
-    /// independent spelling the assertions are written in.
+    /// Coord with an explicit [`RouteLayer`], for tests: an assertion written with
+    /// [`Self::new`]'s rule would agree with a broken rule.
     #[cfg(test)]
     #[must_use]
     pub(crate) const fn with_layer(x: u32, y: u32, z: u32, layer: RouteLayer) -> Self {
@@ -257,97 +169,58 @@ impl CellCoord {
     }
 }
 
-/// One implicit buffer repeater the crossing-legalization pass
-/// materialised, tagged with the driver port on the owning cell it
-/// belongs to.
+/// One implicit buffer repeater the crossing-legalization pass placed, tagged with the segment it
+/// serves.
 ///
-/// The driver attribution is copied verbatim from
-/// [`PlacedCellNode::drivers`]`[i].port` at push time, so a downstream
-/// consumer can group buffers by their source segment without
-/// re-walking the routed tree.
+/// **An attribution list, not a block list.** There is one entry per segment per repeater that
+/// segment's signal passes through, so [`Self::coord`] repeats when one repeater serves several
+/// segments: two ports of a cell reading one signal, two cells hanging off one point of the routed
+/// tree, a cell and an actuator on one net. **To count blocks, deduplicate by `coord`**; to get a
+/// segment's repeaters, filter by `port`. The delay pass charges ticks per driving net for the
+/// same reason, so `local_delay_ticks - base_delay_ticks` is `BUFFER_REPEATER_TICKS` per distinct
+/// block, not per entry.
 ///
-/// **The vector is an attribution list, not a block list.** There is
-/// one entry per segment per repeater that segment's signal passes
-/// through, so [`Self::coord`] repeats whenever one repeater serves
-/// more than one segment: two ports of a cell reading one signal, two
-/// cells hanging off the same point of the routed tree, a cell and an
-/// actuator on one net. That is the shape the `{port, coord}` pair
-/// asks for — the answer to "which segments does this block serve" is
-/// a list, and the entries carry it one at a time. **A consumer that
-/// wants the number of blocks deduplicates by `coord`**; a consumer
-/// that wants a segment's repeaters filters by `port`. The delay pass
-/// charges ticks per driving net for the same reason, so
-/// `local_delay_ticks - base_delay_ticks` is `BUFFER_REPEATER_TICKS`
-/// per deduplicated block and not per entry.
+/// **Order.** In [`PlacedCellNode::buffer_coords`], entries follow [`PlacedCellNode::drivers`],
+/// and within one driver the order the routed path visits them, source first. That is not an
+/// x → z → y sweep: the route hangs off the trunk laid for a nearer sink and turns wherever it
+/// goes round a block.
 ///
-/// **Order contract on `Vec<BufferCoord>`** (as returned by
-/// [`PlacedCellNode::buffer_coords`]): entries appear in
-/// [`PlacedCellNode::drivers`] iteration order, and within one
-/// driver's segment in the order the routed path visits them. A
-/// consumer that reads the vector positionally therefore sees driver
-/// 0's buffers before driver 1's, and closer-to-source buffers before
-/// closer-to-sink ones. That order is *not* one x → z → y sweep: the
-/// route hangs off the trunk laid for a nearer sink and turns wherever
-/// it has to go round a block.
-///
-/// **Coord layer.** [`Self::coord`]`.layer` records the crossing
-/// pass's placement decision — see [`RouteLayer`] for the full
-/// vocabulary and which variants a producer emits today.
-///
-/// Serialises as `{"port": "<a|b|sel|out>", "coord": {...}}`, matching the
-/// `{port, ...}` shape [`CellPortDriver`] uses on the netlist side.
-/// The nested `coord` still elides its `layer` field when it stays on
-/// [`RouteLayer::Plane`], so the JSON footprint of a plane buffer stays
-/// compact.
+/// Serialises as `{"port": "<a|b|sel|out>", "coord": {...}}`, the `{port, ...}` shape of
+/// [`CellPortDriver`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BufferCoord {
     /// Which segment this buffer stands on: a driver port of the owning
     /// cell, or the wire out to an actuator pad.
     pub port: BufferSegment,
-    /// Coordinate the crossing pass chose for the buffer. The
-    /// `layer` field records the placement decision — see
-    /// [`RouteLayer`] for the vocabulary.
+    /// Coordinate of the buffer, on the layer of the wire it stands on.
     pub coord: CellCoord,
 }
 
 impl BufferCoord {
-    /// New `(segment, coord)` attribution pair. Mirrors the
-    /// [`CellCoord::new`] constructor convention so the crossing pass
-    /// and its tests build entries without struct-literal noise.
+    /// A `(segment, coord)` attribution pair.
     #[must_use]
     pub const fn new(port: BufferSegment, coord: CellCoord) -> Self {
         Self { port, coord }
     }
 }
 
-/// Which wire a buffer repeater stands on.
-///
-/// Separate from [`PortName`] rather than a variant of it, because a
-/// [`CellPortDriver`] must not be able to say `out`: a cell has no such
-/// input, and public fields plus no validation is all it would take.
-/// Here the two are the same kind of answer — "which segment" — so they
-/// share one flat wire form: `"a"` / `"b"` / `"sel"` for a driver port,
+/// Which wire a buffer repeater stands on, written `"a"`, `"b"` or `"sel"` for a driver port and
 /// `"out"` for the wire to an actuator.
 ///
-/// `#[non_exhaustive]` for the reason [`PortName`] is: a future cell
-/// with more ports, or a future segment kind, is additive.
+/// Separate from [`PortName`] rather than a variant of it, because a [`CellPortDriver`] must not
+/// be able to say `out`: a cell has no such input. `#[non_exhaustive]` like [`PortName`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum BufferSegment {
-    /// A driver port feeding the owning cell. Copies
-    /// [`CellPortDriver::port`] from the driver the crossing pass was
-    /// walking when it emitted the entry.
+    /// A driver port feeding the owning cell.
     Port(PortName),
-    /// The wire leaving a driver for an actuator's output pad. Has no
-    /// owning cell: it is attributed to the [`PlacedOutputNode`] whose
+    /// The wire from a driver to an actuator's pad, attributed to the [`PlacedOutputNode`] whose
     /// pad it runs to.
     Out,
 }
 
-// Hand-written so the two cases share one flat string vocabulary
-// instead of the externally-tagged shape a derive would give `Port(..)`.
-// The wire form is the contract `BufferCoord`'s doc states.
+// Hand-written so both cases are one flat word, where a derive would tag `Port(..)`.
 impl Serialize for BufferSegment {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         match self {
@@ -358,19 +231,13 @@ impl Serialize for BufferSegment {
 }
 
 impl BufferSegment {
-    /// Every word a segment is written as — the driver ports as
-    /// [`PortName`]'s derived `Serialize` spells them, then `out` — for
-    /// the error an unknown word earns. Only the error reads it: the
-    /// acceptance set is [`PortName`]'s own, so a port added there reads
-    /// back without touching this list, and a test holds the list to
-    /// every word a segment is written as.
+    /// Every segment word, for the error an unknown word earns. Only the error reads it: what is
+    /// accepted is [`PortName`]'s own set plus `out`, and a test holds this list to it.
     const WORDS: &'static [&'static str] = &["a", "b", "sel", "out"];
 }
 
-/// Reads back the one flat string vocabulary [`Serialize`] writes:
-/// `out`, or any word [`PortName`]'s own `Deserialize` accepts. An
-/// unknown word is refused naming every segment word rather than only
-/// the ports.
+/// Reads back the flat word [`Serialize`] writes: `out`, or any word [`PortName`] accepts. An
+/// unknown word is refused naming every segment word, not only the ports.
 impl<'de> Deserialize<'de> for BufferSegment {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let word = String::deserialize(deserializer)?;
@@ -385,14 +252,11 @@ impl<'de> Deserialize<'de> for BufferSegment {
     }
 }
 
-/// The `circuit region=<label> void=<N>` reservation the enclosing
-/// scope declared, together with the footprint that reservation sits
-/// inside.
+/// The `circuit region=<label> void=<N>` reservation a scope declared, with the footprint it sits
+/// in.
 ///
-/// Copied verbatim onto every non-empty [`PlacementIr`] so a JSON dump
-/// self-describes and downstream routing does not re-derive the
-/// budget. Extending this struct with a new field (region origin,
-/// per-region attenuation budget, ...) is `#[non_exhaustive]`-safe.
+/// Copied onto every non-empty [`PlacementIr`], so a dump describes itself and routing reads the
+/// budget from it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct CircuitRegionReservation {
@@ -410,34 +274,14 @@ pub struct CircuitRegionReservation {
 }
 
 impl CircuitRegionReservation {
-    /// Total blocks reserved for routing: `width * depth * void`,
-    /// saturating.
+    /// Total blocks reserved for routing: `width * depth * void`, saturating.
     ///
-    /// `u64` holds the product of two `u32`s and not of three —
-    /// `u32::MAX` squared is already within a rounding error of
-    /// `u64::MAX`, `2^33 - 2` short of it — so a reservation taken from
-    /// a hostile `size=` can carry it over, though not every `void`
-    /// above 1 does: `2147483647x2147483647` still fits at `void=4`.
-    /// What overflowed is reachable from a `.crn` either way.
-    ///
-    /// The workspace sets no `overflow-checks`, so what that cost
-    /// depended on the build. A debug build panicked. A release build
-    /// wrapped, and wrapping is the worse of the two, because it is
-    /// silent exactly where the number is still plausible:
-    /// `size=4294967295x4294967295 void=3` wraps to ~1.8e19, which no
-    /// caller distinguishes from a real reservation, and the run exits
-    /// 0. Where the product is an exact multiple of `2^64` it wraps to
-    /// **zero** instead — `size=2147483648x2147483648 void=4` is the
-    /// smallest such shape — and a zero reservation is not merely
-    /// wrong: the congestion test it then fails divides by it in
-    /// `area_ratio_tenths`, which takes the process down.
-    ///
-    /// Saturating rather than widening, because every caller compares
-    /// this against a budget or divides into it, and `u64::MAX` is the
-    /// right answer to both: a reservation that large is not the
-    /// constraint on anything. The refusal such a scope earns comes
-    /// from the attenuation cap, which its own span and its own
-    /// sentence are about.
+    /// `u64` holds the product of two `u32`s but not of three, and a `size=` from a `.crn` can
+    /// overflow it. A wrapped product is either a plausible wrong reservation
+    /// (`size=4294967295x4294967295 void=3`) or zero (`size=2147483648x2147483648 void=4`), which
+    /// the congestion check divides by. Saturating suits every caller, which compares this with a
+    /// budget or divides by it: a reservation that large constrains nothing, and such a scope's
+    /// refusal comes from the attenuation cap.
     #[must_use]
     pub const fn reserved_area(&self) -> u64 {
         (self.width as u64)
@@ -446,95 +290,52 @@ impl CircuitRegionReservation {
     }
 }
 
-/// One placed cell — an [`EditionCell`] plus its assigned [`CellCoord`]
-/// inside the reservation.
+/// One placed cell: an [`EditionCell`] at its [`CellCoord`] inside the reservation.
 ///
-/// The progressive fields the routing, delay-insertion, and
-/// crossing-legalization passes produce (`wire_length`, `local_delay_ticks`,
-/// `buffer_coords`) live inside the `phase` field as a
-/// [`PlacementPhase`] — see that enum's docstring for the four
-/// legitimate states and the transition methods each pass calls.
-/// Read-only convenience accessors [`Self::wire_length`],
-/// [`Self::local_delay_ticks`], and [`Self::buffer_coords`] project the
-/// phase back onto the three flat fields the JSON wire form exposes,
-/// so consumers that only care about the values do not need to match
-/// on the phase enum; [`Self::stage`] projects the discriminant
-/// itself.
+/// What routing, delay insertion and crossing legalization add (`wire_length`,
+/// `local_delay_ticks`, `buffer_coords`) lives in a crate-private [`PlacementPhase`] field, read
+/// through [`Self::wire_length`], [`Self::local_delay_ticks`], [`Self::buffer_coords`] and
+/// [`Self::stage`].
 ///
-/// The custom [`Serialize`] impl flattens that `phase` field onto
-/// `{stage, cell, drivers, coord[, wire_length][, local_delay_ticks][, buffer_coords]}`.
-/// The three optionals carry the shape earlier revisions of this
-/// struct produced via `skip_serializing_if`, so the JSON dump of a
-/// stage-N output is an additive subset of the stage-(N+1) dump *apart
-/// from the `stage` tag* on scopes whose stage-(N+1) pass had nothing
-/// to write. The tag is the one field whose value changes rather than
-/// appears, and it exists precisely because the subset relation made
-/// a zero-buffer [`PlacementPhase::Legalized`] indistinguishable from
-/// a [`PlacementPhase::Delayed`] — see [`PlacementStage`].
+/// [`Serialize`] flattens the phase into
+/// `{stage, cell, drivers, coord[, wire_length][, local_delay_ticks][, buffer_coords]}`, so one
+/// stage's dump is a subset of the next one's apart from the `stage` value (see
+/// [`PlacementStage`] for why the tag exists).
 ///
-/// The matching [`Deserialize`] reads that flat form back. It picks the
-/// [`PlacementPhase`] variant by the `stage` tag, never by which
-/// optional keys are present, and refuses a dump whose keys disagree
-/// with its tag: a payload key the named stage has not written yet
-/// (`buffer_coords` under `"route"`), or one it must have written and
-/// is missing (`local_delay_ticks` under `"delay"`). `buffer_coords`
-/// is the one payload key that may be absent at its own stage, because
-/// [`Serialize`] leaves it out when the crossing pass placed nothing.
-/// A missing `stage`, an unknown `stage` or `layer` word, a `layer`
-/// that disagrees with the coord's height (see [`CellCoord`]), a buffer
-/// on a segment the cell has no driver for, and a key the wire form
-/// does not have — at any depth — are refused too. Every refusal is a
-/// deserializer error, not a panic.
+/// [`Deserialize`] reads the flat form back, picking the phase by `stage`, never by which keys are
+/// present. It refuses a payload key the named stage has not written (`buffer_coords` under
+/// `"route"`) or one it must have written (`local_delay_ticks` under `"delay"`); `buffer_coords`
+/// alone may be absent at its own stage, meaning no buffers. It also refuses a missing `stage`, an
+/// unknown `stage` or `layer` word, a `layer` that disagrees with the height (see [`CellCoord`]),
+/// a buffer on a segment the cell has no driver for, and an unknown key at any depth. Every
+/// refusal is a deserializer error, not a panic.
 ///
-/// This reader is the first way code outside this crate can build a
-/// `PlacedCellNode` at all: the struct is `#[non_exhaustive]` with a
-/// crate-private phase and has no public constructor. What it builds is
-/// a cell as its `stage`'s pass left it, so hand it to the pass *after*
-/// that stage. The phase transitions still panic on a phase they do
-/// not expect, as they do for a cell the pipeline built: the promise
-/// above that a bad dump is an error rather than a panic is this
-/// reader's, not theirs.
+/// The reader is the only way another crate can build a `PlacedCellNode`. It builds a cell as its
+/// stage's pass left it, so hand it to the pass after that stage; the phase transitions still
+/// panic on a phase they do not expect.
 ///
-/// [`Self::span`] is not part of the wire form, so a cell read back
-/// carries `0..0` — which is also a real empty span at the start of a
-/// file, and `PartialEq` compares it. A round trip is therefore equal
-/// except for the span: compare against the original with its span set
-/// to `0..0`.
+/// [`Self::span`] is not serialised, so a cell read back has `0..0`, and `PartialEq` compares it:
+/// a round trip is equal once the original's span is set to `0..0`.
 ///
-/// Read-back is for self-describing formats (JSON and the like). The
-/// reader takes a map; the field count of the flat form varies with the
-/// phase, from four keys to seven, so a positional encoding such as
-/// bincode or postcard cannot be read back unambiguously, and a
-/// non-map input is refused rather than guessed at. A repeated key is
-/// refused only where the deserializer hands over the map as written —
-/// `serde_json::from_str`, `from_slice`, `from_reader`. Through a
-/// `serde_json::Value` it cannot be: the `Value` has already folded the
-/// duplicates, last one winning, before this reader sees the map.
+/// Read-back needs a self-describing format such as JSON: the flat form has four to seven keys
+/// depending on the phase, so a positional format (bincode, postcard) is ambiguous, and a non-map
+/// input is refused. A repeated key is refused when the deserializer hands over the map as written
+/// (`serde_json::from_str`, `from_slice`, `from_reader`), but not through a `serde_json::Value`,
+/// which has already kept the last duplicate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PlacedCellNode {
-    /// Edition-specific realisation chosen for this cell (copied verbatim
-    /// from the source [`crate::edition_netlist_ir::EditionCellNode`]).
+    /// Edition-specific realisation, from the source
+    /// [`crate::edition_netlist_ir::EditionCellNode`].
     pub cell: EditionCell,
-    /// Port → net drivers, in canonical port order carried across from
-    /// the Netlist IR (`[A, B]` for two-input gates, `[A]` for `Not`,
-    /// `[Sel, A, B]` for `Mux`).
+    /// Port → net drivers, in the Netlist IR's port order.
     pub drivers: Vec<CellPortDriver>,
     /// Coordinate assigned by the placement pass.
     pub coord: CellCoord,
-    /// Progressive pipeline state — see [`PlacementPhase`].
-    ///
-    /// Crate-visible so the three pipeline passes (routing, delay,
-    /// crossing) can call the phase-transition methods, but hidden from
-    /// downstream crates: writes must go through
-    /// [`PlacementPhase::route`] / [`PlacementPhase::delay`] /
-    /// [`PlacementPhase::legalize`], and reads through the flat
-    /// accessor methods on this struct. Direct field assignment would
-    /// bypass the phase-transition guards and re-open the illegal
-    /// states the enum exists to forbid.
+    /// Pipeline state, written only through [`PlacementPhase::route`], [`PlacementPhase::delay`]
+    /// and [`PlacementPhase::legalize`], whose guards keep the illegal states out.
     pub(crate) phase: PlacementPhase,
-    /// Byte range of the originating `logic ...` sub-expression, inherited
-    /// from the source [`crate::edition_netlist_ir::EditionCellNode`].
+    /// Byte range inherited from the source [`crate::edition_netlist_ir::EditionCellNode`].
     pub span: Span,
 }
 
@@ -576,19 +377,14 @@ impl PlacedCellNode {
     phase_projections!("cell", "Wire length once routing has run.");
 }
 
-/// The flat wire form both placed node types share: `stage` first, so a
-/// truncated or eyeballed dump still says which pass produced it, then
-/// the node's own `identity_fields` (written by `identity`), then the
-/// phase's fields as far as the pipeline has filled them.
+/// Writes the flat form both placed node types share: `stage` first, so a truncated dump still
+/// names its pass, then the node's `identity_fields` (written by `identity`), then the phase's
+/// fields as far as they are filled.
 ///
-/// Hand-written rather than derived because the derived form would tag
-/// the phase enum and reshape the flat form the integration tests lock
-/// byte-for-byte. Binary formats (bincode, postcard, msgpack) rely on the
-/// announced field count being exact, so every write goes through a
-/// [`CountedFields`] and the count is checked against it before `end`;
-/// a new visible field on either node type, or a Stage-5 variant whose
-/// payload the JSON must expose, is added here and given a
-/// [`PlacementStage`] variant.
+/// Hand-written because a derive would tag the phase enum. Binary formats need the announced field
+/// count to be exact, so every write goes through a [`CountedFields`] and the count is checked
+/// before `end`. A new visible field on either node type, or a stage whose payload the JSON must
+/// show, is added here along with a [`PlacementStage`] variant.
 fn serialize_phased<S: Serializer>(
     serializer: S,
     name: &'static str,
@@ -784,13 +580,10 @@ impl PhaseFields {
     }
 }
 
-/// Refuse a buffer a cell could not carry: every [`BufferCoord`] on a
-/// cell stands on [`BufferSegment::Port`] of one of that cell's own
-/// drivers. It is the contract the crossing pass debug-asserts where it
-/// writes them, held here in every build so a dump cannot bring in what
-/// the pass itself would never emit — `out` belongs to a
-/// [`PlacedOutputNode`], and a port the cell has no driver on would
-/// group buffers under a driver that does not exist.
+/// Refuses a buffer a cell could not carry: every [`BufferCoord`] on a cell stands on a
+/// [`BufferSegment::Port`] one of its drivers feeds. The crossing pass debug-asserts this where it
+/// writes them; it is checked here in every build so a dump cannot bring in what the pass never
+/// emits.
 fn check_buffers_stand_on_drivers<E: de::Error>(
     phase: &PlacementPhase,
     drivers: &[CellPortDriver],
@@ -867,55 +660,37 @@ impl<'de> Deserialize<'de> for PlacedCellNode {
 
 /// An actuator-driven net sink, placed at its output pad.
 ///
-/// The placement counterpart of [`crate::netlist_ir::NetlistOutput`],
-/// and the reason it
-/// exists is that the wire from a driver to an actuator is wire like any
-/// other: it attenuates, it needs buffer repeaters past
-/// [`crate::DUST_ATTENUATION_LIMIT`], and those repeaters occupy coords
-/// inside the reservation. Before this node existed, the pass counted
-/// buffers on the segments *into* cells and none on the segment out of
-/// the last one, so a driver sitting a hundred blocks from its actuator
-/// reported the same delay as one sitting next to it.
+/// The placement counterpart of [`crate::netlist_ir::NetlistOutput`]. It exists because the wire
+/// from a driver to an actuator is wire like any other: it attenuates, needs buffer repeaters
+/// past [`crate::DUST_ATTENUATION_LIMIT`], and they stand inside the reservation, so a driver far
+/// from its actuator costs more delay than one beside it.
 ///
-/// It carries the same [`PlacementPhase`] the cells do, so the four
-/// stages fill it by the same rules and a dump reads alike on both
-/// sides: `wire_length` after routing, `local_delay_ticks` after delay
-/// insertion, `buffer_coords` after legalization. `local_delay_ticks` here is
-/// the wire's own contribution — the buffers standing on the segment —
-/// with no base delay to add, because a pad is not a cell.
+/// It carries the same [`PlacementPhase`] as a cell, filled by the same passes. Its
+/// `local_delay_ticks` is the buffers on the segment alone, with no base delay, since a pad is not
+/// a cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PlacedOutputNode {
-    /// Dotted signal reference the actuator consumes, carried across
-    /// from [`crate::netlist_ir::NetlistOutput::name`].
+    /// Dotted signal reference the actuator consumes, from
+    /// [`crate::netlist_ir::NetlistOutput::name`].
     pub name: DottedRef,
-    /// Which net drives this port, carried across from
-    /// [`crate::netlist_ir::NetlistOutput::driver`].
+    /// The net driving this port, from [`crate::netlist_ir::NetlistOutput::driver`].
     pub driver: NetRef,
-    /// Coordinate the placement pass assigned this actuator's pad, per
-    /// the `x = width - 1` convention the routing geometry uses.
+    /// Coordinate the placement pass assigned this actuator's pad, per the `x = width - 1`
+    /// convention the routing geometry uses.
     pub pad: CellCoord,
-    /// Progressive pipeline state — see [`PlacementPhase`]. Crate-
-    /// visible for the same reason [`PlacedCellNode::phase`] is: writes
-    /// go through the transition methods so the illegal shapes stay
-    /// unrepresentable.
+    /// Pipeline state, written only through the transition methods, as with
+    /// [`PlacedCellNode::phase`].
     pub(crate) phase: PlacementPhase,
     /// Byte range of the originating `opened_by=` argument.
     pub span: Span,
 }
 
 impl PlacedOutputNode {
-    /// A freshly placed actuator pad, before routing has run. Mirrors
-    /// the [`CellCoord::new`] / [`BufferCoord::new`] convention so the
-    /// placement pass and the fixtures build one without struct-literal
-    /// noise, and so the starting phase is chosen in one place rather
-    /// than at every construction site.
+    /// A placed actuator pad, before routing.
     ///
-    /// Crate-visible: the pad is the placement pass's to assign, from
-    /// the reservation, and a coordinate handed in from outside is one
-    /// nothing checks against the region. [`PlacedCellNode`] is
-    /// unconstructible from another crate for the same reason — it has
-    /// no constructor and the struct is `#[non_exhaustive]`.
+    /// Crate-visible because the pad is placement's to assign from the reservation: a coordinate
+    /// from outside is checked against nothing.
     #[must_use]
     pub(crate) fn new(name: DottedRef, driver: NetRef, pad: CellCoord, span: Span) -> Self {
         Self {
@@ -943,32 +718,22 @@ impl Serialize for PlacedOutputNode {
     }
 }
 
-/// The Placement IR for one struct/def body.
-///
-/// One instance per [`crate::edition_netlist_ir::EditionNetlistIr`]
-/// handed to the pass whose scope produced at least one cell or one
-/// actuator. The target edition is pinned so a JSON dump makes clear
-/// which library the cells were selected from before placement ran.
+/// The Placement IR for one struct/def body, one per non-empty
+/// [`crate::edition_netlist_ir::EditionNetlistIr`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct PlacementIr {
-    /// Edition this IR was compiled for. Equal to every cell's
-    /// [`EditionCell::edition`] by construction.
+    /// Edition this IR was compiled for, which every cell's [`EditionCell::edition`] matches.
     pub edition: Edition,
-    /// Reservation the cells were placed into. Absent only when the
-    /// scope had zero cells (an empty scope is elided by
-    /// [`ScopedPlacementIr::push`], so a serialised entry always has a
-    /// reservation).
+    /// Reservation the cells and pads were placed into; absent only on an empty IR, which
+    /// [`ScopedPlacementIr::push`] drops.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub region: Option<CircuitRegionReservation>,
-    /// Sensor-driven nets, copied verbatim from the source Edition
-    /// Netlist IR.
+    /// Sensor-driven nets, copied from the source Edition Netlist IR.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<NetlistInput>,
-    /// Actuator-driven nets, each placed at its output pad. Carried
-    /// across from the source Edition Netlist IR and given a coordinate
-    /// by the placement pass, so the wire out to an actuator is routed,
-    /// delayed, and buffered by the same rules as the wire into a cell.
+    /// Actuator-driven nets, each placed at its output pad, so the wire out to an actuator is
+    /// routed, delayed and buffered like the wire into a cell.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<PlacedOutputNode>,
     /// Placed cells, in the same topological order as the source
@@ -976,13 +741,8 @@ pub struct PlacementIr {
     /// (`NetRef::Cell(j)` in `cells[i]` still satisfies `j < i`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cells: Vec<PlacedCellNode>,
-    /// `sig.NAME` → the net that defines it, copied verbatim from the
-    /// source Edition Netlist IR.
-    ///
-    /// Serialises as a JSON object keyed by the flattened dotted name —
-    /// the same custom serialisation the Logic / Netlist / Edition
-    /// Netlist IRs use — so consumers see a uniform shape across every
-    /// IR in the pipeline.
+    /// `sig.NAME` → the net that defines it, copied from the source Edition Netlist IR and
+    /// serialised the same way.
     #[serde(
         skip_serializing_if = "IndexMap::is_empty",
         serialize_with = "crate::logic_ir::serialize_signal_defs"
@@ -991,8 +751,7 @@ pub struct PlacementIr {
 }
 
 impl PlacementIr {
-    /// Empty Placement IR for the given edition — no reservation, no
-    /// inputs, no outputs, no cells.
+    /// An empty Placement IR for `edition`.
     #[must_use]
     pub fn new(edition: Edition) -> Self {
         Self {
@@ -1005,10 +764,7 @@ impl PlacementIr {
         }
     }
 
-    /// `true` when this scope produced zero inputs, zero outputs, and
-    /// zero cells. Matches [`crate::edition_netlist_ir::EditionNetlistIr::is_empty`]
-    /// so scope elision behaves the same across every IR in the
-    /// pipeline.
+    /// `true` when the IR has no inputs, outputs or cells.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inputs.is_empty() && self.outputs.is_empty() && self.cells.is_empty()
@@ -1024,9 +780,7 @@ pub type ScopedPlacementIr = Scoped<PlacementIr>;
 pub type ScopedPlacementIrEntry = ScopedEntry<PlacementIr>;
 
 impl ScopedPlacementIr {
-    /// Append one scope's Placement IR. Empty scopes are elided so a
-    /// module without any redstone renders as `[]`, matching the
-    /// sibling IRs' elision.
+    /// Appends one scope's Placement IR, skipping an empty one.
     pub fn push(&mut self, kind: ScopeKind, name: String, ir: PlacementIr) {
         if ir.is_empty() {
             debug_assert!(
