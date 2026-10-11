@@ -1,16 +1,14 @@
 //! Which physical member an actuator patch acts on.
 //!
-//! `door[id=front] opened_by=sig.x` is written on a line of its own,
-//! before or after the door it binds, and its brackets pick that door by
-//! `id=`. Two passes need the answer: block-array lowering, which
-//! recognises the patch and builds nothing for it, and the redstone front
-//! end, which turns the binding into a netlist port. Asked separately they
-//! disagreed — lowering deferred `door[id=nope]` while the front end gave
-//! it a port and a pad — so both read it from [`actuator_patch_target`].
+//! `door[id=front] opened_by=sig.x` is written on a line of its own, before or after the door it
+//! binds, and its brackets pick that door by `id=`. Block-array lowering recognises the patch and
+//! builds nothing for it; the redstone front end turns the binding into a netlist port. Both read
+//! the answer from [`actuator_patch_target`], so one cannot defer `door[id=nope]` while the other
+//! gives it a port and a pad.
 //!
-//! Beside [`Member`] rather than in `block_array`, because which member a
-//! selector picks is a fact about the member lines and touches no voxel —
-//! the reason [`super::SENSOR_HOSTS`] sits in the keyword table.
+//! Beside [`Member`] rather than in `block_array`, because which member a selector picks is a fact
+//! about the member lines and touches no voxel, the reason [`super::SENSOR_HOSTS`] sits in the
+//! keyword table.
 
 use std::fmt;
 
@@ -18,13 +16,11 @@ use super::{Member, MemberRole};
 
 /// Why an actuator patch's `[selector]` picks no physical member.
 ///
-/// The [`fmt::Display`] form is the reason clause both passes print, so
-/// the two cannot describe the same line differently. It states what is
-/// wrong and stops there: the repair depends on what the caller can offer
-/// the author, so each caller writes its own.
+/// The [`fmt::Display`] form is the reason clause both passes print, so they cannot describe the
+/// same line differently. It stops at what is wrong; each caller writes the repair it can offer.
 ///
-/// Every variant carries `keyword`, the keyword of the patch line, which is
-/// also the role of the members it may pick.
+/// Every variant carries `keyword`, the patch line's keyword, which is also the role of the members
+/// it may pick.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PatchTargetError {
@@ -151,28 +147,22 @@ impl fmt::Display for PatchTargetError {
     }
 }
 
-/// The one physical member `patch`'s `[selector]` picks out of
-/// `candidates`.
+/// The one physical member `patch`'s `[selector]` picks out of `candidates`.
 ///
-/// A physical member is one of the patch's own role written without
-/// brackets — `door[id=front]` picks among `door` lines — and a bracketed
-/// one is another patch, not something a patch can act on. `candidates`
-/// is the scope's members as the caller sees them — lowering passes its
-/// flattened view, so a door written under `level y=N` is selectable.
-/// Where the patch line sits among them does not matter. An id declared on
-/// two members is [`PatchTargetError::Ambiguous`] rather than "first hit
-/// wins", because the two are equally what the author named.
+/// A physical member has the patch's role and no brackets: `door[id=front]` picks among `door`
+/// lines, and a bracketed one is another patch. `candidates` is the scope's members as the caller
+/// sees them (lowering passes its flattened view, so a door under `level y=N` is selectable), and
+/// where the patch sits among them does not matter. An id on two members is
+/// [`PatchTargetError::Ambiguous`] rather than first-hit-wins, because both are equally what the
+/// author named.
 ///
-/// Only the `id=` half of the selector is read. Whether the selector
-/// carries anything else is the caller's question: lowering refuses such
-/// a key, and in the redstone front end a binding written inside the
-/// brackets is refused on its own.
+/// Only the `id=` half of the selector is read: lowering refuses any other key, and the redstone
+/// front end refuses a binding inside the brackets on its own.
 ///
 /// # Errors
 ///
-/// [`PatchTargetError`] when the selector has no readable `id=`, or when
-/// that id is carried by no physical member of the role or by more than
-/// one.
+/// [`PatchTargetError`] when the selector has no readable `id=`, or when that id is carried by no
+/// physical member of the role or by more than one.
 pub fn actuator_patch_target<'a>(
     patch: &Member,
     candidates: impl IntoIterator<Item = &'a Member>,
@@ -263,8 +253,6 @@ mod tests {
         assert!(std::ptr::eq(door, &raw const ir.structs[0].members[1]));
     }
 
-    /// A patch written above its door picks it the same way: the lookup
-    /// reads the whole scope, not the lines before the patch.
     #[test]
     fn a_patch_above_its_door_picks_it() {
         let ir = module(concat!(
@@ -295,8 +283,6 @@ mod tests {
         );
     }
 
-    /// The patch's own keyword is the role it picks among: a member of
-    /// another role carrying the id is not a candidate.
     #[test]
     fn only_members_of_the_patch_role_are_candidates() {
         let ir = module(concat!(
@@ -337,8 +323,6 @@ mod tests {
         );
     }
 
-    /// A door without an `id=` is still a door: the reason counts it
-    /// rather than saying none is declared.
     #[test]
     fn counts_doors_that_carry_no_id() {
         let ir = module(concat!(
@@ -365,8 +349,6 @@ mod tests {
         );
     }
 
-    /// Beside a labelled door, an unlabelled one is mentioned after the
-    /// known ids rather than leaving no trace.
     #[test]
     fn mentions_unlabelled_doors_beside_known_ids() {
         let ir = module(concat!(

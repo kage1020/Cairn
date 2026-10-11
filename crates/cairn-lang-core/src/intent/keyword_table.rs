@@ -1,29 +1,20 @@
 //! Mapping from surface command keywords to [`MemberRole`] classifications.
 //!
-//! Kept as a single source of truth so the `keyword_allowlist` validation
-//! pass in `crate::check` can share the same table without drifting.
-//!
-//! The roster is drawn from the surface keywords used by the four shipped
-//! examples (`cottage`, `themed-tower`, `village`, `redstone-door`) and from
-//! the phase-ordered evaluation table in `spec/compilation` "Phase evaluation"
-//! (massing → envelope → openings → fixtures → logic). Any keyword outside
-//! this table is intentionally surfaced as [`MemberRole::Other`] so the
-//! lowering step never has to reject input.
+//! One table, so `check`'s `keyword_allowlist` pass shares it without drifting. The roster follows
+//! the phase table in `spec/compilation` "Phase evaluation" (massing → envelope → openings →
+//! fixtures → logic) and the keywords the shipped examples use. A keyword outside it is
+//! [`MemberRole::Other`], so lowering never rejects input.
 
 use super::member::MemberRole;
 
-/// All keywords known to the role table, in their declaration order.
+/// All keywords known to the role table, in declaration order.
 ///
-/// Used by the `keyword_allowlist` diagnostic pass to render the
-/// "expected one of ..." note attached to `E_UNKNOWN_KEYWORD`. Kept in
-/// lock-step with [`role_of`] — the unit test below trips if the two
-/// drift apart.
+/// `keyword_allowlist` renders the "expected one of ..." note of `E_UNKNOWN_KEYWORD` from it, and
+/// the tests below keep it in step with [`role_of`].
 ///
-/// The declaration order doubles as the tie-break order for
-/// `cairn-lang-core::suggest`'s `did you mean ...?` note: when two keywords
-/// sit at the same Damerau-Levenshtein distance from the user's typo, the
-/// one appearing earlier in this array wins. Re-sorting the array changes
-/// which keyword surfaces on ambiguous near-misses.
+/// The order is also the tie-break for the `did you mean ...?` note of `cairn-lang-core::suggest`:
+/// of two keywords at the same Damerau-Levenshtein distance from a typo, the earlier wins, so
+/// re-sorting changes which keyword an ambiguous near-miss suggests.
 pub const KNOWN_KEYWORDS: &[&str] = &[
     "floor",
     "walls",
@@ -40,86 +31,59 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
 
 /// Argument keys every member accepts, whatever its role.
 ///
-/// Two reasons, and they answer different questions.
+/// They are **candidates** because `intent::lower` dispatches on the key, so a misspelled `clas=`
+/// never reaches the dedicated field, and its repair is a word the role's own arguments do not
+/// contain.
 ///
-/// They are in the **candidate** set because `intent::lower` dispatches on
-/// the key — `match arg.key { "id" | "class" | "mat_slot" => ... }` — so a
-/// misspelled `clas=` is not that key at all and never reaches the
-/// dedicated field. The repair is a word the role's own arguments do not
-/// contain, and a suggestion drawn from them alone could not offer it.
-///
-/// They are in the **accepted** set because the hoist also requires the
-/// value to be a plain label. A second occurrence of the key, or a value of
-/// any other shape, stays in `intent_state`, where an argument check would
-/// otherwise read it as a word nobody knows. `check::type_mismatch` already
-/// reports a value of another shape, and `check::duplicate` a second
-/// occurrence; the key is not the mistake. For the same reason one left in
-/// `intent_state` is not reported as unread on a role whose
-/// [`MemberRole::unread_arguments`] lists it: the hoisted occurrence, when
-/// there is one, is reported from its field instead.
-///
-/// [`Member`]: super::Member
+/// They are **accepted** because the hoist also requires a plain label: a repeat, or a value of
+/// another shape, stays in `intent_state`, where an argument check would read it as an unknown
+/// word. `check::type_mismatch` reports the shape and `check::duplicate` the repeat; the key is not
+/// the mistake. For the same reason one left in `intent_state` is not reported as unread on a role
+/// whose [`MemberRole::unread_arguments`] lists it: the hoisted occurrence, if any, is reported
+/// from its field.
 pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
 
 /// The component keywords that may carry a `-> value` sensor tail.
 ///
-/// `spec/redstone` "Signal binding" writes an emitted signal on the
-/// component that emits it, and the sensor set it lists is `lever` /
-/// `button` / `daylight` / `observer` — none of which the surface accepts
-/// yet. `pressure_plate` is the one sensor [`known_keywords()`] returns,
-/// so it is the only member a tail may sit on, and a recognizer for the
-/// other four costs one entry here.
+/// `spec/redstone` "Signal binding" writes an emitted signal on the component that emits it, and
+/// lists `lever` / `button` / `daylight` / `observer` as sensors, none of which the surface accepts
+/// yet. `pressure_plate` is the one sensor [`known_keywords()`] returns, so it is the only member a
+/// tail may sit on, and recognising each of the other four costs one entry here.
 ///
-/// Beside the argument tables rather than in `cairn-lang-redstone`, where
-/// the rule started, because it is a fact about the member line and not
-/// about the Logic IR. `cairn synth` sits behind
-/// `--experimental-logic-synth`, so while the rule lived there a
-/// `walls ... -> sig.w` was silent through `check` and `compile` — the
-/// same silence the argument vocabulary exists to end, in the one field
-/// that had no vocabulary to answer to.
+/// Beside the argument tables rather than in `cairn-lang-redstone`, because it is a fact about the
+/// member line and not the Logic IR: `cairn synth` sits behind `--experimental-logic-synth`, so the
+/// rule there would leave `walls ... -> sig.w` silent through `check` and `compile`.
 pub const SENSOR_HOSTS: &[&str] = &["pressure_plate"];
 
-/// A `key=` one lowering rule reads and another does not, together with the
-/// sibling argument whose value picks between them.
+/// A `key=` one lowering rule reads and another does not, together with the sibling argument whose
+/// value picks between them.
 ///
-/// The vocabulary's second axis. [`MemberRole::arguments`] is a flat list
-/// per keyword, and it answers the question a misspelled key asks: is this
-/// a word any member of this role may carry. One level down, a key that
-/// *is* in the list can still be read by nothing on the line it is written
-/// on, because the pass that would read it only runs for some values of
-/// another argument. `roof slope_to=` is the instance: `fill_roof`
-/// dispatches on `kind=` and only the `shed` arm consults the direction, so
-/// `kind=gable slope_to=front` carries it into the IR and drops it — the
-/// same silence a key outside the vocabulary used to build in.
+/// The vocabulary's second axis. [`MemberRole::arguments`] is a flat list per keyword, answering
+/// whether a key is a word any member of the role may carry. A listed key can still be read by
+/// nothing on its line, because the pass that reads it runs only for some values of another
+/// argument: `fill_roof` dispatches on `kind=` and only the `shed` arm reads `slope_to=`, so `roof
+/// kind=gable slope_to=front` carries the key into the IR and drops it. A relation between two keys
+/// does not fit a flat list, so this is a table of its own.
 ///
-/// A relation between two keys does not fit in a flat list, which is why
-/// this is a table of its own rather than a flag on the vocabulary.
-///
-/// Where the boundary runs: the selector is an argument that picks a
-/// *lowering rule*, and its arms are the ways of writing it that name one.
-/// A key another key makes inert without selecting a rule — `window step=`,
-/// which the stamp loop consults only from the second instance on, so
-/// `repeat=1 step=3` drops the spacing — is a condition on a count rather
-/// than on a rule, and is not this table's shape.
+/// The selector is an argument that picks a *lowering rule*, and its arms are the ways of writing
+/// it that name one. A key another key makes inert without selecting a rule is not this table's
+/// shape: `window step=` is read only from the second instance on, so `repeat=1 step=3` drops the
+/// spacing on a count, not a rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectorAxis {
     /// The argument that selects the lowering rule.
     pub selector: &'static str,
-    /// One arm per way of writing [`Self::selector`] that a lowering rule
-    /// exists for, in the order the dispatch writes them.
+    /// One arm per way of writing [`Self::selector`] that a lowering rule exists for, in the order
+    /// the dispatch writes them.
     ///
-    /// A selector value *outside* this list is deliberately absent rather
-    /// than listed with an empty [`SelectorArm::reads`]: it names no rule,
-    /// so the member lowers to nothing and already earns a
-    /// `W_DEFERRED_MEMBER` from the pass that tried to draw it, and a
-    /// second finding about the argument that rule would not have read
-    /// would be a second bill for one repair.
+    /// A selector value outside this list is absent rather than listed with an empty
+    /// [`SelectorArm::reads`]: it names no rule, so the member lowers to nothing and already earns
+    /// a `W_DEFERRED_MEMBER`, and a finding about an argument that rule would not have read would
+    /// bill one repair twice.
     ///
-    /// Absence is not automatically that case, which is why
-    /// [`SelectorValue::Absent`] is an arm rather than the lack of one. On
-    /// a `roof`, no `kind=` means no rule and the deferral owns the line;
-    /// on a `place`, no `at=` is the relative-placement rule, which is
-    /// where `gap=` is read.
+    /// A missing selector is not automatically that case, so [`SelectorValue::Absent`] is an arm:
+    /// on a `roof`, no `kind=` means no rule and the deferral owns the line; on a `place`, no `at=`
+    /// is the relative-placement rule, which reads `gap=`.
     pub arms: &'static [SelectorArm],
 }
 
@@ -134,13 +98,11 @@ impl SelectorAxis {
         self.arms.iter().find(|arm| arm.value.matches(value))
     }
 
-    /// Whether `key` is conditional on this axis at all — some arm reads
-    /// it, so some other arm may not.
+    /// Whether `key` is conditional on this axis at all: some arm reads it, so some other arm may
+    /// not.
     ///
-    /// Derived from the arms rather than listed beside them, so a key every
-    /// rule reads before the dispatch (`roof overhang=`) is simply absent
-    /// from all of them. Writing it under each arm to say "not conditional"
-    /// would put that claim in as many places as there are rules.
+    /// Derived from the arms, so a key every rule reads before the dispatch (`roof overhang=`) is
+    /// absent from all of them rather than written under each to say it is not conditional.
     #[must_use]
     pub fn is_conditional(&self, key: &str) -> bool {
         self.arms.iter().any(|arm| arm.reads.contains(&key))
@@ -164,17 +126,14 @@ impl SelectorAxis {
 pub struct SelectorArm {
     /// How the selector is written to reach this rule.
     pub value: SelectorValue,
-    /// The keys this rule reads inside itself: everything it consults once
-    /// the dispatch has picked it, whether or not a sibling arm exists.
-    /// Arguments read *before* the dispatch, by every rule alike, are not
-    /// listed — see [`SelectorAxis::is_conditional`].
+    /// The keys this rule reads once the dispatch has picked it, whether or not a sibling arm
+    /// exists. Keys every rule reads before the dispatch are not listed; see
+    /// [`SelectorAxis::is_conditional`].
     ///
-    /// On a one-arm axis that makes every key the rule reads conditional
-    /// on a selector nothing else answers to, so `is_conditional` says
-    /// `true` and the finding can still never fire: any other selector
-    /// value names no rule, and the deferral carries that line. The row is
-    /// written anyway, because the arm that lands beside it is where a key
-    /// this one reads would otherwise go missing in silence.
+    /// On a one-arm axis every key the rule reads is conditional on a selector nothing else answers
+    /// to, so `is_conditional` says `true` and the finding still never fires: any other value names
+    /// no rule, and the deferral carries that line. The row is written so that a sibling arm, once
+    /// added, cannot drop a key this one reads silently.
     pub reads: &'static [&'static str],
 }
 
@@ -244,45 +203,31 @@ pub struct UnreadArgument {
 }
 
 impl MemberRole {
-    /// The `key=` arguments this role's vocabulary contains, in the order
-    /// the spec introduces them.
+    /// The `key=` arguments this role's vocabulary contains, in the order the spec introduces them.
     ///
-    /// Not the grammar's — the surface parser accepts any `key=value` on
-    /// any line — and not any one pass's either. This is the closed set a
-    /// member of this role may be written with, so a key outside it is a
-    /// word that will be read by nothing however the passes grow, which is
-    /// what makes `E_UNKNOWN_ARGUMENT` an error rather than a note.
+    /// Not the grammar's, which accepts any `key=value` on any line, and not any one pass's: the
+    /// closed set a member of this role may be written with, so a key outside it will be read by
+    /// nothing however the passes grow, which is what makes `E_UNKNOWN_ARGUMENT` an error rather
+    /// than a note.
     ///
-    /// Two directions can go wrong. A key a reader reads and this table
-    /// omits refuses a source the compiler is built to accept, which is
-    /// what `stair y=` did between two commits of the branch that added
-    /// this table; `the_table_and_the_sweep_agree_key_for_key` in
-    /// `tests/check/arguments.rs` walks every keyword and compares this
-    /// list against a line that writes it, in both directions. A key this
-    /// role accepts that nothing reads is the other direction, and it is
-    /// deliberate. One listed here is a key the specification defines and
-    /// the implementation has not reached, and refusing it would make a
-    /// future lowering rule a change from error to legal; one of the
-    /// [`UNIVERSAL_ARGUMENTS`] is accepted on every role, whether or not the
-    /// role has a use for it. Both are accepted and reported as ignored —
-    /// see [`Self::unread_arguments`].
+    /// A key a reader reads and this table omits refuses a source the compiler is built to accept;
+    /// `the_table_and_the_sweep_agree_key_for_key` in `tests/check/arguments.rs` compares this list
+    /// against a line writing each keyword, in both directions. A listed key that nothing reads is
+    /// deliberate: either the spec defines it and the implementation has not reached it, and
+    /// refusing it would make a future lowering rule a change from error to legal, or it is one of
+    /// the [`UNIVERSAL_ARGUMENTS`]. Both are accepted and reported as ignored; see
+    /// [`Self::unread_arguments`].
     ///
-    /// Membership here is per keyword and says nothing about the line the
-    /// key is written on: a key this list contains can still be read by
-    /// nothing on one particular member, because a sibling argument's value
-    /// chose a lowering rule that does not consult it. That is
-    /// [`Self::conditional_arguments`], and it is reported as ignored too.
+    /// Membership is per keyword: a listed key can still be read by nothing on one member, because
+    /// a sibling argument chose a rule that does not consult it. That is
+    /// [`Self::conditional_arguments`], also reported as ignored.
     ///
-    /// `None` for a keyword the role table does not know — not an empty
-    /// vocabulary but the absence of one, which is a different answer and
-    /// the reason the two are not the same arm. A `floor` takes no
-    /// arguments of its own and writing one on it is a mistake; a
-    /// `torch` has no vocabulary for anything to be a mistake against,
-    /// and `check::keyword_allowlist` owns the whole line.
+    /// `None` for a keyword the role table does not know: not an empty vocabulary but none at all.
+    /// An argument on a `floor` is a mistake; a `torch` has no vocabulary to be mistaken against,
+    /// and `check::keyword_allowlist` owns its whole line.
     ///
-    /// Matched with no wildcard so a new role has to be answered here
-    /// rather than silently inheriting an empty vocabulary, which would
-    /// report every argument written on it.
+    /// Matched with no wildcard so a new role is answered here rather than inheriting an empty
+    /// vocabulary that would report every argument written on it.
     #[must_use]
     pub fn arguments(&self) -> Option<&'static [&'static str]> {
         Some(match self {
@@ -299,48 +244,36 @@ impl MemberRole {
             Self::Level => &["y"],
             Self::PressurePlate => &["at", "offset", "y"],
             Self::Circuit => &["region", "void"],
-            // `spec/components-editing-sites` "Origin selectors" and
-            // "Cross-scope references" fix this set: a name, what to
-            // instantiate, what to resolve materials against, and exactly one
-            // origin selector. The same chapter's "`def`, the component
-            // construct" reserves parameterisation, which nothing forwards
-            // today; the day it lands this is the arm that opens.
+            // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references" fix
+            // this set: a name, what to instantiate, what to resolve materials against, and exactly
+            // one origin selector. Parameterisation, which `spec/components-editing-sites` "`def`,
+            // the component construct" reserves, would open this arm.
             Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
             Self::Connect => &["path"],
             Self::Other(_) => return None,
         })
     }
 
-    /// Keys in [`Self::accepted_arguments`] that no pass reads on this
-    /// role, each with the [`Unread`] reason why.
+    /// Keys in [`Self::accepted_arguments`] that no pass reads on this role, each with the
+    /// [`Unread`] reason why.
     ///
-    /// Spelled out rather than derived, because "nothing reads it" is not a
-    /// fact any table can compute about itself. The value is carried into
-    /// the IR and dropped, so the member builds without it and the author
-    /// is told so rather than left to notice. The two kinds of entry are
-    /// two different facts: an [`Unread::Unreached`] key is one the
-    /// specification defines and the implementation has not reached, so a
-    /// lowering rule is owed; an [`Unread::Inapplicable`] key is a
-    /// universal one on a role that puts down nothing it would be read
-    /// for, so none is. Each entry says which it is, and the finding's note
-    /// is worded from that.
+    /// Spelled out, because "nothing reads it" is not a fact a table can compute about itself. The
+    /// value is carried into the IR and dropped, so the member builds without it and the author is
+    /// told. An [`Unread::Unreached`] key is one the spec defines and the implementation has not
+    /// reached, so a lowering rule is owed; an [`Unread::Inapplicable`] key is a universal one on a
+    /// role that puts down nothing it would be read for, so none is. The finding's note is worded
+    /// from which.
     ///
     /// Every `mat_slot` entry is also a slot no member of the role reads:
-    /// [`super::Member::read_slot`] defines reading one from this table, and
-    /// the passes that need the answer ask it. The resolver does not look
-    /// the name up, so a name the theme lacks is not a refusal over an
-    /// argument that changes nothing, and the member alone does not earn a
-    /// scope with no theme bound a `W_NO_THEME_BOUND`. What holds the
-    /// `mat_slot` entries to the lowering is `tests/lower/unread_mat_slot.rs`,
-    /// which builds each of those roles under two slot names that resolve
-    /// to different blocks and compares the builds.
+    /// [`super::Member::read_slot`] defines reading one from this table. The resolver does not look
+    /// the name up, so a name the theme lacks refuses nothing, and the member alone does not earn a
+    /// scope with no theme bound a `W_NO_THEME_BOUND`. `tests/lower/unread_mat_slot.rs` holds these
+    /// entries to the lowering by building each role under two slot names that resolve to different
+    /// blocks and comparing the builds.
     ///
-    /// Where the boundary runs: a spec'd key on a keyword the role table
-    /// knows belongs here. A spec'd keyword the table does *not* know —
-    /// `painting`, in the same worked example the window and roof keys
-    /// below come from — has no row for its arguments to sit in, and
-    /// `E_UNKNOWN_KEYWORD` owns the whole line, the way it does for any
-    /// other unknown word.
+    /// A spec'd key on a keyword the role table knows belongs here. A spec'd keyword the table does
+    /// not know (`painting`, in the worked example the window and roof keys below come from) has no
+    /// row, and `E_UNKNOWN_KEYWORD` owns its whole line.
     #[must_use]
     pub fn unread_arguments(&self) -> &'static [UnreadArgument] {
         match self {
@@ -371,22 +304,17 @@ impl MemberRole {
                     why: Unread::Unreached,
                 },
             ],
-            // A door's material is the material of the door block, whose
-            // `hinge` / `open` states `spec/blockstate` "Derive by default,
-            // promote on override" keeps overridable, and that block is not
-            // placed yet: `block_array::lower`'s `carve_door` cuts the
-            // opening and records the block as deferred along with
-            // per-theme door materials. The day it lands, this entry is the
-            // one to remove.
+            // A door's material is the material of the door block, whose `hinge` / `open` states
+            // `spec/blockstate` "Derive by default, promote on override" keeps overridable, and
+            // that block is not placed: `block_array::lower`'s `carve_door` cuts the opening and
+            // records the block, with per-theme door materials, as deferred. This entry goes when
+            // the block is placed.
             Self::Door => &[UnreadArgument {
                 key: "mat_slot",
                 why: Unread::Unreached,
             }],
-            // None of these puts down a block a slot would choose. Why, for
-            // each, is written once, in `check::material`'s
-            // `without_a_material`, where `level`, `circuit` and `place`
-            // are `PutsNothingDown` and `connect` is
-            // `NamesItsMaterialElsewhere`.
+            // None of these puts down a block a slot would choose; `check::material`'s
+            // `without_a_material` says why for each.
             Self::Level | Self::Circuit | Self::Place | Self::Connect => &[UnreadArgument {
                 key: "mat_slot",
                 why: Unread::Inapplicable,
@@ -406,35 +334,22 @@ impl MemberRole {
             .map(|entry| entry.why)
     }
 
-    /// The axes on which one of this role's arguments is read by one
-    /// lowering rule and not by another.
+    /// The axes on which one of this role's arguments is read by one lowering rule and not by
+    /// another.
     ///
-    /// Spelled out rather than derived, for the reason
-    /// [`Self::unread_arguments`] is: which pass reads what is not a fact
-    /// any table can compute about itself. What holds it to the dispatch it
-    /// describes is `tests/lower/conditional_arguments.rs`, which writes each
-    /// pair at a value a reader would notice and lowers the source twice,
-    /// with the argument and without it. An arm this table says reads the
-    /// key has to build something different; an arm it says does not has to
-    /// build the same voxels. Both directions fail there rather than in a
-    /// silent build.
+    /// Spelled out for the reason [`Self::unread_arguments`] is.
+    /// `tests/lower/conditional_arguments.rs` holds it to the dispatch: it writes each pair at a
+    /// value a reader would notice and lowers with and without the argument; an arm said to read
+    /// the key must build something different, and one said not to must build the same voxels.
     ///
-    /// A slice, because nothing says a role has only one axis: a second
-    /// selector on the same keyword is another entry here rather than a
-    /// second shape of table. Empty for a role whose vocabulary has no
-    /// conditional key —
-    /// [`Self::Other`] among them, whose whole line belongs to
-    /// `check::keyword_allowlist` and whose arguments are judged against no
-    /// vocabulary at all.
+    /// A slice, since a second selector on the same keyword is another entry rather than a second
+    /// table shape. Empty for a role with no conditional key, [`Self::Other`] among them, whose
+    /// whole line belongs to `check::keyword_allowlist`.
     #[must_use]
     pub fn conditional_arguments(&self) -> &'static [SelectorAxis] {
         match self {
-            // `fill_roof` dispatches on `kind=` and hands each kind its own
-            // generator. Three of the four take the inflated footprint and
-            // the wall top and nothing else; `shed` is the one with a
-            // direction to be told. `overhang=` is read before the
-            // dispatch, by every kind, which is why it is in none of the
-            // arms — the axis is not "everything after `kind=`".
+            // `fill_roof` hands each `kind=` its own generator, and only `shed` has a direction to
+            // be told. `overhang=` is read before the dispatch, by every kind, so it is in no arm.
             Self::Roof => &[SelectorAxis {
                 selector: "kind",
                 arms: &[
@@ -456,15 +371,11 @@ impl MemberRole {
                     },
                 ],
             }],
-            // `fill_stair` checks `kind=stairs` before it reads anything
-            // else, so every argument it goes on to read is read under that
-            // one value — which is why the arm lists all five rather than
-            // the three that shape the blockstate. Nothing is reported
-            // today, because a `kind=` outside the arm lowers to nothing
-            // and its own `W_DEFERRED_MEMBER` carries the repair. The row
-            // is the shape of the answer for the day a second stair kind
-            // lands: whichever of these it does not read is asked about
-            // here rather than dropped in silence.
+            // `fill_stair` checks `kind=stairs` before reading anything else, so every argument it
+            // reads is read under that one value, and the arm lists all five rather than the three
+            // that shape the blockstate. Nothing fires while this is the only arm, since any other
+            // `kind=` lowers to nothing and carries its own `W_DEFERRED_MEMBER`; a second stair
+            // kind is asked about each key it does not read rather than dropping it silently.
             Self::Stair => &[SelectorAxis {
                 selector: "kind",
                 arms: &[SelectorArm {
@@ -472,16 +383,11 @@ impl MemberRole {
                     reads: &["side", "half", "facing", "shape", "y"],
                 }],
             }],
-            // `resolve_place_anchor` answers `at=origin` with the world
-            // origin and returns before it reads anything else, so `gap=`
-            // belongs to the other rule: the relative placement a row with
-            // no `at=` asks for. The two origin selectors it reads there,
-            // `east_of=` and `north_of=`, are not listed — writing one
-            // beside `at=` is two origin selectors, which
-            // `E_INVALID_PLACE_ORIGIN` already refuses, and this would be
-            // the second finding for that one repair. `gap=` is not an
-            // origin selector, so nothing else has anything to say about
-            // it.
+            // `resolve_place_anchor` answers `at=origin` with the world origin before reading
+            // anything else, so `gap=` belongs to the other rule, the relative placement a row with
+            // no `at=` asks for. `east_of=` and `north_of=` are not listed: beside `at=` they make
+            // two origin selectors, which `E_INVALID_PLACE_ORIGIN` already refuses. `gap=` is no
+            // origin selector, so this is its only finding.
             Self::Place => &[SelectorAxis {
                 selector: "at",
                 arms: &[
@@ -521,10 +427,7 @@ impl MemberRole {
     }
 }
 
-/// Return the known-keyword table.
-///
-/// Public-facing helper so external passes can render the same list this
-/// module uses for classification, without duplicating the constant.
+/// Return the known-keyword table, for passes outside this module that render the same list.
 #[must_use]
 pub fn known_keywords() -> &'static [&'static str] {
     KNOWN_KEYWORDS
@@ -532,11 +435,9 @@ pub fn known_keywords() -> &'static [&'static str] {
 
 /// Look up a command keyword in the known-keyword table.
 ///
-/// Returns the corresponding [`MemberRole`] for known keywords and
-/// [`MemberRole::Other`] (wrapping the original keyword string) for
-/// everything else. The fallback keeps the AST → IR lowering total: an
-/// unknown keyword surfaces as data rather than an error and is reported by
-/// the `keyword_allowlist` pass in `crate::check`.
+/// Returns the [`MemberRole`] for a known keyword and [`MemberRole::Other`] wrapping it otherwise,
+/// which keeps lowering total: an unknown keyword is data, reported by `check`'s
+/// `keyword_allowlist` pass.
 #[must_use]
 pub fn role_of(keyword: &str) -> MemberRole {
     match keyword {
@@ -575,10 +476,8 @@ mod tests {
         assert_eq!(role_of("mystery"), MemberRole::Other("mystery".to_owned()));
     }
 
-    /// `MemberRole::keyword` is the inverse of [`role_of`], and
-    /// diagnostics quote it back to the author. A role added here
-    /// without its keyword arm would render as some other member's
-    /// word, which is worse than rendering nothing.
+    /// Diagnostics quote `MemberRole::keyword` back to the author, so a role whose arm spells
+    /// another member's word would misreport the line.
     #[test]
     fn every_known_keyword_survives_the_round_trip_through_its_role() {
         for kw in KNOWN_KEYWORDS {

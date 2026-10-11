@@ -1,21 +1,16 @@
-//! Intent IR — the first semantic layer above the surface AST.
+//! Intent IR, the first semantic layer above the surface AST.
 //!
-//! The Intent IR keeps the surface form's structure (a module owns themes,
-//! defs, sites, and structs) but reorganises each body into typed groups:
-//! [`Member`]s carry roles and an [`IntentState`] of `key=value` attributes,
-//! `logic` and `assert` lines are split out of the generic statement stream,
-//! and the size header on a struct is hoisted into a dedicated field.
+//! It keeps the surface structure (a module owns themes, defs, sites and structs) but sorts each
+//! body into typed groups: [`Member`]s carry roles and an [`IntentState`] of `key=value`
+//! attributes, `logic` and `assert` lines are split out of the statement stream, and a struct's
+//! size header is hoisted into a field.
 //!
-//! This is what the spec calls the "rich member with invariants" layer
-//! (`spec/architecture` "The Intent IR is rich and carries invariants"). The
-//! current lowering produces it at semantic level [`SemanticLevel::Grouped`];
-//! registry-backed resolution (materials, themes, per-edition blockstate)
-//! belongs to the later [`SemanticLevel::Lifted`] tier.
+//! This is the "rich member with invariants" layer of `spec/architecture` "The Intent IR is rich
+//! and carries invariants". Lowering produces it at [`SemanticLevel::Grouped`]; registry-backed
+//! resolution (materials, themes, per-edition blockstate) belongs to [`SemanticLevel::Lifted`].
 //!
-//! Each IR node carries a `span: Span` pointing at the originating byte range
-//! in the source. The `check` module relies on those spans to emit gcc-style
-//! diagnostics; spans are tagged `#[serde(skip)]` so the on-the-wire form is
-//! unchanged from the pre-span IR.
+//! Every node carries the `span` of its source bytes, which `check` anchors diagnostics on. Spans
+//! are `#[serde(skip)]`, so the serialized IR holds no byte offsets.
 
 mod keyword_table;
 mod lower;
@@ -47,8 +42,7 @@ pub use self::semantic_level::SemanticLevel;
 /// Intent IR for a whole `.crn` module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct IntentModule {
-    /// Maturity of this IR. The current [`lower()`] always returns
-    /// [`SemanticLevel::Grouped`].
+    /// Maturity of this IR; [`lower()`] always produces [`SemanticLevel::Grouped`].
     pub semantic_level: SemanticLevel,
     /// Headers carried through verbatim from the AST.
     pub headers: Vec<Header>,
@@ -106,9 +100,8 @@ pub(crate) struct ItemBody<'a> {
 pub struct ThemeIr {
     /// Theme name.
     pub name: String,
-    /// `slot NAME -> VALUE` bindings. Source order is preserved; if a slot is
-    /// declared twice the last wins here and the duplicate is flagged by the
-    /// `duplicate` pass in `crate::check`.
+    /// `slot NAME -> VALUE` bindings in source order. A slot declared twice keeps its last value
+    /// here; `check`'s `duplicate` pass reports the repeat.
     pub slots: IndexMap<String, ValueWithSpan>,
     /// `KEYWORD[...] -> ...` selector bindings, in source order.
     pub selectors: Vec<SelectorRule>,
@@ -192,8 +185,7 @@ pub struct SiteIr {
     /// [`Member`]s so role-based passes treat them uniformly with struct
     /// members.
     pub placements: Vec<Member>,
-    /// `logic` bindings from the site body. Rare, but legal at the site
-    /// scope so we don't drop them.
+    /// `logic` bindings from the site body, where they are rare but legal.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub logic: Vec<LogicBinding>,
     /// `assert` properties from the site body.
@@ -270,12 +262,10 @@ impl AssertIr {
 
     /// Every signal this property names, in declaration order.
     ///
-    /// Lives here rather than at the consumer because the enum is
-    /// `#[non_exhaustive]`: a match written in another crate needs a
-    /// wildcard, and a wildcard is where a variant added later would go to
-    /// have its references silently unchecked. Written here the match is
-    /// exhaustive, so the next variant stops the compile until it says
-    /// which of its fields are signals.
+    /// Here rather than at the consumer because the enum is `#[non_exhaustive]`: a match in another
+    /// crate needs a wildcard, where a new variant's references would go unchecked. Here the match
+    /// is exhaustive, so a new variant does not compile until it says which of its fields are
+    /// signals.
     #[must_use]
     pub fn signal_refs(&self) -> Vec<&DottedRef> {
         match self {
@@ -293,10 +283,8 @@ impl AssertIr {
 
 /// Which family of Intent IR scope a downstream pass is describing.
 ///
-/// Introduced so passes that hand data off across crates (redstone
-/// placement, future routing) can key on scope identity without
-/// depending on the surface AST or on a downstream crate's local
-/// discriminator. The three variants intentionally mirror the shape of
+/// Lets passes that hand data across crates (redstone placement) key on scope identity without
+/// depending on the surface AST or on a downstream crate's own discriminator. The variants mirror
 /// [`IntentModule::structs`] / [`IntentModule::defs`] / [`IntentModule::sites`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -309,18 +297,14 @@ pub enum ScopeKind {
     Site,
 }
 
-/// One recognised `circuit region=<label> void=<N>` fixture together
-/// with the footprint of its enclosing scope.
+/// One recognised `circuit region=<label> void=<N>` fixture together with the footprint of its
+/// enclosing scope.
 ///
-/// Produced by [`circuit_regions`] out of a lowered [`IntentModule`] so
-/// the redstone placement pass (`spec/redstone` "Place-and-route") has one
-/// entry point for looking up the reserved area of each scope instead of
-/// walking [`Member`]s and re-decoding `intent_state` at every caller.
-/// The block-array pass's [`crate::block_array`] recogniser owns the
-/// shape validation and per-shape diagnostics; [`circuit_regions`]
-/// leaves out every `circuit` line that reserves nothing, and
-/// [`circuit_lines`] hands each of those back with the reason, for a
-/// caller that needs to say why a scope has no reservation.
+/// [`circuit_regions`] produces these so the redstone placement pass (`spec/redstone`
+/// "Place-and-route") looks up each scope's reserved area in one place rather than re-decoding
+/// `intent_state` at every caller. The recogniser in [`crate::block_array`] owns shape validation
+/// and its diagnostics; [`circuit_lines`] hands back each line that reserves nothing with the
+/// reason, for a caller that has to say why a scope has no reservation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct CircuitRegion {
@@ -341,18 +325,16 @@ pub struct CircuitRegion {
     pub span: Span,
 }
 
-/// Lift every well-formed `circuit region=<label> void=<N>` fixture out
-/// of `module`, tagged with the enclosing scope's footprint.
+/// Lift every well-formed `circuit region=<label> void=<N>` fixture out of `module`, tagged with
+/// the enclosing scope's footprint.
 ///
-/// The reservations among [`circuit_lines`], in the same order: a
-/// `circuit` line at the top level of a `struct` or `def` body whose
-/// scope has a `size=WxH` header and whose `region=` and `void=` are
-/// usable. Every other line that walk finds, a line under a `level`
-/// among them, is left out here. (`cairn check --edition E --target V`
-/// reports each malformed shape individually via the block-array pass's
-/// `recognize_circuit_region`; `cairn check` lowers only when given
-/// both flags, and this function is called from paths that skip the
-/// block-array lower, so it cannot rely on that pass firing.)
+/// The reservations among [`circuit_lines`], in the same order: a `circuit` line at the top level
+/// of a `struct` or `def` body whose scope has a `size=WxH` header and whose `region=` and `void=`
+/// are usable. Every other line, one under a `level` among them, is left out.
+///
+/// The block-array pass's `recognize_circuit_region` reports each malformed shape, but `cairn
+/// check` lowers only when given both `--edition` and `--target`, and some callers of this skip
+/// that lowering, so this cannot rely on it.
 #[must_use]
 pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
     circuit_lines(module)
@@ -361,29 +343,21 @@ pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
         .collect()
 }
 
-/// Every `circuit` line at the top level of a `struct` or `def` body or
-/// under a `level` in one, in source order within each scope, read into
-/// the reservation it makes or the [`CircuitRegionDefect`] that keeps it
-/// from making one.
+/// Every `circuit` line at the top level of a `struct` or `def` body or under a `level` in one, in
+/// source order within each scope, read into the reservation it makes or the
+/// [`CircuitRegionDefect`] that keeps it from making one.
 ///
-/// One walk, so [`circuit_regions`] and a caller that also needs the
-/// rejected lines cannot disagree about which lines are usable: each
-/// line lands on exactly one side.
+/// One walk, so [`circuit_regions`] and a caller that also needs the rejected lines cannot disagree
+/// about which lines are usable: each line lands on exactly one side.
 ///
-/// Reads the top-level members of each body, and descends into every
-/// `level` among them and into any `level` nested in one. A `circuit`
-/// line found under a `level` comes back as
-/// [`CircuitRegionDefect::NestedUnderLevel`] whatever else it says: v1
-/// reserves nothing from one, and naming that lets a pass point at the
-/// line rather than tell the author the scope has none. An indented
-/// body under any other member is not descended into; `cairn check`
-/// reports that body as never reaching the build.
+/// A `circuit` line under a `level`, at any depth, comes back as
+/// [`CircuitRegionDefect::NestedUnderLevel`] whatever else it says, so a pass can point at the line
+/// rather than tell the author the scope has none. An indented body under any other member is not
+/// descended into; `cairn check` reports that body as never reaching the build.
 ///
-/// Sites are not walked: [`SiteIr`] has no `size` and no `members` (its
-/// rows are `placements`), and this function reads `module.structs` and
-/// `module.defs` only, so a `circuit` line in a `site` body comes back on
-/// neither side. A `struct` or `def` with no `size=` is walked, and its
-/// lines come back as [`CircuitRegionDefect::NoSize`].
+/// Sites are not walked, since [`SiteIr`] has no `size` and its rows are `placements`, so a
+/// `circuit` line in a `site` body comes back on neither side. A `struct` or `def` with no `size=`
+/// is walked, and its lines come back as [`CircuitRegionDefect::NoSize`].
 #[must_use]
 pub fn circuit_lines(module: &IntentModule) -> Vec<Result<CircuitRegion, RejectedCircuitRegion>> {
     let mut out = Vec::new();
@@ -422,27 +396,21 @@ pub struct RejectedCircuitRegion {
     pub span: Span,
 }
 
-/// Why a `circuit` line is not a usable reservation. The first that
-/// applies, in the order listed.
+/// Why a `circuit` line is not a usable reservation: the first that applies, in the order listed.
 ///
-/// The [`fmt::Display`] form is the reason clause a pass prints after
-/// naming the line, so no two passes can describe the same line
-/// differently. It states what is wrong and stops there: the repair
-/// depends on what the caller can offer the author, so each caller
-/// writes its own.
+/// The [`fmt::Display`] form is the reason clause a pass prints after naming the line, so no two
+/// passes describe the same line differently. It stops at what is wrong; each caller writes the
+/// repair it can offer.
 ///
-/// `#[non_exhaustive]` on the enum and on every variant, as on
-/// [`PatchTargetError`]. That costs no exhaustiveness checking: the match
-/// that has to name every variant is the `Display` below, in this crate,
-/// where the attribute does not apply, so a new variant does not compile
-/// until it has a sentence. A caller in another crate matches only to
-/// choose its repair, and keeps a `_` arm for a variant it has none for.
+/// `#[non_exhaustive]` on the enum and every variant, as on [`PatchTargetError`]. That costs no
+/// exhaustiveness checking: the match that must name every variant is the `Display` below, in this
+/// crate, so a new variant does not compile until it has a sentence. A caller in another crate
+/// matches only to choose its repair, and keeps a `_` arm for a variant it has none for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CircuitRegionDefect {
-    /// The line sits under a `level` (at any depth). v1 reads a
-    /// reservation only from a `circuit` line at the top level of a
-    /// `struct` or `def` body, so this one reserves nothing whatever its
+    /// The line sits under a `level`, at any depth. Only a `circuit` line at the top level of a
+    /// `struct` or `def` body is read as a reservation, so this one reserves nothing whatever its
     /// `region=` and `void=` say.
     #[non_exhaustive]
     NestedUnderLevel,
