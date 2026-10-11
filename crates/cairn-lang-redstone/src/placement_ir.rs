@@ -70,10 +70,10 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 /// at one voxel are one map key rather than two.
 /// Serialising as the enum's stable lowercase string (`plane` /
 /// `bridge` / `via`) keeps the JSON wire form small and matches the
-/// vocabulary `spec/redstone` "Place-and-route" uses. Reading one back
-/// is derived, so it accepts exactly the variant names in snake case —
-/// the words [`Self::as_str`] writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize)]
+/// vocabulary `spec/redstone` "Place-and-route" uses. Both directions
+/// are derived from the variant names in snake case — the words
+/// [`Self::as_str`] spells.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(strum::EnumIter))]
 pub enum RouteLayer {
@@ -121,12 +121,6 @@ impl RouteLayer {
             Self::Bridge => "bridge",
             Self::Via => "via",
         }
-    }
-}
-
-impl Serialize for RouteLayer {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -463,13 +457,13 @@ impl CircuitRegionReservation {
 /// accepts, so a dump names the flag that produced it and a consumer
 /// can round-trip the two. Keep them in step with the CLI's
 /// `SynthStage` value names — the CLI test suite asserts the
-/// equality per stage. Reading a tag back is derived, so it accepts
-/// exactly the variant names in snake case, which are the words
-/// [`Self::as_str`] writes; a test walks every variant through both.
+/// equality per stage. Both directions are derived from the variant
+/// names in snake case, which are the words [`Self::as_str`] spells; a
+/// test walks every variant through both.
 ///
 /// `#[non_exhaustive]` for the same reason [`PlacementPhase`] is: the
 /// fifth stage (Edition legalization) has no variant yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
@@ -502,12 +496,6 @@ impl PlacementStage {
             Self::Delay => "delay",
             Self::Crossing => "crossing",
         }
-    }
-}
-
-impl Serialize for PlacementStage {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
     }
 }
 

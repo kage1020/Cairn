@@ -1051,7 +1051,10 @@ fn a_buffer_on_a_segment_the_cell_has_no_driver_for_is_refused() {
 
 /// Each wire word reads back as the variant that writes it, walking
 /// every variant through `EnumIter` rather than a list kept by hand,
-/// so a variant added later is covered the day it lands.
+/// so a variant added later is covered the day it lands. The two enums
+/// whose `as_str` names their wire word are held to it, since serde
+/// derives that word from the variant name rather than reading
+/// `as_str`.
 #[test]
 fn every_wire_word_reads_back_as_its_variant() {
     use strum::IntoEnumIterator;
@@ -1063,9 +1066,17 @@ fn every_wire_word_reads_back_as_its_variant() {
     }
     for layer in RouteLayer::iter() {
         round_trip(&layer);
+        assert_eq!(
+            serde_json::to_value(layer).expect("serialises"),
+            layer.as_str()
+        );
     }
     for stage in PlacementStage::iter() {
         round_trip(&stage);
+        assert_eq!(
+            serde_json::to_value(stage).expect("serialises"),
+            stage.as_str()
+        );
     }
     for port in PortName::iter() {
         round_trip(&BufferSegment::Port(port));
