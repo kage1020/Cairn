@@ -300,38 +300,6 @@ fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
 }
 
 #[test]
-fn ac4_unknown_edition_rejected_with_exit_two() {
-    // AC4: `--editions foo` fails before dry-run lowering runs (which
-    // would otherwise silently produce a zero-fill row that a caller
-    // couldn't distinguish from a real portable-only result).
-    let path = examples_dir().join("cottage.crn");
-    let out = Command::new(cargo_bin())
-        .args(["info", path.to_str().unwrap(), "--editions", "foo"])
-        .output()
-        .expect("run cairn");
-    assert_eq!(
-        out.status.code(),
-        Some(2),
-        "expected exit 2 for unknown edition, got {:?}; stderr={}",
-        out.status.code(),
-        String::from_utf8_lossy(&out.stderr),
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    // The message threads the offending value + the closed valid set,
-    // matching the self-correction triple in `spec/versioning-editions`
-    // "Fail-loud and minimum-version inference" (what is wrong / what is
-    // valid / how to fix).
-    assert!(
-        stderr.contains("foo"),
-        "stderr should name the offending value, got: {stderr}",
-    );
-    assert!(
-        stderr.contains("java, bedrock"),
-        "stderr should list valid editions, got: {stderr}",
-    );
-}
-
-#[test]
 fn ac5_an_edition_specific_resolve_failure_is_reported_not_counted_away() {
     // `info` gates on the edition-neutral pass, which unions slot names
     // across per-edition theme variants. A slot only one variant declares

@@ -135,16 +135,39 @@ fn info_6_registry_compatibility_renders_as_single_range_line() {
     );
 }
 
+/// An `--editions` list naming something other than editions is a usage
+/// error, refused before the source is lowered: an empty entry would
+/// render as a row with no edition, and an unknown name would get a
+/// zero-filled row a caller could not tell from a real portable-only one.
+/// An unknown name is answered with the name and the valid set
+/// (`spec/versioning-editions` "Fail-loud and minimum-version inference").
 #[test]
-fn info_7_empty_editions_value_is_rejected_with_exit_two() {
+fn a_malformed_editions_list_is_a_usage_error() {
     let path = examples_dir().join("cottage.crn");
-    let out = cairn("info", &[path.to_str().unwrap(), "--editions", ""]);
-    assert_eq!(out.status.code(), Some(2));
-    let out = cairn(
-        "info",
-        &[path.to_str().unwrap(), "--editions", "java,,bedrock"],
-    );
-    assert_eq!(out.status.code(), Some(2));
+    for (editions, names) in [
+        ("", &["empty entries"][..]),
+        ("java,,bedrock", &["empty entries"][..]),
+        ("foo", &["`foo`", "java, bedrock"][..]),
+        ("java,foo", &["`foo`", "java, bedrock"][..]),
+    ] {
+        let out = cairn("info", &[path.to_str().unwrap(), "--editions", editions]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(
+            out.status.code(),
+            Some(2),
+            "--editions {editions:?}: stderr={stderr}",
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "--editions {editions:?} printed a report",
+        );
+        for name in names {
+            assert!(
+                stderr.contains(name),
+                "--editions {editions:?}: the refusal should say {name}, got: {stderr}",
+            );
+        }
+    }
 }
 
 #[test]
