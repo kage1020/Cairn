@@ -198,7 +198,7 @@ static bool at_line_break(TSLexer *lexer) {
 // step. The bottom `0` sentinel is never popped: callers only reach here
 // while a level above it is still open.
 static bool emit_dedent(Scanner *s, TSLexer *lexer) {
-  array_pop(&s->indent_stack);
+  (void)array_pop(&s->indent_stack);
   if (s->pending_dedents > 0) s->pending_dedents--;
   lexer->result_symbol = DEDENT;
   return true;
