@@ -51,9 +51,8 @@ fn no_example_draws_dust_inside_a_component() {
 
     use cairn_lang_core::{lower, parse};
 
-    use crate::routing_geometry::{
-        PadColumn, Router, block_sites, collect_nets, input_pad, manhattan, net_trees,
-    };
+    use crate::grid::{PadColumn, input_pad, manhattan};
+    use crate::routing_geometry::{Router, block_sites, collect_nets, net_trees};
 
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -172,7 +171,7 @@ fn claim(
     dust: &[CellCoord],
     where_it_is: &str,
 ) {
-    use crate::routing_geometry::beside;
+    use crate::grid::beside;
 
     for coord in dust {
         for taken in std::iter::once(*coord).chain(beside(*coord)) {

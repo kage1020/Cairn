@@ -3,7 +3,8 @@ use std::fmt::Write as _;
 use cairn_lang_core::{Edition, lower, parse};
 
 use super::compile_placement;
-use crate::routing_geometry::{BlockKind, BlockSite, PadColumn, block_sites};
+use crate::grid::PadColumn;
+use crate::routing_geometry::{BlockKind, BlockSite, block_sites};
 use crate::{compile_edition_netlist, compile_netlist, synthesize};
 
 /// Every block the placement pass puts in the one scope `source`

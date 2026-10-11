@@ -9,16 +9,15 @@
 
 use std::collections::HashMap;
 
-use crate::delay::MAX_ATTENUATION_SEGMENT;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
+use crate::grid::{MAX_ATTENUATION_SEGMENT, PadColumn, input_pad, manhattan};
 use crate::netlist_ir::NetRef;
 use crate::placement_ir::{
     CellCoord, CellIdentity, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode,
     PlacementIr, PlacementPhase, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
 use crate::routing_geometry::{
-    BlockSite, NetTree, PadColumn, Router, block_sites, collapsed_block, collect_nets, input_pad,
-    manhattan, net_trees, unroutable,
+    BlockSite, NetTree, Router, block_sites, collapsed_block, collect_nets, net_trees, unroutable,
 };
 use crate::saturating_index;
 

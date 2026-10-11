@@ -6,13 +6,13 @@ use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 
 use crate::edition_netlist_ir::EditionCell;
+use crate::grid::{PadColumn, output_pad};
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
     PlacementPhase, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::PadColumn;
 
 pub(crate) fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
     CircuitRegionReservation {
@@ -34,11 +34,46 @@ pub(crate) fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlac
     scoped
 }
 
+/// A cell's phase as stage 2 hands it on, with nothing measured.
+pub(crate) const ROUTED: PlacementPhase = PlacementPhase::Routed { wire_length: 0 };
+
+/// A cell of kind `cell` standing on `coord`, driven by `drivers`, in
+/// `phase`.
+pub(crate) fn placed_cell(
+    cell: EditionCell,
+    coord: CellCoord,
+    drivers: Vec<CellPortDriver>,
+    phase: PlacementPhase,
+) -> PlacedCellNode {
+    PlacedCellNode {
+        cell,
+        drivers,
+        coord,
+        phase,
+        span: Span::default(),
+    }
+}
+
+/// An actuator pad already through routing, matching what
+/// [`placed_cell`] does for a cell in [`ROUTED`]: these fixtures hand the
+/// delay pass an IR that skipped stages 1 and 2, so both node kinds have
+/// to arrive in the phase stage 2 would have left them in.
+pub(crate) fn routed_output(driver: NetRef, pad: CellCoord) -> PlacedOutputNode {
+    let mut output = PlacedOutputNode::new(
+        DottedRef::new("sig".into(), vec!["out".into()]),
+        driver,
+        pad,
+        Span::default(),
+    );
+    output.phase = ROUTED;
+    output
+}
+
 /// One scope whose reservation is too shallow to hold its pad column,
 /// so the actuator pad lands on the only cell.
 ///
 /// `depth = 1` leaves the pad column a single row and
-/// [`crate::routing_geometry::output_pad`] saturates into it: `z = 0`,
+/// [`crate::grid::output_pad`] saturates into it: `z = 0`,
 /// `x = width - 1 = 1`, which is where the cell stands. Two blocks,
 /// one coord.
 ///
@@ -76,7 +111,7 @@ pub(crate) fn collapsed_pad_row(phase: &PlacementPhase, row: CollapsedRow) -> Sc
 /// actuator edge all on coords of their own.
 fn roomy_ir(phase: &PlacementPhase) -> PlacementIr {
     let region = reservation(6, 3, 1);
-    let pad = crate::routing_geometry::output_pad(0, PadColumn::for_cell_count(1), &region);
+    let pad = output_pad(0, PadColumn::for_cell_count(1), &region);
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(region);
     ir.inputs.push(NetlistInput {
@@ -145,7 +180,7 @@ impl CollapsedRow {
 
 fn shallow_ir(phase: &PlacementPhase, row: CollapsedRow) -> PlacementIr {
     let (region, inputs) = row.shape();
-    let pad = crate::routing_geometry::output_pad(0, PadColumn::for_cell_count(1), &region);
+    let pad = output_pad(0, PadColumn::for_cell_count(1), &region);
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(region);
     for i in 0..inputs {

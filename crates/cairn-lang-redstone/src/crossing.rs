@@ -15,7 +15,7 @@
 //! same routed tree, and this pass reads them back.
 //!
 //! A repeater refreshes the dust it stands on, so each one stands on its
-//! net's routed tree, where `crate::delay::repeater_sites` puts it. This
+//! net's routed tree, where `crate::repeater_sites::repeater_sites` puts it. This
 //! pass builds its own set from the trees it rebuilt; it is the set the
 //! delay pass charged ticks from because that function is deterministic
 //! and nothing between the two stages moves a cell, not because one is
@@ -45,7 +45,6 @@
 //! delay-pass input did apart from the `stage` tag — which is why that
 //! tag exists (see [`crate::placement_ir::PlacementStage`]).
 
-use crate::delay::{Fed, RepeaterSites, repeater_sites_of_scope};
 use crate::diagnostic::Diagnostic;
 use crate::pass::{
     OpenScope, Skipped, lay_nets, lower_scopes, missing_region_diagnostic, open_scope,
@@ -55,6 +54,8 @@ use crate::placement_ir::{
     BufferCoord, BufferSegment, CellIdentity, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
 };
+use crate::repeater_sites::{Fed, RepeaterSites, repeater_sites_of_scope};
+
 /// Output of a [`compile_crossing`] run.
 ///
 /// Mirrors [`crate::delay::DelayOutput`]'s shape so callers see a

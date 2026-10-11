@@ -11,6 +11,7 @@ use super::compile_crossing;
 use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
 use crate::diagnostic::DiagnosticCode;
 use crate::edition_netlist_ir::EditionCell;
+use crate::grid::{PadColumn, input_pad};
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
 use crate::placement_ir::{BufferSegment, PlacedOutputNode};
@@ -18,7 +19,7 @@ use crate::placement_ir::{
     CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, RouteLayer, ScopedPlacementIr,
 };
 use crate::routing::compile_routing;
-use crate::routing_geometry::{PadColumn, Router, block_sites, collect_nets, input_pad, net_trees};
+use crate::routing_geometry::{Router, block_sites, collect_nets, net_trees};
 use crate::test_fixtures::{reservation, scoped, staircase};
 
 fn placed_cell(
@@ -956,7 +957,7 @@ fn an_actuator_segment_records_the_repeater_a_cell_segment_placed() {
 /// The four nets contend for the rows across the region. Their pads
 /// stand at `z=0`, `2`, `3` and `4`, the column stepping over the
 /// cell row. `sig.sel` is laid first — same fanout, lowest
-/// [`crate::routing_geometry::net_ref_key`] — and runs out along
+/// [`crate::grid::net_ref_key`] — and runs out along
 /// `z=0`; `sig.blocker` takes the row at `z=2`, and `sig.port_a`,
 /// whose pad stands beside that row, has no row left and climbs at
 /// its own pad; `sig.port_b` runs out along `z=4`. Every repeater

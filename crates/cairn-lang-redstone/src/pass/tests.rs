@@ -7,12 +7,12 @@ use cairn_lang_core::error::Span;
 use super::MAX_ATTENUATION_SEGMENT;
 use crate::diagnostic::DiagnosticCode;
 use crate::edition_netlist_ir::EditionCell;
+use crate::grid::{PadColumn, output_pad};
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 use crate::placement_ir::{
     CellCoord, PlacedCellNode, PlacedOutputNode, PlacementIr, PlacementPhase, ScopedPlacementIr,
 };
-use crate::routing_geometry::{PadColumn, output_pad};
 use crate::test_fixtures::{
     CollapsedRow, DanglingNet, FarSink, collapsed_pad_row, dangling_net, far_sink,
     regionless_scope, reservation, scoped,

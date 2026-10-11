@@ -29,7 +29,7 @@
 //! the actuator-pad column at the exact `2n + 1` fit, and a clear
 //! column inside the region at any width past it. The pads keep off the
 //! cells two ways. They step over the cell row
-//! (`routing_geometry::PadColumn`), so the coord beside an end cell in
+//! (`grid::PadColumn`), so the coord beside an end cell in
 //! a pad column holds no pad. And the row check demands `2n + 1`
 //! columns rather than `2n`, because at `2n` the last cell would stand
 //! at `x = width - 1`, inside the actuator-pad column, face to face
@@ -64,12 +64,12 @@ use cairn_lang_core::intent::{self, IntentModule};
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::edition_netlist_ir::{EditionNetlistIr, ScopedEditionNetlistIr};
+use crate::grid::{CELL_ROW, PadColumn, output_pad};
 use crate::logic_ir::ScopeKind;
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
     PlacementPhase, ScopedPlacementIr,
 };
-use crate::routing_geometry::{PadColumn, output_pad};
 use crate::saturating_index;
 
 /// Per-cell footprint used by the v1 congestion estimate. Four blocks
@@ -91,15 +91,6 @@ pub const CELL_FOOTPRINT: u32 = 4;
 /// column for the end of the row; that one is not per cell, so it is
 /// not folded in here.
 const CELL_SPACING: u32 = 2;
-
-/// The row the cells stand on, counted from the near edge of the
-/// reservation.
-///
-/// One row in, so every cell has a clear lane on each side of it rather
-/// than only the one — see the module doc. Read here by the coordinate
-/// and by the depth refusal that reserves the rows it needs, and by the
-/// pad coordinates that step over it, so the three cannot drift.
-pub(crate) const CELL_ROW: u32 = 1;
 
 /// The `Fix:` footer every area-budget refusal carries, here and in the
 /// routing pass's post-routing re-check.
