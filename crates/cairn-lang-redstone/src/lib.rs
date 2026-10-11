@@ -5,53 +5,30 @@
 //! three-tier (logical cell → edition cell → physical tile) so an edition difference is
 //! confined to the library.
 //!
-//! The crate currently exposes the first three of the four IR layers in
-//! `spec/redstone` "Connection to the IR and phases" plus the cell
-//! library's tier-2 selection pass:
-//! [`synth::synthesize`] lowers the Intent IR's `logic` bindings,
-//! sensors, and actuators into an edition-neutral Logic IR;
-//! [`netlist::compile_netlist`] rewrites that DAG into an
-//! edition-neutral Netlist IR of cells + nets;
-//! [`edition_netlist::compile_edition_netlist`] picks the target-edition
-//! realisation of each cell against a [`cairn_lang_core::Edition`] —
-//! the second rung (`Edition Cell`) of the three-tier cell library
-//! from `spec/redstone` "Edition differences", materialised as
-//! [`edition_netlist_ir::EditionNetlistIr`] so the placement pass has
-//! one type to consume;
-//! [`placement::compile_placement`] lays out those edition-tagged
-//! cells inside each scope's `circuit region=` reservation — stage 1
-//! of the five-stage pipeline `spec/redstone` "Place-and-route"
-//! describes;
-//! [`routing::compile_routing`] runs stage 2 (Steiner routing) over
-//! that layout, filling every [`placement_ir::PlacedCellNode`]'s
-//! `wire_length` with the routed total of the driver→sink paths
-//! through its Steiner tree, re-checking `E_ROUTE_CONGESTION`
-//! against the actual post-routing occupancy, and naming with
-//! `W_ROUTE_CROSS_LAYER_CLEARANCE` the strands its escape left a layer
-//! apart, which that pipeline makes the physical tile layer's to separate;
-//! [`delay::compile_delay`] runs stage 3
-//! (delay insertion) over the routed IR, promoting every cell's
-//! `local_delay_ticks` from `None` to `Some(base delay + implicit buffer
-//! repeater ticks)` — a local wire cost, not an arrival time, as
-//! [`delay`] sets out — and refusing with `E_ATTENUATION_LIMIT`
-//! whenever a single driver segment's *routed* length exceeds the v1
-//! sanity cap, which stage 2 has already applied to the straight line
-//! between that segment's ends so the hopeless cases never get routed
-//! at all; and
-//! [`crossing::compile_crossing`] runs stage 4 (crossing legalization)
-//! over the delayed IR, filling every cell's `buffer_coords` with the
-//! coord of each implicit buffer repeater the delay pass counted. The
-//! crossing it is named for is prevented rather than legalized: stage
-//! 2 lays each net around the dust of the nets before it, climbing to
-//! a [`placement_ir::RouteLayer::Bridge`] layer where there is no way
-//! round on the plane, and refusing the scope where there is no way at
-//! all. Every
-//! [`placement_ir::PlacedCellNode`] names the last of those four
-//! passes to touch it via [`placement_ir::PlacementStage`], which the
-//! JSON dump carries as a `stage` key in the same vocabulary
-//! `cairn synth --stage <s>` accepts. The physical-tile
-//! selection and simulator layers are not yet public API — see
-//! `spec/redstone` for the complete pipeline they will fill in.
+//! The passes, in the order of `spec/redstone` "Connection to the IR and phases" and
+//! "Place-and-route":
+//!
+//! - [`synth::synthesize`] lowers the Intent IR's `logic` bindings, sensors and actuators into an
+//!   edition-neutral Logic IR;
+//! - [`netlist::compile_netlist`] rewrites that DAG into a Netlist IR of cells and nets;
+//! - [`edition_netlist::compile_edition_netlist`] picks each cell's realisation for a
+//!   [`cairn_lang_core::Edition`], the edition-cell tier of
+//!   `spec/redstone` "Edition differences", as an [`edition_netlist_ir::EditionNetlistIr`];
+//! - [`placement::compile_placement`], stage 1, lays the cells out inside each scope's
+//!   `circuit region=` reservation;
+//! - [`routing::compile_routing`], stage 2, lays a Steiner tree per net and fills each cell's
+//!   `wire_length`;
+//! - [`delay::compile_delay`], stage 3, fills each cell's `local_delay_ticks`, a local wire cost
+//!   rather than an arrival time;
+//! - [`crossing::compile_crossing`], stage 4, fills each cell's `buffer_coords` with the coord
+//!   of every implicit buffer repeater. Crossings are prevented rather than legalized: stage 2
+//!   lays each net around the ones before it, climbing to a
+//!   [`placement_ir::RouteLayer::Bridge`] layer where the plane has no way round.
+//!
+//! Each [`placement_ir::PlacedCellNode`] names the last pass to touch it with a
+//! [`placement_ir::PlacementStage`], which the JSON dump carries as a `stage` key in the
+//! vocabulary of `cairn synth --stage <s>`. The physical-tile layer and the simulator are not
+//! implemented here.
 
 pub mod crossing;
 pub mod delay;
@@ -101,10 +78,9 @@ pub use placement_ir::{
 pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};
 
-/// Saturating `usize -> u32` for every index space in the crate (ports,
-/// gates, cells, coords). A `.crn` big enough to overflow `u32` is well
-/// past any Cairn build the compiler will practically finish, so clamp
-/// rather than panic on adversarial input.
+/// Saturating `usize -> u32` for every index space in the crate. A `.crn` that overflows `u32`
+/// is far past any build the compiler would finish, so this clamps rather than panics on
+/// adversarial input.
 pub(crate) fn saturating_index(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }

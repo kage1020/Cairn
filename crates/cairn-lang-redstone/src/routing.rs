@@ -1,13 +1,9 @@
 //! Placement IR → routed Placement IR lowering (Steiner routing).
 //!
-//! Stage 2 of the five-stage pipeline `spec/redstone` "Place-and-route"
-//! lays out. Lays a rectilinear Steiner tree per driver net inside each
-//! scope's [`crate::placement_ir::CircuitRegionReservation`] and
-//! rewrites every cell's and actuator pad's
-//! [`crate::placement_ir::PlacedCellNode::wire_length`] from `None` to
-//! `Some(routed length of the nets driving it, summed)`.
-//! [`crate::placement_ir::PlacedCellNode::local_delay_ticks`] stays
-//! `None`; stage 3 ([`crate::delay::compile_delay`]) promotes it.
+//! Stage 2 of the five in `spec/redstone` "Place-and-route": lays a rectilinear Steiner tree per
+//! driver net inside each scope's [`crate::placement_ir::CircuitRegionReservation`] and sets every
+//! cell's and actuator pad's [`crate::placement_ir::PlacedCellNode::wire_length`] to the routed
+//! length of the nets driving it, summed.
 //!
 //! - **Nets.** Each cell driver is a sink on its driver's net and each
 //!   output driver a sink on its actuator's net; the source is the input
@@ -19,9 +15,9 @@
 //!   plane, climbing to a [`crate::placement_ir::RouteLayer::Bridge`]
 //!   layer where the plane offers no way round. Nets are laid in
 //!   `crate::routing_geometry::net_order`, a total order, so the delay
-//!   and crossing passes rebuild the same trees. Keeping nets apart here
-//!   rather than at stage 4 is what gets the climb measured into
-//!   `wire_length` and into the delay pass's tick count.
+//!   and crossing passes rebuild the same trees. Nets are kept apart here
+//!   rather than at stage 4 so the climb is measured into `wire_length`
+//!   and into the delay pass's tick count.
 //! - **Cross-layer pairs.** A net that climbed runs over, or one step
 //!   across from, the net it cleared. Separating those is the physical
 //!   tile layer's obligation, so they are named once, here, by
@@ -31,22 +27,16 @@
 //!   reservation cannot fit (its saturated z collapses onto a cell or
 //!   another pad); a sink with no free path; and, after every net is
 //!   laid, `cells * CELL_FOOTPRINT + wire-only coords > reserved area`.
-//!   Each primary says which, so a reader can tell the placement pass's
-//!   pessimistic cell budget from the routed layout. Two more codes
-//!   reach this pass through `crate::pass::lay_nets`:
-//!   `E_ATTENUATION_LIMIT` for a sink further from its driver than the
-//!   v1 cap in a straight line, and `E_NO_CIRCUIT_REGION` for a scope
-//!   carrying cells but no reservation to place them in.
+//!   Each primary says which. Two more codes come from
+//!   `crate::pass::lay_nets`: `E_ATTENUATION_LIMIT` for a sink further
+//!   from its driver than the cap in a straight line, and
+//!   `E_NO_CIRCUIT_REGION` for a scope with cells and no reservation.
 //! - **Attribution.** `wire_length` is summed over the distinct nets
 //!   driving a cell (two ports reading one signal are one strand), each
 //!   measured as the routed path from the net's source into the cell —
 //!   the measure stage 3 counts buffer repeaters against.
 //!
-//! The pad coordinates are derived on the fly and not stored; they would
-//! become `PlacementIr` fields if a consumer outside routing ever needed
-//! them. `RouteLayer::Bridge` has one producer, this pass; `RouteLayer::Via`
-//! has none, because a climb is a step between two coords rather than a
-//! coord of its own.
+//! Sensor pad coordinates are derived from the reservation where needed rather than stored.
 
 use std::collections::HashSet;
 
@@ -58,21 +48,12 @@ use crate::placement_ir::{
 };
 use crate::routing_geometry::{net_order, sum_over_driving_nets, tile_layer_clearance};
 
-/// Per-cell footprint used by the post-routing congestion budget: the
-/// placement pass's own, so this pass carries the same footprint model
-/// and adds wire occupancy on top.
+/// Per-cell footprint of the post-routing congestion budget: the placement pass's, with the
+/// routed wire counted on top.
 pub use crate::placement::CELL_FOOTPRINT;
 
-/// Output of a [`compile_routing`] run.
-///
-/// Mirrors the shape of [`crate::placement::PlacementOutput`] so
-/// callers see a uniform result type across every stage of the
-/// place-and-route pipeline. The routed IR is a
-/// [`ScopedPlacementIr`] with every non-failed scope's
-/// `wire_length` promoted from `None` to `Some(_)` — no new IR type;
-/// the routing pass is one
-/// [`crate::placement_ir::PlacementPhase::route`] transition per
-/// cell, per the producer↔variant table on that enum.
+/// Output of a [`compile_routing`] run: the routed scopes, every cell having taken
+/// [`crate::placement_ir::PlacementPhase::route`], and the findings.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct RoutingOutput {
@@ -84,28 +65,16 @@ pub struct RoutingOutput {
 }
 
 impl RoutingOutput {
-    /// Empty output (no routed scopes, no diagnostics).
+    /// An empty output.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-/// Lower a [`ScopedPlacementIr`] into a routed [`ScopedPlacementIr`].
-///
-/// Reads the reservation from every scope's `region` field rather than
-/// re-consulting the Intent IR — the Placement IR is self-describing
-/// by construction, so the routing pass has no `IntentModule`
-/// dependency.
-///
-/// One entry per non-empty [`PlacementIr`] whose routing succeeded;
-/// scopes whose routing raises an Error-severity diagnostic are elided
-/// from the output so a partial `wire_length` cannot pollute the
-/// delay-insertion pass downstream. Today those are
-/// `E_ROUTE_CONGESTION`, `E_ATTENUATION_LIMIT` for a sink the v1 cap
-/// already puts out of reach in a straight line, and
-/// `E_NO_CIRCUIT_REGION` for a scope carrying cells with no
-/// reservation.
+/// Lowers a [`ScopedPlacementIr`] into a routed one, reading each scope's reservation from its
+/// `region`. A scope refused with an error (see the module doc) is left out, so a partial
+/// `wire_length` never reaches delay insertion.
 #[must_use]
 pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
     let (scoped, diagnostics) = lower_scopes(placement, route_scope);
@@ -115,11 +84,8 @@ pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
     }
 }
 
-/// Result of routing one scope: the routed IR plus whatever the layout
-/// is advised of on success, a single Error-severity diagnostic on
-/// failure. A refused scope carries no advisory: what an elided scope
-/// would have left the tile layer is not an obligation anything will be
-/// asked to discharge.
+/// Result of routing one scope: the routed IR and its advisories, or one error. A refused scope
+/// carries no advisory, since nothing will build it.
 type ScopeRouting = Result<(PlacementIr, Vec<Diagnostic>), Diagnostic>;
 
 fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
@@ -133,10 +99,8 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         return Ok((entry.ir.clone(), Vec::new()));
     };
 
-    // Occupancy for the congestion figure below: the blocks, then the
-    // dust laid over them. The refusal a repeated coord earns is
-    // `lay_nets`', asked before any of this, so what is left here is
-    // counting.
+    // Occupancy for the congestion figure: the blocks and the dust laid over them. `lay_nets`
+    // has already refused a repeated coord, so this only counts.
     let mut occupancy: HashSet<CellCoord> = HashSet::with_capacity(ir.cells.len() * 4);
     occupancy.extend(blocks.iter().map(|site| site.coord));
     for net in net_order(&nets.sinks) {
@@ -157,10 +121,8 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
         |phase, len, identity| phase.route_at(len, identity),
     );
 
-    // Congestion against the actual post-routing footprint: the
-    // placement pass's pessimistic per-cell budget, plus the wire-only
-    // coords laid on top (cell coords excluded so they are not counted
-    // twice).
+    // The placement pass's per-cell budget plus the wire-only coords, so a cell coord is not
+    // counted twice.
     let cell_coord_set: HashSet<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
     let wire_only: u64 = occupancy
         .iter()

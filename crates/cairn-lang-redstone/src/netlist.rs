@@ -1,26 +1,10 @@
 //! Logic IR → Netlist IR lowering.
 //!
-//! Rewrites each [`crate::logic_ir::ScopedLogicIrEntry`] into a
-//! [`ScopedNetlistIrEntry`] by mapping every [`crate::logic_ir::GateNode`]
-//! to a [`CellNode`] tagged with a [`LogicalCell`]. The pass is a single
-//! forward walk: the Logic IR carries a topologically ordered DAG
-//! (invariant enforced by [`crate::synth::synthesize`], which also
-//! runs CSE + cycle detection + unbound-signal reporting), so this
-//! stage carries no diagnostics of its own — it is a pure structural
-//! rewrite.
-//!
-//! Edition is intentionally *not* in scope. Selecting Java `ComparatorAND`
-//! vs Bedrock `TorchAND` is the Edition Cell step per `spec/redstone`
-//! "Edition differences", which runs against a target
-//! [`cairn_lang_core::Edition`] in a later pass. The Netlist IR built
-//! here is the "Logical Cell selection" stage of the IR diagram in
-//! "Connection to the IR and phases".
-//!
-//! Port ordering is canonical per cell — two-input gates emit
-//! `[A, B]`; `Not` emits `[A]`; `Mux` emits `[Sel, A, B]` — so a
-//! consumer can index by position without inspecting [`PortName`].
-//!
-//! [`ScopedNetlistIrEntry`]: crate::netlist_ir::ScopedNetlistIrEntry
+//! Maps every [`crate::logic_ir::GateNode`] to a [`CellNode`] tagged with a [`LogicalCell`], the
+//! "Logical Cell selection" of `spec/redstone` "Connection to the IR and phases". The Logic IR is
+//! already topologically ordered and checked by [`crate::synth::synthesize`], so this is one
+//! forward walk with no diagnostics. The edition is chosen one step down, by
+//! [`crate::edition_netlist::compile_edition_netlist`].
 
 use crate::logic_ir::{GateKind, LogicIr, ScopedLogicIr, SignalRef};
 use crate::netlist_ir::{
@@ -29,12 +13,7 @@ use crate::netlist_ir::{
 };
 use crate::saturating_index;
 
-/// Lower a [`ScopedLogicIr`] to a [`ScopedNetlistIr`].
-///
-/// One [`NetlistIr`] entry per non-empty [`crate::logic_ir::LogicIr`] in
-/// the input; empty scopes remain elided (they are already dropped by
-/// [`ScopedLogicIr::push`], so this pass simply walks whatever the synth
-/// pass emitted).
+/// Lowers a [`ScopedLogicIr`] to a [`ScopedNetlistIr`], one [`NetlistIr`] per scope.
 #[must_use]
 pub fn compile_netlist(scoped: &ScopedLogicIr) -> ScopedNetlistIr {
     let mut out = ScopedNetlistIr::new();
@@ -84,17 +63,9 @@ fn compile_scope(ir: &LogicIr) -> NetlistIr {
     netlist
 }
 
-/// Rewrite one Logic IR [`SignalRef`] into a Netlist IR [`NetRef`],
-/// checking the arena bounds the synth pass is supposed to have
-/// preserved. `max_gate` is the largest legal `Gate(j)` index +1 —
-/// pass the current cells vector length when rewriting an output or
-/// `signal_defs` reference (any `Gate` may be forward), and the current
-/// node index when rewriting an operand inside a cell (`j < node_index`
-/// per the topological invariant).
-///
-/// The checks are `debug_assert!` because the synth pass already
-/// enforces them fail-loud — a broken invariant here would be a synth
-/// regression, not user input, and release builds should keep zero cost.
+/// Rewrites a Logic IR [`SignalRef`] as a [`NetRef`], debug-checking the arena bounds synth
+/// guarantees. `max_gate` is one past the largest legal `Gate` index: the cell count for an output
+/// or `signal_defs` entry, and the node's own index for an operand, which must point earlier.
 fn net_ref_from(sig: SignalRef, max_gate: u32, inputs_len: u32) -> NetRef {
     match sig {
         SignalRef::Input(i) => {

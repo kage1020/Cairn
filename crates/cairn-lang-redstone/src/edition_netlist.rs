@@ -1,28 +1,10 @@
 //! Netlist IR → Edition Netlist IR lowering.
 //!
-//! Rewrites each [`crate::netlist_ir::ScopedNetlistIrEntry`] into a
-//! [`ScopedEditionNetlistIrEntry`] by mapping every
-//! [`crate::netlist_ir::CellNode`] to an [`EditionCellNode`] whose
-//! [`EditionCell`] tag names the target-edition realisation of the source
-//! [`crate::netlist_ir::LogicalCell`] — the middle tier of the three-tier
-//! cell library documented in `spec/redstone` "Edition differences".
-//!
-//! The pass is a single forward walk. Every [`crate::netlist_ir::CellNode`]
-//! becomes exactly one [`EditionCellNode`]; drivers, inputs, outputs, and
-//! `signal_defs` are copied verbatim. The Netlist IR already carries the
-//! topological invariant (`NetRef::Cell(j)` in `cells[i]` satisfies
-//! `j < i`), so this stage preserves it by construction.
-//!
-//! No diagnostics are emitted: CSE / cycle / unbound-signal reporting
-//! ran in [`crate::synth::synthesize`], the Logical-Cell selection ran in
-//! [`crate::netlist::compile_netlist`], and this stage is a pure lookup.
-//! QC / BUD refusal (`E_NO_PORTABLE_IMPL`, from that same section) joins
-//! the pass alongside the first cell that needs it (sequential-macro or
-//! observer families), since none of today's reachable
-//! [`crate::netlist_ir::LogicalCell`] variants require update-order
-//! semantics.
-//!
-//! [`ScopedEditionNetlistIrEntry`]: crate::edition_netlist_ir::ScopedEditionNetlistIrEntry
+//! Maps every [`crate::netlist_ir::CellNode`] to one [`EditionCellNode`] whose [`EditionCell`]
+//! names the target edition's realisation of its [`crate::netlist_ir::LogicalCell`], the middle
+//! tier of the cell library (`spec/redstone` "Edition differences"). Drivers, ports and
+//! `signal_defs` are copied, so the topological order carries over. A pure lookup, with no
+//! diagnostics.
 
 use cairn_lang_core::Edition;
 
@@ -31,13 +13,8 @@ use crate::edition_netlist_ir::{
 };
 use crate::netlist_ir::{LogicalCell, NetlistIr, ScopedNetlistIr};
 
-/// Lower a [`ScopedNetlistIr`] to a [`ScopedEditionNetlistIr`] against
-/// `edition`.
-///
-/// One [`EditionNetlistIr`] entry per non-empty [`NetlistIr`] in the
-/// input; empty scopes remain elided (they are already dropped by
-/// [`ScopedNetlistIr::push`], so this pass simply walks whatever the
-/// Netlist IR pass emitted).
+/// Lowers a [`ScopedNetlistIr`] to a [`ScopedEditionNetlistIr`] for `edition`, one
+/// [`EditionNetlistIr`] per scope.
 #[must_use]
 pub fn compile_edition_netlist(
     scoped: &ScopedNetlistIr,
@@ -72,26 +49,10 @@ fn compile_scope(source: &NetlistIr, edition: Edition) -> EditionNetlistIr {
     out
 }
 
-/// Look up the edition-specific realisation of `logical` for `edition`.
+/// The realisation of `logical` for `edition`.
 ///
-/// The match is fully exhaustive over `(Edition, LogicalCell)` — no
-/// wildcard arm. That gives compile-time protection against two silent
-/// regressions:
-///
-/// 1. **New `Edition` variant** (e.g. `Education`) — every arm below
-///    fails to compile until the third edition's realisation is chosen,
-///    preventing a silent "matches Java" fallthrough.
-/// 2. **New `LogicalCell` variant** — same story via
-///    `#[non_exhaustive]`-within-crate matching, since both types live
-///    in this crate.
-///
-/// The `*Unpinned` variants for `Xor` / `Nand` / `Nor` / `Mux` are the
-/// safety net for the third silent regression: **new surface syntax that
-/// makes an already-reserved cell reachable**. Renaming the variant to
-/// its pinned physical form (e.g. `JavaXorUnpinned` → some
-/// `JavaComparatorXor`) is the natural editing motion at every mapping
-/// site, so the parser expansion cannot slip through without also
-/// choosing a physical implementation.
+/// No wildcard arm, so a new `Edition` or `LogicalCell` variant is a compile error here rather
+/// than a silent fallback to another edition's cell.
 fn select_edition_cell(logical: LogicalCell, edition: Edition) -> EditionCell {
     match (edition, logical) {
         (Edition::Java, LogicalCell::And) => EditionCell::JavaComparatorAnd,

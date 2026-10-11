@@ -1,11 +1,10 @@
 //! Delayed Placement IR → legalized Placement IR lowering (crossing
 //! legalization).
 //!
-//! Stage 4 of the five-stage pipeline `spec/redstone` "Place-and-route"
-//! lays out. Rebuilds every net's Steiner tree through the same call the
-//! routing and delay passes make, and fills every cell's and actuator
-//! pad's [`crate::placement_ir::PlacedCellNode::buffer_coords`] with the
-//! coord of each implicit buffer repeater the delay pass counted.
+//! Stage 4 of the five in `spec/redstone` "Place-and-route": rebuilds every net's Steiner tree
+//! through the same call routing and delay insertion make, and fills every cell's and actuator
+//! pad's [`crate::placement_ir::PlacedCellNode::buffer_coords`] with the coord of each implicit
+//! buffer repeater the delay pass counted.
 //!
 //! The wire itself needs no legalizing here: stage 2 lays each net round
 //! the dust of the nets before it and the coords beside that dust, so a
@@ -14,36 +13,20 @@
 //! coord it does not own. The delay pass chose those coords off the
 //! same routed tree, and this pass reads them back.
 //!
-//! A repeater refreshes the dust it stands on, so each one stands on its
-//! net's routed tree, where `crate::repeater_sites::repeater_sites` puts it. This
-//! pass builds its own set from the trees it rebuilt; it is the set the
-//! delay pass charged ticks from because that function is deterministic
-//! and nothing between the two stages moves a cell, not because one is
-//! handed to the other. Each segment records the repeaters on
-//! `route_to`, the routed path from the net's source to *this* sink.
+//! Each segment records the repeaters `crate::repeater_sites::repeater_sites` stands on its
+//! routed path (`route_to`), from a set rebuilt the way the delay pass built the one it charged
+//! (see [`crate::delay`]).
 //!
-//! A repeater is never contested, and never stands on a cell body or a
-//! pad. A site needs a parent and exactly one child, so it is never the
-//! source and never a leaf; every terminal is a leaf, because
-//! `block_sites` makes cells and pads obstacles and `Router::tree` keeps
-//! each path's far end out of the coords a later path may leave from.
-//! So a site is dust of its own net, and stage 2 gave that net its dust
-//! alone. Two segments of one net do pass the
-//! same repeater (their routes share a prefix); both record it, because
-//! `buffer_coords` is an attribution list rather than a block list.
+//! A repeater is never contested, and never stands on a cell body or a pad. A site needs a parent
+//! and exactly one child, so it is never the source and never a leaf; every terminal is a leaf,
+//! because `block_sites` makes cells and pads obstacles and `Router::tree` keeps each path's far
+//! end out of the coords a later path may leave from. So a site is dust of its own net, and stage
+//! 2 gave that net its dust alone. Two segments of one net do pass the same repeater where their
+//! routes share a prefix; both record it, because `buffer_coords` is an attribution list rather
+//! than a block list.
 //!
-//! Neither [`crate::placement_ir::RouteLayer::Bridge`] nor
-//! [`crate::placement_ir::RouteLayer::Via`] has a producer here: bridge
-//! coords reach the legalized IR from the routing pass, and `Via` has no
-//! producer anywhere.
-//!
-//! Failed scopes are elided from the output so a stage-5 consumer never
-//! reads a partially populated `buffer_coords`. The pass is one
-//! [`crate::placement_ir::PlacementPhase::legalize`] transition per
-//! cell; no new IR type. Both the layer and the coord vector serde-skip
-//! on their defaults, so a scope with nothing to legalize dumps as its
-//! delay-pass input did apart from the `stage` tag — which is why that
-//! tag exists (see [`crate::placement_ir::PlacementStage`]).
+//! A refused scope is left out, so a later consumer never reads a partial `buffer_coords`. A scope
+//! with nothing to legalize dumps as its input did apart from the `stage` tag.
 
 use crate::diagnostic::Diagnostic;
 use crate::pass::{OpenScope, lower_scopes, open_scope};
@@ -53,18 +36,9 @@ use crate::placement_ir::{
 };
 use crate::repeater_sites::{Fed, RepeaterSites, repeater_sites_of_scope};
 
-/// Output of a [`compile_crossing`] run.
+/// Output of a [`compile_crossing`] run: the legalized scopes, every cell having taken
+/// [`PlacementPhase::legalize`], and the findings.
 ///
-/// Mirrors [`crate::delay::DelayOutput`]'s shape so callers see a
-/// uniform result type across every stage of the place-and-route
-/// pipeline. The legalized IR is a [`ScopedPlacementIr`] with every
-/// non-failed scope's `buffer_coords` populated with one entry per
-/// implicit buffer repeater the delay pass counted, each carrying the
-/// [`RouteLayer`] of the route coord it stands on. No new IR type; the
-/// crossing pass is one [`PlacementPhase::legalize`] transition per
-/// cell, per the producer↔variant table on that enum.
-///
-/// [`RouteLayer`]: crate::placement_ir::RouteLayer
 /// [`PlacementPhase::legalize`]: crate::placement_ir::PlacementPhase::legalize
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
@@ -79,35 +53,20 @@ pub struct CrossingOutput {
 }
 
 impl CrossingOutput {
-    /// Empty output (no legalized scopes, no diagnostics).
+    /// An empty output.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-/// Lower a delayed [`ScopedPlacementIr`] into a legalized
-/// [`ScopedPlacementIr`].
+/// Lowers a delayed [`ScopedPlacementIr`] into a legalized one.
 ///
-/// Reads every cell's coord and the scope's
-/// [`CircuitRegionReservation`] out of the input IR — the Placement
-/// IR is self-describing by construction, so the crossing pass has no
-/// `IntentModule` dependency.
+/// A scope refused with an error is left out: the [`DiagnosticCode::NoCircuitRegion`],
+/// [`DiagnosticCode::RouteCongestion`] and [`DiagnosticCode::AttenuationLimit`] refusals every
+/// place-and-route pass shares, or [`DiagnosticCode::AttenuationLimit`] for a stretch of dust no
+/// repeater can stand on. The pass raises no warning.
 ///
-/// One entry per non-empty [`PlacementIr`] whose legalization
-/// succeeded; a scope that raises [`DiagnosticCode::NoCircuitRegion`],
-/// either [`DiagnosticCode::RouteCongestion`] that
-/// `crate::pass::lay_nets` raises — a pad row the reservation cannot
-/// hold, or a sink no route reaches — or the
-/// [`DiagnosticCode::AttenuationLimit`] it raises for a sink further
-/// from its driver than the v1 cap in a straight line, or the one
-/// raised for a stretch of dust no repeater can stand on, is
-/// elided from the output so a partial `buffer_coords` set cannot
-/// pollute the downstream block-array voxel lowering. Every finding
-/// this pass makes refuses its scope, so there is no warning that
-/// outlives one.
-///
-/// [`CircuitRegionReservation`]: crate::placement_ir::CircuitRegionReservation
 /// [`DiagnosticCode::NoCircuitRegion`]: crate::DiagnosticCode::NoCircuitRegion
 /// [`DiagnosticCode::RouteCongestion`]: crate::DiagnosticCode::RouteCongestion
 /// [`DiagnosticCode::AttenuationLimit`]: crate::DiagnosticCode::AttenuationLimit
@@ -130,11 +89,8 @@ pub fn compile_crossing(delayed: &ScopedPlacementIr) -> CrossingOutput {
     }
 }
 
-/// Result of legalizing one scope: the legalized IR on success, the
-/// single Error-severity diagnostic that elides the scope on failure.
-///
-/// The pass raises nothing else. Every finding it can make refuses the
-/// scope, so there is no warning arm to carry.
+/// Result of legalizing one scope: the legalized IR, or the error that refuses it. Every finding
+/// this pass makes refuses the scope, so there is no warning arm.
 type ScopeLegalization = Result<PlacementIr, Diagnostic>;
 
 fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
@@ -148,10 +104,8 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
         return Ok(entry.ir.clone());
     };
 
-    // Every coord a repeater can be asked to stand on is a coord of its
-    // own net's route, and `net_trees` asserts as it builds that no
-    // net's dust stands on, or one step from, another's. That is what
-    // leaves this pass with a coord to record and no coord to contest.
+    // A repeater stands only on its own net's route, and `net_trees` asserts that no net's dust
+    // stands on or beside another's, so there is no coord to contest.
     let sites = repeater_sites_of_scope(&ir, entry, "delayed", &region, &nets.trees)?;
     let allocation = allocate_buffer_coords(&ir, &sites);
 
@@ -170,15 +124,8 @@ fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
     Ok(ir)
 }
 
-/// Buffer coord allocation for one scope: every cell driver segment,
-/// then every actuator segment.
-///
-/// Each segment records the repeaters of `sites` its routed path runs
-/// through. `sites` is this pass's own, built as the delay pass built
-/// the one it charged ticks from, so stage 3 and stage 4 describe one
-/// circuit. Split out of `legalize_scope` so
-/// the entry function stays under clippy's `too_many_lines` budget and
-/// the allocation strategy reads as a self-contained table.
+/// The buffer coords of one scope: for every cell driver segment and then every actuator segment,
+/// the repeaters of `sites` its routed path runs through.
 fn allocate_buffer_coords(ir: &PlacementIr, sites: &RepeaterSites<'_>) -> BufferAllocation {
     let mut per_cell: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.cells.len());
     for (cell_index, cell) in ir.cells.iter().enumerate() {
@@ -198,15 +145,8 @@ fn allocate_buffer_coords(ir: &PlacementIr, sites: &RepeaterSites<'_>) -> Buffer
                     .map(|coord| BufferCoord::new(BufferSegment::Port(driver.port), coord)),
             );
         }
-        // Producer-side contract on [`BufferCoord::port`]: every entry
-        // must name a driver that actually exists on the owning cell.
-        // Trivially true today because the push site sources
-        // `driver.port` from the enclosing `for driver in &cell.drivers`
-        // loop, but debug-asserted so a future buffer producer (e.g.
-        // fan-out duplication) added elsewhere cannot silently emit a
-        // `BufferCoord` whose `port` does not match any driver — the
-        // downstream voxel lowering would then group buffers under a
-        // driver that does not exist.
+        // Every entry names a driver of the owning cell, which the Placement IR reader also
+        // holds a dump to. True by construction here; asserted for a producer added elsewhere.
         debug_assert!(
             buffers_for_cell.iter().all(|b| matches!(
                 b.port,
@@ -217,14 +157,9 @@ fn allocate_buffer_coords(ir: &PlacementIr, sites: &RepeaterSites<'_>) -> Buffer
         per_cell.push(buffers_for_cell);
     }
 
-    // The segment out to an actuator is charged for buffers by stage 3
-    // exactly as a segment into a cell is, so stage 4 has to give those
-    // buffers coords or the two stages disagree about how many exist.
-    //
-    // An actuator's route leaves its driver along the same trunk a
-    // cell's does, so the two pass the same repeaters wherever they
-    // share a prefix — and record the same coord, because one repeater
-    // standing there refreshes both.
+    // Stage 3 charges the segment out to an actuator like a segment into a cell, so its buffers
+    // need coords too. Where it shares a prefix with a cell's route, both record the same
+    // repeater, which refreshes both.
     let mut per_output: Vec<Vec<BufferCoord>> = Vec::with_capacity(ir.outputs.len());
     for (output_index, output) in ir.outputs.iter().enumerate() {
         let buffers_for_output: Vec<BufferCoord> = sites
@@ -253,10 +188,8 @@ fn allocate_buffer_coords(ir: &PlacementIr, sites: &RepeaterSites<'_>) -> Buffer
     }
 }
 
-/// Where every implicit buffer repeater in one scope goes: one entry
-/// per cell, then one per actuator pad. Two vectors rather than one
-/// because the two commit into different nodes, and a single flat list
-/// would need the split re-derived at the commit site.
+/// Where every buffer repeater of one scope goes, per cell and per actuator pad: two vectors,
+/// because they commit into different nodes.
 struct BufferAllocation {
     per_cell: Vec<Vec<BufferCoord>>,
     per_output: Vec<Vec<BufferCoord>>,

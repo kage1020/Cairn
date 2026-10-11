@@ -1,11 +1,9 @@
 //! Routed Placement IR → delayed Placement IR lowering (delay insertion).
 //!
-//! Stage 3 of the five-stage pipeline `spec/redstone` "Place-and-route"
-//! lays out. Rebuilds every net's routed tree (the routing pass stores
-//! only the summed `wire_length`; the trees are cheap to rebuild
-//! and would bloat the JSON if stored) and rewrites every cell's
-//! [`crate::placement_ir::PlacedCellNode::local_delay_ticks`] from `None`
-//! to `Some(base delay + implicit buffer ticks)`:
+//! Stage 3 of the five in `spec/redstone` "Place-and-route": rebuilds every net's routed tree
+//! (routing stores only `wire_length`, since the trees are cheap to rebuild and would bloat the
+//! JSON) and sets every cell's [`crate::placement_ir::PlacedCellNode::local_delay_ticks`] to its
+//! base delay plus its implicit buffer ticks:
 //!
 //! - **Base delay** is the cell's
 //!   [`crate::edition_netlist_ir::EditionCell::base_delay_ticks`]; an
@@ -28,44 +26,30 @@
 //!   limit the two wires count as one run, and a repeater that run
 //!   needs can land on either side of the cell.
 //!
-//! A segment is the *routed* path from the net's source to the sink
-//! (`route_to`), not the Manhattan distance: the two differ whenever the
-//! wire goes round something, and counting against the route is what
-//! lets stage 4 put every buffer this stage paid for onto the dust it
-//! refreshes. A cell is charged for the repeaters its segment passes
-//! through, and stage 4 gives those same repeaters their coords. Each
-//! pass builds its own `RepeaterSites` by running the same
-//! deterministic function over its own rebuilt trees and the same
-//! `ir.cells`, so the ticks one charges and the blocks the other lays
-//! land on the same set as long as nothing between them moves a cell.
-//! Nothing asserts it at runtime; `crossing.rs`'s proptest is what
-//! checks the two describe one circuit.
+//! A segment is the *routed* path from the net's source to the sink (`route_to`), not the
+//! Manhattan distance: the two differ whenever the wire goes round something, and counting
+//! against the route lets stage 4 put every buffer this stage paid for onto the dust it
+//! refreshes. Each pass builds its own `RepeaterSites` by running the same deterministic function
+//! over its own rebuilt trees and the same `ir.cells`, so the ticks one charges and the blocks the
+//! other lays are the same set as long as nothing between them moves a cell. Nothing asserts that
+//! at runtime; the proptest in `crossing`'s tests checks it.
 //!
-//! **`local_delay_ticks` is a local wire cost, not an arrival time.** It
-//! sums the buffers on every net feeding the cell, and it is the number
-//! stage 4 is held to: `local_delay_ticks - base_delay_ticks` equals
-//! [`BUFFER_REPEATER_TICKS`] per block in the cell's *deduplicated*
-//! `buffer_coords` — the attribution list may name a coord twice, the
-//! count may not. An arrival time would
-//! take the max over those nets and add the arrival of each upstream
-//! driver, so the two part company whenever more than one incoming net
-//! carries a buffer or any driver is itself a cell. Nothing in this crate
-//! computes an arrival time, and nothing should read this field as one —
-//! `assert latency(...)` (`spec/redstone` "Verification") is a path
-//! latency for the simulator pass to evaluate.
+//! **`local_delay_ticks` is a local wire cost, not an arrival time.** It sums the buffers on every
+//! net feeding the cell, and stage 4 is held to it: `local_delay_ticks - base_delay_ticks` equals
+//! [`BUFFER_REPEATER_TICKS`] per block in the cell's *deduplicated* `buffer_coords`. An arrival
+//! time would take the max over those nets and add each upstream driver's arrival, so the two
+//! differ whenever more than one incoming net carries a buffer or a driver is a cell. Nothing in
+//! this crate computes an arrival time; `assert latency(...)` (`spec/redstone` "Verification") is
+//! a path latency, not this.
 //!
-//! `E_ATTENUATION_LIMIT` fires when a single segment's routed length
-//! exceeds the v1 sanity cap [`MAX_ATTENUATION_SEGMENT`]. It also fires
-//! when a run of dust would pass the attenuation limit — counted from
-//! the last block that restored strength, or within a cell's smaller
-//! budget — and no coord on it can hold a repeater close enough. Failed
-//! scopes are elided so a partial `local_delay_ticks`
-//! set never reaches a downstream reader.
+//! `E_ATTENUATION_LIMIT` fires when a single segment's routed length exceeds the sanity cap
+//! [`MAX_ATTENUATION_SEGMENT`], and when a run of dust would pass the attenuation limit (counted
+//! from the last block that restored strength, or within a cell's smaller budget) with no coord
+//! on it that can hold a repeater close enough. A refused scope is left out, so a partial
+//! `local_delay_ticks` never reaches a later reader.
 //!
-//! The pass is one `PlacementPhase::delay` transition per cell; no new
-//! IR type. `--stage route` JSON keeps every key it had, gains
-//! `local_delay_ticks` after `wire_length`, and its `stage` tag moves
-//! from `route` to `delay`.
+//! The JSON is the routing stage's plus `local_delay_ticks` after `wire_length`, with `stage` set
+//! to `delay`.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::netlist_ir::NetRef;
@@ -80,31 +64,19 @@ use crate::saturating_index;
 pub use crate::grid::MAX_ATTENUATION_SEGMENT;
 pub use crate::repeater_sites::DUST_ATTENUATION_LIMIT;
 
-/// Tick delay added by one implicit buffer repeater. Matches the
-/// Minecraft default repeater `delay=1` setting; a follow-up pass that
-/// exposes per-buffer delay tuning (Tier 0 `repeater delay=<N>`) would
-/// swap this constant for a per-buffer field on the routed IR.
+/// Tick delay of one implicit buffer repeater: a repeater at its default `delay=1`.
 pub const BUFFER_REPEATER_TICKS: u32 = 1;
 
-/// Compile-time guard on [`BUFFER_REPEATER_TICKS`]. A default repeater
-/// cannot delay by less than one tick — if this constant is ever set
-/// to zero, `attribute_local_delay_ticks` would charge nothing for the
-/// repeaters stage 4 still lays, silently under-reporting
-/// `local_delay_ticks` on every net that crosses the 15-block
-/// attenuation limit. Assert forces the value ≥ 1 so a future edit
-/// cannot slide past this without deliberate intent.
+/// At zero, delay insertion would charge nothing for the repeaters crossing legalization still
+/// lays.
 const _: () = assert!(
     BUFFER_REPEATER_TICKS >= 1,
     "BUFFER_REPEATER_TICKS must be at least 1 — a default repeater delays by one tick",
 );
 
-/// Compile-time guard on the sanity cap: it must sit above the longest
-/// segment a fresh source carries without a buffer, which is
-/// `DUST_ATTENUATION_LIMIT + 1` steps. Otherwise the band that
-/// [`repeater_sites`] fills with implicit buffers — past those 16
-/// steps, within the cap — would be empty for a segment from a fresh
-/// source, and every such segment past 16 steps would refuse instead of
-/// being absorbed by buffers.
+/// The cap must exceed the longest segment a fresh source carries without a buffer,
+/// `DUST_ATTENUATION_LIMIT + 1` steps, or every segment that [`repeater_sites`] would buffer is
+/// refused instead.
 ///
 /// [`repeater_sites`]: crate::repeater_sites
 const _: () = assert!(
@@ -112,15 +84,8 @@ const _: () = assert!(
     "MAX_ATTENUATION_SEGMENT must exceed DUST_ATTENUATION_LIMIT + 1 steps so implicit buffers have a band to cover on a segment from a fresh source",
 );
 
-/// Output of a [`compile_delay`] run.
-///
-/// Mirrors [`crate::routing::RoutingOutput`]'s shape so callers see a
-/// uniform result type across every stage of the place-and-route
-/// pipeline. The delayed IR is a [`ScopedPlacementIr`] with every
-/// non-failed scope's `local_delay_ticks` promoted from `None` to `Some(_)` —
-/// no new IR type; the delay pass is one
-/// [`crate::placement_ir::PlacementPhase::delay`] transition per cell,
-/// per the producer↔variant table on that enum.
+/// Output of a [`compile_delay`] run: the delayed scopes, every cell having taken
+/// [`crate::placement_ir::PlacementPhase::delay`], and the findings.
 #[derive(Debug, Clone, PartialEq, Default)]
 #[non_exhaustive]
 pub struct DelayOutput {
@@ -132,27 +97,17 @@ pub struct DelayOutput {
 }
 
 impl DelayOutput {
-    /// Empty output (no delayed scopes, no diagnostics).
+    /// An empty output.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-/// Lower a routed [`ScopedPlacementIr`] into a delayed
-/// [`ScopedPlacementIr`].
+/// Lowers a routed [`ScopedPlacementIr`] into a delayed one.
 ///
-/// Reads every cell's [`crate::edition_netlist_ir::EditionCell`] and
-/// the scope's [`CircuitRegionReservation`] out of the input IR — the
-/// Placement IR is self-describing by construction, so the delay pass
-/// has no `IntentModule` dependency.
-///
-/// One entry per non-empty [`PlacementIr`] whose delay insertion
-/// succeeded; scopes that raise an Error-severity diagnostic are
-/// elided from the output so a partial `local_delay_ticks` set cannot
-/// pollute a downstream reader. This pass raises `E_ATTENUATION_LIMIT`
-/// itself, and carries the two `E_ROUTE_CONGESTION` refusals and the
-/// `E_NO_CIRCUIT_REGION` that `crate::pass` asks on its behalf.
+/// A scope refused with an error is left out: `E_ATTENUATION_LIMIT` from this pass, or the
+/// `E_ROUTE_CONGESTION` and `E_NO_CIRCUIT_REGION` refusals every place-and-route pass shares.
 #[must_use]
 pub fn compile_delay(routed: &ScopedPlacementIr) -> DelayOutput {
     let (scoped, diagnostics) = lower_scopes(routed, |entry| {
@@ -220,19 +175,13 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     Ok(ir)
 }
 
-/// Fill every cell's `local_delay_ticks` with `base_delay(cell) + Σ buffer
-/// ticks per driving net`, and every actuator pad's with the buffer
-/// ticks on its own segment (a pad is not a cell, so no base delay).
+/// Sets every cell's `local_delay_ticks` to its base delay plus the buffer ticks on each driving
+/// net ([`sum_over_driving_nets`]), and every actuator pad's to the buffer ticks on its own
+/// segment.
 ///
-/// `buffers_on(net, sink, fed)` is how many repeaters the signal of
-/// `net` passes through on its way to `sink`, the coord of `fed` —
-/// [`RepeaterSites::along`] in the pass.
-///
-/// Per net rather than per driver — see [`sum_over_driving_nets`] — and
-/// summed rather than maxed, because the figure is a local wire cost
-/// and not the tick the cell's output settles on (see the module doc).
-///
-/// [`RepeaterSites::along`]: crate::repeater_sites::RepeaterSites::along
+/// `buffers_on(net, sink, fed)` counts the repeaters `net`'s signal passes through on its way to
+/// `sink`, the coord of `fed`. Summed over nets rather than maxed, because the figure is a local
+/// wire cost, not an arrival time (see the module doc).
 fn attribute_local_delay_ticks<F>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,

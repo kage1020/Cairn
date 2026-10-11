@@ -25,8 +25,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 /// tile is a type error. Every `(Edition, LogicalCell)` pair has a variant. The `*Unpinned` ones
 /// stand for the reserved cells (`Xor`, `Nand`, `Nor`, `Mux`), whose realisations are not chosen;
 /// they are per edition rather than one `Reserved`, so a cell's edition is always its variant's
-/// and pinning one is a rename. [`crate::edition_netlist::compile_edition_netlist`] has no
-/// wildcard arm, so a new `Edition` is a compile error at every mapping site.
+/// and pinning one is a rename.
 ///
 /// `#[non_exhaustive]` for the same reason as [`crate::netlist_ir::LogicalCell`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

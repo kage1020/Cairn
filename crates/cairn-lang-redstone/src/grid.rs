@@ -93,12 +93,10 @@ impl PadColumn {
     }
 }
 
-/// v1 input-pad coordinate: left edge (`x=0`), first service layer
-/// (`y=0`), z-axis increasing as the input index grows, laid by
-/// `column` (see [`edge_pad`]). Saturates at `depth-1` when the input
-/// count would push z past the region; the resulting overlap is what
-/// [`collapsed_block`] finds, and every pass that lays nets surfaces it
-/// as `E_ROUTE_CONGESTION` rather than a silent misroute.
+/// Input-pad coordinate: left edge (`x=0`), ground layer (`y=0`), z growing with the input index,
+/// laid by `column` (see [`edge_pad`]). Saturates at `depth-1`; the resulting overlap is what
+/// [`collapsed_block`] finds, and every pass that lays nets refuses it as `E_ROUTE_CONGESTION`
+/// rather than misrouting.
 ///
 /// [`collapsed_block`]: crate::routing_geometry::collapsed_block
 pub(crate) fn input_pad(
@@ -109,8 +107,7 @@ pub(crate) fn input_pad(
     edge_pad(i, 0, column, region)
 }
 
-/// v1 output-pad coordinate: right edge (`x=width-1`), same
-/// saturating z-axis convention as [`input_pad`].
+/// Output-pad coordinate: right edge (`x=width-1`), z as in [`input_pad`].
 pub(crate) fn output_pad(
     k: usize,
     column: PadColumn,
@@ -237,15 +234,10 @@ pub(crate) fn beside(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
 /// The coords one layer under `coord` that are within one step of it:
 /// the one directly under it, and the four diagonally under it.
 ///
-/// Not an obstacle — [`beside`] is what the router routes by, and this
-/// is what nothing routes by. Two strands a layer apart are separated
-/// by the physical tile layer rather than by stage 2, so what this
-/// names is the pair that layer is obliged to keep apart, and
-/// [`tile_layer_pairs`] is where the obligation gets written down.
-///
-/// Derived from [`IN_PLANE`] rather than listed, so the rule the
-/// router routes by and the rule the tile layer is handed cannot come
-/// to mean different widths.
+/// Not an obstacle: the router routes by [`beside`]. Two strands a layer apart are the physical
+/// tile layer's to separate, so this names the pairs that layer must keep apart, which
+/// [`tile_layer_pairs`] writes down. Derived from [`IN_PLANE`], so the router's rule and the tile
+/// layer's cannot come to mean different widths.
 ///
 /// [`tile_layer_pairs`]: crate::routing_geometry::tile_layer_pairs
 pub(crate) fn under(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
@@ -254,33 +246,23 @@ pub(crate) fn under(coord: CellCoord) -> impl Iterator<Item = CellCoord> {
         .filter_map(move |delta| stepped(coord, delta))
 }
 
-/// v1 sanity cap on the routed length of a single driver segment. A
-/// segment longer than this reads as a placement mistake, so the pass
-/// that measures it refuses with `E_ATTENUATION_LIMIT` rather than
+/// Sanity cap on the routed length of a single driver segment. A longer segment reads as a
+/// placement mistake, so the pass that measures it refuses with `E_ATTENUATION_LIMIT` rather than
 /// charge for the repeaters it would need.
 ///
-/// It caps the dust, not the repeater chain: `repeater_sites` stands
-/// a repeater earlier wherever a coord turns, climbs or forks, so a
-/// route of this length can carry more repeaters than
+/// It caps the dust, not the repeater chain: `repeater_sites` stands a repeater earlier wherever a
+/// coord turns, climbs or forks, so a route of this length can carry more repeaters than
 /// `buffer_count_for_segment` gives for it.
 ///
-/// Three measures are held against it. [`compile_delay`] applies it to
-/// the segment's *routed* length — the dust the signal travels — which
-/// is the cap proper. `crate::pass::lay_nets`, which all three
-/// place-and-route passes call, applies it to the straight line between
-/// the segment's ends, before a route is laid. And the router's search
-/// stops at it: a path from the net's wire to a sink is part of that
-/// sink's segment, so a coord whose cheapest path through it is longer
-/// than this is not searched. The straight line is a floor on every
-/// route between two coords, and the path from the wire is a floor on
-/// the segment, so neither earlier answer turns away anything the delay
-/// pass would have kept: they refuse strictly less than it does, and
-/// save laying a route — or searching a reservation — first.
+/// Three measures are held against it. [`compile_delay`] applies it to the segment's *routed*
+/// length, the cap proper. `crate::pass::lay_nets`, which all three place-and-route passes call,
+/// applies it to the straight line between the segment's ends before a route is laid. And the
+/// router's search does not expand a coord whose cheapest path from the net's wire is longer. The
+/// straight line and the path from the wire are both floors on the routed segment, so the earlier
+/// checks refuse strictly less than the delay pass would, and save laying or searching first.
 ///
-/// 256 steps is at least 15 buffer repeaters from a fresh source
-/// (`(256 - 1) / 16`); anything past that in a single segment reads as
-/// a placement mistake rather than a routing corner case in every
-/// fixture the crate ships today.
+/// 256 steps is at least 15 buffer repeaters from a fresh source (`(256 - 1) / 16`); a single
+/// segment past that reads as a placement mistake rather than a routing corner case.
 ///
 /// [`compile_delay`]: crate::delay::compile_delay
 pub const MAX_ATTENUATION_SEGMENT: u32 = 256;
