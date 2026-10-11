@@ -31,7 +31,14 @@
 //! this module enforces.
 
 mod binding;
+mod connect;
+mod output_names;
+mod resolution;
 mod resolver;
+mod selector;
+mod site;
+mod slots;
+mod theme_reference;
 mod theme_variant;
 mod version_axes;
 
@@ -40,11 +47,11 @@ pub use crate::version::{
     parse_min_version, parse_requirement,
 };
 pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
-pub(crate) use resolver::select_the_same_members;
-pub use resolver::{
-    PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,
-    resolve,
+pub use resolution::{
+    PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect,
 };
+pub use resolver::{place_scope_key, resolve};
+pub(crate) use selector::select_the_same_members;
 pub use version_axes::{
     BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, DroppedIntent,
     EditionPortability, EditionReport, FloorDeclarer, FloorOrigin, FloorPart, RefusedTarget,
