@@ -1,4 +1,4 @@
-//! Delay-pass behaviours `tests/delay.rs` cannot reach through synth
+//! Delay-pass behaviours `tests/redstone/delay.rs` cannot reach through synth
 //! fixtures: shapes only a hand-built `PlacementIr` produces.
 
 use std::collections::HashSet;
@@ -492,7 +492,7 @@ fn cell_driver_attenuation_primary_names_cell_and_port() {
 /// distance — must elide its scope without disturbing a sibling.
 ///
 /// This shape cannot be written in `.crn`: see [`trunk_detour`],
-/// so the integration fixture in `tests/delay.rs` exercises the
+/// so the integration fixture in `tests/redstone/delay.rs` exercises the
 /// routing pass's independence rather than this one's. Hand-built is
 /// the only way in.
 #[test]

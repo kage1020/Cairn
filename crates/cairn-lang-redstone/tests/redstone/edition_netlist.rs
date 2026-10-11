@@ -11,8 +11,7 @@ use cairn_lang_redstone::{
     compile_netlist,
 };
 
-mod common;
-use common::{load_example, sig, synth_source};
+use crate::common::{load_example, sig, synth_source};
 
 fn find_cell_port(cell: &EditionCellNode, port: PortName) -> NetRef {
     cell.drivers

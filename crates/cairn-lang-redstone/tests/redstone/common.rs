@@ -1,21 +1,15 @@
-//! Helpers shared by the redstone integration test binaries.
+//! Helpers shared by the redstone integration tests.
 //!
 //! The fixture builders — `load_example`, `synth_source`, `gate_source`
 //! and the `*_from_source` ladder — pin one prefix of the pipeline each,
 //! and every rung is the previous one plus a stage and the assertion that
 //! the stage ran clean, so a change to a pass's signature or to what
 //! "clean" means for a fixture lands in one place rather than in each
-//! binary downstream of it. `normalize_stage_tags` and `strip_int_field`
+//! module downstream of it. `normalize_stage_tags` and `strip_int_field`
 //! are machinery whose *correctness* is shared: they have to agree with
 //! the JSON wire form across every stage, and would rot silently if each
-//! binary kept its own copy. The rest read a result back the same way in
-//! every binary that asks.
-
-// Every test binary compiles this module on its own and calls a subset of
-// it, so the unused-item lint would fire per binary. The workspace has no
-// other `#![allow]`; the fix that removes this one is a dev-dependency
-// helper crate, worth doing if the set keeps growing.
-#![allow(dead_code)]
+//! module kept its own copy. The rest read a result back the same way in
+//! every module that asks.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -180,7 +174,7 @@ pub fn legalized_from_source(source: &str, edition: Edition) -> ScopedPlacementI
 /// carries `buffer_coords`. Each cell also reads the one before it, so
 /// the placement pass lays them out as one row, `2 * 16` columns long.
 ///
-/// Shared because more than one binary is built on what it does: the
+/// Shared because more than one module is built on what it does: the
 /// crossing tests pin where its repeaters go, and the Placement IR
 /// round-trip tests need a real dump with buffers in it to read back.
 pub fn shared_bus_source() -> String {
@@ -220,12 +214,12 @@ struct chain size=60x5
 /// two adjacent stages' dumps can be byte-compared on everything
 /// *except* the tag that distinguishes them.
 ///
-/// The routing, delay, and crossing binaries each assert that their
+/// The routing, delay, and crossing modules each assert that their
 /// pass perturbs nothing but the field it writes. Since every cell
 /// carries a `stage` tag whose value moves from stage to stage, that
 /// assertion has to neutralise the tag first — and it has to do so
 /// identically in all three, or a change to the key name would be
-/// caught in one binary and papered over in another.
+/// caught in one module and papered over in another.
 ///
 /// Handles both the compact and the pretty spelling: the separator
 /// between the key and the value is copied through verbatim rather

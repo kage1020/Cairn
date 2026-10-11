@@ -18,8 +18,7 @@
 
 use cairn_lang_redstone::ScopeKind;
 
-mod common;
-use common::{codes, gate_source, synth_source};
+use crate::common::{codes, gate_source, synth_source};
 
 /// A sensor and a `logic` line over it, so a fixture below can hang a
 /// binding off a *derived* signal rather than off the sensor's own — the

@@ -12,8 +12,7 @@
 
 use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput};
 
-mod common;
-use common::{codes, only, synth_source};
+use crate::common::{codes, only, synth_source};
 
 const PRELUDE: &str = concat!(
     "theme t:\n",

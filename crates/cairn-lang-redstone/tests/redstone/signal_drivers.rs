@@ -9,8 +9,7 @@
 
 use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput};
 
-mod common;
-use common::{line_of, synth_source};
+use crate::common::{line_of, synth_source};
 
 fn drivers_findings(out: &SynthOutput) -> Vec<&Diagnostic> {
     out.diagnostics

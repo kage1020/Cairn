@@ -1,5 +1,5 @@
 //! Crate-internal coverage for the routing pass's phase-transition
-//! commit. `tests/routing.rs` drives real synth fixtures and can
+//! commit. `tests/redstone/routing.rs` drives real synth fixtures and can
 //! only ever hand this pass a uniformly `Unrouted` IR; building a
 //! scope whose cells sit in different phases needs the
 //! `pub(crate)` `phase` field, so it lives here.
@@ -22,7 +22,7 @@ use crate::test_fixtures::{ROUTED, placed_cell, reservation, scoped};
 /// of its own sinks. Anything else is a strand of redstone inside a
 /// comparator or a pressure plate.
 ///
-/// A unit test rather than one in `tests/routing.rs` because the
+/// A unit test rather than one in `tests/redstone/routing.rs` because the
 /// wire coords are crate-internal — the routed IR carries lengths,
 /// not paths.
 #[test]

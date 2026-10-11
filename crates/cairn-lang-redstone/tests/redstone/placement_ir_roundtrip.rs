@@ -20,9 +20,7 @@
 use cairn_lang_core::Edition;
 use cairn_lang_redstone::{PlacedCellNode, PlacementStage, ScopedPlacementIr};
 
-mod common;
-
-use common::{
+use crate::common::{
     delayed_from_source, legalized_from_source, load_example, placement_from_source,
     routed_from_source, shared_bus_source,
 };

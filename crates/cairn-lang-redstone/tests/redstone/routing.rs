@@ -8,9 +8,7 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{DiagnosticCode, PlacedCellNode, ScopedPlacementIr, compile_routing};
 
-mod common;
-
-use common::{load_example, normalize_stage_tags, placement_from_source, strip_int_field};
+use crate::common::{load_example, normalize_stage_tags, placement_from_source, strip_int_field};
 
 /// `examples/redstone-door.crn` compiled for Java routes its
 /// sole `JavaRepeaterOr` cell with `wire_length = Some(4)`: the sum of

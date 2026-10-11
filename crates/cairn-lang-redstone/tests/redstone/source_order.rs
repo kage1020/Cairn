@@ -10,8 +10,7 @@
 
 use cairn_lang_redstone::{DiagnosticCode, ScopeKind, SignalRef};
 
-mod common;
-use common::{line_of, synth_source};
+use crate::common::{line_of, synth_source};
 
 const NESTED_AFTER_TOP_LEVEL: &str = "\
 @cairn 2026.06

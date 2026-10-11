@@ -20,8 +20,7 @@
 
 use cairn_lang_redstone::DiagnosticCode;
 
-mod common;
-use common::{codes, gate_source, only, synth_source};
+use crate::common::{codes, gate_source, only, synth_source};
 
 // --- the value axis ------------------------------------------------------
 

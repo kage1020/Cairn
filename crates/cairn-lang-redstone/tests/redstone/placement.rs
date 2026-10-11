@@ -9,8 +9,7 @@ use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{DiagnosticCode, EditionCell, ScopedEditionNetlistIr, compile_placement};
 
-mod common;
-use common::{edition_netlist_from_source, load_example};
+use crate::common::{edition_netlist_from_source, load_example};
 
 /// `examples/redstone-door.crn` compiled for Java places its lone
 /// `JavaRepeaterOr` cell one column in from the pad column of its

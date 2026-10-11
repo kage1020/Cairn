@@ -21,9 +21,7 @@ use cairn_lang_redstone::{
     compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
 };
 
-mod common;
-
-use common::{
+use crate::common::{
     delayed_from_source, legalized_from_source, load_example, normalize_stage_tags,
     shared_bus_source,
 };

@@ -8,8 +8,7 @@ use std::fmt::Write as _;
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{DiagnosticCode, GateKind, ScopeKind, SignalRef};
 
-mod common;
-use common::{load_example, synth_source};
+use crate::common::{line_of, load_example, synth_source};
 
 fn count_code(out: &cairn_lang_redstone::SynthOutput, code: DiagnosticCode) -> usize {
     out.diagnostics.iter().filter(|d| d.code == code).count()
@@ -583,7 +582,7 @@ struct s size=5x5
         out.diagnostics
     );
     assert_eq!(
-        common::line_of(source, unbound[0].span.start),
+        line_of(source, unbound[0].span.start),
         4,
         "the first `assert` naming `sig.zz` is on line 4: {:?}",
         unbound[0],
@@ -616,7 +615,7 @@ fn nesting_refusals(source: &str) -> Vec<NestingRefusal> {
         .iter()
         .filter(|d| d.code == DiagnosticCode::LogicNestingTooDeep)
         .map(|d| NestingRefusal {
-            line: common::line_of(source, d.span.start),
+            line: line_of(source, d.span.start),
             primary: d.primary.clone(),
             noted: d
                 .notes
@@ -624,7 +623,7 @@ fn nesting_refusals(source: &str) -> Vec<NestingRefusal> {
                 .filter_map(|n| {
                     n.span
                         .as_ref()
-                        .map(|span| (common::line_of(source, span.start), n.message.clone()))
+                        .map(|span| (line_of(source, span.start), n.message.clone()))
                 })
                 .collect(),
             footers: d

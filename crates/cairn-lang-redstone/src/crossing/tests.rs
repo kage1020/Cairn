@@ -1,4 +1,4 @@
-//! Crossing-legalization behaviours `tests/crossing.rs` cannot reach
+//! Crossing-legalization behaviours `tests/redstone/crossing.rs` cannot reach
 //! through synth fixtures: shapes only a hand-built `PlacementIr`
 //! produces, such as a segment long enough to need a buffer.
 
@@ -689,7 +689,7 @@ fn cell_on_the_fifteen_step_point() -> ScopedPlacementIr {
 /// pinned 1 rather than the `_Unpinned` sentinel, and because
 /// `sig.s0 = sig.a and sig.a` is how a `.crn` reaches this shape —
 /// see `ports_sharing_a_net_are_measured_once` in
-/// `tests/routing.rs`.
+/// `tests/redstone/routing.rs`.
 /// A cell fed by two *distinct* nets is charged for every buffer
 /// standing on both of them.
 ///
@@ -1751,7 +1751,7 @@ mod phase4_invariant {
     //! inside the crossing pass's own crate-internal test module so
     //! the strategy can hand-build `Unrouted` [`PlacedCellNode`]s
     //! (the `PlacementPhase` variants and the `pub(crate)`
-    //! `phase` field are not reachable from `tests/crossing.rs`).
+    //! `phase` field are not reachable from `tests/redstone/crossing.rs`).
     use proptest::prelude::*;
 
     use super::{

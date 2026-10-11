@@ -16,9 +16,7 @@ use cairn_lang_redstone::{
     compile_routing,
 };
 
-mod common;
-
-use common::{
+use crate::common::{
     load_example, normalize_stage_tags, placement_from_source, routed_from_source, strip_int_field,
 };
 
