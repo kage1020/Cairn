@@ -23,14 +23,11 @@ use std::collections::HashSet;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::Span;
+use cairn_lang_core::ast::ItemKind;
 use cairn_lang_core::intent::{BodyKind, role_of};
 use cairn_lang_formats::builtin_pack;
 
 use crate::line_index::LineIndex;
-
-/// Keywords that may open a top-level (indent 0) line, in the order the
-/// parser names them when rejecting anything else.
-const TOP_LEVEL_KEYWORDS: &[&str] = &["theme", "def", "site", "struct"];
 
 /// Where the cursor sits, and the byte span of the partial token to replace.
 enum Context {
@@ -88,7 +85,9 @@ pub fn completions(
             &index,
             source,
             &replace,
-            TOP_LEVEL_KEYWORDS.iter().map(|kw| (*kw, "top-level item")),
+            ItemKind::ALL
+                .into_iter()
+                .map(|kind| (kind.keyword(), "top-level item")),
         ),
         Some(Context::MemberKeyword { replace, body }) => keyword_items(
             &index,

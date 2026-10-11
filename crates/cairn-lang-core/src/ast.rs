@@ -297,6 +297,9 @@ pub enum ItemKind {
 }
 
 impl ItemKind {
+    /// Every kind, in the order `keyword` lists them.
+    pub const ALL: [Self; 4] = [Self::Theme, Self::Def, Self::Site, Self::Struct];
+
     /// Keyword introducing this kind, as written in source.
     ///
     /// Doubles as the scope-key prefix for the three kinds that have
