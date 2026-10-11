@@ -142,19 +142,13 @@ fn themed_tower_bedrock_reports_at_least_one_degraded_palette_entry() {
 }
 
 #[test]
-fn cottage_bedrock_has_no_unsupported_entries() {
+fn cottage_ports_to_bedrock_without_loss() {
     // Gable stairs are `shape=straight`, Bedrock's default, so dropping the shape loses nothing.
     let axes = info_json("cottage.crn", "bedrock");
     let bedrock = portability_entry(&axes, "bedrock");
     assert_eq!(
-        as_u64(bedrock, "unsupported"),
-        0,
-        "cottage on Bedrock must not report unsupported entries",
-    );
-    let degraded = as_u64(bedrock, "degraded");
-    assert!(
-        degraded <= 1,
-        "cottage on Bedrock: unexpectedly high degraded count {degraded} — the gable roof should stay all-straight",
+        (as_u64(bedrock, "unsupported"), as_u64(bedrock, "degraded")),
+        (0, 0),
     );
 }
 
