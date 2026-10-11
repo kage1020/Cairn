@@ -1,20 +1,15 @@
-//! Integration coverage for `redstone-door.crn` under `pressure_plate`,
-//! `circuit`, and door actuator-patch lowering. Pins the palette (air,
-//! floor material, wall material, `oak_pressure_plate`), the two plate
-//! voxels, and the invariant that no `W_DEFERRED_MEMBER` fires on any
-//! of the three fixture roles: the `pressure_plate` lines, the
-//! `circuit region=floor void=2` routing marker, or the
-//! `door[id=front] opened_by=sig.open` actuator patch that binds the
-//! physical `door id=front` declared earlier in the struct body to a
-//! logic-graph signal. Line-number references are intentionally avoided
-//! so the tests survive edits to the fixture.
+//! `redstone-door.crn` lowers its pressure plates, `circuit` marker and door
+//! actuator patch: the gatehouse dims, the plate id each edition's pack
+//! names and the voxels the plates land on, and no `W_DEFERRED_MEMBER` for
+//! any of the three.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
 
-mod common;
-use common::{example_source, latest, lower_example, lower_source, pack_for, supported_versions};
+use crate::common::{
+    example_source, latest, lower_example, lower_source, pack_for, supported_versions,
+};
 
 fn lower_redstone_door() -> BlockArrayIr {
     lower_example(

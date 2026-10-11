@@ -1,4 +1,5 @@
-//! AC F1–F11 for the Java vanilla structure backend.
+//! The Java vanilla structure tag tree: its root keys, palette, per-voxel
+//! `blocks` list and `DataVersion`, and the file name a scope writes to.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
@@ -8,8 +9,7 @@ use cairn_lang_formats::java_structure::{
 };
 use cairn_lang_nbt::tag::Tag;
 
-mod common;
-use common::{latest, lower_example};
+use crate::common::{latest, lower_example};
 
 fn target_1_21_4() -> JavaTarget {
     resolve_java_target("1.21.4").expect("known target")
@@ -61,8 +61,8 @@ fn synthetic_cottage() -> BlockArray {
 }
 
 #[test]
-fn f1_unit_air_root_has_size_palette_blocks_entities_dataversion() {
-    // AC F1: 1×1×1 all-air structure produces the canonical empty room.
+fn unit_air_root_has_size_palette_blocks_entities_dataversion() {
+    // 1×1×1 all-air structure produces the canonical empty room.
     let target = target_1_21_4();
     let root = build_structure_tag(&unit_air(), &target).expect("build");
     let keys: Vec<&String> = root.entries.keys().collect();
@@ -125,8 +125,8 @@ fn f1_unit_air_root_has_size_palette_blocks_entities_dataversion() {
 }
 
 #[test]
-fn f2_cottage_palette_contains_three_concrete_entries() {
-    // AC F2: synthetic cottage IR exposes air / cobblestone / oak_planks.
+fn cottage_palette_contains_three_concrete_entries() {
+    // Synthetic cottage IR exposes air / cobblestone / oak_planks.
     let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");
     let Tag::List(palette) = &root.entries["palette"] else {
         unreachable!()
@@ -154,8 +154,8 @@ fn f2_cottage_palette_contains_three_concrete_entries() {
 }
 
 #[test]
-fn f3_palette_entry_without_properties_omits_properties_compound() {
-    // AC F3: property-less states leave Properties out entirely.
+fn palette_entry_without_properties_omits_properties_compound() {
+    // Property-less states leave Properties out entirely.
     let root = build_structure_tag(&unit_air(), &target_1_21_4()).expect("build");
     let Tag::List(palette) = &root.entries["palette"] else {
         unreachable!()
@@ -167,8 +167,8 @@ fn f3_palette_entry_without_properties_omits_properties_compound() {
 }
 
 #[test]
-fn f4_palette_entry_with_properties_keeps_them() {
-    // AC F4: non-empty properties round-trip into a Properties compound.
+fn palette_entry_with_properties_keeps_them() {
+    // Non-empty properties round-trip into a Properties compound.
     let mut palette = Palette::new_with_air();
     let mut stairs = BlockState::bare("minecraft:oak_stairs");
     stairs
@@ -210,8 +210,8 @@ fn f4_palette_entry_with_properties_keeps_them() {
 }
 
 #[test]
-fn f5_blocks_entries_count_equals_dims_volume() {
-    // AC F5: every voxel — including air — has an entry.
+fn blocks_entries_count_equals_dims_volume() {
+    // Every voxel — including air — has an entry.
     let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");
     let Tag::List(blocks) = &root.entries["blocks"] else {
         unreachable!()
@@ -220,8 +220,8 @@ fn f5_blocks_entries_count_equals_dims_volume() {
 }
 
 #[test]
-fn f6_blocks_entries_walk_yzx_order() {
-    // AC F6: block list traversal matches voxel storage order.
+fn blocks_entries_walk_yzx_order() {
+    // Block list traversal matches voxel storage order.
     let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");
     let Tag::List(blocks) = &root.entries["blocks"] else {
         unreachable!()
@@ -262,16 +262,16 @@ fn int_at(items: &[Tag], i: usize) -> i32 {
 }
 
 #[test]
-fn f7_dataversion_matches_target() {
-    // AC F7: the integer in the root reflects the target table.
+fn dataversion_matches_target() {
+    // The integer in the root reflects the target table.
     let t = resolve_java_target("1.20.4").expect("known");
     let root = build_structure_tag(&unit_air(), &t).expect("build");
     assert_eq!(root.entries.get("DataVersion"), Some(&Tag::Int(3700)));
 }
 
 #[test]
-fn f8_abstract_palette_id_rejected() {
-    // AC F8: an unresolved abstract token is a hard error, not silent air.
+fn abstract_palette_id_rejected() {
+    // An unresolved abstract token is a hard error, not silent air.
     let mut palette = Palette::new_with_air();
     palette.intern(BlockState::bare("@cobblestone"));
     let dims = Dims { x: 1, y: 1, z: 1 };
@@ -291,8 +291,8 @@ fn f8_abstract_palette_id_rejected() {
 }
 
 #[test]
-fn f9_output_filename_strips_struct_prefix() {
-    // AC F9: scope key → filename.
+fn output_filename_strips_struct_prefix() {
+    // Scope key → filename.
     assert_eq!(output_filename_nbt("struct::cottage"), "cottage.nbt");
     assert_eq!(output_filename_nbt("cottage"), "cottage.nbt");
 }
@@ -359,8 +359,8 @@ fn output_filename_handles_empty_input() {
 }
 
 #[test]
-fn f10_gzip_output_begins_with_magic_bytes() {
-    // AC F10: write_structure_gzip produces a gzip stream.
+fn gzip_output_begins_with_magic_bytes() {
+    // Write_structure_gzip produces a gzip stream.
     let mut buf = Vec::new();
     write_structure_gzip(&mut buf, &unit_air(), &target_1_21_4()).expect("write");
     assert!(buf.len() >= 2);
@@ -368,8 +368,8 @@ fn f10_gzip_output_begins_with_magic_bytes() {
 }
 
 #[test]
-fn f11_unit_air_debug_snapshot_is_stable() {
-    // AC F11: stable debug snapshot of the tag tree so a future refactor
+fn unit_air_debug_snapshot_is_stable() {
+    // Stable debug snapshot of the tag tree so a future refactor
     // that accidentally changes Tag construction order is caught.
     let root = build_structure_tag(&unit_air(), &target_1_21_4()).expect("build");
     insta::assert_debug_snapshot!(root);
@@ -387,7 +387,7 @@ fn cottage_structure_tag() -> cairn_lang_formats::java_structure::Compound {
 }
 
 #[test]
-fn f12_cottage_end_to_end_palette_carries_spruce_stairs_properties() {
+fn cottage_end_to_end_palette_carries_spruce_stairs_properties() {
     // Lowering the cottage example must produce a Java palette where
     // spruce_stairs appears with `facing` and `half` properties on every
     // entry. The Properties compound is the contract the Minecraft
@@ -428,7 +428,7 @@ fn f12_cottage_end_to_end_palette_carries_spruce_stairs_properties() {
 }
 
 #[test]
-fn f13_cottage_end_to_end_size_matches_overhang_inflated_dims() {
+fn cottage_end_to_end_size_matches_overhang_inflated_dims() {
     // cottage.crn declares size=9x7 walls height=4 roof overhang=1.
     // The Java structure root must mirror the lowering pass:
     //   x = 9 + 2 = 11

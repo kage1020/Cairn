@@ -10,7 +10,7 @@
 //! target and so takes each material's default mapping, while a build takes
 //! the target's, and a rename inside an edition's range makes those two ids
 //! different strings for the same block. What must not differ is how many
-//! entries there are, and `tests/example_portability.rs` holds every
+//! entries there are, and `tests/portability/shipped_examples.rs` holds every
 //! shipped example to that against every supported target.
 //!
 //! Two independent questions decide an entry's category, asked in that

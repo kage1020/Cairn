@@ -6,7 +6,7 @@
 //! material. The figures still have to agree, because a portability count
 //! that does not describe the build it is about is worse than no count —
 //! `unsupported: 0` on a source no version of the edition can load is the
-//! shape this file exists to refuse.
+//! shape these tests refuse.
 //!
 //! What is checked per example, per edition:
 //!
@@ -20,7 +20,7 @@
 //!   A count comparison alone cannot see an array that shortened.
 //!
 //! Whether each pinned build's ids exist in that pinned version is the
-//! neighbouring question, held by `pack_ids_exist.rs`.
+//! neighbouring question, held by `tests/packs/ids_exist.rs`.
 
 use std::collections::BTreeMap;
 
@@ -31,8 +31,7 @@ use cairn_lang_formats::portability::{
 };
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
-mod common;
-use common::{examples, lower_source, supported_versions};
+use crate::common::{examples, lower_source, supported_versions};
 
 /// Every structure's extent, keyed by scope so a comparison cannot pass
 /// by two scopes swapping sizes.

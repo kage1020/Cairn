@@ -1,6 +1,5 @@
 ---
-source: crates/cairn-lang-formats/tests/java_structure.rs
-assertion_line: 321
+source: crates/cairn-lang-formats/tests/writers/java_structure.rs
 expression: root
 ---
 Compound {

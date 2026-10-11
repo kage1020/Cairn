@@ -1,23 +1,15 @@
-//! End-to-end coverage for compiling the example builds through the Bedrock
-//! `.mcstructure` backend.
-//!
-//! Lives in `cairn-lang-formats` because the pipeline needs both the built-in
-//! Bedrock registry pack (`builtin_bedrock`, to resolve the abstract material
-//! tokens) and the Bedrock structure backend (`build_mcstructure_tag`), which
-//! `cairn-lang-core` cannot reach without a dependency cycle.
-//!
-//! Contract pinned: the roof stair family — the only block kind the lowering
-//! interns with blockstate properties — maps to Bedrock `states` rather than
-//! failing loud, so `cottage` compiles cleanly and `themed-tower` compiles
-//! with exactly the shape-drop degradation its eave corners incur.
+//! Examples compiled through the Bedrock `.mcstructure` backend. The roof
+//! stair family, the only block kind lowering interns with blockstate
+//! properties, maps to Bedrock `states`: `cottage` compiles without a parity
+//! note and `themed-tower` with exactly the shape-drop note its eave corners
+//! incur.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 
-mod common;
-use common::{block_palette, latest, lower_example};
+use crate::common::{block_palette, latest, lower_example};
 
 /// Lower an example the way `cairn compile --edition bedrock` does.
 fn lower_bedrock(example: &str) -> BlockArrayIr {

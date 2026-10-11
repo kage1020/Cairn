@@ -31,8 +31,7 @@ use cairn_lang_formats::java_structure::{
 };
 use cairn_lang_nbt::NbtIoError;
 
-mod common;
-use common::{block_palette, examples, latest, lower_source};
+use crate::common::{block_palette, examples, latest, lower_source};
 
 /// Assert two encodings are the same bytes, reporting the lengths and the
 /// first offset where they part rather than two megabyte-scale buffers.

@@ -14,8 +14,7 @@ use cairn_lang_formats::portability::{
 use cairn_lang_formats::registry::{AliasCatalog, AliasIndex, BlocksCatalog, BlocksIndex};
 use indexmap::IndexMap;
 
-mod common;
-use common::stair_props;
+use crate::common::stair_props;
 
 /// A pack shipping no `aliases` component — every test that is not
 /// about renames uses this, so a group added to one of them is a
@@ -93,8 +92,8 @@ fn one_state_ir(states: Vec<BlockState>) -> BlockArrayIr {
 }
 
 #[test]
-fn ac11_bedrock_counts_bare_stair_corner_and_stateful_non_stair() {
-    // AC11: palette with (bare oak_planks, straight stair, corner stair,
+fn bedrock_counts_bare_stair_corner_and_stateful_non_stair() {
+    // Palette with (bare oak_planks, straight stair, corner stair,
     // door with facing) folds to (portable: 2, degraded: 1, unsupported: 1).
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),
@@ -128,9 +127,9 @@ fn ac11_bedrock_counts_bare_stair_corner_and_stateful_non_stair() {
 }
 
 #[test]
-fn ac12_java_reports_every_non_air_entry_as_portable() {
-    // AC12: Java always reports the full non-air palette as portable.
-    // The palette mirrors AC11's — the Java axis must ignore the
+fn java_reports_every_non_air_entry_as_portable() {
+    // Java always reports the full non-air palette as portable.
+    // The palette mirrors the Bedrock test's — the Java axis must ignore the
     // Bedrock-only degradation signal.
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),

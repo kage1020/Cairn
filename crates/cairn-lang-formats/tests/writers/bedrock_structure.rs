@@ -1,4 +1,6 @@
-//! Acceptance criteria 1–6 for the Bedrock `.mcstructure` backend.
+//! The Bedrock `.mcstructure` tag tree: its root keys, both `block_indices`
+//! layers, palette entries with their translated `states` and block version,
+//! and the uncompressed little-endian bytes.
 //!
 //! Format reference: wiki.bedrock.dev's "mcstructure" page — little-endian
 //! uncompressed NBT, `block_indices` in two layers ordered with Z as the
@@ -14,8 +16,7 @@ use cairn_lang_formats::data_version::{BedrockTarget, resolve_bedrock_target};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_nbt::tag::{Compound, Tag};
 
-mod common;
-use common::{block_palette, default_palette, structure_compound};
+use crate::common::{block_palette, default_palette, structure_compound};
 
 fn target_1_21_60() -> BedrockTarget {
     resolve_bedrock_target("1.21.60").expect("known target")
@@ -54,8 +55,8 @@ fn asymmetric_array() -> (BlockArray, PaletteIndex) {
 }
 
 #[test]
-fn m1_root_carries_format_version_size_structure_and_origin() {
-    // AC 1: root key set and scalar values.
+fn root_carries_format_version_size_structure_and_origin() {
+    // Root key set and scalar values.
     let (ba, _) = asymmetric_array();
     let (root, _notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     let keys: Vec<&String> = root.entries.keys().collect();
@@ -80,8 +81,8 @@ fn m1_root_carries_format_version_size_structure_and_origin() {
 }
 
 #[test]
-fn m2_block_indices_are_z_fastest_with_minus_one_second_layer() {
-    // AC 2: layer 0 is the palette indices in (x, y, z) nesting with z
+fn block_indices_are_z_fastest_with_minus_one_second_layer() {
+    // Layer 0 is the palette indices in (x, y, z) nesting with z
     // fastest — flat index (x * size_y + y) * size_z + z — and layer 1 is
     // volume × -1 (no waterlog layer authored).
     let (ba, planks) = asymmetric_array();
@@ -113,8 +114,8 @@ fn m2_block_indices_are_z_fastest_with_minus_one_second_layer() {
 }
 
 #[test]
-fn m3_palette_entries_carry_name_empty_states_and_version() {
-    // AC 3: `structure.palette.default.block_palette[i]` mirrors the IR
+fn palette_entries_carry_name_empty_states_and_version() {
+    // `structure.palette.default.block_palette[i]` mirrors the IR
     // palette order, `states` is an empty compound for a bare (property-free)
     // block, and `version` is the target's block version.
     // `block_position_data` is present and empty, and `entities` is an
@@ -184,8 +185,8 @@ fn last_palette_states(root: &Compound) -> &Compound {
 }
 
 #[test]
-fn m4_unmappable_stateful_entry_fails_loud() {
-    // AC8: a stateful entry outside a mapped family is a hard error
+fn unmappable_stateful_entry_fails_loud() {
+    // A stateful entry outside a mapped family is a hard error
     // (`spec/versioning-editions` "Fail-loud and minimum-version inference"
     // — no silent substitution/dropping) whose message carries the
     // self-correction triple. Stairs are now mapped, so fail-loud is pinned
@@ -208,8 +209,8 @@ fn m4_unmappable_stateful_entry_fails_loud() {
 }
 
 #[test]
-fn m4b_stair_states_map_to_bedrock_vocabulary() {
-    // AC9: a stair palette entry's Java facing/half map to Bedrock's
+fn stair_states_map_to_bedrock_vocabulary() {
+    // A stair palette entry's Java facing/half map to Bedrock's
     // weirdo_direction/upside_down_bit as typed states; a straight shape is
     // lossless (no degradation note).
     let mut stairs = BlockState::bare("minecraft:dark_oak_stairs");
@@ -232,8 +233,8 @@ fn m4b_stair_states_map_to_bedrock_vocabulary() {
 }
 
 #[test]
-fn m4c_non_straight_stair_shape_degrades() {
-    // AC10: a non-straight stair shape has no Bedrock state; the build
+fn non_straight_stair_shape_degrades() {
+    // A non-straight stair shape has no Bedrock state; the build
     // succeeds but raises exactly one W_INTENT_DEGRADED note, keyed by the
     // id and naming the Java state the entry came from.
     let mut stairs = BlockState::bare("minecraft:oak_stairs");
@@ -270,8 +271,8 @@ fn m4c_non_straight_stair_shape_degrades() {
 }
 
 #[test]
-fn m5_abstract_palette_entry_fails_loud() {
-    // AC 5: an unresolved abstract token is rejected the same way the
+fn abstract_palette_entry_fails_loud() {
+    // An unresolved abstract token is rejected the same way the
     // Java backend rejects it.
     let mut palette = Palette::new_with_air();
     let idx = palette.intern(BlockState::bare("@cobblestone"));
@@ -291,8 +292,8 @@ fn m5_abstract_palette_entry_fails_loud() {
 }
 
 #[test]
-fn m6_write_mcstructure_is_uncompressed_little_endian() {
-    // AC 6: the on-disk bytes are raw NBT — an unnamed root compound
+fn write_mcstructure_is_uncompressed_little_endian() {
+    // The on-disk bytes are raw NBT — an unnamed root compound
     // (0x0a + u16 zero length), not a gzip stream (0x1f 0x8b) — and the
     // filename helper produces `.mcstructure` names alongside the `.nbt`
     // ones.

@@ -1,21 +1,12 @@
-//! Integration coverage for `themed-tower.crn` after level-block lowering
-//! and roof/stair theme-honouring landed together.
-//!
-//! Lives in `cairn-lang-formats` because the assertions need the built-in
-//! registry pack (`builtin_java`) to resolve the tower's abstract material
-//! tokens — `cairn-lang-core` cannot depend on `formats` without
-//! introducing a cycle. Pins the dim math (with per-level walls extending
-//! the tower to two stories), the palette (four resolved theme slots plus
-//! air), the eave stair band, and the `repeat=/step=` arrow-slit window
-//! pattern. Zero `W_DEFERRED_MEMBER` at the top level is what this file
-//! pins, replacing an older "at least one deferred" expectation.
+//! `themed-tower.crn` lowers to a two-story keep: its dims, the four theme
+//! materials in the palette, the upper wall ring, the eave stair band, the
+//! `repeat=`/`step=` arrow slits, and no `W_DEFERRED_MEMBER`.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
 
-mod common;
-use common::{latest, lower_example};
+use crate::common::{latest, lower_example};
 
 fn lower_themed_tower() -> BlockArrayIr {
     lower_example(

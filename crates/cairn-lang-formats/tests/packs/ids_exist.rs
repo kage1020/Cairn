@@ -1,19 +1,13 @@
-//! Every id a built-in pack can produce exists in the target it produces it for.
-//!
-//! The Bedrock pack shipped `oak_sign`, `oak_wall_sign`, and (through core)
-//! `oak_pressure_plate` — three Java spellings that Bedrock has never had.
-//! Nothing caught them, because nothing compared a pack's own mappings
-//! against a list of ids that edition declares. These tests are that
-//! comparison, and they run against every supported version rather than
-//! one, because a rename inside an edition's own range (`stonebrick` →
-//! `stone_bricks` at Bedrock 1.21.40) is invisible to a spot check.
+//! Every id a built-in pack can produce exists in the target it produces it
+//! for, on every supported version: a rename inside an edition's own range
+//! (`stonebrick` → `stone_bricks` at Bedrock 1.21.40) is invisible to a spot
+//! check.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BUILTIN_BLOCK_IDS;
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
-mod common;
-use common::{examples, lower_source, supported_versions};
+use crate::common::{examples, lower_source, supported_versions};
 
 fn edition(pack: &RegistryPack) -> &'static str {
     pack.manifest.edition.label()

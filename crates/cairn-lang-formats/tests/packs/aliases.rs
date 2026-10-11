@@ -15,8 +15,7 @@
 use cairn_lang_core::block_array::TargetRegistry;
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
-mod common;
-use common::supported_versions;
+use crate::common::supported_versions;
 
 /// Whether either built-in pack declares `id` in any version it supports.
 fn known_to_some_edition(id: &str) -> bool {
