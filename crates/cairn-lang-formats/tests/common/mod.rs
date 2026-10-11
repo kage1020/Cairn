@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 
 use cairn_lang_formats::registry::RegistryPack;
+use indexmap::IndexMap;
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
@@ -74,4 +75,19 @@ pub fn supported_versions(pack: &RegistryPack) -> Vec<&str> {
         .filter(|e| e.targetable)
         .map(|e| e.mc_version.as_str())
         .collect()
+}
+
+/// A blockstate property map from `(key, value)` pairs, in the order given.
+pub fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
+    pairs
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect()
+}
+
+/// Stair properties in the `facing` / `half` / `shape` insertion order the
+/// lowering uses, so `translate_states` sees the same key stream as at
+/// runtime.
+pub fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
+    props([("facing", facing), ("half", half), ("shape", shape)])
 }
