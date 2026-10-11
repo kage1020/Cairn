@@ -42,9 +42,8 @@ cargo xtask lint
   token), never a synonym.
 - No Minecraft edition or version in language semantics: the `(edition, version)` target is a
   compile-time parameter.
-- A diagnostic says what is wrong, what would be valid, and how to fix it. A new code needs a row
-  in the diagnostic catalog of `spec/lint`, in English and Japanese, which
-  `cargo xtask lint diagnostic-catalog` checks.
+- A diagnostic says what is wrong, what would be valid, and how to fix it. The `diagnostic-code`
+  skill covers adding one; `syntax-change` covers changing the syntax.
 - Every public item has a `///` doc. No `#[allow]`: fix the lint, or put
   `#[expect(lint, reason = "...")]` on the one item it is wrong for.
 - `unsafe` is forbidden outside the tree-sitter binding's `ffi` module.
