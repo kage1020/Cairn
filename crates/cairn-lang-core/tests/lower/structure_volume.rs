@@ -5,6 +5,7 @@
 //! a subprocess with a deadline to observe. These pin where the bound sits
 //! and that crossing it is reported rather than silently absorbed.
 
+use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::block_array::{Dims, MAX_STRUCTURE_VOLUME};
 
 use crate::common::lowered;
@@ -89,7 +90,7 @@ fn a_scope_past_the_bound_is_skipped_and_named() {
     let message = &out
         .diagnostics
         .iter()
-        .find(|d| d.code.as_str() == "W_STRUCTURE_TOO_LARGE")
+        .find(|d| d.code == DiagnosticCode::StructureTooLarge)
         .expect("the diagnostic")
         .primary;
     assert!(
@@ -115,7 +116,7 @@ fn a_place_past_the_bound_is_skipped_and_named() {
     let reported: Vec<&str> = out
         .diagnostics
         .iter()
-        .filter(|d| d.code.as_str() == "W_STRUCTURE_TOO_LARGE")
+        .filter(|d| d.code == DiagnosticCode::StructureTooLarge)
         .map(|d| d.primary.as_str())
         .collect();
     assert_eq!(reported.len(), 1, "{:#?}", out.diagnostics);
@@ -141,7 +142,7 @@ fn an_ordinary_scope_is_untouched_by_the_bound() {
     assert!(
         !out.diagnostics
             .iter()
-            .any(|d| d.code.as_str() == "W_STRUCTURE_TOO_LARGE"),
+            .any(|d| d.code == DiagnosticCode::StructureTooLarge),
     );
 }
 
@@ -158,7 +159,7 @@ fn an_out_of_range_overhang_is_reported_rather_than_shrinking_the_roof() {
     let out = lowered(&source);
     assert!(
         out.diagnostics.iter().any(|d| {
-            d.code.as_str() == "W_IGNORED_ARGUMENT" && d.primary.contains("overhang=")
+            d.code == DiagnosticCode::IgnoredArgument && d.primary.contains("overhang=")
         }),
         "an unusable `overhang=` must be named; got {:?}",
         out.diagnostics
@@ -178,7 +179,7 @@ fn an_out_of_range_height_is_reported_rather_than_saturating() {
     assert!(
         out.diagnostics
             .iter()
-            .any(|d| d.code.as_str() == "W_DEFERRED_MEMBER"),
+            .any(|d| d.code == DiagnosticCode::DeferredMember),
         "an unusable `height=` must be named; got {:?}",
         out.diagnostics
             .iter()

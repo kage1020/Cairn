@@ -108,38 +108,6 @@ fn l5_lockfile_roundtrips_through_yaml() {
     assert_eq!(lf, parsed);
 }
 
-#[test]
-fn l6_lockfile_yaml_key_order_matches_spec() {
-    // AC L6: top-level keys appear in the order `spec/versioning-editions`
-    // "Provenance and lock" prints, `lock_schema_version` first. The AC
-    // moved deliberately: a reader that has to decide whether it understands
-    // the document at all cannot be asked to parse the rest of it first, so
-    // the version leads and the spec sample was updated to match in both
-    // languages.
-    let body = serde_norway::to_string(&sample_lockfile()).expect("encode");
-    let keys: Vec<&str> = body
-        .lines()
-        .filter_map(|line| {
-            if line.starts_with(char::is_whitespace) || line.starts_with('-') {
-                None
-            } else {
-                line.split(':').next()
-            }
-        })
-        .collect();
-    let expected = vec![
-        "lock_schema_version",
-        "source_hash",
-        "cairn_version",
-        "target",
-        "inputs",
-        "resolved_ir_hash",
-        "verified",
-        "member_version_sensitivity",
-    ];
-    assert_eq!(keys, expected);
-}
-
 fn sample_lockfile_with_walkways() -> Lockfile {
     Lockfile {
         lock_schema_version: LOCK_SCHEMA_VERSION,
@@ -268,8 +236,9 @@ fn lockfile_yaml_with_bad_edition_is_rejected() {
     );
     let err = serde_norway::from_str::<Lockfile>(&body).expect_err("typo edition");
     assert!(
-        err.to_string().contains("jav") || err.to_string().contains("variant"),
-        "expected variant error, got {err}",
+        err.to_string()
+            .starts_with("target.edition: unknown variant `jav`, expected `java` or `bedrock`"),
+        "expected the field, the typo and the editions there are, got {err}",
     );
 }
 

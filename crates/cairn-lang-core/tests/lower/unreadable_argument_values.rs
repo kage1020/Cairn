@@ -34,8 +34,8 @@
 //! refused row's body, or that of a row placed relative to a refused one,
 //! still reports what is wrong with its `def` and theme.
 
-use cairn_lang_core::Diagnostic;
 use cairn_lang_core::block_array::BlockArrayIr;
+use cairn_lang_core::{Diagnostic, DiagnosticCode};
 
 use crate::common::{lowered, only_structure};
 
@@ -559,7 +559,7 @@ fn with_bad_body(row: &str) -> BlockArrayIr {
 fn incompatible(ir: &BlockArrayIr) -> Option<Diagnostic> {
     ir.diagnostics
         .iter()
-        .find(|d| d.code.as_str() == "E_INCOMPATIBLE_MATERIAL")
+        .find(|d| d.code == DiagnosticCode::IncompatibleMaterial)
         .cloned()
 }
 

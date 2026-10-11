@@ -8,7 +8,7 @@
 use cairn_lang_core::intent::{
     MemberRole, UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
 };
-use cairn_lang_core::{Diagnostic, Edition, check, lower, parse};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Edition, check, lower, parse};
 
 use crate::common::{codes, diagnose, exactly_one};
 
@@ -38,7 +38,7 @@ fn only_with_code(source: &str, code: &str, total: usize) -> Diagnostic {
 fn ignored_at(source: &str) -> Vec<&str> {
     diagnose(source)
         .iter()
-        .filter(|d| d.code.as_str() == "W_IGNORED_ARGUMENT")
+        .filter(|d| d.code == DiagnosticCode::IgnoredArgument)
         .map(|d| &source[d.span.clone()])
         .collect()
 }
@@ -856,7 +856,7 @@ fn a_theme_selector_widens_the_bracket_as_well_as_the_line() {
     );
     for d in found
         .iter()
-        .filter(|d| d.code.as_str() == "E_UNKNOWN_ARGUMENT")
+        .filter(|d| d.code == DiagnosticCode::UnknownArgument)
     {
         assert!(
             notes(d).contains("did you mean `side`?"),

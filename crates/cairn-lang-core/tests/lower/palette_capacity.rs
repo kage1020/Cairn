@@ -10,6 +10,8 @@
 
 use std::fmt::Write as _;
 
+use cairn_lang_core::DiagnosticCode;
+
 use crate::common::lowered;
 
 /// Distinct non-air states the body paints.
@@ -37,7 +39,7 @@ fn a_thousand_distinct_states_build_at_the_real_capacity() {
     let refused: Vec<&str> = out
         .diagnostics
         .iter()
-        .filter(|d| d.code.as_str() == "W_PALETTE_TOO_LARGE")
+        .filter(|d| d.code == DiagnosticCode::PaletteTooLarge)
         .map(|d| d.primary.as_str())
         .collect();
     assert!(refused.is_empty(), "{refused:?}");

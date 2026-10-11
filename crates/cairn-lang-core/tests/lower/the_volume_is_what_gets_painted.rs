@@ -13,6 +13,7 @@
 //! member's line deleted rather than against a literal, because the claim
 //! is "this member contributed nothing", not "the answer is 5x4x5".
 
+use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::block_array::BlockArrayIr;
 
 use crate::common::lowered;
@@ -81,7 +82,7 @@ fn a_roof_with_no_kind_and_an_unusable_overhang_reports_both_and_widens_nothing(
     assert!(
         out.diagnostics
             .iter()
-            .any(|d| d.code.as_str() == "W_DEFERRED_MEMBER" && d.primary.contains("kind=")),
+            .any(|d| d.code == DiagnosticCode::DeferredMember && d.primary.contains("kind=")),
         "the missing `kind=` is reported: {:?}",
         codes(&out),
     );
@@ -259,7 +260,7 @@ fn a_window_in_walls_that_paint_nothing_is_deferred_and_the_array_shrinks() {
     assert!(
         out.diagnostics
             .iter()
-            .any(|d| d.code.as_str() == "W_DEFERRED_MEMBER"),
+            .any(|d| d.code == DiagnosticCode::DeferredMember),
         "a window with no masonry to cut is reported: {:?}",
         codes(&out),
     );
@@ -278,7 +279,7 @@ fn a_door_in_walls_that_paint_nothing_says_what_is_missing() {
     let reason = out
         .diagnostics
         .iter()
-        .find(|d| d.code.as_str() == "W_DEFERRED_MEMBER" && d.primary.contains("door"))
+        .find(|d| d.code == DiagnosticCode::DeferredMember && d.primary.contains("door"))
         .unwrap_or_else(|| panic!("the door must be reported: {:?}", codes(&out)))
         .primary
         .clone();

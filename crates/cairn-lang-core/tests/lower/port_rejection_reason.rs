@@ -36,21 +36,29 @@ fn site(probe_members: &str, gap: u32) -> String {
     )
 }
 
-/// The one walkway defer `out` carries, for one refused port or two.
-fn skip(out: &BlockArrayIr) -> &Diagnostic {
+/// The one walkway defer `out` carries, for one refused port or two: the
+/// `W_DEFERRED_MEMBER` anchored on the `connect` row of `src`.
+fn skip<'a>(src: &str, out: &'a BlockArrayIr) -> &'a Diagnostic {
     let skips: Vec<_> = out
         .diagnostics
         .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember && d.primary.starts_with("walkway `"))
+        .filter(|d| {
+            d.code == DiagnosticCode::DeferredMember && src[d.span.clone()].starts_with("connect ")
+        })
         .collect();
     assert_eq!(skips.len(), 1, "one walkway defer: {:#?}", out.diagnostics);
     assert!(out.walkways.is_empty(), "and no strip is laid");
+    let primary = &skips[0].primary;
+    assert!(
+        primary.starts_with("walkway `") && primary.contains("` was skipped because port"),
+        "the defer names the walkway and why it was skipped: {primary}",
+    );
     skips[0]
 }
 
 /// The notes of the one walkway defer `out` carries.
-fn skip_notes(out: &BlockArrayIr) -> Vec<&DiagnosticNote> {
-    skip(out).notes.iter().collect()
+fn skip_notes<'a>(src: &str, out: &'a BlockArrayIr) -> Vec<&'a DiagnosticNote> {
+    skip(src, out).notes.iter().collect()
 }
 
 /// The suffix a note carries when the member's own line defers too.
@@ -93,7 +101,7 @@ const CHECKLIST: [&str; 4] = [
 fn assert_reason(probe_members: &str, gap: u32, reason: &str, member_line: Option<&str>) {
     let src = site(probe_members, gap);
     let out = lowered(&src);
-    let notes = skip_notes(&out);
+    let notes = skip_notes(&src, &out);
     assert_eq!(notes.len(), 1, "one note for the one port: {notes:#?}");
     let note = notes[0];
     assert_own_line_holds(&out, note);
@@ -216,7 +224,7 @@ fn a_port_past_the_coordinate_range_is_refused_as_out_of_range() {
         i32::MAX - 9,
     );
     let out = lowered(&src);
-    let notes = skip_notes(&out);
+    let notes = skip_notes(&src, &out);
     assert_eq!(notes.len(), 1, "{notes:#?}");
     assert!(
         notes[0]
@@ -245,10 +253,10 @@ fn two_refused_ports_get_one_note_each_in_row_order() {
     );
     let out = lowered(&src);
     assert_eq!(
-        skip(&out).primary,
+        skip(&src, &out).primary,
         "walkway `a.typo ↔ b.mid` was skipped because ports `a.typo` and `b.mid` could not be placed",
     );
-    let notes = skip_notes(&out);
+    let notes = skip_notes(&src, &out);
     let messages: Vec<_> = notes.iter().map(|n| n.message.as_str()).collect();
     assert_eq!(messages.len(), 2, "{messages:#?}");
     assert!(
@@ -286,12 +294,10 @@ fn a_window_without_offset_anchors_a_walkway_as_it_is_cut() {
 
 #[test]
 fn one_refused_port_is_named_in_the_singular() {
-    let out = lowered(&site(
-        &format!("{WALLS}  door id=p side=frnt at=center\n"),
-        6,
-    ));
+    let src = site(&format!("{WALLS}  door id=p side=frnt at=center\n"), 6);
+    let out = lowered(&src);
     assert_eq!(
-        skip(&out).primary,
+        skip(&src, &out).primary,
         "walkway `a.p ↔ b.e` was skipped because port `a.p` could not be placed",
     );
 }
@@ -305,7 +311,7 @@ fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
     let out = lowered(&src);
     let clause =
         "has an `at=` that is not one of center, left, right (numeric offsets are reserved)";
-    let notes = skip_notes(&out);
+    let notes = skip_notes(&src, &out);
     assert_eq!(notes.len(), 1, "{notes:#?}");
     assert_eq!(
         notes[0].message,
@@ -357,7 +363,7 @@ fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
     ] {
         let src = site(&format!("{WALLS}  window id=p side=front {args}\n"), 6);
         let out = lowered(&src);
-        let notes = skip_notes(&out);
+        let notes = skip_notes(&src, &out);
         assert_eq!(notes.len(), 1, "`{args}`: {notes:#?}");
         assert!(
             notes[0]
@@ -405,7 +411,7 @@ fn a_window_whose_material_does_not_resolve_anchors_no_walkway() {
         "{:#?}",
         out.diagnostics,
     );
-    let notes = skip_notes(&out);
+    let notes = skip_notes(src, &out);
     assert_eq!(notes.len(), 1, "{notes:#?}");
     assert_eq!(
         notes[0].message,
@@ -423,7 +429,7 @@ fn a_window_whose_rows_overflow_prints_no_backwards_range() {
         6,
     );
     let out = lowered(&src);
-    let notes = skip_notes(&out);
+    let notes = skip_notes(&src, &out);
     assert_eq!(notes.len(), 1, "{notes:#?}");
     assert_eq!(
         notes[0].message,
@@ -464,7 +470,7 @@ fn a_port_one_step_past_the_coordinate_range_is_refused_as_out_of_range() {
          connect a.e to b.n path=@gravel\n",
     );
     let out = lowered(&src);
-    let notes = skip_notes(&out);
+    let notes = skip_notes(&src, &out);
     assert_eq!(notes.len(), 1, "{notes:#?}");
     assert!(
         notes[0]

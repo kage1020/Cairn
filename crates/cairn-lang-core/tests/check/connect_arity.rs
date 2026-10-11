@@ -22,7 +22,7 @@
 
 use cairn_lang_core::{DiagnosticCode, Severity};
 
-use crate::common::{codes, of_code, one_of_code, slice};
+use crate::common::{codes, notes, of_code, one_of_code, slice};
 
 const PROLOGUE: &str = "struct hut size=3x3\n  \
 floor\n  \
@@ -61,17 +61,14 @@ fn ca_2_bare_connect_emits_arity_with_keyword_span() {
         "primary span should cover the `connect` row, got: {:?}",
         slice(&src, d),
     );
-    assert!(
-        d.primary.contains("connect"),
-        "primary message should name the keyword, got: {}",
-        d.primary,
+    assert_eq!(
+        d.primary, "`connect` requires `<from>.<port> to <to>.<port>`",
+        "the primary names the keyword and the shape it takes",
     );
-    assert!(
-        d.notes
-            .iter()
-            .any(|n| n.message.contains("connect") && n.message.contains("to")),
-        "should include an example shape note, got: {:#?}",
-        d.notes,
+    assert_eq!(
+        notes(d),
+        ["example: `connect home1.entry to home2.entry path=@gravel`"],
+        "the one note is an example of the whole shape",
     );
 }
 
@@ -94,10 +91,9 @@ fn ca_3_only_from_emits_arity_anchored_after_from() {
         d.span.end, from_end,
         "primary span should be zero-width (a cursor, not a range)",
     );
-    assert!(
-        d.primary.contains("to"),
-        "primary message should mention the missing `to` half, got: {}",
-        d.primary,
+    assert_eq!(
+        d.primary, "`connect` is missing the `to <to>.<port>` half",
+        "the primary names the missing `to` half",
     );
 }
 
@@ -119,10 +115,9 @@ fn ca_4_to_without_target_emits_arity_anchored_after_to() {
         d.span.end, to_end,
         "primary span should be zero-width (a cursor, not a range)",
     );
-    assert!(
-        d.primary.to_lowercase().contains("port"),
-        "primary message should mention the missing port, got: {}",
-        d.primary,
+    assert_eq!(
+        d.primary, "`connect` is missing the `<to>.<port>` target after `to`",
+        "the primary names the missing target port",
     );
 }
 

@@ -23,8 +23,8 @@
 //! that cannot exist, so that is an error again, while two that agree cost
 //! nothing but the line.
 
-use cairn_lang_core::Diagnostic;
 use cairn_lang_core::check::{DiagnosticData, Severity};
+use cairn_lang_core::{Diagnostic, DiagnosticCode};
 
 use crate::common::{codes, diagnose};
 
@@ -1123,7 +1123,7 @@ fn assert_every_order_matches_the_enumeration(rows: &[&str], orders_expected: us
         assert!(
             found
                 .iter()
-                .any(|d| d.code.as_str() == "E_TRUTH_TABLE_CONFLICT"),
+                .any(|d| d.code == DiagnosticCode::TruthTableConflict),
             "the table is refused in every order: {source}",
         );
     }
@@ -1318,7 +1318,7 @@ fn a_dash_output_inside_a_reported_row_is_told_to_settle_that_row_first() {
     let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 10 -> -");
     let found: Vec<Diagnostic> = diagnose(&source)
         .into_iter()
-        .filter(|d| d.code.as_str() == "W_TRUTH_TABLE_DUPLICATE_ROW")
+        .filter(|d| d.code == DiagnosticCode::TruthTableDuplicateRow)
         .collect();
     assert_eq!(found.len(), 2, "one finding each for `-0` and `10`");
     assert_eq!(underlined(&source, &found[1].span), "10 -> -");
@@ -1519,7 +1519,7 @@ fn assert_table_findings_are_sound(
         assert!(
             found
                 .iter()
-                .any(|d| d.code.as_str() == "E_TRUTH_TABLE_EMPTY"),
+                .any(|d| d.code == DiagnosticCode::TruthTableEmpty),
             "a table of `-` outputs verifies nothing: {source}",
         );
     }

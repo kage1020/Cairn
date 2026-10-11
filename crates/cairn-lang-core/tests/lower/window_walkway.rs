@@ -144,14 +144,14 @@ connect anchor.entry to peer.overflow path=@gravel\n";
     // Two `W_DEFERRED_MEMBER` warnings come from the def-side openings
     // pass dropping the overflow window itself (one per placement —
     // `anchor` and `peer` both reuse `def hut`); the cascade we are
-    // pinning fires from `lower_connects` and is the one whose
-    // `primary` mentions "walkway". Filtering by message keeps the
-    // assertion robust against the unrelated def-side count.
+    // pinning is the one anchored on the `connect` row. Filtering by that
+    // anchor keeps the assertion robust against the unrelated def-side
+    // count.
     let walkway_cascades: Vec<_> = out
         .diagnostics
         .iter()
         .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .filter(|d| d.primary.contains("walkway"))
+        .filter(|d| &src[d.span.clone()] == "connect anchor.entry to peer.overflow path=@gravel")
         .collect();
     assert_eq!(
         walkway_cascades.len(),
@@ -159,14 +159,11 @@ connect anchor.entry to peer.overflow path=@gravel\n";
         "overflowing window must surface exactly one walkway-cascade W_DEFERRED_MEMBER, got {:#?}",
         out.diagnostics,
     );
-    let primary = &walkway_cascades[0].primary;
-    assert!(
-        primary.contains("peer.overflow"),
-        "diagnostic should name the unplaceable port `peer.overflow`, got: {primary}",
-    );
-    assert!(
-        !primary.contains("`anchor.entry` and `peer.overflow`"),
-        "the door side resolves; only the window side should be reported, got: {primary}",
+    // The door side resolves, so only the window side is named.
+    assert_eq!(
+        walkway_cascades[0].primary,
+        "walkway `anchor.entry ↔ peer.overflow` was skipped because port `peer.overflow` \
+         could not be placed",
     );
     // The note names the rule this window broke, with the numbers that
     // broke it — not every contract a port could have hit.

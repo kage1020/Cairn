@@ -17,7 +17,7 @@ use cairn_lang_core::ast::{Item, Statement};
 use cairn_lang_core::resolve::{
     FloorOrigin, VersionFloor, declared_version_floors, unscoped_version_floors,
 };
-use cairn_lang_core::{Edition, check, lower, parse};
+use cairn_lang_core::{DiagnosticCode, Edition, check, lower, parse};
 
 use crate::common::codes;
 
@@ -430,7 +430,7 @@ def cottage size=5x5:
     let ir = lower(&module);
     let invalid: Vec<_> = check(&module, &ir, None)
         .into_iter()
-        .filter(|d| d.code.as_str() == "E_INVALID_REQUIRES")
+        .filter(|d| d.code == DiagnosticCode::InvalidRequires)
         .collect();
     assert_eq!(invalid.len(), 1);
     assert!(

@@ -16,6 +16,7 @@
 //! from this side: a tail on a `pressure_plate` passes here whatever it
 //! names.
 
+use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::intent::{SENSOR_HOSTS, known_keywords, role_of};
 
 use crate::common::{codes, diagnose, exactly_one, notes, slice};
@@ -141,7 +142,7 @@ fn a_tail_in_a_def_or_a_site_body_is_reached() {
     assert!(
         in_def
             .iter()
-            .any(|d| d.code.as_str() == "E_MISPLACED_BINDING"),
+            .any(|d| d.code == DiagnosticCode::MisplacedBinding),
         "{in_def:#?}",
     );
 
@@ -155,7 +156,7 @@ fn a_tail_in_a_def_or_a_site_body_is_reached() {
     assert!(
         in_site
             .iter()
-            .any(|d| d.code.as_str() == "E_MISPLACED_BINDING"),
+            .any(|d| d.code == DiagnosticCode::MisplacedBinding),
         "{in_site:#?}",
     );
 }
