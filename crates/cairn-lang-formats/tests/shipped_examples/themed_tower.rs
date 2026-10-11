@@ -1,6 +1,4 @@
-//! `themed-tower.crn` lowers to a two-story keep: its dims, the four theme
-//! materials in the palette, the upper wall ring, the eave stair band, the
-//! `repeat=`/`step=` arrow slits, and no `W_DEFERRED_MEMBER`.
+//! `themed-tower.crn` lowered: a two-story keep with a theme, an eave band and arrow slits.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
@@ -18,10 +16,6 @@ fn lower_themed_tower() -> BlockArrayIr {
 
 #[test]
 fn themed_tower_lowers_to_two_story_volume() {
-    // size=11x9, roof overhang=1 → dims.x = 11+2 = 13, dims.z = 9+2 = 11.
-    // Struct walls height=5, level y=5 walls height=4 → max_wall_top =
-    // max(5, 5+4) = 9. Gable ridge span = min(13, 11) = 11, extra height =
-    // ceil(11/2) = 6. dims.y = 1 + 9 + 6 = 16.
     let out = lower_themed_tower();
     let ba = out
         .structures
@@ -34,13 +28,6 @@ fn themed_tower_lowers_to_two_story_volume() {
 
 #[test]
 fn themed_tower_palette_carries_every_resolved_theme_slot() {
-    // themed-tower's `keep_dark` theme lifts four abstract tokens through
-    // the built-in registry pack:
-    //   @floor.wood.broadleaf → oak_planks
-    //   @wall.stone.cobble    → cobblestone
-    //   @wood.dark            → dark_oak_planks   (used by trim window)
-    //   @roof.dark_wood       → dark_oak_stairs   (roof + eave stair)
-    // Level-scoped members must reach the palette for this to hold.
     let out = lower_themed_tower();
     let ba = out.structures.get("struct::keep").unwrap();
     let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
@@ -60,11 +47,7 @@ fn themed_tower_palette_carries_every_resolved_theme_slot() {
 
 #[test]
 fn themed_tower_upper_walls_paint_at_second_floor_height() {
-    // level y=5 walls id=upper height=4 → the upper wall ring lives at
-    // y=6..=9. Pick a corner along the ring that must be cobblestone
-    // (@wall.stone.cobble). Interior x∈[1, 11], z∈[1, 9] (overhang=1).
-    // `front=+z` and `left=-x` (see WallSide docs), so the low-x /
-    // low-z corner (1, y, 1) is the *back-left* corner of the tower.
+    // The upper ring spans y=6..=9, and (1, y, 1) is its back-left corner.
     let out = lower_themed_tower();
     let ba = out.structures.get("struct::keep").unwrap();
     let cobble_idx = u16::try_from(
@@ -86,11 +69,7 @@ fn themed_tower_upper_walls_paint_at_second_floor_height() {
 
 #[test]
 fn themed_tower_eave_band_paints_outside_the_front_wall() {
-    // level y=5 stair id=eave side=front half=top facing=out shape=outer_left
-    // → 11 dark_oak_stairs blocks at world y=5, in the overhang row one
-    // voxel outside the +z (front) wall (z = overhang + interior_h = 10).
-    // `shape=outer_left` and `facing=south` are baked into the palette
-    // entry, so we count matching entries by their properties.
+    // The overhang row outside the front wall is z=10.
     let out = lower_themed_tower();
     let ba = out.structures.get("struct::keep").unwrap();
     let mut count = 0;
@@ -114,13 +93,7 @@ fn themed_tower_eave_band_paints_outside_the_front_wall() {
 
 #[test]
 fn themed_tower_arrow_slit_repeat_step_carves_three_openings() {
-    // level y=5 window class=arrow_slit side=front repeat=3 step=2 y=2
-    // size=1x2 (no `mat_slot=`, `offset=` defaults to 0). A window without
-    // a `mat_slot=` carves air, giving the `arrow_slit` class its slit
-    // look — the second-floor wall ring (cobblestone) at those columns
-    // becomes air. Wall-local u → world x: 0→1, 2→3, 4→5. World y =
-    // y_offset (5) + local y (2) = 7 → world y=7..=8. Front wall is at
-    // z = overhang + interior_h - 1 = 9.
+    // Three 1x2 slits at x=1, 3, 5 and y=7..=8, through the front wall at z=9.
     let out = lower_themed_tower();
     let ba = out.structures.get("struct::keep").unwrap();
     let mut carved = 0;
@@ -135,14 +108,10 @@ fn themed_tower_arrow_slit_repeat_step_carves_three_openings() {
             }
         }
     }
-    // 3 stamps × 2 rows tall = 6 carved air cells (air is palette index 0).
     assert_eq!(
         carved, 6,
         "arrow-slit repeat=3 step=2 size=1x2 should carve 6 air cells through the front wall",
     );
-    // Cells outside the stamped columns must remain cobblestone (the level
-    // walls). Sample a control column at x=7 that is not on any slit
-    // column so the arrow-slit air carves do not touch it.
     let cobble_idx = u16::try_from(
         ba.palette
             .entries

@@ -28,9 +28,6 @@ fn a_spelling_answers_with_its_whole_group() {
 
 #[test]
 fn the_group_answers_from_either_end() {
-    // The rows carry no direction: which spelling is the old one is a
-    // question about the target, and the target's block table is what
-    // answers it.
     let index = parse(RENAME_AND_SPLIT).expect("catalog");
     assert_eq!(
         index.spellings_of("minecraft:stone_bricks"),
@@ -148,8 +145,6 @@ fn a_repeated_spelling_inside_one_group_is_refused() {
 
 #[test]
 fn a_spelling_two_groups_claim_is_refused() {
-    // Bedrock's `snow` is Java's `snow_block` and Java's `snow` is
-    // Bedrock's `snow_layer`: the real shape of this mistake.
     let err = parse(
         r#"{
         "schema_version": 1,

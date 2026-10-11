@@ -1,17 +1,5 @@
-//! `BlockArray` → Java vanilla structure NBT tag tree.
-//!
-//! The Java structure file format ships a root [`Compound`] with:
-//!
-//! ```text
-//! size:        List<Int>[3]
-//! palette:     List<Compound>  (each: { Name: String, Properties: Compound? })
-//! blocks:      List<Compound>  (each: { state: Int, pos: List<Int>[3] })
-//! entities:    List<empty>
-//! DataVersion: Int
-//! ```
-//!
-//! The IR's `block_entities` and `entities` are not written: lowering never
-//! populates them, and the format accepts them absent or empty.
+//! A [`BlockArray`] as a Java structure file: `size`, `palette`, `blocks`, an empty `entities`
+//! and `DataVersion`. Lowering never fills the IR's entities or block entities, so none is written.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState};
 pub use cairn_lang_nbt::Compound;
@@ -25,77 +13,54 @@ use crate::block_id::is_concrete_id;
 use crate::data_version::JavaTarget;
 use crate::dims::{VolumeError, dim_to_i32, dims_to_i32, fits_list_limit, list_volume};
 
-/// Errors raised while serialising a [`BlockArray`] to a Java structure.
+/// Why a [`BlockArray`] cannot be written as a Java structure.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum JavaStructureError {
-    /// Forwarded failure from the NBT writer. [`prepare_structure`] rules
-    /// out every encoding error, so from [`write_structure_gzip`] this is
-    /// I/O.
+    /// An NBT writer failure, only I/O once [`prepare_structure`] has passed.
     #[error("nbt: {0}")]
     Nbt(#[from] NbtIoError),
-    /// A palette entry's `id` lacks a `namespace:identifier` form. Abstract
-    /// material tokens (`@cobblestone`) are expected to be resolved to a
-    /// concrete `minecraft:cobblestone` before reaching the backend; an
-    /// unresolved one is a build invariant violation, not a recoverable
-    /// state.
+    /// A palette id is not `namespace:identifier`, which the game would load as air.
     #[error("palette entry `{id}` is abstract; expected `namespace:identifier`")]
     AbstractPaletteEntry {
-        /// Offending id verbatim.
+        /// The id.
         id: String,
     },
-    /// A voxel named a palette slot the palette does not have.
-    ///
-    /// Unreachable through the compiler, where interning
-    /// ([`Palette::intern`], [`Palette::try_intern`]) is the only source of
-    /// a [`PaletteIndex`], but [`BlockArray`]'s fields and this builder are
-    /// public, so a consumer can hand over a grid and a palette that
-    /// disagree.
-    ///
-    /// [`Palette::intern`]: cairn_lang_core::block_array::Palette::intern
-    /// [`Palette::try_intern`]: cairn_lang_core::block_array::Palette::try_intern
-    /// [`PaletteIndex`]: cairn_lang_core::block_array::PaletteIndex
+    /// A voxel names a slot the palette lacks, reachable only through the public fields.
     #[error("voxel palette index {index} is outside the {len}-entry palette")]
     PaletteIndexOutOfRange {
-        /// The index the grid asked for.
+        /// The slot.
         index: u16,
-        /// How many entries the palette actually has.
+        /// The palette's length.
         len: usize,
     },
-    /// A voxel dimension overflowed the `i32` wire width Java NBT uses.
+    /// A dimension past the `i32` wire width.
     #[error("dimension {axis} = {value} exceeds Java NBT i32 wire limit")]
     DimensionOverflow {
-        /// Which axis overflowed (`"x"` / `"y"` / `"z"`).
+        /// The axis, `"x"`, `"y"` or `"z"`.
         axis: &'static str,
-        /// Offending dimension value.
+        /// The dimension.
         value: u32,
     },
-    /// The dims' voxel count `x * y * z` overflows `usize`, so it has no
-    /// value to compare with the grid or to declare as a list length.
+    /// The voxel count `x * y * z` overflows `usize`.
     #[error("dimensions {x}x{y}x{z} hold more voxels than this platform can count")]
     VolumeOverflow {
-        /// Extent along x.
+        /// The x extent.
         x: u32,
-        /// Extent along y.
+        /// The y extent.
         y: u32,
-        /// Extent along z.
+        /// The z extent.
         z: u32,
     },
-    /// A list the file holds would have more entries than the `i32` length
-    /// prefix of an NBT list can declare.
+    /// A list longer than an NBT list's `i32` length prefix allows.
     #[error("the `{list}` list would hold {len} entries, past the NBT list limit of 2147483647")]
     ListTooLong {
-        /// Which list (`"blocks"`, `"palette"`).
+        /// `"blocks"` or `"palette"`.
         list: &'static str,
-        /// How many entries it would hold.
+        /// Its length.
         len: usize,
     },
-    /// The grid holds a different number of voxels than its dims describe.
-    ///
-    /// Unreachable through the compiler, which allocates the grid from the
-    /// dims, but reachable through public fields like
-    /// [`Self::PaletteIndexOutOfRange`]. Writing such a grid would either
-    /// read past its end or leave voxels out of the file.
+    /// The grid's length is not its dims' voxel count, reachable only through the public fields.
     #[error("dimensions hold {volume} voxels but the grid has {voxels}")]
     VoxelCountMismatch {
         /// `x * y * z`.
@@ -103,16 +68,12 @@ pub enum JavaStructureError {
         /// `voxels.len()`.
         voxels: usize,
     },
-    /// A palette string the NBT encoder cannot write: a NUL or non-ASCII
-    /// byte, or more bytes than the `u16` length prefix carries. Named here
-    /// with its palette entry rather than left to the writer, which could
-    /// only report the byte.
+    /// A palette string the NBT encoder cannot write.
     #[error("palette entry `{id}`: {field} cannot be written as NBT: {source}")]
     UnencodablePaletteString {
-        /// The entry's id verbatim.
+        /// The entry's id.
         id: String,
-        /// Which string of the entry: its id, a property name or a
-        /// property value.
+        /// Which string: the id, a property name or a property value.
         field: String,
         /// The encoder's refusal.
         source: NbtIoError,
@@ -140,28 +101,18 @@ impl From<VolumeError> for JavaStructureError {
     }
 }
 
-/// A [`BlockArray`] checked to serialise as a Java vanilla structure, and
-/// the target it is written for.
-///
-/// Holding one means every refusal [`build_structure_tag`] can raise has
-/// already been ruled out, and so has every refusal the NBT encoder could
-/// raise on this structure: each palette string is encodable, the voxel
-/// count fits a list's length prefix and is the grid's length, and the
-/// palette fits one too. [`Self::write_gzip`] can therefore fail only on
-/// I/O and has no panic of its own to reach, so a caller can validate
-/// every structure of a build before writing any, without building a tree.
+/// A [`BlockArray`] checked to write as a Java structure for its target, so writing it can fail
+/// only on I/O.
 #[derive(Clone, Copy)]
 pub struct JavaStructure<'a> {
     block_array: &'a BlockArray,
     size: [i32; 3],
-    /// The `blocks` list's declared length: the dims' voxel count, checked
-    /// to fit `i32` and to equal `block_array.voxels.len()`.
+    /// The `blocks` list's length, checked to fit `i32` and to equal `voxels.len()`.
     volume: usize,
     data_version: i32,
 }
 
-/// The dims and palette size rather than the grid, which can hold millions
-/// of voxels.
+/// Leaves out the grid, which can hold millions of voxels.
 impl std::fmt::Debug for JavaStructure<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JavaStructure")
@@ -174,26 +125,11 @@ impl std::fmt::Debug for JavaStructure<'_> {
     }
 }
 
-/// Check that `block_array` serialises as a Java vanilla structure for
-/// `target`, without building anything.
-///
-/// The palette is checked before the grid: its checks cost one pass over
-/// the palette, the grid's a pass over every voxel.
+/// Checks that `block_array` writes as a Java structure for `target`, without building anything.
 ///
 /// # Errors
 ///
-/// Returns [`JavaStructureError::AbstractPaletteEntry`] when a palette
-/// entry's id is not a concrete `namespace:identifier`, which Minecraft
-/// would silently load as air.
-/// Returns [`JavaStructureError::UnencodablePaletteString`] when an entry's
-/// id, a property name or a property value cannot be written as an NBT
-/// string, [`JavaStructureError::DimensionOverflow`] when a dimension does
-/// not fit the wire width, [`JavaStructureError::VolumeOverflow`] when the
-/// voxel count overflows `usize`, [`JavaStructureError::ListTooLong`] when
-/// the voxel count or the palette is past an NBT list's length limit,
-/// [`JavaStructureError::VoxelCountMismatch`] when the grid's length is not
-/// the voxel count, and [`JavaStructureError::PaletteIndexOutOfRange`] when
-/// a voxel names a slot the palette does not have.
+/// The first fault found, as any [`JavaStructureError`] but [`JavaStructureError::Nbt`].
 pub fn prepare_structure<'a>(
     block_array: &'a BlockArray,
     target: &JavaTarget,
@@ -226,8 +162,7 @@ pub fn prepare_structure<'a>(
     })
 }
 
-/// Refuse the first string of `entry` that `palette_entry` would write and
-/// the NBT encoder could not.
+/// Refuses the first string of `entry` the NBT encoder could not write.
 fn check_palette_strings(entry: &BlockState) -> Result<(), JavaStructureError> {
     let refuse = |field: String, source: NbtIoError| JavaStructureError::UnencodablePaletteString {
         id: entry.id.clone(),
@@ -244,18 +179,13 @@ fn check_palette_strings(entry: &BlockState) -> Result<(), JavaStructureError> {
 }
 
 impl JavaStructure<'_> {
-    /// Gzip-write the structure under the empty root name vanilla expects.
-    /// The bytes are the ones [`write_compound_gzip`] writes for the tree
-    /// [`build_structure_tag`] builds, but nothing per voxel is held in
-    /// memory: each `blocks` entry is encoded from the grid and dropped.
+    /// Gzip-writes the structure, encoding each `blocks` entry from the grid as it goes.
     ///
     /// # Errors
     ///
-    /// [`NbtIoError::Io`] for I/O failure on `writer` or in the gzip
-    /// encoder. [`prepare_structure`] has ruled out every encoding error.
+    /// [`NbtIoError::Io`] only, since [`prepare_structure`] ruled out every encoding error.
     pub fn write_gzip<W: std::io::Write>(&self, writer: &mut W) -> Result<(), NbtIoError> {
-        // The same envelope and level as `write_java_gzip`, built here so
-        // `cairn-lang-nbt`'s streaming API names no `flate2` type.
+        // As `write_java_gzip` does; the streaming API names no `flate2` type.
         let mut gz = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
         stream_java_uncompressed(&mut gz, "", |root| self.write_root(root))?;
         gz.finish()?;
@@ -274,9 +204,7 @@ impl JavaStructure<'_> {
             &Tag::List(palette_list(&block_array.palette.entries)),
         )?;
         root.list("blocks", 10, self.volume, |blocks| {
-            // Same (y, z, x) order as `blocks_list`. `prepare_structure`
-            // checked every dimension fits `i32` and `voxels` holds
-            // `self.volume` entries, which bounds `Dims::index`.
+            // `blocks_list`'s (y, z, x) order.
             for y in 0..block_array.dims.y {
                 let yi = i32::try_from(y).expect("dims checked to fit i32");
                 for z in 0..block_array.dims.z {
@@ -306,12 +234,8 @@ impl JavaStructure<'_> {
     }
 }
 
-/// Build the root [`Compound`] for a Java vanilla structure file from a
-/// lowered [`BlockArray`].
-///
-/// The tree holds one compound per voxel, several hundred bytes each, so
-/// it is for inspecting a structure rather than for writing a large one:
-/// [`JavaStructure::write_gzip`] writes the same bytes without it.
+/// The root [`Compound`] of a Java structure, a compound per voxel; to write a large one, use
+/// [`JavaStructure::write_gzip`].
 ///
 /// # Errors
 ///
@@ -334,16 +258,11 @@ pub fn build_structure_tag(
     Ok(root)
 }
 
-/// Check and gzip-write a [`BlockArray`] to the given writer in one step,
-/// streaming the per-voxel list rather than building the tree. Every check
-/// runs before the first byte is written, so a refused array leaves
-/// `writer` untouched.
+/// Checks and gzip-writes `block_array`, leaving `writer` untouched when a check fails.
 ///
 /// # Errors
 ///
-/// Every refusal of [`prepare_structure`], and [`JavaStructureError::Nbt`]
-/// carrying [`NbtIoError::Io`] for I/O failure on `writer` or in the gzip
-/// encoder.
+/// Every refusal of [`prepare_structure`], or [`JavaStructureError::Nbt`] for an I/O failure.
 pub fn write_structure_gzip<W: std::io::Write>(
     writer: &mut W,
     block_array: &BlockArray,
@@ -353,14 +272,11 @@ pub fn write_structure_gzip<W: std::io::Write>(
     Ok(())
 }
 
-/// Gzip-write an already-built structure [`Compound`] under the empty root
-/// name vanilla expects, for a caller holding a tree it built or edited.
-/// [`JavaStructure::write_gzip`] writes a structure without building one.
+/// Gzip-writes a structure [`Compound`] under the empty root name.
 ///
 /// # Errors
 ///
-/// Propagates I/O failure from `writer` and any encoding error raised by
-/// the tag tree.
+/// An I/O failure, or a tag the encoder rejects.
 pub fn write_compound_gzip<W: std::io::Write>(
     writer: &mut W,
     root: &Compound,
@@ -368,9 +284,7 @@ pub fn write_compound_gzip<W: std::io::Write>(
     write_java_gzip(writer, "", root)
 }
 
-/// On-disk extension of a compiled structure artifact, one per backend.
-/// Kept next to [`output_filename`] so a caller cannot pass a free-form
-/// string and end up with `".nbt.nbt"` or a bare `"mcstructure"`.
+/// The file extension of a compiled structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputExt {
     /// Java vanilla structure (`.nbt`).
@@ -380,7 +294,7 @@ pub enum OutputExt {
 }
 
 impl OutputExt {
-    /// Extension without the leading dot.
+    /// The extension without its dot.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -390,9 +304,7 @@ impl OutputExt {
     }
 }
 
-/// Filename for a single [`BlockArray`] within a multi-structure IR: the
-/// scope's [`cairn_lang_core::artifact_stem`] plus `ext`, so
-/// `"struct::cottage"` with [`OutputExt::Nbt`] is `"cottage.nbt"`.
+/// The file name of one structure, such as `"cottage.nbt"` for `"struct::cottage"`.
 #[must_use]
 pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
     format!(
@@ -421,12 +333,7 @@ fn palette_entry(state: &BlockState) -> Compound {
 }
 
 fn blocks_list(block_array: &BlockArray) -> Result<List, JavaStructureError> {
-    // The IR's (y, z, x) order, so successive compiles produce
-    // byte-identical output. Air cells are included, as vanilla structure
-    // blocks write them, so placement can tell void from explicit air.
-    //
-    // The caller has checked `dims` fits, but the conversions stay fallible
-    // rather than `expect` so this function cannot panic on its own.
+    // Air is written too, as the game's structure blocks do, so placement can tell it from void.
     let mut entries: Vec<Compound> = Vec::with_capacity(block_array.dims.volume());
     for y in 0..block_array.dims.y {
         let yi = dim_to_i32(y, "y")?;

@@ -1,91 +1,45 @@
-//! Alias-group component of a [`crate::registry::RegistryPack`].
-//!
-//! Answers the question a distance search cannot: *what does this target
-//! call the block I just named?* `E_UNKNOWN_ID` suggests a replacement by
-//! Damerau-Levenshtein distance over the target's own block table, which
-//! catches a typo (`oak_plank` → `oak_planks`) and nothing else. A rename
-//! is not a typo — Bedrock spells Java's `light` `light_block_0` …
-//! `light_block_15`, eight edits away — so the search has no candidate to
-//! offer for the case an author is far more likely to hit, and
-//! `spec/versioning-editions` "Fail-loud and minimum-version inference" asks
-//! an error to return "the closed set of candidates valid in the target"
-//! rather than fall silent.
-//!
-//! # What a row is keyed on
-//!
-//! One row is a **group of spellings**: the names one block has worn,
-//! across editions and across one edition's own range, including the
-//! several ids a single old spelling split into.
-//!
-//! ```json
-//! { "spellings": ["light", "light_block", "light_block_0", "light_block_1"] }
-//! ```
-//!
-//! Nothing in the row says which spelling belongs to which
-//! `(edition, version)`, and that is deliberate: the `blocks` component
-//! already knows, per version, which ids exist. Resolution is therefore
-//! "take the group, keep the members the pinned target declares" — one
-//! table that answers Java → Bedrock (`oak_sign` → `standing_sign`) and
-//! Bedrock 1.21.0 → 1.21.40 (`stonebrick` → `stone_bricks`) with the same
-//! rows, because the version scoping is not in them.
-//!
-//! The cost of that key is the case it cannot express: a spelling two
-//! editions both declare, meaning different blocks. Bedrock's `snow` is
-//! Java's `snow_block` and Java's `snow` is Bedrock's `snow_layer`, so the
-//! two pairs would have to share a row keyed on `snow` alone and would
-//! then answer each other's question. Such a pair gets no row at all;
-//! saying nothing is what this component does everywhere it has nothing to
-//! say, and the distance search still runs behind it.
+//! The aliases component of a registry pack: groups of the spellings one block has worn across
+//! editions and versions, which `E_UNKNOWN_ID` offers where a typo search finds nothing. A group
+//! names no version; the target's `blocks` table picks its members. A spelling two editions use
+//! for different blocks, such as `snow`, gets no group, since one group would answer both.
 
 use indexmap::IndexMap;
 use serde::Deserialize;
 
 use super::namespaced;
 
-/// Highest `aliases.schema_version` this Cairn build understands.
+/// The highest `aliases.schema_version` this build reads.
 pub const SUPPORTED_ALIASES_SCHEMA: u32 = 1;
 
-/// On-disk `aliases.json` body.
+/// The body of `aliases.json`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AliasCatalog {
-    /// Schema version of the catalog itself.
+    /// The catalog's schema version.
     pub schema_version: u32,
-    /// Default id namespace, applied to every spelling that does not carry
-    /// its own `namespace:` prefix — the same rule
-    /// [`crate::registry::BlocksCatalog::namespace`] states for the block
-    /// tables these rows are resolved against.
+    /// The namespace for a spelling that names none.
     pub namespace: String,
-    /// The groups, in declared order. A suggestion lists the members a
-    /// target declares in this order, so the file's order is the order an
-    /// author reads.
+    /// The groups, in the order a suggestion lists their members.
     pub groups: Vec<AliasGroup>,
 }
 
 /// One `groups` row of an [`AliasCatalog`].
 #[derive(Debug, Clone, Deserialize)]
 pub struct AliasGroup {
-    /// Every spelling of the block, namespace optional. Two or more: a
-    /// group of one names nothing it could be confused with.
+    /// Every spelling of the block, at least two.
     pub spellings: Vec<String>,
 }
 
-/// Validated, lookup-ready alias groups.
+/// Validated alias groups, ready for lookup.
 #[derive(Debug, Clone)]
 pub struct AliasIndex {
-    /// Groups in declared order, each fully namespaced and in the order the
-    /// file wrote them.
+    /// The groups in declared order, every spelling namespaced.
     groups: Vec<Vec<String>>,
-    /// `spelling → index into groups`. Every spelling belongs to exactly
-    /// one group, which is what makes the lookup a single answer rather
-    /// than a merge of several.
+    /// Each spelling's group; a spelling belongs to exactly one.
     by_spelling: IndexMap<String, usize>,
 }
 
 impl AliasIndex {
-    /// Index with no groups, used when a pack omits the `aliases`
-    /// component. [`Self::spellings_of`] answers with an empty slice rather
-    /// than `None` because the caller's fallback, the distance search, is
-    /// the same either way.
+    /// An index with no groups, for a pack without an `aliases` component.
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -94,14 +48,11 @@ impl AliasIndex {
         }
     }
 
-    /// Fold a parsed [`AliasCatalog`] into a lookup index.
+    /// Validates `catalog` into an index.
     ///
     /// # Errors
     ///
-    /// Returns [`AliasError`] for an unsupported `schema_version`, a
-    /// catalog declaring no groups at all, a group of fewer than two
-    /// spellings, a spelling repeated inside one group, or a spelling
-    /// claimed by two groups.
+    /// [`AliasError`] for the first fault in the catalog.
     pub fn from_catalog(catalog: AliasCatalog) -> Result<Self, AliasError> {
         if catalog.schema_version > SUPPORTED_ALIASES_SCHEMA {
             return Err(AliasError::UnsupportedSchemaVersion {
@@ -121,8 +72,6 @@ impl AliasIndex {
             let mut spellings: Vec<String> = Vec::with_capacity(group.spellings.len());
             for spelling in group.spellings {
                 let id = namespaced(namespace, &spelling);
-                // A repeat within this group and a spelling another group
-                // claims need different edits, so they are reported apart.
                 match by_spelling.get(&id) {
                     Some(&owner) if owner == at => {
                         return Err(AliasError::DuplicateSpelling { id });
@@ -146,12 +95,7 @@ impl AliasIndex {
         })
     }
 
-    /// Every spelling of the block `id` names, `id` included, in declared
-    /// order — empty when no group claims it.
-    ///
-    /// `id` itself is kept: callers filter the group by their target's
-    /// table anyway, and dropping it would make the answer depend on which
-    /// caller asked.
+    /// Every spelling in `id`'s group, `id` included, in declared order; empty when none claims it.
     #[must_use]
     pub fn spellings_of(&self, id: &str) -> &[String] {
         self.by_spelling
@@ -159,66 +103,54 @@ impl AliasIndex {
             .map_or(&[], |&at| self.groups[at].as_slice())
     }
 
-    /// Every group, in declared order. The loader walks these to refuse a
-    /// group no version of the pack's own block tables can answer with.
+    /// Every group, in declared order.
     pub fn groups(&self) -> impl Iterator<Item = &[String]> {
         self.groups.iter().map(Vec::as_slice)
     }
 
-    /// Number of groups declared.
+    /// The number of groups.
     #[must_use]
     pub fn len(&self) -> usize {
         self.groups.len()
     }
 
-    /// `true` when the index carries no group at all.
+    /// Whether the index has no groups.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.groups.is_empty()
     }
 }
 
-/// Errors raised while folding an [`AliasCatalog`].
-///
-/// Every variant is a pack-author mistake. None of them can be reached by
-/// something an author of a `.crn` file wrote.
+/// A fault in an [`AliasCatalog`], always the pack author's.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AliasError {
-    /// Catalog declared a `schema_version` this build does not understand.
+    /// The catalog's `schema_version` is newer than this build reads.
     #[error(
         "unsupported registry pack aliases schema_version {got}; this Cairn supports up to {supported}"
     )]
     UnsupportedSchemaVersion {
-        /// Version the catalog declared.
+        /// The declared version.
         got: u32,
-        /// Highest version this build supports.
+        /// The highest version this build reads.
         supported: u32,
     },
-    /// The catalog declared no groups. A pack that names the component and
-    /// then fills it with nothing reads as "renames are answered here" at
-    /// every call site, and answers none of them; leaving the component
-    /// out says the same thing where a reader can see it.
+    /// The catalog declared no groups; a pack without aliases leaves the component out.
     #[error("registry pack aliases declares no groups")]
     NoGroups,
-    /// A group carried fewer than two spellings. One spelling is a group
-    /// that can only ever suggest the id the caller already has, which is
-    /// the answer [`crate::registry::BlocksIndex`] gave before it asked.
+    /// A group carried fewer than two spellings.
     #[error("registry pack aliases group [{spellings}] has fewer than two spellings")]
     GroupTooSmall {
-        /// The spellings it did carry, comma-joined. Empty for an empty
-        /// group, which is the one case that cannot name itself.
+        /// Its spellings, comma-joined; empty for an empty group.
         spellings: String,
     },
     /// One group listed the same spelling twice.
     #[error("registry pack aliases group declares `{id}` more than once")]
     DuplicateSpelling {
-        /// Verbatim id, after namespacing.
+        /// The spelling, namespaced.
         id: String,
     },
-    /// Two groups claimed the same spelling, so a lookup for it has two
-    /// answers and no rule for choosing. Almost always two halves of one
-    /// family written as separate rows; merging them is the fix.
+    /// Two groups claimed the same spelling; merging them is usually the fix.
     #[error("registry pack aliases declares `{id}` in two groups")]
     SpellingInTwoGroups {
         /// The spelling both groups claimed.

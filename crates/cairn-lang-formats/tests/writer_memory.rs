@@ -1,10 +1,5 @@
-//! The structure writers hold a bounded amount of memory whatever the
-//! structure's volume: `MAX_STRUCTURE_VOLUME` is sized at two bytes a voxel,
-//! and a tag per voxel costs hundreds of times that. The peak heap of the
-//! check and the write must not grow between two volumes; the tree
-//! builders, measured the same way, show the harness sees per-voxel
-//! allocation. One test in its own binary, because the counter is
-//! process-wide.
+//! The structure writers' peak heap does not grow with the volume. One test in its own binary,
+//! because the allocation counter is process-wide.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_formats::bedrock_structure::{build_mcstructure_tag, prepare_mcstructure};
@@ -12,16 +7,12 @@ use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_targ
 use cairn_lang_formats::java_structure::{build_structure_tag, prepare_structure};
 use peak_alloc::PeakAlloc;
 
-// A dependency rather than a local `GlobalAlloc`: implementing one takes
-// `unsafe`, which the workspace denies outside the tree-sitter binding.
+// A local `GlobalAlloc` would need `unsafe`, which the workspace forbids here.
 #[global_allocator]
 static ALLOCATOR: PeakAlloc = PeakAlloc;
 
-/// The most bytes `f` holds live at once beyond what was live before it.
-///
-/// The peak is reset before `before` is read: the reset pins the peak at
-/// the live total, so anything freed or allocated between the two reads
-/// leaves the peak at or above `before` and the subtraction cannot wrap.
+/// The most bytes `f` holds live at once beyond what was live before; the peak is reset before
+/// `before` is read, so the subtraction cannot wrap.
 fn peak_during(f: impl FnOnce()) -> usize {
     ALLOCATOR.reset_peak_usage();
     let before = ALLOCATOR.current_usage();
@@ -57,10 +48,7 @@ fn cube(side: u32) -> BlockArray {
     }
 }
 
-/// Headroom between the two volumes' peaks. The writers' fixed costs
-/// (the gzip encoder's window, a palette, a formatted error) do not depend
-/// on the volume, so the two peaks should match to within noise; 64 KiB
-/// is far below the smaller of the two controls' growth.
+/// Headroom between the two volumes' peaks, for the writers' fixed costs.
 const SLACK: usize = 64 * 1024;
 
 #[test]
@@ -92,8 +80,7 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
         peak_during(|| drop(build_mcstructure_tag(array, &bedrock).expect("build")))
     };
 
-    // Controls: the trees grow by at least a byte per added voxel, which is
-    // what a writer that builds one would show.
+    // Controls: the trees must grow, or the harness cannot see a per-voxel allocation.
     for (label, tree) in [
         ("java tree", &java_tree as &dyn Fn(&BlockArray) -> usize),
         ("bedrock tree", &bedrock_tree),
@@ -111,11 +98,7 @@ fn writing_a_structure_does_not_hold_memory_per_voxel() {
         ("bedrock write", &bedrock_write),
     ] {
         let (small_peak, large_peak) = (write(&small), write(&large));
-        // Both writers allocate something (the gzip encoder's window, the
-        // palette), so a zero means the allocation moved out of the
-        // counter's view, for example into a C allocator behind a
-        // different flate2 backend, and the bound below would hold
-        // vacuously.
+        // Zero would mean the allocations escaped the counter, such as into a C allocator.
         assert!(
             small_peak > 0,
             "{label}: the counter saw no allocation, so it cannot bound one",

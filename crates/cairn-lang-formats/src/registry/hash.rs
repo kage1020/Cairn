@@ -1,34 +1,17 @@
-//! sha256 over the manifest bytes + each named component, in declared
-//! order. The output is the value that lands in the lockfile under
-//! `inputs.registry_pack_hash`.
+//! The registry pack hash the lockfile records as `inputs.registry_pack_hash`.
 
 use cairn_lang_core::lock::HashHex;
 
-/// Width of one length prefix, for sizing the buffer up front. What keeps
-/// the digest independent of the machine's pointer width is
-/// [`push_framed`]'s `u64` conversion, not this constant.
 const LENGTH_PREFIX: usize = size_of::<u64>();
 
-/// Append `bytes` preceded by its length, so no rearrangement of the same
-/// bytes across two fields produces the same stream.
+/// Appends `bytes` after its length, so moving bytes from one field to the next changes the hash.
 fn push_framed(buf: &mut Vec<u8>, bytes: &[u8]) {
-    // `usize` is at most 64 bits on every target Rust supports, so this
-    // cannot fail. Saturating instead would frame two different lengths
-    // identically, which is the one property the framing exists to give.
     let len = u64::try_from(bytes.len()).expect("a length fits in u64 on every supported target");
     buf.extend_from_slice(&len.to_le_bytes());
     buf.extend_from_slice(bytes);
 }
 
-/// Hash the manifest body and every referenced component file in declared
-/// order, so two packs produce the same digest only when they hold the
-/// same bytes under the same filenames in the same order.
-///
-/// Every field is length-prefixed. Run together, the same bytes divided one
-/// place to the left or right would hash identically, so the digest could
-/// not tell a rename from a content edit that compensates for it. The gap
-/// is both between the manifest and the first name and between one body and
-/// the next name, so a single separator would not close it.
+/// The sha256 of the manifest and each named component in declared order, every field framed.
 #[must_use]
 pub fn pack_hash(manifest_bytes: &[u8], components: &[(&str, &[u8])]) -> HashHex {
     let extra: usize = components
@@ -76,12 +59,8 @@ mod tests {
 
     #[test]
     fn the_framing_produces_a_known_digest() {
-        // The collision tests only assert `!=`, which a half-framed encoding
-        // also satisfies; this absolute digest moves only when the framing
-        // does. Derived from the framing rule, not copied out of a run:
-        // sha256 over
-        // `u64le(2) "{}" u64le(1) "a" u64le(1) "X"`
-        // = 02000000000000007b7d010000000000000061010000000000000058.
+        // sha256 of `u64le(2) "{}" u64le(1) "a" u64le(1) "X"`, worked out by hand, not copied
+        // from a run.
         assert_eq!(
             pack_hash(b"{}", &[("a", b"X")]).as_str(),
             "sha256:5587de979011a708a5592e56ccdb3073472266e0c4df7bd8c25171f8018692de",
@@ -90,8 +69,6 @@ mod tests {
 
     #[test]
     fn a_byte_moved_from_the_manifest_into_a_name_changes_the_hash() {
-        // The same bytes, split one place apart between the manifest and
-        // the first component name.
         let body: &[u8] = b"BODY";
         let left = pack_hash(b"{\"x\":1}ab", &[("c", body)]);
         let right = pack_hash(b"{\"x\":1}a", &[("bc", body)]);
@@ -100,8 +77,6 @@ mod tests {
 
     #[test]
     fn a_byte_moved_across_a_component_boundary_changes_the_hash() {
-        // With NUL separators alone, two components `a\0X` + `b\0Y` would
-        // read as one component `a` whose body is `X`, `b`, NUL, `Y`.
         let two = pack_hash(b"{}", &[("a", b"X"), ("b", b"Y")]);
         let one = pack_hash(b"{}", &[("a", b"Xb\0Y")]);
         assert_ne!(two, one);

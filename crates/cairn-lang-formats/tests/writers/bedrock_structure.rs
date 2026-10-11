@@ -1,7 +1,4 @@
-//! The Bedrock `.mcstructure` tag tree against wiki.bedrock.dev's
-//! "mcstructure" page: its root keys, both `block_indices` layers (z
-//! fastest), palette entries of `{ name, states, version }` with their
-//! translated `states`, and the uncompressed little-endian bytes.
+//! The Bedrock `.mcstructure` tag tree and bytes, against wiki.bedrock.dev's "mcstructure" page.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::resolve::DroppedIntent;
@@ -19,17 +16,12 @@ fn target_1_21_60() -> BedrockTarget {
     resolve_bedrock_target("1.21.60").expect("known target")
 }
 
-/// The `.mcstructure` block-palette `version` integer packs
-/// `(major, minor, patch, revision)` one byte each, major in the high
-/// byte. Deriving the expected value from the parts pins the JSON table
-/// against this documented formula.
+/// The packed palette `version`: a byte each of major, minor, patch and revision.
 fn block_version(major: i32, minor: i32, patch: i32, revision: i32) -> i32 {
     (major << 24) | (minor << 16) | (patch << 8) | revision
 }
 
-/// Non-cubic 2×3×4 array with two marked voxels. Distinct per-axis sizes
-/// make any axis-order mistake in the index math shift at least one of
-/// the expected flat indices.
+/// A 2×3×4 array with two marked voxels, so an axis-order mistake moves a flat index.
 fn asymmetric_array() -> (BlockArray, PaletteIndex) {
     let mut palette = Palette::new_with_air();
     let planks = palette.intern(BlockState::bare("minecraft:oak_planks"));
@@ -52,7 +44,6 @@ fn asymmetric_array() -> (BlockArray, PaletteIndex) {
 
 #[test]
 fn root_carries_format_version_size_structure_and_origin() {
-    // Root key set and scalar values.
     let (ba, _) = asymmetric_array();
     let (root, _notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     let keys: Vec<&String> = root.entries.keys().collect();
@@ -78,9 +69,6 @@ fn root_carries_format_version_size_structure_and_origin() {
 
 #[test]
 fn block_indices_are_z_fastest_with_minus_one_second_layer() {
-    // Layer 0 is the palette indices in (x, y, z) nesting with z
-    // fastest — flat index (x * size_y + y) * size_z + z — and layer 1 is
-    // volume × -1 (no waterlog layer authored).
     let (ba, planks) = asymmetric_array();
     let (root, _notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     let structure = structure_compound(&root);
@@ -111,11 +99,6 @@ fn block_indices_are_z_fastest_with_minus_one_second_layer() {
 
 #[test]
 fn palette_entries_carry_name_empty_states_and_version() {
-    // `structure.palette.default.block_palette[i]` mirrors the IR
-    // palette order, `states` is an empty compound for a bare (property-free)
-    // block, and `version` is the target's block version.
-    // `block_position_data` is present and empty, and `entities` is an
-    // empty list.
     let (ba, _) = asymmetric_array();
     let target = target_1_21_60();
     // 1.21.60's wiki-confirmed block-palette marker is 1.21.60.33.
@@ -182,9 +165,7 @@ fn last_palette_states(root: &Compound) -> &Compound {
 
 #[test]
 fn unmappable_stateful_entry_fails_loud() {
-    // A stateful entry outside a mapped family is a hard error carrying the
-    // self-correction triple (`spec/versioning-editions` "Fail-loud and
-    // minimum-version inference"). Stairs are mapped, so a door pins it.
+    // Stairs are mapped, so a door stands in for an unmapped family.
     let mut door = BlockState::bare("minecraft:oak_door");
     door.properties
         .insert("facing".to_owned(), "north".to_owned());
@@ -204,9 +185,6 @@ fn unmappable_stateful_entry_fails_loud() {
 
 #[test]
 fn stair_states_map_to_bedrock_vocabulary() {
-    // A stair palette entry's Java facing/half map to Bedrock's
-    // weirdo_direction/upside_down_bit as typed states; a straight shape is
-    // lossless (no degradation note).
     let mut stairs = BlockState::bare("minecraft:dark_oak_stairs");
     stairs
         .properties
@@ -228,9 +206,6 @@ fn stair_states_map_to_bedrock_vocabulary() {
 
 #[test]
 fn non_straight_stair_shape_degrades() {
-    // A non-straight stair shape has no Bedrock state; the build
-    // succeeds but raises exactly one W_INTENT_DEGRADED note, keyed by the
-    // id and naming the Java state the entry came from.
     let mut stairs = BlockState::bare("minecraft:oak_stairs");
     stairs
         .properties
@@ -245,8 +220,6 @@ fn non_straight_stair_shape_degrades() {
     let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0].id, "minecraft:oak_stairs");
-    // Against the writer rather than a literal, so the build's wording
-    // cannot drift from the `cairn info` note's.
     assert_eq!(
         notes[0].message,
         degradation_message(
@@ -256,7 +229,6 @@ fn non_straight_stair_shape_degrades() {
             },
         ),
     );
-    // The mappable intent still lands in `states`.
     let states = last_palette_states(&root);
     assert_eq!(states.entries.get("weirdo_direction"), Some(&Tag::Int(0)));
     assert_eq!(states.entries.get("upside_down_bit"), Some(&Tag::Byte(0)));
@@ -264,8 +236,6 @@ fn non_straight_stair_shape_degrades() {
 
 #[test]
 fn abstract_palette_entry_fails_loud() {
-    // An unresolved abstract token is rejected the same way the
-    // Java backend rejects it.
     let mut palette = Palette::new_with_air();
     let idx = palette.intern(BlockState::bare("@cobblestone"));
     let ba = BlockArray {
@@ -285,16 +255,12 @@ fn abstract_palette_entry_fails_loud() {
 
 #[test]
 fn write_mcstructure_is_uncompressed_little_endian() {
-    // The on-disk bytes are raw NBT — an unnamed root compound
-    // (0x0a + u16 zero length), not a gzip stream (0x1f 0x8b) — and the
-    // filename helper produces `.mcstructure` names alongside the `.nbt`
-    // ones.
     let (ba, _) = asymmetric_array();
     let (root, _notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     let mut buf = Vec::new();
     write_mcstructure(&mut buf, &root).expect("write");
     assert_eq!(&buf[..3], &[0x0a, 0x00, 0x00]);
-    // format_version entry follows: Int tag id + name length 14 LE.
+    // Then `format_version`: an Int tag id and a name length of 14.
     assert_eq!(&buf[3..6], &[0x03, 0x0e, 0x00]);
 
     assert_eq!(
@@ -306,7 +272,6 @@ fn write_mcstructure_is_uncompressed_little_endian() {
 
 #[test]
 fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
-    // Unreachable from the CLI, as on the Java side.
     let (mut ba, _) = asymmetric_array();
     assert_eq!(ba.palette.entries.len(), 2, "fixture palette");
     ba.voxels[0] = PaletteIndex(7);
@@ -320,8 +285,7 @@ fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
     );
 }
 
-/// A bottom-half stair of `id`, its properties in the order the lowering
-/// interns them.
+/// A bottom-half stair of `id`, its properties in the order lowering interns them.
 fn stair(id: &str, facing: &str, shape: &str) -> BlockState {
     let mut stairs = BlockState::bare(id);
     for (key, value) in [("facing", facing), ("half", "bottom"), ("shape", shape)] {
@@ -330,8 +294,7 @@ fn stair(id: &str, facing: &str, shape: &str) -> BlockState {
     stairs
 }
 
-/// A row along z: air, then one voxel per state in `states`, each naming
-/// its own palette entry.
+/// A row along z: air, then one voxel per state, each its own palette entry.
 fn row_of(states: &[BlockState]) -> BlockArray {
     let mut palette = Palette::new_with_air();
     let mut voxels = vec![PaletteIndex::AIR];
@@ -370,9 +333,7 @@ fn block_layer(root: &Compound) -> Vec<i32> {
         .collect()
 }
 
-/// The `block_palette` entry a layer-0 value names. A writer that wrote
-/// the Java palette index rather than the slot names one past the list
-/// once entries have merged, so that is refused here rather than indexed.
+/// The `block_palette` entry a layer-0 value names, refusing a slot past the list.
 fn written_entry(entries: &[Tag], slot: i32) -> &Tag {
     match usize::try_from(slot)
         .ok()
@@ -408,11 +369,6 @@ fn states_of(entry: &Tag) -> &Compound {
     }
 }
 
-/// Stairs that differ only in `shape` are distinct Java states and one
-/// Bedrock block once `shape` is dropped. The written palette is a set:
-/// they share one `block_palette` entry, and every voxel is written as
-/// the slot of the block it holds. Each degradation note names its own
-/// Java state, so no two read the same.
 #[test]
 fn stairs_that_differ_only_in_a_dropped_shape_share_one_palette_entry() {
     let oak = "minecraft:oak_stairs";
@@ -435,8 +391,6 @@ fn stairs_that_differ_only_in_a_dropped_shape_share_one_palette_entry() {
     assert_eq!(entries.len(), 3, "{entries:?}");
     assert_eq!(name_of(&entries[0]), "minecraft:air");
 
-    // Every voxel is written as a slot the palette has, and that slot holds
-    // the block the voxel's own entry translates to.
     let layer = block_layer(&root);
     assert_eq!(layer[0], 0, "air stays at slot 0");
     // `weirdo_direction` 3 is north and 2 is south.
@@ -476,7 +430,6 @@ fn stairs_that_differ_only_in_a_dropped_shape_share_one_palette_entry() {
     );
     assert!(notes.iter().all(|note| note.id == oak));
 
-    // The streamed writer writes the same merged structure as the tree.
     let mut tree = Vec::new();
     write_mcstructure(&mut tree, &root).expect("write tree");
     let (prepared, _) = prepare_mcstructure(&ba, &target_1_21_60()).expect("prepare");
@@ -485,10 +438,7 @@ fn stairs_that_differ_only_in_a_dropped_shape_share_one_palette_entry() {
     assert_eq!(streamed, tree);
 }
 
-/// Two ids whose states translate equal are still two blocks. `name` is
-/// what keeps their `block_palette` entries apart, so a merge that
-/// compared `states` alone would write one material's voxels as the
-/// other's.
+/// Two ids whose states translate equal stay two blocks, kept apart by `name`.
 #[test]
 fn stairs_of_two_ids_with_equal_states_keep_an_entry_each() {
     let ids = ["minecraft:oak_stairs", "minecraft:spruce_stairs"];

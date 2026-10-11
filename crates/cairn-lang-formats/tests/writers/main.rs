@@ -1,5 +1,4 @@
-//! The Java `.nbt` and Bedrock `.mcstructure` writers: the tag trees they
-//! build, and the streamed bytes those trees must match.
+//! The Java `.nbt` and Bedrock `.mcstructure` writers: their tag trees and streamed bytes.
 
 #[path = "../common/mod.rs"]
 pub mod common;

@@ -1,7 +1,4 @@
-//! Every id a built-in pack can produce exists in the target it produces it
-//! for, on every supported version: a rename inside an edition's own range
-//! (`stonebrick` → `stone_bricks` at Bedrock 1.21.40) is invisible to a spot
-//! check.
+//! Every id a built-in pack can produce exists in its target, on every supported version.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BUILTIN_BLOCK_IDS;
@@ -22,15 +19,11 @@ fn every_material_mapping_resolves_to_an_id_its_target_declares() {
                 .ids_for(version)
                 .unwrap_or_else(|| panic!("{} {version} has no block table", edition(pack)));
             for (token, pinned, id) in pack.materials.mappings() {
-                // A mapping pinned to another version says nothing about
-                // this one; the default it falls back from is checked on
-                // its own row.
+                // A pinned mapping is checked only on its own version.
                 if pinned.is_some_and(|v| v != version) {
                     continue;
                 }
-                // The default is only reachable on versions with no
-                // override, so a default that is wrong *only* where an
-                // override covers it is not a defect.
+                // A default is checked only where no override replaces it.
                 if pinned.is_none()
                     && pack.materials.lookup_id_for(token, Some(version)) != Some(id)
                 {
@@ -67,13 +60,7 @@ fn every_id_core_hardcodes_exists_in_every_supported_target() {
     }
 }
 
-/// The plate is the one hardcoded id a pack can redirect, so the promise
-/// that makes it safe is that both packs actually declare the token.
-///
-/// Lowering falls back to a Java spelling when the token is missing, and
-/// on Bedrock that fallback is a block the game does not have — so a pack
-/// that quietly dropped the row would put it back into `.mcstructure`
-/// output with nothing to say so.
+/// Without the token, lowering falls back to a Java id that Bedrock does not have.
 #[test]
 fn both_packs_declare_the_token_that_redirects_the_plate() {
     for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
@@ -102,9 +89,6 @@ fn both_packs_declare_the_token_that_redirects_the_plate() {
     }
 }
 
-/// Three ids pinned by spelling rather than by "the mapping resolves to
-/// something", which an edit pointing `sign.oak` at another existing block
-/// would still pass.
 #[test]
 fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
     let bedrock = builtin_pack(Edition::Bedrock);
@@ -134,8 +118,6 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
     }
 }
 
-/// The Bedrock range spans the flattening wave, so one token needs two
-/// spellings inside one pack.
 #[test]
 fn the_bedrock_pack_respells_stone_bricks_for_the_version_that_predates_it() {
     let bedrock = builtin_pack(Edition::Bedrock);
@@ -154,7 +136,6 @@ fn the_bedrock_pack_respells_stone_bricks_for_the_version_that_predates_it() {
         }
     }
 
-    // Java never had the old spelling, so it needs no override at all.
     assert_eq!(
         builtin_pack(Edition::Java).materials.overrides().count(),
         0,
@@ -162,12 +143,6 @@ fn the_bedrock_pack_respells_stone_bricks_for_the_version_that_predates_it() {
     );
 }
 
-/// Every id the shipped examples actually put in a palette exists in the
-/// target they were lowered for.
-///
-/// The tests above walk the pack's mappings and `BUILTIN_BLOCK_IDS`; this
-/// one reads the palettes, so an id hardcoded in lowering and added to no
-/// list, which the game would load as air, is caught too.
 #[test]
 fn every_id_the_examples_intern_exists_in_its_target() {
     let examples = examples();
@@ -198,9 +173,7 @@ fn every_id_the_examples_intern_exists_in_its_target() {
     }
 }
 
-/// A guard on the tests above rather than on the packs: both walk "every
-/// supported version", and a pack that supported none would make them pass
-/// by iterating nothing.
+/// Guards the sweeps above, which would pass on a pack supporting no version.
 #[test]
 fn both_packs_declare_the_versions_these_tests_expect_to_walk() {
     assert_eq!(

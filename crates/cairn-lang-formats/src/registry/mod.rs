@@ -1,16 +1,5 @@
-//! Registry pack ingest.
-//!
-//! A *registry pack* is the bundle of JSON files describing the Minecraft
-//! identifiers, blockstate domains, item schemas, and `DataVersion` table
-//! that a compile depends on. It is hashed into the lockfile's
-//! `inputs.registry_pack_hash` field so a build is reproducible against a
-//! pinned set of bytes.
-//!
-//! Its components are `data_versions` (`mc_version` → `DataVersion`),
-//! `materials` (abstract `@token` → id), `blocks` (the per-version id table
-//! an `E_UNKNOWN_ID` is decided against), and `aliases` (the spellings one
-//! block has worn, which turns a refused id into the name the target does
-//! use).
+//! Registry packs: the JSON files of `DataVersion`s, materials, block ids and aliases a compile
+//! depends on, hashed into the lockfile so a build is reproducible.
 
 pub mod aliases;
 pub mod blocks;
@@ -33,12 +22,7 @@ pub use load::{
 };
 pub use manifest::{PackFiles, PackManifest};
 
-/// Prepend `namespace` to a component entry that does not carry one.
-///
-/// Shared by the `materials`, `blocks` and `aliases` components, which name
-/// blocks the same way: `oak_planks` inherits the catalog's namespace and
-/// `create:cogwheel` keeps its own. One copy matters because an alias group
-/// is matched against a block table by string equality.
+/// Prepends `namespace` to a component entry that does not carry one.
 pub(crate) fn namespaced(namespace: &str, block: &str) -> String {
     if block.contains(':') {
         block.to_owned()

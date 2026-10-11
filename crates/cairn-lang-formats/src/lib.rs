@@ -1,8 +1,5 @@
-//! Readers and writers around the Cairn block-array IR for existing schematic formats.
-//!
-//! Supported: vanilla Java `.nbt` structures and Bedrock `.mcstructure`,
-//! writers only. Planned: Litematica `.litematic` and the `WorldEdit`
-//! `.schem` format.
+//! Java `.nbt` and Bedrock `.mcstructure` writers for the block-array IR, with the registry packs
+//! and portability reports they rely on.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;

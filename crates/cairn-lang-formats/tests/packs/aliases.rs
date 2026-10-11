@@ -1,9 +1,4 @@
-//! What the built-in packs' alias groups promise about their ids, checked
-//! against both packs at once: every spelling is an id some supported
-//! version of some edition declares, and the renames the component exists
-//! for come out of it. The loader refuses a group only when *no* member is
-//! an id its own edition declares, so it cannot catch a mistyped foreign
-//! spelling.
+//! The built-in packs' alias groups, checked against both editions' tables at once.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::TargetRegistry;
@@ -23,13 +18,7 @@ fn aliases_at(pack: &RegistryPack, version: &str, id: &str) -> Vec<String> {
     pack.view(Some(version)).aliases_for(id)
 }
 
-/// A spelling no edition has ever declared is a typo in the pack, not a
-/// rename.
-///
-/// The loader cannot catch this: it refuses a group only when *nothing* in
-/// it is an id this pack's own tables have, and a cross-edition row is
-/// supposed to carry a spelling this edition does not use. `standing_sgn`
-/// beside `oak_sign` would load, answer nothing, and read as data.
+/// The loader accepts a mistyped foreign spelling, such as `standing_sgn` beside `oak_sign`.
 #[test]
 fn every_spelling_is_an_id_some_supported_version_declares() {
     for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
@@ -46,13 +35,7 @@ fn every_spelling_is_an_id_some_supported_version_declares() {
     }
 }
 
-/// Every group answers a question some version of this pack can actually
-/// be asked.
-///
-/// The asking id is one the target *refused*, so some spelling has to be
-/// absent from that version for the row to be reachable; "the answer is
-/// non-empty" would hold of every loaded group. A group whose members every
-/// version declares passes the loader and can never be reached.
+/// A group whose members every version declares loads, but no refused id ever reaches it.
 #[test]
 fn every_group_answers_somewhere_in_its_own_range() {
     for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
@@ -74,8 +57,7 @@ fn every_group_answers_somewhere_in_its_own_range() {
     }
 }
 
-/// Renames a distance search cannot reach (seven and eight edits), each
-/// asked of the target that refuses the id.
+/// Renames seven and eight edits apart, out of the typo search's reach.
 #[test]
 fn the_java_spellings_a_bedrock_build_refuses_are_answered() {
     let bedrock = builtin_pack(Edition::Bedrock);
@@ -96,11 +78,6 @@ fn the_java_spellings_a_bedrock_build_refuses_are_answered() {
     }
 }
 
-/// A rename that splits one id into a family answers with the family.
-///
-/// Bedrock 1.21.40 replaced `light_block` with sixteen ids, one per light
-/// level. Which one an author wants is theirs to pick, so all sixteen are
-/// returned rather than a guess.
 #[test]
 fn a_split_answers_with_every_id_the_version_has() {
     let bedrock = builtin_pack(Edition::Bedrock);
@@ -115,8 +92,6 @@ fn a_split_answers_with_every_id_the_version_has() {
     assert!(!after.contains(&"minecraft:light_block".to_owned()));
 }
 
-/// The same table answers a rename inside one edition's own range, which
-/// is the half a Java-as-the-base alias map would not have covered.
 #[test]
 fn a_rename_inside_bedrocks_own_range_is_answered_both_ways() {
     let bedrock = builtin_pack(Edition::Bedrock);
@@ -132,8 +107,6 @@ fn a_rename_inside_bedrocks_own_range_is_answered_both_ways() {
     );
 }
 
-/// A group carries no direction, so the Java pack answers the mirror of
-/// what the Bedrock pack does.
 #[test]
 fn the_java_pack_answers_a_bedrock_spelling() {
     let java = builtin_pack(Edition::Java);
@@ -146,19 +119,7 @@ fn the_java_pack_answers_a_bedrock_spelling() {
     }
 }
 
-/// The Java pack's groups are the Bedrock pack's, minus the ones no Java
-/// version can answer.
-///
-/// The two files are hand-written and hold the same rows, because a group
-/// carries no direction: `oak_sign` ↔ `standing_sign` is one fact, and a
-/// pack that has it in one file and not the other answers in one direction
-/// only. Nothing else would notice — each pack validates against its own
-/// tables — so the drift is checked here.
-///
-/// Subset rather than equality: the Bedrock pack carries rows for blocks
-/// Java has never had (the education chemistry tables, the two split
-/// coloured torches), and `validate_aliases_answerable` would refuse those
-/// inside a Java pack.
+/// Not equality: the Bedrock pack also groups blocks Java has never had, which a Java pack refuses.
 #[test]
 fn the_java_groups_are_a_subset_of_the_bedrock_ones() {
     let bedrock: Vec<Vec<String>> = builtin_pack(Edition::Bedrock)
@@ -176,8 +137,6 @@ fn the_java_groups_are_a_subset_of_the_bedrock_ones() {
     }
 }
 
-/// An id that is not a block anywhere gets no alias, so the refusal keeps
-/// saying it has no candidate rather than reaching for the nearest group.
 #[test]
 fn an_id_no_group_names_is_answered_with_nothing() {
     for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {

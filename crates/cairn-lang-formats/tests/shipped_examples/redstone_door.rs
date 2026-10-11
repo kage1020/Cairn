@@ -1,7 +1,4 @@
-//! `redstone-door.crn` lowers its pressure plates, `circuit` marker and door
-//! actuator patch: the gatehouse dims, the plate id each edition's pack
-//! names and the voxels the plates land on, and no `W_DEFERRED_MEMBER` for
-//! any of the three.
+//! `redstone-door.crn` lowered: its gatehouse, pressure plates, circuit marker and door actuator.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
@@ -20,8 +17,6 @@ fn lower_redstone_door() -> BlockArrayIr {
 
 #[test]
 fn redstone_door_lowers_to_a_flat_gatehouse_volume() {
-    // struct gatehouse size=7x5, walls height=3, no roof, no overhang →
-    // dims.x = 7, dims.z = 5, dims.y = floor(1) + wall_top(3) = 4.
     let out = lower_redstone_door();
     let ba = out
         .structures
@@ -43,19 +38,9 @@ fn redstone_door_palette_contains_oak_pressure_plate() {
     );
 }
 
-/// The plate id is edition-specific, and lowering has no edition of its
-/// own — it reads the pack's `pressure_plate.default`.
-///
-/// Bedrock has never had `oak_pressure_plate`, so a lowering that ignored
-/// the pack and used its hardcoded Java default would put an id into the
-/// `.mcstructure` palette that the game loads as air. Asserting the pack
-/// *declares* the right id is not enough: this is the test that the
-/// lowering pass actually reads it.
+/// Bedrock has no `oak_pressure_plate`, so lowering must take the plate id from the pack.
 #[test]
 fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
-    // The buildable rows only: the table also carries the releases the
-    // pack can order a floor against but has no block data for, and
-    // pinning a lowering to one of those checks nothing.
     for version in supported_versions(builtin_pack(Edition::Bedrock)) {
         let out = lower_example("redstone-door.crn", Edition::Bedrock, Some(version));
         let ba = out.structures.get("struct::gatehouse").unwrap();
@@ -73,12 +58,7 @@ fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
 
 #[test]
 fn redstone_door_outside_plate_falls_back_to_wall_column_without_overhang() {
-    // `pressure_plate id=plate at=front.outside offset=0 y=0` — the
-    // shift-outward step lands at z=dims.z (out of range) because the
-    // struct has no overhang. The `y=0` foundation fallback then paints
-    // on the wall's own column at (x=0, y=0, z=4). The main-line
-    // "shift into overhang column" semantics is covered by a unit test
-    // in `cairn-lang-core::block_array::lower::tests`.
+    // With no overhang, the outward shift leaves the volume and falls back to the wall's column.
     let out = lower_redstone_door();
     let ba = out.structures.get("struct::gatehouse").unwrap();
     let plate_idx = u16::try_from(
@@ -98,10 +78,6 @@ fn redstone_door_outside_plate_falls_back_to_wall_column_without_overhang() {
 
 #[test]
 fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
-    // `pressure_plate id=inner at=inside.front offset=1 y=0` — shift-inward
-    // from (1, 0, 4) is (1, 0, 3), the first interior cell along the front
-    // wall. `offset=0` would be the corner, whose inward cell sits under
-    // the left wall.
     let out = lower_redstone_door();
     let ba = out.structures.get("struct::gatehouse").unwrap();
     let plate_idx = u16::try_from(
@@ -137,12 +113,6 @@ fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
 
 #[test]
 fn redstone_door_lowers_without_deferred_warnings() {
-    // `circuit region=floor void=2` is a routing marker and
-    // `door[id=front] opened_by=sig.open` an actuator patch binding the
-    // struct's `door id=front` to a logic signal; block-array lowering
-    // recognises both and emits neither voxels nor `W_DEFERRED_MEMBER`.
-    // The total is pinned rather than primaries filtered by role, because
-    // `nonneg_int_or_defer`'s primary does not name the enclosing role.
     let out = lower_redstone_door();
     let deferred = out
         .diagnostics
@@ -162,10 +132,7 @@ fn redstone_door_lowers_without_deferred_warnings() {
 
 #[test]
 fn redstone_door_actuator_patch_bad_id_emits_actuator_shaped_primary() {
-    // Keeps the test above from passing on a `recognize_actuator_patch`
-    // that accepts everything: a patch naming no door must defer once,
-    // with a primary naming the offending id and the fixture's real door
-    // id `front`.
+    // Keeps the test above from passing on a recognizer that accepts every patch.
     let mut source = example_source("redstone-door.crn");
     source.push_str("  door[id=nonexistent] opened_by=sig.open\n");
     let out = lower_source(&source, Edition::Java, Some(latest(Edition::Java)));

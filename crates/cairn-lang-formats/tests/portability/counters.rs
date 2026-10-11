@@ -1,7 +1,4 @@
-//! The per-edition portability counters over hand-built palettes and block
-//! tables: which category each palette entry lands in, the entries named
-//! behind the `unsupported` and `degraded` counts, and the palettes the
-//! Bedrock counter refuses to count.
+//! The portability counters over hand-built palettes and block tables.
 
 use cairn_lang_core::block_array::{
     BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex,
@@ -16,18 +13,11 @@ use indexmap::IndexMap;
 
 use crate::common::stair_props;
 
-/// A pack shipping no `aliases` component — every test that is not
-/// about renames uses this, so a group added to one of them is a
-/// deliberate change to what that test asks.
 fn no_aliases() -> AliasIndex {
     AliasIndex::empty()
 }
 
-/// The Bedrock report for a palette every test but the leak ones
-/// expects to be valid.
-///
-/// Named rather than `.expect(..)` at thirty call sites, so a test about
-/// counts does not read as also asking about leaks.
+/// The Bedrock report for a palette expected to carry no leak.
 fn bedrock_report(
     ir: &BlockArrayIr,
     blocks: &BlocksIndex,
@@ -37,9 +27,7 @@ fn bedrock_report(
         .expect("the palette carries no blockstate a pack would have refused")
 }
 
-/// A table shaped like a real edition's: two versions with a rename
-/// between them, so an id valid for only part of the range is available
-/// to test with alongside ids valid for all of it.
+/// Two versions with a rename between them.
 fn table() -> BlocksIndex {
     let catalog: BlocksCatalog = serde_json::from_str(
         r#"{
@@ -60,8 +48,6 @@ fn table() -> BlocksIndex {
 }
 
 fn one_block_array(scope: &str, states: Vec<BlockState>) -> BlockArray {
-    // Reuse a single 1×1×1 volume — the counters only inspect the
-    // palette, so the voxel grid can stay minimal.
     let mut palette = Palette::new_with_air();
     for s in states {
         palette.intern(s);
@@ -92,8 +78,6 @@ fn one_state_ir(states: Vec<BlockState>) -> BlockArrayIr {
 
 #[test]
 fn bedrock_counts_bare_stair_corner_and_stateful_non_stair() {
-    // Palette with (bare oak_planks, straight stair, corner stair,
-    // door with facing) folds to (portable: 2, degraded: 1, unsupported: 1).
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),
         BlockState {
@@ -127,9 +111,6 @@ fn bedrock_counts_bare_stair_corner_and_stateful_non_stair() {
 
 #[test]
 fn java_reports_every_non_air_entry_as_portable() {
-    // Java always reports the full non-air palette as portable.
-    // The palette mirrors the Bedrock test's — the Java axis must ignore the
-    // Bedrock-only degradation signal.
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),
         BlockState {
@@ -158,8 +139,6 @@ fn java_reports_every_non_air_entry_as_portable() {
 
 #[test]
 fn air_slot_is_skipped_by_both_editions() {
-    // Every palette starts with air at index 0; neither edition should
-    // count it as an authored intent.
     let ir = one_state_ir(Vec::new());
     assert_eq!(
         portability_for_java(&ir, &table(), &no_aliases()).counts(),
@@ -173,8 +152,6 @@ fn air_slot_is_skipped_by_both_editions() {
 
 #[test]
 fn an_id_the_edition_never_declares_is_unsupported_on_both_sides() {
-    // A stateless id comes back clean from `translate_states`, so only
-    // the block tables can find it absent.
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),
         BlockState::bare("minecraft:totally_not_a_block"),
@@ -200,10 +177,6 @@ fn an_id_the_edition_never_declares_is_unsupported_on_both_sides() {
 
 #[test]
 fn an_id_only_part_of_the_range_declares_is_not_unsupported() {
-    // Both spellings of the renamed block are valid somewhere in the
-    // range, so neither is absent from the edition. Counting them
-    // unsupported would mark a build that succeeds on the target the
-    // author picked as impossible on the edition entirely.
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:stonebrick"),
         BlockState::bare("minecraft:stone_bricks"),
@@ -229,10 +202,6 @@ fn an_id_only_part_of_the_range_declares_is_not_unsupported() {
 
 #[test]
 fn an_absent_id_with_unsupported_states_is_counted_once() {
-    // The door's `facing` has no Bedrock mapping, so both questions
-    // would answer "unsupported". The entry is one palette row and
-    // must contribute one count, or `total()` stops matching the
-    // palette it was computed from.
     let mut properties = IndexMap::new();
     properties.insert("facing".to_owned(), "north".to_owned());
     let door = BlockState {
@@ -258,11 +227,6 @@ fn an_absent_id_with_unsupported_states_is_counted_once() {
 
 #[test]
 fn an_absent_id_whose_states_would_degrade_is_still_unsupported() {
-    // The two questions disagree here: the states translate (with loss)
-    // while the block does not exist. Asking them in the other order
-    // files the entry as `degraded`, which reads as "builds, looks
-    // slightly wrong" for something that does not build at all — and
-    // `total()` is identical either way, so no parity assertion notices.
     let stair = BlockState {
         id: "minecraft:spruce_stairs".to_owned(),
         properties: stair_props("south", "top", "outer_left"),
@@ -285,11 +249,6 @@ fn an_absent_id_whose_states_would_degrade_is_still_unsupported() {
 
 #[test]
 fn a_pack_with_no_id_tables_refutes_nothing() {
-    // `BlocksIndex::empty()` is what a pack shipping no `blocks`
-    // component loads with. Reading it as "no version declares this"
-    // would report every entry of every source as unsupported — the
-    // inverse of the rule the lowering pass follows for the same
-    // absence.
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),
         BlockState::bare("minecraft:totally_not_a_block"),
@@ -315,8 +274,6 @@ fn a_pack_with_no_id_tables_refutes_nothing() {
 
 #[test]
 fn a_walkway_strip_is_counted_like_any_other_entry() {
-    // A walkway of a block the edition lacks reads in-game as a routing
-    // decision rather than a gap.
     let mut structures = IndexMap::new();
     structures.insert(
         "site::duo::home1".to_owned(),
@@ -347,10 +304,6 @@ fn a_walkway_strip_is_counted_like_any_other_entry() {
             unsupported: 1,
         },
     );
-    // And the reason, which the figure alone cannot hold: asking the
-    // id question after the states one keeps `unsupported: 1` while
-    // reversing the advice from "this block is not here, did you mean
-    // ...?" to "the block is here and its states are not".
     assert_eq!(
         only_reason(&report),
         &UnsupportedReason::AbsentFromEdition {
@@ -362,7 +315,6 @@ fn a_walkway_strip_is_counted_like_any_other_entry() {
 
 #[test]
 fn empty_ir_produces_zero_counts() {
-    // Not reachable from `cairn lower`, but the counters are public.
     let ir = BlockArrayIr {
         structures: IndexMap::new(),
         placements: IndexMap::new(),
@@ -379,8 +331,7 @@ fn empty_ir_produces_zero_counts() {
     );
 }
 
-/// The reason of the single unsupported entry `report` names, or a
-/// panic naming what it found instead.
+/// The reason of `report`'s single unsupported entry.
 fn only_reason(report: &PortabilityReport) -> &UnsupportedReason {
     assert_eq!(
         report.unsupported().len(),
@@ -393,10 +344,6 @@ fn only_reason(report: &PortabilityReport) -> &UnsupportedReason {
 
 #[test]
 fn an_absent_id_is_named_with_the_nearest_id_the_edition_declares() {
-    // The count says one entry has no form here; the entry says which
-    // one, and the suggestion says what to write instead. The typo is
-    // one the edit cap admits, so the suggestion is the point of the
-    // test rather than incidental to it.
     let ir = one_state_ir(vec![BlockState::bare("minecraft:oak_planck")]);
     let report = portability_for_java(&ir, &table(), &no_aliases());
     assert_eq!(report.counts().unsupported, 1);
@@ -412,11 +359,6 @@ fn an_absent_id_is_named_with_the_nearest_id_the_edition_declares() {
 
 #[test]
 fn a_spelling_only_the_other_edition_has_is_named_under_both() {
-    // A rename inside one edition's own range is not this case: the id
-    // is absent from *every* version the table describes. Asked of
-    // both counters because the id half of the question is the one
-    // thing Java also asks, and a Bedrock-only spelling reaching a
-    // Java palette is the way it gets asked in practice.
     let ir = one_state_ir(vec![BlockState::bare("minecraft:standing_sign")]);
     for report in [
         portability_for_java(&ir, &table(), &no_aliases()),
@@ -435,9 +377,7 @@ fn a_spelling_only_the_other_edition_has_is_named_under_both() {
     }
 }
 
-/// The alias table for [`table`]: the one rename it describes, plus
-/// the cross-edition spelling of a block the table has under another
-/// name.
+/// The alias table for [`table`]: its rename, and a cross-edition spelling.
 fn aliases() -> AliasIndex {
     let catalog: AliasCatalog = serde_json::from_str(
         r#"{
@@ -453,13 +393,7 @@ fn aliases() -> AliasIndex {
     AliasIndex::from_catalog(catalog).expect("test catalog folds")
 }
 
-/// An id this edition has under another name is reported with that
-/// name, which is the answer the distance search cannot reach.
-///
-/// `standing_sign` is seven edits from `oak_sign` and the same block.
-/// Without the alias table the row says the edition does not have it
-/// and stops; that sentence is true about the id and useless about the
-/// build.
+/// `standing_sign` is seven edits from `oak_sign`, out of the typo search's reach.
 #[test]
 fn a_renamed_id_is_reported_with_the_name_this_edition_uses() {
     let ir = one_state_ir(vec![BlockState::bare("minecraft:standing_sign")]);
@@ -473,12 +407,6 @@ fn a_renamed_id_is_reported_with_the_name_this_edition_uses() {
     );
 }
 
-/// The alias question is asked of the edition, not of one version.
-///
-/// `stonebrick` is declared by `1.0` alone and `stone_bricks` by `1.1`
-/// alone, and this axis reports across the range — so each is the
-/// other's answer here, where a pinned build would answer with only the
-/// one its own version has.
 #[test]
 fn an_alias_any_version_declares_counts_for_the_edition() {
     let ir = one_state_ir(vec![BlockState::bare("minecraft:chiseled_stone_bricks")]);
@@ -507,8 +435,6 @@ fn an_alias_any_version_declares_counts_for_the_edition() {
     );
 }
 
-/// A group whose other spellings this edition does not have either is
-/// no answer.
 #[test]
 fn an_alias_this_edition_lacks_is_not_offered() {
     let ir = one_state_ir(vec![BlockState::bare("minecraft:standing_sign")]);
@@ -523,7 +449,7 @@ fn an_alias_this_edition_lacks_is_not_offered() {
     );
 }
 
-/// [`table`] plus the one id the alias tests need it to declare.
+/// [`table`] plus `oak_sign`.
 fn table_with_oak_sign() -> BlocksIndex {
     let catalog: BlocksCatalog = serde_json::from_str(
         r#"{
@@ -545,9 +471,6 @@ fn table_with_oak_sign() -> BlocksIndex {
 
 #[test]
 fn an_id_nothing_resembles_is_named_without_a_suggestion() {
-    // Failing to find a suggestion must not cost the name. An id this
-    // far from every candidate is the ordinary case for a block that
-    // belongs to the other edition entirely.
     let ir = one_state_ir(vec![BlockState::bare("minecraft:totally_not_a_block")]);
     let report = bedrock_report(&ir, &table(), &no_aliases());
     assert_eq!(report.unsupported()[0].id, "minecraft:totally_not_a_block");
@@ -562,11 +485,7 @@ fn an_id_nothing_resembles_is_named_without_a_suggestion() {
 
 #[test]
 fn a_suggestion_is_scored_on_the_path_and_not_on_the_whole_id() {
-    // `nearest_match`'s edit cap scales with input length, and every
-    // vanilla id shares the ten-character `minecraft:` prefix — long
-    // enough to buy an edit the typed part never earned. `ok_dr` is
-    // three edits from `oak_door`, which a five-character input does
-    // not admit and a fifteen-character one would.
+    // `ok_dr` is three edits from `oak_door`: too many for its path, few enough for the whole id.
     let ir = one_state_ir(vec![BlockState::bare("minecraft:ok_dr")]);
     let report = portability_for_java(&ir, &table(), &no_aliases());
     assert_eq!(
@@ -580,17 +499,7 @@ fn a_suggestion_is_scored_on_the_path_and_not_on_the_whole_id() {
 
 #[test]
 fn a_suggestion_can_come_from_any_version_the_edition_declares() {
-    // The candidates are every id the edition has, not the oldest
-    // version's list: this axis asks of the edition, and a block added
-    // partway through the range is a block the edition has. `table()`
-    // adds `stone_bricks` in its diff and removes `stonebrick` there,
-    // so the base-only reading has a plausible wrong answer to give
-    // (`stonebrick`, two edits away) rather than no answer at all.
-    //
-    // Asked in both directions. `stone_bricks` is in the diff and not
-    // the base, `stonebrick` is in the base and not the diff, and each
-    // is the nearest candidate to a different typo — so neither a
-    // base-only nor a newest-only reading can pass both halves.
+    // `stone_bricks` is only in the diff and `stonebrick` only in the base.
     for (typo, nearest) in [
         ("minecraft:stone_brickz", "minecraft:stone_bricks"),
         ("minecraft:stonebrik", "minecraft:stonebrick"),
@@ -610,10 +519,6 @@ fn a_suggestion_can_come_from_any_version_the_edition_declares() {
 
 #[test]
 fn a_suggestion_is_never_drawn_from_the_other_namespace() {
-    // `cairn_lang_core::suggest::nearest_namespaced_id` compares paths
-    // within one namespace: a `mod:oak_planck` is not repaired by
-    // `minecraft:oak_planks`, because the pack that would have to
-    // declare it is the mod's.
     let ir = one_state_ir(vec![BlockState::bare("mod:oak_planck")]);
     let report = portability_for_java(&ir, &table(), &no_aliases());
     assert_eq!(
@@ -627,8 +532,6 @@ fn a_suggestion_is_never_drawn_from_the_other_namespace() {
 
 #[test]
 fn a_block_the_backend_maps_no_states_for_is_named_by_the_states_it_carries() {
-    // The block exists on the edition, so the repair is not to the
-    // material, and the states are what says so.
     let mut properties = IndexMap::new();
     properties.insert("facing".to_owned(), "north".to_owned());
     let ir = one_state_ir(vec![BlockState {
@@ -668,9 +571,6 @@ fn a_state_value_outside_the_java_domain_refuses_the_report() {
 
 #[test]
 fn a_state_key_the_backend_does_not_read_refuses_the_report() {
-    // The neighbouring leak, asked separately: the two arrive through
-    // different translator branches, and one arm folded into the other
-    // would leave a variant no test could tell apart from its sibling.
     let ir = one_state_ir(vec![BlockState {
         id: "minecraft:oak_stairs".to_owned(),
         properties: {
@@ -693,8 +593,6 @@ fn a_state_key_the_backend_does_not_read_refuses_the_report() {
 
 #[test]
 fn a_leak_refuses_the_whole_palette_and_names_every_one_of_them() {
-    // The other entries are portable, degraded and unsupported, and
-    // none of those counts is reported.
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),
         BlockState {
@@ -727,9 +625,6 @@ fn a_leak_refuses_the_whole_palette_and_names_every_one_of_them() {
         leaked[0].contains("facing=up") && leaked[1].contains("waterlogged"),
         "in palette order, unreworded: {leaked:?}",
     );
-    // The premise: without the two leaked entries the same palette
-    // classifies into all three categories, so the refusal is what
-    // withheld them rather than there being nothing to withhold.
     let clean = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),
         BlockState {
@@ -750,8 +645,6 @@ fn a_leak_refuses_the_whole_palette_and_names_every_one_of_them() {
 
 #[test]
 fn a_block_the_backend_maps_no_states_for_is_not_a_leak() {
-    // A fact about this backend that a build would hit and no pack
-    // validation could prevent, unlike the two leaks above.
     let mut properties = IndexMap::new();
     properties.insert("facing".to_owned(), "north".to_owned());
     let ir = one_state_ir(vec![BlockState {
@@ -765,9 +658,6 @@ fn a_block_the_backend_maps_no_states_for_is_not_a_leak() {
 
 #[test]
 fn a_degraded_entry_is_named_with_the_states_that_degraded_it() {
-    // The states, not the id alone: degradation is a fact about the
-    // state combination, and one id reaches this list once per
-    // combination that loses something.
     let ir = one_state_ir(vec![BlockState {
         id: "minecraft:oak_stairs".to_owned(),
         properties: stair_props("south", "top", "outer_left"),
@@ -784,8 +674,6 @@ fn a_degraded_entry_is_named_with_the_states_that_degraded_it() {
             }],
         }],
     );
-    // The categories stay apart: this entry builds, so it is not in
-    // the list of entries with no form at all.
     assert!(
         report.unsupported().is_empty(),
         "got {:?}",
@@ -795,9 +683,6 @@ fn a_degraded_entry_is_named_with_the_states_that_degraded_it() {
 
 #[test]
 fn two_state_combinations_of_one_id_are_two_named_entries() {
-    // The case a list keyed by id alone cannot report, and the one
-    // `examples/roof-hip.crn` actually hits: four degraded entries,
-    // every one of them `minecraft:spruce_stairs`.
     let ir = one_state_ir(vec![
         BlockState {
             id: "minecraft:oak_stairs".to_owned(),
@@ -835,9 +720,6 @@ fn two_state_combinations_of_one_id_are_two_named_entries() {
 
 #[test]
 fn the_named_entries_are_the_counted_ones_in_palette_order() {
-    // One of each category, with the two unsupported ones separated by
-    // entries that are not, so the order asserted is the palette's and
-    // not an artefact of them being adjacent.
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:no_such_block_at_all"),
         BlockState::bare("minecraft:oak_planks"),
@@ -880,10 +762,6 @@ fn the_named_entries_are_the_counted_ones_in_palette_order() {
             .collect::<Vec<_>>(),
         ["minecraft:oak_stairs"],
     );
-    // The pairing invariant, asked where entries actually exist: over
-    // a palette with none of them, "pushed without counting" and
-    // "counted without pushing" both read as 0 == 0. Asked of both
-    // lists, since each has its own push site.
     assert_eq!(
         report.unsupported().len(),
         report.counts().unsupported as usize,
@@ -898,10 +776,6 @@ fn the_named_entries_are_the_counted_ones_in_palette_order() {
 
 #[test]
 fn a_pack_that_cannot_refute_an_id_names_nothing() {
-    // The "cannot refute" rule is what keeps a pack with no `blocks`
-    // component from reporting every id as absent. The list has to
-    // follow the count through that rule rather than be built from a
-    // second, laxer reading of the same table.
     let ir = one_state_ir(vec![BlockState::bare("minecraft:totally_not_a_block")]);
     let none = BlocksIndex::empty();
     for report in [

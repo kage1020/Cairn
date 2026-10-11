@@ -1,46 +1,35 @@
-//! Top-level `pack.json` schema describing a registry pack.
+//! The `pack.json` manifest of a registry pack.
 
 use cairn_lang_core::Edition;
 use serde::Deserialize;
 
-/// `pack.json` body.
+/// The body of `pack.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PackManifest {
-    /// Schema version of the manifest itself. Bumped only when an
-    /// incompatible shape change lands.
+    /// The manifest's schema version.
     pub schema_version: u32,
-    /// Edition the pack targets.
+    /// The edition the pack targets.
     pub edition: Edition,
-    /// Stable identifier for the pack, surfaced in error messages.
+    /// The pack's name, shown in error messages.
     pub name: String,
-    /// Free-form description. Informational; not consumed by the compiler.
+    /// A description the compiler does not read.
     pub description: String,
-    /// Component file references.
+    /// The component files.
     pub files: PackFiles,
 }
 
-/// Component file references inside a registry pack.
-///
-/// `data_versions` is the only required component. Every other one is an
-/// `Option`, so a pack predating it stays loadable.
+/// The component files of a pack; all but `data_versions` are optional, so older packs still load.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PackFiles {
-    /// Relative filename of the `DataVersionTable` JSON.
+    /// The `data_versions` file, relative to the pack.
     pub data_versions: String,
-    /// Relative filename of the abstract `materials` catalog JSON. When
-    /// absent, the loader fills [`crate::registry::MaterialsIndex::empty`]
-    /// in its place.
+    /// The `materials` file.
     #[serde(default)]
     pub materials: Option<String>,
-    /// Relative filename of the per-version `blocks` id table JSON. When
-    /// absent, the loader fills [`crate::registry::BlocksIndex::empty`] in
-    /// its place, and a compile against the pack cannot decide whether an
-    /// id exists, so every id passes, silently.
+    /// The `blocks` file; without it, every id passes as known.
     #[serde(default)]
     pub blocks: Option<String>,
-    /// Relative filename of the `aliases` group catalog JSON. When absent,
-    /// the loader fills [`crate::registry::AliasIndex::empty`] in its place,
-    /// and an `E_UNKNOWN_ID` against the pack offers the typo search alone.
+    /// The `aliases` file; without it, an `E_UNKNOWN_ID` offers only the typo search.
     #[serde(default)]
     pub aliases: Option<String>,
 }

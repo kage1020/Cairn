@@ -1,8 +1,4 @@
-//! Examples compiled through the Bedrock `.mcstructure` backend. The roof
-//! stair family, the only block kind lowering interns with blockstate
-//! properties, maps to Bedrock `states`: `cottage` compiles without a parity
-//! note and `themed-tower` with exactly the shape-drop note its eave corners
-//! incur.
+//! Shipped examples through the Bedrock `.mcstructure` backend; only roof stairs carry states.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
@@ -11,17 +7,13 @@ use cairn_lang_formats::data_version::resolve_bedrock_target;
 
 use crate::common::{block_palette, latest, lower_example};
 
-/// Lower an example the way `cairn compile --edition bedrock` does.
+/// An example lowered as `cairn compile --edition bedrock` lowers it.
 fn lower_bedrock(example: &str) -> BlockArrayIr {
     lower_example(example, Edition::Bedrock, Some(latest(Edition::Bedrock)))
 }
 
 #[test]
 fn cottage_compiles_to_mcstructure_without_degradation() {
-    // cottage's gable roof stairs are all `shape=straight`
-    // (`roof::gable_stair_state`), which is Bedrock's default — so every
-    // stair palette entry maps losslessly and no W_INTENT_DEGRADED note is
-    // raised.
     let out = lower_bedrock("cottage.crn");
     let target = resolve_bedrock_target("latest").expect("known target");
     let mut total_notes = 0;
@@ -38,7 +30,6 @@ fn cottage_compiles_to_mcstructure_without_degradation() {
 
 #[test]
 fn cottage_roof_stairs_carry_bedrock_states() {
-    // A non-empty typed `states` compound shows the mapping fired.
     use cairn_lang_nbt::tag::Tag;
 
     let out = lower_bedrock("cottage.crn");
@@ -57,10 +48,7 @@ fn cottage_roof_stairs_carry_bedrock_states() {
         .id;
     let (root, _notes) = build_mcstructure_tag(ba, &target).expect("build");
 
-    // The `block_palette` entry named `stair_id`, then its states. Found by
-    // `name` rather than by the Java palette index: translation can merge
-    // Java entries into one `block_palette` entry, so the two lists need not
-    // line up.
+    // By `name`, since translation can merge Java entries into one `block_palette` entry.
     let palette = block_palette(&root);
     let stair = palette
         .iter()
@@ -89,10 +77,6 @@ fn cottage_roof_stairs_carry_bedrock_states() {
 
 #[test]
 fn themed_tower_compiles_to_mcstructure_with_shape_degradation() {
-    // themed-tower's eave stair binds `shape=outer_left`, which Bedrock has
-    // no state for. The build succeeds; palette dedup means one warning per
-    // distinct dropped `(id, shape)`, and the source has exactly one such
-    // palette entry (`dark_oak_stairs` with `outer_left`).
     let out = lower_bedrock("themed-tower.crn");
     let target = resolve_bedrock_target("latest").expect("known target");
     let mut total_notes = 0;

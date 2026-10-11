@@ -79,8 +79,6 @@ fn the_empty_index_describes_no_version() {
 
 #[test]
 fn an_id_only_one_version_declares_is_still_declared_by_the_edition() {
-    // A rename inside the range leaves each spelling declared by one
-    // version, and neither is absent from the edition.
     let index = parse(TWO_VERSIONS).expect("catalog");
     assert_eq!(
         index.declared_by_some_version("minecraft:stonebrick"),
@@ -110,9 +108,6 @@ fn an_id_no_version_declares_is_absent_from_the_edition() {
 
 #[test]
 fn a_prefix_of_a_declared_id_is_not_itself_declared() {
-    // `minecraft:stone` is a prefix of two declared ids and declared by
-    // no version. A prefix match would pass a wrong id the game loads as
-    // air.
     let index = parse(TWO_VERSIONS).expect("catalog");
     assert_eq!(
         index.declared_by_some_version("minecraft:stone"),
@@ -122,8 +117,6 @@ fn a_prefix_of_a_declared_id_is_not_itself_declared() {
 
 #[test]
 fn an_index_with_no_tables_answers_nothing_rather_than_no() {
-    // `Some(false)` here would turn a pack that ships no `blocks`
-    // component into one that declares no block at all.
     assert_eq!(
         BlocksIndex::empty().declared_by_some_version("minecraft:stone"),
         None,
@@ -278,9 +271,7 @@ fn adding_an_id_the_parent_already_has_is_refused() {
 
 #[test]
 fn a_removal_and_a_re_add_of_the_same_id_both_apply() {
-    // The removal runs first by construction, so a diff may re-add an
-    // id it just removed — that is how a pack expresses "same name,
-    // new meaning" without needing a third list.
+    // Removing and re-adding an id is how a diff says "same name, new meaning".
     let index = parse(
         r#"{
         "schema_version": 1,

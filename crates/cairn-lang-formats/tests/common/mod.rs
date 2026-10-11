@@ -1,7 +1,4 @@
 //! Helpers shared by the `cairn-lang-formats` integration test binaries.
-//!
-//! Every binary here reads the same `examples/` tree and walks the same
-//! built-in registry packs, so the plumbing for both lives once.
 
 use std::path::PathBuf;
 
@@ -19,21 +16,15 @@ pub fn examples_dir() -> PathBuf {
         .join("examples")
 }
 
-/// The number of `.crn` files `examples/` ships. Bump it with the next
-/// example; every sweep below refuses a smaller set, and a loop over a
-/// filtered-down set passes silently.
+/// The number of `.crn` files `examples/` ships; bump it with the next example.
 pub const SHIPPED_EXAMPLES: usize = 12;
 
-/// Every `.crn` under `examples/`, as `(file name, source)`, sorted by name.
-///
-/// Refuses to return a set other than the shipped one. Every sweep is a
-/// loop over this, and a loop over nothing passes — the guard lives with
-/// the iteration source so no test can forget it.
+/// Every `.crn` under `examples/`, as `(file name, source)` sorted by name, refusing any set but
+/// the shipped one, since a sweep over nothing passes.
 ///
 /// # Panics
 ///
-/// Panics if `examples/` cannot be read or holds other than
-/// [`SHIPPED_EXAMPLES`] files.
+/// When `examples/` cannot be read or holds other than [`SHIPPED_EXAMPLES`] files.
 pub fn examples() -> Vec<(String, String)> {
     let dir = examples_dir();
     let entries = std::fs::read_dir(&dir)
@@ -70,7 +61,7 @@ pub fn examples() -> Vec<(String, String)> {
 ///
 /// # Panics
 ///
-/// Panics if the file cannot be read.
+/// When the file cannot be read.
 pub fn example_source(name: &str) -> String {
     let path = examples_dir().join(name);
     std::fs::read_to_string(&path)
@@ -82,14 +73,12 @@ pub fn latest(edition: Edition) -> &'static str {
     &builtin_pack(edition).data_versions.latest
 }
 
-/// The block-array IR `cairn compile --edition <edition>` lowers `source`
-/// to: resolved for that edition, through that edition's built-in pack,
-/// with the id table of `mc_version`. `None` pins no version, which is how
-/// `cairn info` lowers.
+/// The block-array IR `cairn compile --edition <edition>` lowers `source` to; a `mc_version` of
+/// `None` pins no version, as `cairn info` does.
 ///
 /// # Panics
 ///
-/// Panics if `source` does not parse.
+/// When `source` does not parse.
 pub fn lower_source(source: &str, edition: Edition, mc_version: Option<&str>) -> BlockArrayIr {
     let module = parse(source).unwrap_or_else(|err| panic!("source does not parse: {err}"));
     let ir = lower(&module);
@@ -106,8 +95,7 @@ pub fn lower_example(name: &str, edition: Edition, mc_version: Option<&str>) -> 
     lower_source(&example_source(name), edition, mc_version)
 }
 
-/// Every version the pack can build for, as the `--target` strings a user
-/// types.
+/// Every version the pack can build for.
 pub fn supported_versions(pack: &RegistryPack) -> Vec<&str> {
     pack.targetable()
         .into_iter()
@@ -119,7 +107,7 @@ pub fn supported_versions(pack: &RegistryPack) -> Vec<&str> {
 ///
 /// # Panics
 ///
-/// Panics if the root has no `structure` compound.
+/// When the root has no `structure` compound.
 pub fn structure_compound(root: &Compound) -> &Compound {
     match root.entries.get("structure") {
         Some(Tag::Compound(c)) => c,
@@ -131,7 +119,7 @@ pub fn structure_compound(root: &Compound) -> &Compound {
 ///
 /// # Panics
 ///
-/// Panics if the root has no `structure.palette.default` compound.
+/// When the root has no `structure.palette.default` compound.
 pub fn default_palette(root: &Compound) -> &Compound {
     match structure_compound(root).entries.get("palette") {
         Some(Tag::Compound(p)) => match p.entries.get("default") {
@@ -142,12 +130,11 @@ pub fn default_palette(root: &Compound) -> &Compound {
     }
 }
 
-/// The `structure.palette.default.block_palette` entries of a
-/// `.mcstructure` root.
+/// The `structure.palette.default.block_palette` entries of a `.mcstructure` root.
 ///
 /// # Panics
 ///
-/// Panics if the root has no `block_palette` list.
+/// When the root has no `block_palette` list.
 pub fn block_palette(root: &Compound) -> &[Tag] {
     match default_palette(root).entries.get("block_palette") {
         Some(Tag::List(l)) => &l.items,
@@ -163,9 +150,7 @@ pub fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, Strin
         .collect()
 }
 
-/// Stair properties in the `facing` / `half` / `shape` insertion order the
-/// lowering uses, so `translate_states` sees the same key stream as at
-/// runtime.
+/// Stair properties in the order lowering inserts them.
 pub fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
     props([("facing", facing), ("half", half), ("shape", shape)])
 }

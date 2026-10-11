@@ -1,11 +1,5 @@
-//! The streaming structure writers against the tree builders: the same
-//! bytes over every structure the shipped examples lower to, on both
-//! editions, and over shapes the examples do not reach (an array with a
-//! different extent on each axis, and empty ones, whose lists must declare
-//! `TAG_End`), with each Bedrock `block_palette` a set per
-//! `spec/compilation` "Within-phase conflicts and the palette". The write
-//! path does not re-check the grid, so `prepare_*` must refuse every grid
-//! it could not stream.
+//! The streaming structure writers write the tree builders' bytes, and `prepare_*` refuses every
+//! grid they could not stream.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
@@ -22,8 +16,7 @@ use cairn_lang_nbt::NbtIoError;
 
 use crate::common::{block_palette, examples, latest, lower_source};
 
-/// Assert two encodings are the same bytes, reporting the lengths and the
-/// first offset where they part rather than two megabyte-scale buffers.
+/// Asserts two encodings match, reporting the first offset where they differ.
 fn assert_same_bytes(label: &str, what: &str, actual: &[u8], expected: &[u8]) {
     if actual == expected {
         return;
@@ -41,7 +34,7 @@ fn assert_same_bytes(label: &str, what: &str, actual: &[u8], expected: &[u8]) {
     );
 }
 
-/// Assert both Java write paths agree with the tree for `array`.
+/// Asserts both Java write paths agree with the tree for `array`.
 fn assert_java_streams_the_tree(label: &str, array: &BlockArray) {
     let target = resolve_java_target("latest").expect("latest");
     let mut tree = Vec::new();
@@ -61,14 +54,8 @@ fn assert_java_streams_the_tree(label: &str, array: &BlockArray) {
     assert_same_bytes(label, "write_structure_gzip", &one_step, &tree);
 }
 
-/// Assert the Bedrock write path agrees with the tree for `array`, and
-/// that the `block_palette` it writes lists no block twice. Returns the
-/// parity notes `prepare_mcstructure` raised and how many palette entries
-/// translation merged into an earlier one.
-///
-/// The tree builder takes its notes from `prepare_mcstructure`, so the
-/// sweep checks that notes are raised at all, and that some palette has a
-/// merge for the set check to hold, rather than comparing the two.
+/// Asserts the Bedrock write path agrees with the tree and its `block_palette` is a set, returning
+/// the parity notes and how many palette entries translation merged.
 fn assert_bedrock_streams_the_tree(label: &str, array: &BlockArray) -> (Vec<ParityNote>, usize) {
     let target = resolve_bedrock_target("latest").expect("latest");
     let (root, _) = build_mcstructure_tag(array, &target).expect("build");
@@ -110,9 +97,7 @@ fn every_shipped_structure_streams_the_bytes_its_tree_writes() {
             }
         }
         assert!(compared > 0, "{edition:?}: the examples lowered to nothing");
-        // `themed-tower`'s corner stair raises a note, and `roof-hip`'s
-        // corners fold two stairs into one Bedrock block once `shape` is
-        // dropped.
+        // `themed-tower` raises a note, and `roof-hip` folds two corner stairs into one block.
         if matches!(edition, Edition::Bedrock) {
             assert!(
                 notes > 0,
@@ -126,8 +111,7 @@ fn every_shipped_structure_streams_the_bytes_its_tree_writes() {
     }
 }
 
-/// A 2×3×4 array whose voxels all differ from their neighbours along each
-/// axis, so a loop nested in the wrong order writes a different sequence.
+/// A 2×3×4 array that a loop nested in the wrong order writes differently.
 fn asymmetric_array() -> BlockArray {
     let mut palette = Palette::new_with_air();
     let slots = [
@@ -164,9 +148,6 @@ fn an_asymmetric_array_streams_the_bytes_its_tree_writes() {
 
 #[test]
 fn an_empty_array_streams_the_bytes_its_tree_writes() {
-    // Every per-voxel list is empty, so each must declare `TAG_End` the way
-    // `List::of_compounds` / `List::of_tags` do. One axis at zero empties
-    // the grid as surely as all three, so both shapes are compared.
     for dims in [Dims { x: 0, y: 0, z: 0 }, Dims { x: 2, y: 0, z: 3 }] {
         let array = BlockArray {
             dims,
@@ -196,8 +177,7 @@ fn grid(dims: Dims, voxels: usize) -> BlockArray {
 
 #[test]
 fn a_voxel_count_past_the_list_limit_is_refused_before_a_byte_is_written() {
-    // 2000 fits an `i32` on every axis, but 2000^3 does not, so the `blocks`
-    // list and each `block_indices` layer could not declare their length.
+    // 2000 fits an `i32` on every axis, but 2000^3 does not.
     let array = grid(
         Dims {
             x: 2000,
@@ -263,7 +243,6 @@ fn a_voxel_count_past_usize_is_refused() {
 
 #[test]
 fn a_grid_shorter_than_its_dims_is_refused_before_a_byte_is_written() {
-    // 2x2x2 holds 8 voxels and this grid has 3.
     let array = grid(Dims { x: 2, y: 2, z: 2 }, 3);
     let java = resolve_java_target("latest").expect("latest");
     let err = prepare_structure(&array, &java).expect_err("java prepare");
@@ -334,7 +313,6 @@ fn a_palette_string_the_encoder_refuses_is_named_with_its_entry() {
          contains byte 0xc3 at index 13, not encodable here",
     );
 
-    // Java writes property names and values too, and names the property.
     let mut array = grid(Dims { x: 1, y: 1, z: 1 }, 1);
     let mut state = BlockState::bare("minecraft:oak_stairs");
     state

@@ -1,5 +1,4 @@
-//! The shipped examples lowered the way `cairn compile` lowers them, and
-//! what the block arrays it produces hold.
+//! The shipped examples lowered as `cairn compile` lowers them, and the block arrays they become.
 
 #[path = "../common/mod.rs"]
 pub mod common;

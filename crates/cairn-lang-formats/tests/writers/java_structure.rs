@@ -1,5 +1,4 @@
-//! The Java vanilla structure tag tree: its root keys, palette, per-voxel
-//! `blocks` list and `DataVersion`, and the file name a scope writes to.
+//! The Java structure tag tree, and the file name a scope writes to.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
@@ -15,8 +14,6 @@ fn target_1_21_4() -> JavaTarget {
     resolve_java_target("1.21.4").expect("known target")
 }
 
-/// The `.nbt` flavour every naming test in this file pins; the
-/// `.mcstructure` flavour is pinned in `bedrock_structure.rs`.
 fn output_filename_nbt(source_scope: &str) -> String {
     output_filename(source_scope, OutputExt::Nbt)
 }
@@ -33,22 +30,17 @@ fn unit_air() -> BlockArray {
 }
 
 fn synthetic_cottage() -> BlockArray {
-    // A tiny cottage-shaped IR built by hand so the test does not depend on
-    // the lowering pipeline. Two materials beyond air: a floor of
-    // cobblestone and walls of oak_planks. dims = 2x2x2, voxels in (y,z,x)
-    // order: floor row first, walls row second.
+    // A cobblestone floor and one plank wall cell, built without lowering.
     let mut palette = Palette::new_with_air();
     let cobble = palette.intern(BlockState::bare("minecraft:cobblestone"));
     let planks = palette.intern(BlockState::bare("minecraft:oak_planks"));
     let dims = Dims { x: 2, y: 2, z: 2 };
     let mut voxels = vec![PaletteIndex::AIR; dims.volume()];
-    // y=0 (floor): all cobblestone.
     for z in 0..2 {
         for x in 0..2 {
             voxels[dims.index(x, 0, z).unwrap()] = cobble;
         }
     }
-    // y=1: corner walls (z=0,x=0), rest air.
     voxels[dims.index(0, 1, 0).unwrap()] = planks;
     BlockArray {
         dims,
@@ -62,7 +54,6 @@ fn synthetic_cottage() -> BlockArray {
 
 #[test]
 fn unit_air_root_has_size_palette_blocks_entities_dataversion() {
-    // 1×1×1 all-air structure produces the canonical empty room.
     let target = target_1_21_4();
     let root = build_structure_tag(&unit_air(), &target).expect("build");
     let keys: Vec<&String> = root.entries.keys().collect();
@@ -71,12 +62,10 @@ fn unit_air_root_has_size_palette_blocks_entities_dataversion() {
         vec!["size", "palette", "blocks", "entities", "DataVersion"]
     );
 
-    // size = [1, 1, 1]
     match &root.entries["size"] {
         Tag::List(l) => assert_eq!(l.items, vec![Tag::Int(1), Tag::Int(1), Tag::Int(1)]),
         _ => panic!("size is not a List"),
     }
-    // palette = [{Name: minecraft:air}]
     match &root.entries["palette"] {
         Tag::List(l) => {
             assert_eq!(l.items.len(), 1);
@@ -93,7 +82,6 @@ fn unit_air_root_has_size_palette_blocks_entities_dataversion() {
         }
         _ => panic!("palette is not a List"),
     }
-    // blocks = [{state: 0, pos: [0,0,0]}]
     match &root.entries["blocks"] {
         Tag::List(l) => {
             assert_eq!(l.items.len(), 1);
@@ -112,12 +100,10 @@ fn unit_air_root_has_size_palette_blocks_entities_dataversion() {
         }
         _ => panic!("blocks is not a List"),
     }
-    // entities = []
     match &root.entries["entities"] {
         Tag::List(l) => assert!(l.items.is_empty()),
         _ => panic!("entities is not a List"),
     }
-    // DataVersion
     assert_eq!(
         root.entries.get("DataVersion"),
         Some(&Tag::Int(target.data_version))
@@ -126,7 +112,6 @@ fn unit_air_root_has_size_palette_blocks_entities_dataversion() {
 
 #[test]
 fn cottage_palette_contains_three_concrete_entries() {
-    // Synthetic cottage IR exposes air / cobblestone / oak_planks.
     let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");
     let Tag::List(palette) = &root.entries["palette"] else {
         unreachable!()
@@ -155,7 +140,6 @@ fn cottage_palette_contains_three_concrete_entries() {
 
 #[test]
 fn palette_entry_without_properties_omits_properties_compound() {
-    // Property-less states leave Properties out entirely.
     let root = build_structure_tag(&unit_air(), &target_1_21_4()).expect("build");
     let Tag::List(palette) = &root.entries["palette"] else {
         unreachable!()
@@ -168,7 +152,6 @@ fn palette_entry_without_properties_omits_properties_compound() {
 
 #[test]
 fn palette_entry_with_properties_keeps_them() {
-    // Non-empty properties round-trip into a Properties compound.
     let mut palette = Palette::new_with_air();
     let mut stairs = BlockState::bare("minecraft:oak_stairs");
     stairs
@@ -211,7 +194,6 @@ fn palette_entry_with_properties_keeps_them() {
 
 #[test]
 fn blocks_entries_count_equals_dims_volume() {
-    // Every voxel — including air — has an entry.
     let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");
     let Tag::List(blocks) = &root.entries["blocks"] else {
         unreachable!()
@@ -221,7 +203,6 @@ fn blocks_entries_count_equals_dims_volume() {
 
 #[test]
 fn blocks_entries_walk_yzx_order() {
-    // Block list traversal matches voxel storage order.
     let root = build_structure_tag(&synthetic_cottage(), &target_1_21_4()).expect("build");
     let Tag::List(blocks) = &root.entries["blocks"] else {
         unreachable!()
@@ -263,7 +244,6 @@ fn int_at(items: &[Tag], i: usize) -> i32 {
 
 #[test]
 fn dataversion_matches_target() {
-    // The integer in the root reflects the target table.
     let t = resolve_java_target("1.20.4").expect("known");
     let root = build_structure_tag(&unit_air(), &t).expect("build");
     assert_eq!(root.entries.get("DataVersion"), Some(&Tag::Int(3700)));
@@ -271,7 +251,6 @@ fn dataversion_matches_target() {
 
 #[test]
 fn abstract_palette_id_rejected() {
-    // An unresolved abstract token is a hard error, not silent air.
     let mut palette = Palette::new_with_air();
     palette.intern(BlockState::bare("@cobblestone"));
     let dims = Dims { x: 1, y: 1, z: 1 };
@@ -292,17 +271,12 @@ fn abstract_palette_id_rejected() {
 
 #[test]
 fn output_filename_strips_struct_prefix() {
-    // Scope key → filename.
     assert_eq!(output_filename_nbt("struct::cottage"), "cottage.nbt");
     assert_eq!(output_filename_nbt("cottage"), "cottage.nbt");
 }
 
 #[test]
 fn output_filename_strips_site_and_name_prefixes_to_place_id() {
-    // Site keys take the form `site::SITE::PLACE_ID`; the on-disk name
-    // uses only the `place id=` so siblings share a flat output dir with
-    // structs. Two sites placing one id therefore share a file name, which
-    // the resolver refuses as `E_OUTPUT_NAME_COLLISION`.
     assert_eq!(output_filename_nbt("site::hamlet::home1"), "home1.nbt");
     assert_eq!(
         output_filename_nbt("site::village::cottage_2"),
@@ -312,34 +286,20 @@ fn output_filename_strips_site_and_name_prefixes_to_place_id() {
 
 #[test]
 fn output_filename_preserves_inner_colons_and_unicode() {
-    // Only the exact `struct::` prefix is stripped; filename sanitisation
-    // is the OS layer's responsibility.
     assert_eq!(output_filename_nbt("struct::deep::room"), "deep::room.nbt");
-    // No prefix, no transformation: the scope key carries through verbatim.
     assert_eq!(output_filename_nbt("塔"), "塔.nbt");
 }
 
 #[test]
 fn output_filename_flattens_walkway_scope_to_site_prefixed_name() {
-    // `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` →
-    // `SITE_walkway_FROM_PLACE_FROM_PORT__TO_PLACE_TO_PORT.nbt`. The
-    // site name is preserved (so a multi-site file's walkways do not
-    // collide on disk) and `.` separators between place and port are
-    // flattened to `_` so the on-disk name stays a single identifier
-    // token across operating systems.
     assert_eq!(
         output_filename_nbt("walkway::hamlet::home1.entry__home2.entry"),
         "hamlet_walkway_home1_entry__home2_entry.nbt",
     );
-    // Different site → different filename prefix.
     assert_eq!(
         output_filename_nbt("walkway::village::a.door__b.door"),
         "village_walkway_a_door__b_door.nbt",
     );
-    // A walkway-prefixed key without the `::` site separator falls
-    // through to the generic branch rather than panicking — the IR
-    // contract guarantees the full shape, but the fallback keeps the
-    // helper total against hand-built keys.
     assert_eq!(
         output_filename_nbt("walkway::no_site"),
         "walkway::no_site.nbt"
@@ -348,16 +308,12 @@ fn output_filename_flattens_walkway_scope_to_site_prefixed_name() {
 
 #[test]
 fn output_filename_handles_empty_input() {
-    // Degenerate: an empty scope key produces a file named `.nbt`, which
-    // is malformed on every OS we target. We don't try to fix it — IR
-    // callers control the scope key, and a silent rename would mask the
-    // bug.
+    // Left malformed, since a silent rename would hide a bad scope key.
     assert_eq!(output_filename_nbt(""), ".nbt");
 }
 
 #[test]
 fn gzip_output_begins_with_magic_bytes() {
-    // Write_structure_gzip produces a gzip stream.
     let mut buf = Vec::new();
     write_structure_gzip(&mut buf, &unit_air(), &target_1_21_4()).expect("write");
     assert!(buf.len() >= 2);
@@ -366,13 +322,11 @@ fn gzip_output_begins_with_magic_bytes() {
 
 #[test]
 fn unit_air_debug_snapshot_is_stable() {
-    // Pins the tag tree's construction order.
     let root = build_structure_tag(&unit_air(), &target_1_21_4()).expect("build");
     insta::assert_debug_snapshot!(root);
 }
 
-/// The cottage example's structure tag, built from the block array
-/// `cairn compile --edition java` lowers it to.
+/// The cottage example's structure tag, lowered as `cairn compile --edition java` lowers it.
 fn cottage_structure_tag() -> cairn_lang_formats::java_structure::Compound {
     let block_array = lower_example("cottage.crn", Edition::Java, Some(latest(Edition::Java)));
     let ba = block_array
@@ -384,11 +338,6 @@ fn cottage_structure_tag() -> cairn_lang_formats::java_structure::Compound {
 
 #[test]
 fn cottage_end_to_end_palette_carries_spruce_stairs_properties() {
-    // Lowering the cottage example must produce a Java palette where
-    // spruce_stairs appears with `facing` and `half` properties on every
-    // entry. The Properties compound is the contract the Minecraft
-    // structure block reads — losing it would silently strip the roof
-    // orientation and render the gable as flat slabs.
     let root = cottage_structure_tag();
     let Tag::List(palette) = &root.entries["palette"] else {
         panic!("palette must be a list")
@@ -425,11 +374,6 @@ fn cottage_end_to_end_palette_carries_spruce_stairs_properties() {
 
 #[test]
 fn cottage_end_to_end_size_matches_overhang_inflated_dims() {
-    // cottage.crn declares size=9x7 walls height=4 roof overhang=1.
-    // The Java structure root must mirror the lowering pass:
-    //   x = 9 + 2 = 11
-    //   z = 7 + 2 = 9
-    //   y = 1 (floor) + 4 (walls) + ceil(9/2) (gable) = 10
     let root = cottage_structure_tag();
     match &root.entries["size"] {
         Tag::List(l) => assert_eq!(
@@ -443,8 +387,6 @@ fn cottage_end_to_end_size_matches_overhang_inflated_dims() {
 
 #[test]
 fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
-    // Unreachable from the CLI, but `BlockArray`'s fields and
-    // `build_structure_tag` are public.
     let mut ba = unit_air();
     ba.voxels[0] = PaletteIndex(7);
     let err = build_structure_tag(&ba, &target_1_21_4()).expect_err("out-of-range index");
@@ -463,10 +405,7 @@ fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
 
 #[test]
 fn the_check_lands_exactly_on_the_first_index_that_is_not_a_slot() {
-    // Both sides of the boundary, because `len` is the only value at which
-    // `>= len` and `> len` disagree: the last slot is `len - 1` and must
-    // build, and `len` itself is the first index with nothing behind it and
-    // must not. Testing one side alone leaves the operator free.
+    // Both sides of the boundary, since only `len` tells `>=` from `>`.
     let ba = synthetic_cottage();
     let len = ba.palette.entries.len();
     let highest = ba.voxels.iter().map(|i| i.0).max().expect("non-empty");

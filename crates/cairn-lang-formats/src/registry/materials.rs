@@ -1,53 +1,33 @@
-//! Abstract material catalog component of a [`crate::registry::RegistryPack`].
-//!
-//! Maps the abstract material tokens of `spec/materials-themes` "Canonical
-//! vocabulary" (`@floor.wood.broadleaf`) onto the canonical Minecraft block
-//! ids the block-array IR stores. The catalog is a flat list of
-//! `(token, block)` pairs; the tree the token names suggest is *not*
-//! enforced, because resolution is exact-match.
-//!
-//! The block-array lowering pass reaches this catalog through
-//! [`crate::registry::PackView`], which pairs it with the block-id table
-//! for the version a compile pinned. The trait that pairing satisfies
-//! lives in `cairn_lang_core::block_array`, so `core` never depends on
-//! `formats`.
+//! The materials component of a registry pack: the material tokens of `spec/materials-themes`
+//! "Canonical vocabulary", each matched exactly to a block id.
 
 use indexmap::IndexMap;
 use serde::Deserialize;
 
 use super::namespaced;
 
-/// Highest `materials.schema_version` this Cairn build understands.
+/// The highest `materials.schema_version` this build reads.
 pub const SUPPORTED_MATERIALS_SCHEMA: u32 = 1;
 
-/// On-disk `materials.json` body.
+/// The body of `materials.json`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MaterialsCatalog {
-    /// Schema version of the catalog itself.
+    /// The catalog's schema version.
     pub schema_version: u32,
-    /// Default Minecraft id namespace for entries whose `block` value does
-    /// not carry one. An entry overrides it by writing `"create:cogwheel"`
-    /// instead of `"oak_planks"`.
+    /// The namespace for a `block` that names none.
     pub namespace: String,
-    /// Token → block mappings in declared order.
+    /// The token mappings, in declared order.
     pub entries: Vec<MaterialEntry>,
 }
 
 /// One row of [`MaterialsCatalog::entries`].
 #[derive(Debug, Clone, Deserialize)]
 pub struct MaterialEntry {
-    /// Inner body of the `@TOKEN` literal — no leading `@`.
+    /// The token without its leading `@`.
     pub token: String,
-    /// Resolved Minecraft block id. May omit the namespace, in which case
-    /// the catalog's [`MaterialsCatalog::namespace`] is prepended.
+    /// The block id, namespaced by [`MaterialsCatalog::namespace`] when it names none.
     pub block: String,
-    /// Versions that spell the same material differently.
-    ///
-    /// A material token is edition-neutral, but an id is not always stable
-    /// across one edition's own supported range: Bedrock 1.21.0 spells
-    /// stone bricks `stonebrick` and 1.21.40 spells it `stone_bricks`, so
-    /// a single `block` for `floor.stone.smooth` is wrong at one end of
-    /// the range whichever spelling it picks.
+    /// Per-version spellings, for an id that changes inside the edition's supported range.
     #[serde(default)]
     pub overrides: Vec<MaterialOverride>,
 }
@@ -55,21 +35,16 @@ pub struct MaterialEntry {
 /// One `overrides` row of a [`MaterialEntry`].
 #[derive(Debug, Clone, Deserialize)]
 pub struct MaterialOverride {
-    /// Version this spelling applies to. Exact match — a pack lists one row
-    /// per affected version rather than a range, because the versions it
-    /// supports are a short closed list and a range would need an ordering
-    /// the catalog does not otherwise depend on.
+    /// The version this spelling applies to, matched exactly.
     pub mc_version: String,
-    /// The id for that version, namespaced on the same terms as
-    /// [`MaterialEntry::block`].
+    /// The id for that version, namespaced as [`MaterialEntry::block`] is.
     pub block: String,
 }
 
-/// Validated, lookup-ready abstract-material catalog.
+/// A validated materials catalog, ready for lookup.
 #[derive(Debug, Clone)]
 pub struct MaterialsIndex {
-    /// `token → mapping`, in insertion order, which `nearest_match`'s
-    /// first-seen tie-break then follows.
+    /// In declared order, which the typo suggestion's first-seen tie-break follows.
     by_token: IndexMap<String, MaterialMapping>,
 }
 
@@ -83,8 +58,7 @@ struct MaterialMapping {
 }
 
 impl MaterialsIndex {
-    /// Catalog with no entries, used when a registry pack's manifest
-    /// declares no `materials` component. Lookups always miss.
+    /// A catalog with no entries, for a pack without a `materials` component.
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -92,13 +66,11 @@ impl MaterialsIndex {
         }
     }
 
-    /// Build a [`MaterialsIndex`] from a parsed [`MaterialsCatalog`].
+    /// Validates `catalog` into an index.
     ///
     /// # Errors
     ///
-    /// Returns [`MaterialsError`] when the catalog declares an unsupported
-    /// `schema_version`, a duplicate `token`, or two overrides of one token
-    /// for the same version.
+    /// [`MaterialsError`] for an unsupported schema, a duplicate token or a duplicate override.
     pub fn from_catalog(catalog: MaterialsCatalog) -> Result<Self, MaterialsError> {
         if catalog.schema_version > SUPPORTED_MATERIALS_SCHEMA {
             return Err(MaterialsError::UnsupportedSchemaVersion {
@@ -134,19 +106,13 @@ impl MaterialsIndex {
         Ok(Self { by_token })
     }
 
-    /// Look up an abstract token, ignoring any per-version override.
-    ///
-    /// This is the answer for a caller with no version in hand. A compile
-    /// has one and uses [`Self::lookup_id_for`]; the two differ only for a
-    /// token the pack respells somewhere inside its range.
+    /// The default id for `token`, ignoring per-version overrides.
     #[must_use]
     pub fn lookup_id(&self, token: &str) -> Option<&str> {
         self.by_token.get(token).map(|m| m.default.as_str())
     }
 
-    /// Look up an abstract token as `mc_version` spells it, falling back to
-    /// the default when that version declares no override — or when no
-    /// version is pinned at all.
+    /// The id for `token` as `mc_version` spells it, or the default without an override.
     #[must_use]
     pub fn lookup_id_for(&self, token: &str, mc_version: Option<&str>) -> Option<&str> {
         let mapping = self.by_token.get(token)?;
@@ -154,9 +120,7 @@ impl MaterialsIndex {
         Some(overridden.unwrap_or(&mapping.default).as_str())
     }
 
-    /// Every `(token, mc_version)` pair that carries an override, in
-    /// declared order. The loader uses it to refuse an override naming a
-    /// version the pack's `data_versions` table does not declare.
+    /// Every `(token, mc_version)` pair that carries an override, in declared order.
     pub fn overrides(&self) -> impl Iterator<Item = (&str, &str)> {
         self.by_token.iter().flat_map(|(token, mapping)| {
             mapping
@@ -166,9 +130,7 @@ impl MaterialsIndex {
         })
     }
 
-    /// Every `(token, mc_version, id)` triple this catalog can resolve to,
-    /// with `mc_version` `None` for the default. Used by the pack tests
-    /// that hold every mapping against the block tables.
+    /// Every `(token, mc_version, id)` the catalog resolves to, `mc_version` `None` for a default.
     pub fn mappings(&self) -> impl Iterator<Item = (&str, Option<&str>, &str)> {
         self.by_token.iter().flat_map(|(token, mapping)| {
             std::iter::once((token.as_str(), None, mapping.default.as_str())).chain(
@@ -180,25 +142,18 @@ impl MaterialsIndex {
         })
     }
 
-    /// Iterate every declared token in insertion order without allocating.
-    ///
-    /// The `&dyn`-dispatched suggestion path
-    /// (`cairn_lang_core::block_array::TargetRegistry::known_tokens`) has
-    /// to hand back an owned `Vec` because a borrowing iterator cannot
-    /// cross the dyn boundary; callers holding a concrete
-    /// [`MaterialsIndex`] use this instead and pay for no clone.
+    /// Every declared token, in declared order.
     pub fn tokens(&self) -> impl Iterator<Item = &str> {
         self.by_token.keys().map(String::as_str)
     }
 
-    /// Number of declared entries. Useful for diagnostics that want to say
-    /// "the catalog declares N tokens but none match".
+    /// The number of declared tokens.
     #[must_use]
     pub fn len(&self) -> usize {
         self.by_token.len()
     }
 
-    /// `true` when no tokens are declared.
+    /// Whether no tokens are declared.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.by_token.is_empty()
@@ -209,32 +164,28 @@ impl MaterialsIndex {
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MaterialsError {
-    /// Catalog declared a `schema_version` this build does not understand.
+    /// The catalog's `schema_version` is newer than this build reads.
     #[error(
         "unsupported registry pack materials schema_version {got}; this Cairn supports up to {supported}"
     )]
     UnsupportedSchemaVersion {
-        /// Version the catalog declared.
+        /// The declared version.
         got: u32,
-        /// Highest version this build supports.
+        /// The highest version this build reads.
         supported: u32,
     },
-    /// Two `entries` rows declared the same `token`. Silent overwrite would
-    /// pin lookups on the *last* row, which is invisible to the pack author
-    /// and almost always a copy-paste bug.
+    /// Two entries declared the same token.
     #[error("registry pack materials catalog declares token `{token}` more than once")]
     DuplicateMaterialEntry {
-        /// Verbatim token text from the catalog.
+        /// The token.
         token: String,
     },
-    /// One entry declared two overrides for the same version. As with a
-    /// duplicate token, the silent outcome is "the last row wins", which is
-    /// invisible to the pack author.
+    /// One entry declared two overrides for the same version.
     #[error(
         "registry pack materials token `{token}` declares more than one override for `{mc_version}`"
     )]
     DuplicateMaterialOverride {
-        /// Verbatim token text from the catalog.
+        /// The token.
         token: String,
         /// The version declared twice.
         mc_version: String,

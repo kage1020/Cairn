@@ -1,5 +1,4 @@
-//! What the built-in registry packs hold: every id they can produce exists
-//! in its target, and their alias groups answer the renames they exist for.
+//! What the built-in registry packs hold: ids that exist in their targets, and working aliases.
 
 #[path = "../common/mod.rs"]
 pub mod common;

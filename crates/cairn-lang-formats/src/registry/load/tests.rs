@@ -38,8 +38,7 @@ fn good_data_versions() -> &'static str {
     }"#
 }
 
-/// A pack carrying every component, so a test can vary one piece at a
-/// time without re-spelling the other three.
+/// Writes a pack with every component but `aliases`.
 fn write_full_pack(
     tmp: &Path,
     manifest_json: &str,
@@ -65,8 +64,7 @@ fn manifest_with_blocks() -> &'static str {
     }"#
 }
 
-/// One id list per version `good_data_versions` declares, so the
-/// coverage check passes and a test that wants to break it says so.
+/// One id list per version `good_data_versions` declares.
 fn good_blocks() -> &'static str {
     r#"{
         "schema_version": 1,
@@ -78,8 +76,7 @@ fn good_blocks() -> &'static str {
     }"#
 }
 
-/// A pack carrying every component including `aliases`, for the tests
-/// that are about renames rather than about ids.
+/// Writes a pack with every component, `aliases` included.
 fn write_pack_with_aliases(
     tmp: &Path,
     data_versions_json: &str,
@@ -111,9 +108,7 @@ fn manifest_with_aliases() -> &'static str {
     }"#
 }
 
-/// One group over `good_blocks`: the id `1.21.4` added, beside a
-/// spelling no version of this pack declares. That is the shape of a
-/// cross-edition row, and it is answerable because one member is here.
+/// One group: the id `1.21.4` adds, beside a spelling no version of this pack declares.
 fn good_aliases() -> &'static str {
     r#"{
         "schema_version": 1,
@@ -126,14 +121,12 @@ fn one_material(body: &str) -> String {
     format!(r#"{{ "schema_version": 1, "namespace": "minecraft", "entries": [{body}] }}"#)
 }
 
-/// A fresh directory for one pack, removed when the guard drops.
 fn pack_dir() -> tempfile::TempDir {
     tempfile::tempdir().expect("create a temp dir")
 }
 
 #[test]
 fn a_pack_without_a_blocks_component_loads_and_refutes_no_id() {
-    // `blocks` is optional, so a `materials`-only pack must load.
     let pack = load_from_dir_or_die("no-blocks", |dir| {
         write_pack_with_materials(
             dir,
@@ -183,7 +176,6 @@ fn a_view_with_no_version_pinned_carries_no_id_table() {
     });
     let view = pack.view(None);
     assert!(view.block_ids().is_none());
-    // The catalog still resolves — only the id check is off.
     assert!(TargetRegistry::lookup(&view, "a.b").is_some());
 }
 
@@ -334,9 +326,7 @@ fn an_alias_answers_with_the_spellings_the_pinned_version_declares() {
         write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
     });
     assert_eq!(pack.aliases.len(), 1);
-    // `1.21.4` is the version that added `pale_oak_planks`, so the same
-    // group answers there and stays silent on `1.20.4` — the version
-    // scoping lives in the block tables, not in the row.
+    // `pale_oak_planks` arrives in `1.21.4`.
     assert_eq!(
         pack.view(Some("1.21.4"))
             .aliases_for("minecraft:paleoak_planks"),
@@ -409,8 +399,6 @@ fn a_malformed_alias_catalog_is_refused_with_its_own_error() {
 
 #[test]
 fn the_aliases_bytes_reach_the_pack_hash() {
-    // The manifest is shared, so only the `aliases` bytes can separate
-    // the digests.
     let one = load_from_dir_or_die("alias-hash-one", |dir| {
         write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
     });
@@ -431,9 +419,6 @@ fn the_aliases_bytes_reach_the_pack_hash() {
 
 #[test]
 fn the_blocks_bytes_reach_the_pack_hash() {
-    // The manifest is shared, so only the `blocks` bytes can separate
-    // the digests; varying the manifest would pass even with `blocks`
-    // left out of the hash.
     let materials = one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#);
     let one = load_from_dir_or_die("hash-one", |dir| {
         write_full_pack(
@@ -463,16 +448,12 @@ fn the_blocks_bytes_reach_the_pack_hash() {
     assert_ne!(one.bytes_hash, other.bytes_hash);
 }
 
-/// Write a pack into a fresh directory and load it, panicking on any
-/// failure.
 fn load_from_dir_or_die(label: &str, write: impl FnOnce(&Path)) -> RegistryPack {
     let dir = pack_dir();
     write(dir.path());
     load_from_dir(dir.path()).unwrap_or_else(|err| panic!("load {label}: {err}"))
 }
 
-/// The mirror of [`load_from_dir_or_die`] for the packs that must be
-/// refused: panics when the load unexpectedly succeeds.
 fn load_from_dir_err(label: &str, write: impl FnOnce(&Path)) -> RegistryError {
     let dir = pack_dir();
     write(dir.path());
@@ -661,13 +642,11 @@ fn builtin_pack_rejects_unknown_target() {
     assert_eq!(err.requested, "0.0.0");
     assert!(err.supported.contains("1.20.4"));
     assert!(err.supported.contains("latest"));
-    // `0.0.0` is far from every supported version.
     assert!(err.suggestion.is_none());
 }
 
 #[test]
 fn builtin_pack_suggests_near_target() {
-    // `1.21.5` is one substitution away from `1.21.4`.
     let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     let err = pack
         .resolve_java_target("1.21.5")
@@ -675,10 +654,7 @@ fn builtin_pack_suggests_near_target() {
     assert_eq!(err.suggestion.as_deref(), Some("1.21.4"));
 }
 
-/// `--target` reads a version label the way `@requires` and
-/// `@intended_targets` do, and the target carries the row's own label.
-/// Both editions are covered, since they spell the same release in
-/// opposite ways (`1.21` on Java, `1.21.0` on Bedrock).
+/// Java spells the release `1.21` and Bedrock `1.21.0`.
 #[test]
 fn either_spelling_of_a_version_names_its_row() {
     let java = load_builtin_pack(Edition::Java).expect("java pack");
@@ -702,8 +678,6 @@ fn either_spelling_of_a_version_names_its_row() {
     assert_eq!(trimmed.mc_version, "1.21.0");
 }
 
-/// A leading zero in a numeric component is padding, as the comparison
-/// reads it, so `1.021` names Java's `1.21`.
 #[test]
 fn a_leading_zero_in_a_target_is_padding() {
     let java = load_builtin_pack(Edition::Java).expect("java pack");
@@ -712,11 +686,6 @@ fn a_leading_zero_in_a_target_is_padding() {
     assert_eq!(padded.mc_version, "1.21");
 }
 
-/// A non-zero trailing component is a different version, and a zero
-/// digit at the end of a component is part of its number. Bedrock
-/// numbers its patch releases in tens, so a rule that stripped trailing
-/// `0` characters before comparing would build Bedrock's `1.21.40` for
-/// `--target 1.21.4`, another release's palette version.
 #[test]
 fn a_nonzero_trailing_component_names_a_different_version() {
     let bedrock = load_builtin_pack(Edition::Bedrock).expect("bedrock pack");
@@ -730,10 +699,6 @@ fn a_nonzero_trailing_component_names_a_different_version() {
         .expect_err("1.2 is neither 1.20.4 nor 1.21");
 }
 
-/// A row the pack only orders against is not a target in any spelling:
-/// resolving `--target` to one would pin a compile to a version with no
-/// id table. The premise is asserted first, so the test cannot pass on
-/// a pack that dropped the row or made it targetable.
 #[test]
 fn an_ordering_only_row_is_not_a_target_in_any_spelling() {
     let java = load_builtin_pack(Edition::Java).expect("java pack");
@@ -761,8 +726,6 @@ fn an_ordering_only_row_is_not_a_target_in_any_spelling() {
     }
 }
 
-/// A pre-release is not its release, and an empty component is not a
-/// zero one: both stay unequal to the `1.21` row under the comparison.
 #[test]
 fn a_pre_release_or_an_empty_component_is_not_the_release() {
     let java = load_builtin_pack(Edition::Java).expect("java pack");
@@ -786,9 +749,7 @@ fn the_builtin_bedrock_pack_loads_with_every_java_token() {
     assert_eq!(pack.manifest.name, "cairn-builtin-bedrock");
     assert_eq!(pack.source, PackSource::Builtin);
     assert!(!pack.data_versions.versions.is_empty());
-    // The materials catalog must cover the same abstract tokens the
-    // Java pack lifts, or a `.crn` that compiles for Java would fail
-    // resolution for Bedrock on vocabulary rather than parity.
+    // Bedrock must resolve every token Java does.
     let java = load_builtin_pack(Edition::Java).expect("java pack");
     for token in java.materials.tokens() {
         assert!(
@@ -800,21 +761,12 @@ fn the_builtin_bedrock_pack_loads_with_every_java_token() {
 
 #[test]
 fn builtin_bedrock_resolves_known_targets_and_latest() {
-    // The block-palette `version` integer packs (major, minor, patch,
-    // revision) one byte each, major high. Deriving the expected value
-    // from the parts pins the JSON table against the documented
-    // packing rather than restating the packed integer.
     let version = |major: i32, minor: i32, patch: i32, revision: i32| {
         (major << 24) | (minor << 16) | (patch << 8) | revision
     };
     let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
-    // Each targetable row is the block-state version that release
-    // writes into a palette (PocketMine-MP's
-    // `BlockStateData::CURRENT_VERSION` in the release supporting it),
-    // whose revision need not be the client build's (1.21.0.3, 1.21.40.3,
-    // 1.21.60.10). The targetable set is pinned with the integers, so a
-    // row added or a table regenerated with revision 0 or from build
-    // numbers fails here rather than in a user's lock.
+    // The block-state version each release writes (PocketMine-MP's
+    // `BlockStateData::CURRENT_VERSION`), whose revision is not the client build's.
     let expected = [
         ("1.21.0", version(1, 21, 0, 3)),
         ("1.21.40", version(1, 21, 40, 1)),
@@ -828,9 +780,7 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         .map(|row| row.mc_version.as_str())
         .collect();
     assert_eq!(targetable, expected.map(|(mc_version, _)| mc_version));
-    // An ordering row never reaches an artifact, so the built-in pack
-    // gives it the release's base integer with revision 0. The schema
-    // does not require that of a pack; this pins it for this one.
+    // This pack gives ordering rows revision 0, though the schema does not require it.
     for row in pack.data_versions.versions.iter().filter(|r| !r.targetable) {
         assert_eq!(row.data_version & 0xFF, 0, "{}", row.mc_version);
     }
@@ -883,11 +833,6 @@ fn load_from_dir_reads_a_complete_pack() {
     assert_eq!(t.data_version, 4189);
 }
 
-/// Row order in `data_versions.json` is part of the schema, as the
-/// `DataVersionTable::versions` doc says: a table whose keys or labels
-/// do not ascend row by row is refused at load. Two labels that compare
-/// equal do not ascend, which is what lets `targetable_row_for` find at
-/// most one row.
 #[test]
 fn data_versions_rows_out_of_order_are_refused() {
     let keys_descend = r#"{
@@ -920,9 +865,7 @@ fn data_versions_rows_out_of_order_are_refused() {
         panic!("expected VersionOrderBroken, got {err}");
     };
     assert!(reason.contains("does not sort above"), "{reason}");
-    // Two spellings of one version. The keys are distinct and ascend, so
-    // the key check passes and the label check is the one that refuses:
-    // equal keys would trip the key check first.
+    // Two spellings of one version, with distinct keys so the label check is what refuses.
     let labels_equal = r#"{
         "schema_version": 1,
         "latest": "1.21",

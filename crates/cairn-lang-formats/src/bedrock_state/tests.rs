@@ -17,9 +17,7 @@ fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, String> {
         .collect()
 }
 
-/// Stair properties in the `facing` / `half` / `shape` insertion order the
-/// lowering uses, so `translate_states` sees the same key stream as at
-/// runtime.
+/// Stair properties in the order lowering inserts them.
 fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
     props([("facing", facing), ("half", half), ("shape", shape)])
 }
@@ -40,7 +38,6 @@ fn stair_maps_facing_and_half_straight_is_lossless() {
     .expect("stair");
     assert_eq!(t.states.entries.get("weirdo_direction"), Some(&Tag::Int(3)));
     assert_eq!(t.states.entries.get("upside_down_bit"), Some(&Tag::Byte(0)));
-    // `shape=straight` and no other keys leak in.
     assert_eq!(t.states.entries.len(), 2);
     assert!(t.degraded.is_empty());
 }
@@ -79,7 +76,6 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
         &stair_props("south", "top", "outer_left"),
     )
     .expect("stair");
-    // States carry only the mappable intent.
     assert_eq!(t.states.entries.get("weirdo_direction"), Some(&Tag::Int(2)));
     assert_eq!(t.states.entries.get("upside_down_bit"), Some(&Tag::Byte(1)));
     assert_eq!(t.states.entries.len(), 2);
@@ -89,7 +85,6 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
             value: "outer_left".to_owned(),
         }],
     );
-    // The warning is the note's sentence with the entry's Java state named.
     let detail = degradation_detail(&t.degraded[0]);
     assert!(
         detail.starts_with("shape=outer_left has no Bedrock state"),
@@ -104,7 +99,6 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
         format!("stair `minecraft:oak_stairs[facing=south,half=top,shape=outer_left]` {detail}"),
     );
 
-    // `straight` produces no note.
     let straight = translate(
         "minecraft:oak_stairs",
         &stair_props("south", "top", "straight"),
@@ -115,10 +109,7 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
 
 #[test]
 fn the_family_test_agrees_with_the_one_that_decided_to_paint_it() {
-    // `minecraft:mystairs` ends in `stairs` but not in `_stairs`, the id the
-    // two plausible spellings of the stair rule disagree about; core does
-    // not treat it as a stair. Pinned on behaviour rather than through the
-    // predicate, so the test holds if the two stop sharing one.
+    // Ends in `stairs` but not `_stairs`, so core does not count it as a stair.
     let err = translate(
         "minecraft:mystairs",
         &stair_props("south", "top", "straight"),
@@ -138,8 +129,7 @@ fn non_stair_with_properties_fails_loud() {
         err,
         BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:oak_door"
     ));
-    // The self-correction triple, `spec/versioning-editions` "Fail-loud
-    // and minimum-version inference".
+    // `spec/versioning-editions` "Fail-loud and minimum-version inference": wrong, valid, fix.
     let msg = err.to_string();
     assert!(msg.contains("minecraft:oak_door"), "wrong: {msg}");
     assert!(msg.contains("facing=north"), "wrong: {msg}");
@@ -162,8 +152,6 @@ fn unknown_stair_facing_value_fails_loud() {
     let msg = err.to_string();
     assert!(msg.contains("facing=up"), "wrong: {msg}");
     assert!(msg.contains("east, west, south, north"), "valid: {msg}");
-    // The value is no more valid on Java, where it would be written
-    // unchanged, so the fix does not send the author there.
     assert!(
         msg.contains("correct the source blockstate")
             && msg.contains("Java has no such")

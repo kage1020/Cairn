@@ -1,9 +1,5 @@
-//! `cairn info`'s portability figures against what a build emits, per
-//! shipped example and edition. `info` lowers with no target pinned and a
-//! build pins one, so the two may disagree about *which* spelling an entry
-//! takes, but every range-wide entry must be a block the edition declares,
-//! and the entry count and each structure's extent must match a pinned
-//! build on every supported version.
+//! `cairn info`'s portability figures against what a pinned build emits, per shipped example and
+//! edition.
 
 use std::collections::BTreeMap;
 
@@ -16,12 +12,7 @@ use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
 use crate::common::{examples, lower_source, supported_versions};
 
-/// Every structure's extent, keyed by scope so a comparison cannot pass
-/// by two scopes swapping sizes.
-///
-/// The volume counts the members whose material resolves against the
-/// pinned target, so an id only some versions declare moves `Dims` as well
-/// as the palette, which an entry count alone cannot see.
+/// Every structure's extent, keyed by scope.
 fn extents(ir: &BlockArrayIr) -> BTreeMap<&str, (u32, u32, u32)> {
     ir.structures
         .iter()
@@ -44,12 +35,7 @@ fn editions() -> [(Edition, &'static RegistryPack); 2] {
     ]
 }
 
-/// The edition's report, refusing the whole test if the palette carries a
-/// blockstate the registry pack was expected to reject.
-///
-/// A leak in a shipped example would be the strongest case of the bug the
-/// refusal exists for, so it fails here rather than being unwrapped
-/// silently.
+/// The edition's report, failing the test on a leaked blockstate.
 fn report_for(
     edition: Edition,
     pack: &RegistryPack,
