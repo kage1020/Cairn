@@ -16,26 +16,15 @@
 //! from this side: a tail on a `pressure_plate` passes here whatever it
 //! names.
 
-use cairn_lang_core::Diagnostic;
 use cairn_lang_core::intent::{SENSOR_HOSTS, known_keywords, role_of};
 
-use crate::common::{codes, diagnose, notes, slice};
-
-/// The one finding `source` is expected to raise, or a panic naming what
-/// it raised instead.
-fn only(source: &str) -> Diagnostic {
-    let diags = diagnose(source);
-    assert_eq!(
-        diags.len(),
-        1,
-        "expected exactly one finding, got {diags:#?}"
-    );
-    diags.into_iter().next().expect("length checked above")
-}
+use crate::common::{codes, diagnose, exactly_one, notes, slice};
 
 #[test]
 fn a_tail_on_a_member_that_cannot_emit_is_refused() {
-    let d = only("struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n");
+    let d = exactly_one(diagnose(
+        "struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n",
+    ));
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
     assert!(
         d.primary.contains("`walls` cannot emit a signal"),
@@ -51,7 +40,7 @@ fn the_finding_lands_on_the_tail_and_not_on_the_line() {
     // again. The value is what the author deletes or moves, so it is what
     // the finding underlines.
     let src = "struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n";
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(slice(src, &d), "sig.w");
 }
 
@@ -61,7 +50,9 @@ fn the_repair_names_the_hosts_that_exist_and_the_ones_reserved() {
     // plate they already have, or to write the `lever` the surface has
     // not reached. A note naming only the first would read as a refusal
     // of the second.
-    let d = only("struct s size=5x5\n  walls mat_slot=wall height=3 -> sig.w\n");
+    let d = exactly_one(diagnose(
+        "struct s size=5x5\n  walls mat_slot=wall height=3 -> sig.w\n",
+    ));
     let note = notes(&d).join("\n");
     assert!(note.contains("`pressure_plate`"), "got: {note}");
     for reserved in ["`lever`", "`button`", "`daylight`", "`observer`"] {
@@ -96,7 +87,9 @@ fn a_tail_on_a_sensor_naming_no_signal_is_left_to_the_redstone_pipeline() {
 /// the value is not asked at all.
 #[test]
 fn a_tail_on_the_wrong_host_naming_no_signal_is_still_one_finding() {
-    let d = only("struct s size=5x5\n  walls mat_slot=wall height=3 -> a\n");
+    let d = exactly_one(diagnose(
+        "struct s size=5x5\n  walls mat_slot=wall height=3 -> a\n",
+    ));
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
 }
 
@@ -125,11 +118,11 @@ fn a_tail_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
 /// deeper.
 #[test]
 fn a_tail_under_a_level_is_reached() {
-    let d = only(concat!(
+    let d = exactly_one(diagnose(concat!(
         "struct s size=5x5\n",
         "  level y=3\n",
         "    walls mat_slot=wall height=2 -> sig.w\n",
-    ));
+    )));
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
 }
 
@@ -196,7 +189,7 @@ fn every_sensor_host_is_a_keyword_the_role_table_knows() {
 #[test]
 fn a_tail_on_a_sensor_keyword_in_the_selector_form_is_refused() {
     let src = "struct s size=5x5\n  pressure_plate[id=nope] -> sig.b\n";
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
     assert!(
         d.primary.contains(
@@ -229,7 +222,9 @@ fn a_selector_tail_is_refused_even_when_the_selector_names_a_real_plate() {
 /// dropping the brackets would not repair the line.
 #[test]
 fn a_selector_tail_on_a_non_sensor_is_told_about_the_host() {
-    let d = only("struct s size=5x5\n  walls[class=outer] mat_slot=wall height=3 -> sig.w\n");
+    let d = exactly_one(diagnose(
+        "struct s size=5x5\n  walls[class=outer] mat_slot=wall height=3 -> sig.w\n",
+    ));
     assert!(
         d.primary.contains("`walls` cannot emit a signal"),
         "got: {}",

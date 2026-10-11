@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::{Diagnostic, check, lower, parse, resolve};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
 /// The number of `.crn` files `examples/` ships. Bump it with the next
 /// example; every sweep refuses a different count, and a loop over a
@@ -87,6 +87,27 @@ pub fn diagnose(source: &str) -> Vec<Diagnostic> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
     check(&module, &ir, None)
+}
+
+/// The findings `source` raises with `code`, in report order.
+///
+/// # Panics
+///
+/// When `source` does not parse.
+pub fn of_code(source: &str, code: DiagnosticCode) -> Vec<Diagnostic> {
+    diagnose(source)
+        .into_iter()
+        .filter(|d| d.code == code)
+        .collect()
+}
+
+/// The single finding `source` raises with `code`.
+///
+/// # Panics
+///
+/// When `source` does not parse, or raises other than one such finding.
+pub fn one_of_code(source: &str, code: DiagnosticCode) -> Diagnostic {
+    exactly_one(of_code(source, code))
 }
 
 /// The codes of every finding `source` raises, in report order.

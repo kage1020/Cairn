@@ -20,18 +20,7 @@
 
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
-use crate::common::{PRELUDE, diagnose, exactly_one, slice};
-
-fn nesting_only(source: &str) -> Vec<Diagnostic> {
-    diagnose(source)
-        .into_iter()
-        .filter(|d| d.code == DiagnosticCode::UnsupportedNesting)
-        .collect()
-}
-
-fn one(source: &str) -> Diagnostic {
-    exactly_one(nesting_only(source))
-}
+use crate::common::{PRELUDE, diagnose, of_code, one_of_code, slice};
 
 /// The advice note — the one without a span. The `declared here` note
 /// carries a span and quotes the same keyword, so an assertion that
@@ -64,7 +53,7 @@ fn ne_1_every_nested_row_in_a_site_body_is_reported() {
     ];
     for (keyword, body) in cases {
         let src = format!("{PRELUDE}{body}");
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::UnsupportedNesting);
         assert_eq!(d.severity(), Severity::Error);
         assert_eq!(
             d.primary,
@@ -90,7 +79,7 @@ fn ne_2_a_member_nested_under_a_geometry_member_is_reported() {
          walls class=outer mat_slot=wall height=3\n    \
          door id=d side=front at=center\n"
     );
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::UnsupportedNesting);
     assert_eq!(d.severity(), Severity::Error);
     assert_eq!(
         d.primary,
@@ -119,7 +108,7 @@ fn ne_2b_the_rule_reaches_def_bodies_too() {
          walls class=outer mat_slot=wall height=3\n    \
          door id=d side=front at=center\n"
     );
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::UnsupportedNesting);
     assert_eq!(
         d.primary,
         "`walls` does not group members: the 1 member indented under it produces no blocks",
@@ -136,14 +125,18 @@ fn ne_3_level_groups_its_children_and_the_walk_continues_inside() {
          level y=0\n    walls class=outer mat_slot=wall height=3\n    \
          door id=d side=front at=center\n"
     );
-    assert!(nesting_only(&ok).is_empty(), "got {:#?}", nesting_only(&ok));
+    assert!(
+        of_code(&ok, DiagnosticCode::UnsupportedNesting).is_empty(),
+        "got {:#?}",
+        of_code(&ok, DiagnosticCode::UnsupportedNesting)
+    );
 
     let nested = format!(
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          level y=0\n    walls class=outer mat_slot=wall height=3\n      \
          door id=d side=front at=center\n"
     );
-    let d = one(&nested);
+    let d = one_of_code(&nested, DiagnosticCode::UnsupportedNesting);
     assert!(
         d.primary.starts_with("`walls` does not group members"),
         "got: {}",
@@ -161,11 +154,11 @@ fn ne_4_level_in_a_site_body_is_reported_as_a_misplaced_row_not_as_nesting() {
          place id=anchor use=hut theme=plain at=origin\n"
     );
     assert!(
-        nesting_only(&src).is_empty(),
+        of_code(&src, DiagnosticCode::UnsupportedNesting).is_empty(),
         "a `site` body has no reader for `level` at all, so the finding is \
          about the row rather than about what is indented under it — \
          reporting both would bill one mistake twice, got {:#?}",
-        nesting_only(&src),
+        of_code(&src, DiagnosticCode::UnsupportedNesting),
     );
     assert_eq!(
         diagnose(&src)
@@ -189,7 +182,7 @@ fn ne_5_a_subtree_is_reported_once_at_its_root_and_underlined_whole() {
          place id=peer use=hut theme=plain east_of=anchor gap=4\n      \
          connect anchor.entry to peer.entry path=@gravel\n"
     );
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::UnsupportedNesting);
     let text = slice(&src, &d);
     assert!(
         text.starts_with("place id=peer"),
@@ -211,7 +204,7 @@ fn ne_6_sibling_nested_members_are_underlined_as_one_run() {
          door id=d side=front at=center\n    \
          window id=w side=front y=1 offset=1 size=1x1\n"
     );
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::UnsupportedNesting);
     assert_eq!(
         d.primary,
         "`walls` does not group members: the 2 members indented under it produce no blocks",
@@ -243,7 +236,7 @@ fn ne_7_a_level_inside_a_level_is_reported_by_check_not_left_to_lowering() {
         ),
     ] {
         let src = format!("{PRELUDE}{body}");
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::UnsupportedNesting);
         assert_eq!(
             d.primary,
             "a `level` inside another `level` does not group members: the 1 member indented under it produces no blocks",
@@ -268,7 +261,7 @@ fn ne_7b_a_level_without_a_usable_offset_is_reported() {
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
              level{y}\n    walls class=outer mat_slot=wall height=3\n"
         );
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::UnsupportedNesting);
         assert_eq!(
             d.primary,
             "`level` has no `y=` offset to place its children at: the 1 member indented under it produces no blocks",
@@ -288,9 +281,9 @@ fn ne_7c_an_unknown_keyword_parent_is_left_to_the_allowlist() {
          room name=hall\n    walls class=outer mat_slot=wall height=3\n"
     );
     assert!(
-        nesting_only(&src).is_empty(),
+        of_code(&src, DiagnosticCode::UnsupportedNesting).is_empty(),
         "got {:#?}",
-        nesting_only(&src)
+        of_code(&src, DiagnosticCode::UnsupportedNesting)
     );
     let codes: Vec<&str> = diagnose(&src).iter().map(|d| d.code.as_str()).collect();
     assert!(
@@ -338,7 +331,7 @@ fn ne_9_flat_bodies_are_silent() {
          place id=peer use=hut theme=plain east_of=anchor gap=4\n  \
          connect anchor.entry to peer.entry path=@gravel\n"
     );
-    let found = nesting_only(&src);
+    let found = of_code(&src, DiagnosticCode::UnsupportedNesting);
     assert!(found.is_empty(), "got {found:#?}");
 }
 

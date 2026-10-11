@@ -500,16 +500,9 @@ mod items {
     //!    `resolve` records why that direction was picked.
 
     use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
-    use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, lower, parse, resolve};
+    use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
 
-    use crate::common::{codes, diagnose, nth, slice};
-
-    fn of_code(source: &str, code: DiagnosticCode) -> Vec<Diagnostic> {
-        diagnose(source)
-            .into_iter()
-            .filter(|d| d.code == code)
-            .collect()
-    }
+    use crate::common::{codes, nth, of_code, slice};
 
     const THEME: &str = "theme t:\n  slot floor -> @oak_planks\n\n";
 
@@ -1010,16 +1003,9 @@ mod selector {
     //!   binding. Which of two *overlapping* rows wins is the cascade, and the
     //!   cascade is source order by design; only a coincidence is a duplicate.
 
-    use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, lower, parse};
+    use cairn_lang_core::{DiagnosticCode, Severity, lower, parse};
 
-    use crate::common::{diagnose, exactly_one, notes};
-
-    fn selector_only(source: &str) -> Vec<Diagnostic> {
-        diagnose(source)
-            .into_iter()
-            .filter(|d| d.code == DiagnosticCode::DuplicateSelector)
-            .collect()
-    }
+    use crate::common::{diagnose, notes, of_code, one_of_code};
 
     /// Every code `source` raises but the `W_IGNORED_ARGUMENT` each selector
     /// binding earns.
@@ -1057,10 +1043,6 @@ mod selector {
         kept.iter().map(|d| d.code.as_str()).collect()
     }
 
-    fn one(source: &str) -> Diagnostic {
-        exactly_one(selector_only(source))
-    }
-
     /// The selector rows are the variable; the struct below them carries one
     /// `window` every row in this file selects. A control that reports nothing
     /// is then a control whose rows *matched* and were still judged distinct,
@@ -1085,7 +1067,7 @@ mod selector {
             "  window[class=small] -> frame=@spruce_wood\n  \
          window[class=small] -> frame=@dark_oak_wood\n",
         );
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::DuplicateSelector);
         assert_eq!(d.severity(), Severity::Error);
         assert_eq!(
             &src[d.span.clone()],
@@ -1114,7 +1096,7 @@ mod selector {
                 "  window[class=small] -> frame=@spruce_wood sill=@oak_slab trim=@stone\n  \
              window[class=small] -> {second}\n"
             ));
-            let d = one(&src);
+            let d = one_of_code(&src, DiagnosticCode::DuplicateSelector);
             assert_eq!(
                 d.primary,
                 format!(
@@ -1134,7 +1116,7 @@ mod selector {
             "  window[class=small] -> frame=@spruce_wood\n  \
          window[class=small] -> frame=@dark_oak_wood\n",
         );
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::DuplicateSelector);
         let anchored = d.notes[0]
             .span
             .as_ref()
@@ -1167,7 +1149,7 @@ mod selector {
             "  window[class=small] -> frame=@spruce_wood sill=@oak_slab\n  \
          window[class=small] -> frame=@dark_oak_wood sill=@stone_slab\n",
         );
-        let d = one(&from_one_row);
+        let d = one_of_code(&from_one_row, DiagnosticCode::DuplicateSelector);
         assert_eq!(
             notes(&d)[0],
             "`frame=` and `sill=` bound here",
@@ -1183,7 +1165,7 @@ mod selector {
          window[class=small] -> sill=@oak_slab\n  \
          window[class=small] -> sill=@stone_slab frame=@dark_oak_wood\n",
         );
-        let d = one(&from_two_rows);
+        let d = one_of_code(&from_two_rows, DiagnosticCode::DuplicateSelector);
         assert_eq!(notes(&d)[0], "`frame=` bound here");
         assert_eq!(notes(&d)[1], "`sill=` bound here");
         let anchors: Vec<&str> = d.notes[..2]
@@ -1208,7 +1190,11 @@ mod selector {
             "  window[class=small,side=front] -> frame=@spruce_wood\n  \
          window[side=front,class=small] -> frame=@dark_oak_wood\n",
         );
-        assert!(one(&src).primary.contains("rebinds `frame=`"));
+        assert!(
+            one_of_code(&src, DiagnosticCode::DuplicateSelector)
+                .primary
+                .contains("rebinds `frame=`")
+        );
     }
 
     /// Whether `small` and `"small"` are the same attribute is a property of
@@ -1268,9 +1254,9 @@ mod selector {
                 "  window[class=small] -> frame=@spruce_wood\n  {second}\n"
             ));
             assert!(
-                selector_only(&src).is_empty(),
+                of_code(&src, DiagnosticCode::DuplicateSelector).is_empty(),
                 "`{second}` selects a different set: {:#?}",
-                selector_only(&src),
+                of_code(&src, DiagnosticCode::DuplicateSelector),
             );
         }
     }
@@ -1285,9 +1271,9 @@ mod selector {
          window[class=small] -> sill=@stone_slab\n",
         );
         assert!(
-            selector_only(&src).is_empty(),
+            of_code(&src, DiagnosticCode::DuplicateSelector).is_empty(),
             "got {:#?}",
-            selector_only(&src),
+            of_code(&src, DiagnosticCode::DuplicateSelector),
         );
     }
 
@@ -1299,7 +1285,7 @@ mod selector {
             "  window[class=small] -> frame=@spruce_wood\n  \
          window[class=small] -> frame=@dark_oak_wood sill=@stone_slab\n",
         );
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::DuplicateSelector);
         assert!(
             d.primary.ends_with("rebinds `frame=`"),
             "`sill=` is added, not rebound: {}",
@@ -1318,7 +1304,7 @@ mod selector {
          window[class=small] -> frame=@birch_wood\n  \
          window[class=small] -> frame=@dark_oak_wood\n",
         );
-        let found = selector_only(&src);
+        let found = of_code(&src, DiagnosticCode::DuplicateSelector);
         assert_eq!(
             found.len(),
             2,
@@ -1346,7 +1332,7 @@ mod selector {
          window[class=small] -> sill=@stone_slab\n  \
          window[class=small] -> frame=@dark_oak_wood\n",
         );
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::DuplicateSelector);
         assert_eq!(
             &src[d.notes[0].span.clone().expect("anchored note")],
             "window[class=small] -> frame=@spruce_wood",
@@ -1367,9 +1353,9 @@ mod selector {
          struct cottage size=9x7\n  \
          window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
         assert!(
-            selector_only(src).is_empty(),
+            of_code(src, DiagnosticCode::DuplicateSelector).is_empty(),
             "got {:#?}",
-            selector_only(src),
+            of_code(src, DiagnosticCode::DuplicateSelector),
         );
     }
 
@@ -1382,9 +1368,9 @@ mod selector {
          door[class=small] -> frame=@dark_oak_wood\n",
         );
         assert!(
-            selector_only(&src).is_empty(),
+            of_code(&src, DiagnosticCode::DuplicateSelector).is_empty(),
             "got {:#?}",
-            selector_only(&src),
+            of_code(&src, DiagnosticCode::DuplicateSelector),
         );
     }
 
@@ -1397,7 +1383,7 @@ mod selector {
             "  window[class=small] -> frame=@spruce_wood sill=@oak_slab\n  \
          window[class=small] -> sill=@stone_slab frame=@dark_oak_wood\n",
         );
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::DuplicateSelector);
         let value = serde_json::to_value(&d.data).expect("serialise payload");
         assert_eq!(
             value,
@@ -1433,7 +1419,7 @@ mod selector {
          window[side=front,y=2] -> frame=@birch_wood\n  \
          window[side=front,y=2] -> frame=@oak_wood\n",
         );
-        let rendered: Vec<String> = selector_only(&src)
+        let rendered: Vec<String> = of_code(&src, DiagnosticCode::DuplicateSelector)
             .iter()
             .map(|d| {
                 d.primary
@@ -1491,7 +1477,7 @@ mod selector {
          window[class=small] -> frame=@dark_oak_wood\n\n\
          struct cottage size=9x7\n  \
          window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
-        let found = selector_only(src);
+        let found = of_code(src, DiagnosticCode::DuplicateSelector);
         assert_eq!(found.len(), 1, "got {found:#?}");
         assert_eq!(
             &src[found[0].span.clone()],
@@ -1521,9 +1507,11 @@ mod selector {
             ],
         );
         assert!(
-            !one(&src).primary.contains("no member"),
+            !one_of_code(&src, DiagnosticCode::DuplicateSelector)
+                .primary
+                .contains("no member"),
             "the primary states the coincidence, not a loss it cannot know happened: {}",
-            one(&src).primary,
+            one_of_code(&src, DiagnosticCode::DuplicateSelector).primary,
         );
     }
 }

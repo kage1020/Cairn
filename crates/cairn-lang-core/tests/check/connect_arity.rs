@@ -20,16 +20,9 @@
 //! which drops it and lays no walkway. The endpoint cases below pin the
 //! diagnostic that keeps that drop from being silent.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
+use cairn_lang_core::{DiagnosticCode, Severity};
 
-use crate::common::{diagnose, slice};
-
-fn arity_only(diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {
-    diagnostics
-        .into_iter()
-        .filter(|d| d.code == DiagnosticCode::ConnectArity)
-        .collect()
-}
+use crate::common::{codes, of_code, one_of_code, slice};
 
 const PROLOGUE: &str = "struct hut size=3x3\n  \
 floor\n  \
@@ -45,7 +38,7 @@ place id=b use=hut east_of=a gap=4\n  ";
 #[test]
 fn ca_1_well_formed_connect_emits_no_arity_diagnostic() {
     let src = format!("{PROLOGUE}connect a.entry to b.entry path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert!(
         arity.is_empty(),
         "well-formed connect must not trigger arity pass, got: {arity:#?}",
@@ -58,7 +51,7 @@ fn ca_1_well_formed_connect_emits_no_arity_diagnostic() {
 #[test]
 fn ca_2_bare_connect_emits_arity_with_keyword_span() {
     let src = format!("{PROLOGUE}connect path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 1, "got: {arity:#?}");
     let d = &arity[0];
     assert_eq!(d.code, DiagnosticCode::ConnectArity);
@@ -89,7 +82,7 @@ fn ca_2_bare_connect_emits_arity_with_keyword_span() {
 #[test]
 fn ca_3_only_from_emits_arity_anchored_after_from() {
     let src = format!("{PROLOGUE}connect a.entry path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 1, "got: {arity:#?}");
     let d = &arity[0];
     let from_end = src.find("a.entry").expect("from value present") + "a.entry".len();
@@ -114,7 +107,7 @@ fn ca_3_only_from_emits_arity_anchored_after_from() {
 #[test]
 fn ca_4_to_without_target_emits_arity_anchored_after_to() {
     let src = format!("{PROLOGUE}connect a.entry to path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 1, "got: {arity:#?}");
     let d = &arity[0];
     let to_end = src.find("a.entry to").expect("from + to present") + "a.entry to".len();
@@ -140,7 +133,7 @@ fn ca_4_to_without_target_emits_arity_anchored_after_to() {
 #[test]
 fn ca_5_wrong_separator_emits_arity_anchored_at_middle_token() {
     let src = format!("{PROLOGUE}connect a.entry xxx b.entry path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 1, "got: {arity:#?}");
     let d = &arity[0];
     assert_eq!(
@@ -163,7 +156,7 @@ fn ca_5_wrong_separator_emits_arity_anchored_at_middle_token() {
 #[test]
 fn ca_6_wrong_separator_with_missing_target_prefers_separator_message() {
     let src = format!("{PROLOGUE}connect a.entry xxx path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 1, "got: {arity:#?}");
     let d = &arity[0];
     assert_eq!(slice(&src, d), "xxx");
@@ -185,7 +178,7 @@ fn ca_6_wrong_separator_with_missing_target_prefers_separator_message() {
 #[test]
 fn ca_7_over_arity_emits_arity_anchored_at_extras() {
     let src = format!("{PROLOGUE}connect a.entry to b.entry c.exit path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 1, "got: {arity:#?}");
     let d = &arity[0];
     assert_eq!(
@@ -206,7 +199,7 @@ fn ca_7_over_arity_emits_arity_anchored_at_extras() {
 #[test]
 fn ca_8_over_arity_with_two_extras_underlines_the_full_run() {
     let src = format!("{PROLOGUE}connect a.entry to b.entry c.exit d.exit path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 1, "got: {arity:#?}");
     let d = &arity[0];
     assert_eq!(
@@ -245,12 +238,6 @@ fn to_slot(src: &str, from: &str, text: &str) -> std::ops::Range<usize> {
     slot_span(src, &format!("connect {from} to "), text)
 }
 
-fn only_arity_diag(src: &str) -> Diagnostic {
-    let mut arity = arity_only(diagnose(src));
-    assert_eq!(arity.len(), 1, "expected one diagnostic, got: {arity:#?}");
-    arity.remove(0)
-}
-
 /// Every non-reference value the parser accepts in the from-slot. Each
 /// entry is `(source text, expected kind word)`; the kind word is
 /// `Value::kind_name`, which the message quotes so the author can tell
@@ -282,7 +269,7 @@ const NON_REFERENCE_ENDPOINTS: &[(&str, &str)] = &[
 fn ca_10_from_side_non_reference_endpoints_are_flagged() {
     for (text, kind) in NON_REFERENCE_ENDPOINTS {
         let src = format!("{PROLOGUE}connect {text} to b.entry path=@gravel\n");
-        let d = only_arity_diag(&src);
+        let d = one_of_code(&src, DiagnosticCode::ConnectArity);
         assert_eq!(d.severity(), Severity::Error);
         assert_eq!(
             d.span,
@@ -321,7 +308,7 @@ fn ca_11_to_side_non_reference_endpoints_are_flagged() {
         .collect();
     for (text, kind) in cases {
         let src = format!("{PROLOGUE}connect a.entry to {text} path=@gravel\n");
-        let d = only_arity_diag(&src);
+        let d = one_of_code(&src, DiagnosticCode::ConnectArity);
         assert_eq!(
             d.span,
             to_slot(&src, "a.entry", text),
@@ -357,7 +344,7 @@ fn ca_11_to_side_non_reference_endpoints_are_flagged() {
 #[test]
 fn ca_12_both_endpoints_broken_earn_one_diagnostic_each() {
     let src = format!("{PROLOGUE}connect 1 to 2 path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 2, "got: {arity:#?}");
     assert_eq!(arity[0].span, from_slot(&src, "1"));
     assert_eq!(arity[1].span, to_slot(&src, "1", "2"));
@@ -374,7 +361,7 @@ fn ca_12_both_endpoints_broken_earn_one_diagnostic_each() {
 #[test]
 fn ca_13_from_side_reference_with_extra_segment_is_flagged() {
     let src = format!("{PROLOGUE}connect a.entry.x to b.entry path=@gravel\n");
-    let d = only_arity_diag(&src);
+    let d = one_of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(d.span, from_slot(&src, "a.entry.x"));
     assert!(
         d.primary.contains("a.entry.x") && d.primary.contains("3 segments"),
@@ -387,7 +374,7 @@ fn ca_13_from_side_reference_with_extra_segment_is_flagged() {
 #[test]
 fn ca_14_to_side_reference_with_extra_segment_is_flagged() {
     let src = format!("{PROLOGUE}connect a.entry to b.entry.x path=@gravel\n");
-    let d = only_arity_diag(&src);
+    let d = one_of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(d.span, to_slot(&src, "a.entry", "b.entry.x"));
     assert!(
         d.primary.contains("b.entry.x") && d.primary.contains("3 segments"),
@@ -405,7 +392,7 @@ fn ca_14_to_side_reference_with_extra_segment_is_flagged() {
 #[test]
 fn ca_15_over_arity_also_reports_broken_endpoints() {
     let src = format!("{PROLOGUE}connect 1 to 2 c.exit path=@gravel\n");
-    let arity = arity_only(diagnose(&src));
+    let arity = of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 3, "got: {arity:#?}");
     let spans: Vec<_> = arity.iter().map(|d| slice(&src, d)).collect();
     assert_eq!(spans, vec!["1", "2", "c.exit"]);
@@ -418,7 +405,7 @@ fn ca_15_over_arity_also_reports_broken_endpoints() {
 #[test]
 fn ca_16_wrong_separator_suppresses_endpoint_findings() {
     let src = format!("{PROLOGUE}connect 1 xxx 2 path=@gravel\n");
-    let d = only_arity_diag(&src);
+    let d = one_of_code(&src, DiagnosticCode::ConnectArity);
     assert_eq!(slice(&src, &d), "xxx");
 }
 
@@ -430,7 +417,7 @@ fn ca_16_wrong_separator_suppresses_endpoint_findings() {
 #[test]
 fn ca_17_missing_half_suppresses_endpoint_findings() {
     let src = format!("{PROLOGUE}connect 1 path=@gravel\n");
-    let d = only_arity_diag(&src);
+    let d = one_of_code(&src, DiagnosticCode::ConnectArity);
     assert!(
         d.primary.contains("missing"),
         "expected the missing-half message, got: {}",
@@ -449,7 +436,7 @@ fn ca_17b_to_without_target_suppresses_endpoint_findings() {
         "{PROLOGUE}connect 1 to path=@gravel
 "
     );
-    let d = only_arity_diag(&src);
+    let d = one_of_code(&src, DiagnosticCode::ConnectArity);
     assert!(
         d.primary.contains("missing"),
         "expected the missing-target message, got: {}",
@@ -467,14 +454,14 @@ fn ca_17b_to_without_target_suppresses_endpoint_findings() {
 #[test]
 fn ca_18_string_separator_renders_distinctly_from_the_bare_keyword() {
     let quoted = format!("{PROLOGUE}connect a.entry \"to\" b.entry path=@gravel\n");
-    let d = only_arity_diag(&quoted);
+    let d = one_of_code(&quoted, DiagnosticCode::ConnectArity);
     assert!(
         d.primary.contains("\"to\""),
         "a string separator must keep its quotes in the message, got: {}",
         d.primary,
     );
     let bare = format!("{PROLOGUE}connect a.entry xxx b.entry path=@gravel\n");
-    let other = only_arity_diag(&bare);
+    let other = one_of_code(&bare, DiagnosticCode::ConnectArity);
     assert_ne!(
         d.primary, other.primary,
         "the quoted and bare separators must not render identically",
@@ -491,7 +478,7 @@ fn ca_19_endpoint_check_reaches_connect_rows_outside_a_site() {
     let src = "def d size=3x3:\n  \
 floor id=floor\n  \
 connect 1 to 2 path=@gravel\n";
-    let arity = arity_only(diagnose(src));
+    let arity = of_code(src, DiagnosticCode::ConnectArity);
     assert_eq!(arity.len(), 2, "got: {arity:#?}");
 }
 
@@ -510,7 +497,7 @@ fn ca_20_endpoint_notes_name_the_repair_for_the_shape_at_hand() {
     ];
     for (text, expected) in cases {
         let src = format!("{PROLOGUE}connect {text} to b.entry path=@gravel\n");
-        let d = only_arity_diag(&src);
+        let d = one_of_code(&src, DiagnosticCode::ConnectArity);
         assert!(
             d.notes.iter().any(|n| n.message.contains(expected)),
             "endpoint `{text}` should carry a note mentioning `{expected}`, got: {:#?}",
@@ -539,10 +526,6 @@ site duo:\n  \
 place id=anchor use=hut theme=plain at=origin\n  \
 place id=peer   use=hut theme=plain east_of=anchor gap=4\n  ";
 
-fn all_codes(source: &str) -> Vec<&'static str> {
-    diagnose(source).iter().map(|d| d.code.as_str()).collect()
-}
-
 /// One mistake earns one diagnostic once both layers have run.
 ///
 /// The endpoint check and the resolver's endpoint guard look at the
@@ -555,9 +538,9 @@ fn all_codes(source: &str) -> Vec<&'static str> {
 fn ca_21_one_endpoint_mistake_earns_one_diagnostic_across_both_layers() {
     let clean = format!("{RESOLVING_PROLOGUE}connect anchor.entry to peer.entry path=@gravel\n");
     assert!(
-        all_codes(&clean).is_empty(),
+        codes(&clean).is_empty(),
         "the resolvable prologue must be clean on a well-formed row, got: {:?}",
-        all_codes(&clean),
+        codes(&clean),
     );
     for row in [
         "connect anchor to peer.entry path=@gravel",
@@ -569,13 +552,13 @@ fn ca_21_one_endpoint_mistake_earns_one_diagnostic_across_both_layers() {
     ] {
         let src = format!("{RESOLVING_PROLOGUE}{row}\n");
         assert_eq!(
-            all_codes(&src),
+            codes(&src),
             ["E_CONNECT_ARITY"],
             "`{row}` must earn exactly one diagnostic",
         );
     }
     let both = format!("{RESOLVING_PROLOGUE}connect 1 to 2 path=@gravel\n");
-    assert_eq!(all_codes(&both), ["E_CONNECT_ARITY", "E_CONNECT_ARITY"]);
+    assert_eq!(codes(&both), ["E_CONNECT_ARITY", "E_CONNECT_ARITY"]);
 }
 
 /// The division of labour holds in the other direction too: a row whose
@@ -596,6 +579,6 @@ fn ca_22_well_shaped_endpoints_that_do_not_resolve_stay_with_the_resolver() {
         ),
     ] {
         let src = format!("{RESOLVING_PROLOGUE}{row}\n");
-        assert_eq!(all_codes(&src), [expected], "for `{row}`");
+        assert_eq!(codes(&src), [expected], "for `{row}`");
     }
 }

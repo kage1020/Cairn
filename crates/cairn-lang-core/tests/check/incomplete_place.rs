@@ -16,20 +16,9 @@
 //! point at.
 
 use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, lower, parse, resolve};
+use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
 
-use crate::common::{PRELUDE, diagnose, exactly_one, notes};
-
-fn incomplete_only(source: &str) -> Vec<Diagnostic> {
-    diagnose(source)
-        .into_iter()
-        .filter(|d| d.code == DiagnosticCode::IncompletePlace)
-        .collect()
-}
-
-fn one(source: &str) -> Diagnostic {
-    exactly_one(incomplete_only(source))
-}
+use crate::common::{PRELUDE, diagnose, notes, of_code, one_of_code};
 
 /// A site whose first row anchors at the origin, so the row under test is
 /// the only thing that can be wrong.
@@ -75,7 +64,7 @@ fn ip_1_the_missing_key_list_reads_at_every_arity() {
         ),
     ] {
         let src = site_with(row);
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::IncompletePlace);
         assert_eq!(d.severity(), Severity::Error, "for `{row}`");
         let subject = if row.contains("id=b") {
             "`place id=b`"
@@ -110,7 +99,7 @@ fn ip_1b_each_note_explains_the_key_it_belongs_to() {
         ),
     ] {
         let src = site_with(row);
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::IncompletePlace);
         assert_eq!(notes(&d).len(), 1, "for `{row}`");
         assert!(
             notes(&d)[0].starts_with(needle),
@@ -126,7 +115,7 @@ fn ip_1b_each_note_explains_the_key_it_belongs_to() {
 #[test]
 fn ip_1c_the_payload_lists_the_missing_keys() {
     let src = site_with("place east_of=anchor gap=4");
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::IncompletePlace);
     let value = serde_json::to_value(&d.data).expect("serialise payload");
     assert_eq!(
         value,
@@ -141,12 +130,12 @@ fn ip_1c_the_payload_lists_the_missing_keys() {
 fn ip_2_every_missing_key_is_named_at_once() {
     let src = site_with("place east_of=anchor gap=4");
     assert_eq!(
-        incomplete_only(&src).len(),
+        of_code(&src, DiagnosticCode::IncompletePlace).len(),
         1,
         "one finding, not one per key",
     );
     assert_eq!(
-        notes(&one(&src)).len(),
+        notes(&one_of_code(&src, DiagnosticCode::IncompletePlace)).len(),
         3,
         "and one note per key, saying what each is for",
     );
@@ -154,15 +143,15 @@ fn ip_2_every_missing_key_is_named_at_once() {
 
 /// The negative space: a site whose every row is complete says nothing.
 /// The tests above already rule out a report-everything implementation —
-/// `one()` counts across the whole source, and `site_with`'s anchor row is
+/// `one_of_code(, DiagnosticCode::IncompletePlace)` counts across the whole source, and `site_with`'s anchor row is
 /// complete — so what this adds is the case with no incomplete row at all.
 #[test]
 fn ip_3_a_complete_row_is_not_reported() {
     let src = site_with("place id=b use=hut theme=plain east_of=anchor gap=4");
     assert!(
-        incomplete_only(&src).is_empty(),
+        of_code(&src, DiagnosticCode::IncompletePlace).is_empty(),
         "got {:#?}",
-        incomplete_only(&src),
+        of_code(&src, DiagnosticCode::IncompletePlace),
     );
 }
 
@@ -179,9 +168,9 @@ fn ip_4_a_mistyped_key_is_not_a_missing_one() {
     ] {
         let src = site_with(row);
         assert!(
-            incomplete_only(&src).is_empty(),
+            of_code(&src, DiagnosticCode::IncompletePlace).is_empty(),
             "`{row}` is mistyped, not incomplete, got {:#?}",
-            incomplete_only(&src),
+            of_code(&src, DiagnosticCode::IncompletePlace),
         );
         assert!(
             diagnose(&src)
@@ -197,7 +186,7 @@ fn ip_4_a_mistyped_key_is_not_a_missing_one() {
 #[test]
 fn ip_5_the_span_underlines_the_offending_row() {
     let src = site_with("place id=b use=hut east_of=anchor gap=4");
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::IncompletePlace);
     assert_eq!(
         &src[d.span.clone()],
         "place id=b use=hut east_of=anchor gap=4"
@@ -288,10 +277,10 @@ fn ip_9_every_incomplete_row_is_reported() {
          place east_of=anchor gap=12\n"
     );
     assert_eq!(
-        incomplete_only(&src).len(),
+        of_code(&src, DiagnosticCode::IncompletePlace).len(),
         3,
         "got {:#?}",
-        incomplete_only(&src),
+        of_code(&src, DiagnosticCode::IncompletePlace),
     );
 }
 

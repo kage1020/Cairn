@@ -3,7 +3,7 @@
 
 use cairn_lang_core::DiagnosticCode;
 
-use crate::common::{diagnose, slice};
+use crate::common::{diagnose, of_code, slice};
 
 #[test]
 fn tm_1_id_set_to_token_is_flagged_as_label_mismatch() {
@@ -103,10 +103,7 @@ fn tm_7_place_use_and_theme_with_a_non_label_value_are_flagged() {
         ("place id=a use=hut theme=x.y at=origin", "x.y"),
     ] {
         let src = format!("{PLACE_PRELUDE}site s:\n  {row}\n");
-        let found: Vec<_> = diagnose(&src)
-            .into_iter()
-            .filter(|d| d.code == DiagnosticCode::TypeMismatchLabel)
-            .collect();
+        let found = of_code(&src, DiagnosticCode::TypeMismatchLabel);
         assert_eq!(found.len(), 1, "for `{row}`, got {found:#?}");
         assert_eq!(slice(&src, &found[0]), offending, "for `{row}`");
     }
@@ -122,10 +119,7 @@ fn tm_8_place_use_and_theme_accept_identifiers_and_strings() {
         "place id=a use=\"hut\" theme=\"plain\" at=origin",
     ] {
         let src = format!("{PLACE_PRELUDE}site s:\n  {row}\n");
-        let found: Vec<_> = diagnose(&src)
-            .into_iter()
-            .filter(|d| d.code == DiagnosticCode::TypeMismatchLabel)
-            .collect();
+        let found = of_code(&src, DiagnosticCode::TypeMismatchLabel);
         assert!(found.is_empty(), "for `{row}`, got {found:#?}");
     }
 }
@@ -140,10 +134,7 @@ fn tm_9_an_absent_use_or_theme_is_not_a_type_mismatch() {
         "place id=a use=hut at=origin",
     ] {
         let src = format!("{PLACE_PRELUDE}site s:\n  {row}\n");
-        let found: Vec<_> = diagnose(&src)
-            .into_iter()
-            .filter(|d| d.code == DiagnosticCode::TypeMismatchLabel)
-            .collect();
+        let found = of_code(&src, DiagnosticCode::TypeMismatchLabel);
         assert!(found.is_empty(), "for `{row}`, got {found:#?}");
     }
 }

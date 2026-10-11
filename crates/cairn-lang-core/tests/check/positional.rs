@@ -18,20 +18,9 @@
 //! values that explain it.
 
 use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, lower, parse, resolve};
+use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
 
-use crate::common::{PRELUDE, def_with, diagnose, exactly_one, struct_with};
-
-fn positional_only(source: &str) -> Vec<Diagnostic> {
-    diagnose(source)
-        .into_iter()
-        .filter(|d| d.code == DiagnosticCode::UnexpectedPositional)
-        .collect()
-}
-
-fn one(source: &str) -> Diagnostic {
-    exactly_one(positional_only(source))
-}
+use crate::common::{PRELUDE, def_with, diagnose, of_code, one_of_code, struct_with};
 
 fn duo_with(row: &str) -> String {
     format!(
@@ -47,7 +36,7 @@ fn po_1_the_spec_forbidden_form_is_an_error() {
         struct_with("window front G 2 2 2x2 mat_slot=wall"),
         def_with("window front G 2 2 2x2 mat_slot=wall"),
     ] {
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
         assert_eq!(d.severity(), Severity::Error);
         assert_eq!(
             d.primary,
@@ -63,7 +52,7 @@ fn po_1_the_spec_forbidden_form_is_an_error() {
 #[test]
 fn po_2_a_dropped_equals_sign_is_reported() {
     let src = struct_with("walls mat_slot=wall height 3");
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
     assert_eq!(&src[d.span.clone()], "height 3");
 }
 
@@ -81,9 +70,9 @@ fn po_3_connect_is_exempt_well_formed_or_not() {
     ] {
         let src = duo_with(row);
         assert!(
-            positional_only(&src).is_empty(),
+            of_code(&src, DiagnosticCode::UnexpectedPositional).is_empty(),
             "`{row}` is `connect_arity`'s, got {:#?}",
-            positional_only(&src),
+            of_code(&src, DiagnosticCode::UnexpectedPositional),
         );
     }
     let over_arity = duo_with("connect anchor.entry to peer.entry c.exit path=@gravel");
@@ -102,7 +91,7 @@ fn po_3_connect_is_exempt_well_formed_or_not() {
 #[test]
 fn po_4_a_positional_after_an_argument_is_still_reported() {
     let src = struct_with("window id=w side=front y=1 offset=1 size=2 x2 mat_slot=wall");
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
     assert_eq!(&src[d.span.clone()], "x2");
 }
 
@@ -112,7 +101,7 @@ fn po_4_a_positional_after_an_argument_is_still_reported() {
 #[test]
 fn po_5_the_span_covers_the_whole_run() {
     let src = struct_with("window front side=front G mat_slot=wall");
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
     assert_eq!(&src[d.span.clone()], "front side=front G");
 }
 
@@ -127,9 +116,9 @@ fn po_6_a_fully_keyed_line_is_not_reported() {
     ] {
         let src = struct_with(row);
         assert!(
-            positional_only(&src).is_empty(),
+            of_code(&src, DiagnosticCode::UnexpectedPositional).is_empty(),
             "`{row}` is well-formed, got {:#?}",
-            positional_only(&src),
+            of_code(&src, DiagnosticCode::UnexpectedPositional),
         );
     }
 }
@@ -141,9 +130,9 @@ fn po_6_a_fully_keyed_line_is_not_reported() {
 fn po_7_an_unknown_keyword_is_left_to_the_allowlist() {
     let src = struct_with("frame front 2");
     assert!(
-        positional_only(&src).is_empty(),
+        of_code(&src, DiagnosticCode::UnexpectedPositional).is_empty(),
         "got {:#?}",
-        positional_only(&src),
+        of_code(&src, DiagnosticCode::UnexpectedPositional),
     );
     assert!(
         diagnose(&src)
@@ -162,7 +151,7 @@ fn po_8_a_positional_inside_a_dropped_body_is_still_reported() {
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls mat_slot=wall height=3\n    window front G mat_slot=wall\n"
     );
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
     assert_eq!(&src[d.span.clone()], "front G");
     assert!(
         diagnose(&src)
@@ -177,7 +166,10 @@ fn po_8_a_positional_inside_a_dropped_body_is_still_reported() {
 /// string shows that the verb agrees with the count.
 #[test]
 fn po_9_the_verb_agrees_with_the_count() {
-    let one_value = one(&struct_with("roof flat mat_slot=wall"));
+    let one_value = one_of_code(
+        &struct_with("roof flat mat_slot=wall"),
+        DiagnosticCode::UnexpectedPositional,
+    );
     assert!(
         one_value
             .primary
@@ -185,7 +177,10 @@ fn po_9_the_verb_agrees_with_the_count() {
         "got {:?}",
         one_value.primary,
     );
-    let two_values = one(&struct_with("roof flat gable mat_slot=wall"));
+    let two_values = one_of_code(
+        &struct_with("roof flat gable mat_slot=wall"),
+        DiagnosticCode::UnexpectedPositional,
+    );
     assert!(
         two_values
             .primary
@@ -201,7 +196,7 @@ fn po_9_the_verb_agrees_with_the_count() {
 #[test]
 fn po_10_a_site_row_is_covered_too() {
     let src = duo_with("place extra theme=plain at=origin");
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
     assert_eq!(&src[d.span.clone()], "extra");
 }
 

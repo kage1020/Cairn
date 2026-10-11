@@ -15,20 +15,9 @@
 //! both `continue` past a non-`place` row without a word, so the member
 //! produced no voxels and no diagnostic anywhere.
 
-use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
+use cairn_lang_core::{DiagnosticCode, Severity};
 
-use crate::common::{PRELUDE, def_with, diagnose, exactly_one, notes, struct_with};
-
-fn misplaced_only(source: &str) -> Vec<Diagnostic> {
-    diagnose(source)
-        .into_iter()
-        .filter(|d| d.code == DiagnosticCode::MisplacedMember)
-        .collect()
-}
-
-fn one(source: &str) -> Diagnostic {
-    exactly_one(misplaced_only(source))
-}
+use crate::common::{PRELUDE, def_with, diagnose, notes, of_code, one_of_code, struct_with};
 
 /// Every keyword the role table knows, with a well-formed argument list
 /// for each so the finding under test is the only thing wrong with the
@@ -63,7 +52,7 @@ fn site_with(row: &str) -> String {
 fn ms_1_a_site_row_in_a_geometry_body_is_an_error() {
     for row in SITE_ROWS {
         for src in [struct_with(row), def_with(row)] {
-            let d = one(&src);
+            let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
             assert_eq!(d.severity(), Severity::Error, "for `{row}`");
             assert!(
                 d.primary
@@ -81,7 +70,7 @@ fn ms_1_a_site_row_in_a_geometry_body_is_an_error() {
 fn ms_2_a_geometry_row_in_a_site_body_is_an_error() {
     for row in GEOMETRY_ROWS {
         let src = site_with(row);
-        let d = one(&src);
+        let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
         assert_eq!(d.severity(), Severity::Error, "for `{row}`");
         assert!(
             d.primary.starts_with("nothing in a `site` body lowers `"),
@@ -98,18 +87,18 @@ fn ms_3_a_row_the_body_reads_is_not_reported() {
     for row in GEOMETRY_ROWS {
         for src in [struct_with(row), def_with(row)] {
             assert!(
-                misplaced_only(&src).is_empty(),
+                of_code(&src, DiagnosticCode::MisplacedMember).is_empty(),
                 "`{row}` belongs in a geometry body, got {:#?}",
-                misplaced_only(&src),
+                of_code(&src, DiagnosticCode::MisplacedMember),
             );
         }
     }
     for row in SITE_ROWS {
         let src = site_with(row);
         assert!(
-            misplaced_only(&src).is_empty(),
+            of_code(&src, DiagnosticCode::MisplacedMember).is_empty(),
             "`{row}` belongs in a `site` body, got {:#?}",
-            misplaced_only(&src),
+            of_code(&src, DiagnosticCode::MisplacedMember),
         );
     }
 }
@@ -123,7 +112,7 @@ fn ms_4_the_body_kind_carries_through_a_level() {
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  level y=0\n    \
          place id=extra use=hut theme=plain at=origin\n"
     );
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
     assert!(d.primary.contains("lowers `place`"), "got {:?}", d.primary);
 }
 
@@ -137,7 +126,7 @@ fn ms_5_a_subtree_is_reported_once_at_its_root() {
          walls mat_slot=wall height=3\n    floor mat_slot=floor\n    \
          door id=d side=front at=center\n"
     );
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
     assert!(
         d.primary.contains("lowers `walls`"),
         "the outermost misplaced row is the one reported, got {:?}",
@@ -181,9 +170,9 @@ fn ms_7_an_unknown_keyword_is_left_to_the_allowlist() {
         site_with("frame id=f"),
     ] {
         assert!(
-            misplaced_only(&src).is_empty(),
+            of_code(&src, DiagnosticCode::MisplacedMember).is_empty(),
             "got {:#?}",
-            misplaced_only(&src),
+            of_code(&src, DiagnosticCode::MisplacedMember),
         );
         assert!(
             diagnose(&src)
@@ -204,9 +193,9 @@ fn ms_8_logic_and_assert_lines_are_not_members() {
          logic sig.open = sig.step\n"
     );
     assert!(
-        misplaced_only(&src).is_empty(),
+        of_code(&src, DiagnosticCode::MisplacedMember).is_empty(),
         "got {:#?}",
-        misplaced_only(&src),
+        of_code(&src, DiagnosticCode::MisplacedMember),
     );
 }
 
@@ -220,7 +209,7 @@ fn ms_9_a_level_in_a_site_body_says_dedent_rather_than_relocate() {
         "{PRELUDE}site duo:\n  level y=0\n    \
          place id=anchor use=hut theme=plain at=origin\n"
     );
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
     assert!(
         notes(&d).contains(
             &"a `site` body has no grouping construct: dedent the rows to the site's own indentation and drop the `level`"
@@ -234,7 +223,10 @@ fn ms_9_a_level_in_a_site_body_says_dedent_rather_than_relocate() {
 /// is actually in, not the whole keyword table.
 #[test]
 fn ms_10_the_candidate_list_is_scoped_to_the_body() {
-    let geometry = one(&struct_with("place id=extra use=hut theme=plain at=origin"));
+    let geometry = one_of_code(
+        &struct_with("place id=extra use=hut theme=plain at=origin"),
+        DiagnosticCode::MisplacedMember,
+    );
     assert!(
         notes(&geometry).contains(
             &"expected one of: floor, walls, door, window, roof, stair, level, pressure_plate, circuit"
@@ -242,7 +234,10 @@ fn ms_10_the_candidate_list_is_scoped_to_the_body() {
         "got {:#?}",
         notes(&geometry),
     );
-    let site = one(&site_with("floor mat_slot=floor"));
+    let site = one_of_code(
+        &site_with("floor mat_slot=floor"),
+        DiagnosticCode::MisplacedMember,
+    );
     assert!(
         notes(&site).contains(&"expected one of: place, connect"),
         "got {:#?}",
@@ -256,7 +251,7 @@ fn ms_10_the_candidate_list_is_scoped_to_the_body() {
 #[test]
 fn ms_11_the_span_underlines_the_offending_row() {
     let src = site_with("floor id=stray mat_slot=floor");
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
     assert_eq!(&src[d.span.clone()], "floor id=stray mat_slot=floor");
 }
 
@@ -266,7 +261,10 @@ fn ms_11_the_span_underlines_the_offending_row() {
 /// whole crate green.
 #[test]
 fn ms_12_the_def_loop_is_walked() {
-    let d = one(&def_with("place id=extra use=hut theme=plain at=origin"));
+    let d = one_of_code(
+        &def_with("place id=extra use=hut theme=plain at=origin"),
+        DiagnosticCode::MisplacedMember,
+    );
     assert!(
         d.primary
             .starts_with("nothing in a `struct` or `def` body lowers `place`"),
@@ -283,21 +281,28 @@ fn ms_12_the_def_loop_is_walked() {
 #[test]
 fn ms_13_a_signal_bearing_row_is_not_told_it_reaches_nothing() {
     let hedge = "the `sig.` reference on this line does still reach redstone synthesis — but the block it would sense or drive is the one being dropped, so move the member and the signal keeps working";
-    let sensor = one(&site_with(
-        "pressure_plate id=gate at=front.outside -> sig.step",
-    ));
+    let sensor = one_of_code(
+        &site_with("pressure_plate id=gate at=front.outside -> sig.step"),
+        DiagnosticCode::MisplacedMember,
+    );
     assert!(notes(&sensor).contains(&hedge), "got {:#?}", notes(&sensor));
 
     // An actuator argument counts too, and a row with no signal at all
     // must not carry the note — otherwise it would be noise on every
     // finding rather than a correction on the ones that need it.
-    let actuator = one(&site_with("door[id=entry] opened_by=sig.open"));
+    let actuator = one_of_code(
+        &site_with("door[id=entry] opened_by=sig.open"),
+        DiagnosticCode::MisplacedMember,
+    );
     assert!(
         notes(&actuator).contains(&hedge),
         "got {:#?}",
         notes(&actuator),
     );
-    let plain = one(&site_with("floor mat_slot=floor"));
+    let plain = one_of_code(
+        &site_with("floor mat_slot=floor"),
+        DiagnosticCode::MisplacedMember,
+    );
     assert!(!notes(&plain).contains(&hedge), "got {:#?}", notes(&plain));
 }
 
@@ -311,7 +316,7 @@ fn ms_14_the_nested_count_covers_the_whole_subtree() {
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
          walls mat_slot=wall height=3\n    level y=0\n      floor mat_slot=floor\n"
     );
-    let d = one(&src);
+    let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
     assert!(
         notes(&d).contains(&"the 2 members indented under it go with it"),
         "got {:#?}",
@@ -330,9 +335,9 @@ fn ms_15_a_child_of_a_lost_body_is_left_to_nesting() {
          floor mat_slot=floor\n"
     );
     assert!(
-        misplaced_only(&src).is_empty(),
+        of_code(&src, DiagnosticCode::MisplacedMember).is_empty(),
         "got {:#?}",
-        misplaced_only(&src),
+        of_code(&src, DiagnosticCode::MisplacedMember),
     );
     let codes: Vec<&str> = diagnose(&src).iter().map(|d| d.code.as_str()).collect();
     assert_eq!(
@@ -355,9 +360,9 @@ fn ms_16_a_subtree_under_an_unknown_keyword_is_left_alone() {
          bogus id=b\n    floor mat_slot=floor\n"
     );
     assert!(
-        misplaced_only(&src).is_empty(),
+        of_code(&src, DiagnosticCode::MisplacedMember).is_empty(),
         "got {:#?}",
-        misplaced_only(&src),
+        of_code(&src, DiagnosticCode::MisplacedMember),
     );
     assert!(
         diagnose(&src)

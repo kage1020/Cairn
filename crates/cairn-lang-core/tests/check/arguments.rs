@@ -10,19 +10,7 @@ use cairn_lang_core::intent::{
 };
 use cairn_lang_core::{Diagnostic, Edition, check, lower, parse};
 
-use crate::common::{codes, diagnose};
-
-/// The one finding `source` is expected to raise, or a panic naming what it
-/// raised instead.
-fn only(source: &str) -> Diagnostic {
-    let diags = diagnose(source);
-    assert_eq!(
-        diags.len(),
-        1,
-        "expected exactly one finding, got {diags:#?}"
-    );
-    diags.into_iter().next().expect("length checked above")
-}
+use crate::common::{codes, diagnose, exactly_one};
 
 /// The one finding `source` raises with `code`, beside exactly `total`
 /// findings in all, or a panic naming every finding it raised.
@@ -66,7 +54,9 @@ fn notes(d: &Diagnostic) -> String {
 #[test]
 fn a_key_the_role_does_not_read_is_refused() {
     // One letter, and the wall is built without the height it asked for.
-    let d = only("struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n");
+    let d = exactly_one(diagnose(
+        "struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n",
+    ));
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
     assert!(d.primary.contains("`hieght=`"), "got: {}", d.primary);
     assert!(d.primary.contains("`walls`"), "got: {}", d.primary);
@@ -81,7 +71,7 @@ fn the_finding_points_at_the_argument_and_not_at_the_line() {
     // maps a key to its value and the value's span — and the message names
     // the key, so the two read as one argument between them.
     let src = "struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n";
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(&src[d.span.clone()], "3");
     assert!(d.primary.contains("`hieght=`"), "got: {}", d.primary);
 }
@@ -93,13 +83,17 @@ fn the_suggestion_is_drawn_from_the_role_and_from_the_universal_keys() {
     // key is not the key at all — so the repair is a word the role's own
     // arguments do not contain. A candidate list without the universal
     // keys could not offer it.
-    let role_key = only("struct s size=5x5\n  walls mat_slot=wall hieght=3\n");
+    let role_key = exactly_one(diagnose(
+        "struct s size=5x5\n  walls mat_slot=wall hieght=3\n",
+    ));
     assert!(
         notes(&role_key).contains("did you mean `height`?"),
         "got: {}",
         notes(&role_key),
     );
-    let universal = only("struct s size=5x5\n  walls height=3 clas=outer mat_slot=m\n");
+    let universal = exactly_one(diagnose(
+        "struct s size=5x5\n  walls height=3 clas=outer mat_slot=m\n",
+    ));
     assert!(
         notes(&universal).contains("did you mean `class`?"),
         "got: {}",
@@ -109,7 +103,9 @@ fn the_suggestion_is_drawn_from_the_role_and_from_the_universal_keys() {
 
 #[test]
 fn a_key_nothing_resembles_is_named_with_the_closed_set_and_no_suggestion() {
-    let d = only("struct s size=5x5\n  floor totally_unrelated=1 mat_slot=m\n");
+    let d = exactly_one(diagnose(
+        "struct s size=5x5\n  floor totally_unrelated=1 mat_slot=m\n",
+    ));
     let notes = notes(&d);
     assert!(!notes.contains("did you mean"), "got: {notes}");
     // `floor` reads nothing of its own, so the note is the universal keys
@@ -137,7 +133,9 @@ fn an_unknown_keyword_answers_for_its_own_arguments() {
 
 #[test]
 fn a_nested_member_is_checked_at_any_depth() {
-    let d = only("struct s size=5x5\n  level y=0\n    walls hieght=3 mat_slot=m\n");
+    let d = exactly_one(diagnose(
+        "struct s size=5x5\n  level y=0\n    walls hieght=3 mat_slot=m\n",
+    ));
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
 }
 
@@ -149,7 +147,7 @@ fn a_member_inside_a_def_is_checked_like_any_other() {
     let src = "def hut size=3x3:\n  walls hieght=3 mat_slot=m\n\n\
                theme t:\n  slot m -> @oak_planks\n\n\
                site v:\n  place id=a use=hut theme=t at=origin\n";
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
     assert!(d.primary.contains("`hieght=`"), "got: {}", d.primary);
 }
@@ -164,7 +162,7 @@ fn a_struct_header_key_outside_its_vocabulary_is_refused_with_the_closed_set() {
     // `hieght` is too far from `size` and `class` for one, and the `height`
     // it is one transposition from is a member's key.
     let src = "struct s size=5x5 hieght=3\n  floor mat_slot=m\n";
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
     assert_eq!(&src[d.span.clone()], "3");
     assert!(
@@ -246,7 +244,7 @@ fn a_near_miss_on_a_header_class_is_offered_the_unread_key() {
     // is a candidate for the suggestion like `size` is: the repair is the
     // word the author meant, and what becomes of it is the next finding.
     let src = "struct s size=5x5 clas=house\n  floor mat_slot=m\n";
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
     assert_eq!(&src[d.span.clone()], "house");
     assert!(
@@ -313,7 +311,9 @@ fn an_argument_the_spec_defines_and_nothing_reads_is_reported_as_ignored() {
     // in silence is the defect this whole pass is about, one door along. The
     // key is the author's to write and the gap is the implementation's, so
     // it is a warning and it names the consequence.
-    let d = only("struct s size=9x7\n  window side=front y=2 offset=2 size=2x2 shape=arch\n");
+    let d = exactly_one(diagnose(
+        "struct s size=9x7\n  window side=front y=2 offset=2 size=2x2 shape=arch\n",
+    ));
     assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT");
     assert!(d.primary.contains("`shape=`"), "got: {}", d.primary);
     assert!(
@@ -329,7 +329,9 @@ fn a_key_a_sibling_argument_routed_past_is_reported_as_ignored() {
     // vocabulary; `fill_roof` only consults it for
     // `kind=shed`, so on a gable the direction reaches the IR and is
     // dropped — a roof that ignores the way the author pointed it.
-    let d = only("struct s size=9x9\n  roof kind=gable slope_to=front\n");
+    let d = exactly_one(diagnose(
+        "struct s size=9x9\n  roof kind=gable slope_to=front\n",
+    ));
     assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT");
     assert!(d.primary.contains("`slope_to=`"), "got: {}", d.primary);
     assert!(d.primary.contains("`kind=shed`"), "got: {}", d.primary);
@@ -342,7 +344,9 @@ fn the_conditional_finding_names_both_repair_sites() {
     // `slope_to=` is left over from one — which is the whole reason this is
     // a warning and not a refusal. A message naming one of them would pick
     // for the author.
-    let d = only("struct s size=9x9\n  roof kind=flat slope_to=front\n");
+    let d = exactly_one(diagnose(
+        "struct s size=9x9\n  roof kind=flat slope_to=front\n",
+    ));
     let notes = notes(&d);
     assert!(notes.contains("write `kind=shed`"), "got: {notes}");
     assert!(notes.contains("drop `slope_to=`"), "got: {notes}");
@@ -354,7 +358,7 @@ fn the_conditional_finding_points_at_the_value_it_is_about() {
     // likely to make is on the argument that was ignored, and the message
     // quotes the selector so the other site is one word away.
     let src = "struct s size=9x9\n  roof kind=hip slope_to=left\n";
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(&src[d.span.clone()], "left");
 }
 
@@ -422,7 +426,7 @@ fn place_takes_the_closed_set_the_spec_fixes_and_nothing_else() {
     let src = "def hut size=3x3:\n  floor mat_slot=floor\n\n\
                theme t:\n  slot floor -> @oak_planks\n\n\
                site v:\n  place id=a use=hut theme=t at=origin size=3x3\n";
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
     assert!(d.primary.contains("`size=`"), "got: {}", d.primary);
 }
@@ -616,7 +620,7 @@ fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() 
         ("  roof kind=gable bounds=expand\n", "bounds"),
     ] {
         let src = format!("struct s size=9x9\n{line}");
-        let d = only(&src);
+        let d = exactly_one(diagnose(&src));
         assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT", "source:\n{src}");
         assert!(
             d.primary.contains(&format!("`{key}=`")),
@@ -765,10 +769,10 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
 fn a_selector_key_no_member_of_the_role_carries_is_refused() {
     // The issue's own source. `clas=` is one edit from `class`, and the
     // `class` is lost: nothing reads the key and nothing said so.
-    let d = only(
+    let d = exactly_one(diagnose(
         "struct s size=9x7\n  walls id=shell mat_slot=wall height=5\n  \
          window[clas=outer] side=front offset=2 y=2 size=2x2 mat_slot=glass\n",
-    );
+    ));
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
     assert!(d.primary.contains("`clas=`"), "got: {}", d.primary);
     assert!(
@@ -786,7 +790,7 @@ fn a_selector_key_no_member_of_the_role_carries_is_refused() {
 #[test]
 fn the_finding_lands_on_the_selector_attribute_that_carries_it() {
     let src = "struct s size=9x7\n  window[clas=outer] side=front offset=2 y=2 size=2x2\n";
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(
         &src[d.span.clone()],
         "outer",
@@ -890,7 +894,7 @@ fn a_theme_selector_binding_is_reported_as_ignored() {
     // `frame=@diamond_block`, and without the row. Saying nothing let the
     // opening example demonstrate a line that does nothing.
     let src = COTTAGE_WITH_A_SELECTOR_ROW;
-    let d = only(src);
+    let d = exactly_one(diagnose(src));
     assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT");
     assert_eq!(&src[d.span.clone()], "@spruce_wood");
     assert!(

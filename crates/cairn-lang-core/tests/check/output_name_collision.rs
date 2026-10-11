@@ -7,18 +7,11 @@
 //! reports the pair without a `--target`.
 
 use cairn_lang_core::{
-    Diagnostic, DiagnosticCode, PlaceId, PortId, Severity, SiteName, WalkwayEndpoint,
-    WalkwayScopeKey, artifact_stem,
+    DiagnosticCode, PlaceId, PortId, Severity, SiteName, WalkwayEndpoint, WalkwayScopeKey,
+    artifact_stem,
 };
 
-use crate::common::{PRELUDE, codes, diagnose, exactly_one, lowered, notes, slice};
-
-fn collisions(source: &str) -> Vec<Diagnostic> {
-    diagnose(source)
-        .into_iter()
-        .filter(|d| d.code == DiagnosticCode::OutputNameCollision)
-        .collect()
-}
+use crate::common::{PRELUDE, codes, lowered, notes, of_code, one_of_code, slice};
 
 /// The simplest shape: a `struct` and a `place id=` of one name both
 /// write `hut`.
@@ -28,7 +21,7 @@ fn a_struct_and_a_place_of_one_name_collide() {
         "{PRELUDE}struct hut size=3x3\n  floor mat_slot=floor\n\n\
          site s:\n  place id=hut use=hut theme=plain at=origin\n"
     );
-    let found = exactly_one(collisions(&source));
+    let found = one_of_code(&source, DiagnosticCode::OutputNameCollision);
     assert_eq!(found.severity(), Severity::Error);
     assert_eq!(
         slice(&source, &found),
@@ -59,7 +52,7 @@ fn one_place_id_in_two_sites_collides() {
         "{PRELUDE}site a:\n  place id=home use=hut theme=plain at=origin\n\n\
          site b:\n  place id=home use=hut theme=plain at=origin\n"
     );
-    let found = exactly_one(collisions(&source));
+    let found = one_of_code(&source, DiagnosticCode::OutputNameCollision);
     assert_eq!(
         found.primary,
         "`place id=home` in site `b` would be written to the same file as `place id=home` in \
@@ -75,7 +68,7 @@ fn names_that_differ_only_in_case_collide() {
         "{PRELUDE}struct Hut size=3x3\n  floor mat_slot=floor\n\n\
          struct hut size=3x3\n  floor mat_slot=floor\n"
     );
-    let found = exactly_one(collisions(&source));
+    let found = one_of_code(&source, DiagnosticCode::OutputNameCollision);
     assert_eq!(
         found.primary,
         "`struct hut` would be written to the same file as `struct Hut`",
@@ -106,7 +99,7 @@ fn two_walkways_whose_names_flatten_alike_collide() {
         artifact_stem("walkway::s::x.y_entry__z.entry"),
         "the fixture's two walkways must share a name for this test to mean anything",
     );
-    let found = exactly_one(collisions(source));
+    let found = one_of_code(source, DiagnosticCode::OutputNameCollision);
     assert_eq!(
         slice(source, &found),
         "connect x.y_entry to z.entry path=@gravel"
@@ -127,14 +120,14 @@ fn a_scope_declared_twice_is_left_to_the_duplicate_codes() {
          struct hut size=3x3\n  floor mat_slot=floor\n"
     );
     assert!(codes(&structs).contains(&"E_DUPLICATE_ITEM"));
-    assert_eq!(collisions(&structs), []);
+    assert_eq!(of_code(&structs, DiagnosticCode::OutputNameCollision), []);
 
     let places = format!(
         "{PRELUDE}site s:\n  place id=home use=hut theme=plain at=origin\n  \
          place id=home use=hut theme=plain at=origin\n"
     );
     assert!(codes(&places).contains(&"E_DUPLICATE_PLACE_ID"));
-    assert_eq!(collisions(&places), []);
+    assert_eq!(of_code(&places, DiagnosticCode::OutputNameCollision), []);
 }
 
 /// Only what a build writes can collide. A `def` is a template with no
@@ -145,14 +138,20 @@ fn names_that_write_no_file_do_not_collide() {
         "{PRELUDE}struct hut size=3x3\n  floor mat_slot=floor\n\n\
          site s:\n  place id=home use=hut theme=plain at=origin\n"
     );
-    assert_eq!(collisions(&def_and_struct), []);
+    assert_eq!(
+        of_code(&def_and_struct, DiagnosticCode::OutputNameCollision),
+        []
+    );
 
     let refused_place = format!(
         "{PRELUDE}struct home size=3x3\n  floor mat_slot=floor\n\n\
          site s:\n  place id=home use=nowhere theme=plain at=origin\n"
     );
     assert!(codes(&refused_place).contains(&"E_UNRESOLVED_PLACE_REF"));
-    assert_eq!(collisions(&refused_place), []);
+    assert_eq!(
+        of_code(&refused_place, DiagnosticCode::OutputNameCollision),
+        []
+    );
 }
 
 /// Structs are compared before places whatever the source order, so with
@@ -164,7 +163,7 @@ fn the_finding_anchors_by_kind_not_by_source_order() {
         "{PRELUDE}site s:\n  place id=hut use=hut theme=plain at=origin\n\n\
          struct hut size=3x3\n  floor mat_slot=floor\n"
     );
-    let found = exactly_one(collisions(&source));
+    let found = one_of_code(&source, DiagnosticCode::OutputNameCollision);
     assert_eq!(
         slice(&source, &found),
         "place id=hut use=hut theme=plain at=origin"
@@ -206,7 +205,7 @@ fn a_scope_declared_twice_beside_a_third_is_reported_once() {
     }
     let counts: Vec<usize> = shapes
         .iter()
-        .map(|(source, _)| collisions(source).len())
+        .map(|(source, _)| of_code(source, DiagnosticCode::OutputNameCollision).len())
         .collect();
     assert_eq!(counts, [1, 1, 1], "one finding per shape");
 }
@@ -224,7 +223,7 @@ fn a_reversed_duplicate_connect_is_one_walkway() {
          connect a.entry to b.entry path=@gravel\n  \
          connect b.entry to a.entry path=@gravel\n"
     );
-    assert_eq!(collisions(&source), []);
+    assert_eq!(of_code(&source, DiagnosticCode::OutputNameCollision), []);
     let ir = lowered(&source);
     let written: Vec<&str> = ir.structures.keys().map(String::as_str).collect();
     assert_eq!(
@@ -248,7 +247,7 @@ fn a_place_of_a_sizeless_def_does_not_collide() {
          struct hut size=3x3\n  floor mat_slot=floor\n\n\
          site s:\n  place id=hut use=bare theme=plain at=origin\n"
     );
-    assert_eq!(collisions(&source), []);
+    assert_eq!(of_code(&source, DiagnosticCode::OutputNameCollision), []);
     let ir = lowered(&source);
     let written: Vec<&str> = ir.structures.keys().map(String::as_str).collect();
     assert_eq!(written, ["struct::hut"]);
@@ -262,7 +261,7 @@ fn a_sizeless_struct_does_not_collide() {
         "{PRELUDE}struct hut\n  floor mat_slot=floor\n\n\
          site s:\n  place id=hut use=hut theme=plain at=origin\n"
     );
-    assert_eq!(collisions(&source), []);
+    assert_eq!(of_code(&source, DiagnosticCode::OutputNameCollision), []);
     let ir = lowered(&source);
     let written: Vec<&str> = ir.structures.keys().map(String::as_str).collect();
     assert_eq!(written, ["site::s::hut"]);
@@ -279,7 +278,7 @@ fn a_walkway_to_a_dropped_placement_does_not_collide() {
          place id=a use=bare theme=plain east_of=b gap=4\n  \
          connect a.entry to b.entry path=@gravel\n"
     );
-    assert_eq!(collisions(&source), []);
+    assert_eq!(of_code(&source, DiagnosticCode::OutputNameCollision), []);
     let ir = lowered(&source);
     let written: Vec<&str> = ir.structures.keys().map(String::as_str).collect();
     assert_eq!(
@@ -308,7 +307,7 @@ fn a_walkway_whose_key_is_refused_writes_no_file() {
         WalkwayScopeKey::from_parts(&site, &end("a__b"), &end("b_")).is_err(),
         "the row's key must be refused for this test to mean anything",
     );
-    assert_eq!(collisions(&source), []);
+    assert_eq!(of_code(&source, DiagnosticCode::OutputNameCollision), []);
     let ir = lowered(&source);
     let written: Vec<&str> = ir.structures.keys().map(String::as_str).collect();
     assert_eq!(written, ["site::s::a__b", "site::s::b_"]);
@@ -334,7 +333,7 @@ fn walkways_in_two_sites_do_not_collide() {
         )
     };
     let source = format!("{PRELUDE}{}{}", site("x"), site("y"));
-    let found = collisions(&source);
+    let found = of_code(&source, DiagnosticCode::OutputNameCollision);
     let anchored: Vec<&str> = found.iter().map(|d| slice(&source, d)).collect();
     assert_eq!(
         anchored,
@@ -356,7 +355,7 @@ fn a_struct_or_a_place_spelled_like_a_walkway_collides_with_it() {
     let with_struct = format!(
         "{PRELUDE}struct s_walkway_a_entry__b_entry size=3x3\n  floor mat_slot=floor\n\n{sites}"
     );
-    let found = exactly_one(collisions(&with_struct));
+    let found = one_of_code(&with_struct, DiagnosticCode::OutputNameCollision);
     assert_eq!(
         found.primary,
         "the walkway `a.entry ↔ b.entry` in site `s` would be written to the same file as \
@@ -367,7 +366,7 @@ fn a_struct_or_a_place_spelled_like_a_walkway_collides_with_it() {
         "{PRELUDE}{sites}  place id=s_walkway_a_entry__b_entry use=hut theme=plain north_of=a \
          gap=4\n"
     );
-    let found = exactly_one(collisions(&with_place));
+    let found = one_of_code(&with_place, DiagnosticCode::OutputNameCollision);
     assert_eq!(
         found.primary,
         "the walkway `a.entry ↔ b.entry` in site `s` would be written to the same file as \
