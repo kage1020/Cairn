@@ -249,11 +249,9 @@ mod tests {
     }
 
     #[test]
-    fn adjacent_swap_suggests_match() {
-        assert_eq!(
-            nearest_match("wlals", KEYWORDS.iter().copied()),
-            Some("walls"),
-        );
+    fn adjacent_swap_counts_as_one_edit() {
+        // A three-character input allows one edit, and Levenshtein charges a swap two.
+        assert_eq!(nearest_match("dfe", ["def"]), Some("def"));
     }
 
     #[test]
@@ -298,10 +296,9 @@ mod tests {
     }
 
     #[test]
-    fn short_input_has_tighter_cap() {
-        // A three-character input's cap is 1.
-        let cands: &[&str] = &["abcdef"];
-        assert!(nearest_match("abc", cands.iter().copied()).is_none());
+    fn a_three_character_input_allows_one_edit() {
+        assert_eq!(nearest_match("abc", ["abd"]), Some("abd"));
+        assert_eq!(nearest_match("abc", ["axy"]), None);
     }
 
     fn owned(ids: &[&str]) -> Vec<String> {
