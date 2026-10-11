@@ -1,10 +1,7 @@
-//! Acceptance tests for `E_OUTPUT_NAME_COLLISION`.
-//!
-//! Every artifact of one build is written into the same directory, named by
-//! `artifact_stem`: a `struct` by its name, a `place` by its `id=` alone, a
-//! walkway by its site and endpoints. Two scopes can therefore name one
-//! file. The resolver compares the names before lowering, so `cairn check`
-//! reports the pair without a `--target`.
+//! `E_OUTPUT_NAME_COLLISION`: every artifact of one build is written into one
+//! directory, a `struct` under its name, a `place` under its `id=` and a
+//! walkway under its site and endpoints, so two scopes that would write one
+//! file are reported as a pair by `cairn check`, without a `--target`.
 
 use cairn_lang_core::{
     DiagnosticCode, PlaceId, PortId, Severity, SiteName, WalkwayEndpoint, WalkwayScopeKey,

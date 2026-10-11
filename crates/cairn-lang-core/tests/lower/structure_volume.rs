@@ -1,9 +1,5 @@
-//! The derived-extent bound, at its boundary and in the pipeline.
-//!
-//! `cairn-lang-cli/tests/cli_hostile_dimensions.rs` proves the process no
-//! longer crashes or hangs on the shapes that reach this bound, which needs
-//! a subprocess with a deadline to observe. These pin where the bound sits
-//! and that crossing it is reported rather than silently absorbed.
+//! The derived-extent bound sits exactly where it is documented, and a source
+//! that crosses it is reported rather than silently absorbed.
 
 use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::block_array::{Dims, MAX_STRUCTURE_VOLUME};

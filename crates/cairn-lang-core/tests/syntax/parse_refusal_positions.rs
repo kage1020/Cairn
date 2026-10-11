@@ -1,10 +1,5 @@
-//! Parse refusals point at the text that is wrong and name the mistake
-//! that was made.
-//!
-//! `spec/syntax` "Literals and separators": "A position always points at
-//! the text that is wrong". Each source below was already refused; what
-//! these pin is the position and the message, which is the whole of what
-//! an author gets to repair the file with.
+//! A parse refusal points at the text that is wrong and names the mistake
+//! (`spec/syntax` "Literals and separators").
 
 use cairn_lang_core::parse::parse;
 

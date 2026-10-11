@@ -1,13 +1,7 @@
-//! End-to-end check that `village.crn` lowers to the expected site shape.
-//!
-//! Three placements connected by two gravel walkways. The assertions pin
-//! the per-place block-array emission (one `BlockArray` per place under
-//! the matching `site::SITE::PLACE_ID` key), the walkway emission (one
-//! entry per `connect` row, with the
-//! `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT` key shape),
-//! and the absence of `W_DEFERRED_MEMBER` warnings — a regression in any
-//! of those would mean a future change quietly re-broke either site
-//! lowering or walkway voxelisation.
+//! `village.crn` lowers to one block array per place under its
+//! `site::SITE::PLACE_ID` key, one walkway per `connect` row under
+//! `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT`, and no deferred
+//! member.
 
 use cairn_lang_core::block_array::Footprint;
 use cairn_lang_core::check::{DiagnosticCode, Severity};
@@ -124,11 +118,9 @@ fn village_walkway_block_arrays_share_keys_with_walkways_map() {
 
 #[test]
 fn village_emits_zero_walkway_blocked_warnings() {
-    // The home1↔home3 row used to warn `W_WALKWAY_BLOCKED` (its straight
-    // L cut through home1's floor and shipped a strip with a 7-cell
-    // hole). With the ground-plane router the walkway detours around the
-    // building instead, so the whole example must lower warning-free and
-    // the laid strip must be unbroken.
+    // A straight L for the home1↔home3 row would cut through home1's
+    // floor; the ground-plane router detours around the building, so the
+    // whole example lowers warning-free and the laid strip is unbroken.
     let out = lowered_with_resolver_diagnostics(&read_example("village.crn"));
     let blocked: Vec<_> = out
         .diagnostics
@@ -181,7 +173,7 @@ fn village_emits_zero_deferred_member_warnings() {
         .count();
     assert_eq!(
         deferred, 0,
-        "village.crn must voxelise without W_DEFERRED_MEMBER warnings now that connect rows lower, diagnostics: {:#?}",
+        "village.crn must voxelise without W_DEFERRED_MEMBER warnings, diagnostics: {:#?}",
         out.diagnostics,
     );
 }

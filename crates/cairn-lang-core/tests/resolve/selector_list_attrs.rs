@@ -1,14 +1,5 @@
-//! A selector attribute whose value is a list selects the members that
-//! carry that list.
-//!
-//! `ast::Value` derived `PartialEq` over both of its fields, and one of
-//! them is the source span. `ValueKind::List(Vec<Value>)` therefore
-//! compared its elements' spans, so two lists written identically on two
-//! lines were never equal — and `member_attr_matches`, which compares a
-//! selector's expected value against the member's `key=value` arg by
-//! `ValueKind`, matched no member at all for a list-valued attribute. The
-//! author saw `E_THEME_SELECTOR_UNMATCHED`, which reads as "your filter is
-//! too narrow" rather than "this attribute type cannot match".
+//! A selector attribute whose value is a list selects the members that carry an
+//! equal list, compared by value and never by source span.
 
 use cairn_lang_core::ast::ValueKind;
 use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
@@ -72,7 +63,7 @@ fn the_binding_that_selector_carries_actually_reaches_the_member() {
 
 #[test]
 fn a_list_that_differs_still_does_not_match() {
-    // The other half: the fix is "compare what the value is", not
+    // The other half: the rule is "compare what the value is", not
     // "compare nothing". Each row rules out a different wrong reading —
     // `shorter` a zip that truncates, `reordered` set or multiset
     // semantics, and `longer` a containment rule, which is the reading
@@ -121,10 +112,9 @@ struct s size=9x7
 
 #[test]
 fn two_identical_list_valued_rows_are_a_duplicate_pair() {
-    // The inherited half. `select_the_same_members` compares the two rows'
-    // attribute values the same way, so while a list was not equal to the
-    // same list written on another line, two byte-identical rows were not
-    // recognised as coinciding and `E_DUPLICATE_SELECTOR` under-reported.
+    // The inherited half. The duplicate pass compares two rows' attribute
+    // values the same way, so two byte-identical list-valued rows coincide
+    // and earn `E_DUPLICATE_SELECTOR`.
     let source = "\
 theme t:
   slot glass -> @glass_pane
@@ -135,8 +125,8 @@ struct s size=9x7
   window tags=[a,b] class=small side=front offset=2 y=2 size=2x2 mat_slot=glass
 ";
     // The exact list, not "contains one": this fixture is what pins the
-    // claim that the matcher and the duplicate pass now give the same
-    // answer about a value. A matcher that regressed would add
+    // claim that the matcher and the duplicate pass give the same answer
+    // about a value. A matcher that compared spans would add
     // `E_THEME_SELECTOR_UNMATCHED` here, which a containment check would
     // not see.
     // Each row's binding is reported between them, since nothing lowers

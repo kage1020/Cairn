@@ -1,13 +1,7 @@
-//! A canonical token's block-state literal, `@oak_log[axis=x]`.
-//!
-//! `spec/materials-themes` "Canonical vocabulary" gives `@oak_log[axis=x]`
-//! as a canonical block token, and everything past the parser already read
-//! that shape: `resolve::classify_token` judges it on the part before the
-//! `[`, and `block_array::material` turns the tail into the block's
-//! properties. The parser stopped at the `[`, so none of it could be
-//! written. It now reads the literal into the token's text, and it is the
-//! one place a malformed literal is refused — the material layer reads the
-//! tail leniently on that understanding.
+//! A canonical token's block-state literal, `@oak_log[axis=x]`, parses into the
+//! token's text (`spec/materials-themes` "Canonical vocabulary"), and the
+//! parser is the one place a malformed literal is refused: the material layer
+//! reads the tail leniently on that understanding.
 
 use cairn_lang_core::ast::{Item, Statement, ThemeRule, Value, ValueKind};
 use cairn_lang_core::block_array::{BlockState, resolve_block_state};

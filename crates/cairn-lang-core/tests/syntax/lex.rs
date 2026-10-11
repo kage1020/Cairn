@@ -1,4 +1,4 @@
-//! Lexer acceptance tests.
+//! The lexer: the tokens a source becomes, and where each one sits.
 
 use cairn_lang_core::error::LexError;
 use cairn_lang_core::lex::{TokenKind, lex};
@@ -232,12 +232,11 @@ fn dedent_emits_per_level_closed() {
 
 /// A `-` that is not the head of an `->` is a token of its own.
 ///
-/// It used to be an `UnexpectedChar`, which put a version label's
-/// pre-release suffix out of reach of the directive that reads it:
-/// `@requires version>=1.21.4-rc1` died on the `-` before any check pass
-/// saw it, back when the parser refused any file `lex` refuses. For why
-/// that label shape has to be readable, see `spec/versioning-editions`
-/// "The target is a compile-time parameter".
+/// An `UnexpectedChar` there would put a version label's pre-release
+/// suffix out of reach of the directive that reads it, as in
+/// `@requires version>=1.21.4-rc1`. For why that label shape has to be
+/// readable, see `spec/versioning-editions` "The target is a compile-time
+/// parameter".
 #[test]
 fn a_lone_dash_lexes_as_a_token_rather_than_failing() {
     let suffixed = kinds("@requires version>=1.21.4-rc1\n");
@@ -269,15 +268,10 @@ fn a_lone_dash_is_still_refused_where_no_grammar_reads_one() {
 }
 
 mod refusals {
-    //! What the lexer refuses, and what it says when it does.
-    //!
-    //! Every case here is text a lexer *could* quietly reshape into something
-    //! it can represent — a size literal with a third extent, an indent two
-    //! levels deep, a byte-order mark. The tests assert that it does not, and
-    //! that the message names the thing that would fix the file: the audience
-    //! for these diagnostics is a generator reading them back, so a message
-    //! whose instruction is already satisfied ("must be a multiple of 2" for
-    //! a 4-space indent) is a defect, not a wording nit.
+    //! What the lexer refuses, and what it says: text it could quietly reshape
+    //! (a third size extent, an indent two levels deep, a byte-order mark past
+    //! the start) is refused, with a message naming what would fix the file
+    //! rather than one the file already satisfies.
 
     use cairn_lang_core::error::LexError;
     use cairn_lang_core::lex::{TokenKind, lex};
@@ -290,12 +284,9 @@ mod refusals {
 
     // -- size literals --------------------------------------------------------
 
-    /// `2x2x9` used to lex as `Size(2,2)` followed by `Ident("x9")`. The
-    /// stray identifier was reported — by `check::positional`, as a bare
-    /// value, at a column past the literal that produced it — or, in a
-    /// declaration header, not by that pass at all, since a header keeps no
-    /// positional list and the parser simply ran to the end of the line.
-    /// Neither names the size literal.
+    /// Lexed as `Size(2,2)` followed by `Ident("x9")`, `2x2x9` would be
+    /// reported as a bare value at a column past the literal, or in a
+    /// declaration header not at all, and neither names the size literal.
     #[test]
     fn a_size_literal_with_a_third_extent_is_refused() {
         let err = lex("struct s size=2x2x9\n").unwrap_err();
@@ -362,10 +353,10 @@ mod refusals {
         assert_eq!(kinds("9x0007\n")[0], TokenKind::Size(9, 7));
     }
 
-    /// `9x` has no height digits, so `scan_number` never builds a `Size` at
-    /// all — it is `Int` then `Ident`, and the parser is what refuses it. The
-    /// fix must not move that refusal into the lexer, because `9` followed by
-    /// an identifier is legal in other positions.
+    /// `9x` has no height digits, so it is never a `Size`: it is `Int` then
+    /// `Ident`, and the parser is what refuses it. The refusal stays out of
+    /// the lexer, because `9` followed by an identifier is legal in other
+    /// positions.
     #[test]
     fn a_size_literal_with_no_height_is_still_two_tokens() {
         assert_eq!(
@@ -380,12 +371,11 @@ mod refusals {
 
     /// A digit run past `i64` is not the lexer's to refuse.
     ///
-    /// `scan_number` used to parse every run into an `i64` on the way through,
-    /// which made the token type a range check on text the lexer cannot type:
-    /// a truth-table row is digits too, and `11111111111111111111` is a legal
-    /// twenty-input pattern rather than an overflow. The refusal still exists
-    /// where a value is actually asked for — `parse_value` reports
-    /// `IntContext::IntLiteral` — but it belongs there, not here.
+    /// Parsing every run into an `i64` would make the token type a range
+    /// check on text the lexer cannot type: a truth-table row is digits too,
+    /// and `11111111111111111111` is a legal twenty-input pattern rather than
+    /// an overflow. The refusal belongs where a value is actually asked for,
+    /// which reports `IntContext::IntLiteral`.
     #[test]
     fn an_integer_past_i64_still_lexes() {
         assert_eq!(
@@ -495,9 +485,9 @@ mod refusals {
 
     // -- byte-order marks and unprintable characters --------------------------
 
-    /// U+FEFF is what a default Windows editor writes, and it used to fail as
-    /// an unexpected character quoted verbatim — which renders as nothing, so
-    /// the message named an empty string.
+    /// U+FEFF is what a default Windows editor writes. Refused as an
+    /// unexpected character quoted verbatim, it would render as nothing, and
+    /// the message would name an empty string.
     #[test]
     fn a_leading_byte_order_mark_is_skipped() {
         let with_bom = lex("\u{feff}struct s size=3x3\n").expect("a leading BOM should lex");

@@ -1,4 +1,5 @@
-//! Acceptance tests for individual parser building blocks.
+//! What each header, block, command and expression parses to, and which
+//! malformed ones the parser refuses.
 
 use std::num::{IntErrorKind, NonZeroU32};
 
@@ -483,16 +484,11 @@ fn int_literal_overflow_surfaces_invalid_int_variant() {
     assert_eq!(kind, IntErrorKind::PosOverflow);
 }
 
-/// The `within` bound is the one site whose `IntContext` this layering
-/// changed, and it needs a bound past `i64` to reach.
-///
-/// `within_overflow_surfaces_invalid_int_variant` above uses `4294967296`
-/// — past `u32` but inside `i64` — so the lexer built a token for it and
-/// `parse_assert_always` reported it either way. A bound past `i64` used
-/// to be refused by the lexer first, as a bare `IntLiteral`; now it
-/// reaches the site that knows what the digits were for and says
-/// "invalid `within` bound" instead. The better phrasing, pinned as a
-/// deliberate outcome rather than left as an unremarked side effect.
+/// A `within` bound past `i64` is refused by the site that knows what the
+/// digits were for, as "invalid `within` bound", not as a bare
+/// `IntLiteral`. `within_overflow_surfaces_invalid_int_variant` above uses
+/// `4294967296`, past `u32` but inside `i64`, so it cannot tell the two
+/// apart.
 #[test]
 fn a_within_bound_past_i64_is_a_within_bound_error_not_a_literal_one() {
     let err = parse("struct s\n  assert always(a -> eventually b within 99999999999999999999)\n")
@@ -544,10 +540,8 @@ fn a_rebased_position_tracks_the_directives_own_line() {
     assert_eq!(err.position(), pos(3, 25));
 }
 
-/// The same path carried a wrong position before this layering touched
-/// it — a zero extent is `parse_value`'s refusal too — so the rebase
-/// fixes that case at the same time rather than only the one that
-/// regressed.
+/// A zero extent inside `@intended_targets` is refused on the same path,
+/// so its position is rebased onto the directive's line too.
 #[test]
 fn a_zero_extent_inside_intended_targets_is_located_too() {
     let err = parse("@cairn 2026.06\n@intended_targets [\"a\", 0x3]\n").expect_err("zero extent");

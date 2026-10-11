@@ -1,38 +1,9 @@
-//! A `key=` whose value is present but not readable is not the same as a
-//! `key=` left off, and the build has to say which one it saw.
-//!
-//! `spec/lint` "Error vs warning" calls this an unreadable value. The pass
-//! drops the value and uses the default, which is a `W_IGNORED_ARGUMENT`:
-//! the rule forbids *silent* substitution. Where the key decides whether
-//! the member is built at all, as `sym=` does on a window whose `repeat=`
-//! is greater than 1, the member is refused instead. Five keys, read by
-//! three members, used to treat a value of the wrong shape as if the key
-//! were absent, building the default and reporting nothing:
-//!
-//! - window `sym=`, where anything but a bare `true` or `false` meant "no
-//!   mirror";
-//! - stair `facing=` / `half=` / `shape=`, where a quoted or numeric value
-//!   became the default state;
-//! - place `gap=`, where a non-integer became `0`.
-//!
-//! The tests for a member that is built pin both halves of that contract:
-//! the build equals the build of the same line with the key left off, so
-//! the default really is what was used, and exactly one finding names the
-//! key and the value that was written. A member that is refused reports
-//! the unreadable value all the same, with a note saying it is not built
-//! either way, or, when the value is why, that it is not built on the
-//! default, so the author learns about both in one compile.
-//!
-//! Two more keys, `side=` and shed `slope_to=`, always refused their
-//! member for a value that is not a side. The refusal now names the value
-//! written, so a quoted `"front"` reads as the string it is rather than as
-//! the side it spells.
-//!
-//! Separately, an origin that works out past `i32` used to saturate onto
-//! the range's edge, so two `place` rows could land on one coordinate. It
-//! is refused now, as is a body whose far edge is past the range, and a
-//! refused row's body, or that of a row placed relative to a refused one,
-//! still reports what is wrong with its `def` and theme.
+//! A `key=` whose value is present but unreadable is not a `key=` left off
+//! (`spec/lint` "Error vs warning"): a built member equals the build with the
+//! key left off and earns one `W_IGNORED_ARGUMENT` naming the value, and a
+//! refused member reports the value too, with a note saying whether the default
+//! would have built it. An origin or far edge past `i32` is refused rather than
+//! saturated.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::{Diagnostic, DiagnosticCode};
@@ -502,8 +473,8 @@ fn a_placement_past_i32_refuses_the_row_instead_of_saturating() {
 
 #[test]
 fn rows_past_the_range_are_not_stacked_on_one_coordinate() {
-    // Saturating used to put `b` on `i32::MAX` and `c`, placed east of it,
-    // on the same coordinate. Neither is placed now: `b` for its origin,
+    // Saturating would put `b` on `i32::MAX` and `c`, placed east of it,
+    // on the same coordinate. Neither is placed: `b` for its origin,
     // and `c` as a row whose anchor did not lower. `c`'s unreadable `gap=`
     // is still reported, with a note saying the row is not placed.
     let ir = lowered(&site(

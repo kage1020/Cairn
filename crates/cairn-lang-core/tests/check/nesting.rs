@@ -1,22 +1,8 @@
-//! Acceptance tests for the `nesting` pass of `cairn_lang_core::check`.
-//!
-//! The parser attaches an indented body to any command, but only one
-//! shape has a reader: a `level y=N` sitting directly in a `struct` or
-//! `def` body, which `block_array::flatten_members` unwraps so the
-//! children join the phase buckets. Everything else is dropped before a
-//! block is placed.
-//!
-//! The failure was inverted. `check::connect_arity` recurses into
-//! children, so a *malformed* nested `connect` was reported loudly,
-//! while a well-formed one produced no walkway and no diagnostic. The
-//! more correct the row, the quieter it failed.
-//!
-//! Two things these tests deliberately do *not* claim. Dropped is not
-//! inert in a `struct` or `def` body — a nested member still receives a
-//! theme binding and still contributes to redstone synthesis, so the
-//! diagnostic is about blocks, not about the member vanishing. And the
-//! "no voxels" half of that is pinned in `check_nesting_lowering.rs`,
-//! which runs the lowering these tests do not.
+//! `E_UNSUPPORTED_NESTING`: the parser attaches an indented body to any
+//! command, but only a `level y=N` directly in a `struct` or `def` body has a
+//! reader, so any other indented body is reported. The finding is about blocks:
+//! a nested member in a `struct` or `def` body still takes a theme binding and
+//! still feeds redstone synthesis.
 
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
@@ -36,7 +22,7 @@ fn advice(diag: &Diagnostic) -> &str {
 /// keyword the message has to quote — `walk` has one loop and one
 /// report call, so what these buy is the quoting, not four code paths.
 #[test]
-fn ne_1_every_nested_row_in_a_site_body_is_reported() {
+fn every_nested_row_in_a_site_body_is_reported() {
     let cases = [
         (
             "place",
@@ -73,7 +59,7 @@ fn ne_1_every_nested_row_in_a_site_body_is_reported() {
 /// no voxels. The `door` here is the shape that reads most like working
 /// code: dedent it by two spaces and the wall gains its opening.
 #[test]
-fn ne_2_a_member_nested_under_a_geometry_member_is_reported() {
+fn a_member_nested_under_a_geometry_member_is_reported() {
     let src = format!(
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n    \
@@ -99,10 +85,10 @@ fn ne_2_a_member_nested_under_a_geometry_member_is_reported() {
 }
 
 /// Same rule in a `def` body. `def` is what a `site` instantiates, so
-/// it is the more likely place to meet this — and it is a separate loop
-/// in `run`, which a struct-only suite leaves unexecuted.
+/// it is the more likely place to meet this, and it is walked apart from a
+/// `struct` body, which a struct-only suite leaves unexercised.
 #[test]
-fn ne_2b_the_rule_reaches_def_bodies_too() {
+fn the_rule_reaches_def_bodies_too() {
     let src = format!(
         "{PRELUDE}def lodge size=5x5:\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n    \
@@ -119,7 +105,7 @@ fn ne_2b_the_rule_reaches_def_bodies_too() {
 /// recurse *through* it: a member nested under a member nested under a
 /// `level` is still lost.
 #[test]
-fn ne_3_level_groups_its_children_and_the_walk_continues_inside() {
+fn level_groups_its_children_and_the_walk_continues_inside() {
     let ok = format!(
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          level y=0\n    walls class=outer mat_slot=wall height=3\n    \
@@ -144,11 +130,11 @@ fn ne_3_level_groups_its_children_and_the_walk_continues_inside() {
     );
 }
 
-/// A `level` in a *site* body is not the exception. `lower_site`
-/// iterates the rows for `Place` and `Connect` and a `Level` is
-/// neither, so nothing unwraps it.
+/// A `level` in a *site* body is not the exception. A site body is read
+/// for its `place` and `connect` rows and a `level` is neither, so nothing
+/// unwraps it.
 #[test]
-fn ne_4_level_in_a_site_body_is_reported_as_a_misplaced_row_not_as_nesting() {
+fn level_in_a_site_body_is_reported_as_a_misplaced_row_not_as_nesting() {
     let src = format!(
         "{PRELUDE}site duo:\n  level y=0\n    \
          place id=anchor use=hut theme=plain at=origin\n"
@@ -176,7 +162,7 @@ fn ne_4_level_in_a_site_body_is_reported_as_a_misplaced_row_not_as_nesting() {
 /// underline built from it alone would leave the grandchildren the
 /// author has to move outside the range.
 #[test]
-fn ne_5_a_subtree_is_reported_once_at_its_root_and_underlined_whole() {
+fn a_subtree_is_reported_once_at_its_root_and_underlined_whole() {
     let src = format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n    \
          place id=peer use=hut theme=plain east_of=anchor gap=4\n      \
@@ -197,7 +183,7 @@ fn ne_5_a_subtree_is_reported_once_at_its_root_and_underlined_whole() {
 /// Two members under one parent are one mistake with one fix, so they
 /// earn one diagnostic covering the whole indented run.
 #[test]
-fn ne_6_sibling_nested_members_are_underlined_as_one_run() {
+fn sibling_nested_members_are_underlined_as_one_run() {
     let src = format!(
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n    \
@@ -222,7 +208,7 @@ fn ne_6_sibling_nested_members_are_underlined_as_one_run() {
 /// reaches it. A nested `level` inside a `def` that no site places is
 /// not lowered at all, so that one has no other reporter anywhere.
 #[test]
-fn ne_7_a_level_inside_a_level_is_reported_by_check_not_left_to_lowering() {
+fn a_level_inside_a_level_is_reported_by_check_not_left_to_lowering() {
     for (label, body) in [
         (
             "struct",
@@ -250,7 +236,7 @@ fn ne_7_a_level_inside_a_level_is_reported_by_check_not_left_to_lowering() {
 /// which, because "does not group members" would be false advice about
 /// a construct that does.
 #[test]
-fn ne_7b_a_level_without_a_usable_offset_is_reported() {
+fn a_level_without_a_usable_offset_is_reported() {
     // No negative case: `-` lexes (a version label's pre-release suffix
     // needs it to) but no value position reads one, so `y=-3` fails in
     // the parser and never reaches a check pass. The overflow case does
@@ -275,7 +261,7 @@ fn ne_7b_a_level_without_a_usable_offset_is_reported() {
 /// the keyword, so adding "move these into a `level`" alongside would
 /// point the author at the wrong line.
 #[test]
-fn ne_7c_an_unknown_keyword_parent_is_left_to_the_allowlist() {
+fn an_unknown_keyword_parent_is_left_to_the_allowlist() {
     let src = format!(
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          room name=hall\n    walls class=outer mat_slot=wall height=3\n"
@@ -296,7 +282,7 @@ fn ne_7c_an_unknown_keyword_parent_is_left_to_the_allowlist() {
 /// nested `connect` earns both its arity error and the nesting error,
 /// once each, and the well-formed one earns only the nesting error.
 #[test]
-fn ne_7d_a_malformed_nested_connect_earns_both_findings_once() {
+fn a_malformed_nested_connect_earns_both_findings_once() {
     let src = format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
          place id=peer use=hut theme=plain east_of=anchor gap=4\n  \
@@ -322,7 +308,7 @@ fn ne_7d_a_malformed_nested_connect_earns_both_findings_once() {
 /// A flat body is the normal case and must stay silent — the negative
 /// space every assertion above depends on.
 #[test]
-fn ne_9_flat_bodies_are_silent() {
+fn flat_bodies_are_silent() {
     let src = format!(
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n  \
@@ -336,15 +322,8 @@ fn ne_9_flat_bodies_are_silent() {
 }
 
 mod lowering {
-    //! What an indented body actually costs, measured on the build rather
-    //! than on the diagnostic.
-    //!
-    //! `check_nesting.rs` pins the wording and the anchoring of
-    //! `E_UNSUPPORTED_NESTING`; every assertion there filters to that code
-    //! and never lowers, so none of them would notice if the premise —
-    //! "these members produce no blocks" — stopped being true. These do the
-    //! lowering and compare against the same source with the indentation
-    //! removed.
+    //! What an indented body costs, measured on the build: each source is
+    //! lowered and compared with the same source with the indentation removed.
 
     use cairn_lang_core::{lower, parse, resolve};
 
@@ -354,7 +333,7 @@ mod lowering {
     /// def, one level of indentation apart — so the difference in solid
     /// cells is the door and nothing else.
     #[test]
-    fn nl_1_a_nested_door_cuts_no_opening() {
+    fn a_nested_door_cuts_no_opening() {
         let flat = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n  \
@@ -378,7 +357,7 @@ mod lowering {
     /// space for the test above, and the reason `level` is exempt from the
     /// nesting check at all.
     #[test]
-    fn nl_2_a_door_under_a_level_still_cuts_its_opening() {
+    fn a_door_under_a_level_still_cuts_its_opening() {
         let flat = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n  \
@@ -397,10 +376,10 @@ mod lowering {
     }
 
     /// A `place` indented under another `place` produces no placement, and
-    /// a `connect` indented under a `place` lays no walkway. Both come out
-    /// of `resolve_site_placements` iterating the rows without descending.
+    /// a `connect` indented under a `place` lays no walkway: a site body's
+    /// rows are read without descending into their bodies.
     #[test]
-    fn nl_3_a_nested_site_row_produces_neither_a_placement_nor_a_walkway() {
+    fn a_nested_site_row_produces_neither_a_placement_nor_a_walkway() {
         let flat = format!(
             "{PRELUDE}site duo:\n  \
          place id=anchor use=hut theme=plain at=origin\n  \
@@ -439,7 +418,7 @@ mod lowering {
     /// body is not gone from resolution — it still takes a theme binding.
     /// The note says so, so something has to hold it.
     #[test]
-    fn nl_4_a_nested_geometry_member_still_takes_a_theme_binding() {
+    fn a_nested_geometry_member_still_takes_a_theme_binding() {
         let src = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls class=outer mat_slot=wall height=3\n    \

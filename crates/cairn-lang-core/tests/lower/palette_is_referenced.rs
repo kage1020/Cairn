@@ -1,24 +1,8 @@
-//! Every palette entry an artifact carries must be one its voxels use.
-//!
-//! The palette is not a scratch table the pass keeps to itself. The Java
-//! writer emits it verbatim into the `.nbt`, `cairn info` reports one
-//! portability row per entry, and `resolved_ir_hash` covers it. An entry no
-//! voxel references is therefore a block the tooling counts and the artifact
-//! ships for a block that is not in the build.
-//!
-//! Claiming a slot before knowing whether a voxel will use it is how one
-//! gets there, and there are two ways to be early. A generator can claim a
-//! face its geometry never emits — a gable roof has four stair faces but a
-//! 3x3 roof has no room for a high apex. And a member can claim its
-//! material on the way to a check that refuses to paint it at all, which is
-//! what a window above the wall column and a plate with no exterior cell
-//! both did.
-//!
-//! The palette full of stairs on a structure with no stairs, which is what
-//! `level y=0` used to produce, was neither of those: the roof emitted
-//! every face and every write landed outside a volume sized without it.
-//! That one is closed by the volume being derived from the members that
-//! paint, not by anything here — these tests hold the line once it is.
+//! Every palette entry an artifact carries is one its voxels use, since the
+//! writer emits the palette verbatim, `cairn info` reports a row per entry and
+//! `resolved_ir_hash` covers it. A generator claims a face only if its geometry
+//! emits one, and a member claims its material only once it is certain to
+//! paint.
 
 use std::collections::HashSet;
 

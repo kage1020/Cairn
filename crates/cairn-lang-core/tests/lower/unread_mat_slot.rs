@@ -1,39 +1,9 @@
-//! The `mat_slot` entries of `MemberRole::unread_arguments` against the
-//! lowering they describe.
-//!
-//! An entry there is a claim about other code: that nothing a `door`,
-//! `level`, `circuit`, `place` or `connect` builds reads the line's
-//! `mat_slot=`. The warning built on it tells the author the member is built
-//! the same with the argument or without it, and the resolver stops looking
-//! the name up on the strength of it. `tests/lower/conditional_arguments.rs` gives
-//! the reason a claim of that shape is measured rather than trusted: a table
-//! that drifts from the code it describes is worse than no table. So it is
-//! tested the same way: write the argument two ways a reader would tell
-//! apart, build the source once for each, and compare the blocks.
-//!
-//! The two ways are two slot names the theme binds to different blocks. A
-//! role that reads its `mat_slot=` paints one block for the first and
-//! another for the second; a role that reads none builds the same blocks,
-//! in the same palette, at the same dims, in the same place. A `window` row
-//! is the control that the two names do tell builds apart.
-//!
-//! Each source is built two ways. Once through the pipeline as the CLI runs
-//! it, which is what the author gets. And once with the resolver's answer
-//! filled in by hand: the resolver does not look these names up, so
-//! through the pipeline alone a lowering rule that started reading the
-//! binding's `slot_value` would read `None` under both names and the
-//! comparison could not see it. The second build gives every member the
-//! `slot_value` its bound theme declares for its `mat_slot=` — what the
-//! resolver does for a role that reads one — so a lowering that consults
-//! it moves the build there.
-//!
-//! Every build also has to paint something and to lower without a
-//! diagnostic. Two empty builds compare equal, and a build that deferred
-//! the member differs from one that did not for a reason that is not the
-//! slot.
-//!
-//! Every source here is one line per member, spelled with explicit `\n`, for
-//! the reason `conditional_arguments.rs` gives.
+//! A role whose `MemberRole::unread_arguments` lists `mat_slot` builds the same
+//! blocks, palette, dims and place under two slot names the theme binds to
+//! different blocks, while a `window`, the control, builds differently. Each
+//! source is built through the pipeline and again with every binding's
+//! `slot_value` filled in by hand, since the resolver does not look these names
+//! up and a lowering that read one would otherwise see `None` both times.
 
 use std::collections::HashMap;
 

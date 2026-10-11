@@ -1,27 +1,9 @@
-//! A truth table is checked as a table, not only row by row.
-//!
-//! Row-level checks live in the parser, where the input arity is in hand:
-//! a row's digits and its width are refused there (`parse_truth_rows.rs`).
-//! What no row can see is the header read against itself, and the table
-//! around it. The header can list one signal twice, which is a fault in
-//! the header: the table then has more than one column for one input, and
-//! its rows describe combinations the circuit does not have. The table can
-//! have no rows at all, a row can assign inputs another row already did,
-//! or the combinations it leaves out can be the ones a bug would hide in.
-//! Those three read, in a diff, exactly like a table that verifies
-//! something.
-//!
-//! Severity follows what is provable. A repeated input is an error, since
-//! the header alone shows the table is written for combinations the
-//! circuit does not have, and it is the only finding its table gets: every
-//! other one reads the rows against that list. A table with no rows can
-//! never assert anything, whatever is written around it, so it is an
-//! error — reported as the repeated input when its list has one. A table
-//! missing rows asserts everything its rows say — the finding is about
-//! coverage, not about the statement being void — so it is a warning. Two
-//! rows that assign the same inputs different outputs describe a circuit
-//! that cannot exist, so that is an error again, while two that agree cost
-//! nothing but the line.
+//! A truth table is checked as a table, not only row by row (rows are the
+//! parser's, in `syntax/parse_truth_rows.rs`). Severity follows what is
+//! provable: a header listing one input twice, a table with no rows and two
+//! rows giving one combination different outputs are errors; a table missing
+//! combinations still asserts what its rows say, so it is a warning, as is a
+//! row repeated outright.
 
 use cairn_lang_core::check::{DiagnosticData, Severity};
 use cairn_lang_core::{Diagnostic, DiagnosticCode};
@@ -870,11 +852,11 @@ fn a_table_thirty_two_thousand_inputs_wide_is_searched_without_recursing() {
 /// constrain half the combinations and to say nothing about the other
 /// half.
 ///
-/// Written out of the issue that asked for it — three inputs, one of them
-/// an enable, and every combination with the enable low deliberately
-/// unconstrained. Without the `-` output the four enabled rows raise
-/// `W_TRUTH_TABLE_PARTIAL`, and the only ways to answer it were to assert
-/// four outputs the author does not mean or to leave the warning standing.
+/// Three inputs, one of them an enable, and every combination with the
+/// enable low deliberately unconstrained. Without the `-` output the four
+/// enabled rows raise `W_TRUTH_TABLE_PARTIAL`, and the only ways to answer
+/// it would be to assert four outputs the author does not mean or to leave
+/// the warning standing.
 #[test]
 fn a_dash_output_answers_the_coverage_finding() {
     let enabled = "001 -> 0; 011 -> 1; 101 -> 1; 111 -> 1";

@@ -1,17 +1,6 @@
-//! A member that paints nothing shapes nothing.
-//!
-//! `spec/compilation` "Level grouping and volume derivation" derives the
-//! volume from `overhang`, `wall_top` and `roof_extra`, and states the
-//! invariant the three have to keep: "every member the pass paints is one
-//! the volume was sized to hold", two readings of one list, which "is what
-//! keeps a member from painting past the end of the array it was handed".
-//! These pin the other direction — a member the pass does *not* paint must
-//! not be sized for either, whether it drops out for want of a `kind=` or
-//! for want of a material.
-//!
-//! Every dims assertion here is written against the same source with the
-//! member's line deleted rather than against a literal, because the claim
-//! is "this member contributed nothing", not "the answer is 5x4x5".
+//! A member that paints nothing shapes nothing (`spec/compilation` "Level
+//! grouping and volume derivation"): one dropped for want of a `kind=` or a
+//! material leaves the volume exactly as the same source with its line deleted.
 
 use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::block_array::BlockArrayIr;
@@ -51,9 +40,9 @@ const THEME: &str = "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @oak_
 
 /// `overhang=` widened the footprint for a roof that could not be drawn.
 ///
-/// `max_roof_extra_height` filters the roof list through `roof_kind_of` and
-/// `max_roof_overhang` did not, so the member gave the volume its width and
-/// nothing else: the walls moved inward and a ring of air surrounded them.
+/// Sized for its overhang alone, the member would give the volume its
+/// width and nothing else: the walls move inward and a ring of air
+/// surrounds them.
 #[test]
 fn a_roof_with_no_kind_does_not_widen_the_footprint() {
     let line = "  roof mat_slot=roof overhang=3\n";
@@ -113,12 +102,9 @@ fn a_roof_that_draws_still_widens_the_footprint() {
 /// A `shed` with no `slope_to=` is a kind the table knows and a roof the
 /// pass will not draw.
 ///
-/// `roof_kind_of` answers "is this name in the table", which is a
-/// different question from "will this member paint" — `fill_roof_shed`
-/// returns before its first voxel without a `slope_to=`, and the height
-/// walk already gave it `0`. Filtering the footprint on the name alone
-/// left the two roof walks disagreeing for exactly the reason they
-/// disagreed before this change.
+/// "Is this kind known" is a different question from "will this member
+/// paint": a shed with no `slope_to=` paints no voxel, and gives the volume
+/// no height, so it gives it no footprint either.
 #[test]
 fn a_shed_with_no_slope_to_does_not_widen_the_footprint() {
     let line = "  roof kind=shed mat_slot=roof overhang=3\n";
@@ -200,9 +186,9 @@ fn a_mixed_wall_column_keeps_only_the_courses_that_paint() {
 
 // --- B. Walls that paint nothing shape nothing ------------------------------
 
-/// A struct with no theme bound paints no `mat_slot=` at all, and used to
-/// reserve the full wall height anyway: a `3x7x3` array whose palette is
-/// air and nothing else.
+/// A struct with no theme bound paints no `mat_slot=` at all, so it does
+/// not reserve the wall height: no `3x7x3` array whose palette is air and
+/// nothing else.
 #[test]
 fn themeless_walls_do_not_raise_the_array() {
     let line = "  walls mat_slot=wall height=6\n";
@@ -216,8 +202,8 @@ fn themeless_walls_do_not_raise_the_array() {
 }
 
 /// The same shape reached a different way, and this one says nothing at
-/// all: `resolve_member_state` returns `None` for a member with no
-/// `mat_slot=` binding without a diagnostic from any pass.
+/// all: a member with no `mat_slot=` binding resolves to no block state,
+/// with no diagnostic from any pass.
 #[test]
 fn walls_with_no_material_binding_do_not_raise_the_array() {
     let line = "  walls height=6\n";
@@ -244,12 +230,11 @@ fn walls_that_paint_still_raise_the_array() {
 /// A window in walls that paint nothing is deferred, and the array shrinks
 /// with it.
 ///
-/// The two halves have to move together. `wall_column` decides whether the
-/// rectangle lands in masonry and `max_wall_top` sizes the array; filtering
-/// one without the other would leave the carve writing rows that no longer
-/// exist. What the window loses is a carve of air out of air — the lowered
-/// output of this fixture is byte-identical to the same source without the
-/// window today.
+/// The two halves move together: whether the rectangle lands in masonry
+/// and how tall the array is are read off the same wall column, or the
+/// carve would write rows that do not exist. What the window loses is a
+/// carve of air out of air: the lowered output is byte-identical to the
+/// same source without the window.
 #[test]
 fn a_window_in_walls_that_paint_nothing_is_deferred_and_the_array_shrinks() {
     let line = "  window side=front y=1 offset=1 size=2x2 mat_slot=wall\n";
@@ -268,8 +253,8 @@ fn a_window_in_walls_that_paint_nothing_is_deferred_and_the_array_shrinks() {
 
 /// A door in the same walls defers too, and says what is actually missing.
 ///
-/// The gate is `wall_top < 1`, which now reads "no walls member paints"
-/// as well as "no walls member has a positive `height=`". The author wrote
+/// The gate reads "no walls member paints" as well as "no walls member
+/// has a positive `height=`". The author wrote
 /// a positive height, so a reason naming only that sends them to the wrong
 /// line.
 #[test]
@@ -311,8 +296,8 @@ fn walls_whose_abstract_token_cannot_be_resolved_do_not_raise_the_array() {
 }
 
 /// A roof falls back to a material of its own where walls fall back to
-/// air, so a themeless struct with a gable still draws one — now seated on
-/// the ground plane instead of on walls that are not there.
+/// air, so a themeless struct with a gable still draws one, seated on the
+/// ground plane instead of on walls that are not there.
 #[test]
 fn a_roof_still_draws_over_walls_that_paint_nothing() {
     let source = "struct s size=5x5\n  walls mat_slot=wall height=6\n  roof kind=gable mat_slot=roof overhang=1\n";

@@ -1,9 +1,5 @@
-//! Span propagation acceptance tests.
-//!
-//! Locks down the invariant that every parser-visible AST node carries
-//! a `span` whose byte range round-trips through `&source[span]` to the
-//! surface form, and that the IR's [`Member`] mirrors the originating
-//! [`Statement::Generic`] span exactly.
+//! Every AST node carries a span that slices the source to its surface form,
+//! and the IR's [`Member`] carries its [`Statement::Generic`]'s span exactly.
 
 use cairn_lang_core::ast::{Item, Statement, ValueKind};
 use cairn_lang_core::{lower, parse};
@@ -15,8 +11,8 @@ fn statement_generic_span_round_trips_to_surface_text() {
     let Item::Struct { body, span, .. } = &module.items[0] else {
         panic!("expected Struct, got {:?}", module.items[0]);
     };
-    // The item span starts at the keyword and (per `last_content_byte`)
-    // ends after the last meaningful body token.
+    // The item span starts at the keyword and ends after the last
+    // meaningful body token.
     let item_slice = &src[span.clone()];
     assert!(
         item_slice.starts_with("struct s") && item_slice.ends_with("height=4"),

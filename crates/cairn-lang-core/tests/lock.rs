@@ -1,4 +1,6 @@
-//! AC L1–L8 for the lockfile module.
+//! A lockfile is a reproducibility claim: its hashes are deterministic, its
+//! YAML round-trips and keeps one shape, and a reader refuses any document
+//! it cannot vouch for rather than reading part of it.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
@@ -33,8 +35,7 @@ fn unit_ir(palette: Palette) -> BlockArrayIr {
 }
 
 #[test]
-fn l1_hash_source_empty_input_matches_known_sha256() {
-    // AC L1: well-known sha256 of the empty input.
+fn hash_source_empty_input_matches_known_sha256() {
     let h = hash_source("");
     assert_eq!(
         h.as_str(),
@@ -43,8 +44,7 @@ fn l1_hash_source_empty_input_matches_known_sha256() {
 }
 
 #[test]
-fn l2_hash_source_is_deterministic() {
-    // AC L2: same input → same hash, across calls.
+fn hash_source_is_deterministic() {
     let a = hash_source("cottage example body\n");
     let b = hash_source("cottage example body\n");
     assert_eq!(a, b);
@@ -53,8 +53,7 @@ fn l2_hash_source_is_deterministic() {
 }
 
 #[test]
-fn l3_hash_resolved_ir_is_deterministic() {
-    // AC L3: same IR → same hash, across calls.
+fn hash_resolved_ir_is_deterministic() {
     let ir = unit_ir(Palette::new_with_air());
     let h1 = hash_resolved_ir(&ir).expect("hash");
     let h2 = hash_resolved_ir(&ir).expect("hash");
@@ -62,8 +61,7 @@ fn l3_hash_resolved_ir_is_deterministic() {
 }
 
 #[test]
-fn l4_hash_resolved_ir_reflects_palette_order() {
-    // AC L4: palette insertion order is observable through the hash.
+fn hash_resolved_ir_reflects_palette_order() {
     let mut p1 = Palette::new_with_air();
     p1.intern(BlockState::bare("minecraft:cobblestone"));
     p1.intern(BlockState::bare("minecraft:oak_planks"));
@@ -100,8 +98,7 @@ fn sample_lockfile() -> Lockfile {
 }
 
 #[test]
-fn l5_lockfile_roundtrips_through_yaml() {
-    // AC L5: serialise → deserialise → equal.
+fn lockfile_roundtrips_through_yaml() {
     let lf = sample_lockfile();
     let body = serde_norway::to_string(&lf).expect("encode");
     let parsed: Lockfile = serde_norway::from_str(&body).expect("decode");
@@ -131,12 +128,8 @@ fn sample_lockfile_with_walkways() -> Lockfile {
 
 #[test]
 fn lockfile_with_walkways_roundtrips_through_yaml() {
-    // A lockfile carrying a non-empty `walkways:` section must
-    // serialise and deserialise back to the same value — without this
-    // the new section could silently lose fields under a future struct
-    // rename and the `sample_lockfile()` round-trip (which leaves
-    // `walkways: vec![]` and so skips the section entirely) would not
-    // catch it.
+    // `sample_lockfile()` leaves `walkways` empty, so its round-trip never
+    // writes the section at all.
     let lf = sample_lockfile_with_walkways();
     let body = serde_norway::to_string(&lf).expect("encode");
     let parsed: Lockfile = serde_norway::from_str(&body).expect("decode");
@@ -154,23 +147,19 @@ fn lockfile_with_walkways_roundtrips_through_yaml() {
 
 #[test]
 fn lockfile_walkways_yaml_snapshot() {
-    // Pin the full wire shape of a walkway-bearing lockfile (key order,
-    // nested `from`/`to` objects, `dims` as a 3-element list) so a
-    // future struct reshuffle is caught here before downstream tooling
-    // that greps the lockfile breaks. The `sample_lockfile()` snapshot
-    // (`l8_*`) covers the walkway-less case; this is its companion.
+    // The full wire shape of a walkway-bearing lockfile: key order, nested
+    // `from`/`to` objects, `dims` as a 3-element list.
+    // `sample_lockfile_yaml_snapshot` covers the walkway-less case.
     let body = serde_norway::to_string(&sample_lockfile_with_walkways()).expect("encode");
     insta::assert_snapshot!(body);
 }
 
 #[test]
 fn lockfile_yaml_rejects_legacy_string_walkway_endpoint() {
-    // Pre-newtype lockfiles encoded `from`/`to` as a single
-    // `"PLACE.PORT"` joined string. A `#[serde(untagged)]` fallback
-    // that quietly accepted the legacy form would re-open the
-    // silent-disaster the newtype split was meant to close, so the
-    // reject must stay loud. Construct the offending YAML by hand so
-    // the test does not depend on whatever the current encoder emits.
+    // An endpoint is a `place`/`port` mapping, never one `"PLACE.PORT"`
+    // string: a joined string cannot say which dot splits it. The YAML is
+    // written by hand so the test does not depend on what the encoder
+    // emits.
     let body = format!(
         concat!(
             "source_hash: {zero}\ncairn_version: '2026.09'\n",
@@ -191,9 +180,11 @@ fn lockfile_yaml_rejects_legacy_string_walkway_endpoint() {
         serde_norway::from_str::<Lockfile>(&body).expect_err("legacy string walkway endpoint");
     let msg = err.to_string();
     assert!(
-        msg.contains("place") || msg.contains("expected") || msg.contains("invalid"),
-        "expected a structural deserialise error pointing at the missing `place`/`port` \
-         fields, got: {msg}",
+        msg.starts_with(
+            "walkways[0].from: invalid type: string \"home1.entry\", expected struct \
+             WalkwayEndpoint"
+        ),
+        "expected the field, the string and the shape it should have been, got: {msg}",
     );
 }
 
@@ -250,7 +241,8 @@ fn lockfile_yaml_with_bad_hash_is_rejected() {
     );
     let err = serde_norway::from_str::<Lockfile>(&body).expect_err("bad hash");
     assert!(
-        err.to_string().contains("prefix"),
+        err.to_string()
+            .starts_with("hash is missing the `sha256:` prefix"),
         "expected hash prefix error, got {err}",
     );
 }
@@ -269,10 +261,9 @@ fn the_schema_version_is_the_first_thing_a_reader_sees() {
 
 #[test]
 fn a_document_without_the_field_is_the_version_that_had_none() {
-    // Every lockfile written before the field existed is this shape. It is
-    // the schema this build reads, so absence means version 1 rather than
-    // "unknown" — the alternative is refusing to read files the compiler
-    // itself wrote.
+    // A document with no `lock_schema_version` is version 1, the schema
+    // this build reads, rather than "unknown": the alternative is refusing
+    // to read files the compiler itself wrote.
     let mut lf = sample_lockfile();
     lf.lock_schema_version = LOCK_SCHEMA_VERSION;
     let with_field = lf.to_yaml().expect("encode");
@@ -292,9 +283,7 @@ fn a_document_without_the_field_is_the_version_that_had_none() {
 #[test]
 fn a_schema_from_the_future_is_refused_by_name() {
     // The whole point of recording the version: a later format that reuses
-    // these field names must not be read as if it were this one. Before the
-    // field existed such a document deserialised as `Ok` with
-    // `verified: true`.
+    // these field names must not be read as if it were this one.
     let body = sample_lockfile().to_yaml().expect("encode").replace(
         &format!("lock_schema_version: {LOCK_SCHEMA_VERSION}"),
         "lock_schema_version: 99",
@@ -315,9 +304,8 @@ fn a_schema_from_the_future_is_refused_by_name() {
 }
 
 /// A lockfile with every container populated, so a test can tamper with
-/// each one. `sample_lockfile` leaves `placements` and `walkways` empty,
-/// which is why the endpoint containers never appeared in the YAML to be
-/// tampered with.
+/// each one. `sample_lockfile` leaves `placements` and `walkways` empty, so
+/// their containers never appear in its YAML.
 fn lockfile_with_every_container() -> Lockfile {
     Lockfile {
         placements: vec![LockPlacement {
@@ -448,9 +436,9 @@ fn an_encoded_lockfile_ends_with_a_newline() {
 }
 
 #[test]
-fn l8_sample_lockfile_yaml_snapshot() {
-    // AC L8: stable YAML snapshot, so a future struct/field reshuffle is
-    // caught before downstream tooling that greps the lockfile breaks.
+fn sample_lockfile_yaml_snapshot() {
+    // The whole document, top-level key order included, so a reshuffle is
+    // caught before tooling that greps the lockfile breaks.
     let body = serde_norway::to_string(&sample_lockfile()).expect("encode");
     insta::assert_snapshot!(body);
 }

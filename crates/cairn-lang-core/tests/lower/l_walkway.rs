@@ -1,15 +1,6 @@
-//! Integration check that `l-walkway.crn` lowers to a Manhattan L between
-//! `home1.entry` (front, +z) and `home3.side_entry` (left, -x).
-//!
-//! The unit tests in `block_array::walkway` already pin `l_path`'s corner
-//! dedup directly, but until this fixture landed every shipping example
-//! laid its walkways purely along one axis. A regression that broke the
-//! L's elbow (corner omitted, axis swap, off-by-one in either leg) would
-//! pass `village_lower` and only fail at this boundary. The fixture
-//! intentionally places the middle home so the elbow column clears every
-//! footprint, pinning `blocked_count == 0` as the regression-free state;
-//! that, and the walkway's key, are asserted for every walkway example in
-//! `walkway_examples_lower`.
+//! `l-walkway.crn` lowers to a Manhattan L between `home1.entry` (front, +z)
+//! and `home3.side_entry` (left, -x), with its elbow laid once and each leg on
+//! its own axis; the middle home is placed so the elbow clears every footprint.
 
 use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex};
 

@@ -1,17 +1,8 @@
-//! What `@requires` accepts, and what it says about the rest.
-//!
-//! The directive declares a Minecraft capability floor. Every expression
-//! this pass does not understand used to be dropped in silence: the floor
-//! simply did not exist, `cairn info` printed `0.0 .. latest`, and the
-//! author's constraint was gone without a word. A floor that quietly
-//! evaporates is worse than no floor, because it is still written in the
-//! file and still read by whoever opens it.
-//!
-//! Only `version>=X` is defined (`spec/syntax` "Headers" and
-//! `spec/versioning-editions` "Fail-loud and minimum-version inference").
-//! Anything else is reported rather than ignored — including the shapes an
-//! author reasonably reaches for first, since "not supported" is an answer
-//! and silence is not.
+//! `@requires` declares a Minecraft capability floor, and only `version>=X` is
+//! defined (`spec/syntax` "Headers"). Any other expression is reported rather
+//! than dropped, including the shapes an author reaches for first: a floor that
+//! silently evaporates is still written in the file and still read by whoever
+//! opens it.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::DiagnosticCode;
@@ -75,9 +66,8 @@ fn versions_for(header: &str, edition: Option<cairn_lang_core::Edition>) -> Vec<
 
 // -- the grammar ----------------------------------------------------------
 
-/// A space around the operator used to make the floor vanish.
-/// `version >= 1.21` is what a human writes first, and the constraint was
-/// dropped with `cairn check` exiting 0 and `cairn info` printing `0.0`.
+/// A space around the operator does not make the floor vanish:
+/// `version >= 1.21` is what a human writes first.
 #[test]
 fn whitespace_around_the_operator_does_not_change_the_floor() {
     for header in [
@@ -112,8 +102,8 @@ fn repeated_requirements_fold_to_the_strictest() {
 // -- what it refuses ------------------------------------------------------
 
 /// `version<1.20` is not a constraint Cairn can intersect — only `>=` is
-/// defined — and it used to be dropped, so the file read as if it declared
-/// an upper bound that was never enforced or even acknowledged.
+/// defined. Dropped, the file would read as if it declared an upper bound
+/// that was never enforced or even acknowledged.
 #[test]
 fn an_operator_other_than_at_least_is_refused() {
     for (header, operator) in [
@@ -196,8 +186,8 @@ fn a_label_the_spec_says_will_exist_is_not_refused_by_the_directive() {
     }
 }
 
-/// A `-` used to die in the lexer, before any pass could have an opinion,
-/// back when the parser refused any file `lex` refuses.
+/// A `-` in a directive's raw value reaches the directive rather than
+/// dying in the lexer before any pass could have an opinion.
 #[test]
 fn a_pre_release_label_reaches_the_directive_at_all() {
     let source = with_header("@requires version>=1.21.4-rc1\n");

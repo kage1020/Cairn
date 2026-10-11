@@ -49,7 +49,7 @@ pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> boo
 /// `Ident` or a `Str` carrying the same text; every other key is compared
 /// against an [`crate::intent::IntentState`] entry by [`ValueKind`], where
 /// the two spellings are different values.
-/// `ds_*_value_form_matters_exactly_where_the_matcher_says_it_does` in
+/// `selector::value_form_matters_exactly_where_the_matcher_says_it_does` in
 /// `tests/check/duplicate.rs` pins that pair of answers from the
 /// outside, by checking `E_THEME_SELECTOR_UNMATCHED` alongside the
 /// finding.
@@ -60,9 +60,8 @@ pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> boo
 /// take over. Those rows are already an error by a different scope —
 /// `check::type_mismatch` covers the same three keys and reports
 /// `E_TYPE_MISMATCH_LABEL` on each of them — so the gap says nothing that
-/// goes unsaid. `ds_*_a_label_key_holding_a_non_label_value_pairs_with_nothing`
-/// pins the pairing. (Named by its half rather than its number: the `ds_`
-/// numbering in that file is not in file order.)
+/// goes unsaid. `selector::a_label_key_holding_a_non_label_value_pairs_with_nothing`
+/// in `tests/check/duplicate.rs` pins the pairing.
 ///
 /// The [`ValueKind`] comparison is by value at every depth, including
 /// inside a `ValueKind::List`: [`Value`]'s equality is its kind's, so two

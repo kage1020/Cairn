@@ -1,12 +1,13 @@
-//! Acceptance tests for the `keyword_allowlist` pass of
-//! `cairn_lang_core::check`.
+//! `E_UNKNOWN_KEYWORD`: a member or selector keyword no role defines is an
+//! error at the keyword, with a did-you-mean note when a known keyword is
+//! close.
 
 use cairn_lang_core::DiagnosticCode;
 
 use crate::common::{diagnose, slice};
 
 #[test]
-fn kw_1_unknown_top_level_keyword_emits_e_unknown_keyword() {
+fn unknown_top_level_keyword_emits_e_unknown_keyword() {
     let src = "struct s size=1x1\n  mystery foo=1\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
@@ -26,7 +27,7 @@ fn kw_1_unknown_top_level_keyword_emits_e_unknown_keyword() {
 }
 
 #[test]
-fn kw_2_unknown_keyword_inside_nested_level_is_still_flagged() {
+fn unknown_keyword_inside_nested_level_is_still_flagged() {
     let src = "struct s size=3x3\n  level y=0\n    mystery foo=1\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
@@ -35,7 +36,7 @@ fn kw_2_unknown_keyword_inside_nested_level_is_still_flagged() {
 }
 
 #[test]
-fn kw_3_unknown_keyword_note_carries_no_secondary_span() {
+fn unknown_keyword_note_carries_no_secondary_span() {
     // `expected one of: ...` is informational, not locational — its span
     // is `None` so renderers do not print a second `file:L:C` pointer at
     // the primary span.
@@ -50,7 +51,7 @@ fn kw_3_unknown_keyword_note_carries_no_secondary_span() {
 }
 
 #[test]
-fn kw_4_theme_selector_with_unknown_keyword_is_flagged() {
+fn theme_selector_with_unknown_keyword_is_flagged() {
     // A typo in the leading keyword of a `theme` selector is just as
     // wrong as a typo in a struct body — the lowering step keeps the raw
     // string and the keyword_allowlist pass must re-check it.
@@ -66,7 +67,7 @@ fn kw_4_theme_selector_with_unknown_keyword_is_flagged() {
 }
 
 #[test]
-fn kw_6_close_typo_attaches_did_you_mean_note() {
+fn close_typo_attaches_did_you_mean_note() {
     // `wals` is one deletion away from `walls`; the suggest pass must lead
     // the notes with a targeted "did you mean" line, keeping the broader
     // candidate listing as a fallback.
@@ -95,7 +96,7 @@ fn kw_6_close_typo_attaches_did_you_mean_note() {
 }
 
 #[test]
-fn kw_7_distant_typo_skips_the_suggestion() {
+fn distant_typo_skips_the_suggestion() {
     // `mystery` is 4+ edits away from every known keyword, so the suggest
     // pass must not invent a guess — the candidate listing alone is the
     // right surface for the user to scan.
@@ -115,7 +116,7 @@ fn kw_7_distant_typo_skips_the_suggestion() {
 }
 
 #[test]
-fn kw_5_every_known_keyword_is_silent() {
+fn every_known_keyword_is_silent() {
     // Build a source that uses every keyword in the known-keyword table.
     // None should trigger `E_UNKNOWN_KEYWORD`. `place` and `connect` live
     // in a site; everything else lives in a struct.

@@ -1,48 +1,8 @@
-//! A `def` member's resolver diagnostics are reported once per member per
-//! theme.
-//!
-//! A def body is walked once as its own scope and once more per `place`
-//! that instantiates it, and every walk resolves the same `mat_slot=`
-//! against a theme. Left alone that makes the count of a bad slot "one
-//! plus the number of placements", which is not a fact about the source —
-//! the author sees the same line, the same code and the same note with
-//! nothing to tell the copies apart.
-//!
-//! What the copies are *not* is redundant. Each resolution binds a
-//! different theme when the placements name different ones, and two themes
-//! missing the same slot are two findings an author has to fix separately.
-//! So the rule is *at most once per member per bound theme* — which of the
-//! resolutions produced the surviving copy is not promised, because two of
-//! them can bind one theme and still judge the slot differently.
-//!
-//!  1. one placement — the shape the report was filed on;
-//!  2. two placements under one theme — the count that used to scale;
-//!  3. two placements under two themes — both findings survive, each
-//!     naming its own theme;
-//!  4. a def nothing places — still reported, against the theme the module
-//!     auto-picks, because a file of defs and no site is a file worth
-//!     checking;
-//!  5. two defs sharing the bad slot name — two findings, because the rule
-//!     keys on the member and not on the name;
-//!  6. a placement the resolver abandons before the body — the def's own
-//!     finding survives, because nothing else is left to report it;
-//!  7. a nested member — the same rule inside a `level` block;
-//!  8. a `struct` — the control. Nothing places a struct, so its count was
-//!     never inflated and must not now deflate;
-//!  9. a resolution that stayed silent followed by a stricter one — the
-//!     finding the stricter one owes is still reported. This is the case
-//!     that says "already reported" has to mean reported, not walked;
-//! 10. the same disagreement between two *placements* rather than between
-//!     the module and a placement — the shape the spec paragraph uses;
-//! 11. an `--edition` pin — the path every build command actually runs,
-//!     and the one where sibling softening does not apply at all;
-//! 12. two `site` blocks placing one def — the ledger spans the whole
-//!     resolution, not one site;
-//! 13. a module with two logical themes, and one with none — the two ends
-//!     the spec paragraph promises silence at;
-//! 14. a theme applied only through a `place` — nothing else in the
-//!     repository covers that route, and it is where a walk-memoising
-//!     rewrite of this rule would drop a finding first.
+//! A `def` member's resolver findings are reported at most once per member per
+//! bound theme. A def body is resolved once as its own scope and once per
+//! `place`, so without the rule a bad slot counts one plus the placements; two
+//! themes missing one slot are still two findings, and which resolution's copy
+//! survives is not promised.
 
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
 use cairn_lang_core::{Edition, Resolution, lower, parse, resolve};
@@ -335,8 +295,8 @@ place id=a use=hut theme=shop_java east_of=b gap=5\n"
 /// The `--edition` path, which is what every build command runs and what
 /// the report was filed against.
 ///
-/// A pin removes sibling softening on both routes (`resolver.rs`'s
-/// module-level pick and `bind_place_theme` agree on that), so the module
+/// A pin removes sibling softening on both routes (the module-level pick
+/// and the `place` row's theme agree on that), so the module
 /// and the placement both have grounds to report — which is exactly the
 /// "once per placement plus once more" shape.
 #[test]
@@ -426,7 +386,7 @@ floor mat_slot=missing\n",
 /// Nothing else in the repository takes this route — every other selector
 /// test uses the `struct` shape, which the module-level pick binds. Both
 /// halves matter to the rule here, and the second more than the first:
-/// `check_unmatched_selectors` skips a theme no scope applied, so a
+/// unmatched selectors are judged only for a theme some scope applied, so a
 /// rewrite that resolved each `(def, theme)` pair once and reused the
 /// result would have to keep marking the theme applied on the reused path
 /// or `E_THEME_SELECTOR_UNMATCHED` would stop firing for it — a finding
@@ -479,59 +439,10 @@ place id=a use=hut theme=alpha at=origin\n",
 }
 
 mod lowering {
-    //! A `def` member's *lowering* diagnostics are reported once, however many
-    //! placements reach them.
-    //!
-    //! Companion to `def_member_diagnostics.rs`, which covers the resolver
-    //! stage. The shape is the same one stage down and the fix is not: a def
-    //! body is voxelised once per `place` that instantiates it — and never on
-    //! its own, because a def has no voxels until something places it — so a
-    //! finding about the def, or about the theme `slot` line the def reads,
-    //! comes back once per placement with nothing at all to tell the copies
-    //! apart. `E_INCOMPATIBLE_MATERIAL` is anchored on the theme's slot value,
-    //! so three placements produced three findings on one line, each ending in
-    //! a note saying every member reading that slot has it too.
-    //!
-    //! The rule lowering settles on is that **a lowering diagnostic's identity
-    //! is the diagnostic**: code, span, message, notes and data. It is stated
-    //! once, in `lower_to_block_array`, rather than per code — the resolver's
-    //! `(member, slot, theme)` triple is a claim about one finding and would
-    //! have to be re-derived for every code lowering learns to raise, and this
-    //! stage has two already.
-    //!
-    //! What that rule has to keep apart is the point of most of this file. A
-    //! finding that genuinely belongs to one placement carries the placement
-    //! in its span or its message, and these cases say so from both sides:
-    //!
-    //!  1. one placement — the baseline, so a later count means something;
-    //!  2. two placements under one theme — the count that used to scale;
-    //!  3. three of them — it does not scale any faster either;
-    //!  4. two placements under two themes — two findings, each naming the
-    //!     material its own theme bound, because two themes binding a
-    //!     non-stair are two lines to fix;
-    //!  5. two placements under two themes that bind the *same* material —
-    //!     still two, because the two slot lines are two edits;
-    //!  6. two defs sharing one bad theme slot — one finding, because the
-    //!     finding is anchored on the slot line both defs read and the note
-    //!     says as much;
-    //!  7. a per-placement finding — two `place` rows that each earn a
-    //!     `W_DEFERRED_MEMBER` with byte-identical text, kept apart by their
-    //!     spans. This is the case a dedup keyed on the message alone would
-    //!     collapse, taking a row the author has to fix with it;
-    //!  8. two geometry kinds reading one slot — two findings on one line,
-    //!     kept apart by their messages, and still two after two placements;
-    //!  9. a `struct` — the control. Nothing places a struct, so its count was
-    //!     never inflated and must not now deflate;
-    //! 10. two structs reading one bad slot — still one finding, because the
-    //!     anchor is the slot line and not the member, which is the contrast
-    //!     with item 9;
-    //! 11. two sibling-variant themes deferring one slot — two findings, each
-    //!     naming its own theme. This is the case where the message had to
-    //!     change for the rule to hold;
-    //! 12. two phase conflicts that differ only inside a note — both survive,
-    //!     because the notes are part of the identity;
-    //! 13. a sizeless def placed twice — one finding, on the `def` line that is
-    //!     the one thing to fix.
+    //! A `def` member's lowering findings are reported once however many
+    //! placements reach them. A finding's identity is the whole diagnostic
+    //! (code, span, message, notes and data), so a finding that belongs to one
+    //! placement survives by carrying it in its span or its message.
 
     use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
 
@@ -874,14 +785,12 @@ roof kind=gable mat_slot=roof overhang=1\n"
     /// Two sibling-variant themes deferring one slot report once each, naming
     /// the theme that deferred.
     ///
-    /// The case that made `geometry_material_id`'s message name its theme. With
-    /// no `--edition` pin, a slot only the `_bedrock` sibling declares is
-    /// softened at the resolver — `ResolveCtx::diagnosed`'s arm stays silent —
-    /// so lowering is the only reporter, and it anchors on the `def` body's
-    /// member line, which every placement shares. Before the theme was in the
-    /// message the two findings were byte-identical and this rule kept one:
-    /// `cairn lower` then said the same thing whether both themes were broken
-    /// or only one, and fixing one of them changed no output.
+    /// With no `--edition` pin, a slot only the `_bedrock` sibling declares
+    /// is softened at the resolver, so lowering is the only reporter, and it
+    /// anchors on the `def` body's member line, which every placement shares.
+    /// The theme in the message is what keeps the two findings apart:
+    /// without it this rule would keep one, and `cairn lower` would say the
+    /// same thing whether both themes were broken or only one.
     #[test]
     fn two_sibling_variant_themes_deferring_one_slot_report_both() {
         const VARIANTS: &str = "theme alpha_java:\n  \
@@ -999,10 +908,11 @@ walls mat_slot=c height=4\n",
 
     /// A sizeless `def` placed twice is one finding, on the `def` line.
     ///
-    /// The collapse case with no theme in it: `diag_def_no_size` is anchored on
-    /// the def header, so every placement that fails to derive a footprint
-    /// produced a copy. One header is one thing to fix. The `place` rows that
-    /// lost their origin are a separate finding each, which case 7 covers.
+    /// The collapse case with no theme in it: the finding is anchored on the
+    /// def header, so every placement that fails to derive a footprint
+    /// produces a copy. One header is one thing to fix. The `place` rows that
+    /// lost their origin are a separate finding each, which
+    /// `two_place_rows_earning_one_message_both_survive` covers.
     #[test]
     fn a_sizeless_def_placed_twice_reports_its_header_once() {
         let found = of_code(

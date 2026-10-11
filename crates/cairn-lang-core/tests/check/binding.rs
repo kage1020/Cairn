@@ -1,20 +1,7 @@
-//! `E_MISPLACED_BINDING` — a `-> value` tail on a member that cannot emit
-//! a signal.
-//!
-//! The last of a member line's four fields to get a check. A tail is read
-//! by exactly one thing, the sensor set of `spec/redstone` "Signal
-//! binding", and until this pass landed the only code that said so lived
-//! in `cairn-lang-redstone` behind `cairn synth
-//! --experimental-logic-synth`. So `walls ... -> sig.w` built a wall,
-//! exited 0 through `check` and `compile`, and left the signal it named
-//! emitted by nothing.
-//!
-//! What is asked here is the host and only the host, because the host is
-//! what can be asked without a Logic IR. The value-side questions — does
-//! the tail name a signal, is that signal driven twice or by nobody —
-//! stay in the redstone crate, and the fixtures below pin the boundary
-//! from this side: a tail on a `pressure_plate` passes here whatever it
-//! names.
+//! `E_MISPLACED_BINDING`: a `-> value` tail on a member that cannot emit a
+//! signal is an error. Only the host is judged here, since that needs no Logic
+//! IR; what the tail names is the redstone crate's question, so a tail on a
+//! `pressure_plate` passes here whatever it names.
 
 use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::intent::{SENSOR_HOSTS, known_keywords, role_of};

@@ -1,12 +1,7 @@
-//! The palette capacity `lower_to_block_array` paints against, from outside
-//! the crate.
-//!
-//! `block_array::lower`'s unit tests reach `W_PALETTE_TOO_LARGE` at a
-//! capacity of four, and `block_array`'s pin `Palette::try_intern` at
-//! `PALETTE_CAPACITY`. Neither lowers at the capacity the public entry point
-//! passes down, and painting the 65,536 states that reach it costs seconds a
-//! run. This holds a floor under it instead: a body of a thousand distinct
-//! states builds, which a capacity cut to a thousand or below would refuse.
+//! `lower_to_block_array` paints against the full palette capacity: a body of a
+//! thousand distinct states builds, which a capacity cut to a thousand or below
+//! would refuse. Painting the 65,536 states of the real bound costs seconds a
+//! run, so this holds a floor under it instead.
 
 use std::fmt::Write as _;
 

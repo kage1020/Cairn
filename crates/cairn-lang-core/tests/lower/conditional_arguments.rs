@@ -1,35 +1,8 @@
-//! The conditional-argument table against the lowering rules it describes.
-//!
-//! `MemberRole::conditional_arguments` is a claim about other code: that
-//! `fill_roof`'s `shed` arm consults `slope_to=` and its three siblings do
-//! not. Nothing in the table can check that claim, and a table that drifts
-//! from the dispatch is worse than no table — it either reports a key the
-//! build does read, or stays quiet about one it drops.
-//!
-//! So the claim is tested the way an author would notice it: write the
-//! argument two ways that a reader would tell apart, build the source once
-//! for each, and compare the blocks. An arm the table says reads the key
-//! has to build something different. An arm it says does not has to build
-//! the same blocks, in the same palette, at the same dims, in the same
-//! place. Two values rather than presence and absence, because several of
-//! these keys have no default: dropping `slope_to=` from a shed defers the
-//! whole member, and a build that did not happen differs from one that did
-//! for a reason that has nothing to do with reading the key.
-//!
-//! Every build is also required to paint something and to lower without a
-//! diagnostic. Two empty builds compare equal, so without that a generator
-//! that drew nothing at all would satisfy every "does not read it" row.
-//!
-//! One caveat this file cannot close from the table side: a selector value
-//! the dispatch knows and the table has no arm for takes the "names no
-//! rule" path and reports nothing.
-//! `block_array::roof::tests::every_roof_kind_the_dispatch_knows_has_an_arm`
-//! is the guard for that direction, and it lives there because it needs
-//! `RoofKind`.
-//!
-//! Every source here is one line per member, spelled with explicit `\n`. A
-//! `\` continuation discards the newline *and* the next line's leading
-//! whitespace, so a member's indentation would never reach the lexer.
+//! `MemberRole::conditional_arguments` holds against the lowering it describes:
+//! where the table says a selector value's arm reads a key, two values of that
+//! key build different blocks, and where it says the arm ignores the key, both
+//! build the same blocks, palette, dims and place. Every build must also paint
+//! something and lower clean, since two empty builds compare equal.
 
 use std::collections::BTreeSet;
 
@@ -442,7 +415,7 @@ fn the_pass_reports_exactly_the_pairs_the_build_drops() {
 /// The spellings matter. `kind=` is written as a word no roof kind could
 /// take, so the fixture cannot quietly become a *known* kind the day the
 /// dispatch grows one; and the two non-identifier shapes are here because
-/// `routed_past` narrows on `ValueKind::Ident` and nothing else pinned what
+/// only an identifier `kind=` can name an arm, and nothing else pins what
 /// the other shapes do.
 #[test]
 fn the_member_that_does_not_lower_is_billed_once() {
@@ -468,13 +441,13 @@ fn the_member_that_does_not_lower_is_billed_once() {
 
 /// An axis with one arm is a live configuration that reports nothing.
 ///
-/// `stair` is that shape today: `fill_stair` accepts `kind=stairs` and
-/// nothing else, so every key it reads is conditional on a selector no
+/// `stair` is that shape: a stair is built for `kind=stairs` and nothing
+/// else, so every key it reads is conditional on a selector no
 /// other arm answers to. `is_conditional` therefore says `true` for all
 /// five while the finding can never fire — any other `kind=` names no rule
 /// and its deferral carries the line. Worth pinning rather than leaving to
-/// be rediscovered: the row is written for the day a second stair kind
-/// lands, and until then this is what it does.
+/// be rediscovered: the row is written for a second stair kind, and with
+/// one this is what it does.
 #[test]
 fn a_one_arm_axis_reports_nothing() {
     let conditional = role_of("stair").conditional_arguments();

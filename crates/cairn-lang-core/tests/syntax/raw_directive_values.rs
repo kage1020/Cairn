@@ -1,17 +1,7 @@
-//! A directive value the lexer has no token for is the directive's to judge.
-//!
-//! `@cairn`, `@requires` and a part's `requires` take their value as raw
-//! text to end of line, and a check pass decides what it means:
-//! `W_INVALID_CAIRN_VERSION` for a `@cairn` that names no version,
-//! `E_INVALID_REQUIRES` for a floor that declares none (`spec/syntax`
-//! "Headers"). The whole file used to be lexed before the parser started,
-//! so a value holding a character no token starts with never reached
-//! either pass: `@cairn 2026.6 draft` was a warning and
-//! `@cairn 2026.6 draft!` refused the build.
-//!
-//! The other half is that nothing else moved. The same stretch anywhere a
-//! raw value does not take it is refused with the error [`lex`] reports
-//! for it, at the same position, ahead of whatever the parse found.
+//! `@cairn`, `@requires` and a part's `requires` take raw text to end of line,
+//! so a character no token starts with reaches the check pass that judges the
+//! value; anywhere else the same text is refused with the error [`lex`]
+//! reports, at the same position.
 
 use cairn_lang_core::ast::Header;
 use cairn_lang_core::check::DiagnosticCode;
@@ -137,7 +127,7 @@ fn the_same_stretch_anywhere_else_is_refused_as_before() {
         "theme t:\n  slot $ -> @stone\n\tslot x -> @y\n",
         // And ahead of a parse error later in the file.
         "theme t:\n  slot $ -> @stone\n  slot x ->\n",
-        // And behind one: the whole file used to be lexed first.
+        // And behind one: the lex refusal is still the one reported.
         "theme t:\n  slot x ->\n  slot $ -> @stone\n",
     ] {
         refused_as_lex_refuses(source);

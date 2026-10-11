@@ -1,14 +1,7 @@
-//! A `connect` row whose port cannot be placed says which of the port's
-//! rules it broke, and only that one.
-//!
-//! The walkway defer used to carry the same four notes whatever the cause —
-//! the door contract, the window contract, the masonry contract and the
-//! reserved roles — because the port lookup answered every refusal with one
-//! `None`. A `connect` naming a `stair` was told about `at=` and `size=WxH`,
-//! and nothing else in the build narrowed it down, since the stair itself
-//! lowers clean. Each case below builds one refusal through the whole
-//! pipeline and pins that the row names that reason, points at the member
-//! it is about, and says nothing about the rest.
+//! A `connect` row whose port cannot be placed says which of the port's rules
+//! it broke, and only that one: each case builds one refusal through the whole
+//! pipeline and pins that the row names that reason, points at the member it is
+//! about, and says nothing about the rest.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, DiagnosticNote};
@@ -86,8 +79,8 @@ fn assert_own_line_holds(out: &BlockArrayIr, note: &DiagnosticNote) {
     );
 }
 
-/// The contracts the note used to list whatever the cause. None of them
-/// is the reason for any case here, so none may appear.
+/// Every contract a port has. None of them is the reason for any case
+/// here, so none may appear.
 const CHECKLIST: [&str; 4] = [
     "a `door` port requires",
     "a `window` port requires",
@@ -304,9 +297,9 @@ fn one_refused_port_is_named_in_the_singular() {
 
 #[test]
 fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
-    // `at=3` is present and not an identifier. The door's own line used
-    // to say it had no `at=` at all while the row's note said it had one
-    // of the wrong shape; both are now built from one reading.
+    // `at=3` is present and not an identifier. The door's own line and
+    // the row's note are built from one reading, so neither says the door
+    // has no `at=` at all.
     let src = site(&format!("{WALLS}  door id=p side=front at=3\n"), 6);
     let out = lowered(&src);
     let clause =
@@ -333,8 +326,8 @@ fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
 #[test]
 fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
     // The port reads `offset=`, `y=` and `size=`; the cut also reads
-    // `repeat=`, `step=` and `sym=`, and each of these defers the cut. A
-    // strip used to be laid to every one of them, ending at the wall.
+    // `repeat=`, `step=` and `sym=`, and each of these defers the cut, so
+    // no strip may end at the wall where the window is not.
     for (args, own_line) in [
         (
             "offset=0 y=1 size=1x1 repeat=0 mat_slot=glass",
@@ -452,8 +445,8 @@ fn a_port_one_step_past_the_coordinate_range_is_refused_as_out_of_range() {
     // `north_of=a` puts `b`'s origin at exactly `z = i32::MIN` with
     // `gap=2147483643` (`0 - 5 - gap`), so its back wall sits on the last
     // addressable row and only the step out of the wall leaves the range.
-    // A debug build used to panic on that step. A larger gap no longer
-    // reaches here: the origin itself would leave the range, and the
+    // A debug build must not panic on that step. A larger gap does not
+    // reach here: the origin itself would leave the range, and the
     // `place` is refused before it has a door to step from.
     let gap = 2_147_483_643_u32;
     let src = format!(

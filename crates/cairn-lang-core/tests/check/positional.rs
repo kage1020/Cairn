@@ -1,21 +1,8 @@
-//! Acceptance tests for the `positional` pass of
-//! `cairn_lang_core::check`.
-//!
-//! `spec/syntax` "Lexical" requires `key=value` for everything after the
-//! command keyword and prints `window front G 2 2 2x2` as the forbidden
-//! form. Nothing enforced it: the parser appends any token that is not
-//! `key=`, `-> binding`, or `[selector]` to the statement's `positional`
-//! list, and every reader except `connect`'s ignores that list. The
-//! author got the member they wrote minus the arguments they meant, with
-//! `cairn check` reporting nothing.
-//!
-//! The shape that makes this more than a style rule is a dropped `=`.
-//! `walls mat_slot=wall height 3` is one keystroke from correct, and
-//! there is no default to fall back on: `wall_height` refuses a member
-//! with no positive `height=`, so the wall is not built at all. Before
-//! this pass, `cairn check` exited 0 on that line and only `cairn lower`
-//! said anything — about the missing `height=`, never about the two bare
-//! values that explain it.
+//! `E_UNEXPECTED_POSITIONAL`: everything after a command keyword is `key=value`
+//! (`spec/syntax` "Lexical"), so a bare value on any row but `connect` is an
+//! error at the value. A dropped `=` is the case that matters: `walls
+//! mat_slot=wall height 3` builds no wall, and the missing `height=` alone does
+//! not say why.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
@@ -31,7 +18,7 @@ fn duo_with(row: &str) -> String {
 
 /// The spec's own forbidden example.
 #[test]
-fn po_1_the_spec_forbidden_form_is_an_error() {
+fn the_spec_forbidden_form_is_an_error() {
     for src in [
         struct_with("window front G 2 2 2x2 mat_slot=wall"),
         def_with("window front G 2 2 2x2 mat_slot=wall"),
@@ -50,7 +37,7 @@ fn po_1_the_spec_forbidden_form_is_an_error() {
 /// two bare values, and `walls` with no `height=` is not built at all —
 /// there is no default to fall back on.
 #[test]
-fn po_2_a_dropped_equals_sign_is_reported() {
+fn a_dropped_equals_sign_is_reported() {
     let src = struct_with("walls mat_slot=wall height 3");
     let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
     assert_eq!(&src[d.span.clone()], "height 3");
@@ -61,7 +48,7 @@ fn po_2_a_dropped_equals_sign_is_reported() {
 /// is malformed, which is `connect_arity`'s finding and carries advice
 /// about the endpoint shape rather than about `key=value`.
 #[test]
-fn po_3_connect_is_exempt_well_formed_or_not() {
+fn connect_is_exempt_well_formed_or_not() {
     for row in [
         "connect anchor.entry to peer.entry path=@gravel",
         "connect anchor.entry to peer.entry c.exit path=@gravel",
@@ -85,11 +72,10 @@ fn po_3_connect_is_exempt_well_formed_or_not() {
 }
 
 /// The parser appends to `positional` whenever the next token is not
-/// `key=`, so a bare value can sit *after* an argument. The AST field's
-/// own doc used to say positionals are consumed before the first
-/// `key=value`; the loop never had that ordering.
+/// `key=`, so a bare value can sit *after* an argument, not only before
+/// the first `key=value`.
 #[test]
-fn po_4_a_positional_after_an_argument_is_still_reported() {
+fn a_positional_after_an_argument_is_still_reported() {
     let src = struct_with("window id=w side=front y=1 offset=1 size=2 x2 mat_slot=wall");
     let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
     assert_eq!(&src[d.span.clone()], "x2");
@@ -99,7 +85,7 @@ fn po_4_a_positional_after_an_argument_is_still_reported() {
 /// split by an argument underlines the whole run. The argument caught
 /// in between is part of the line the author rewrites.
 #[test]
-fn po_5_the_span_covers_the_whole_run() {
+fn the_span_covers_the_whole_run() {
     let src = struct_with("window front side=front G mat_slot=wall");
     let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
     assert_eq!(&src[d.span.clone()], "front side=front G");
@@ -107,7 +93,7 @@ fn po_5_the_span_covers_the_whole_run() {
 
 /// Negative space: a line whose arguments are all keyed says nothing.
 #[test]
-fn po_6_a_fully_keyed_line_is_not_reported() {
+fn a_fully_keyed_line_is_not_reported() {
     for row in [
         "floor mat_slot=floor",
         "walls mat_slot=wall height=3",
@@ -127,7 +113,7 @@ fn po_6_a_fully_keyed_line_is_not_reported() {
 /// reader whose argument form the bare values could be measured against,
 /// and the repair is the word.
 #[test]
-fn po_7_an_unknown_keyword_is_left_to_the_allowlist() {
+fn an_unknown_keyword_is_left_to_the_allowlist() {
     let src = struct_with("frame front 2");
     assert!(
         of_code(&src, DiagnosticCode::UnexpectedPositional).is_empty(),
@@ -146,7 +132,7 @@ fn po_7_an_unknown_keyword_is_left_to_the_allowlist() {
 /// `nesting` have already reported: dedenting the row leaves it just as
 /// broken.
 #[test]
-fn po_8_a_positional_inside_a_dropped_body_is_still_reported() {
+fn a_positional_inside_a_dropped_body_is_still_reported() {
     let src = format!(
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          walls mat_slot=wall height=3\n    window front G mat_slot=wall\n"
@@ -165,7 +151,7 @@ fn po_8_a_positional_inside_a_dropped_body_is_still_reported() {
 /// Singular and plural both appear in the message, and only a rendered
 /// string shows that the verb agrees with the count.
 #[test]
-fn po_9_the_verb_agrees_with_the_count() {
+fn the_verb_agrees_with_the_count() {
     let one_value = one_of_code(
         &struct_with("roof flat mat_slot=wall"),
         DiagnosticCode::UnexpectedPositional,
@@ -194,7 +180,7 @@ fn po_9_the_verb_agrees_with_the_count() {
 /// (the `use=` key forgotten) is a plausible typo and drops the whole
 /// placement.
 #[test]
-fn po_10_a_site_row_is_covered_too() {
+fn a_site_row_is_covered_too() {
     let src = duo_with("place extra theme=plain at=origin");
     let d = one_of_code(&src, DiagnosticCode::UnexpectedPositional);
     assert_eq!(&src[d.span.clone()], "extra");
@@ -205,7 +191,7 @@ fn po_10_a_site_row_is_covered_too() {
 /// not built at all. Without this the doc comments above are a claim
 /// about lowering that no test in this file exercises.
 #[test]
-fn po_11_a_dropped_equals_costs_the_whole_member() {
+fn a_dropped_equals_costs_the_whole_member() {
     let solid = |source: &str| {
         let module = parse(source).expect("parse");
         let ir = lower(&module);

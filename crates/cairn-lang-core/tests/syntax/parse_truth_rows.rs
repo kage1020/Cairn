@@ -1,18 +1,7 @@
-//! Truth-table rows are checked against the header they sit under.
-//!
-//! `assert truth` exists to verify a circuit, so a row the evaluator
-//! cannot read is worse than no row at all: it looks like coverage. The
-//! parser is where *this* check belongs, because the input arity — the
-//! number of signals left of the arrow — is in hand there and nowhere
-//! downstream keeps it beside the rows.
-//!
-//! What one row cannot see is the table around it. No rows at all, two
-//! rows assigning one combination, combinations left out: those are
-//! `check::truth`, reported as diagnostics rather than as parse errors,
-//! and `check_truth_table.rs` covers them. The split is the reason a
-//! shape refused there still parses here — including the empty table, so
-//! `an_empty_table_still_parses` is a statement about which layer owns
-//! the refusal and not about the table being acceptable.
+//! The parser checks each truth-table row against its header's input arity,
+//! which only it has in hand. Whole-table findings are `check`'s (in
+//! `check/truth_table.rs`), so a table they refuse, the empty one included,
+//! still parses here.
 
 use cairn_lang_core::ast::{Item, Statement};
 use cairn_lang_core::parse::parse;
@@ -218,11 +207,10 @@ fn bare_identifiers_count_as_inputs() {
 
 /// A row's pattern is bounded by the input arity and by nothing else.
 ///
-/// Twenty ones used to be an overflow: `scan_number` parsed every digit
-/// run into an `i64`, so the table failed during lexing with a message
-/// about integer range and no row ever reached the parser. The refusal
-/// was value-dependent, which the all-zero row records — same width,
-/// same table, and it parsed.
+/// Twenty ones are a pattern, not an integer overflow: lexing a digit run
+/// as an `i64` would fail the table with a message about integer range
+/// before any row reached the parser, and only for some values, which the
+/// all-zero row of the same width records.
 ///
 /// Forty ones is the assertion that the ceiling is *gone* rather than
 /// raised: it is past `u128::MAX`, so no integer type this crate could

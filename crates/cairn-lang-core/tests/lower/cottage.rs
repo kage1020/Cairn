@@ -1,11 +1,5 @@
-//! End-to-end check that `cottage.crn` lowers to the expected voxel volume.
-//!
-//! cottage.crn exercises every voxel role the current pass ships (floor,
-//! walls, door, window, gable roof with overhang), so this integration test
-//! pins the inflated dims, the door/window/roof voxel placements, the full
-//! palette, and the *zero* deferred-warning bar. A regression in any of
-//! those — lowering arithmetic, phase ordering, overhang shift, or roof
-//! orientation — fails immediately.
+//! `cottage.crn` lowers to the expected volume: the inflated dims, the door,
+//! window and roof voxels, the whole palette, and no deferred member.
 
 use cairn_lang_core::check::DiagnosticCode;
 

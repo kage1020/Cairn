@@ -1,114 +1,8 @@
-//! Regression check for the silent-skip arms in
-//! `resolve::resolver::resolve_site_placements` and the cascade
-//! `W_DEFERRED_CONNECT` warning in `validate_port`.
-//!
-//! One arm in `resolve_connect_row` returns when the `connect` line is
-//! missing its `to` positional, and several endpoint shapes take the same
-//! return. The risk that sits on these arms is that a row the author wrote
-//! drops its walkway with no visible signal — the failure mode
-//! `W_DEFERRED_MEMBER` already covers for endpoint cascades in
-//! `block_array::lower`.
-//!
-//! The three `place`-level arms this file used to open with are no longer
-//! silent: `E_INCOMPLETE_PLACE` names an absent `id=` / `use=` / `theme=`
-//! at the row. What is still worth pinning about them is the *cascade* —
-//! a `connect` naming such a place still says so itself, rather than
-//! leaving the author to infer which walkway went missing.
-//!
-//! Coverage matrix:
-//!
-//! 1. **Baseline** — a well-formed `connect` lays exactly one walkway
-//!    and emits zero diagnostics. Pins the negative space so the
-//!    remaining cases are interpretable.
-//! 2. **Missing `use=`** — one `E_INCOMPLETE_PLACE` at the `place` row
-//!    *and* one `W_DEFERRED_CONNECT` at the `connect` row, no walkway.
-//!    The pairing is the same one an unresolved `use=DEF` already
-//!    produces, and the cascade is the refactor-safety net: a future bug
-//!    that drops a normal-path `place_def.insert` would surface as a wave
-//!    of these warnings instead of silently breaking every walkway.
-//! 3. **Missing `theme=`** — same pairing.
-//! 4. **Missing `id=`** — unreachable from any `connect` by
-//!    construction (no name to dot-ref), so what is pinned is that the
-//!    row is reported once and the cascade does not fire.
-//! 5. **`connect` rows with a non-`FROM.PORT to TO.PORT` shape** —
-//!    three entries to the same silent return at the resolver, all
-//!    pinned together so a future guard refactor cannot split their
-//!    behaviour without showing up here: the missing-`to`-half case
-//!    (`connect anchor.entry`), the missing-target case
-//!    (`connect anchor.entry to`), and the wrong-separator case
-//!    (`connect anchor.entry xxx peer.entry`). The cross-layer signal
-//!    is owned by `check::connect_arity` (`E_CONNECT_ARITY`), which
-//!    runs ahead of `resolve` inside `check`; these tests pin the
-//!    resolver-only contract so library callers that bypass `check`
-//!    keep the defensive behaviour, while
-//!    `tests/check_connect_arity.rs` pins the user-facing diagnostic
-//!    on the full pipeline.
-//! 6. **`connect` rows whose endpoints are not one-dot references** —
-//!    the same silent return, reached through the endpoint slot
-//!    instead of the positional count. The extra-segment case is the
-//!    one that was not silent but *wrong*: the resolver read
-//!    `tail()[0]` and laid the walkway the author would have got by
-//!    deleting the trailing segments.
-//! 7. **`connect` rows carrying a fourth positional** — the count
-//!    bound, which the endpoint and separator cases do not exercise
-//!    because they all pass exactly three.
-//! 8. **`use=` / `theme=` present but not label-shaped** — the same
-//!    resolver arm as the absent case, because `as_label_str` answers
-//!    `None` for both, but a *different* code above it:
-//!    `E_TYPE_MISMATCH_LABEL` rather than `E_INCOMPLETE_PLACE`. Pinned
-//!    here because the resolver still cannot tell the two apart — the
-//!    completeness check reads the surface key, not the lifted value —
-//!    so a guard that starts distinguishing them has to say so.
-//! 9. **Top-level names declared twice** — `resolve` binds the first and
-//!    skips the rest without a diagnostic, because `check::duplicate`
-//!    owns `E_DUPLICATE_ITEM` and can anchor it on the name token, which
-//!    the IR no longer carries. Same division of labour as the `connect`
-//!    arms; pinned here so a library caller that skips `check` has the
-//!    skip written down rather than discovered.
-//! 10. **A `mat_slot=` already reported against the same theme** —
-//!     `resolve_members` drops the repeat rather than the finding. This
-//!     one is in the matrix but not in this file, and the difference is
-//!     the point: every other entry defers its signal to a pass that runs
-//!     elsewhere, while this arm's signal is a copy already sitting in the
-//!     `Vec` the same call returns. A library caller that skips `check`
-//!     loses nothing by it. The counting is pinned by
-//!     `tests/def_member_diagnostics.rs`, which the arm's
-//!     `INVARIANT(already-reported)` comment names.
-//! 11. **The wall-cell walks in `block_array::lower`** — `carve_door`,
-//!     `fill_stair`, `paint_window_rect`, and the single-cell
-//!     `plate_voxel_position` ask `openings::wall_local_to_grid` for a
-//!     cell and drop it when the helper refuses. Also not in this file,
-//!     for a different reason from 10: 10's signal exists and is pinned
-//!     elsewhere, while this arm has no signal to pin because it cannot be
-//!     reached. Each caller validated its extents against the wall first,
-//!     and it is that prior check, not the drop, that answers the author.
-//!     What guards the arm is a `debug_assert!(false, ..)` at each site,
-//!     tagged `INVARIANT(wall-grid-validated)` and naming the check it
-//!     relied on. In a build with debug assertions on, an edit that breaks
-//!     one of those agreements fails every test that reaches the broken
-//!     cell — break only the back wall's mirror and the front-wall tests
-//!     stay green, which is what the per-side edge cases in `openings.rs`'s
-//!     own tests are for. Release builds keep the one-voxel drop rather
-//!     than panic.
-//! 12. **An origin naming a row refused for its id** — the row whose
-//!     `east_of=` / `north_of=` names an id refused with
-//!     `E_INVALID_PLACE_ID` registers its own id but never reaches
-//!     `place_def.insert`, because what it is placed against has no
-//!     position. It is not silent: `W_DEFERRED_PLACE` sits on the
-//!     reference, with a note pointing at the refused row, so the
-//!     `W_DEFERRED_CONNECT` a `connect` naming it earns sends the author to a
-//!     row that prints something, and that row's note leads on to the one
-//!     with the repair.
-//! 13. **A `mat_slot=` on a role that reads none** — `resolve_members` does
-//!     not look the name up when the role's `unread_arguments` lists
-//!     `mat_slot` (`Member::read_slot`), so a slot the theme lacks is not
-//!     `E_UNRESOLVED_SLOT` and the binding's `slot_value` stays `None`.
-//!     `check::arguments` owns the signal, `W_IGNORED_ARGUMENT` on the
-//!     value, and every CLI command and the language server reach it
-//!     through `check`. A library caller that resolves and lowers without
-//!     `check` gets nothing for the line — the same division of labour as
-//!     9, pinned the same way. The build is the same with the argument or
-//!     without it, which `tests/lower/unread_mat_slot.rs` measures.
+//! The resolver drops some rows without a finding of its own, because a
+//! pass that runs ahead of it in `check` reports them. Each test pins one
+//! such arm through `resolve` alone, next to the signal it relies on, so a
+//! library caller that skips `check` has the silence written down; and a
+//! `connect` naming a `place` row that was dropped still says so itself.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -171,11 +65,10 @@ connect anchor.entry to peer.entry path=@gravel\n"
     );
 }
 
-/// `place` missing `use=` registers in `seen_place_ids` but never
-/// reaches `place_def.insert`. The downstream `connect` therefore
-/// passes the `port_ref_from_value` gate and reaches `validate_port`'s
-/// `place_def` miss arm, where the new cascade emits one
-/// `W_DEFERRED_CONNECT`.
+/// A `place` missing `use=` keeps its id but is never placed, so a
+/// `connect` naming it is well-formed and finds no body behind the id: one
+/// `W_DEFERRED_CONNECT` at the row, beside the `E_INCOMPLETE_PLACE` at the
+/// place.
 #[test]
 fn missing_use_cascades_w_deferred_connect_with_no_walkway() {
     let src = format!(
@@ -204,9 +97,9 @@ connect anchor.entry to silent.entry path=@gravel\n"
     );
 }
 
-/// Mirror test for missing `theme=`. The theme count is irrelevant: the
-/// arm returns before any scope is built, so the single-theme heuristic
-/// in `resolve_struct_or_def` never gets a chance to default it.
+/// The same for a missing `theme=`. The file declaring a single theme does
+/// not stand in for the key: the row is dropped before a theme would be
+/// picked for it.
 #[test]
 fn missing_theme_cascades_w_deferred_connect_with_no_walkway() {
     let src = format!(
@@ -293,17 +186,14 @@ connect anchor.entry\n"
     assert_eq!(
         count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
         0,
-        "the cascade fires from `validate_port`, which is never reached when the `to` half is absent",
+        "the cascade needs an endpoint read off the row, and there is none when the `to` half is absent",
     );
 }
 
-/// `connect FROM.PORT to` (2 positionals: the `to` keyword present but
-/// no target port) is the other entry to the same INVARIANT'd silent
-/// arm. The resolver's guard inspects `positional.get(2)` — `None`
-/// here — so it returns silently identically to the 1-positional
-/// case. Pin both shapes so a future resolver refactor that splits
-/// them (e.g. panic when `to` is present but target is missing) shows
-/// up as a deliberate test change.
+/// `connect FROM.PORT to` (the `to` keyword present but no target port)
+/// takes the same silent return as the row with no `to` half. Both shapes
+/// are pinned, so a resolver that starts treating them differently (say,
+/// panicking when `to` is present) shows up as a deliberate test change.
 #[test]
 fn connect_with_to_keyword_only_silently_returns_without_diagnostics() {
     let src = format!(
@@ -327,16 +217,13 @@ connect anchor.entry to\n"
     assert_eq!(
         count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
         0,
-        "the cascade fires from `validate_port`, which is never reached when the target port is absent",
+        "the cascade needs an endpoint read off the row, and there is none when the target port is absent",
     );
 }
 
-/// `connect FROM.PORT xxx TO.PORT` (3 positionals but the middle slot
-/// is not the literal `to` keyword) used to slip through the resolver
-/// guard because `positional.get(2)` is `Some`. The strengthened
-/// guard now rejects it on shape-mismatch; this test pins that
-/// behaviour so a regression that softens the guard cannot quietly
-/// re-open the silent-misinterpretation hole.
+/// `connect FROM.PORT xxx TO.PORT` has three positionals, but the middle
+/// one is not the `to` keyword, so the resolver reads no endpoints from it
+/// rather than guessing which words are the ends.
 #[test]
 fn connect_with_wrong_separator_silently_returns_without_diagnostics() {
     let src = format!(
@@ -361,7 +248,7 @@ connect anchor.entry xxx peer.entry path=@gravel\n"
     assert_eq!(
         count(&outcome.diagnostics, DiagnosticCode::DeferredConnect),
         0,
-        "the cascade fires from `validate_port`, which is never reached when the guard rejects the shape upstream",
+        "the cascade needs an endpoint read off the row, and there is none when the separator is not `to`",
     );
 }
 
@@ -404,14 +291,11 @@ fn connect_with_non_reference_endpoint_silently_returns_without_diagnostics() {
 /// A row carrying more than three positionals must not lay a walkway
 /// through the resolver-only path.
 ///
-/// The resolver used to read `positional.first()` and
-/// `positional.get(2)`, which accepts any longer row and quietly
-/// ignores the tail. That made the two layers disagree about what is
-/// well-formed rather than merely about how loudly to say so: `check`
-/// calls `connect a.entry to b.entry c.exit` an error while
-/// `resolve(ir)` laid its walkway. The exact-length slice pattern is
-/// what holds the count, so this pins it — the endpoint and separator
-/// tests above would all still pass with the count bound removed.
+/// `check` calls `connect a.entry to b.entry c.exit` an error, so a
+/// resolver that read the first three positionals and ignored the tail
+/// would disagree with it about what is well-formed, not merely about how
+/// loudly to say so. The endpoint and separator tests above would all still
+/// pass with the count bound removed.
 #[test]
 fn connect_with_extra_positionals_lays_no_walkway() {
     let outcome = lowered_with_resolver_diagnostics(&duo_with(
@@ -431,11 +315,9 @@ fn connect_with_extra_positionals_lays_no_walkway() {
 }
 
 /// An endpoint carrying a second dot must not lay a walkway either.
-/// This is the shape that made the defect worse than a silent drop:
-/// the resolver read `dot.tail()[0]` and ignored everything after it,
-/// so `anchor.entry.typo` produced exactly the walkway
-/// `anchor.entry` would have produced. A mistyped port compiled into a
-/// build that looked correct.
+/// Reading only the first segment after the place would give
+/// `anchor.entry.typo` exactly the walkway `anchor.entry` lays, so a
+/// mistyped port would compile into a build that looked correct.
 #[test]
 fn connect_with_extra_segment_endpoint_lays_no_walkway() {
     for row in [

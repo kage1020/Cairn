@@ -55,11 +55,8 @@ fn multiple_themes_leave_struct_unbound() {
 
 #[test]
 fn multi_theme_unbound_scope_gets_no_selector_extras() {
-    // Regression: an earlier version walked `themes.values_mut()`
-    // unconditionally and wrote every matching selector into
-    // `selector_extras`, even when the scope's `bound_theme` was None.
-    // That violated the per-theme DI contract from
-    // `spec/materials-themes`.
+    // A scope with no bound theme takes no theme's selectors: selectors
+    // are per theme (`spec/materials-themes`), and none applies here.
     let src = "theme a:\n  walls[class=outer] -> trim=@a_trim\ntheme b:\n  walls[class=outer] -> trim=@b_trim\n\nstruct s size=4x4\n  walls class=outer height=3\n";
     let r = resolve(&ir(src), None);
     let scope = r.scopes.get("struct::s").unwrap();
@@ -74,8 +71,8 @@ fn multi_theme_unbound_scope_gets_no_selector_extras() {
 
 #[test]
 fn unmatched_selector_warning_is_suppressed_for_unapplied_themes() {
-    // Regression: in a multi-theme file, no theme is applied to the
-    // struct/def, so warning on every theme selector would be noise.
+    // In a multi-theme file no theme is applied to the struct or def, so
+    // warning on every theme selector would be noise.
     // A theme is picked at the `place ... theme=X` boundary; until
     // that binding runs, the selectors are not "unmatched", they're
     // "not yet bound".
@@ -543,8 +540,8 @@ fn connect_non_token_path_emits_e_missing_path_material() {
 fn connect_unknown_place_emits_e_unresolved_place_ref() {
     // `ghost` is not a known place id. Re-uses the existing
     // E_UNRESOLVED_PLACE_REF code so a single diagnostic family
-    // covers every "unknown place" path (origin selectors and now
-    // connect refs).
+    // covers every "unknown place" path, origin selectors and connect
+    // refs alike.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -728,8 +725,8 @@ fn per_edition_variants_src() -> String {
     // One logical theme `t` split into `_java` / `_bedrock` variants.
     // Each variant has a private slot (`java_only` / `bedrock_only`) so
     // the variant-picking behaviour is observable via `slot_value`, and
-    // a shared slot (`floor`) confirms both variants participate in
-    // `single_logical_theme` grouping.
+    // a shared slot (`floor`) confirms both variants are grouped as one
+    // logical theme.
     [
         "theme t_java:",
         "  slot floor -> @oak_planks",
@@ -796,7 +793,7 @@ fn per_edition_variant_binds_only_its_own_slot_under_compile() {
 
 #[test]
 fn per_edition_check_unions_slots_across_variants() {
-    // AC10: resolve(ir, None) on a file with `_java` + `_bedrock` variants
+    // resolve(ir, None) on a file with `_java` + `_bedrock` variants
     // must accept a `mat_slot=X` when X is declared by *either* variant.
     let src = [
         "theme t_java:",
@@ -1031,9 +1028,9 @@ fn placed_scope(r: &Resolution) -> &ScopeResolution {
 
 /// No finding about variant selection, and no error of any kind.
 ///
-/// Narrower than "no diagnostics at all", which these tests used to
-/// assert: an advisory added later for an unrelated reason would break
-/// them while saying nothing about the theme reference they are about.
+/// Narrower than "no diagnostics at all": an advisory added for an
+/// unrelated reason would break that while saying nothing about the theme
+/// reference these tests are about.
 fn nothing_said_about_variants(r: &Resolution) -> bool {
     !r.diagnostics.iter().any(|d| {
         d.severity() == Severity::Error
@@ -1142,10 +1139,9 @@ fn an_unpinned_resolve_refuses_nothing_about_variants() {
 
 #[test]
 fn a_place_naming_the_other_editions_variant_binds_this_editions() {
-    // The defect: `theme=shop_bedrock` bound verbatim under a Java
-    // build, so Bedrock-only slot values reached a Java `.nbt` while
-    // `pick_variant` — the guard written to prevent exactly that — was
-    // never consulted on this path.
+    // Bound verbatim under a Java build, `theme=shop_bedrock` would let
+    // Bedrock-only slot values reach a Java `.nbt`; a `place` row picks
+    // the variant the same way a scope does.
     let src = placed_under("shop_bedrock", &["_java", "_bedrock"]);
     let r = resolve(&ir(&src), Some(Edition::Java));
     assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop_java"));
@@ -1655,13 +1651,12 @@ const UNUSED_DEF_CASES: &[(&[&str], &[Expected])] = &[
 /// on the row, and removing the def, as the warning would advise, only
 /// brings it back as `E_UNRESOLVED_PLACE_REF` once the row is fixed.
 ///
-/// Every way out of `usable_place_id` and `validate_place_origin` that
-/// refuses the row has a case. Out of `usable_place_id`: the
-/// unnamed-placement return, reached both by a missing `id=` and by
+/// Every way the resolver refuses the row has a case. For its id: the
+/// unnamed placement, reached both by a missing `id=` and by
 /// `id=3` (not label-shaped, so never hoisted onto `Member::id`;
 /// `check::type_mismatch` reports it, so `resolve` says nothing), an id
-/// `PlaceId` refuses, and an id already placed. Out of
-/// `validate_place_origin`: no origin selector, two, an `at=` other
+/// `PlaceId` refuses, and an id already placed. For its origin: no
+/// origin selector, two, an `at=` other
 /// than `origin`, a non-label `east_of=`, an `east_of=` and a
 /// `north_of=` naming no prior place, and an `east_of=` naming a row
 /// refused for its id, the one refusal that is a warning alone.

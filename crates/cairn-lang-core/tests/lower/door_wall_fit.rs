@@ -1,25 +1,8 @@
-//! A `door` is an opening cut into a wall, and the row it opens at has to
-//! be a row some `walls` member paints.
-//!
-//! `walls height=H` under `level y=N` paints the world rows
-//! `N + 1 ..= N + H` — the floor slab owns the base plane — and a door
-//! under `level y=M` opens at row `M + 1`. Asked only whether the struct
-//! paints *any* wall row, the cut could not see the body whose walls
-//! start a storey up: the carve painted AIR over rows that were already
-//! air and said nothing, while a `window` on the same body was deferred
-//! with the rows the walls occupy quoted back. One shape, two answers,
-//! and the silent one belonged to the member an author is most likely to
-//! write first.
-//!
-//! The gate is what ends the silence. The course it finds is also the
-//! cap — a doorway takes two rows where that course has them and one
-//! where it does not — which keeps the opening inside the masonry it was
-//! cut from rather than running into the roof over a short wall.
-//!
-//! `spec/components-editing-sites` "Ports and `connect`" requires the
-//! walkway port to draw the same line as the openings pass, so the last
-//! group here asserts the two answers case by case rather than each in
-//! isolation.
+//! A `door` opens only at a row some `walls` member paints, and is capped by
+//! that course: two rows where the course has them, one where it does not.
+//! `walls height=H` under `level y=N` paints rows `N + 1 ..= N + H`, and a
+//! walkway port draws the same line as the openings pass, so the last group
+//! compares the two answers case by case.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
@@ -282,14 +265,13 @@ fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
 #[test]
 fn a_door_under_a_level_is_not_a_port_at_all() {
     // The invariant the port side's base row rests on. Port resolution
-    // walks the `def` body only — both the resolver's port check and
-    // `port_world_position`'s member lookup — so the door a port names
-    // has never been shifted by a `level`, and the row it opens at is
-    // always `1`. Pinned here because that is what makes one constant on
-    // the port side answer the same question as `carve_door`'s
-    // `y_offset + 1`: were port lookup ever to walk the flattened
-    // members, a door under `level y=6` would resolve, and the two
-    // would disagree about the row — the fault this file exists for.
+    // walks the `def` body only, in the resolver and in lowering, so the
+    // door a port names has never been shifted by a `level`, and the row
+    // it opens at is always `1`. Pinned here because that is what makes
+    // one constant on the port side answer the same question as the
+    // openings pass's `level y + 1`: were port lookup ever to walk the
+    // flattened members, a door under `level y=6` would resolve, and the
+    // two would disagree about the row.
     let src = format!(
         "{THEME}def hut size=5x5:\n  \
          walls id=w mat_slot=wall height=4\n  \
@@ -334,11 +316,9 @@ fn a_door_under_a_level_is_not_a_port_at_all() {
 
 #[test]
 fn the_walkway_defer_states_the_rule_the_door_broke() {
-    // The note is where an author is told why the strip is missing, and it
-    // used to list every contract a port has — so a reader whose walls
-    // started a storey up checked `side=` and `at=`, which were already
-    // right, before reaching the row that was wrong. It names the row now,
-    // and the rows the walls occupy.
+    // The note is where an author is told why the strip is missing, so it
+    // names the row the door opens at and the rows the walls occupy, not
+    // every contract a port has: `side=` and `at=` are already right.
     let src = site_with_door_port(6);
     let out = lowered(&src);
     let notes: Vec<_> = out

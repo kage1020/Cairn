@@ -1,13 +1,8 @@
-//! Diagnostic prose has to read as prose.
-//!
-//! Multi-line string literals in this crate are joined with a trailing `\`,
-//! which swallows the newline and the next line's indentation. Drop the
-//! backslash and the literal keeps both — the message still compiles, still
-//! says the right thing, and renders with a twenty-space gap in the middle
-//! of a sentence. `rustfmt` does not touch string contents and `clippy` has
-//! no lint for it, so CI stayed green through three of these at once.
-//!
-//! Checking the rendered text is the only place the mistake is visible.
+//! Diagnostic prose reads as prose: no primary or note the corpus below reaches
+//! carries a run of spaces, a raw line break or tab, or padding. A multi-line
+//! literal that loses its trailing `\` still compiles and says the right thing,
+//! so the rendered text is the only place it shows, and the corpus's reach is
+//! asserted so the checks cannot quietly shrink.
 
 use std::collections::BTreeSet;
 
@@ -68,16 +63,6 @@ fn no_diagnostic_text_is_empty_or_padded() {
     }
 }
 
-/// The three assertions above are only as good as the corpus: a code no
-/// fixture reaches has its prose unchecked. The reach is asserted rather
-/// than assumed, and named, so a fixture deleted for another reason shows
-/// up as a shrunken list here instead of as silent coverage loss.
-///
-/// This is a floor, not the full code set — the block-array codes that
-/// need a registry pack, and the resolver codes that need a multi-theme
-/// file, are not all represented. Severity is deliberately not among the
-/// properties guarded here: `Diagnostic::severity` reads the ledger, so
-/// there is no per-diagnostic value left for a fixture to catch.
 /// The codes are a floor and not the whole story: one code can render
 /// several different sentences, and a fixture that stops reaching one of
 /// them takes its prose out of the checks above without changing the code
@@ -180,6 +165,16 @@ fn the_corpus_reaches_the_header_vocabulary_prose() {
     }
 }
 
+/// The three assertions above are only as good as the corpus: a code no
+/// fixture reaches has its prose unchecked. The reach is asserted rather
+/// than assumed, and named, so a fixture deleted for another reason shows
+/// up as a shrunken list here instead of as silent coverage loss.
+///
+/// This is a floor, not the full code set: the block-array codes that need
+/// a registry pack, and the resolver codes that need a multi-theme file,
+/// are not all represented. Severity is not among the properties guarded
+/// here: `Diagnostic::severity` reads the ledger, so there is no
+/// per-diagnostic value left for a fixture to catch.
 #[test]
 fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
     let mut seen: BTreeSet<&'static str> = BTreeSet::new();

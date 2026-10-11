@@ -1,10 +1,5 @@
-//! A file that does not parse has a diagnostic like every other finding.
-//!
-//! Until this existed, a parse failure was a `ParseError` and nothing else:
-//! no code, no span, no way to render it beside the check pass's findings.
-//! Every consumer that wanted to show one built its own shape — the CLI
-//! wrote a bare `error:` line and the language server kept a private
-//! converter — and `--format json` had nothing to put on stdout at all.
+//! A file that does not parse has a diagnostic like every other finding: a
+//! code, a span and notes, rendered the way the check passes' findings are.
 
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::error::{LexError, ParseError};
@@ -22,7 +17,7 @@ use cairn_lang_core::{Diagnostic, Severity, diagnose_parse_failure, parse};
 /// level, and an odd count is refused before the comparison, so every even
 /// level below the current one is already on the stack and the arm that
 /// raises it cannot be taken. Written down rather than left as a gap: if
-/// the indent rules change, this is the note that says the row is now
+/// the indent rules change, this is the note that says the row is
 /// missing.
 const REFUSED: &[(&str, &str, &str)] = &[
     ("tab_indent", "theme t:\n\tslot a -> @b\n", "TabIndent"),

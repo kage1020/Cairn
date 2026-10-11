@@ -1,43 +1,8 @@
-//! A member that paints nothing because it names no material says so.
-//!
-//! `floor` and `walls` take their block from `mat_slot=NAME` through the
-//! applied theme, and that is the only route they have — a selector's
-//! bindings never reach the painter, and neither role has a fallback
-//! material. A member written without one therefore paints nothing, and
-//! before `E_MISSING_MATERIAL` nothing anywhere said so: `cairn check`
-//! exited 0 and the lowered structure came out empty.
-//!
-//! The rule is about the *absent* key only, and "absent" means the author
-//! did not write it — not that no `mat_slot` field survived lowering.
-//! `mat_slot=@oak_planks` is a key that is there and unusable, which is
-//! `E_TYPE_MISMATCH_LABEL`'s; `mat_slot=absent` is a key that is there and
-//! unresolvable, which is `E_UNRESOLVED_SLOT`'s. No member earns two of
-//! them, the same split `E_INCOMPLETE_PLACE` and `E_TYPE_MISMATCH_LABEL`
-//! already draw on a `place` row.
-//!
-//! Coverage:
-//!
-//!  1. `walls` and `floor` without one — refused, at the member;
-//!  2. a `window` without one — **not** refused: it is an opening carved
-//!     to air, which is what `examples/themed-tower.crn`'s
-//!     `class=arrow_slit` row is. Grouping `window` with `floor` and
-//!     `walls` is wrong for that reason;
-//!  3. the roles that paint a fallback — untouched, with the fallback
-//!     shown painting rather than assumed;
-//!  4. `mat_slot=` present but unusable, in both of its shapes — the
-//!     other code's finding alone;
-//!  5. no theme in the file at all — still refused, because the member
-//!     names no material whatever the module declares, and the advice
-//!     says what has to exist first;
-//!  6. inside a `def` body and inside a `level` block — the walk reaches
-//!     both;
-//!  7. a body another pass has already dropped — silent, because one
-//!     mistake is one finding and the two repairs disagree;
-//!  8. **role parity** — among the roles that paint, `check` refuses
-//!     exactly those whose bare form leaves the lowered structure
-//!     untouched. That is the property `member_will_paint`'s
-//!     documentation warns can drift, and it is measured here rather than
-//!     asserted from a list.
+//! `E_MISSING_MATERIAL`: a `floor` or `walls` with no `mat_slot=` paints
+//! nothing, since a theme slot is its only route to a block, and is an error at
+//! the member. The rule is about the absent key only: a `mat_slot=` that is
+//! present but unusable or unresolvable is another code's finding, and a
+//! `window` without one is an opening carved to air.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};

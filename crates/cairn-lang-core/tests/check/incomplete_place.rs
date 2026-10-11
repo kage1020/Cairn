@@ -1,19 +1,8 @@
-//! Acceptance tests for `E_INCOMPLETE_PLACE`.
-//!
-//! `resolve_site_placements` reads three keys off a `place` row before it
-//! can build anything: `id=` for the scope key and the output `.nbt`,
-//! `use=` for the def to instantiate, `theme=` for the materials. Each read
-//! used to `continue` on a miss, so a row short of any of them produced no
-//! placement, no voxels, and no diagnostic at either stage — `cairn check`
-//! exited 0 on a site whose buildings were simply absent.
-//!
-//! The keys are required rather than auto-filled. The auto-address of
-//! `spec/components-editing-sites` "Editing model" derives from parent /
-//! role / side / level / offset and names nothing outside the body it sits
-//! in; a `place`'s `id=` is the name `east_of=` and `connect` refer to and
-//! the name its `.nbt` is written under (that chapter's "Output naming"),
-//! so an invented one would be a name the author never wrote and cannot
-//! point at.
+//! `E_INCOMPLETE_PLACE`: a `place` row needs `id=`, `use=` and `theme=` before
+//! anything can be built from it, and a row short of any of them is an error
+//! naming every key it lacks. The keys are never filled in: `id=` is the name
+//! `east_of=`, `connect` and the output `.nbt` use, so an invented one would be
+//! a name the author cannot point at.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
@@ -32,7 +21,7 @@ fn site_with(row: &str) -> String {
 /// later — is the one that read `` `id=`, and `use=` `` until a reviewer
 /// caught it: the serial comma is a three-or-more rule.
 #[test]
-fn ip_1_the_missing_key_list_reads_at_every_arity() {
+fn the_missing_key_list_reads_at_every_arity() {
     for (row, listed) in [
         (
             "place           use=hut theme=plain east_of=anchor gap=4",
@@ -79,11 +68,11 @@ fn ip_1_the_missing_key_list_reads_at_every_arity() {
 }
 
 /// Each note says what its own key is for. Without this the note bodies are
-/// pinned by nothing — `ip_2` counts them and `diagnostic_text.rs` only
+/// pinned by nothing — `every_missing_key_is_named_at_once` counts them and `diagnostic_text.rs` only
 /// checks formatting — so a build emitting the `theme=` sentence on a
 /// `use=`-less row passes the whole suite.
 #[test]
-fn ip_1b_each_note_explains_the_key_it_belongs_to() {
+fn each_note_explains_the_key_it_belongs_to() {
     for (row, needle) in [
         (
             "place           use=hut theme=plain east_of=anchor gap=4",
@@ -113,7 +102,7 @@ fn ip_1b_each_note_explains_the_key_it_belongs_to() {
 /// to parse the sentence back apart — which is what
 /// `spec/lint` "Machine-readable payload" exists to stop consumers doing.
 #[test]
-fn ip_1c_the_payload_lists_the_missing_keys() {
+fn the_payload_lists_the_missing_keys() {
     let src = site_with("place east_of=anchor gap=4");
     let d = one_of_code(&src, DiagnosticCode::IncompletePlace);
     let value = serde_json::to_value(&d.data).expect("serialise payload");
@@ -127,7 +116,7 @@ fn ip_1c_the_payload_lists_the_missing_keys() {
 /// one line once rather than re-running the compiler to discover the next
 /// omission.
 #[test]
-fn ip_2_every_missing_key_is_named_at_once() {
+fn every_missing_key_is_named_at_once() {
     let src = site_with("place east_of=anchor gap=4");
     assert_eq!(
         of_code(&src, DiagnosticCode::IncompletePlace).len(),
@@ -146,7 +135,7 @@ fn ip_2_every_missing_key_is_named_at_once() {
 /// `one_of_code(, DiagnosticCode::IncompletePlace)` counts across the whole source, and `site_with`'s anchor row is
 /// complete — so what this adds is the case with no incomplete row at all.
 #[test]
-fn ip_3_a_complete_row_is_not_reported() {
+fn a_complete_row_is_not_reported() {
     let src = site_with("place id=b use=hut theme=plain east_of=anchor gap=4");
     assert!(
         of_code(&src, DiagnosticCode::IncompletePlace).is_empty(),
@@ -160,7 +149,7 @@ fn ip_3_a_complete_row_is_not_reported() {
 /// add a key that is already on the line, and `E_TYPE_MISMATCH_LABEL`
 /// already names it.
 #[test]
-fn ip_4_a_mistyped_key_is_not_a_missing_one() {
+fn a_mistyped_key_is_not_a_missing_one() {
     for row in [
         "place id=3 use=hut theme=plain east_of=anchor gap=4",
         "place id=b use=3   theme=plain east_of=anchor gap=4",
@@ -184,7 +173,7 @@ fn ip_4_a_mistyped_key_is_not_a_missing_one() {
 /// The span underlines the offending row. A renderer pointing at the
 /// `site` header would send the author to a line that is correct.
 #[test]
-fn ip_5_the_span_underlines_the_offending_row() {
+fn the_span_underlines_the_offending_row() {
     let src = site_with("place id=b use=hut east_of=anchor gap=4");
     let d = one_of_code(&src, DiagnosticCode::IncompletePlace);
     assert_eq!(
@@ -198,7 +187,7 @@ fn ip_5_the_span_underlines_the_offending_row() {
 /// registration would turn one mistake into a cascade of unresolved
 /// references down the rest of the site.
 #[test]
-fn ip_6_an_incomplete_row_with_an_id_still_registers_its_name() {
+fn an_incomplete_row_with_an_id_still_registers_its_name() {
     let src = format!(
         "{PRELUDE}site trio:\n  place id=anchor use=hut theme=plain at=origin\n  \
          place id=gap theme=plain east_of=anchor gap=4\n  \
@@ -221,7 +210,7 @@ fn ip_6_an_incomplete_row_with_an_id_still_registers_its_name() {
 /// other which walkway went missing because of it — the same pairing an
 /// unresolved `use=DEF` already produces.
 #[test]
-fn ip_7_a_connect_naming_the_row_still_cascades() {
+fn a_connect_naming_the_row_still_cascades() {
     let src = format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
          place id=peer theme=plain east_of=anchor gap=4\n  \
@@ -237,7 +226,7 @@ fn ip_7_a_connect_naming_the_row_still_cascades() {
 /// a code and never lowers, so none of them would notice if an incomplete
 /// row started building something.
 #[test]
-fn ip_8_an_incomplete_row_builds_nothing() {
+fn an_incomplete_row_builds_nothing() {
     let build = |source: &str| {
         let module = parse(source).expect("parse");
         let ir = lower(&module);
@@ -269,7 +258,7 @@ fn ip_8_an_incomplete_row_builds_nothing() {
 /// the row-wise version of the loop the code closes: a `reported_once` flag
 /// would leave the second author-written row as invisible as it was before.
 #[test]
-fn ip_9_every_incomplete_row_is_reported() {
+fn every_incomplete_row_is_reported() {
     let src = format!(
         "{PRELUDE}site many:\n  place id=anchor use=hut theme=plain at=origin\n  \
          place id=b theme=plain east_of=anchor gap=4\n  \
@@ -285,12 +274,12 @@ fn ip_9_every_incomplete_row_is_reported() {
 }
 
 /// The finding coexists with the other `place`-row errors rather than
-/// masking them or being masked. Each pair is a different guard in
-/// `resolve_site_placements`, and each is on the same line the author has
+/// masking them or being masked. Each pair is a different check on a
+/// `place` row, and each is on the same line the author has
 /// to edit — so batching them is the same promise the multi-key message
 /// makes, extended across codes.
 #[test]
-fn ip_10_it_coexists_with_the_other_place_row_errors() {
+fn it_coexists_with_the_other_place_row_errors() {
     for (row, other) in [
         // The id guards run after the completeness check and report on
         // their own.
@@ -303,9 +292,9 @@ fn ip_10_it_coexists_with_the_other_place_row_errors() {
             "E_DUPLICATE_PLACE_ID",
         ),
         // The origin check sits behind the `id=` gate, so a row with no
-        // `id=` at all is the shape that used to lose it: adding the `id=`
-        // this code asks for would have surfaced a brand-new error on the
-        // line just fixed.
+        // `id=` at all is the shape that could lose it: adding the `id=`
+        // this code asks for would surface a brand-new error on the line
+        // just fixed.
         (
             "place use=hut theme=plain at=middle",
             "E_INVALID_PLACE_ORIGIN",

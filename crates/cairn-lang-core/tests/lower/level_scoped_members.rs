@@ -1,19 +1,7 @@
-//! `level y=N` grouping must not change what the members inside it mean.
-//!
-//! Dimension derivation and painting used to read two different member
-//! lists. The dims walked the source members, where a `level` block is
-//! opaque, while the paint pass walked the flattened ones. A `roof` under
-//! `level y=0` was therefore invisible to the volume that had to hold it:
-//! every voxel it produced landed past the end of that volume and was
-//! dropped without a word, leaving a palette full of stairs and a structure
-//! with none.
-//!
-//! These tests pin the two lists to each other from both directions. A
-//! member the pass paints is one the dims saw — so it lowers to exactly the
-//! volume it would have produced written directly in the body. A member the
-//! pass defers is one the dims did not see — so it lowers to exactly the
-//! volume of a source that never mentioned it. Anything in between is the
-//! shape of this bug.
+//! `level y=N` grouping does not change what the members inside it mean: a
+//! member the pass paints lowers to the volume it has written directly in the
+//! body, and a member it defers lowers to the volume of a source that never
+//! mentioned it.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 
@@ -162,9 +150,8 @@ fn a_level_scoped_roofs_overhang_is_validated_exactly_once() {
     //
     // The roof is drawn, flush with the wall line, so the finding is the
     // one for an argument the pass ignored rather than the one for a
-    // member it dropped. The code is asserted alongside the text because
-    // the two used to disagree: the wording said "deferred" about a
-    // member that is in the build.
+    // member it dropped. The code is asserted alongside the text so the
+    // wording cannot say "deferred" about a member that is in the build.
     let ir = lowered(&source(
         "\n  level id=l0 y=0\n    roof kind=gable mat_slot=roof overhang=nope\n",
     ));

@@ -1,18 +1,7 @@
-//! Integration check that `at-side-walkway.crn` lowers two corner-anchored
-//! doors (`at=right` on the west cottage's front wall, `at=left` on the
-//! east cottage's) into a straight x-axis walkway.
-//!
-//! The unit tests in `block_array::walkway` already pin
-//! [`door_anchor_offset`](cairn_lang_core::block_array::walkway) for every
-//! `at=center|left|right` × wall-side combination. This fixture pins the
-//! same vocabulary at the integration boundary: a regression that silently
-//! folded `at=left|right` back to `at=center` would shift one of the two
-//! ports by exactly one cell and break the bounding-box assertions below.
-//! Geometry is chosen so the L collapses to a single x-axis run at z=3 and
-//! `blocked_count == 0`, isolating the anchor-resolution behaviour from
-//! the L-corner and collision behaviours covered by `l_walkway_lower`.
-//! That the fixture lowers to one unblocked walkway with no deferred
-//! door is pinned for every walkway example in `walkway_examples_lower`.
+//! `at-side-walkway.crn` lowers its two corner-anchored doors (`at=right` on
+//! the west cottage's front wall, `at=left` on the east cottage's) into one
+//! straight x-axis walkway at z=3, so folding `at=left|right` back to
+//! `at=center` shifts a port by one cell and breaks the bounding box.
 
 use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex};
 

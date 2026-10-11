@@ -1,9 +1,6 @@
-//! `E_UNKNOWN_ARGUMENT` — a `key=` no member of that role reads.
-//!
-//! The keyword allowlist has always answered this question one level up. A
-//! misspelled *argument* was accepted in silence, and the only thing the
-//! author eventually saw was a `W_DEFERRED_MEMBER` naming the argument that
-//! is now absent rather than the one that is wrong.
+//! `E_UNKNOWN_ARGUMENT`: a `key=` that no member of that role reads is an error
+//! at the key, so a misspelt argument is named itself rather than surfacing
+//! later as whatever the member lacks.
 
 use cairn_lang_core::intent::{
     MemberRole, UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
@@ -326,8 +323,7 @@ fn an_argument_the_spec_defines_and_nothing_reads_is_reported_as_ignored() {
 #[test]
 fn a_key_a_sibling_argument_routed_past_is_reported_as_ignored() {
     // `slope_to=` is a `roof` argument and lints clean against the
-    // vocabulary; `fill_roof` only consults it for
-    // `kind=shed`, so on a gable the direction reaches the IR and is
+    // vocabulary; a roof only reads it for `kind=shed`, so on a gable the direction reaches the IR and is
     // dropped — a roof that ignores the way the author pointed it.
     let d = exactly_one(diagnose(
         "struct s size=9x9\n  roof kind=gable slope_to=front\n",
@@ -401,7 +397,7 @@ fn a_selector_that_names_no_rule_is_not_billed_twice() {
 
 #[test]
 fn a_selector_matched_conditional_key_is_still_reported() {
-    // Selecting on `slope_to=` does not make `fill_roof` read it: the match
+    // Selecting on `slope_to=` does not make the roof read it: the match
     // hands the roof a binding no pass lowers, so the gable is the same
     // gable with the row or without it. Both the argument and the binding
     // are reported, each where it was written.
@@ -551,10 +547,9 @@ fn a_selector_matched_key_is_still_reported_as_ignored() {
 
 #[test]
 fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
-    // Writing the typo twice used to forgive it completely: the selector
-    // matched, so nothing anywhere said a word, and the only line the author
-    // saw was the `W_DEFERRED_MEMBER` about the `height=` that is now
-    // absent. That is the failure this whole pass exists to end.
+    // Writing the typo twice must not forgive it: the selector matches, so
+    // the only other line the author would see is a `W_DEFERRED_MEMBER`
+    // about the `height=` that is absent.
     let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hieght=3] -> frame=@spruce_wood\n\nstruct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
     // Beside it, only the row's binding.
     let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
@@ -593,7 +588,7 @@ fn a_widened_key_appears_once_in_the_closed_set() {
 
 #[test]
 fn a_stair_reads_the_height_it_is_written_at() {
-    // `fill_stair` reads `y=`, and the shipped `stair` line carries none, so
+    // A stair reads `y=`, and the shipped `stair` line carries none, so
     // nothing but the sweep round trip sees this key.
     let src = "theme t:\n  slot m -> @spruce_stairs\n\nstruct s size=9x9\n  stair kind=stairs mat_slot=m side=front half=top facing=out y=2\n";
     assert_eq!(codes(src), Vec::<&str>::new(), "source:\n{src}");

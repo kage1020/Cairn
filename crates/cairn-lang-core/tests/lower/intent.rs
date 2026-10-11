@@ -1,11 +1,6 @@
-//! AST → Intent IR lowering acceptance tests.
-//!
-//! Two layers:
-//! 1. Insta snapshots over every shipped example, fixing the IR shape so any
-//!    behavioural drift in `lower` shows up as a snapshot diff.
-//! 2. Unit tests that pin down the hoisting rules (`id` / `class` /
-//!    `mat_slot`, size, nested children, unknown-keyword fallback) without
-//!    depending on a snapshot file.
+//! Lowering the AST to the intent IR. Every shipped example's IR is
+//! snapshotted, and the hoisting of `id` / `class` / `mat_slot`, size, nested
+//! children and unknown keywords is pinned without a snapshot.
 
 use std::fmt::Write as _;
 use std::num::NonZeroU32;
@@ -32,7 +27,7 @@ fn every_shipped_example_lowers_to_its_snapshot() {
 }
 
 #[test]
-fn m2_lower_always_returns_grouped_semantic_level() {
+fn lower_always_returns_grouped_semantic_level() {
     let ir = lower_source("struct s size=1x1\n  floor\n");
     assert_eq!(ir.semantic_level, SemanticLevel::Grouped);
 }
@@ -147,10 +142,8 @@ fn level_block_recursively_lowers_its_children() {
 
 #[test]
 fn level_block_keeps_nested_logic_and_asserts() {
-    // Regression: a nested `logic` or `assert` used to either panic via
-    // `unreachable!()` or be silently dropped because `Member.children`
-    // was `Vec<Member>`. The MemberBody shape preserves all three
-    // statement flavours.
+    // A `level` body keeps all three statement flavours: members, `logic`
+    // and `assert`.
     let src = "\
 struct gate size=3x3
   level y=0
@@ -168,9 +161,8 @@ struct gate size=3x3
 
 #[test]
 fn duplicate_size_does_not_leak_into_residual_args() {
-    // Regression: a repeated `size=` used to land in `StructIr::args`,
-    // contradicting that field's documented "everything except size"
-    // contract.
+    // A repeated `size=` stays out of `StructIr::args`, which holds
+    // everything except the size.
     let ir = lower_source("struct s size=4x4 size=5x5\n  floor\n");
     let s = &ir.structs[0];
     let size = s.size.as_ref().expect("first size= still hoists");
@@ -184,9 +176,8 @@ fn duplicate_size_does_not_leak_into_residual_args() {
 
 #[test]
 fn token_and_dotref_are_not_hoisted_into_label_fields() {
-    // Regression: hoist_label used to accept Token and DotRef silently,
-    // swallowing diagnostics the `check::type_mismatch` pass needs to
-    // report.
+    // A token or dotted reference is not a label, so it stays an argument
+    // for `check::type_mismatch` to report.
     let ir = lower_source("struct s size=1x1\n  walls id=@oak class=foo.bar mat_slot=wall\n");
     let member = &ir.structs[0].members[0];
     assert!(

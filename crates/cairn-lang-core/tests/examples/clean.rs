@@ -1,14 +1,7 @@
-//! Regression: every shipped example must pass `cairn check` clean.
-//!
-//! If a future change introduces a diagnostic against `cottage.crn` (or any
-//! other example) without also updating the example to match the new rule,
-//! this sweep catches it before release. The shipped examples also define
-//! the "what shape of input do we promise to support" surface, so this
-//! suite doubles as the contract for that promise.
-//!
-//! The sweep reads `examples/` rather than naming files, so a new example
-//! is covered the moment it lands; the guard in [`common::examples`]
-//! refuses a set too small to be the shipped one.
+//! Every shipped example passes `cairn check` with no finding. The sweep reads
+//! `examples/` rather than naming files, so a new example is covered the moment
+//! it lands, and `common::examples` refuses a set too small to be the shipped
+//! one.
 
 use crate::common::{diagnose, examples};
 

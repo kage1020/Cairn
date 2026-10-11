@@ -1,17 +1,8 @@
-//! The minimum version of a composite is the max of its parts.
-//!
-//! `spec/versioning-editions` "Fail-loud and minimum-version inference"
-//! gives a `def` and a `theme` a `requires version>=X` line of their own,
-//! and says a composite's floor is the max over its parts. A module-level
-//! `@requires` cannot say that: it applies to the whole file rather than to
-//! the template, so a library of `def`s had no way to carry its own
-//! requirements and every consumer restated them.
-//!
-//! What "its parts" means is the subject of most of this file. A part the
-//! build does not instantiate is not a part of it; a `theme` is a part of
-//! every build that *binds* it, whether or not a member reads a slot from
-//! it; and a floor that names an edition is inert in the other one, exactly
-//! as the header form is.
+//! A composite's minimum version is the max over the `requires` floors of its
+//! parts (`spec/versioning-editions` "Fail-loud and minimum-version
+//! inference"): a part the build does not instantiate is not one, a `theme` is
+//! part of every build that binds it, and a floor naming an edition is inert in
+//! the other.
 
 use cairn_lang_core::ast::{Item, Statement};
 use cairn_lang_core::resolve::{

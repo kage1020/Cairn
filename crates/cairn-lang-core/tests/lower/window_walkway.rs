@@ -1,16 +1,6 @@
-//! Integration check that `window-walkway.crn` lowers to a flat strip
-//! between `home1.entry` (door, front) and `home2.front` (window, front).
-//!
-//! Door-only port endpoints are exercised by `l_walkway_lower` and
-//! `village_lower`; this fixture pins the window-port surface so a
-//! regression in [`port_world_position`]'s window branch — wrong wall
-//! mirror, missed `offset + size.w / 2`, or an unintended Y lift from
-//! the authored `y=` — fails loud here rather than only at the spec
-//! boundary. Geometry is chosen so the Manhattan strip is a single
-//! x-leg that clears both cottage footprints, pinning `blocked_count
-//! == 0` as the regression-free state; that, the walkway's key and the
-//! absence of any `W_DEFERRED_MEMBER` cascade are asserted for every
-//! walkway example in `walkway_examples_lower`.
+//! `window-walkway.crn` lowers to a flat strip from `home1.entry`, a door, to
+//! `home2.front`, a window, which pins the window port's wall, horizontal
+//! centre and height where the door-only examples cannot reach them.
 
 use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex};
 use cairn_lang_core::check::{DiagnosticCode, Severity};
@@ -114,17 +104,13 @@ fn window_walkway_emits_no_resolver_errors() {
 
 /// Walkway anchored to a window whose `offset + size.w` overflows the
 /// wall must cascade exactly one `W_DEFERRED_MEMBER`, with the door
-/// half of the row identified as the side that *did* place. Pins the
-/// `port_world_position` → `W_DEFERRED_MEMBER` cascade across the
-/// resolver / lower boundary: a regression that returns early from
-/// `lower_connects` on the first rejection (skipping the diagnostic
-/// push) would silently drop the walkway and only fail this
-/// integration test.
+/// half of the row identified as the side that *did* place: a walkway
+/// dropped on its first refused port without a word fails here.
 #[test]
 fn window_walkway_overflowing_window_cascades_one_deferred_member() {
     // size=3x3 → wall_length(Front) = 3. The overflow window declares
-    // `offset=2 size=2x2`, so `offset + size.w = 4 > 3` and
-    // `window_center_offset` refuses it as past the wall. The peer's door
+    // `offset=2 size=2x2`, so `offset + size.w = 4 > 3` and the window
+    // port is refused as past the wall. The peer's door
     // port still resolves cleanly, so the cascade names the window side.
     let src = "@cairn 2026.06\n\n\
 def hut size=3x3:\n  \

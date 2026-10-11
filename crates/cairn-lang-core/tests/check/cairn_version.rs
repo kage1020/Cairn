@@ -1,19 +1,9 @@
-//! What `@cairn` accepts, and what it says when it cannot read the value.
-//!
-//! The directive declares the Cairn language version a file was written
-//! against. `spec/index` calls it "provenance only, so a future compiler
-//! can parse and warn correctly" — a job that needs the value to be
-//! readable as a version, which nothing checked. `@cairn banana` and
-//! `@cairn 2026.06.1.2` compiled in silence, and so did a file declaring a
-//! language newer than the compiler reading it, which is the one case where
-//! the header has something to say about the findings around it.
-//!
-//! Both codes are warnings. The value reaches no pass, no palette and no
-//! lockfile field, so the error test of `spec/lint` "Error vs warning" —
-//! leaving it alone yields something other than what the source asked for —
-//! is not met: the artifact is identical either way. `@requires` is an
-//! error for the opposite reason, its floor being folded into the
-//! compatible range and the `--target` gate.
+//! `@cairn` names the language version a file was written against. A value
+//! that is not a calver earns `W_INVALID_CAIRN_VERSION`, one newer than this
+//! compiler earns `W_FUTURE_CAIRN_VERSION`, and a file that does not parse
+//! carries the gap as a note on its parse error instead. Both codes are
+//! warnings: the value reaches no pass, palette or lockfile field, so the
+//! artifact is the same either way.
 
 use cairn_lang_core::ast::Header;
 use cairn_lang_core::calver::{LanguageVersion, parse_language_version};
@@ -40,8 +30,8 @@ fn only(header: &str, code: DiagnosticCode) -> Diagnostic {
 
 #[test]
 fn the_spelling_every_shipped_file_uses_is_accepted() {
-    // AC1. `2026.06` is calver's `YYYY.0M`; the crate's own release version
-    // is `YYYY.M`. Both are in this repo today and both are read.
+    // `2026.06` is calver's `YYYY.0M`; the crate's own release version is
+    // `YYYY.M`. Both are read.
     for header in [
         "@cairn 2026.06\n",
         "@cairn 2026.6\n",
@@ -58,7 +48,7 @@ fn the_spelling_every_shipped_file_uses_is_accepted() {
 
 #[test]
 fn a_value_that_is_not_a_calver_is_reported() {
-    // AC2. Each of these reaches a different named failure, so a consumer
+    // Each of these reaches a different named failure, so a consumer
     // choosing a repair does not have to read the sentence.
     for (header, fragment) in [
         ("@cairn banana\n", "two or three"),
@@ -98,9 +88,9 @@ fn an_empty_component_is_described_rather_than_quoted() {
 #[test]
 fn a_second_word_on_the_line_is_reported_as_one() {
     // `@cairn` takes the rest of the line, so an interior space is the
-    // one way a second word arrives. It used to travel into the payload
-    // as a "component" of `06 draft`, which a quick-fix consumer would
-    // have used as a replacement range.
+    // one way a second word arrives. The payload names that word alone,
+    // not a "component" `06 draft` a quick-fix consumer would use as a
+    // replacement range.
     let found = only(
         "@cairn 2026.06 draft\n",
         DiagnosticCode::InvalidCairnVersion,
@@ -123,7 +113,7 @@ fn the_finding_lands_on_the_directive_that_carries_it() {
 
 #[test]
 fn a_version_newer_than_this_compiler_is_reported() {
-    // AC3. The one thing an older compiler can usefully say about a file
+    // The one thing an older compiler can usefully say about a file
     // written against a newer language.
     let header = "@cairn 9999.12\n";
     let found = only(header, DiagnosticCode::FutureCairnVersion);
@@ -137,7 +127,7 @@ fn a_version_newer_than_this_compiler_is_reported() {
 
 #[test]
 fn a_version_this_compiler_is_at_or_past_is_not_reported() {
-    // AC4. Including the boundary: `CAIRN_VERSION` itself is not future.
+    // Including the boundary: `CAIRN_VERSION` itself is not future.
     for header in [
         "@cairn 2026.06\n".to_owned(),
         "@cairn 1970.1\n".to_owned(),
@@ -152,7 +142,7 @@ fn a_version_this_compiler_is_at_or_past_is_not_reported() {
 
 #[test]
 fn an_absent_patch_compares_as_zero() {
-    // AC4's boundary, asked of the comparison directly so no test pins a
+    // The boundary, asked of the comparison directly so no test pins a
     // verdict against a constant `release-plz` moves.
     let two = parse_language_version("2026.9").expect("a language version");
     let three = parse_language_version("2026.9.2").expect("a language version");
@@ -174,7 +164,7 @@ fn the_leading_zero_does_not_change_the_month() {
 
 #[test]
 fn this_compilers_own_version_is_a_language_version() {
-    // AC7. The pass compares against `CAIRN_VERSION`; a release that made
+    // The pass compares against `CAIRN_VERSION`; a release that made
     // that string unparseable would leave the comparison with nothing on
     // one side, and no fixture would notice.
     parse_language_version(CAIRN_VERSION)
@@ -185,7 +175,7 @@ fn this_compilers_own_version_is_a_language_version() {
 
 #[test]
 fn a_value_that_is_not_a_version_has_no_version_to_compare() {
-    // AC5. A malformed value cannot also be a future one; reporting both
+    // A malformed value cannot also be a future one; reporting both
     // would tell an author to upgrade over a string that names nothing.
     let found = codes(&with_header("@cairn banana\n"));
     assert!(found.contains(&"W_INVALID_CAIRN_VERSION"), "{found:?}");
@@ -194,7 +184,7 @@ fn a_value_that_is_not_a_version_has_no_version_to_compare() {
 
 #[test]
 fn each_repeated_header_is_judged_on_its_own_line() {
-    // AC6. The duplicate pass reports the repeat; this pass still reads
+    // The duplicate pass reports the repeat; this pass still reads
     // both values, because the author has two lines to fix.
     let header = "@cairn banana\n@cairn 9999.12\n";
     let found = codes(&with_header(header));
@@ -210,7 +200,7 @@ fn each_repeated_header_is_judged_on_its_own_line() {
 
 #[test]
 fn both_codes_carry_a_payload_a_consumer_can_act_on() {
-    // AC9. `spec/lint` "Machine-readable payload" tells consumers not to
+    // `spec/lint` "Machine-readable payload" tells consumers not to
     // parse the prose, so the parts a quick-fix needs travel beside it.
     let invalid = only("@cairn 2026.13\n", DiagnosticCode::InvalidCairnVersion);
     let json = serde_json::to_value(invalid.data.expect("a payload")).expect("serialises");
@@ -235,7 +225,7 @@ fn a_module_with_no_cairn_header_is_silent() {
 
 // -- the file the header explains best -----------------------------------
 //
-// `run` never sees a source that does not parse, and a later language
+// `check` never sees a source that does not parse, and a later language
 // adding a whole syntactic form is exactly what does not parse here. The
 // note on the parse error is what carries the version gap into that
 // report.
@@ -330,9 +320,9 @@ fn a_header_that_names_no_version_says_it_cannot_judge_the_gap() {
 /// The scan reads a line the way `crate::lines` does, not the way
 /// `split('\n')` would.
 ///
-/// A lone `\r` is a line break Cairn accepts, and a file written with
-/// them used to be one long chunk to this scan: the `@cairn` value swept
-/// up the rest of the file and parsed as no version at all.
+/// A lone `\r` is a line break Cairn accepts. Read as part of the line, it
+/// would let the `@cairn` value sweep up the rest of the file and parse as
+/// no version at all.
 #[test]
 fn a_file_broken_by_lone_carriage_returns_is_still_read() {
     assert!(notes_the_version_gap(
@@ -340,12 +330,11 @@ fn a_file_broken_by_lone_carriage_returns_is_still_read() {
     ));
 }
 
-/// A byte-order mark is skipped, the way `crate::lex` skips one.
+/// A byte-order mark is skipped, the way the lexer skips one.
 ///
 /// It is what a Windows editor writes at the head of a file, which is the
-/// same author this note is for. Left in place it turned the first line
-/// into something that is not a directive, and the scan gave up on the
-/// whole file rather than on that line.
+/// same author this note is for. Left in place it would make the first
+/// line something that is not a directive.
 #[test]
 fn a_leading_byte_order_mark_does_not_hide_the_header() {
     assert!(notes_the_version_gap(
@@ -355,11 +344,11 @@ fn a_leading_byte_order_mark_does_not_hide_the_header() {
 
 /// Space the lexer would have stopped on means the file declares nothing.
 ///
-/// `Lexer::skip_spaces` advances over `' '` alone, so a tab between the
-/// directive and its value is `LexError::TabIndent` and `parse` built no
-/// header at all. A `str::trim` strips the tab and would have the note
-/// claim a version the file never carried — and send an author whose
-/// repair is "delete the tab" after a newer compiler instead.
+/// The lexer takes only `' '` between a directive and its value, so a tab
+/// there is `LexError::TabIndent` and `parse` builds no header at all.
+/// Reading past the tab would have the note claim a version the file never
+/// carried, and send an author whose repair is "delete the tab" after a
+/// newer compiler instead.
 #[test]
 fn whitespace_the_lexer_refuses_declares_no_version() {
     for source in [
@@ -377,8 +366,7 @@ fn whitespace_the_lexer_refuses_declares_no_version() {
 
 #[test]
 fn a_cairn_line_that_is_not_a_header_is_not_read() {
-    // `parse_module` takes headers from the run of lines at the top of the
-    // file, at column zero. A `@cairn` anywhere else is not one, and
+    // Headers are the run of lines at the top of the file, at column zero. A `@cairn` anywhere else is not one, and
     // reading it would attribute a version to a file the parser never saw
     // one in.
     for source in [
@@ -417,8 +405,8 @@ fn a_file_that_parses_reports_the_gap_through_the_pass_instead() {
 
 /// The scan and the parser read the same bytes as the header.
 ///
-/// `declared_version` reads the `@cairn` line out of the text because the
-/// caller has no AST, so nothing holds the two to each other — a
+/// The note reads the `@cairn` line out of the text because the caller
+/// has no AST, so nothing holds the two to each other — a
 /// disagreement about where the directive begins or ends would show up
 /// as a note underlining the wrong thing, on a file nobody can parse and
 /// so nobody can compare. This compares them on a file that *does*

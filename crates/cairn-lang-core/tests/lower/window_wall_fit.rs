@@ -1,20 +1,8 @@
-//! A `window` is a rectangle cut into a wall, and the two passes that act
-//! on one have to agree about which rectangles are inside a wall.
-//!
-//! `walls height=H` under `level y=N` paints the world rows
-//! `N + 1 ..= N + H` — the floor slab owns the base plane — so a window
-//! sits inside masonry exactly when every row of `y ..= y + size.h - 1`
-//! is one of those. Read as a single ceiling instead, the rule cannot see
-//! the two ways out of the wall that are not "too tall": the rows below
-//! the first course, where the rectangle carves through the floor, and
-//! the air between two `level` courses, where it hangs glass in the open.
-//!
-//! `spec/components-editing-sites` "Ports and `connect`" requires the
-//! walkway port to draw the same line as the openings pass — "a window that
-//! the openings pass would defer cannot anchor a walkway either" — so the
-//! last group here asserts the two answers case by case rather than each in
-//! isolation. Two checks that agree today drift apart the moment one of
-//! them is edited alone; a matrix that compares them fails when they do.
+//! A `window` is cut only where every row of `y ..= y + size.h - 1` is a row
+//! some `walls` member paints (`N + 1 ..= N + H` for `walls height=H` under
+//! `level y=N`), so neither the floor below the first course nor the air
+//! between two courses takes one. A walkway port draws the same line as the
+//! openings pass, so the last group compares the two answers case by case.
 
 use cairn_lang_core::block_array::BlockArray;
 
@@ -275,9 +263,8 @@ fn walkway_was_laid(source: &str) -> bool {
 #[test]
 fn a_window_flush_with_the_top_course_anchors_a_walkway() {
     // `walls height=3` paints rows 1..=3 and the window occupies row 3 —
-    // the last course `fill_walls` painted, and a cell the openings pass
-    // carves. The port used to be refused here because its own bound
-    // stopped one row short of the wall.
+    // the last course the walls paint, and a cell the openings pass
+    // carves, so the port's bound reaches it too.
     assert!(walkway_was_laid(&site_with_window_port(3, 1, 3)));
 }
 
@@ -297,10 +284,9 @@ fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
     // test of either side by itself can see.
     //
     // Every case here declares `walls` in the def body. The two tests
-    // below carry the cases that used to fall outside the equivalence —
-    // walls under a `level`, and walls whose material does not resolve —
-    // because the port now reads the column the body was lowered with
-    // rather than deriving its own from the `def`.
+    // below carry walls under a `level` and walls whose material does not
+    // resolve: the port reads the column the body was lowered with, so
+    // those agree too.
     const WALL_HEIGHT: u32 = 3;
     for (y, height) in [
         (0, 1),
@@ -331,11 +317,9 @@ fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
 
 #[test]
 fn walls_under_a_level_are_carved_into_and_anchor_a_port() {
-    // The equivalence used to stop at the def body: the openings pass
-    // read the flattened member list and so saw a `walls` under a
-    // `level`, while port resolution walked the body only. The window was
-    // cut and the walkway was dropped, so the author was told to move a
-    // window that was already in masonry.
+    // The equivalence reaches past the def body: the openings pass sees a
+    // `walls` under a `level`, so the port does too, and the author is not
+    // told to move a window that is already in masonry.
     let src = format!(
         "{THEME}def hut size=5x5:\n  \
          level id=up y=0\n    \
@@ -365,11 +349,9 @@ fn walls_under_a_level_are_carved_into_and_anchor_a_port() {
 
 #[test]
 fn the_walkway_defer_states_the_rule_the_window_broke() {
-    // The note is where an author is told why the strip is missing. It
-    // used to quote every contract a port has; a reader who followed the
-    // window one — and it once quoted a bound that was wrong — had to work
-    // out which clause their window broke. It names the rows now, and the
-    // rows the walls occupy, which is the check the port applied.
+    // The note is where an author is told why the strip is missing, so it
+    // names the window's rows and the rows the walls occupy, which is the
+    // check the port applied, rather than every contract a port has.
     let src = site_with_window_port(0, 1, 3);
     let out = lowered(&src);
     let notes: Vec<_> = out
@@ -400,7 +382,7 @@ fn the_walkway_defer_states_the_rule_the_window_broke() {
 
 #[test]
 fn walls_that_paint_nothing_are_masonry_to_neither_pass() {
-    // The other case that used to fall outside the equivalence. The wall
+    // The other case past the def-body equivalence. The wall
     // is declared with a positive `height=`, and its material is an
     // abstract token that no registry pack is here to lift — so the pass
     // paints no wall row, defers the cut, and the port has to agree.

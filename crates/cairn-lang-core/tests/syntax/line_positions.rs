@@ -1,19 +1,6 @@
-//! Every layer that names a `line:column` names the same one.
-//!
-//! Two layers in this crate answer that question by different routes: the
-//! lexer counts as it walks, and [`LineStarts`] resolves a byte offset
-//! after the fact. A diagnostic from one is read next to a diagnostic from
-//! the other — and next to an editor's cursor — so a disagreement is not a
-//! cosmetic difference, it is a wrong line number in the one message whose
-//! whole job is to say where to look.
-//!
-//! The `Newline` token is where they used to disagree. It was pushed after
-//! the line break was consumed, so it recorded the first column of the
-//! *following* line and carried an empty span at that line's first byte.
-//! Since a parse error at the end of a line reports the position of the
-//! token it stopped at, every "expected X, got end of line" pointed one
-//! line past the text that was wrong — and after the last break in a file,
-//! at a line holding no text at all.
+//! Every layer that names a `line:column` names the same one: the lexer
+//! counting as it walks and [`LineStarts`] resolving a byte offset agree,
+//! including for a `Newline` token, which sits on the line it ends.
 
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::lex::{TokenKind, lex};
@@ -183,18 +170,9 @@ fn an_end_of_line_error_reports_the_same_place_for_every_line_ending() {
 }
 
 mod byte_order_mark {
-    //! A BOM shifts every layer's columns by the same amount.
-    //!
-    //! Three places turn a source location into a `line:column`: the lexer,
-    //! counting as it walks; `LineStarts::position` here, counting characters
-    //! from a line's start; and `LineIndex` in the LSP, doing the same for an
-    //! editor. They only agree if they agree about the byte-order mark, and
-    //! the two span-derived ones count it — so the lexer does too.
-    //!
-    //! Nothing else pins that. A lexer that skipped the mark would put its
-    //! own errors one column left of every check diagnostic about the same
-    //! character, on the first line of exactly the files a default Windows
-    //! editor produces, and no test in this crate would notice.
+    //! A byte-order mark shifts every layer's columns by the same amount: the
+    //! lexer counts it, as `LineStarts::position` and the LSP's `LineIndex` do,
+    //! so a lexer error and a check finding about one character share a column.
 
     use cairn_lang_core::check::LineStarts;
     use cairn_lang_core::lex::lex;

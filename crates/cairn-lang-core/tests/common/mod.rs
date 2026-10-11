@@ -1,13 +1,7 @@
-//! Helpers shared by the `cairn-lang-core` integration test binaries.
-//!
-//! Every binary here drives the same front half of the pipeline — parse,
-//! lower, then either `check` or `resolve` + `lower_to_block_array` — and
-//! reads the same `examples/` tree. The plumbing lives once so a change to
-//! a pass's signature, or to where the examples are found, lands in one
-//! place.
-//!
-//! Each binary declares this module `pub`, so a helper one binary leaves
-//! unused is not dead code there.
+//! Helpers shared by the core integration test binaries, which all drive the
+//! same front half of the pipeline and read the same `examples/` tree. Each
+//! binary declares this module `pub`, so a helper one binary leaves unused is
+//! not dead code there.
 
 use std::path::PathBuf;
 

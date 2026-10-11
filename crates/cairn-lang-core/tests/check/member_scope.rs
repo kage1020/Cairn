@@ -1,19 +1,7 @@
-//! Acceptance tests for the `member_scope` pass of
-//! `cairn_lang_core::check`.
-//!
-//! `intent::role_of` is one global table, so every keyword classifies to
-//! its role in every body. Nothing downstream puts the distinction back:
-//! `block_array` buckets the geometry roles and the site passes match
-//! `place` / `connect`, so a keyword written into the wrong body falls off
-//! the end of both.
-//!
-//! The two halves failed differently, which is why both are covered here.
-//! A `place` in a `def` body at least earned a `W_DEFERRED_MEMBER` during
-//! lowering — invisible to `cairn check`, which does not lower, but
-//! visible to `cairn lower`. A `floor` among a site's placements had no
-//! reporter at either stage: the resolver's loop and the lowering loop
-//! both `continue` past a non-`place` row without a word, so the member
-//! produced no voxels and no diagnostic anywhere.
+//! `E_MISPLACED_MEMBER`: a keyword written into a body that has no reader for
+//! its role, such as a `place` in a `def` or a `floor` among a site's
+//! placements, is an error at the row, because every loop that would build it
+//! passes it by without a word.
 
 use cairn_lang_core::{DiagnosticCode, Severity};
 
@@ -49,7 +37,7 @@ fn site_with(row: &str) -> String {
 /// The bug as reported: `place` and `connect` written into a `struct` or
 /// `def` body. `cairn check` exited 0 on this source.
 #[test]
-fn ms_1_a_site_row_in_a_geometry_body_is_an_error() {
+fn a_site_row_in_a_geometry_body_is_an_error() {
     for row in SITE_ROWS {
         for src in [struct_with(row), def_with(row)] {
             let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
@@ -67,7 +55,7 @@ fn ms_1_a_site_row_in_a_geometry_body_is_an_error() {
 /// The half with no reporter at all: a geometry keyword among a site's
 /// placements produced no voxels and no diagnostic at either stage.
 #[test]
-fn ms_2_a_geometry_row_in_a_site_body_is_an_error() {
+fn a_geometry_row_in_a_site_body_is_an_error() {
     for row in GEOMETRY_ROWS {
         let src = site_with(row);
         let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
@@ -83,7 +71,7 @@ fn ms_2_a_geometry_row_in_a_site_body_is_an_error() {
 /// The negative space. Without this, a pass that reported every member
 /// would satisfy the two tests above.
 #[test]
-fn ms_3_a_row_the_body_reads_is_not_reported() {
+fn a_row_the_body_reads_is_not_reported() {
     for row in GEOMETRY_ROWS {
         for src in [struct_with(row), def_with(row)] {
             assert!(
@@ -104,10 +92,10 @@ fn ms_3_a_row_the_body_reads_is_not_reported() {
 }
 
 /// A `level y=N` groups members inside the geometry body it already sits
-/// in — `flatten_members` splices its children into the same phase
-/// buckets — so nesting does not open a body with different rules.
+/// in, its children joining the same phase buckets as their siblings, so
+/// nesting does not open a body with different rules.
 #[test]
-fn ms_4_the_body_kind_carries_through_a_level() {
+fn the_body_kind_carries_through_a_level() {
     let src = format!(
         "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  level y=0\n    \
          place id=extra use=hut theme=plain at=origin\n"
@@ -120,7 +108,7 @@ fn ms_4_the_body_kind_carries_through_a_level() {
 /// this body cannot read goes with it, so descending would bill one
 /// mistake once per line underneath.
 #[test]
-fn ms_5_a_subtree_is_reported_once_at_its_root() {
+fn a_subtree_is_reported_once_at_its_root() {
     let src = format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
          walls mat_slot=wall height=3\n    floor mat_slot=floor\n    \
@@ -144,7 +132,7 @@ fn ms_5_a_subtree_is_reported_once_at_its_root() {
 /// advice ("dedent these") does not fit a row that cannot be in this body
 /// at any indentation.
 #[test]
-fn ms_6_nesting_does_not_also_report_a_misplaced_row() {
+fn nesting_does_not_also_report_a_misplaced_row() {
     let src = format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
          walls mat_slot=wall height=3\n    floor mat_slot=floor\n"
@@ -164,7 +152,7 @@ fn ms_6_nesting_does_not_also_report_a_misplaced_row() {
 /// the repair is the word, and there is no role to measure against the
 /// body's readers.
 #[test]
-fn ms_7_an_unknown_keyword_is_left_to_the_allowlist() {
+fn an_unknown_keyword_is_left_to_the_allowlist() {
     for src in [
         struct_with("frame id=f side=front"),
         site_with("frame id=f"),
@@ -187,7 +175,7 @@ fn ms_7_an_unknown_keyword_is_left_to_the_allowlist() {
 /// them into `MemberBody`'s own fields, so they never reach this walk —
 /// and the pass must not touch them.
 #[test]
-fn ms_8_logic_and_assert_lines_are_not_members() {
+fn logic_and_assert_lines_are_not_members() {
     let src = format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
          logic sig.open = sig.step\n"
@@ -204,7 +192,7 @@ fn ms_8_logic_and_assert_lines_are_not_members() {
 /// one indent to the left, and the generic "move it into a struct"
 /// advice would cost the author the placement.
 #[test]
-fn ms_9_a_level_in_a_site_body_says_dedent_rather_than_relocate() {
+fn a_level_in_a_site_body_says_dedent_rather_than_relocate() {
     let src = format!(
         "{PRELUDE}site duo:\n  level y=0\n    \
          place id=anchor use=hut theme=plain at=origin\n"
@@ -222,7 +210,7 @@ fn ms_9_a_level_in_a_site_body_says_dedent_rather_than_relocate() {
 /// The "expected one of" note is the closed set for the body the author
 /// is actually in, not the whole keyword table.
 #[test]
-fn ms_10_the_candidate_list_is_scoped_to_the_body() {
+fn the_candidate_list_is_scoped_to_the_body() {
     let geometry = one_of_code(
         &struct_with("place id=extra use=hut theme=plain at=origin"),
         DiagnosticCode::MisplacedMember,
@@ -249,18 +237,17 @@ fn ms_10_the_candidate_list_is_scoped_to_the_body() {
 /// pointing at the `struct` header would send the author to a line that
 /// is correct.
 #[test]
-fn ms_11_the_span_underlines_the_offending_row() {
+fn the_span_underlines_the_offending_row() {
     let src = site_with("floor id=stray mat_slot=floor");
     let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
     assert_eq!(&src[d.span.clone()], "floor id=stray mat_slot=floor");
 }
 
-/// The `def` loop is a separate `run` arm from the `struct` loop, and a
-/// `def` is what a `site` instantiates, so the geometry half of this code
-/// reaches users through it first. Deleting the loop used to leave the
-/// whole crate green.
+/// A `def` body is walked apart from a `struct` body, and a `def` is what
+/// a `site` instantiates, so the geometry half of this code reaches users
+/// through it first.
 #[test]
-fn ms_12_the_def_loop_is_walked() {
+fn the_def_loop_is_walked() {
     let d = one_of_code(
         &def_with("place id=extra use=hut theme=plain at=origin"),
         DiagnosticCode::MisplacedMember,
@@ -273,13 +260,13 @@ fn ms_12_the_def_loop_is_walked() {
     );
 }
 
-/// "Produces nothing" is about the block array. `redstone::synth`'s
-/// `collect_member` is role-agnostic and its `lower_site` walks a site's
-/// rows, so a `-> sig.NAME` tail on a misplaced row does still reach
+/// "Produces nothing" is about the block array. Redstone synthesis
+/// collects members whatever their role and walks a site's rows, so a
+/// `-> sig.NAME` tail on a misplaced row does still reach
 /// synthesis — the message says so rather than overclaiming, and says why
 /// that is not a reason to keep the row where it is.
 #[test]
-fn ms_13_a_signal_bearing_row_is_not_told_it_reaches_nothing() {
+fn a_signal_bearing_row_is_not_told_it_reaches_nothing() {
     let hedge = "the `sig.` reference on this line does still reach redstone synthesis — but the block it would sense or drive is the one being dropped, so move the member and the signal keeps working";
     let sensor = one_of_code(
         &site_with("pressure_plate id=gate at=front.outside -> sig.step"),
@@ -311,7 +298,7 @@ fn ms_13_a_signal_bearing_row_is_not_told_it_reaches_nothing() {
 /// three-deep run — understating the cost by exactly the part the author
 /// cannot see from the reported line.
 #[test]
-fn ms_14_the_nested_count_covers_the_whole_subtree() {
+fn the_nested_count_covers_the_whole_subtree() {
     let src = format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
          walls mat_slot=wall height=3\n    level y=0\n      floor mat_slot=floor\n"
@@ -324,12 +311,12 @@ fn ms_14_the_nested_count_covers_the_whole_subtree() {
     );
 }
 
-/// The other half of `ms_6`: a row this body *does* read, whose indented
+/// The other half of `nesting_does_not_also_report_a_misplaced_row`: a row this body *does* read, whose indented
 /// body `nesting` is about to declare lost. Descending into it would bill
 /// one mistake twice with repairs that disagree — following nesting's
 /// "dedent these" leaves the `E_MISPLACED_MEMBER` standing.
 #[test]
-fn ms_15_a_child_of_a_lost_body_is_left_to_nesting() {
+fn a_child_of_a_lost_body_is_left_to_nesting() {
     let src = format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n    \
          floor mat_slot=floor\n"
@@ -354,7 +341,7 @@ fn ms_15_a_child_of_a_lost_body_is_left_to_nesting() {
 /// it is by `nesting`: the row names nothing the compiler builds, so the
 /// repair is the word and everything below it is re-judged afterwards.
 #[test]
-fn ms_16_a_subtree_under_an_unknown_keyword_is_left_alone() {
+fn a_subtree_under_an_unknown_keyword_is_left_alone() {
     let src = format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
          bogus id=b\n    floor mat_slot=floor\n"
@@ -375,7 +362,7 @@ fn ms_16_a_subtree_under_an_unknown_keyword_is_left_alone() {
 /// shrink the matrix without failing anything. Their combined length is the
 /// table's, so an addition has to land in one of them.
 #[test]
-fn ms_17_the_row_tables_cover_every_known_keyword() {
+fn the_row_tables_cover_every_known_keyword() {
     assert_eq!(
         GEOMETRY_ROWS.len() + SITE_ROWS.len(),
         cairn_lang_core::intent::known_keywords().len(),
@@ -385,15 +372,9 @@ fn ms_17_the_row_tables_cover_every_known_keyword() {
 }
 
 mod lowering {
-    //! What a misplaced member actually costs, measured on the build rather
-    //! than on the diagnostic.
-    //!
-    //! `check_member_scope.rs` pins the wording and the anchoring of
-    //! `E_MISPLACED_MEMBER`; every assertion there filters to that code and
-    //! never lowers, so none of them would notice if the premise — "nothing
-    //! in this body reads that keyword" — stopped being true. These do the
-    //! lowering and compare against the same source with the row moved to
-    //! the body that does read it.
+    //! What a misplaced member costs, measured on the build: each source is
+    //! lowered and compared with the same source without the row, or with the
+    //! row in the body that reads it.
 
     use crate::common::{PRELUDE, lowered, solid_cells};
 
@@ -401,7 +382,7 @@ mod lowering {
     /// same site, one row apart — and the site's own placement is unchanged,
     /// so the row contributed nothing rather than displacing something.
     #[test]
-    fn msl_1_a_geometry_row_in_a_site_body_builds_nothing() {
+    fn a_geometry_row_in_a_site_body_builds_nothing() {
         let without =
             format!("{PRELUDE}site s:\n  place id=anchor use=hut theme=plain at=origin\n");
         let with = format!(
@@ -437,7 +418,7 @@ mod lowering {
     /// `cairn lower` — the code `cairn check` never sees, which is why the
     /// same fact needs a check-layer owner.
     #[test]
-    fn msl_2_a_site_row_in_a_geometry_body_builds_nothing() {
+    fn a_site_row_in_a_geometry_body_builds_nothing() {
         let src = format!(
             "{PRELUDE}def lodge size=5x5:\n  floor id=floor mat_slot=floor\n  \
          place id=inner use=hut theme=plain at=origin\n  \
@@ -460,7 +441,7 @@ mod lowering {
     /// is dropped from the build, not from resolution. The struct's own
     /// members still resolve around it, so the finding is about the one row.
     #[test]
-    fn msl_3_a_misplaced_row_does_not_disturb_its_siblings() {
+    fn a_misplaced_row_does_not_disturb_its_siblings() {
         let src = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
          place id=inner use=hut theme=plain at=origin\n  \

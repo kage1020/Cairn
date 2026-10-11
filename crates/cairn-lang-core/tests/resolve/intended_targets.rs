@@ -1,16 +1,7 @@
-//! `@intended_targets` weighed against the floors the same file declares.
-//!
-//! The two headers used to be two inert statements. A file could say
-//! `@requires version>=1.21` on one line and `@intended_targets ["1.20.4"]`
-//! on the next, and `cairn check` exited 0 — while `cairn compile --target
-//! 1.20.4` refused with `E_VERSION_CAP`, because one of the two
-//! declarations decides a build and the other decided nothing. The header
-//! that reads like an instruction was the ignored one.
-//!
-//! The comparison needs a version table, so it is a pass of its own rather
-//! than one of `check`'s: every question below is answered by ordering two
-//! labels by `DataVersion` in one edition's table, and comparing them as
-//! text is the defect `VersionOrder` exists to remove.
+//! `@intended_targets` is weighed against the floors the same file declares, so
+//! a file whose `@requires` already rules a listed target out says so at `cairn
+//! check`, not first at `cairn compile --target`. Labels are ordered by
+//! `DataVersion` in one edition's table, never as text.
 
 use cairn_lang_core::check::weigh_intended_targets;
 use cairn_lang_core::resolve::VersionOrder;

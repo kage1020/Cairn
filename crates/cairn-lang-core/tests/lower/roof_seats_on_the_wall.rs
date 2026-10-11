@@ -1,30 +1,9 @@
-//! A roof's first course sits on the wall top, and a roof that is only
-//! one course tall is still a first course.
-//!
-//! `spec/compilation` "Hip roof voxel rules" lays a hip roof out as the
-//! inset rectangle frame at every layer `L`, with `outer_*` corners so the
-//! diagonals close, and caps whatever the frames leave. That chapter's
-//! "Gable roof voxel rules" does the same for a gable with two slope rows
-//! per layer. A short span of 1 or 2 rises one layer, which made layer 0
-//! the apex layer as well — and the apex branch ran instead of the frame,
-//! so a whole roof came out `half=top`.
-//!
-//! A `half=top` stair fills the upper half of its voxel (plus the lower
-//! quarter on its facing side), so a course of them one voxel above the
-//! wall leaves a half-block slit running the whole perimeter. For a hip it
-//! also drops the four `outer_*` corners and every per-edge facing: sixteen
-//! cells that should have been four
-//! corners and two slope rows came out as one repeated state.
-//!
-//! The even-span gable cap is the other half of the same subject. The
-//! generator's own comment said the pair faced outward "so the cap
-//! closes"; the table faced them at each other, which leaves the
-//! `half=top` stair's open half on the *outer* face for the roof's full
-//! length. Facing them outward moves that void under the ridge.
-//!
-//! The last group pins the footprints none of this touches. A change to
-//! the degenerate case that also moved a three-layer roof would be a
-//! regression these fixtures catch and the ones above cannot.
+//! A roof's first course sits on the wall top, even when it is the only course:
+//! a hip or gable whose short span rises one layer lays the frame
+//! (`spec/compilation` "Hip roof voxel rules", "Gable roof voxel rules"), not a
+//! `half=top` apex that leaves a slit above the wall. An even-span gable's cap
+//! pair faces outward, so its void sits under the ridge, and taller roofs keep
+//! their footprints.
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
 use cairn_lang_core::{lower, parse, resolve};
@@ -87,10 +66,8 @@ fn stair_states(ba: &BlockArray) -> Vec<(&str, &str, &str)> {
 
 #[test]
 fn a_hip_one_course_tall_frames_its_only_layer() {
-    // The issue's third repro. `size=8x2` rises one layer, and every one
-    // of its sixteen cells used to be `facing=south, half=top,
-    // shape=straight` — one state for a course that is four corners and
-    // two opposing slope rows.
+    // `size=8x2` rises one layer, and its sixteen cells are four corners
+    // and two opposing slope rows, not one `half=top` state repeated.
     let out = roof("8x2", "hip");
     let ba = structure(&out);
     assert_eq!(stair_at(ba, 0, 4, 0), ("south", "bottom", "outer_left"));
@@ -143,9 +120,8 @@ fn a_hip_over_a_single_voxel_is_one_corner() {
 
 #[test]
 fn a_hip_over_a_two_by_two_is_four_corners() {
-    // Square and even, so this used to take the `2x2` apex-cap branch and
-    // come out as four `half=top` straights. Every cell of a 2x2 frame is
-    // a corner.
+    // Square and even, and still a frame rather than an apex cap of four
+    // `half=top` straights: every cell of a 2x2 frame is a corner.
     let out = roof("2x2", "hip");
     let ba = structure(&out);
     assert_eq!(stair_at(ba, 0, 4, 0), ("south", "bottom", "outer_left"));
@@ -193,10 +169,9 @@ fn a_gable_over_a_one_deep_footprint_emits_its_row_once() {
 #[test]
 fn an_even_span_gable_caps_the_ridge_with_a_pair_facing_outward() {
     // `size=6x4` rises two layers: slopes at y=4 on z=0 and z=3, and the
-    // cap pair at y=5 on z=1 and z=2 with the ridge between them. The
-    // pair used to point at each other, leaving the open half of each
-    // `half=top` stair on the outer face — an undercut running the length
-    // of the roof, on both sides.
+    // cap pair at y=5 on z=1 and z=2 with the ridge between them. Facing
+    // each other, the pair would leave the open half of each `half=top`
+    // stair on the outer face, an undercut the length of the roof.
     let out = roof("6x4", "gable");
     let ba = structure(&out);
     for x in 0..6 {

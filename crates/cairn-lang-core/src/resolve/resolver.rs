@@ -439,7 +439,7 @@ fn resolve_members(
         //    `W_IGNORED_ARGUMENT` for it into the same sink, and a slot name
         //    the theme lacks changes nothing on such a role. A library
         //    caller that runs `resolve` without `check` gets no signal;
-        //    `tests/resolve/silent_skip_arms.rs` carries the arm in its matrix.
+        //    `tests/resolve/silent_skip_arms.rs` pins the arm.
         if let Some(slot_name) = member.read_slot()
             && let Some((tname, slots)) = bound
         {
@@ -451,9 +451,8 @@ fn resolve_members(
                 // identical triple can only be here because a copy is
                 // already in `ctx.diagnostics`, which is built and
                 // returned by the same call. See
-                // [`ResolveCtx::diagnosed`]; `tests/resolve/silent_skip_arms.rs`
-                // carries it in the matrix of resolver arms that drop
-                // something without reporting it.
+                // [`ResolveCtx::diagnosed`]; `tests/resolve/def_member.rs`
+                // pins the count.
                 None => {
                     let said = (member.span.start, slot_name.to_owned(), tname.to_owned());
                     if ctx.diagnosed.insert(said) {

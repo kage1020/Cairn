@@ -1,26 +1,9 @@
-//! `spec/compilation` "Phase evaluation" opens by promising that source
-//! "MAY be written line-oriented, flat, and order-free" because the
-//! compiler assigns every command to a phase and evaluates the phases in
-//! a fixed order — "order accidents are eliminated".
-//!
-//! Two things have to hold for that to be true of the artifact and not
-//! only of the paint order. The phase a member lands in has to be the one
-//! that section names, or two members that belong to different phases end
-//! up in one bucket where the later line simply wins. And the palette has
-//! to describe the finished grid rather than the sequence of writes that
-//! produced it — both in *which* entries it holds, or the material of a
-//! member whose last cell was covered rides along into the `.nbt` and the
-//! `resolved_ir_hash`, and in what order it holds them, or two members
-//! that share no voxel at all still number the palette by which of their
-//! lines was written first. Either way, permuting two lines changes the
-//! artifact when it does not change a single voxel.
-//!
-//! Inside one phase that section does grant last-wins, to "local overrides
-//! within the same phase". An author restating a member is what that grant
-//! is for; two footprints that happen to intersect is not, and the grid
-//! cannot tell them apart. So the resolution stays last-wins and stops
-//! being silent — `W_PHASE_CONFLICT` names both members and how many
-//! voxels changed hands.
+//! Source is order-free (`spec/compilation` "Phase evaluation"): each member
+//! lands in the phase that section names, and the palette describes the
+//! finished grid, both which entries it holds and their order, so permuting two
+//! lines that change no voxel changes no artifact. Within one phase the last
+//! write wins, and `W_PHASE_CONFLICT` names both members and how many voxels
+//! changed hands.
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
 use cairn_lang_core::check::DiagnosticCode;
@@ -158,12 +141,11 @@ fn every_palette_entry_of_a_permuted_pair_survives_the_permutation() {
 fn permuting_two_members_of_one_phase_that_share_no_voxel_leaves_the_array_equal() {
     // Two windows on opposite walls: same phase, and not one cell in
     // common, so nothing about the finished grid depends on their order.
-    // The palette used to record it anyway — `intern` appends on first
-    // use, and inside a phase first use follows the lines — so swapping
-    // them moved `glass_pane` and `oak_planks` past each other in every
-    // `.nbt` byte, `cairn info` row, and `resolved_ir_hash` derived from
-    // the array. Comparing the whole `BlockArray` is the point: an
-    // assertion on the voxels alone passed the whole time.
+    // A palette numbered by first use would record it anyway, moving
+    // `glass_pane` and `oak_planks` past each other in every `.nbt` byte,
+    // `cairn info` row and `resolved_ir_hash` derived from the array.
+    // Comparing the whole `BlockArray` is the point: an assertion on the
+    // voxels alone cannot see it.
     let glass_first = lowered(&source(concat!(
         "  window side=front y=1 offset=1 size=1x1 mat_slot=glass\n",
         "  window side=back  y=1 offset=1 size=1x1 mat_slot=deck\n",
@@ -350,11 +332,10 @@ fn the_conflict_warning_does_not_change_which_block_wins() {
 
 #[test]
 fn a_conflict_between_two_fixtures_is_reported_like_any_other() {
-    // Every conflict fixture above lands in Openings, which is the bucket
-    // that already existed. The Fixtures bucket is new, and what is new
-    // with it is the `run_phase` wiring that names the member each write
-    // belongs to — so the phase has to be exercised on the conflict path
-    // too, not only on the "the plate wins" path.
+    // Every conflict fixture above lands in Openings. Fixtures names the
+    // member each write belongs to the same way, so that phase is
+    // exercised on the conflict path too, not only on the "the plate wins"
+    // path.
     //
     // Two plates on one anchor with different materials. One voxel, so
     // this is also where the singular wording is pinned.
@@ -454,14 +435,15 @@ fn one_member_overwriting_two_others_is_reported_once_per_pair() {
     );
     assert!(
         overwritten_lines[0] < overwritten_lines[1],
-        "the cell it took from the `low` window is painted first, so that          pair is recorded and reported first",
+        "the cell it took from the `low` window is painted first, so that pair is recorded \
+         and reported first",
     );
 }
 
 #[test]
 fn a_conflict_across_a_level_anchors_at_the_member_and_not_the_level() {
-    // `flatten_members` hands the phase buckets the members, not the
-    // `level` that grouped them, so the span the finding carries is the
+    // The phase buckets hold the members, not the `level` that grouped
+    // them, so the span the finding carries is the
     // member's own line — the one an author would move.
     let src = source(concat!(
         "  window side=front y=1 offset=3 size=1x1 mat_slot=glass\n",

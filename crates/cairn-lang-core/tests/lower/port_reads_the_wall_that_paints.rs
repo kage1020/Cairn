@@ -1,15 +1,7 @@
-//! A `connect` row anchors its ports to the masonry the openings pass
-//! cuts, not to the masonry the source happens to spell.
-//!
-//! The two used to be derived separately: the openings pass built its
-//! wall column from the flattened, resolved member list, while port
-//! resolution rebuilt one from the `def`'s top-level `walls` members and
-//! their `height=` alone. The two derivations disagreed in both
-//! directions — a strip laid to a window that was never cut when a
-//! material did not resolve, and a strip refused to a window that *was*
-//! cut when the walls were declared inside a `level`. Both endpoints now
-//! read the column the body was lowered with, so the disagreement has
-//! nowhere left to live.
+//! A `connect` row anchors its ports to the masonry the openings pass cuts,
+//! not to the masonry the source happens to spell: a port stands exactly
+//! when its door or window was cut into a wall that paints, whether that
+//! wall is top-level or inside a `level`.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
@@ -33,8 +25,8 @@ fn walkway_keys(out: &BlockArrayIr) -> Vec<String> {
 ///
 /// `solid`'s walls paint: `wall` is a concrete token. `hollow`'s do not:
 /// `ghost` lifts to an abstract token, which without a registry pack
-/// defers to air — the live shape of "a wall that paints nothing" now
-/// that a bare `mat_slot=` is refused outright.
+/// defers to air. That is the shape a wall that paints nothing takes,
+/// since a bare `mat_slot=` is refused outright.
 fn pair(other: &str, connect: &str) -> String {
     format!(
         "@cairn 2026.06
@@ -80,8 +72,8 @@ site pair:
 
 #[test]
 fn a_window_over_walls_that_paint_nothing_anchors_no_port() {
-    // AC1. The openings pass defers the cut; the strip used to be laid
-    // to the window anyway.
+    // The openings pass defers the cut, so there is no window to lay a
+    // strip to.
     let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     assert!(
         walkway_keys(&out).is_empty(),
@@ -94,8 +86,7 @@ fn a_window_over_walls_that_paint_nothing_anchors_no_port() {
 
 #[test]
 fn a_door_over_walls_that_paint_nothing_anchors_no_port() {
-    // AC2. The door branch consulted no column at all, so this half of
-    // the disagreement predates the material axis.
+    // The door asks the same column the window does.
     let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.front to home2.entry"));
     assert!(
         walkway_keys(&out).is_empty(),
@@ -107,7 +98,7 @@ fn a_door_over_walls_that_paint_nothing_anchors_no_port() {
 
 #[test]
 fn a_def_with_no_walls_anchors_neither_a_door_nor_a_window() {
-    // AC5. Same rule, reached without a material: nothing to cut into.
+    // Same rule, reached without a material: nothing to cut into.
     for connect in [
         "home1.entry to home2.front",
         "home1.front to home2.entry",
@@ -127,11 +118,10 @@ fn a_def_with_no_walls_anchors_neither_a_door_nor_a_window() {
 
 #[test]
 fn a_door_in_level_scoped_walls_anchors_its_port() {
-    // AC3's other half. The door gate asks the same column, so a `def`
-    // that keeps its walls in a `level` has to anchor a doorway port for
-    // the same reason it anchors a window one — a gate that regressed to
-    // "are there top-level walls" would refuse it and send the author to
-    // move a door already in masonry.
+    // The door asks the same column, so a `def` that keeps its walls in a
+    // `level` anchors a doorway port for the same reason it anchors a
+    // window one. Asking "are there top-level walls" instead would send the
+    // author to move a door already in masonry.
     let out = lowered_with_resolver_diagnostics(&pair("storeyed", "home1.entry to home2.entry"));
     assert_eq!(
         walkway_keys(&out),
@@ -142,10 +132,9 @@ fn a_door_in_level_scoped_walls_anchors_its_port() {
 
 #[test]
 fn a_window_cut_into_level_scoped_walls_anchors_its_port() {
-    // AC3. The other direction: the openings pass cuts this window,
-    // because the flattened list carries the `level`'s walls. The port
-    // used to refuse it, so the author was told to move a window that
-    // was already in masonry.
+    // The openings pass cuts this window, because the `level`'s walls are
+    // masonry too, so the port anchors rather than telling the author to
+    // move a window that is already in masonry.
     let out = lowered_with_resolver_diagnostics(&pair("storeyed", "home1.entry to home2.front"));
     assert_eq!(
         walkway_keys(&out),
@@ -161,7 +150,7 @@ fn a_window_cut_into_level_scoped_walls_anchors_its_port() {
 
 #[test]
 fn the_deferral_names_only_the_endpoint_that_has_no_masonry() {
-    // AC4. `home1` is `solid`; only `home2.front` is unplaceable.
+    // `home1` is `solid`; only `home2.front` is unplaceable.
     let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     let defer = port_defer(&out).expect("the connect row defers");
     assert!(
@@ -178,10 +167,9 @@ fn the_deferral_names_only_the_endpoint_that_has_no_masonry() {
 
 #[test]
 fn the_deferral_states_the_masonry_contract() {
-    // AC6. The masonry cause's fix is not on the `connect` row, so the
-    // note has to say where it is instead — and, since the row now names
-    // the one cause it hit rather than every contract a port has, it is
-    // the only note there.
+    // The masonry cause's fix is not on the `connect` row, so the note says
+    // where it is instead. The row names the one cause it hit rather than
+    // every contract a port has, so this is the only note.
     let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     let defer = port_defer(&out).expect("the connect row defers");
     assert_eq!(
@@ -242,7 +230,7 @@ site pair:
 
 #[test]
 fn a_duplicate_place_id_is_judged_by_the_body_that_was_kept() {
-    // AC7. `structures` and `placements` are first-write-wins, so the
+    // `structures` and `placements` are first-write-wins, so the
     // column map has to be too — otherwise the port is checked against
     // a body that is in no artifact.
     let out = lowered_with_resolver_diagnostics(DUPLICATE_ID);
@@ -288,7 +276,7 @@ site pair:
 
 #[test]
 fn a_window_hanging_in_the_gap_between_two_courses_anchors_no_port() {
-    // AC8, refusing half: `height=2` plus `level y=6 height=2` leaves
+    // Refusing half: `height=2` plus `level y=6 height=2` leaves
     // y=3..=6 open air, and a window at y=3 is in none of it.
     let out = lowered_with_resolver_diagnostics(&two_courses(3, 6));
     assert!(
@@ -308,7 +296,7 @@ fn a_window_hanging_in_the_gap_between_two_courses_anchors_no_port() {
 
 #[test]
 fn a_window_crossing_the_seam_of_two_touching_courses_anchors_its_port() {
-    // AC8, anchoring half: `height=2` plus `level y=2 height=2` is one
+    // Anchoring half: `height=2` plus `level y=2 height=2` is one
     // wall from y=1 to y=4, and a window at y=2..=3 is inside it.
     let out = lowered_with_resolver_diagnostics(&two_courses(2, 2));
     assert_eq!(

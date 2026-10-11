@@ -1,12 +1,13 @@
-//! Acceptance tests for the `type_mismatch` pass of
-//! `cairn_lang_core::check`.
+//! `E_TYPE_MISMATCH_LABEL` and `E_TYPE_MISMATCH_SIZE`: a key that takes a label
+//! or a size literal is an error when given a value of another shape, and an
+//! absent key is not a type mismatch.
 
 use cairn_lang_core::DiagnosticCode;
 
 use crate::common::{diagnose, of_code, slice};
 
 #[test]
-fn tm_1_id_set_to_token_is_flagged_as_label_mismatch() {
+fn id_set_to_token_is_flagged_as_label_mismatch() {
     let src = "struct s size=1x1\n  walls id=@oak mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
@@ -20,7 +21,7 @@ fn tm_1_id_set_to_token_is_flagged_as_label_mismatch() {
 }
 
 #[test]
-fn tm_2_class_set_to_dotted_ref_is_flagged() {
+fn class_set_to_dotted_ref_is_flagged() {
     let src = "struct s size=1x1\n  walls class=foo.bar mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
@@ -29,7 +30,7 @@ fn tm_2_class_set_to_dotted_ref_is_flagged() {
 }
 
 #[test]
-fn tm_3_mat_slot_string_value_is_accepted() {
+fn mat_slot_string_value_is_accepted() {
     let src = "struct s size=1x1\n  walls mat_slot=\"wall\"\n";
     let diags = diagnose(src);
     assert!(
@@ -39,7 +40,7 @@ fn tm_3_mat_slot_string_value_is_accepted() {
 }
 
 #[test]
-fn tm_4_struct_size_set_to_integer_is_flagged() {
+fn struct_size_set_to_integer_is_flagged() {
     let src = "struct s size=5\n  floor mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
@@ -53,7 +54,7 @@ fn tm_4_struct_size_set_to_integer_is_flagged() {
 }
 
 #[test]
-fn tm_5_window_size_with_proper_literal_passes() {
+fn window_size_with_proper_literal_passes() {
     // `at=` is a door anchor (`spec/syntax` "Selectors") and a window does
     // not read it; the second argument is here only so the line under test
     // carries more than the one key it is about.
@@ -66,7 +67,7 @@ fn tm_5_window_size_with_proper_literal_passes() {
 }
 
 #[test]
-fn tm_6_duplicate_size_and_size_mismatch_pass_independently() {
+fn duplicate_size_and_size_mismatch_pass_independently() {
     // `struct s size=2x2 size=foo` is BOTH a duplicate size= AND a
     // size= with the wrong value type. The two passes are independent.
     let src = "struct s size=2x2 size=foo\n  floor\n";
@@ -95,7 +96,7 @@ floor id=floor mat_slot=floor\n\n";
 /// difference; what they saw was the resolver's silent `continue`, which
 /// drops the entire placement.
 #[test]
-fn tm_7_place_use_and_theme_with_a_non_label_value_are_flagged() {
+fn place_use_and_theme_with_a_non_label_value_are_flagged() {
     for (row, offending) in [
         ("place id=a use=3 theme=plain at=origin", "3"),
         ("place id=a use=hut theme=7 at=origin", "7"),
@@ -113,7 +114,7 @@ fn tm_7_place_use_and_theme_with_a_non_label_value_are_flagged() {
 /// otherwise the test above would pass on a pass that flagged every
 /// `use=`.
 #[test]
-fn tm_8_place_use_and_theme_accept_identifiers_and_strings() {
+fn place_use_and_theme_accept_identifiers_and_strings() {
     for row in [
         "place id=a use=hut theme=plain at=origin",
         "place id=a use=\"hut\" theme=\"plain\" at=origin",
@@ -128,7 +129,7 @@ fn tm_8_place_use_and_theme_accept_identifiers_and_strings() {
 /// optional in the surface grammar, and the resolver's skip for it is
 /// deliberate. Only the present-but-wrong shape belongs to this pass.
 #[test]
-fn tm_9_an_absent_use_or_theme_is_not_a_type_mismatch() {
+fn an_absent_use_or_theme_is_not_a_type_mismatch() {
     for row in [
         "place id=a theme=plain at=origin",
         "place id=a use=hut at=origin",

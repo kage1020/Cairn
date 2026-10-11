@@ -1,17 +1,7 @@
-//! The parser's two depth bounds, pinned at their exact boundaries.
-//!
-//! `cairn-lang-cli/tests/cli_nesting_depth.rs` proves the process survives a
-//! pathological source, which needs a subprocess to observe. These pin where
-//! each wall stands, which that test cannot do cheaply.
-//!
-//! The two bounds guard different stacks and so are separate numbers:
-//!
-//! - `MAX_NESTING_DEPTH` bounds how deep the parser itself descends — list
-//!   values, parentheses, `not` chains, indented bodies.
-//! - `MAX_EXPR_DEPTH` bounds the boolean tree the parser hands back. `or`
-//!   and `and` are parsed iteratively, so a flat chain costs the parser
-//!   nothing while still building one node of depth per term, and every
-//!   consumer of that tree recurses.
+//! The parser's two depth bounds hold at their exact boundaries:
+//! `MAX_NESTING_DEPTH` on how deep the parser descends, and `MAX_EXPR_DEPTH` on
+//! the boolean tree it hands back, which a flat `or`/`and` chain deepens
+//! without deepening the parser.
 
 use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, ParseError, parse};
 
@@ -43,9 +33,8 @@ fn chained_not(depth: usize) -> String {
     )
 }
 
-/// One indented block per level. `parse_command` and
-/// `parse_optional_command_body` are mutually recursive, which is the third
-/// recursive production and the one that stayed unguarded longest.
+/// One indented block per level: a command and its indented body recurse
+/// into each other, the third recursive production.
 fn nested_blocks(depth: usize) -> String {
     let mut source = String::from("struct a size=1x1\n");
     for level in 1..=depth {
