@@ -106,10 +106,7 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-
-    const DUPLICATE: &str =
-        include_str!("../../cairn-lang-core/tests/fixtures/check/duplicate.crn");
-    const CLEAN: &str = include_str!("../../cairn-lang-core/tests/fixtures/check/clean.crn");
+    use crate::test_fixtures::{CLEAN, DUPLICATE};
 
     fn uri() -> lsp_types::Uri {
         lsp_types::Uri::from_str("file:///test.crn").expect("valid uri")

@@ -9,8 +9,19 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::thread;
 use std::time::Duration;
 
-const DUPLICATE: &str = include_str!("../../cairn-lang-core/tests/fixtures/check/duplicate.crn");
-const CLEAN: &str = include_str!("../../cairn-lang-core/tests/fixtures/check/clean.crn");
+/// A document with a finding on every line.
+const DUPLICATE: &str = "\
+struct s size=4x4 size=5x5
+  walls height=4 height=5
+  door id=front
+  door id=front
+";
+/// A document `check` has nothing to say about.
+const CLEAN: &str = "\
+struct s size=2x2
+  floor mat_slot=wall
+  walls height=4 mat_slot=wall
+";
 const TEST_URI: &str = "file:///test.crn";
 
 /// How long a test waits for a message before declaring the server stuck.

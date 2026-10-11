@@ -17,3 +17,5 @@ pub mod diagnostics;
 pub mod line_index;
 pub mod server;
 pub mod store;
+#[cfg(test)]
+mod test_fixtures;
