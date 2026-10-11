@@ -1,0 +1,80 @@
+# Cairn
+
+Cairn compiles `.crn` build descriptions into Minecraft structure files. The specification under
+`website/src/content/docs/spec/` is normative. When code and spec disagree, the code is wrong, and
+a change to behaviour the spec describes starts as a spec change.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the contributor guide and
+[development.md](website/src/content/docs/development.md) the developer guide. This file is what
+to keep in mind while editing.
+
+## Workspace
+
+| Crate | Role | Depends on |
+|---|---|---|
+| `cairn-lang-core` | lex, parse, AST, Intent IR, check, resolve, block-array lowering | — |
+| `cairn-lang-nbt` | NBT codec | — |
+| `cairn-lang-formats` | `.nbt` and `.mcstructure` writers, registry packs, portability | core, nbt |
+| `cairn-lang-redstone` | logic IR, netlist, place-and-route | core |
+| `cairn-lang-cli` | the `cairn` binary | core, formats, redstone |
+| `cairn-lang-lsp` | the `cairn-lsp` server | core, formats |
+| `cairn-lang-wasm` | browser bindings, a placeholder | core |
+| `cairn-lang-tree-sitter` | editor grammar, separate from core's parser | — |
+| `xtask` | `cargo xtask lint`, unpublished | — |
+
+Dependencies point one way. A library never depends on `cli` or `lsp`, so code both front ends
+need lives in the library they call. Modules inside a crate form a DAG too: when two modules need
+the same item, it moves down into a module both can import.
+
+## Commands
+
+The `verify` skill lists everything CI runs. While iterating:
+
+```sh
+cargo clippy -p <crate> --all-targets -- -D warnings
+cargo test -p <crate>
+cargo xtask lint
+```
+
+## Code
+
+- Name things with the spec's vocabulary (`intent_state`, `resolved_state`, `mat_slot`, canonical
+  token), never a synonym.
+- No Minecraft edition or version in language semantics: the `(edition, version)` target is a
+  compile-time parameter.
+- A diagnostic says what is wrong, what would be valid, and how to fix it. A new code needs a row
+  in the diagnostic catalog of `spec/lint`, in English and Japanese, which
+  `cargo xtask lint diagnostic-catalog` checks.
+- Every public item has a `///` doc. No `#[allow]`: fix the lint, or put
+  `#[expect(lint, reason = "...")]` on the one item it is wrong for.
+- `unsafe` is forbidden outside the tree-sitter binding's `ffi` module.
+
+## Comments
+
+The code says how, the commit message says what, and a comment says only the why the code cannot.
+
+- Never restate the code, narrate history ("used to", "no longer", "previously"), or mention an
+  issue, pull request, milestone, acceptance id or anything else that only means something to the
+  session that wrote it.
+- Cite the spec by chapter and section title, never by number: `spec/lint` "Error vs warning".
+- A change that makes a comment false fixes the comment.
+
+## Tests
+
+- Test behaviour through the narrowest public surface that shows it. A module's unit tests that
+  outgrow a screen move to a sibling `tests.rs` (`foo.rs` → `foo/tests.rs`) behind
+  `#[cfg(test)] mod tests;`.
+- A crate's integration tests build as a few binaries, `tests/<area>/main.rs` with one module per
+  theme, sharing helpers through a `common` module rather than copying them.
+- Assert the exact result, such as the full list of diagnostic codes with their positions, not a
+  substring that something else would also satisfy.
+- Name a test for the behaviour it pins, without ordinal or acceptance-id prefixes.
+- Pin each behaviour in the crate that owns it. A CLI test covers what only the CLI does.
+- A check that reads files rather than running code (README tables, spec citations, manifest
+  settings) is a rule in `xtask/src/rules/`, not a test.
+- Snapshots use insta. Read the `.snap.new` before accepting it.
+
+## Pull requests
+
+Target `canary`. The `pull-request` skill covers the title, the changelog fragment and the checks
+to run first.
