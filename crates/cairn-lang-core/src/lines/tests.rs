@@ -341,3 +341,12 @@ fn line_of_is_the_zero_based_line_of_position() {
     assert_eq!(crlf.line_of(2), 0, "so is the `\\n` after it");
     assert_eq!(crlf.line_of(3), 1);
 }
+
+#[test]
+fn line_end_stops_before_the_terminator_of_the_line_an_offset_is_on() {
+    let source = "ab\r\ncd\n\nef\rgh";
+    let lines = LineStarts::new(source);
+    for (offset, end) in [(0, 2), (3, 2), (4, 6), (7, 7), (8, 10), (11, 13), (99, 13)] {
+        assert_eq!(lines.line_end(source, offset), end, "byte {offset}");
+    }
+}

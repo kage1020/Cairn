@@ -14,18 +14,12 @@
 //! the line under its own cursor.
 
 use cairn_lang_core::Span;
+use cairn_lang_core::lines::LineStarts;
 
-/// Precomputed line-start byte offsets for one document revision.
-///
-/// Build once per document text with [`LineIndex::new`], then convert any
-/// number of byte offsets / spans. Mirrors
-/// [`cairn_lang_core::check::LineStarts`] (whose internal offsets are
-/// private) but targets the LSP coordinate system directly.
+/// One document revision's line starts, answering in LSP coordinates.
 #[derive(Debug, Clone)]
 pub struct LineIndex {
-    /// Byte offset of the first byte of each line: entry 0 is always 0, and
-    /// each subsequent entry is the byte after a line break.
-    line_starts: Vec<usize>,
+    starts: LineStarts,
 }
 
 impl LineIndex {
@@ -33,14 +27,14 @@ impl LineIndex {
     #[must_use]
     pub fn new(source: &str) -> Self {
         Self {
-            line_starts: cairn_lang_core::lines::starts(source),
+            starts: LineStarts::new(source),
         }
     }
 
     /// How many lines the text has, counting the empty line after a
     /// trailing terminator: `"abc\n"` has 2, and `""` has 1.
     pub(crate) fn line_count(&self) -> usize {
-        self.line_starts.len()
+        self.starts.line_starts().len()
     }
 
     /// Convert a byte offset into a 0-based line / UTF-16 code-unit column
@@ -48,23 +42,14 @@ impl LineIndex {
     /// the final position.
     #[must_use]
     pub fn position(&self, source: &str, byte_offset: usize) -> lsp_types::Position {
-        let (line_idx, clamped) = self.line_of(source, byte_offset);
-        let line_start = self.line_starts[line_idx];
+        let clamped = byte_offset.min(source.len());
+        let line = self.starts.line_of(clamped);
+        let line_start = self.starts.line_starts()[line];
         let character = source[line_start..clamped].encode_utf16().count();
         lsp_types::Position {
-            line: u32::try_from(line_idx).unwrap_or(u32::MAX),
+            line: u32::try_from(line).unwrap_or(u32::MAX),
             character: u32::try_from(character).unwrap_or(u32::MAX),
         }
-    }
-
-    /// The 0-based line containing `byte_offset` (clamped to the end of
-    /// `source`), and the clamped offset.
-    fn line_of(&self, source: &str, byte_offset: usize) -> (usize, usize) {
-        let clamped = byte_offset.min(source.len());
-        // partition_point returns the count of line starts at or before the
-        // offset; the containing line is the last of those, i.e. count - 1.
-        let line_idx = self.line_starts.partition_point(|&s| s <= clamped) - 1;
-        (line_idx, clamped)
     }
 
     /// Convert both ends of a core byte [`Span`] into an
@@ -102,8 +87,8 @@ impl LineIndex {
     #[must_use]
     pub fn offset_at(&self, source: &str, position: lsp_types::Position) -> Option<usize> {
         let line = position.line as usize;
-        let &line_start = self.line_starts.get(line)?;
-        let line_end = self.line_end(source, line_start);
+        let &line_start = self.starts.line_starts().get(line)?;
+        let line_end = self.starts.line_end(source, line_start);
         let target = position.character as usize;
         let mut units = 0;
         for (rel, ch) in source[line_start..line_end].char_indices() {
@@ -113,19 +98,6 @@ impl LineIndex {
             units += ch.len_utf16();
         }
         Some(line_end)
-    }
-
-    /// Byte offset of the end of the line containing `byte_offset` — the
-    /// first byte of its terminator, or `source.len()` for the final line.
-    #[must_use]
-    pub fn line_end(&self, source: &str, byte_offset: usize) -> usize {
-        let (line_idx, _) = self.line_of(source, byte_offset);
-        // The last line has no terminator to stop before.
-        self.line_starts
-            .get(line_idx + 1)
-            .map_or(source.len(), |&next_start| {
-                cairn_lang_core::lines::end_before(source, next_start)
-            })
     }
 }
 
@@ -346,25 +318,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn line_end_handles_lf_crlf_and_eof() {
-        let source = "ab\r\ncd\nef";
-        let index = LineIndex::new(source);
-        // Line 0 ends before its `\r`.
-        assert_eq!(index.line_end(source, 0), 2);
-        // Line 1 ends at its `\n`.
-        assert_eq!(index.line_end(source, 4), 6);
-        // Final line without a terminator ends at EOF.
-        assert_eq!(index.line_end(source, 7), source.len());
-    }
-
-    #[test]
-    fn line_end_of_blank_line_is_its_start() {
-        let source = "a\n\nb\n";
-        let index = LineIndex::new(source);
-        assert_eq!(index.line_end(source, 2), 2);
-    }
-
     // -- the lone `\r` ----------------------------------------------------
 
     #[test]
@@ -432,35 +385,6 @@ mod tests {
                     index.offset_at(source, position),
                     Some(offset),
                     "{source:?} round trip failed at byte {offset}",
-                );
-            }
-        }
-    }
-
-    /// Stepping back over a terminator must land inside the line doing the
-    /// stepping, on every shape that puts a break next to a break.
-    ///
-    /// A source *opening* with `\n` matters most: the first line is empty
-    /// and ends at offset 0, so a step back that reads the byte before the
-    /// terminator leaves the source and panics on the subtraction. Two lone
-    /// `\r`s are the other: the byte before the second line's break is the
-    /// *first* line's, which is not this line's to give up.
-    #[test]
-    fn line_end_never_precedes_its_own_line_start() {
-        for source in [
-            "\n", "\nx", "\n\r\n", "\r", "\r\r", "a\r\r\n", "\r\n\r\n", "a\n\r\nb", "\r\r\r",
-        ] {
-            let index = LineIndex::new(source);
-            for (offset, _) in source.char_indices().chain([(source.len(), ' ')]) {
-                let start = index.line_starts[index.line_of(source, offset).0];
-                let end = index.line_end(source, offset);
-                assert!(
-                    (start..=source.len()).contains(&end),
-                    "{source:?}: line at byte {offset} starts at {start} but ends at {end}",
-                );
-                assert!(
-                    !source[start..end].contains(['\r', '\n']),
-                    "{source:?}: line at byte {offset} covers its terminator",
                 );
             }
         }
