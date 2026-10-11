@@ -5,11 +5,8 @@ use std::path::PathBuf;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::Edition;
-use cairn_lang_core::lock::LockEdition;
-use cairn_lang_formats::registry::RegistryPack;
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::pipeline::builtin_pack;
 use crate::report::FailureReport;
 
 /// `cairn` — Minecraft build DSL command-line interface.
@@ -386,43 +383,11 @@ pub(crate) enum EditionArg {
     Bedrock,
 }
 
-impl EditionArg {
-    pub(crate) fn as_lock_edition(self) -> LockEdition {
-        match self {
-            EditionArg::Java => LockEdition::Java,
-            EditionArg::Bedrock => LockEdition::Bedrock,
-        }
-    }
-
-    /// The core [`Edition`] this names, so the resolver's theme-variant
-    /// selection and the backend see the same value.
-    pub(crate) fn as_edition(self) -> Edition {
-        match self {
+impl From<EditionArg> for Edition {
+    fn from(arg: EditionArg) -> Self {
+        match arg {
             EditionArg::Java => Edition::Java,
             EditionArg::Bedrock => Edition::Bedrock,
-        }
-    }
-
-    /// The built-in registry pack this edition compiles against, whose
-    /// version table is the closed set of `--target` values.
-    pub(crate) fn registry_pack(self) -> &'static RegistryPack {
-        builtin_pack(self.as_edition())
-    }
-
-    /// The edition this one is not.
-    pub(crate) fn other(self) -> Self {
-        match self {
-            EditionArg::Java => EditionArg::Bedrock,
-            EditionArg::Bedrock => EditionArg::Java,
-        }
-    }
-
-    /// Lowercase name, matching the `--edition` spelling and the label
-    /// `UnsupportedTarget` uses, so one message never calls it two things.
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            EditionArg::Java => "java",
-            EditionArg::Bedrock => "bedrock",
         }
     }
 }

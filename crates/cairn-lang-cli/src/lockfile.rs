@@ -3,14 +3,13 @@
 
 use std::path::{Path, PathBuf};
 
-use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::lock::{
-    HashHex, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs, LockPlacement, LockTarget,
-    LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
+    HashHex, LOCK_SCHEMA_VERSION, LockError, LockInputs, LockPlacement, LockTarget, LockWalkway,
+    Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
 };
+use cairn_lang_core::{CAIRN_VERSION, Edition};
 
-use crate::cli::EditionArg;
 use crate::target::ResolvedTarget;
 
 /// Compare the lockfile at `lock_path` with the target being built, and
@@ -25,11 +24,7 @@ use crate::target::ResolvedTarget;
 /// [`Lockfile::refused_identifier`] reads it with the strict rules but for
 /// its identifiers. Any other unreadable lockfile says so; only an absent
 /// one is silent.
-pub(crate) fn report_previous_target(
-    lock_path: &Path,
-    edition: EditionArg,
-    target: &ResolvedTarget,
-) {
+pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target: &ResolvedTarget) {
     // Read once rather than through `Lockfile::read_from_path`, so the
     // second parse below sees the same bytes as the first.
     let body = match std::fs::read_to_string(lock_path) {
@@ -110,11 +105,11 @@ fn warn_unreadable_lock(lock_path: &Path, err: &LockError) {
 fn report_target_change(
     verified: &LockTarget,
     sensitive: &[MemberSensitivity],
-    edition: EditionArg,
+    edition: Edition,
     target: &ResolvedTarget,
 ) {
     let now = LockTarget {
-        edition: edition.as_lock_edition(),
+        edition,
         mc_version: target.mc_version().to_owned(),
         data_version: target.version_int(),
     };
@@ -149,8 +144,8 @@ fn report_target_change(
 /// one.
 fn describe_verified(target: &LockTarget, show_edition: bool) -> String {
     let field = match target.edition {
-        LockEdition::Java => "DataVersion",
-        LockEdition::Bedrock => "block version",
+        Edition::Java => "DataVersion",
+        Edition::Bedrock => "block version",
     };
     format!(
         "{}{}/{} {}",
@@ -190,7 +185,7 @@ pub(crate) fn default_lock_path(source: &Path) -> PathBuf {
 pub(crate) fn build_lockfile(
     source: &str,
     block_ir: &BlockArrayIr,
-    edition: EditionArg,
+    edition: Edition,
     target: &ResolvedTarget,
 ) -> Result<Lockfile, cairn_lang_core::lock::HashError> {
     Ok(Lockfile {
@@ -198,7 +193,7 @@ pub(crate) fn build_lockfile(
         source_hash: hash_source(source),
         cairn_version: CAIRN_VERSION.to_owned(),
         target: LockTarget {
-            edition: edition.as_lock_edition(),
+            edition,
             mc_version: target.mc_version().to_owned(),
             data_version: target.version_int(),
         },

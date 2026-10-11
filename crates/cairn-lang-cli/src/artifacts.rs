@@ -4,11 +4,11 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::bedrock_structure::McStructure;
 use cairn_lang_formats::java_structure::{JavaStructure, output_filename};
 
-use crate::cli::EditionArg;
 use crate::lockfile::build_lockfile;
 use crate::staging;
 use crate::target::ResolvedTarget;
@@ -364,7 +364,7 @@ pub(crate) fn write_artifacts_and_lock(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
     source: &str,
     block_ir: &BlockArrayIr,
-    edition: EditionArg,
+    edition: Edition,
     target: &ResolvedTarget,
     lock_path: &Path,
 ) -> ExitCode {

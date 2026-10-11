@@ -11,7 +11,7 @@ use cairn_lang_redstone::{
 };
 use clap::ValueEnum;
 
-use crate::cli::{EditionArg, SynthStage};
+use crate::cli::SynthStage;
 use crate::pipeline::{build_diagnostics, load_module, weighed_editions};
 use crate::report::{FailureReport, report_diagnostics};
 
@@ -19,7 +19,7 @@ pub(crate) fn run_synth(
     file: &Path,
     experimental_logic_synth: bool,
     stage: SynthStage,
-    edition: Option<EditionArg>,
+    edition: Option<Edition>,
 ) -> ExitCode {
     if !experimental_logic_synth {
         // The redstone pipeline is Internal-tier (`spec/compatibility`),
@@ -86,7 +86,7 @@ pub(crate) fn run_synth(
 /// from argv, and any later an error in the file would end the run first,
 /// or a warning print ahead of the refusal. So a path that names nothing is
 /// reported only once `--edition` is right.
-fn synth_edition(stage: SynthStage, edition: Option<EditionArg>) -> Result<StageEdition, ExitCode> {
+fn synth_edition(stage: SynthStage, edition: Option<Edition>) -> Result<StageEdition, ExitCode> {
     if !stage_requires_edition(stage) {
         if edition.is_some() {
             eprintln!(
@@ -98,8 +98,7 @@ fn synth_edition(stage: SynthStage, edition: Option<EditionArg>) -> Result<Stage
         }
         return Ok(StageEdition::Neutral);
     }
-    require_edition(edition, stage_cli_name(stage))
-        .map(|edition| StageEdition::Tagged(edition.as_edition()))
+    require_edition(edition, stage_cli_name(stage)).map(StageEdition::Tagged)
 }
 
 /// [`synth_edition`]'s answer: which side of `stage_requires_edition`'s
@@ -307,7 +306,7 @@ fn join_stages(
 
 /// Enforce `--edition` for an edition-tagged stage, naming the stage and
 /// why it needs the flag.
-fn require_edition(edition: Option<EditionArg>, stage_name: &str) -> Result<EditionArg, ExitCode> {
+fn require_edition(edition: Option<Edition>, stage_name: &str) -> Result<Edition, ExitCode> {
     edition.ok_or_else(|| {
         eprintln!(
             "error: `cairn synth --stage {stage_name}` requires --edition <java|bedrock> (this stage picks the target-edition cell realisation, so the flag is not optional)",

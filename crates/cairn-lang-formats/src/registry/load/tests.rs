@@ -484,8 +484,8 @@ fn load_from_dir_err(label: &str, write: impl FnOnce(&Path)) -> RegistryError {
 
 #[test]
 fn load_builtin_java_succeeds() {
-    let pack = load_builtin_java().expect("builtin pack");
-    assert_eq!(pack.manifest.edition, PackEdition::Java);
+    let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
+    assert_eq!(pack.manifest.edition, Edition::Java);
     assert_eq!(pack.manifest.name, "cairn-builtin-java");
     assert_eq!(pack.source, PackSource::Builtin);
     assert!(!pack.data_versions.versions.is_empty());
@@ -493,7 +493,7 @@ fn load_builtin_java_succeeds() {
 
 #[test]
 fn builtin_pack_includes_materials_catalog() {
-    let pack = load_builtin_java().expect("builtin pack");
+    let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     assert!(
         !pack.materials.is_empty(),
         "built-in pack ships a non-empty materials catalog",
@@ -589,13 +589,13 @@ fn pack_with_duplicate_materials_token_is_error() {
 
 #[test]
 fn targetable_rows_are_the_buildable_ones_in_data_version_order() {
-    let java: Vec<&str> = builtin_java()
+    let java: Vec<&str> = builtin_pack(Edition::Java)
         .targetable()
         .into_iter()
         .map(|e| e.mc_version.as_str())
         .collect();
     assert_eq!(java, ["1.20.4", "1.21", "1.21.4"]);
-    let bedrock: Vec<&str> = builtin_bedrock()
+    let bedrock: Vec<&str> = builtin_pack(Edition::Bedrock)
         .targetable()
         .into_iter()
         .map(|e| e.mc_version.as_str())
@@ -605,7 +605,7 @@ fn targetable_rows_are_the_buildable_ones_in_data_version_order() {
 
 #[test]
 fn targetable_rows_sort_by_data_version_whatever_the_table_order() {
-    let mut pack = load_builtin_java().expect("builtin java");
+    let mut pack = load_builtin_pack(Edition::Java).expect("builtin java");
     pack.data_versions.versions.reverse();
     let rows: Vec<i32> = pack
         .targetable()
@@ -618,7 +618,7 @@ fn targetable_rows_sort_by_data_version_whatever_the_table_order() {
 
 #[test]
 fn version_order_carries_every_row_including_the_untargetable_ones() {
-    for pack in [builtin_java(), builtin_bedrock()] {
+    for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
         let order = pack.version_order();
         assert_eq!(order.rows().count(), pack.data_versions.versions.len());
         assert!(pack.data_versions.versions.iter().any(|e| !e.targetable));
@@ -635,7 +635,7 @@ fn version_order_carries_every_row_including_the_untargetable_ones() {
 
 #[test]
 fn builtin_pack_resolves_known_targets() {
-    let pack = load_builtin_java().expect("builtin pack");
+    let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     let t = pack.resolve_java_target("1.20.4").expect("1.20.4");
     assert_eq!(t.mc_version, "1.20.4");
     assert_eq!(t.data_version, 3700);
@@ -647,14 +647,14 @@ fn builtin_pack_resolves_known_targets() {
 
 #[test]
 fn builtin_pack_resolves_latest_alias() {
-    let pack = load_builtin_java().expect("builtin pack");
+    let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     let latest = pack.resolve_java_target("latest").expect("latest");
     assert_eq!(latest.mc_version, pack.data_versions.latest);
 }
 
 #[test]
 fn builtin_pack_rejects_unknown_target() {
-    let pack = load_builtin_java().expect("builtin pack");
+    let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     let err = pack
         .resolve_java_target("0.0.0")
         .expect_err("unknown target");
@@ -668,7 +668,7 @@ fn builtin_pack_rejects_unknown_target() {
 #[test]
 fn builtin_pack_suggests_near_target() {
     // `1.21.5` is one substitution away from `1.21.4`.
-    let pack = load_builtin_java().expect("builtin pack");
+    let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     let err = pack
         .resolve_java_target("1.21.5")
         .expect_err("unknown target");
@@ -681,7 +681,7 @@ fn builtin_pack_suggests_near_target() {
 /// opposite ways (`1.21` on Java, `1.21.0` on Bedrock).
 #[test]
 fn either_spelling_of_a_version_names_its_row() {
-    let java = load_builtin_java().expect("java pack");
+    let java = load_builtin_pack(Edition::Java).expect("java pack");
     let named = java
         .resolve_java_target("1.21")
         .expect("the row's own label");
@@ -691,7 +691,7 @@ fn either_spelling_of_a_version_names_its_row() {
     assert_eq!(padded, named);
     assert_eq!(padded.mc_version, "1.21");
 
-    let bedrock = load_builtin_bedrock().expect("bedrock pack");
+    let bedrock = load_builtin_pack(Edition::Bedrock).expect("bedrock pack");
     let named = bedrock
         .resolve_bedrock_target("1.21.0")
         .expect("the row's own label");
@@ -706,7 +706,7 @@ fn either_spelling_of_a_version_names_its_row() {
 /// reads it, so `1.021` names Java's `1.21`.
 #[test]
 fn a_leading_zero_in_a_target_is_padding() {
-    let java = load_builtin_java().expect("java pack");
+    let java = load_builtin_pack(Edition::Java).expect("java pack");
     let padded = java.resolve_java_target("1.021").expect("1.021 is 1.21");
     assert_eq!(padded, java.resolve_java_target("1.21").expect("1.21"));
     assert_eq!(padded.mc_version, "1.21");
@@ -719,11 +719,11 @@ fn a_leading_zero_in_a_target_is_padding() {
 /// `--target 1.21.4`, another release's palette version.
 #[test]
 fn a_nonzero_trailing_component_names_a_different_version() {
-    let bedrock = load_builtin_bedrock().expect("bedrock pack");
+    let bedrock = load_builtin_pack(Edition::Bedrock).expect("bedrock pack");
     bedrock
         .resolve_bedrock_target("1.21.4")
         .expect_err("1.21.4 is not 1.21.40");
-    let java = load_builtin_java().expect("java pack");
+    let java = load_builtin_pack(Edition::Java).expect("java pack");
     java.resolve_java_target("1.21.40")
         .expect_err("1.21.40 is not 1.21.4");
     java.resolve_java_target("1.2")
@@ -736,8 +736,8 @@ fn a_nonzero_trailing_component_names_a_different_version() {
 /// a pack that dropped the row or made it targetable.
 #[test]
 fn an_ordering_only_row_is_not_a_target_in_any_spelling() {
-    let java = load_builtin_java().expect("java pack");
-    let bedrock = load_builtin_bedrock().expect("bedrock pack");
+    let java = load_builtin_pack(Edition::Java).expect("java pack");
+    let bedrock = load_builtin_pack(Edition::Bedrock).expect("bedrock pack");
     for (pack, label) in [(&java, "1.21.1"), (&bedrock, "1.21.20")] {
         assert!(
             pack.data_versions
@@ -765,7 +765,7 @@ fn an_ordering_only_row_is_not_a_target_in_any_spelling() {
 /// zero one: both stay unequal to the `1.21` row under the comparison.
 #[test]
 fn a_pre_release_or_an_empty_component_is_not_the_release() {
-    let java = load_builtin_java().expect("java pack");
+    let java = load_builtin_pack(Edition::Java).expect("java pack");
     java.resolve_java_target("1.21.0-rc1")
         .expect_err("a pre-release of 1.21");
     java.resolve_java_target("1.21.")
@@ -774,22 +774,22 @@ fn a_pre_release_or_an_empty_component_is_not_the_release() {
 
 #[test]
 fn pack_hash_is_deterministic() {
-    let a = load_builtin_java().expect("a");
-    let b = load_builtin_java().expect("b");
+    let a = load_builtin_pack(Edition::Java).expect("a");
+    let b = load_builtin_pack(Edition::Java).expect("b");
     assert_eq!(a.bytes_hash, b.bytes_hash);
 }
 
 #[test]
 fn load_builtin_bedrock_succeeds() {
-    let pack = load_builtin_bedrock().expect("builtin pack");
-    assert_eq!(pack.manifest.edition, PackEdition::Bedrock);
+    let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
+    assert_eq!(pack.manifest.edition, Edition::Bedrock);
     assert_eq!(pack.manifest.name, "cairn-builtin-bedrock");
     assert_eq!(pack.source, PackSource::Builtin);
     assert!(!pack.data_versions.versions.is_empty());
     // The materials catalog must cover the same abstract tokens the
     // Java pack lifts, or a `.crn` that compiles for Java would fail
     // resolution for Bedrock on vocabulary rather than parity.
-    let java = load_builtin_java().expect("java pack");
+    let java = load_builtin_pack(Edition::Java).expect("java pack");
     for token in java.materials.tokens() {
         assert!(
             pack.materials.lookup_id(token).is_some(),
@@ -807,7 +807,7 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
     let version = |major: i32, minor: i32, patch: i32, revision: i32| {
         (major << 24) | (minor << 16) | (patch << 8) | revision
     };
-    let pack = load_builtin_bedrock().expect("builtin pack");
+    let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
     // Each targetable row is the block-state version that release
     // writes into a palette (PocketMine-MP's
     // `BlockStateData::CURRENT_VERSION` in the release supporting it),
@@ -846,11 +846,11 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
 
 #[test]
 fn builtin_bedrock_unknown_target_names_bedrock_edition() {
-    let pack = load_builtin_bedrock().expect("builtin pack");
+    let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
     let err = pack
         .resolve_bedrock_target("1.21.61")
         .expect_err("unknown target");
-    assert_eq!(err.edition, "bedrock");
+    assert_eq!(err.edition, Edition::Bedrock);
     assert_eq!(err.suggestion.as_deref(), Some("1.21.60"));
     assert!(err.supported.contains("1.21.60"));
     assert!(
@@ -861,7 +861,7 @@ fn builtin_bedrock_unknown_target_names_bedrock_edition() {
 
 #[test]
 fn bedrock_pack_hash_snapshot() {
-    let pack = load_builtin_bedrock().expect("builtin pack");
+    let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
     insta::assert_snapshot!("builtin_bedrock_pack_hash", pack.bytes_hash.as_str());
 }
 
@@ -1024,8 +1024,8 @@ fn bedrock_manifest_into_java_loader_is_edition_mismatch() {
     assert!(matches!(
         err,
         RegistryError::EditionMismatch {
-            expected: PackEdition::Java,
-            got: PackEdition::Bedrock,
+            expected: Edition::Java,
+            got: Edition::Bedrock,
         }
     ));
 }
@@ -1041,6 +1041,6 @@ fn malformed_manifest_json_is_error() {
 
 #[test]
 fn pack_hash_snapshot() {
-    let pack = load_builtin_java().expect("builtin pack");
+    let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     insta::assert_snapshot!("builtin_java_pack_hash", pack.bytes_hash.as_str());
 }

@@ -7,8 +7,8 @@ use std::process::ExitCode;
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::resolve::resolve;
-use cairn_lang_core::{Severity, lower};
-use cairn_lang_formats::registry::builtin_java;
+use cairn_lang_core::{Edition, Severity, lower};
+use cairn_lang_formats::registry::builtin_pack;
 
 use crate::cli::LowerFormat;
 use crate::pipeline::{build_diagnostics, load_module, weighed_editions};
@@ -22,7 +22,11 @@ pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     // No `--target`, so no version to check ids against.
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+    let mut block_ir = lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&builtin_pack(Edition::Java).view(None)),
+    );
     // As in `load_and_lower`, the check pass gates the output, ahead of the
     // lowering deferrals its findings cascade into.
     block_ir.diagnostics = build_diagnostics(

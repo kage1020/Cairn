@@ -5,7 +5,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use cairn_lang_core::lock::{HashHex, LockEdition, Lockfile};
+use cairn_lang_core::Edition;
+use cairn_lang_core::lock::{HashHex, Lockfile};
 use tempfile::TempDir;
 
 use crate::common::{
@@ -151,7 +152,7 @@ fn lockfile_records_target_triple() {
     );
     assert!(result.status.success());
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
-    assert_eq!(lf.target.edition, LockEdition::Java);
+    assert_eq!(lf.target.edition, Edition::Java);
     assert_eq!(lf.target.mc_version, "1.21.4");
     assert_eq!(lf.target.data_version, 4189);
 }
@@ -296,7 +297,7 @@ fn bedrock_lockfile_records_bedrock_target_and_pack_hash() {
         String::from_utf8_lossy(&result.stderr),
     );
     let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
-    assert_eq!(lf.target.edition, LockEdition::Bedrock);
+    assert_eq!(lf.target.edition, Edition::Bedrock);
     assert_eq!(lf.target.mc_version, "1.21.60");
     // Bedrock's block-palette version integer, not a Java DataVersion.
     assert_eq!(lf.target.data_version, 18_168_865);

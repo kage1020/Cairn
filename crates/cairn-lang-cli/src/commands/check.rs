@@ -5,9 +5,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use cairn_lang_core::check::LineStarts;
-use cairn_lang_core::{Severity, diagnose_parse_failure, lower, parse};
+use cairn_lang_core::{Edition, Severity, diagnose_parse_failure, lower, parse};
 
-use crate::cli::{CheckFormat, EditionArg};
+use crate::cli::CheckFormat;
 use crate::pipeline::{
     CheckLowering, build_diagnostics, check_lowering, read_source, report_partial_build,
     weighed_editions,
@@ -16,7 +16,7 @@ use crate::report::{print_json, render_diagnostics, report_diagnostic, report_pa
 
 pub(crate) fn run_check(
     file: &Path,
-    edition: Option<EditionArg>,
+    edition: Option<Edition>,
     target: Option<&str>,
     format: CheckFormat,
 ) -> ExitCode {
@@ -51,7 +51,7 @@ pub(crate) fn run_check(
     // Through `build_diagnostics` rather than `check`, which cannot produce
     // the `@intended_targets` findings. The lowering list is empty unless
     // `--target` pinned a version.
-    let pin = edition.map(EditionArg::as_edition);
+    let pin = edition;
     let CheckLowering {
         diagnostics: lowering,
         dropped_scopes,

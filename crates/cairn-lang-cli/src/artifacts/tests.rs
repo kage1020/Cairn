@@ -41,7 +41,7 @@ fn an_artifact_file_name_that_is_not_plain_is_refused() {
 /// and collision check), so the file name is the only thing left to refuse.
 #[test]
 fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
-    let target = resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+    let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
     let out_dir = Path::new("out");
 
     for key in ["site::s::/abs/hut", "site::s::sub/hut", "site::s::a\\b"] {
@@ -87,7 +87,7 @@ fn prepared_paths(
 /// collision's.
 #[test]
 fn two_scopes_that_name_one_file_are_refused_before_any_io() {
-    let target = resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+    let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
     let out_dir = Path::new("out");
     assert!(
         prepare_artifacts(
@@ -120,7 +120,7 @@ fn two_scopes_that_name_one_file_are_refused_before_any_io() {
 #[cfg(any(target_os = "macos", windows))]
 #[test]
 fn two_scopes_whose_names_differ_only_in_case_are_refused_where_case_is_folded() {
-    let target = resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+    let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
     match prepare_artifacts(
         &rekeyed_probe(&["struct::hut", "struct::HUT"]),
         &target,

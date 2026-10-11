@@ -13,22 +13,13 @@ use cairn_lang_core::resolve::{declared_version_floors, resolve};
 use cairn_lang_core::{
     Diagnostic, DiagnosticCode, Edition, check, diagnose_parse_failure, lower, parse,
 };
-use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
+use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
-use crate::cli::EditionArg;
 use crate::floors::{DeclaredFloors, floor_refusing_target};
 use crate::report::{FailureReport, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target};
 
 pub(crate) use requested::{RequestedEditions, requested_editions};
-
-/// The built-in registry pack an edition compiles against.
-pub(crate) fn builtin_pack(edition: Edition) -> &'static RegistryPack {
-    match edition {
-        Edition::Java => builtin_java(),
-        Edition::Bedrock => builtin_bedrock(),
-    }
-}
 
 /// Read the source a command was pointed at, or report why it could not
 /// be and hand back the exit code: 2 for a path that names nothing (a
@@ -88,7 +79,7 @@ pub(crate) struct CheckLowering {
 /// is reported in the same run.
 pub(crate) fn check_lowering(
     ir: &cairn_lang_core::intent::IntentModule,
-    edition: Option<EditionArg>,
+    edition: Option<Edition>,
     target: Option<&str>,
 ) -> CheckLowering {
     // clap's `requires` refuses `--target` without `--edition`
@@ -108,8 +99,8 @@ pub(crate) fn check_lowering(
     let pinned = resolved.as_ref().ok().map(ResolvedTarget::mc_version);
     // Resolved for the id table's edition, as in `load_and_lower`: the
     // theme variant decides which id a `mat_slot=` reaches.
-    let resolution = resolve(ir, Some(edition.as_edition()));
-    let registry = edition.registry_pack().view(pinned);
+    let resolution = resolve(ir, Some(edition));
+    let registry = builtin_pack(edition).view(pinned);
     let block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
     CheckLowering {
         dropped_scopes: dropped_scopes(&resolution, &block_ir),
@@ -422,14 +413,14 @@ pub(crate) struct Lowered {
 /// suspends the check.
 pub(crate) fn load_and_lower(
     file: &Path,
-    edition: EditionArg,
+    edition: Edition,
     target: Option<&ResolvedTarget>,
 ) -> Result<Lowered, ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
-    let floors = declared_version_floors(&module, edition.as_edition());
+    let floors = declared_version_floors(&module, edition);
     let version_floors = (!floors.is_empty()).then(|| DeclaredFloors {
         floors,
-        order: edition.registry_pack().version_order(),
+        order: builtin_pack(edition).version_order(),
     });
     let mc_version = target
         .filter(|target| {
@@ -439,18 +430,18 @@ pub(crate) fn load_and_lower(
         })
         .map(ResolvedTarget::mc_version);
     let ir = lower(&module);
-    let resolution = resolve(&ir, Some(edition.as_edition()));
+    let resolution = resolve(&ir, Some(edition));
     // `mc_version: None` leaves the id check off rather than running it
     // against a version nobody chose or one the floors refuse.
-    let registry = edition.registry_pack().view(mc_version);
+    let registry = builtin_pack(edition).view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     // `cairn check`'s gate, so `compile` never writes a `verified: true`
     // lockfile for a source `check` rejects.
     block_ir.diagnostics = build_diagnostics(
         &module,
         &ir,
-        Some(edition.as_edition()),
-        &weighed_editions(Some(edition.as_edition())),
+        Some(edition),
+        &weighed_editions(Some(edition)),
         std::mem::take(&mut block_ir.diagnostics),
     );
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);

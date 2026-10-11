@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 pub use hash::{HashError, HashHex, HashParseError, hash_resolved_ir, hash_source};
 pub use schema::{
-    LOCK_SCHEMA_VERSION, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
+    LOCK_SCHEMA_VERSION, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
     MemberSensitivity, RefusedIdentifierLock,
 };
 

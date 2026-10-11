@@ -15,6 +15,8 @@
 
 use std::fmt;
 
+use cairn_lang_core::Edition;
+
 pub use crate::registry::{resolve_bedrock_target, resolve_java_target};
 
 /// Resolved Minecraft Java target.
@@ -47,9 +49,8 @@ pub struct BedrockTarget {
 /// never candidates.
 #[derive(Debug)]
 pub struct UnsupportedTarget {
-    /// Which edition's version table was consulted (`"java"` /
-    /// `"bedrock"`), so the error names the right `--target` vocabulary.
-    pub edition: &'static str,
+    /// The edition whose version table was consulted.
+    pub edition: Edition,
     /// Verbatim value passed via `--target`.
     pub requested: String,
     /// Closest supported version within the suggestion pass's

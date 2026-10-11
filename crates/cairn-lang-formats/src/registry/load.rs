@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry};
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{VersionOrder, compare_versions};
@@ -19,7 +20,7 @@ use super::aliases::{AliasError, AliasIndex};
 use super::blocks::{BlocksError, BlocksIndex};
 use super::data_versions::{DataVersionEntry, DataVersionTable};
 use super::hash::pack_hash;
-use super::manifest::{PackEdition, PackManifest};
+use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
 use crate::data_version::{BedrockTarget, JavaTarget, UnsupportedTarget};
 
@@ -244,9 +245,9 @@ pub enum RegistryError {
     #[error("registry pack edition `{got:?}` does not match expected `{expected:?}`")]
     EditionMismatch {
         /// Expected edition.
-        expected: PackEdition,
+        expected: Edition,
         /// Edition the manifest declared.
-        got: PackEdition,
+        got: Edition,
     },
     /// The pack's `materials` catalog failed to validate.
     #[error("registry pack `materials`: {source}")]
@@ -393,7 +394,7 @@ impl RegistryPack {
     /// [`validate_data_versions`] rules out at load time.
     fn resolve_target_row(
         &self,
-        edition: PackEdition,
+        edition: Edition,
         requested: &str,
     ) -> Result<(String, i32), UnsupportedTarget> {
         assert_eq!(
@@ -407,7 +408,7 @@ impl RegistryPack {
             );
         }
         targetable_row_for(&self.data_versions, requested).ok_or_else(|| UnsupportedTarget {
-            edition: self.manifest.edition.label(),
+            edition: self.manifest.edition,
             requested: requested.to_owned(),
             suggestion: self.suggestion_for(requested),
             supported: self.supported_list(),
@@ -431,7 +432,7 @@ impl RegistryPack {
     /// integer, so it is a hard caller-bug guard rather than a recoverable
     /// error.
     pub fn resolve_java_target(&self, requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
-        let (mc_version, data_version) = self.resolve_target_row(PackEdition::Java, requested)?;
+        let (mc_version, data_version) = self.resolve_target_row(Edition::Java, requested)?;
         Ok(JavaTarget {
             mc_version,
             data_version,
@@ -458,8 +459,7 @@ impl RegistryPack {
         &self,
         requested: &str,
     ) -> Result<BedrockTarget, UnsupportedTarget> {
-        let (mc_version, block_version) =
-            self.resolve_target_row(PackEdition::Bedrock, requested)?;
+        let (mc_version, block_version) = self.resolve_target_row(Edition::Bedrock, requested)?;
         Ok(BedrockTarget {
             mc_version,
             block_version,
@@ -568,8 +568,8 @@ impl RegistryPack {
             mc_version,
             ids,
             label: match mc_version {
-                Some(version) => format!("{} {version}", self.manifest.edition.label()),
-                None => self.manifest.edition.label().to_owned(),
+                Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
+                None => self.manifest.edition.as_str().to_owned(),
             },
         }
     }
@@ -589,25 +589,23 @@ impl RegistryPack {
     }
 }
 
-/// Built-in Java pack, parsed once per process.
+/// The built-in pack for `edition`, parsed once per process.
 ///
 /// # Panics
 ///
 /// Panics if the embedded JSON fails to parse or validate, which means the
 /// build artefact itself is broken.
-pub fn builtin_java() -> &'static RegistryPack {
-    builtin(PackEdition::Java)
-}
-
-/// Built-in Bedrock pack, parsed once per process. The mirror of
-/// [`builtin_java`] for `--edition bedrock` compiles.
-///
-/// # Panics
-///
-/// Panics if the embedded JSON fails to parse or validate, as
-/// [`builtin_java`] does.
-pub fn builtin_bedrock() -> &'static RegistryPack {
-    builtin(PackEdition::Bedrock)
+pub fn builtin_pack(edition: Edition) -> &'static RegistryPack {
+    static JAVA: OnceLock<RegistryPack> = OnceLock::new();
+    static BEDROCK: OnceLock<RegistryPack> = OnceLock::new();
+    let cell = match edition {
+        Edition::Java => &JAVA,
+        Edition::Bedrock => &BEDROCK,
+    };
+    cell.get_or_init(|| {
+        load_builtin_pack(edition)
+            .expect("built-in registry pack failed to load — this is a build invariant")
+    })
 }
 
 /// Resolve a `--target` string against the built-in registry pack. The
@@ -622,7 +620,7 @@ pub fn builtin_bedrock() -> &'static RegistryPack {
 /// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
 /// uses, nor the `"latest"` alias.
 pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
-    builtin_java().resolve_java_target(requested)
+    builtin_pack(Edition::Java).resolve_java_target(requested)
 }
 
 /// Resolve a `--target` string against the built-in Bedrock registry pack.
@@ -636,51 +634,21 @@ pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTar
 /// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
 /// uses, nor the `"latest"` alias.
 pub fn resolve_bedrock_target(requested: &str) -> Result<BedrockTarget, UnsupportedTarget> {
-    builtin_bedrock().resolve_bedrock_target(requested)
+    builtin_pack(Edition::Bedrock).resolve_bedrock_target(requested)
 }
 
-fn builtin(edition: PackEdition) -> &'static RegistryPack {
-    static JAVA: OnceLock<RegistryPack> = OnceLock::new();
-    static BEDROCK: OnceLock<RegistryPack> = OnceLock::new();
-    let cell = match edition {
-        PackEdition::Java => &JAVA,
-        PackEdition::Bedrock => &BEDROCK,
-    };
-    cell.get_or_init(|| {
-        load_builtin(edition)
-            .expect("built-in registry pack failed to load — this is a build invariant")
-    })
-}
-
-/// Parse the built-in Java pack from its embedded bytes.
+/// Parse the built-in pack for `edition` from its embedded bytes, for a caller that wants the
+/// error rather than [`builtin_pack`]'s panic.
 ///
 /// # Errors
 ///
 /// Returns [`RegistryError`] if the embedded JSON fails to deserialise,
-/// declares an unsupported schema, or fails validation. In practice all
-/// of these would mean the bundled `registry-data/java/*.json` files have
-/// been corrupted, which is a release-process bug.
-pub fn load_builtin_java() -> Result<RegistryPack, RegistryError> {
-    load_builtin(PackEdition::Java)
-}
-
-/// Parse the built-in Bedrock pack from its embedded bytes.
-///
-/// # Errors
-///
-/// Returns [`RegistryError`] if the embedded JSON fails to deserialise,
-/// declares an unsupported schema, or fails validation. In practice all
-/// of these would mean the bundled `registry-data/bedrock/*.json` files
-/// have been corrupted, which is a release-process bug.
-pub fn load_builtin_bedrock() -> Result<RegistryPack, RegistryError> {
-    load_builtin(PackEdition::Bedrock)
-}
-
-/// Run the embedded files of `edition` through [`load_pack`].
-fn load_builtin(edition: PackEdition) -> Result<RegistryPack, RegistryError> {
+/// declares an unsupported schema, or fails validation. Any of these means
+/// the bundled `registry-data` files are corrupt.
+pub fn load_builtin_pack(edition: Edition) -> Result<RegistryPack, RegistryError> {
     let files = match edition {
-        PackEdition::Java => BUILTIN_JAVA,
-        PackEdition::Bedrock => BUILTIN_BEDROCK,
+        Edition::Java => BUILTIN_JAVA,
+        Edition::Bedrock => BUILTIN_BEDROCK,
     };
     load_pack(&files, edition)
 }
@@ -693,7 +661,7 @@ fn load_builtin(edition: PackEdition) -> Result<RegistryPack, RegistryError> {
 /// Returns [`RegistryError`] on I/O failure, JSON parse failure, unsupported
 /// schema versions, or validation failure of the loaded data.
 pub fn load_from_dir(dir: &Path) -> Result<RegistryPack, RegistryError> {
-    load_pack(&PackDir(dir), PackEdition::Java)
+    load_pack(&PackDir(dir), Edition::Java)
 }
 
 /// The manifest and the four component files it can name.
@@ -778,7 +746,7 @@ impl ComponentSource for PackDir<'_> {
 /// Parse, validate and hash one pack from `source`.
 fn load_pack(
     source: &impl ComponentSource,
-    expected_edition: PackEdition,
+    expected_edition: Edition,
 ) -> Result<RegistryPack, RegistryError> {
     let manifest_text = source.read_text(Component::Manifest, "pack.json")?;
     let manifest: PackManifest = parse_component(&manifest_text, Component::Manifest)?;
@@ -971,7 +939,7 @@ fn validate_blocks_cover_versions(
     })
 }
 
-fn validate_manifest(manifest: &PackManifest, expected: PackEdition) -> Result<(), RegistryError> {
+fn validate_manifest(manifest: &PackManifest, expected: Edition) -> Result<(), RegistryError> {
     if manifest.schema_version > SUPPORTED_MANIFEST_SCHEMA {
         return Err(RegistryError::UnsupportedSchemaVersion {
             kind: "manifest",

@@ -5,17 +5,17 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BUILTIN_BLOCK_IDS;
-use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
+use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
 use crate::common::{examples, lower_source, supported_versions};
 
 fn edition(pack: &RegistryPack) -> &'static str {
-    pack.manifest.edition.label()
+    pack.manifest.edition.as_str()
 }
 
 #[test]
 fn every_material_mapping_resolves_to_an_id_its_target_declares() {
-    for pack in [builtin_java(), builtin_bedrock()] {
+    for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
         for version in supported_versions(pack) {
             let ids = pack
                 .blocks
@@ -49,7 +49,7 @@ fn every_material_mapping_resolves_to_an_id_its_target_declares() {
 
 #[test]
 fn every_id_core_hardcodes_exists_in_every_supported_target() {
-    for pack in [builtin_java(), builtin_bedrock()] {
+    for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
         for version in supported_versions(pack) {
             let ids = pack
                 .blocks
@@ -76,7 +76,7 @@ fn every_id_core_hardcodes_exists_in_every_supported_target() {
 /// output with nothing to say so.
 #[test]
 fn both_packs_declare_the_token_that_redirects_the_plate() {
-    for pack in [builtin_java(), builtin_bedrock()] {
+    for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
         for version in supported_versions(pack) {
             let id = pack
                 .materials
@@ -107,7 +107,7 @@ fn both_packs_declare_the_token_that_redirects_the_plate() {
 /// would still pass.
 #[test]
 fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
-    let bedrock = builtin_bedrock();
+    let bedrock = builtin_pack(Edition::Bedrock);
     for (token, expected) in [
         ("sign.oak", "minecraft:standing_sign"),
         ("sign.oak_wall", "minecraft:wall_sign"),
@@ -120,7 +120,7 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
         );
     }
 
-    let java = builtin_java();
+    let java = builtin_pack(Edition::Java);
     for (token, expected) in [
         ("sign.oak", "minecraft:oak_sign"),
         ("sign.oak_wall", "minecraft:oak_wall_sign"),
@@ -138,7 +138,7 @@ fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
 /// spellings inside one pack.
 #[test]
 fn the_bedrock_pack_respells_stone_bricks_for_the_version_that_predates_it() {
-    let bedrock = builtin_bedrock();
+    let bedrock = builtin_pack(Edition::Bedrock);
     for token in ["floor.stone.smooth", "wall.stone.smooth"] {
         assert_eq!(
             bedrock.materials.lookup_id_for(token, Some("1.21.0")),
@@ -156,7 +156,7 @@ fn the_bedrock_pack_respells_stone_bricks_for_the_version_that_predates_it() {
 
     // Java never had the old spelling, so it needs no override at all.
     assert_eq!(
-        builtin_java().materials.overrides().count(),
+        builtin_pack(Edition::Java).materials.overrides().count(),
         0,
         "an override on the Java pack would mean a rename nobody has recorded a reason for",
     );
@@ -173,8 +173,8 @@ fn every_id_the_examples_intern_exists_in_its_target() {
     let examples = examples();
     for (name, source) in &examples {
         for (pack, pinned_edition) in [
-            (builtin_java(), Edition::Java),
-            (builtin_bedrock(), Edition::Bedrock),
+            (builtin_pack(Edition::Java), Edition::Java),
+            (builtin_pack(Edition::Bedrock), Edition::Bedrock),
         ] {
             for version in supported_versions(pack) {
                 let out = lower_source(source, pinned_edition, Some(version));
@@ -204,14 +204,14 @@ fn every_id_the_examples_intern_exists_in_its_target() {
 #[test]
 fn both_packs_declare_the_versions_these_tests_expect_to_walk() {
     assert_eq!(
-        supported_versions(builtin_java()),
+        supported_versions(builtin_pack(Edition::Java)),
         vec!["1.20.4", "1.21", "1.21.4"],
     );
     assert_eq!(
-        supported_versions(builtin_bedrock()),
+        supported_versions(builtin_pack(Edition::Bedrock)),
         vec!["1.21.0", "1.21.40", "1.21.60"],
     );
-    for pack in [builtin_java(), builtin_bedrock()] {
+    for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
         for version in supported_versions(pack) {
             let count = pack.blocks.ids_for(version).map_or(0, <[String]>::len);
             assert!(

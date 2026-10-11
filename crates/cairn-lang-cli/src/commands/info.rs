@@ -16,7 +16,7 @@ use cairn_lang_formats::bedrock_state::degradation_detail;
 use cairn_lang_formats::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
 };
-use cairn_lang_formats::registry::builtin_java;
+use cairn_lang_formats::registry::builtin_pack;
 
 use crate::cli::InfoFormat;
 use crate::floors::{
@@ -24,8 +24,8 @@ use crate::floors::{
     weigh_versions,
 };
 use crate::pipeline::{
-    RequestedEditions, build_diagnostics, builtin_pack, dropped_scopes, load_module,
-    requested_editions, supported_versions,
+    RequestedEditions, build_diagnostics, dropped_scopes, load_module, requested_editions,
+    supported_versions,
 };
 use crate::report::{
     FailureReport, Reporting, print_json, report_diagnostic, report_diagnostics,
@@ -53,7 +53,11 @@ pub(crate) fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> 
     let resolution = resolve(&ir, None);
     // `info` spans every target, so the view pins no version: guessing one
     // would refuse ids that are fine on the version the author builds for.
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+    let mut block_ir = lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&builtin_pack(Edition::Java).view(None)),
+    );
     // The requested editions, not both: a finding only Java's table reaches
     // must not refuse an `--editions bedrock` report.
     let combined = build_diagnostics(

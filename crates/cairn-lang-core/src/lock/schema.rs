@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::hash::HashHex;
+use crate::edition::Edition;
 use crate::ids::{IdError, PlaceId, PortId, SiteName, WalkwayEndpoint};
 
 /// The lockfile schema this build reads and writes.
@@ -290,39 +291,12 @@ pub struct LockWalkway {
     pub dims: [u32; 3],
 }
 
-/// Backend edition the lockfile pins to.
-///
-/// A closed enum (rather than `String`) so a typo (`"jav"`,
-/// `"BEDROCK"`) cannot ride along as a valid lockfile. The serde
-/// representation is the lowercase identifier (`"java"` / `"bedrock"`),
-/// matching the human-facing CLI flag values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LockEdition {
-    /// Java Edition.
-    Java,
-    /// Bedrock Edition.
-    Bedrock,
-}
-
-impl LockEdition {
-    /// Lowercase identifier (`"java"` / `"bedrock"`). Same string used in
-    /// the YAML output.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            LockEdition::Java => "java",
-            LockEdition::Bedrock => "bedrock",
-        }
-    }
-}
-
 /// `(edition, mc_version, data_version)` triple.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LockTarget {
     /// Backend edition.
-    pub edition: LockEdition,
+    pub edition: Edition,
     /// Human-facing Minecraft version, e.g. `"1.21.4"`.
     pub mc_version: String,
     /// Java `DataVersion` integer or Bedrock `block_version` once that
@@ -466,7 +440,7 @@ mod tests {
             source_hash: HashHex::zero(),
             cairn_version: "2026.10.0".to_owned(),
             target: LockTarget {
-                edition: LockEdition::Java,
+                edition: Edition::Java,
                 mc_version: "1.20.4".to_owned(),
                 data_version: 3700,
             },

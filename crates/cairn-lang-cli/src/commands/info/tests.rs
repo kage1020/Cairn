@@ -1,7 +1,5 @@
 use cairn_lang_core::resolve::DroppedIntent;
 
-use cairn_lang_formats::registry::builtin_bedrock;
-
 use super::*;
 use crate::pipeline::lowered_probe;
 
@@ -87,7 +85,7 @@ fn the_degraded_notes_answer_the_figure_they_sit_under() {
 fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
     use cairn_lang_core::block_array::BlockState;
 
-    let pack = builtin_bedrock();
+    let pack = builtin_pack(Edition::Bedrock);
     let mut block_ir = lowered_probe(Edition::Bedrock);
     let mut leaked = BlockState::bare("minecraft:oak_stairs");
     leaked

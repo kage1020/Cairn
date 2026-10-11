@@ -25,6 +25,7 @@ mod target;
 
 use std::process::ExitCode;
 
+use cairn_lang_core::Edition;
 use clap::Parser;
 
 use cli::{Cli, Command};
@@ -59,7 +60,7 @@ fn main() -> ExitCode {
             edition,
             target,
             format,
-        }) => run_check(&file, edition, target.as_deref(), format),
+        }) => run_check(&file, edition.map(Edition::from), target.as_deref(), format),
         Some(Command::Info {
             file,
             editions,
@@ -71,14 +72,25 @@ fn main() -> ExitCode {
             experimental_logic_synth,
             stage,
             edition,
-        }) => run_synth(&file, experimental_logic_synth, stage, edition),
+        }) => run_synth(
+            &file,
+            experimental_logic_synth,
+            stage,
+            edition.map(Edition::from),
+        ),
         Some(Command::Compile {
             file,
             edition,
             target,
             out,
             lock,
-        }) => run_compile(&file, edition, &target, out.as_deref(), lock.as_deref()),
+        }) => run_compile(
+            &file,
+            edition.into(),
+            &target,
+            out.as_deref(),
+            lock.as_deref(),
+        ),
         None => {
             eprintln!("error: a subcommand is required (try `cairn --help`)");
             ExitCode::from(2)

@@ -14,9 +14,8 @@ use cairn_lang_core::resolve::{
     declared_version_floors, unscoped_version_floors, versions_satisfying,
 };
 use cairn_lang_core::{Edition, Module, Severity};
-use cairn_lang_formats::registry::RegistryPack;
+use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
-use crate::cli::EditionArg;
 use crate::pipeline::supported_versions;
 use crate::report::render_diagnostics;
 use crate::target::ResolvedTarget;
@@ -309,7 +308,7 @@ pub(crate) fn enforce_version_floor(
     file: &Path,
     source: &str,
     declared: &DeclaredFloors,
-    edition: EditionArg,
+    edition: Edition,
     target: &ResolvedTarget,
 ) -> Result<(), ExitCode> {
     let DeclaredFloors { floors, order } = declared;
@@ -337,13 +336,13 @@ pub(crate) fn enforce_version_floor(
     // makes the valid candidates part of the message. They satisfy every
     // floor, not only this one, and come from the buildable rows, not every
     // row the order carries, so none of them is a second error.
-    let buildable = supported_versions(edition.registry_pack());
+    let buildable = supported_versions(builtin_pack(edition));
     let usable = versions_satisfying(order, floors, &buildable);
     if usable.is_empty() {
         eprintln!(
             "  no supported {} target satisfies it: {}",
             edition.as_str(),
-            edition.registry_pack().supported_list(),
+            builtin_pack(edition).supported_list(),
         );
         eprintln!(
             "  fix: lower the {} floor, or build against another edition",
@@ -419,7 +418,7 @@ fn report_unplaceable_floor(
     file: &Path,
     source: &str,
     floor: &VersionFloor,
-    edition: EditionArg,
+    edition: Edition,
     order: &VersionOrder,
 ) {
     let position = LineStarts::new(source).position(source, floor.span.start);
@@ -455,10 +454,12 @@ fn report_unplaceable_floor(
     // label as a release or the pre-release of one. Scoped to an edition
     // that does not, or that places it below or above every row, the floor
     // goes inert and the author's constraint is lost.
-    let other = edition.other();
+    let other = match edition {
+        Edition::Java => Edition::Bedrock,
+        Edition::Bedrock => Edition::Java,
+    };
     let other_edition_names_it = floor.edition.is_none()
-        && other
-            .registry_pack()
+        && builtin_pack(other)
             .version_order()
             .place(&floor.version)
             .names_release();

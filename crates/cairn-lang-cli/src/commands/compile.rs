@@ -4,6 +4,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
 
@@ -11,7 +12,6 @@ use crate::artifacts::{
     PrepareRefusal, check_lock_path_is_free, prepare_artifacts, prepare_out_dir,
     write_artifacts_and_lock,
 };
-use crate::cli::EditionArg;
 use crate::floors::enforce_version_floor;
 use crate::lockfile::{default_lock_path, report_previous_target};
 use crate::pipeline::{Lowered, built_scopes, load_and_lower, report_partial_build};
@@ -20,7 +20,7 @@ use crate::target::{ResolvedTarget, resolve_target};
 
 pub(crate) fn run_compile(
     file: &Path,
-    edition: EditionArg,
+    edition: Edition,
     target: &str,
     out: Option<&Path>,
     lock: Option<&Path>,
@@ -92,7 +92,7 @@ pub(crate) fn run_compile(
 fn check_and_write(
     block_ir: &BlockArrayIr,
     source: &str,
-    edition: EditionArg,
+    edition: Edition,
     target: &ResolvedTarget,
     out_dir: &Path,
     lock_path: &Path,
@@ -127,8 +127,7 @@ mod tests {
     #[test]
     fn a_structure_the_backend_refuses_leaves_out_dir_and_lockfile_untouched() {
         let mut block_ir = lowered_probe(Edition::Java);
-        let target =
-            resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
+        let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
         let array = block_ir
             .structures
             .values()
@@ -149,7 +148,7 @@ mod tests {
         let code = check_and_write(
             &block_ir,
             "",
-            EditionArg::Java,
+            Edition::Java,
             &target,
             dir.path(),
             &lock_path,

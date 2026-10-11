@@ -21,9 +21,10 @@
 
 use std::collections::HashSet;
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::Span;
 use cairn_lang_core::intent::{BodyKind, role_of};
-use cairn_lang_formats::{builtin_bedrock, builtin_java};
+use cairn_lang_formats::builtin_pack;
 
 use crate::line_index::LineIndex;
 
@@ -442,8 +443,8 @@ fn material_items(
     source: &str,
     replace: &Span,
 ) -> Vec<lsp_types::CompletionItem> {
-    let java = &builtin_java().materials;
-    let bedrock = &builtin_bedrock().materials;
+    let java = &builtin_pack(Edition::Java).materials;
+    let bedrock = &builtin_pack(Edition::Bedrock).materials;
     let mut items = Vec::new();
     let mut order = 0;
     let mut seen = HashSet::new();
@@ -924,8 +925,8 @@ mod tests {
         sorted.sort_unstable();
         assert_eq!(sort_texts, sorted, "items must carry their own order");
 
-        let java = &builtin_java().materials;
-        let bedrock = &builtin_bedrock().materials;
+        let java = &builtin_pack(Edition::Java).materials;
+        let bedrock = &builtin_pack(Edition::Bedrock).materials;
         let expected_abstract: BTreeSet<&str> = java.tokens().chain(bedrock.tokens()).collect();
         let (canonical, abstract_items): (Vec<_>, Vec<_>) = items
             .iter()

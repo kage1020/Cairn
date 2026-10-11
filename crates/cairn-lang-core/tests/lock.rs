@@ -5,11 +5,10 @@
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::lock::{
-    HashHex, HashParseError, LOCK_SCHEMA_VERSION, LockEdition, LockError, LockInputs,
-    LockPlacement, LockTarget, LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir,
-    hash_source,
+    HashHex, HashParseError, LOCK_SCHEMA_VERSION, LockError, LockInputs, LockPlacement, LockTarget,
+    LockWalkway, Lockfile, MemberSensitivity, hash_resolved_ir, hash_source,
 };
-use cairn_lang_core::{PlaceId, PortId, SiteName, WalkwayEndpoint};
+use cairn_lang_core::{Edition, PlaceId, PortId, SiteName, WalkwayEndpoint};
 use indexmap::IndexMap;
 
 fn unit_ir(palette: Palette) -> BlockArrayIr {
@@ -81,7 +80,7 @@ fn sample_lockfile() -> Lockfile {
         source_hash: HashHex::from_bytes(b"cottage"),
         cairn_version: "2026.09".to_owned(),
         target: LockTarget {
-            edition: LockEdition::Java,
+            edition: Edition::Java,
             mc_version: "1.21.4".to_owned(),
             data_version: 4189,
         },
@@ -219,8 +218,6 @@ fn hash_parse_accepts_uppercase_hex() {
 
 #[test]
 fn lockfile_yaml_with_bad_edition_is_rejected() {
-    // `LockEdition` is a closed enum on the wire too, so a typo in the
-    // edition cannot ride along as a valid lockfile.
     let body = format!(
         "source_hash: {zero}\ncairn_version: '2026.09'\ntarget:\n  edition: jav\n  mc_version: '1.21.4'\n  data_version: 4189\ninputs:\n  registry_pack_hash: {zero}\n  constraint_catalog_hash: {zero}\nresolved_ir_hash: {zero}\nverified: true\nmember_version_sensitivity: []\n",
         zero = HashHex::ZERO_STR,

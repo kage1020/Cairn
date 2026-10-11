@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::{Edition, lower, parse, resolve};
-use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
+use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
 
@@ -76,8 +76,8 @@ pub fn example_source(name: &str) -> String {
 /// The built-in pack a build for `edition` reads.
 pub fn pack_for(edition: Edition) -> &'static RegistryPack {
     match edition {
-        Edition::Java => builtin_java(),
-        Edition::Bedrock => builtin_bedrock(),
+        Edition::Java => builtin_pack(Edition::Java),
+        Edition::Bedrock => builtin_pack(Edition::Bedrock),
     }
 }
 

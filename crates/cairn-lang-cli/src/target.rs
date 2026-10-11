@@ -1,16 +1,16 @@
 //! A `--target` resolved against its edition's data table, and the
 //! backend it selects.
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArray;
 use cairn_lang_formats::bedrock_structure::{ParityNote, prepare_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
 use cairn_lang_formats::java_structure::{OutputExt, prepare_structure};
-use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
+use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
 use crate::artifacts::PreparedStructure;
-use crate::cli::EditionArg;
 
 /// A `--target` resolved for one edition, which also selects the backend
 /// that serialises it.
@@ -80,8 +80,8 @@ impl ResolvedTarget {
     /// the lockfile.
     pub(crate) fn registry_pack(&self) -> &'static RegistryPack {
         match self {
-            ResolvedTarget::Java(_) => builtin_java(),
-            ResolvedTarget::Bedrock(_) => builtin_bedrock(),
+            ResolvedTarget::Java(_) => builtin_pack(Edition::Java),
+            ResolvedTarget::Bedrock(_) => builtin_pack(Edition::Bedrock),
         }
     }
 }
@@ -93,11 +93,11 @@ impl ResolvedTarget {
 /// a bad target after the parse and lowering diagnostics, so a syntax
 /// error is still the first problem a user is told about.
 pub(crate) fn resolve_target(
-    edition: EditionArg,
+    edition: Edition,
     target: &str,
 ) -> Result<ResolvedTarget, cairn_lang_formats::data_version::UnsupportedTarget> {
     match edition {
-        EditionArg::Java => resolve_java_target(target).map(ResolvedTarget::Java),
-        EditionArg::Bedrock => resolve_bedrock_target(target).map(ResolvedTarget::Bedrock),
+        Edition::Java => resolve_java_target(target).map(ResolvedTarget::Java),
+        Edition::Bedrock => resolve_bedrock_target(target).map(ResolvedTarget::Bedrock),
     }
 }

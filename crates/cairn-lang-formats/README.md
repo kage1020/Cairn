@@ -40,14 +40,13 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `portability::PortabilityReport` | The counts and both entry lists, kept together so the figure and the list can never describe different palettes. Fields are private for that reason. |
 | `portability::PortabilityCounts` | `portable` / `degraded` / `unsupported`, as `u32` palette-entry counts. |
 | `portability::InvalidPalette` | Returned instead of counts when the palette is not one a build could have produced. Carries every refusal, unreworded, because they are one bug's symptoms. |
-| `registry::builtin_java` / `registry::builtin_bedrock` | The block, alias, material, and data-version tables for one edition, built in and parsed once per process. |
-| `registry::load_builtin_java` / `registry::load_builtin_bedrock` | The same two packs as a `Result`, for a caller that wants the parse error rather than the panic. |
+| `registry::builtin_pack` | The block, alias, material, and data-version tables for one edition, built in and parsed once per process. |
+| `registry::load_builtin_pack` | The same pack as a `Result`, for a caller that wants the parse error rather than the panic. |
 | `registry::load_from_dir` | The same tables from an external pack directory. Loads it as a Java pack; there is no Bedrock equivalent yet. |
 | `registry::RegistryPack` | A loaded and validated pack. `#[non_exhaustive]`, so "cannot be built without passing the validators" holds outside this crate too. |
 | `registry::RegistryError` | Everything reading or validating a pack can refuse: a missing or unreadable component, a schema version past what this build understands, a failed validator. |
 | `registry::PackSource` | `Builtin` or `Path`. Carried into diagnostics so a `--registry-pack` user can tell which directory was read. |
-| `registry::PackManifest` | The `pack.json` body: schema version, edition, and the component file references. |
-| `registry::PackEdition` | `java` / `bedrock`, closed, so `"BEDROCK"` cannot ride along as a valid pack. |
+| `registry::PackManifest` | The `pack.json` body: schema version, edition, and the component file references. An unknown edition, such as `"BEDROCK"`, is refused. |
 | `registry::PackFiles` | The component references inside a manifest. New components arrive as `Option` fields, so an older pack stays loadable. |
 
 ## Registry packs

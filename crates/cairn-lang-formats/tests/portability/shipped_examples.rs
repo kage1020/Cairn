@@ -12,7 +12,7 @@ use cairn_lang_core::block_array::{BlockArrayIr, BlockState};
 use cairn_lang_formats::portability::{
     PortabilityReport, portability_for_bedrock, portability_for_java,
 };
-use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
+use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
 use crate::common::{examples, lower_source, supported_versions};
 
@@ -39,8 +39,8 @@ fn non_air_entries(ir: &BlockArrayIr) -> usize {
 
 fn editions() -> [(Edition, &'static RegistryPack); 2] {
     [
-        (Edition::Java, builtin_java()),
-        (Edition::Bedrock, builtin_bedrock()),
+        (Edition::Java, builtin_pack(Edition::Java)),
+        (Edition::Bedrock, builtin_pack(Edition::Bedrock)),
     ]
 }
 

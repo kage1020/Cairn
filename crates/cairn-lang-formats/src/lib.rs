@@ -30,6 +30,6 @@ pub use portability::{
     portability_for_java,
 };
 pub use registry::{
-    PackEdition, PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_bedrock,
-    builtin_java, load_builtin_bedrock, load_builtin_java, load_from_dir,
+    PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_pack,
+    load_builtin_pack, load_from_dir,
 };

@@ -1,5 +1,6 @@
 //! Top-level `pack.json` schema describing a registry pack.
 
+use cairn_lang_core::Edition;
 use serde::Deserialize;
 
 /// `pack.json` body.
@@ -9,38 +10,13 @@ pub struct PackManifest {
     /// incompatible shape change lands.
     pub schema_version: u32,
     /// Edition the pack targets.
-    pub edition: PackEdition,
+    pub edition: Edition,
     /// Stable identifier for the pack, surfaced in error messages.
     pub name: String,
     /// Free-form description. Informational; not consumed by the compiler.
     pub description: String,
     /// Component file references.
     pub files: PackFiles,
-}
-
-/// Edition a pack targets. Closed enum so a typo (`"jav"`, `"BEDROCK"`)
-/// cannot ride along as a valid pack.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum PackEdition {
-    /// Java Edition.
-    Java,
-    /// Bedrock Edition.
-    Bedrock,
-}
-
-impl PackEdition {
-    /// Lowercase label matching the manifest's on-disk spelling and the
-    /// CLI's `--edition` vocabulary. Used in error messages so the text a
-    /// user reads matches the flag value they typed.
-    #[must_use]
-    pub fn label(self) -> &'static str {
-        match self {
-            PackEdition::Java => "java",
-            PackEdition::Bedrock => "bedrock",
-        }
-    }
 }
 
 /// Component file references inside a registry pack.
@@ -84,7 +60,7 @@ mod tests {
         }"#;
         let m: PackManifest = serde_json::from_str(src).expect("deserialise manifest");
         assert_eq!(m.schema_version, 1);
-        assert_eq!(m.edition, PackEdition::Java);
+        assert_eq!(m.edition, Edition::Java);
         assert_eq!(m.name, "cairn-builtin-java");
         assert_eq!(m.files.data_versions, "data_versions.json");
         assert!(m.files.materials.is_none(), "materials defaults to None");
