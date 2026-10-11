@@ -1,18 +1,6 @@
-//! Semantic layer for the Intent IR.
-//!
-//! [`resolve`] walks every `theme`, `def`, `struct` and `site` of a lowered
-//! [`crate::intent::IntentModule`] and returns a [`Resolution`]: each
-//! member's `mat_slot=NAME` paired with the applied theme's slot, each theme
-//! selector row paired with the members it matches, each `place` and
-//! `connect` resolved across scopes, and the diagnostics found on the way,
-//! which `crate::check` merges into `cairn check`'s output. The module also
-//! computes the version axes `cairn info` reports ([`compute_axes`]).
-//!
-//! Per-edition blockstate (the `Lifted` semantic level) is not resolved
-//! here; `Member::resolved_state` is left untouched.
-//!
-//! The rules come from `spec/materials-themes` (slots, selectors, canonical
-//! and abstract tokens) and `spec/versioning-editions` (the version axes).
+//! Semantic layer for the Intent IR: [`resolve`] pairs each `mat_slot=` with its theme slot, each
+//! theme selector with the members it matches, and each `place` and `connect` across scopes;
+//! [`compute_axes`] computes the version axes `cairn info` reports.
 
 mod binding;
 mod connect;

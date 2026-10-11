@@ -2,11 +2,7 @@
 
 use crate::diagnostic::{Diagnostic, sort_by_position};
 
-/// Collects the findings of every `check` pass.
-///
-/// Passes push in walk order, which is not source order (a duplicate is
-/// reported where its second occurrence is reached), so the list leaves
-/// only through [`Self::into_sorted`].
+/// Collects the findings of every `check` pass; they leave only through [`Self::into_sorted`].
 #[derive(Debug, Default)]
 pub struct DiagnosticSink {
     diags: Vec<Diagnostic>,
@@ -36,8 +32,7 @@ impl DiagnosticSink {
         self.diags.is_empty()
     }
 
-    /// Drain into a `Vec` sorted by `(span.start, span.end)`, keeping push
-    /// order among diagnostics with the same span.
+    /// The findings sorted by `(span.start, span.end)`, in push order among equal spans.
     #[must_use]
     pub fn into_sorted(mut self) -> Vec<Diagnostic> {
         sort_by_position(&mut self.diags);

@@ -19,8 +19,6 @@ pub(super) fn unresolved_slot_diag(
     member: &Member,
     available_slots: &IndexMap<String, ValueWithSpan>,
 ) -> Diagnostic {
-    // Suggestions come from the applied theme only: a `mat_slot=` cannot
-    // bind across themes.
     let mut notes = Vec::with_capacity(2);
     notes.extend(
         nearest_match(slot, available_slots.keys().map(String::as_str)).map(did_you_mean_note),
@@ -40,12 +38,7 @@ pub(super) fn unresolved_slot_diag(
     }
 }
 
-/// Flag slot values that are not material tokens.
-///
-/// Takes every *declared* theme rather than the bound map: the check is
-/// local to one body and needs no resolution, so a body whose name lost
-/// the binding still gets its findings. Selector matching is the
-/// opposite case — see [`check_unmatched_selectors`].
+/// Slot values that are not material tokens, in every declared theme, shadowed ones included.
 pub(super) fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<Diagnostic>) {
     for theme in themes {
         for (slot_name, v) in &theme.slots {
@@ -70,13 +63,7 @@ pub(super) fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<
     }
 }
 
-/// Flag theme selectors that matched no member.
-///
-/// Takes the bound map, not every declared body. "Matched nothing" is a
-/// statement about a resolution this selector took part in, and a body
-/// whose name lost the binding never got to take part — reporting its
-/// selectors would blame them for a name collision reported elsewhere.
-/// The body-local counterpart is [`check_slot_targets`].
+/// Selectors that matched no member, in bound themes only: a shadowed body never took part.
 pub(super) fn check_unmatched_selectors(
     themes: &IndexMap<String, ThemeBinding>,
     applied_themes: &HashSet<String>,

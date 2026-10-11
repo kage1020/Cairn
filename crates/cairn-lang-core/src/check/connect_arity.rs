@@ -1,26 +1,5 @@
-//! `connect_arity` pass: flags every `connect` member whose positional
-//! shape is not `FROM.PORT to TO.PORT`.
-//!
-//! `spec/components-editing-sites` "Ports and `connect`" fixes that shape:
-//! three positionals, each endpoint a one-dot `<place>.<port>` reference.
-//! The parser accepts any [`Value`]s up to the newline and
-//! [`crate::intent::lower`] carries them through, while the resolver drops
-//! a row it cannot lift into a `PortRef` without a word, so without this
-//! pass the walkway would be silently absent from the build.
-//!
-//! Anchoring:
-//!   * 0 positionals: the whole `connect` row.
-//!   * 1 positional: a zero-width cursor after it, where `to TO.PORT` goes.
-//!   * 2 positionals with `to` in the middle: a zero-width cursor after `to`.
-//!   * 2 or more with another middle: that token alone, since the target
-//!     slot cannot be read until the keyword is fixed.
-//!   * 3 or more with `to` in the middle: each endpoint that is not a
-//!     one-dot reference, plus the run of trailing extras, one finding each
-//!     because they are independent fixes.
-//!
-//! The resolver's silent arms (`resolve::connect`'s `resolve_connect_row`
-//! and `port_ref_from_value`) stay for callers that resolve without
-//! checking, and accept exactly the rows this pass leaves unreported.
+//! The `connect_arity` pass: a `connect` whose positionals are not `FROM.PORT to TO.PORT`
+//! (`spec/components-editing-sites` "Ports and `connect`"), which the resolver drops silently.
 
 use crate::ast::{Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
@@ -30,9 +9,7 @@ use crate::intent::{ConnectEnd, IntentModule, Member, MemberRole};
 use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    // Every body, not only sites: a `connect` in a `struct` or `def` gets
-    // `E_MISPLACED_MEMBER` from `check::member_scope`, and its arity finding
-    // should arrive with that one rather than after it is fixed.
+    // Every body, not only sites, so the finding arrives beside `E_MISPLACED_MEMBER`.
     for body in ir.bodies() {
         walk(body.members, sink);
     }
@@ -90,9 +67,6 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
             validate_endpoint(ConnectEnd::From, from, sink);
             validate_endpoint(ConnectEnd::To, to_port, sink);
             if let (Some(first), Some(last)) = (extras.first(), extras.last()) {
-                // The resolver reads only `positional[0..3]`, so a second
-                // destination would vanish silently. One span covers the
-                // extras because the fix is the whole suffix.
                 let span = Span {
                     start: first.span.start,
                     end: last.span.end,
@@ -115,21 +89,12 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
     }
 }
 
-/// Flag `value` when it is not a one-dot `<place>.<port>` reference, the
-/// shape `resolve::connect`'s `port_ref_from_value` lifts into a `PortRef`.
-///
-/// Swapping the slots at the two call sites would still typecheck; the
-/// per-slot messages in `tests/check/connect_arity.rs` pin the pairing.
 fn validate_endpoint(end: ConnectEnd, value: &Value, sink: &mut DiagnosticSink) {
     let got = match &value.kind {
         ValueKind::DotRef(dot) if dot.tail().len() == 1 => return,
-        // The count makes an extra dot visible in a message read without
-        // the source beside it.
         ValueKind::DotRef(dot) => format!("{} with {} segments", value.describe(), dot.len()),
         _ => value.describe(),
     };
-    // The position tells two endpoint findings on one row apart in a
-    // plain-text log, which renders no spans.
     let (shape, position) = match end {
         ConnectEnd::From => ("`<from>.<port>`", "before `to`"),
         ConnectEnd::To => ("`<to>.<port>`", "after `to`"),
@@ -149,8 +114,7 @@ fn validate_endpoint(end: ConnectEnd, value: &Value, sink: &mut DiagnosticSink) 
     );
 }
 
-/// The single edit that turns this value into a port reference, when
-/// there is one; the example note shows the shape but not what to change.
+/// The single edit that turns `value` into a port reference, if there is one.
 fn repair_note(value: &Value) -> Option<String> {
     match &value.kind {
         ValueKind::Ident(name) => Some(format!(

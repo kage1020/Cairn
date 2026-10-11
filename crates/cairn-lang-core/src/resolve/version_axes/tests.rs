@@ -1,8 +1,7 @@
 use super::*;
 use crate::parse;
 
-/// A per-edition report with only the portable count set, for tests not about axis 2 or the version
-/// lists.
+/// Reports with only the portable count set.
 fn synthetic_portability(entries: &[(Edition, u32)]) -> Vec<EditionReport> {
     entries
         .iter()
@@ -83,8 +82,6 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
     assert_eq!(axes.edition_portability[0].unsupported, 0);
     assert_eq!(axes.edition_portability[1].edition, Edition::Bedrock);
     assert_eq!(axes.edition_portability[1].portable, 1);
-    // Both figures are the lengths of the lists beside them: the one thing this function decides
-    // rather than forwards.
     assert_eq!(axes.edition_portability[1].degraded, 1);
     assert_eq!(axes.edition_portability[1].unsupported, 2);
     assert_eq!(
@@ -98,9 +95,6 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
     let json = serde_json::to_string(&axes).unwrap();
     assert!(json.contains(r#""edition":"java""#), "got: {json}");
     assert!(json.contains(r#""edition":"bedrock""#), "got: {json}");
-    // The buildable row is fanned out of the same input, so it matches the portability rows one for
-    // one, and keeps `considered` because an empty `buildable` alone says nothing about how many
-    // versions were weighed.
     assert_eq!(axes.buildable_targets.len(), axes.edition_portability.len());
     let editions: Vec<Edition> = axes
         .buildable_targets
@@ -121,7 +115,6 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
         json.contains(r#""considered":["1.21.0","1.21.40"]"#),
         "got: {json}",
     );
-    // An edition with nothing unsupported carries an empty list, not a missing one.
     assert_eq!(
         axes.edition_portability[1].unsupported_entries,
         one_entry_per_reason(),
@@ -129,8 +122,7 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
     assert_eq!(axes.edition_portability[0].unsupported_entries, Vec::new());
 }
 
-/// One [`UnsupportedEntry`] per [`UnsupportedReason`] variant, so a test about all of them cannot
-/// quietly stop covering one.
+/// One [`UnsupportedEntry`] per [`UnsupportedReason`] variant.
 fn one_entry_per_reason() -> Vec<UnsupportedEntry> {
     vec![
         UnsupportedEntry {
@@ -150,8 +142,7 @@ fn one_entry_per_reason() -> Vec<UnsupportedEntry> {
     ]
 }
 
-/// Every reason's JSON, pinned here because one of the two is unreachable from a `.crn` and so
-/// never passes through a CLI test.
+/// One of these reasons is unreachable from a `.crn`, so no CLI test covers its JSON.
 #[test]
 fn every_unsupported_reason_carries_its_own_wire_shape() {
     let entries = serde_json::to_value(one_entry_per_reason()).expect("the entries serialize");
@@ -172,8 +163,6 @@ fn every_unsupported_reason_carries_its_own_wire_shape() {
             },
         ]),
     );
-    // `suggestion` is null and `aliases` empty rather than absent, so a consumer reads one shape
-    // per reason.
     let absent = serde_json::to_value(UnsupportedEntry {
         id: "minecraft:nothing_like_this".to_owned(),
         reason: UnsupportedReason::AbsentFromEdition {
@@ -201,9 +190,6 @@ fn semantic_sensitive_is_empty_without_catalog() {
     assert!(axes.semantic_sensitive.is_empty());
 }
 
-/// [`FloorPart`] copies two words [`ItemKind`] spells. Each variant serializes to its keyword, and
-/// every [`FloorOrigin`] naming a part is one of the two, so a new route fails here rather than
-/// reaching the wire as a new string.
 #[test]
 fn floor_part_spells_the_surface_keyword() {
     for (part, kind) in [

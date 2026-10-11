@@ -1,22 +1,5 @@
-//! Theme-binding resolution over an [`IntentModule`]: [`resolve`] and the
-//! per-scope walk behind it.
-//!
-//! Theme selection is deliberately narrow. With no theme in the file, no
-//! scope has one and every `mat_slot=` stays unresolved silently, since the
-//! file may be a library. With one logical theme, every scope picks it. With
-//! several, a `struct` or `def` picks none, and the choice waits for a
-//! `place ... theme=X`.
-//!
-//! A selector belongs to one theme (`spec/materials-themes`), so a scope
-//! with no bound theme gets no `selector_extras`, and
-//! `E_THEME_SELECTOR_UNMATCHED` is reported only for a theme some scope
-//! applied.
-//!
-//! Each `place` resolves the referenced `def`'s members under the place's
-//! own `theme=`, in a `site::SITE::ID` scope, and each `connect` row
-//! resolves into a [`ValidatedConnect`]. Once every scope is resolved,
-//! [`check_output_names`] compares the artifact names they would be written
-//! under.
+//! [`resolve`] and the per-scope walk behind it. With one logical theme every scope picks it; with
+//! several, a `struct` or `def` picks none and waits for a `place ... theme=X`.
 
 use std::collections::HashSet;
 
@@ -37,70 +20,30 @@ use super::theme_reference::{
     theme_variant_missing_diag,
 };
 
-/// The state every scope resolution reads from and adds to, including the
-/// two say-it-once ledgers: a cause with several emission sites, reported
-/// once between them.
+/// The state every scope resolution reads from and adds to.
 pub(super) struct ResolveCtx<'a> {
-    /// Theme bindings by name. Mutable because selector matching records
-    /// the members each selector bound to.
+    /// Theme bindings by name; selector matching records its members here.
     pub(super) themes: &'a mut IndexMap<String, ThemeBinding>,
-    /// Theme names some scope applied, so [`check_unmatched_selectors`] can
-    /// tell "matched nothing" apart from "never applied to anything".
+    /// Theme names some scope applied.
     applied_themes: &'a mut HashSet<String>,
     /// Everything the resolution found, in the order it found it.
     pub(super) diagnostics: &'a mut Vec<Diagnostic>,
-    /// Logical theme names already reported as unbindable under the pin, so
-    /// the module-level pick and every `place` naming one say it once
-    /// between them rather than once each.
+    /// Logical themes already reported as unbindable under the pin, so each is said once.
     pub(super) reported_missing: &'a mut HashSet<String>,
-    /// `(member position, slot name, theme name)` triples an
-    /// `E_UNRESOLVED_SLOT` has already been pushed for.
-    ///
-    /// A def body is resolved as its own scope and again per `place`, so
-    /// without this one finding would repeat per placement. The triple is
-    /// the finding's identity: two placements naming two themes, or two
-    /// members reading one missing slot, earn two findings.
-    ///
-    /// Written where a diagnostic is pushed, never where a body is walked:
-    /// two resolutions binding the same theme can still judge a slot
-    /// differently (sibling-variant softening applies only to a reference
-    /// naming the logical theme), so a resolution that said nothing must
-    /// leave the next free to speak.
+    /// `(member position, slot, theme)` triples already reported as `E_UNRESOLVED_SLOT`. Written
+    /// only where one is pushed: another walk of the same body may judge the slot differently.
     diagnosed: &'a mut HashSet<(usize, String, String)>,
 }
 
-/// Resolve theme bindings over the given Intent IR.
+/// The theme bindings, placements and `connect` rows of `ir` under `edition`'s theme variants.
 ///
-/// Always returns a [`Resolution`]: every distinct theme name is in
-/// `themes`, every distinct scope key in `scopes`, and every problem in
-/// `diagnostics`, in emission order.
-///
-/// INVARIANT(`FIRST_BINDING_WINS`): when two declarations produce the same
-/// binding key, the first binds and the rest are skipped, as the
-/// `place use=` lookup does and as `E_DUPLICATE_ITEM` tells the author. A
-/// `def` sized from one body and resolved from another would be a wrong
-/// build. The key is the name for a `theme`, `struct::NAME` or `def::NAME`,
-/// and `site::NAME::PLACE_ID` for a placement, so two `site` blocks of one
-/// name share a namespace and only a repeated place id collides.
-///
-/// INVARIANT(upstream-diagnosed): a skipped binding is not reported here;
-/// `check::duplicate` reports it, anchored on the name token the IR no
-/// longer carries. There is no `debug_assert` on the skip: it is ordinary
-/// malformed input, and aborting would take down the language server
-/// mid-edit. Each duplicate body is still walked for its own diagnostics.
-///
-/// `edition` selects theme variants (`spec/versioning-editions` "Java /
-/// Bedrock portability"): of two themes named alike but for a `_java` /
-/// `_bedrock` suffix, `Some(edition)` picks that edition's. `None` (no
-/// `--edition` yet) unions slot names across a logical theme's variants, so
-/// a `mat_slot=` only one variant declares does not raise
-/// `E_UNRESOLVED_SLOT`.
+/// INVARIANT(`FIRST_BINDING_WINS`): of two declarations with one binding key, the first binds.
+/// INVARIANT(upstream-diagnosed): `check::duplicate` reports the others.
 #[must_use]
 pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let mut themes: IndexMap<String, ThemeBinding> = IndexMap::new();
-    // Every declared body, including one whose name lost the binding, so
-    // a shadowed theme's bad slot value is still reported.
+    // Every declared body, shadowed ones too, so a shadowed theme's bad slot value is reported.
     let mut declared: Vec<ThemeBinding> = Vec::with_capacity(ir.themes.len());
     for theme in &ir.themes {
         let binding = build_theme_binding(theme);
@@ -111,19 +54,13 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let single_logical = single_logical_theme(&themes);
     let mut scopes: IndexMap<String, ScopeResolution> = IndexMap::new();
     let mut applied_themes: HashSet<String> = HashSet::new();
-    // See [`ResolveCtx::reported_missing`].
     let mut reported_missing: HashSet<String> = HashSet::new();
-    // See [`ResolveCtx::diagnosed`].
     let mut diagnosed: HashSet<(usize, String, String)> = HashSet::new();
 
     let (auto_picked, auto_siblings) = match single_logical.as_deref() {
         Some(logical) => {
             let picked = pick_variant(&themes, logical, edition).map(str::to_owned);
-            // The module-level half of the finding the site path reports
-            // per `place`: no variant fits the pin, so every `mat_slot=`
-            // would build air. Raised only when some member reads a slot,
-            // since otherwise the pin costs nothing. `reported_missing`
-            // stops each `place` naming the theme from repeating it.
+            // Only when some member reads a slot, since otherwise the pin costs nothing.
             if picked.is_none()
                 && let Some(pinned) = edition
                 && let Some(first) = themes.values().next()
@@ -138,8 +75,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
                 ));
             }
             let siblings = match (&picked, edition) {
-                // Only without a pin: a pinned build binds one variant, and
-                // other variants' slots must not soften its findings.
+                // Only unpinned: a pinned build's findings ignore other variants' slots.
                 (Some(name), None) => sibling_slot_names(&themes, logical, name),
                 _ => HashSet::new(),
             };
@@ -161,9 +97,7 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             resolve_struct_or_def(&s.members, auto_picked.as_deref(), &auto_siblings, &mut ctx);
         scopes.entry(struct_key(s)).or_insert(resolution);
     }
-    // Each `place` walks a def again under its own theme, but a file of
-    // defs and no `site` is worth checking, and a placement can be
-    // abandoned before its body (no `theme=`, an unresolvable origin).
+    // Each `place` walks its def again, but a file with no `site` is still worth checking;
     // `diagnosed` drops the repeats.
     for d in &ir.defs {
         let resolution =
@@ -226,34 +160,19 @@ fn def_key(d: &DefIr) -> String {
 }
 
 /// IR-side key for a single `place` inside a `site`, `site::SITE::ID`.
-///
-/// The site name keeps one `id=` placed in two sites apart in resolution
-/// and lowering. The artifact is named by
-/// [`artifact_stem`](crate::ids::artifact_stem) after the `id=` alone, so
-/// those two placements still name one file: `E_OUTPUT_NAME_COLLISION`.
 #[must_use]
 pub fn place_scope_key(site_name: &str, place_id: &str) -> String {
     format!("site::{site_name}::{place_id}")
 }
 
-/// Resolve one struct / def / place scope against a specific picked
-/// theme name.
-///
-/// `picked_theme_name` is a variant's own name (`shop_java`), not a logical
-/// one: variant selection is the caller's job. `sibling_slots` is the union
-/// of slot names in the other variants of the same logical theme, which
-/// keeps `E_UNRESOLVED_SLOT` quiet when no edition is pinned; it is empty
-/// when no siblings apply.
+/// One struct, def or place scope resolved under `picked_theme_name`, a variant's own name.
 pub(super) fn resolve_struct_or_def(
     members: &[Member],
     picked_theme_name: Option<&str>,
     sibling_slots: &HashSet<String>,
     ctx: &mut ResolveCtx<'_>,
 ) -> ScopeResolution {
-    // Structural invariant: every name reaching here came from
-    // `themes.keys()`, through `pick_variant` or `bind_place_theme`, which
-    // refuses an unknown `theme=X` earlier. A release build degrades to the
-    // unbound path rather than panicking on user data.
+    // INVARIANT(structural): every name reaching here came from `themes.keys()`.
     let bound = if let Some(name) = picked_theme_name {
         if let Some(t) = ctx.themes.get(name) {
             Some((name.to_owned(), t.slots.clone()))
@@ -287,11 +206,6 @@ pub(super) fn resolve_struct_or_def(
     resolution
 }
 
-/// Walk `members` under the scope's bound theme, filling `out` and pushing
-/// whatever the walk finds into `ctx`.
-///
-/// `bound` pairs the theme's name with its slot map because a scope has
-/// both or neither.
 fn resolve_members(
     members: &[Member],
     bound: Option<(&str, &IndexMap<String, ValueWithSpan>)>,
@@ -302,22 +216,14 @@ fn resolve_members(
     for member in members {
         let mut binding = ResolvedMemberBinding::default();
 
-        // A slot only a sibling variant declares raises nothing and binds
-        // nothing until a pin picks a variant.
-        //
-        // INVARIANT(upstream-diagnosed): a `mat_slot=` its role does not
-        // read is not looked up; `check::arguments` reports it as
-        // `W_IGNORED_ARGUMENT`, and a library caller running `resolve`
-        // alone gets no signal (`tests/resolve/silent_skip_arms.rs`).
+        // INVARIANT(upstream-diagnosed): `check::arguments` reports a `mat_slot=` its role ignores.
         if let Some(slot_name) = member.read_slot()
             && let Some((tname, slots)) = bound
         {
             match slots.get(slot_name) {
                 Some(v) => binding.slot_value = Some(v.clone()),
                 None if sibling_slots.contains(slot_name) => {}
-                // INVARIANT(already-reported): only a repeat is dropped; an
-                // identical triple means a copy is already in
-                // `ctx.diagnostics` (see `ResolveCtx::diagnosed`).
+                // INVARIANT(already-reported): an identical triple is already in `ctx.diagnostics`.
                 None => {
                     let said = (member.span.start, slot_name.to_owned(), tname.to_owned());
                     if ctx.diagnosed.insert(said) {

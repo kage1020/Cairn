@@ -1,36 +1,5 @@
-//! `nesting` pass: flags an indented body that never reaches the build.
-//!
-//! The parser hangs a body off every command, but only a `level y=N`
-//! directly in a `struct` or `def` body has a reader:
-//! [`crate::block_array`]'s `flatten_members` unwraps it into the phase
-//! buckets. Every other body is dropped before any block is placed, in one
-//! of three ways that share a code because the repair is the same (move the
-//! members):
-//!
-//! * the parent's role is not a grouping construct;
-//! * `level` inside another `level`, which lowering refuses;
-//! * `level` whose `y=` is missing or not a `u32`.
-//!
-//! A `level` in a `site` body is [`super::member_scope`]'s, since that body
-//! has no reader for the row at all. The last two shapes also earn
-//! lowering's `W_DEFERRED_MEMBER`, but `check` does not lower, and a `def`
-//! no `site` places is never lowered.
-//!
-//! A dropped member in a `struct` or `def` still takes a theme binding
-//! (`resolve::resolver`'s `resolve_members` recurses) and still feeds
-//! redstone synthesis (`collect_member` recurses); it only produces no
-//! blocks, so the message is about blocks. In a `site` body
-//! `resolve_site_placements` does not descend, so a nested row takes part
-//! in nothing.
-//!
-//! Only `children.members` are walked: `logic` and `assert` lines are read
-//! at any depth ([`super::truth`] and redstone synthesis walk nested
-//! bodies), so indentation loses nothing of theirs.
-//!
-//! The underline runs from the first indented member to the end of the last
-//! one's subtree, covering every line the author has to move; interleaved
-//! `logic` / `assert` lines fall inside it without being counted. One
-//! diagnostic per dropped subtree, at its root.
+//! The `nesting` pass: an indented body that never reaches the build. Only a `level y=N` directly
+//! in a `struct` or `def` body has a reader; every other body is dropped before any block lands.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
@@ -41,11 +10,8 @@ use super::DiagnosticSink;
 /// Why an indented body will not reach the build.
 #[derive(Debug, Clone, Copy)]
 enum Loss {
-    /// The parent's role is not a grouping construct.
     NotAGroupingConstruct,
-    /// `level` inside another `level`.
     LevelInsideLevel,
-    /// `level` with no usable `y=` to place its children at.
     LevelWithoutOffset,
 }
 
@@ -63,8 +29,7 @@ fn walk(members: &[Member], scope: BodyKind, inside_level: bool, sink: &mut Diag
         ) else {
             continue;
         };
-        // `keyword_allowlist` and `member_scope` own these rows, and their
-        // repair is the keyword line, not the indentation.
+        // `keyword_allowlist` and `member_scope` own these rows.
         if matches!(member.role, MemberRole::Other(_)) || !member.role.is_read_in(scope) {
             continue;
         }
@@ -75,19 +40,11 @@ fn walk(members: &[Member], scope: BodyKind, inside_level: bool, sink: &mut Diag
     }
 }
 
-/// Whether this member's indented body reaches the build, so another walk
-/// does not report a child of a body this pass reports as lost.
-///
-/// Only meaningful for a role the enclosing body reads.
+/// Whether this member's indented body reaches the build, for a role its body reads.
 pub(super) fn body_reaches_the_build(member: &Member, inside_level: bool) -> bool {
     loss(member, inside_level).is_none()
 }
 
-/// How this member's indented body is lost, or `None` when it reaches
-/// the build.
-///
-/// The caller has checked that the enclosing body reads the role, so a
-/// `Level` here is in a `struct` or `def`.
 fn loss(member: &Member, inside_level: bool) -> Option<Loss> {
     if !matches!(member.role, MemberRole::Level) {
         return Some(Loss::NotAGroupingConstruct);
@@ -170,8 +127,7 @@ fn geometry_primary(reason: &str, count: usize, subject: &str) -> String {
     )
 }
 
-/// Last byte of `member` including everything indented under it;
-/// [`Member::span`] covers the member's own line only.
+/// Last byte of `member`'s subtree; [`Member::span`] covers its own line only.
 fn subtree_end(member: &Member) -> usize {
     member
         .children

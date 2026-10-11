@@ -1,5 +1,4 @@
-//! `E_OUTPUT_NAME_COLLISION`: the names a build would write its artifacts
-//! under, compared once every scope is resolved.
+//! `E_OUTPUT_NAME_COLLISION`: the names a build would write its artifacts under.
 
 use std::collections::HashSet;
 
@@ -13,30 +12,8 @@ use crate::intent::{IntentModule, MemberRole};
 use super::resolution::{PortRef, ScopeResolution, ValidatedConnect};
 use super::resolver::{place_scope_key, struct_key};
 
-/// `E_OUTPUT_NAME_COLLISION`: two scopes the build would write to one
-/// file.
-///
-/// The artifacts are the ones a build would write, as far as resolution
-/// can tell: every `struct` with a `size=`, every resolved `place` whose
-/// `def` has a `size=`, and one walkway per endpoint pair
-/// ([`ValidatedConnect::walkway_pair`]) whose places are both counted,
-/// named after the pair's first row whose scope key can be built.
-///
-/// That is not exactly what a build writes, which is why the finding says
-/// "would". It still counts an artifact lowering refuses for its size
-/// (`W_STRUCTURE_TOO_LARGE`, `W_WALKWAY_BLOCKED`), and when lowering
-/// refuses a pair's first row and lays a later one written the other way
-/// round, that file's name was not counted. `cairn compile` compares the
-/// names lowering produced again before writing any.
-///
-/// Names are [`artifact_stem`] folded to lower case, so `Hut` and `hut`
-/// collide on every host, not only on case-insensitive file systems. A
-/// scope key already seen is one scope declared twice, which
-/// `E_DUPLICATE_ITEM` or `E_DUPLICATE_PLACE_ID` reports, so it is skipped.
-///
-/// Artifacts are compared structs, then places, then walkways, each in
-/// declaration order, and the finding anchors on the second of a pair in
-/// that order, even when it comes first in the source.
+/// Two scopes a build would write to one file, compared by [`artifact_stem`] folded to lower case
+/// so `Hut` and `hut` collide on every host. A scope key seen twice is another code's finding.
 pub(super) fn check_output_names(
     ir: &IntentModule,
     scopes: &IndexMap<String, ScopeResolution>,
@@ -89,16 +66,12 @@ pub(super) fn check_output_names(
     }
 }
 
-/// One artifact [`check_output_names`] compares: its scope key, where it
-/// is declared, and how the finding names it.
 struct OutputArtifact {
     key: String,
     span: Span,
     label: String,
 }
 
-/// The artifacts [`check_output_names`] compares, in the order it
-/// compares them; its doc says which are counted and why.
 fn output_artifacts(
     ir: &IntentModule,
     scopes: &IndexMap<String, ScopeResolution>,
@@ -123,8 +96,7 @@ fn output_artifacts(
                 .filter_map(move |m| {
                     let id = m.id.as_deref()?;
                     let key = place_scope_key(&site.name, id);
-                    // The same lookup lowering makes before it reports
-                    // `W_DEF_NO_SIZE` and skips the placement.
+                    // The lookup lowering makes before it skips the placement with `W_DEF_NO_SIZE`.
                     let sized = m
                         .intent_state
                         .get("use")
@@ -154,13 +126,10 @@ fn output_artifacts(
         };
         let Ok(key) = WalkwayScopeKey::from_parts(&c.site, &endpoint(&c.from), &endpoint(&c.to))
         else {
-            // Lowering refuses the same key with `W_INVALID_WALKWAY_IDENT`
-            // and writes no file (`lower_connects`), so there is nothing to
-            // collide with.
+            // Lowering refuses this key with `W_INVALID_WALKWAY_IDENT` and writes no file.
             return None;
         };
-        // Recorded only for a row that gets this far, as lowering records
-        // a pair only once it lays it.
+        // Recorded only here, as lowering records a pair only once it lays it.
         seen_pairs.insert(c.walkway_pair()).then(|| OutputArtifact {
             key: key.as_str().to_owned(),
             span: c.span.clone(),

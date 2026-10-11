@@ -1,21 +1,13 @@
-//! `type_mismatch` pass — flags label-typed keys with non-label values and
-//! `size=` with a non-`Size` value.
-//!
-//! Walks the surface AST, where every value still has its type and span
-//! whether or not lowering hoisted it out of `IntentState`.
+//! The `type_mismatch` pass: a label key with a non-label value, or `size=` with a non-`WxH` one.
+//! It walks the surface AST, where a value lowering hoisted still has its type and span.
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 
 use super::DiagnosticSink;
 
-/// Keys whose value is a label and whose mistyping is otherwise silent.
-///
-/// `circuit region=` is left to `block_array`'s `W_DEFERRED_MEMBER`, and
-/// `east_of=` / `north_of=` to `E_INVALID_PLACE_ORIGIN`, so no value is
-/// reported under two codes. A mistyped `use=` or `theme=` makes
-/// `resolve_site_placements` drop the placement just as a row with no
-/// `use=` does, so this finding is what tells the two apart.
+/// Label keys whose mistyping is otherwise silent. `region=`, `east_of=` and `north_of=` are
+/// left out because another code already reports them.
 const LABEL_KEYS: &[&str] = &["id", "class", "mat_slot", "use", "theme"];
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {

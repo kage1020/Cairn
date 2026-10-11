@@ -7,14 +7,7 @@ use crate::ast::{Value, ValueKind};
 use crate::error::Span;
 use crate::intent::ValueWithSpan;
 
-/// Classification of a `@TOKEN` value used as a theme slot target.
-///
-/// Drawn from `spec/materials-themes` "Canonical vocabulary": a canonical
-/// token names a concrete Minecraft meaning (`@oak_planks`,
-/// `@oak_log[axis=x]`), an abstract token names an aesthetic choice that the
-/// theme policy may downgrade (`@floor.wood.broadleaf`). Anything else — a
-/// bare identifier, a string, a list — is `NotAToken` and surfaces as
-/// `E_UNKNOWN_SLOT_TARGET`.
+/// The kind of value a theme slot binds (`spec/materials-themes` "Canonical vocabulary").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TokenKind {
     /// Concrete canonical block token (`@oak_planks`, `@oak_log[axis=x]`).
@@ -25,12 +18,7 @@ pub enum TokenKind {
     NotAToken,
 }
 
-/// Classify the value behind a `slot NAME -> VALUE` binding (or any other
-/// `@`-prefixed token reference).
-///
-/// A `.` before any `[` makes the token abstract (`@floor.wood.broadleaf`);
-/// anything else, including a state literal such as `@oak_log[axis=x]`
-/// whatever its state values contain, is canonical.
+/// Classifies a token value: a `.` before any `[` makes it abstract, anything else canonical.
 #[must_use]
 pub fn classify_token(value: &Value) -> TokenKind {
     let ValueKind::Token(inner) = &value.kind else {
@@ -51,9 +39,6 @@ pub fn classify_token(value: &Value) -> TokenKind {
 }
 
 /// Resolver-side view of one `theme` block.
-///
-/// The IR's slot map and selector rules, each selector annotated with the
-/// members it matched.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ThemeBinding {
     /// Theme name.
@@ -76,9 +61,7 @@ pub struct SelectorMatch {
     pub attrs: IndexMap<String, ValueWithSpan>,
     /// `key=value` bindings on the RHS of the arrow.
     pub bindings: IndexMap<String, ValueWithSpan>,
-    /// Byte ranges of every member this selector matched. Empty is
-    /// `E_THEME_SELECTOR_UNMATCHED` only when some scope applied the theme
-    /// and the keyword is known.
+    /// Byte ranges of every member this selector matched.
     #[serde(skip)]
     pub matched_member_spans: Vec<Span>,
     /// Byte range of the originating `KEYWORD[...] -> ...` row in source.
@@ -123,8 +106,7 @@ mod tests {
 
     #[test]
     fn classify_token_rejects_empty_token() {
-        // The parser does not emit this shape, but the classifier owns the
-        // policy.
+        // The parser never emits this shape.
         assert_eq!(classify_token(&token("")), TokenKind::NotAToken);
     }
 }

@@ -1,22 +1,6 @@
-//! Diagnostic-collecting validation over a parsed [`Module`] and its
-//! [`IntentModule`].
-//!
-//! Every pass is non-fatal: each pushes its findings into a
-//! [`DiagnosticSink`], and [`check`] runs them all before sorting by source
-//! position. The sort is stable, so the pass order in [`check`] decides the
-//! order of findings that share a span.
-//!
-//! `crate::intent::lower` is total and never rejects input, so a structural
-//! surprise (an unknown keyword, a duplicate `size=`, an `id=` whose value
-//! is not a label) surfaces here as a [`Diagnostic`] rather than a parse
-//! error, and one `cairn check` reports every problem in a file.
-//!
-//! Two passes run outside [`check`]. Block-array lowering raises codes
-//! [`check`] never sees; `cairn check --edition E --target V` lowers beside
-//! it and merges both streams. [`weigh_intended_targets`] needs the target
-//! edition's `DataVersion` table, which reaches this crate only as a
-//! [`crate::resolve::VersionOrder`] built from a registry pack, so a caller
-//! that has one runs it beside [`check`] and merges the findings.
+//! Validation passes over a parsed [`Module`] and its [`IntentModule`], collected by [`check`].
+//! Block-array lowering and [`weigh_intended_targets`] raise codes [`check`] never sees; a caller
+//! that runs them merges their findings itself.
 
 mod arguments;
 mod binding;
@@ -46,19 +30,10 @@ use crate::ast::Module;
 use crate::edition::Edition;
 use crate::intent::IntentModule;
 
-/// Run every validation pass over `module` and its IR, including
-/// [`crate::resolve::resolve`], and return the findings sorted by
-/// `(span.start, span.end)`.
+/// Every pass's findings, [`crate::resolve::resolve`]'s included, sorted by span.
 ///
-/// No pass short-circuits on another's findings. The resolver's diagnostics
-/// are already in the list, so a caller holding its own
-/// [`crate::resolve::Resolution`] must not append `Resolution::diagnostics`
-/// to it.
-///
-/// `edition` selects theme variants (`spec/versioning-editions` "Java /
-/// Bedrock portability"). `None` means no target is picked yet: the
-/// resolver then unions slot names across a theme's variants, so a
-/// `mat_slot=` only one variant declares does not raise `E_UNRESOLVED_SLOT`.
+/// `edition` picks theme variants; `None` unions slot names across them
+/// (`spec/versioning-editions` "Java / Bedrock portability").
 #[must_use]
 pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
     let mut sink = DiagnosticSink::new();
@@ -88,30 +63,17 @@ mod tests {
     use super::{DiagnosticCode, DiagnosticCode as C, Severity};
 
     /// Which pass raises a code, and therefore whether [`check`] can see it.
-    ///
-    /// The match is exhaustive on purpose. `DiagnosticCode` is
-    /// `#[non_exhaustive]` for downstream crates but not in-crate, so a new
-    /// variant stops this file compiling until someone says where it comes
-    /// from.
     #[derive(Debug, PartialEq, Eq)]
     enum RaisedBy {
-        /// `crate::parse`. A source that reaches [`check`] has parsed, so
-        /// commands build this from the [`crate::error::ParseError`].
         Parser,
-        /// A pass [`check`] runs directly.
         Syntactic,
-        /// `crate::resolve::resolve`, whose diagnostics [`check`] merges in.
         Resolver,
-        /// Raised from both `crate::resolve` and `crate::block_array`, so
-        /// `cairn check` reports a subset of the occurrences a build does.
         ResolverAndLowering,
-        /// `crate::block_array` only. [`check`] never runs that pass.
         LoweringOnly,
-        /// [`weigh_intended_targets`], which needs a registry pack's
-        /// version table and so runs beside [`check`], never inside it.
         NeedsVersionTable,
     }
 
+    /// No wildcard arm, so a new code must say which pass raises it.
     fn raised_by(code: DiagnosticCode) -> RaisedBy {
         match code {
             C::Parse => RaisedBy::Parser,
@@ -190,8 +152,6 @@ mod tests {
         names
     }
 
-    /// A consumer that calls only [`check`] (the LSP, the wasm surface) sees
-    /// none of these, so another one landing here should be a decision.
     #[test]
     fn the_intended_target_codes_are_the_ones_check_cannot_reach() {
         assert_eq!(
@@ -201,25 +161,19 @@ mod tests {
                 "W_INTENDED_TARGET_CAP",
                 "W_INTENDED_TARGET_UNSUPPORTED",
             ],
-            "a code whose pass needs a registry pack's version table is \
-             invisible to `check`, so a caller that only calls `check` \
-             reports a source clean that a build refuses",
+            "these codes are invisible to `check`",
         );
     }
 
-    /// Every consumer renders a parse failure under this one code.
     #[test]
     fn exactly_one_code_belongs_to_the_parser() {
         assert_eq!(
             codes_where(|c| raised_by(c) == RaisedBy::Parser),
             ["E_PARSE"],
-            "a parse failure renders under one code, whatever shape it took",
+            "a parse failure renders under one code",
         );
     }
 
-    /// An unpinned `cairn check` passes a source raising one of these that
-    /// `cairn compile` then refuses; only `--edition E --target V` lowers and
-    /// catches them. A new entry widens that gap, so it should be a decision.
     #[test]
     fn check_sees_every_error_code_except_the_lowering_only_ones() {
         let escapes = codes_where(|c| {
@@ -232,9 +186,7 @@ mod tests {
                 "E_UNKNOWN_ABSTRACT_TOKEN",
                 "E_UNKNOWN_ID",
             ],
-            "an Error-severity code raised only during block-array lowering \
-             cannot be reported by `cairn check`, so a CI job gating on it \
-             goes green on a source `cairn compile` refuses",
+            "an Error raised only in lowering passes an unpinned `cairn check`",
         );
     }
 }

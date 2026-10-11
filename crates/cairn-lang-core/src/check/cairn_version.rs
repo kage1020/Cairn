@@ -1,21 +1,5 @@
-//! `cairn_version` pass: reads the `@cairn` header's declared language
-//! version, and says so when it cannot.
-//!
-//! Nothing branches on the value, but `spec/index` gives it a job ("so a
-//! future compiler can parse and warn correctly") that an unreadable value
-//! cannot do. The pass warns when the value is not a `CalVer`, and when it
-//! is later than this build, since an unknown keyword or argument elsewhere
-//! in the file may then be about the gap rather than the source. A new
-//! syntactic form never reaches this pass because it fails to parse, so
-//! [`crate::calver::future_version_note`] carries the gap to that parse
-//! error as a note.
-//!
-//! Both are warnings because neither changes a voxel (`spec/lint` "Error vs
-//! warning"). `@requires` is an error by the same rule: its floor reaches
-//! `cairn info`'s compatible range and the `--target` gate.
-//!
-//! Only the surface AST is walked, because lowering does not carry headers
-//! into the IR.
+//! The `cairn_version` pass: warns when the `@cairn` header's version is not a `CalVer`, or is
+//! later than this build.
 
 use crate::CAIRN_VERSION;
 use crate::ast::{Header, Module};
@@ -26,8 +10,6 @@ use crate::error::Span;
 use super::DiagnosticSink;
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
-    // `None` only for a build whose own version is not a `CalVer`, which the
-    // release process cannot produce; then only the future check stands down.
     let compiler = parse_language_version(CAIRN_VERSION).ok();
     for header in &module.headers {
         let Header::Cairn { version, span } = header else {
@@ -61,10 +43,7 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
     }
 }
 
-/// The finding for a file written against a later language than this build.
-///
-/// Both versions are quoted as written, not as parsed: `2026.06` and
-/// `2026.6` compare equal, but the author edits the string they wrote.
+/// Quotes both versions as written: the author edits the string, not the parsed value.
 fn future_diag(declared: &str, span: &Span) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::FutureCairnVersion,
