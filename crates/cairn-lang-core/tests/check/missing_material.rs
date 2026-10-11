@@ -42,24 +42,11 @@
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
 use cairn_lang_core::intent::MemberRole;
-use cairn_lang_core::{check, lower, parse, resolve};
+use cairn_lang_core::{lower, parse, resolve};
+
+use crate::common::{diagnose, of_code};
 
 const THEME: &str = "theme t:\n  slot m -> @oak_planks\n\n";
-
-/// Every finding `cairn check` reports for `src`.
-fn findings(src: &str) -> Vec<Diagnostic> {
-    let module = parse(src).expect("parse");
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-/// The `E_MISSING_MATERIAL` findings in `src`.
-fn missing(src: &str) -> Vec<Diagnostic> {
-    findings(src)
-        .into_iter()
-        .filter(|d| d.code == DiagnosticCode::MissingMaterial)
-        .collect()
-}
 
 fn codes(found: &[Diagnostic]) -> Vec<&'static str> {
     found.iter().map(|d| d.code.as_str()).collect()
@@ -68,12 +55,12 @@ fn codes(found: &[Diagnostic]) -> Vec<&'static str> {
 #[test]
 fn walls_with_no_mat_slot_is_refused() {
     let src = format!("{THEME}struct s size=3x3\n  walls class=outer height=6\n");
-    let found = missing(&src);
+    let found = of_code(&src, DiagnosticCode::MissingMaterial);
     assert_eq!(
         found.len(),
         1,
         "the member paints nothing and nothing else says so; got {:?}",
-        codes(&findings(&src)),
+        codes(&diagnose(&src)),
     );
     assert_eq!(
         found[0].code.severity(),
@@ -91,10 +78,10 @@ fn walls_with_no_mat_slot_is_refused() {
 fn floor_with_no_mat_slot_is_refused() {
     let src = format!("{THEME}struct s size=3x3\n  floor id=base\n");
     assert_eq!(
-        missing(&src).len(),
+        of_code(&src, DiagnosticCode::MissingMaterial).len(),
         1,
         "a floor takes the same route to a block as a walls; got {:?}",
-        codes(&findings(&src)),
+        codes(&diagnose(&src)),
     );
 }
 
@@ -108,9 +95,9 @@ walls mat_slot=m height=4\n  \
 window class=arrow_slit side=front repeat=3 step=2 y=2 size=1x2\n"
     );
     assert!(
-        missing(&src).is_empty(),
+        of_code(&src, DiagnosticCode::MissingMaterial).is_empty(),
         "a window without a material is a hole, and holes are a feature; got {:?}",
-        codes(&findings(&src)),
+        codes(&diagnose(&src)),
     );
 }
 
@@ -130,9 +117,9 @@ door id=d side=front at=center\n  \
 pressure_plate id=p at=front.outside offset=0 y=0\n"
     );
     assert!(
-        missing(&src).is_empty(),
+        of_code(&src, DiagnosticCode::MissingMaterial).is_empty(),
         "each of these puts a block down without a `mat_slot=`; got {:?}",
-        codes(&findings(&src)),
+        codes(&diagnose(&src)),
     );
 
     // And they really do put one down. Without this the assertion above
@@ -159,7 +146,7 @@ pressure_plate id=p at=front.outside offset=0 y=0\n"
 #[test]
 fn a_slot_no_theme_declares_is_the_resolvers_finding_and_not_this_one() {
     let src = format!("{THEME}struct s size=3x3\n  walls mat_slot=absent height=4\n");
-    let found = findings(&src);
+    let found = diagnose(&src);
     assert!(
         found
             .iter()
@@ -188,7 +175,7 @@ fn a_slot_no_theme_declares_is_the_resolvers_finding_and_not_this_one() {
 fn a_mat_slot_whose_value_is_not_a_label_is_the_type_findings_and_not_this_one() {
     for value in ["@oak_planks", "foo.bar"] {
         let src = format!("{THEME}struct s size=3x3\n  walls mat_slot={value} height=4\n");
-        let found = findings(&src);
+        let found = diagnose(&src);
         assert!(
             found
                 .iter()
@@ -212,8 +199,8 @@ fn a_module_with_no_theme_still_names_the_missing_material() {
     // all, which is true of a module that declares none and of one that
     // declares ten.
     let src = "struct s size=3x3\n  walls height=4\n";
-    let found = missing(src);
-    assert_eq!(found.len(), 1, "got {:?}", codes(&findings(src)));
+    let found = of_code(src, DiagnosticCode::MissingMaterial);
+    assert_eq!(found.len(), 1, "got {:?}", codes(&diagnose(src)));
     // The advice has to be followable. "Name a slot the applied theme
     // declares" is not, in a file with no theme to declare one.
     let note = &found[0].notes[0].message;
@@ -221,7 +208,10 @@ fn a_module_with_no_theme_still_names_the_missing_material() {
         note.contains("declares no `theme`"),
         "the advice must say what has to exist first; got: {note}",
     );
-    let with_theme = missing(&format!("{THEME}struct s size=3x3\n  walls height=4\n"));
+    let with_theme = of_code(
+        &format!("{THEME}struct s size=3x3\n  walls height=4\n"),
+        DiagnosticCode::MissingMaterial,
+    );
     assert!(
         with_theme[0].notes[0].message.contains("applied theme"),
         "and it must point at the slot vocabulary when there is one; got: {}",
@@ -239,10 +229,10 @@ level y=0\n    \
 floor id=inner\n"
     );
     assert_eq!(
-        missing(&src).len(),
+        of_code(&src, DiagnosticCode::MissingMaterial).len(),
         2,
         "one in the def, one under the level; got {:?}",
-        codes(&findings(&src)),
+        codes(&diagnose(&src)),
     );
 }
 
@@ -286,9 +276,9 @@ site x:\n  floor\n"
     ];
     for (what, src) in cases {
         assert!(
-            missing(&src).is_empty(),
+            of_code(&src, DiagnosticCode::MissingMaterial).is_empty(),
             "{what}: the owning pass already covers the whole subtree; got {:?}",
-            codes(&findings(&src)),
+            codes(&diagnose(&src)),
         );
     }
 }
@@ -393,7 +383,7 @@ fn check_refuses_exactly_the_bare_members_that_change_nothing() {
         );
 
         let changed_the_build = (&with.0, &with.1) != (&without.0, &without.1);
-        let refused = !missing(&with_src).is_empty();
+        let refused = !of_code(&with_src, DiagnosticCode::MissingMaterial).is_empty();
         assert_eq!(
             refused,
             !changed_the_build,

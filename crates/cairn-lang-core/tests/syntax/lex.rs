@@ -1,24 +1,9 @@
 //! Lexer acceptance tests.
 
-use std::num::NonZeroU32;
-
-use cairn_lang_core::error::{LexError, Position};
+use cairn_lang_core::error::LexError;
 use cairn_lang_core::lex::{TokenKind, lex};
 
-fn pos(line: u32, col: u32) -> Position {
-    Position {
-        line: NonZeroU32::new(line).expect("line"),
-        col: NonZeroU32::new(col).expect("col"),
-    }
-}
-
-fn kinds(source: &str) -> Vec<TokenKind> {
-    lex(source)
-        .expect("lex")
-        .into_iter()
-        .map(|t| t.kind)
-        .collect()
-}
+use crate::{kinds, pos};
 
 #[test]
 fn lexes_simple_command() {
@@ -297,13 +282,7 @@ mod refusals {
     use cairn_lang_core::error::LexError;
     use cairn_lang_core::lex::{TokenKind, lex};
 
-    fn kinds(source: &str) -> Vec<TokenKind> {
-        lex(source)
-            .expect("lex")
-            .into_iter()
-            .map(|t| t.kind)
-            .collect()
-    }
+    use crate::kinds;
 
     fn message(source: &str) -> String {
         lex(source).expect_err("lex should refuse").user_message()

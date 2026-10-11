@@ -114,23 +114,7 @@ use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
 use cairn_lang_core::{check, lower, parse, resolve};
 
-struct Outcome {
-    walkways: usize,
-    diagnostics: Vec<Diagnostic>,
-}
-
-fn run(src: &str) -> Outcome {
-    let module = parse(src).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let mut out: BlockArrayIr = lower_to_block_array(&ir, &resolution, None);
-    let mut combined = resolution.diagnostics;
-    combined.append(&mut out.diagnostics);
-    Outcome {
-        walkways: out.walkways.len(),
-        diagnostics: combined,
-    }
-}
+use crate::common::{duo_with, lowered_with_resolver_diagnostics};
 
 fn count(diagnostics: &[Diagnostic], code: DiagnosticCode) -> usize {
     diagnostics.iter().filter(|d| d.code == code).count()
@@ -168,9 +152,10 @@ place id=anchor use=hut theme=plain at=origin\n  \
 place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
 connect anchor.entry to peer.entry path=@gravel\n"
     );
-    let outcome = run(&src);
+    let outcome = lowered_with_resolver_diagnostics(&src);
     assert_eq!(
-        outcome.walkways, 1,
+        outcome.walkways.len(),
+        1,
         "baseline: a well-formed connect must emit exactly one walkway",
     );
     assert_eq!(
@@ -200,9 +185,10 @@ place id=anchor use=hut theme=plain at=origin\n  \
 place id=silent         theme=plain east_of=anchor gap=4\n  \
 connect anchor.entry to silent.entry path=@gravel\n"
     );
-    let outcome = run(&src);
+    let outcome = lowered_with_resolver_diagnostics(&src);
     assert_eq!(
-        outcome.walkways, 0,
+        outcome.walkways.len(),
+        0,
         "a connect targeting a `use=`-less place must drop its walkway",
     );
     assert_eq!(
@@ -230,9 +216,10 @@ place id=anchor    use=hut theme=plain at=origin\n  \
 place id=themeless use=hut             east_of=anchor gap=4\n  \
 connect anchor.entry to themeless.entry path=@gravel\n"
     );
-    let outcome = run(&src);
+    let outcome = lowered_with_resolver_diagnostics(&src);
     assert_eq!(
-        outcome.walkways, 0,
+        outcome.walkways.len(),
+        0,
         "a connect targeting a `theme=`-less place must drop its walkway",
     );
     assert_eq!(
@@ -261,7 +248,7 @@ site duo:\n  \
 place id=anchor use=hut theme=plain at=origin\n  \
 place           use=hut theme=plain east_of=anchor gap=4\n"
     );
-    let outcome = run(&src);
+    let outcome = lowered_with_resolver_diagnostics(&src);
     assert_eq!(
         count(&outcome.diagnostics, DiagnosticCode::IncompletePlace),
         1,
@@ -291,9 +278,10 @@ site duo:\n  \
 place id=anchor use=hut theme=plain at=origin\n  \
 connect anchor.entry\n"
     );
-    let outcome = run(&src);
+    let outcome = lowered_with_resolver_diagnostics(&src);
     assert_eq!(
-        outcome.walkways, 0,
+        outcome.walkways.len(),
+        0,
         "a `connect` row missing the `to` half must not lay a walkway",
     );
     assert_eq!(
@@ -324,9 +312,10 @@ site duo:\n  \
 place id=anchor use=hut theme=plain at=origin\n  \
 connect anchor.entry to\n"
     );
-    let outcome = run(&src);
+    let outcome = lowered_with_resolver_diagnostics(&src);
     assert_eq!(
-        outcome.walkways, 0,
+        outcome.walkways.len(),
+        0,
         "a `connect` row missing the target port must not lay a walkway",
     );
     assert_eq!(
@@ -357,9 +346,10 @@ place id=anchor use=hut theme=plain at=origin\n  \
 place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
 connect anchor.entry xxx peer.entry path=@gravel\n"
     );
-    let outcome = run(&src);
+    let outcome = lowered_with_resolver_diagnostics(&src);
     assert_eq!(
-        outcome.walkways, 0,
+        outcome.walkways.len(),
+        0,
         "a `connect` row with a non-`to` separator must not lay a walkway through the resolver-only path",
     );
     assert_eq!(
@@ -373,18 +363,6 @@ connect anchor.entry xxx peer.entry path=@gravel\n"
         0,
         "the cascade fires from `validate_port`, which is never reached when the guard rejects the shape upstream",
     );
-}
-
-/// Site prologue plus two placed huts, so a `connect` row can be
-/// appended with both endpoints resolvable when their shape is right.
-fn duo(connect_row: &str) -> String {
-    format!(
-        "{PROLOGUE}\
-site duo:\n  \
-place id=anchor use=hut theme=plain at=origin\n  \
-place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
-{connect_row}\n"
-    )
 }
 
 /// An endpoint that is not a dotted reference at all takes the same
@@ -408,9 +386,10 @@ fn connect_with_non_reference_endpoint_silently_returns_without_diagnostics() {
         "connect @gravel to peer.entry path=@gravel",
         "connect 1 to 2 path=@gravel",
     ] {
-        let outcome = run(&duo(row));
+        let outcome = lowered_with_resolver_diagnostics(&duo_with(row));
         assert_eq!(
-            outcome.walkways, 0,
+            outcome.walkways.len(),
+            0,
             "`{row}` must not lay a walkway through the resolver-only path",
         );
         assert_eq!(
@@ -435,11 +414,12 @@ fn connect_with_non_reference_endpoint_silently_returns_without_diagnostics() {
 /// tests above would all still pass with the count bound removed.
 #[test]
 fn connect_with_extra_positionals_lays_no_walkway() {
-    let outcome = run(&duo(
+    let outcome = lowered_with_resolver_diagnostics(&duo_with(
         "connect anchor.entry to peer.entry c.exit path=@gravel",
     ));
     assert_eq!(
-        outcome.walkways, 0,
+        outcome.walkways.len(),
+        0,
         "an over-arity row must not lay a walkway through the resolver-only path",
     );
     assert_eq!(
@@ -463,9 +443,10 @@ fn connect_with_extra_segment_endpoint_lays_no_walkway() {
         "connect anchor.entry to peer.entry.x path=@gravel",
         "connect anchor.entry.x to peer.entry.y path=@gravel",
     ] {
-        let outcome = run(&duo(row));
+        let outcome = lowered_with_resolver_diagnostics(&duo_with(row));
         assert_eq!(
-            outcome.walkways, 0,
+            outcome.walkways.len(),
+            0,
             "`{row}` must not lay the walkway that truncating the extra segment would produce",
         );
         assert_eq!(
@@ -557,7 +538,7 @@ place id=\"a/b\" use=hut theme=plain east_of=anchor gap=4\n  \
 place id=peer   use=hut theme=plain east_of=\"a/b\" gap=4\n  \
 connect anchor.entry to peer.entry path=@gravel\n"
     );
-    let outcome = run(&src);
+    let outcome = lowered_with_resolver_diagnostics(&src);
     let codes: Vec<&str> = outcome
         .diagnostics
         .iter()
@@ -574,7 +555,8 @@ connect anchor.entry to peer.entry path=@gravel\n"
         outcome.diagnostics,
     );
     assert_eq!(
-        outcome.walkways, 0,
+        outcome.walkways.len(),
+        0,
         "the walkway goes with the row that is not placed",
     );
 
@@ -631,9 +613,10 @@ place id=anchor use=hut theme=plain at=origin\n  \
 {row}\n  \
 connect anchor.entry to silent.entry path=@gravel\n"
         );
-        let outcome = run(&src);
+        let outcome = lowered_with_resolver_diagnostics(&src);
         assert_eq!(
-            outcome.walkways, 0,
+            outcome.walkways.len(),
+            0,
             "`{row}` must drop the placement, and the walkway with it",
         );
         assert_eq!(

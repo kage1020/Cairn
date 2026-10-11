@@ -21,11 +21,10 @@
 //! paint, not by anything here — these tests hold the line once it is.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState};
 
-use crate::common::lowered;
+use crate::common::{examples, lowered};
 
 /// Palette slots no voxel names, rendered for the failure message.
 ///
@@ -60,32 +59,9 @@ fn assert_every_entry_is_used(label: &str, ir: &BlockArrayIr) {
     }
 }
 
-fn examples() -> Vec<PathBuf> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples");
-    let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
-        .map(|entry| entry.expect("dir entry").path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "crn"))
-        .collect();
-    found.sort();
-    // A directory walk that finds nothing turns every assertion below into
-    // a claim about the empty set.
-    assert!(
-        found.len() >= 10,
-        "expected the shipped examples, found {found:?}",
-    );
-    found
-}
-
 #[test]
 fn no_shipped_example_ships_a_palette_entry_it_does_not_use() {
-    for path in examples() {
-        let source = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let name = path.file_name().expect("file name").to_string_lossy();
+    for (name, source) in examples() {
         assert_every_entry_is_used(&name, &lowered(&source));
     }
 }

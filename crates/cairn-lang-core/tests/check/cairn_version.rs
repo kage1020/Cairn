@@ -18,35 +18,20 @@
 use cairn_lang_core::ast::Header;
 use cairn_lang_core::calver::{LanguageVersion, parse_language_version};
 use cairn_lang_core::check::{DiagnosticCode, LineStarts, Severity};
-use cairn_lang_core::{CAIRN_VERSION, Diagnostic, check, diagnose_parse_failure, lower, parse};
+use cairn_lang_core::{CAIRN_VERSION, Diagnostic, diagnose_parse_failure, parse};
 
-/// The body every fixture shares, so the header is the only variable.
-const BODY: &str = "struct s size=2x2\n  floor mat_slot=f\n";
-
-fn diagnostics(header: &str) -> Vec<Diagnostic> {
-    let source = format!("{header}{BODY}");
-    let module = parse(&source).expect("the fixtures all parse");
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-fn codes(header: &str) -> Vec<&'static str> {
-    diagnostics(header)
-        .iter()
-        .map(|d| d.code.as_str())
-        .collect()
-}
+use crate::common::{codes, diagnose, with_header};
 
 /// The one finding of `code` this header earns.
 fn only(header: &str, code: DiagnosticCode) -> Diagnostic {
-    let found = diagnostics(header);
+    let found = diagnose(&with_header(header));
     let mut matching: Vec<_> = found.iter().filter(|d| d.code == code).cloned().collect();
     assert_eq!(
         matching.len(),
         1,
         "{header:?} should report exactly one {}, got {:?}",
         code.as_str(),
-        codes(header),
+        codes(&with_header(header)),
     );
     matching.remove(0)
 }
@@ -65,7 +50,7 @@ fn the_spelling_every_shipped_file_uses_is_accepted() {
         "@cairn 2026.01.0\n",
     ] {
         assert!(
-            !codes(header).contains(&"W_INVALID_CAIRN_VERSION"),
+            !codes(&with_header(header)).contains(&"W_INVALID_CAIRN_VERSION"),
             "{header:?} is a language version",
         );
     }
@@ -130,7 +115,7 @@ fn the_finding_lands_on_the_directive_that_carries_it() {
     // The span is the whole `@cairn …` line, the way `@requires` anchors.
     let header = "@cairn banana\n";
     let found = only(header, DiagnosticCode::InvalidCairnVersion);
-    let source = format!("{header}{BODY}");
+    let source = with_header(header);
     assert_eq!(&source[found.span.clone()], "@cairn banana");
 }
 
@@ -159,7 +144,7 @@ fn a_version_this_compiler_is_at_or_past_is_not_reported() {
         format!("@cairn {CAIRN_VERSION}\n"),
     ] {
         assert!(
-            !codes(&header).contains(&"W_FUTURE_CAIRN_VERSION"),
+            !codes(&with_header(&header)).contains(&"W_FUTURE_CAIRN_VERSION"),
             "{header:?} is not a future version",
         );
     }
@@ -202,7 +187,7 @@ fn this_compilers_own_version_is_a_language_version() {
 fn a_value_that_is_not_a_version_has_no_version_to_compare() {
     // AC5. A malformed value cannot also be a future one; reporting both
     // would tell an author to upgrade over a string that names nothing.
-    let found = codes("@cairn banana\n");
+    let found = codes(&with_header("@cairn banana\n"));
     assert!(found.contains(&"W_INVALID_CAIRN_VERSION"), "{found:?}");
     assert!(!found.contains(&"W_FUTURE_CAIRN_VERSION"), "{found:?}");
 }
@@ -212,11 +197,11 @@ fn each_repeated_header_is_judged_on_its_own_line() {
     // AC6. The duplicate pass reports the repeat; this pass still reads
     // both values, because the author has two lines to fix.
     let header = "@cairn banana\n@cairn 9999.12\n";
-    let found = codes(header);
+    let found = codes(&with_header(header));
     assert!(found.contains(&"E_DUPLICATE_HEADER"), "{found:?}");
     let invalid = only(header, DiagnosticCode::InvalidCairnVersion);
     let future = only(header, DiagnosticCode::FutureCairnVersion);
-    let source = format!("{header}{BODY}");
+    let source = with_header(header);
     assert_eq!(&source[invalid.span.clone()], "@cairn banana");
     assert_eq!(&source[future.span.clone()], "@cairn 9999.12");
 }
@@ -243,7 +228,7 @@ fn both_codes_carry_a_payload_a_consumer_can_act_on() {
 #[test]
 fn a_module_with_no_cairn_header_is_silent() {
     // The directive is optional, and an absent one is not a finding.
-    let found = codes("");
+    let found = codes(&with_header(""));
     assert!(!found.contains(&"W_INVALID_CAIRN_VERSION"), "{found:?}");
     assert!(!found.contains(&"W_FUTURE_CAIRN_VERSION"), "{found:?}");
 }
@@ -425,9 +410,9 @@ fn the_header_is_read_past_the_layout_a_file_may_open_with() {
 fn a_file_that_parses_reports_the_gap_through_the_pass_instead() {
     // The note is for the report a check pass cannot reach. Where one can,
     // `W_FUTURE_CAIRN_VERSION` is the finding, and it is not doubled.
-    let found = codes("@cairn 9999.12\n");
+    let found = codes(&with_header("@cairn 9999.12\n"));
     assert!(found.contains(&"W_FUTURE_CAIRN_VERSION"), "{found:?}");
-    assert!(parse(&format!("@cairn 9999.12\n{BODY}")).is_ok());
+    assert!(parse(&with_header("@cairn 9999.12\n")).is_ok());
 }
 
 /// The scan and the parser read the same bytes as the header.

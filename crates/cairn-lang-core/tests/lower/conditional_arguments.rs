@@ -33,9 +33,10 @@
 
 use std::collections::BTreeSet;
 
-use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::intent::{SelectorAxis, known_keywords, role_of};
-use cairn_lang_core::{BlockArrayIr, Diagnostic, check, lower, parse, resolve};
+use cairn_lang_core::{BlockArrayIr, Diagnostic, check, lower, parse};
+
+use crate::common::{lowered, solid_cells};
 
 /// Where a fixture's conditional argument goes.
 const MARKER: &str = "%CONDITIONAL%";
@@ -244,13 +245,6 @@ fn written(selector: &str, value: Option<&str>) -> String {
     )
 }
 
-fn built(source: &str) -> BlockArrayIr {
-    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, None)
-}
-
 /// Everything about a build that an argument could move: the blocks, and
 /// where the structures carrying them were placed.
 ///
@@ -296,10 +290,7 @@ fn shape(ir: &BlockArrayIr) -> String {
 
 /// Voxels the build actually paints, across every structure.
 fn painted(ir: &BlockArrayIr) -> usize {
-    ir.structures
-        .values()
-        .map(|ba| ba.voxels.iter().filter(|i| i.0 != 0).count())
-        .sum()
+    ir.structures.values().map(solid_cells).sum()
 }
 
 fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
@@ -317,14 +308,14 @@ fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
 fn conditional_arguments_match_the_lowering() {
     for pair in PAIRS {
         let (one, other) = pair.values;
-        let first = built(&pair.source(one));
-        let second = built(&pair.source(other));
+        let first = lowered(&pair.source(one));
+        let second = lowered(&pair.source(other));
         // A member that paints nothing proves nothing: the two builds would
         // be equally empty of it and compare equal, so every "does not read
         // it" row would pass on a generator that had stopped drawing. The
         // rest of the body paints either way, so the baseline is the same
         // source with this member deleted.
-        let without = built(&pair.source_without_member());
+        let without = lowered(&pair.source_without_member());
         for (value, ir) in [(one, &first), (other, &second)] {
             assert!(
                 painted(ir) > painted(&without),
@@ -459,7 +450,7 @@ fn the_member_that_does_not_lower_is_billed_once() {
         let source = format!(
             "{GEOMETRY}  walls mat_slot=wall height=3\n  roof {kind}mat_slot=roof slope_to=front\n",
         );
-        let out = built(&source);
+        let out = lowered(&source);
         assert_eq!(
             codes(&out.diagnostics),
             ["W_DEFERRED_MEMBER"],

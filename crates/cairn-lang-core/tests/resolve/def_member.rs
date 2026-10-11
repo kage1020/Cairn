@@ -47,6 +47,8 @@
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
 use cairn_lang_core::{Edition, Resolution, lower, parse, resolve};
 
+use crate::common::primaries;
+
 /// Resolve `src` under `edition`.
 fn resolution(src: &str, edition: Option<Edition>) -> Resolution {
     let module = parse(src).expect("parse");
@@ -67,12 +69,6 @@ fn unresolved_under(src: &str, edition: Option<Edition>) -> Vec<Diagnostic> {
 /// runs by default.
 fn unresolved(src: &str) -> Vec<Diagnostic> {
     unresolved_under(src, None)
-}
-
-/// The primaries of `found`, so a failing count shows what was reported
-/// rather than only how much of it there was.
-fn primaries(found: &[Diagnostic]) -> Vec<&str> {
-    found.iter().map(|d| d.primary.as_str()).collect()
 }
 
 const ONE_THEME: &str = "theme plain:\n  slot floor -> @oak_planks\n\n";
@@ -537,22 +533,14 @@ mod lowering {
     //! 13. a sizeless def placed twice — one finding, on the `def` line that is
     //!     the one thing to fix.
 
-    use cairn_lang_core::block_array::lower_to_block_array;
     use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
-    use cairn_lang_core::{lower, parse, resolve};
 
-    /// Every diagnostic `lower_to_block_array` reports for `src`, with no
-    /// registry — the route `cairn lower` takes.
-    fn lowered(src: &str) -> Vec<Diagnostic> {
-        let module = parse(src).expect("parse");
-        let intent = lower(&module);
-        let resolution = resolve(&intent, None);
-        lower_to_block_array(&intent, &resolution, None).diagnostics
-    }
+    use crate::common::{lowered, primaries};
 
     /// Just the findings of one code.
     fn of_code(src: &str, code: DiagnosticCode) -> Vec<Diagnostic> {
         lowered(src)
+            .diagnostics
             .into_iter()
             .filter(|d| d.code == code)
             .collect()
@@ -562,12 +550,6 @@ mod lowering {
     /// that cannot carry `facing` / `half` / `shape`.
     fn incompatible(src: &str) -> Vec<Diagnostic> {
         of_code(src, DiagnosticCode::IncompatibleMaterial)
-    }
-
-    /// The primaries of `found`, so a failing count shows what was reported
-    /// rather than only how much of it there was.
-    fn primaries(found: &[Diagnostic]) -> Vec<&str> {
-        found.iter().map(|d| d.primary.as_str()).collect()
     }
 
     /// One theme whose roof slot is bound to planks, which is not a stair.

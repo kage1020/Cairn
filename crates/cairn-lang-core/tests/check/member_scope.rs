@@ -395,21 +395,7 @@ mod lowering {
     //! lowering and compare against the same source with the row moved to
     //! the body that does read it.
 
-    use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
-    use cairn_lang_core::{lower, parse, resolve};
-
-    use crate::common::PRELUDE;
-
-    fn build(source: &str) -> BlockArrayIr {
-        let module = parse(source).expect("parse");
-        let ir = lower(&module);
-        let resolution = resolve(&ir, None);
-        lower_to_block_array(&ir, &resolution, None)
-    }
-
-    fn solid_cells(array: &BlockArray) -> usize {
-        array.voxels.iter().filter(|c| c.0 != 0).count()
-    }
+    use crate::common::{PRELUDE, lowered, solid_cells};
 
     /// A geometry row among a site's placements lays no voxels. Same source,
     /// same site, one row apart — and the site's own placement is unchanged,
@@ -423,8 +409,8 @@ mod lowering {
          floor id=stray mat_slot=floor\n  \
          walls id=stray_walls mat_slot=wall height=3\n"
         );
-        let base = build(&without);
-        let extended = build(&with);
+        let base = lowered(&without);
+        let extended = lowered(&with);
         assert_eq!(
             extended.placements.len(),
             base.placements.len(),
@@ -458,7 +444,7 @@ mod lowering {
          connect inner.entry to inner.entry path=@gravel\n\n\
          site s:\n  place id=anchor use=lodge theme=plain at=origin\n"
         );
-        let built = build(&src);
+        let built = lowered(&src);
         assert_eq!(
             built.placements.len(),
             1,
@@ -485,8 +471,8 @@ mod lowering {
          walls mat_slot=wall height=3\n"
         );
         assert_eq!(
-            solid_cells(&build(&src).structures["struct::s"]),
-            solid_cells(&build(&clean).structures["struct::s"]),
+            solid_cells(&lowered(&src).structures["struct::s"]),
+            solid_cells(&lowered(&clean).structures["struct::s"]),
             "the misplaced row is the only thing lost",
         );
     }

@@ -29,6 +29,8 @@
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
 use cairn_lang_core::{lower, parse, resolve};
 
+use crate::common::state_at;
+
 /// A struct whose only members are `walls height=3` and one roof, so the
 /// roof's first course always lands at `y = 4`.
 fn roof(size: &str, kind: &str) -> BlockArrayIr {
@@ -54,11 +56,6 @@ fn roof(size: &str, kind: &str) -> BlockArrayIr {
 
 fn structure(ir: &BlockArrayIr) -> &BlockArray {
     ir.structures.values().next().expect("one structure")
-}
-
-fn state_at(ba: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
-    let i = ((y * ba.dims.z + z) * ba.dims.x + x) as usize;
-    &ba.palette.entries[ba.voxels[i].0 as usize]
 }
 
 /// `(facing, half, shape)` of the stair at a cell, so a fixture reads as

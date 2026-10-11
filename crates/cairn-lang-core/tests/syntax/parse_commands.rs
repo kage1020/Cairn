@@ -5,8 +5,10 @@ use std::num::{IntErrorKind, NonZeroU32};
 use cairn_lang_core::ast::{
     DottedRef, Header, Item, RawRequirement, RawVersion, Statement, ThemeRule, Value, ValueKind,
 };
-use cairn_lang_core::error::{IntContext, Position};
+use cairn_lang_core::error::IntContext;
 use cairn_lang_core::{ParseError, parse};
+
+use crate::pos;
 
 fn dr(segments: &[&str]) -> DottedRef {
     let (head, tail) = segments
@@ -20,13 +22,6 @@ fn dr(segments: &[&str]) -> DottedRef {
 
 fn nz(n: u32) -> NonZeroU32 {
     NonZeroU32::new(n).expect("test value must be non-zero")
-}
-
-fn pos(line: u32, col: u32) -> Position {
-    Position {
-        line: nz(line),
-        col: nz(col),
-    }
 }
 
 #[test]

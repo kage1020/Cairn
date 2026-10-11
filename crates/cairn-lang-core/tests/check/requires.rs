@@ -18,27 +18,11 @@ use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::resolve::compare_versions;
 use cairn_lang_core::{check, lower, parse};
 
-/// The body every fixture shares, so the header is the only variable.
-const BODY: &str = "struct s size=2x2\n  floor mat_slot=f\n";
-
-fn diagnostics(header: &str) -> Vec<cairn_lang_core::Diagnostic> {
-    let source = format!("{header}{BODY}");
-    let module = parse(&source).expect("the fixtures all parse");
-    let ir = lower(&module);
-    check(&module, &ir, None)
-}
-
-/// Codes reported for a source, as strings, so a failure names them.
-fn codes(header: &str) -> Vec<&'static str> {
-    diagnostics(header)
-        .iter()
-        .map(|d| d.code.as_str())
-        .collect()
-}
+use crate::common::{codes, diagnose, with_header};
 
 /// The `E_INVALID_REQUIRES` message for a header that has exactly one.
 fn message(header: &str) -> String {
-    let found = diagnostics(header);
+    let found = diagnose(&with_header(header));
     let invalid: Vec<_> = found
         .iter()
         .filter(|d| d.code == DiagnosticCode::InvalidRequires)
@@ -72,7 +56,7 @@ fn floors_for(
     header: &str,
     edition: Option<cairn_lang_core::Edition>,
 ) -> Vec<cairn_lang_core::resolve::VersionFloor> {
-    let source = format!("{header}{BODY}");
+    let source = with_header(header);
     let module = parse(&source).expect("parse");
     match edition {
         Some(edition) => cairn_lang_core::resolve::declared_version_floors(&module, edition),
@@ -105,7 +89,7 @@ fn whitespace_around_the_operator_does_not_change_the_floor() {
     ] {
         assert_eq!(floor(header), "1.21", "{header:?}");
         assert!(
-            !codes(header).contains(&"E_INVALID_REQUIRES"),
+            !codes(&with_header(header)).contains(&"E_INVALID_REQUIRES"),
             "{header:?} is well formed",
         );
     }
@@ -118,7 +102,11 @@ fn whitespace_around_the_operator_does_not_change_the_floor() {
 fn repeated_requirements_fold_to_the_strictest() {
     let header = "@requires version>=1.20\n@requires version>=1.21\n@requires version>=1.19\n";
     assert_eq!(floor(header), "1.21");
-    assert!(codes(header).is_empty(), "{:?}", codes(header));
+    assert!(
+        codes(&with_header(header)).is_empty(),
+        "{:?}",
+        codes(&with_header(header))
+    );
 }
 
 // -- what it refuses ------------------------------------------------------
@@ -200,9 +188,9 @@ fn a_label_the_spec_says_will_exist_is_not_refused_by_the_directive() {
         ("@requires version>=2026.1\n", "2026.1"),
     ] {
         assert!(
-            !codes(header).contains(&"E_INVALID_REQUIRES"),
+            !codes(&with_header(header)).contains(&"E_INVALID_REQUIRES"),
             "{header:?}: {:?}",
-            codes(header),
+            codes(&with_header(header)),
         );
         assert_eq!(floor(header), version, "{header:?}");
     }
@@ -212,7 +200,7 @@ fn a_label_the_spec_says_will_exist_is_not_refused_by_the_directive() {
 /// back when the parser refused any file `lex` refuses.
 #[test]
 fn a_pre_release_label_reaches_the_directive_at_all() {
-    let source = format!("@requires version>=1.21.4-rc1\n{BODY}");
+    let source = with_header("@requires version>=1.21.4-rc1\n");
     parse(&source).expect("a pre-release suffix lexes");
 }
 
@@ -254,7 +242,7 @@ fn the_finding_carries_the_failure_as_data() {
         ("@requires version>=\n", "empty_version", ""),
         ("@requires nonsense\n", "not_a_version_requirement", ""),
     ] {
-        let payload = diagnostics(header)
+        let payload = diagnose(&with_header(header))
             .into_iter()
             .find(|d| d.code == DiagnosticCode::InvalidRequires)
             .and_then(|d| d.data)
@@ -301,7 +289,11 @@ fn an_expression_that_is_not_a_version_requirement_is_refused() {
 fn a_scoped_floor_is_collected_for_the_edition_it_names() {
     let header = "@requires java version>=1.21.4\n";
     assert_eq!(versions_for(header, Some(Edition::Java)), ["1.21.4"]);
-    assert!(codes(header).is_empty(), "{:?}", codes(header));
+    assert!(
+        codes(&with_header(header)).is_empty(),
+        "{:?}",
+        codes(&with_header(header))
+    );
 }
 
 /// And inert in the other's — not violated by it. A file declaring a floor
@@ -360,7 +352,7 @@ fn a_refused_requirement_declares_no_floor() {
     // And it does not suppress a well-formed one on another line.
     let mixed = "@requires version<1.20\n@requires version>=1.21\n";
     assert_eq!(floor(mixed), "1.21");
-    assert_eq!(codes(mixed), vec!["E_INVALID_REQUIRES"]);
+    assert_eq!(codes(&with_header(mixed)), vec!["E_INVALID_REQUIRES"]);
 }
 
 /// The diagnostic has to land on the directive, or an editor underlines
@@ -368,7 +360,7 @@ fn a_refused_requirement_declares_no_floor() {
 #[test]
 fn the_diagnostic_covers_the_directive_that_is_wrong() {
     let header = "@cairn 2026.7\n@requires version<1.20\n";
-    let source = format!("{header}{BODY}");
+    let source = with_header(header);
     let module = parse(&source).expect("parse");
     let ir = lower(&module);
     let found = check(&module, &ir, None);

@@ -14,7 +14,7 @@
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
 
-use crate::common::lowered_with_resolver_diagnostics;
+use crate::common::{defers, lowered_with_resolver_diagnostics};
 
 /// The `W_DEFERRED_MEMBER` a `connect` row earns when one of its ports
 /// cannot be placed, or `None` when every port landed.
@@ -22,15 +22,6 @@ fn port_defer(out: &BlockArrayIr) -> Option<&Diagnostic> {
     out.diagnostics
         .iter()
         .find(|d| d.primary.contains("was skipped because port"))
-}
-
-/// Every `W_DEFERRED_MEMBER` primary, the member-side ones included.
-fn defers(out: &BlockArrayIr) -> Vec<&str> {
-    out.diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .map(|d| d.primary.as_str())
-        .collect()
 }
 
 fn walkway_keys(out: &BlockArrayIr) -> Vec<String> {

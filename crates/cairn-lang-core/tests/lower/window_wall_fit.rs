@@ -16,30 +16,15 @@
 //! isolation. Two checks that agree today drift apart the moment one of
 //! them is edited alone; a matrix that compares them fails when they do.
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
-use cairn_lang_core::check::DiagnosticCode;
+use cairn_lang_core::block_array::BlockArray;
 
-use crate::common::{lowered, only_structure};
+use crate::common::{defers, lowered, only_structure, state_at};
 
 const THEME: &str = "theme t:\n  \
                      slot floor -> @oak_planks\n  \
                      slot wall  -> @cobblestone\n  \
                      slot glass -> @glass_pane\n  \
                      slot gravel -> @gravel\n\n";
-
-/// Every `W_DEFERRED_MEMBER` message, in the order the pass raised them.
-fn defers(ir: &BlockArrayIr) -> Vec<&str> {
-    ir.diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .map(|d| d.primary.as_str())
-        .collect()
-}
-
-fn block_id(ba: &BlockArray, x: u32, y: u32, z: u32) -> &str {
-    let i = ((y * ba.dims.z + z) * ba.dims.x + x) as usize;
-    ba.palette.entries[ba.voxels[i].0 as usize].id.as_str()
-}
 
 /// Whether any voxel anywhere carries `id`.
 fn contains_id(ba: &BlockArray, id: &str) -> bool {
@@ -73,7 +58,7 @@ fn a_window_on_the_floor_plane_is_refused_instead_of_carving_the_slab() {
     let ba = only_structure(&out);
     for x in 0..ba.dims.x {
         assert_eq!(
-            block_id(ba, x, 0, 4),
+            state_at(ba, x, 0, 4).id,
             "minecraft:oak_planks",
             "floor cell x={x} was carved",
         );
@@ -119,7 +104,7 @@ fn a_window_that_fills_the_wall_end_to_end_is_carved() {
     assert_eq!(defers(&out), [] as [&str; 0]);
     let ba = only_structure(&out);
     for y in 1..=3 {
-        assert_eq!(block_id(ba, 3, y, 4), "minecraft:glass_pane");
+        assert_eq!(state_at(ba, 3, y, 4).id, "minecraft:glass_pane");
     }
 }
 
@@ -133,7 +118,7 @@ fn a_window_flush_with_the_top_course_is_carved() {
     let out = lowered(&src);
     assert_eq!(defers(&out), [] as [&str; 0]);
     assert_eq!(
-        block_id(only_structure(&out), 3, 3, 4),
+        state_at(only_structure(&out), 3, 3, 4).id,
         "minecraft:glass_pane",
     );
 }
@@ -174,7 +159,11 @@ fn a_window_across_the_seam_between_two_stacked_courses_is_carved() {
     assert_eq!(defers(&out), [] as [&str; 0]);
     let ba = only_structure(&out);
     for y in 4..=6 {
-        assert_eq!(block_id(ba, 3, y, 4), "minecraft:glass_pane", "row y={y}");
+        assert_eq!(
+            state_at(ba, 3, y, 4).id,
+            "minecraft:glass_pane",
+            "row y={y}"
+        );
     }
 }
 
@@ -214,7 +203,7 @@ fn a_window_inside_a_level_is_checked_against_the_rows_it_lands_on() {
     let out = lowered(&inside);
     assert_eq!(defers(&out), [] as [&str; 0]);
     assert_eq!(
-        block_id(only_structure(&out), 3, 5, 4),
+        state_at(only_structure(&out), 3, 5, 4).id,
         "minecraft:glass_pane",
     );
 

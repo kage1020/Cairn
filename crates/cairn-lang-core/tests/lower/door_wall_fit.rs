@@ -21,26 +21,17 @@
 //! group here asserts the two answers case by case rather than each in
 //! isolation.
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
+use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
 use cairn_lang_core::{lower, parse, resolve};
 
-use crate::common::{lowered, only_structure};
+use crate::common::{defers, lowered, only_structure, state_at};
 
 const THEME: &str = "theme t:\n  \
                      slot floor -> @oak_planks\n  \
                      slot wall  -> @cobblestone\n  \
                      slot roof  -> @spruce_stairs\n  \
                      slot gravel -> @gravel\n\n";
-
-/// Every `W_DEFERRED_MEMBER` message, in the order the pass raised them.
-fn defers(ir: &BlockArrayIr) -> Vec<&str> {
-    ir.diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .map(|d| d.primary.as_str())
-        .collect()
-}
 
 /// Nothing at all was reported — not a deferral and not a refusal.
 ///
@@ -53,11 +44,6 @@ fn assert_clean(ir: &BlockArrayIr) {
         "expected a source that compiles clean, got {:?}",
         ir.diagnostics,
     );
-}
-
-fn block_id(ba: &BlockArray, x: u32, y: u32, z: u32) -> &str {
-    let i = ((y * ba.dims.z + z) * ba.dims.x + x) as usize;
-    ba.palette.entries[ba.voxels[i].0 as usize].id.as_str()
 }
 
 // ------------------------------------------------- the openings pass
@@ -122,11 +108,15 @@ fn a_door_inside_the_level_whose_walls_it_opens_is_carved() {
     assert_clean(&out);
     let ba = only_structure(&out);
     for y in 7..=8 {
-        assert_eq!(block_id(ba, 2, y, 4), "minecraft:air", "row y={y}");
+        assert_eq!(state_at(ba, 2, y, 4).id, "minecraft:air", "row y={y}");
     }
     // The rows above the opening are still the wall they were cut from.
     for y in 9..=10 {
-        assert_eq!(block_id(ba, 2, y, 4), "minecraft:cobblestone", "row y={y}");
+        assert_eq!(
+            state_at(ba, 2, y, 4).id,
+            "minecraft:cobblestone",
+            "row y={y}"
+        );
     }
 }
 
@@ -155,7 +145,7 @@ fn a_door_is_checked_against_its_own_course_and_not_the_tallest_one() {
     );
     let out = lowered(&two_courses(6));
     assert_clean(&out);
-    assert_eq!(block_id(only_structure(&out), 2, 7, 4), "minecraft:air");
+    assert_eq!(state_at(only_structure(&out), 2, 7, 4).id, "minecraft:air");
 }
 
 #[test]
@@ -178,10 +168,14 @@ fn two_courses_that_touch_are_one_wall_to_the_doorway_too() {
     assert_clean(&out);
     let ba = only_structure(&out);
     for y in 1..=2 {
-        assert_eq!(block_id(ba, 2, y, 4), "minecraft:air", "row y={y}");
+        assert_eq!(state_at(ba, 2, y, 4).id, "minecraft:air", "row y={y}");
     }
     for y in 3..=4 {
-        assert_eq!(block_id(ba, 2, y, 4), "minecraft:cobblestone", "row y={y}");
+        assert_eq!(
+            state_at(ba, 2, y, 4).id,
+            "minecraft:cobblestone",
+            "row y={y}"
+        );
     }
 }
 
@@ -222,8 +216,8 @@ fn a_door_under_a_one_row_course_opens_that_row_and_stops() {
     let out = lowered(&src);
     assert_clean(&out);
     let ba = only_structure(&out);
-    assert_eq!(block_id(ba, 2, 1, 4), "minecraft:air");
-    assert_eq!(block_id(ba, 2, 2, 4), "minecraft:spruce_stairs");
+    assert_eq!(state_at(ba, 2, 1, 4).id, "minecraft:air");
+    assert_eq!(state_at(ba, 2, 2, 4).id, "minecraft:spruce_stairs");
 }
 
 // --------------------------------------------- the walkway port agrees

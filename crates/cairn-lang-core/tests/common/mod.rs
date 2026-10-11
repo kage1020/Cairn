@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
 /// The number of `.crn` files `examples/` ships. Bump it with the next
@@ -136,6 +136,12 @@ pub fn nth(source: &str, needle: &str, n: usize) -> usize {
         .0
 }
 
+/// The primaries of `found`, so a failing count shows what was reported
+/// rather than only how much of it there was.
+pub fn primaries(found: &[Diagnostic]) -> Vec<&str> {
+    found.iter().map(|d| d.primary.as_str()).collect()
+}
+
 /// The messages of `diag`'s notes, in order.
 pub fn notes(diag: &Diagnostic) -> Vec<&str> {
     diag.notes.iter().map(|n| n.message.as_str()).collect()
@@ -156,9 +162,9 @@ pub fn exactly_one(mut found: Vec<Diagnostic>) -> Diagnostic {
 ///
 /// # Panics
 ///
-/// When `source` does not parse.
+/// When `source` does not parse, with the source in the message.
 pub fn lowered(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     lower_to_block_array(&ir, &resolution, None)
@@ -169,9 +175,9 @@ pub fn lowered(source: &str) -> BlockArrayIr {
 ///
 /// # Panics
 ///
-/// When `source` does not parse.
+/// When `source` does not parse, with the source in the message.
 pub fn lowered_with_resolver_diagnostics(source: &str) -> BlockArrayIr {
-    let module = parse(source).expect("parse");
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
     let mut out = lower_to_block_array(&ir, &resolution, None);
@@ -179,6 +185,34 @@ pub fn lowered_with_resolver_diagnostics(source: &str) -> BlockArrayIr {
     combined.append(&mut out.diagnostics);
     out.diagnostics = combined;
     out
+}
+
+/// The primaries of the `W_DEFERRED_MEMBER` findings `ir` carries, in
+/// report order.
+pub fn defers(ir: &BlockArrayIr) -> Vec<&str> {
+    ir.diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DeferredMember)
+        .map(|d| d.primary.as_str())
+        .collect()
+}
+
+/// The cells of `array` that are not air.
+pub fn solid_cells(array: &BlockArray) -> usize {
+    array.voxels.iter().filter(|c| c.0 != 0).count()
+}
+
+/// The block state at `(x, y, z)` of `array`.
+///
+/// # Panics
+///
+/// When the cell is outside `array`.
+pub fn state_at(array: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
+    let i = array
+        .dims
+        .index(x, y, z)
+        .unwrap_or_else(|| panic!("({x}, {y}, {z}) is outside {:?}", array.dims));
+    &array.palette.entries[array.voxels[i].0 as usize]
 }
 
 /// The single structure `ir` holds, for sources that declare exactly one.
@@ -208,6 +242,21 @@ door  id=entry side=front at=center\n\n";
 /// [`PRELUDE`] plus a struct whose body is a floor and then `row`.
 pub fn struct_with(row: &str) -> String {
     format!("{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  {row}\n")
+}
+
+/// [`PRELUDE`] plus a site placing two `hut`s, `anchor` at the origin and
+/// `peer` east of it, and then `row`, so a site row can name both.
+pub fn duo_with(row: &str) -> String {
+    format!(
+        "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
+         place id=peer use=hut theme=plain east_of=anchor gap=4\n  {row}\n"
+    )
+}
+
+/// `header` above a one-struct body, so the header lines are the only
+/// variable in a fixture about them.
+pub fn with_header(header: &str) -> String {
+    format!("{header}struct s size=2x2\n  floor mat_slot=f\n")
 }
 
 /// [`PRELUDE`] plus a `def` whose body is a floor and then `row`.
