@@ -42,10 +42,6 @@ pub use roof::is_stair;
 // asked correctly with the wall column the body was lowered against,
 // which nothing outside this module holds. Exporting it invited the
 // second derivation the port used to carry.
-pub use walkway::{
-    BlockedIndex, RoutePathError, SearchRect, WalkwayLayout, build_walkway_array, l_path,
-    route_path,
-};
 
 use crate::check::Diagnostic;
 use crate::ids::{PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
