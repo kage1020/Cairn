@@ -1,10 +1,8 @@
 //! `type_mismatch` pass — flags label-typed keys with non-label values and
 //! `size=` with a non-`Size` value.
 //!
-//! Walks the surface AST because the offending values may have been hoisted
-//! out of `IntentState` during lowering (when the value *was* a label) or
-//! kept (when it was not), and the AST is the simplest place where the
-//! original value type is still attached to its span.
+//! Walks the surface AST, where every value still has its type and span
+//! whether or not lowering hoisted it out of `IntentState`.
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
@@ -13,22 +11,11 @@ use super::DiagnosticSink;
 
 /// Keys whose value is a label and whose mistyping is otherwise silent.
 ///
-/// Not every `as_label_str` call site is here. `circuit region=` is lifted
-/// the same way but has its own recognizer in `block_array`, which names
-/// the key and the offending kind in a `W_DEFERRED_MEMBER`; adding it to
-/// this list would report the same value twice with two different codes.
-/// `east_of=` / `north_of=` are owned by `E_INVALID_PLACE_ORIGIN` for the
-/// same reason. What is left are the keys whose mistyped value reaches a
-/// reader that skips silently.
-///
-/// `id` / `class` / `mat_slot` are hoisted onto [`crate::intent::Member`]'s
-/// own fields during lowering; `use` / `theme` stay in `intent_state` and
-/// are read by `resolve::resolve_site_placements`. The distinction does not
-/// reach the author: all five reject a non-label the same way, and for
-/// `use=` / `theme=` the rejection used to be the resolver's silent
-/// `continue`, which drops the whole placement — the same arm a `place` row
-/// with no `use=` at all takes. Naming the mistyped case here is what tells
-/// those two apart.
+/// `circuit region=` is left to `block_array`'s `W_DEFERRED_MEMBER`, and
+/// `east_of=` / `north_of=` to `E_INVALID_PLACE_ORIGIN`, so no value is
+/// reported under two codes. A mistyped `use=` or `theme=` makes
+/// `resolve_site_placements` drop the placement just as a row with no
+/// `use=` does, so this finding is what tells the two apart.
 const LABEL_KEYS: &[&str] = &["id", "class", "mat_slot", "use", "theme"];
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {

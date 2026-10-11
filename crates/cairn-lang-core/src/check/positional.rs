@@ -1,29 +1,17 @@
 //! `positional` pass — flags bare values on a line that reads none.
 //!
-//! `spec/syntax` "Lexical" requires `key=value` for everything after the
-//! command keyword, and gives the reason: positional arguments make the
-//! author (or the model) remember an order, and a dropped or reordered one
-//! is invisible. `connect FROM.PORT to TO.PORT` is the single form that
-//! reads positionals, and `check::connect_arity` owns its shape.
+//! `spec/syntax` "Lexical" requires `key=value` after the command keyword,
+//! because an order the author has to remember is invisible when a value is
+//! dropped or reordered. The parser still puts any token that is not
+//! `key=`, `-> binding` or `[selector]` into `positional`, so `walls height
+//! 3` and `window front G 2 2 2x2` lower with the bare values ignored.
+//! `connect FROM.PORT to TO.PORT` is the one form that reads positionals,
+//! and `check::connect_arity` owns its shape.
 //!
-//! Nothing enforced the rule. The parser fills `positional` with any token
-//! on the line that is not `key=`, `-> binding`, or `[selector]` — so a
-//! dropped `=` (`walls height 3`) and the spec's own forbidden example
-//! (`window front G 2 2 2x2`) both parse, classify to a real role, and
-//! lower with the bare values ignored. What the author gets is the member
-//! they wrote minus the arguments they meant, with `cairn check` reporting
-//! nothing.
-//!
-//! Walks every member at every depth. Where a line sits does not change
-//! whether its own values are read, so unlike `member_scope` and `nesting`
-//! this pass keeps descending through a subtree those two have already
-//! reported: dedenting a `window front G 2 2 2x2` leaves it just as
-//! broken.
-//!
-//! [`MemberRole::Other`] is skipped for the reason `keyword_allowlist`
-//! gives — the keyword is not in the table, so the repair is the word, and
-//! there is no reader whose argument form the bare values could be
-//! measured against.
+//! Unlike `member_scope` and `nesting`, this pass descends through subtrees
+//! those two report, since dedenting a line does not make its values read.
+//! [`MemberRole::Other`] is skipped: with no role there is no argument form
+//! to measure the values against.
 
 use crate::ast::Value;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
@@ -49,11 +37,9 @@ fn walk(members: &[Member], sink: &mut DiagnosticSink) {
     }
 }
 
-/// `first` / `last` are the ends of the run, not necessarily a prefix of
-/// the line: the parser appends to `positional` whenever the next token is
-/// not `key=`, so `size=2 x2` leaves one bare value *after* an argument.
-/// Spanning first-to-last covers the run either way, and the arguments
-/// caught in between are part of the line the author rewrites.
+/// `first` and `last` bound the run, which need not be a prefix of the
+/// line: `size=2 x2` leaves a bare value after an argument. Arguments
+/// caught between them are part of the line the author rewrites.
 fn report(member: &Member, first: &Value, last: &Value, sink: &mut DiagnosticSink) {
     let keyword = member.role.keyword();
     let count = member.positional.len();
@@ -68,9 +54,7 @@ fn report(member: &Member, first: &Value, last: &Value, sink: &mut DiagnosticSin
             value = if count == 1 { "value" } else { "values" },
             verb = if count == 1 { "is" } else { "are" },
         ),
-        // No "declared here" note: the keyword and the run sit on the same
-        // line, so a second location would point where the underline
-        // already is.
+        // No "declared here" note: the keyword is on the underlined line.
         notes: vec![
             DiagnosticNote {
                 span: None,

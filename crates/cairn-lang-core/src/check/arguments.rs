@@ -1,94 +1,29 @@
-//! `arguments` pass — flags every `key=value` whose key is outside the
-//! vocabulary of the member's role, every key the role accepts that no pass
-//! reads, every key a sibling argument's value routed past, and every
-//! binding a theme selector carries, which no pass reads either. A
-//! member's own `[key=value]` selector answers to the same vocabulary.
-//! The `struct` / `def` header line answers to a vocabulary of its own,
-//! `size=` and `class=`, and gets two of those findings: an unknown key
-//! and an unreached one. No selector widens it, no sibling routes past one
-//! of its keys, and its `size=` is accepted whatever the value, which
-//! `check::type_mismatch` judges.
+//! `arguments` pass: flags every `key=value` outside the vocabulary of the
+//! member's role, every accepted key no pass reads, every key a sibling
+//! argument's value routed past, and every binding on a theme selector. A
+//! member's own `[key=value]` selector answers to the same vocabulary. A
+//! `struct` / `def` header answers to its own, `size=` and `class=`, and
+//! gets only the unknown-key and unread-key findings.
 //!
-//! Walks the Intent IR beside [`super::keyword_allowlist`], which asks the
-//! same question one level up. The two do not both fire on a line: a
-//! member whose keyword is unknown has no vocabulary to judge its
-//! arguments against, so this pass leaves it alone and the keyword's own
-//! finding carries the repair.
+//! A member whose keyword is unknown is left to
+//! [`super::keyword_allowlist`]: it has no vocabulary to judge against.
+//! Positionals belong to `check::positional` and the `-> value` tail to
+//! [`super::binding`].
 //!
-//! Two of a member's four fields are in scope. `check::positional` reads
-//! positionals at every role and depth, and [`super::binding`] asks the
-//! `-> value` tail the one question that needs no Logic IR: whether the
-//! member may emit a signal at all.
+//! The question asked of a key is only whether something in the module reads
+//! the word, so `clas=` is refused and `id=` accepted in an argument and a
+//! selector alike, whatever a later pass decides a selector key means. A theme
+//! selector `window[tags=...]` makes `tags=` a word something reads
+//! (`resolve`'s matcher) on a `window` and nothing else. A widened key one
+//! edit from the role's own vocabulary is still refused, because
+//! `walls[hieght=3]` beside `walls hieght=3` would otherwise forgive the
+//! typo everywhere; a deliberate tag that close has to be renamed. Widening
+//! admits a word without making its value do anything, so a key no pass
+//! reads stays reported when a selector matches on it.
 //!
-//! A member's own selector (`door[id=front]`) is judged here, against the
-//! same vocabulary its arguments answer to. Its keys are *read* in two
-//! narrow places — the `door` actuator-patch recogniser in
-//! `block_array::lower` and redstone's binding-key walk — and nowhere
-//! else, which left `window[clas=outer]` silent through `check` and
-//! `compile` with the `class` lost.
-//!
-//! What the key means is a separate question and stays open: a member's
-//! selector is carried through verbatim, and later passes decide whether
-//! one binds a fresh id or references an existing member. This pass does
-//! not need that answer. It asks only whether the *word* is one something
-//! in this module reads, which is the same question it asks of a
-//! `key=value` on the same line and has the same answer — so `clas=` is
-//! refused with the suggestion wherever it is written, and `id=` is
-//! accepted on both sides whatever a later pass decides it means.
-//!
-//! A theme selector widens the vocabulary of the keyword it names. `theme t:
-//! window[tags=[a,b]] -> frame=@spruce_wood` makes `tags=` a key something
-//! reads — `resolve`'s selector matcher — on a `window` and on nothing else,
-//! so the member carrying it is not writing a word that will be read by
-//! nothing. That is the whole test this pass applies, and a key the module
-//! never selects on fails it however plausible it looks. The reverse
-//! direction is already covered: a selector matching no member is
-//! `E_THEME_SELECTOR_UNMATCHED`.
-//!
-//! Widening admits a word; it does not make a value do anything. What a
-//! match hands the member is the row's bindings, and no pass lowers those
-//! yet, so a key the role defines and nothing reads is still reported
-//! when a selector matches on it — `window shape=slit` builds the same
-//! window with a `window[shape=slit] -> frame=...` row or without one. A
-//! row whose keyword names a role is reported too, once per binding on the
-//! right of its arrow, with the same code: a binding nothing lowers is the
-//! same unreached key one level up.
-//!
-//! The widening admits words the module *coins*, and one edit from an
-//! existing key is not a coinage. `walls[hieght=3]` beside `walls hieght=3`
-//! would otherwise forgive the typo completely — the selector matches, so
-//! nothing anywhere says a word — and that is byte for byte the failure
-//! this pass exists to end. A widened key near-missing the role's own
-//! vocabulary is refused with the suggestion, as though it had never been
-//! widened. The cost is that a deliberate tag one edit from a real key is
-//! refused too; the tie-break favours catching the typo, and renaming the
-//! tag is the escape.
-//!
-//! The candidate set is the role's, plus the universal keys. `clas=outer`
-//! is the case that needs the second half: `class` is hoisted into a
-//! dedicated field only when the value is label-shaped, so the typo never
-//! reaches the field, and a suggestion drawn from the role's own arguments
-//! could not offer the word the author meant.
-//!
-//! The third finding is the vocabulary's second axis. A key the role's list
-//! contains is still read by nothing when a sibling argument chose a
-//! lowering rule that does not consult it — `roof kind=gable
-//! slope_to=front` is the instance, and it built a roof that ignored the
-//! direction exactly the way a misspelled key did. The message names both
-//! repair sites, because which of the two arguments the author meant is not
-//! this pass's to decide; why that makes it a warning where an unknown key
-//! is a refusal is argued once, on [`DiagnosticCode::severity`].
-//!
-//! Where the *selector* names no rule — a word the dispatch does not know,
-//! a value of another shape, or, on an axis with no absent arm, not written
-//! at all — nothing is reported here. That member lowers to nothing and the
-//! pass that tried to draw it says so with `W_DEFERRED_MEMBER`, which is
-//! the same repair; a finding here would bill it twice. It is worth being
-//! exact about which stream that is: the deferral is raised by block-array
-//! lowering, so a `cairn check` with no `--edition` / `--target` runs none
-//! of it and reports nothing at all on such a line. Pinning one of the two
-//! and dropping the other would be the wrong trade — the case the author
-//! most needs told is the one where the member *does* build.
+//! Suggestions draw on the role's keys plus the universal ones: `class` is
+//! hoisted only when its value is label-shaped, so `clas=outer` never
+//! reaches the field and the role's own list could not offer `class`.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -107,14 +42,13 @@ use super::DiagnosticSink;
 
 /// Keys the module's theme selectors match on, per keyword they name.
 ///
-/// `BTreeSet` rather than a hash set so the closed-set note reads in a
-/// stable order whatever the source did.
+/// A `BTreeSet` keeps the closed-set note in a stable order.
 type SelectorKeys<'a> = HashMap<&'a str, BTreeSet<&'a str>>;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     for theme in &ir.themes {
         for rule in &theme.selectors {
-            // The keyword is the repair, as it is for a member.
+            // An unknown keyword's own finding carries the repair.
             if matches!(role_of(&rule.keyword), MemberRole::Other(_)) {
                 continue;
             }
@@ -140,26 +74,20 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
 /// Keys a `struct` / `def` header line may carry, in the order the
 /// closed-set note lists them.
 ///
-/// `size=` is the one lowering reads. `class=` is the other key the
-/// specification writes on a header — `def cottage class=house size=9x7:`
-/// in `spec/components-editing-sites` "`def`, the component construct" —
-/// and [`UNREAD_HEADER_ARGUMENTS`] says what becomes of it.
+/// `class=` is here because `spec/components-editing-sites` "`def`, the
+/// component construct" writes it on a header.
 const HEADER_ARGUMENTS: &[&str] = &["size", "class"];
 
 /// Keys in [`HEADER_ARGUMENTS`] that no pass reads yet: carried into
-/// `StructIr::args` / `DefIr::args` and never consulted, so the scope is
-/// built the same with them or without them.
+/// `StructIr::args` / `DefIr::args` and never consulted.
 const UNREAD_HEADER_ARGUMENTS: &[&str] = &["class"];
 
-/// Judge the `key=value` arguments of a `struct` / `def` header line, other
-/// than the `size=WxH` lowering hoisted out of them.
+/// Judge the `key=value` arguments of a `struct` / `def` header line
+/// against [`HEADER_ARGUMENTS`].
 ///
-/// The header answers to its own closed vocabulary rather than to any
-/// member role's, and no theme selector widens it: a selector names a
-/// member keyword, and `struct` / `def` are not member keywords. A `size=`
-/// that reaches `args` is one whose value is not a `WxH` literal, which
-/// `check::type_mismatch` reports; the key is not the mistake, so it is
-/// accepted here.
+/// No theme selector widens it, since a selector names a member keyword. A
+/// `size=` still in `args` has a value that is not a `WxH` literal, which
+/// `check::type_mismatch` reports, so the key itself is accepted here.
 fn check_header(keyword: &str, args: &IndexMap<String, ValueWithSpan>, sink: &mut DiagnosticSink) {
     for (key, value) in args {
         if !HEADER_ARGUMENTS.contains(&key.as_str()) {
@@ -177,10 +105,7 @@ fn check_header(keyword: &str, args: &IndexMap<String, ValueWithSpan>, sink: &mu
 }
 
 /// Every attribute key a theme selector filters on, under the keyword that
-/// selector names.
-///
-/// Per keyword rather than module-wide: `window[tags=...]` says something
-/// reads `tags=` on a window, and says nothing at all about a `door`.
+/// selector names: `window[tags=...]` says nothing about a `door`.
 fn selector_keys(ir: &IntentModule) -> SelectorKeys<'_> {
     let mut keys: SelectorKeys<'_> = HashMap::new();
     for theme in &ir.themes {
@@ -202,16 +127,13 @@ fn walk(members: &[Member], selected: &SelectorKeys<'_>, sink: &mut DiagnosticSi
 }
 
 fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut DiagnosticSink) {
-    // The keyword is the repair; its arguments answer to a vocabulary that
-    // does not exist.
+    // An unknown keyword's own finding carries the repair.
     let Some(own) = member.role.accepted_arguments() else {
         return;
     };
     let keyword = member.role.keyword();
     let widened = selected.get(keyword);
-    // Deduplicated, because a key can be both in the role's vocabulary and
-    // selected on, and a closed set naming one word twice reads as two
-    // different things.
+    // Deduplicated: a closed set naming one word twice reads as two words.
     let mut accepted = own.clone();
     if let Some(extra) = widened {
         accepted.extend(extra.iter().copied().filter(|k| !own.contains(k)));
@@ -227,11 +149,8 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
                 &accepted,
             ));
         } else if coined && !own.contains(&key.as_str()) {
-            // Widened by a selector. Legal unless it is a near-miss of a
-            // word the role already has, which is a typo written twice
-            // rather than a word the module coined. Candidates are the
-            // role's own vocabulary — feeding the widened set in would let
-            // the key suggest itself.
+            // Candidates leave out the widened set, which would let the key
+            // suggest itself.
             if let Some(suggested) = nearest_match(key, own.iter().copied()) {
                 sink.push(coined_near_miss(
                     Field::Argument,
@@ -243,40 +162,26 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
                 ));
             }
         } else if let Some(why) = member.role.unread_argument(key) {
-            // A key nothing on this role reads. A theme selecting on it
-            // does not change that: the selector's match hands the member
-            // bindings no pass lowers, so the build is the same with the
-            // argument or without it.
-            //
-            // Not for a universal key, though. One still in the fields is
-            // one `intent::lower` could not hoist — a value that is not a
-            // label, which `check::type_mismatch` reports, or a second
-            // occurrence, which `check::duplicate` does — and the key is not
-            // the mistake (`UNIVERSAL_ARGUMENTS`). Reporting it here too put
-            // "write a label" and "drop it, nothing reads it" on one span.
-            // The hoisted occurrence, if there is one, is judged below.
+            // A universal key still in the fields is one `intent::lower`
+            // could not hoist, which `check::type_mismatch` or
+            // `check::duplicate` reports; reporting it here too would put
+            // "write a label" and "drop it" on one span. The hoisted
+            // occurrence is judged below.
             if !UNIVERSAL_ARGUMENTS.contains(&key.as_str()) {
                 sink.push(unread_argument(keyword, key, &value.span, why));
             }
         } else if let Some(finding) = routed_past(member, key, &value.span) {
-            // A key some lowering rule reads, on a member whose sibling
-            // argument picked a rule that does not — selected on or not,
-            // for the same reason.
             sink.push(finding);
         }
     }
-    // A label-shaped `mat_slot=` was hoisted out of the fields above, so
-    // the one branch that can apply to it — the key is universal, hence
-    // always accepted — is asked here, and this is the only place it is
-    // reported as unread. It fires exactly on a hoisted slot
-    // `Member::read_slot` answers `None` for; the table is asked directly
-    // because the finding needs the reason, which that answer drops.
+    // A label-shaped `mat_slot=` was hoisted out of the fields, so it is
+    // judged unread here. This fires exactly where `Member::read_slot`
+    // answers `None`; the table is asked directly because the finding needs
+    // the reason that answer drops.
     if let Some(slot) = &member.mat_slot
         && let Some(why) = member.role.unread_argument("mat_slot")
     {
         let mut finding = unread_argument(keyword, "mat_slot", &slot.span, why);
-        // What the role gives up by not reading it: the resolver skips the
-        // lookup too, so the name is not checked against the theme.
         finding.notes.push(DiagnosticNote {
             span: None,
             message: "the slot name is not looked up in the theme, so a misspelling of it is \
@@ -285,10 +190,8 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
         });
         sink.push(finding);
     }
-    // The member's own `[key=value]`, against the same vocabulary. Only
-    // the two branches about the *word* apply: the other two ask what a
-    // lowering rule does with a value, and a selector filters rather than
-    // supplies one.
+    // Only the two branches about the word apply to the member's own
+    // `[key=value]`: a selector filters on a value rather than supplying one.
     for (key, value) in member.selector.iter().flatten() {
         if !accepted.contains(&key.as_str()) {
             sink.push(unknown_key(
@@ -316,21 +219,13 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
 
 /// A `key=value` on the right of a theme selector's arrow.
 ///
-/// Every binding on a row whose keyword names a role is reported, whatever
-/// its key or value; a row whose keyword names none gets
-/// `E_UNKNOWN_KEYWORD` alone, and a key written twice in one row is
-/// `E_DUPLICATE_ARG` with only its last value reported here, since the row's
-/// bindings are a map by then. No lowering rule reads a
-/// selector's bindings yet (`spec/materials-themes` "Slots as dependency
-/// injection"), so `frame=@spruce_wood` builds exactly what the file builds
-/// without it. That is an unreached key one level up from a member's, and
-/// `spec/lint` "Error vs warning" gives it the same code. The key is not
-/// judged against a vocabulary, because there is no vocabulary of keys a
-/// binding may set until some pass reads one, and for the same reason the
-/// value is not resolved as a block: what `frame=` names is not specified.
-///
-/// Matched or not, the finding is the same, so the note says nothing about
-/// which members the row selects or where their blocks come from.
+/// No lowering rule reads a selector's bindings yet
+/// (`spec/materials-themes` "Slots as dependency injection"), so every
+/// binding on a row whose keyword names a role is reported, whatever its key
+/// or value, with the code `spec/lint` "Error vs warning" gives an unreached
+/// key. Neither key nor value is judged: there is no vocabulary of binding
+/// keys until a pass reads one. A key written twice in a row is reported
+/// once, for its last value, since the bindings are a map by then.
 fn unlowered_binding(keyword: &str, key: &str, span: &crate::error::Span) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::IgnoredArgument,
@@ -350,31 +245,27 @@ fn unlowered_binding(keyword: &str, key: &str, span: &crate::error::Span) -> Dia
     }
 }
 
-/// A key in the role's vocabulary that this member's own selector routed
-/// past, if it has one.
+/// A key in the role's vocabulary that this member's own selector argument
+/// (`kind=` on a `roof`) routed past, if it has one.
 ///
-/// `None` covers three different silences, and all three are wanted. The
-/// key may be conditional on no axis, which is the ordinary case. The
-/// selector may name a rule that does read it, which is the working source.
-/// Or the selector may name no rule at all — a word the dispatch does not
-/// know, a value of another shape, or, on an axis with no
-/// [`SelectorValue::Absent`] arm, not written at all — and then the member
-/// lowers to nothing and the `W_DEFERRED_MEMBER` from the pass that tried
-/// to draw it carries the whole repair.
+/// `None` also when the selector names no rule at all: an unknown word, a
+/// value of another shape, or no value on an axis without a
+/// [`SelectorValue::Absent`] arm. That member lowers to nothing and
+/// lowering's `W_DEFERRED_MEMBER` carries the repair, which a finding here
+/// would bill twice. An unpinned `cairn check` runs no lowering and so says
+/// nothing on such a line; the member that does build is the one the author
+/// most needs told about.
 fn routed_past(member: &Member, key: &str, span: &crate::error::Span) -> Option<Diagnostic> {
     for axis in member.role.conditional_arguments() {
         if !axis.is_conditional(key) {
             continue;
         }
-        // Absent is a value here rather than a reason to stop: an axis may
-        // have a rule for the selector not being written, and on a `place`
-        // that rule is the one that reads `gap=`.
+        // An unwritten selector can still pick a rule: on a `place` it is
+        // the one that reads `gap=`.
         let written = match member.intent_state.get(axis.selector) {
             None => None,
             Some(value) => match &value.value.kind {
                 ValueKind::Ident(name) => Some(name.as_str()),
-                // Written as something that is not an identifier, so it
-                // names no rule however it is spelled.
                 _ => continue,
             },
         };
@@ -384,9 +275,8 @@ fn routed_past(member: &Member, key: &str, span: &crate::error::Span) -> Option<
         if arm.reads.contains(&key) {
             continue;
         }
-        // Both renderings are built here, where the arms that read the key
-        // are still in hand, so the message has no invariant left to assert
-        // about a list being non-empty.
+        // Rendered here, where an empty list of reading arms can still be
+        // skipped, so the message builder has nothing to assert.
         let reading = axis.read_when(key);
         let alternatives: Vec<String> = reading
             .iter()
@@ -422,7 +312,7 @@ fn repair_phrase(selector: &str, value: SelectorValue) -> String {
     }
 }
 
-/// How the line reads today, for the clause that quotes it back.
+/// How the line writes the selector, for the clause that quotes it back.
 fn written_as(selector: &str, value: SelectorValue) -> String {
     match value.ident() {
         Some(ident) => format!("`{selector}={ident}`"),
@@ -430,11 +320,8 @@ fn written_as(selector: &str, value: SelectorValue) -> String {
     }
 }
 
-/// Build the finding for a key the selected rule does not read.
-///
-/// `alternatives` and `repair` arrive already rendered because the arms
-/// that read the key are the caller's to walk; this function turns one arm
-/// and one key into the two sentences the author sees.
+/// Build the finding for a key the selected rule does not read, from the
+/// caller's rendered `alternatives` and `repair`.
 fn routed_past_argument(
     keyword: &str,
     key: &str,
@@ -444,9 +331,8 @@ fn routed_past_argument(
     alternatives: &str,
     repair: &str,
 ) -> Diagnostic {
-    // Both repair sites are named because either argument may be the
-    // mistake — which is the reason `DiagnosticCode::severity` gives for
-    // this being a warning where an unknown key is a refusal.
+    // Either argument may be the mistake, so both repairs are named; it is
+    // also why `DiagnosticCode::severity` makes this a warning.
     let kept = match chosen.ident() {
         Some(ident) => format!("`{ident}` {keyword}"),
         None => format!("`{keyword}`"),
@@ -473,9 +359,8 @@ fn routed_past_argument(
 /// Which key-bearing field a finding is about: a member's two, or the
 /// `struct` / `def` header line.
 ///
-/// One defect — a word the author expects something to read, that nothing
-/// does — written in three places, so the code and the notes are shared and
-/// only the sentence changes, naming the field the author has to edit.
+/// All three share a code and notes; only the sentence naming the field to
+/// edit differs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Field {
     /// A `key=value` written after the keyword.
@@ -504,9 +389,7 @@ fn unknown_key(
     span: &crate::error::Span,
     accepted: &[&str],
 ) -> Diagnostic {
-    // Suggestion first, closed set second — the same order
-    // `E_UNKNOWN_KEYWORD` uses, so a reader who has seen one knows where
-    // to look in the other.
+    // Suggestion before closed set, the order `E_UNKNOWN_KEYWORD` uses.
     let mut notes = Vec::with_capacity(2);
     notes.extend(nearest_match(key, accepted.iter().copied()).map(did_you_mean_note));
     notes.push(DiagnosticNote {
@@ -522,16 +405,12 @@ fn unknown_key(
     }
 }
 
-/// A selector-widened key that is one edit from the role's own vocabulary.
+/// A selector-widened key that is one edit from the role's own vocabulary,
+/// reported as if the selector were not there.
 ///
-/// Reported exactly as if the selector were not there, because a word a
-/// module coins is a word it chose, and this one is a word it nearly typed.
-///
-/// The middle note names the `theme` row that did the widening, in the
-/// present: that row exists, or this branch would not have been reached.
-/// Phrasing it as something the author could add read as advice to write
-/// the selector — and on a finding about the member's own bracket, advice
-/// to write the text being reported.
+/// The middle note names the widening `theme` row as one that exists.
+/// Phrased as something to add, it would advise writing the selector, or on
+/// the member's own bracket, the very text being reported.
 fn coined_near_miss(
     field: Field,
     keyword: &str,
@@ -564,10 +443,9 @@ fn coined_near_miss(
 
 /// A key the role accepts and nothing on it reads, worded by [`Unread`].
 ///
-/// The two kinds differ in what is owed. An unreached key waits on a
-/// lowering rule, so keeping it is a choice the author may make; an
-/// inapplicable one waits on nothing, so the note asks for its removal and
-/// mentions no rule.
+/// An unreached key waits on a lowering rule, so keeping it is the author's
+/// choice; an inapplicable one waits on nothing, so the note asks for its
+/// removal.
 fn unread_argument(keyword: &str, key: &str, span: &crate::error::Span, why: Unread) -> Diagnostic {
     let (primary, note) = match why {
         Unread::Unreached => (
@@ -626,10 +504,8 @@ fn unread_header_argument(keyword: &str, key: &str, span: &crate::error::Span) -
 mod tests {
     use super::{HEADER_ARGUMENTS, UNREAD_HEADER_ARGUMENTS};
 
-    /// The header's twin of the member tables' consistency test. A key
-    /// listed as unread but missing from the vocabulary would never reach
-    /// the unread branch: `check_header` refuses it as unknown first, so
-    /// the key the specification writes would be an error.
+    /// Otherwise `check_header` refuses the key as unknown before the
+    /// unread branch sees it.
     #[test]
     fn every_unread_header_argument_is_in_the_header_vocabulary() {
         for key in UNREAD_HEADER_ARGUMENTS {

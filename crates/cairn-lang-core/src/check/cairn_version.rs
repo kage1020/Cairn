@@ -1,38 +1,20 @@
-//! `cairn_version` pass — reads the `@cairn` header's declared language
+//! `cairn_version` pass: reads the `@cairn` header's declared language
 //! version, and says so when it cannot.
 //!
-//! The directive is provenance: nothing branches on the value and the
-//! artifact is identical whatever it says. `spec/index` still gives it
-//! a job — "so a future compiler can parse and warn correctly" — and a
-//! value no compiler can read cannot do that job. Two findings come out of
-//! reading it:
+//! Nothing branches on the value, but `spec/index` gives it a job ("so a
+//! future compiler can parse and warn correctly") that an unreadable value
+//! cannot do. The pass warns when the value is not a `CalVer`, and when it
+//! is later than this build, since an unknown keyword or argument elsewhere
+//! in the file may then be about the gap rather than the source. A new
+//! syntactic form never reaches this pass because it fails to parse, so
+//! [`crate::calver::future_version_note`] carries the gap to that parse
+//! error as a note.
 //!
-//! - the value is not a `CalVer` at all, so the header declares nothing;
-//! - the value is a later version than this build, which is the one thing
-//!   an older compiler can usefully say about a file written against a
-//!   newer language. An unknown keyword or argument anywhere in the file
-//!   might be about the gap rather than about the source, and only the
-//!   header knows.
+//! Both are warnings because neither changes a voxel (`spec/lint` "Error vs
+//! warning"). `@requires` is an error by the same rule: its floor reaches
+//! `cairn info`'s compatible range and the `--target` gate.
 //!
-//! The second reaches the cases a later language adds *within* the
-//! existing shapes. A whole new syntactic form does not get here at all:
-//! an unrecognised `@directive` and an unrecognised top-level item are
-//! both `E_PARSE`, and `spec/lint` "Error vs warning" says what follows —
-//! parsing precedes every check pass, so a source that does not parse reaches
-//! none of them. The version gap is the whole explanation there, so
-//! [`crate::calver::future_version_note`] carries it to the one finding that *is*
-//! reported: the parse error itself, as a note rather than a second
-//! finding.
-//!
-//! Both are warnings. That same section makes a finding an error when
-//! leaving it alone yields something other than what the source asked for;
-//! neither of these changes a voxel. `@requires` is an error on the same
-//! rule read the other way — its floor reaches `cairn info`'s compatible
-//! range and the `--target` gate, so a floor that evaporates accepts a
-//! target it should not.
-//!
-//! Only the surface AST is walked, for the reason [`super::requires`]
-//! walks it: `@cairn` is a header, and lowering does not carry headers
+//! Only the surface AST is walked, because lowering does not carry headers
 //! into the IR.
 
 use crate::CAIRN_VERSION;
@@ -44,12 +26,8 @@ use crate::error::Span;
 use super::DiagnosticSink;
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
-    // Parsed once for the whole module rather than per header. `None` is a
-    // build whose own `CARGO_PKG_VERSION` is not a `CalVer`, which the
-    // release process cannot produce and which
-    // `this_compilers_own_version_is_a_language_version` pins. There is
-    // nothing to compare against then, so the future check stands down —
-    // and the shape check, which needs no comparison, goes on running.
+    // `None` only for a build whose own version is not a `CalVer`, which the
+    // release process cannot produce; then only the future check stands down.
     let compiler = parse_language_version(CAIRN_VERSION).ok();
     for header in &module.headers {
         let Header::Cairn { version, span } = header else {
@@ -85,11 +63,8 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
 
 /// The finding for a file written against a later language than this build.
 ///
-/// Both versions are quoted as they are written rather than as they parse:
-/// the declared one is what the author has to edit, and `CAIRN_VERSION` is
-/// what a bug report has to name. `2026.06` and `2026.6` are one version to
-/// the comparison and two strings to a reader, and the reader is the one
-/// being told which line to change.
+/// Both versions are quoted as written, not as parsed: `2026.06` and
+/// `2026.6` compare equal, but the author edits the string they wrote.
 fn future_diag(declared: &str, span: &Span) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::FutureCairnVersion,

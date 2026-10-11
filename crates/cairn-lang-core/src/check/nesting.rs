@@ -1,62 +1,36 @@
-//! `nesting` pass — flags an indented body that never reaches the build.
+//! `nesting` pass: flags an indented body that never reaches the build.
 //!
-//! The surface grammar hangs a body off every command
-//! (`parse_optional_command_body` is called for each generic statement),
-//! but only one shape has a reader: a `level y=N` sitting directly in a
-//! `struct` or `def` body, which [`crate::block_array`]'s
-//! `flatten_members` unwraps so the children join the phase buckets.
-//! Everything else is dropped before any block is placed — and dropped
-//! quietly, which is what this pass exists to stop.
+//! The parser hangs a body off every command, but only a `level y=N`
+//! directly in a `struct` or `def` body has a reader:
+//! [`crate::block_array`]'s `flatten_members` unwraps it into the phase
+//! buckets. Every other body is dropped before any block is placed, in one
+//! of three ways that share a code because the repair is the same (move the
+//! members):
 //!
-//! Three ways to lose a body, all one code because the author's next
-//! action is the same (move the members) and the message says which
-//! case they are in:
+//! * the parent's role is not a grouping construct;
+//! * `level` inside another `level`, which lowering refuses;
+//! * `level` whose `y=` is missing or not a `u32`.
 //!
-//! * the parent's role is not a grouping construct at all;
-//! * `level` inside another `level`, which the lowering pass refuses;
-//! * `level` whose `y=` is missing or not a `u32`, so it has nowhere to
-//!   put the children.
+//! A `level` in a `site` body is [`super::member_scope`]'s, since that body
+//! has no reader for the row at all. The last two shapes also earn
+//! lowering's `W_DEFERRED_MEMBER`, but `check` does not lower, and a `def`
+//! no `site` places is never lowered.
 //!
-//! A fourth shape — `level` in a `site` body, where nothing unwraps it —
-//! belongs to [`super::member_scope`] instead: a `site` body has no
-//! reader for `level` at all, so the finding is about the row rather
-//! than about what is indented under it, and reporting both would bill
-//! one mistake twice.
+//! A dropped member in a `struct` or `def` still takes a theme binding
+//! (`resolve::resolver`'s `resolve_members` recurses) and still feeds
+//! redstone synthesis (`collect_member` recurses); it only produces no
+//! blocks, so the message is about blocks. In a `site` body
+//! `resolve_site_placements` does not descend, so a nested row takes part
+//! in nothing.
 //!
-//! The last two also earn a `W_DEFERRED_MEMBER` from block-array
-//! lowering. That is not a substitute: `check` does not lower (see the
-//! module doc on [`super::check`]), and a nested `level` in a `def` that
-//! no `site` places is never lowered at all.
+//! Only `children.members` are walked: `logic` and `assert` lines are read
+//! at any depth ([`super::truth`] and redstone synthesis walk nested
+//! bodies), so indentation loses nothing of theirs.
 //!
-//! Dropped is not quite inert, which is why the geometry message is
-//! about blocks rather than about the member disappearing. A member
-//! nested in a `struct` or `def` body still receives a theme binding
-//! (`resolve::resolver`'s `resolve_members` recurses) and still
-//! contributes sensors, actuators, and `logic` bindings to redstone
-//! synthesis (`collect_member` recurses). What it never produces is
-//! blocks. In a `site` body neither of those applies:
-//! `resolve_site_placements` iterates the rows without descending, so a
-//! nested row takes part in nothing.
-//!
-//! Scope of the walk: `children.members` only. A `logic` binding in the
-//! same body is read by redstone synthesis at any depth, so it is not
-//! lost. An `assert` is read at any depth as well: [`super::truth`] walks
-//! nested bodies, and redstone synthesis checks the signals a nested one
-//! names. Neither of those is the evaluator, which is still unbuilt — but
-//! a nested `assert` is no worse off than a top-level one either way, so
-//! reporting it here would blame the indentation for a gap the
-//! indentation did not open.
-//!
-//! Anchoring: the indented members, from the first to the last byte of
-//! the last one's own subtree, so the underline reaches the members
-//! that have to move rather than stopping at the last one's header
-//! line. `logic` / `assert` lines interleaved in the same body fall
-//! inside that range without being counted — they are part of the block
-//! the author will re-indent, but not part of what is lost.
-//!
-//! One diagnostic per dropped subtree, reported at its root. Recursing
-//! into a body that is already dropped would count one mistake once per
-//! member inside it.
+//! The underline runs from the first indented member to the end of the last
+//! one's subtree, covering every line the author has to move; interleaved
+//! `logic` / `assert` lines fall inside it without being counted. One
+//! diagnostic per dropped subtree, at its root.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
@@ -89,14 +63,8 @@ fn walk(members: &[Member], scope: BodyKind, inside_level: bool, sink: &mut Diag
         ) else {
             continue;
         };
-        // An unknown keyword is `keyword_allowlist`'s finding, and a
-        // keyword this body has no reader for is `member_scope`'s. Both
-        // repairs are the keyword line, not the indentation — "move
-        // these into a `level`" would send the author to fix the wrong
-        // line, and in a `site` body there is no `level` to move them
-        // into. The subtree under either is skipped rather than walked:
-        // it hangs off a row that does not name anything the compiler
-        // builds here.
+        // `keyword_allowlist` and `member_scope` own these rows, and their
+        // repair is the keyword line, not the indentation.
         if matches!(member.role, MemberRole::Other(_)) || !member.role.is_read_in(scope) {
             continue;
         }
@@ -107,16 +75,10 @@ fn walk(members: &[Member], scope: BodyKind, inside_level: bool, sink: &mut Diag
     }
 }
 
-/// Whether this member's indented body reaches the build.
+/// Whether this member's indented body reaches the build, so another walk
+/// does not report a child of a body this pass reports as lost.
 ///
-/// [`super::member_scope`] asks before recursing, for the same reason
-/// this pass asks before recursing: a body about to be reported as lost
-/// takes its children with it, so a second finding on one of those
-/// children bills one mistake twice — and with repairs that disagree,
-/// since following "dedent these" leaves the other finding standing.
-///
-/// Only meaningful for a role the enclosing body reads; both callers
-/// check that first.
+/// Only meaningful for a role the enclosing body reads.
 pub(super) fn body_reaches_the_build(member: &Member, inside_level: bool) -> bool {
     loss(member, inside_level).is_none()
 }
@@ -124,9 +86,8 @@ pub(super) fn body_reaches_the_build(member: &Member, inside_level: bool) -> boo
 /// How this member's indented body is lost, or `None` when it reaches
 /// the build.
 ///
-/// Only reached for a role the enclosing body reads — `walk` hands the
-/// rest to `member_scope` — so a `Level` here is always in a `struct` or
-/// `def`, where `flatten_members` is the thing that would unwrap it.
+/// The caller has checked that the enclosing body reads the role, so a
+/// `Level` here is in a `struct` or `def`.
 fn loss(member: &Member, inside_level: bool) -> Option<Loss> {
     if !matches!(member.role, MemberRole::Level) {
         return Some(Loss::NotAGroupingConstruct);
@@ -134,9 +95,7 @@ fn loss(member: &Member, inside_level: bool) -> Option<Loss> {
     if inside_level {
         return Some(Loss::LevelInsideLevel);
     }
-    // Same reader as `flatten_members`, through the same accessor, so
-    // "the offset this pass accepted" and "the offset lowering placed
-    // the children at" cannot drift apart.
+    // The accessor `flatten_members` uses, so the two agree on the offset.
     if member.nonneg_u32("y").is_none() {
         return Some(Loss::LevelWithoutOffset);
     }
@@ -211,12 +170,8 @@ fn geometry_primary(reason: &str, count: usize, subject: &str) -> String {
     )
 }
 
-/// Last byte of `member` including everything indented under it.
-///
-/// [`Member::span`] covers the member's own line only, so a dropped
-/// subtree would otherwise be underlined down to its root's header and
-/// stop there, leaving the grandchildren the author has to move outside
-/// the range.
+/// Last byte of `member` including everything indented under it;
+/// [`Member::span`] covers the member's own line only.
 fn subtree_end(member: &Member) -> usize {
     member
         .children

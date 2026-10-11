@@ -1,38 +1,19 @@
-//! `binding` pass — flags a `-> value` tail on a member that cannot emit a
-//! signal: one whose keyword is not a sensor, or a sensor keyword written
-//! in the `[selector]` form, which no sensor binding is defined for.
+//! `binding` pass: flags a `-> value` tail on a member that cannot emit a
+//! signal, either because its keyword is not a sensor or because a sensor
+//! keyword is written in the `[selector]` form, which no sensor binding is
+//! defined for.
 //!
-//! The fourth field of a member line, and the last one with no check of its
-//! own. [`super::arguments`] judges the `key=value` list and the member's
-//! own `[key=value]`; `check::positional` reads the bare values; and the
-//! tail was left to `synth`'s Logic IR walk, which only
-//! `cairn synth --experimental-logic-synth` reaches. So
-//! `walls ... -> sig.w` was silent through `check` and `compile`, built a
-//! wall with no trace of the binding, and left the signal it named driven
-//! by nothing.
+//! It asks only whether the role may carry a tail at all, which
+//! [`crate::intent::SENSOR_HOSTS`] answers without a Logic IR. Whether the
+//! value names a signal (`E_LOGIC_INVALID_SIGNAL`), and whether that signal
+//! is driven twice or by nobody, need one and stay in `cairn-lang-redstone`.
+//! The host comes first because no edit to the value makes a `walls` emit;
+//! a tail on a `pressure_plate` passes here whatever it names.
 //!
-//! What this pass asks is the host question alone: may a member of this
-//! role carry a tail at all. [`crate::intent::SENSOR_HOSTS`] answers it,
-//! and the answer needs no Logic IR — which is the whole reason the rule
-//! can run here. The two questions that do need one stay in
-//! `cairn-lang-redstone`: whether the value names a signal
-//! (`E_LOGIC_INVALID_SIGNAL`), and whether the signal it names is driven
-//! twice or by nobody.
-//!
-//! The host is asked before the value for the same reason it is in that
-//! crate: no edit to the value makes a `walls` emit, so telling the author
-//! about the `sig.` namespace would send them round the loop to be told
-//! about the host next time. A tail on a `pressure_plate` passes here
-//! whatever it names, and the value-side refusal is the redstone
-//! pipeline's to make.
-//!
-//! A member whose keyword the role table does not know is left alone, the
-//! same way [`super::arguments`] leaves one: `E_UNKNOWN_KEYWORD` owns the
-//! line, and "this member cannot emit a signal" would be a second finding
-//! about a component that does not exist. `lever ... -> sig.w` is that
-//! case today — a sensor `spec/redstone` "Signal binding" lists and the
-//! surface has not reached — and telling its author about the host would
-//! be telling them the wrong thing.
+//! A member with an unknown keyword is left to `E_UNKNOWN_KEYWORD`: `lever
+//! ... -> sig.w` names a sensor `spec/redstone` "Signal binding" lists and
+//! the surface does not accept yet, and a host finding would tell its
+//! author the wrong thing.
 
 use crate::ast::SIGNAL_HEAD;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
@@ -58,8 +39,7 @@ fn check_member(member: &Member, sink: &mut DiagnosticSink) {
     let Some(binding) = &member.binding else {
         return;
     };
-    // The keyword is the repair; whether it may emit is a question about a
-    // component that does not exist.
+    // An unknown keyword's own finding carries the repair.
     if matches!(member.role, MemberRole::Other(_)) {
         return;
     }
@@ -73,16 +53,11 @@ fn check_member(member: &Member, sink: &mut DiagnosticSink) {
 
 /// A tail on a sensor keyword written in the selector form.
 ///
-/// `door[id=front] opened_by=sig.x` binds a door declared elsewhere, and
-/// that door actuator patch is the only binding `spec/redstone` "Signal
-/// binding" defines for a selector line — there is no sensor patch. Read
-/// as a sensor, `pressure_plate[id=p] -> sig.x` became a netlist input
-/// for a plate the selector may not even name. Asked after the host,
-/// because a `walls[...]` tail is wrong on the keyword first and dropping
-/// the brackets would not repair it.
-///
-/// The rule is about the tail. What a selector line *without* one builds
-/// is not this pass's question, so the sentence claims nothing about it.
+/// The door actuator patch (`door[id=front] opened_by=sig.x`) is the only
+/// binding `spec/redstone` "Signal binding" defines for a selector line.
+/// Read as a sensor, `pressure_plate[id=p] -> sig.x` would become a netlist
+/// input for a plate the selector may not even name. Asked after the host,
+/// because dropping the brackets would not repair a `walls[...]` tail.
 fn tail_on_selector(keyword: &str, span: &Span) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::MisplacedBinding,
@@ -105,10 +80,9 @@ fn tail_on_selector(keyword: &str, span: &Span) -> Diagnostic {
 
 /// A tail on a member that is not a sensor.
 ///
-/// The repair names the hosts that exist today and the ones the
-/// specification has reserved, because an author who wrote a tail on a
-/// `walls` may have meant either: to move it onto the plate they already
-/// have, or to write the `lever` the surface has not reached yet.
+/// The repair names both the accepted hosts and the ones the specification
+/// reserves: the author may mean to move the tail onto a plate they have,
+/// or to write a `lever` the surface does not accept yet.
 fn misplaced_binding(keyword: &str, span: &Span) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::MisplacedBinding,
@@ -119,9 +93,6 @@ fn misplaced_binding(keyword: &str, span: &Span) -> Diagnostic {
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            // Word for word the repair `cairn synth` gave, because it is
-            // the same finding moved and not a second opinion about the
-            // same line.
             message: format!(
                 "move the tail onto a sensor — `{hosts}` {verb} the sensor {noun} the surface \
                  accepts today; `spec/redstone` \"Signal binding\" also lists `lever`, \

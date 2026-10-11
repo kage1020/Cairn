@@ -1,50 +1,26 @@
-//! `connect_arity` pass — flags every `connect` member whose positional
+//! `connect_arity` pass: flags every `connect` member whose positional
 //! shape is not `FROM.PORT to TO.PORT`.
 //!
-//! The surface grammar of `connect` (`spec/components-editing-sites` "Ports
-//! and `connect`") is fixed at three positionals: the from-side dotted
-//! reference, the literal `to` keyword, and the to-side dotted reference. The
-//! line-based parser (`parse`'s `parse_command`) accepts any number of
-//! positionals up to the next newline without enforcing arity, and
-//! [`crate::intent::lower`] carries them through verbatim. Without this
-//! pass, broken rows like `connect a.entry` would reach the resolver,
-//! whose `resolve_connect_row` arm short-circuits with no diagnostic
-//! and leaves the walkway silently absent from the build.
+//! `spec/components-editing-sites` "Ports and `connect`" fixes that shape:
+//! three positionals, each endpoint a one-dot `<place>.<port>` reference.
+//! The parser accepts any [`Value`]s up to the newline and
+//! [`crate::intent::lower`] carries them through, while the resolver drops
+//! a row it cannot lift into a `PortRef` without a word, so without this
+//! pass the walkway would be silently absent from the build.
 //!
-//! "Shape" is not only the count. The grammar admits exactly a one-dot
-//! `<place>.<port>` reference in each endpoint slot, and the parser
-//! accepts any [`Value`] in a positional — a bare identifier, a
-//! literal, a `@material` token, a quoted string, a list, or a
-//! reference carrying a second dot. None of those can be lifted into a
-//! `PortRef`, so the resolver drops the row and its walkway never
-//! appears in the build.
+//! Anchoring:
+//!   * 0 positionals: the whole `connect` row.
+//!   * 1 positional: a zero-width cursor after it, where `to TO.PORT` goes.
+//!   * 2 positionals with `to` in the middle: a zero-width cursor after `to`.
+//!   * 2 or more with another middle: that token alone, since the target
+//!     slot cannot be read until the keyword is fixed.
+//!   * 3 or more with `to` in the middle: each endpoint that is not a
+//!     one-dot reference, plus the run of trailing extras, one finding each
+//!     because they are independent fixes.
 //!
-//! Anchoring strategy:
-//!   * 0 positional → underline the whole `connect` row.
-//!   * 1 positional → zero-width cursor right after the from value, so
-//!     the rendered `file:L:C` points at where `to TO.PORT` should go.
-//!   * 2 positional with `to` middle → zero-width cursor right after the
-//!     `to` keyword.
-//!   * 2 or 3+ positional with a non-`to` middle → underline the
-//!     offending separator token; the user must fix the wrong keyword
-//!     before the trailing target slot is interpretable, so surfacing
-//!     two findings for one row would be noise.
-//!   * 3+ positional with a `to` middle → underline each endpoint that
-//!     is not a one-dot reference, plus the run of trailing extras.
-//!     These are independent fix sites: deleting the extras does not
-//!     turn `1` into a port reference, and correcting one endpoint says
-//!     nothing about the other, so one finding each spares the author a
-//!     round of the edit-check loop per mistake.
-//!
-//! Resolver-side note: the silent return arms in
-//! `resolve::resolver`'s `resolve_connect_row` and
-//! `port_ref_from_value` stay in place so library callers that invoke
-//! `resolve(ir)` directly without going through `check` still see the
-//! same defensive behaviour. Their guards accept exactly the rows this
-//! pass leaves unreported — the same positional count, the same
-//! separator, the same endpoint shapes — so the two layers cannot
-//! disagree on which rows are well-formed, only on how loudly they say
-//! so.
+//! The resolver's silent arms (`resolve::connect`'s `resolve_connect_row`
+//! and `port_ref_from_value`) stay for callers that resolve without
+//! checking, and accept exactly the rows this pass leaves unreported.
 
 use crate::ast::{Value, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
@@ -54,15 +30,9 @@ use crate::intent::{ConnectEnd, IntentModule, Member, MemberRole};
 use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    // `connect` carries semantic meaning only at site placement scope,
-    // but `intent::keyword_table::role_of` treats `connect` as global
-    // and lowers any occurrence to [`MemberRole::Connect`] regardless
-    // of the surrounding body. `check::member_scope` reports a `connect`
-    // written into a `struct` or `def` body as `E_MISPLACED_MEMBER`, but
-    // that finding is about the body rather than the row: it says nothing
-    // about whether the row would have been well-formed where it belongs.
-    // Walk every scope here so a stray row gets both halves at once,
-    // instead of an arity error appearing only after the first is fixed.
+    // Every body, not only sites: a `connect` in a `struct` or `def` gets
+    // `E_MISPLACED_MEMBER` from `check::member_scope`, and its arity finding
+    // should arrive with that one rather than after it is fixed.
     for body in ir.bodies() {
         walk(body.members, sink);
     }
@@ -96,10 +66,7 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
             mid.span.clone(),
             format!(
                 "expected `to` between `<from>.<port>` and `<to>.<port>`, got {}",
-                // Quoted, which is why this reads `` got `"to"` `` rather
-                // than `` got `to` `` for `connect a.entry "to" b.entry` —
-                // a message that printed the string's contents bare read
-                // as the pass rejecting the very keyword it asked for.
+                // Quoted, so `"to"` does not read as the keyword it asks for.
                 mid.describe(),
             ),
             vec![example_note()],
@@ -115,32 +82,17 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
             mid.span.clone(),
             format!(
                 "expected `to` between `<from>.<port>` and `<to>.<port>`, got {}",
-                // Quoted, which is why this reads `` got `"to"` `` rather
-                // than `` got `to` `` for `connect a.entry "to" b.entry` —
-                // a message that printed the string's contents bare read
-                // as the pass rejecting the very keyword it asked for.
                 mid.describe(),
             ),
             vec![example_note()],
         ),
-        // Three positionals with `to` in the middle is the well-formed
-        // count. What remains to check is the two endpoint slots, and —
-        // when the row runs long — the trailing extras.
         [from, _to_kw, to_port, extras @ ..] => {
             validate_endpoint(ConnectEnd::From, from, sink);
             validate_endpoint(ConnectEnd::To, to_port, sink);
             if let (Some(first), Some(last)) = (extras.first(), extras.last()) {
-                // Over-arity. The grammar caps `connect` at three
-                // positionals; everything beyond `to TO.PORT` is `args=`
-                // territory (notably `path=@MATERIAL`). Without this arm
-                // the resolver would read `positional[0..3]` and drop
-                // every trailing slot on the floor — a user who wrote
-                // `connect a.entry to b.entry c.exit path=@gravel`
-                // thinking the row could carry two destinations would
-                // see one walkway lay and the other vanish silently.
-                // Underline the run of extras together so the fix
-                // surface is the whole offending suffix rather than each
-                // token in isolation.
+                // The resolver reads only `positional[0..3]`, so a second
+                // destination would vanish silently. One span covers the
+                // extras because the fix is the whole suffix.
                 let span = Span {
                     start: first.span.start,
                     end: last.span.end,
@@ -163,32 +115,21 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
     }
 }
 
-/// Flag `value` when it is not a one-dot `<place>.<port>` reference.
+/// Flag `value` when it is not a one-dot `<place>.<port>` reference, the
+/// shape `resolve::connect`'s `port_ref_from_value` lifts into a `PortRef`.
 ///
-/// The accepted shape is exactly what `resolve::resolver`'s
-/// `port_ref_from_value` can lift into a `PortRef`; anything else
-/// leaves the row without a walkway, so this is the layer that has to
-/// say so.
-///
-/// `end` comes first so the call site reads in the order the row does.
-/// It cannot be made unswappable — the two call sites below could hand
-/// over the wrong slot and still typecheck — so the pairing is pinned
-/// by the per-slot message assertions in `tests/check/connect_arity.rs`
-/// instead of by the signature.
+/// Swapping the slots at the two call sites would still typecheck; the
+/// per-slot messages in `tests/check/connect_arity.rs` pin the pairing.
 fn validate_endpoint(end: ConnectEnd, value: &Value, sink: &mut DiagnosticSink) {
     let got = match &value.kind {
         ValueKind::DotRef(dot) if dot.tail().len() == 1 => return,
-        // A reference with the wrong number of segments. Naming the
-        // count makes the extra dot visible in a message quoted without
-        // the source beside it, where `a.entry.x` and `a.entry` differ
-        // by one easily-missed character.
+        // The count makes an extra dot visible in a message read without
+        // the source beside it.
         ValueKind::DotRef(dot) => format!("{} with {} segments", value.describe(), dot.len()),
         _ => value.describe(),
     };
-    // The placeholder is spelled as the other arms of this pass and the
-    // spec's 9.3.5 grammar line spell it; the position keeps two
-    // endpoint findings on one row apart in a plain-text log, which
-    // renders no spans.
+    // The position tells two endpoint findings on one row apart in a
+    // plain-text log, which renders no spans.
     let (shape, position) = match end {
         ConnectEnd::From => ("`<from>.<port>`", "before `to`"),
         ConnectEnd::To => ("`<to>.<port>`", "after `to`"),
@@ -209,9 +150,7 @@ fn validate_endpoint(end: ConnectEnd, value: &Value, sink: &mut DiagnosticSink) 
 }
 
 /// The single edit that turns this value into a port reference, when
-/// there is one. `spec/lint` asks for messages an author can act on
-/// from the message alone; the generic example note shows the target
-/// shape but not which character to change.
+/// there is one; the example note shows the shape but not what to change.
 fn repair_note(value: &Value) -> Option<String> {
     match &value.kind {
         ValueKind::Ident(name) => Some(format!(

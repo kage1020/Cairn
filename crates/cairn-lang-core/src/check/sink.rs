@@ -2,23 +2,18 @@
 
 use crate::diagnostic::{Diagnostic, sort_by_position};
 
-/// Collector that gathers diagnostics from one or more passes without
-/// short-circuiting.
+/// Collects the findings of every `check` pass.
 ///
-/// Passes call [`Self::push`] for each finding. The driver in
-/// [`super::check`] consumes the sink via [`Self::into_sorted`] which
-/// returns a stable, position-ordered vector — a single pass might emit
-/// diagnostics out of order (e.g. a duplicate noticed mid-walk reports the
-/// second occurrence after a later attribute), and the sort makes the wire
-/// output reproducible.
+/// Passes push in walk order, which is not source order (a duplicate is
+/// reported where its second occurrence is reached), so the list leaves
+/// only through [`Self::into_sorted`].
 #[derive(Debug, Default)]
 pub struct DiagnosticSink {
     diags: Vec<Diagnostic>,
 }
 
 impl DiagnosticSink {
-    /// Empty sink. Equivalent to `DiagnosticSink::default()` but spells out
-    /// the intent at call sites.
+    /// An empty sink.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -29,9 +24,7 @@ impl DiagnosticSink {
         self.diags.push(diagnostic);
     }
 
-    /// Number of diagnostics collected so far. Used by passes that need to
-    /// suppress a follow-on finding when an earlier one already covered the
-    /// same byte range.
+    /// Number of diagnostics collected so far.
     #[must_use]
     pub fn len(&self) -> usize {
         self.diags.len()
@@ -43,9 +36,8 @@ impl DiagnosticSink {
         self.diags.is_empty()
     }
 
-    /// Drain into a `Vec` sorted by primary span position
-    /// (`(start, end)`). Stable: passes that emit two diagnostics with the
-    /// same span preserve their push order.
+    /// Drain into a `Vec` sorted by `(span.start, span.end)`, keeping push
+    /// order among diagnostics with the same span.
     #[must_use]
     pub fn into_sorted(mut self) -> Vec<Diagnostic> {
         sort_by_position(&mut self.diags);

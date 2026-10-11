@@ -1,48 +1,32 @@
-//! `duplicate` pass — flags a `key=` / `slot` / `id=` / item name repeated
-//! in the same scope, a `theme` selector row repeated as a whole, and a
-//! second `circuit` line in a `struct` / `def` body.
+//! `duplicate` pass: flags a `key=`, `slot`, `id=` or item name repeated in
+//! one scope, a `theme` selector row repeated as a whole, and a second
+//! `circuit` line in a `struct` / `def` body.
 //!
-//! Walks the surface AST rather than the IR because the IR's
+//! It walks the surface AST because the IR's
 //! [`IntentState`](crate::intent::IntentState) and `args` maps are
-//! last-write-wins; the surface form is the only place where both the first
-//! and second occurrences are still visible. `E_DUPLICATE_SELECTOR` is the
-//! exception, and for the reason the rule states rather than against it —
-//! `ThemeIr::selectors` is a `Vec` that keeps every row, and it is the
-//! shape the matcher those rows feed actually reads. See
-//! [`check_theme_selectors`].
+//! last-write-wins, so only the surface still holds both occurrences. The
+//! exception is [`check_theme_selectors`], whose rows the IR keeps intact.
 //!
-//! The codes emitted here use distinct scopes:
-//! - `E_DUPLICATE_HEADER` — a single-valued `@directive` (`@cairn`,
-//!   `@intended_targets`) appears more than once in the module.
-//!   `@requires` is exempt; see [`check_headers`].
-//! - `E_DUPLICATE_ITEM` — two top-level items *of the same kind* share a
-//!   name. The four kinds are separate namespaces, so this is four
-//!   independent scopes rather than one.
-//! - `E_DUPLICATE_SIZE` — a struct/def header has more than one `size=`.
-//! - `E_DUPLICATE_SLOT` — a `theme` body has two `slot NAME ->` lines for
-//!   the same `NAME`.
-//! - `E_DUPLICATE_SELECTOR` — a `theme` body has two selector rows that
-//!   select the same members and bind the same key.
-//! - `E_DUPLICATE_ARG`  — any other duplicate `key=` inside the same
-//!   argument list (header excluding `size=`, statement args, selector
-//!   attrs, selector bindings, header args of struct/def excluding size).
-//! - `E_DUPLICATE_ID`   — two members in the same immediate body scope
-//!   declare `id=NAME` for the same `NAME` (per-body scope; nested `level`
-//!   blocks have their own namespace). Two `place` rows of one `site` body
-//!   are left to the resolver, which compares refused ids as well as
-//!   accepted ones and reports a repeat as `E_DUPLICATE_PLACE_ID`. A `place`
-//!   row indented under another row is not in that body and stays here. See
+//! Scopes and codes:
+//! - `E_DUPLICATE_HEADER`: a single-valued `@directive` repeated in the
+//!   module; `@requires` is exempt, see [`check_headers`].
+//! - `E_DUPLICATE_ITEM`: two top-level items of the same kind share a name;
+//!   each kind is its own namespace.
+//! - `E_DUPLICATE_SIZE`: a `struct` / `def` header with two `size=`.
+//! - `E_DUPLICATE_SLOT`: two `slot NAME ->` lines in a `theme` body.
+//! - `E_DUPLICATE_SELECTOR`: two theme rows that select the same members
+//!   and bind the same key.
+//! - `E_DUPLICATE_ARG`: any other `key=` repeated in one argument list.
+//! - `E_DUPLICATE_ID`: two members of one immediate body declare the same
+//!   `id=`. A nested body is its own namespace, and a repeat between two
+//!   top-level `place` rows of a `site` is the resolver's; see
 //!   [`PlaceIdOwner`].
-//! - `E_DUPLICATE_CIRCUIT` — a `struct` / `def` body has two `circuit`
-//!   lines among its own members, the ones place-and-route reads a
-//!   scope's reservation from.
+//! - `E_DUPLICATE_CIRCUIT`: two `circuit` lines among a `struct` / `def`
+//!   body's own members.
 //!
-//! Every scope here reports the *repeat* and points a note at the first
-//! declaration, so the anchor is the token the author would edit and the
-//! note is the one they would keep. `E_DUPLICATE_SELECTOR` is the
-//! exception: it names the row the repeat actually takes the value from,
-//! which past two rows is not the first one. See [`check_theme_selectors`]
-//! for why that scope needs the distinction and the others do not.
+//! Each finding sits on the repeat, the token the author would edit, with a
+//! note on the first declaration. `E_DUPLICATE_SELECTOR` notes the row the
+//! repeat displaces instead; see [`check_theme_selectors`].
 
 use indexmap::IndexMap;
 
@@ -69,36 +53,20 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
             Item::Site { body, .. } => check_body(body, PlaceIdOwner::Resolver, sink),
         }
     }
-    // The one scope read off the IR rather than the surface AST, walked in
-    // its own loop because it needs a different tree. `lower` visits items
-    // in order and keeps one `ThemeIr` per `theme` block, including the
-    // blocks whose name lost the binding, so this is the same set of
-    // bodies the loop above walks; the sink sorts by span at the end, so
-    // splitting the theme work across two passes does not reorder anything
-    // the user sees.
+    // `lower` keeps one `ThemeIr` per `theme` block, including blocks whose
+    // name lost the binding, so this walks the same bodies as the loop above.
     for theme in &ir.themes {
         check_theme_selectors(theme, sink);
     }
 }
 
-/// Module-header scope: a single-valued `@directive` may be declared
-/// once.
+/// Module-header scope: a single-valued `@directive` (`@cairn`,
+/// `@intended_targets`) may be declared once, because no rule says which
+/// of two answers holds.
 ///
-/// `@cairn` and `@intended_targets` are single-valued by construction —
-/// one language version the file was written against, one list of
-/// intended targets. Two of either state two answers to a question that
-/// has one, and no rule anywhere says which holds. Neither has a
-/// consumer in the compiler today (both are provenance for a future
-/// reader), which is precisely why a repeat has to be reported rather
-/// than resolved: there is no reader to prefer one over the other, and
-/// picking silently later would be worse than saying so now.
-///
-/// `@requires` is exempt because it *composes*. `resolve::version_axes`
-/// folds every `version>=X` floor to the strictest, which is the
-/// conjunction of the constraints, not a choice between them — nothing
-/// is discarded, and the behaviour is documented on `RegistryRange` and
-/// pinned by that module's tests. Reporting it here would make an error
-/// out of a shape the rest of the crate defines as meaningful.
+/// `@requires` is exempt because its floors compose: `resolve::version_axes`
+/// folds them to the strictest (see `RegistryRange`), so nothing is
+/// discarded.
 fn check_headers(headers: &[Header], sink: &mut DiagnosticSink) {
     let mut seen: IndexMap<&'static str, Span> = IndexMap::new();
     for header in headers {
@@ -130,23 +98,16 @@ fn check_headers(headers: &[Header], sink: &mut DiagnosticSink) {
     }
 }
 
-/// Top-level name scope, one namespace per item kind.
-///
-/// [`ItemKind`] is the namespace: the resolver keys scopes `struct::`,
-/// `def::`, and `site::NAME::` and holds themes in a map of their own,
-/// so the same name on two different kinds never collides and must not
-/// be reported. Keying the seen-map by the kind rather than by a
-/// keyword string is what keeps this pass and the resolver reading the
-/// same definition of "namespace".
+/// Top-level name scope, one namespace per [`ItemKind`], matching the
+/// resolver's `struct::`, `def::` and `site::NAME::` scope keys and its
+/// separate theme map.
 fn check_item_names(items: &[Item], sink: &mut DiagnosticSink) {
     let mut seen: IndexMap<(ItemKind, &str), Span> = IndexMap::new();
     for item in items {
         let kind = item.kind();
         let keyword = kind.keyword();
         let name = item.name();
-        // Anchor on the name token, not the item's span: the block span
-        // covers the indented body, and underlining a whole `def` says
-        // nothing about which word to change.
+        // The name token, not the item span, which covers the whole body.
         let span = item.name_span().clone();
         if let Some(first_span) = seen.get(&(kind, name)) {
             sink.push(Diagnostic {
@@ -168,16 +129,11 @@ fn check_item_names(items: &[Item], sink: &mut DiagnosticSink) {
     }
 }
 
-/// What the author has to do about a repeated name, which differs by
-/// kind because what the repeat costs differs by kind.
+/// What the author has to do about a repeated name.
 ///
-/// For `theme` / `def` / `struct` the name *is* the binding key, so the
-/// second declaration binds nothing and its body reaches no artifact.
-/// For `site` the binding key is `site::NAME::PLACE_ID`, so two blocks
-/// of one name do not shadow each other — their places land in one
-/// shared namespace and all of them build. Telling that author "the
-/// first one resolves" would invite them to delete a block whose
-/// placements were in the build.
+/// A second `theme`, `def` or `struct` binds nothing, but two `site` blocks
+/// share the `site::NAME::` namespace and all their places build, so "the
+/// first one resolves" would invite deleting a block that is in the build.
 fn repair_advice(kind: ItemKind, name: &str) -> String {
     let keyword = kind.keyword();
     match kind {
@@ -224,38 +180,26 @@ struct SelectorGroup<'a> {
     /// [`select_the_same_members`] is an equivalence relation, so agreeing
     /// with the representative is agreeing with the whole class.
     representative: &'a SelectorRule,
-    /// Binding key -> span of the row that bound it last. Only ever
-    /// `get` and `insert`, so the ordering is not load-bearing here;
-    /// `IndexMap` for consistency with the rest of the pass. The map in
-    /// [`duplicate_selector_diag`] is the one whose order is read.
+    /// Binding key -> span of the row that bound it last. Its order is
+    /// never read.
     bound: IndexMap<&'a str, &'a Span>,
 }
 
 /// Theme-selector scope: two rows that select the same members and bind the
-/// same key, where the second row's value is the only one any member reads.
+/// same key, where only the later row's value is read.
 ///
-/// This is the one scope in the pass that reads the IR. The module's reason
-/// for preferring the surface AST — the IR's maps are last-write-wins, so
-/// the earlier occurrence is already gone — does not apply here:
-/// `ThemeIr::selectors` is a `Vec` in source order with every row intact.
-/// What the IR adds is the shape `resolve` matches on, so "these two rows
-/// select the same members" is answered by the matcher's own rule instead
-/// of a second copy of it written over `Vec<Arg>`. A key repeated *inside*
-/// one row is a different scope and stays with [`check_arg_keys`], which
-/// runs over the same rows from the AST side.
+/// Read off the IR, where `ThemeIr::selectors` keeps every row in source
+/// order, so the matcher's own rule ([`select_the_same_members`]) decides
+/// which rows select the same members. A key repeated inside one row is
+/// [`check_arg_keys`]'s.
 ///
-/// Where the rest of the pass points its note at the *first* declaration,
-/// this one points at the most recent row to bind the key. The other
-/// scopes have nothing between the two occurrences that took anything
-/// away, so "first" and "displaced by this repeat" name the same row; a
-/// selector binding can be displaced more than once, and naming the first
-/// row would send the author to a value that was already gone.
+/// The note points at the most recent row to bind the key, not the first:
+/// a binding can be displaced more than once, and the first row's value is
+/// already gone by the third.
 ///
-/// Unlike `resolve`'s `check_unmatched_selectors`, no theme is skipped for
-/// not being applied to a scope. Two rows saying two things about one
-/// filter are redundant whether or not anything is bound to the theme
-/// today, and suppressing the finding would surface it later, on the
-/// unrelated edit that binds it.
+/// Unlike `resolve`'s `check_unmatched_selectors`, a theme no scope applies
+/// is checked too, so the finding does not surface later on the unrelated
+/// edit that binds the theme.
 fn check_theme_selectors(theme: &ThemeIr, sink: &mut DiagnosticSink) {
     let mut groups: Vec<SelectorGroup<'_>> = Vec::new();
     for rule in &theme.selectors {
@@ -285,12 +229,6 @@ fn check_theme_selectors(theme: &ThemeIr, sink: &mut DiagnosticSink) {
         if !rebound.is_empty() {
             sink.push(duplicate_selector_diag(rule, &theme.name, &rebound));
         }
-        // Record this row against every key it binds, displacing whatever
-        // was there. The map then holds the binding a *later* row would
-        // actually replace, which is what its note has to point at: with
-        // three rows on one key, the first row's value was gone before the
-        // third was reached, and naming it would send the author to a line
-        // whose value nothing was reading either.
         for key in rule.bindings.keys() {
             group.bound.insert(key.as_str(), &rule.span);
         }
@@ -304,16 +242,13 @@ fn duplicate_selector_diag(
 ) -> Diagnostic {
     let quoted: Vec<String> = rebound.iter().map(|(key, _)| format!("`{key}=`")).collect();
     let listed = and_list(&quoted).expect("built only for a non-empty rebound set");
-    // One note per displaced *row*, not per displaced key: two keys can
-    // come from two different rows, and two from one row would otherwise
-    // name the same line twice.
+    // One note per displaced row, so two keys from one row name it once.
     let mut per_row: IndexMap<&Span, Vec<String>> = IndexMap::new();
     for (key, span) in rebound {
         per_row.entry(span).or_default().push(format!("`{key}=`"));
     }
-    // Notes in source order. Insertion order is the offending row's binding
-    // order, which can put the note about a later line ahead of an earlier
-    // one when two rows are displaced at once.
+    // Source order: insertion follows this row's binding order, which can
+    // put a later row's note first.
     per_row.sort_unstable_by(|a, _, b, _| a.start.cmp(&b.start));
     let mut notes: Vec<DiagnosticNote> = per_row
         .into_iter()
@@ -399,17 +334,13 @@ fn first_declaration_note(first_span: &Span) -> DiagnosticNote {
     }
 }
 
-/// Scope reservation: a `struct` or `def` body may hold one `circuit`
-/// line.
+/// Scope reservation: a `struct` or `def` body's own members may hold one
+/// `circuit` line.
 ///
-/// Every `circuit` member of the body counts, well-formed or not and
-/// with or without a `[...]` selector: each states the scope's
-/// reservation, and [`crate::circuit_regions`] keeps every well-formed
-/// one of a sized scope, of which place-and-route uses the first.
-///
-/// This check counts the body's own members and nothing below them. A
-/// `circuit` line under a `level` is in that level's body, not this
-/// one, so it is neither a first line here nor a second.
+/// Every `circuit` member counts, well-formed or not and with or without a
+/// `[...]` selector: each states the reservation, and place-and-route uses
+/// only the first of a scope's [`crate::circuit_regions`]. A `circuit` line
+/// under a `level` is in that level's body.
 fn check_circuit_lines(body: &[Statement], sink: &mut DiagnosticSink) {
     let mut first: Option<&Span> = None;
     for stmt in body {
@@ -441,53 +372,29 @@ fn check_circuit_lines(body: &[Statement], sink: &mut DiagnosticSink) {
 /// Who reports two `place` rows of one body that share an `id=`: the
 /// resolver, or this pass.
 ///
-/// The resolver does, for the one body its placement loop walks: the
-/// top-level body of a `site`, lowered into `SiteIr::placements`. There
-/// `usable_place_id` compares each `place` row's id with the `place` rows
-/// above it and reports a repeat as `E_DUPLICATE_PLACE_ID`. That code
-/// names the site, and it is the one `spec/lint` "Sites and placements"
-/// documents the first-row-wins rule for. Reporting `E_DUPLICATE_ID` here
-/// as well would bill one repair twice.
+/// The resolver does for the body its placement loop walks, a `site`'s
+/// top-level `SiteIr::placements`: `usable_place_id` reports the repeat as
+/// `E_DUPLICATE_PLACE_ID`, the code `spec/lint` "Sites and placements"
+/// documents first-row-wins for, so `E_DUPLICATE_ID` here would bill one
+/// repair twice. It compares refused ids with refused ones and accepted with
+/// accepted, and acceptance depends on the id alone, so two rows sharing an
+/// id are always compared.
 ///
-/// The resolver compares refused ids as well as accepted ones: an id
-/// `PlaceId` accepts against the accepted ids above it, and an id it
-/// refuses against the refused ones, after reporting the row as
-/// `E_INVALID_PLACE_ID`. Whether `PlaceId` accepts an id depends on the id
-/// alone, so two rows sharing one land in the same ledger and are always
-/// compared.
+/// It reads the id off `Member::id`, which `hoist_label` fills from the
+/// first identifier or string `id=`, the same argument [`id_declaration`]
+/// takes. The two must agree, or a repeat falls between this pass and the
+/// resolver.
 ///
-/// The resolver reads the id off `Member::id`, which `hoist_label` fills
-/// from the first `id=` whose value is an identifier or a string. That is
-/// the same argument [`id_declaration`] takes here, and the two have to
-/// agree. Were `hoist_label` to narrow, a `place id="a"` row left to the
-/// resolver would reach it with no id to compare; were `id_declaration` to
-/// narrow, the row would drop out of this pass's ledger, and a `connect`
-/// row repeating its id would go unreported.
-///
-/// Only `place` rows are the resolver's, because its ledgers hold nothing
-/// else. The placement loop reads a `connect` row but not its `id=`, and
-/// skips a row the body has no reader for (`E_MISPLACED_MEMBER`) whole.
-/// So a repeat between one of those and any other row, a `place` row
-/// included, is reported here. [`check_body`] records every row's id, and
-/// stays quiet about a repeat only when it and the row it repeats are
-/// both the resolver's.
-///
-/// The row it repeats is the first one to declare the id. That leaves one
-/// arrangement reported twice: after `connect id=a`, `place id=a`, `place
-/// id=a`, the third row repeats the `connect` row here and the second row
-/// in the resolver, so it carries `E_DUPLICATE_ID` and
+/// Only `place` rows are the resolver's: its loop ignores a `connect` row's
+/// `id=` and skips a misplaced row whole. [`check_body`] stays quiet only
+/// when both rows are the resolver's, so after `connect id=a`, `place
+/// id=a`, `place id=a` the third row carries both `E_DUPLICATE_ID` and
 /// `E_DUPLICATE_PLACE_ID`, with notes on different rows.
 ///
-/// The predicate is the exact body the placement loop walks, not the body
-/// kind. [`crate::intent::BodyKind`] says which roles a body has a reader
-/// for, and it does not change with depth: `check::member_scope` recurses
-/// with it unchanged, because nesting does not open a new body. Who
-/// compares a `place` row's id does change with depth. `lower_body` keeps
-/// an indented row in its parent's `Member::children`, and the placement
-/// loop walks `SiteIr::placements` one level deep, so a `place` row
-/// indented under any row of a `site` never reaches the resolver. Keyed on
-/// `BodyKind`, that row would be left to a pass that never sees it, and its
-/// repeat would go unreported.
+/// The predicate is the exact body, not [`crate::intent::BodyKind`], which
+/// does not change with depth: a `place` row indented under any `site` row
+/// stays in its parent's `Member::children` and never reaches the
+/// placement loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PlaceIdOwner {
     /// The top-level body of a `site`, the list the placement loop walks.
@@ -507,8 +414,6 @@ struct FirstId {
 }
 
 fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut DiagnosticSink) {
-    // Per immediate body: collect `id=` values declared by `Statement::Generic`
-    // at this depth, plus the `key=` arg list of each statement and selector.
     let mut seen_ids: IndexMap<String, FirstId> = IndexMap::new();
     for stmt in body {
         if let Statement::Generic {
@@ -523,10 +428,6 @@ fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut Diagnostic
             if let Some(attrs) = selector {
                 check_arg_keys(attrs, ArgScope::List, sink);
             }
-            // Take the id this row declares out of its args, and report it
-            // if an earlier row of this body declared it too, unless both
-            // rows are the resolver's. A selector `id=` references a member
-            // rather than declaring one, so it is not read; see `extract_id`.
             if let Some((id, id_span)) = extract_id(stmt) {
                 let owned_by_resolver = place_ids == PlaceIdOwner::Resolver
                     && matches!(role_of(keyword), MemberRole::Place);
@@ -550,8 +451,8 @@ fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut Diagnostic
                     );
                 }
             }
-            // A nested body has its own scope, both for `id=` and for args,
-            // and none of its `place` rows reach the resolver.
+            // A nested body is its own scope, and none of its `place` rows
+            // reach the resolver.
             check_body(children, PlaceIdOwner::ThisPass, sink);
         }
     }
@@ -559,13 +460,10 @@ fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut Diagnostic
 
 /// Pull an `id=label` *declaration* out of a generic statement.
 ///
-/// Only the dedicated arg list (`door id=front ...`) declares a fresh id;
-/// the selector form (`door[id=front] ...`) references an existing member
-/// per the surface grammar — see `Member::selector` in `intent::member`.
-/// Treating selector ids as declarations would falsely flag the
-/// `redstone-door` example's `logic` rebind line.
-///
-/// `id=` whose value is not a label is left to the type-mismatch pass.
+/// Only the argument list (`door id=front`) declares an id; the selector
+/// form (`door[id=front]`) references an existing member
+/// (`Member::selector`). An `id=` whose value is not a label is left to
+/// the type-mismatch pass.
 fn extract_id(stmt: &Statement) -> Option<(String, Span)> {
     let Statement::Generic { args, .. } = stmt else {
         return None;
