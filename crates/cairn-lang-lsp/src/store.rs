@@ -1,15 +1,12 @@
 //! In-memory store of open documents.
 //!
 //! A `textDocument/completion` request identifies its document by URI only,
-//! so the server has to remember the last synced text to answer it. This
-//! store is that memory: URI → full text of the latest revision.
+//! so the server keeps URI → full text of the latest revision.
 //!
-//! It is also what a `didChange` is applied to. The server advertises FULL
-//! sync, so a conforming client sends the whole new text in every event; a
-//! client that sends a ranged edit anyway is out of spec, but taking that
-//! edit's text as the whole document would leave the server diagnosing and
-//! completing text nobody has. [`DocumentStore::apply`] applies each event
-//! the way the protocol defines it, ranged or not.
+//! The server advertises FULL sync, but a client that sends a ranged edit
+//! anyway would otherwise leave the server diagnosing and completing text
+//! nobody has, so [`DocumentStore::apply`] applies each event the way the
+//! protocol defines it, ranged or not.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -164,18 +161,15 @@ impl DocumentStore {
     ///
     /// [`ChangeRefused::DocumentNotOpen`] when the URI names no open
     /// document. The store mirrors the client's open set, so a revision for
-    /// a URI it does not hold is refused rather than inserted: inserting it
-    /// would resurrect a document the client had closed, leaving the server
-    /// answering completion for a buffer the editor no longer has. Three
-    /// ways to get here, and the third is the server's own doing:
+    /// a URI it does not hold is refused rather than inserted, which would
+    /// resurrect a document the client had closed. Three ways to get here,
+    /// the third the server's own doing:
     ///
     /// - a `didChange` after `didClose`,
     /// - a `didChange` for a URI never opened,
     /// - a `didChange` whose `didOpen` the server itself dropped, because
     ///   the payload did not match the method's schema. That document
-    ///   stays unknown until the client opens it again — a keystroke does
-    ///   not revive it — which is a real cost, paid only by a client that
-    ///   violated the protocol on the way in.
+    ///   stays unknown until the client opens it again.
     ///
     /// Otherwise, for the first event that cannot be applied,
     /// [`ChangeRefused::OutsideDocument`] when its range names a line the
@@ -276,7 +270,6 @@ mod tests {
 
     #[test]
     fn apply_after_close_does_not_reopen_the_document() {
-        // The order that made the store outlive the client's open set.
         let mut store = DocumentStore::new();
         store.open(uri("file:///a.crn"), "text".to_owned());
         store.close(&uri("file:///a.crn"));

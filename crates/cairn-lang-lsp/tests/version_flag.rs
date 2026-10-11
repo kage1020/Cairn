@@ -1,20 +1,8 @@
-//! Contract tests for the `cairn-lsp` command-line surface.
-//!
-//! The binary is spawned by editors (no arguments, or `--stdio`, which an LSP
-//! client appends when told to use the stdio transport — both mean LSP over
-//! stdio, and `lsp_stdio.rs` drives a session through each) and by users on
-//! the command line for support triage. The surface it exposes to that second
-//! audience is: `--version`/`-V` → `cairn-lsp <version>` and exit 0;
-//! `--help`/`-h` → usage string and exit 0; an unknown argument → exit 2
-//! with a message that lists the valid flags; a second argument after any
-//! flag → exit 2 naming that argument and the flag it followed. These tests
-//! pin that contract so a refactor of `main.rs` cannot silently reshape it.
-//!
-//! The version is compared against the number cargo derived for this crate
-//! rather than against `cairn-lang-core`'s `CAIRN_VERSION`, which is where the
-//! binary reads it from. Both resolve to `[workspace.package] version`, by two
-//! independent routes, so a constant that stops tracking the workspace shows up
-//! here instead of being restated.
+//! The `cairn-lsp` command-line surface a user meets: `--version`/`-V`,
+//! `--help`/`-h`, and exit 2 for an unknown argument or a second argument
+//! after any flag. The version is compared against the number cargo derived
+//! for this crate rather than the `CAIRN_VERSION` the binary prints, so a
+//! constant that stops tracking `[workspace.package] version` shows up here.
 
 use std::process::Command;
 

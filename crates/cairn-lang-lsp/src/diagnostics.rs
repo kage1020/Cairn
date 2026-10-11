@@ -24,9 +24,7 @@ use crate::line_index::LineIndex;
 /// `cairn check`) and yields exactly one error diagnostic. It goes through
 /// the same `to_lsp_diagnostic` every other finding does, because
 /// [`diagnose_parse_failure`] gives it the same shape: a code, a span, a
-/// message. This file used to build that one by hand — a diagnostic with
-/// no code, in a converter only it could reach — which is how the server
-/// and the CLI came to describe the same failure differently.
+/// message, so the server and the CLI describe the failure alike.
 ///
 /// Edition is left unpinned (`None`), matching `cairn check` without
 /// `--edition`: slot presence checks union the per-edition theme variants.
@@ -85,10 +83,9 @@ fn to_lsp_diagnostic(
         message,
         related_information: (!related.is_empty()).then_some(related),
         data: diagnostic.data.as_ref().and_then(|data| {
-            // `DiagnosticData` serialisation cannot fail today (plain enums
-            // and integers), but if a future payload variant breaks that,
-            // dropping it silently would starve a quick-fix of its input —
-            // log so the miss is visible without killing the diagnostic.
+            // `DiagnosticData` is plain enums and integers, but a payload
+            // that fails to serialise is logged rather than dropped
+            // silently, since a quick-fix would be starved of its input.
             match serde_json::to_value(data) {
                 Ok(value) => Some(value),
                 Err(err) => {
@@ -121,10 +118,7 @@ mod tests {
 
     #[test]
     fn duplicate_fixture_reports_e_duplicate_size_with_error_severity() {
-        // The duplicate fixture carries a second
-        // `size=5x5` on line 0; the finding surfaces with the stable code
-        // string, ERROR severity, source "cairn", and a 0-based range on
-        // that line.
+        // The duplicate fixture's second `size=5x5` is on line 0.
         let diagnostics = compute_diagnostics(&uri(), DUPLICATE);
         let dup = diagnostics
             .iter()
@@ -140,8 +134,6 @@ mod tests {
 
     #[test]
     fn span_notes_become_related_information() {
-        // The "first declared here" note on a duplicate
-        // finding points back into the same document with a distinct range.
         let diagnostics = compute_diagnostics(&uri(), DUPLICATE);
         let dup = diagnostics
             .iter()
@@ -164,9 +156,7 @@ mod tests {
 
     #[test]
     fn spanless_notes_append_to_message_as_note_lines() {
-        // The closed-set "expected one of" footer on
-        // E_UNKNOWN_KEYWORD has no span of its own and must survive inside
-        // the message body so the self-correction triple stays intact.
+        // The "expected one of" footer on E_UNKNOWN_KEYWORD has no span.
         let source = "struct s size=2x2\n  wals height=4\n";
         let diagnostics = compute_diagnostics(&uri(), source);
         let unknown = diagnostics
@@ -182,9 +172,6 @@ mod tests {
 
     #[test]
     fn parse_error_yields_exactly_one_error_diagnostic() {
-        // Parser-rejected content produces a single ERROR diagnostic
-        // carrying the parse error's own message, its code, and a
-        // non-empty range on the offending line.
         let source = "struct s size=2x2\n\tfloor\n";
         let err = parse(source).expect_err("tab indent should be rejected");
         let diagnostics = compute_diagnostics(&uri(), source);
@@ -192,9 +179,7 @@ mod tests {
         let d = &diagnostics[0];
         assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::ERROR));
         assert_eq!(d.message, err.user_message());
-        // The code is what a client looks the finding up by, and this one
-        // used to have none — the server rendered it through a converter of
-        // its own rather than from a core diagnostic.
+        // The code is what a client looks the finding up by.
         assert_eq!(code_of(d), "E_PARSE");
         assert_eq!(d.range.start.line, 1);
         assert!(
@@ -243,10 +228,8 @@ mod tests {
 
     #[test]
     fn ranges_count_utf16_code_units_on_non_ascii_lines() {
-        // A 😀 (2 UTF-16 units, 4 bytes, 1 scalar)
-        // inside a string ahead of the duplicated key shifts the reported
-        // column by exactly 2 units — asserting the UTF-16 count is
-        // distinct from both the byte and scalar interpretations.
+        // 😀 is 2 UTF-16 units, 4 bytes and 1 scalar, so the column tells
+        // the three counts apart.
         let source = "struct s size=2x2\n  door id=\"😀\" id=x\n";
         let diagnostics = compute_diagnostics(&uri(), source);
         let dup = diagnostics
@@ -272,12 +255,10 @@ mod tests {
     /// The text a diagnostic covers does not depend on how the author's
     /// editor ends its lines.
     ///
-    /// The reported break: a document with a lone `\r` in it published the
-    /// `walls` finding at line 2 — the `struct t` line — because the index
-    /// had not counted the `\r` as a break while the editor had. Asserting
-    /// on the *text* the range selects rather than on the line number is
-    /// what makes the three renderings directly comparable, and it is also
-    /// what the reader sees: a highlight over the wrong words.
+    /// Asserting on the *text* the range selects rather than on the line
+    /// number makes the three renderings directly comparable, and it is
+    /// what the reader sees: an index that miscounts a lone `\r` highlights
+    /// the wrong words.
     #[test]
     fn a_diagnostic_covers_the_same_text_whatever_the_line_ending() {
         let base = "struct s size=2x2\n  floor\n  wals height=4\nstruct t size=3x3 size=4x4\n";
@@ -305,8 +286,8 @@ mod tests {
         }
         assert_eq!(selected[1], selected[0], "CRLF disagrees with LF");
         assert_eq!(selected[2], selected[0], "lone CR disagrees with LF");
-        // And the covered text is the offending token, not a neighbouring
-        // line's — the failure mode the line numbers alone would hide.
+        // Agreement alone would not catch all three covering a neighbouring
+        // line.
         assert!(
             selected[0]
                 .iter()

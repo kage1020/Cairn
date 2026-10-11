@@ -29,14 +29,8 @@ type DynError = Box<dyn std::error::Error + Send + Sync>;
 /// document sync with open/close notifications, and completion triggered by
 /// the characters that open a closed-vocabulary position (`@` a material
 /// token, `=` a `mat_slot` value, `.` a segment inside an abstract token).
-/// Everything else (hover, code actions) is intentionally absent until it
-/// is implemented.
-///
-/// FULL is what is advertised, but a `didChange` event that carries a
-/// `range` anyway is still applied as an edit to that range
-/// ([`DocumentStore::apply`]), not stored as the whole text: a client that
-/// sends ranges would otherwise leave the server diagnosing and completing
-/// text nobody has.
+/// A ranged `didChange` is still applied as a range
+/// ([`DocumentStore::apply`]).
 fn server_capabilities() -> lsp_types::ServerCapabilities {
     lsp_types::ServerCapabilities {
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
@@ -70,16 +64,12 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
 /// notification arriving without a preceding `shutdown` request — the LSP
 /// spec requires that sequence to end the process with a non-zero code.
 ///
-/// When the dispatch loop ends without an error of its own, the I/O
-/// threads are joined before anything is reported, and `lsp-server` joins
-/// the reader first. An unreadable frame ends the reader with an error and
-/// drops its sender, which the loop sees exactly as it sees the input
-/// closing; only the join tells the two apart. So a frame that could not be
-/// read comes back as that error, and is not also reported as the input
-/// closing. The join does not say whether the reader or the writer failed,
-/// so when the loop ended before `shutdown`, its error comes back with
-/// "the session ended without `shutdown`" appended, which is true of
-/// either.
+/// An unreadable frame ends the reader and closes the loop's receiver just
+/// as closed input does; only joining the I/O threads tells the two apart,
+/// so the join comes before anything is reported. The join does not say
+/// whether the reader or the writer failed, so an error after a loop that
+/// ended before `shutdown` gets "the session ended without `shutdown`"
+/// appended, which is true of either.
 pub fn run() -> Result<(), DynError> {
     let (connection, io_threads) = Connection::stdio();
     let capabilities = serde_json::to_value(server_capabilities())?;
@@ -92,12 +82,9 @@ pub fn run() -> Result<(), DynError> {
     match (io_threads.join(), teardown) {
         (Ok(()), Teardown::AfterShutdown) => Ok(()),
         (Ok(()), Teardown::WithoutShutdown) => {
-            // The reader returned `Ok`, so the input closed: the client
-            // shut stdin without saying anything — an editor that was
-            // killed rather than one that quit. There is nobody left to
-            // answer, so this is not an error, but it is not the orderly
-            // teardown either and the stream should say which one
-            // happened.
+            // The input closed without `shutdown`: an editor that was
+            // killed rather than one that quit. Nobody is left to answer,
+            // so not an error, but stderr says it was not orderly.
             eprintln!(
                 "cairn-lsp: client closed stdin without `{}`; the session ended abnormally",
                 Shutdown::METHOD,
@@ -134,10 +121,9 @@ enum Teardown {
 /// the session. `lsp_server::Connection::handle_shutdown` models
 /// that window as "the very next message is `exit`", which no real client
 /// guarantees: `$/cancelRequest` may arrive at any time, and an editor
-/// closing its last buffer sends `didClose` on the way out. Every one of
-/// those became a `ProtocolError` that ended `run()` with an error before
-/// the `exit` behind it was ever read, so the process died with code 1 and
-/// the editor reported the language server as crashed.
+/// closing its last buffer sends `didClose` on the way out. Under that
+/// model each is a `ProtocolError` that ends the process with code 1
+/// before the `exit` behind it is read, and the editor reports a crash.
 ///
 /// The loop ends without an error on `exit` after `shutdown` or when its
 /// receiver closes; whether `shutdown` came first comes back as a
@@ -192,7 +178,6 @@ fn main_loop(connection: &Connection) -> Result<Teardown, DynError> {
             }
         }
     }
-    // The receiver closed. `run` reports a `Teardown::WithoutShutdown`.
     Ok(if shutdown_requested {
         Teardown::AfterShutdown
     } else {
@@ -310,11 +295,8 @@ fn handle_notification(
             ) else {
                 return Ok(());
             };
-            // An empty `contentChanges` changes nothing: `apply` would hand
-            // back the stored text as it is, and the publish below would
-            // repeat the last diagnostics under a new version. The notification is dropped
-            // instead, with a line on stderr so a client that sends one
-            // shows up in the log.
+            // An empty `contentChanges` changes nothing, and publishing would
+            // repeat the last diagnostics under a new version.
             if params.content_changes.is_empty() {
                 eprintln!(
                     "cairn-lsp: ignoring `{}` notification with empty contentChanges",
@@ -323,15 +305,10 @@ fn handle_notification(
                 return Ok(());
             }
             let uri = params.text_document.uri;
-            // Ahead of the diagnostics run, not after it: a refused
-            // revision is dropped with a line on stderr, the way a
-            // malformed payload is, and the parse that would have been
-            // thrown away with it never runs. Nothing is published for it
-            // either. For a document that is not open, a publish would
-            // leave a squiggle on a file the editor has no buffer for and
-            // therefore no way to clear; for a range the text does not
-            // have, the stored text stays the last one that could be
-            // built, rather than becoming a guess.
+            // A refused revision publishes nothing: for a document that is
+            // not open, a squiggle would land on a file the editor has no
+            // buffer for and no way to clear; for a range the text does not
+            // have, the stored text stays the last one that could be built.
             let source = match store.apply(&uri, params.content_changes) {
                 Ok(source) => source,
                 Err(refused) => {

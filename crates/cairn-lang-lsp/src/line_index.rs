@@ -9,11 +9,9 @@
 //! editor-agnostic.
 //!
 //! What it does *not* own is where a line ends. That comes from
-//! [`cairn_lang_core::lines`], because an editor compares the line number in
-//! a diagnostic against the line number under its own cursor: a document
-//! containing a lone `\r` used to shift every diagnostic after it onto the
-//! wrong line, since VS Code and Monaco both break on `\r\n|\r|\n` and this
-//! index broke on `\n` alone.
+//! [`cairn_lang_core::lines`], which breaks on `\r\n|\r|\n` as VS Code and
+//! Monaco do, because an editor compares a diagnostic's line number against
+//! the line under its own cursor.
 
 use cairn_lang_core::Span;
 
@@ -324,11 +322,9 @@ mod tests {
             Some(5),
         );
         // A line the document does not have is refused, whether it is one
-        // past the last or far beyond it. Clamping the near miss to
-        // `source.len()` answered with an offset on the *previous* line,
-        // which the completion path then used as the anchor of every
-        // `textEdit` it returned — edits that do not contain the position
-        // the client asked about, which the protocol requires them to.
+        // past the last or far beyond it: clamping the near miss would give
+        // an offset on the *previous* line, and completion edits anchored
+        // there would not contain the requested position.
         for line in [2, 3, 99] {
             assert_eq!(
                 index.offset_at(source, lsp_types::Position { line, character: 0 }),
@@ -385,9 +381,9 @@ mod tests {
         }
     }
 
-    /// The reported break: an editor splits on `\r\n|\r|\n`, so an index
-    /// that splits on `\n` alone reports a diagnostic one line — and, in a
-    /// CR-only document, every line — above where the editor draws it.
+    /// An editor splits on `\r\n|\r|\n`, so an index that splits on `\n`
+    /// alone would report a diagnostic one line (in a CR-only document,
+    /// every line) above where the editor draws it.
     #[test]
     fn line_numbers_match_the_core_resolver_for_every_line_ending() {
         let base = "struct s size=2x2\n  floor mat_slot=f\nstruct t size=3x3\n";
@@ -415,9 +411,9 @@ mod tests {
 
     #[test]
     fn position_and_offset_at_round_trip_across_mixed_line_endings() {
-        // A `\r`-terminated document was the broken case: `line_end`
-        // stripped the terminator of a line the index did not know had
-        // ended, so `offset_at` answered two bytes short of `position`.
+        // On a `\r`-terminated line, a `line_end` that disagrees with the
+        // index about where the line ended puts `offset_at` short of
+        // `position`.
         for source in ["ab\r", "a\rb\r\nc\nd", "\r\r", "\r\n\r", "a\r\r\nb"] {
             let index = LineIndex::new(source);
             let boundaries = source
@@ -444,13 +440,11 @@ mod tests {
     /// Stepping back over a terminator must land inside the line doing the
     /// stepping, on every shape that puts a break next to a break.
     ///
-    /// A source *opening* with `\n` is the case that matters most and the
-    /// one an earlier version of this file had no fixture for: the first
-    /// line is empty and ends at offset 0, so a step back that reads the
-    /// byte before the terminator leaves the source and panics on the
-    /// subtraction. Two lone `\r`s are the other: the byte before the
-    /// second line's break is the *first* line's, which is not this line's
-    /// to give up.
+    /// A source *opening* with `\n` matters most: the first line is empty
+    /// and ends at offset 0, so a step back that reads the byte before the
+    /// terminator leaves the source and panics on the subtraction. Two lone
+    /// `\r`s are the other: the byte before the second line's break is the
+    /// *first* line's, which is not this line's to give up.
     #[test]
     fn line_end_never_precedes_its_own_line_start() {
         for source in [

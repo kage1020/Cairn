@@ -532,10 +532,8 @@ fn did_change_for_a_never_opened_document_is_ignored() {
 #[test]
 fn a_change_whose_did_open_was_dropped_is_also_dropped() {
     // A `didOpen` whose payload does not match the method's schema is
-    // discarded, so the document never enters the store, and a `didChange`
-    // does not put it there: the file stays unknown until it is opened
-    // again. That cost is paid only by a client that violated the protocol
-    // on the way in.
+    // discarded, and a `didChange` does not put the document in the store:
+    // the file stays unknown until it is opened again.
     let session = Session::start();
     session.send(&serde_json::json!({
         "jsonrpc": "2.0",
@@ -650,12 +648,11 @@ fn a_ranged_change_outside_the_document_is_dropped() {
 
 #[test]
 fn a_did_change_with_no_events_publishes_nothing() {
-    // The document is open, so the only thing that keeps this revision from
-    // being published is the guard on empty `contentChanges`: applied, it
-    // would hand back the stored text and republish the same diagnostics
-    // under version 2. `malformed_notifications_do_not_end_the_loop` sends
-    // one too, but to a document whose `didOpen` was malformed, so it would
-    // pass without the guard.
+    // The document is open, so only the guard on empty `contentChanges`
+    // keeps this revision from republishing the same diagnostics under
+    // version 2. `malformed_notifications_do_not_end_the_loop` sends one to
+    // a document whose `didOpen` was malformed, so it passes without the
+    // guard.
     let session = Session::start();
     session.did_open(CLEAN, 1);
     session.read_until_method("textDocument/publishDiagnostics");
@@ -762,10 +759,9 @@ fn interlopers() -> Vec<(&'static str, serde_json::Value)> {
 
 #[test]
 fn a_message_between_shutdown_and_exit_still_ends_the_loop_cleanly() {
-    // `Connection::handle_shutdown` demands that the very next message be
-    // `exit`, and anything else is a protocol error that ends the process
-    // with code 1 without reading the `exit` behind it. An editor reads a
-    // non-zero exit as a crashed language server.
+    // Under `Connection::handle_shutdown` each of these would be a
+    // protocol error ending the process with code 1, which an editor reads
+    // as a crash.
     for (label, interloper) in interlopers() {
         let session = Session::start();
         session.did_open(CLEAN, 1);

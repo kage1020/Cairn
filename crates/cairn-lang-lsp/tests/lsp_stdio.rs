@@ -28,11 +28,8 @@ const TEST_URI: &str = "file:///test.crn";
 
 /// How long a test waits for a message before declaring the server stuck.
 ///
-/// The regressions here are about messages that never arrive — a request
-/// left unanswered, a notification silently dropped — and a blocking read
-/// turns every one of those into a hang. On CI a hang surfaces as a job
-/// timeout with no failing test name, which is the least useful shape a
-/// failure can take. A bounded wait turns it back into a named assertion.
+/// The failures here are messages that never arrive, and a blocking read
+/// turns each into a hang with no failing test name.
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// A spawned `cairn-lsp` with framed stdin access and its two output
@@ -168,8 +165,7 @@ impl Server {
     /// The server writes stderr and stdout down two different pipes, and a
     /// reader thread carries each to its own channel, so reading a response
     /// says nothing about whether a line logged *before* it has been
-    /// delivered yet. Taking whatever happened to have arrived made these
-    /// assertions a race that lost on a loaded runner.
+    /// delivered yet; taking whatever has arrived would be a race.
     fn read_stderr_until(&mut self, needle: &str) -> Vec<String> {
         let mut seen = Vec::new();
         loop {
@@ -393,9 +389,7 @@ fn a_change_to_a_closed_document_is_logged_with_its_uri() {
 
 #[test]
 fn closing_stdin_without_exit_says_the_session_ended_abnormally() {
-    // An editor that was killed rather than one that quit. There is nobody
-    // left to answer, so this is not a failure, but it is not the orderly
-    // teardown either, and stderr says which one happened.
+    // An editor that was killed rather than one that quit.
     let (mut server, _) = Server::start();
     server.did_open(CLEAN, 1);
     server.read_until_method("textDocument/publishDiagnostics");

@@ -133,10 +133,8 @@ fn is_token_char(c: char) -> bool {
 
 /// What one pass over a line finds out about where its text ends up.
 ///
-/// Both facts come from the same grammar, so they come from the same
-/// scan. Encoding "is this `#` a comment opener" and "is this cursor in a
-/// string" as two walks meant two copies of the string rules, which have
-/// to move together or silently disagree.
+/// Both facts come from the same string grammar, so they come from one
+/// scan rather than two copies of the string rules that could disagree.
 struct LineScan {
     /// Byte offset of the first `#` that opens a comment — i.e. one that
     /// sits outside a string literal.
@@ -184,13 +182,9 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     let line_start = cairn_lang_core::lines::start_of(source, offset);
     let prefix = &source[line_start..offset];
     // A comment opener before the cursor puts it in a comment, and an
-    // unclosed quote puts it in a string. Both are positions where the
-    // grammar accepts free-form text — an `id=`, a `label=`, a note to
-    // the reader — and this module's rule is to invent nothing where
-    // anything is legal. The `#` half was honoured already; the `@` and
-    // `mat_slot=` checks below read the two characters in front of the
-    // cursor and ignored quoting, so `id="@oa"` offered the whole
-    // material vocabulary inside a quoted name.
+    // unclosed quote puts it in a string. Both accept free-form text, and
+    // the `@` and `mat_slot=` checks below read only the characters in
+    // front of the cursor, so they must not run there.
     let scan = scan_line(prefix);
     if scan.comment.is_some() || scan.open_string {
         return None;
@@ -253,11 +247,9 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
             body: BodyKind::Geometry,
         }),
         // The header is mid-keystroke (`stru s size=2x2`) or absent. The
-        // body kind is unresolved, not empty — and an empty list is
-        // indistinguishable from "no candidates", which would read as a
-        // wrong answer rather than a missing one. Offer the union, which
-        // is what this position offered before the split; the scoped set
-        // arrives as soon as the header parses as a keyword.
+        // body kind is unresolved, not empty, and an empty list would read
+        // as "no candidates", so the union is offered until the header
+        // parses as a keyword.
         _ => Some(Context::UnscopedMemberKeyword { replace }),
     }
 }
@@ -453,8 +445,7 @@ fn material_items(
             continue;
         }
         // A token without a resolvable id cannot be offered with a truthful
-        // detail; skip it rather than crash the whole server on a future
-        // catalog shape this code did not anticipate.
+        // detail, and skipping it beats taking the server down.
         let Some(id) = java.lookup_id(token).or_else(|| bedrock.lookup_id(token)) else {
             continue;
         };
@@ -548,8 +539,6 @@ mod tests {
 
     #[test]
     fn top_level_line_start_offers_exactly_the_item_keywords() {
-        // The first word of an indent-0 line completes to the parser's
-        // closed set of top-level items, replacing the partial token.
         let source = "st";
         let items = complete(source, "st");
         assert_eq!(labels(&items), vec!["theme", "def", "site", "struct"]);
@@ -561,10 +550,8 @@ mod tests {
 
     #[test]
     fn member_position_offers_the_bodys_keywords_with_replace_range() {
-        // Inside a struct body the geometry closed set comes back (no
-        // server-side prefix filter) and every item replaces the partial
-        // token's span. `place` / `connect` are absent: they classify here
-        // and then reach nothing, which is `E_MISPLACED_MEMBER`.
+        // No server-side prefix filter. `place` / `connect` are absent:
+        // they classify here and then reach nothing (`E_MISPLACED_MEMBER`).
         let source = "struct s size=2x2\n  flo";
         let items = complete(source, "flo");
         assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
@@ -609,10 +596,8 @@ mod tests {
 
     #[test]
     fn nested_block_body_offers_the_enclosing_items_keywords() {
-        // Deeper nesting inside a struct (`level`) resolves to the same
-        // set as the struct body itself: the walk looks for the enclosing
-        // *item*, so an intervening `level` — which names no vocabulary of
-        // its own — does not change the answer.
+        // The walk looks for the enclosing *item*, so an intervening
+        // `level` does not change the answer.
         let source = "struct t size=5x5\n  level h=4\n    flo";
         let items = complete(source, "    flo");
         assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
@@ -628,10 +613,6 @@ mod tests {
 
     #[test]
     fn an_unresolved_header_offers_the_whole_table_rather_than_nothing() {
-        // A header mid-keystroke leaves the body kind unknown. An empty
-        // list reads as "no candidates", which is a wrong answer rather
-        // than a missing one — so the union is offered until the header
-        // parses.
         for source in [
             "  flo",
             "stru s size=2x2
@@ -649,8 +630,7 @@ mod tests {
     #[test]
     fn slot_names_union_across_themes_survives_parse_failure() {
         // The cursor's own line (`mat_slot=` with no value) makes the
-        // whole document unparseable — the main case completion exists for —
-        // and slot names still arrive as the union across all themes.
+        // whole document unparseable, the main case completion exists for.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
                       theme b:\n  slot wall -> @cobblestone\n\
                       struct s size=2x2\n  floor mat_slot=";
@@ -665,9 +645,8 @@ mod tests {
 
     #[test]
     fn slot_value_replace_range_counts_utf16_units() {
-        // An astral char earlier in the line shifts the replace range
-        // by UTF-16 units, not bytes or scalars (same discrimination as the
-        // diagnostics range test).
+        // An astral char earlier in the line shifts the replace range by
+        // UTF-16 units, not bytes or scalars.
         let source = "theme a:\n  slot walls -> @cobblestone\n\
                       struct s size=2x2\n  window id=\"😀\" mat_slot=wa";
         let items = complete(source, "mat_slot=wa");
@@ -681,11 +660,8 @@ mod tests {
 
     #[test]
     fn the_line_scan_answers_both_questions_from_one_walk() {
-        // `open_string` is read by `context_at` only after `comment` has
-        // been found absent, so nothing at that call site can tell whether
-        // the field means what it says on its own. It has to, because the
-        // next caller may ask it first — measured here rather than left to
-        // the order of an `||`.
+        // `context_at` reads `open_string` only after `comment` is found
+        // absent, so whether the field holds on its own is measured here.
         let cases = [
             // (line, comment offset, open string at the end)
             ("door id=front", None, false),
@@ -709,8 +685,7 @@ mod tests {
     #[test]
     fn a_material_token_inside_a_string_offers_nothing() {
         // `id=` takes free-form text, so an `@` between quotes is a
-        // character in a name, not the opener of a material token. The
-        // whole registry catalogue used to arrive here.
+        // character in a name, not the opener of a material token.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
                       struct s size=2x2\n  door id=\"@oa";
         // The needle carries the quote: `@oa` alone first matches inside
@@ -723,9 +698,7 @@ mod tests {
 
     #[test]
     fn a_mat_slot_key_inside_a_string_offers_nothing() {
-        // The characters `mat_slot=` inside a quoted value are text. The
-        // key check read the two characters in front of the cursor and
-        // offered the theme's slots inside a name.
+        // The characters `mat_slot=` inside a quoted value are text.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
                       struct s size=2x2\n  window id=\"mat_slot=";
         assert_eq!(
@@ -736,12 +709,9 @@ mod tests {
 
     #[test]
     fn a_mat_slot_key_inside_a_longer_string_offers_nothing() {
-        // The same with prose around it and a partial token after it —
-        // a sentence in a `label=`, not an argument.
         // The needle has to reach past `slot floor` on line 1: `at_end_of`
-        // resolves the *first* occurrence, and `fl` occurs there. Aimed at
-        // the wrong line this test passes because `slot ` precedes the
-        // cursor, with nothing to do with the string it is named for.
+        // resolves the *first* occurrence, and aimed there the test would
+        // pass because `slot ` precedes the cursor.
         let source = "theme a:\n  slot floor -> @oak_planks\n\
                       struct s size=2x2\n  window label=\"pick mat_slot=fl";
         assert_eq!(
@@ -844,16 +814,11 @@ mod tests {
 
     #[test]
     fn line_endings_do_not_shift_keyword_classification_or_replace_ranges() {
-        // A lone `\r` used to leave every scanner here reading the document
-        // as one line, and the replace range landed on line 0.
-        //
-        // The `theme` above the `struct` is what makes the enclosing-item
-        // scan discriminating: read as one line, the document begins with
-        // `theme` and the cursor is offered a theme body's vocabulary. With
-        // a single-item document the collapsed reading happens to start
-        // with the right keyword and the wrong scan looks right.
-        // `wal`, not `flo`: the cursor is located by the first occurrence
-        // of the needle, and `floor` appears in the slot declaration above.
+        // A scanner that misses a lone `\r` reads the document as one
+        // line. The `theme` above the `struct` makes that visible: read as
+        // one line, the document begins with `theme` and the cursor gets a
+        // theme body's vocabulary. `wal`, not `flo`: the cursor is located
+        // by the first occurrence of the needle, and `floor` appears above.
         for (label, source) in
             renderings("theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  wal")
         {
@@ -884,16 +849,9 @@ mod tests {
 
     #[test]
     fn position_far_past_the_document_is_refused() {
-        // A position beyond one line past the end is a client bug, not a
-        // clampable race: the caller gets `None` (surfaced as InvalidParams
-        // by the server) instead of candidates fabricated at EOF.
-        //
-        // One line past the end is refused for the same reason and not as a
-        // near miss. Clamping it anchored every item's `textEdit` on the
-        // line before, and the protocol requires a completion item's edit
-        // range to contain the position the request named — so the items
-        // were unusable by construction, whatever a given client does with
-        // them.
+        // One line past the end is refused too: clamping it would anchor
+        // every item's `textEdit` on the line before, and the protocol
+        // requires an item's edit range to contain the requested position.
         let source = "st";
         for line in [1, 99] {
             let position = lsp_types::Position { line, character: 0 };
@@ -907,9 +865,6 @@ mod tests {
 
     #[test]
     fn material_token_position_offers_registry_catalog_in_order() {
-        // After `@` the registry union (java ∪ bedrock) arrives in
-        // catalog insertion order — abstract tokens with their resolved id
-        // as detail, then the deduplicated canonical ids.
         let source = "theme a:\n  slot floor -> @";
         let items = complete(source, "@");
         assert_eq!(items[0].label, "floor.wood.broadleaf");
