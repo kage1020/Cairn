@@ -840,7 +840,7 @@ fn stage_crossing_inherits_upstream_attenuation_failure() {
     // only the routed-length one cannot be written in `.crn` at all, so
     // "crossing inherits a *delay* failure" is exercised by a
     // hand-built two-scope fixture in `cairn-lang-redstone`'s
-    // `tests/delay.rs` rather than here.
+    // `tests/redstone/delay.rs` rather than here.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("wide.crn");
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\

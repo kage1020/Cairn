@@ -61,30 +61,6 @@ fn floor_origin_note(floor: &VersionFloor) -> Option<String> {
     ))
 }
 
-/// One pack's version table, as the `DataVersion` ordering
-/// `spec/versioning-editions` "The target is a compile-time parameter" makes
-/// canonical.
-///
-/// **Every** row, including the ones `--target` may not name. Ordering a
-/// floor and building for a version are different questions: the pack has
-/// block data for three versions per edition and knows where every release
-/// sits, and it is the second set that decides whether a floor can be
-/// placed at all. A table holding only the buildable rows is what made a
-/// floor naming a real release the pack does not ship — `1.21.1` on Java —
-/// indistinguishable from one naming another edition's release.
-///
-/// Built per call rather than cached: it is a few dozen rows, and a cache
-/// would have to be keyed by pack to stay correct once `--registry-pack`
-/// can supply one.
-pub(crate) fn version_order(pack: &RegistryPack) -> VersionOrder {
-    VersionOrder::new(
-        pack.data_versions
-            .versions
-            .iter()
-            .map(|entry| (entry.mc_version.clone(), i64::from(entry.data_version))),
-    )
-}
-
 /// How each supported version of one edition answered.
 ///
 /// Borrows the floors it names rather than carrying them rendered. Two
@@ -154,7 +130,7 @@ pub(crate) fn weigh_versions<'a>(
     considered: &[String],
     dropped: &[String],
 ) -> VersionVerdicts<'a> {
-    let order = version_order(pack);
+    let order = pack.version_order();
     let mut verdicts = VersionVerdicts {
         unplaceable_floors: floors
             .iter()
@@ -357,7 +333,7 @@ pub(crate) struct DeclaredFloors {
     /// enforcement below already consults once per floor, reaching the
     /// same answer without the extra comparison.
     pub(crate) floors: Vec<VersionFloor>,
-    /// The target edition's `DataVersion` table, as [`version_order`]
+    /// The target edition's `DataVersion` table, as [`RegistryPack::version_order`]
     /// builds it.
     pub(crate) order: VersionOrder,
 }
@@ -559,7 +535,9 @@ fn report_unplaceable_floor(
     // inert floor: satisfied by every target of that edition, or by none.
     let other = edition.other();
     let other_edition_names_it = floor.edition.is_none()
-        && version_order(other.registry_pack())
+        && other
+            .registry_pack()
+            .version_order()
             .place(&floor.version)
             .names_release();
     if other_edition_names_it {

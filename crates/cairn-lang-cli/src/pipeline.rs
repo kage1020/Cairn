@@ -16,7 +16,7 @@ use cairn_lang_core::{
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
 use crate::cli::EditionArg;
-use crate::floors::{DeclaredFloors, floor_refusing_target, version_order};
+use crate::floors::{DeclaredFloors, floor_refusing_target};
 use crate::report::{FailureReport, report_failure_document};
 use crate::target::{ResolvedTarget, resolve_target};
 
@@ -264,24 +264,9 @@ pub(crate) fn report_partial_build(file: &Path, dropped: &[String], built: usize
 }
 
 /// Every version a pack can build for, in ascending release order.
-///
-/// The buildable rows, not every row: the table also carries the releases
-/// the pack can order an `@requires` floor against but has no block table
-/// for, and offering one of those as a `--target` would pin a compile to a
-/// version whose id check cannot run.
-///
-/// Sorted here rather than taken as written: `DataVersionTable` documents
-/// its row order as informational, and this list is shown to a reader, so
-/// reordering rows in a pack's JSON must not reorder the output.
 pub(crate) fn supported_versions(pack: &RegistryPack) -> Vec<String> {
-    let mut rows: Vec<&cairn_lang_formats::registry::DataVersionEntry> = pack
-        .data_versions
-        .versions
-        .iter()
-        .filter(|entry| entry.targetable)
-        .collect();
-    rows.sort_by_key(|entry| entry.data_version);
-    rows.into_iter()
+    pack.targetable()
+        .into_iter()
         .map(|entry| entry.mc_version.clone())
         .collect()
 }
@@ -378,7 +363,8 @@ fn intended_target_findings(
     for edition in asked {
         let pack = builtin_pack(*edition);
         let targetable = supported_versions(pack);
-        for finding in weigh_intended_targets(module, *edition, &version_order(pack), &targetable) {
+        for finding in weigh_intended_targets(module, *edition, &pack.version_order(), &targetable)
+        {
             if asked.len() > 1 && finding.code == DiagnosticCode::IntendedTargetUnsupported {
                 continue;
             }
@@ -524,7 +510,7 @@ pub(crate) fn load_and_lower(
     let floors = declared_version_floors(&module, edition.as_edition());
     let version_floors = (!floors.is_empty()).then(|| DeclaredFloors {
         floors,
-        order: version_order(edition.registry_pack()),
+        order: edition.registry_pack().version_order(),
     });
     let mc_version = target
         .filter(|target| {
