@@ -183,9 +183,6 @@ fn an_item_of_another_type_is_refused_with_its_index() {
 
 #[test]
 fn an_empty_list_declares_tag_end_whatever_type_it_names() {
-    // `List::of_tags(3, vec![])` declares `TAG_End`, and so does a streamed
-    // list of no items, for a list entry and for a list item alike, so a
-    // caller does not have to re-derive the rule.
     let mut tree = Compound::new();
     tree.insert("size", Tag::List(List::of_tags(3, vec![])));
     tree.insert(
@@ -231,10 +228,7 @@ impl Write for FillsUp {
 
 #[test]
 fn a_writer_failing_inside_a_list_returns_its_error_rather_than_panicking() {
-    // The count check runs only after the list's closure returns `Ok`. A
-    // write failing part-way leaves the list short, and checking the count
-    // first would turn a full disk into an abort in a `panic = "abort"`
-    // build.
+    // The failed write leaves the list short of its declared count.
     let mut disk = FillsUp { budget: 64 };
     let err = stream_bedrock_uncompressed(&mut disk, "", |root| {
         root.list("layer", 3, 1000, |layer| {

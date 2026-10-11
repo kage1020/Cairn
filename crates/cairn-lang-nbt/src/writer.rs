@@ -4,9 +4,9 @@
 //! The two on-disk dialects are byte-identical in structure — tag ids,
 //! nesting, length-prefix widths, validation rules — and differ only in
 //! the byte order of multi-byte scalars (numeric payloads and the u16 /
-//! i32 length prefixes). Keeping one implementation here means a
-//! validation fix (string encoding, list homogeneity, length overflow)
-//! can never land on one edition and silently miss the other.
+//! i32 length prefixes). One implementation keeps the validation rules
+//! (string encoding, list homogeneity, length overflow) identical for both
+//! editions.
 
 use std::io::Write;
 
@@ -18,12 +18,9 @@ use crate::tag::{Compound, List, Tag};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum NbtIoError {
-    /// A [`Tag::String`] contained a byte that cannot be carried by Java
-    /// Modified UTF-8. The encoder currently declines the NUL byte and
-    /// non-ASCII (a supplementary-pair encoder is reserved for a future
-    /// extension once a registry-pack id is observed outside that range).
-    /// The position is the byte offset within the offending string so a
-    /// caller can point at it.
+    /// A string held a NUL or non-ASCII byte. The encoder accepts only
+    /// non-NUL ASCII, the range on which Java's Modified UTF-8 and Bedrock's
+    /// UTF-8 coincide, so one validator covers both dialects.
     #[error("nbt: string contains byte 0x{byte:02x} at index {index}, not encodable here")]
     InvalidString {
         /// Offending byte.
@@ -42,13 +39,10 @@ pub enum NbtIoError {
         actual: u8,
     },
     /// A [`List`] with no items declared an element type other than
-    /// `TAG_End`.
+    /// `TAG_End`, which the NBT format requires of an empty list.
     ///
-    /// The spec fixes the id at `0` for an empty list, and the sibling
-    /// check above cannot see this one: it runs inside the item loop,
-    /// which an empty list never enters. `List`'s fields are public, so a
-    /// constructor is a convenience and not a funnel — this is the point
-    /// every byte passes through.
+    /// The writer checks this rather than a constructor because `List`'s
+    /// fields are public.
     #[error("nbt: empty list declared element type {declared}, expected 0 (TAG_End)")]
     EmptyListWithElementType {
         /// Declared element type id.
@@ -142,11 +136,6 @@ pub fn check_string(s: &str) -> Result<(), NbtIoError> {
 
 /// [`check_string`], returning the length prefix to write.
 fn string_len(s: &str) -> Result<u16, NbtIoError> {
-    // Java NBT String uses Modified UTF-8; Bedrock uses plain UTF-8. Both
-    // carry a u16 length prefix. The accepted byte set matches what
-    // `NbtIoError::InvalidString` documents — ASCII and non-NUL only — a
-    // range on which the two encodings coincide, so one validator covers
-    // both dialects.
     for (index, &byte) in s.as_bytes().iter().enumerate() {
         if byte == 0 || byte >= 0x80 {
             return Err(NbtIoError::InvalidString { byte, index });
@@ -180,9 +169,7 @@ pub(crate) fn write_payload<W: Write>(
         Tag::Double(v) => endian.write_f64(w, *v)?,
         Tag::ByteArray(bytes) => {
             write_array_len(w, endian, "byte_array", bytes.len())?;
-            // i8 → u8 with the same bit pattern via `to_ne_bytes`; the NBT
-            // wire treats both as raw bytes so the in-memory sign tag is
-            // not part of the payload.
+            // A single byte has no byte order; the sign is not on the wire.
             for &b in bytes {
                 w.write_all(&b.to_ne_bytes())?;
             }

@@ -1,18 +1,12 @@
 //! Java-flavoured NBT writer (big-endian, optionally gzip-wrapped).
 //!
-//! Two entry points: [`write_java_uncompressed`] for tests and
-//! [`write_java_gzip`] for the on-disk `.nbt` format Minecraft Java itself
-//! emits. [`stream_java_uncompressed`] is the streaming twin of the first,
-//! writing the root's body as it goes rather than from a built tree (see
-//! [`crate::stream`]); a caller wanting the gzip form wraps its writer in
+//! [`write_java_uncompressed`] is for tests and [`write_java_gzip`] for
+//! the on-disk `.nbt` format Minecraft Java itself emits. There is no
+//! gzip form of [`stream_java_uncompressed`]: a caller wraps its writer in
 //! its own encoder, so this crate's signatures name no `flate2` type. The
 //! gzip wrapper uses [`flate2::Compression::default`] (level 6), which
-//! matches Mojang's output — important so binary snapshots of small
-//! structures stay byte-stable when checked against samples from the game.
-//!
-//! The byte-level encoding lives in the crate-internal `writer` module,
-//! shared with the Bedrock writer; this module only pins the byte order
-//! and the gzip envelope.
+//! matches Mojang's output, so binary snapshots of small structures stay
+//! byte-stable against samples from the game.
 
 use std::io::Write;
 

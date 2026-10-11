@@ -13,24 +13,18 @@
 //! owns string validation, length prefixes and byte order.
 //!
 //! A list's length prefix is written before its first item, so the item
-//! count is declared up front and checked when the list's closure returns
-//! successfully. Writing a different number of items than declared panics.
-//! A wrong item type returns [`NbtIoError::HeterogeneousList`] instead, and
-//! the difference is whether the stream can still be finished. A wrong type
-//! is refused before the item is counted and before any byte of it is
-//! written, so the bytes so far are still a valid prefix and a retry with
-//! the right type continues the list. A short list is found only once its
-//! closure has returned, when the prefix promises items that will not
-//! follow. A long one is found at the extra item, before any of its bytes,
-//! but it is the same bug: a declared length that the caller's own loop
-//! disagrees with. Like any input the caller built wrong, both assert.
+//! count is declared up front. Writing a different number of items than
+//! declared panics: the prefix has already promised them, and the mismatch
+//! is a bug in the caller's own loop. A wrong item type returns
+//! [`NbtIoError::HeterogeneousList`] instead, because it is refused before
+//! any byte of the item is written, so the stream is still a valid prefix
+//! and a retry with the right type continues the list.
 //!
 //! An empty list always declares `TAG_End`, whatever element type the
 //! caller names, as [`List::of_tags`](crate::tag::List::of_tags) does.
 //!
 //! A [`CompoundStream`] writes every entry it is given, so naming one key
-//! twice writes it twice. A [`Compound`]'s map keeps only the last, so such
-//! a stream has no tree that writes the same bytes; the caller keeps keys
+//! twice writes it twice, which no [`Compound`] can; the caller keeps keys
 //! unique.
 
 use std::io::Write;
@@ -93,14 +87,11 @@ where
 }
 
 /// Write a list's element type and length prefix, stream its items, and
-/// check the count. An empty list declares `TAG_End` whatever
-/// `element_type_id` says, as `List::of_tags` does. `body` runs even for
-/// an empty list, so a caller that writes an item into one is caught the
-/// same way as any other miscount.
+/// check the count. `body` runs even for an empty list, so an item written
+/// into one is caught like any other miscount.
 ///
-/// The count check runs only after `body` returns `Ok`. An error from
-/// `body` (a failed write, an unencodable item) returns before it, so the
-/// caller gets that error rather than a panic about the count it left
+/// The count check runs only after `body` returns `Ok`, so an error from
+/// `body` reaches the caller rather than a panic about the count it left
 /// short.
 fn stream_list_body<W, F>(
     writer: &mut W,

@@ -6,11 +6,6 @@
 //! point on purpose: emitting a gzip-wrapped `.mcstructure` would produce
 //! a file the game silently fails to load, so the API surface should not
 //! make that mistake expressible.
-//!
-//! The byte-level encoding lives in the crate-internal `writer` module,
-//! shared with the Java writer; this module only pins the byte order.
-//! [`stream_bedrock_uncompressed`] is the streaming twin of
-//! [`write_bedrock_uncompressed`] (see [`crate::stream`]).
 
 use std::io::Write;
 

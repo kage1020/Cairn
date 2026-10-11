@@ -20,15 +20,15 @@ pub use crate::writer::check_string;
 pub enum Tag {
     /// Signed 8-bit integer (`TAG_Byte`, id 1).
     Byte(i8),
-    /// Signed 16-bit integer, big-endian on the wire (`TAG_Short`, id 2).
+    /// Signed 16-bit integer (`TAG_Short`, id 2).
     Short(i16),
-    /// Signed 32-bit integer, big-endian on the wire (`TAG_Int`, id 3).
+    /// Signed 32-bit integer (`TAG_Int`, id 3).
     Int(i32),
-    /// Signed 64-bit integer, big-endian on the wire (`TAG_Long`, id 4).
+    /// Signed 64-bit integer (`TAG_Long`, id 4).
     Long(i64),
-    /// IEEE 754 single, big-endian on the wire (`TAG_Float`, id 5).
+    /// IEEE 754 single (`TAG_Float`, id 5).
     Float(f32),
-    /// IEEE 754 double, big-endian on the wire (`TAG_Double`, id 6).
+    /// IEEE 754 double (`TAG_Double`, id 6).
     Double(f64),
     /// Length-prefixed signed byte array (`TAG_Byte_Array`, id 7).
     ByteArray(Vec<i8>),
@@ -45,9 +45,7 @@ pub enum Tag {
 }
 
 impl Tag {
-    /// Wire tag id used by the Java/Bedrock NBT formats. Matches the
-    /// variant order above (1 = `Byte` through 12 = `LongArray`); `TAG_End` is
-    /// `0` and is written by [`Compound`] termination, not by this enum.
+    /// Wire tag id, the same in both dialects.
     #[must_use]
     pub fn type_id(&self) -> u8 {
         match self {
@@ -69,10 +67,8 @@ impl Tag {
 
 /// An ordered map of named NBT tags.
 ///
-/// `IndexMap` is used so write order matches insertion order. Java vanilla
-/// does not require a canonical key order, but determinism is what the
-/// downstream `resolved_ir_hash` rests on — two compiles of the same source
-/// must produce the same byte stream.
+/// Entries are written in insertion order. The game accepts any key order,
+/// but two compiles of the same source must produce the same bytes.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Compound {
     /// Named entries in insertion order.
@@ -86,9 +82,8 @@ impl Compound {
         Self::default()
     }
 
-    /// Insert or replace a named entry and return `&mut self` so callers can
-    /// chain. Insertion order is preserved on first insert; replacement
-    /// keeps the original position.
+    /// Insert or replace a named entry, returning `self` for chaining. A
+    /// replaced entry keeps its original position.
     pub fn insert(&mut self, name: impl Into<String>, value: Tag) -> &mut Self {
         self.entries.insert(name.into(), value);
         self
@@ -97,11 +92,9 @@ impl Compound {
 
 /// A homogeneous list of tags.
 ///
-/// The element type is captured by `element_type_id` rather than inferred
-/// from `items[0]` so an empty list can still declare its element kind. The
-/// spec requires `0` (`TAG_End`) for empty lists, which is what
-/// [`List::empty`] writes; populated lists are expected to declare the same
-/// id as every item carries.
+/// `element_type_id` is stored rather than inferred from the items because
+/// the wire carries it even for an empty list, where the format requires `0`
+/// (`TAG_End`). A populated list declares the id every item carries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct List {
     /// Wire id of every item. `0` for an empty list (spec).
@@ -120,37 +113,27 @@ impl List {
         }
     }
 
-    /// Build a `List<TAG_Int>` from a slice of integers. Used for the
-    /// `size` and `pos` triples in Java vanilla structure NBT.
-    ///
-    /// An empty input declares `TAG_End`, not `TAG_Int`: the id describes
-    /// the items on the wire, and there are none.
+    /// Build a `List<TAG_Int>` from integers. An empty input declares
+    /// `TAG_End`, as in [`List::of_tags`].
     #[must_use]
     pub fn of_ints(values: impl IntoIterator<Item = i32>) -> Self {
         Self::of_tags(3, values.into_iter().map(Tag::Int).collect())
     }
 
-    /// Build a `List<TAG_Compound>` from a vector of [`Compound`]s. Used
-    /// for `palette` and `blocks` in Java vanilla structure NBT (and for
-    /// `entities` once entity lowering lands).
-    ///
-    /// An empty input declares `TAG_End`, as in [`List::of_ints`].
+    /// Build a `List<TAG_Compound>` from [`Compound`]s. An empty input
+    /// declares `TAG_End`, as in [`List::of_tags`].
     #[must_use]
     pub fn of_compounds(items: Vec<Compound>) -> Self {
         Self::of_tags(10, items.into_iter().map(Tag::Compound).collect())
     }
 
-    /// Choose the element id from the items, so an empty list cannot
-    /// acquire one by which constructor was called.
+    /// Build a list declaring `element_type_id`, or `TAG_End` when `items`
+    /// is empty: a reader trusts the declared id, and an empty list has no
+    /// items for it to describe.
     ///
-    /// `element_type_id` is a wire field a reader is entitled to trust, and
-    /// the spec fixes it at `0` when the list is empty. A constructor knows
-    /// what the items *would* have been, which is not the same as what the
-    /// list declares.
-    ///
-    /// This is a convenience, not a funnel: `List`'s fields are public, so
-    /// a struct literal reaches the same shape. The invariant is enforced
-    /// in the writer, which is the point every byte passes through.
+    /// A struct literal bypasses this constructor, so the writer enforces
+    /// the same rule
+    /// ([`EmptyListWithElementType`](crate::NbtIoError::EmptyListWithElementType)).
     #[must_use]
     pub fn of_tags(element_type_id: u8, items: Vec<Tag>) -> Self {
         if items.is_empty() {
@@ -178,13 +161,7 @@ mod tests {
 
     #[test]
     fn a_list_declares_the_element_id_of_what_built_it() {
-        // The element id is a wire field. Given items, each constructor
-        // declares the id of what it holds. For an empty list the spec
-        // fixes it at 0 (`TAG_End`) — the doc above says so and
-        // `List::empty` writes it — and a constructor that knows what it
-        // *would* have held still has nothing to declare, so the three
-        // routes to an empty list have to agree; a reader that trusts the
-        // id would otherwise see three different answers for the same list.
+        // Every route to an empty list declares `TAG_End`.
         for (label, list, element_type_id, len) in [
             ("empty", List::empty(), 0, 0),
             ("of_ints of nothing", List::of_ints([]), 0, 0),
