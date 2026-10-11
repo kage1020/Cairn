@@ -45,7 +45,7 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `registry::load_from_dir` | The same tables from an external pack directory. Loads it as a Java pack; there is no Bedrock equivalent yet. |
 | `registry::RegistryPack` | A loaded and validated pack. `#[non_exhaustive]`, so "cannot be built without passing the validators" holds outside this crate too. |
 | `registry::RegistryError` | Everything reading or validating a pack can refuse: a missing or unreadable component, a schema version past what this build understands, a failed validator. |
-| `registry::PackSource` | `Builtin` or `Path`. Carried into diagnostics so a `--registry-pack` user can tell which directory was read. |
+| `registry::PackSource` | `Builtin` or `Path`. Carried into diagnostics so a reader can tell which directory was read. |
 | `registry::PackManifest` | The `pack.json` body: schema version, edition, and the component file references. An unknown edition, such as `"BEDROCK"`, is refused. |
 | `registry::PackFiles` | The component references inside a manifest. New components arrive as `Option` fields, so an older pack stays loadable. |
 

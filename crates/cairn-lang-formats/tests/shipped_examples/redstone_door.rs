@@ -6,10 +6,9 @@
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
+use cairn_lang_formats::registry::builtin_pack;
 
-use crate::common::{
-    example_source, latest, lower_example, lower_source, pack_for, supported_versions,
-};
+use crate::common::{example_source, latest, lower_example, lower_source, supported_versions};
 
 fn lower_redstone_door() -> BlockArrayIr {
     lower_example(
@@ -57,7 +56,7 @@ fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
     // The buildable rows only: the table also carries the releases the
     // pack can order a floor against but has no block data for, and
     // pinning a lowering to one of those checks nothing.
-    for version in supported_versions(pack_for(Edition::Bedrock)) {
+    for version in supported_versions(builtin_pack(Edition::Bedrock)) {
         let out = lower_example("redstone-door.crn", Edition::Bedrock, Some(version));
         let ba = out.structures.get("struct::gatehouse").unwrap();
         let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();

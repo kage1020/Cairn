@@ -2,7 +2,7 @@
 //! build, and the streamed bytes those trees must match.
 
 #[path = "../common/mod.rs"]
-mod common;
+pub mod common;
 
 mod bedrock_structure;
 mod java_structure;

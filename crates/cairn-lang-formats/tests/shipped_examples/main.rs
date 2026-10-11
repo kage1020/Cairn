@@ -2,7 +2,7 @@
 //! what the block arrays it produces hold.
 
 #[path = "../common/mod.rs"]
-mod common;
+pub mod common;
 
 mod bedrock_mcstructure;
 mod redstone_door;

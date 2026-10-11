@@ -3,11 +3,6 @@
 //! Every binary here reads the same `examples/` tree and walks the same
 //! built-in registry packs, so the plumbing for both lives once.
 
-// Every test binary compiles this module on its own and calls a subset of
-// it, so the unused-item lint would fire per binary. A dev-dependency
-// helper crate would remove the need.
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
@@ -34,6 +29,11 @@ pub const SHIPPED_EXAMPLES: usize = 12;
 /// Refuses to return a set other than the shipped one. Every sweep is a
 /// loop over this, and a loop over nothing passes — the guard lives with
 /// the iteration source so no test can forget it.
+///
+/// # Panics
+///
+/// Panics if `examples/` cannot be read or holds other than
+/// [`SHIPPED_EXAMPLES`] files.
 pub fn examples() -> Vec<(String, String)> {
     let dir = examples_dir();
     let entries = std::fs::read_dir(&dir)
@@ -67,34 +67,38 @@ pub fn examples() -> Vec<(String, String)> {
 }
 
 /// The source of the shipped example `name` (`"cottage.crn"`).
+///
+/// # Panics
+///
+/// Panics if the file cannot be read.
 pub fn example_source(name: &str) -> String {
     let path = examples_dir().join(name);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()))
 }
 
-/// The built-in pack a build for `edition` reads.
-pub fn pack_for(edition: Edition) -> &'static RegistryPack {
-    match edition {
-        Edition::Java => builtin_pack(Edition::Java),
-        Edition::Bedrock => builtin_pack(Edition::Bedrock),
-    }
-}
-
 /// The version `--target latest` pins on `edition`.
 pub fn latest(edition: Edition) -> &'static str {
-    &pack_for(edition).data_versions.latest
+    &builtin_pack(edition).data_versions.latest
 }
 
 /// The block-array IR `cairn compile --edition <edition>` lowers `source`
 /// to: resolved for that edition, through that edition's built-in pack,
 /// with the id table of `mc_version`. `None` pins no version, which is how
 /// `cairn info` lowers.
+///
+/// # Panics
+///
+/// Panics if `source` does not parse.
 pub fn lower_source(source: &str, edition: Edition, mc_version: Option<&str>) -> BlockArrayIr {
     let module = parse(source).unwrap_or_else(|err| panic!("source does not parse: {err}"));
     let ir = lower(&module);
     let resolution = resolve(&ir, Some(edition));
-    lower_to_block_array(&ir, &resolution, Some(&pack_for(edition).view(mc_version)))
+    lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&builtin_pack(edition).view(mc_version)),
+    )
 }
 
 /// [`lower_source`] over the shipped example `name`.
@@ -112,6 +116,10 @@ pub fn supported_versions(pack: &RegistryPack) -> Vec<&str> {
 }
 
 /// The `structure` compound of a `.mcstructure` root.
+///
+/// # Panics
+///
+/// Panics if the root has no `structure` compound.
 pub fn structure_compound(root: &Compound) -> &Compound {
     match root.entries.get("structure") {
         Some(Tag::Compound(c)) => c,
@@ -120,6 +128,10 @@ pub fn structure_compound(root: &Compound) -> &Compound {
 }
 
 /// The `structure.palette.default` compound of a `.mcstructure` root.
+///
+/// # Panics
+///
+/// Panics if the root has no `structure.palette.default` compound.
 pub fn default_palette(root: &Compound) -> &Compound {
     match structure_compound(root).entries.get("palette") {
         Some(Tag::Compound(p)) => match p.entries.get("default") {
@@ -132,6 +144,10 @@ pub fn default_palette(root: &Compound) -> &Compound {
 
 /// The `structure.palette.default.block_palette` entries of a
 /// `.mcstructure` root.
+///
+/// # Panics
+///
+/// Panics if the root has no `block_palette` list.
 pub fn block_palette(root: &Compound) -> &[Tag] {
     match default_palette(root).entries.get("block_palette") {
         Some(Tag::List(l)) => &l.items,
