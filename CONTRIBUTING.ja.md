@@ -48,6 +48,14 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-featur
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
 ```
 
+CI の `Lint` ジョブは、振る舞いを試すのではなくファイルどうしを突き合わせる検査を回します。README の一覧とコード、仕様の参照と仕様、診断コード表と `DiagnosticCode`、バージョンの各コピーとワークスペースマニフェストです。指摘はファイルと行を名指し、なぜその検査があるのかは `xtask/src/rules/` の各ルールのモジュールに書いてあります。
+
+```sh
+cargo xtask lint            # すべてのルール
+cargo xtask lint --list     # ルールの一覧と、それぞれが守るもの
+cargo xtask lint versions   # 1 つのルールだけ
+```
+
 ### リポジトリの構成
 
 | パス | 中身 |
@@ -85,15 +93,7 @@ Rust のソース、仕様本文、サンプル、ドキュメントは、何年
 
 先送りされていたものが実装されたら、それを入れる PR の中で同時にコメントを更新します。
 
-例外は 3 つだけです。マイルストーンの語彙こそがその目的である面 — [CHANGELOG.md](CHANGELOG.md) とその断片を置く [changelog.d/](changelog.d/README.md)、[ロードマップ](https://cairn.kage1020.com/ja/roadmap/)、[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)表のマイルストーン列。それ以外はレビュー時に次で確認できます。
-
-```sh
-rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\b' \
-  --glob '!CHANGELOG*' --glob '!changelog.d/**' --glob '!CONTRIBUTING*' \
-  --glob '!**/compatibility.md' --glob '!**/roadmap.md' --glob '!target/**'
-```
-
-結果が空であることが約束事です。
+例外は 3 つだけです。マイルストーンの語彙こそがその目的である面 — [CHANGELOG.md](CHANGELOG.md) とその断片を置く [changelog.d/](changelog.d/README.md)、[ロードマップ](https://cairn.kage1020.com/ja/roadmap/)、[互換性ティア](https://cairn.kage1020.com/ja/spec/compatibility/)表のマイルストーン列。それ以外の追跡ファイルはすべて `cargo xtask lint session-refs` が守ります。
 
 ### 仕様は番号ではなく名前で参照する
 
@@ -105,7 +105,7 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 章は拡張子なしのファイル名（`spec/redstone`、`spec/versioning-editions`）で書き、節の見出しはそのまま写します。章全体を指すときは章だけを挙げます。一度その形で引いたあとは、同じコメントの後続の文では「that pipeline」「the phase order」のように散文で受けてください。同じ引用を繰り返す必要はありません。
 
-これは `cargo test --workspace` が `crates/`、`examples/`、`.github/` の 3 つの木に対して守ります。その中に `§` や "section 11.3" が残っていないこと、`spec/<章>` が実在する章を指していること、引用符で囲まれた見出しがその章に実在することの 3 点です。仕様を採番し直しても Rust 側は 1 行も動きません。節の見出しを変えた場合はテストが引用箇所をファイルと行番号で名指して落ちますが、それが狙いです。見出しの変更は意味の変更であり、それに寄りかかっていたコメントは読み直す価値があります。
+これは `cargo xtask lint spec-citations` が `crates/`、`examples/`、`xtask/`、`.github/`、`.claude/`、`CLAUDE.md` に対して守ります。その中に `§` や "section 11.3" が残っていないこと、`spec/<章>` が実在する章を指していること、引用符で囲まれた見出しがその章に実在することの 3 点です。仕様を採番し直しても Rust 側は 1 行も動きません。節の見出しを変えた場合はルールが引用箇所をファイルと行番号で名指して落ちますが、それが狙いです。見出しの変更は意味の変更であり、それに寄りかかっていたコメントは読み直す価値があります。
 
 残りは人の目で見るしかありません。`website/` を読まないのは、そこが番号を定義している側だからです。仕様の隣に並ぶガイドページは今も番号を埋め込んだアンカーで節を参照しており、それをほどくのは見出しそのものを変える変更と一緒にやる仕事です。`editors/`、このファイル、`CHANGELOG.md` と `changelog.d/` は単に走査範囲の外です。
 
@@ -113,11 +113,11 @@ rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\
 
 各クレートの `README.md` は crates.io に表示されるものであり、リポジトリを一度も見たことがない人にとっての表紙です。ステージが実装されたら、同じ PR でそのクレートの README も更新してください。表紙がまだ「これから」と言っているうちは、そのステージは出荷されていません。
 
-コードと突き合わせられる一覧を持つクレートの README は 4 つあり、そのすべてがレビューではなくテストで守られています。`cairn-lang-core` のモジュール表はクレートの `pub mod` 宣言と、`cairn-lang-cli` のサブコマンド表は `cairn --help` が並べるものと、`cairn-lang-nbt` と `cairn-lang-formats` の `## Public API` 表は各クレートルートの再エクスポートと照合されます。`pub mod`・サブコマンド・`pub use` のいずれかを追加して行を足さなければ `cargo test --workspace` が落ち、足りていないものを名指しします。どの照合も双方向なので、もう出荷されていないものの行が残っていても落ちます。
+コードと突き合わせられる一覧を持つクレートの README は 4 つあり、そのすべてがレビューではなく `cargo xtask lint` で守られています。`cairn-lang-core` のモジュール表はクレートの `pub mod` 宣言と、`cairn-lang-cli` のサブコマンド表は `cairn --help` が並べるものと、`cairn-lang-nbt` と `cairn-lang-formats` の `## Public API` 表は各クレートルートの再エクスポートと照合されます。`pub mod`・サブコマンド・`pub use` のいずれかを追加して行を足さなければ lint が落ち、足りていないものを名指しします。どの照合も双方向なので、もう出荷されていないものの行が残っていても落ちます。
 
-`## Public API` が指すのは、クレートルートの `pub use` 再エクスポートだけです。モジュール内でしか `pub` でない項目 — `registry::AliasCatalog` や `registry::blocks` 以下のもの — は意図的に表に載せません。説明が要るなら散文で書いてください。行の第一セルはコードスパン 1 つにつき `module::item` の完全パスを 1 つ書き、1 つの説明文を共有する項目どうしなら複数のスパンを並べて構いません。まだ表を持たないクレートに `## Public API` 表を足すときは、`readme_public_api_tables.rs` の `TABLED_CRATES` にそのクレートを追加してください。忘れても同じテストが教えてくれます。
+`## Public API` が指すのは、クレートルートの `pub use` 再エクスポートだけです。モジュール内でしか `pub` でない項目 — `registry::AliasCatalog` や `registry::blocks` 以下のもの — は意図的に表に載せません。説明が要るなら散文で書いてください。行の第一セルはコードスパン 1 つにつき `module::item` の完全パスを 1 つ書き、1 つの説明文を共有する項目どうしなら複数のスパンを並べて構いません。まだ表を持たないクレートに `## Public API` 表を足すときは、`xtask/src/rules/readme.rs` の `PUBLIC_API_CRATES` にそのクレートを追加してください。忘れても同じルールが教えてくれます。
 
-どのテストも読めないのは散文のほうです。行の説明、「Status」の段落、表を*予定*と呼ぶ見出し、「まだここにない」一覧 — どれも誰かが覚えていたから正しかっただけで、公開済みの 2 クレートではコンパイラが動いたあとも長らく未実装のスケルトンだと説明し続けていました。「まだ」から出したものは README からも出してください。今日出荷されているものを書き、これから先のものは独立した節に置く。そうすればコードを動かさなくても読者が両者を見分けられます。
+どのルールも読めないのは散文のほうです。行の説明、「Status」の段落、表を*予定*と呼ぶ見出し、「まだここにない」一覧 — どれも誰かが覚えていたから正しかっただけで、公開済みの 2 クレートではコンパイラが動いたあとも長らく未実装のスケルトンだと説明し続けていました。「まだ」から出したものは README からも出してください。今日出荷されているものを書き、これから先のものは独立した節に置く。そうすればコードを動かさなくても読者が両者を見分けられます。
 
 ## ブランチとプルリクエスト
 

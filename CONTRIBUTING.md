@@ -48,6 +48,14 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-featur
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
 ```
 
+CI's `Lint` job runs the checks that hold files to each other rather than test behaviour: README inventories against the code, spec citations against the spec, the diagnostic catalog against `DiagnosticCode`, every copy of the version against the workspace manifest. A finding names the file and line, and the rule's module in `xtask/src/rules/` says why it holds:
+
+```sh
+cargo xtask lint            # every rule
+cargo xtask lint --list     # the rules and what each holds
+cargo xtask lint versions   # one rule
+```
+
 ### The repository
 
 | Path | What lives there |
@@ -85,15 +93,7 @@ Rust source, spec body, examples, and docs have to read on their own years from 
 
 When the deferred thing lands, update the comment in the same PR.
 
-Three surfaces are exempt, because milestone vocabulary is what they are *for*: [CHANGELOG.md](CHANGELOG.md) with its fragments in [changelog.d/](changelog.d/README.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the milestone columns of the [compatibility](https://cairn.kage1020.com/spec/compatibility/) table. Reviewers can check the rest with:
-
-```sh
-rg '\bM[1-6]\b|M[0-9]-PR[0-9]+|pre-M[0-9]|\bPR[0-9]+\b|\blater PR\b|\bfuture PR\b' \
-  --glob '!CHANGELOG*' --glob '!changelog.d/**' --glob '!CONTRIBUTING*' \
-  --glob '!**/compatibility.md' --glob '!**/roadmap.md' --glob '!target/**'
-```
-
-An empty result is the contract.
+Three surfaces are exempt, because milestone vocabulary is what they are *for*: [CHANGELOG.md](CHANGELOG.md) with its fragments in [changelog.d/](changelog.d/README.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the milestone columns of the [compatibility](https://cairn.kage1020.com/spec/compatibility/) table. `cargo xtask lint session-refs` holds every other tracked file to this.
 
 ### Cite the spec by name, not by number
 
@@ -105,7 +105,7 @@ A section number is the same kind of coordinate. `§14.5` is true only while "Pl
 
 Write the chapter as its file stem without the extension (`spec/redstone`, `spec/versioning-editions`) and copy the section title verbatim. Cite the chapter alone when you mean the chapter, and once a comment has given the full citation, later sentences in it should refer back in prose — "that pipeline", "the phase order" — rather than repeat it.
 
-`cargo test --workspace` holds this over `crates/`, `examples/` and `.github/`: no `§` or "section 11.3" in any of them, every `spec/<chapter>` names a chapter that exists, and every quoted title is a real heading in it. Renumbering the spec now touches no Rust at all. Retitling a section fails the test at each citation by file and line, which is the point — a title change is a change of meaning, and the comment that leaned on it deserves a re-read.
+`cargo xtask lint spec-citations` holds this over `crates/`, `examples/`, `xtask/`, `.github/`, `.claude/` and `CLAUDE.md`: no `§` or "section 11.3" in any of them, every `spec/<chapter>` names a chapter that exists, and every quoted title is a real heading in it. Renumbering the spec now touches no Rust at all. Retitling a section fails the rule at each citation by file and line, which is the point — a title change is a change of meaning, and the comment that leaned on it deserves a re-read.
 
 The rest of the repository is on you. `website/` is unread because that is where the numbers are defined, and the guide pages beside the spec still link to sections by an anchor that bakes the number into the slug — untangling that belongs with a change to the headings themselves. `editors/`, this file, `CHANGELOG.md` and `changelog.d/` are simply outside the scan.
 
@@ -113,11 +113,11 @@ The rest of the repository is on you. `website/` is unread because that is where
 
 Each crate's `README.md` is what crates.io shows, so it is the front page for anyone who has never seen the repository. When a stage lands, update that crate's README in the same PR — a stage is not shipped while the front page still says it is coming.
 
-Four crate READMEs keep an inventory the code could be compared against, and every one of them is held to it by a test rather than by review: `cairn-lang-core`'s module table against the crate's `pub mod` declarations, `cairn-lang-cli`'s subcommand table against what `cairn --help` lists, and the `## Public API` tables in `cairn-lang-nbt` and `cairn-lang-formats` against what each crate root re-exports. Add a `pub mod`, a subcommand, or a `pub use` without adding its row and `cargo test --workspace` fails, naming the missing one. Every check runs in both directions, so a row for something that no longer ships fails too.
+Four crate READMEs keep an inventory the code could be compared against, and every one of them is held to it by `cargo xtask lint` rather than by review: `cairn-lang-core`'s module table against the crate's `pub mod` declarations, `cairn-lang-cli`'s subcommand table against what `cairn --help` lists, and the `## Public API` tables in `cairn-lang-nbt` and `cairn-lang-formats` against what each crate root re-exports. Add a `pub mod`, a subcommand, or a `pub use` without adding its row and the lint fails, naming the missing one. Every check runs in both directions, so a row for something that no longer ships fails too.
 
-`## Public API` means the crate root's `pub use` re-exports, and nothing else. An item that is only `pub` inside a module — `registry::AliasCatalog`, anything under `registry::blocks` — is deliberately off the table; it belongs in prose if it needs describing. A row writes one full `module::item` path per code span, and may hold several spans when the items share a sentence. Adding a `## Public API` table to a crate that has none means adding that crate to `TABLED_CRATES` in `readme_public_api_tables.rs`, which the same test will tell you.
+`## Public API` means the crate root's `pub use` re-exports, and nothing else. An item that is only `pub` inside a module — `registry::AliasCatalog`, anything under `registry::blocks` — is deliberately off the table; it belongs in prose if it needs describing. A row writes one full `module::item` path per code span, and may hold several spans when the items share a sentence. Adding a `## Public API` table to a crate that has none means adding that crate to `PUBLIC_API_CRATES` in `xtask/src/rules/readme.rs`, which the same rule will tell you.
 
-What no test reads is the prose. A row's description, a "Status" paragraph, a heading calling a table *planned*, a "Not yet here" list — all of it stayed true only because someone remembered, and for two published crates it went on describing an unimplemented skeleton long after the compiler worked. When you move something out of "not yet", move it out of the README too. Say what ships today; keep what is still ahead in a section of its own, so a reader can tell the two apart without running the code.
+What no rule reads is the prose. A row's description, a "Status" paragraph, a heading calling a table *planned*, a "Not yet here" list — all of it stayed true only because someone remembered, and for two published crates it went on describing an unimplemented skeleton long after the compiler worked. When you move something out of "not yet", move it out of the README too. Say what ships today; keep what is still ahead in a section of its own, so a reader can tell the two apart without running the code.
 
 ## Branches and pull requests
 

@@ -51,6 +51,28 @@ jobs:
           cargo test -p cairn-lang-core --bench lowering
           cargo test -p cairn-lang-redstone --bench place_and_route
 
+  lint:
+    # Short and stable on purpose: a required status check is matched as
+    # a literal string, so renaming this job un-gates it silently.
+    name: Lint
+    # The rules read files and manifests, which are the same on every OS.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: lint
+          save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
+
+      - name: Repository lint
+        run: cargo xtask lint
+
   docs:
     # Short and stable on purpose: a required status check is matched as
     # a literal string, so renaming this job un-gates it silently. A new

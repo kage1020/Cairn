@@ -13,10 +13,9 @@ on:
       # grammar, which is the one check that an editor installing from npm
       # resolves `.crn` at all. And `cottage_highlight_golden_is_stable` in
       # `tests/examples.rs` needs the `tree-sitter` CLI that `pnpm install`
-      # puts in `node_modules/.bin`; without it the test prints `skip:` and
-      # returns, asserting nothing. That is what `ci.yml` gets — it runs
-      # `cargo test --workspace` on every push with no path filter, but sets up
-      # no Node, so the golden passes there whatever `cottage.crn` says.
+      # puts in `node_modules/.bin`. `ci.yml` sets up no Node, so the golden
+      # skips there; this workflow sets `CAIRN_REQUIRE_TREE_SITTER_CLI` so a
+      # missing CLI fails it instead.
       - "examples/**"
       - "Cargo.toml"
       - ".github/workflows/tree-sitter.yml"
@@ -77,34 +76,15 @@ jobs:
         with:
           ref: ${{ needs.resolve-ref.outputs.ref }}
 
-      - name: Compare the three version declarations
-        shell: bash
+      - name: Install Rust toolchain
+        working-directory: .
+        run: rustup show
+
+      - name: Compare every version declaration with the workspace version
+        working-directory: .
         env:
           TAG: ${{ needs.resolve-ref.outputs.tag }}
-        run: |
-          set -euo pipefail
-          workspace=$(awk '
-            /^\[workspace\.package\]/   { in_section = 1; next }
-            /^\[/                       { in_section = 0 }
-            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
-          ' ../../Cargo.toml)
-          if [[ ! "$workspace" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
-            echo "Read '$workspace' from [workspace.package]; that is not a CalVer number" >&2
-            exit 1
-          fi
-          package=$(jq -er '.version' package.json)
-          manifest=$(jq -er '.metadata.version' tree-sitter.json)
-          echo "Cargo [workspace.package]: $workspace"
-          echo "package.json:              $package"
-          echo "tree-sitter.json:          $manifest"
-          if [ "$workspace" != "$package" ] || [ "$workspace" != "$manifest" ]; then
-            echo "Version declarations disagree. All three move together." >&2
-            exit 1
-          fi
-          if [ -n "$TAG" ] && [ "$workspace" != "${TAG#v}" ]; then
-            echo "Tag $TAG does not match the declared version $workspace" >&2
-            exit 1
-          fi
+        run: cargo xtask lint versions ${TAG:+--tag "$TAG"}
 
   generate-check:
     name: Generate drift check
@@ -148,6 +128,8 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show
       - run: cargo test -p cairn-lang-tree-sitter
+        env:
+          CAIRN_REQUIRE_TREE_SITTER_CLI: "1"
 
   node-smoke:
     name: Node addon smoke (${{ matrix.os }}, node ${{ matrix.node }})

@@ -8,11 +8,10 @@ pub use ffi::LANGUAGE;
 
 /// The one module in the workspace allowed to lift `unsafe_code`.
 ///
-/// The workspace denies the lint, and `cairn-lang-core`'s
-/// `unsafe_code_is_confined` test — whose module doc states the policy —
-/// fails on an attribute lifting it anywhere outside this module, this
-/// file's crate root included. Keep this module to the declaration and the
-/// handle below.
+/// The workspace forbids the lint and this crate's manifest lowers it to
+/// `deny` so that this module can lift it; `cargo xtask lint` fails on an
+/// attribute lifting it anywhere else, this file's crate root included.
+/// Keep this module to the declaration and the handle below.
 mod ffi {
     #![expect(
         unsafe_code,
