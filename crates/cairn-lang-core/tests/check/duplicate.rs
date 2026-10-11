@@ -724,9 +724,7 @@ site x:\n  place id=a use=x theme=x at=origin\n";
         let found = of_code(&src, DiagnosticCode::DuplicateHeader);
         assert!(found.is_empty(), "got {found:#?}");
         let module = parse(&src).expect("parse");
-        let ir = lower(&module);
-        let resolution = resolve(&ir, None);
-        let axes = cairn_lang_core::resolve::compute_axes(&module, &ir, &resolution, Vec::new());
+        let axes = cairn_lang_core::resolve::compute_axes(&module, Vec::new());
         assert_eq!(
             axes.registry_compat.min, "1.21",
             "the strictest floor must still win",

@@ -92,7 +92,7 @@ use cairn_lang_core::intent::{
     AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
     SiteIr, StructIr, ValueWithSpan, actuator_patch_target, known_keywords,
 };
-use cairn_lang_core::suggest::nearest_match;
+use cairn_lang_core::suggest::{did_you_mean, nearest_match};
 
 /// Each actuator argument key from `spec/redstone` "Signal binding",
 /// paired with the component keyword that carries it.
@@ -1059,7 +1059,7 @@ fn diag_unknown_binding_key(
     )
     .with_note(member.span.clone(), "declared here");
     match nearest_match(key, keys.iter().copied()) {
-        Some(near) => diag.with_footer(format!("did you mean `{near}=`?")),
+        Some(near) => diag.with_footer(did_you_mean(&format!("{near}="))),
         None => diag.with_footer(format!(
             "Fix: use one of `{}=`, or drop the argument if this member is not an actuator.",
             keys.join("=`, `"),

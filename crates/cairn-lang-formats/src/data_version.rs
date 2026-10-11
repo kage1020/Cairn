@@ -16,6 +16,7 @@
 use std::fmt;
 
 use cairn_lang_core::Edition;
+use cairn_lang_core::suggest::did_you_mean;
 
 pub use crate::registry::{resolve_bedrock_target, resolve_java_target};
 
@@ -70,7 +71,7 @@ impl fmt::Display for UnsupportedTarget {
             self.edition, self.requested
         )?;
         if let Some(s) = &self.suggestion {
-            write!(f, "did you mean `{s}`? ")?;
+            write!(f, "{} ", did_you_mean(s))?;
         }
         write!(f, "supported targets: {}", self.supported)
     }

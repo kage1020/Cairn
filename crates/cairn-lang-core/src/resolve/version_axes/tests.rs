@@ -1,13 +1,5 @@
 use super::*;
-use crate::resolve::resolve;
-use crate::{lower, parse};
-
-fn module_with(source: &str) -> (Module, IntentModule, Resolution) {
-    let m = parse(source).expect("parse");
-    let i = lower(&m);
-    let r = resolve(&i, None);
-    (m, i, r)
-}
+use crate::parse;
 
 /// Fabricate a per-edition report matching the shape the CLI builds
 /// from `cairn-lang-formats::portability` and its own version loop.
@@ -32,8 +24,8 @@ fn synthetic_portability(entries: &[(Edition, u32)]) -> Vec<EditionReport> {
 #[test]
 fn registry_compat_min_from_requires_header() {
     let src = "@requires version>=1.20\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
-    let (m, i, r) = module_with(src);
-    let axes = compute_axes(&m, &i, &r, synthetic_portability(&[(Edition::Java, 0)]));
+    let m = parse(src).expect("parse");
+    let axes = compute_axes(&m, synthetic_portability(&[(Edition::Java, 0)]));
     assert_eq!(axes.registry_compat.min, "1.20");
     assert_eq!(axes.registry_compat.max, "latest");
 }
@@ -41,16 +33,16 @@ fn registry_compat_min_from_requires_header() {
 #[test]
 fn registry_compat_takes_max_when_multiple_requires_present() {
     let src = "@requires version>=1.20\n@requires version>=1.21\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
-    let (m, i, r) = module_with(src);
-    let axes = compute_axes(&m, &i, &r, synthetic_portability(&[(Edition::Java, 0)]));
+    let m = parse(src).expect("parse");
+    let axes = compute_axes(&m, synthetic_portability(&[(Edition::Java, 0)]));
     assert_eq!(axes.registry_compat.min, "1.21");
 }
 
 #[test]
 fn registry_compat_defaults_when_requires_absent() {
     let src = "struct s size=4x4\n  walls mat_slot=wall height=3\n";
-    let (m, i, r) = module_with(src);
-    let axes = compute_axes(&m, &i, &r, synthetic_portability(&[(Edition::Java, 0)]));
+    let m = parse(src).expect("parse");
+    let axes = compute_axes(&m, synthetic_portability(&[(Edition::Java, 0)]));
     assert_eq!(axes.registry_compat.min, "0.0");
 }
 
@@ -62,11 +54,9 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
     // them into the output. Pin the forwarding so a future refactor
     // can't quietly re-introduce a zero-fill or reordering.
     let src = "struct s size=4x4\n  walls height=3\n  floor\n  roof kind=gable\n";
-    let (m, i, r) = module_with(src);
+    let m = parse(src).expect("parse");
     let axes = compute_axes(
         &m,
-        &i,
-        &r,
         vec![
             EditionReport {
                 edition: Edition::Java,
@@ -230,8 +220,8 @@ fn every_unsupported_reason_carries_its_own_wire_shape() {
 #[test]
 fn semantic_sensitive_is_empty_without_catalog() {
     let src = "struct s size=4x4\n  walls height=3\n";
-    let (m, i, r) = module_with(src);
-    let axes = compute_axes(&m, &i, &r, synthetic_portability(&[(Edition::Java, 0)]));
+    let m = parse(src).expect("parse");
+    let axes = compute_axes(&m, synthetic_portability(&[(Edition::Java, 0)]));
     assert!(axes.semantic_sensitive.is_empty());
 }
 

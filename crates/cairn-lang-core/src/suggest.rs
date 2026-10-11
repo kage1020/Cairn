@@ -20,14 +20,21 @@ use strsim::damerau_levenshtein;
 
 use crate::diagnostic::DiagnosticNote;
 
-/// The "did you mean X?" note every unknown-identifier diagnostic
-/// attaches, with `suggested` already spelled the way the source would
-/// write it (`@token`, `place.port`, a bare keyword).
+/// The sentence every suggestion is phrased as, so a diagnostic, a CLI
+/// report and an error's `Display` word it alike. `suggested` is spelled
+/// the way the source would write it (`@token`, `place.port`, `key=`).
+#[must_use]
+pub fn did_you_mean(suggested: &str) -> String {
+    format!("did you mean `{suggested}`?")
+}
+
+/// [`did_you_mean`] as the note every unknown-identifier diagnostic
+/// attaches.
 #[must_use]
 pub(crate) fn did_you_mean_note(suggested: &str) -> DiagnosticNote {
     DiagnosticNote {
         span: None,
-        message: format!("did you mean `{suggested}`?"),
+        message: did_you_mean(suggested),
     }
 }
 

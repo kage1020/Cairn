@@ -43,10 +43,8 @@ use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement}
 use crate::diagnostic::RenderedDiagnostic;
 use crate::edition::Edition;
 use crate::error::{Position, Span};
-use crate::intent::IntentModule;
 use crate::version::{FloorVerdict, VersionOrder, compare_versions, parse_min_version};
 
-use super::resolution::Resolution;
 use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};
 
 /// The three-axis answer to "which version is this `.crn` for?".
@@ -594,17 +592,8 @@ pub struct SemanticSensitiveFinding {
 /// same reason: deciding them means lowering once per supported version
 /// against that version's id table, which is the registry pack's data and
 /// so the caller's to hold.
-///
-/// `_resolution` is accepted so future work that needs the resolved binding
-/// (semantic-sensitivity checks per concrete token) can land without an API
-/// change. Currently only `module.headers` and `editions` are consumed.
 #[must_use]
-pub fn compute_axes(
-    module: &Module,
-    _ir: &IntentModule,
-    _resolution: &Resolution,
-    editions: Vec<EditionReport>,
-) -> VersionAxes {
+pub fn compute_axes(module: &Module, editions: Vec<EditionReport>) -> VersionAxes {
     let mut edition_portability = Vec::with_capacity(editions.len());
     let mut buildable_targets = Vec::with_capacity(editions.len());
     for report in editions {

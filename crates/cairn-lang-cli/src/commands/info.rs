@@ -10,7 +10,7 @@ use cairn_lang_core::resolve::{
     BuildableTargets, DegradedEntry, EditionReport, UnsupportedEntry, UnsupportedReason,
     VersionAxes, compute_axes, declared_version_floors, resolve,
 };
-use cairn_lang_core::suggest::candidate_list;
+use cairn_lang_core::suggest::{candidate_list, did_you_mean};
 use cairn_lang_core::{Diagnostic, Edition, Module, Severity, lower};
 use cairn_lang_formats::bedrock_state::degradation_detail;
 use cairn_lang_formats::portability::{
@@ -96,7 +96,7 @@ pub(crate) fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> 
         }
     };
 
-    let axes = compute_axes(&module, &ir, &resolution, rows);
+    let axes = compute_axes(&module, rows);
 
     match format {
         InfoFormat::Text => {
@@ -401,7 +401,7 @@ fn unsupported_reason(reason: &UnsupportedReason) -> String {
             // this edition spells differently, which no edit distance finds.
             match (aliases.as_slice(), suggestion) {
                 ([], None) => absent.to_owned(),
-                ([], Some(suggestion)) => format!("{absent}; did you mean `{suggestion}`?"),
+                ([], Some(suggestion)) => format!("{absent}; {}", did_you_mean(suggestion)),
                 (spellings, _) => format!(
                     "no supported version of this edition declares that id; it spells the \
                      block {}",
