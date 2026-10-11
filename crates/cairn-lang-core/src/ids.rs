@@ -1,29 +1,7 @@
-//! Newtype wrappers for Cairn identifiers shared across the resolver, the block-array IR and the
-//! lockfile DTOs.
+//! Identifier newtypes and the walkway scope key built from them.
 //!
-//! # What an identifier may not carry
-//!
-//! The one place the rule and its reasons are written. An identifier is non-empty and carries
-//! none of:
-//!
-//! - `.` and `:`, the scope-key separators; otherwise a connect endpoint such as `home.1.entry`
-//!   would have its walkway scope key re-parse as a different `(place, port)` pair.
-//! - `/` and `\`, because an identifier is the stem of the artifact file written into `--out`:
-//!   either would put the file in another directory, and an absolute id would replace `--out`.
-//! - `*`, `|`, `?`, `<`, `>`, `"` and U+0000 to U+001F, which a Windows file name cannot carry.
-//!   They are refused on every host, so an identifier that builds on Linux is also written on
-//!   Windows.
-//! - U+007F to U+009F, which a Windows file name allows but which print as nothing or move the
-//!   terminal cursor, so a message quoting the identifier could not show it.
-//! - Whitespace: a `connect` endpoint is an identifier token, which cannot hold any, and quoted in
-//!   a message such an id reads as two names.
-//!
-//! `place id=` takes a string literal, so the constructor is where the rule is first applied; the
-//! lockfile reader applies it again. Every newtype serializes as its bare string.
-//!
-//! [`WalkwayScopeKey`] is the structural counterpart: a normalized
-//! `walkway::SITE::PLACE.PORT__PLACE.PORT` string, built by [`WalkwayScopeKey::from_parts`] or
-//! [`WalkwayScopeKey::parse`] and taken apart by [`WalkwayScopeKey::parts`].
+//! An identifier is non-empty and carries no `.`, `:`, `/`, `\`, `*`, `|`, `?`, `<`, `>`, `"`,
+//! whitespace or control character (`spec/lint` "Sites and placements").
 
 use std::borrow::Borrow;
 use std::fmt;
@@ -37,8 +15,7 @@ pub enum IdError {
     /// Construction was attempted with an empty string.
     #[error("identifier is empty")]
     Empty,
-    /// A character no identifier may carry, as the [module docs](crate::ids) list. The message
-    /// escapes a character that would not read as itself.
+    /// A character no identifier may carry, as the [module docs](crate::ids) list.
     #[error(
         "identifier `{ident}` contains forbidden character `{}`",
         shown_char(*ch)
@@ -51,18 +28,15 @@ pub enum IdError {
     },
 }
 
-/// The punctuation no identifier may carry, in the order a message lists it. Whitespace and
-/// control characters are the other two classes.
+/// The punctuation no identifier may carry, in the order a message lists it.
 pub(crate) const FORBIDDEN_IDENT_PUNCTUATION: [char; 10] =
     ['.', ':', '/', '\\', '*', '|', '?', '<', '>', '"'];
 
-/// Whether an identifier may not carry `c`, per the [module docs](crate::ids).
 fn is_forbidden_ident_char(c: char) -> bool {
     FORBIDDEN_IDENT_PUNCTUATION.contains(&c) || c.is_whitespace() || c.is_control()
 }
 
-/// `c` as a message quotes it: escaped when it would not read as itself, as a control character
-/// or a no-break space would not.
+/// `c` as a message quotes it, escaped when it would not read as itself.
 #[must_use]
 pub(crate) fn shown_char(c: char) -> String {
     if c.is_control() || (c.is_whitespace() && c != ' ') {
@@ -101,8 +75,6 @@ fn has_edge_underscore(s: &str) -> bool {
     s.starts_with('_') || s.ends_with('_')
 }
 
-/// Check one place or port segment of a walkway scope key. See
-/// [`KeyConstructError::UnderscoreAtEdge`] for why every edge is refused.
 fn check_endpoint_segment(role: EndpointSegmentRole, s: &str) -> Result<(), KeyConstructError> {
     check_no_dunder(role.into(), s)?;
     if has_edge_underscore(s) {
@@ -114,10 +86,7 @@ fn check_endpoint_segment(role: EndpointSegmentRole, s: &str) -> Result<(), KeyC
     Ok(())
 }
 
-/// Which segment of a walkway scope key a
-/// [`KeyConstructError::ConsecutiveUnderscore`] names.
-///
-/// Exhaustive on purpose: a key's segments are a closed set.
+/// Which segment of a walkway scope key a [`KeyConstructError::ConsecutiveUnderscore`] names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeySegmentRole {
     /// The site name.
@@ -128,10 +97,7 @@ pub enum KeySegmentRole {
     Port,
 }
 
-/// Which endpoint segment a [`KeyConstructError::UnderscoreAtEdge`] names.
-///
-/// Apart from [`KeySegmentRole`] because the site is exempt from the edge rule, so a site-role
-/// edge error cannot be built.
+/// Which endpoint segment a [`KeyConstructError::UnderscoreAtEdge`] names; the site is exempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EndpointSegmentRole {
     /// A `place id=`, on either end.
@@ -189,14 +155,11 @@ macro_rules! ident_newtype {
         pub struct $Name(String);
 
         impl $Name {
-            /// Build a new identifier, refusing what the
-            /// [module docs](crate::ids) say no identifier may carry.
+            /// Build an identifier, refusing what the [module docs](crate::ids) list.
             ///
             /// # Errors
             ///
-            /// Returns [`IdError::Empty`] for the empty string, or
-            /// [`IdError::ForbiddenChar`] naming the first character the
-            /// rule refuses.
+            /// [`IdError::Empty`] for the empty string, or [`IdError::ForbiddenChar`].
             pub fn new<S: Into<String>>(s: S) -> Result<Self, IdError> {
                 let s = s.into();
                 validate_ident(&s)?;
@@ -287,12 +250,10 @@ pub enum KeyParseError {
     /// The key does not start with the `walkway::` prefix.
     #[error("missing `walkway::` prefix in scope key `{0}`")]
     MissingPrefix(String),
-    /// The key has the prefix but no `::` separating the site from the
-    /// endpoint pair.
+    /// The key has the prefix but no `::` after the site.
     #[error("missing site segment in scope key `{0}`")]
     MissingSite(String),
-    /// The endpoint pair does not contain the `__` separator between
-    /// `from` and `to`.
+    /// The endpoint pair has no `__` between `from` and `to`.
     #[error("missing `__` separator between from and to endpoints in scope key `{0}`")]
     MissingFromToSeparator(String),
     /// One endpoint is not in `PLACE.PORT` form (missing `.`).
@@ -325,8 +286,7 @@ pub enum KeyParseError {
         /// The offending segment.
         segment: String,
     },
-    /// A place or port segment starts or ends with `_`. See
-    /// [`KeyConstructError::UnderscoreAtEdge`].
+    /// A place or port segment starts or ends with `_`.
     #[error(
         "segment `{segment}` in scope key `{key}` starts or ends with `_`, and a walkway \
          place or port segment may carry `_` only between other characters"
@@ -340,10 +300,6 @@ pub enum KeyParseError {
 }
 
 /// Failure modes for [`WalkwayScopeKey::from_parts`].
-///
-/// The lexer allows `_` anywhere in an identifier, so `home__1` and `p_` are legal ids. Lowering
-/// turns this error into a diagnostic on the `connect` row rather than emit a key that two
-/// endpoint pairs share.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum KeyConstructError {
@@ -358,14 +314,7 @@ pub enum KeyConstructError {
         /// The offending segment.
         segment: String,
     },
-    /// A place or port segment starts or ends with `_`.
-    ///
-    /// A `_` beside the `__` separator merges into it: `(a, p_)` to `(b, p)` and `(a, p)` to
-    /// `(_b, p)` both encode as `a.p___b.p`, and a port named `_` gives `a.___b._`, which splits
-    /// back into an empty port. Which edges touch the separator depends on the direction a row is
-    /// written, and the edges beside a `.` cannot merge, but every edge is refused so the rule
-    /// reads as one sentence: no place or port id starts or ends with `_`. The site is exempt,
-    /// sitting between two `::`.
+    /// A place or port segment starts or ends with `_`, which could merge into the `__` separator.
     #[error(
         "walkway scope key segment `{segment}` starts or ends with `_`, and a walkway place \
          or port id may carry `_` only between other characters; rename the {role} to drop \
@@ -379,11 +328,7 @@ pub enum KeyConstructError {
     },
 }
 
-/// IR scope key for a single walkway, of the form
-/// `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT`.
-///
-/// Built only by [`from_parts`](Self::from_parts) or [`parse`](Self::parse), so no segment holds
-/// a `.` or `__` that would make the key ambiguous to take apart.
+/// IR scope key for a single walkway, `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct WalkwayScopeKey(String);
@@ -391,14 +336,9 @@ pub struct WalkwayScopeKey(String);
 impl WalkwayScopeKey {
     /// Build a walkway scope key from a `(site, from, to)` triple.
     ///
-    /// Each end is one [`WalkwayEndpoint`], so a call site cannot swap `from_port` for
-    /// `to_place`.
-    ///
     /// # Errors
     ///
-    /// [`KeyConstructError::ConsecutiveUnderscore`] when any segment contains `__`, and
-    /// [`KeyConstructError::UnderscoreAtEdge`] when a place or port segment starts or ends with
-    /// `_`.
+    /// [`KeyConstructError`] for a `__` in any segment or a `_` at a place or port's edge.
     pub fn from_parts(
         site: &SiteName,
         from: &WalkwayEndpoint,
@@ -422,11 +362,7 @@ impl WalkwayScopeKey {
     ///
     /// # Errors
     ///
-    /// Returns a [`KeyParseError`] variant when the input does not
-    /// follow the `walkway::SITE::PLACE.PORT__PLACE.PORT` shape, or
-    /// when any of the five segments fails identifier validation
-    /// (e.g. a port id containing `.` or `__`, or starting or ending
-    /// with `_`).
+    /// [`KeyParseError`] when the shape is wrong or a segment fails validation.
     pub fn parse(s: &str) -> Result<Self, KeyParseError> {
         let rest = s
             .strip_prefix("walkway::")
@@ -453,8 +389,7 @@ impl WalkwayScopeKey {
             key: s.to_owned(),
             segment: segment.to_owned(),
         };
-        // `__` first, so a separator collision is reported as one rather than as whatever
-        // forbidden character the mis-split leaves.
+        // `__` first, so a separator collision is reported as one.
         for seg in [site, from_place, from_port, to_place, to_port] {
             if seg.contains("__") {
                 return Err(dunder(seg));
@@ -465,8 +400,7 @@ impl WalkwayScopeKey {
         let from_port_id = PortId::new(from_port).map_err(|e| invalid(from_port, e))?;
         let to_place_id = PlaceId::new(to_place).map_err(|e| invalid(to_place, e))?;
         let to_port_id = PortId::new(to_port).map_err(|e| invalid(to_port, e))?;
-        // `from_parts` judges `_` at an edge. Its `__` arm cannot fire after the loop above, but
-        // is mapped rather than `unreachable!()` so removing the loop cannot add a panic.
+        // `from_parts` judges `_` at an edge; its `__` arm cannot fire after the loop above.
         Self::from_parts(
             &site_id,
             &WalkwayEndpoint {
@@ -495,13 +429,11 @@ impl WalkwayScopeKey {
         &self.0
     }
 
-    /// Decompose the key into its five segments, borrowing into the
-    /// internal representation.
+    /// The key's five segments, borrowed.
     ///
     /// # Panics
     ///
-    /// Panics if the internal string is not canonical, which [`Self::from_parts`] and
-    /// [`Self::parse`] both guarantee.
+    /// If the internal string is not canonical, which every constructor guarantees.
     #[must_use]
     pub fn parts(&self) -> WalkwayScopeKeyParts<'_> {
         let rest = self
@@ -570,13 +502,9 @@ pub struct WalkwayScopeKeyParts<'a> {
     pub to_port: &'a str,
 }
 
-/// `(place, port)` pair the block-array IR and the lockfile DTOs share.
+/// `(place, port)` pair the block-array IR and the lockfile share.
 ///
-/// The span-less counterpart of [`crate::resolve::PortRef`], so [`crate::block_array::Walkway`]
-/// and [`crate::lock::LockWalkway`] spell an endpoint with one type. Unknown keys are refused
-/// because it is a lockfile container (`walkways[].from`), serde does not cascade the attribute
-/// from [`crate::lock`]'s structs, and a record of what was built must not carry a payload the
-/// reader ignores.
+/// Denies unknown fields itself: serde does not cascade the attribute from [`crate::lock`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WalkwayEndpoint {
@@ -592,31 +520,12 @@ impl fmt::Display for WalkwayEndpoint {
     }
 }
 
-/// The name, without extension, of the file a scope of
-/// [`crate::BlockArrayIr::structures`] is written to.
-///
-/// - `struct::cottage` → `cottage`
-/// - `site::hamlet::home1` → `home1`: a placement is named after its `id=`
-///   alone, so it shares one output directory with every struct and every
-///   other site's placements (`spec/components-editing-sites` "Output
-///   naming").
-/// - `walkway::hamlet::home1.entry__home2.entry` →
-///   `hamlet_walkway_home1_entry__home2_entry`: the site is kept, so the
-///   walkways of different sites do not share a name even when their
-///   endpoints are spelled alike, and the `.` between a place and its port
-///   becomes `_`, so the name stays a single identifier token on every
-///   operating system.
-///
-/// A key with none of these shapes, such as `walkway::no_site` or `site::hamlet`, is returned
-/// unchanged. Kept apart from the file writers so the resolver's `E_OUTPUT_NAME_COLLISION` and the
-/// name a build writes are one function.
+/// The file name, without extension, a scope of [`crate::BlockArrayIr::structures`] is written to
+/// (`spec/components-editing-sites` "Output naming"); a key of no known shape comes back as is.
 ///
 /// # Panics
 ///
-/// In a debug build, when `source_scope` starts with `walkway::`, has a further `::`, and does not
-/// parse as a [`WalkwayScopeKey`] (`walkway::hamlet::bogus`); a release build returns it
-/// unchanged. No source reaches this, because every walkway key a build writes comes from
-/// [`WalkwayScopeKey::from_parts`].
+/// In a debug build, on a `walkway::SITE::…` key that does not parse.
 #[must_use]
 pub fn artifact_stem(source_scope: &str) -> String {
     if let Some(rest) = source_scope.strip_prefix("walkway::")
@@ -624,8 +533,7 @@ pub fn artifact_stem(source_scope: &str) -> String {
     {
         match WalkwayScopeKey::parse(source_scope) {
             Ok(key) => {
-                // `a_b.c__d_e.f` and `a.b_c__d.e_f` flatten to one name; the resolver reports
-                // that pair as `E_OUTPUT_NAME_COLLISION`.
+                // Two keys can flatten to one name; the resolver reports `E_OUTPUT_NAME_COLLISION`.
                 let parts = key.parts();
                 return format!(
                     "{site}_walkway_{from_place}_{from_port}__{to_place}_{to_port}",

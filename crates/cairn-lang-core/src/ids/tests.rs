@@ -8,8 +8,6 @@ fn artifact_stem_names_each_scope_kind() {
         artifact_stem("walkway::hamlet::home1.entry__home2.entry"),
         "hamlet_walkway_home1_entry__home2_entry",
     );
-    // Anything else passes through, including a walkway key without
-    // its site separator.
     assert_eq!(artifact_stem("cottage"), "cottage");
     assert_eq!(artifact_stem("walkway::no_site"), "walkway::no_site");
 }
@@ -53,7 +51,6 @@ fn ident_new_rejects_colon_and_whitespace() {
 
 #[test]
 fn ident_new_rejects_path_separators() {
-    // Every newtype, since all three become file names.
     for (ident, ch) in [("/tmp/x", '/'), ("sub/x", '/'), ("a\\b", '\\')] {
         for result in [
             PlaceId::new(ident).map(|_| ()),
@@ -74,7 +71,6 @@ fn ident_new_rejects_path_separators() {
 
 #[test]
 fn ident_new_rejects_what_a_windows_file_name_cannot_carry() {
-    // Both ends of U+0000 to U+001F, the controls Windows reserves.
     for ch in ['*', '|', '?', '<', '>', '"', '\u{0}', '\u{1}', '\u{1f}'] {
         assert_refused_by_every_newtype(ch);
     }
@@ -82,8 +78,6 @@ fn ident_new_rejects_what_a_windows_file_name_cannot_carry() {
 
 #[test]
 fn ident_new_rejects_the_controls_a_windows_file_name_allows_as_illegible() {
-    // Legal in a Windows file name and refused on their own ground, so a separate test keeps
-    // either half of the rule from taking the other with it.
     for ch in ['\u{7f}', '\u{80}', '\u{85}', '\u{9f}'] {
         assert_refused_by_every_newtype(ch);
     }
@@ -110,7 +104,6 @@ fn assert_refused_by_every_newtype(ch: char) {
 
 #[test]
 fn every_listed_punctuation_mark_is_refused() {
-    // The `E_INVALID_PLACE_ID` note is built from this list.
     for ch in FORBIDDEN_IDENT_PUNCTUATION {
         assert_refused_by_every_newtype(ch);
     }
@@ -133,7 +126,6 @@ fn an_illegible_forbidden_character_is_quoted_as_its_escape() {
             format!("identifier `{ident}` contains forbidden character `{shown}`"),
         );
     }
-    // A character that reads as itself, the plain space included, is quoted as itself.
     for (ident, shown) in [("a\\b", "\\"), ("a b", " ")] {
         let err = PlaceId::new(ident).unwrap_err();
         assert_eq!(
@@ -186,7 +178,6 @@ fn walkway_scope_key_round_trips() {
 
 #[test]
 fn walkway_scope_key_parse_rejects_dot_in_port() {
-    // Accepted, `(home1, a.b)` would share its key with `(home1.a, b)`.
     let err = WalkwayScopeKey::parse("walkway::hamlet::home1.a.b__home2.entry").unwrap_err();
     match err {
         KeyParseError::InvalidSegment { segment, .. } => {
@@ -215,7 +206,6 @@ fn walkway_scope_key_from_parts_rejects_dunder_in_segment() {
             panic!("expected ConsecutiveUnderscore, got {other:?}")
         }
     }
-    // Place ids and the site name too.
     assert!(matches!(
         WalkwayScopeKey::from_parts(
             &SiteName::new("dunder__site").expect("site"),
@@ -241,7 +231,7 @@ fn walkway_scope_key_parse_rejects_dunder_in_segment() {
     let err = WalkwayScopeKey::parse("walkway::s::a.b__c__d.e").unwrap_err();
     match err {
         KeyParseError::ConsecutiveUnderscore { segment, .. } => {
-            // The first `__` is the separator, leaving `c__d` as the `to` place.
+            // The first `__` is the separator.
             assert_eq!(segment, "c__d");
         }
         other => panic!("expected ConsecutiveUnderscore, got {other:?}"),
@@ -250,7 +240,6 @@ fn walkway_scope_key_parse_rejects_dunder_in_segment() {
 
 #[test]
 fn walkway_scope_key_from_parts_rejects_edge_underscore_in_place_or_port() {
-    // Every edge of every place and port, not only the two beside the separator.
     let site = SiteName::new("s").expect("site");
     let cases = [
         (
@@ -316,7 +305,6 @@ fn walkway_scope_key_from_parts_rejects_edge_underscore_in_place_or_port() {
             other => panic!("{from} → {to}: expected UnderscoreAtEdge, got {other:?}"),
         }
     }
-    // The site is exempt.
     let key = WalkwayScopeKey::from_parts(
         &SiteName::new("_s_").expect("site"),
         &endpoint("a", "p"),
@@ -328,8 +316,7 @@ fn walkway_scope_key_from_parts_rejects_edge_underscore_in_place_or_port() {
 
 #[test]
 fn walkway_scope_key_parse_rejects_the_edge_underscore_aliases() {
-    // The key both aliasing rows would share, naming the segment the first `__` leaves with a
-    // leading `_`.
+    // `(a, p_) → (b, p)` and `(a, p) → (_b, p)` would both encode as this.
     match WalkwayScopeKey::parse("walkway::s::a.p___b.p") {
         Err(KeyParseError::UnderscoreAtEdge { key, segment }) => {
             assert_eq!(key, "walkway::s::a.p___b.p");
@@ -349,10 +336,7 @@ fn walkway_scope_key_parse_rejects_the_edge_underscore_aliases() {
 
 #[test]
 fn walkway_scope_key_from_parts_is_injective_and_parses_back() {
-    // `_` is the only character that can merge into the separator, and segments of `a` and `_`
-    // up to three long put it at an edge, in the middle and doubled. Sites stop at two, since
-    // `::` fences them. An accepted key that parses back to its exact parts is shared by no
-    // other accepted input.
+    // `_` alone can merge into the separator; sites stop at two, fenced by `::`.
     let mut segments = vec![String::new()];
     let mut all = Vec::new();
     for _ in 0..3 {
@@ -412,8 +396,6 @@ fn walkway_scope_key_from_parts_is_injective_and_parses_back() {
         }
     }
     assert!(rejected_dunder > 0 && rejected_edge > 0);
-    // 5 sites (`a`, `_`, `aa`, `a_`, `_a`) times 4 endpoint segments (`a`, `aa`, `aaa`, `a_a`)
-    // to the fourth power.
     assert_eq!(accepted, 1280, "5 sites x 4^4 endpoint combinations");
 }
 

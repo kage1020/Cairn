@@ -1,14 +1,6 @@
-//! Abstract syntax tree for the Cairn surface language.
+//! Abstract syntax tree for the Cairn surface language, keeping each construct as written.
 //!
-//! Every node keeps the surface form of one `.crn` construct, so error reporting and later layers
-//! see what the author wrote. Anything that would merge equivalent spellings (canonicalising
-//! tokens, resolving names, type-checking) belongs to a later layer.
-//!
-//! [`Header`], [`Item`], [`Statement`], [`ThemeRule`], [`MemberRequires`], [`Arg`], [`Value`]
-//! and [`TruthRow`] carry the byte `span` of their source, and [`Item`] also a narrower
-//! `name_span`. Every span field is `#[serde(skip)]`, and a new one must be too, so the
-//! serialized shape carries no positions. [`Expr`] and [`DottedRef`] carry none, because no
-//! finding points inside a `logic` or `assert` expression.
+//! Every span field is `#[serde(skip)]`, and a new one must be too.
 
 use std::num::NonZeroU32;
 
@@ -16,13 +8,7 @@ use serde::Serialize;
 
 use crate::error::Span;
 
-/// A `CalVer` language version string captured verbatim from `@cairn`.
-///
-/// A newtype so it is not confused with other strings; the `YYYY.M[.PATCH]` shape is not checked
-/// here. The parsed [`crate::calver::LanguageVersion`] is deliberately not held beside it: the
-/// header is provenance, so consumers want the author's string, and a parsed copy would be a
-/// second answer to keep in step. `#[non_exhaustive]` keeps external callers on
-/// [`RawVersion::new`].
+/// A language version string captured verbatim from `@cairn`, its shape unchecked.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 #[non_exhaustive]
@@ -42,8 +28,6 @@ impl RawVersion {
 }
 
 /// A Minecraft requirement expression captured verbatim from `@requires`.
-///
-/// A newtype and `#[non_exhaustive]` for the same reasons as [`RawVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 #[non_exhaustive]
@@ -62,26 +46,12 @@ impl RawRequirement {
     }
 }
 
-/// One `requires version>=X` line inside a `def` or `theme` body.
-///
-/// The member-level twin of [`Header::Requires`] (`spec/versioning-editions` "Fail-loud and
-/// minimum-version inference"): the same verbatim expression, read by the same
-/// `parse_requirement`, but a floor on the part that declares it, and so on every build that
-/// instantiates the part.
-///
-/// Held on the item rather than among its body statements because `requires` is not a member
-/// keyword: as a statement it would lower to `MemberRole::Other` and be reported as
-/// `E_UNKNOWN_KEYWORD`.
-///
-/// The expression is kept unshaped, as `@requires` keeps it, so that `E_INVALID_REQUIRES` can say
-/// which part is wrong; a shape check here would turn that into a bare `E_PARSE`. The parser
-/// refuses only an empty expression.
+/// One `requires version>=X` line inside a `def` or `theme` body, kept verbatim like
+/// [`Header::Requires`] so `E_INVALID_REQUIRES` can say which part is wrong.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct MemberRequires {
-    /// Requirement expression captured verbatim from the source, without
-    /// the leading `requires` keyword. Known to be non-empty; not known to
-    /// be a version floor.
+    /// Requirement expression captured verbatim, without the `requires` keyword; never empty.
     pub requirement: RawRequirement,
     /// Byte range of the whole `requires ...` line.
     #[serde(skip)]
@@ -96,8 +66,7 @@ impl MemberRequires {
     }
 }
 
-/// A whole `.crn` source file: a sequence of leading directives followed by
-/// top-level items, both kept in source order.
+/// A whole `.crn` source file: leading directives, then top-level items, in source order.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Module {
     /// Leading `@cairn` / `@requires` / `@intended_targets` directives.
@@ -106,9 +75,7 @@ pub struct Module {
     pub items: Vec<Item>,
 }
 
-/// A leading directive line introduced by `@`.
-///
-/// Values are captured verbatim; parsing them is a later layer's job.
+/// A leading directive line introduced by `@`, its value captured verbatim.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
@@ -157,9 +124,6 @@ impl Header {
 #[non_exhaustive]
 pub enum Item {
     /// `theme NAME[:]` block — slot/selector bindings.
-    ///
-    /// `#[non_exhaustive]` on the variant as well as the enum, because the enum's attribute does
-    /// not cover a field added to an existing variant.
     #[non_exhaustive]
     Theme {
         /// Theme name following the `theme` keyword.
@@ -172,14 +136,11 @@ pub enum Item {
         requires: Vec<MemberRequires>,
         /// Body rules in source order.
         body: Vec<ThemeRule>,
-        /// Byte range covering the whole `theme ...` block including its
-        /// indented body.
+        /// Byte range of the whole block, indented body included.
         #[serde(skip)]
         span: Span,
     },
     /// `def NAME[ ARGS][:]` block — reusable component.
-    ///
-    /// `#[non_exhaustive]`, for the reason given on [`Self::Theme`].
     #[non_exhaustive]
     Def {
         /// Definition name following the `def` keyword.
@@ -194,8 +155,7 @@ pub enum Item {
         requires: Vec<MemberRequires>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
-        /// Byte range covering the whole `def ...` block including its
-        /// indented body.
+        /// Byte range of the whole block, indented body included.
         #[serde(skip)]
         span: Span,
     },
@@ -208,8 +168,7 @@ pub enum Item {
         name_span: Span,
         /// Indented body statements in source order.
         body: Vec<Statement>,
-        /// Byte range covering the whole `site ...` block including its
-        /// indented body.
+        /// Byte range of the whole block, indented body included.
         #[serde(skip)]
         span: Span,
     },
@@ -224,18 +183,13 @@ pub enum Item {
         args: Vec<Arg>,
         /// Indented body statements in source order.
         body: Vec<Statement>,
-        /// Byte range covering the whole `struct ...` block including its
-        /// indented body.
+        /// Byte range of the whole block, indented body included.
         #[serde(skip)]
         span: Span,
     },
 }
 
-/// Which top-level construct an [`Item`] is.
-///
-/// The kind is also the name's namespace: one name may be declared once per kind, because the
-/// resolver keys scopes `struct::NAME`, `def::NAME` and `site::NAME::PLACE_ID` and holds themes in
-/// a map of their own.
+/// Which top-level construct an [`Item`] is, and so the namespace its name is declared in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ItemKind {
     /// `theme NAME` block.
@@ -252,8 +206,7 @@ impl ItemKind {
     /// Every kind, in the order `keyword` lists them.
     pub const ALL: [Self; 4] = [Self::Theme, Self::Def, Self::Site, Self::Struct];
 
-    /// Keyword introducing this kind, as written in source, and the scope-key prefix of every
-    /// kind but `theme`.
+    /// Keyword introducing this kind, also the scope-key prefix of every kind but `theme`.
     #[must_use]
     pub fn keyword(self) -> &'static str {
         match self {
@@ -299,8 +252,7 @@ impl Item {
         }
     }
 
-    /// Byte range of the name token alone, for a finding about the name; [`Self::span`] runs to
-    /// the end of the body.
+    /// Byte range of the name token alone.
     #[must_use]
     pub fn name_span(&self) -> &Span {
         match self {
@@ -311,12 +263,7 @@ impl Item {
         }
     }
 
-    /// The `requires version>=X` lines this item declares.
-    ///
-    /// Empty for `site` and `struct`: `spec/versioning-editions` "Fail-loud and minimum-version
-    /// inference" gives the line only to `def` and `theme`, the kinds a build instantiates rather
-    /// than is. A slice rather than an `Option`, so a caller folding floors over every item asks
-    /// one question.
+    /// The `requires version>=X` lines this item declares; always empty for `site` and `struct`.
     #[must_use]
     pub fn requires(&self) -> &[MemberRequires] {
         match self {
@@ -366,9 +313,6 @@ impl ThemeRule {
 }
 
 /// One line of a struct / site / def body.
-///
-/// Most lines are `Generic`: `keyword[selector] positional... key=value... -> binding`. `logic`
-/// and `assert` have grammars of their own, and so variants of their own.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
@@ -381,17 +325,12 @@ pub enum Statement {
         /// Optional bracketed selector immediately after the keyword.
         #[serde(skip_serializing_if = "Option::is_none")]
         selector: Option<Vec<Arg>>,
-        /// Bare values on the line, in source order.
-        ///
-        /// Not only a prefix: a bare value after an argument lands here too (`size=2 x2`),
-        /// because it is usually a dropped `=` that `check::positional` reports. Empty for every
-        /// well-formed command but `connect <ref> to <ref>` (`spec/syntax` "Lexical").
+        /// Bare values on the line in source order, wherever they sit (`size=2 x2`).
         #[serde(skip_serializing_if = "Vec::is_empty")]
         positional: Vec<Value>,
         /// `key=value` arguments in source order.
         args: Vec<Arg>,
-        /// Optional `-> VALUE` binding at the end of the line, e.g.
-        /// `pressure_plate ... -> sig.step`.
+        /// Optional `-> VALUE` binding at the end of the line, e.g. `-> sig.step`.
         #[serde(skip_serializing_if = "Option::is_none")]
         binding: Option<Value>,
         /// Child statements indented under this one.
@@ -411,8 +350,7 @@ pub enum Statement {
         #[serde(skip)]
         span: Span,
     },
-    /// `assert truth(INPUTS -> OUTPUT) { ROWS }` line — declarative truth
-    /// table over input signals.
+    /// `assert truth(INPUTS -> OUTPUT) { ROWS }` — a truth table over input signals.
     AssertTruth {
         /// Input signal references inside `truth(...)`.
         inputs: Vec<DottedRef>,
@@ -424,8 +362,7 @@ pub enum Statement {
         #[serde(skip)]
         span: Span,
     },
-    /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` line —
-    /// liveness property bounded by `within N` ticks.
+    /// `assert always(ANTECEDENT -> eventually CONSEQUENT within N)` — bounded liveness.
     AssertAlways {
         /// Antecedent reference on the LHS of `->`.
         antecedent: DottedRef,
@@ -440,9 +377,7 @@ pub enum Statement {
 }
 
 impl Statement {
-    /// Byte range covered by this statement in the original source. For
-    /// `Generic`, this is the keyword line only — child statements have their
-    /// own spans.
+    /// Byte range covered by this statement; for `Generic`, the keyword line alone.
     #[must_use]
     pub fn span(&self) -> &Span {
         match self {
@@ -477,16 +412,14 @@ pub enum ValueKind {
     Bool(bool),
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
-    /// Size literal `WxH` (`9x7`), in blocks. Non-zero, since a zero extent is no footprint.
+    /// Size literal `WxH` (`9x7`), in blocks.
     Size {
         /// Width in blocks.
         w: NonZeroU32,
         /// Height in blocks.
         h: NonZeroU32,
     },
-    /// Canonical or abstract token, stored *without* the leading `@` sigil
-    /// (source `@oak_planks` → `Token("oak_planks")`,
-    /// `@floor.wood.broadleaf` → `Token("floor.wood.broadleaf")`).
+    /// Canonical or abstract token without its `@`: `@oak_planks` is `Token("oak_planks")`.
     Token(String),
     /// Dotted reference (`home1.entry`, `sig.step`, `inside.front`).
     DotRef(DottedRef),
@@ -496,8 +429,7 @@ pub enum ValueKind {
     List(Vec<Value>),
 }
 
-/// A value on the right of `key=`, inside a list, or as a positional argument, with its byte
-/// range. Serializes as its [`ValueKind`] alone.
+/// A value after `key=`, inside a list, or as a positional argument, with its byte range.
 #[derive(Debug, Clone, Serialize)]
 #[serde(transparent)]
 pub struct Value {
@@ -508,19 +440,7 @@ pub struct Value {
     pub span: Span,
 }
 
-/// Two values are equal when they say the same thing, wherever they were
-/// written.
-///
-/// Hand-written so `span` is ignored at every depth of a [`ValueKind::List`]: a theme selector and
-/// the duplicate-selector pass ask what a value is, not where it was written.
-///
-/// Two traits stay absent:
-///
-/// - `Hash`: a derived hash would include `span` and break `a == b ⇒ hash(a) == hash(b)`.
-///   Clippy's `derived_hash_with_manual_eq` catches a derive but not a hand-written impl.
-/// - `Eq`: it would hold, but `ValueKind` is `#[non_exhaustive]` and the spec already shows a
-///   decimal literal (`scale=2.0`). A float variant would then mean withdrawing `Eq`, a major
-///   break, and nothing needs it.
+/// Equality ignores `span` at every depth; a derived `Hash` would not, so there is none.
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         self.kind == other.kind
@@ -540,8 +460,7 @@ impl Value {
         &self.span
     }
 
-    /// The inner string when this value is a label: an identifier or a string literal, as in
-    /// `use=cottage` or `theme=medieval`. The one place that decides what counts as a label.
+    /// The inner string when this value is a label: an identifier or a string literal.
     #[must_use]
     pub fn as_label_str(&self) -> Option<&str> {
         match &self.kind {
@@ -550,11 +469,7 @@ impl Value {
         }
     }
 
-    /// Source text that would parse back to this value, or `None` for a list, whose text is
-    /// unbounded and so cannot be rendered inline.
-    ///
-    /// A string is quoted and otherwise left alone: string literals have no escapes, so `Debug`'s
-    /// escaping would show text the author did not write.
+    /// Source text that parses back to this value (strings have no escapes), or `None` for a list.
     fn surface_form(&self) -> Option<String> {
         match &self.kind {
             ValueKind::Ident(s) => Some(s.clone()),
@@ -568,11 +483,7 @@ impl Value {
         }
     }
 
-    /// Kind and surface form together, for a message that says what it found:
-    /// `` identifier `a` ``, `` reference `foo.bar` ``, `a list`.
-    ///
-    /// A noun phrase, article included where there is no surface form, so it drops into a
-    /// sentence whichever arm it took.
+    /// Kind and surface form as a noun phrase: `` identifier `a` `` or `a list`.
     #[must_use]
     pub fn describe(&self) -> String {
         match self.surface_form() {
@@ -601,15 +512,11 @@ impl Value {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct TruthRow {
-    /// Input pattern, one character per input signal: `0`, `1`, or `-` for a don't-care, which
-    /// stands for both values. Leading zeros are kept, since `01` and `1` are rows of differently
-    /// sized tables.
+    /// Input pattern, one `0`, `1` or `-` (don't-care) per input signal, leading zeros kept.
     pub inputs: String,
-    /// Output bit, or `None` where the row's output is `-`: the combinations it covers count as
-    /// assigned for coverage, but nothing is asserted about the output there.
+    /// Output bit, or `None` for `-`: the row counts as covered but asserts nothing.
     pub output: Option<bool>,
-    /// Byte range of `PATTERN -> BIT`, without the separator that follows, which is punctuation
-    /// between rows.
+    /// Byte range of `PATTERN -> BIT`, without the separator after it.
     #[serde(skip)]
     pub span: Span,
 }
@@ -629,18 +536,10 @@ pub enum Expr {
     Not(Box<Expr>),
 }
 
-/// Head segment marking a [`DottedRef`] as a redstone signal name rather than a member id or a
-/// place reference.
-///
-/// Kept beside the type it classifies, because `block_array`, `check` and the redstone crate all
-/// ask the question.
+/// Head segment marking a [`DottedRef`] as a redstone signal name.
 pub const SIGNAL_HEAD: &str = "sig";
 
-/// A non-empty dotted name path such as `home1.entry`, `sig.step`, or a bare
-/// `outer` (single segment).
-///
-/// Never empty: [`DottedRef::new`] takes the head segment apart from the tail. Serializes as the
-/// bare segment list, `["sig", "step"]`.
+/// A non-empty dotted name path such as `home1.entry`, `sig.step`, or a bare `outer`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct DottedRef {
@@ -734,7 +633,6 @@ mod tests {
 
     #[test]
     fn a_value_is_equal_to_the_same_value_written_somewhere_else() {
-        // A derived `PartialEq` would compare spans at every depth of a list.
         let ident = |s: &str| ValueKind::Ident(s.to_owned());
         let flat =
             |offset| ValueKind::List(vec![at(offset, ident("a")), at(offset + 2, ident("b"))]);
@@ -744,7 +642,6 @@ mod tests {
         assert_eq!(at(0, flat(0)), at(90, flat(90)), "list");
         assert_eq!(at(0, nested(0)), at(90, nested(90)), "list of lists");
 
-        // Still unequal when the contents differ, at any depth.
         assert_ne!(at(0, ident("a")), at(0, ident("b")), "different idents");
         assert_ne!(
             at(0, ValueKind::List(vec![at(0, ident("a"))])),

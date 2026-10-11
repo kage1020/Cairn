@@ -1,16 +1,11 @@
 //! Sentence fragments shared by the diagnostic builders in `check` and `resolve`.
-//!
-//! One copy of each, because a joined list goes wrong in its arity branches: the unbranched
-//! `format!("{}, and {last}", head.join(", "))` renders two items as `` `a`, and `b` ``.
 
 use indexmap::IndexMap;
 
 use crate::ast::{Value, ValueKind};
 use crate::intent::ValueWithSpan;
 
-/// Render `items` as an English list — `a`, `a and b`, `a, b, and c`.
-///
-/// `None` for an empty slice, because every caller's sentence claims that something was listed.
+/// Render `items` as an English list — `a`, `a and b`, `a, b, and c` — or `None` when empty.
 pub(crate) fn and_list(items: &[String]) -> Option<String> {
     join_list(items, "and")
 }
@@ -28,11 +23,7 @@ fn join_list(items: &[String], conjunction: &str) -> Option<String> {
     })
 }
 
-/// Render a `KEYWORD[attrs]` selector the way the source spells it.
-///
-/// Attributes keep their source order, not a normal form, so the author can find the string on
-/// the line. Two rows that are one selector can therefore render differently, which is wanted:
-/// the message names this row and the note points at the other.
+/// Render a `KEYWORD[attrs]` selector as the source spells it, attributes in source order.
 pub(crate) fn selector_text(keyword: &str, attrs: &IndexMap<String, ValueWithSpan>) -> String {
     let rendered: Vec<String> = attrs
         .iter()
@@ -41,11 +32,7 @@ pub(crate) fn selector_text(keyword: &str, attrs: &IndexMap<String, ValueWithSpa
     format!("{keyword}[{}]", rendered.join(","))
 }
 
-/// Render a value the way the surface grammar spells it.
-///
-/// `Str` keeps its quotes, because `class="small"` and `class=small` are different selector
-/// attributes. Re-quoting is exact because a string literal has no escapes, so its content holds
-/// no `"`.
+/// Render a value as the surface grammar spells it; a string literal has no escapes to re-quote.
 fn value_text(value: &Value) -> String {
     match &value.kind {
         ValueKind::Ident(name) => name.clone(),
@@ -94,8 +81,6 @@ mod tests {
         assert_eq!(either_of(&["a", "b", "c"]).as_deref(), Some("a, b, or c"));
     }
 
-    /// Goes through the parser, so each rendering is checked against the spelling that produced
-    /// it.
     #[test]
     fn every_value_kind_renders_as_written() {
         let written = "@cairn 2026.06\n\ntheme t:\n  \
@@ -129,7 +114,6 @@ mod tests {
         );
     }
 
-    /// `window` without brackets is a parse error, so the brackets are part of the spelling.
     #[test]
     fn an_empty_selector_keeps_its_brackets() {
         let module = parse("theme t:\n  window[] -> frame=@a\n").expect("parses");

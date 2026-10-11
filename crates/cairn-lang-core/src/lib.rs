@@ -1,11 +1,5 @@
-//! Core of the Cairn language.
-//!
-//! Hosts the surface-syntax lexer, parser, and AST; the Intent IR, the first semantic layer above
-//! the surface, where struct/site/def bodies are reorganised into typed members with roles; the
-//! diagnostic-collecting `check` pipeline, which turns structural surprises in a lowered module
-//! into position-anchored [`check::Diagnostic`] values; and the passes that resolve intent into a
-//! block-array IR. Everything past that IR (the NBT codec, the format backends, redstone
-//! synthesis, the LSP) lives in sibling crates.
+//! Core of the Cairn language: lexer, parser, AST, Intent IR, `check`, and the passes that
+//! resolve intent down to the block-array IR.
 
 pub mod ast;
 pub mod block_array;
@@ -45,9 +39,5 @@ pub use lex::{Token, TokenKind, lex};
 pub use parse::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, diagnose_parse_failure, parse};
 pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
 
-/// The Cairn release version, in date-based versioning (`YYYY.M[.PATCH]`).
-///
-/// Read from this crate's package version, which is `[workspace.package]`'s, the number the
-/// release tooling bumps. Everything that names the compiler that produced an artefact
-/// (`cairn --version`, a lockfile's `cairn_version`) reads it from here.
+/// The Cairn release version (`YYYY.M[.PATCH]`), from the workspace package version.
 pub const CAIRN_VERSION: &str = env!("CARGO_PKG_VERSION");

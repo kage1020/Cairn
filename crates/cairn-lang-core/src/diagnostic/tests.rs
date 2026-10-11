@@ -3,8 +3,6 @@ use strum::IntoEnumIterator;
 use super::*;
 
 /// Stable strings of every code the predicate accepts, sorted.
-///
-/// Drawn from `EnumIter`, so a new variant must land in one of the expected lists below.
 fn codes_where(predicate: impl Fn(DiagnosticCode) -> bool) -> Vec<&'static str> {
     let mut names: Vec<&'static str> = DiagnosticCode::iter()
         .filter(|c| predicate(*c))
@@ -16,8 +14,6 @@ fn codes_where(predicate: impl Fn(DiagnosticCode) -> bool) -> Vec<&'static str> 
 
 #[test]
 fn every_code_renders_its_documented_string() {
-    // Spelled out rather than derived, so a rename that downstream matchers would notice shows
-    // as a changed literal.
     assert_eq!(
         codes_where(|_| true),
         [
@@ -91,8 +87,6 @@ fn every_code_renders_its_documented_string() {
 
 #[test]
 fn every_code_is_classified_against_the_error_vs_warning_rule() {
-    // `severity` holds the rule; this pins the partition, so a reclassification changes exit
-    // codes only through an edit here.
     assert_eq!(
         codes_where(|c| c.severity() == Severity::Error),
         [

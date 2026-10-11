@@ -1,11 +1,5 @@
-//! Minecraft version labels: reading an `@requires` floor, and placing a
-//! label in an edition's `DataVersion` order.
-//!
-//! The parser reads a member-level `requires` line with the same grammar
-//! the `@requires` header uses, and `check` and `resolve` both weigh the
-//! floors, so this sits below all three rather than inside one of them.
-//! [`mod@crate::resolve`] re-exports every public item, which is the path
-//! downstream crates use.
+//! Minecraft version labels: reading an `@requires` floor, and placing a label in an edition's
+//! `DataVersion` order. Downstream crates reach these through [`mod@crate::resolve`].
 
 mod order;
 mod requirement;

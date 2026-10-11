@@ -1,27 +1,17 @@
-//! "Did you mean ...?" candidate lookup over a closed vocabulary.
-//!
-//! `spec/glossary` "Fail-loud" asks an error for the valid candidates and a suggested fix; this
-//! module supplies the fix for a diagnostic that reports an unknown identifier against a known
-//! set.
-//!
-//! The distance is Damerau-Levenshtein, which scores an adjacent swap (`walsl` for `walls`) as one
-//! edit where Levenshtein charges two. The cap scales with input length, so a short identifier
-//! cannot suggest a candidate the author could not plausibly have meant.
+//! "Did you mean ...?" lookup over a closed vocabulary, by Damerau-Levenshtein distance under a
+//! cap that grows with the input's length.
 
 use strsim::damerau_levenshtein;
 
 use crate::diagnostic::DiagnosticNote;
 
-/// The sentence every suggestion is phrased as, so a diagnostic, a CLI
-/// report and an error's `Display` word it alike. `suggested` is spelled
-/// the way the source would write it (`@token`, `place.port`, `key=`).
+/// The sentence every suggestion is phrased as; `suggested` is spelled as the source writes it.
 #[must_use]
 pub fn did_you_mean(suggested: &str) -> String {
     format!("did you mean `{suggested}`?")
 }
 
-/// [`did_you_mean`] as the note every unknown-identifier diagnostic
-/// attaches.
+/// [`did_you_mean`] as a diagnostic note.
 #[must_use]
 pub(crate) fn did_you_mean_note(suggested: &str) -> DiagnosticNote {
     DiagnosticNote {
@@ -30,10 +20,8 @@ pub(crate) fn did_you_mean_note(suggested: &str) -> DiagnosticNote {
     }
 }
 
-/// Maximum edit distance for a suggestion, by input length in characters. Past three edits a
-/// suggestion reads as a different word.
+/// Maximum edit distance for a suggestion, by input length in characters.
 fn max_distance(input_len: usize) -> usize {
-    // `nearest_match_by` returns early on an empty input, so 0 never arrives.
     match input_len {
         1..=3 => 1,
         4..=6 => 2,
@@ -41,13 +29,8 @@ fn max_distance(input_len: usize) -> usize {
     }
 }
 
-/// The candidate closest to `input` by Damerau-Levenshtein distance, within the length-scaled
-/// cap.
-///
-/// `None` when `input` is empty, when no candidate is within the cap, or when `input` is itself a
-/// candidate, because an exact match is not a typo. On a tie the first candidate wins, so the
-/// caller's candidate order is the tie-break. A case difference costs one edit: identifiers are
-/// case-sensitive, and a wrong case is a typo worth catching.
+/// The candidate closest to `input` within the cap, the first on a tie; `None` when `input` is
+/// empty or is itself a candidate.
 #[must_use]
 pub fn nearest_match<'a, I>(input: &str, candidates: I) -> Option<&'a str>
 where
@@ -56,8 +39,7 @@ where
     nearest_match_by(input, candidates, damerau_levenshtein)
 }
 
-/// [`nearest_match`] with the distance as an argument, so a test can count
-/// which candidates the distance is computed for.
+/// [`nearest_match`] with the distance as an argument, so a test can count what is scored.
 fn nearest_match_by<'a, I>(
     input: &str,
     candidates: I,
@@ -76,8 +58,7 @@ where
         if cand == input {
             return None;
         }
-        // The distance is at least the length difference, so this skip changes no answer and
-        // saves a quadratic distance computation.
+        // The distance is at least the length difference, so this skip changes no answer.
         if cand.chars().count().abs_diff(input_len) > max_edits {
             continue;
         }
@@ -86,7 +67,6 @@ where
             continue;
         }
         match best {
-            // Only a strictly nearer candidate replaces the first one found.
             Some((best_distance, _)) if distance >= best_distance => {}
             _ => best = Some((distance, cand)),
         }
@@ -94,18 +74,8 @@ where
     best.map(|(_, c)| c)
 }
 
-/// The candidate closest to `id`, compared on the path within `id`'s own
-/// namespace.
-///
-/// `id` and every candidate are `namespace:path`.
-///
-/// - The path is scored, not the id: the cap scales with length, and the ten-character
-///   `minecraft:` prefix would buy a third edit the path never earned (`dirt` for `light`).
-/// - Only `id`'s own namespace is searched, because a `mod:` id is not repaired by a `minecraft:`
-///   one.
-///
-/// `None` for an id with no `namespace:` prefix; otherwise [`nearest_match`]'s answer,
-/// re-prefixed.
+/// The candidate in `id`'s namespace closest to it, scored on the path alone so the prefix buys no
+/// extra edits; `None` when `id` has no `namespace:` prefix.
 #[must_use]
 pub fn nearest_namespaced_id<'a, I>(id: &str, candidates: I) -> Option<String>
 where
@@ -120,19 +90,11 @@ where
     nearest_match(path, paths).map(|best| format!("{namespace}:{best}"))
 }
 
-/// How many candidates [`candidate_list`] prints before counting the
-/// rest.
-///
-/// A registry-pack alias group can run to sixteen ids (`light_block_0` … `_15`), and printing
-/// them all buries what went wrong.
+/// How many candidates [`candidate_list`] prints before counting the rest.
 pub const CANDIDATES_SHOWN: usize = 4;
 
-/// Render a closed candidate set as the fragment a diagnostic note reads,
-/// in the order given and truncated to [`CANDIDATES_SHOWN`].
-///
-/// The truncation is only about the sentence: the closed set an error must return
-/// (`spec/versioning-editions` "Fail-loud and minimum-version inference") is in the diagnostic's
-/// `data`.
+/// Render candidates as a note fragment, truncated to [`CANDIDATES_SHOWN`]; the full set belongs in
+/// the diagnostic's `data`.
 #[must_use]
 pub fn candidate_list(candidates: &[String]) -> String {
     let listed = candidates
@@ -153,7 +115,6 @@ mod tests {
 
     const KEYWORDS: &[&str] = &["floor", "walls", "door", "window", "roof", "stair", "level"];
 
-    /// `block_ids` stands in for a pinned target's block table.
     #[test]
     fn a_candidate_too_far_away_in_length_is_never_scored() {
         fn answer_and_scored<'a>(input: &str, table: &'a [String]) -> (Option<&'a str>, usize) {
@@ -183,11 +144,8 @@ mod tests {
         );
     }
 
-    /// Inputs a few characters longer or shorter than a candidate sit on the prune's edge, where
-    /// an off-by-one would drop a match.
     #[test]
     fn the_length_prune_agrees_with_scoring_every_candidate() {
-        /// Scores every candidate; the first of equally near ones wins.
         fn unpruned<'a>(input: &str, candidates: &[&'a str]) -> Option<&'a str> {
             if input.is_empty() {
                 return None;
@@ -221,7 +179,7 @@ mod tests {
             "window",
             "oak_planks",
             "stone_bricks",
-            // Three chars in nine bytes: a prune measuring bytes would drop it for `日本語z`.
+            // Three chars in nine bytes.
             "日本語",
         ];
         let mut inputs: Vec<String> = Vec::new();
@@ -250,7 +208,6 @@ mod tests {
 
     #[test]
     fn adjacent_swap_counts_as_one_edit() {
-        // A three-character input allows one edit, and Levenshtein charges a swap two.
         assert_eq!(nearest_match("dfe", ["def"]), Some("def"));
     }
 
@@ -264,7 +221,6 @@ mod tests {
 
     #[test]
     fn distant_input_returns_none() {
-        // Far beyond the cap of 2 for a five-character input.
         assert!(nearest_match("xyzzy", KEYWORDS.iter().copied()).is_none());
     }
 
@@ -290,7 +246,6 @@ mod tests {
 
     #[test]
     fn tie_break_prefers_first_in_iteration_order() {
-        // Both candidates are one edit from `aa`.
         let cands: &[&str] = &["ab", "ba"];
         assert_eq!(nearest_match("aa", cands.iter().copied()), Some("ab"));
     }
@@ -327,13 +282,11 @@ mod tests {
 
     #[test]
     fn an_empty_candidate_list_renders_empty() {
-        // Callers check for an empty set first, but a bug must still not render "and 0 more".
         assert_eq!(candidate_list(&[]), "");
     }
 
     #[test]
     fn long_input_admits_three_edits() {
-        // Three substitutions, within the cap of 3 for seven characters or more.
         let cands: &[&str] = &["minecraft"];
         assert_eq!(
             nearest_match("minexyzft", cands.iter().copied()),

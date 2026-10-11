@@ -1,23 +1,11 @@
-//! Where a line ends.
-//!
-//! Cairn takes `\n`, `\r\n` and a lone `\r` each as one line break, so a file lexes the same
-//! whatever platform wrote it. `str::lines` does not: it leaves a lone `\r` inside a line.
-//!
-//! Every layer that turns a byte offset into a `line:column` (the lexer, [`LineStarts`], the
-//! language server's `LineIndex` and its completion scanner) takes the rule from here, because a
-//! diagnostic's position is compared against an editor's cursor. The tree-sitter grammar cannot:
-//! its runtime advances the row on `\n` only.
+//! Where a line ends: `\n`, `\r\n` and a lone `\r` each break a line, unlike `str::lines`.
+//! Everything that turns a byte offset into a `line:column` takes the rule from here.
 
 use std::num::NonZeroU32;
 
 use crate::error::Position;
 
-/// Byte length of the line terminator beginning at `offset` — 2 for a
-/// `\r\n` pair, 1 for a lone `\r` or a `\n` — or `None` when no terminator
-/// begins there, including when `offset` is past the end of `source`.
-///
-/// Byte indexing is sound for this question: `\r` and `\n` are ASCII, and
-/// no byte of a multi-byte UTF-8 sequence is ASCII.
+/// Byte length of the line terminator beginning at `offset`, or `None` when none begins there.
 #[must_use]
 pub fn terminator_len(source: &str, offset: usize) -> Option<usize> {
     let bytes = source.as_bytes();
@@ -28,13 +16,8 @@ pub fn terminator_len(source: &str, offset: usize) -> Option<usize> {
     }
 }
 
-/// Byte offset at which each line of `source` begins.
-///
-/// Entry 0 is always 0, so an empty source is one empty line, and a source ending in a terminator
-/// gets a final entry at `source.len()`. Both match what an editor's cursor reports.
-///
-/// [`split`] follows `str::lines` instead and drops that trailing empty line. Positions resolve
-/// against this one, because a cursor can sit on that line.
+/// Byte offset at which each line of `source` begins, including the empty line after a trailing
+/// terminator that [`split`] drops, since a cursor can sit on it.
 #[must_use]
 pub fn starts(source: &str) -> Vec<usize> {
     let mut starts = vec![0];
@@ -52,14 +35,11 @@ pub fn starts(source: &str) -> Vec<usize> {
 }
 
 /// Byte offset at which the line containing `offset` begins.
-///
-/// Agrees with [`starts`] plus a binary search, without allocating; prefer the index for many
-/// offsets.
 #[must_use]
 pub fn start_of(source: &str, offset: usize) -> usize {
     let bytes = source.as_bytes();
     let clamped = offset.min(source.len());
-    // An offset on the `\n` of a `\r\n` is inside the break, so on the line before the `\r`.
+    // The `\n` of a `\r\n` belongs to the line the `\r` ends.
     let search_end =
         if clamped > 0 && bytes[clamped - 1] == b'\r' && bytes.get(clamped) == Some(&b'\n') {
             clamped - 1
@@ -72,11 +52,8 @@ pub fn start_of(source: &str, offset: usize) -> usize {
         .map_or(0, |i| i + 1)
 }
 
-/// Byte offset at which the line preceding `next_start` ends: the first byte of the terminator
-/// that `next_start` follows.
-///
-/// `next_start` must be a nonzero entry of [`starts`]. Use this rather than `next_start - 1`,
-/// which leaves the `\r` of a `\r\n` pair inside the line.
+/// Byte offset where the line before `next_start`, a nonzero entry of [`starts`], ends: the first
+/// byte of its terminator, which `next_start - 1` misses for a `\r\n`.
 #[must_use]
 pub fn end_before(source: &str, next_start: usize) -> usize {
     debug_assert!(
@@ -91,11 +68,7 @@ pub fn end_before(source: &str, next_start: usize) -> usize {
     }
 }
 
-/// Iterate the lines of `source` with their terminators removed.
-///
-/// Same contract as [`str::lines`] (no line for an empty source, no empty line after a trailing
-/// terminator), plus the lone `\r` break. See [`starts`] for why the two differ on that trailing
-/// line.
+/// Iterate the lines of `source` without terminators, as [`str::lines`] does plus the lone `\r`.
 #[must_use]
 pub fn split(source: &str) -> Split<'_> {
     Split { rest: source }
@@ -104,8 +77,7 @@ pub fn split(source: &str) -> Split<'_> {
 /// Iterator returned by [`split`].
 #[derive(Debug, Clone)]
 pub struct Split<'a> {
-    /// The tail not yet yielded. Empty means exhausted, which is why a trailing break yields no
-    /// empty line.
+    /// The tail not yet yielded.
     rest: &'a str,
 }
 
@@ -132,17 +104,13 @@ impl<'a> DoubleEndedIterator for Split<'a> {
         if self.rest.is_empty() {
             return None;
         }
-        // A terminator at the very end closes the last line rather than opening an empty one; a
-        // forward walk gets that from running out of input.
+        // A trailing terminator closes the last line rather than opening an empty one.
         let body = match trailing_terminator_len(self.rest) {
             Some(len) => &self.rest[..self.rest.len() - len],
             None => self.rest,
         };
-        // The break before the line stays in `rest`, because it closes the line before it;
-        // dropping it would swallow an empty line between two breaks.
+        // The break before the line stays in `rest`: it closes the line before.
         let line_start = start_of(body, body.len());
-        // The tail shrinks only while `trailing_terminator_len` and `start_of` agree on what a
-        // terminator is. If they ever disagree this walk would hang, so it panics instead.
         debug_assert!(
             line_start < self.rest.len(),
             "the reverse walk must consume input: {:?} yielded nothing",
@@ -156,26 +124,19 @@ impl<'a> DoubleEndedIterator for Split<'a> {
 impl std::iter::FusedIterator for Split<'_> {}
 
 /// Length of the terminator `source` ends with, if it ends with one.
-///
-/// Defers to [`end_before`] for how far back the terminator begins, rather than restating the
-/// rule.
 fn trailing_terminator_len(source: &str) -> Option<usize> {
     matches!(source.as_bytes().last()?, b'\r' | b'\n')
         .then(|| source.len() - end_before(source, source.len()))
 }
 
 /// Precomputed line-start byte offsets for a source string.
-///
-/// Build once, then resolve many offsets: `O(file_len + N * log L)` for `N` offsets over `L`
-/// lines, rather than a walk of the source per offset.
 #[derive(Debug, Clone)]
 pub struct LineStarts {
-    /// As [`starts`] computes them.
     starts: Vec<usize>,
 }
 
 impl LineStarts {
-    /// Build the index by walking the source exactly once.
+    /// Index the line starts of `source`.
     #[must_use]
     pub fn new(source: &str) -> Self {
         Self {
@@ -184,19 +145,13 @@ impl LineStarts {
     }
 
     /// The byte offset each line begins at, as [`crate::lines::starts`] computes them.
-    ///
-    /// For a caller that wants a line's text, so it does not walk the source again deciding where
-    /// lines end.
     #[must_use]
     pub fn line_starts(&self) -> &[usize] {
         &self.starts
     }
 
-    /// Resolve a byte offset into a 1-based `line:column` [`Position`].
-    ///
-    /// `byte_offset` must be a character boundary, as every [`Span`](crate::error::Span) bound
-    /// is. An offset past the end of `source` clamps to the final position; one inside a
-    /// character panics on the slice. Line and column saturate at `u32::MAX`.
+    /// Resolve a byte offset, on a character boundary, into a 1-based `line:column` [`Position`],
+    /// clamping one past the end.
     #[must_use]
     pub fn position(&self, source: &str, byte_offset: usize) -> Position {
         let clamped = byte_offset.min(source.len());
@@ -210,12 +165,8 @@ impl LineStarts {
         Position { line, col }
     }
 
-    /// Resolve a 1-based `line:column` back to a byte offset, the inverse of
-    /// [`LineStarts::position`].
-    ///
-    /// Out-of-range input, such as a position from a different source, clamps: a line past the
-    /// end gives the end of the source, and a column past the end of its line gives that line's
-    /// end before its terminator.
+    /// Resolve a 1-based `line:column` back to a byte offset, clamping a line or column past the
+    /// end to the end of the source or the line.
     #[must_use]
     pub fn offset_of(&self, source: &str, position: Position) -> usize {
         let line_index = position.line.get() as usize - 1;
@@ -233,10 +184,7 @@ impl LineStarts {
         offset
     }
 
-    /// Byte offset of the end of the line `byte_offset` sits on, before
-    /// that line's terminator.
-    ///
-    /// Excludes the terminator, so a span ending here does not underline the next row.
+    /// Byte offset of the end of the line `byte_offset` sits on, before its terminator.
     #[must_use]
     pub fn line_end(&self, source: &str, byte_offset: usize) -> usize {
         let clamped = byte_offset.min(source.len());
@@ -245,12 +193,8 @@ impl LineStarts {
             .map_or(source.len(), |&next| end_before(source, next))
     }
 
-    /// The 0-based index of the line `byte_offset` sits on.
-    ///
-    /// An offset past the end of the indexed source lands on its last line,
-    /// the one [`LineStarts::position`] clamps such an offset to. An offset
-    /// on the `\n` of a `\r\n` pair is on the line that pair ends, since
-    /// the break is one terminator and the next line begins after it.
+    /// The 0-based index of the line `byte_offset` sits on; past the end is the last line, and the
+    /// `\n` of a `\r\n` is on the line the pair ends.
     #[must_use]
     pub fn line_of(&self, byte_offset: usize) -> usize {
         // Never underflows: `starts[0]` is 0, which is `<=` every offset.
@@ -258,10 +202,7 @@ impl LineStarts {
     }
 }
 
-/// Compute a 1-based `line:column` for a byte offset into `source`.
-///
-/// A one-shot [`LineStarts`], so the two cannot disagree on where a line ends. Builds an index per
-/// call; hold a [`LineStarts`] to convert many offsets.
+/// Compute a 1-based `line:column` for a byte offset into `source`; hold a [`LineStarts`] for many.
 #[must_use]
 pub fn position_at(source: &str, byte_offset: usize) -> Position {
     LineStarts::new(source).position(source, byte_offset)

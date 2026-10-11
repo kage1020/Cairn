@@ -1,13 +1,6 @@
-//! Cairn surface-syntax parser.
+//! Cairn surface-syntax parser: line-based, with indent-driven nesting.
 //!
-//! Consumes the token stream from [`crate::lex()`] and produces a [`Module`]. The grammar is
-//! line-based with indent-driven nesting: a command carries `key=value` arguments, an optional
-//! bracketed selector, optional bare positional values (as in
-//! `connect a.entry to b.entry path=@gravel`), and an optional `-> binding` tail.
-//!
-//! `logic` and `assert` become [`crate::ast::Statement`] variants of their own. `requires` leaves
-//! the body entirely: it declares a version floor rather than anything to build, so it is lifted
-//! onto the `def` or `theme` that carries it ([`crate::ast::MemberRequires`]).
+//! A body's `requires` lines leave the body, lifted onto the `def` or `theme` that carries them.
 
 use crate::ast::{
     Arg, DottedRef, Expr, Header, Item, MemberRequires, Module, RawRequirement, RawVersion,
@@ -21,41 +14,25 @@ use crate::lines::LineStarts;
 use crate::version::parse_requirement;
 use indexmap::IndexSet;
 
-/// The word that introduces a version floor: after `@`, a floor on the file; bare on a body line,
-/// a floor on the part.
+/// The word that introduces a version floor, after `@` or at the start of a body line.
 const REQUIRES: &str = "requires";
 
-/// Whether the body being parsed may carry `requires version>=X` lines,
-/// and what to say when it may not.
-///
-/// `spec/versioning-editions` "Fail-loud and minimum-version inference" gives the member-level
-/// floor to `def` and `theme`, the kinds a build instantiates rather than is. Every body passes a
-/// policy, so the rule is decided in one place.
-///
-/// The three refusing variants keep three messages, because one message would say something false
-/// about the files it does not fit. None refuses on the word alone: only a line whose expression
-/// reads as a version floor is refused, since `requires` is an ordinary identifier in a body that
-/// reads no floors. An accepting body lifts the line whatever follows the word, so
-/// `requires foo=1` in a `def` is a floor that states nothing (`E_INVALID_REQUIRES`).
+/// Whether the body being parsed may carry `requires version>=X` lines, and what to say when it
+/// may not. A refusing body refuses only a line that reads as a floor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RequiresPolicy {
-    /// A `def` or `theme` body: lift the line onto the item, whatever
-    /// follows the word.
+    /// A `def` or `theme` body: lift the line onto the item, whatever follows the word.
     Accepted,
-    /// A `struct` or `site` body. Each is the build, so its floor is the file's, which is what
-    /// `@requires` says.
+    /// A `struct` or `site` body, whose floor is the file's `@requires`.
     NotAPart,
-    /// A member's indented children inside a `def`. The floor is the part's, so the repair is one
-    /// dedent.
+    /// A member's indented children inside a `def`; the repair is one dedent.
     MemberOfAPart,
-    /// A member's indented children inside a `struct` or `site`. One dedent would land in a body
-    /// that refuses it too, so the repair is [`Self::NotAPart`]'s.
+    /// A member's indented children inside a `struct` or `site`.
     MemberOfTheBuild,
 }
 
 impl RequiresPolicy {
-    /// The refusal for a floor written where this policy holds, or `None`
-    /// where one may stand.
+    /// The refusal for a floor written where this policy holds, or `None` where one may stand.
     fn refusal(self) -> Option<&'static str> {
         match self {
             Self::Accepted => None,
@@ -76,8 +53,7 @@ impl RequiresPolicy {
         }
     }
 
-    /// The policy for the indented children of a member in a body under
-    /// this one.
+    /// The policy for the indented children of a member in this body.
     fn for_children(self) -> Self {
         match self {
             Self::Accepted | Self::MemberOfAPart => Self::MemberOfAPart,
@@ -88,14 +64,8 @@ impl RequiresPolicy {
 
 /// Parse a `.crn` source string into a [`Module`].
 ///
-/// A lex failure inside a line is judged after the parse. `@cairn`, `@requires` and a part's
-/// `requires` take raw text to end of line, so a character no token starts with is theirs to judge
-/// (`W_INVALID_CAIRN_VERSION`, `E_INVALID_REQUIRES`). A failure none of them took is reported
-/// exactly as [`lex()`] reports it, ahead of whatever the parse found.
-///
-/// A refused stretch holding whitespace other than a space, alone or inside an unterminated
-/// string, is never taken into a value. The lexer separates tokens with spaces alone, and a tab
-/// taken in and then trimmed would make `@cairn` declare the version behind it.
+/// A lex failure inside a line stands unless a raw directive value took it, which a stretch
+/// holding whitespace other than a space never is.
 ///
 /// # Errors
 /// Returns a [`ParseError`] on the first lex or parse failure.
@@ -122,19 +92,8 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
     parsed
 }
 
-/// Render a parse failure as a [`Diagnostic`], so it can be reported
-/// beside the findings of every pass that runs after one.
-///
-/// A [`ParseError`] has a position, not a range, so the span runs from there to the end of the
-/// line, before its terminator so the underline cannot reach the row below. An
-/// `expected X, got end of line` error sits at the end of its line, so its span is empty and an
-/// editor draws a caret: something is missing after the line.
-///
-/// Takes the line index rather than building one, since every renderer needs one anyway.
-///
-/// The one note comes from the `@cairn` header, when it declares a later language than this build
-/// or names no language version, because no check pass runs to say so. Built here rather than in
-/// a front end, so the CLI and the language server both get it.
+/// Render a parse failure as an `E_PARSE` [`Diagnostic`] running to the end of its line, with a
+/// note when the `@cairn` header names a later or unreadable version.
 #[must_use]
 pub fn diagnose_parse_failure(source: &str, lines: &LineStarts, err: &ParseError) -> Diagnostic {
     let start = lines.offset_of(source, err.position());
@@ -147,39 +106,24 @@ pub fn diagnose_parse_failure(source: &str, lines: &LineStarts, err: &ParseError
         notes: future_version_note(source, lines.line_starts())
             .into_iter()
             .collect(),
-        // No payload: one would freeze a shape for two `#[non_exhaustive]` enums.
         data: None,
     }
 }
 
-/// Deepest value or expression nesting the parser descends into.
-///
-/// Recursive descent spends native stack per level, and a stack overflow aborts the process,
-/// taking any embedder with it (`cairn-lsp` re-parses on every keystroke). Measured on a debug
-/// build, the tightest shape (`mat=[[[…`) overflowed at 287 levels, parenthesised expressions at
-/// 380 and `not` chains at 785; staying well under leaves room for a smaller thread stack and
-/// deeper frames. Real sources come nowhere near.
+/// Deepest value or expression nesting the parser descends into, well under the depth at which a
+/// debug build's recursive descent overflows the stack.
 pub const MAX_NESTING_DEPTH: usize = 64;
 
-/// Deepest boolean-expression tree the parser hands back.
-///
-/// Separate from [`MAX_NESTING_DEPTH`], which bounds the parser's descent: `or` and `and` are
-/// parsed iteratively, building a left-leaning tree one node per term at no cost to the parser,
-/// while every consumer (`Serialize`, the check passes, `Box`'s `Drop`) walks it recursively.
-/// Measured on a debug build, `cairn parse` died at roughly 570 terms, so this keeps the margin
-/// [`MAX_NESTING_DEPTH`] keeps. A longer chain splits into intermediate `logic` bindings, as the
-/// diagnostic says.
+/// Deepest boolean-expression tree the parser hands back: `and` / `or` chains parse iteratively,
+/// but every consumer walks the tree recursively.
 pub const MAX_EXPR_DEPTH: usize = 128;
 
-/// A truth row's input pattern, and whether it stopped at an adjacent `->`, which may have eaten
-/// a final `-`; a width mismatch then says so.
+/// A truth row's input pattern, and whether an adjacent `->` may have eaten its final `-`.
 struct TruthPattern {
     text: String,
     ends_at_the_arrow: bool,
 }
 
-/// The file directives the language defines, named once the parser has
-/// read the word after `@`.
 #[derive(Debug, Clone, Copy)]
 enum Directive {
     Cairn,
@@ -191,12 +135,9 @@ struct Parser<'a> {
     source: &'a str,
     tokens: &'a [Token],
     pos: usize,
-    /// How many value / expression levels are currently open, bounded by
-    /// [`MAX_NESTING_DEPTH`].
+    /// Open value / expression levels, bounded by [`MAX_NESTING_DEPTH`].
     depth: usize,
-    /// Token-index ranges taken whole as a raw directive value, where a
-    /// [`TokenKind::Unlexed`] is part of the text rather than a failure.
-    /// See [`parse`].
+    /// Token ranges taken whole as a raw directive value, where a [`TokenKind::Unlexed`] is text.
     raw_values: Vec<std::ops::Range<usize>>,
 }
 
@@ -211,11 +152,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Run `descend` one nesting level deeper, refusing past
-    /// [`MAX_NESTING_DEPTH`].
-    ///
-    /// Every recursive step in a value, expression or body must go through here, so the bound is
-    /// enforced in one place.
+    /// Run `descend` one level deeper, refusing past [`MAX_NESTING_DEPTH`]. Every recursive step
+    /// in a value, expression or body must go through here.
     fn nested<T>(
         &mut self,
         descend: impl FnOnce(&mut Self) -> Result<T, ParseError>,
@@ -288,23 +226,19 @@ impl<'a> Parser<'a> {
                 span,
             }),
             Directive::IntendedTargets => {
-                // The detached sub-parse counts from its own 1:1, so every diagnostic out of it
-                // is rebased onto `value_start_pos`.
+                // The detached sub-parse counts from its own 1:1.
                 let sub_tokens =
                     lex(&raw).map_err(|err| ParseError::from(err).rebased(value_start_pos))?;
                 let mut p = Parser::new(&raw, &sub_tokens);
                 let value = p
                     .parse_value()
                     .map_err(|err| err.rebased(value_start_pos))?;
-                // `@intended_targets [..] junk` is refused at `junk`.
                 if let Some(trailing) = p.peek().filter(|t| t.kind != TokenKind::Newline) {
                     return Err(ParseError::Syntax {
                         position: trailing.position.rebased(value_start_pos),
                         message: "@intended_targets has trailing tokens after the list".into(),
                     });
                 }
-                // Sub-parse spans count from the start of `raw`, so the position is the
-                // sub-token's, rebased.
                 let at = |value: &Value| {
                     sub_tokens
                         .iter()
@@ -478,10 +412,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parse an indented body, splitting `requires` lines out of it.
-    ///
-    /// `policy` is applied here rather than by the caller, because a refusal needs the offending
-    /// line's position.
+    /// Parse an indented body, splitting `requires` lines out of it under `policy`.
     fn parse_optional_command_body(
         &mut self,
         policy: RequiresPolicy,
@@ -505,17 +436,8 @@ impl<'a> Parser<'a> {
         Ok((requires, commands))
     }
 
-    /// Read a `requires` line at the current position, if one stands there
-    /// and `policy` lets it.
-    ///
-    /// `Ok(None)` means the caller reads the line as an ordinary body item: the word is absent, or,
-    /// under a refusing policy, the line declares no floor, since there `requires` is an ordinary
-    /// identifier. Deciding that needs the whole expression, so the line is read and then rewound;
-    /// [`Self::read_requires_line`] opens no nesting level, so `pos` and `raw_values` are all
-    /// there is to restore.
-    ///
-    /// The decision looks at the expression alone, so a floor with an indented line under it is
-    /// still refused as a floor.
+    /// Read a `requires` line here if `policy` lets it; `Ok(None)` leaves the line to be read as
+    /// an ordinary member, as one stating no floor is in a body that refuses floors.
     fn requires_line_here(
         &mut self,
         policy: RequiresPolicy,
@@ -525,13 +447,12 @@ impl<'a> Parser<'a> {
         }
         let position = self.position();
         let mark = self.pos;
-        // A rewound line gives back its raw value, so an unlexable stretch in it fails again.
+        // A rewound line gives back its raw value, so an unlexable stretch fails again.
         let raw_mark = self.raw_values.len();
         let (raw, span) = self.read_requires_line()?;
         match policy.refusal() {
             None => self.finish_requires_line(position, raw, span).map(Some),
-            // Otherwise the author gets `unexpected `>=`` three tokens along, which names the
-            // token rather than the mistake.
+            // Refused as a floor, not as an unexpected `>=` three tokens along.
             Some(message) if parse_requirement(&raw).is_ok() => Err(ParseError::Syntax {
                 position,
                 message: message.to_owned(),
@@ -545,15 +466,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Consume every token up to the end of the line and return their index
-    /// range, the source text they cover (trimmed), and the byte the text
-    /// ends at — the start of the first token when there is none.
-    ///
-    /// The text is sliced out of the source rather than rebuilt from the
-    /// tokens, so what the lexer split it into does not matter, and a
-    /// [`TokenKind::Unlexed`] stretch is part of it like any other token.
-    /// Whether that stretch is then a failure is the caller's to say, by
-    /// recording the range in `raw_values` or not.
+    /// Consume the rest of the line: its token range, its trimmed source text (sliced, so an
+    /// `Unlexed` stretch is text like any other), and the byte the text ends at.
     fn rest_of_line(&mut self) -> (std::ops::Range<usize>, String, usize) {
         let first = self.pos;
         let value_start_byte = self.current_byte();
@@ -571,12 +485,7 @@ impl<'a> Parser<'a> {
         (first..self.pos, raw, value_end_byte)
     }
 
-    /// Read one `requires <expression>` line up to its line break, and
-    /// return the expression and the line's span.
-    ///
-    /// The expression is taken verbatim to end of line, as [`Self::parse_header`] takes
-    /// `@requires`'s, so the two share one `parse_requirement` and labels the lexer splits
-    /// (`24w14a`, `1.21.4-rc1`) stay out of the grammar's way.
+    /// Read one `requires` line verbatim to its end: the expression, and the line's span.
     fn read_requires_line(&mut self) -> Result<(String, crate::error::Span), ParseError> {
         let start_byte = self.current_byte();
         self.advance();
@@ -586,11 +495,7 @@ impl<'a> Parser<'a> {
         Ok((raw, start_byte..value_end_byte))
     }
 
-    /// Accept a `requires` line [`Self::read_requires_line`] has read, in
-    /// a body that carries floors.
-    ///
-    /// `keyword_position` is the keyword's, because an empty expression has nothing else to point
-    /// at.
+    /// Accept a `requires` line [`Self::read_requires_line`] read, in a body that carries floors.
     fn finish_requires_line(
         &self,
         keyword_position: Position,
@@ -615,8 +520,7 @@ impl<'a> Parser<'a> {
         Ok(MemberRequires::new(RawRequirement::new(raw), span))
     }
 
-    /// `policy` is the enclosing body's, so a member's own children get
-    /// the refusal that names the repair for the item they are in.
+    /// Parse one body line; `policy` is the enclosing body's.
     fn parse_command(&mut self, policy: RequiresPolicy) -> Result<Statement, ParseError> {
         let start_byte = self.current_byte();
         let keyword = self.expect_ident()?;
@@ -660,9 +564,7 @@ impl<'a> Parser<'a> {
         }
         let span = start_byte..self.last_byte();
         self.expect_newline()?;
-        // A body recurses like a list or an expression, so it goes through `nested`: its O(n²)
-        // source cost is no bound, since 400 levels is a third of a megabyte. A member's
-        // children are members, and the part's floor is read one level up.
+        // A body recurses like a list or an expression, so it goes through `nested`.
         let (_, children) =
             self.nested(|p| p.parse_optional_command_body(policy.for_children()))?;
         Ok(Statement::Generic {
@@ -724,9 +626,7 @@ impl<'a> Parser<'a> {
             let row_start_byte = self.current_byte();
             let pattern = self.expect_truth_pattern()?;
             let inputs_lex = pattern.text;
-            // Checked here, where the failure has a position, rather than by each pass that
-            // cares. What one row cannot see (no rows, repeated patterns, missing combinations)
-            // is `check::truth`'s, which is why each row keeps a span.
+            // Row checks here, where a failure has a position; table checks in `check::truth`.
             if let Some(bad) = inputs_lex.chars().find(|c| !matches!(c, '0' | '1' | '-')) {
                 return Err(ParseError::Syntax {
                     position: pattern_position,
@@ -738,8 +638,7 @@ impl<'a> Parser<'a> {
             }
             let width = inputs_lex.chars().count();
             if width != inputs.len() {
-                // `->` is lexed greedily, so a final `-` before it is lost and the pattern comes
-                // back exactly one bit short.
+                // `->` is lexed greedily, so a final `-` before it is lost.
                 let hint = if width + 1 == inputs.len() && pattern.ends_at_the_arrow {
                     format!(
                         ". A `-` written immediately before `->` is read as part of the arrow, \
@@ -846,8 +745,7 @@ impl<'a> Parser<'a> {
         Ok(self.parse_expr_or()?.0)
     }
 
-    /// Refuse a boolean tree deeper than [`MAX_EXPR_DEPTH`], whose doc says why that differs from
-    /// the bound [`Self::nested`] keeps.
+    /// Refuse a boolean tree deeper than [`MAX_EXPR_DEPTH`].
     fn charge_expr_depth(&self, depth: usize) -> Result<(), ParseError> {
         if depth > MAX_EXPR_DEPTH {
             return Err(ParseError::NestingTooDeep {
@@ -858,8 +756,7 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// Returns the expression and the depth of the tree it built, so an
-    /// iteratively-parsed chain still pays for the shape it produced.
+    /// The expression and its tree depth, so an iteratively parsed chain pays for its shape.
     fn parse_expr_or(&mut self) -> Result<(Expr, usize), ParseError> {
         let (mut lhs, mut depth) = self.parse_expr_and()?;
         while self.match_keyword("or") {
@@ -882,8 +779,7 @@ impl<'a> Parser<'a> {
         Ok((lhs, depth))
     }
 
-    /// A `not` chain and a parenthesised sub-expression both pass through [`Self::nested`].
-    /// Parentheses build no node, so they cost descent but no tree depth; `not` costs both.
+    /// `not` costs descent and tree depth; parentheses cost descent alone.
     fn parse_expr_not(&mut self) -> Result<(Expr, usize), ParseError> {
         if self.match_keyword("not") {
             let (inner, inner_depth) = self.nested(Self::parse_expr_not)?;
@@ -897,8 +793,7 @@ impl<'a> Parser<'a> {
             self.expect(&TokenKind::RParen)?;
             return Ok(inner);
         }
-        // `and` and `or` are never signal names; read as one, a missing operand would surface
-        // downstream as an unbound signal.
+        // `and` and `or` are never signal names, so a missing operand is reported here.
         if let Some(Token {
             kind: TokenKind::Ident(word),
             position,
@@ -921,8 +816,7 @@ impl<'a> Parser<'a> {
         Ok((Expr::Ref(dotted), 1))
     }
 
-    /// Is the next token the bare identifier `name`? Unlike [`Self::match_keyword`], consumes
-    /// nothing.
+    /// Whether the next token is the bare identifier `name`, consuming nothing.
     fn peek_is_ident(&self, name: &str) -> bool {
         matches!(self.peek(), Some(t) if matches!(&t.kind, TokenKind::Ident(ident) if ident == name))
     }
@@ -978,19 +872,8 @@ impl<'a> Parser<'a> {
         Ok(Arg { key, value, span })
     }
 
-    /// The refusal for a key that is really the `x` of a size literal with
-    /// no height, as in `size=9x`, or `None` when `key` is not one.
-    ///
-    /// The lexer builds a size only when a digit follows the `x`, so `9x` arrives as an integer and
-    /// an `x` read as the next key. Only forms whose every argument is `key=value` reach here
-    /// unconditionally (an item header, a `[…]` list, a `theme` binding); a member command asks
-    /// [`Self::is_at_key_eq`] first, so there `window size=9x` parses and the checks report it.
-    ///
-    /// Where it does arrive, the argument has failed anyway, and ``expected `=` `` would name the
-    /// parser's reading rather than the author's literal. The `x` is the size's when it touches the
-    /// integer before it, whichever key that was given to, since digits-`x`-digits reads as nothing
-    /// but a size. The caller has seen that no `=` follows `key`, so `size=9x=2` is a `size=9` and
-    /// an `x=2`.
+    /// The refusal for a key that is the `x` of a size literal with no height, as in `size=9x`,
+    /// or `None` when `key` is not one: `9x` lexes as an integer and an `x` key.
     fn size_with_no_height_before(&self, key: &str) -> Option<ParseError> {
         if key != "x" {
             return None;
@@ -1008,9 +891,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Read an `@` token value — `@oak_planks`, `@floor.wood`, or a
-    /// canonical token with its state literal, `@oak_log[axis=x]` — whose
-    /// `@` starts at `start_byte`.
+    /// Read an `@` token value whose `@` starts at `start_byte`, with its state literal if any.
     fn parse_token_value(&mut self, start_byte: usize) -> Result<Value, ParseError> {
         self.advance();
         let mut text = self.expect_ident()?;
@@ -1021,8 +902,7 @@ impl<'a> Parser<'a> {
             text.push_str(&self.expect_ident()?);
             dotted = true;
         }
-        // Only a `[` touching an undotted name is a state literal: a dotted token is abstract and
-        // names no block to have a state, and a `[` after a space is the caller's.
+        // Only a `[` touching an undotted name is a state literal.
         if !dotted
             && self
                 .peek()
@@ -1036,15 +916,8 @@ impl<'a> Parser<'a> {
         ))
     }
 
-    /// Read a block-state literal, `[key=value,…]`, after the `@` token
-    /// named `token`, and return it as the text it folds into the token:
-    /// `[axis=x]`, with the spaces the source may hold between its parts
-    /// left out.
-    ///
-    /// The one place a malformed literal is refused, because `block_array::material` reads the
-    /// folded text back leniently. It is Minecraft's block-state syntax rather than a Cairn list,
-    /// so the comma between pairs is required. Whether the block has those properties and values
-    /// is the target registry's question.
+    /// Read a block-state literal after `@token` as the text it folds into, spaces dropped. The
+    /// one place a malformed literal is refused: `block_array::material` reads it back leniently.
     fn parse_state_literal(&mut self, token: &str) -> Result<String, ParseError> {
         let refuse = |position, found: &str| ParseError::Syntax {
             position,
@@ -1055,7 +928,6 @@ impl<'a> Parser<'a> {
         };
         self.expect(&TokenKind::LBracket)?;
         let mut text = String::from("[");
-        // A set, because the duplicate check runs once per property of a literal of any length.
         let mut seen: IndexSet<String> = IndexSet::new();
         loop {
             let position = self.position();
@@ -1120,9 +992,6 @@ impl<'a> Parser<'a> {
     }
 
     /// The next token as a refusal names it: `` `]` ``, `end of line`.
-    ///
-    /// The lexer ends every stream with a `Newline`, so `end of input` answers only for a stream
-    /// that breaks that rule.
     fn next_token_text(&self) -> String {
         self.peek()
             .map_or_else(|| "end of input".to_owned(), |t| t.kind.to_string())
@@ -1159,8 +1028,7 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Int { lexeme, .. } => {
                 self.advance();
-                // Here digits must be a number, so here the `i64` ceiling applies; see
-                // `TokenKind::Int`.
+                // Only here do digits become a number, under the `i64` ceiling.
                 let value = lexeme
                     .parse::<i64>()
                     .map_err(|err: std::num::ParseIntError| ParseError::InvalidInt {
@@ -1275,9 +1143,6 @@ impl<'a> Parser<'a> {
     }
 
     /// [`Self::expect_ident`] keeping the identifier's own byte range.
-    ///
-    /// For a name the AST records, since rebuilding it from the item's span would assume one space
-    /// after the keyword, which `def   hut` does not have.
     fn expect_ident_spanned(&mut self) -> Result<(String, crate::error::Span), ParseError> {
         let position = self.position();
         let Some(token) = self.peek().cloned() else {
@@ -1316,14 +1181,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// The pattern left of a truth row's `->`, reassembled from the
-    /// tokens the lexer split it into.
-    ///
-    /// A pattern holds `0`, `1` or `-` per input signal (`spec/syntax` "Lexical"), but a run of
-    /// digits lexes as one `Int` and each `-` as a `Minus`, so `0-1` is three tokens. They are one
-    /// pattern exactly when nothing separates their byte spans: `0- 1` is a too-narrow pattern
-    /// and a stray `1`, which the width check reports. The last dash of `--->` goes into the
-    /// arrow, so `11--> 0` and `11- -> 0` are the same row.
+    /// The pattern left of a truth row's `->`, reassembled from adjacent `Int` and `Minus` tokens;
+    /// a gap ends it.
     fn expect_truth_pattern(&mut self) -> Result<TruthPattern, ParseError> {
         let position = self.position();
         let mut text = String::new();
@@ -1394,31 +1253,19 @@ impl<'a> Parser<'a> {
             .map_or(Position::START, |t| t.position)
     }
 
-    /// Byte offset where the next un-consumed token begins, or `source.len()`
-    /// at EOF. Anchors the start of a node's [`Span`] before any token is
-    /// consumed in its parser arm.
-    ///
-    /// [`Span`]: crate::error::Span
+    /// Byte offset where the next token begins, or `source.len()` at EOF.
     fn current_byte(&self) -> usize {
         self.peek().map_or(self.source.len(), |t| t.span.start)
     }
 
-    /// Byte offset where the most-recently-consumed token ended. Used to
-    /// close a [`Span`] right after the last meaningful token for a node;
-    /// callers capture this *before* `expect_newline()` so trailing layout
-    /// tokens stay outside the node's span.
-    ///
-    /// [`Span`]: crate::error::Span
+    /// Byte offset where the last consumed token ended; read it before `expect_newline()`.
     fn last_byte(&self) -> usize {
         self.tokens
             .get(self.pos.wrapping_sub(1))
             .map_or(0, |t| t.span.end)
     }
 
-    /// Byte offset of the end of the last *content* token consumed, ignoring
-    /// trailing `Newline`/`Indent`/`Dedent` layout tokens. Used for
-    /// container-level spans ([`Item::Theme`] etc.) whose body may have just
-    /// closed with a `Dedent`.
+    /// Byte offset where the last consumed token that is not layout ended.
     fn last_content_byte(&self) -> usize {
         let mut i = self.pos;
         while i > 0 {

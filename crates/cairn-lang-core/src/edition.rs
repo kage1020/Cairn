@@ -1,8 +1,4 @@
 //! The Minecraft edition a build targets.
-//!
-//! One type serves the CLI's `--edition` flag, the resolver's per-edition theme variants
-//! (`spec/versioning-editions` "Java / Bedrock portability"), registry packs and the lockfile, so
-//! it lives in the crate all of them depend on.
 
 use std::fmt;
 use std::str::FromStr;
@@ -11,15 +7,14 @@ use serde::{Deserialize, Serialize};
 
 /// A Minecraft edition Cairn can target.
 ///
-/// Java sorts first, matching the spec's "Java as the base, Bedrock as overriding diffs"
-/// (`spec/versioning-editions` "Backend = data tables"). Serde uses the lowercase name, the
-/// spelling `--edition` takes, so a typo in a lockfile or pack manifest is refused.
+/// Java sorts first: it is the base and Bedrock the diff (`spec/versioning-editions` "Backend =
+/// data tables").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Edition {
-    /// Java Edition. Emits gzip-compressed vanilla `.nbt` structures.
+    /// Java Edition, written as `.nbt`.
     Java,
-    /// Bedrock Edition. Emits uncompressed little-endian `.mcstructure`.
+    /// Bedrock Edition, written as `.mcstructure`.
     Bedrock,
 }
 

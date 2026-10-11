@@ -20,10 +20,9 @@ fn terminator_len_names_each_of_the_three_breaks() {
     assert_eq!(terminator_len("a\rb", 1), Some(1));
     assert_eq!(terminator_len("a\nb", 1), Some(1));
     assert_eq!(terminator_len("a\r\nb", 0), None);
-    // Past the end is no terminator, so callers need no bounds check.
     assert_eq!(terminator_len("a", 1), None);
     assert_eq!(terminator_len("a", 99), None);
-    // At the `\n` of a pair it answers 1, so a caller must step over the whole pair.
+    // The `\n` of a pair, on its own.
     assert_eq!(terminator_len("a\r\nb", 2), Some(1));
 }
 
@@ -34,14 +33,11 @@ fn starts_a_new_line_after_every_break() {
     assert_eq!(starts("ab\ncd"), vec![0, 3]);
     assert_eq!(starts("ab\r\ncd"), vec![0, 4]);
     assert_eq!(starts("ab\rcd"), vec![0, 3]);
-    // A trailing break opens a final empty line.
     assert_eq!(starts("ab\r"), vec![0, 3]);
-    // Consecutive breaks of different kinds each open one line.
     assert_eq!(starts("\r\r\n\n"), vec![0, 1, 3, 4]);
 }
 
-/// Sources with a lone `\r`, an empty line, or a break at either edge —
-/// the shapes where stepping across a terminator can leave its own line.
+/// Sources with a lone `\r`, an empty line, or a break at either edge.
 const AWKWARD: &[&str] = &[
     "\n",
     "\nx",
@@ -59,10 +55,8 @@ fn end_before_stops_at_the_terminator_it_follows() {
     assert_eq!(end_before("a\nb", 2), 1);
     assert_eq!(end_before("a\r\nb", 3), 1);
     assert_eq!(end_before("a\rb", 2), 1);
-    // A source opening with a break: the first line is empty.
     assert_eq!(end_before("\nx", 1), 0);
     assert_eq!(end_before("\r\nx", 2), 0);
-    // An empty line between two breaks ends at its own terminator, not the one before it.
     assert_eq!(end_before("\r\r", 2), 1);
     assert_eq!(end_before("a\r\r\n", 4), 2);
 }
@@ -107,7 +101,6 @@ fn split_matches_str_lines_wherever_str_lines_is_right() {
 fn split_also_breaks_at_a_lone_carriage_return() {
     assert_eq!(split("a\rb\r").collect::<Vec<_>>(), vec!["a", "b"]);
     assert_eq!(split("a\r\rb").collect::<Vec<_>>(), vec!["a", "", "b"]);
-    // `str::lines` yields one line here.
     assert_eq!(
         split("floor\rwalls").collect::<Vec<_>>(),
         vec!["floor", "walls"]
@@ -125,7 +118,6 @@ fn split_matches_str_lines_backwards_too() {
     }
 }
 
-/// Alternating ends is what catches a line yielded twice or not at all.
 #[test]
 fn split_yields_each_line_once_when_walked_from_both_ends() {
     for source in AGREED.iter().copied().chain(AWKWARD.iter().copied()) {
@@ -186,8 +178,7 @@ fn split_and_starts_describe_the_same_lines() {
                 &source[start..end]
             })
             .collect();
-        // `starts` keeps the trailing empty line that `split` drops, so
-        // the comparison is against the prefix.
+        // `starts` keeps the trailing empty line that `split` drops.
         let split_lines: Vec<&str> = split(source).collect();
         assert_eq!(
             from_starts[..split_lines.len()],
@@ -204,8 +195,6 @@ fn position(line: u32, col: u32) -> Position {
     }
 }
 
-/// Non-ASCII on both sides of a break, because a byte-counting column would pass an ASCII-only
-/// round trip.
 #[test]
 fn a_byte_offset_survives_the_round_trip_through_a_position() {
     let source = "α\nfoo\nβar\n";
@@ -219,8 +208,6 @@ fn a_byte_offset_survives_the_round_trip_through_a_position() {
     }
 }
 
-/// Nothing in this crate produces such a position; an editor holding one from an older revision
-/// of the document does.
 #[test]
 fn a_position_from_outside_the_source_clamps() {
     let source = "ab\ncd";
@@ -228,13 +215,12 @@ fn a_position_from_outside_the_source_clamps() {
     assert_eq!(
         index.offset_of(source, position(1, 99)),
         2,
-        "a column past the end of its line clamps to that line's end, \
-             before the terminator",
+        "a column past its line's end",
     );
     assert_eq!(
         index.offset_of(source, position(9, 1)),
         source.len(),
-        "a line past the end of the source clamps to its end",
+        "a line past the source's end",
     );
 }
 
@@ -260,7 +246,6 @@ fn position_at_for_offset_past_end_clamps_to_eof() {
 
 #[test]
 fn position_agrees_with_a_direct_walk_of_the_source() {
-    // `position_at` is the index itself, so the reference is an independent walk.
     for source in ["α\nfoo\nbar\nβaz\n", "a\r\nb\rc", "\r\r\n", "", "no break"] {
         let lines = LineStarts::new(source);
         let (mut line, mut col, mut offset) = (1_u32, 1_u32, 0_usize);

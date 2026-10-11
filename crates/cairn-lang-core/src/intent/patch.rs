@@ -1,26 +1,10 @@
-//! Which physical member an actuator patch acts on.
-//!
-//! `door[id=front] opened_by=sig.x` is written on a line of its own, before or after the door it
-//! binds, and its brackets pick that door by `id=`. Block-array lowering recognises the patch and
-//! builds nothing for it; the redstone front end turns the binding into a netlist port. Both read
-//! the answer from [`actuator_patch_target`], so one cannot defer `door[id=nope]` while the other
-//! gives it a port and a pad.
-//!
-//! Beside [`Member`] rather than in `block_array`, because which member a selector picks is a fact
-//! about the member lines and touches no voxel, the reason [`super::SENSOR_HOSTS`] sits in the
-//! keyword table.
+//! Which physical member an actuator patch such as `door[id=front] opened_by=sig.x` acts on.
 
 use std::fmt;
 
 use super::{Member, MemberRole};
 
-/// Why an actuator patch's `[selector]` picks no physical member.
-///
-/// The [`fmt::Display`] form is the reason clause both passes print, so they cannot describe the
-/// same line differently. It stops at what is wrong; each caller writes the repair it can offer.
-///
-/// Every variant carries `keyword`, the patch line's keyword, which is also the role of the members
-/// it may pick.
+/// Why an actuator patch's `[selector]` picks no physical member; `Display` gives the reason alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PatchTargetError {
@@ -45,16 +29,12 @@ pub enum PatchTargetError {
         keyword: String,
         /// The id the selector names.
         id: String,
-        /// Every id a physical member of the role carries in the scope,
-        /// in source order, each once.
+        /// Ids the role's physical members carry, in source order, each once.
         known: Vec<String>,
-        /// How many physical members of the role carry no `id=` at all.
-        /// The selector can never pick one, and adding the id to one is
-        /// the repair when `known` is empty.
+        /// How many physical members of the role carry no `id=`.
         unlabelled: u32,
     },
-    /// The id is declared on more than one physical member of the role, so
-    /// the patch has no single member to act on.
+    /// The id is declared on more than one physical member of the role.
     #[non_exhaustive]
     Ambiguous {
         /// The patch line's keyword.
@@ -67,8 +47,7 @@ pub enum PatchTargetError {
 }
 
 impl PatchTargetError {
-    /// Stable machine-readable name for this failure, for a consumer
-    /// choosing a repair without reading the prose.
+    /// Stable machine-readable name for this failure.
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
@@ -79,8 +58,7 @@ impl PatchTargetError {
         }
     }
 
-    /// The patch line's keyword, which is also the role of the members it
-    /// may pick.
+    /// The patch line's keyword, which is also the role of the members it may pick.
     #[must_use]
     pub fn keyword(&self) -> &str {
         match self {
@@ -147,22 +125,11 @@ impl fmt::Display for PatchTargetError {
     }
 }
 
-/// The one physical member `patch`'s `[selector]` picks out of `candidates`.
-///
-/// A physical member has the patch's role and no brackets: `door[id=front]` picks among `door`
-/// lines, and a bracketed one is another patch. `candidates` is the scope's members as the caller
-/// sees them (lowering passes its flattened view, so a door under `level y=N` is selectable), and
-/// where the patch sits among them does not matter. An id on two members is
-/// [`PatchTargetError::Ambiguous`] rather than first-hit-wins, because both are equally what the
-/// author named.
-///
-/// Only the `id=` half of the selector is read: lowering refuses any other key, and the redstone
-/// front end refuses a binding inside the brackets on its own.
+/// The one physical member (same role, no brackets) that `patch`'s `[id=]` picks from `candidates`.
 ///
 /// # Errors
 ///
-/// [`PatchTargetError`] when the selector has no readable `id=`, or when that id is carried by no
-/// physical member of the role or by more than one.
+/// [`PatchTargetError`] when there is no readable `id=` or not exactly one member carries it.
 pub fn actuator_patch_target<'a>(
     patch: &Member,
     candidates: impl IntoIterator<Item = &'a Member>,
@@ -213,8 +180,6 @@ pub fn actuator_patch_target<'a>(
     }
 }
 
-/// Whether `m` is a member a patch of `role` can act on: that role, and
-/// declared rather than patched.
 fn is_physical(m: &Member, role: &MemberRole) -> bool {
     m.role == *role && m.selector.is_none()
 }
@@ -229,8 +194,6 @@ mod tests {
         crate::intent::lower(&crate::parse::parse(&source).expect("fixtures parse"))
     }
 
-    /// Resolve the scope's last member, a patch, against every member
-    /// before it.
     fn target_of(ir: &IntentModule) -> Result<&Member, PatchTargetError> {
         let members = &ir.structs[0].members;
         let (patch, rest) = members.split_last().expect("a patch");
@@ -264,8 +227,7 @@ mod tests {
         assert!(std::ptr::eq(door, &raw const members[1]));
     }
 
-    /// A bracketed door is another patch, so even an `id=` written after
-    /// its brackets is not a door the selector could pick.
+    /// `id=front` after the brackets still leaves a patch, not a door.
     #[test]
     fn a_patch_is_not_a_target() {
         let ir = module(concat!(
