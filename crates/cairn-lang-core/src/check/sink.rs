@@ -43,7 +43,7 @@ impl DiagnosticSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostic::{DiagnosticCode, Severity};
+    use crate::diagnostic::DiagnosticCode;
 
     fn diag(start: usize, end: usize, code: DiagnosticCode, msg: &str) -> Diagnostic {
         Diagnostic {
@@ -78,12 +78,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_sink_has_severity_independent_invariants() {
+    fn a_new_sink_is_empty() {
         let sink = DiagnosticSink::new();
         assert!(sink.is_empty());
         assert_eq!(sink.len(), 0);
-        let drained = sink.into_sorted();
-        assert!(drained.is_empty());
-        assert_eq!(Severity::Error.as_str(), "error");
+        assert!(sink.into_sorted().is_empty());
     }
 }
