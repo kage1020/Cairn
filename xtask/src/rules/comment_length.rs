@@ -19,8 +19,7 @@ enum Kind {
 }
 
 impl Kind {
-    /// The kind of a trimmed line and the text after its marker, or `None` for a line that is not
-    /// a comment.
+    /// The kind of a trimmed comment line and the text after its marker.
     fn of(trimmed: &str) -> Option<(Self, &str)> {
         if let Some(text) = trimmed.strip_prefix("//!") {
             Some((Self::Module, text))

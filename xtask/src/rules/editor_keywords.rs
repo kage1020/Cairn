@@ -1,9 +1,5 @@
-//! The VS Code grammar highlights exactly the keywords core's parser reads.
-//!
-//! The grammar is a list of regexes nothing compiles against the parser, so a keyword added
-//! to core and not to the grammar ships unhighlighted, and one removed from core stays
-//! highlighted. Two of its alternations are held to core: `top-level` to the keywords
-//! `ItemKind::keyword` returns, and `member-keyword` to `KNOWN_KEYWORDS`.
+//! The VS Code grammar highlights exactly the keywords core's parser reads: nothing compiles its
+//! regexes against the parser.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -21,8 +17,7 @@ pub const RULE: Rule = Rule {
 
 const GRAMMAR: &str = "editors/vscode/syntaxes/cairn.tmLanguage.json";
 
-/// Each grammar pattern with the core source that defines its keywords, and which literals there
-/// count.
+/// Each grammar pattern, the core source defining its keywords, and which literals there count.
 const PAIRS: [(&str, &str, Source); 2] = [
     (
         "top-level",

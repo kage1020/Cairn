@@ -1,9 +1,4 @@
-//! Every copy of the release version agrees with `[workspace.package] version`.
-//!
-//! The npm package, the tree-sitter manifest, the VS Code extension and every versioned path
-//! dependency on a workspace crate carry the number again; a release built while one of them
-//! lags ships artefacts that disagree about what they are. With `--tag`, the tag has to name
-//! the same version.
+//! Every copy of the release version agrees with `[workspace.package] version`, and with `--tag`.
 
 use std::path::Path;
 

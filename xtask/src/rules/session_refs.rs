@@ -1,9 +1,5 @@
-//! No milestone or pull-request coordinates outside the files whose purpose they are.
-//!
-//! Code, docs and examples have to read on their own later, so a milestone id, a pull request
-//! number or a pointer to a pull request yet to come is replaced by the fact it stood for. The
-//! changelog, the roadmap, the compatibility table and CONTRIBUTING (which states this rule)
-//! are exempt.
+//! No milestone or pull-request coordinates outside the files whose purpose they are: code, docs
+//! and examples have to read on their own later.
 
 use regex::Regex;
 

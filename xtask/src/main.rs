@@ -1,15 +1,4 @@
-//! Repository checks for the Cairn workspace that neither rustc nor clippy can express: manifest
-//! policy, documentation inventories, spec citations, and version agreement.
-//!
-//! ```text
-//! cargo xtask lint                  # every rule
-//! cargo xtask lint spec-citations   # one or more rules by name
-//! cargo xtask lint --list           # the rules and what each holds
-//! cargo xtask lint versions --tag v2026.10.0
-//! ```
-//!
-//! Each finding prints as `path:line: rule: message`, and as a GitHub annotation when
-//! `GITHUB_ACTIONS` is set. The exit code is 1 when anything was found.
+//! Repository checks for the Cairn workspace that neither rustc nor clippy can express.
 
 mod markdown;
 mod repo;

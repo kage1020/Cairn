@@ -7,9 +7,7 @@ fn heading(line: &str) -> Option<(usize, &str)> {
     (level > 0).then_some((level, text.trim()))
 }
 
-/// The lines of the first level-`level` section whose title satisfies `title_matches`, up to the
-/// next heading of the same or a higher level, each with its 1-based line number. Lines inside
-/// fenced blocks are left out, so an example table in a fence is never read as rows.
+/// The numbered lines of the first level-`level` section whose title matches, fences left out.
 pub fn section(
     text: &str,
     level: usize,
@@ -41,8 +39,7 @@ pub fn section(
     found
 }
 
-/// The code spans in the first cell of a table row, or `None` when `line` is not a row. A row
-/// is a line starting with `|`; the header and the `|---|` rule hold no spans.
+/// The code spans in the first cell of a table row, or `None` when `line` is not a row.
 pub fn first_cell_spans(line: &str) -> Result<Option<Vec<&str>>, String> {
     let Some(cell) = line
         .trim()

@@ -1,10 +1,5 @@
-//! Every workspace crate takes its lints from `[workspace.lints]`, which forbids `unsafe_code`.
-//!
-//! Cargo's lint inheritance is opt-in per crate and all-or-nothing, so a crate without
-//! `[lints] workspace = true` silently gets none of them. The one exception is
-//! [`UNSAFE_EXEMPT`], whose FFI module has to lift `unsafe_code`: `forbid` cannot be lifted, so
-//! that crate carries its own copy of the table with the lint at `deny`, and the `unsafe-code`
-//! rule confines the lift to that module.
+//! Every workspace crate takes its lints from `[workspace.lints]`, which a crate has to opt into.
+//! [`UNSAFE_EXEMPT`] keeps a copy with `unsafe_code` at `deny`, since `forbid` cannot be lifted.
 
 use std::path::Path;
 

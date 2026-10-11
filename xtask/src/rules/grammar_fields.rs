@@ -1,14 +1,5 @@
-//! Every field the tree-sitter grammar declares is labelled in some corpus case, and nothing
-//! else is.
-//!
-//! `tree-sitter test` compares field labels only in a case whose expected tree spells some out,
-//! and dropping a `field(...)` from a rule leaves the tree shape alone, so an unlabelled corpus
-//! stays green while the labels that `queries/*.scm` and downstream `child_by_field_name` calls
-//! read disappear. This rule holds the `(node, field)` pairs in `src/node-types.json` equal to the
-//! pairs labelled in `test/corpus/`.
-//!
-//! `node-types.json` is per node, not per grammar branch, so a field declared in several `choice`
-//! branches is satisfied by a label in any one of them.
+//! Every field the tree-sitter grammar declares is labelled in some corpus case, and nothing else
+//! is: dropping a `field(...)` leaves tree shapes alone, so an unlabelled corpus would not notice.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -49,20 +40,18 @@ fn declared_fields(node_types: &str) -> Result<Pairs, String> {
 
 struct Case {
     title: String,
-    /// `:skip`, `:error`, `:platform(...)` and the other attribute lines of the header.
+    /// The header's attribute lines, such as `:skip`.
     markers: Vec<String>,
-    /// The expected tree after the `---` divider; empty when the case has none.
+    /// The expected tree; empty when the case has none.
     tree: String,
 }
 
-/// Whether `line` is a header rule (`===…`) or divider (`---…`): three or more of `glyph`, with
-/// any suffix after them.
+/// Whether `line` is a header rule or divider: three or more of `glyph`, then anything.
 fn is_rule(line: &str, glyph: char) -> bool {
     line.chars().take_while(|c| *c == glyph).count() >= 3
 }
 
-/// The cases of one corpus file. Only the expected tree is kept, because Cairn source has
-/// parentheses and trailing colons of its own that would read as labels.
+/// The cases of one corpus file, keeping only the expected tree: Cairn source has its own `(`.
 fn parse_cases(text: &str) -> Result<Vec<Case>, String> {
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
     let mut cases = Vec::new();
@@ -102,9 +91,8 @@ fn parse_cases(text: &str) -> Result<Vec<Case>, String> {
     Ok(cases)
 }
 
-/// Record every `(node, field)` labelled in an expected tree. A word ending in `:` labels the
-/// node on top of the stack; every `(` pushes, so a quoted token in node position cannot make the
-/// next `)` pop the parent.
+/// Records every `(node, field)` labelled in `tree`. Every `(` pushes, named or not, so a quoted
+/// token in node position cannot make its `)` pop the parent.
 fn collect_labels(tree: &str, into: &mut Pairs) -> Result<(), String> {
     let bytes = tree.as_bytes();
     let mut stack: Vec<&str> = Vec::new();

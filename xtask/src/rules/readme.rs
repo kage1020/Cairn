@@ -1,14 +1,5 @@
-//! Crate READMEs that keep an inventory keep it exact, in both directions.
-//!
-//! crates.io shows a crate's README as its front page, and a table nothing compares with the
-//! code drifts one merge at a time. Three inventories are held:
-//!
-//! - `cairn-lang-core`'s `## Modules` table names exactly its `pub mod`s;
-//! - the `## Public API` tables (exactly the crates in `PUBLIC_API_CRATES`) name exactly the
-//!   crate root's `pub use` re-exports, each as its full `module::item` path;
-//! - `cairn-lang-cli`'s `## Subcommands` table names exactly what `cairn --help` lists.
-//!
-//! What a row says is not checked, only which names the table holds.
+//! Crate READMEs that keep an inventory keep it exact, in both directions: crates.io shows a
+//! crate's README as its front page. Only which names a table holds is checked.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -37,8 +28,7 @@ pub const SUBCOMMANDS: Rule = Rule {
     check: check_subcommands,
 };
 
-/// The crates whose README carries a `## Public API` table. Listed rather than discovered, so
-/// deleting the heading cannot switch the check off unnoticed.
+/// The crates whose README carries a `## Public API` table, listed so deleting one is seen.
 const PUBLIC_API_CRATES: &[&str] = &["cairn-lang-formats", "cairn-lang-nbt"];
 
 /// The spans in the first column of a README section's table, with the line each is on.
@@ -270,8 +260,7 @@ fn check_public_api(repo: &Repo) -> Vec<Finding> {
     findings
 }
 
-/// The subcommands clap lists under `Commands:`, one per line at a two-space indent, without
-/// clap's own `help`.
+/// The subcommands clap lists under `Commands:`, without its own `help`.
 fn listed_subcommands(help: &str) -> Option<BTreeSet<String>> {
     let block = help.split_once("\nCommands:\n")?.1.split("\n\n").next()?;
     Some(

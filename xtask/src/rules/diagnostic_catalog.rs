@@ -1,8 +1,5 @@
-//! Every diagnostic code has a row of its own in the spec's catalog, in each language.
-//!
-//! A code is public contract: it is what `--format json` consumers branch on, and the lint
-//! chapter's catalog is where a reader looks it up. A code mentioned only in a neighbouring row's
-//! prose does not count. Rows for codes raised outside the enum (run-level refusals) are fine.
+//! Every diagnostic code has a row of its own in the spec's catalog, in each language: a code is
+//! what `--format json` consumers branch on.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -21,9 +18,8 @@ pub const RULE: Rule = Rule {
 
 const CORE_SRC: &str = "crates/cairn-lang-core/src";
 
-/// The spec directory in each language, with the translated title of the lint chapter's catalog
-/// section. The chapter file is joined on separately: a path spelled whole would read as a
-/// citation to the `spec-citations` rule.
+/// The spec directory in each language, with its catalog section's title. The chapter file is
+/// joined on apart, since a path spelled whole would read as a citation to `spec-citations`.
 const CATALOGS: &[(&str, &str)] = &[
     ("website/src/content/docs/spec", "Diagnostic codes"),
     ("website/src/content/docs/ja/spec", "診断コード"),

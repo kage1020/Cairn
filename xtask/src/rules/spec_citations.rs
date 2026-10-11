@@ -1,15 +1,6 @@
-//! The spec is cited by chapter and section title, never by section number.
-//!
-//! A number is a coordinate: inserting a chapter or splitting a section silently turns every
-//! comment that held one into a wrong pointer. A citation names the chapter file and, for one
-//! section, its title — `spec/lint` followed by the quoted title — and this rule holds three
-//! lines over code, examples, workflows and agent docs:
-//!
-//! 1. No section sign, no "section" followed by a number, and no number after `spec_` in a name.
-//! 2. Every `spec/<chapter>` names a chapter that exists.
-//! 3. Every quoted title after one is a heading of that chapter, or a glossary term.
-//!
-//! The spec itself and the rest of `website/` are not read: that is where the numbers live.
+//! The spec is cited by chapter and section title, never by number, which goes stale when a
+//! section moves. Every `spec/<chapter>` names a chapter, and every quoted title after one is a
+//! heading of that chapter or a glossary term.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,7 +16,6 @@ pub const RULE: Rule = Rule {
 
 const SPEC_DIR: &str = "website/src/content/docs/spec";
 
-/// The trees read, and the extensions read in them.
 const SCANNED: &[&str] = &[
     "crates",
     "examples",
@@ -36,8 +26,7 @@ const SCANNED: &[&str] = &[
 ];
 const SCANNED_EXTENSIONS: &[&str] = &["rs", "md", "crn"];
 
-/// How far past the chapter a quoted title may start: room for a long title wrapped over two
-/// comment lines, not for a quote from a later sentence.
+/// How far past the chapter a quoted title may reach: one wrapped over two comment lines.
 const TITLE_WINDOW: usize = 400;
 
 const SECTION_SIGN: char = '\u{a7}';
@@ -152,7 +141,6 @@ fn named_citations(
             cite(offset, stem, quoted_titles_after(&rest[stem.len()..]));
         }
     }
-    // A Markdown citation puts the title in the link text, ahead of the href.
     for (open, _) in text.match_indices('[') {
         if let Some((stem, quoted)) = markdown_link_citation(text, open) {
             cite(open, stem, quoted);
@@ -167,9 +155,7 @@ fn chapter_stem(text: &str) -> &str {
     &text[..end]
 }
 
-/// Chapter file stem → the titles it declares: the frontmatter title and every heading, each
-/// without its leading number, plus the glossary's defined terms. Fenced blocks are skipped,
-/// since a sample release note in one has headings of its own.
+/// Chapter file stem → its frontmatter title, its headings without numbers, and glossary terms.
 fn spec_titles(repo: &Repo) -> BTreeMap<String, Vec<String>> {
     let mut chapters = BTreeMap::new();
     for path in repo.files_in(Path::new(SPEC_DIR), &["md"]) {
@@ -210,8 +196,7 @@ fn defined_term(line: &str) -> Option<String> {
     Some(rest[..end].trim_end_matches('.').to_owned())
 }
 
-/// A heading without its number: `14.5 Place-and-route` and `C.3 How a break is communicated`
-/// lose their numbers, while `3D coordinates` keeps its digit because no space follows it.
+/// A heading without its number, such as the `14.5` or `C.3` before it.
 fn strip_leading_number(heading: &str) -> String {
     let digits = heading.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
     let after = if digits.len() < heading.len() {
@@ -231,9 +216,7 @@ fn strip_leading_number(heading: &str) -> String {
     after.trim_start().to_owned()
 }
 
-/// The chapter and titles of a Markdown link citing the spec, given the offset of its `[`:
-/// `[lint "Error vs warning"](https://…/spec/lint/)`. The href has to confirm the chapter, so
-/// an ordinary link whose text starts with a lowercase word is not read as one.
+/// The chapter and titles of a Markdown link citing the spec, given the offset of its `[`.
 fn markdown_link_citation(text: &str, open: usize) -> Option<(&str, Vec<String>)> {
     let rest = &text[open + 1..];
     let close = rest.find("](")?;
@@ -251,10 +234,7 @@ fn markdown_link_citation(text: &str, open: usize) -> Option<(&str, Vec<String>)
     (!titles.is_empty()).then_some((stem, titles))
 }
 
-/// The quoted titles right after a chapter stem. Only the punctuation that can sit between a
-/// chapter and its title is stepped over (a closing backtick, `.md`, a link's `]`, spaces);
-/// anything else means the next quote belongs to another sentence. Several titles may follow,
-/// joined by ` / `, ` and ` or `, `.
+/// The quoted titles right after a chapter stem, joined by ` / `, ` and ` or `, `.
 fn quoted_titles_after(rest: &str) -> Vec<String> {
     let window = match rest.char_indices().nth(TITLE_WINDOW) {
         Some((end, _)) => &rest[..end],
@@ -283,9 +263,7 @@ fn quoted_titles_after(rest: &str) -> Vec<String> {
     titles
 }
 
-/// Text that wrapped over several comment or string lines, joined back into one line: each
-/// continuation loses its comment marker (`///`, `//!`, `//`, `#`) and a string literal's
-/// trailing `\`, and whitespace runs become one space.
+/// `text` joined back into one line across comment markers and string-literal line breaks.
 fn unwrapped(text: &str) -> String {
     text.lines()
         .map(|line| {

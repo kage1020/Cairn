@@ -155,9 +155,6 @@ jobs:
           pnpm run generate
           cd ../..
 
-          # Fold changelog.d/ into the section release-plz just wrote, and
-          # delete the fragments, so the merged release PR carries the whole
-          # entry and the release body is read from it.
           # `release-patch` refuses to publish if this never ran.
           python3 .github/scripts/changelog.py assemble --version "$version" --delete
 
@@ -195,10 +192,7 @@ jobs:
       - name: Assert every copy of the version agrees before publishing
         run: cargo xtask lint versions
 
-      # The fold happens in the release PR, and that PR's own checks do not run
-      # on commits this workflow pushes with GITHUB_TOKEN. For a version not yet
-      # tagged, this is the last point at which a missed fold can stop the
-      # release instead of shipping a month without its entries.
+      # The release PR's checks do not run on the fold, which was pushed with GITHUB_TOKEN.
       - name: Assert the changelog fragments were folded into this version
         run: python3 .github/scripts/changelog.py verify-release
 

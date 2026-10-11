@@ -1,9 +1,5 @@
-//! `unsafe_code` is lifted only inside the modules `ALLOWED` lists.
-//!
-//! Everywhere else the workspace forbids it and rustc enforces that. The `manifest` rule's
-//! exempt crate only denies it, so there an `allow`, `expect` or `warn` attribute — bare or
-//! inside `cfg_attr` — could lift it anywhere; this rule keeps the lift to the listed modules,
-//! and fails on a listed module that no longer lifts it so no stale exemption survives.
+//! `unsafe_code` is lifted only inside the modules `ALLOWED` lists. The `manifest` rule's exempt
+//! crate only denies it, so rustc would let it be lifted anywhere in that crate.
 
 use std::path::{Path, PathBuf};
 
@@ -23,8 +19,7 @@ pub const RULE: Rule = Rule {
 /// `(file, module)` pairs whose module body may lift `unsafe_code`.
 const ALLOWED: &[(&str, &str)] = &[("crates/cairn-lang-tree-sitter/bindings/rust/lib.rs", "ffi")];
 
-/// Whether `tokens` hold `allow(…unsafe_code…)`, `expect(…)` or `warn(…)` at any depth, as a
-/// `cfg_attr` body does.
+/// Whether `tokens` allow, expect or warn `unsafe_code` at any depth, as in a `cfg_attr`.
 fn lowers_unsafe_code(tokens: TokenStream) -> bool {
     let mut lowering = false;
     for token in tokens {

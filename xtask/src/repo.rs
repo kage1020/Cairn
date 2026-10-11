@@ -14,8 +14,7 @@ pub struct Repo {
     pub root: PathBuf,
     /// `--tag` from the command line, for the rules that compare against a release tag.
     pub tag: Option<String>,
-    /// Every file git tracks or would track, relative to `root`, sorted. Ignored files (build
-    /// output, `node_modules`) are left out by `.gitignore` rather than by a list here.
+    /// Every file git tracks or would track, relative to `root`, sorted.
     files: Vec<PathBuf>,
 }
 
