@@ -13,7 +13,9 @@ use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_state::degradation_detail;
 use serde_json::Value;
 
-use crate::common::{cargo_bin, example_in_tempdir, examples_dir};
+use crate::common::{
+    cargo_bin, compile, crn_examples, example_in_tempdir, examples_dir, stderr_of,
+};
 
 fn info_json(file: &str, editions: &str) -> Value {
     info_json_at(&examples_dir().join(file), editions)
@@ -110,23 +112,15 @@ fn compile_accepts(
     target: &str,
     out: &std::path::Path,
 ) -> bool {
-    Command::new(cargo_bin())
-        .args([
-            "compile",
-            path.to_str().unwrap(),
-            "--edition",
-            edition,
-            "--target",
-            target,
-            "--out",
-            out.to_str().unwrap(),
-            "--lock",
-            out.join("build.crn.lock").to_str().unwrap(),
-        ])
-        .output()
-        .expect("run cairn")
-        .status
-        .success()
+    compile(
+        path,
+        edition,
+        target,
+        out,
+        Some(&out.join("build.crn.lock")),
+    )
+    .status
+    .success()
 }
 
 fn portability_entry<'a>(axes: &'a Value, edition: &str) -> &'a Value {
@@ -224,20 +218,10 @@ fn ac3_the_java_axis_is_pure_portable_for_a_source_java_can_build() {
 /// the `W_INTENT_DEGRADED` lines it printed.
 fn degraded_warnings(example: &str) -> Vec<String> {
     let (tmp, copied) = example_in_tempdir(example);
-    let compile = Command::new(cargo_bin())
-        .args([
-            "compile",
-            copied.to_str().unwrap(),
-            "--edition",
-            "bedrock",
-            "--out",
-            tmp.path().to_str().unwrap(),
-        ])
-        .output()
-        .expect("run cairn");
-    let stderr = String::from_utf8_lossy(&compile.stderr);
+    let compiled = compile(&copied, "bedrock", "latest", tmp.path(), None);
+    let stderr = stderr_of(&compiled);
     assert!(
-        compile.status.success(),
+        compiled.status.success(),
         "compile {example} failed; stderr={stderr}"
     );
     stderr
@@ -385,19 +369,9 @@ fn ac5_an_edition_specific_resolve_failure_is_reported_not_counted_away() {
     assert_eq!(check.status.code(), Some(0), "premise: check accepts it");
 
     // Bedrock cannot resolve it, and `compile` says so.
-    let compile = Command::new(cargo_bin())
-        .args([
-            "compile",
-            path,
-            "--edition",
-            "bedrock",
-            "--out",
-            tmp.path().join("out").to_str().unwrap(),
-        ])
-        .output()
-        .expect("run cairn");
+    let compiled = compile(&src, "bedrock", "latest", &tmp.path().join("out"), None);
     assert_eq!(
-        compile.status.code(),
+        compiled.status.code(),
         Some(1),
         "premise: compile refuses it"
     );
@@ -565,8 +539,8 @@ fn a_warning_at_every_version_leaves_every_target_buildable() {
 /// both editions and `info` still exits 0.
 #[test]
 fn every_example_lists_every_supported_target() {
-    for (name, _) in examples() {
-        let path = examples_dir().join(&name);
+    for path in crn_examples() {
+        let name = path.display();
         let axes = info_json_at(&path, "java,bedrock");
         for edition in ["java", "bedrock"] {
             let entry = buildable_entry(&axes, edition);
@@ -1125,30 +1099,6 @@ fn naming_the_reason_does_not_move_the_exit_code_or_the_text_row() {
     );
 }
 
-/// Every `.crn` under `examples/`, as `(file name, source)`, with a guard
-/// against a loop over nothing.
-fn examples() -> Vec<(String, String)> {
-    let entries = std::fs::read_dir(examples_dir()).expect("read examples dir");
-    let mut found: Vec<(String, String)> = entries
-        .map(|entry| entry.expect("read an entry").path())
-        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("crn"))
-        .map(|path| {
-            let source = std::fs::read_to_string(&path).expect("read example");
-            (
-                path.file_name().expect("named").to_string_lossy().into(),
-                source,
-            )
-        })
-        .collect();
-    found.sort();
-    assert!(
-        found.len() >= 5,
-        "found only {} examples, which is not the shipped set",
-        found.len(),
-    );
-    found
-}
-
 /// A source whose only material exists on one edition, written out to
 /// `tmp` and returned as its path.
 fn one_slot_source(dir: &std::path::Path, name: &str, id: &str) -> PathBuf {
@@ -1170,32 +1120,6 @@ fn one_slot_source(dir: &std::path::Path, name: &str, id: &str) -> PathBuf {
     path
 }
 
-/// Build `path` for one target, returning `(exit code, stderr)`.
-fn compile_for(
-    path: &std::path::Path,
-    edition: &str,
-    target: &str,
-    out: &std::path::Path,
-) -> (Option<i32>, String) {
-    let result = Command::new(cargo_bin())
-        .args([
-            "compile",
-            path.to_str().unwrap(),
-            "--edition",
-            edition,
-            "--target",
-            target,
-            "--out",
-            out.to_str().unwrap(),
-        ])
-        .output()
-        .expect("run cairn");
-    (
-        result.status.code(),
-        String::from_utf8_lossy(&result.stderr).into_owned(),
-    )
-}
-
 /// Assert that a build of `path` refuses `id` as unknown to that target.
 ///
 /// The premise these tests rest on is not "the build failed" — any
@@ -1209,9 +1133,10 @@ fn assert_build_refuses_the_id(
     out: &std::path::Path,
     id: &str,
 ) {
-    let (code, stderr) = compile_for(path, edition, target, out);
+    let run = compile(path, edition, target, out, None);
+    let stderr = stderr_of(&run);
     assert_eq!(
-        code,
+        run.status.code(),
         Some(1),
         "premise: the build must fail; stderr={stderr}"
     );
@@ -1301,9 +1226,10 @@ fn a_block_only_part_of_the_range_declares_stays_portable() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "renamed.crn", "floor.stone.smooth");
     for target in ["1.21.0", "1.21.40", "1.21.60"] {
-        let (code, stderr) = compile_for(&src, "bedrock", target, &tmp.path().join(target));
+        let run = compile(&src, "bedrock", target, &tmp.path().join(target), None);
+        let stderr = stderr_of(&run);
         assert_eq!(
-            code,
+            run.status.code(),
             Some(0),
             "premise: the material must build on every supported Bedrock target; stderr={stderr}",
         );

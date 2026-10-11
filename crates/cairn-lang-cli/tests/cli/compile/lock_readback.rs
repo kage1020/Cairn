@@ -8,44 +8,10 @@
 //! tampered file was discarded in silence.
 
 use std::fs;
-use std::path::Path;
-use std::process::Command;
 
 use tempfile::TempDir;
 
-use crate::common::{cargo_bin, example_in_tempdir};
-
-struct Run {
-    code: Option<i32>,
-    stdout: String,
-    stderr: String,
-}
-
-fn compile(src: &Path, out_dir: &Path, edition: &str, target: &str, lock: Option<&Path>) -> Run {
-    let mut args: Vec<String> = vec![
-        "compile".to_owned(),
-        src.to_string_lossy().into_owned(),
-        "--edition".to_owned(),
-        edition.to_owned(),
-        "--target".to_owned(),
-        target.to_owned(),
-        "--out".to_owned(),
-        out_dir.to_string_lossy().into_owned(),
-    ];
-    if let Some(lock) = lock {
-        args.push("--lock".to_owned());
-        args.push(lock.to_string_lossy().into_owned());
-    }
-    let out = Command::new(cargo_bin())
-        .args(&args)
-        .output()
-        .expect("run cairn compile");
-    Run {
-        code: out.status.code(),
-        stdout: String::from_utf8(out.stdout).expect("stdout utf-8"),
-        stderr: String::from_utf8(out.stderr).expect("stderr utf-8"),
-    }
-}
+use crate::common::{Run, compile, example_in_tempdir};
 
 fn warning_lines(stderr: &str) -> Vec<&str> {
     stderr
@@ -64,7 +30,7 @@ fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
-    let first = compile(&src, out_dir.path(), "java", "1.20.4", Some(&lock));
+    let first = Run::from(compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock)));
     assert_eq!(first.code, Some(0), "stderr={}", first.stderr);
     assert!(
         warning_lines(&first.stderr).is_empty(),
@@ -72,7 +38,7 @@ fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
         warning_lines(&first.stderr),
     );
 
-    let second = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     assert_eq!(second.code, Some(0), "stderr={}", second.stderr);
     assert!(
         second.stderr.contains(
@@ -98,8 +64,8 @@ fn a_recompile_for_the_same_target_says_nothing() {
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
-    compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
-    let again = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock));
+    let again = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     assert_eq!(again.code, Some(0), "stderr={}", again.stderr);
     assert!(
         warning_lines(&again.stderr).is_empty(),
@@ -117,8 +83,14 @@ fn a_change_of_edition_names_both_editions() {
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
-    compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
-    let switched = compile(&src, out_dir.path(), "bedrock", "1.21.60", Some(&lock));
+    compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock));
+    let switched = Run::from(compile(
+        &src,
+        "bedrock",
+        "1.21.60",
+        out_dir.path(),
+        Some(&lock),
+    ));
     assert_eq!(switched.code, Some(0), "stderr={}", switched.stderr);
     let line = switched
         .stderr
@@ -143,8 +115,8 @@ fn the_verified_side_names_the_field_the_recorded_edition_actually_has() {
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
-    compile(&src, out_dir.path(), "bedrock", "1.21.60", Some(&lock));
-    let switched = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    compile(&src, "bedrock", "1.21.60", out_dir.path(), Some(&lock));
+    let switched = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     let line = switched
         .stderr
         .lines()
@@ -171,7 +143,7 @@ fn the_sensitivity_list_reported_is_the_one_the_lockfile_recorded() {
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
-    compile(&src, out_dir.path(), "java", "1.20.4", Some(&lock));
+    compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock));
     let recorded = fs::read_to_string(&lock).expect("read lock");
     let doctored = recorded.replace(
         "member_version_sensitivity: []\n",
@@ -184,7 +156,7 @@ fn the_sensitivity_list_reported_is_the_one_the_lockfile_recorded() {
     assert_ne!(doctored, recorded, "the fixture did not add any entries");
     fs::write(&lock, &doctored).expect("write lock");
 
-    let second = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     assert!(
         second.stderr.contains(
             "W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence"
@@ -207,7 +179,7 @@ fn one_recorded_member_reads_as_one_member() {
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
-    compile(&src, out_dir.path(), "java", "1.20.4", Some(&lock));
+    compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock));
     let recorded = fs::read_to_string(&lock).expect("read lock");
     let doctored = recorded.replace(
         "member_version_sensitivity: []\n",
@@ -218,7 +190,7 @@ fn one_recorded_member_reads_as_one_member() {
     assert_ne!(doctored, recorded, "the fixture did not add any entries");
     fs::write(&lock, &doctored).expect("write lock");
 
-    let second = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     assert!(
         second
             .stderr
@@ -236,8 +208,8 @@ fn nothing_is_said_about_sensitivity_when_the_lockfile_recorded_none() {
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
-    compile(&src, out_dir.path(), "java", "1.20.4", Some(&lock));
-    let second = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock));
+    let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     assert!(
         second.stderr.contains("W_PREVIOUSLY_VERIFIED_TARGET:"),
         "the target warning should still fire: {}",
@@ -261,7 +233,7 @@ fn a_lockfile_that_does_not_parse_is_reported_rather_than_discarded() {
     let lock = out_dir.path().join("cottage.lock");
     fs::write(&lock, "this: [is not, a lockfile\n").expect("write junk");
 
-    let run = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    let run = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
     assert!(
         run.stderr.contains("existing lockfile"),
@@ -284,13 +256,13 @@ fn a_lockfile_from_a_newer_schema_is_reported_rather_than_read() {
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
-    compile(&src, out_dir.path(), "java", "1.20.4", Some(&lock));
+    compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock));
     let recorded = fs::read_to_string(&lock).expect("read lock");
     let doctored = recorded.replace("lock_schema_version: 1\n", "lock_schema_version: 99\n");
     assert_ne!(doctored, recorded, "the fixture did not change the version");
     fs::write(&lock, doctored).expect("write lock");
 
-    let run = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    let run = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
     // Told apart from a corrupt file in words, not only in kind: a document
     // written by a newer Cairn is not malformed, and replacing it does lose
@@ -326,7 +298,7 @@ fn the_default_lock_path_is_read_back_too() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
 
-    let first = compile(&src, out_dir.path(), "java", "1.20.4", None);
+    let first = Run::from(compile(&src, "java", "1.20.4", out_dir.path(), None));
     assert_eq!(first.code, Some(0), "stderr={}", first.stderr);
     let default_lock = src.with_extension("crn.lock");
     assert!(
@@ -335,7 +307,7 @@ fn the_default_lock_path_is_read_back_too() {
         default_lock.display(),
     );
 
-    let second = compile(&src, out_dir.path(), "java", "1.21.4", None);
+    let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), None));
     assert!(
         second.stderr.contains("W_PREVIOUSLY_VERIFIED_TARGET:"),
         "the default path was not read back: {}",
@@ -350,13 +322,13 @@ fn recompile_village_over(doctor: impl FnOnce(&str) -> String) -> (Run, String) 
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("village.lock");
-    let first = compile(&src, out_dir.path(), "java", "1.20.4", Some(&lock));
+    let first = Run::from(compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock)));
     assert_eq!(first.code, Some(0), "stderr={}", first.stderr);
     let written = fs::read_to_string(&lock).expect("read lock");
     let doctored = doctor(&written);
     assert_ne!(doctored, written, "the fixture changed nothing");
     fs::write(&lock, doctored).expect("write lock");
-    let run = compile(&src, out_dir.path(), "java", "1.21.4", Some(&lock));
+    let run = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     let replaced = fs::read_to_string(&lock).expect("read lock");
     (run, replaced)
 }

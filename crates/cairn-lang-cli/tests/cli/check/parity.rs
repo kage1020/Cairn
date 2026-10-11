@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use crate::common::{cairn_argv, examples_dir};
+use crate::common::{Reported, cairn_argv, crn_examples, stderr_stream};
 
 /// Shared prologue so each fixture differs only in the construct that trips
 /// its diagnostic. Named for its role rather than for the `@directive`
@@ -311,11 +311,6 @@ fn exit_code(out: &std::process::Output) -> i32 {
     out.status.code().expect("process exited via a signal")
 }
 
-/// A diagnostic reduced to what parity is about: where it points, how bad it
-/// is, and which code it carries. The prose `primary` is deliberately left
-/// out — `diagnostic.rs` states the code, not the prose, is the contract.
-type Reported = (u64, u64, String, String);
-
 /// Diagnostics from `cairn check --format json`, in emission order.
 fn check_stream(path: &Path) -> Vec<Reported> {
     let out = cairn_argv(&["check", path.to_str().unwrap(), "--format", "json"]);
@@ -332,37 +327,6 @@ fn check_stream(path: &Path) -> Vec<Reported> {
                 d["severity"].as_str().expect("severity").to_owned(),
                 d["code"].as_str().expect("code").to_owned(),
             )
-        })
-        .collect()
-}
-
-/// Diagnostics parsed back out of a build command's stderr, in emission
-/// order. Lines that are not `FILE:LINE:COL: SEVERITY[CODE]: ...` — notes,
-/// `wrote ...`, plain `error:` messages — are skipped.
-///
-/// Parsing rather than substring-matching is what makes these assertions
-/// mean something: it pins which code was reported, where, and how often.
-fn stderr_stream(stderr: &str) -> Vec<Reported> {
-    stderr
-        .lines()
-        .filter_map(|line| {
-            // The file path may itself contain `:` (`C:\...`), so anchor on
-            // the severity marker and walk backwards from there.
-            let (head, tail) = ["error[", "warning["].iter().find_map(|marker| {
-                let needle = format!(": {marker}");
-                line.find(&needle)
-                    .map(|i| (&line[..i], &line[i + ": ".len()..]))
-            })?;
-            let (severity, tail) = tail.split_once('[')?;
-            let (code, _) = tail.split_once(']')?;
-            let (head, col) = head.rsplit_once(':')?;
-            let (_, line_no) = head.rsplit_once(':')?;
-            Some((
-                line_no.parse().ok()?,
-                col.parse().ok()?,
-                severity.to_owned(),
-                code.to_owned(),
-            ))
         })
         .collect()
 }
@@ -602,13 +566,7 @@ fn parity_6_a_partially_lowered_source_is_not_certified() {
 #[test]
 fn parity_7_every_example_still_passes_all_four_commands() {
     let tmp = TempDir::new().expect("tempdir");
-    let mut seen = 0usize;
-    for entry in fs::read_dir(examples_dir()).expect("read examples") {
-        let src = entry.expect("dir entry").path();
-        if src.extension().and_then(|e| e.to_str()) != Some("crn") {
-            continue;
-        }
-        seen += 1;
+    for src in crn_examples() {
         let name = src.file_name().expect("file name").to_owned();
         // Copy into the tempdir: `compile` writes its lockfile next to the
         // source, and `examples/` is not ours to dirty.
@@ -645,7 +603,6 @@ fn parity_7_every_example_still_passes_all_four_commands() {
             );
         }
     }
-    assert!(seen > 0, "no examples found — the corpus path is wrong");
 }
 
 #[test]

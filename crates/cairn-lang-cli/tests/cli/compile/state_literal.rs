@@ -8,13 +8,11 @@
 //! bedrock` refuses the same entry.
 
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use flate2::read::GzDecoder;
 use tempfile::TempDir;
 
-use crate::common::{cairn, write_source};
+use crate::common::{bytes_contain, cairn, compile, nbt_body, stderr_of, write_source};
 
 /// A one-theme, one-struct source binding `target` to a floor.
 fn floored(dir: &Path, target: &str) -> PathBuf {
@@ -23,36 +21,6 @@ fn floored(dir: &Path, target: &str) -> PathBuf {
         "s.crn",
         &format!("theme t:\n  slot f -> {target}\n\nstruct s size=3x3\n  floor mat_slot=f\n"),
     )
-}
-
-fn stderr_of(out: &std::process::Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
-
-/// Compile `src` for `edition` at `target` into `out`.
-fn compile(src: &Path, edition: &str, target: &str, out: &Path) -> std::process::Output {
-    cairn(
-        "compile",
-        &[
-            src.to_str().unwrap(),
-            "--edition",
-            edition,
-            "--target",
-            target,
-            "--out",
-            out.to_str().unwrap(),
-        ],
-    )
-}
-
-/// The Java writer gzips; the assertions read the NBT inside.
-fn nbt_body(path: &Path) -> Vec<u8> {
-    let bytes = fs::read(path).expect("read artifact");
-    let mut body = Vec::new();
-    GzDecoder::new(bytes.as_slice())
-        .read_to_end(&mut body)
-        .expect("gzip decode");
-    body
 }
 
 /// The NBT bytes of a `String` tag named `key` holding `value`: tag id 8,
@@ -64,10 +32,6 @@ fn string_tag(key: &str, value: &str) -> Vec<u8> {
         tag.extend(part.as_bytes());
     }
     tag
-}
-
-fn contains(hay: &[u8], needle: &[u8]) -> bool {
-    hay.windows(needle.len()).any(|w| w == needle)
 }
 
 /// `info` answers with a figure, exit 0, where `compile --edition bedrock`
@@ -89,7 +53,7 @@ fn bedrock_refuses_to_compile_the_entry_info_counts_unsupported() {
     assert!(stdout.contains("unsupported: 1"), "{stdout}");
 
     let out = TempDir::new().expect("out tempdir");
-    let compiled = compile(&src, "bedrock", "1.21.60", out.path());
+    let compiled = compile(&src, "bedrock", "1.21.60", out.path(), None);
     let stderr = stderr_of(&compiled);
     assert_eq!(compiled.status.code(), Some(1), "{stderr}");
     assert!(
@@ -114,7 +78,7 @@ fn java_writes_an_unchecked_literal_as_given_and_says_so() {
     let tmp = TempDir::new().expect("tempdir");
     let src = floored(tmp.path(), "@oak_log[axis=q]");
     let out = TempDir::new().expect("out tempdir");
-    let compiled = compile(&src, "java", "1.21.4", out.path());
+    let compiled = compile(&src, "java", "1.21.4", out.path(), None);
     let stderr = stderr_of(&compiled);
     assert_eq!(compiled.status.code(), Some(0), "{stderr}");
     assert!(
@@ -124,7 +88,7 @@ fn java_writes_an_unchecked_literal_as_given_and_says_so() {
     );
     let body = nbt_body(&out.path().join("s.nbt"));
     assert!(
-        contains(&body, &string_tag("axis", "q")),
+        bytes_contain(&body, string_tag("axis", "q")),
         "the Properties compound carries `axis=q`",
     );
 }
@@ -141,7 +105,7 @@ fn two_spellings_of_one_state_write_the_same_bytes() {
         let tmp = TempDir::new().expect("tempdir");
         let src = floored(tmp.path(), target);
         let out = TempDir::new().expect("out tempdir");
-        let compiled = compile(&src, "java", "1.21.4", out.path());
+        let compiled = compile(&src, "java", "1.21.4", out.path(), None);
         assert_eq!(
             compiled.status.code(),
             Some(0),

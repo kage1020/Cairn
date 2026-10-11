@@ -7,49 +7,17 @@
 //! and `cairn check` accepts the file across all three edition states.
 
 use std::fs;
-use std::io::Read;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use flate2::read::GzDecoder;
 use tempfile::TempDir;
 
-use crate::common::{cargo_bin, examples_dir, write_source};
-
-/// Copy `examples/edition-fallback.crn` into a fresh temp dir so a test can
-/// rely on the source's parent being writable and avoid polluting the repo
-/// with lock artefacts.
-fn fallback_in_tempdir() -> (TempDir, PathBuf) {
-    let tmp = TempDir::new().expect("tempdir");
-    let src = examples_dir().join("edition-fallback.crn");
-    let dst = tmp.path().join("edition-fallback.crn");
-    fs::copy(&src, &dst).expect("copy edition-fallback");
-    (tmp, dst)
-}
-
-fn read_bytes(path: &Path) -> Vec<u8> {
-    fs::read(path).expect("read artifact")
-}
-
-fn gunzip(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    GzDecoder::new(bytes)
-        .read_to_end(&mut out)
-        .expect("gzip decode");
-    out
-}
-
-/// Search for a UTF-8 needle inside a byte haystack. Enough for the
-/// palette id assertions here — Java `.nbt` embeds the id as a length-
-/// prefixed `TAG_String` whose bytes contain the id verbatim, and the
-/// same is true for the Bedrock `.mcstructure`'s `name` field.
-fn bytes_contain(hay: &[u8], needle: &str) -> bool {
-    hay.windows(needle.len()).any(|w| w == needle.as_bytes())
-}
+use crate::common::{
+    bytes_contain, cargo_bin, example_in_tempdir, examples_dir, nbt_body, write_source,
+};
 
 #[test]
 fn ac5_java_compile_writes_oak_sign_and_not_wall_sign() {
-    let (_tmp_src, src) = fallback_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("edition-fallback.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = Command::new(cargo_bin())
         .args([
@@ -74,7 +42,7 @@ fn ac5_java_compile_writes_oak_sign_and_not_wall_sign() {
     );
 
     let nbt = out_dir.path().join("shop.nbt");
-    let bytes = gunzip(&read_bytes(&nbt));
+    let bytes = nbt_body(&nbt);
     assert!(
         bytes_contain(&bytes, "minecraft:oak_sign"),
         "Java palette must include oak_sign (from shop_java's floating_text slot)",
@@ -87,7 +55,7 @@ fn ac5_java_compile_writes_oak_sign_and_not_wall_sign() {
 
 #[test]
 fn ac6_bedrock_compile_writes_the_bedrock_wall_sign_and_not_the_java_one() {
-    let (_tmp_src, src) = fallback_in_tempdir();
+    let (_tmp_src, src) = example_in_tempdir("edition-fallback.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = Command::new(cargo_bin())
         .args([
@@ -112,7 +80,7 @@ fn ac6_bedrock_compile_writes_the_bedrock_wall_sign_and_not_the_java_one() {
     );
 
     let structure = out_dir.path().join("shop.mcstructure");
-    let bytes = read_bytes(&structure);
+    let bytes = fs::read(&structure).expect("read artifact");
     // Bedrock has no `oak_wall_sign` at all — it spells the block
     // `wall_sign`, and the pack used to hand the Java spelling to the
     // `.mcstructure` writer, which produced a file the game loads as air.
@@ -333,7 +301,7 @@ fn a_java_build_writes_the_java_variants_block_whatever_the_place_named() {
         "stderr={}",
         String::from_utf8_lossy(&result.stderr),
     );
-    let nbt = gunzip(&read_bytes(&out_dir.path().join("home.nbt")));
+    let nbt = nbt_body(&out_dir.path().join("home.nbt"));
     assert!(
         bytes_contain(&nbt, "minecraft:spruce_planks"),
         "the Java variant's material must be the one written",
@@ -483,11 +451,10 @@ fn a_place_naming_the_logical_theme_builds_under_both_editions() {
         } else {
             "home.mcstructure"
         });
-        let bytes = read_bytes(&artifact);
         let body = if edition == "java" {
-            gunzip(&bytes)
+            nbt_body(&artifact)
         } else {
-            bytes
+            fs::read(&artifact).expect("read artifact")
         };
         assert!(bytes_contain(&body, expected), "--edition {edition}");
         assert!(!bytes_contain(&body, absent), "--edition {edition}");
@@ -581,6 +548,6 @@ fn the_lockfile_names_the_theme_the_artifact_was_built_from() {
     );
     // And the artifact agrees with the lock, which is the claim that makes
     // the field worth anything.
-    let nbt = gunzip(&read_bytes(&out_dir.path().join("home.nbt")));
+    let nbt = nbt_body(&out_dir.path().join("home.nbt"));
     assert!(bytes_contain(&nbt, "minecraft:spruce_planks"));
 }

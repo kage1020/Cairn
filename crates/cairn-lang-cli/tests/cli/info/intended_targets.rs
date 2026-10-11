@@ -22,8 +22,8 @@ struct hut size=5x5
 ";
 
 /// `headers` above [`BUILD`], in a directory of its own.
-fn fixture(label: &str, headers: &str) -> Fixture {
-    Fixture::new("cairn-intended", label, &format!("{headers}{BUILD}"))
+fn fixture(headers: &str) -> Fixture {
+    Fixture::new(&format!("{headers}{BUILD}"))
 }
 
 fn run(command: &str, fixture: &Fixture, args: &[&str]) -> (Option<i32>, String, String) {
@@ -45,10 +45,7 @@ fn run(command: &str, fixture: &Fixture, args: &[&str]) -> (Option<i32>, String,
 /// `cairn compile --target 1.20.4` refused.
 #[test]
 fn a_floor_above_every_intended_target_stops_check_exiting_zero() {
-    let fixture = fixture(
-        "cap",
-        "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
-    );
+    let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
     let (code, _, stderr) = run("check", &fixture, &[]);
     assert_eq!(code, Some(1), "got: {stderr}");
     assert!(
@@ -67,10 +64,7 @@ fn a_floor_above_every_intended_target_stops_check_exiting_zero() {
 /// `cairn check` an author runs is where it has to show up.
 #[test]
 fn the_contradiction_needs_no_edition_pin() {
-    let fixture = fixture(
-        "nopin",
-        "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
-    );
+    let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
     let (pinned, _, pinned_err) = run("check", &fixture, &["--edition", "java"]);
     let (bare, _, bare_err) = run("check", &fixture, &[]);
     assert_eq!(pinned, Some(1), "got: {pinned_err}");
@@ -82,10 +76,7 @@ fn the_contradiction_needs_no_edition_pin() {
 /// widely is not a file that cannot be built.
 #[test]
 fn part_of_the_list_below_the_floor_is_a_warning_and_exits_zero() {
-    let fixture = fixture(
-        "partial",
-        "@requires version>=1.21\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n",
-    );
+    let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n");
     let (code, _, stderr) = run("check", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
     assert!(
@@ -101,7 +92,7 @@ fn part_of_the_list_below_the_floor_is_a_warning_and_exits_zero() {
 /// mistake.
 #[test]
 fn a_version_no_target_names_is_reported_only_with_one_edition_in_scope() {
-    let fixture = fixture("unsupported", "@intended_targets [\"1.19\"]\n");
+    let fixture = fixture("@intended_targets [\"1.19\"]\n");
     let (bare_code, _, bare_err) = run("check", &fixture, &[]);
     assert_eq!(bare_code, Some(0), "got: {bare_err}");
     assert!(
@@ -129,7 +120,7 @@ fn a_version_no_target_names_is_reported_only_with_one_edition_in_scope() {
 /// newest release and names no Bedrock release at all.
 #[test]
 fn the_pinned_edition_decides_which_table_weighs_the_list() {
-    let fixture = fixture("cross", "@intended_targets [\"1.21.4\"]\n");
+    let fixture = fixture("@intended_targets [\"1.21.4\"]\n");
     let (java, _, java_err) = run("check", &fixture, &["--edition", "java"]);
     assert_eq!(java, Some(0));
     assert!(
@@ -150,10 +141,7 @@ fn the_pinned_edition_decides_which_table_weighs_the_list() {
 /// resolves it.
 #[test]
 fn compile_refuses_the_source_check_refuses() {
-    let fixture = fixture(
-        "compile",
-        "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
-    );
+    let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
     let out = Command::new(cargo_bin())
         .arg("compile")
         .arg(fixture.source())
@@ -178,10 +166,7 @@ fn compile_refuses_the_source_check_refuses() {
 /// that names versions was the one the report never mentioned.
 #[test]
 fn info_prints_the_declared_targets_beside_the_buildable_ones() {
-    let fixture = fixture(
-        "inforow",
-        "@requires version>=1.20\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n",
-    );
+    let fixture = fixture("@requires version>=1.20\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n");
     let (code, stdout, stderr) = run("info", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
     assert!(
@@ -199,7 +184,7 @@ fn info_prints_the_declared_targets_beside_the_buildable_ones() {
 /// second one answers the question.
 #[test]
 fn info_says_so_when_no_targets_are_declared() {
-    let fixture = fixture("inforow-empty", "");
+    let fixture = fixture("");
     let (code, stdout, stderr) = run("info", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
     assert!(
@@ -212,7 +197,7 @@ fn info_says_so_when_no_targets_are_declared() {
 /// consumer reads the declaration without parsing the text rows.
 #[test]
 fn the_json_report_carries_the_declared_targets() {
-    let fixture = fixture("infojson", "@intended_targets [\"1.21.4\"]\n");
+    let fixture = fixture("@intended_targets [\"1.21.4\"]\n");
     let (code, stdout, stderr) = run("info", &fixture, &["--format", "json"]);
     assert_eq!(code, Some(0), "got: {stderr}");
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -229,10 +214,7 @@ fn the_json_report_carries_the_declared_targets() {
 /// consumer taking the sentence apart.
 #[test]
 fn the_finding_carries_a_structured_payload() {
-    let fixture = fixture(
-        "json",
-        "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
-    );
+    let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
     let (code, stdout, _) = run("check", &fixture, &["--format", "json"]);
     assert_eq!(code, Some(1));
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -258,10 +240,7 @@ fn the_finding_carries_a_structured_payload() {
 /// the floor anywhere.
 #[test]
 fn a_header_both_editions_judge_alike_is_reported_once() {
-    let fixture = fixture(
-        "dedup",
-        "@requires version>=99.0\n@intended_targets [\"1.21\"]\n",
-    );
+    let fixture = fixture("@requires version>=99.0\n@intended_targets [\"1.21\"]\n");
     let (code, stdout, _) = run("check", &fixture, &["--format", "json"]);
     assert_eq!(code, Some(1));
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
@@ -282,7 +261,6 @@ fn a_header_both_editions_judge_alike_is_reported_once() {
 #[test]
 fn two_editions_disagreeing_about_reach_report_the_error() {
     let fixture = fixture(
-        "reach",
         "@requires java version>=1.21.4\n@requires bedrock version>=1.21.60\n\
          @intended_targets [\"1.20.4\",\"1.21.4\",\"1.21.40\"]\n",
     );
@@ -301,10 +279,7 @@ fn two_editions_disagreeing_about_reach_report_the_error() {
 /// computed, for a file Bedrock has nothing to say against.
 #[test]
 fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
-    let fixture = fixture(
-        "scoped",
-        "@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n",
-    );
+    let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
     let (bedrock, stdout, stderr) = run("info", &fixture, &["--editions", "bedrock"]);
     assert_eq!(bedrock, Some(0), "got: {stderr}");
     assert!(
@@ -330,7 +305,7 @@ fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
 /// other's target, and nobody has said which is being asked.
 #[test]
 fn info_across_both_editions_does_not_name_an_unbuildable_version() {
-    let fixture = fixture("bothscope", "@intended_targets [\"1.20.4\"]\n");
+    let fixture = fixture("@intended_targets [\"1.20.4\"]\n");
     let (code, _, stderr) = run("info", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
     assert!(
@@ -345,7 +320,7 @@ fn info_across_both_editions_does_not_name_an_unbuildable_version() {
 /// that version unnamed, as the two-edition default above does.
 #[test]
 fn info_naming_one_edition_twice_still_names_an_unbuildable_version() {
-    let fixture = fixture("repeated", "@intended_targets [\"1.20.4\"]\n");
+    let fixture = fixture("@intended_targets [\"1.20.4\"]\n");
     let (code, stdout, stderr) = run("info", &fixture, &["--editions", "bedrock,bedrock"]);
     assert!(
         stderr.contains("W_INTENDED_TARGET_UNSUPPORTED"),

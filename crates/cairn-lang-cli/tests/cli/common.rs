@@ -2,9 +2,11 @@
 //! are, how to run one, and the temp directories a run writes into.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use flate2::read::GzDecoder;
 use tempfile::TempDir;
 
 /// The `cairn` binary cargo built for this test run.
@@ -88,41 +90,29 @@ pub fn crn_examples() -> Vec<PathBuf> {
 
 /// A source plus the directory its artifacts would land in, both removed
 /// when the test ends.
-///
-/// `prefix` names the binary that owns the directory, so two binaries
-/// running the same `label` at once do not share one.
 pub struct Fixture {
     /// Directory holding the source, the output, and the lock.
-    dir: PathBuf,
+    dir: TempDir,
 }
 
 impl Fixture {
-    pub fn new(prefix: &str, label: &str, source: &str) -> Self {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("{prefix}-{}-{label}", std::process::id()));
-        // A leftover from an interrupted run would let a test read a stale
-        // artifact as a fresh one, so the removal has to have happened —
-        // "it was not there" is the only other acceptable outcome.
-        match fs::remove_dir_all(&dir) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => panic!("cannot clear {}: {err}", dir.display()),
-        }
-        fs::create_dir_all(&dir).expect("create fixture dir");
-        fs::write(dir.join("s.crn"), source).expect("write source");
+    /// Write `source` as `s.crn` in a fresh directory.
+    pub fn new(source: &str) -> Self {
+        let dir = TempDir::new().expect("tempdir");
+        fs::write(dir.path().join("s.crn"), source).expect("write source");
         Self { dir }
     }
 
     pub fn source(&self) -> PathBuf {
-        self.dir.join("s.crn")
+        self.dir.path().join("s.crn")
     }
 
     pub fn lock(&self) -> PathBuf {
-        self.dir.join("s.crn.lock")
+        self.dir.path().join("s.crn.lock")
     }
 
     pub fn out(&self) -> PathBuf {
-        self.dir.join("out")
+        self.dir.path().join("out")
     }
 
     /// Every file the compile could have produced.
@@ -148,29 +138,115 @@ impl Fixture {
             }
         }
         let mut found = Vec::new();
-        walk(&self.dir, &mut found);
+        walk(self.dir.path(), &mut found);
         found.sort();
         found
     }
 }
 
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir);
+/// `cairn compile <src> --edition <edition> --target <target> --out <out>`,
+/// with `--lock <lock>` when one is given; without it the lockfile lands
+/// beside the source.
+pub fn compile(src: &Path, edition: &str, target: &str, out: &Path, lock: Option<&Path>) -> Output {
+    let mut command = Command::new(cargo_bin());
+    command
+        .arg("compile")
+        .arg(src)
+        .args(["--edition", edition, "--target", target])
+        .arg("--out")
+        .arg(out);
+    if let Some(lock) = lock {
+        command.arg("--lock").arg(lock);
     }
+    command.output().expect("failed to invoke cairn binary")
 }
 
 /// `cairn compile` of the fixture's source for `edition` / `target`, with
 /// the output directory and the lockfile inside the fixture's directory.
 pub fn compile_as(fixture: &Fixture, edition: &str, target: &str) -> Output {
-    Command::new(cargo_bin())
-        .arg("compile")
-        .arg(fixture.source())
-        .args(["--edition", edition, "--target", target])
-        .arg("--out")
-        .arg(fixture.out())
-        .arg("--lock")
-        .arg(fixture.lock())
-        .output()
-        .expect("failed to invoke cairn binary")
+    compile(
+        &fixture.source(),
+        edition,
+        target,
+        &fixture.out(),
+        Some(&fixture.lock()),
+    )
+}
+
+/// What a run of the binary reported: its exit code and both streams as
+/// text.
+pub struct Run {
+    pub code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl From<Output> for Run {
+    fn from(out: Output) -> Self {
+        Self {
+            code: out.status.code(),
+            stdout: String::from_utf8(out.stdout).expect("stdout utf-8"),
+            stderr: String::from_utf8(out.stderr).expect("stderr utf-8"),
+        }
+    }
+}
+
+/// A run's stderr as text, for an assertion and its failure message.
+pub fn stderr_of(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+/// The NBT inside a Java `.nbt` artifact. The writer gzips, so a search
+/// over the file as written finds nothing whatever it is asked for.
+pub fn nbt_body(path: &Path) -> Vec<u8> {
+    let bytes = fs::read(path).expect("read artifact");
+    let mut body = Vec::new();
+    GzDecoder::new(bytes.as_slice())
+        .read_to_end(&mut body)
+        .expect("gzip decode");
+    body
+}
+
+/// Whether `needle` occurs in `hay`. Both writers store a block id as the
+/// bytes of a string tag, so a palette assertion is a byte search over the
+/// NBT body.
+pub fn bytes_contain(hay: &[u8], needle: impl AsRef<[u8]>) -> bool {
+    let needle = needle.as_ref();
+    hay.windows(needle.len()).any(|w| w == needle)
+}
+
+/// A diagnostic reduced to what an assertion compares: where it points
+/// (line, column), how bad it is, and which code it carries. The prose is
+/// left out; the code, not the wording, is the contract.
+pub type Reported = (u64, u64, String, String);
+
+/// Diagnostics parsed back out of a command's stderr, in emission order.
+/// Lines that are not `FILE:LINE:COL: SEVERITY[CODE]: ...` (notes,
+/// `wrote ...`, plain `error:` messages) are skipped.
+///
+/// Parsing rather than substring-matching pins which code was reported,
+/// where, and how often.
+pub fn stderr_stream(stderr: &str) -> Vec<Reported> {
+    stderr
+        .lines()
+        .filter_map(|line| {
+            // The file path may itself contain `:` (`C:\...`), so anchor on
+            // the severity marker and walk backwards from there.
+            let (head, tail) = ["error[", "warning["].iter().find_map(|marker| {
+                let needle = format!(": {marker}");
+                line.find(&needle)
+                    .map(|i| (&line[..i], &line[i + ": ".len()..]))
+            })?;
+            let (severity, tail) = tail.split_once('[')?;
+            let (code, _) = tail.split_once(']')?;
+            let (head, col) = head.rsplit_once(':')?;
+            let (_, line_no) = head.rsplit_once(':')?;
+            Some((
+                line_no.parse().ok()?,
+                col.parse().ok()?,
+                severity.to_owned(),
+                code.to_owned(),
+            ))
+        })
+        .collect()
 }

@@ -18,7 +18,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use crate::common::{cargo_bin, examples_dir};
+use crate::common::{cargo_bin, compile, examples_dir, stderr_of};
 
 /// Every regular file under `dir`, keyed by name, so a snapshot can be
 /// compared byte-for-byte before and after a failed run.
@@ -80,6 +80,19 @@ impl Build {
         };
         (field("source_hash:"), field("resolved_ir_hash:"))
     }
+
+    /// Compile the source again over this build: the exit code, and stderr
+    /// so an assertion failure carries the CLI's own account of what went
+    /// wrong instead of only the resulting directory listing.
+    fn rebuild(&self) -> (Option<i32>, String) {
+        self.rebuild_with_lock(&self.lock)
+    }
+
+    /// [`Build::rebuild`] with the lockfile at `lock` instead.
+    fn rebuild_with_lock(&self, lock: &Path) -> (Option<i32>, String) {
+        let run = compile(&self.source, "java", "latest", &self.out_dir, Some(lock));
+        (run.status.code(), stderr_of(&run))
+    }
 }
 
 /// A directory holding one successfully compiled `village.crn`: five
@@ -91,8 +104,13 @@ fn first_successful_build() -> Build {
     let out_dir = tmp.path().join("out");
     let lock = tmp.path().join("village.crn.lock");
 
-    let status = compile(&source, &out_dir, &lock);
-    assert_eq!(status, Some(0), "the first build must succeed");
+    let run = compile(&source, "java", "latest", &out_dir, Some(&lock));
+    assert_eq!(
+        run.status.code(),
+        Some(0),
+        "the first build must succeed: {}",
+        stderr_of(&run),
+    );
     assert_eq!(
         snapshot(&out_dir).len(),
         5,
@@ -105,33 +123,6 @@ fn first_successful_build() -> Build {
         out_dir,
         lock,
     }
-}
-
-/// Returns the exit code and stderr — the latter so an assertion failure
-/// carries the CLI's own account of what went wrong instead of only the
-/// resulting directory listing.
-fn compile_with_output(source: &Path, out_dir: &Path, lock: &Path) -> (Option<i32>, String) {
-    let out = Command::new(cargo_bin())
-        .args([
-            "compile",
-            source.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.to_str().unwrap(),
-            "--lock",
-            lock.to_str().unwrap(),
-        ])
-        .output()
-        .expect("run cairn");
-    (
-        out.status.code(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    )
-}
-
-fn compile(source: &Path, out_dir: &Path, lock: &Path) -> Option<i32> {
-    compile_with_output(source, out_dir, lock).0
 }
 
 /// Edit the source so the second run genuinely produces different bytes —
@@ -214,7 +205,7 @@ fn atomic_1_a_failed_build_leaves_the_previous_one_untouched() {
         let before_lock = fs::read(&build.lock).expect("read lockfile");
         let obstruction = arrange_failure(&build, label);
 
-        let code = compile(&build.source, &build.out_dir, &build.lock);
+        let (code, _) = build.rebuild();
         assert_eq!(code, Some(1), "{label}: the build must fail");
 
         // The obstruction itself is a directory we planted, not an artifact
@@ -261,7 +252,7 @@ fn atomic_2_a_failed_build_leaves_no_scratch_files_behind() {
     for label in OBSTRUCTIONS {
         let build = first_successful_build();
         arrange_failure(&build, label);
-        let (code, stderr) = compile_with_output(&build.source, &build.out_dir, &build.lock);
+        let (code, stderr) = build.rebuild();
         assert_eq!(
             code,
             Some(1),
@@ -286,7 +277,7 @@ fn atomic_2b_a_failed_build_says_which_file_stopped_it() {
     // was fine.
     let build = first_successful_build();
     arrange_failure(&build, "artifact-backup");
-    let (code, stderr) = compile_with_output(&build.source, &build.out_dir, &build.lock);
+    let (code, stderr) = build.rebuild();
     assert_eq!(code, Some(1), "stderr={stderr}");
     assert!(
         stderr.contains("home2.nbt.bak"),
@@ -297,7 +288,7 @@ fn atomic_2b_a_failed_build_says_which_file_stopped_it() {
     // failure on it used to be indistinguishable from an artifact's.
     let build = first_successful_build();
     arrange_failure(&build, "lockfile");
-    let (code, stderr) = compile_with_output(&build.source, &build.out_dir, &build.lock);
+    let (code, stderr) = build.rebuild();
     assert_eq!(code, Some(1), "stderr={stderr}");
     assert!(
         stderr.contains("lockfile"),
@@ -317,7 +308,8 @@ fn atomic_3_a_failed_first_build_leaves_nothing_at_all() {
     let lock = tmp.path().join("village.crn.lock");
     fs::create_dir_all(&lock).expect("plant the obstruction");
 
-    assert_eq!(compile(&source, &out_dir, &lock), Some(1));
+    let run = compile(&source, "java", "latest", &out_dir, Some(&lock));
+    assert_eq!(run.status.code(), Some(1), "{}", stderr_of(&run));
     assert!(
         snapshot(&out_dir).is_empty(),
         "a build that never completed must not leave artifacts: {:?}",
@@ -334,7 +326,7 @@ fn atomic_4_a_successful_rebuild_replaces_everything_and_cleans_up() {
     let before_hashes = build.lock_hashes();
     change_the_source(&build.source);
 
-    let (code, stderr) = compile_with_output(&build.source, &build.out_dir, &build.lock);
+    let (code, stderr) = build.rebuild();
     assert_eq!(code, Some(0), "stderr={stderr}");
 
     let after = snapshot(&build.out_dir);
@@ -375,7 +367,7 @@ fn atomic_5_a_lock_path_that_collides_with_an_artifact_is_refused() {
         let victim = build.out_dir.join(format!("home1.nbt{suffix}"));
         change_the_source(&build.source);
 
-        let (code, stderr) = compile_with_output(&build.source, &build.out_dir, &victim);
+        let (code, stderr) = build.rebuild_with_lock(&victim);
         assert_eq!(
             code,
             Some(1),
@@ -598,7 +590,7 @@ fn atomic_11_two_artifacts_differing_only_in_case_are_refused_on_every_host() {
     );
     fs::write(&build.source, edited).expect("write source");
 
-    let (code, stderr) = compile_with_output(&build.source, &build.out_dir, &build.lock);
+    let (code, stderr) = build.rebuild();
     assert_eq!(code, Some(1), "stderr={stderr}");
     assert!(
         stderr.contains("error[E_OUTPUT_NAME_COLLISION]") && stderr.contains("differ only in case"),

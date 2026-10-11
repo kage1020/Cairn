@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::common::{cairn, examples_dir};
+use crate::common::{Fixture, cairn, examples_dir};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -62,11 +62,9 @@ fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
 /// file used to be refused by the lexer before the check pass saw it.
 #[test]
 fn an_unlexable_cairn_value_is_a_warning_and_the_build_goes_on() {
-    let file = tempfile_with_contents(
-        "cairn-unlexable",
-        "@cairn 2026.6+build\n\ntheme t:\n  slot wall -> @stone\n",
-    );
-    let out = cairn("check", &[file.arg()]);
+    let fixture = Fixture::new("@cairn 2026.6+build\n\ntheme t:\n  slot wall -> @stone\n");
+    let file = fixture.source();
+    let out = cairn("check", &[file.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
     assert!(stderr.contains("W_INVALID_CAIRN_VERSION"), "{stderr}");
@@ -87,8 +85,9 @@ fn an_unlexable_requires_value_is_an_invalid_floor_rather_than_a_parse_error() {
             "theme t:\n  requires version~=1.21\n  slot wall -> @stone\n",
         ),
     ] {
-        let file = tempfile_with_contents(label, source);
-        let out = cairn("check", &[file.arg()]);
+        let fixture = Fixture::new(source);
+        let file = fixture.source();
+        let out = cairn("check", &[file.to_str().unwrap()]);
         let stderr = String::from_utf8(out.stderr).expect("utf-8");
         assert_eq!(out.status.code(), Some(1), "{label}: stderr={stderr}");
         assert!(stderr.contains("E_INVALID_REQUIRES"), "{label}: {stderr}");
@@ -169,8 +168,9 @@ fn cli_4_clean_fixture_json_output_is_empty_array() {
 fn cli_5_parse_failure_exits_one_with_parse_style_message() {
     // A file the parser rejects must still hand the user a gcc-style
     // location, just like `cairn parse` does today.
-    let bad = tempfile_with_contents("directive", "@unknown_directive nope\n");
-    let out = cairn("check", &[bad.arg()]);
+    let fixture = Fixture::new("@unknown_directive nope\n");
+    let bad = fixture.source();
+    let out = cairn("check", &[bad.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -195,8 +195,9 @@ fn cli_end_of_line_parse_error_names_the_line_that_has_it() {
         ("cr", "def foo bar\r"),
         ("none", "def foo bar"),
     ] {
-        let file = tempfile_with_contents(label, source);
-        let out = cairn("check", &[file.arg()]);
+        let fixture = Fixture::new(source);
+        let file = fixture.source();
+        let out = cairn("check", &[file.to_str().unwrap()]);
         assert_eq!(out.status.code(), Some(1), "{label}");
         let stderr = String::from_utf8(out.stderr).expect("utf-8");
         assert!(
@@ -311,41 +312,4 @@ fn cli_type_mismatch_fixture_reports_both_label_and_size_codes() {
     let reported = String::from_utf8(out.stderr).expect("utf-8");
     assert!(reported.contains("E_TYPE_MISMATCH_LABEL"));
     assert!(reported.contains("E_TYPE_MISMATCH_SIZE"));
-}
-
-/// Write a transient `.crn` file under the system temp dir, removing it
-/// when the returned handle drops. Lets a test depend on a source that is
-/// intentionally broken at the parse layer without checking one in, and
-/// without leaving one behind on every run.
-///
-/// `label` distinguishes concurrent callers: the harness runs these tests
-/// as threads of one process, so the pid alone would have two of them
-/// writing and reading the same path.
-fn tempfile_with_contents(label: &str, contents: &str) -> TempSource {
-    let mut path = std::env::temp_dir();
-    let pid = std::process::id();
-    path.push(format!("cairn-cli-check-{pid}-{label}.crn"));
-    std::fs::write(&path, contents).expect("write tempfile");
-    TempSource { path }
-}
-
-/// A `.crn` file that exists for the length of one test.
-struct TempSource {
-    /// Where it was written; `Drop` removes it.
-    path: PathBuf,
-}
-
-impl TempSource {
-    /// The path as the CLI wants it on its argument list.
-    fn arg(&self) -> &str {
-        self.path.to_str().expect("temp path is utf-8")
-    }
-}
-
-impl Drop for TempSource {
-    fn drop(&mut self) {
-        // Best effort: a test that has already failed should report that
-        // failure, not a cleanup error on top of it.
-        let _ = std::fs::remove_file(&self.path);
-    }
 }

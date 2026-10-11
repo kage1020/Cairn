@@ -42,7 +42,7 @@ fn run(args: &[&str]) -> (Option<i32>, String, String) {
 
 #[test]
 fn check_refuses_with_and_without_a_target() {
-    let fixture = Fixture::new("cli-output-name", "check", COLLIDE);
+    let fixture = Fixture::new(COLLIDE);
     let source = fixture.source();
     let source = source.to_str().unwrap();
     for args in [
@@ -81,7 +81,7 @@ fn check_refuses_with_and_without_a_target() {
 
 #[test]
 fn info_certifies_no_version() {
-    let fixture = Fixture::new("cli-output-name", "info", COLLIDE);
+    let fixture = Fixture::new(COLLIDE);
     let source = fixture.source();
     let (code, stdout, stderr) = run(&[
         "info",
@@ -100,7 +100,7 @@ fn info_certifies_no_version() {
 #[test]
 fn compile_refuses_with_the_code_and_writes_nothing() {
     for (edition, target) in [("java", "1.21.4"), ("bedrock", "1.21.60")] {
-        let fixture = Fixture::new("cli-output-name", edition, COLLIDE);
+        let fixture = Fixture::new(COLLIDE);
         let out = compile_as(&fixture, edition, target);
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert_eq!(out.status.code(), Some(1), "{edition}: stderr={stderr}");

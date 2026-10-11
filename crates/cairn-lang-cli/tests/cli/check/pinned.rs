@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use crate::common::{cairn, examples_dir};
+use crate::common::{cairn, crn_examples, examples_dir};
 
 /// The repro this flag was added for: a theme slot bound to a block no
 /// version has.
@@ -558,13 +558,7 @@ fn every_shipped_example_passes_the_pinned_check_on_both_editions() {
     // `latest` on both, because the point is the pass rather than a
     // particular release, and a pack that adds a version should not need
     // this list edited.
-    let mut seen = 0;
-    let entries = std::fs::read_dir(examples_dir()).expect("read examples dir");
-    for entry in entries {
-        let path = entry.expect("read an entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("crn") {
-            continue;
-        }
+    for path in crn_examples() {
         for edition in ["java", "bedrock"] {
             let out = cairn(
                 "check",
@@ -583,12 +577,8 @@ fn every_shipped_example_passes_the_pinned_check_on_both_editions() {
                 "{} on {edition}: stderr={stderr}",
                 path.display(),
             );
-            seen += 1;
         }
     }
-    // A directory that stopped matching would pass every assertion above
-    // by making none of them.
-    assert!(seen > 0, "no examples were checked");
 }
 
 #[test]

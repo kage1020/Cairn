@@ -1712,23 +1712,19 @@ fn a_walkway_port_named_underscore_is_refused_rather_than_panicking_the_namer() 
     // debug assertion while `check` passed. The row is now dropped at
     // lowering with a finding, and the build, having lost the walkway the
     // row asked for, is refused as partial rather than certified.
-    let fixture = Fixture::new(
-        "cli-compile",
-        "underscore-port",
-        concat!(
-            "def hut size=5x5:\n",
-            "  walls id=w mat_slot=wall height=3\n",
-            "  door  id=_ side=front at=center\n",
-            "\n",
-            "theme t:\n",
-            "  slot wall -> @cobblestone\n",
-            "\n",
-            "site s:\n",
-            "  place id=a use=hut theme=t at=origin\n",
-            "  place id=b use=hut theme=t east_of=a gap=4\n",
-            "  connect a._ to b._ path=@gravel\n",
-        ),
-    );
+    let fixture = Fixture::new(concat!(
+        "def hut size=5x5:\n",
+        "  walls id=w mat_slot=wall height=3\n",
+        "  door  id=_ side=front at=center\n",
+        "\n",
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "\n",
+        "site s:\n",
+        "  place id=a use=hut theme=t at=origin\n",
+        "  place id=b use=hut theme=t east_of=a gap=4\n",
+        "  connect a._ to b._ path=@gravel\n",
+    ));
     let result = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
@@ -1758,27 +1754,23 @@ fn walkway_ids_that_would_alias_across_the_separator_are_each_named() {
     // build: the name a loss is reported under is the row's own ports,
     // not the key the two rows would both have spelled. The sound third
     // row laid its walkway, so it is not among them.
-    let fixture = Fixture::new(
-        "cli-compile",
-        "edge-underscore-alias",
-        concat!(
-            "def hut size=5x5:\n",
-            "  walls id=w mat_slot=wall height=3\n",
-            "  door  id=p  side=front at=center\n",
-            "  door  id=p_ side=back  at=center\n",
-            "\n",
-            "theme t:\n",
-            "  slot wall -> @cobblestone\n",
-            "\n",
-            "site s:\n",
-            "  place id=a  use=hut theme=t at=origin\n",
-            "  place id=b  use=hut theme=t east_of=a gap=4\n",
-            "  place id=_b use=hut theme=t north_of=a gap=4\n",
-            "  connect a.p_ to b.p path=@gravel\n",
-            "  connect a.p to _b.p path=@gravel\n",
-            "  connect a.p to b.p path=@gravel\n",
-        ),
-    );
+    let fixture = Fixture::new(concat!(
+        "def hut size=5x5:\n",
+        "  walls id=w mat_slot=wall height=3\n",
+        "  door  id=p  side=front at=center\n",
+        "  door  id=p_ side=back  at=center\n",
+        "\n",
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "\n",
+        "site s:\n",
+        "  place id=a  use=hut theme=t at=origin\n",
+        "  place id=b  use=hut theme=t east_of=a gap=4\n",
+        "  place id=_b use=hut theme=t north_of=a gap=4\n",
+        "  connect a.p_ to b.p path=@gravel\n",
+        "  connect a.p to _b.p path=@gravel\n",
+        "  connect a.p to b.p path=@gravel\n",
+    ));
     let result = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
@@ -1821,17 +1813,13 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
         "  slot wall -> @cobblestone\n",
         "\n",
     );
-    let laid = Fixture::new(
-        "cli-compile",
-        "duplicate-laid-pair",
-        &format!(
-            "{hut}site s:\n  \
+    let laid = Fixture::new(&format!(
+        "{hut}site s:\n  \
              place id=a use=hut theme=t at=origin\n  \
              place id=b use=hut theme=t east_of=a gap=4\n  \
              connect a.p to b.p path=@gravel\n  \
              connect b.p to a.p path=@gravel\n",
-        ),
-    );
+    ));
     let result = compile_as(&laid, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(result.status.success(), "stderr={stderr}");
@@ -1845,17 +1833,13 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
 
     // Neither row lays: the trailing `_` on `a_` is refused by the
     // walkway ident rule, whichever end of the row it sits on.
-    let lost = Fixture::new(
-        "cli-compile",
-        "duplicate-lost-pair",
-        &format!(
-            "{hut}site s:\n  \
+    let lost = Fixture::new(&format!(
+        "{hut}site s:\n  \
              place id=a_ use=hut theme=t at=origin\n  \
              place id=b  use=hut theme=t east_of=a_ gap=4\n  \
              connect a_.p to b.p path=@gravel\n  \
              connect b.p to a_.p path=@gravel\n",
-        ),
-    );
+    ));
     let partial = "error[E_PARTIAL_BUILD]";
     let counted_once = "1 of 3 requested scopes did not lower";
     let named = "  note: `site::s::a_.p ↔ b.p` produced no voxels\n";
@@ -1909,26 +1893,22 @@ fn a_walkway_whose_every_cell_is_blocked_is_lost_rather_than_written_as_air() {
     // walkway's array is all air. It used to be written as an `.nbt` of
     // two air blocks and certified; holding no block, it is now a lost
     // walkway like a row that was refused.
-    let fixture = Fixture::new(
-        "cli-compile",
-        "walkway-every-cell-blocked",
-        concat!(
-            "theme t:\n",
-            "  slot wall -> @cobblestone\n",
-            "  slot floor -> @stone\n",
-            "\n",
-            "def hut size=3x3:\n",
-            "  floor id=floor mat_slot=floor\n",
-            "  walls id=walls mat_slot=wall height=3\n",
-            "  door  id=front side=front at=center\n",
-            "  door  id=back  side=back  at=center\n",
-            "\n",
-            "site duo:\n",
-            "  place id=a use=hut theme=t at=origin\n",
-            "  place id=b use=hut theme=t north_of=a gap=0\n",
-            "  connect a.back to b.front path=@gravel\n",
-        ),
-    );
+    let fixture = Fixture::new(concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "  slot floor -> @stone\n",
+        "\n",
+        "def hut size=3x3:\n",
+        "  floor id=floor mat_slot=floor\n",
+        "  walls id=walls mat_slot=wall height=3\n",
+        "  door  id=front side=front at=center\n",
+        "  door  id=back  side=back  at=center\n",
+        "\n",
+        "site duo:\n",
+        "  place id=a use=hut theme=t at=origin\n",
+        "  place id=b use=hut theme=t north_of=a gap=0\n",
+        "  connect a.back to b.front path=@gravel\n",
+    ));
     let refusal = "1 of 3 requested scopes did not lower";
     let named = "  note: `site::duo::a.back ↔ b.front` produced no voxels\n";
     let result = compile_as(&fixture, "java", "1.21.4");
@@ -1979,25 +1959,21 @@ fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
     // `nada`'s one member cannot voxelise, so lowering keeps an array for
     // `b` that holds only air. It used to be written as `b.nbt` and
     // certified beside `a`; holding no block, it is now a lost scope.
-    let fixture = Fixture::new(
-        "cli-compile",
-        "place-every-member-deferred",
-        concat!(
-            "theme t:\n",
-            "  slot wall -> @cobblestone\n",
-            "  slot floor -> @stone\n",
-            "\n",
-            "def box size=3x3:\n",
-            "  floor id=f mat_slot=floor\n",
-            "\n",
-            "def nada size=3x3:\n",
-            "  walls id=w mat_slot=wall height=0\n",
-            "\n",
-            "site s:\n",
-            "  place id=a use=box theme=t at=origin\n",
-            "  place id=b use=nada theme=t east_of=a gap=2\n",
-        ),
-    );
+    let fixture = Fixture::new(concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "  slot floor -> @stone\n",
+        "\n",
+        "def box size=3x3:\n",
+        "  floor id=f mat_slot=floor\n",
+        "\n",
+        "def nada size=3x3:\n",
+        "  walls id=w mat_slot=wall height=0\n",
+        "\n",
+        "site s:\n",
+        "  place id=a use=box theme=t at=origin\n",
+        "  place id=b use=nada theme=t east_of=a gap=2\n",
+    ));
     let result = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
@@ -2023,29 +1999,25 @@ fn walkways_that_flatten_to_one_filename_are_refused_before_anything_is_written(
     // walkways flatten to `s_walkway_a_b_c__d_e_f.nbt`. The second would
     // overwrite the first, so the resolver refuses the source with
     // `E_OUTPUT_NAME_COLLISION` before it lowers, and nothing is staged.
-    let fixture = Fixture::new(
-        "cli-compile",
-        "walkway-filename-collision",
-        concat!(
-            "def hut size=5x5:\n",
-            "  walls id=w mat_slot=wall height=3\n",
-            "  door  id=c   side=front at=center\n",
-            "  door  id=f   side=front at=left\n",
-            "  door  id=b_c side=back  at=center\n",
-            "  door  id=e_f side=back  at=left\n",
-            "\n",
-            "theme t:\n",
-            "  slot wall -> @cobblestone\n",
-            "\n",
-            "site s:\n",
-            "  place id=a_b use=hut theme=t at=origin\n",
-            "  place id=d_e use=hut theme=t east_of=a_b gap=4\n",
-            "  place id=a   use=hut theme=t north_of=a_b gap=6\n",
-            "  place id=d   use=hut theme=t east_of=a gap=4\n",
-            "  connect a_b.c to d_e.f path=@gravel\n",
-            "  connect a.b_c to d.e_f path=@gravel\n",
-        ),
-    );
+    let fixture = Fixture::new(concat!(
+        "def hut size=5x5:\n",
+        "  walls id=w mat_slot=wall height=3\n",
+        "  door  id=c   side=front at=center\n",
+        "  door  id=f   side=front at=left\n",
+        "  door  id=b_c side=back  at=center\n",
+        "  door  id=e_f side=back  at=left\n",
+        "\n",
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "\n",
+        "site s:\n",
+        "  place id=a_b use=hut theme=t at=origin\n",
+        "  place id=d_e use=hut theme=t east_of=a_b gap=4\n",
+        "  place id=a   use=hut theme=t north_of=a_b gap=6\n",
+        "  place id=d   use=hut theme=t east_of=a gap=4\n",
+        "  connect a_b.c to d_e.f path=@gravel\n",
+        "  connect a.b_c to d.e_f path=@gravel\n",
+    ));
     let result = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");

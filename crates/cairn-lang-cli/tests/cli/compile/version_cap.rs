@@ -16,19 +16,10 @@ use crate::common::{Fixture, cargo_bin, compile_as};
 const BUILD: &str =
     "theme t:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  floor mat_slot=floor\n";
 
-/// A Java compile: every test here is about the version axis.
-fn compile(fixture: &Fixture, target: &str) -> std::process::Output {
-    compile_as(fixture, "java", target)
-}
-
 #[test]
 fn a_target_below_the_declared_floor_is_refused() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "below",
-        &format!("@requires version>=1.21\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.20.4");
+    let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.20.4");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -48,12 +39,8 @@ fn a_target_below_the_declared_floor_is_refused() {
 /// `enforce_version_floor`, whose single caller is `run_compile`.
 #[test]
 fn a_pinned_check_is_not_held_to_the_floor_the_compile_is_held_to() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "check-floor",
-        &format!("@requires version>=1.21\n{BUILD}"),
-    );
-    let refused = compile(&fixture, "1.20.4");
+    let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
+    let refused = compile_as(&fixture, "java", "1.20.4");
     let stderr = String::from_utf8(refused.stderr).expect("utf-8");
     assert_eq!(refused.status.code(), Some(1), "premise: {stderr}");
     assert!(stderr.contains("E_VERSION_CAP"), "premise: {stderr}");
@@ -87,12 +74,8 @@ fn a_pinned_check_is_not_held_to_the_floor_the_compile_is_held_to() {
 /// before any of it.
 #[test]
 fn a_refused_target_writes_nothing() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "nothing",
-        &format!("@requires version>=1.21\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.20.4");
+    let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.20.4");
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(
         fixture.artifacts(),
@@ -111,12 +94,8 @@ fn a_refused_target_writes_nothing() {
 /// for this code.
 #[test]
 fn the_refusal_names_the_floor_the_target_and_the_fix() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "message",
-        &format!("@requires version>=1.21\n{BUILD}"),
-    );
-    let stderr = String::from_utf8(compile(&fixture, "1.20.4").stderr).expect("utf-8");
+    let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
+    let stderr = String::from_utf8(compile_as(&fixture, "java", "1.20.4").stderr).expect("utf-8");
     assert!(stderr.contains("1.21"), "should name the floor: {stderr}");
     assert!(
         stderr.contains("1.20.4"),
@@ -136,8 +115,8 @@ fn the_refusal_names_the_floor_the_target_and_the_fix() {
 #[test]
 fn the_refusal_points_at_the_line_that_set_the_floor() {
     let source = format!("@cairn 2026.7\n\n@requires version>=1.21\n{BUILD}");
-    let fixture = Fixture::new("cairn-version-cap", "position", &source);
-    let stderr = String::from_utf8(compile(&fixture, "1.20.4").stderr).expect("utf-8");
+    let fixture = Fixture::new(&source);
+    let stderr = String::from_utf8(compile_as(&fixture, "java", "1.20.4").stderr).expect("utf-8");
     assert!(
         stderr.contains(":3:1: this file requires"),
         "the `@requires` is the third line: {stderr}",
@@ -152,12 +131,8 @@ fn the_refusal_points_at_the_line_that_set_the_floor() {
 /// failure and no closer to a build.
 #[test]
 fn an_unsatisfiable_floor_says_so_instead_of_suggesting_a_target() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "unsat_msg",
-        &format!("@requires version>=99.0\n{BUILD}"),
-    );
-    let stderr = String::from_utf8(compile(&fixture, "1.21.4").stderr).expect("utf-8");
+    let fixture = Fixture::new(&format!("@requires version>=99.0\n{BUILD}"));
+    let stderr = String::from_utf8(compile_as(&fixture, "java", "1.21.4").stderr).expect("utf-8");
     assert!(
         stderr.contains("no supported java target satisfies it"),
         "should say the floor cannot be met: {stderr}",
@@ -175,12 +150,8 @@ fn an_unsatisfiable_floor_says_so_instead_of_suggesting_a_target() {
 /// A satisfiable floor names one that works, and only ones that work.
 #[test]
 fn a_satisfiable_floor_names_a_target_that_meets_it() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "sat_msg",
-        &format!("@requires version>=1.21.4\n{BUILD}"),
-    );
-    let stderr = String::from_utf8(compile(&fixture, "1.20.4").stderr).expect("utf-8");
+    let fixture = Fixture::new(&format!("@requires version>=1.21.4\n{BUILD}"));
+    let stderr = String::from_utf8(compile_as(&fixture, "java", "1.20.4").stderr).expect("utf-8");
     assert!(
         stderr.contains("--target 1.21.4"),
         "should suggest the target that meets the floor: {stderr}",
@@ -194,12 +165,8 @@ fn a_satisfiable_floor_names_a_target_that_meets_it() {
 
 #[test]
 fn a_target_at_the_floor_compiles() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "at",
-        &format!("@requires version>=1.21\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.21");
+    let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.21");
     assert!(
         out.status.success(),
         "stderr={}",
@@ -210,12 +177,8 @@ fn a_target_at_the_floor_compiles() {
 
 #[test]
 fn a_target_above_the_floor_compiles() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "above",
-        &format!("@requires version>=1.21\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.21.4");
+    let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.21.4");
     assert!(
         out.status.success(),
         "stderr={}",
@@ -227,13 +190,9 @@ fn a_target_above_the_floor_compiles() {
 /// says so for every target rather than only the low ones.
 #[test]
 fn a_floor_above_every_supported_target_refuses_all_of_them() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "unreachable",
-        &format!("@requires version>=99.0\n{BUILD}"),
-    );
+    let fixture = Fixture::new(&format!("@requires version>=99.0\n{BUILD}"));
     for target in ["1.20.4", "1.21", "1.21.4", "latest"] {
-        let out = compile(&fixture, target);
+        let out = compile_as(&fixture, "java", target);
         assert_eq!(out.status.code(), Some(1), "{target}");
     }
 }
@@ -242,9 +201,9 @@ fn a_floor_above_every_supported_target_refuses_all_of_them() {
 /// may make an ordinary file harder to compile.
 #[test]
 fn a_source_with_no_requirement_compiles_against_any_target() {
-    let fixture = Fixture::new("cairn-version-cap", "none", BUILD);
+    let fixture = Fixture::new(BUILD);
     for target in ["1.20.4", "1.21", "1.21.4"] {
-        let out = compile(&fixture, target);
+        let out = compile_as(&fixture, "java", target);
         assert!(
             out.status.success(),
             "{target}: {}",
@@ -261,12 +220,8 @@ fn a_source_with_no_requirement_compiles_against_any_target() {
 /// requirement is an error in its own right.
 #[test]
 fn a_malformed_requirement_is_reported_as_itself_not_as_a_cap() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "malformed",
-        &format!("@requires version<1.20\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.20.4");
+    let fixture = Fixture::new(&format!("@requires version<1.20\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.20.4");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -290,8 +245,8 @@ fn a_malformed_requirement_is_reported_as_itself_not_as_a_cap() {
 #[test]
 fn a_malformed_requirement_is_reported_before_a_cap_it_would_also_trigger() {
     let source = format!("@requires version<1.20\n@requires version>=1.21\n{BUILD}");
-    let fixture = Fixture::new("cairn-version-cap", "malformed_and_capped", &source);
-    let out = compile(&fixture, "1.20.4");
+    let fixture = Fixture::new(&source);
+    let out = compile_as(&fixture, "java", "1.20.4");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -310,8 +265,8 @@ fn a_malformed_requirement_is_reported_before_a_cap_it_would_also_trigger() {
 #[test]
 fn equal_floors_report_at_the_first_of_them() {
     let source = format!("@requires version>=1.21\n@requires version>=1.21.0\n{BUILD}");
-    let fixture = Fixture::new("cairn-version-cap", "equal_floors", &source);
-    let stderr = String::from_utf8(compile(&fixture, "1.20.4").stderr).expect("utf-8");
+    let fixture = Fixture::new(&source);
+    let stderr = String::from_utf8(compile_as(&fixture, "java", "1.20.4").stderr).expect("utf-8");
     assert!(
         stderr.contains(":1:1: this file requires"),
         "the first of two equal floors owns the diagnostic: {stderr}",
@@ -328,8 +283,8 @@ fn equal_floors_report_at_the_first_of_them() {
 #[test]
 fn the_offered_target_clears_every_floor_not_only_the_reported_one() {
     let source = format!("@requires version>=1.21\n@requires version>=1.21.4\n{BUILD}");
-    let fixture = Fixture::new("cairn-version-cap", "two_floors", &source);
-    let stderr = String::from_utf8(compile(&fixture, "1.20.4").stderr).expect("utf-8");
+    let fixture = Fixture::new(&source);
+    let stderr = String::from_utf8(compile_as(&fixture, "java", "1.20.4").stderr).expect("utf-8");
     assert!(
         stderr.contains(":1:1:"),
         "the first floor in source order owns the diagnostic: {stderr}",
@@ -344,7 +299,7 @@ fn the_offered_target_clears_every_floor_not_only_the_reported_one() {
     );
     // Following the advice has to end in a build, which is the assertion
     // the string match above is a proxy for.
-    let out = compile(&fixture, "1.21.4");
+    let out = compile_as(&fixture, "java", "1.21.4");
     assert!(
         out.status.success(),
         "stderr={}",
@@ -357,24 +312,16 @@ fn the_offered_target_clears_every_floor_not_only_the_reported_one() {
 /// editing either.
 #[test]
 fn latest_is_held_to_the_floor_like_any_other_target() {
-    let satisfiable = Fixture::new(
-        "cairn-version-cap",
-        "latest_ok",
-        &format!("@requires version>=1.21\n{BUILD}"),
-    );
-    let out = compile(&satisfiable, "latest");
+    let satisfiable = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
+    let out = compile_as(&satisfiable, "java", "latest");
     assert!(
         out.status.success(),
         "stderr={}",
         String::from_utf8_lossy(&out.stderr),
     );
 
-    let unreachable = Fixture::new(
-        "cairn-version-cap",
-        "latest_cap",
-        &format!("@requires version>=99.0\n{BUILD}"),
-    );
-    let out = compile(&unreachable, "latest");
+    let unreachable = Fixture::new(&format!("@requires version>=99.0\n{BUILD}"));
+    let out = compile_as(&unreachable, "java", "latest");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -393,11 +340,7 @@ fn latest_is_held_to_the_floor_like_any_other_target() {
 /// The comparison works where the two schemes happen to agree.
 #[test]
 fn a_bedrock_target_is_held_to_the_floor_too() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "bedrock_cap",
-        &format!("@requires version>=99.0\n{BUILD}"),
-    );
+    let fixture = Fixture::new(&format!("@requires version>=99.0\n{BUILD}"));
     let out = compile_as(&fixture, "bedrock", "1.21.60");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
@@ -424,11 +367,7 @@ fn a_bedrock_target_is_held_to_the_floor_too() {
 /// of `1.21` is the same version by the comparison's own convention.
 #[test]
 fn a_bedrock_target_equal_to_the_floor_but_for_a_trailing_zero_compiles() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "bedrock_zero",
-        &format!("@requires version>=1.21\n{BUILD}"),
-    );
+    let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
     let out = compile_as(&fixture, "bedrock", "1.21.0");
     assert!(
         out.status.success(),
@@ -451,11 +390,7 @@ fn a_bedrock_target_equal_to_the_floor_but_for_a_trailing_zero_compiles() {
 /// it has no `DataVersion` in this edition's table and cannot be given one.
 #[test]
 fn a_java_shaped_floor_is_not_evaluated_against_bedrock_numbering() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "cross",
-        &format!("@requires version>=1.21.4\n{BUILD}"),
-    );
+    let fixture = Fixture::new(&format!("@requires version>=1.21.4\n{BUILD}"));
     let out = compile_as(&fixture, "bedrock", "1.21.40");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
@@ -484,11 +419,7 @@ fn a_java_shaped_floor_is_not_evaluated_against_bedrock_numbering() {
 /// mode this shape of test exists to catch.
 #[test]
 fn the_unorderable_refusal_offers_a_scope_that_works() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "cross_msg",
-        &format!("@requires version>=1.21.4\n{BUILD}"),
-    );
+    let fixture = Fixture::new(&format!("@requires version>=1.21.4\n{BUILD}"));
     let stderr =
         String::from_utf8(compile_as(&fixture, "bedrock", "1.21.40").stderr).expect("utf-8");
     assert!(
@@ -508,11 +439,7 @@ fn the_unorderable_refusal_offers_a_scope_that_works() {
     );
 
     // Now take the advice, and check it builds.
-    let repaired = Fixture::new(
-        "cairn-version-cap",
-        "cross_msg_fixed",
-        &format!("@requires java version>=1.21.4\n{BUILD}"),
-    );
+    let repaired = Fixture::new(&format!("@requires java version>=1.21.4\n{BUILD}"));
     let out = compile_as(&repaired, "bedrock", "1.21.40");
     assert!(
         out.status.success(),
@@ -528,11 +455,7 @@ fn the_unorderable_refusal_offers_a_scope_that_works() {
 /// the author wrote evaporates into a `verified: true` build.
 #[test]
 fn a_label_no_edition_can_place_is_not_answered_with_a_scope() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "snapshot_label",
-        &format!("@requires version>=24w14a\n{BUILD}"),
-    );
+    let fixture = Fixture::new(&format!("@requires version>=24w14a\n{BUILD}"));
     let stderr =
         String::from_utf8(compile_as(&fixture, "bedrock", "1.21.60").stderr).expect("utf-8");
     assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
@@ -551,13 +474,9 @@ fn a_label_no_edition_can_place_is_not_answered_with_a_scope() {
 ///
 /// The refusal is checked whole: exit code `1` and nothing written, so a
 /// regression that prints the refusal and then builds anyway fails here.
-fn assert_no_bedrock_scope_is_offered(name: &str, label: &str) {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        name,
-        &format!("@requires version>={label}\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.21.4");
+fn assert_no_bedrock_scope_is_offered(label: &str) {
+    let fixture = Fixture::new(&format!("@requires version>={label}\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "`{label}`: {stderr}");
     assert!(
@@ -588,7 +507,7 @@ fn assert_no_bedrock_scope_is_offered(name: &str, label: &str) {
 /// Java release; the Bedrock table only grows upward, so that holds.
 #[test]
 fn a_label_below_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
-    assert_no_bedrock_scope_is_offered("below_every_row", "1.14.5");
+    assert_no_bedrock_scope_is_offered("1.14.5");
 }
 
 /// A label Bedrock's table places above every row is not one of its
@@ -602,7 +521,7 @@ fn a_label_below_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
 /// the code.
 #[test]
 fn a_label_above_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
-    assert_no_bedrock_scope_is_offered("above_every_row", "1.99");
+    assert_no_bedrock_scope_is_offered("1.99");
 }
 
 /// A label the other edition's table carries as a row gets the scope, and
@@ -615,12 +534,8 @@ fn a_label_above_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
 /// targetable ones. And the advice is taken, to a build.
 #[test]
 fn a_label_naming_a_row_of_the_other_edition_is_offered_its_scope() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "other_row",
-        &format!("@requires version>=1.21.20\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.21.4");
+    let fixture = Fixture::new(&format!("@requires version>=1.21.20\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
@@ -633,11 +548,7 @@ fn a_label_naming_a_row_of_the_other_edition_is_offered_its_scope() {
         "should offer the bedrock scope: {stderr}",
     );
 
-    let repaired = Fixture::new(
-        "cairn-version-cap",
-        "other_row_fixed",
-        &format!("@requires bedrock version>=1.21.20\n{BUILD}"),
-    );
+    let repaired = Fixture::new(&format!("@requires bedrock version>=1.21.20\n{BUILD}"));
     let out = compile_as(&repaired, "bedrock", "1.21.40");
     assert!(
         out.status.success(),
@@ -655,12 +566,8 @@ fn a_label_naming_a_row_of_the_other_edition_is_offered_its_scope() {
 /// which calls the label a release where it is the candidate for one.
 #[test]
 fn a_pre_release_of_a_row_of_the_other_edition_is_offered_its_scope() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "other_pre_release",
-        &format!("@requires version>=1.19.30-rc1\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.21.4");
+    let fixture = Fixture::new(&format!("@requires version>=1.19.30-rc1\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "{stderr}");
     assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
@@ -669,11 +576,7 @@ fn a_pre_release_of_a_row_of_the_other_edition_is_offered_its_scope() {
         "should offer the bedrock scope: {stderr}",
     );
 
-    let repaired = Fixture::new(
-        "cairn-version-cap",
-        "other_pre_release_fixed",
-        &format!("@requires bedrock version>=1.19.30-rc1\n{BUILD}"),
-    );
+    let repaired = Fixture::new(&format!("@requires bedrock version>=1.19.30-rc1\n{BUILD}"));
     let out = compile_as(&repaired, "bedrock", "1.21.40");
     assert!(
         out.status.success(),
@@ -690,19 +593,15 @@ fn a_pre_release_of_a_row_of_the_other_edition_is_offered_its_scope() {
 /// with the second is what made this refuse a build that `canary` accepted.
 #[test]
 fn a_floor_naming_a_release_the_pack_cannot_build_for_still_orders() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "unbuildable_row",
-        &format!("@requires version>=1.21.1\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.21.4");
+    let fixture = Fixture::new(&format!("@requires version>=1.21.1\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.21.4");
     assert!(
         out.status.success(),
         "1.21.4 is above 1.21.1 by DataVersion: {}",
         String::from_utf8_lossy(&out.stderr),
     );
     // And below it is still below it.
-    let below = compile(&fixture, "1.21");
+    let below = compile_as(&fixture, "java", "1.21");
     assert_eq!(below.status.code(), Some(1));
     assert!(
         String::from_utf8_lossy(&below.stderr).contains("E_VERSION_CAP"),
@@ -716,12 +615,8 @@ fn a_floor_naming_a_release_the_pack_cannot_build_for_still_orders() {
 /// offer a release as a `--target` the pack would then refuse.
 #[test]
 fn an_orderable_but_unbuildable_release_is_not_offered_as_a_target() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "unbuildable_floor",
-        &format!("@requires version>=1.21.11\n{BUILD}"),
-    );
-    let stderr = String::from_utf8(compile(&fixture, "1.21.4").stderr).expect("utf-8");
+    let fixture = Fixture::new(&format!("@requires version>=1.21.11\n{BUILD}"));
+    let stderr = String::from_utf8(compile_as(&fixture, "java", "1.21.4").stderr).expect("utf-8");
     assert!(
         stderr.contains("no supported java target satisfies it"),
         "{stderr}",
@@ -736,11 +631,7 @@ fn an_orderable_but_unbuildable_release_is_not_offered_as_a_target() {
 /// to Java, builds Bedrock because it says nothing about Bedrock.
 #[test]
 fn a_java_scoped_floor_is_inert_on_a_bedrock_build() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "scoped_java",
-        &format!("@requires java version>=1.21.4\n{BUILD}"),
-    );
+    let fixture = Fixture::new(&format!("@requires java version>=1.21.4\n{BUILD}"));
     let out = compile_as(&fixture, "bedrock", "1.21.0");
     assert!(
         out.status.success(),
@@ -748,7 +639,7 @@ fn a_java_scoped_floor_is_inert_on_a_bedrock_build() {
         String::from_utf8_lossy(&out.stderr),
     );
     // And it is still enforced where it does apply.
-    let java = compile(&fixture, "1.21");
+    let java = compile_as(&fixture, "java", "1.21");
     assert_eq!(java.status.code(), Some(1));
     let stderr = String::from_utf8(java.stderr).expect("utf-8");
     assert!(stderr.contains("E_VERSION_CAP"), "{stderr}");
@@ -763,11 +654,7 @@ fn a_java_scoped_floor_is_inert_on_a_bedrock_build() {
 /// then offer a scope it already carries.
 #[test]
 fn a_scoped_floor_naming_no_release_of_its_own_edition_is_refused_without_the_scope_advice() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "scoped_unorderable",
-        &format!("@requires bedrock version>=1.21.5\n{BUILD}"),
-    );
+    let fixture = Fixture::new(&format!("@requires bedrock version>=1.21.5\n{BUILD}"));
     let stderr =
         String::from_utf8(compile_as(&fixture, "bedrock", "1.21.40").stderr).expect("utf-8");
     assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
@@ -787,7 +674,7 @@ fn a_scoped_floor_naming_no_release_of_its_own_edition_is_refused_without_the_sc
 fn a_floor_per_edition_builds_both() {
     let source =
         format!("@requires java version>=1.21\n@requires bedrock version>=1.21.40\n{BUILD}");
-    let fixture = Fixture::new("cairn-version-cap", "both", &source);
+    let fixture = Fixture::new(&source);
     for (edition, target) in [("java", "1.21.4"), ("bedrock", "1.21.60")] {
         let out = compile_as(&fixture, edition, target);
         assert!(
@@ -816,19 +703,15 @@ fn a_floor_per_edition_builds_both() {
 /// directive rather than mis-ordered; now it is a floor, and it is met.
 #[test]
 fn a_pre_release_floor_is_met_by_the_release_it_names() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "prerelease",
-        &format!("@requires version>=1.21.4-rc1\n{BUILD}"),
-    );
-    let out = compile(&fixture, "1.21.4");
+    let fixture = Fixture::new(&format!("@requires version>=1.21.4-rc1\n{BUILD}"));
+    let out = compile_as(&fixture, "java", "1.21.4");
     assert!(
         out.status.success(),
         "stderr={}",
         String::from_utf8_lossy(&out.stderr),
     );
     // And a target below the release it precedes still misses it.
-    let below = compile(&fixture, "1.21");
+    let below = compile_as(&fixture, "java", "1.21");
     assert_eq!(below.status.code(), Some(1));
     assert!(
         String::from_utf8_lossy(&below.stderr).contains("E_VERSION_CAP"),
@@ -848,13 +731,11 @@ fn a_pre_release_floor_is_met_by_the_release_it_names() {
 #[test]
 fn a_floor_a_def_declares_refuses_the_target_and_names_the_def() {
     let fixture = Fixture::new(
-        "cairn-version-cap",
-        "def-floor",
         "theme t:\n  slot floor -> @oak_planks\n\
          \ndef cottage size=2x2:\n  requires version>=1.21.4\n  floor mat_slot=floor\n\
          \nsite hamlet:\n  place id=a use=cottage theme=t at=origin\n",
     );
-    let out = compile(&fixture, "1.21");
+    let out = compile_as(&fixture, "java", "1.21");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(stderr.contains("E_VERSION_CAP"), "{stderr}");
@@ -882,12 +763,10 @@ fn a_floor_a_def_declares_refuses_the_target_and_names_the_def() {
 #[test]
 fn a_floor_a_bound_theme_declares_refuses_the_target() {
     let fixture = Fixture::new(
-        "cairn-version-cap",
-        "theme-floor",
         "theme t:\n  requires version>=1.21.4\n  slot floor -> @oak_planks\n\
          \nstruct s size=2x2\n  floor mat_slot=floor\n",
     );
-    let out = compile(&fixture, "1.21");
+    let out = compile_as(&fixture, "java", "1.21");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -905,13 +784,11 @@ fn a_floor_a_bound_theme_declares_refuses_the_target() {
 #[test]
 fn the_refusal_names_the_floor_that_refused_not_the_first_one() {
     let fixture = Fixture::new(
-        "cairn-version-cap",
-        "header-and-part",
         "@requires version>=1.20.4\ntheme t:\n  slot floor -> @oak_planks\n\
          \ndef cottage size=2x2:\n  requires version>=1.21.4\n  floor mat_slot=floor\n\
          \nsite hamlet:\n  place id=a use=cottage theme=t at=origin\n",
     );
-    let out = compile(&fixture, "1.21");
+    let out = compile_as(&fixture, "java", "1.21");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -933,12 +810,10 @@ fn the_refusal_names_the_floor_that_refused_not_the_first_one() {
 #[test]
 fn a_theme_bound_only_by_an_unplaced_def_refuses_nothing() {
     let fixture = Fixture::new(
-        "cairn-version-cap",
-        "unplaced-def-theme-floor",
         "theme t:\n  requires version>=1.21.4\n  slot floor -> @oak_planks\n\
          \ndef cottage size=2x2:\n  floor mat_slot=floor\n",
     );
-    let out = compile(&fixture, "1.20.4");
+    let out = compile_as(&fixture, "java", "1.20.4");
     assert!(
         out.status.success(),
         "stderr={}",
@@ -951,14 +826,10 @@ fn a_theme_bound_only_by_an_unplaced_def_refuses_nothing() {
 /// rather than an error.
 #[test]
 fn a_floor_on_an_unplaced_def_refuses_nothing() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "unplaced-def-floor",
-        &format!(
-            "def spare size=2x2:\n  requires version>=1.21.4\n  floor mat_slot=floor\n\n{BUILD}"
-        ),
-    );
-    let out = compile(&fixture, "1.20.4");
+    let fixture = Fixture::new(&format!(
+        "def spare size=2x2:\n  requires version>=1.21.4\n  floor mat_slot=floor\n\n{BUILD}"
+    ));
+    let out = compile_as(&fixture, "java", "1.20.4");
     assert!(
         out.status.success(),
         "stderr={}",
@@ -992,12 +863,8 @@ fn pale_moss_under(floors: &str) -> String {
 /// is what supplies the premise.
 #[test]
 fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "floor-block",
-        &pale_moss_under("@requires version>=1.21.4\n"),
-    );
-    let out = compile(&fixture, "1.20.4");
+    let fixture = Fixture::new(&pale_moss_under("@requires version>=1.21.4\n"));
+    let out = compile_as(&fixture, "java", "1.20.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert!(
@@ -1015,7 +882,7 @@ fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks()
         "a suspended run is refused and writes nothing",
     );
 
-    let built = compile(&fixture, "1.21.4");
+    let built = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8(built.stderr).expect("utf-8");
     assert_eq!(
         built.status.code(),
@@ -1036,12 +903,8 @@ fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks()
 /// still `E_UNKNOWN_ID`.
 #[test]
 fn a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "cleared-block",
-        &pale_moss_under("@requires version>=1.20.4\n"),
-    );
-    let out = compile(&fixture, "1.20.4");
+    let fixture = Fixture::new(&pale_moss_under("@requires version>=1.20.4\n"));
+    let out = compile_as(&fixture, "java", "1.20.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert!(
@@ -1063,11 +926,7 @@ fn a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks() {
 /// premise the first half's missing `E_UNKNOWN_ID` rests on.
 #[test]
 fn an_unplaceable_floor_suspends_the_block_id_check_too() {
-    let fixture = Fixture::new(
-        "cairn-version-cap",
-        "unplaceable-block",
-        &pale_moss_under("@requires version>=1.21.4\n"),
-    );
+    let fixture = Fixture::new(&pale_moss_under("@requires version>=1.21.4\n"));
     let out = compile_as(&fixture, "bedrock", "1.21.40");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
@@ -1085,11 +944,7 @@ fn an_unplaceable_floor_suspends_the_block_id_check_too() {
         "a suspended run is refused and writes nothing",
     );
 
-    let scoped = Fixture::new(
-        "cairn-version-cap",
-        "unplaceable-block-scoped",
-        &pale_moss_under("@requires java version>=1.21.4\n"),
-    );
+    let scoped = Fixture::new(&pale_moss_under("@requires java version>=1.21.4\n"));
     let out = compile_as(&scoped, "bedrock", "1.21.40");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -1112,8 +967,8 @@ fn an_unplaceable_floor_suspends_the_block_id_check_too() {
 /// orders are run because the order is what a helper answering "the first
 /// floor in source order that refuses" gets wrong: it names the cap when
 /// the cap comes first.
-fn assert_the_unplaceable_floor_is_reported_beside_a_cap(label: &str, floors: &str) {
-    let fixture = Fixture::new("cairn-version-cap", label, &pale_moss_under(floors));
+fn assert_the_unplaceable_floor_is_reported_beside_a_cap(floors: &str) {
+    let fixture = Fixture::new(&pale_moss_under(floors));
     let out = compile_as(&fixture, "bedrock", "1.21.40");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
@@ -1139,7 +994,6 @@ fn assert_the_unplaceable_floor_is_reported_beside_a_cap(label: &str, floors: &s
 #[test]
 fn an_unplaceable_floor_before_a_cap_is_reported_as_unplaceable() {
     assert_the_unplaceable_floor_is_reported_beside_a_cap(
-        "unplaceable-then-cap",
         "@requires version>=1.21.4\n@requires version>=1.21.60\n",
     );
 }
@@ -1147,7 +1001,6 @@ fn an_unplaceable_floor_before_a_cap_is_reported_as_unplaceable() {
 #[test]
 fn an_unplaceable_floor_after_a_cap_is_reported_as_unplaceable() {
     assert_the_unplaceable_floor_is_reported_beside_a_cap(
-        "cap-then-unplaceable",
         "@requires version>=1.21.60\n@requires version>=1.21.4\n",
     );
 }

@@ -1,8 +1,6 @@
 //! End-to-end tests for `cairn info <file>`.
 
-use std::path::PathBuf;
-
-use crate::common::{cairn, crn_examples, examples_dir};
+use crate::common::{Fixture, cairn, crn_examples, examples_dir};
 
 #[test]
 fn info_1_clean_example_exits_zero_with_three_section_headers() {
@@ -151,10 +149,10 @@ fn info_7_empty_editions_value_is_rejected_with_exit_two() {
 
 #[test]
 fn info_8_file_without_requires_defaults_min_to_zero_zero() {
-    let path = tempfile_with_contents(
-        "no_requires",
+    let fixture = Fixture::new(
         "theme t:\n  slot m -> @oak_planks\n\nstruct s size=4x4\n  walls height=3 mat_slot=m\n",
     );
+    let path = fixture.source();
     let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
@@ -177,7 +175,8 @@ fn info_9_requires_floor_reaches_the_registry_range_however_it_is_spaced() {
         ("left", "@requires version >=1.21\n"),
         ("right", "@requires version>= 1.21\n"),
     ] {
-        let path = tempfile_with_contents(label, &format!("{header}struct s size=4x4\n"));
+        let fixture = Fixture::new(&format!("{header}struct s size=4x4\n"));
+        let path = fixture.source();
         let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
         assert!(
             out.status.success(),
@@ -201,10 +200,8 @@ fn info_9_requires_floor_reaches_the_registry_range_however_it_is_spaced() {
 /// stderr rather than an empty row nobody can read.
 #[test]
 fn info_9b_a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() {
-    let path = tempfile_with_contents(
-        "cross_edition_floor",
-        &format!("@requires version>=1.21.4\n{PAINTED_STRUCT}"),
-    );
+    let fixture = Fixture::new(&format!("@requires version>=1.21.4\n{PAINTED_STRUCT}"));
+    let path = fixture.source();
     let out = cairn(
         "info",
         &[path.to_str().unwrap(), "--editions", "java,bedrock"],
@@ -233,10 +230,8 @@ fn info_9b_a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() 
 /// And a floor scoped to one edition leaves the other alone.
 #[test]
 fn info_9c_a_scoped_floor_is_weighed_only_against_its_own_edition() {
-    let path = tempfile_with_contents(
-        "scoped_floor",
-        &format!("@requires java version>=1.21.4\n{PAINTED_STRUCT}"),
-    );
+    let fixture = Fixture::new(&format!("@requires java version>=1.21.4\n{PAINTED_STRUCT}"));
+    let path = fixture.source();
     let out = cairn(
         "info",
         &[path.to_str().unwrap(), "--editions", "java,bedrock"],
@@ -273,10 +268,10 @@ fn info_9c_a_scoped_floor_is_weighed_only_against_its_own_edition() {
 /// report they can act on.
 #[test]
 fn info_9d_the_floor_note_names_the_line_that_refused() {
-    let path = tempfile_with_contents(
-        "two_floors",
+    let fixture = Fixture::new(
         "@requires version>=1.20.4\n@requires java version>=1.21.4\nstruct s size=4x4\n",
     );
+    let path = fixture.source();
     let out = cairn("info", &[path.to_str().unwrap(), "--editions", "java"]);
     assert!(
         out.status.success(),
@@ -302,10 +297,8 @@ fn info_9d_the_floor_note_names_the_line_that_refused() {
 /// The reader is told which, rather than left to work it out.
 #[test]
 fn info_9e_a_scoped_only_file_says_why_the_neutral_row_is_empty() {
-    let path = tempfile_with_contents(
-        "scoped_only",
-        "@requires java version>=1.21.4\nstruct s size=4x4\n",
-    );
+    let fixture = Fixture::new("@requires java version>=1.21.4\nstruct s size=4x4\n");
+    let path = fixture.source();
     let out = cairn("info", &[path.to_str().unwrap(), "--editions", "java"]);
     assert!(
         out.status.success(),
@@ -338,10 +331,8 @@ fn info_9e_a_scoped_only_file_says_why_the_neutral_row_is_empty() {
 /// answer the code exists to stop.
 #[test]
 fn info_10_a_rejected_requirement_stops_info_in_both_formats() {
-    let path = tempfile_with_contents(
-        "bad_requires",
-        "@requires version<1.20\nstruct s size=4x4\n",
-    );
+    let fixture = Fixture::new("@requires version<1.20\nstruct s size=4x4\n");
+    let path = fixture.source();
     let text = cairn("info", &[path.to_str().unwrap()]);
     assert_eq!(text.status.code(), Some(1));
     assert!(
@@ -369,19 +360,6 @@ fn info_10_a_rejected_requirement_stops_info_in_both_formats() {
 /// every target before the floor is weighed.
 const PAINTED_STRUCT: &str =
     "theme t:\n  slot m -> @oak_planks\n\nstruct s size=4x4\n  floor mat_slot=m\n";
-
-/// Write a transient `.crn` under the system temp dir.
-///
-/// `label` distinguishes concurrent callers: the harness runs these as
-/// threads of one process, so the pid alone would have two of them writing
-/// and reading the same path.
-fn tempfile_with_contents(label: &str, contents: &str) -> PathBuf {
-    let mut path = std::env::temp_dir();
-    let pid = std::process::id();
-    path.push(format!("cairn-cli-info-{pid}-{label}.crn"));
-    std::fs::write(&path, contents).expect("write tempfile");
-    path
-}
 
 #[test]
 fn info_9_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
@@ -433,12 +411,12 @@ fn info_9_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
 /// disagree on their face.
 #[test]
 fn info_9f_the_neutral_row_reads_a_floor_a_placed_def_declares() {
-    let path = tempfile_with_contents(
-        "def_floor",
+    let fixture = Fixture::new(
         "theme t:\n  slot floor -> @oak_planks\n\
          \ndef cottage size=4x4:\n  requires version>=1.21.4\n  floor mat_slot=floor\n\
          \nsite hamlet:\n  place id=a use=cottage theme=t at=origin\n",
     );
+    let path = fixture.source();
     let out = cairn("info", &[path.to_str().unwrap(), "--editions", "java"]);
     assert!(
         out.status.success(),
@@ -473,12 +451,12 @@ fn info_9f_the_neutral_row_reads_a_floor_a_placed_def_declares() {
 /// carries as `registry_compat.min` with nothing on the row to correct it.
 #[test]
 fn info_9g_a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
-    let path = tempfile_with_contents(
-        "variant_floor",
+    let fixture = Fixture::new(
         "theme shop:\n  requires version>=1.21.4\n  slot floor -> @oak_planks\n\
          \ntheme shop_bedrock:\n  slot floor -> @oak_planks\n\
          \nstruct s size=4x4\n  floor mat_slot=floor\n",
     );
+    let path = fixture.source();
     let out = cairn("info", &[path.to_str().unwrap(), "--editions", "bedrock"]);
     assert!(
         out.status.success(),
@@ -524,12 +502,12 @@ fn info_8b_the_declared_range_is_not_an_answer_about_which_versions_build() {
     // beside a palette only the newest one has. `1.20.4 .. latest` reads
     // as an authoritative answer, and the row two below disproves it —
     // with `1.20.4` itself among the refusals.
-    let floored = tempfile_with_contents(
-        "floor_below_its_palette",
+    let floored_fixture = Fixture::new(
         "@requires version>=1.20.4\n\ntheme pale:\n  slot floor -> @pale_moss_block\n\
          \x20\x20slot wall -> @cobblestone\n\
          \nstruct hut size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n",
     );
+    let floored = floored_fixture.source();
     let stdout = info_rows(&floored, "java");
     // The claim first, taken off both rows rather than written twice: the
     // version the declared range opens at is one a build refuses. No
@@ -555,11 +533,11 @@ fn info_8b_the_declared_range_is_not_an_answer_about_which_versions_build() {
     // And the case where the row has nothing to report: `0.0` is the
     // widest range it can print, beside four refusals across two
     // editions.
-    let floorless = tempfile_with_contents(
-        "narrow_palette_no_floor",
+    let floorless_fixture = Fixture::new(
         "theme pale:\n  slot floor -> @pale_moss_block\n  slot wall -> @cobblestone\n\
          \nstruct hut size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n",
     );
+    let floorless = floorless_fixture.source();
     let stdout = info_rows(&floorless, "java,bedrock");
     assert!(
         stdout.contains("registry compatibility:  0.0 .. latest"),
@@ -623,10 +601,8 @@ fn declared_edge_and_refusals(stdout: &str) -> (String, Vec<&str>) {
 /// refuses, which a `java` walked twice would print twice.
 #[test]
 fn info_4b_an_edition_named_twice_is_reported_once() {
-    let path = tempfile_with_contents(
-        "repeated_edition",
-        &format!("@requires java version>=1.21.4\n{PAINTED_STRUCT}"),
-    );
+    let fixture = Fixture::new(&format!("@requires java version>=1.21.4\n{PAINTED_STRUCT}"));
+    let path = fixture.source();
     let path = path.to_str().unwrap();
     for (repeated, distinct) in [
         ("java,java", "java"),

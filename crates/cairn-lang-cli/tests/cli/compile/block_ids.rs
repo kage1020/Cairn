@@ -10,7 +10,7 @@
 
 use std::process::Command;
 
-use crate::common::{Fixture, cairn_argv, cargo_bin, compile_as};
+use crate::common::{Fixture, cairn_argv, cargo_bin, compile_as, stderr_of};
 
 /// A struct with one painted floor whose material comes from `slot floor`.
 /// `{id}` is what the theme binds, so each test names exactly the id it is
@@ -19,17 +19,9 @@ fn source_binding(id: &str) -> String {
     format!("theme t:\n  slot floor -> @{id}\nstruct s size=2x2\n  floor mat_slot=floor\n")
 }
 
-fn stderr_of(out: &std::process::Output) -> String {
-    String::from_utf8(out.stderr.clone()).expect("utf-8 stderr")
-}
-
 #[test]
 fn an_id_no_edition_has_is_refused_rather_than_written() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "nonsense",
-        &source_binding("totally_not_a_block"),
-    );
+    let fixture = Fixture::new(&source_binding("totally_not_a_block"));
     let out = compile_as(&fixture, "java", "1.21.4");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
@@ -51,11 +43,7 @@ fn an_id_no_edition_has_is_refused_rather_than_written() {
 /// tags are built, so a check placed one step later leaves it behind.
 #[test]
 fn a_refused_id_writes_nothing() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "nothing",
-        &source_binding("totally_not_a_block"),
-    );
+    let fixture = Fixture::new(&source_binding("totally_not_a_block"));
     let out = compile_as(&fixture, "java", "1.21.4");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     assert_eq!(
@@ -70,7 +58,7 @@ fn a_java_only_block_is_refused_on_bedrock_and_compiles_on_java() {
     // `minecraft:light` is Java's light block. Bedrock 1.21.60 has no id of
     // that name at all — it spells the same thing `light_block_0` …
     // `light_block_15` — so the same source must part ways at the edition.
-    let bedrock = Fixture::new("cairn-block-ids", "light-bedrock", &source_binding("light"));
+    let bedrock = Fixture::new(&source_binding("light"));
     let out = compile_as(&bedrock, "bedrock", "1.21.60");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
@@ -79,7 +67,7 @@ fn a_java_only_block_is_refused_on_bedrock_and_compiles_on_java() {
         "the message must name the registry it checked, got: {stderr}",
     );
 
-    let java = Fixture::new("cairn-block-ids", "light-java", &source_binding("light"));
+    let java = Fixture::new(&source_binding("light"));
     let out = compile_as(&java, "java", "1.21.4");
     assert_eq!(
         out.status.code(),
@@ -91,7 +79,7 @@ fn a_java_only_block_is_refused_on_bedrock_and_compiles_on_java() {
 
 #[test]
 fn a_typo_is_answered_with_the_id_the_target_does_spell() {
-    let fixture = Fixture::new("cairn-block-ids", "typo", &source_binding("oak_plank"));
+    let fixture = Fixture::new(&source_binding("oak_plank"));
     let out = compile_as(&fixture, "java", "1.21.4");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
@@ -111,7 +99,7 @@ fn a_typo_is_answered_with_the_id_the_target_does_spell() {
 /// are one block.
 #[test]
 fn a_rename_is_answered_with_the_name_the_target_uses() {
-    let fixture = Fixture::new("cairn-block-ids", "rename", &source_binding("light"));
+    let fixture = Fixture::new(&source_binding("light"));
     let out = compile_as(&fixture, "bedrock", "1.21.60");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
@@ -130,11 +118,7 @@ fn a_rename_is_answered_with_the_name_the_target_uses() {
 /// target's own id table answers it.
 #[test]
 fn the_same_group_answers_from_either_edition() {
-    let on_bedrock = Fixture::new(
-        "cairn-block-ids",
-        "sign-bedrock",
-        &source_binding("oak_sign"),
-    );
+    let on_bedrock = Fixture::new(&source_binding("oak_sign"));
     let out = compile_as(&on_bedrock, "bedrock", "1.21.60");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     assert!(
@@ -143,11 +127,7 @@ fn the_same_group_answers_from_either_edition() {
         stderr_of(&out),
     );
 
-    let on_java = Fixture::new(
-        "cairn-block-ids",
-        "sign-java",
-        &source_binding("standing_sign"),
-    );
+    let on_java = Fixture::new(&source_binding("standing_sign"));
     let out = compile_as(&on_java, "java", "1.21.4");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     assert!(
@@ -165,11 +145,7 @@ fn the_same_group_answers_from_either_edition() {
 /// an id that is simply not a block.
 #[test]
 fn an_id_no_group_names_still_says_it_has_no_candidate() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "no-group",
-        &source_binding("totally_not_a_block"),
-    );
+    let fixture = Fixture::new(&source_binding("totally_not_a_block"));
     let out = compile_as(&fixture, "bedrock", "1.21.60");
     let stderr = stderr_of(&out);
     assert!(
@@ -185,11 +161,7 @@ fn an_id_no_group_names_still_says_it_has_no_candidate() {
 /// accept both spellings everywhere and catch neither mistake.
 #[test]
 fn an_id_is_checked_against_the_version_and_not_the_edition() {
-    let old = Fixture::new(
-        "cairn-block-ids",
-        "flat-old",
-        &source_binding("stone_bricks"),
-    );
+    let old = Fixture::new(&source_binding("stone_bricks"));
     let out = compile_as(&old, "bedrock", "1.21.0");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     assert!(
@@ -198,11 +170,7 @@ fn an_id_is_checked_against_the_version_and_not_the_edition() {
         stderr_of(&out),
     );
 
-    let new = Fixture::new(
-        "cairn-block-ids",
-        "flat-new",
-        &source_binding("stone_bricks"),
-    );
+    let new = Fixture::new(&source_binding("stone_bricks"));
     let out = compile_as(&new, "bedrock", "1.21.60");
     assert_eq!(
         out.status.code(),
@@ -219,8 +187,6 @@ fn an_id_is_checked_against_the_version_and_not_the_edition() {
 fn a_material_token_follows_the_rename_across_its_editions_range() {
     for target in ["1.21.0", "1.21.40", "1.21.60"] {
         let fixture = Fixture::new(
-            "cairn-block-ids",
-            &format!("token-{target}"),
             "theme t:\n  slot floor -> @floor.stone.smooth\nstruct s size=2x2\n  floor mat_slot=floor\n",
         );
         let out = compile_as(&fixture, "bedrock", target);
@@ -244,11 +210,7 @@ fn a_material_token_follows_the_rename_across_its_editions_range() {
 /// what says the default did not move with it.
 #[test]
 fn check_stays_silent_about_ids_because_it_does_not_lower() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "check",
-        &source_binding("totally_not_a_block"),
-    );
+    let fixture = Fixture::new(&source_binding("totally_not_a_block"));
     let out = Command::new(cargo_bin())
         .arg("check")
         .arg(fixture.source())
@@ -271,11 +233,7 @@ fn check_stays_silent_about_ids_because_it_does_not_lower() {
 /// mistake for a routing decision.
 #[test]
 fn a_walkway_path_id_is_checked_too() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "walkway",
-        &two_huts_joined_by("totally_not_a_block"),
-    );
+    let fixture = Fixture::new(&two_huts_joined_by("totally_not_a_block"));
     let out = compile_as(&fixture, "java", "1.21.4");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
@@ -286,11 +244,7 @@ fn a_walkway_path_id_is_checked_too() {
 
     // The same shape with a real block has to still build, or the test
     // above would pass on any source that happens to fail.
-    let ok = Fixture::new(
-        "cairn-block-ids",
-        "walkway-ok",
-        &two_huts_joined_by("gravel"),
-    );
+    let ok = Fixture::new(&two_huts_joined_by("gravel"));
     let out = compile_as(&ok, "java", "1.21.4");
     assert_eq!(
         out.status.code(),
@@ -310,11 +264,7 @@ fn a_walkway_path_id_is_checked_too() {
 /// control: the same id on a `slot` is still `E_UNKNOWN_ID`.
 #[test]
 fn a_theme_selector_binding_id_does_not_refuse_the_build() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "selector",
-        &window_bound_to("totally_not_a_block"),
-    );
+    let fixture = Fixture::new(&window_bound_to("totally_not_a_block"));
     let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = stderr_of(&out);
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
@@ -344,8 +294,6 @@ fn a_theme_selector_binding_id_does_not_refuse_the_build() {
 #[test]
 fn a_binding_in_a_def_nothing_places_is_not_an_error() {
     let fixture = Fixture::new(
-        "cairn-block-ids",
-        "unplaced-def",
         "theme medieval:\n  slot glass -> @glass_pane\n  slot bad   -> @no_such_slot_block\n  \
          window[class=small] -> frame=@no_such_binding_block\n\n\
          def shed size=9x7:\n  \
@@ -397,14 +345,8 @@ fn buildable_row(fixture: &Fixture) -> String {
 /// without the binding row gets.
 #[test]
 fn a_bad_binding_id_leaves_every_target_buildable() {
-    let with = Fixture::new(
-        "cairn-block-ids",
-        "info-binding",
-        &window_bound_to("totally_not_a_block"),
-    );
+    let with = Fixture::new(&window_bound_to("totally_not_a_block"));
     let without = Fixture::new(
-        "cairn-block-ids",
-        "info-no-binding",
         &window_bound_to("totally_not_a_block")
             .replace("  window[class=small] -> frame=@totally_not_a_block\n", ""),
     );
@@ -423,8 +365,6 @@ fn a_bad_binding_id_leaves_every_target_buildable() {
 #[test]
 fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
     let fixture = Fixture::new(
-        "cairn-block-ids",
-        "cobbl",
         "theme medieval:\n  slot wall -> @wall.stone.cobble\n  \
          walls[class=outer] -> trim=@wall.stone.cobbl\n\n\
          struct cottage size=9x7\n  walls class=outer mat_slot=wall height=3\n",
@@ -477,11 +417,7 @@ fn two_huts_joined_by(path: &str) -> String {
 /// as `info` — it lowers, but against no version.
 #[test]
 fn lower_stays_silent_about_ids_because_it_takes_no_target() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "lower",
-        &source_binding("totally_not_a_block"),
-    );
+    let fixture = Fixture::new(&source_binding("totally_not_a_block"));
     let out = Command::new(cargo_bin())
         .arg("lower")
         .arg(fixture.source())
@@ -513,11 +449,7 @@ fn lower_stays_silent_about_ids_because_it_takes_no_target() {
 /// that version.
 #[test]
 fn info_blames_a_named_target_or_says_nothing_about_ids() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "info",
-        &source_binding("totally_not_a_block"),
-    );
+    let fixture = Fixture::new(&source_binding("totally_not_a_block"));
     let out = Command::new(cargo_bin())
         .arg("info")
         .arg(fixture.source())
@@ -553,11 +485,7 @@ fn info_blames_a_named_target_or_says_nothing_about_ids() {
 /// message ahead of every parse and lowering diagnostic.
 #[test]
 fn an_unresolvable_target_is_still_reported_as_a_target_problem() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "badtarget",
-        &source_binding("oak_planks"),
-    );
+    let fixture = Fixture::new(&source_binding("oak_planks"));
     let out = compile_as(&fixture, "java", "1.99");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
@@ -576,11 +504,7 @@ fn an_unresolvable_target_is_still_reported_as_a_target_problem() {
 /// the `@id` it resolves to starts at column 17.
 #[test]
 fn the_refusal_points_at_the_line_that_names_the_material() {
-    let fixture = Fixture::new(
-        "cairn-block-ids",
-        "span",
-        &source_binding("totally_not_a_block"),
-    );
+    let fixture = Fixture::new(&source_binding("totally_not_a_block"));
     let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = stderr_of(&out);
     assert!(

@@ -202,8 +202,8 @@ fn compile_reports_the_build_it_committed() {
     // closed run has to leave the same artifacts and lock as the open one.
     // Two copies, so neither run reads the other's lock.
     let village = std::fs::read_to_string(examples_dir().join("village.crn")).expect("read");
-    let open_fixture = Fixture::new("cli_closed_stdout", "open", &village);
-    let closed_fixture = Fixture::new("cli_closed_stdout", "closed", &village);
+    let open_fixture = Fixture::new(&village);
+    let closed_fixture = Fixture::new(&village);
     let open_src = open_fixture.source();
     let closed_src = closed_fixture.source();
     assert_closed_stdout_keeps_the_verdict(
