@@ -14,17 +14,7 @@ use super::canvas::{MemberCanvas, ScopePalette};
 use super::members::{StructCtx, resolve_member_state, side_name, side_of};
 use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
 
-/// Voxelise a `stair` member as a horizontal band of stair blocks along one
-/// wall: the eave `themed-tower.crn` uses to trim between floors.
-///
-/// Reads `kind=stairs`, a `side=` naming a wall, `half=top|bottom`
-/// (default `top`, so a plain `stair` is an inverted eave), `facing=out|in`
-/// (default `out`, the riser away from the interior) and
-/// `shape=straight|outer_left|outer_right` (default `straight`); any other
-/// `kind=`, `half=`, `facing=` or `shape=` defers with `W_DEFERRED_MEMBER`.
-/// The row lands at `y_offset + y=` (default `0`) in the overhang column
-/// one voxel outside the wall, so with no overhang the stair defers rather
-/// than overwrite the wall.
+/// Paint a `stair kind=stairs` member as a band of stairs in the overhang outside a wall.
 pub(super) fn fill_stair(
     member: &Member,
     y_offset: u32,
@@ -33,11 +23,7 @@ pub(super) fn fill_stair(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // A value that is not an identifier at all (`half="bottom"`,
-    // `facing=1`) is unreadable rather than unsupported: the band is drawn
-    // with the default state. Read before anything can refuse the stair,
-    // so every unreadable state is reported in the same compile as the
-    // refusal, with a note that says which of the two happened.
+    // Read before anything can refuse the stair, so every unreadable state is reported now.
     let mut unread = Vec::new();
     let mut ident = |key: &'static str, expected: &'static str, default: &'static str| {
         ident_or_ignore(member, key, expected).unwrap_or_else(|argument| {
@@ -68,9 +54,7 @@ pub(super) fn fill_stair(
     }
 }
 
-/// The three state arguments of an eave `stair`, as identifiers: `None`
-/// is a key not written, or written with a value [`fill_stair`] could not
-/// read, and either way takes the default.
+/// The eave's `facing`, `half` and `shape` identifiers; `None` takes the default.
 #[derive(Debug, Clone, Copy)]
 struct EaveStates<'m> {
     facing: Option<&'m str>,
@@ -78,8 +62,7 @@ struct EaveStates<'m> {
     shape: Option<&'m str>,
 }
 
-/// [`fill_stair`]'s refusals and paint. Returns whether the band was drawn,
-/// which is what the note on an unreadable state has to say.
+/// [`fill_stair`]'s refusals and paint; whether the band was drawn.
 fn draw_eave_band(
     member: &Member,
     states: EaveStates<'_>,
@@ -101,9 +84,6 @@ fn draw_eave_band(
     let Some(y_world) = eave_row(member, y_offset, ctx, diagnostics) else {
         return false;
     };
-    // The band's `facing` / `half` / `shape` come from its own arguments
-    // rather than a slope, but are attached all the same, so the material
-    // must be able to carry them.
     let resolved = resolve_member_state(
         member,
         ctx.scope,
@@ -129,8 +109,7 @@ fn draw_eave_band(
     true
 }
 
-/// Whether the stair's `kind=` is `stairs`, the one kind an eave band
-/// draws. Any other, or none, is refused with a `W_DEFERRED_MEMBER`.
+/// Whether the stair's `kind=` is `stairs`, refusing any other with a `W_DEFERRED_MEMBER`.
 fn eave_kind_is_stairs(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
     let Some(raw_kind) = member.ident_value("kind") else {
         let reason = if member.intent_state.contains_key("kind") {
@@ -152,9 +131,7 @@ fn eave_kind_is_stairs(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bo
 }
 
 impl EaveStates<'_> {
-    /// The `facing`, `half` and `shape` the band's stairs carry along the
-    /// `side` wall, a state not given taking its default. `None` after a
-    /// `W_DEFERRED_MEMBER` for a value the band does not support.
+    /// The `facing`, `half` and `shape` the band carries on `side`, or `None` after a refusal.
     fn block_states(
         self,
         member: &Member,
@@ -201,20 +178,14 @@ impl EaveStates<'_> {
     }
 }
 
-/// The row an eave band lands on: its `y=`, `0` when not given, above the
-/// level's `y_offset`. `None` after a `W_DEFERRED_MEMBER` when no roof
-/// draws an overhang for the band to sit in, when `y=` is unreadable, or
-/// when the row is past the top of the volume.
+/// The row an eave band lands on, or `None` after a `W_DEFERRED_MEMBER`.
 fn eave_row(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<u32> {
-    // The gate is the overhang the roof *draws*, not the `overhang=` the
-    // author wrote: a roof that will not draw contributes none, so a
-    // struct with `overhang=2` and no `kind=` arrives here at zero.
-    // Naming only the key would send that author to the wrong line.
+    // The overhang a roof draws, not the `overhang=` written: a roof that draws nothing gives none.
     if ctx.overhang == 0 {
         diagnostics.push(diag_deferred_member_reason(
             member,
@@ -241,8 +212,7 @@ fn eave_row(
     Some(y_world)
 }
 
-/// Paint `idx` along the whole `side` wall at row `y_world`, each cell
-/// shifted one voxel outward into the overhang column.
+/// Paint `idx` along the whole `side` wall at `y_world`, one voxel out in the overhang column.
 fn paint_eave_band(
     side: WallSide,
     y_world: u32,
@@ -261,9 +231,7 @@ fn paint_eave_band(
             ctx.interior_h,
             ctx.dims,
         ) else {
-            // INVARIANT(wall-grid-validated): `u` walks the length the
-            // helper checks, and `eave_row` refused `y_world >= dims.y`.
-            // Release builds skip the cell rather than panic.
+            // INVARIANT(wall-grid-validated): `u` is on the wall; `eave_row` checked `y_world`.
             debug_assert!(
                 false,
                 "eave stair cell u={u} y={y_world} on the {} wall is outside the wall grid; \
@@ -278,11 +246,7 @@ fn paint_eave_band(
     }
 }
 
-/// Opposite of the wall's outward normal — used for `facing=in`.
-///
-/// `facing=out` reuses [`shed_high_side`], since a shed's high edge points
-/// the cardinal of the wall's outward normal; a second copy of that
-/// mapping could drift.
+/// The cardinal opposite the wall's outward normal, for `facing=in`.
 fn inward_cardinal(side: WallSide) -> Cardinal {
     match side {
         WallSide::Front => Cardinal::North,
@@ -292,9 +256,7 @@ fn inward_cardinal(side: WallSide) -> Cardinal {
     }
 }
 
-/// Shift a wall voxel's `(x, z)` by one voxel toward the wall's outward
-/// normal so an eave lands in the overhang row instead of overwriting the
-/// wall itself.
+/// Shift a wall voxel's `(x, z)` one voxel along the wall's outward normal.
 pub(super) fn shift_outward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
     let (dx, dz) = side.outward_normal();
     (x.saturating_add_signed(dx), z.saturating_add_signed(dz))

@@ -12,20 +12,12 @@ use crate::block_array::material::{IdOrigin, UnknownId};
 
 use super::members::MemberFallback;
 
-/// Where an `@token` was read from, for the prose of the abstract-token
-/// diagnostics. [`Self::MemberSlot`] also carries what gets built without
-/// the material, which [`Self::consequence`] words.
-///
-/// Only `W_ABSTRACT_TOKEN_DEFERRED` reads that payload.
-/// [`diag_unknown_abstract_token`] reads [`Self::token_noun`] and
-/// [`Self::catalog_note`] alone, because `E_UNKNOWN_ABSTRACT_TOKEN` stops the
-/// build and there is no fallback to describe.
+/// Where an `@token` was read from, for the prose of the abstract-token diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TokenSite {
     /// A `connect` row's `path=`.
     WalkwayPath,
-    /// A member's `mat_slot=` binding, with what becomes of that member
-    /// when the binding resolves to nothing.
+    /// A member's `mat_slot=` binding, with what becomes of the member without it.
     MemberSlot(MemberFallback),
 }
 
@@ -37,8 +29,7 @@ impl TokenSite {
         }
     }
 
-    /// What the build does instead, worded to follow "cannot be lowered
-    /// without the registry pack; ".
+    /// What the build does instead, following "cannot be lowered without the registry pack; ".
     fn consequence(self) -> &'static str {
         match self {
             Self::WalkwayPath => "the walkway falls back to air",
@@ -120,18 +111,7 @@ pub(super) fn diag_unknown_abstract_token(
     }
 }
 
-/// Say that a state literal was taken as written, when `value` carries one.
-///
-/// `spec/versioning-editions` "Fail-loud and minimum-version inference"
-/// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, but no
-/// table this compiler holds says which properties a block has or which
-/// values each takes. So the literal reaches the palette and the structure
-/// file unchanged, right or wrong, and this warning keeps that from being
-/// silent. It anchors on the value as `E_UNKNOWN_ID` does, so a mistake
-/// right of the `[` is pointed at from the same place as one left of it.
-///
-/// Only a canonical token folds a `[` into its text, so a state that came
-/// from anywhere else — a catalog lookup, a member default — is not one.
+/// Warn that a state literal reaches the output unchecked, when `value` carries one.
 pub(super) fn diag_state_literal_unchecked(
     value: &ValueWithSpan,
     state: &BlockState,
@@ -162,12 +142,7 @@ pub(super) fn diag_state_literal_unchecked(
     })
 }
 
-/// Report a block id the compile's target does not declare.
-///
-/// Serves the member and the walkway site alike, which differ only in the
-/// span. The prose forks on *who chose* the id: an author can correct what
-/// they typed, but a catalog mapping is not theirs to edit, and blaming
-/// their token would send them to the wrong file.
+/// Report a block id the compile's target does not declare, worded for who chose the id.
 pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
     let UnknownId {
         id,
@@ -192,10 +167,7 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             ),
         }),
     }
-    // One note, and the alias table wins it: handed both "this target
-    // calls it X" and "the nearest spelling is Y", a reader must guess
-    // which the compiler believes, and it is always the first. The payload
-    // carries both, for a consumer that can show them apart.
+    // One note, the alias table winning it; the payload carries both answers.
     notes.push(DiagnosticNote {
         span: None,
         message: match (aliases.as_slice(), suggestion) {

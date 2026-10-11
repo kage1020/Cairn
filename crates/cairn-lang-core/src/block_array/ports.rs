@@ -1,17 +1,7 @@
-//! Where a `connect` row's ports sit in world space.
+//! Where a `connect` row's ports sit in world space, or why one cannot be placed.
 //!
-//! [`port_world_position`] turns a `(place_origin, def, port_id)` triple
-//! into the world voxel one block outside the member's `side=` face. Only
-//! `door` and `window` members carry ports: a door anchors at its
-//! `at=center | left | right`, a window at its rectangle's centre
-//! (`offset + size.w / 2`). A port it cannot place comes back as the one
-//! [`PortRejection`] that says why, which the caller turns into the
-//! `connect` row's `W_DEFERRED_MEMBER`.
-//!
-//! The caller hands over the [`WallColumn`] the body was lowered with
-//! rather than this module deriving it again from the `def`: a port is
-//! somewhere a wall was opened, and a second derivation can disagree with
-//! the cut.
+//! Ports take the [`WallColumn`] the body was lowered against, so they cannot disagree with the
+//! cut.
 
 use std::collections::HashSet;
 use std::hash::BuildHasher;
@@ -28,46 +18,29 @@ use super::openings::{
 };
 use super::wall_column::WallColumn;
 
-/// Wall-local `v` every port anchors at, whatever the member's `y=`:
-/// walkways are flat one-voxel strips on the placement's ground row.
+/// Wall-local `v` every port anchors at, whatever the member's `y=`.
 const PORT_GROUND_V: u32 = 0;
 
-/// World row a door port's doorway opens at: one above the base plane,
-/// which the floor slab owns. It is where the masonry has to be; the strip
-/// lands on [`PORT_GROUND_V`], one row below.
+/// World row a door port's doorway opens at: one above the floor slab.
 ///
-/// `super::lower::door::carve_door` asks about `y_offset + 1`, which is
-/// this only because port resolution refuses a door nested under a
-/// `level` (pinned in `tests/lower/door_wall_fit.rs`). A port lookup over
-/// the flattened members would make the two disagree.
+/// `carve_door` asks about `y_offset + 1`; the two agree because no port reaches a door under a
+/// `level`.
 const DOOR_PORT_BASE_V: u32 = 1;
 
-/// Why [`port_world_position`] placed no port: one variant per refusal, in
-/// the order it asks, so the `connect` row names the one it hit rather than
-/// every contract a port has.
-///
-/// A variant naming a member carries its span for the note to point at.
-/// For the side, argument and masonry variants that line also has its own
-/// `W_DEFERRED_MEMBER`, since the opening was not cut either.
+/// Why [`port_world_position`] placed no port, one variant per refusal in the order it asks.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum PortRejection {
-    /// No member of the `def` body carries the port's `id=`. A `connect`
-    /// never reaches this, because the resolver refuses it first
-    /// (`E_UNRESOLVED_PORT`), but the function answers every input.
+    /// No member of the `def` body carries the port's `id=`.
     UnknownMember,
-    /// The member's role is not one a port can anchor on. Only `door` and
-    /// `window` are openings; stair and roof ports are reserved.
+    /// The member's role is not `door` or `window`.
     ReservedRole { role: String, member: Span },
     /// `side=` is missing or does not name a cardinal wall.
     Side { written: Written, member: Span },
-    /// The `def` has no `size=`, so its walls have no length. Unreachable
-    /// from a `connect` too: such a placement is refused before walkways
-    /// are laid.
+    /// The `def` has no `size=`, so its walls have no length.
     Sizeless,
     /// A door's `at=` is missing or is not `center | left | right`.
     DoorAt { written: Written, member: Span },
-    /// No `walls` member of the body paints, so a door has nothing to
-    /// open.
+    /// No `walls` member of the body paints.
     DoorNoWalls { member: Span },
     /// The walls paint, but not the row a door opens at.
     DoorOutsideCourse { walls: WallColumn, member: Span },
@@ -80,8 +53,7 @@ pub(super) enum PortRejection {
         wall_length: u32,
         member: Span,
     },
-    /// No `walls` member of the body paints, so a window has nothing to
-    /// be cut into.
+    /// No `walls` member of the body paints.
     WindowNoWalls { member: Span },
     /// The walls paint, but not every row of the window.
     WindowOutsideCourse {
@@ -90,22 +62,14 @@ pub(super) enum PortRejection {
         walls: WallColumn,
         member: Span,
     },
-    /// Every rule above held and the openings pass still did not cut the
-    /// opening: a window argument only the cut reads (`repeat=`, `step=`,
-    /// `sym=`) deferred it, or its `mat_slot=` resolved to no block. A
-    /// strip to it would end at a wall.
+    /// Every rule above held and the openings pass still did not cut the opening.
     NotCut { role: &'static str, member: Span },
-    /// The port's world coordinate does not fit an `i32`: a `place` far
-    /// enough from the origin that one more step overflows.
+    /// The port's world coordinate does not fit an `i32`.
     OutOfRange,
 }
 
 impl PortRejection {
-    /// The note the `connect` row carries for the endpoint `port`
-    /// (`place.port`), pointing at the member when there is one.
-    ///
-    /// A door's `at=` and a window's arguments are worded by the same
-    /// clause as the member's own line.
+    /// The note the `connect` row carries for the endpoint `port` (`place.port`).
     pub(super) fn note(&self, port: &str) -> DiagnosticNote {
         let (member, own_line) = self.anchor();
         let own_line = if own_line {
@@ -119,12 +83,7 @@ impl PortRejection {
         }
     }
 
-    /// The member the refusal is about, when it is about one, and whether
-    /// that member's own line carries a deferral for the same fault.
-    ///
-    /// The two answers split differently: a reserved role has a line but
-    /// no finding there about the port (a `stair` lowers clean), and
-    /// [`Self::NotCut`] says where to look itself.
+    /// The member the refusal is about, and whether its own line reports the same fault.
     fn anchor(&self) -> (Option<&Span>, bool) {
         match self {
             Self::Side { member, .. }
@@ -142,15 +101,13 @@ impl PortRejection {
         }
     }
 
-    /// What is wrong, as the predicate of a sentence whose subject is the
-    /// port.
+    /// What is wrong, as the predicate of a sentence whose subject is the port.
     fn fault(&self) -> String {
         const NO_WALLS: &str = "its `def` has no `walls` that paints — a positive `height=` and a `mat_slot=` that resolves";
         match self {
             Self::UnknownMember => "names no member of its `def` body".to_owned(),
             Self::ReservedRole { role, .. } => {
-                // Only the reserved roles: after `floor` the parenthetical
-                // would read as though floor ports were reserved.
+                // After `floor` the parenthetical would read as though floor ports were reserved.
                 let reserved = if role == "stair" || role == "roof" {
                     format!(" (`{role}` ports are reserved)")
                 } else {
@@ -207,8 +164,7 @@ impl PortRejection {
                 ),
             },
             Self::NotCut { role, .. } => {
-                // Only a window paints a material; a door is carved to
-                // air, so its line is the one place a reason can be.
+                // A door is carved to air, so only a window has a material to blame.
                 let why = if *role == "window" {
                     "the finding on its own line, or on the material its `mat_slot=` names, says why"
                 } else {
@@ -226,40 +182,11 @@ impl PortRejection {
     }
 }
 
-/// World-space `(x, y, z)` one block outside the named port's wall, on
-/// the placement's ground row (`place_origin.1`).
-///
-/// `place_dims` are the placement's extents inflated by the roof
-/// overhang, so the walls sit at `origin + overhang`;
-/// `(dims.x - interior_w) / 2` inverts the inflation [`super::lower`]
-/// applies.
-///
-/// `walls` is the column [`super::lower`] painted this body against: the
-/// openings phase reads the rows the `walls` members *painted*, which a
-/// walk over the `def` cannot see.
-///
-/// A door's `u` comes from `at=` ([`door_anchor_offset`]); a window's is
-/// its rectangle's centre, `offset + size.w / 2`, which `sym=` and `y=` do
-/// not move.
-///
-/// `cut` holds the spans of the doors and windows the openings pass cut.
-/// The checks here say *why* for every rule the port reads itself; `cut`
-/// covers the rest (`repeat=`, `step=`, `sym=`, a `mat_slot=` that
-/// resolves to no block), including any rule the cut gains later.
+/// The world cell one block outside `port_id`'s wall, on the placement's ground row.
 ///
 /// # Errors
 ///
-/// A [`PortRejection`] naming the first refusal, asked in this order: the
-/// role (a stair is refused for being a stair, whatever else is wrong),
-/// `side=`, the `def`'s `size=`, then the openings pass's own questions in
-/// its order, so the `connect` row gives the reason the member's line
-/// gives: the door's `at=` and masonry, or the window's `offset=`, `y=`,
-/// `size=`, horizontal fit and masonry. Then [`PortRejection::NotCut`],
-/// and last whether the world coordinate fits.
-///
-/// The horizontal fit here is `offset + size.w`; the cut's spans every
-/// `repeat=` stamp. A window the two disagree on was deferred by the cut,
-/// and `cut` refuses it.
+/// The first [`PortRejection`], in the order the member's own line reports its faults.
 pub(super) fn port_world_position<S: BuildHasher>(
     place_origin: (i32, i32, i32),
     place_dims: Dims,
@@ -302,8 +229,6 @@ pub(super) fn port_world_position<S: BuildHasher>(
     let def_size = def.size.as_ref().ok_or(PortRejection::Sizeless)?;
     let interior_w = def_size.w.get();
     let interior_h = def_size.h.get();
-    // Overhang inflates both axes alike; `max` keeps the port outside the
-    // larger eave should they ever differ.
     let overhang_x = place_dims.x.saturating_sub(interior_w) / 2;
     let overhang_z = place_dims.z.saturating_sub(interior_h) / 2;
     let overhang = overhang_x.max(overhang_z);
@@ -313,9 +238,6 @@ pub(super) fn port_world_position<S: BuildHasher>(
             written,
             member: member.span.clone(),
         })?;
-        // The question `carve_door` asks of this column: *where* the walls
-        // are, not merely whether, since walls only above a `level` start
-        // above the doorway's row.
         if walls.is_empty() {
             return Err(PortRejection::DoorNoWalls {
                 member: member.span.clone(),
@@ -374,22 +296,9 @@ fn opening_was_cut<S: BuildHasher>(
     }
 }
 
-/// A window port's wall-local `u`, its rectangle's centre
-/// `offset + size.w / 2`, or the [`PortRejection`] saying how the window
-/// misses its wall.
+/// A window port's wall-local `u`, its rectangle's centre `offset + size.w / 2`.
 ///
-/// The arguments come from [`read_window_args`], as the cut's do
-/// (`super::lower::window::cut_window`). The bounds follow in the cut's
-/// order, so a window wrong both ways gets the reason its own line gives:
-///
-/// - Horizontal: `offset + size.w ≤ wall_length`, so a window may end
-///   flush with the corner. The cut also bounds every `repeat=` stamp,
-///   which this does not.
-/// - Vertical: every row lies in one course of `wall_column`
-///   ([`WallColumn::contains_rows`], the cut's predicate). A
-///   `walls height=H` fills rows `1 ..= H`, so a window flush with its top
-///   (`y + size.h == H + 1`) fits and one at `y=0`, on the floor slab,
-///   does not.
+/// Bounds are checked in the cut's order, so a window wrong both ways gets its own line's reason.
 fn window_center_offset(
     member: &Member,
     len: u32,
@@ -431,12 +340,7 @@ fn window_center_offset(
     Ok(offset + sw / 2)
 }
 
-/// The world `(x, z)` of wall-local `u` on the ground row, through
-/// [`wall_local_to_grid`] so ports and the openings pass share one mapping.
-///
-/// `None` means the world coordinate overflowed: [`door_anchor_offset`] and
-/// [`window_center_offset`] already put `u` inside the wall, so
-/// [`wall_local_to_grid`]'s own `None` is unreachable.
+/// The world `(x, z)` of wall-local `u` on the ground row, or `None` on overflow.
 fn wall_world_xz(
     side: WallSide,
     u: u32,

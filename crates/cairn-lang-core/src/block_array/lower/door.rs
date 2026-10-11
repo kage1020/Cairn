@@ -12,13 +12,7 @@ use crate::block_array::openings::{
 use super::canvas::MemberCanvas;
 use super::members::{StructCtx, side_name, side_of};
 
-/// Rows a doorway opens where the course it is cut into has room for
-/// them: the head height of a Minecraft door.
-///
-/// A ceiling rather than a size. The rows are counted from the row the
-/// door opens at, that row included, so a course whose top *is* that row
-/// yields an opening one row tall — the row above a short course is the
-/// roof or the gap over the wall, not masonry to cut. See [`carve_door`].
+/// Most rows a doorway opens, counted from the row it opens at; a shorter course cuts fewer.
 const DOOR_HEIGHT: u32 = 2;
 
 pub(super) fn carve_door(
@@ -32,11 +26,7 @@ pub(super) fn carve_door(
         return;
     };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
-    // A `connect` port on this door reads `at=` and words its refusal
-    // through these same functions, so the cut, the walkway and both
-    // messages agree. Asked before the wall, as `fill_window` reads its
-    // rectangle first, so an `at=` typo is reported even on a body whose
-    // walls are wrong too.
+    // Asked before the wall, so an `at=` typo is reported even when the walls are wrong too.
     let at = match door_anchor_offset(member, len) {
         Ok(at) => at,
         Err(written) => {
@@ -47,18 +37,10 @@ pub(super) fn carve_door(
             return;
         }
     };
-    // Gate and cap come from the course holding the row the door opens
-    // at, `y_offset + 1` (the floor slab owns the base plane), never from
-    // the tallest wall row: over a shorter course stands the gap or the
-    // roof at `wall_top + 1`, which a door judged against `wall_top` would
-    // carve. `fill_window` asks the same column, so the two agree.
+    // Judged against the course holding the door's row, never the tallest wall row.
     let base_row = y_offset.saturating_add(1);
     let Some(course_top) = ctx.wall_column.course_top_at(base_row) else {
-        // "Nowhere" and "not here" are different findings. An empty
-        // column means no `walls` paints, which a positive `height=` does
-        // not settle: an unresolved `mat_slot=` empties it too, so naming
-        // only the height would send the author of `height=4` over a
-        // themeless struct to the wrong line. Same split as `fill_window`'s.
+        // An unresolved `mat_slot=` empties the column too, so "no walls" names both causes.
         let reason = if ctx.wall_column.is_empty() {
             "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into".to_owned()
         } else {
@@ -70,10 +52,7 @@ pub(super) fn carve_door(
         diagnostics.push(diag_deferred_member_reason(member, &reason));
         return;
     };
-    // Only the opening is cut; no door block (`oak_door` with hinge,
-    // half, facing, open) is placed. A door's `mat_slot=` is what that
-    // block would read, so `MemberRole::unread_arguments` lists it as
-    // unreached on a `door`.
+    // Only the opening is cut; no door block is placed.
     let door_height = course_top
         .saturating_sub(base_row)
         .saturating_add(1)
@@ -89,10 +68,7 @@ pub(super) fn carve_door(
             ctx.interior_h,
             ctx.dims,
         ) else {
-            // INVARIANT(wall-grid-validated): `at < len` by the match
-            // above and `door_height` keeps every row within `course_top`,
-            // so `wall_local_to_grid`'s `u < length` / `v < dims.y` cannot
-            // refuse. Release builds skip the cell rather than panic.
+            // INVARIANT(wall-grid-validated): `at < len`, and `door_height` stays in `course_top`.
             debug_assert!(
                 false,
                 "door row y={v} at u={at} on the {} wall is outside the wall grid; \

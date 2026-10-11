@@ -19,8 +19,7 @@ fn from_ident_parses_four_cardinals() {
 
 #[test]
 fn front_wall_maps_u_to_x_and_z_to_far_edge() {
-    // size=9x7, overhang=1 → interior x ∈ [1, 9], z ∈ [1, 7].
-    // Front wall is the +z face: z = overhang + size.h - 1 = 7.
+    // size=9x7, overhang=1: the front wall sits at z = 1 + 7 - 1 = 7.
     let dims = dims_for(9, 7, 1, 9);
     assert_eq!(
         wall_local_to_grid(WallSide::Front, 0, 1, 1, 9, 7, dims),
@@ -34,8 +33,6 @@ fn front_wall_maps_u_to_x_and_z_to_far_edge() {
 
 #[test]
 fn back_wall_mirrors_u_along_x() {
-    // size=9x7, overhang=1. Back wall at z=overhang=1, and u=0 at the
-    // opposite x corner from the front's.
     let dims = dims_for(9, 7, 1, 9);
     assert_eq!(
         wall_local_to_grid(WallSide::Back, 0, 1, 1, 9, 7, dims),
@@ -50,7 +47,6 @@ fn back_wall_mirrors_u_along_x() {
 #[test]
 fn left_and_right_walls_run_along_z() {
     let dims = dims_for(9, 7, 1, 9);
-    // Left wall: x=overhang, u runs along z starting at z=overhang.
     assert_eq!(
         wall_local_to_grid(WallSide::Left, 0, 2, 1, 9, 7, dims),
         Some((1, 2, 1)),
@@ -59,7 +55,6 @@ fn left_and_right_walls_run_along_z() {
         wall_local_to_grid(WallSide::Left, 6, 2, 1, 9, 7, dims),
         Some((1, 2, 7)),
     );
-    // Right wall: x=overhang+size.w-1=9, u runs along z mirrored.
     assert_eq!(
         wall_local_to_grid(WallSide::Right, 0, 2, 1, 9, 7, dims),
         Some((9, 2, 7)),
@@ -73,12 +68,10 @@ fn left_and_right_walls_run_along_z() {
 #[test]
 fn out_of_range_returns_none() {
     let dims = dims_for(9, 7, 1, 9);
-    // u past the wall length.
     assert_eq!(
         wall_local_to_grid(WallSide::Front, 9, 1, 1, 9, 7, dims),
         None,
     );
-    // v past dims.y.
     assert_eq!(
         wall_local_to_grid(WallSide::Front, 0, 9, 1, 9, 7, dims),
         None,
@@ -87,9 +80,6 @@ fn out_of_range_returns_none() {
 
 #[test]
 fn the_gate_is_exactly_the_wall_on_every_side() {
-    // The callers' assertions only catch a gate that tightens. One that
-    // loosens returns no `None` at all, and on the back and right walls
-    // the `saturating_sub` mirror answers a valid-looking corner cell.
     let dims = dims_for(9, 7, 1, 9);
     for (side, len, last_cell) in [
         (WallSide::Front, 9, (9, 8, 7)),

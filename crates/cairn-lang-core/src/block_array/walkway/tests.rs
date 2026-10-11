@@ -1,15 +1,9 @@
 use super::*;
 
-/// Manhattan distance between two ground-plane cells: the fewest steps
-/// a route can take, so a route with no detour is `manhattan + 1` cells.
 fn manhattan(a: (i32, i32, i32), b: (i32, i32, i32)) -> usize {
     usize::try_from((a.0 - b.0).abs() + (a.2 - b.2).abs()).expect("non-negative")
 }
 
-/// Structural invariants every successful route must satisfy: the
-/// endpoints are the requested ports, consecutive cells are
-/// 4-neighbour adjacent at a constant Y, no cell repeats, and no
-/// cell collides with `blocked`.
 fn assert_route_shape(
     path: &[(i32, i32, i32)],
     from: (i32, i32, i32),
@@ -45,8 +39,6 @@ fn route(
     route_path(from, to, &BlockedIndex::new(blocked))
 }
 
-/// Direction changes along `path`, the second component of the
-/// router's cost.
 fn turn_count(path: &[(i32, i32, i32)]) -> usize {
     path.windows(3)
         .filter(|w| {
@@ -68,10 +60,7 @@ fn route_path_unobstructed_is_shortest() {
 
 #[test]
 fn route_path_detours_around_a_wall() {
-    // Wall at x=2, z∈[-2, 2]. The shortest detours run through z=±3,
-    // outside the bbox of blocked ∪ endpoints, so they exist only
-    // through the one-cell inflation margin: this also pins that
-    // margin, since an off-by-one leaves no way round.
+    // The z=±3 detours exist only through the search rectangle's one-cell margin.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     for z in -2..=2 {
         blocked.insert((2, 0, z));
@@ -89,9 +78,6 @@ fn route_path_detours_around_a_wall() {
 
 #[test]
 fn route_path_prefers_fewest_turns_among_shortest_routes() {
-    // Every shortest detour is 11 cells: a staircase has up to 8
-    // turns, the U along the margin row 2. Without `turns` in the
-    // cost, heap order would choose, and a zigzag looks hand-broken.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     for z in -2..=2 {
         blocked.insert((2, 0, z));
@@ -106,9 +92,6 @@ fn route_path_prefers_fewest_turns_among_shortest_routes() {
 
 #[test]
 fn route_path_breaks_symmetric_ties_toward_positive_x() {
-    // The east and west detours tie in length and turns; `STEP_DIRS`
-    // expands `PosX` first, so the east one wins. village.crn's
-    // home1↔home3 walkway rounds home1's east face by this rule.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     for x in -2..=2 {
         blocked.insert((x, 0, 3));
@@ -124,8 +107,6 @@ fn route_path_breaks_symmetric_ties_toward_positive_x() {
 
 #[test]
 fn route_path_is_deterministic() {
-    // The lockfile pins walkway origin and dims, so a tie-break that
-    // varied between runs would break reproducible builds.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     for z in -2..=2 {
         blocked.insert((2, 0, z));
@@ -137,8 +118,6 @@ fn route_path_is_deterministic() {
 
 #[test]
 fn route_path_is_independent_of_blocked_insertion_order() {
-    // Same cells, different insertion order, `RandomState` and bucket
-    // layout: determinism must not lean on hash-set iteration order.
     let cells: Vec<(i32, i32, i32)> = (-2..=2).map(|z| (2, 0, z)).collect();
     let forward: HashSet<(i32, i32, i32)> = cells.iter().copied().collect();
     let reverse: HashSet<(i32, i32, i32)> = cells.iter().rev().copied().collect();
@@ -149,8 +128,6 @@ fn route_path_is_independent_of_blocked_insertion_order() {
 
 #[test]
 fn route_path_reports_which_endpoint_is_buried() {
-    // The error says which side so the caller's `W_WALKWAY_BLOCKED`
-    // note points at the right port.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     blocked.insert((0, 0, 0));
     blocked.insert((9, 0, 9));
@@ -179,8 +156,6 @@ fn route_path_reports_which_endpoint_is_buried() {
 
 #[test]
 fn route_path_reports_enclosed_target_as_unreachable() {
-    // A ring of blocked cells round `to`: the search must end rather
-    // than spin.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     for d in -1..=1 {
         blocked.insert((5 + d, 0, 4));
@@ -196,17 +171,12 @@ fn route_path_reports_enclosed_target_as_unreachable() {
 
 #[test]
 fn route_path_same_endpoints_yields_single_cell() {
-    // `lower_connects` never asks this (a collision-free 1-cell L
-    // never reaches the router), but `route_path` is public and one
-    // cell is the honest answer for coincident ports.
     let blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     assert_eq!(route((5, 0, 5), (5, 0, 5), &blocked), Ok(vec![(5, 0, 5)]));
 }
 
 #[test]
 fn route_path_ignores_blocked_cells_on_other_y_planes() {
-    // `blocked` is a world-space 3D set; cells at a different Y must
-    // neither obstruct the route nor inflate the search bounds.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     for z in -2..=2 {
         blocked.insert((2, 7, z));
@@ -218,9 +188,6 @@ fn route_path_ignores_blocked_cells_on_other_y_planes() {
 
 #[test]
 fn route_path_mixed_y_planes_only_walk_plane_obstructs() {
-    // A longer copy of the wall at y=7 must not count: an inverted or
-    // missing `y` filter would block the z=±3 crossing and return a
-    // longer path.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     for z in -2..=2 {
         blocked.insert((2, 0, z));
@@ -236,7 +203,6 @@ fn route_path_mixed_y_planes_only_walk_plane_obstructs() {
 
 #[test]
 fn route_path_gives_up_past_the_area_cap() {
-    // Fail fast rather than allocate the world.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     blocked.insert((1, 0, 0));
     assert!(matches!(
@@ -247,12 +213,7 @@ fn route_path_gives_up_past_the_area_cap() {
 
 #[test]
 fn route_path_area_cap_boundary_is_exclusive() {
-    // Pins the `>` in the cap check from both sides. One far blocked
-    // cell at `(a, 0, 1997)` makes the inflated rectangle
-    // `(a+3) × 2000`: `a=1997` is exactly the 4-million cap
-    // (allowed), `a=1998` one column past it. The endpoints are
-    // adjacent, so the allowed search still takes a few heap pops:
-    // the cap bounds the worst case, not every search.
+    // The far cell makes the inflated rectangle `(a + 3) × 2000`: `a = 1997` is exactly the cap.
     let at_cap: HashSet<(i32, i32, i32)> = std::iter::once((1997, 0, 1997)).collect();
     let path = route((0, 0, 0), (1, 0, 0), &at_cap).expect("area == cap is allowed");
     assert_eq!(path, vec![(0, 0, 0), (1, 0, 0)]);
@@ -275,10 +236,6 @@ fn route_path_area_cap_boundary_is_exclusive() {
 
 #[test]
 fn route_path_pins_the_exact_tie_broken_detour() {
-    // Catches any change to the cost, the `STEP_DIRS` order or the
-    // equal-cost keep-first rule. The bounding-box pins in
-    // `tests/lower/village.rs` survive a tie-break flip, since both
-    // sides share a bbox.
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
     for z in -2..=2 {
         blocked.insert((2, 0, z));
@@ -304,14 +261,7 @@ fn route_path_pins_the_exact_tie_broken_detour() {
 
 #[test]
 fn route_path_detours_along_each_edge_of_the_coordinate_space() {
-    // The one-cell margin may lie on `i32::MIN` or `i32::MAX`, and a
-    // cell there has a neighbour past the edge that the router must
-    // skip rather than compute.
-    //
-    // Local coordinates: `a` is the distance from the edge, `b` runs
-    // along it. Endpoints at `a = 1`, a wall at `b = 2` over
-    // `a ∈ 1..=3`: the short way round is along `a = 0`, the edge
-    // itself (7 cells); the far way, through `a = 4`, takes 11.
+    // `a` is the distance from the edge and `b` runs along it; the short way round is `a = 0`.
     type Local = fn(i32, i32) -> (i32, i32, i32);
     let edges: [(&str, Local); 4] = [
         ("+x", |a, b| (i32::MAX - a, 0, b)),
@@ -373,19 +323,13 @@ fn l_path_same_endpoints_yields_single_cell() {
     assert_eq!(path, vec![(5, 0, 5)]);
 }
 
-/// A path with no x leg is all z leg, and its first cell is still the
-/// one the x leg pushed: the stepping order alone keeps it single.
 #[test]
 fn l_path_along_z_alone_lays_each_cell_once() {
     let path = l_path((4, 0, 0), (4, 0, 3));
     assert_eq!(path, vec![(4, 0, 0), (4, 0, 1), (4, 0, 2), (4, 0, 3)]);
 }
 
-/// A lookup into the laid cells on every z step would make a
-/// north–south strip quadratic: hours for a million cells in a debug
-/// build, against milliseconds for the linear walk. The deadline sits
-/// orders of magnitude from both, and the walk runs on its own thread
-/// so a quadratic one fails here instead of hanging the suite.
+// The walk runs on its own thread so a quadratic one fails here instead of hanging the suite.
 #[test]
 fn l_path_lays_a_long_z_strip_in_less_than_quadratic_time() {
     use std::sync::mpsc::RecvTimeoutError;
@@ -436,7 +380,6 @@ fn build_walkway_array_fills_unblocked_cells() {
     assert_eq!(layout.blocked_count, 0);
     assert_eq!(layout.origin, (0, 0, 0));
     assert_eq!(layout.array.dims, Dims { x: 2, y: 1, z: 2 });
-    // (0,0,1) is inside the bbox but off the path.
     let palette_id_at = |x: u32, z: u32| -> &str {
         let i = layout.array.dims.index(x, 0, z).expect("in-range");
         let pi = layout.array.voxels[i];

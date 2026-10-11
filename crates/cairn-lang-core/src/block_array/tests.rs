@@ -35,8 +35,7 @@ fn try_intern_refuses_only_a_new_state_once_every_index_is_taken() {
     assert_eq!(palette.try_intern(BlockState::air()), Ok(PaletteIndex::AIR));
 }
 
-/// Without the clamp this panics, so it is caught to fail as the assertion
-/// instead.
+// Unclamped, this panics; catching it lets the assertion report the failure.
 #[test]
 fn try_intern_within_clamps_a_capacity_past_what_an_index_can_name() {
     let mut palette = filled(PALETTE_CAPACITY);
@@ -110,8 +109,7 @@ fn ids(p: &Palette) -> Vec<&str> {
 
 #[test]
 fn canonicalize_sorts_by_id_and_pins_air_at_slot_zero() {
-    // `minecraft:acacia_log` sorts ahead of `minecraft:air`, so the
-    // pin is doing work here rather than agreeing with the sort.
+    // `acacia_log` sorts ahead of `air`, so only the pin keeps air at slot 0.
     let mut p = Palette::new_with_air();
     p.intern(BlockState::bare("minecraft:oak_planks"));
     p.intern(BlockState::bare("minecraft:acacia_log"));
@@ -152,10 +150,6 @@ fn canonicalize_breaks_an_id_tie_on_the_properties() {
 
 #[test]
 fn canonicalize_reads_properties_in_name_order_not_insertion_order() {
-    // Same id on both, and `half` first in one bag but second in the
-    // other, so a key that read the pairs in place would compare
-    // `half=top` against `facing=south`. A source state literal arrives
-    // sorted, but a registry's `lookup` or a hand-built state need not.
     let mut p = Palette::new_with_air();
     p.intern(state(
         "minecraft:oak_stairs",

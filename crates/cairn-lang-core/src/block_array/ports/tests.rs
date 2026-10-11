@@ -5,8 +5,7 @@ fn pid(name: &str) -> PortId {
     PortId::new(name).expect("valid port id")
 }
 
-/// [`port_world_position`] with every door and window taken as cut, for
-/// the cases about the port's own rules.
+/// [`port_world_position`] with every door and window taken as cut.
 fn port_at(
     origin: (i32, i32, i32),
     dims: Dims,
@@ -23,9 +22,7 @@ fn port_at(
     port_world_position(origin, dims, def, id, walls, &cut)
 }
 
-/// The column the fixture's top-level `walls` declare, whether or not
-/// their materials resolve. The port against what a body actually
-/// paints is pinned in `tests/lower/port_reads_the_wall_that_paints.rs`.
+/// The column the fixture's top-level `walls` declare, whether or not their materials resolve.
 fn declared_column(def: &DefIr) -> WallColumn {
     WallColumn::from_walls(
         def.members
@@ -37,10 +34,6 @@ fn declared_column(def: &DefIr) -> WallColumn {
 
 #[test]
 fn port_world_position_offsets_one_block_outside_front_door() {
-    // size=3x3 interior, no overhang inflation (place dims match
-    // interior). center_u = wall_length / 2 = 3 / 2 = 1; door wall
-    // world at (10 + 1, 0, 20 + 3 - 1) = (11, 0, 22); +1 in +z
-    // direction → (11, 0, 23).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -57,11 +50,6 @@ fn port_world_position_offsets_one_block_outside_front_door() {
 
 #[test]
 fn port_world_position_shifts_outward_past_roof_overhang() {
-    // size=3x3 with a `+1` overhang on every horizontal side → place
-    // dims (5, _, 5). Front wall world: (origin.x + overhang + u,
-    // origin.z + overhang + interior_h - 1) = (10 + 1 + 1,
-    // 20 + 1 + 3 - 1) = (12, 23); +1 in the +z direction puts the
-    // port one block beyond the eave → (12, 0, 24).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -78,9 +66,6 @@ fn port_world_position_shifts_outward_past_roof_overhang() {
 
 #[test]
 fn port_world_position_back_side_steps_into_negative_z() {
-    // size=3x3, overhang=0, center u=1. Back wall world:
-    // x = origin.x + (w-1-u) = 10 + (3-1-1) = 11, z = origin.z = 20.
-    // Normal step is (0, -1) → port (11, 0, 19).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -97,9 +82,6 @@ fn port_world_position_back_side_steps_into_negative_z() {
 
 #[test]
 fn port_world_position_left_side_steps_into_negative_x() {
-    // size=3x3, overhang=0, center u=1. Left wall world:
-    // x = origin.x = 10, z = origin.z + u = 20 + 1 = 21.
-    // Normal step is (-1, 0) → port (9, 0, 21).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -116,9 +98,6 @@ fn port_world_position_left_side_steps_into_negative_x() {
 
 #[test]
 fn port_world_position_right_side_steps_into_positive_x() {
-    // size=3x3, overhang=0, center u=1. Right wall world:
-    // x = origin.x + (w-1) = 12, z = origin.z + (h-1-u) = 20 + 1 = 21.
-    // Normal step is (+1, 0) → port (13, 0, 21).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -135,10 +114,6 @@ fn port_world_position_right_side_steps_into_positive_x() {
 
 #[test]
 fn port_world_position_window_front_resolves_to_offset_center() {
-    // size=3x3, no overhang, window offset=0 size=1x1 on front wall.
-    // wall_length(Front, 3, 3) = 3; u = 0 + 1/2 = 0. Wall world via
-    // wall_local_to_grid: (origin.x + 0, origin.z + 3 - 1) = (10, 22);
-    // +1 in the +z normal step → port (10, 0, 23).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -155,10 +130,6 @@ fn port_world_position_window_front_resolves_to_offset_center() {
 
 #[test]
 fn port_world_position_window_back_resolves_to_mirrored_center() {
-    // size=3x3, window offset=1 size=1x1 on back wall. wall_length = 3;
-    // u = 1 + 0 = 1. Back wall world: mirrored = 3 - 1 - 1 = 1,
-    // (origin.x + 1, origin.z + 0) = (11, 20); -1 in the -z normal
-    // step → port (11, 0, 19).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -175,10 +146,6 @@ fn port_world_position_window_back_resolves_to_mirrored_center() {
 
 #[test]
 fn port_world_position_window_left_resolves_to_offset_center() {
-    // size=3x3, window offset=1 size=1x1 on left wall. wall_length
-    // (Left, 3, 3) = 3; u = 1. Left wall world: (origin.x + 0,
-    // origin.z + 1) = (10, 21); -1 in the -x normal step → port
-    // (9, 0, 21).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -195,10 +162,6 @@ fn port_world_position_window_left_resolves_to_offset_center() {
 
 #[test]
 fn port_world_position_window_right_resolves_to_mirrored_center() {
-    // size=3x3, window offset=1 size=1x1 on right wall. wall_length
-    // (Right, 3, 3) = 3; u = 1. Right wall world: mirrored = 1,
-    // x = origin.x + 3 - 1 = 12, z = origin.z + 1 = 21; +1 in the +x
-    // normal step → port (13, 0, 21).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -215,11 +178,6 @@ fn port_world_position_window_right_resolves_to_mirrored_center() {
 
 #[test]
 fn port_world_position_window_shifts_outward_past_roof_overhang() {
-    // size=3x3 interior, place_dims=(5,_,5) for overhang=1. Window
-    // offset=0 size=1x1 on front. u = 0. Wall world via
-    // wall_local_to_grid with overhang=1: (origin.x + 1, origin.z +
-    // 1 + 3 - 1) = (11, 23); +1 in the +z normal step → port
-    // (11, 0, 24).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -236,12 +194,6 @@ fn port_world_position_window_shifts_outward_past_roof_overhang() {
 
 #[test]
 fn port_world_position_window_centres_on_2x2_offset() {
-    // village.crn shape: size=9x7, place_dims (11,_,9) for
-    // overhang=1, window id=front side=front y=2 offset=2 size=2x2.
-    // wall_length(Front, 9, 7) = 9; u = 2 + 2/2 = 3. Wall world:
-    // (origin.x + 1 + 3, origin.z + 1 + 7 - 1) = (origin.x + 4,
-    // origin.z + 7); +1 in the +z normal step → port shifts to z+8.
-    // With origin (0,0,0): port (4, 0, 8).
     let src = concat!(
         "def cottage size=9x7:\n",
         "  walls mat_slot=w height=4\n",
@@ -258,7 +210,6 @@ fn port_world_position_window_centres_on_2x2_offset() {
 
 #[test]
 fn port_world_position_window_refuses_when_offset_size_overflows_wall() {
-    // size=3x3 → wall_length(Front) = 3. offset=2 + size.w=2 = 4 > 3.
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=5\n",
@@ -281,9 +232,6 @@ fn port_world_position_window_refuses_when_offset_size_overflows_wall() {
 
 #[test]
 fn port_world_position_window_sym_true_uses_primary_offset() {
-    // `sym=true` mirrors the cut, but a port takes the primary `offset`
-    // side so one `id=` maps to one coordinate. Same geometry as the
-    // front-resolves test.
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -300,8 +248,7 @@ fn port_world_position_window_sym_true_uses_primary_offset() {
 
 #[test]
 fn port_world_position_window_pins_y_to_ground_row_regardless_of_authored_y() {
-    // Walls `height=10` so the window fits vertically and only the pin
-    // to `place_origin.1` is under test.
+    // `height=10` so the window fits and only the ground-row pin is under test.
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=10\n",
@@ -311,7 +258,6 @@ fn port_world_position_window_pins_y_to_ground_row_regardless_of_authored_y() {
     let ir = crate::lower(&module);
     let def = ir.defs.first().expect("def lowered");
     let dims = Dims { x: 3, y: 1, z: 3 };
-    // Honouring the window's `y=` would give `(10, 11, 23)`.
     let pos = port_at((10, 7, 20), dims, def, &pid("light"), &declared_column(def))
         .expect("port resolves");
     assert_eq!(pos, (10, 7, 23));
@@ -348,10 +294,6 @@ fn port_world_position_refuses_for_stair_role() {
 
 #[test]
 fn port_world_position_window_accepts_boundary_offset_plus_size_equal_wall_length() {
-    // Only this test catches the bound tightened from `>` to `>=`.
-    // size=3x3 → wall_length(Front) = 3 = offset 1 + size.w 2.
-    // u = 1 + 2/2 = 2. Wall world: (origin.x + 2, origin.z + 3 - 1) =
-    // (12, 22); +1 +z → port (12, 0, 23).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=5\n",
@@ -368,7 +310,6 @@ fn port_world_position_window_accepts_boundary_offset_plus_size_equal_wall_lengt
 
 #[test]
 fn port_world_position_window_accepts_a_rectangle_inside_the_wall() {
-    // Rows 2..=2 of 1..=3, strictly inside the wall.
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -394,7 +335,6 @@ fn port_world_position_window_refuses_when_the_top_edge_pierces_the_wall() {
     let ir = crate::lower(&module);
     let def = ir.defs.first().expect("def lowered");
     let dims = Dims { x: 3, y: 1, z: 3 };
-    // `walls height=2` paints rows 1..=2; the rectangle wants 2..=3.
     assert!(matches!(
         port_at((0, 0, 0), dims, def, &pid("light"), &declared_column(def)),
         Err(PortRejection::WindowOutsideCourse { y: 2, height: 2, ref walls, .. }) if !walls.is_empty(),
@@ -419,12 +359,6 @@ fn port_world_position_window_refuses_when_def_has_no_walls() {
 
 #[test]
 fn port_world_position_window_back_shifts_outward_past_roof_overhang() {
-    // The back wall maps differently from the front (mirrored `u`,
-    // `z = overhang`), so the front's overhang test does not cover
-    // it. size=3x3 interior, place_dims=(5,_,5) for
-    // overhang=1, window offset=0 size=1x1 → u = 0; mirrored = 3 -
-    // 1 - 0 = 2; wall world (origin.x + 1 + 2, origin.z + 1) =
-    // (13, 21); -1 -z normal → port (13, 0, 20).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -441,11 +375,6 @@ fn port_world_position_window_back_shifts_outward_past_roof_overhang() {
 
 #[test]
 fn port_world_position_window_right_shifts_outward_past_roof_overhang() {
-    // Right wall mirrors `u` along `z` and pins `x = overhang +
-    // interior_w - 1`. size=3x3 interior, place_dims=(5,_,5) for
-    // overhang=1, window offset=0 size=1x1 → u = 0; mirrored = 3 -
-    // 1 - 0 = 2; wall world (origin.x + 1 + 3 - 1, origin.z + 1 +
-    // 2) = (13, 23); +1 +x normal → port (14, 0, 23).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -479,9 +408,6 @@ fn port_world_position_refuses_for_unknown_port_id() {
 
 #[test]
 fn port_world_position_door_at_left_resolves_to_origin_corner_on_front() {
-    // size=3x3, no overhang. `at=left` pins u = 0 (the wall-local axis
-    // origin). Front wall world: (origin.x + 0, _, origin.z + 3 - 1)
-    // = (10, _, 22); +1 in the +z normal step → port (10, 0, 23).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -498,9 +424,6 @@ fn port_world_position_door_at_left_resolves_to_origin_corner_on_front() {
 
 #[test]
 fn port_world_position_door_at_right_resolves_to_far_corner_on_front() {
-    // size=3x3, no overhang. `at=right` pins u = wall_length - 1 = 2.
-    // Front wall world: (origin.x + 2, _, origin.z + 3 - 1) = (12, _,
-    // 22); +1 in the +z normal step → port (12, 0, 23).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -517,10 +440,6 @@ fn port_world_position_door_at_right_resolves_to_far_corner_on_front() {
 
 #[test]
 fn port_world_position_door_back_at_left_uses_mirrored_axis() {
-    // Back wall mirrors u along x (`x = w - 1 - u`), so `at=left`
-    // (u = 0) lands at the far x corner: (origin.x + (3 - 1 - 0),
-    // origin.z + 0) = (12, _, 20); -1 in the -z normal step → port
-    // (12, 0, 19). Without the mirror it would land at (10, 0, 19).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -537,9 +456,6 @@ fn port_world_position_door_back_at_left_uses_mirrored_axis() {
 
 #[test]
 fn port_world_position_door_left_at_right_uses_far_z_corner() {
-    // Left wall maps u to z without mirroring, so `at=right`
-    // (u = interior_h - 1 = 2) lands at z = origin.z + 2 = 22.
-    // x = origin.x; -1 in the -x normal step → port (9, 0, 22).
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -556,10 +472,6 @@ fn port_world_position_door_left_at_right_uses_far_z_corner() {
 
 #[test]
 fn port_world_position_door_right_at_left_mirrors_along_z() {
-    // Right wall mirrors u along z (`z = h - 1 - u`), so `at=left`
-    // (u = 0) lands at the far z corner: z = origin.z + 2 = 22.
-    // x = origin.x + interior_w - 1 = 12; +1 in the +x normal step →
-    // port (13, 0, 22). Without the mirror it would land at z = 20.
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -576,11 +488,6 @@ fn port_world_position_door_right_at_left_mirrors_along_z() {
 
 #[test]
 fn port_world_position_door_at_left_shifts_outward_past_roof_overhang() {
-    // size=3x3 interior, place_dims=(5,_,5) for overhang=1.
-    // `at=left` pins u = 0. Front wall world: (origin.x + overhang +
-    // 0, _, origin.z + overhang + 3 - 1) = (11, _, 23); +1 in the +z
-    // normal step → port (11, 0, 24). Without the overhang shift it
-    // would land inside the eave at z = 23.
     let src = concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -613,8 +520,6 @@ fn port_world_position_door_refuses_when_the_body_paints_no_wall() {
 
 #[test]
 fn port_world_position_door_refuses_when_the_walls_start_above_the_doorway() {
-    // The column holds rows 7..=10 (`level y=6 walls height=4`), and
-    // the doorway opens at row 1, in open air.
     let src = concat!(
         "def cottage size=3x3:\n",
         "  door id=entry side=front at=center\n",
@@ -628,13 +533,8 @@ fn port_world_position_door_refuses_when_the_walls_start_above_the_doorway() {
         port_at((0, 0, 0), dims, def, &pid("entry"), &upper_storey),
         Err(PortRejection::DoorOutsideCourse { ref walls, .. }) if !walls.is_empty(),
     ));
-    // With a ground course under it the port anchors, so the refusal
-    // is about the row and not the level.
     let both_storeys = WallColumn::from_walls([(0, 3), (6, 4)]);
     assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &both_storeys).is_ok());
-    // A one-row course `1..=1` is enough: the port asks where the
-    // doorway opens, not where it ends. A row constant off by one
-    // would refuse it.
     let one_row = WallColumn::from_walls([(0, 1)]);
     assert!(port_at((0, 0, 0), dims, def, &pid("entry"), &one_row).is_ok());
 }
@@ -656,8 +556,7 @@ fn port_world_position_door_refuses_for_unknown_at_value() {
     ));
 }
 
-/// Lower `body` as the members of `def cottage size=3x3` and ask for
-/// the port `id` against the column its own `walls` declare.
+/// Lower `body` inside `def cottage size=3x3` and ask for the port `id`.
 fn port_in(body: &str, id: &str) -> Result<(i32, i32, i32), PortRejection> {
     let src = format!("def cottage size=3x3:\n{body}");
     let module = crate::parse(&src).expect("parse");
@@ -754,7 +653,6 @@ fn port_world_position_refuses_a_window_argument_by_name() {
 
 #[test]
 fn port_world_position_window_without_offset_anchors_at_the_origin_like_the_cut() {
-    // `cut_window` reads an absent `offset=` as `0`.
     assert_eq!(
         port_in(
             "  walls mat_slot=w height=3\n  window id=l side=front y=1 size=1x1 mat_slot=g\n",
@@ -801,8 +699,7 @@ fn port_world_position_refuses_a_coordinate_past_i32_as_out_of_range() {
     let ir = crate::lower(&module);
     let def = ir.defs.first().expect("def lowered");
     let dims = Dims { x: 3, y: 5, z: 3 };
-    // The right wall's `origin.x + 2` overflows inside `wall_world_xz`,
-    // before the step out of the wall, which the next test reaches.
+    // Overflows inside `wall_world_xz`, before the step out of the wall.
     assert_eq!(
         port_at(
             (i32::MAX - 1, 0, 0),
@@ -817,9 +714,7 @@ fn port_world_position_refuses_a_coordinate_past_i32_as_out_of_range() {
 
 #[test]
 fn port_world_position_refuses_a_coordinate_past_i32_at_the_last_step_out_of_the_wall() {
-    // A back door at `z = i32::MIN`: the wall is addressable and only
-    // the step outward (`-z`) overflows, the one case in this file that
-    // reaches the final `checked_add`.
+    // Only the outward `-z` step overflows here.
     let module = crate::parse(
         "def cottage size=3x3:\n  walls mat_slot=w height=3\n  door id=e side=back at=center\n",
     )
@@ -837,7 +732,6 @@ fn port_world_position_refuses_a_coordinate_past_i32_at_the_last_step_out_of_the
         ),
         Err(PortRejection::OutOfRange),
     );
-    // One row further in, the door is placed.
     assert_eq!(
         port_at(
             (0, 0, i32::MIN + 1),
@@ -852,8 +746,7 @@ fn port_world_position_refuses_a_coordinate_past_i32_at_the_last_step_out_of_the
 
 #[test]
 fn port_world_position_asks_the_window_horizontal_fit_before_the_masonry() {
-    // `offset=4 size=3x2` runs past the 3-long wall and `y=9` is above
-    // the 3-high course.
+    // Past the wall horizontally and above the course too.
     assert!(matches!(
         port_in(
             "  walls mat_slot=w height=3\n  window id=l side=front offset=4 y=9 size=3x2 mat_slot=g\n",
@@ -865,8 +758,6 @@ fn port_world_position_asks_the_window_horizontal_fit_before_the_masonry() {
 
 #[test]
 fn port_world_position_refuses_an_opening_the_openings_pass_did_not_cut() {
-    // Every rule the port reads holds; only the empty `cut` set
-    // refuses it.
     let module = crate::parse(concat!(
         "def cottage size=3x3:\n",
         "  walls mat_slot=w height=3\n",
@@ -891,11 +782,9 @@ fn port_world_position_refuses_an_opening_the_openings_pass_did_not_cut() {
     }
 }
 
-/// One rejection per variant and, where a variant carries how an
-/// argument was [`Written`], per way of writing it.
+/// One rejection per variant, and per way of writing a [`Written`] argument.
 fn every_rejection() -> Vec<PortRejection> {
-    // The seeds' fields are placeholders: `samples` reads only the
-    // variant.
+    // `samples` reads only the variant.
     let seeds = [
         PortRejection::UnknownMember,
         PortRejection::ReservedRole {
@@ -942,9 +831,7 @@ fn every_rejection() -> Vec<PortRejection> {
     seeds.iter().flat_map(samples).collect()
 }
 
-/// Every rendering [`every_rejection`] checks for the variant of `r`.
-/// An exhaustive `match`, so a new variant is a compile error here
-/// until it has a row.
+/// The renderings checked for `r`'s variant; the `match` is exhaustive so each variant has a row.
 fn samples(r: &PortRejection) -> Vec<PortRejection> {
     let span: Span = 3..9;
     match r {

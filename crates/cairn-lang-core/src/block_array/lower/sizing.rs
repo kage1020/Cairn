@@ -15,15 +15,7 @@ use crate::block_array::roof::{
 
 use super::members::member_will_paint;
 
-/// Highest wall voxel Y across the [`painting_walls`] pairs, `0` with
-/// none.
-///
-/// The roof plane sits above the tallest wall column, and a `walls
-/// height=H` inside `level y=N` reaches `y = N + H`, hence the maximum over
-/// `(y_offset, height)`. A `walls` with no positive `height=` or no
-/// resolvable material paints no row and is absent, so the artifact is not
-/// as tall as a building it does not contain; a heightless one earns its
-/// `W_DEFERRED_MEMBER` in the massing phase.
+/// Highest wall row across the [`painting_walls`] pairs, `0` with none.
 pub(super) fn max_wall_top(painting: &[(u32, u32)]) -> u32 {
     painting
         .iter()
@@ -32,17 +24,10 @@ pub(super) fn max_wall_top(painting: &[(u32, u32)]) -> u32 {
         .unwrap_or(0)
 }
 
-/// The `(y_offset, height)` pairs of every walls member that will both
-/// stand and paint.
+/// The `(y_offset, height)` pairs of every walls member that will stand and paint.
 ///
-/// One list behind both the volume and [`WallColumn`], because
-/// `spec/compilation` "Level grouping and volume derivation" makes them two
-/// readings of a single list and rests the "no member paints past the end of
-/// the array" invariant on their agreeing. Filtering one and not the other
-/// would leave the window carve writing rows the array does not have.
-/// `max_wall_top` collapses the pairs to their maximum, which sizes the volume
-/// and seats the roof; the column keeps the spans, which is what decides
-/// whether a rectangle cut into a wall lands in masonry.
+/// The volume and the [`WallColumn`] both read this one list (`spec/compilation` "Level grouping
+/// and volume derivation").
 ///
 /// [`WallColumn`]: crate::block_array::wall_column::WallColumn
 pub(super) fn painting_walls<'a>(
@@ -58,18 +43,9 @@ pub(super) fn painting_walls<'a>(
         .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h)))
 }
 
-/// Largest `overhang=` across the roof members the pass will paint.
+/// Largest `overhang=` across the roofs that draw, reporting an unreadable one on every roof.
 ///
-/// Two concerns over one walk, and they cover different members.
-///
-/// The **contribution** is filtered through [`roof_draws`], as
-/// [`max_roof_extra_height`] is: a roof that will not draw would otherwise
-/// widen the footprint but not the height, moving the walls inward inside
-/// a ring of air.
-///
-/// The **validation** is not filtered, and walks the whole flattened list,
-/// because this is the only place `overhang=` is read: a value not looked
-/// at here is reported nowhere.
+/// This is the only reader of `overhang=`, so a value not checked here is reported nowhere.
 pub(super) fn max_roof_overhang(
     flattened: &[(u32, &Member)],
     diagnostics: &mut Vec<Diagnostic>,
@@ -79,8 +55,6 @@ pub(super) fn max_roof_overhang(
         .map(|(_, m)| *m)
         .filter(|m| matches!(m.role, MemberRole::Roof))
         .filter_map(|m| {
-            // A roof that draws is built flush with the wall line; one that
-            // does not earns its own finding in the envelope phase.
             let draws = roof_draws(m);
             let consequence = if draws.is_some() {
                 "the roof is drawn flush with the wall line"
@@ -94,10 +68,7 @@ pub(super) fn max_roof_overhang(
         .unwrap_or(0)
 }
 
-/// Maximum vertical contribution from any roof member the pass will draw
-/// ([`roof_draws`]); one that draws nothing contributes `0` and is reported
-/// in the envelope phase. Measured on the inflated roof box (interior + 2 *
-/// overhang on each axis), as each per-kind generator is.
+/// Tallest rise of any roof that draws ([`roof_draws`]), measured on the overhang-inflated box.
 pub(super) fn max_roof_extra_height(
     flattened: &[(u32, &Member)],
     interior_w: u32,
@@ -119,10 +90,7 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
     match kind {
         RoofKind::Gable => gable_extra_height(roof_w.min(roof_h)),
         RoofKind::Shed => {
-            // An unusable `slope_to=` contributes `0`; `fill_roof` reports
-            // it and paints nothing. `shed_slope_span` is the helper
-            // `shed_voxels` uses, so the dim and the generator agree on the
-            // slope axis.
+            // An unusable `slope_to=` contributes `0`; `fill_roof` reports it.
             match member
                 .ident_value("slope_to")
                 .and_then(WallSide::from_ident)
@@ -136,20 +104,10 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
     }
 }
 
-/// The kind this roof will actually draw with, or `None` when it will
-/// draw nothing.
+/// The kind this roof will draw with, or `None` when it draws nothing, such as a `shed` with no
+/// usable `slope_to=`.
 ///
-/// Not [`roof_kind_of`], which answers "does the kind table know this
-/// name". A `shed` with no usable `slope_to=` is a name the table knows
-/// and a member [`fill_roof`] paints nothing for. Both roof walks go
-/// through here so the footprint and the height agree on which roofs are
-/// real; otherwise a roof could widen an array it puts nothing in.
-///
-/// Silent, unlike [`shed_slope_to`]: this is the question, and the answer
-/// is reported by the pass that tries to draw.
-///
-/// [`fill_roof`]: super::roof_fill::fill_roof
-/// [`shed_slope_to`]: super::roof_fill::shed_slope_to
+/// Both roof walks ask this, so the footprint and the height agree on which roofs are real.
 pub(super) fn roof_draws(member: &Member) -> Option<RoofKind> {
     let kind = roof_kind_of(member)?;
     if matches!(kind, RoofKind::Shed)
@@ -184,12 +142,7 @@ pub(super) fn wall_height(member: &Member, diagnostics: &mut Vec<Diagnostic>) ->
     }
 }
 
-/// `None` covers "absent", "not a positive integer", and "past `u32`"
-/// alike, which is what [`wall_height`] turns into one `W_DEFERRED_MEMBER`.
-///
-/// Saturating instead would put a wall top at `u32::MAX` because the author
-/// asked for `2^33` — the outcome [`Member::nonneg_u32`] documents as the
-/// reason it refuses rather than clamps.
+/// A positive `height=` that fits `u32`, else `None` rather than a saturated height.
 fn height_value(member: &Member) -> Option<u32> {
     let raw = member.intent_state.get("height")?;
     match &raw.value.kind {

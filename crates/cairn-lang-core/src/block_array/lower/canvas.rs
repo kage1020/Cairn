@@ -6,22 +6,9 @@ use crate::block_array::{BlockState, Dims, Palette, PaletteFull, PaletteIndex};
 
 use super::members::Phase;
 
-/// Drop the palette slots a later phase covered, and remap the voxels
-/// onto the survivors.
+/// Drop the palette slots a later phase covered, and remap the voxels onto the survivors.
 ///
-/// A member's cells may all be covered by a later phase (a `window` set
-/// into a `walls` ring), leaving its material in the palette for a block
-/// the structure does not contain. The Java writer would emit that entry,
-/// `cairn info` would report a portability row for it, and
-/// `resolved_ir_hash` would cover it, so sources differing only in which
-/// member lost would hash apart.
-///
-/// Slot 0 stays whatever happens: [`Palette::new_with_air`] puts air there
-/// before any member runs, and a fully paved volume names it nowhere.
-///
-/// A slot **never painted at all** is a generator bug, not a covered
-/// cell: it is kept, so `tests/lower/palette_is_referenced.rs` can catch
-/// it, and returned for the caller to assert on.
+/// A slot never painted at all is a generator bug, kept and returned for the caller to check.
 pub(super) fn prune_unreferenced(
     palette: &mut Palette,
     canvas: &Canvas,
@@ -55,21 +42,8 @@ pub(super) fn prune_unreferenced(
     (voxels, never_painted)
 }
 
-/// The palette one body is painted against, refusing rather than
-/// panicking once it holds its capacity: [`PALETTE_CAPACITY`] entries
-/// from [`lower_to_block_array`].
-///
-/// Every paint interns its state, covered later or not, so the palette
-/// fills with the states *written* and overflow is caught at paint time.
-/// A paint past the capacity gets air and records the refusal, which
-/// [`Self::into_palette`] answers with, and the body is refused with
-/// `W_PALETTE_TOO_LARGE` before its grid is read. Holding the refusal here
-/// lets generators keep an infallible `intern` without a `Result` threaded
-/// out of each, and the type keeps them off the panicking
-/// [`Palette::intern`].
-///
-/// [`PALETTE_CAPACITY`]: crate::block_array::PALETTE_CAPACITY
-/// [`lower_to_block_array`]: super::lower_to_block_array
+/// The palette one body is painted against, answering air past its capacity and recording the
+/// refusal for [`Self::into_palette`].
 pub(super) struct ScopePalette {
     palette: Palette,
     capacity: usize,
@@ -78,11 +52,7 @@ pub(super) struct ScopePalette {
 }
 
 impl ScopePalette {
-    /// Air at index `0`, and room for `capacity` entries in all, air's
-    /// among them; [`Palette::try_intern_within`] clamps a larger one to
-    /// [`PALETTE_CAPACITY`].
-    ///
-    /// [`PALETTE_CAPACITY`]: crate::block_array::PALETTE_CAPACITY
+    /// Air at index `0`, and room for `capacity` entries in all, air's among them.
     pub(super) fn with_capacity(capacity: usize) -> Self {
         Self {
             palette: Palette::new_with_air(),
@@ -92,8 +62,7 @@ impl ScopePalette {
     }
 
     pub(super) fn intern(&mut self, state: BlockState) -> PaletteIndex {
-        // After an overflow the body is refused and the palette never
-        // read, so air without scanning every entry on each later paint.
+        // After an overflow the palette is never read, so skip the scan.
         if self.overflow.is_some() {
             return PaletteIndex::AIR;
         }
@@ -114,51 +83,20 @@ impl ScopePalette {
     }
 }
 
-/// The voxel grid under construction, plus the two things the phase model
-/// needs to know about the writes that built it.
-///
-/// **Who wrote each cell.** `spec/compilation` "Phase evaluation" promises
-/// that a `window` written after a `roof` still lands as an opening, and only
-/// says last-wins for "local overrides within the same phase". So a
-/// cross-phase overwrite is the model working and a within-phase one is the
-/// author's two members contesting a cell with nothing but line order to
-/// separate them. The canvas can tell the two apart because it remembers the
-/// writer, and reports the second kind rather than resolving it silently.
-///
-/// **Which palette slots a write has named.** An entry no voxel
-/// references comes two ways: a generator claiming a material for geometry
-/// it never emits (a bug), or a member's cells covered by a later phase
-/// (the layering working). [`prune_unreferenced`] drops the second and
-/// keeps the first where the artifact shows it, which the finished grid
-/// alone cannot tell apart.
-///
-/// Nothing paints through a `Canvas` directly: [`Self::for_member`] hands
-/// out a [`MemberCanvas`], and that is the only type with a write on it.
+/// The voxel grid under construction, with who wrote each cell and which palette slots a write
+/// named, so within-phase contests and covered materials can be told apart.
 pub(super) struct Canvas {
     dims: Dims,
     voxels: Vec<PaletteIndex>,
-    /// Per voxel: `0` while nothing has written it, and `n + 1` once the
-    /// member at index `n` of the flattened paint list has.
-    ///
-    /// One `u32` rather than a `(phase, index)` pair, which at 16 bytes
-    /// (align 8) would be 256 MB of bookkeeping against 32 MB of voxels at
-    /// the [`MAX_STRUCTURE_VOLUME`] cap, a cap chosen against the grid
-    /// alone. The phase comes from [`Self::phases`], one entry per member.
-    ///
-    /// [`MAX_STRUCTURE_VOLUME`]: crate::block_array::MAX_STRUCTURE_VOLUME
+    /// Per voxel: `0` while unwritten, `n + 1` once member `n` of the flattened paint list did.
     owners: Vec<u32>,
-    /// Phase of each member of the flattened paint list, by index. `None`
-    /// for a member no phase evaluates, which never paints; the entry
-    /// keeps the indices aligned.
+    /// Phase of each member of the flattened paint list, `None` for one no phase evaluates.
     phases: Vec<Option<Phase>>,
     /// Indexed by palette slot: `true` once a write has named that slot.
     painted: Vec<bool>,
-    /// Indexed like [`Self::phases`]: `true` once that member has written
-    /// a cell, whatever a later write did to it: which openings were cut,
-    /// for the `connect` rows that anchor on them.
+    /// Indexed like [`Self::phases`]: `true` once that member has written a cell.
     pub(super) wrote: Vec<bool>,
-    /// `(overridden, overriding)` member pairs to the number of voxels the
-    /// second took from the first, in discovery order.
+    /// `(overridden, overriding)` member pairs to the voxels the second took, in discovery order.
     pub(super) conflicts: IndexMap<(u32, u32), u32>,
 }
 
@@ -175,15 +113,7 @@ impl Canvas {
         }
     }
 
-    /// Borrow the canvas as the member at `index` of the flattened paint
-    /// list sees it.
-    ///
-    /// The only way to reach a write, so a generator cannot paint without
-    /// a member to file it under, nor file it under a stale one:
-    /// [`run_phase`] opens the scope once per member and the borrow closes
-    /// it.
-    ///
-    /// [`run_phase`]: super::body::run_phase
+    /// Borrow the canvas as the member at `index` of the flattened paint list sees it.
     pub(super) fn for_member(&mut self, index: u32) -> MemberCanvas<'_> {
         debug_assert!(
             (index as usize) < self.phases.len(),
@@ -195,12 +125,7 @@ impl Canvas {
         }
     }
 
-    /// Whether two members of the flattened paint list are evaluated in
-    /// one phase.
-    ///
-    /// A member with no phase never paints, so a `None` on either side
-    /// describes a write that could not have happened; it answers `false`
-    /// rather than letting two of them match each other.
+    /// Whether two members of the flattened paint list run in one phase; never for `None`.
     fn same_phase(&self, a: u32, b: u32) -> bool {
         matches!(
             (
@@ -212,22 +137,14 @@ impl Canvas {
     }
 }
 
-/// The canvas as one member sees it: the same grid, with every write
-/// already attributed.
+/// The canvas as one member sees it, every write attributed to that member.
 pub(super) struct MemberCanvas<'a> {
     canvas: &'a mut Canvas,
     member: u32,
 }
 
 impl MemberCanvas<'_> {
-    /// Paint one voxel, claiming its palette slot only once the cell is
-    /// known to exist.
-    ///
-    /// Every generator derives its coordinates from the [`Dims`] the
-    /// volume was allocated against, so a coordinate outside it means the
-    /// dim math and the generator disagree. The write is clipped rather
-    /// than panicking a release build, and the `debug_assert!` makes the
-    /// disagreement a test failure rather than a silent drop.
+    /// Paint one voxel, claiming its palette slot only once the cell is known to exist.
     pub(super) fn paint(&mut self, pos: (u32, u32, u32), claim: impl FnOnce() -> PaletteIndex) {
         if !self.try_paint(pos, claim) {
             debug_assert!(
@@ -238,11 +155,7 @@ impl MemberCanvas<'_> {
         }
     }
 
-    /// [`Self::paint`] for the one generator whose coordinate is the
-    /// author's to get wrong: a `pressure_plate` anchors at `at=`, so an
-    /// out-of-range cell there earns a diagnostic rather than an assertion.
-    /// Answers whether the cell existed; `claim` runs only when it did,
-    /// so the palette gains no entry no voxel names.
+    /// [`Self::paint`] without the assertion, for a cell the author placed; whether it existed.
     pub(super) fn try_paint(
         &mut self,
         pos: (u32, u32, u32),
@@ -265,17 +178,11 @@ impl MemberCanvas<'_> {
         let before = canvas.voxels[i];
         canvas.voxels[i] = after;
         let previous = std::mem::replace(&mut canvas.owners[i], member + 1);
-        // A write that changes nothing is not a contest: two `walls` of one
-        // material meeting at a corner, or a `window` whose `repeat=` /
-        // `step=` stamps overlap.
+        // A write that changes nothing, or a first write, is not a contest.
         if before == after || previous == 0 {
             return true;
         }
-        // No generator writes one cell to two different blocks, so a
-        // same-member pair stops above. The check stays because the
-        // finding is about two members: against itself it would read
-        // "`roof` overwrites 3 voxels that `roof` painted", a generator
-        // fault no author can move.
+        // A same-member overwrite is a generator fault no author can move, so never a finding.
         let overridden = previous - 1;
         if overridden != member && canvas.same_phase(overridden, member) {
             *canvas.conflicts.entry((overridden, member)).or_default() += 1;

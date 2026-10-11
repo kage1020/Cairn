@@ -1,16 +1,4 @@
-//! Wall-local coordinates for openings (doors and windows).
-//!
-//! A door or window is written as `side=front offset=N y=N size=WxH`, in the
-//! coordinates of the wall it is cut into: `offset` runs along the wall, `y`
-//! rises from the floor, and the side fixes the wall's own `x` or `z`. This
-//! module maps a `(side, u, v)` onto the struct grid, including the inward
-//! `overhang` shift (the overhang convention in the `block_array` module
-//! docs), in one place so doors and windows cannot disagree on a sign.
-//!
-//! It also reads the arguments that place an opening on its wall — a door's
-//! `at=`, a window's `offset=`, `y=` and `size=` — once for the cut and a
-//! `connect` port on the opening alike, so the two accept the same values
-//! and refuse the same first one in the same words.
+//! Wall-local coordinates for doors and windows, and the arguments that place them on a wall.
 
 use crate::ast::ValueKind;
 use crate::intent::Member;
@@ -18,8 +6,7 @@ use crate::intent::Member;
 use super::Dims;
 use super::args::size_value;
 
-/// Which wall of a struct an opening cuts through, named as seen from
-/// outside (`spec/syntax` "Selectors").
+/// A struct wall, named as seen from outside (`spec/syntax` "Selectors").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WallSide {
     /// `+z` face of the struct.
@@ -57,8 +44,7 @@ impl WallSide {
     }
 }
 
-/// Length of the wall along its `offset` axis, in voxels. `interior_w` and
-/// `interior_h` are the authored `size=WxH`, before overhang inflation.
+/// Length of the wall along its `offset` axis, given the authored `size=WxH`.
 #[must_use]
 pub fn wall_length(side: WallSide, interior_w: u32, interior_h: u32) -> u32 {
     match side {
@@ -67,23 +53,9 @@ pub fn wall_length(side: WallSide, interior_w: u32, interior_h: u32) -> u32 {
     }
 }
 
-/// Convert a wall-local `(u, v)` coordinate into a struct-grid `(x, y, z)`,
-/// or `None` when it falls outside the wall.
+/// Convert a wall-local `(u, v)` into a struct-grid `(x, y, z)`, or `None` outside the wall.
 ///
-/// - `u` runs along the wall from its left end as seen from outside, so it
-///   starts at high `x` on the back wall and high `z` on the right one;
-///   that keeps `sym=true` symmetric about the midpoint of every wall.
-/// - `v` is the height from the floor.
-/// - `overhang` shifts the wall inward.
-/// - `interior_w` and `interior_h` are the authored `size=WxH`, before
-///   overhang inflation.
-///
-/// No caller reaches the `None`: each checks the same bounds first. The
-/// lowering callers (`carve_door`, `fill_stair`, `paint_window_rect`,
-/// `plate_voxel_position`) report author errors in that check, so a `None`
-/// here is a compiler bug; at the sites tagged
-/// `INVARIANT(wall-grid-validated)` they `debug_assert!` and drop the cell
-/// in a release build. `ports::wall_world_xz` propagates it with `?`.
+/// `u` runs from the wall's left end as seen from outside, so `sym=true` mirrors about its middle.
 #[must_use]
 pub fn wall_local_to_grid(
     side: WallSide,
@@ -124,8 +96,7 @@ pub fn wall_local_to_grid(
     }
 }
 
-/// How an argument a port cannot use was written, so the note can tell a
-/// missing `side=` from a misspelt `side=frnt`.
+/// How an argument a port cannot use was written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Written {
     /// The key is not on the line.
@@ -146,12 +117,7 @@ impl Written {
     }
 }
 
-/// What is wrong with a door's `at=`, as the rest of a sentence whose
-/// subject is the door.
-///
-/// Shared by the door's own `W_DEFERRED_MEMBER` ([`door_at_deferral`]) and
-/// the note on a `connect` row naming the door (`ports::PortRejection::note`),
-/// so the two describe one refusal in one wording.
+/// What is wrong with a door's `at=`, as the rest of a sentence whose subject is the door.
 pub(super) fn door_at_clause(written: &Written) -> String {
     match written {
         Written::Absent => "has no `at=`".to_owned(),
@@ -162,8 +128,7 @@ pub(super) fn door_at_clause(written: &Written) -> String {
     }
 }
 
-/// The reason `super::lower::door::carve_door` defers a door whose `at=`
-/// [`door_anchor_offset`] refused.
+/// The reason a door is deferred when [`door_anchor_offset`] refused its `at=`.
 pub(super) fn door_at_deferral(written: &Written) -> String {
     format!(
         "door {} — use `at=center | left | right`",
@@ -171,9 +136,7 @@ pub(super) fn door_at_deferral(written: &Written) -> String {
     )
 }
 
-/// The first window argument [`read_window_args`] could not use, and how it
-/// was written. One variant per case rather than a key and a flag, so an
-/// absent `offset=`, which reads as `0`, has none.
+/// The first window argument [`read_window_args`] could not use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WindowArgFault {
     /// `offset=` is present and not a non-negative integer.
@@ -189,8 +152,7 @@ pub(super) enum WindowArgFault {
 }
 
 impl WindowArgFault {
-    /// What is wrong, as the rest of a sentence whose subject is the
-    /// window, shared like [`door_at_clause`].
+    /// What is wrong, as the rest of a sentence whose subject is the window.
     pub(super) fn clause(self) -> &'static str {
         match self {
             Self::OffsetMalformed => {
@@ -222,14 +184,7 @@ pub(super) struct WindowArgs {
     pub(super) height: u32,
 }
 
-/// Read a window's `offset=`, `y=` and `size=`, in that order, refusing
-/// at the first one that cannot be used.
-///
-/// The cut (`super::lower::window::cut_window`) and the port
-/// (`ports::window_center_offset`) both read through this, so they accept
-/// one set and name one first fault. `repeat=`, `step=` and `sym=` are the
-/// cut's alone; a window they defer is refused as a port by
-/// `ports::PortRejection::NotCut`.
+/// Read a window's `offset=`, `y=` and `size=`, in that order.
 ///
 /// # Errors
 ///
@@ -266,16 +221,9 @@ pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgF
     })
 }
 
-/// Wall-local `u` of a door's `at=` on a wall `len` long, for the cut
-/// (`super::lower::door::carve_door`) and a port alike:
+/// Wall-local `u` of a door's `at=` on a wall `len` long, or how an unusable `at=` was written.
 ///
-/// * `center`: `len / 2`, so an even wall rounds half up (`spec/syntax`
-///   "Selectors").
-/// * `left`: `0`.
-/// * `right`: `len - 1`. `len` is a `size=` extent, never `0`.
-///
-/// Anything else, a numeric `at=N` (reserved) or a missing `at=`
-/// included, is refused with how it was [`Written`].
+/// `center` is `len / 2`, rounding half up on an even wall (`spec/syntax` "Selectors").
 pub(super) fn door_anchor_offset(member: &Member, len: u32) -> Result<u32, Written> {
     match member.ident_value("at") {
         Some("center") => Ok(len / 2),

@@ -28,42 +28,20 @@ use super::token_diag::{
 /// A world cell, `(x, y, z)`.
 type Cell = (i32, i32, i32);
 
-/// What laying the walkways reads: the whole finished site at once —
-/// every placement, the masonry each of them lowered with, and the floor
-/// plan they occupy.
+/// What laying the walkways reads: the whole finished site at once.
 pub(super) struct ConnectInputs<'a> {
     pub(super) resolution: &'a Resolution,
     pub(super) defs: &'a [DefIr],
     pub(super) registry: Option<&'a dyn TargetRegistry>,
-    /// Every `place` row that lowered, under its `site::SITE::PLACE_ID`
-    /// key.
+    /// Every `place` row that lowered, under its `site::SITE::PLACE_ID` key.
     pub(super) placed: &'a IndexMap<String, PlacedBody>,
-    /// World cells on the walk plane already occupied by a placement
-    /// floor, and the extent each placement's floor covers.
+    /// Placement floors on the walk plane, and each placement's floor extent.
     pub(super) floor: &'a FloorPlan,
 }
 
-/// Lower every resolved `connect` row into a walkway `BlockArray` and
-/// a matching [`Walkway`] metadata record.
+/// Lower every resolved `connect` row into a walkway array and its [`Walkway`] record.
 ///
-/// Skips a row whose port [`port_world_position`] refuses — a role other
-/// than [`MemberRole::Door`] or [`MemberRole::Window`], an argument the
-/// opening cannot use, masonry the opening does not reach, an opening the
-/// openings phase did not cut, a coordinate past `i32` — with a
-/// `W_DEFERRED_MEMBER` carrying one note per refused endpoint, each naming
-/// that endpoint's [`PortRejection`]. Emits a `W_DUPLICATE_WALKWAY` when
-/// the same `(from, to)` pair has already been laid in the same site.
-///
-/// Every finding here anchors on `ValidatedConnect::span`, one `connect`
-/// row's own, so the dedup at the end of [`lower_to_block_array`] never
-/// merges two rows. That rests on one pair per row: a block form putting
-/// several pairs under one header would share a span, and two equal
-/// `W_WALKWAY_BLOCKED` warnings would collapse, `skipped` count and all.
-///
-/// [`MemberRole::Door`]: crate::intent::MemberRole::Door
-/// [`MemberRole::Window`]: crate::intent::MemberRole::Window
-/// [`lower_to_block_array`]: super::lower_to_block_array
-/// [`PortRejection`]: crate::block_array::ports::PortRejection
+/// Every finding anchors on the row's own span, so the final dedup never merges two rows.
 pub(super) fn lower_connects(
     inputs: &ConnectInputs<'_>,
     structures: &mut IndexMap<String, BlockArray>,
@@ -79,9 +57,7 @@ pub(super) fn lower_connects(
     } = inputs;
     let blocked = &floor.cells;
     let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
-    // Indexed once for every row: a per-row scan for the router's
-    // rectangle would let a large site with many colliding rows multiply
-    // one linear scan into a denial of service on user input.
+    // Indexed once for every row, so many colliding rows cannot multiply a linear scan.
     let blocked_index = BlockedIndex::new(blocked);
 
     for connect in &resolution.connects {
@@ -93,10 +69,7 @@ pub(super) fn lower_connects(
             continue;
         };
 
-        // `walkway_pair` sorts the two ends, so `a.entry → b.entry` and
-        // `b.entry → a.entry` are one walkway. A pair is recorded only
-        // once its strip is laid: an earlier row refused below laid
-        // nothing, so this row does not duplicate it.
+        // A pair is recorded only once its strip is laid, so a refused earlier row is no duplicate.
         let dedup_key = connect.walkway_pair();
         if seen_pairs.contains(&dedup_key) {
             diagnostics.push(diag_duplicate_walkway(connect));
@@ -127,8 +100,6 @@ pub(super) fn lower_connects(
             blocked_count: skipped,
         } = build_walkway_array(&path, material, blocked, &scope_key);
         if routed {
-            // A straight L reaches here only collision-free and a detour
-            // is so by construction, so a skipped cell is a router bug.
             debug_assert_eq!(
                 skipped, 0,
                 "walkway `{scope_key}` laid a routed path with {skipped} collisions",
@@ -151,11 +122,7 @@ pub(super) fn lower_connects(
             diagnostics.push(diag_walkway_blocked(connect, skipped, note));
         }
         let footprint = walkway_footprint(array.dims);
-        // `from_parts` refuses every id that could alias another row's key,
-        // so a replaced entry means that rule has a hole and the earlier
-        // walkway vanished. The `insert` is bound first, since inside a
-        // `debug_assert!` it would not run in release builds, which still
-        // report the loss.
+        // Bound outside the `debug_assert!` so release builds still report a replaced key.
         let replaced = structures.insert(scope_key.as_str().to_owned(), array);
         debug_assert!(
             replaced.is_none(),
@@ -180,10 +147,7 @@ pub(super) fn lower_connects(
     }
 }
 
-/// The world cells of a `connect` row's two ports, whose placements sit
-/// under `keys` in [`ConnectInputs::placed`]. `None` after a
-/// `W_DEFERRED_MEMBER` when either placement did not lower or either port
-/// cannot be placed.
+/// The world cells of a `connect` row's two ports, or `None` after a `W_DEFERRED_MEMBER`.
 fn place_ports(
     connect: &crate::resolve::ValidatedConnect,
     (from_key, to_key): (&str, &str),
@@ -193,9 +157,7 @@ fn place_ports(
     let from_body = inputs.placed.get(from_key);
     let to_body = inputs.placed.get(to_key);
     let (Some(from_body), Some(to_body)) = (from_body, to_body) else {
-        // A placement was refused upstream (sizeless def, unresolved
-        // theme, broken origin chain) but the connect resolved, so the
-        // cascade names the side, or the walkway would vanish silently.
+        // A placement was refused upstream though the connect resolved; say which side.
         diagnostics.push(diag_walkway_endpoint_skipped(
             connect,
             from_body.is_none(),
@@ -210,8 +172,7 @@ fn place_ports(
             .find(|d| d.name == body.placement.source_def)
     };
     let (Some(from_def), Some(to_def)) = (source_def(from_body), source_def(to_body)) else {
-        // INVARIANT: `lower_site` inserts a `Placement` only after
-        // finding its `use=DEF` in `defs`.
+        // INVARIANT: `lower_site` inserts a `Placement` only after finding its `use=DEF` in `defs`.
         debug_assert!(
             false,
             "connect `{}` to `{}` references placements whose source def is missing from `defs`",
@@ -236,12 +197,6 @@ fn place_ports(
         &to_body.walls,
         &to_body.cut,
     );
-    // One note per refused endpoint, naming the reason
-    // `port_world_position` gave rather than every contract a port has.
-    // Where the reason is on a member, the note points at its line, which
-    // for a side, argument or masonry fault carries the member's own
-    // deferral too, the opening being uncut. Each arm builds its notes
-    // from the `Err`s it matched, so no defer lacks a note.
     let (notes, noun, (from_refused, to_refused)) = match (from_pos, to_pos) {
         (Ok(from_pos), Ok(to_pos)) => return Some((from_pos, to_pos)),
         (Err(from_err), Err(to_err)) => (
@@ -278,9 +233,7 @@ fn place_ports(
     None
 }
 
-/// The two ends of a `connect` row as its [`Walkway`] records them, and
-/// the scope key its strip is filed under. `None` after a
-/// `W_INVALID_WALKWAY_IDENT` when an id cannot be encoded into the key.
+/// A `connect` row's two ends and scope key, or `None` after a `W_INVALID_WALKWAY_IDENT`.
 fn walkway_ends(
     connect: &crate::resolve::ValidatedConnect,
     diagnostics: &mut Vec<Diagnostic>,
@@ -302,8 +255,7 @@ fn walkway_ends(
     }
 }
 
-/// The [`Footprint`] a walkway records: its array's `x` and `z`, the
-/// array being one block thick.
+/// The [`Footprint`] of a one-block-thick walkway array.
 fn walkway_footprint(dims: Dims) -> Footprint {
     debug_assert_eq!(
         dims.y, 1,
@@ -317,8 +269,7 @@ fn walkway_footprint(dims: Dims) -> Footprint {
     }
 }
 
-/// A `connect` row whose port pair an earlier row in the same site has
-/// already laid.
+/// A `connect` row whose port pair an earlier row in the same site already laid.
 fn diag_duplicate_walkway(connect: &crate::resolve::ValidatedConnect) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DuplicateWalkway,
@@ -338,8 +289,7 @@ fn diag_duplicate_walkway(connect: &crate::resolve::ValidatedConnect) -> Diagnos
     }
 }
 
-/// The block a `connect` row's `path=` lays, or `None` after the finding
-/// that says why it has none.
+/// The block a `connect` row's `path=` lays, or `None` after the finding that says why.
 fn walkway_material(
     connect: &crate::resolve::ValidatedConnect,
     registry: Option<&dyn TargetRegistry>,
@@ -372,12 +322,8 @@ fn walkway_material(
             None
         }
         Err(MaterialDeferred::AlreadyDiagnosed) => {
-            // INVARIANT(upstream-diagnosed): `resolve_block_state`
-            // answers `AlreadyDiagnosed` only for a value that is not a
-            // token (`TokenKind::NotAToken`), and
-            // `resolve::connect::resolve_connect_row` refuses every such
-            // `path=` with `E_MISSING_PATH_MATERIAL` before the row
-            // reaches `resolution.connects`.
+            // INVARIANT(upstream-diagnosed): `resolve_connect_row` refuses a non-token `path=` with
+            // `E_MISSING_PATH_MATERIAL`.
             debug_assert!(
                 false,
                 "connect `{from}` to `{to}` in site `{site}` returned AlreadyDiagnosed for path; \
@@ -391,10 +337,8 @@ fn walkway_material(
     }
 }
 
-/// The cells a `connect` row's strip runs through between its two port
-/// cells, and why the router could not find a detour when it fell back to
-/// a blocked L. `None` after a `W_WALKWAY_BLOCKED` when the strip spans
-/// more cells than the router's cap.
+/// The cells a `connect` row's strip runs through, and the router's error if it fell back to
+/// the blocked L; `None` after a `W_WALKWAY_BLOCKED` past the router's cap.
 fn walkway_path<S: BuildHasher>(
     connect: &crate::resolve::ValidatedConnect,
     (from_pos, to_pos): (Cell, Cell),
@@ -402,15 +346,7 @@ fn walkway_path<S: BuildHasher>(
     blocked_index: &BlockedIndex<'_, S>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<Cell>, Option<RoutePathError>)> {
-    // The straight Manhattan L first, which is cheap and is what every
-    // unobstructed row lays. Only an L that crosses a placement floor
-    // goes to the router; a `RoutePathError` falls back to the L with
-    // skipped cells, so the row still lays and earns its
-    // `W_WALKWAY_BLOCKED`, with a note matched to the error.
-    //
-    // The L is measured before it is built: `route_path` refuses on the
-    // same quantity but runs only for an obstructed L, so an unobstructed
-    // pair would otherwise size a voxel buffer from its bounding box.
+    // Measured before it is built: an unobstructed L never reaches the router's own cap check.
     let straight_area = l_path_area(from_pos, to_pos);
     if straight_area > ROUTE_AREA_CAP {
         diagnostics.push(Diagnostic {
@@ -444,8 +380,7 @@ fn walkway_path<S: BuildHasher>(
     })
 }
 
-/// A strip laid with `skipped` of its cells dropped where they overlapped
-/// a placement, with the note [`walkway_blocked_note`] wrote for it.
+/// A strip laid with `skipped` cells dropped where they overlapped a placement.
 fn diag_walkway_blocked(
     connect: &crate::resolve::ValidatedConnect,
     skipped: usize,
@@ -469,8 +404,7 @@ fn diag_walkway_blocked(
     }
 }
 
-/// A walkway whose scope key an earlier `connect` row's walkway already
-/// held, and so replaced it.
+/// A walkway that replaced an earlier row's walkway under the same scope key.
 fn diag_walkway_replaced(
     connect: &crate::resolve::ValidatedConnect,
     scope_key: &WalkwayScopeKey,
@@ -495,27 +429,20 @@ fn diag_walkway_replaced(
     }
 }
 
-/// The two ports of a `connect` row a `W_WALKWAY_BLOCKED` note talks
-/// about: each one's world cell and the `site::SITE::PLACE_ID` key of the
-/// placement it belongs to.
+/// The two ports a `W_WALKWAY_BLOCKED` note names: each one's world cell and placement key.
 struct BlockedEndpoints<'a> {
     from: ((i32, i32, i32), &'a str),
     to: ((i32, i32, i32), &'a str),
 }
 
-/// The finished floor plan a `W_WALKWAY_BLOCKED` note reads to name what
-/// is in the way.
+/// The finished floor plan a `W_WALKWAY_BLOCKED` note reads to name what is in the way.
 struct SiteFloor<'a> {
     structures: &'a IndexMap<String, BlockArray>,
     placed: &'a IndexMap<String, PlacedBody>,
     floor: &'a FloorPlan,
 }
 
-/// Note text for a `W_WALKWAY_BLOCKED` warning on a row whose obstructed
-/// straight L sent it to the router, matched to why the router could not
-/// detour: widening the gap frees an enclosed target but not a buried port
-/// or a site past the area cap, so one catch-all would misdirect three of
-/// the four arms.
+/// Note text for a `W_WALKWAY_BLOCKED` row, matched to why the router could not detour.
 fn walkway_blocked_note(
     connect: &crate::resolve::ValidatedConnect,
     route_failure: Option<RoutePathError>,
@@ -544,9 +471,7 @@ fn walkway_blocked_note(
              move the site closer to the origin"
                 .to_owned()
         }
-        // The ports are fine but every route is walled off. `None` with
-        // skipped cells cannot happen, since only a collision-free L skips
-        // the router; sharing the arm keeps the note truthful if it does.
+        // `None` with skipped cells cannot happen; the shared arm keeps the note true if it does.
         Some(RoutePathError::TargetUnreachable) | None => {
             "no unobstructed route exists between the two ports; widen the placement gap so \
              the walkway can round the obstacle"
@@ -555,14 +480,7 @@ fn walkway_blocked_note(
     }
 }
 
-/// The note for a router whose [`SearchRect`] passed the area cap.
-///
-/// The rectangle spans both ports and every placement floor on the walk
-/// plane, so either can be what passed the cap, and the remedies differ.
-/// When the two ports' own box, with the router's margin, is already past
-/// the cap, moving any placement does nothing: the note says to bring the
-/// two structures closer. Otherwise the floors stretched it, and the note
-/// names the placements whose floor reaches an edge beyond both ports.
+/// The note for a router whose [`SearchRect`] passed the area cap, naming what stretched it.
 fn area_cap_note(
     area: u64,
     cap: u64,
@@ -589,8 +507,6 @@ fn area_cap_note(
         .map(|body| placement_label(&body.placement, connect))
         .collect();
     if labels.is_empty() {
-        // The rectangle is the ports' box unless a floor stretches it, and
-        // the ports' box is inside the cap, so some floor must.
         debug_assert!(
             false,
             "the search rectangle {rect:?} passed the cap, but no floor stretches it past the \
@@ -610,17 +526,13 @@ fn area_cap_note(
     )
 }
 
-/// Cells in the box around `from` and `to` inflated by one cell on every
-/// side — the router's rectangle with no floor in it.
+/// Cells in the box around `from` and `to` with the router's one-cell margin.
 fn margin_box_area(from: (i32, i32, i32), to: (i32, i32, i32)) -> u64 {
     let span = |a: i32, b: i32| u64::from(a.abs_diff(b)) + 3;
     span(from.0, to.0).saturating_mul(span(from.2, to.2))
 }
 
-/// The keys of the placements whose floor sets an edge of `rect` beyond
-/// both ports, in placement order: on some side, the floor reaches the
-/// cell just inside the router's one-cell margin, past the outer port on
-/// that side.
+/// The keys of the placements whose floor sets an edge of `rect` beyond both ports.
 pub(super) fn edge_pushers(
     rect: SearchRect,
     from: (i32, i32, i32),
@@ -644,8 +556,7 @@ pub(super) fn edge_pushers(
         .collect()
 }
 
-/// A placement as a note names it: its `place id=` in backticks, plus
-/// the site when that differs from the `connect` row's own.
+/// A placement as a note names it: its `place id=`, plus its site when not the row's own.
 fn placement_label(placement: &Placement, connect: &crate::resolve::ValidatedConnect) -> String {
     if placement.site == connect.site {
         format!("`{}`", placement.place_id)
@@ -654,13 +565,7 @@ fn placement_label(placement: &Placement, connect: &crate::resolve::ValidatedCon
     }
 }
 
-/// One clause of a buried-endpoint note: what covers the port cell, and
-/// the remedy for each. Another placement's floor is fixed by moving the
-/// opening or the placements apart; a block the port's own placement
-/// lays there (a pressure plate in front of its door) is fixed by moving
-/// that block or the opening, and pulling placements apart does nothing.
-/// When both cover the cell, both are named, since fixing either alone
-/// leaves the port buried.
+/// One clause of a buried-endpoint note: what covers the port cell, and the remedy for each.
 fn buried_port_clause(
     port: &crate::resolve::PortRef,
     (cell, own_key): ((i32, i32, i32), &str),
@@ -672,8 +577,7 @@ fn buried_port_clause(
     let mut others: Vec<String> = Vec::new();
     for owner in site.floor.owners.get(&cell).into_iter().flatten() {
         let Some((key, body)) = site.placed.get_index(owner.placement) else {
-            // INVARIANT: `collect_floor_cells` records indices into this
-            // same `placed`, which nothing mutates after.
+            // INVARIANT: `collect_floor_cells` records indices into this same, unmutated `placed`.
             debug_assert!(false, "floor owner {owner:?} indexes past `placed`");
             continue;
         };
@@ -683,10 +587,7 @@ fn buried_port_clause(
                 .get(key)
                 .and_then(|ba| ba.palette.entries.get(usize::from(owner.voxel.0)));
             if block.is_none() {
-                // INVARIANT: the voxel was read from this placement's own
-                // array, whose palette `ScopePalette` built. A miss is a
-                // broken array; the clause still names the placement, just
-                // not the block.
+                // INVARIANT: the voxel was read from this placement's own array and palette.
                 debug_assert!(
                     false,
                     "voxel {owner:?} of `{key}` names no entry of its palette",
@@ -726,8 +627,7 @@ fn buried_port_clause(
              move that door/window to an unobstructed wall or pull the placements apart"
         ),
         (None, None) => {
-            // INVARIANT: the router reported this cell blocked, and every
-            // cell of `FloorPlan::cells` was recorded with its owners.
+            // INVARIANT: every cell the router reports blocked was recorded with its owners.
             debug_assert!(
                 false,
                 "port `{port}` at {cell:?} is blocked but has no owner"
@@ -745,9 +645,6 @@ fn diag_walkway_invalid_ident(
     err: &crate::ids::KeyConstructError,
 ) -> Diagnostic {
     use crate::ids::{KeyConstructError, KeySegmentRole};
-    // Sentence frame, one clause per variant:
-    //   primary: walkway `A ↔ B` was dropped because the ROLE id `SEG` PROBLEM
-    //   note:    CONSTRAINT; rename the ROLE FIX
     let (role, segment, problem, constraint, fix): (KeySegmentRole, _, _, _, _) = match err {
         KeyConstructError::ConsecutiveUnderscore { role, segment } => (
             *role,
@@ -783,9 +680,7 @@ fn diag_walkway_invalid_ident(
     }
 }
 
-/// The endpoint(s) of `connect` a diagnostic blames, each in backticks:
-/// `` `a` and `b` ``, `` `a` `` or `` `b` ``. At least one side must be at
-/// fault.
+/// The endpoint(s) of `connect` a diagnostic blames, each in backticks.
 fn blamed_endpoints(
     connect: &crate::resolve::ValidatedConnect,
     from_at_fault: bool,

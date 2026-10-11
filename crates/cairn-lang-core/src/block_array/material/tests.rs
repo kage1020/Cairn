@@ -11,15 +11,11 @@ fn ident(name: &str) -> ValueWithSpan {
     ValueWithSpan::from_value(Value::new(ValueKind::Ident(name.to_owned()), span))
 }
 
-/// An in-memory [`TargetRegistry`]; the real one is in
-/// `cairn-lang-formats`, which depends on this crate.
 struct FakeResolver {
     entries: Vec<(&'static str, &'static str)>,
-    /// Sorted, fully namespaced ids the pinned target declares. Empty
-    /// means "no target pinned", matching a `blocks`-less pack.
+    /// Empty means no target pinned.
     ids: Vec<String>,
-    /// One alias group: every spelling of one block. Empty means no alias
-    /// table.
+    /// One alias group; empty means no alias table.
     group: Vec<String>,
 }
 
@@ -172,8 +168,7 @@ fn an_authored_id_the_target_lacks_is_refused_with_its_registry_named() {
 
 #[test]
 fn a_rename_is_answered_from_the_alias_table_and_not_by_distance() {
-    // Bedrock 1.21.0 spells Java's `light` as `light_block`, six edits
-    // away and past `nearest_match`'s cap.
+    // `light_block` is six edits from `light`, past `nearest_match`'s cap.
     let registry = FakeResolver::new(vec![])
         .pinned(&["minecraft:light_block"])
         .aliasing(&["minecraft:light", "minecraft:light_block"]);
@@ -191,8 +186,6 @@ fn a_rename_is_answered_from_the_alias_table_and_not_by_distance() {
     }
 }
 
-/// Bedrock 1.21.40 has a `light_block_N` per light level; offering one
-/// would choose the light level for the author.
 #[test]
 fn a_split_answers_with_every_spelling_the_target_has() {
     let registry = FakeResolver::new(vec![])
@@ -221,8 +214,6 @@ fn a_split_answers_with_every_spelling_the_target_has() {
     }
 }
 
-/// An alias group spans versions, so it holds spellings this target
-/// refuses too.
 #[test]
 fn an_alias_the_target_lacks_is_not_offered() {
     let registry = FakeResolver::new(vec![])
@@ -238,8 +229,6 @@ fn an_alias_the_target_lacks_is_not_offered() {
     }
 }
 
-/// `stone_bricks` is in the group and also two edits from `stonebrick`,
-/// so each field is filled, by its own rule.
 #[test]
 fn a_renamed_id_near_its_replacement_carries_both_answers() {
     let registry = FakeResolver::new(vec![])
@@ -255,8 +244,6 @@ fn a_renamed_id_near_its_replacement_carries_both_answers() {
     }
 }
 
-/// `stone_brick` is one edit from the group's `stone_bricks`, but an
-/// alias is group membership, not distance.
 #[test]
 fn a_misspelling_no_group_names_carries_no_alias() {
     let registry = FakeResolver::new(vec![])
@@ -282,9 +269,6 @@ fn a_registry_with_no_alias_table_answers_no_alias() {
     }
 }
 
-/// A path search across namespaces would find `cogwheels` and offer
-/// `minecraft:cogwheels`, an id no registry has. Only a modded table
-/// reaches this: both built-in packs are all `minecraft:`.
 #[test]
 fn a_suggestion_never_borrows_a_path_from_another_namespace() {
     let registry = FakeResolver::new(vec![]).pinned(&["create:cogwheels"]);
@@ -302,8 +286,6 @@ fn a_suggestion_never_borrows_a_path_from_another_namespace() {
     }
 }
 
-/// The control for the test above: the same table does suggest within
-/// its own namespace.
 #[test]
 fn a_suggestion_is_still_found_inside_the_namespace_that_has_one() {
     let registry = FakeResolver::new(vec![]).pinned(&["create:cogwheels"]);

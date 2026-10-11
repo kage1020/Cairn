@@ -14,50 +14,20 @@ use super::members::{StructCtx, resolve_member_state, side_name};
 use super::stair::shift_outward;
 use super::token_diag::diag_unknown_id;
 
-/// Catalog token a `pressure_plate` member's default material comes from.
-///
-/// The id is edition-specific (Java `oak_pressure_plate`, Bedrock
-/// `wooden_pressure_plate`) and lowering has no edition to decide with, so
-/// the pack, already per-edition, supplies it. An author can write the
-/// token too, as `@pressure_plate.default`, which beats a second pack
-/// component holding this one row.
+/// Catalog token a `pressure_plate`'s default material comes from; the pack spells it per edition.
 pub(super) const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
 
-/// Pressure plate id used when the pack cannot supply one — no registry
-/// at all, or a registry with no [`PRESSURE_PLATE_TOKEN`] row.
-///
-/// Neither case carries an edition, and `spec/versioning-editions` "Backend =
-/// data tables" makes Java the base, so the Java spelling is the honest
-/// default. It is still checked against the pinned target before it reaches a
-/// palette.
-///
-/// Species-specific plates (spruce, dark oak, ...) come from a `mat_slot=`
-/// binding, honoured verbatim as [`FLAT_BASE_ID`]'s contract is, not
-/// [`STAIR_BASE_ID`]'s: a plate attaches no blockstates, so it requires
-/// nothing of the block it names.
-///
-/// [`FLAT_BASE_ID`]: crate::block_array::roof::FLAT_BASE_ID
-/// [`STAIR_BASE_ID`]: crate::block_array::roof::STAIR_BASE_ID
+/// Pressure plate id used when the pack cannot supply one: the Java spelling, Java being the base
+/// edition (`spec/versioning-editions` "Backend = data tables").
 pub(super) const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
 
-/// Shift a wall voxel's `(x, z)` by one voxel toward the interior, the
-/// cell an `at=inside.<side>` fixture sits on at whatever row it asks for.
-///
-/// The step saturates at 0 and never checks the result: whether the cell
-/// is really inside the building, rather than a block of another wall, is
-/// [`inside_plate_refusal`]'s question, asked by the caller.
+/// Shift a wall voxel's `(x, z)` one voxel toward the interior, saturating at 0 and unchecked.
 fn shift_inward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
     let (dx, dz) = side.outward_normal();
     (x.saturating_add_signed(-dx), z.saturating_add_signed(-dz))
 }
 
-/// Which side of the wall a `pressure_plate at=…` anchor sits on.
-///
-/// Written as a two-segment `DotRef`:
-/// - `at=<side>.outside`: the overhang cell just outside `<side>`, or, on
-///   the floor row of a struct with no overhang, the wall's foundation
-///   cell.
-/// - `at=inside.<side>`: one voxel inward from the wall's column.
+/// Which side of the wall a `pressure_plate at=<side>.outside | inside.<side>` sits on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PlateAnchor {
     Outside(WallSide),
@@ -72,9 +42,7 @@ impl PlateAnchor {
     }
 }
 
-/// Parse a `pressure_plate at=…` value into a [`PlateAnchor`].
-///
-/// `Err` carries the `W_DEFERRED_MEMBER` reason for any other shape.
+/// Parse a `pressure_plate at=` value, or the `W_DEFERRED_MEMBER` reason for any other shape.
 fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, String> {
     let raw = member
         .intent_state
@@ -116,19 +84,7 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, String> {
     ))
 }
 
-/// Paint a `pressure_plate` fixture onto the block array as a single
-/// vanilla plate voxel.
-///
-/// Honours:
-/// - `at=<side>.outside` / `at=inside.<side>` compound anchors,
-/// - `offset=N` and `y=N`, non-negative offsets along the wall and up
-///   (both `0` when absent),
-/// - an optional `mat_slot=` resolving to a bare block id (no
-///   `[property=…]` state literal).
-///
-/// Anything else defers with `W_DEFERRED_MEMBER`. The `-> sig.<name>`
-/// binding on `member.binding` is the redstone pass's to wire; the block
-/// is placed regardless.
+/// Paint a `pressure_plate` fixture as a single plate voxel.
 pub(super) fn fill_pressure_plate(
     member: &Member,
     y_offset: u32,
@@ -151,9 +107,7 @@ pub(super) fn fill_pressure_plate(
     let Some(base_id) = plate_id_for_member(member, ctx, diagnostics) else {
         return;
     };
-    // Interned only once the cell exists, so a refusal leaves no palette
-    // entry. `plate_voxel_position` refuses every out-of-range anchor it
-    // can name; this catches one it cannot.
+    // Interned only once the cell exists, so a refusal leaves no palette entry.
     if !canvas.try_paint((x, y_world, z), || {
         palette.intern(BlockState::bare(base_id))
     }) {
@@ -164,27 +118,10 @@ pub(super) fn fill_pressure_plate(
     }
 }
 
-/// Resolve a `pressure_plate` anchor + `offset=` + `y=` into the world
-/// voxel `(x, y, z)` the plate should paint onto, or `None` (with a
-/// diagnostic already pushed) when any of the inputs is missing / out
-/// of range / lands outside the block array. The one `None` without a
-/// diagnostic is the `INVARIANT(wall-grid-validated)` arm, which the
-/// checks before it make unreachable and which asserts in debug builds.
+/// The world voxel a plate paints onto, or `None` after a diagnostic.
 ///
-/// `<side>.outside` shifts one voxel toward the exterior. When the
-/// shift lands outside the struct's dims *and* `y_world == 0`, it falls
-/// back to the wall's own foundation cell (the floor voxel directly
-/// under the wall column) so authors can still write `at=front.outside`
-/// on a plain flat-roof gatehouse with no overhang. Above the floor row
-/// the same fallback would overwrite the wall block that the massing
-/// phase painted, so `y_world >= 1` without a usable exterior cell
-/// defers instead.
-///
-/// `inside.<side>` always shifts one voxel inward and defers unless the
-/// shifted cell is strictly inside the wall ring on both horizontal axes
-/// (see [`inside_plate_refusal`]), at every row including the floor row:
-/// otherwise the plate would sit on the ring, where the walls paint their
-/// courses, or outside the building altogether.
+/// With no exterior cell, `<side>.outside` falls back to the wall's foundation, at `y = 0` only.
+/// `inside.<side>` must land strictly inside the wall ring.
 fn plate_voxel_position(
     member: &Member,
     y_offset: u32,
@@ -234,10 +171,8 @@ fn plate_voxel_position(
         ctx.interior_h,
         ctx.dims,
     ) else {
-        // INVARIANT(wall-grid-validated): the two refusals above are
-        // every rejection `wall_local_to_grid` makes, so reaching here is
-        // a compiler bug, not the author's: an assertion rather than a
-        // warning. Release builds drop the plate.
+        // INVARIANT(wall-grid-validated): the two refusals above are every rejection
+        // `wall_local_to_grid` makes; release builds drop the plate.
         debug_assert!(
             false,
             "pressure_plate cell u={offset} y={y_world} on the {} wall is outside the wall grid; \
@@ -250,16 +185,13 @@ fn plate_voxel_position(
     match anchor {
         PlateAnchor::Outside(_) => {
             let (sx, sz) = shift_outward(side, wx, wz);
-            // A saturating shift that stays on the wall column (left or
-            // back wall at coordinate 0 with no overhang) reaches no
-            // exterior cell, like a shift out of dims.
+            // A saturating shift that stays on the wall column reaches no exterior cell either.
             let shift_reached_exterior =
                 (sx, sz) != (wx, wz) && ctx.dims.index(sx, y_world, sz).is_some();
             if shift_reached_exterior {
                 Some((sx, y_world, sz))
             } else if y_world == 0 {
-                // The wall column's y=0 cell is floor (walls start at
-                // y=1), so a plate there is still at the wall's foot.
+                // The wall column's y=0 cell is floor (walls start at y=1).
                 Some((wx, y_world, wz))
             } else {
                 diagnostics.push(diag_deferred_member_reason(
@@ -276,8 +208,7 @@ fn plate_voxel_position(
             let (sx, sz) = shift_inward(side, wx, wz);
             if let Some(mut reason) = inside_plate_refusal(side, offset, y_world, (sx, sz), ctx) {
                 if member.binding.is_some() {
-                    // The redstone pass reads the binding, not the block
-                    // array, so the signal outlives the refused block.
+                    // The redstone pass reads the binding, not the block array.
                     reason.push_str(
                         ". Its signal binding still reaches the netlist, with no plate placed to drive it",
                     );
@@ -290,16 +221,9 @@ fn plate_voxel_position(
     }
 }
 
-/// Why an `at=inside.<side>` plate whose inward step landed on `(sx, sz)`
-/// at row `y` has no interior cell to sit on, or `None` when it has one.
+/// Why an `at=inside.<side>` plate stepped onto `(sx, sz)` has no interior cell, or `None`.
 ///
-/// The interior is what the wall ring encloses. The ring is the
-/// footprint's outermost row and column, offset by the roof overhang, and
-/// it is where `walls` paint their courses, so only a cell strictly inside
-/// it can take a plate without replacing a wall block. The ring is decided
-/// from the footprint whether or not a `walls` member paints it, so a cell
-/// on or outside it is refused either way, and the reason claims a wall
-/// only at a row one is painted on.
+/// The interior is strictly inside the footprint's wall ring, whether or not walls paint it.
 fn inside_plate_refusal(
     side: WallSide,
     offset: u32,
@@ -307,9 +231,6 @@ fn inside_plate_refusal(
     (sx, sz): (u32, u32),
     ctx: &StructCtx<'_>,
 ) -> Option<String> {
-    // Saturation cannot turn an outside cell into an inside one: that
-    // needs `overhang + extent > u32::MAX`, where `dims` saturates too and
-    // `fits_volume_budget` has already dropped the struct.
     let strictly_inside = |c: u32, extent: u32| {
         c > ctx.overhang && c < ctx.overhang.saturating_add(extent).saturating_sub(1)
     };
@@ -318,14 +239,11 @@ fn inside_plate_refusal(
     }
     let name = side_name(side);
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
-    // An interior needs one voxel between two walls on each axis, so a
-    // size below 3 on either axis has none for any side or offset.
     let thin: Vec<(&str, u32)> = [("w", ctx.interior_w), ("h", ctx.interior_h)]
         .into_iter()
         .filter(|&(_, extent)| extent < 3)
         .collect();
-    // With both axes at least 3, every offset but the two ends steps into
-    // the interior, so a refusal with no thin axis is always a corner.
+    // With no thin axis, only the two ends of the wall miss the interior.
     let corner = thin.is_empty() || offset == 0 || offset == length - 1;
     let valid_offsets = if length >= 3 {
         format!("from 1 to {}", length - 2)
@@ -364,9 +282,7 @@ fn inside_plate_refusal(
     } else {
         String::new()
     };
-    // Without an overhang `<side>.outside` finds no exterior cell above
-    // the floor row and, at it, falls back to the cell under the wall, so
-    // it is a remedy only when a roof draws an overhang ring to sit in.
+    // Without an overhang, `<side>.outside` has no ring to sit in, so it is no remedy.
     let outside = if ctx.overhang > 0 {
         format!(", or anchor the plate with `at={name}.outside`")
     } else {
@@ -379,21 +295,10 @@ fn inside_plate_refusal(
     ))
 }
 
-/// Resolve a `pressure_plate` `mat_slot=` binding into the concrete
-/// block id the palette entry should carry, defaulting to
-/// [`PRESSURE_PLATE_BASE_ID`] when no binding is present or the resolver
-/// returned no state.
+/// The block id a `pressure_plate` paints: its `mat_slot=`, or the pack's default.
 ///
-/// A `None` from `resolve_member_state` is already reported: a token
-/// failure by it, a missing theme as the body's `W_NO_THEME_BOUND`, since
-/// a plate reads its `mat_slot=`. Another `W_DEFERRED_MEMBER` would report
-/// one cause twice. The default keeps the fixture visible in-game.
-///
-/// A resolved state with `properties` defers *and* skips the paint:
-/// reducing a `plate[...]` binding to a plain plate would drop the
-/// author's intent. That is stricter than `fill_stair`, which defers but
-/// keeps painting, because a plate has no geometry-derived state, so a
-/// plain one carries less of what was asked than the stair band does.
+/// A binding with a state literal defers and paints nothing. An unresolved binding was already
+/// reported, so the default raises no finding of its own.
 pub(super) fn plate_id_for_member(
     member: &Member,
     ctx: &StructCtx<'_>,
@@ -424,21 +329,8 @@ pub(super) fn plate_id_for_member(
     }
 }
 
-/// The pressure plate id for this compile's edition, checked against the
-/// target the way an authored id is.
-///
-/// Asks the pack for [`PRESSURE_PLATE_TOKEN`] and falls back to
-/// [`PRESSURE_PLATE_BASE_ID`] when there is no pack to ask, or when the
-/// pack declares no such row. A pack that declares it wins, which is how
-/// `--edition bedrock` stops emitting the Java-only `oak_pressure_plate`.
-///
-/// The result goes through [`validated_id`] because it reaches the palette
-/// without passing [`resolve_block_state`]; skipping it would leave the
-/// one path with an edition-specific default and a Java fallback writing
-/// an unverified id. `None` after diagnosing, so the plate is dropped
-/// rather than painted with an id the target has no block for.
-///
-/// [`resolve_block_state`]: crate::block_array::material::resolve_block_state
+/// The pack's pressure plate id, or [`PRESSURE_PLATE_BASE_ID`], checked against the target;
+/// `None` after diagnosing an id the target lacks.
 fn pack_plate_default(
     member: &Member,
     registry: Option<&dyn TargetRegistry>,
@@ -464,9 +356,7 @@ fn pack_plate_default(
             diagnostics.push(diag_unknown_id(member.span.clone(), &unknown));
             None
         }
-        // INVARIANT(validated-id-refuses-one-way): `validated_id` answers
-        // the state or `UnknownId`; the other variants describe a
-        // `mat_slot=` value, and there is none here.
+        // INVARIANT(validated-id-refuses-one-way): `validated_id` answers the state or `UnknownId`.
         Err(other) => {
             debug_assert!(
                 false,

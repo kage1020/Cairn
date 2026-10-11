@@ -28,12 +28,7 @@ pub(super) fn fill_roof(
     let Some(kind) = parse_roof_kind(member, diagnostics) else {
         return;
     };
-    // The material is resolved only past `roof_draws`, the volume's gate:
-    // a `shed` with no usable `slope_to=` draws nothing, and resolving it
-    // would report a material (`W_ABSTRACT_TOKEN_DEFERRED`, then
-    // `geometry_material_id`'s `W_DEFERRED_MEMBER`) for a roof that is not
-    // there. With a kind read, that shed is the only roof turned away
-    // here, and `shed_slope_to` says why.
+    // A shed with no usable `slope_to=` draws nothing, so its material is never resolved.
     if roof_draws(member).is_none() {
         shed_slope_to(member, diagnostics);
         return;
@@ -83,9 +78,7 @@ pub(super) fn fill_roof(
             );
         }
         RoofKind::Hip => {
-            // Hip takes gable's ridge rule, so it shares `gable_ridge_axis`
-            // (`spec/compilation` "Hip roof voxel rules" falls through to
-            // "Gable roof voxel rules").
+            // Hip takes gable's ridge rule (`spec/compilation` "Hip roof voxel rules").
             let ridge_axis = gable_ridge_axis(roof_w, roof_h);
             paint_roof(
                 hip_voxels(roof_w, roof_h, wall_top),
@@ -108,21 +101,7 @@ pub(super) fn fill_roof(
     }
 }
 
-/// Paint a roof's voxels, each with its face's blockstate under the id
-/// `base_id`.
-///
-/// One `palette.intern` per face rather than per voxel (a 99-voxel cottage
-/// roof needs four), claimed on first use rather than up front, since a
-/// roof need not emit every face its kind has. An odd ridge span converges
-/// on one row, so a gable with one (a 3x3 struct) emits three of its five
-/// faces and never the apex pair; a shed one deep is a lone apex row, the
-/// layer count being the slope span floored at one with the apex on top. A
-/// flat deck claims its one slot the same way, so no generator leaves an
-/// entry without a voxel.
-///
-/// A claim is found by the face itself, not through a face → slot table,
-/// so a face enum that grows or reorders cannot send one face to another's
-/// slot.
+/// Paint a roof's voxels, interning each face's state under `base_id` on first use only.
 fn paint_roof<F: Copy + PartialEq>(
     voxels: impl IntoIterator<Item = RoofVoxel<F>>,
     state_of: impl Fn(F) -> BlockState,
@@ -145,51 +124,20 @@ fn paint_roof<F: Copy + PartialEq>(
     }
 }
 
-/// What a geometry-driven member does with the material it is given.
-///
-/// Lets one function serve every such member: it can name the member and
-/// say where its blockstates came from without knowing which one it is.
+/// How a geometry-driven member names itself and its blockstates in a material finding.
 pub(super) struct GeometryMemberDescription {
-    /// How the member names itself in a message, already quoted: a roof
-    /// renders as `` `gable` roof ``, an eave as `` eave `stair` ``.
+    /// How the member names itself in a message, already quoted: `` `gable` roof ``.
     pub(super) subject: String,
-    /// Where its blockstates come from, as a noun phrase: a roof reads the
-    /// geometry, an eave stair reads its own arguments.
+    /// Where its blockstates come from, as a noun phrase.
     pub(super) states_from: &'static str,
-    /// Whether it attaches stair blockstates, and therefore needs a
-    /// material from the stair family.
+    /// Whether it attaches stair blockstates, and so needs a stair material.
     pub(super) requires_stair: bool,
 }
 
-/// The block id a geometry-driven member paints, given its resolved
-/// `mat_slot=` binding.
+/// The block id a roof or eave stair paints, given its resolved `mat_slot=` binding.
 ///
-/// One function for the roof and the eave stair: they take the same three
-/// decisions on the same grounds, and a member that attaches blockstates
-/// has the same obligations wherever it appears. `fallback` is the kind's
-/// own id, used when the binding supplies nothing usable:
-///
-/// - no `mat_slot=` at all — silent, the member asked for nothing;
-/// - a `mat_slot=` that resolved to nothing — the resolver already said why
-///   (`E_UNRESOLVED_SLOT`, `E_UNKNOWN_ABSTRACT_TOKEN`, …) or the theme is
-///   missing entirely (`W_NO_THEME_BOUND` fired against the scope), and the
-///   `W_DEFERRED_MEMBER` here anchors the consequence to the member that
-///   wears the fallback;
-/// - a `mat_slot=` that resolved outside the stair family, when this member
-///   needs one. `E_INCOMPATIBLE_MATERIAL`, which stops the build: a whole
-///   block has nowhere to put `facing` / `half` / `shape`, and neither
-///   answer available without the author is acceptable — attaching them
-///   anyway writes a blockstate that does not exist, and substituting the
-///   fallback builds the member out of a material nobody chose. The
-///   fallback is still returned so the rest of the pass has a coherent
-///   palette to finish with; nothing reaches disk, because the finding is
-///   an error.
-///
-/// A resolved state that carries `properties` is reported and its id still
-/// used — the member derives its own states and drops the binding's, which
-/// is a smaller thing than the material being the wrong shape. Checked
-/// after the family, because properties on an id the member is not going to
-/// paint are nothing the author needs to hear about.
+/// A non-stair where a stair is needed is `E_INCOMPATIBLE_MATERIAL`; `fallback` is still returned
+/// so the pass can finish.
 pub(super) fn geometry_material_id<'a>(
     member: &Member,
     scope: Option<&ScopeResolution>,
@@ -200,12 +148,7 @@ pub(super) fn geometry_material_id<'a>(
 ) -> &'a str {
     let Some(state) = resolved else {
         if member.mat_slot.is_some() {
-            // Names the theme, which is what the author edits, and without
-            // which two placements under two themes write one sentence.
-            // Sibling-variant softening reaches this arm: with no
-            // `--edition` pin the resolver is silent on a slot only the
-            // sibling variant declares, so lowering alone reports it, on a
-            // member line every placement of the `def` shares.
+            // Names the theme, so two placements under two themes write two findings.
             let under = scope
                 .and_then(|scope| scope.bound_theme.as_deref())
                 .map_or_else(String::new, |theme| format!(" under theme `{theme}`"));
@@ -240,12 +183,9 @@ pub(super) fn geometry_material_id<'a>(
     &state.id
 }
 
-/// A member whose geometry attaches blockstates was bound to a material
-/// that cannot carry them.
+/// A member whose geometry attaches blockstates was bound to a material that cannot carry them.
 ///
-/// Anchored on the theme's slot value when there is one, because that line
-/// is where the fix goes — the member itself only names a slot, and every
-/// member reading that slot has the same problem for the same reason.
+/// Anchored on the theme's slot value when there is one, since that is where the fix goes.
 fn diag_incompatible_material(
     member: &Member,
     state: &BlockState,
@@ -282,26 +222,17 @@ fn diag_incompatible_material(
             slot: member.mat_slot.as_ref().map(|slot| slot.name.clone()),
             token: slot_value.and_then(|v| match &v.value.kind {
                 ValueKind::Token(token) => Some(token.clone()),
-                // Anything else here was already refused upstream
-                // (`E_UNKNOWN_SLOT_TARGET`), so there is no token to name.
+                // Anything else was refused upstream as `E_UNKNOWN_SLOT_TARGET`.
                 _ => None,
             }),
         }),
     }
 }
 
-/// Resolve a `roof` member's `kind=` to a [`RoofKind`].
-///
-/// Pushes a `W_DEFERRED_MEMBER` warning and returns `None` when the
-/// `kind=` is missing, typed wrong, or names a kind outside the supported
-/// set.
+/// Resolve a `roof` member's `kind=`, or `None` after a `W_DEFERRED_MEMBER`.
 fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<RoofKind> {
     let Some(raw) = member.ident_value("kind") else {
-        // A value of the wrong shape is named by its shape, not by the
-        // closed set: `kind="shed"` spells a kind in the set, and being
-        // told the set again answers a question the author did not ask.
-        // `check::arguments` stays quiet on a `kind=` naming no rule, so
-        // this finding is the whole repair.
+        // A wrongly shaped value is named by its shape: `kind="shed"` spells a kind in the set.
         let reason = match member.intent_state.get("kind") {
             Some(raw) => format!(
                 "roof `kind=` must be an identifier naming one of {}, got {}",
@@ -326,12 +257,7 @@ fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option
     None
 }
 
-/// Resolve a shed roof's `slope_to=` argument.
-///
-/// Required for `kind=shed` because the slope direction has no sensible
-/// default — picking one silently would let a typo emit a roof that
-/// peaks on the wrong wall. Missing or mis-typed `slope_to=` therefore
-/// surfaces a `W_DEFERRED_MEMBER` warning.
+/// Resolve a shed roof's required `slope_to=`, or `None` after a `W_DEFERRED_MEMBER`.
 pub(super) fn shed_slope_to(
     member: &Member,
     diagnostics: &mut Vec<Diagnostic>,

@@ -20,34 +20,19 @@ use super::members::{
 };
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
 
-/// Which lowering entry point produced this body, for the findings that
-/// name the host.
-///
-/// Distinct from [`crate::intent::BodyKind`], which splits `struct` / `def`
-/// from `site` by what the author wrote. This splits by what is voxelised,
-/// and a `place` voxelises a `def`, so the two disagree on every placement.
+/// Which lowering entry point produced this body: what is voxelised, not what was written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum VoxelSource {
     Struct,
     Place,
 }
 
-/// What every body of one run is lowered against, whether a `struct` or
-/// a `place`'s `def`: threaded unchanged from
-/// [`lower_to_block_array_within`] down to [`lower_body_to_block_array`].
-///
-/// [`lower_to_block_array_within`]: super::lower_to_block_array_within
+/// What every body of one run is lowered against.
 #[derive(Clone, Copy)]
 pub(super) struct BodyInputs<'a> {
-    /// The compile target's registry view; see [`lower_to_block_array`].
-    ///
-    /// [`lower_to_block_array`]: super::lower_to_block_array
+    /// The compile target's registry view.
     pub(super) registry: Option<&'a dyn TargetRegistry>,
-    /// The entries each body's palette may hold, air included:
-    /// [`PALETTE_CAPACITY`] from [`lower_to_block_array`].
-    ///
-    /// [`PALETTE_CAPACITY`]: crate::block_array::PALETTE_CAPACITY
-    /// [`lower_to_block_array`]: super::lower_to_block_array
+    /// The entries each body's palette may hold, air included.
     pub(super) palette_capacity: usize,
 }
 
@@ -58,38 +43,21 @@ pub(super) struct BodyDescriptor<'a> {
     pub(super) scope_label: &'a str,
     pub(super) size: &'a Size,
     pub(super) members: &'a [Member],
-    /// Span the `W_NO_THEME_BOUND` warning anchors at (struct/def header
-    /// for a struct, `place` line for a place).
+    /// Span the `W_NO_THEME_BOUND` warning anchors at.
     pub(super) header_span: &'a Span,
     /// IR key written into the resulting [`BlockArray::source_scope`].
     pub(super) source_scope: String,
 }
 
-/// What lowering one body produced: the voxels, and the wall column they
-/// were painted against.
-///
-/// The column comes back out because the `connect` pass asks a
-/// placement's masonry what the openings phase asked it, and one answer
-/// keeps them from disagreeing. Derived again from the `def`, the two
-/// could lay a strip to a window the openings phase deferred, or refuse
-/// one it cut.
+/// What lowering one body produced: the voxels, and the wall column they were painted against.
 pub(super) struct LoweredBody {
     pub(super) array: BlockArray,
     pub(super) walls: WallColumn,
-    /// The spans of the `door` and `window` members that painted at
-    /// least one cell — the openings the `connect` pass may anchor a port
-    /// on. Read off the canvas rather than reported by the generators, so
-    /// a new way for a cut to defer cannot forget to say so.
+    /// The spans of the `door` and `window` members that painted at least one cell.
     pub(super) cut: HashSet<Span>,
 }
 
-/// Lower one struct or place body into voxels.
-///
-/// `None` means the body was refused, and the diagnostic saying why has
-/// already been pushed: the extent it asks for is past
-/// [`MAX_STRUCTURE_VOLUME`] (`W_STRUCTURE_TOO_LARGE`), or it paints more
-/// states than its palette holds (`W_PALETTE_TOO_LARGE`). The caller drops
-/// the scope.
+/// Lower one struct or place body into voxels, or `None` after the diagnostic refusing it.
 pub(super) fn lower_body_to_block_array<'a>(
     body: BodyDescriptor<'a>,
     scope: Option<&'a ScopeResolution>,
@@ -105,15 +73,10 @@ pub(super) fn lower_body_to_block_array<'a>(
 
     let theme_missing = scope.is_none_or(|sc| sc.bound_theme.is_none());
 
-    // Flattened once: the dim math and the phase buckets both read this
-    // paint set, since dims from any other list could leave a roof a volume
-    // too short to hold it, and `flatten_members` reports what it drops.
+    // Flattened once: sizing and the phase buckets must read the same paint set.
     let flattened = flatten_members(body.members, diagnostics);
-    // `spec/lint` "Materials and targets": a scope that reads no
-    // `mat_slot=` loses nothing to a missing theme, so it is not reported.
-    // "Reads" is `Member::read_slot`, so a `door`'s `mat_slot=` does not
-    // count. Asked of the flattened list because the only reader may sit
-    // in a `level`, and a dropped member paints nothing whatever the theme.
+    // A scope that reads no `mat_slot=` loses nothing to a missing theme (`spec/lint` "Materials
+    // and targets"), so it is not reported.
     if theme_missing && flattened.iter().any(|(_, m)| m.read_slot().is_some()) {
         diagnostics.push(diag_no_theme_bound_generic(
             body.kind,
@@ -121,14 +84,8 @@ pub(super) fn lower_body_to_block_array<'a>(
             body.header_span,
         ));
     }
-    // The footprint grows by the largest roof `overhang=` on every side, so
-    // eaves have room outside the wall ring. Floors, walls, doors and
-    // windows are authored against the *interior* size and shifted inward
-    // by this amount.
     let overhang = max_roof_overhang(&flattened, diagnostics);
-    // One walk over the walls, read twice: `resolve_member_state` is not
-    // free (a token miss builds the whole catalogue for a suggestion), and
-    // one answer per member keeps the volume and the carve on one list.
+    // One walk over the walls, read twice, so the volume and the carve see one list.
     let painting_walls: Vec<(u32, u32)> =
         painting_walls(&flattened, scope, registry, theme_missing).collect();
     let max_wall_top = max_wall_top(&painting_walls);
@@ -140,10 +97,6 @@ pub(super) fn lower_body_to_block_array<'a>(
         y: 1u32.saturating_add(max_wall_top).saturating_add(roof_extra),
         z: interior_h.saturating_add(overhang.saturating_mul(2)),
     };
-    // Ask before allocating. Each of `size=`, `height=`, `overhang=`, and
-    // `level y=` is a valid `u32` in its own right, so nothing upstream can
-    // see that their product is not: `size=100000x100000` alone asks the
-    // allocator for 10^10 cells.
     if !dims.fits_volume_budget() {
         diagnostics.push(diag_structure_too_large(&body, dims));
         return None;
@@ -164,9 +117,7 @@ pub(super) fn lower_body_to_block_array<'a>(
 
     let buckets = bucket_members(&flattened, diagnostics);
     let canvas = paint_phases(buckets, &ctx, &mut palette, diagnostics);
-    // Before anything reads the grid: a voxel painted after the palette
-    // filled up holds air rather than its state, so the array is not the
-    // body the source describes.
+    // Before anything reads the grid: a voxel painted after the palette filled holds air.
     let mut palette = match palette.into_palette() {
         Ok(palette) => palette,
         Err(full) => {
@@ -206,8 +157,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         entities: Vec::new(),
         source_scope: body.source_scope,
     };
-    // After the prune, on the finished grid: earlier would sort entries
-    // about to be dropped and renumber twice.
+    // After the prune, so dropped entries are not sorted and the grid is renumbered once.
     array.canonicalize_palette();
 
     Some(LoweredBody {
@@ -217,23 +167,10 @@ pub(super) fn lower_body_to_block_array<'a>(
     })
 }
 
-/// Paint one body's members onto a fresh canvas, phase by phase in the
-/// order `spec/compilation` "Phase evaluation" fixes.
+/// Paint one body's members onto a fresh canvas, phase by phase in `spec/compilation` "Phase
+/// evaluation" order.
 ///
-/// Openings run after massing, so a `door` written before `walls` still
-/// cuts the wall. The canvas is made here from the buckets about to be
-/// painted onto it, so no caller has an order to get right.
-///
-/// No adjacent swap (massing/envelope, envelope/openings,
-/// openings/fixtures) is observable, because no two neighbouring phases'
-/// generators write the same cell: a roof starts at `wall_top + 1`; an
-/// eave `stair` sits a voxel outside the wall line, in an overhang it
-/// defers without; every opening is cut into the wall ring at or below
-/// `wall_top`; a `pressure_plate` is shifted a voxel in or out; a `floor`
-/// is the interior plane at row 0, which no opening reaches. Massing after
-/// openings, a two-step move, does show: it refills a carved opening. So
-/// this argument, not a test, holds the order until a generator grows
-/// into a neighbour's cells.
+/// No test pins the order: neighbouring phases write disjoint cells, so only a two-step swap shows.
 fn paint_phases(
     buckets: PhaseBuckets<'_>,
     ctx: &StructCtx<'_>,
@@ -242,33 +179,21 @@ fn paint_phases(
 ) -> Canvas {
     let PhaseBuckets { by_phase, phases } = buckets;
     let mut canvas = Canvas::new(ctx.dims, phases);
-    // `by_phase` is indexed by `Phase::index`, so front to back is the
-    // spec's order.
     for bucket in by_phase {
         run_phase(bucket, ctx, palette, &mut canvas, diagnostics);
     }
     canvas
 }
 
-/// The paint set filed by phase, each entry keeping its position in the
-/// flattened list so the canvas can name it in a finding.
+/// The paint set filed by phase, each entry keeping its index in the flattened list.
 struct PhaseBuckets<'a> {
-    /// Indexed by [`Phase::index`]: the members each phase paints, as
-    /// `(index in the flattened list, y_offset, member)`.
+    /// Indexed by [`Phase::index`]: `(index in the flattened list, y_offset, member)` per phase.
     by_phase: [Vec<(u32, u32, &'a Member)>; Phase::COUNT],
-    /// One entry per member of the flattened list, in the same order:
-    /// which phase evaluates it, or `None` when none does. Handed to the
-    /// [`Canvas`] so a voxel can carry its writer's index alone.
+    /// The phase that evaluates each member of the flattened list, in order, or `None`.
     phases: Vec<Option<Phase>>,
 }
 
-/// File every member of the paint set under the phase `spec/compilation`
-/// "Phase evaluation" evaluates it in, reporting the ones no phase has a
-/// reader for.
-///
-/// Within a bucket the members keep source order, which is what that section's
-/// last-wins grant is about; across buckets the order is the spec's, which
-/// is what makes the source order-free.
+/// File every member of the paint set under its phase, reporting the ones no phase reads.
 fn bucket_members<'a>(
     flattened: &[(u32, &'a Member)],
     diagnostics: &mut Vec<Diagnostic>,
@@ -278,15 +203,9 @@ fn bucket_members<'a>(
         phases: Vec::with_capacity(flattened.len()),
     };
     for (index, &(y_offset, member)) in flattened.iter().enumerate() {
-        // `u32` because that is what a voxel stores. A longer paint set
-        // needs gigabytes of `level` blocks, and `MAX_STRUCTURE_VOLUME`
-        // refuses such a body first.
         let index = u32::try_from(index).expect("the paint set is far shorter than u32::MAX");
-        // An actuator patch (`door[id=X] opened_by=sig.Y`) overlays a door
-        // declared elsewhere and has neither `side=` nor `at=`, so in the
-        // openings phase `side_of` would report a missing `side=`. Only
-        // its surface shape is checked here; the signal binding is
-        // redstone's (`spec/redstone` "Signal binding").
+        // An actuator patch overlays a door declared elsewhere, with no `side=`; only its shape is
+        // checked here (`spec/redstone` "Signal binding").
         if is_actuator_patch(member) {
             recognize_actuator_patch(member, flattened, diagnostics);
             buckets.phases.push(None);
@@ -301,10 +220,7 @@ fn bucket_members<'a>(
             MemberDisposition::Paints(phase) => {
                 buckets.by_phase[phase.index()].push((index, y_offset, member));
             }
-            // `circuit region=<label> void=<N>` reserves a routing region
-            // for place-and-route (`spec/redstone` "Place-and-route" and
-            // "Connection to the IR and phases") and paints nothing; only
-            // its surface shape is checked.
+            // A `circuit` region is left for `spec/redstone` "Place-and-route".
             MemberDisposition::Reserves => recognize_circuit_region(member, diagnostics),
             MemberDisposition::NotLowered => diagnostics.push(diag_deferred_member(member)),
         }
@@ -312,10 +228,8 @@ fn bucket_members<'a>(
     buckets
 }
 
-/// Paint one phase's bucket with [`paint_member`], opening a
-/// [`MemberCanvas`] per member so every write it makes is filed under it.
-/// A bucket cannot forget: the borrow is the only route to a write, and it
-/// closes with the member.
+/// Paint one phase's bucket, each member through its own [`MemberCanvas`] so its writes are
+/// filed under it.
 ///
 /// [`MemberCanvas`]: super::canvas::MemberCanvas
 pub(super) fn run_phase(
@@ -338,14 +252,8 @@ pub(super) fn run_phase(
     }
 }
 
-/// Two members of one phase wrote the same cell to different blocks.
-///
-/// `spec/compilation` "Phase evaluation" settles that by source order —
-/// "last-wins applies only to local overrides within the same phase" — and
-/// this says so out loud, because an override the author meant and two
-/// footprints that happen to intersect look identical from the grid. Anchored
-/// at the member that wrote last, the way `E_LOGIC_MULTIPLE_DRIVERS` anchors
-/// at the redefinition and notes the first declaration.
+/// Two members of one phase wrote the same cell to different blocks (`spec/compilation` "Phase
+/// evaluation"); anchored at the later.
 fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) -> Diagnostic {
     let cell = if voxels == 1 { "voxel" } else { "voxels" };
     Diagnostic {
@@ -383,9 +291,6 @@ fn diag_phase_conflict(overridden: &Member, overriding: &Member, voxels: u32) ->
 }
 
 /// A body painted more distinct block states than its palette holds.
-///
-/// The number is `full`'s, the capacity that was in force, less the slot
-/// air holds from the start.
 fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::PaletteTooLarge,
@@ -409,10 +314,6 @@ fn diag_palette_too_large(body: &BodyDescriptor<'_>, full: PaletteFull) -> Diagn
 }
 
 /// The scope asked for more voxels than [`MAX_STRUCTURE_VOLUME`] allows.
-///
-/// Names the extent rather than only the limit: the numbers an author wrote
-/// are `size=`, `height=`, and `overhang=`, and the product is what went out
-/// of range, so showing the derived extent is what connects the two.
 fn diag_structure_too_large(body: &BodyDescriptor<'_>, dims: Dims) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::StructureTooLarge,

@@ -10,46 +10,24 @@ use crate::error::Span;
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{BlockArray, PaletteIndex, Placement};
 
-/// One `place` row that lowered, and the masonry its body lowered with.
+/// One `place` row that lowered, with the masonry and openings its body lowered with.
 ///
-/// The column travels with the placement, not in a map of its own, so the
-/// two cannot disagree about which bodies exist: a key in only one would
-/// judge a `connect` port against a body in no artifact, as when a second
-/// `place` row reuses an `id=` and its body lowers but is not kept.
-///
-/// Not a field on [`Placement`]: that record is hashed into
-/// `resolved_ir_hash`, which the rows a wall occupies must not move (and
-/// [`WallColumn`] derives no `Serialize`).
+/// Not on [`Placement`], which is hashed into `resolved_ir_hash`.
 pub(super) struct PlacedBody {
     pub(super) placement: Placement,
-    /// The rows this body's `walls` painted — the value the openings
-    /// phase cut against. A `connect` row anchoring a port here reads
-    /// it, so the port and the cut ask the wall one question.
+    /// The rows this body's `walls` painted, as the openings phase cut against them.
     pub(super) walls: WallColumn,
-    /// The doors and windows the openings phase cut, by member span. A
-    /// port on any other opening is refused: whatever stopped the cut, the
-    /// strip would end against the wall.
+    /// The doors and windows the openings phase cut, by member span.
     pub(super) cut: HashSet<Span>,
 }
 
-/// The walk plane the placements occupy: every cell a walkway may not
-/// overwrite, who lays each one, and how far each placement's share of it
-/// reaches.
+/// The walk plane the placements occupy: cells a walkway may not overwrite, and who lays each.
 pub(super) struct FloorPlan {
-    /// World-space `(x, y, z)` of every non-air voxel on row 0 of every
-    /// placement. A walkway leaves these cells air, and a row that would
-    /// overwrite one earns a `W_WALKWAY_BLOCKED` warning.
+    /// World cells of every non-air voxel on row 0 of every placement.
     pub(super) cells: HashSet<(i32, i32, i32)>,
     /// For each cell in [`Self::cells`], what lays it, in placement order.
-    /// Recorded as the cell is inserted, so a note naming what covers a
-    /// port reads the derivation the router was blocked by.
     pub(super) owners: HashMap<(i32, i32, i32), Vec<FloorOwner>>,
-    /// Per placement that put at least one cell in [`Self::cells`], under
-    /// its `site::SITE::PLACE_ID` key, the box those cells span. The
-    /// router's search rectangle is the union of these boxes on its plane
-    /// together with the two port cells, inflated by one cell on every
-    /// side (see `walkway::search_rect`), so a note about that rectangle
-    /// can name the placements that stretched it.
+    /// The box each placement's cells span, under its `site::SITE::PLACE_ID` key.
     pub(super) extents: IndexMap<String, FloorExtent>,
 }
 
@@ -83,20 +61,15 @@ pub(super) fn collect_floor_cells(
     let mut extents: IndexMap<String, FloorExtent> = IndexMap::new();
     for (index, (key, PlacedBody { placement, .. })) in placed.iter().enumerate() {
         let Some(ba) = structures.get(key) else {
-            // INVARIANT: `lower_site` inserts each key into `placed` and
-            // into `structures` together, first write winning in both, and
-            // nothing removes one before this runs.
+            // INVARIANT: `lower_site` inserts each key into `placed` and `structures` together.
             debug_assert!(false, "placement `{key}` has no structure");
             continue;
         };
-        // Only row 0: a walkway runs on its ports' shared plane, and the
-        // router searches no other.
+        // Only row 0: the router searches the ports' shared plane alone.
         for z in 0..ba.dims.z {
             for x in 0..ba.dims.x {
                 let Some(i) = ba.dims.index(x, 0, z) else {
-                    // INVARIANT: the loop keeps `x` and `z` inside `dims`,
-                    // and a lowered body is at least one cell tall, so its
-                    // row 0 exists.
+                    // INVARIANT: the loop stays inside `dims`, and a lowered body has a row 0.
                     debug_assert!(
                         false,
                         "cell ({x}, 0, {z}) of `{key}` is outside {:?}",
@@ -113,12 +86,7 @@ pub(super) fn collect_floor_cells(
                         .ok()
                         .and_then(|local| origin.checked_add(local))
                 };
-                // INVARIANT: `PlaceAnchor::origin` refuses a row whose body
-                // reaches past `i32`, so every cell of a placed body has a
-                // world coordinate. Loud in debug builds; a release build
-                // skips the cell. Saturating it instead would fold every
-                // column past the range onto the edge cell, which would then
-                // read as laid by whichever of them was not air.
+                // INVARIANT: `PlaceAnchor::origin` refused any body reaching past `i32`.
                 let (Some(wx), Some(wz)) =
                     (world(placement.origin.0, x), world(placement.origin.2, z))
                 else {

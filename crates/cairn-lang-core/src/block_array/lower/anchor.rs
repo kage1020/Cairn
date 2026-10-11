@@ -12,35 +12,26 @@ use crate::block_array::args::{UnreadArgument, read_or_ignore};
 
 use super::site_floor::PlacedBody;
 
-/// Where one `place` line lands relative to what has already been placed:
-/// the prior placement's origin (and, for `east_of`, its width) and the
-/// `gap`, read before this placement's body is lowered.
-///
-/// Finished by [`PlaceAnchor::origin`] once the new body's dims are known,
-/// because `north_of` steps back by the *new* placement's depth.
+/// Where one `place` line lands relative to prior placements, finished by [`PlaceAnchor::origin`]
+/// once the new body's dims are known.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PlaceAnchor {
     /// `at=origin`.
     WorldOrigin,
-    /// `east_of=ID gap=N`: the prior placement's origin and inflated
-    /// `dims.x`.
+    /// `east_of=ID gap=N`: the prior placement's origin and inflated `dims.x`.
     EastOf {
         prior_origin: (i32, i32, i32),
         prior_dims_x: u32,
         gap: i64,
     },
-    /// `north_of=ID gap=N`: the prior placement's origin. Its depth plays
-    /// no part: the step back is the new body's own depth.
+    /// `north_of=ID gap=N`: the prior placement's origin; the step back is the new body's depth.
     NorthOf {
         prior_origin: (i32, i32, i32),
         gap: i64,
     },
 }
 
-/// A placement [`PlaceAnchor::origin`] works out lies partly outside the
-/// `i32` range world coordinates are recorded and addressed in. `axis` is
-/// the one that left the range and `coord` the coordinate on it that did,
-/// for the message; `corner` says which coordinate that is.
+/// A placement [`PlaceAnchor::origin`] works out lies partly outside the `i32` range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct PlacementOutOfRange {
     pub(super) corner: PlacementCorner,
@@ -48,23 +39,17 @@ pub(super) struct PlacementOutOfRange {
     pub(super) coord: i128,
 }
 
-/// Which end of a placement's box [`PlacementOutOfRange`] found outside
-/// the range, and so what its `coord` holds.
+/// Which end of a placement's box left the range, and so what `coord` holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum PlacementCorner {
-    /// The low-`x`, low-`z` origin the placement records. `coord` is the
-    /// origin on the axis its selector moves along: a sum for `east_of`, a
-    /// difference for `north_of`.
+    /// The low-`x`, low-`z` origin the placement records.
     Origin,
-    /// The body's far edge, `origin + dims − 1`, where its last cell sits.
-    /// `coord` is that edge on the first of `x` and `z` that leaves the
-    /// range, not the whole high corner.
+    /// The body's far edge, `origin + dims − 1`, on the first of `x` and `z` that leaves the range.
     FarEdge,
 }
 
 impl PlacementOutOfRange {
-    /// `coord` as the `i32` it has to fit in, or the refusal that says it
-    /// does not.
+    /// `coord` as the `i32` it has to fit in, or the refusal.
     fn fit(corner: PlacementCorner, axis: char, coord: i128) -> Result<i32, Self> {
         i32::try_from(coord).map_err(|_| Self {
             corner,
@@ -74,11 +59,6 @@ impl PlacementOutOfRange {
     }
 
     /// The `W_DEFERRED_MEMBER` reason for the row this refuses.
-    ///
-    /// The repair depends on which end left the range. The far edge also
-    /// moves with the body's own extent, and on a `north_of` row no `gap=`
-    /// on the row itself moves `x`, so its advice names the body's `size=`
-    /// and `overhang=` beside the `gap=`.
     pub(super) fn deferral(self) -> String {
         let Self {
             corner,
@@ -107,31 +87,14 @@ impl PlacementOutOfRange {
 }
 
 impl PlaceAnchor {
-    /// The world-space origin (low-`x`, low-`z` corner) of a placement
-    /// whose lowered body has `dims`, per `spec/components-editing-sites`
-    /// "Origin selectors": `east_of` is `prior.x + prior.dims.x + gap`,
-    /// `north_of` is `prior.z − new.dims.z − gap`. Either way `gap` counts
-    /// the empty blocks between the two facing bounding-box faces (each the
-    /// wall plus its `overhang=` columns), so `gap=0` makes the boxes touch
-    /// whichever of the two is wider or deeper.
+    /// The world origin of a placement whose body has `dims` (`spec/components-editing-sites`
+    /// "Origin selectors"), or which end of it leaves `i32`.
     ///
-    /// The sum is taken in `i128`, where no `i32` origin, `u32` extent and
-    /// `i64` gap can overflow, and refused when it leaves `i32` rather than
-    /// saturated: a saturated origin would silently stack two placements on
-    /// one coordinate. The body's
-    /// far edge, `origin + dims − 1` on `x` and `z`, is refused the same
-    /// way, since a cell past it has no world coordinate either. `y` is not
-    /// checked, because every placement's `y` is the `0` of the `at=origin`
-    /// row its chain starts from (`east_of` and `north_of` carry the
-    /// prior's `y` through) and [`MAX_STRUCTURE_VOLUME`] keeps `dims.y` far
-    /// below `i32::MAX`; a selector that moves `y` has to join the check.
-    ///
-    /// [`MAX_STRUCTURE_VOLUME`]: crate::block_array::MAX_STRUCTURE_VOLUME
+    /// `y` is unchecked: no selector moves it, and one that does has to join the check.
     pub(super) fn origin(self, dims: Dims) -> Result<(i32, i32, i32), PlacementOutOfRange> {
         use PlacementCorner::{FarEdge, Origin};
         let fit = PlacementOutOfRange::fit;
-        // The low corner first: the far edge is measured from it, so it
-        // has to be in range before the far edge means anything.
+        // The low corner first: the far edge is measured from it.
         let (x, y, z) = match self {
             Self::WorldOrigin => (0, 0, 0),
             Self::EastOf {
@@ -150,10 +113,7 @@ impl PlaceAnchor {
                 (x, y, fit(Origin, 'z', next_z)?)
             }
         };
-        // INVARIANT: a body's `x` and `z` extents are its `size=` (a
-        // `NonZeroU32`) plus twice its overhang, so neither is 0, and
-        // `origin + dims − 1` is the last cell rather than one before the
-        // origin.
+        // INVARIANT: `size=` is non-zero, so `origin + dims − 1` is the last cell.
         debug_assert!(
             dims.x > 0 && dims.z > 0,
             "a placed body has a zero extent: {dims:?}",
@@ -165,23 +125,10 @@ impl PlaceAnchor {
     }
 }
 
-/// Read the `at=origin` / `east_of=ID gap=N` / `north_of=ID gap=N`
-/// selector of one `place` line into a [`PlaceAnchor`].
+/// Read a `place` line's `at=origin` / `east_of=` / `north_of=` selector into a [`PlaceAnchor`].
 ///
-/// On a relative (`east_of` / `north_of`) row the anchor is `None` when the
-/// prior place it names did not lower, which the caller reports before
-/// skipping the row. A row with no usable selector never gets here: the
-/// resolver refuses it (`E_INVALID_PLACE_ORIGIN`, or
-/// `E_UNRESOLVED_PLACE_REF` when it names no prior place) and binds no
-/// scope for it. The front-is-`+z` convention of
-/// `spec/components-editing-sites` "Multi-building with `site`" is why
-/// `north_of` retreats along `-z`.
-///
-/// On a relative row, a `gap=` that is not an integer is an unreadable
-/// value: the anchor carries `gap=0`, and the [`UnreadArgument`] is handed
-/// back beside it — also when the anchor is `None` — for the caller to
-/// report with the note that matches whether the row was placed. An
-/// `at=origin` row returns before `gap=` is read.
+/// The anchor is `None` when the prior place did not lower. An unreadable `gap=` reads as `0`,
+/// and its [`UnreadArgument`] comes back for the caller to report.
 pub(super) fn resolve_place_anchor(
     member: &Member,
     placed: &IndexMap<String, PlacedBody>,
@@ -224,23 +171,18 @@ pub(super) fn resolve_place_anchor(
     (anchor, gap_unread)
 }
 
-/// Where a `place` row with an unreadable `gap=` ended up, which picks the
-/// note its finding carries.
+/// Where a `place` row with an unreadable `gap=` ended up, which picks its finding's note.
 #[derive(Clone, Copy)]
 pub(super) enum GapOutcome {
     /// Placed at the `gap=0` the unreadable value falls back to.
     Placed,
-    /// Refused for a reason no `gap=` reaches: its anchor did not lower,
-    /// or its body was refused.
+    /// Refused for a reason no `gap=` reaches.
     NotPlaced,
-    /// Refused because the placement worked out at `gap=0` leaves the
-    /// `i32` range: its origin, or its body's far edge. Only that value was
-    /// tried, so the note claims nothing about any other `gap=`.
+    /// Refused because the placement at `gap=0` leaves the `i32` range.
     OutOfRange,
 }
 
-/// Report a `place` row's unreadable `gap=`, if it had one, with the note
-/// for where the row ended up.
+/// Report a `place` row's unreadable `gap=`, if any, with the note for where the row ended up.
 pub(super) fn report_unread_gap(
     unread: Option<UnreadArgument>,
     outcome: GapOutcome,

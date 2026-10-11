@@ -3,11 +3,7 @@ use std::collections::BTreeSet;
 use super::*;
 use crate::intent::MemberRole;
 
-/// `tests/lower/conditional_arguments.rs` enumerates from the table, so
-/// it cannot see a kind added here with no row, which `check::arguments`
-/// would let drop `slope_to=` silently. A unit test because [`RoofKind`]
-/// is not public. `stair` has no equivalent: its kinds are a string
-/// literal in `fill_stair`, not a closed type.
+// `tests/lower/conditional_arguments.rs` reads the table, so only this sees a kind with no row.
 #[test]
 fn every_roof_kind_the_dispatch_knows_has_an_arm() {
     let conditional = MemberRole::Roof.conditional_arguments();
@@ -28,7 +24,6 @@ fn every_roof_kind_the_dispatch_knows_has_an_arm() {
         from_dispatch, from_table,
         "`RoofKind` and `MemberRole::Roof.conditional_arguments()` disagree about the kinds",
     );
-    // Every arm also parses, so `name` and `from_ident` agree on spelling.
     for name in from_table {
         assert!(
             RoofKind::from_ident(name).is_some(),
@@ -36,8 +31,6 @@ fn every_roof_kind_the_dispatch_knows_has_an_arm() {
         );
     }
 }
-
-// -------- gable --------
 
 #[test]
 fn gable_extra_height_ceils_half_span() {
@@ -49,11 +42,7 @@ fn gable_extra_height_ceils_half_span() {
 
 #[test]
 fn cottage_dimensions_produce_99_voxels() {
-    // size=9x7 overhang=1 → roof bbox = 11x9. Ridge along x (long axis),
-    // short span = 9 → gable_extra_height(9) = 5 layers, apex on layer 4
-    // (odd span → single apex row).
-    // Layers 0..=3 each emit two rows of 11 stairs; layer 4 emits one
-    // row of 11 stairs. Total = 4 * 2 * 11 + 11 = 99.
+    // An 11x9 box: four layers of two 11-stair rows, then one apex row.
     let voxels = gable_voxels(11, 9, 4);
     let expected: usize = 4 * 2 * 11 + 11;
     assert_eq!(voxels.len(), expected);
@@ -161,8 +150,6 @@ fn square_footprint_breaks_tie_to_x_axis_ridge() {
     }
 }
 
-// -------- roof kind parsing --------
-
 #[test]
 fn parse_roof_kind_recognises_four_idents() {
     assert_eq!(RoofKind::from_ident("gable"), Some(RoofKind::Gable));
@@ -181,8 +168,6 @@ fn roof_kind_base_block_id_picks_stairs_or_planks() {
     assert_eq!(RoofKind::Flat.base_block_id(), FLAT_BASE_ID);
 }
 
-// -------- shed --------
-
 #[test]
 fn shed_extra_height_equals_slope_span() {
     assert_eq!(shed_extra_height(7), 7);
@@ -192,8 +177,6 @@ fn shed_extra_height_equals_slope_span() {
 
 #[test]
 fn shed_voxels_climb_one_layer_per_step_toward_high_side() {
-    // `slope_to=front`: the low edge is the back wall (z=0).
-    // `roof_w=5, roof_h=4` → 4 layers × 5 perpendicular cells.
     let voxels = shed_voxels(5, 4, 4, WallSide::Front);
     assert_eq!(voxels.len(), 4 * 5);
     let l0: Vec<&ShedVoxel> = voxels.iter().filter(|v| v.pos.1 == 5).collect();
@@ -217,10 +200,7 @@ fn shed_voxels_climb_one_layer_per_step_toward_high_side() {
 
 #[test]
 fn shed_voxels_left_high_runs_along_x() {
-    // slope_to=Left (-x high). Slope axis is x, perp is z.
-    // layers = roof_w = 4.
     let voxels = shed_voxels(4, 5, 3, WallSide::Left);
-    // Layer 0 at lowest y=4, on the LOW side x=roof_w-1=3 (Right).
     let l0: Vec<&ShedVoxel> = voxels.iter().filter(|v| v.pos.1 == 4).collect();
     assert_eq!(l0.len(), 5);
     for v in &l0 {
@@ -229,8 +209,6 @@ fn shed_voxels_left_high_runs_along_x() {
     let state = shed_stair_state(WallSide::Left, ShedFace::Slope);
     assert_eq!(state.properties.get("facing").unwrap(), "west");
 }
-
-// -------- hip --------
 
 #[test]
 fn hip_extra_height_matches_gable_short_span_formula() {
@@ -262,11 +240,8 @@ fn hip_square_4x4_caps_with_two_by_two_apex() {
 
 #[test]
 fn hip_rectangular_even_short_span_emits_two_row_ridge_band_single_facing() {
-    // roof_w=8, roof_h=4 → short=4 (even), extra_height=2. Apex layer
-    // L=1 leaves the inset rectangle `lo_x=1..=hi_x=6` (6 cells along
-    // x) × `lo_z=1..=hi_z=2` (2 cells along z). The whole band takes one
-    // facing (`spec/compilation` "Hip roof voxel rules"), unlike a gable's
-    // even-span pair: the open V is deliberate.
+    // The whole band takes one facing (`spec/compilation` "Hip roof voxel rules"), unlike a
+    // gable's even-span pair.
     let voxels = hip_voxels(8, 4, 4);
     let apex_y = 4 + hip_extra_height(8, 4);
     assert_eq!(apex_y, 6);
@@ -284,9 +259,6 @@ fn hip_rectangular_even_short_span_emits_two_row_ridge_band_single_facing() {
 
 #[test]
 fn hip_rectangular_emits_ridge_row_on_long_axis() {
-    // roof_w=9, roof_h=5 → ridge along x. extra_height = ceil(5/2)=3.
-    // Apex layer L=2: ridge rectangle at lo_x=2..=hi_x=6 (5 cells),
-    // lo_z=2..=hi_z=2 (1 cell). Ridge row of 5 cells along x.
     let voxels = hip_voxels(9, 5, 4);
     let apex_y = 4 + 3;
     let apex: Vec<&HipVoxel> = voxels.iter().filter(|v| v.pos.1 == apex_y).collect();
@@ -300,9 +272,6 @@ fn hip_rectangular_emits_ridge_row_on_long_axis() {
 
 #[test]
 fn hip_layer_zero_has_four_corners_and_four_edge_rows() {
-    // roof_w=9, roof_h=5. Layer 0 frame: north row z=0 (x=0..=8),
-    // south row z=4 (x=0..=8), west column x=0 (z=0..=4), east x=8.
-    // Total perimeter cells = 2*9 + 2*5 - 4 corners = 24.
     let voxels = hip_voxels(9, 5, 4);
     let l0: Vec<&HipVoxel> = voxels.iter().filter(|v| v.pos.1 == 5).collect();
     assert_eq!(l0.len(), 2 * 9 + 2 * 5 - 4);
@@ -335,8 +304,6 @@ fn hip_corner_state_uses_outer_left_or_right() {
     assert_eq!(sw.properties.get("facing").unwrap(), "north");
     assert_eq!(sw.properties.get("shape").unwrap(), "outer_right");
 }
-
-// -------- flat --------
 
 #[test]
 fn flat_extra_height_is_one() {
