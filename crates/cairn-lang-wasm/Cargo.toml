@@ -13,7 +13,7 @@ authors.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-cairn-lang-core = { workspace = true }
+cairn-lang-core.workspace = true
 
 [lints]
 workspace = true

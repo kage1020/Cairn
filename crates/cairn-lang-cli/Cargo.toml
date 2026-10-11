@@ -14,9 +14,9 @@ name = "cairn"
 path = "src/main.rs"
 
 [dependencies]
-cairn-lang-core = { workspace = true }
+cairn-lang-core.workspace = true
 cairn-lang-formats.workspace = true
-cairn-lang-redstone = { version = "2026.10.0", path = "../cairn-lang-redstone" }
+cairn-lang-redstone.workspace = true
 # clap's default features stay on deliberately; they are the obvious
 # thing to cut when shrinking the binary. Of the six, three are the reason
 # for this note (`std`, `help` and `usage` are the rest, and losing `help`
@@ -27,12 +27,12 @@ cairn-lang-redstone = { version = "2026.10.0", path = "../cairn-lang-redstone" }
 # two go together. `color` styles `--help` and the error headings.
 # `tests/cli/contract/usage.rs` fails if the first two go.
 clap = { version = "4.6.1", features = ["derive"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.150"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 
 [lints]
 workspace = true
 
 [dev-dependencies]
-flate2 = "1.1.9"
-tempfile = "3.27.0"
+flate2.workspace = true
+tempfile.workspace = true
