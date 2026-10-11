@@ -1,6 +1,7 @@
 //! Lowering the `connect` rows of every `site` to walkway strips.
 
 use std::collections::HashSet;
+use std::hash::BuildHasher;
 
 use indexmap::IndexMap;
 
@@ -16,13 +17,16 @@ use crate::block_array::walkway::{
     BlockedIndex, ROUTE_AREA_CAP, RoutePathError, SearchRect, WalkwayLayout, build_walkway_array,
     l_path, l_path_area, route_path,
 };
-use crate::block_array::{BlockArray, Footprint, Placement, Walkway};
+use crate::block_array::{BlockArray, BlockState, Dims, Footprint, Placement, Walkway};
 
 use super::site_floor::{FloorExtent, FloorPlan, PlacedBody};
 use super::token_diag::{
     TokenSite, diag_abstract_token, diag_state_literal_unchecked, diag_unknown_abstract_token,
     diag_unknown_id,
 };
+
+/// A world cell, `(x, y, z)`.
+type Cell = (i32, i32, i32);
 
 /// What laying the walkways reads: the whole finished site at once —
 /// every placement, the masonry each of them lowered with, and the floor
@@ -63,7 +67,6 @@ pub(super) struct ConnectInputs<'a> {
 /// [`MemberRole::Window`]: crate::intent::MemberRole::Window
 /// [`lower_to_block_array`]: super::lower_to_block_array
 /// [`PortRejection`]: crate::block_array::ports::PortRejection
-#[allow(clippy::too_many_lines)] // one linear resolve-route-and-lay chain per row
 pub(super) fn lower_connects(
     inputs: &ConnectInputs<'_>,
     structures: &mut IndexMap<String, BlockArray>,
@@ -72,10 +75,10 @@ pub(super) fn lower_connects(
 ) {
     let &ConnectInputs {
         resolution,
-        defs,
         registry,
         placed,
         floor,
+        ..
     } = inputs;
     let blocked = &floor.cells;
     let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
@@ -89,102 +92,10 @@ pub(super) fn lower_connects(
     for connect in &resolution.connects {
         let from_key = place_scope_key(connect.site.as_str(), connect.from.place.as_str());
         let to_key = place_scope_key(connect.site.as_str(), connect.to.place.as_str());
-        let from_body = placed.get(&from_key);
-        let to_body = placed.get(&to_key);
-        let (Some(from_body), Some(to_body)) = (from_body, to_body) else {
-            // At least one placement was rejected upstream (sizeless def,
-            // unresolved theme, broken origin chain). The connect itself
-            // resolved, so without a follow-up warning the walkway would
-            // vanish silently — emit a cascade `W_DEFERRED_MEMBER` that
-            // names the offending side so the user can see *why* the
-            // strip was not laid.
-            diagnostics.push(diag_walkway_endpoint_skipped(
-                connect,
-                from_body.is_none(),
-                to_body.is_none(),
-            ));
+        let Some((from_pos, to_pos)) =
+            place_ports(connect, (&from_key, &to_key), inputs, diagnostics)
+        else {
             continue;
-        };
-        let from_def = defs
-            .iter()
-            .find(|d| d.name == from_body.placement.source_def);
-        let to_def = defs.iter().find(|d| d.name == to_body.placement.source_def);
-        let (Some(from_def), Some(to_def)) = (from_def, to_def) else {
-            // Invariant: `lower_site` only inserts a `Placement` after
-            // resolving its `use=DEF` against `defs`, so a placement
-            // pointing at an absent def cannot exist here. Encode that
-            // as a `debug_assert!` so a future refactor that breaks the
-            // chain fails loud in tests instead of dropping the strip.
-            debug_assert!(
-                false,
-                "connect `{}` to `{}` references placements whose source def is missing from `defs`",
-                connect.from.place, connect.to.place,
-            );
-            continue;
-        };
-
-        let from_pos = port_world_position(
-            from_body.placement.origin,
-            from_body.placement.dims,
-            from_def,
-            &connect.from.port,
-            &from_body.walls,
-            &from_body.cut,
-        );
-        let to_pos = port_world_position(
-            to_body.placement.origin,
-            to_body.placement.dims,
-            to_def,
-            &connect.to.port,
-            &to_body.walls,
-            &to_body.cut,
-        );
-        // One note per refused endpoint, naming the reason
-        // `port_world_position` gave for it rather than every contract a
-        // port has. Where the reason is on a member, the note points at
-        // that member's line — which, for a side, argument or masonry
-        // fault, carries the member's own deferral too, since the opening
-        // was not cut either. Each refusing arm is spelled out and builds
-        // its notes from the `Err`s it matched, so a defer with a primary
-        // and no note under it is not a shape this can produce.
-        let refused = match (from_pos, to_pos) {
-            (Ok(from_pos), Ok(to_pos)) => Ok((from_pos, to_pos)),
-            (Err(from_err), Err(to_err)) => Err((
-                vec![
-                    from_err.note(&connect.from.to_string()),
-                    to_err.note(&connect.to.to_string()),
-                ],
-                "ports",
-                (true, true),
-            )),
-            (Err(from_err), Ok(_)) => Err((
-                vec![from_err.note(&connect.from.to_string())],
-                "port",
-                (true, false),
-            )),
-            (Ok(_), Err(to_err)) => Err((
-                vec![to_err.note(&connect.to.to_string())],
-                "port",
-                (false, true),
-            )),
-        };
-        let (from_pos, to_pos) = match refused {
-            Ok(positions) => positions,
-            Err((notes, noun, (from_refused, to_refused))) => {
-                let unplaceable = blamed_endpoints(connect, from_refused, to_refused);
-                diagnostics.push(Diagnostic {
-                    code: DiagnosticCode::DeferredMember,
-                    span: connect.span.clone(),
-                    primary: format!(
-                        "walkway `{from} ↔ {to}` was skipped because {noun} {unplaceable} could not be placed",
-                        from = connect.from,
-                        to = connect.to,
-                    ),
-                    notes,
-                    data: None,
-                });
-                continue;
-            }
         };
 
         // Duplicate guard: pin on (site, from_place, from_port,
@@ -197,137 +108,28 @@ pub(super) fn lower_connects(
         // is not a duplicate of it.
         let dedup_key = connect.walkway_pair();
         if seen_pairs.contains(&dedup_key) {
-            diagnostics.push(Diagnostic {
-                code: DiagnosticCode::DuplicateWalkway,
-                span: connect.span.clone(),
-                primary: format!(
-                    "duplicate walkway `{from} ↔ {to}` in site `{site}`; the second row was dropped",
-                    from = connect.from,
-                    to = connect.to,
-                    site = connect.site,
-                ),
-                notes: vec![DiagnosticNote {
-                    span: None,
-                    message: "remove the duplicate or rewrite it to connect a different port pair"
-                        .to_owned(),
-                }],
-                data: None,
-            });
+            diagnostics.push(diag_duplicate_walkway(connect));
             continue;
         }
 
-        let material = match resolve_block_state(&connect.path, registry) {
-            Ok(state) => {
-                diagnostics.extend(diag_state_literal_unchecked(&connect.path, &state));
-                state
-            }
-            Err(MaterialDeferred::Abstract(token)) => {
-                diagnostics.push(diag_abstract_token(
-                    connect.path.span.clone(),
-                    &token,
-                    TokenSite::WalkwayPath,
-                ));
-                continue;
-            }
-            Err(MaterialDeferred::UnknownAbstract { token, suggestion }) => {
-                diagnostics.push(diag_unknown_abstract_token(
-                    connect.path.span.clone(),
-                    &token,
-                    suggestion.as_deref(),
-                    TokenSite::WalkwayPath,
-                ));
-                continue;
-            }
-            Err(MaterialDeferred::UnknownId(unknown)) => {
-                diagnostics.push(diag_unknown_id(connect.path.span.clone(), &unknown));
-                continue;
-            }
-            Err(MaterialDeferred::AlreadyDiagnosed) => {
-                // INVARIANT(upstream-diagnosed): `resolve_block_state`
-                // returns `AlreadyDiagnosed` only when the input value's
-                // `ValueKind` is not a token (see
-                // `material::resolve_block_state` /
-                // `TokenKind::NotAToken`). The resolver's connect-row pass
-                // (`resolve::resolver::resolve_connect_row`) rejects every
-                // non-token `path=` shape with `E_MISSING_PATH_MATERIAL`
-                // before the row enters `resolution.connects`, so we
-                // cannot legitimately reach this arm. A future change that
-                // bypasses that check would otherwise drop the strip
-                // silently — fail loud in debug builds instead.
-                debug_assert!(
-                    false,
-                    "connect `{from}` to `{to}` in site `{site}` returned AlreadyDiagnosed for path; \
-                     expected E_MISSING_PATH_MATERIAL upstream",
-                    from = connect.from,
-                    to = connect.to,
-                    site = connect.site,
-                );
-                continue;
-            }
+        let Some(material) = walkway_material(connect, registry, diagnostics) else {
+            continue;
         };
         let material_id = material.id.clone();
-
-        // Straight Manhattan L first — the cheap path, and identity for
-        // every unobstructed row (existing lockfiles stay byte-stable).
-        // Only when the L collides with a placement floor does the
-        // ground-plane router search for a detour; a `RoutePathError`
-        // (endpoint buried, target enclosed, area cap, coordinate
-        // overflow) falls back to the L with skipped cells so the row
-        // still lays and earns its `W_WALKWAY_BLOCKED` below, with a
-        // note matched to the error.
-        //
-        // Measure the L before building it. `route_path` refuses on the
-        // same quantity, but it runs second and only when the straight L
-        // is obstructed, so an unobstructed pair would otherwise size a
-        // voxel buffer from the bounding box directly.
-        let straight_area = l_path_area(from_pos, to_pos);
-        if straight_area > ROUTE_AREA_CAP {
-            diagnostics.push(Diagnostic {
-                code: DiagnosticCode::WalkwayBlocked,
-                span: connect.span.clone(),
-                primary: format!(
-                    "walkway `{from} ↔ {to}` spans {straight_area} cells, past the \
-                     {ROUTE_AREA_CAP}-cell router cap, and was not laid",
-                    from = connect.from,
-                    to = connect.to,
-                ),
-                notes: vec![DiagnosticNote {
-                    span: None,
-                    message: format!(
-                        "the walkway search area ({straight_area} cells) exceeds the router's \
-                         cap of {ROUTE_AREA_CAP} cells; place the two structures closer together",
-                    ),
-                }],
-                data: None,
-            });
+        let Some((path, route_failure)) = walkway_path(
+            connect,
+            (from_pos, to_pos),
+            blocked,
+            &blocked_index,
+            diagnostics,
+        ) else {
             continue;
-        }
-        let straight = l_path(from_pos, to_pos);
-        let (path, route_failure) = if straight.iter().any(|cell| blocked.contains(cell)) {
-            match route_path(from_pos, to_pos, &blocked_index) {
-                Ok(detour) => (detour, None),
-                Err(e) => (straight, Some(e)),
-            }
-        } else {
-            (straight, None)
         };
         let routed = route_failure.is_none();
-        let from_endpoint = WalkwayEndpoint {
-            place: connect.from.place.clone(),
-            port: connect.from.port.clone(),
+        let Some((from_endpoint, to_endpoint, scope_key)) = walkway_ends(connect, diagnostics)
+        else {
+            continue;
         };
-        let to_endpoint = WalkwayEndpoint {
-            place: connect.to.place.clone(),
-            port: connect.to.port.clone(),
-        };
-        let scope_key =
-            match WalkwayScopeKey::from_parts(&connect.site, &from_endpoint, &to_endpoint) {
-                Ok(k) => k,
-                Err(e) => {
-                    diagnostics.push(diag_walkway_invalid_ident(connect, &e));
-                    continue;
-                }
-            };
         let WalkwayLayout {
             array,
             origin,
@@ -344,46 +146,22 @@ pub(super) fn lower_connects(
             );
         }
         if skipped > 0 {
-            diagnostics.push(Diagnostic {
-                code: DiagnosticCode::WalkwayBlocked,
-                span: connect.span.clone(),
-                primary: format!(
-                    "walkway `{from} ↔ {to}` skipped {skipped} cells that overlapped an existing structure",
-                    from = connect.from,
-                    to = connect.to,
-                ),
-                notes: vec![DiagnosticNote {
-                    span: None,
-                    message: walkway_blocked_note(
-                        connect,
-                        route_failure,
-                        &BlockedEndpoints {
-                            from: (from_pos, &from_key),
-                            to: (to_pos, &to_key),
-                        },
-                        &SiteFloor {
-                            structures,
-                            placed,
-                            floor,
-                        },
-                    ),
-                }],
-                data: Some(DiagnosticData::WalkwayBlocked {
-                    skipped: skipped as u64,
-                }),
-            });
+            let note = walkway_blocked_note(
+                connect,
+                route_failure,
+                &BlockedEndpoints {
+                    from: (from_pos, &from_key),
+                    to: (to_pos, &to_key),
+                },
+                &SiteFloor {
+                    structures,
+                    placed,
+                    floor,
+                },
+            );
+            diagnostics.push(diag_walkway_blocked(connect, skipped, note));
         }
-        let dims = array.dims;
-        debug_assert_eq!(
-            dims.y, 1,
-            "walkway block array must be 1 block thick; build_walkway_array's contract \
-             pins y = 1 and the lockfile relies on this when re-attaching the implicit y \
-             via Footprint::to_dims_y1",
-        );
-        let footprint = Footprint {
-            x: dims.x,
-            z: dims.z,
-        };
+        let footprint = walkway_footprint(array.dims);
         // `from_parts` refuses every id that could alias another row's key
         // (`W_INVALID_WALKWAY_IDENT` above), so a replaced entry here means
         // that rule has a hole: the earlier row's walkway would vanish from
@@ -397,24 +175,7 @@ pub(super) fn lower_connects(
              encoded to one scope key",
         );
         if replaced.is_some() {
-            diagnostics.push(Diagnostic {
-                code: DiagnosticCode::InvalidWalkwayIdent,
-                span: connect.span.clone(),
-                primary: format!(
-                    "walkway `{from} ↔ {to}` encodes to the scope key `{scope_key}` of an \
-                     earlier `connect` row, whose walkway it replaced",
-                    from = connect.from,
-                    to = connect.to,
-                ),
-                notes: vec![DiagnosticNote {
-                    span: None,
-                    message: "two different endpoint pairs must never share a scope key, so \
-                              this is a compiler bug; rename a place or port on one of the two \
-                              rows to keep both walkways"
-                        .to_owned(),
-                }],
-                data: None,
-            });
+            diagnostics.push(diag_walkway_replaced(connect, &scope_key));
         }
         seen_pairs.insert(dedup_key);
         walkways.insert(
@@ -428,6 +189,338 @@ pub(super) fn lower_connects(
                 path_material: material_id,
             },
         );
+    }
+}
+
+/// The world cells of a `connect` row's two ports, whose placements sit
+/// under `keys` in [`ConnectInputs::placed`]. `None` after a
+/// `W_DEFERRED_MEMBER` when either placement did not lower or either port
+/// cannot be placed.
+fn place_ports(
+    connect: &crate::resolve::ValidatedConnect,
+    (from_key, to_key): (&str, &str),
+    inputs: &ConnectInputs<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(Cell, Cell)> {
+    let from_body = inputs.placed.get(from_key);
+    let to_body = inputs.placed.get(to_key);
+    let (Some(from_body), Some(to_body)) = (from_body, to_body) else {
+        // At least one placement was rejected upstream (sizeless def,
+        // unresolved theme, broken origin chain). The connect itself
+        // resolved, so without a follow-up warning the walkway would
+        // vanish silently — emit a cascade `W_DEFERRED_MEMBER` that
+        // names the offending side so the user can see *why* the
+        // strip was not laid.
+        diagnostics.push(diag_walkway_endpoint_skipped(
+            connect,
+            from_body.is_none(),
+            to_body.is_none(),
+        ));
+        return None;
+    };
+    let source_def = |body: &PlacedBody| {
+        inputs
+            .defs
+            .iter()
+            .find(|d| d.name == body.placement.source_def)
+    };
+    let (Some(from_def), Some(to_def)) = (source_def(from_body), source_def(to_body)) else {
+        // Invariant: `lower_site` only inserts a `Placement` after
+        // resolving its `use=DEF` against `defs`, so a placement
+        // pointing at an absent def cannot exist here. Encode that
+        // as a `debug_assert!` so a future refactor that breaks the
+        // chain fails loud in tests instead of dropping the strip.
+        debug_assert!(
+            false,
+            "connect `{}` to `{}` references placements whose source def is missing from `defs`",
+            connect.from.place, connect.to.place,
+        );
+        return None;
+    };
+
+    let from_pos = port_world_position(
+        from_body.placement.origin,
+        from_body.placement.dims,
+        from_def,
+        &connect.from.port,
+        &from_body.walls,
+        &from_body.cut,
+    );
+    let to_pos = port_world_position(
+        to_body.placement.origin,
+        to_body.placement.dims,
+        to_def,
+        &connect.to.port,
+        &to_body.walls,
+        &to_body.cut,
+    );
+    // One note per refused endpoint, naming the reason
+    // `port_world_position` gave for it rather than every contract a
+    // port has. Where the reason is on a member, the note points at
+    // that member's line — which, for a side, argument or masonry
+    // fault, carries the member's own deferral too, since the opening
+    // was not cut either. Each refusing arm is spelled out and builds
+    // its notes from the `Err`s it matched, so a defer with a primary
+    // and no note under it is not a shape this can produce.
+    let (notes, noun, (from_refused, to_refused)) = match (from_pos, to_pos) {
+        (Ok(from_pos), Ok(to_pos)) => return Some((from_pos, to_pos)),
+        (Err(from_err), Err(to_err)) => (
+            vec![
+                from_err.note(&connect.from.to_string()),
+                to_err.note(&connect.to.to_string()),
+            ],
+            "ports",
+            (true, true),
+        ),
+        (Err(from_err), Ok(_)) => (
+            vec![from_err.note(&connect.from.to_string())],
+            "port",
+            (true, false),
+        ),
+        (Ok(_), Err(to_err)) => (
+            vec![to_err.note(&connect.to.to_string())],
+            "port",
+            (false, true),
+        ),
+    };
+    let unplaceable = blamed_endpoints(connect, from_refused, to_refused);
+    diagnostics.push(Diagnostic {
+        code: DiagnosticCode::DeferredMember,
+        span: connect.span.clone(),
+        primary: format!(
+            "walkway `{from} ↔ {to}` was skipped because {noun} {unplaceable} could not be placed",
+            from = connect.from,
+            to = connect.to,
+        ),
+        notes,
+        data: None,
+    });
+    None
+}
+
+/// The two ends of a `connect` row as its [`Walkway`] records them, and
+/// the scope key its strip is filed under. `None` after a
+/// `W_INVALID_WALKWAY_IDENT` when an id cannot be encoded into the key.
+fn walkway_ends(
+    connect: &crate::resolve::ValidatedConnect,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(WalkwayEndpoint, WalkwayEndpoint, WalkwayScopeKey)> {
+    let from_endpoint = WalkwayEndpoint {
+        place: connect.from.place.clone(),
+        port: connect.from.port.clone(),
+    };
+    let to_endpoint = WalkwayEndpoint {
+        place: connect.to.place.clone(),
+        port: connect.to.port.clone(),
+    };
+    match WalkwayScopeKey::from_parts(&connect.site, &from_endpoint, &to_endpoint) {
+        Ok(scope_key) => Some((from_endpoint, to_endpoint, scope_key)),
+        Err(e) => {
+            diagnostics.push(diag_walkway_invalid_ident(connect, &e));
+            None
+        }
+    }
+}
+
+/// The [`Footprint`] a walkway records: its array's `x` and `z`, the
+/// array being one block thick.
+fn walkway_footprint(dims: Dims) -> Footprint {
+    debug_assert_eq!(
+        dims.y, 1,
+        "walkway block array must be 1 block thick; build_walkway_array's contract \
+         pins y = 1 and the lockfile relies on this when re-attaching the implicit y \
+         via Footprint::to_dims_y1",
+    );
+    Footprint {
+        x: dims.x,
+        z: dims.z,
+    }
+}
+
+/// A `connect` row whose port pair an earlier row in the same site has
+/// already laid.
+fn diag_duplicate_walkway(connect: &crate::resolve::ValidatedConnect) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::DuplicateWalkway,
+        span: connect.span.clone(),
+        primary: format!(
+            "duplicate walkway `{from} ↔ {to}` in site `{site}`; the second row was dropped",
+            from = connect.from,
+            to = connect.to,
+            site = connect.site,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "remove the duplicate or rewrite it to connect a different port pair"
+                .to_owned(),
+        }],
+        data: None,
+    }
+}
+
+/// The block a `connect` row's `path=` lays, or `None` after the finding
+/// that says why it has none.
+fn walkway_material(
+    connect: &crate::resolve::ValidatedConnect,
+    registry: Option<&dyn TargetRegistry>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<BlockState> {
+    match resolve_block_state(&connect.path, registry) {
+        Ok(state) => {
+            diagnostics.extend(diag_state_literal_unchecked(&connect.path, &state));
+            Some(state)
+        }
+        Err(MaterialDeferred::Abstract(token)) => {
+            diagnostics.push(diag_abstract_token(
+                connect.path.span.clone(),
+                &token,
+                TokenSite::WalkwayPath,
+            ));
+            None
+        }
+        Err(MaterialDeferred::UnknownAbstract { token, suggestion }) => {
+            diagnostics.push(diag_unknown_abstract_token(
+                connect.path.span.clone(),
+                &token,
+                suggestion.as_deref(),
+                TokenSite::WalkwayPath,
+            ));
+            None
+        }
+        Err(MaterialDeferred::UnknownId(unknown)) => {
+            diagnostics.push(diag_unknown_id(connect.path.span.clone(), &unknown));
+            None
+        }
+        Err(MaterialDeferred::AlreadyDiagnosed) => {
+            // INVARIANT(upstream-diagnosed): `resolve_block_state`
+            // returns `AlreadyDiagnosed` only when the input value's
+            // `ValueKind` is not a token (see
+            // `material::resolve_block_state` /
+            // `TokenKind::NotAToken`). The resolver's connect-row pass
+            // (`resolve::resolver::resolve_connect_row`) rejects every
+            // non-token `path=` shape with `E_MISSING_PATH_MATERIAL`
+            // before the row enters `resolution.connects`, so we
+            // cannot legitimately reach this arm. A future change that
+            // bypasses that check would otherwise drop the strip
+            // silently — fail loud in debug builds instead.
+            debug_assert!(
+                false,
+                "connect `{from}` to `{to}` in site `{site}` returned AlreadyDiagnosed for path; \
+                 expected E_MISSING_PATH_MATERIAL upstream",
+                from = connect.from,
+                to = connect.to,
+                site = connect.site,
+            );
+            None
+        }
+    }
+}
+
+/// The cells a `connect` row's strip runs through between its two port
+/// cells, and why the router could not find a detour when it fell back to
+/// a blocked L. `None` after a `W_WALKWAY_BLOCKED` when the strip spans
+/// more cells than the router's cap.
+fn walkway_path<S: BuildHasher>(
+    connect: &crate::resolve::ValidatedConnect,
+    (from_pos, to_pos): (Cell, Cell),
+    blocked: &HashSet<Cell, S>,
+    blocked_index: &BlockedIndex<'_, S>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(Vec<Cell>, Option<RoutePathError>)> {
+    // Straight Manhattan L first — the cheap path, and identity for
+    // every unobstructed row (existing lockfiles stay byte-stable).
+    // Only when the L collides with a placement floor does the
+    // ground-plane router search for a detour; a `RoutePathError`
+    // (endpoint buried, target enclosed, area cap, coordinate
+    // overflow) falls back to the L with skipped cells so the row
+    // still lays and earns its `W_WALKWAY_BLOCKED` in `lower_connects`,
+    // with a note matched to the error.
+    //
+    // Measure the L before building it. `route_path` refuses on the
+    // same quantity, but it runs second and only when the straight L
+    // is obstructed, so an unobstructed pair would otherwise size a
+    // voxel buffer from the bounding box directly.
+    let straight_area = l_path_area(from_pos, to_pos);
+    if straight_area > ROUTE_AREA_CAP {
+        diagnostics.push(Diagnostic {
+            code: DiagnosticCode::WalkwayBlocked,
+            span: connect.span.clone(),
+            primary: format!(
+                "walkway `{from} ↔ {to}` spans {straight_area} cells, past the \
+                 {ROUTE_AREA_CAP}-cell router cap, and was not laid",
+                from = connect.from,
+                to = connect.to,
+            ),
+            notes: vec![DiagnosticNote {
+                span: None,
+                message: format!(
+                    "the walkway search area ({straight_area} cells) exceeds the router's \
+                     cap of {ROUTE_AREA_CAP} cells; place the two structures closer together",
+                ),
+            }],
+            data: None,
+        });
+        return None;
+    }
+    let straight = l_path(from_pos, to_pos);
+    Some(if straight.iter().any(|cell| blocked.contains(cell)) {
+        match route_path(from_pos, to_pos, blocked_index) {
+            Ok(detour) => (detour, None),
+            Err(e) => (straight, Some(e)),
+        }
+    } else {
+        (straight, None)
+    })
+}
+
+/// A strip laid with `skipped` of its cells dropped where they overlapped
+/// a placement, with the note [`walkway_blocked_note`] wrote for it.
+fn diag_walkway_blocked(
+    connect: &crate::resolve::ValidatedConnect,
+    skipped: usize,
+    note: String,
+) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::WalkwayBlocked,
+        span: connect.span.clone(),
+        primary: format!(
+            "walkway `{from} ↔ {to}` skipped {skipped} cells that overlapped an existing structure",
+            from = connect.from,
+            to = connect.to,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: note,
+        }],
+        data: Some(DiagnosticData::WalkwayBlocked {
+            skipped: skipped as u64,
+        }),
+    }
+}
+
+/// A walkway whose scope key an earlier `connect` row's walkway already
+/// held, and so replaced it.
+fn diag_walkway_replaced(
+    connect: &crate::resolve::ValidatedConnect,
+    scope_key: &WalkwayScopeKey,
+) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::InvalidWalkwayIdent,
+        span: connect.span.clone(),
+        primary: format!(
+            "walkway `{from} ↔ {to}` encodes to the scope key `{scope_key}` of an \
+             earlier `connect` row, whose walkway it replaced",
+            from = connect.from,
+            to = connect.to,
+        ),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "two different endpoint pairs must never share a scope key, so \
+                      this is a compiler bug; rename a place or port on one of the two \
+                      rows to keep both walkways"
+                .to_owned(),
+        }],
+        data: None,
     }
 }
 

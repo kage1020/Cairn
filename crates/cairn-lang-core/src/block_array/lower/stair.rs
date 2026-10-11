@@ -3,6 +3,7 @@
 use crate::check::Diagnostic;
 use crate::intent::Member;
 
+use crate::block_array::PaletteIndex;
 use crate::block_array::args::{
     NonNegRead, diag_deferred_member_reason, ident_or_ignore, nonneg_int_or_defer,
 };
@@ -84,7 +85,6 @@ struct EaveStates<'m> {
 
 /// [`fill_stair`]'s refusals and paint. Returns whether the band was drawn,
 /// which is what the note on an unreadable state has to say.
-#[allow(clippy::too_many_lines)] // one linear defer-and-paint chain reads better than 6 tiny helpers
 fn draw_eave_band(
     member: &Member,
     states: EaveStates<'_>,
@@ -94,88 +94,18 @@ fn draw_eave_band(
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    let Some(raw_kind) = member.ident_value("kind") else {
-        let reason = if member.intent_state.contains_key("kind") {
-            "stair `kind=` must be `stairs`"
-        } else {
-            "stair without `kind=` is not yet supported (currently only `kind=stairs`)"
-        };
-        diagnostics.push(diag_deferred_member_reason(member, reason));
-        return false;
-    };
-    if raw_kind != "stairs" {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!("stair `kind={raw_kind}` is not yet supported (currently only `kind=stairs`)"),
-        ));
+    if !eave_kind_is_stairs(member, diagnostics) {
         return false;
     }
     let Some(side) = side_of(member, diagnostics) else {
         return false;
     };
-    let half = match states.half {
-        Some("top") | None => "top",
-        Some("bottom") => "bottom",
-        Some(other) => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!("stair `half={other}` is not yet supported (use `top` or `bottom`)"),
-            ));
-            return false;
-        }
-    };
-    let facing = match states.facing {
-        Some("out") | None => shed_high_side(side),
-        Some("in") => inward_cardinal(side),
-        Some(other) => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!("stair `facing={other}` is not yet supported (use `out` or `in`)"),
-            ));
-            return false;
-        }
-    };
-    let shape = match states.shape {
-        Some("straight") | None => StairShape::Straight,
-        Some("outer_left") => StairShape::OuterLeft,
-        Some("outer_right") => StairShape::OuterRight,
-        Some(other) => {
-            diagnostics.push(diag_deferred_member_reason(
-                member,
-                &format!(
-                    "stair `shape={other}` is not yet supported (use `straight`, `outer_left`, or `outer_right`)",
-                ),
-            ));
-            return false;
-        }
-    };
-    // The gate is the overhang the roof *draws*, not the `overhang=` the
-    // author wrote: a roof that will not draw contributes none, so a
-    // struct with `overhang=2` and no `kind=` arrives here at zero.
-    // Naming only the key would send that author to the wrong line.
-    if ctx.overhang == 0 {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            "eave `stair` needs a roof that draws an overhang of at least 1 so the band can sit outside the wall — no roof on this struct contributes one",
-        ));
+    let Some((facing, half, shape)) = states.block_states(member, side, diagnostics) else {
         return false;
-    }
-    let y_local = match nonneg_int_or_defer(member, "y", diagnostics) {
-        NonNegRead::Valid(v) => v,
-        NonNegRead::Absent => 0,
-        NonNegRead::Deferred => return false,
     };
-    let y_world = y_local.saturating_add(y_offset);
-    if y_world >= ctx.dims.y {
-        diagnostics.push(diag_deferred_member_reason(
-            member,
-            &format!(
-                "stair y={y_world} does not fit in the struct (dims.y={})",
-                ctx.dims.y,
-            ),
-        ));
+    let Some(y_world) = eave_row(member, y_offset, ctx, diagnostics) else {
         return false;
-    }
+    };
     // An eave band is a row of stairs whose `facing` / `half` / `shape`
     // come from the member's own arguments rather than from a slope, but
     // they are states this pass attaches to whatever it paints just the
@@ -202,6 +132,131 @@ fn draw_eave_band(
         diagnostics,
     );
     let idx = palette.intern(stair_state(stair_id, facing, half, shape));
+    paint_eave_band(side, y_world, idx, ctx, canvas);
+    true
+}
+
+/// Whether the stair's `kind=` is `stairs`, the one kind an eave band
+/// draws. Any other, or none, is refused with a `W_DEFERRED_MEMBER`.
+fn eave_kind_is_stairs(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> bool {
+    let Some(raw_kind) = member.ident_value("kind") else {
+        let reason = if member.intent_state.contains_key("kind") {
+            "stair `kind=` must be `stairs`"
+        } else {
+            "stair without `kind=` is not yet supported (currently only `kind=stairs`)"
+        };
+        diagnostics.push(diag_deferred_member_reason(member, reason));
+        return false;
+    };
+    if raw_kind != "stairs" {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!("stair `kind={raw_kind}` is not yet supported (currently only `kind=stairs`)"),
+        ));
+        return false;
+    }
+    true
+}
+
+impl EaveStates<'_> {
+    /// The `facing`, `half` and `shape` the band's stairs carry along the
+    /// `side` wall, a state not given taking its default. `None` after a
+    /// `W_DEFERRED_MEMBER` for a value the band does not support.
+    fn block_states(
+        self,
+        member: &Member,
+        side: WallSide,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Option<(Cardinal, &'static str, StairShape)> {
+        let half = match self.half {
+            Some("top") | None => "top",
+            Some("bottom") => "bottom",
+            Some(other) => {
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    &format!("stair `half={other}` is not yet supported (use `top` or `bottom`)"),
+                ));
+                return None;
+            }
+        };
+        let facing = match self.facing {
+            Some("out") | None => shed_high_side(side),
+            Some("in") => inward_cardinal(side),
+            Some(other) => {
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    &format!("stair `facing={other}` is not yet supported (use `out` or `in`)"),
+                ));
+                return None;
+            }
+        };
+        let shape = match self.shape {
+            Some("straight") | None => StairShape::Straight,
+            Some("outer_left") => StairShape::OuterLeft,
+            Some("outer_right") => StairShape::OuterRight,
+            Some(other) => {
+                diagnostics.push(diag_deferred_member_reason(
+                    member,
+                    &format!(
+                        "stair `shape={other}` is not yet supported (use `straight`, `outer_left`, or `outer_right`)",
+                    ),
+                ));
+                return None;
+            }
+        };
+        Some((facing, half, shape))
+    }
+}
+
+/// The row an eave band lands on: its `y=`, `0` when not given, above the
+/// level's `y_offset`. `None` after a `W_DEFERRED_MEMBER` when no roof
+/// draws an overhang for the band to sit in, when `y=` is unreadable, or
+/// when the row is past the top of the volume.
+fn eave_row(
+    member: &Member,
+    y_offset: u32,
+    ctx: &StructCtx<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<u32> {
+    // The gate is the overhang the roof *draws*, not the `overhang=` the
+    // author wrote: a roof that will not draw contributes none, so a
+    // struct with `overhang=2` and no `kind=` arrives here at zero.
+    // Naming only the key would send that author to the wrong line.
+    if ctx.overhang == 0 {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            "eave `stair` needs a roof that draws an overhang of at least 1 so the band can sit outside the wall — no roof on this struct contributes one",
+        ));
+        return None;
+    }
+    let y_local = match nonneg_int_or_defer(member, "y", diagnostics) {
+        NonNegRead::Valid(v) => v,
+        NonNegRead::Absent => 0,
+        NonNegRead::Deferred => return None,
+    };
+    let y_world = y_local.saturating_add(y_offset);
+    if y_world >= ctx.dims.y {
+        diagnostics.push(diag_deferred_member_reason(
+            member,
+            &format!(
+                "stair y={y_world} does not fit in the struct (dims.y={})",
+                ctx.dims.y,
+            ),
+        ));
+        return None;
+    }
+    Some(y_world)
+}
+
+/// Paint `idx` along the whole `side` wall at row `y_world`, each cell
+/// shifted one voxel outward into the overhang column.
+fn paint_eave_band(
+    side: WallSide,
+    y_world: u32,
+    idx: PaletteIndex,
+    ctx: &StructCtx<'_>,
+    canvas: &mut MemberCanvas<'_>,
+) {
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
     for u in 0..length {
         let Some((wx, _wy, wz)) = wall_local_to_grid(
@@ -215,10 +270,10 @@ fn draw_eave_band(
         ) else {
             // INVARIANT(wall-grid-validated): `u` walks `0..length`, the
             // same length the helper checks, and any `y_world >= dims.y`
-            // was refused above with a diagnostic — so the helper has
-            // nothing to reject. Reaching here means one of those stopped
-            // agreeing with `wall_local_to_grid`. Loud in debug builds;
-            // release builds skip the cell rather than panic.
+            // was refused by `eave_row` with a diagnostic — so the helper
+            // has nothing to reject. Reaching here means one of those
+            // stopped agreeing with `wall_local_to_grid`. Loud in debug
+            // builds; release builds skip the cell rather than panic.
             debug_assert!(
                 false,
                 "eave stair cell u={u} y={y_world} on the {} wall is outside the wall grid; \
@@ -231,7 +286,6 @@ fn draw_eave_band(
         let (x, z) = shift_outward(side, wx, wz);
         canvas.paint((x, y_world, z), || idx);
     }
-    true
 }
 
 /// Opposite of the wall's outward normal — used for `facing=in`.
