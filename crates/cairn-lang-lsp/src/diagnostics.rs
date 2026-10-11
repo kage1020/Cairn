@@ -1,13 +1,4 @@
-//! Source text → LSP diagnostics conversion.
-//!
-//! [`compute_diagnostics`] runs the same pipeline as `cairn check`
-//! (`parse → lower → check`) on one in-memory document and maps every
-//! finding into an [`lsp_types::Diagnostic`]. The mapping preserves the
-//! self-correction triple ("what is wrong / valid candidates / suggested
-//! fix") verbatim: spanless notes are appended to the message body as
-//! `note:` lines, exactly as the CLI text renderer prints them, and
-//! span-carrying notes become `relatedInformation` entries pointing back
-//! into the same document.
+//! Source text → LSP diagnostics, from the pipeline `cairn check` runs.
 
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{
@@ -16,18 +7,7 @@ use cairn_lang_core::{
 
 use crate::line_index::LineIndex;
 
-/// Run `parse → lower → check` on `source` and convert every finding into
-/// an LSP diagnostic anchored in the document at `uri`.
-///
-/// A parse/lex failure pre-empts the check passes (the AST has to be
-/// well-formed before invariant collection can run — same rule as
-/// `cairn check`) and yields exactly one error diagnostic. It goes through
-/// the same `to_lsp_diagnostic` every other finding does, because
-/// [`diagnose_parse_failure`] gives it the same shape: a code, a span, a
-/// message, so the server and the CLI describe the failure alike.
-///
-/// Edition is left unpinned (`None`), matching `cairn check` without
-/// `--edition`: slot presence checks union the per-edition theme variants.
+/// The findings of `parse → lower → check` on `source`, as diagnostics in the document at `uri`.
 #[must_use]
 pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types::Diagnostic> {
     let index = LineIndex::new(source);
@@ -40,6 +20,7 @@ pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types:
         }
     };
     let ir = lower(&module);
+    // No edition, as `cairn check` without `--edition`.
     check(&module, &ir, None)
         .iter()
         .map(|d| to_lsp_diagnostic(uri, source, &index, d))
@@ -83,9 +64,7 @@ fn to_lsp_diagnostic(
         message,
         related_information: (!related.is_empty()).then_some(related),
         data: diagnostic.data.as_ref().and_then(|data| {
-            // `DiagnosticData` is plain enums and integers, but a payload
-            // that fails to serialise is logged rather than dropped
-            // silently, since a quick-fix would be starved of its input.
+            // Logged rather than dropped silently, since a quick-fix reads this payload.
             match serde_json::to_value(data) {
                 Ok(value) => Some(value),
                 Err(err) => {
@@ -118,7 +97,6 @@ mod tests {
 
     #[test]
     fn duplicate_fixture_reports_e_duplicate_size_with_error_severity() {
-        // The duplicate fixture's second `size=5x5` is on line 0.
         let diagnostics = compute_diagnostics(&uri(), DUPLICATE);
         let dup = diagnostics
             .iter()
@@ -179,7 +157,6 @@ mod tests {
         let d = &diagnostics[0];
         assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::ERROR));
         assert_eq!(d.message, err.user_message());
-        // The code is what a client looks the finding up by.
         assert_eq!(code_of(d), "E_PARSE");
         assert_eq!(d.range.start.line, 1);
         assert!(
@@ -191,9 +168,6 @@ mod tests {
 
     #[test]
     fn artifacts_that_share_a_file_name_report_e_output_name_collision() {
-        // The resolver raises the collision and `check` returns it, so an
-        // editor sees it without a build. The finding sits on the `place`,
-        // with a related pointer at the struct.
         let source = "theme t:\n  slot floor -> @oak_planks\n\n\
                       struct hut size=3x3\n  floor mat_slot=floor\n\n\
                       def house size=3x3:\n  floor mat_slot=floor\n\n\
@@ -221,15 +195,11 @@ mod tests {
 
     #[test]
     fn clean_fixture_reports_no_diagnostics() {
-        // The editor's side of `cairn check --json` printing `[]` for the
-        // same document.
         assert_eq!(compute_diagnostics(&uri(), CLEAN), vec![]);
     }
 
     #[test]
     fn ranges_count_utf16_code_units_on_non_ascii_lines() {
-        // 😀 is 2 UTF-16 units, 4 bytes and 1 scalar, so the column tells
-        // the three counts apart.
         let source = "struct s size=2x2\n  door id=\"😀\" id=x\n";
         let diagnostics = compute_diagnostics(&uri(), source);
         let dup = diagnostics
@@ -252,13 +222,6 @@ mod tests {
         );
     }
 
-    /// The text a diagnostic covers does not depend on how the author's
-    /// editor ends its lines.
-    ///
-    /// Asserting on the *text* the range selects rather than on the line
-    /// number makes the three renderings directly comparable, and it is
-    /// what the reader sees: an index that miscounts a lone `\r` highlights
-    /// the wrong words.
     #[test]
     fn a_diagnostic_covers_the_same_text_whatever_the_line_ending() {
         let base = "struct s size=2x2\n  floor\n  wals height=4\nstruct t size=3x3 size=4x4\n";
@@ -286,8 +249,6 @@ mod tests {
         }
         assert_eq!(selected[1], selected[0], "CRLF disagrees with LF");
         assert_eq!(selected[2], selected[0], "lone CR disagrees with LF");
-        // Agreement alone would not catch all three covering a neighbouring
-        // line.
         assert!(
             selected[0]
                 .iter()
@@ -297,13 +258,6 @@ mod tests {
         );
     }
 
-    /// A parse error lands on the line that has it, and on the same line
-    /// whichever way the document ends its lines.
-    ///
-    /// Distinct from the check-diagnostic test above only in where the span
-    /// comes from: a parse error carries a line/column and core turns it
-    /// back into a span, so this is the conversion the `Newline` token's
-    /// position feeds, arriving here as an ordinary byte range.
     #[test]
     fn a_parse_error_lands_on_its_own_line_whatever_the_line_ending() {
         let base = "struct s size=2x2\n  floor mat_slot=\n  walls height=4\n";
@@ -316,18 +270,13 @@ mod tests {
             let diagnostics = compute_diagnostics(&uri(), source);
             assert_eq!(diagnostics.len(), 1, "{source:?}");
             let range = diagnostics[0].range;
-            // Line 1 is `  floor mat_slot=`, whose value is missing. The
-            // error belongs at its end, not at the start of line 2.
+            // The end of `  floor mat_slot=`, not the start of line 2.
             assert_eq!(range.start.line, 1, "{source:?}");
             assert_eq!(range.start.character, 17, "{source:?}");
-            // End of line, so nothing on the line is under the marker.
             assert_eq!(range.end, range.start, "{source:?}");
         }
     }
 
-    /// An error the parser reaches *inside* a line keeps a visible width,
-    /// so the zero-width case above is a property of end-of-line errors and
-    /// not of every parse failure.
     #[test]
     fn a_parse_error_inside_a_line_covers_the_rest_of_it() {
         let source = "struct s size=2x2\n\tfloor\n";

@@ -1,6 +1,4 @@
-//! The dispatch loop driven in-process over an in-memory connection: what
-//! each notification publishes, how each request is answered, and the
-//! state machine between `shutdown` and `exit`.
+//! The dispatch loop driven in-process over an in-memory connection.
 
 use std::str::FromStr;
 use std::thread::{self, JoinHandle};
@@ -11,14 +9,10 @@ use crate::test_fixtures::{CLEAN, DUPLICATE};
 
 const TEST_URI: &str = "file:///test.crn";
 
-/// How long a test waits for a message before declaring the loop stuck.
-///
-/// The failures here are messages that never arrive, and a blocking read
-/// turns each of those into a hang with no failing test name.
+/// How long a test waits for a message, so one that never arrives fails rather than hangs.
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// [`main_loop`] running on its own thread, with the client end of its
-/// connection.
+/// [`main_loop`] running on its own thread, with the client end of its connection.
 struct Session {
     client: Connection,
     server: JoinHandle<Result<Teardown, DynError>>,
@@ -106,10 +100,7 @@ impl Session {
         }));
     }
 
-    /// Send a `textDocument/completion` request without waiting for it, for
-    /// a test that reads the next message itself: [`Session::read_response`]
-    /// would step over an interloping `publishDiagnostics`, which is what
-    /// some of these tests assert does not happen.
+    /// Send a `textDocument/completion` request for a test that reads the next message itself.
     fn send_completion(&self, id: i64, uri: &str, line: u32, character: u32) {
         self.send(&serde_json::json!({
             "jsonrpc": "2.0",
@@ -134,8 +125,7 @@ impl Session {
         self.read_response(id)
     }
 
-    /// Send `shutdown` and assert the `null` result the spec requires,
-    /// leaving the loop running for the window before `exit`.
+    /// Send `shutdown` and assert its `null` result, leaving the loop running until `exit`.
     fn request_shutdown(&self) {
         self.send(&serde_json::json!({
             "jsonrpc": "2.0",
@@ -156,8 +146,7 @@ impl Session {
         self.join()
     }
 
-    /// Close the client's end without a word, and return what the loop
-    /// ended with.
+    /// Close the client's end without a word, and return what the loop ended with.
     fn hang_up(self) -> Result<Teardown, String> {
         let Self { client, server } = self;
         drop(client);
@@ -175,16 +164,14 @@ impl Session {
             .map_err(|err| err.to_string())
     }
 
-    /// Run the `shutdown`/`exit` handshake and assert it ends the loop
-    /// cleanly.
+    /// Run the `shutdown`/`exit` handshake and assert it ends the loop cleanly.
     fn shutdown(self) {
         self.request_shutdown();
         assert_eq!(self.exit(), Ok(Teardown::AfterShutdown));
     }
 }
 
-/// The diagnostics array of a `publishDiagnostics` notification, asserting
-/// it targets `uri`.
+/// The diagnostics of a `publishDiagnostics` notification, asserting it targets `uri`.
 fn diagnostics_for<'m>(message: &'m serde_json::Value, uri: &str) -> &'m Vec<serde_json::Value> {
     assert_eq!(
         message["params"]["uri"].as_str(),
@@ -246,8 +233,6 @@ fn did_open_publishes_the_documents_diagnostics_with_its_version() {
 
 #[test]
 fn did_change_republishes_and_echoes_the_version() {
-    // Replacing broken content with clean content via full-sync didChange
-    // publishes an empty set and echoes the version.
     let session = Session::start();
     session.did_open(DUPLICATE, 1);
     let first = session.read_until_method("textDocument/publishDiagnostics");
@@ -273,9 +258,6 @@ fn did_close_clears_diagnostics() {
 
 #[test]
 fn documents_publish_under_their_own_uris() {
-    // Two open documents must not bleed into each other: each publish
-    // targets the URI of the notification that triggered it, and a
-    // didChange on one leaves the other's diagnostics untouched.
     let broken_uri = "file:///broken.crn";
     let clean_uri = "file:///clean.crn";
     let session = Session::start();
@@ -293,9 +275,6 @@ fn documents_publish_under_their_own_uris() {
 
 #[test]
 fn malformed_notifications_do_not_end_the_loop() {
-    // Notifications are fire-and-forget: a payload that does not match the
-    // method's schema, or a didChange with empty contentChanges, is skipped
-    // rather than taking every open document's diagnostics down with it.
     let session = Session::start();
     session.send(&serde_json::json!({
         "jsonrpc": "2.0",
@@ -318,9 +297,6 @@ fn malformed_notifications_do_not_end_the_loop() {
 
 #[test]
 fn an_unknown_notification_before_shutdown_is_ignored() {
-    // The spec lets a server ignore a notification it does not implement,
-    // and `$/cancelRequest` overwhelmingly arrives during a session rather
-    // than in the shutdown window.
     let session = Session::start();
     session.send(&serde_json::json!({
         "jsonrpc": "2.0",
@@ -335,10 +311,7 @@ fn an_unknown_notification_before_shutdown_is_ignored() {
 
 #[test]
 fn a_deeply_nested_document_is_diagnosed_and_the_loop_keeps_serving() {
-    // Unbounded parser recursion overflows the stack and aborts the
-    // process, so the second half — the next document still publishes — is
-    // what tells a diagnosed document from a dead server. Brackets nest a
-    // value and indentation nests a body; both reach here.
+    // A stack overflow would abort the server, so the next document must still publish.
     let mut indented = String::from("struct a size=1x1\n");
     for level in 1..=500 {
         indented.push_str(&"  ".repeat(level));
@@ -383,8 +356,7 @@ fn a_deeply_nested_document_is_diagnosed_and_the_loop_keeps_serving() {
 
 #[test]
 fn an_unknown_request_gets_method_not_found() {
-    // A silent server leaves the client blocked on the response id forever.
-    // -32601 is the JSON-RPC MethodNotFound code.
+    // -32601 is MethodNotFound.
     let session = Session::start();
     session.send(&serde_json::json!({
         "jsonrpc": "2.0",
@@ -399,8 +371,6 @@ fn an_unknown_request_gets_method_not_found() {
 
 #[test]
 fn completion_at_mat_slot_returns_declared_slot_names() {
-    // Resolved through the document store, on a document whose cursor line
-    // does not parse.
     let session = Session::start();
     let source = "theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  floor mat_slot=";
     session.did_open(source, 1);
@@ -411,8 +381,6 @@ fn completion_at_mat_slot_returns_declared_slot_names() {
 
 #[test]
 fn completion_reflects_did_change_revisions() {
-    // The store serves the latest synced revision: a slot added via
-    // didChange shows up in the next completion answer.
     let session = Session::start();
     let source = "theme a:\n  slot floor -> @oak_planks\nstruct s size=2x2\n  floor mat_slot=";
     session.did_open(source, 1);
@@ -426,9 +394,7 @@ fn completion_reflects_did_change_revisions() {
 
 #[test]
 fn completion_on_an_unopened_document_is_invalid_params() {
-    // Asking about a document the client never opened is the client's
-    // protocol violation, refused loud as -32602 InvalidParams, and the
-    // server keeps serving.
+    // -32602 is InvalidParams.
     let session = Session::start();
     let response = session.request_completion(9, "file:///never-opened.crn", 0, 0);
     assert_eq!(response["error"]["code"], serde_json::json!(-32602));
@@ -437,9 +403,6 @@ fn completion_on_an_unopened_document_is_invalid_params() {
 
 #[test]
 fn a_position_one_line_past_the_document_is_refused() {
-    // Clamping it would anchor every `textEdit` on the previous line, a
-    // range that does not contain the requested position, so an editor
-    // discards them all. Refusing is the answer the client can act on.
     let session = Session::start();
     session.did_open("st", 1);
     session.read_until_method("textDocument/publishDiagnostics");
@@ -450,8 +413,6 @@ fn a_position_one_line_past_the_document_is_refused() {
 
 #[test]
 fn completion_answers_at_the_end_of_a_newline_terminated_document() {
-    // A file ending in a newline has a line after it, and the cursor sitting
-    // there is an ordinary position, not one past the document.
     let session = Session::start();
     session.did_open("struct s size=2x2\n", 1);
     session.read_until_method("textDocument/publishDiagnostics");
@@ -465,8 +426,6 @@ fn completion_answers_at_the_end_of_a_newline_terminated_document() {
 
 #[test]
 fn completion_answers_in_an_empty_document() {
-    // A document with no text still has line 0, where the cursor sits the
-    // instant a new file is opened.
     let session = Session::start();
     session.did_open("", 1);
     session.read_until_method("textDocument/publishDiagnostics");
@@ -482,9 +441,6 @@ fn completion_answers_in_an_empty_document() {
 
 #[test]
 fn did_change_after_did_close_leaves_the_document_closed() {
-    // `didClose` publishes an empty set so the editor clears its squiggles.
-    // A publish for a `didChange` behind it would leave a marker on a file
-    // with no buffer to clear it.
     let session = Session::start();
     session.did_open(DUPLICATE, 1);
     let opened = session.read_until_method("textDocument/publishDiagnostics");
@@ -493,8 +449,6 @@ fn did_change_after_did_close_leaves_the_document_closed() {
     let closed = session.read_until_method("textDocument/publishDiagnostics");
     assert!(diagnostics_of(&closed).is_empty(), "close clears the marks");
     session.did_change(TEST_URI, DUPLICATE, 2);
-    // The next message has to be the answer to the request behind the
-    // change; `request_completion` would skip a publish unseen.
     session.send_completion(34, TEST_URI, 0, 0);
     let next = session.read_message();
     assert_eq!(
@@ -512,9 +466,6 @@ fn did_change_after_did_close_leaves_the_document_closed() {
 
 #[test]
 fn did_change_for_a_never_opened_document_is_ignored() {
-    // A `didChange` is a revision of a document, and there is no document:
-    // recording it would make completion available for a URI the client
-    // never opened.
     const OTHER_URI: &str = "file:///never-opened.crn";
     let session = Session::start();
     session.did_change(OTHER_URI, CLEAN, 1);
@@ -531,16 +482,12 @@ fn did_change_for_a_never_opened_document_is_ignored() {
 
 #[test]
 fn a_change_whose_did_open_was_dropped_is_also_dropped() {
-    // A `didOpen` whose payload does not match the method's schema is
-    // discarded, and a `didChange` does not put the document in the store:
-    // the file stays unknown until it is opened again.
     let session = Session::start();
     session.send(&serde_json::json!({
         "jsonrpc": "2.0",
         "method": "textDocument/didOpen",
         "params": {
-            // No `languageId`: required by the protocol, so this payload
-            // does not deserialise and the notification is dropped.
+            // No `languageId`, so this payload does not deserialise.
             "textDocument": { "uri": TEST_URI, "version": 1, "text": DUPLICATE },
         },
     }));
@@ -553,7 +500,6 @@ fn a_change_whose_did_open_was_dropped_is_also_dropped() {
         "neither notification opened the document, got: {next}",
     );
 
-    // The way out: a well-formed `didOpen` restores the document.
     session.did_open(DUPLICATE, 3);
     let published = session.read_until_method("textDocument/publishDiagnostics");
     assert!(
@@ -565,8 +511,7 @@ fn a_change_whose_did_open_was_dropped_is_also_dropped() {
 
 // ----------------------------------------------------------- ranged changes
 
-/// A `didChange` for [`TEST_URI`] carrying `events` as its
-/// `contentChanges`.
+/// A `didChange` for [`TEST_URI`] carrying `events` as its `contentChanges`.
 fn change_events(version: i32, events: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "jsonrpc": "2.0",
@@ -591,11 +536,6 @@ fn insert_at(line: u32, character: u32, text: &str) -> serde_json::Value {
 
 #[test]
 fn a_ranged_change_is_applied_to_the_stored_text() {
-    // The server advertises FULL sync, so a conforming client never sends a
-    // range. One that does has its event applied as an edit: stored as the
-    // whole document, `# note\n` inserted at 0:0 would replace the file,
-    // and version 2 would publish no diagnostics for a file that still has
-    // its parse error.
     let session = Session::start();
     session.did_open("@cairn 2026.06\nstruct s size=3x3\n  bogus!!\n", 1);
     let first = session.read_until_method("textDocument/publishDiagnostics");
@@ -618,9 +558,6 @@ fn a_ranged_change_is_applied_to_the_stored_text() {
 
 #[test]
 fn a_ranged_change_outside_the_document_is_dropped() {
-    // A range on a line the document does not have names no edit. The
-    // revision is dropped, as a malformed payload is, and the document
-    // keeps the text it had.
     let session = Session::start();
     session.did_open("struct s size=2x2\n", 1);
     session.read_until_method("textDocument/publishDiagnostics");
@@ -628,9 +565,6 @@ fn a_ranged_change_outside_the_document_is_dropped() {
         2,
         &serde_json::json!([insert_at(5, 0, "bogus!!")]),
     ));
-    // Nothing is published for the dropped revision: the next message is
-    // the completion response. That the stored text is unchanged is
-    // `a_refused_revision_keeps_none_of_its_events`'s to show.
     session.send_completion(39, TEST_URI, 1, 0);
     let response = session.read_message();
     assert_eq!(
@@ -648,11 +582,7 @@ fn a_ranged_change_outside_the_document_is_dropped() {
 
 #[test]
 fn a_did_change_with_no_events_publishes_nothing() {
-    // The document is open, so only the guard on empty `contentChanges`
-    // keeps this revision from republishing the same diagnostics under
-    // version 2. `malformed_notifications_do_not_end_the_loop` sends one to
-    // a document whose `didOpen` was malformed, so it passes without the
-    // guard.
+    // Unlike in `malformed_notifications_do_not_end_the_loop`, the document is open.
     let session = Session::start();
     session.did_open(CLEAN, 1);
     session.read_until_method("textDocument/publishDiagnostics");
@@ -668,12 +598,6 @@ fn a_did_change_with_no_events_publishes_nothing() {
 
 #[test]
 fn a_refused_revision_keeps_none_of_its_events() {
-    // Version 2 is a valid insert followed by a range on a line the text
-    // does not have. The whole revision is refused, the insert with it, so
-    // the store still holds version 1's text. Version 3 is a ranged edit
-    // that rewrites `struct` as itself: its diagnostics are version 1's
-    // only if version 2 left nothing behind, since the insert would have
-    // moved the parse error down a line.
     let session = Session::start();
     session.did_open("@cairn 2026.06\nstruct s size=3x3\n  bogus!!\n", 1);
     let first = session.read_until_method("textDocument/publishDiagnostics");
@@ -710,9 +634,7 @@ fn a_refused_revision_keeps_none_of_its_events() {
 
 // ------------------------------------------ the window between shutdown and exit
 
-/// One message an editor really sends, per row: a cancellation that may
-/// arrive at any time, the `didClose` a closing window emits, a `didChange`
-/// from a buffer being disposed, and a request already in flight.
+/// Messages an editor sends between `shutdown` and `exit`.
 fn interlopers() -> Vec<(&'static str, serde_json::Value)> {
     vec![
         (
@@ -759,9 +681,6 @@ fn interlopers() -> Vec<(&'static str, serde_json::Value)> {
 
 #[test]
 fn a_message_between_shutdown_and_exit_still_ends_the_loop_cleanly() {
-    // Under `Connection::handle_shutdown` each of these would be a
-    // protocol error ending the process with code 1, which an editor reads
-    // as a crash.
     for (label, interloper) in interlopers() {
         let session = Session::start();
         session.did_open(CLEAN, 1);
@@ -781,9 +700,7 @@ fn a_message_between_shutdown_and_exit_still_ends_the_loop_cleanly() {
 
 #[test]
 fn a_request_after_shutdown_is_refused_as_invalid() {
-    // The spec's words for this window: answer further requests with
-    // `InvalidRequest` (-32600). Not `MethodNotFound` — the method exists —
-    // and not silence, which leaves the client blocked on the id.
+    // -32600 is InvalidRequest, which the LSP spec asks for in this window.
     let session = Session::start();
     session.did_open(CLEAN, 1);
     session.read_until_method("textDocument/publishDiagnostics");
@@ -795,9 +712,6 @@ fn a_request_after_shutdown_is_refused_as_invalid() {
 
 #[test]
 fn a_second_shutdown_is_refused_rather_than_answered_again() {
-    // The state check runs before the method check, so `shutdown` itself
-    // is refused like any other request once the server is shutting down.
-    // A second `result: null` would tell the client the handshake restarted.
     let session = Session::start();
     session.request_shutdown();
     session.send(&serde_json::json!({
@@ -813,9 +727,6 @@ fn a_second_shutdown_is_refused_rather_than_answered_again() {
 
 #[test]
 fn a_notification_after_shutdown_publishes_nothing() {
-    // "Ignore notifications" is only testable as an ordering claim: send a
-    // `didChange` that would publish, then a request that must be answered,
-    // and require the next message to be that answer.
     let session = Session::start();
     session.did_open(CLEAN, 1);
     session.read_until_method("textDocument/publishDiagnostics");
@@ -836,9 +747,6 @@ fn a_notification_after_shutdown_publishes_nothing() {
 
 #[test]
 fn exit_before_shutdown_ends_the_loop_with_an_error() {
-    // The spec requires `exit` without a preceding `shutdown` request to
-    // end the process with a non-zero code, and the error is what `main`
-    // turns into one.
     let session = Session::start();
     assert_eq!(
         session.exit(),
@@ -848,8 +756,6 @@ fn exit_before_shutdown_ends_the_loop_with_an_error() {
 
 #[test]
 fn a_closed_connection_ends_the_loop_without_an_error() {
-    // Nobody is left to answer, before `shutdown` or after it. Whether
-    // `shutdown` came first is what `run` needs to say which ending it was.
     let session = Session::start();
     session.did_open(CLEAN, 1);
     session.read_until_method("textDocument/publishDiagnostics");

@@ -1,12 +1,5 @@
-//! In-memory store of open documents.
-//!
-//! A `textDocument/completion` request identifies its document by URI only,
-//! so the server keeps URI → full text of the latest revision.
-//!
-//! The server advertises FULL sync, but a client that sends a ranged edit
-//! anyway would otherwise leave the server diagnosing and completing text
-//! nobody has, so [`DocumentStore::apply`] applies each event the way the
-//! protocol defines it, ranged or not.
+//! The latest text of each open document, which a completion request names by URI alone. A
+//! ranged edit is applied as one, though the server advertises full sync.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -17,8 +10,7 @@ use crate::line_index::LineIndex;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ChangeRefused {
-    /// The URI names no open document. [`DocumentStore::apply`] lists the
-    /// ways a `didChange` gets here.
+    /// The URI names no open document.
     DocumentNotOpen,
     /// An event's range names a line the text it applies to does not have.
     OutsideDocument {
@@ -26,13 +18,10 @@ pub enum ChangeRefused {
         event_index: usize,
         /// The range it carried.
         range: lsp_types::Range,
-        /// How many lines the text it applies to has, counting the empty
-        /// line after a trailing terminator: lines `0` to `line_count - 1`
-        /// exist.
+        /// How many lines the text it applies to has.
         line_count: usize,
     },
-    /// An event's range has an end that resolves to a byte before its
-    /// start.
+    /// An event's range has an end that resolves to a byte before its start.
     ReversedRange {
         /// Index of the event in the notification's `contentChanges`.
         event_index: usize,
@@ -80,18 +69,11 @@ fn range_text(range: &lsp_types::Range) -> String {
     )
 }
 
-/// Apply a `didChange`'s events to `text` and return the text they build,
-/// by the rules [`DocumentStore::apply`] states.
-///
-/// An event with no `range` moves its `String` into the result, so a
-/// revision made only of those copies no text.
+/// The text a `didChange`'s events build from `text`, each applied to what the one before left.
 ///
 /// # Errors
 ///
-/// [`ChangeRefused::OutsideDocument`] or [`ChangeRefused::ReversedRange`]
-/// for the first event that cannot be applied. Never
-/// [`ChangeRefused::DocumentNotOpen`]: whether a document is open is the
-/// store's to say.
+/// The refusal of the first event that cannot be applied.
 pub(crate) fn apply_content_changes(
     text: &str,
     changes: impl IntoIterator<Item = lsp_types::TextDocumentContentChangeEvent>,
@@ -139,43 +121,11 @@ impl DocumentStore {
         self.docs.insert(uri, text);
     }
 
-    /// Apply a `didChange`'s `contentChanges` to an open document, and hand
-    /// back the text now stored.
-    ///
-    /// The events apply in order, each against the text the one before it
-    /// left, which is how the protocol orders them. An event with no
-    /// `range` replaces the whole text. One with a `range` replaces that
-    /// range: 0-based lines and UTF-16 columns, each end resolved to a byte
-    /// by [`LineIndex::offset_at`], so a column past its line's end is the
-    /// line end and a column between the two halves of a surrogate pair is
-    /// the start of that pair's char. The two ends are compared only once
-    /// both are resolved, as LSP 3.17 says of `Position` ("If the character
-    /// value is greater than the line length it defaults back to the line
-    /// length"): `0:5..0:3` on `"ab\n"` is the empty range at the end of
-    /// line 0, not a reversed one.
-    ///
-    /// Nothing is stored unless every event applies, so on an `Err` the
-    /// document keeps the text it had.
+    /// Applies a `didChange`'s `contentChanges` to an open document and returns the new text.
     ///
     /// # Errors
     ///
-    /// [`ChangeRefused::DocumentNotOpen`] when the URI names no open
-    /// document. The store mirrors the client's open set, so a revision for
-    /// a URI it does not hold is refused rather than inserted, which would
-    /// resurrect a document the client had closed. Three ways to get here,
-    /// the third the server's own doing:
-    ///
-    /// - a `didChange` after `didClose`,
-    /// - a `didChange` for a URI never opened,
-    /// - a `didChange` whose `didOpen` the server itself dropped, because
-    ///   the payload did not match the method's schema. That document
-    ///   stays unknown until the client opens it again.
-    ///
-    /// Otherwise, for the first event that cannot be applied,
-    /// [`ChangeRefused::OutsideDocument`] when its range names a line the
-    /// text it applies to does not have, and
-    /// [`ChangeRefused::ReversedRange`] when its end resolves before its
-    /// start.
+    /// A [`ChangeRefused`], leaving the stored text as it was.
     pub fn apply(
         &mut self,
         uri: &lsp_types::Uri,
@@ -189,9 +139,7 @@ impl DocumentStore {
         Ok(slot)
     }
 
-    /// Forget a document on `didClose`. Closing a URI that was never opened
-    /// is a no-op — the store's contract is "mirror the client's open set",
-    /// not to police the client's notification ordering.
+    /// Forgets a document; closing one that is not open does nothing.
     pub fn close(&mut self, uri: &lsp_types::Uri) {
         self.docs.remove(uri);
     }
@@ -298,8 +246,6 @@ mod tests {
 
     #[test]
     fn events_apply_in_order_each_against_the_text_the_last_left() {
-        // The second range is only right against the first's result: on the
-        // original text, line 1 is `cd`.
         assert_eq!(
             apply_content_changes(
                 "ab\ncd\n",
@@ -319,8 +265,6 @@ mod tests {
 
     #[test]
     fn a_ranged_event_counts_columns_in_utf16_units() {
-        // `🪨` is two UTF-16 units and four bytes, so column 2 is the byte
-        // after it.
         assert_eq!(
             apply_content_changes("🪨b", [edit((0, 2), (0, 3), "c")]),
             Ok("🪨c".to_owned()),
@@ -329,17 +273,12 @@ mod tests {
 
     #[test]
     fn a_column_inside_a_surrogate_pair_takes_the_whole_char() {
-        // Column 1 falls between the two halves of `🪨` and resolves to the
-        // char's start, so the range covers all of it.
         assert_eq!(
             apply_content_changes("🪨b", [edit((0, 1), (0, 2), "")]),
             Ok("b".to_owned()),
         );
     }
 
-    /// A range that crosses a line break takes the whole break with it,
-    /// whichever of the three it is: the end of a line is before its
-    /// terminator, and the start of the next is after all of it.
     #[test]
     fn a_range_across_line_breaks_deletes_them_whole() {
         for (text, start, end, expected) in [
@@ -359,8 +298,6 @@ mod tests {
 
     #[test]
     fn a_column_past_the_last_line_inserts_at_its_end() {
-        // The empty line after a trailing terminator exists, and a column
-        // past any line's end resolves to that end.
         assert_eq!(
             apply_content_changes("abc\n", [edit((1, 0), (1, 0), "Z")]),
             Ok("abc\nZ".to_owned()),
@@ -369,7 +306,6 @@ mod tests {
             apply_content_changes("ab\r\ncd\nef", [edit((2, 9), (2, 9), "Z")]),
             Ok("ab\r\ncd\nefZ".to_owned()),
         );
-        // One line further is a line the text does not have.
         let past = edit((2, 0), (2, 0), "Z");
         assert_eq!(
             apply_content_changes("abc\n", [past.clone()]),
@@ -404,8 +340,6 @@ mod tests {
 
     #[test]
     fn a_range_is_compared_only_once_both_ends_are_resolved() {
-        // Both columns are past the end of `ab`, so both resolve to its end:
-        // the empty range there, not a reversed one.
         assert_eq!(
             apply_content_changes("ab\n", [edit((0, 5), (0, 3), "X")]),
             Ok("abX\n".to_owned()),
@@ -452,7 +386,7 @@ mod tests {
         store.open(uri("file:///a.crn"), "text".to_owned());
         store.close(&uri("file:///a.crn"));
         assert_eq!(store.get(&uri("file:///a.crn")), None);
-        // Closing again (or a never-opened URI) is a no-op.
+        // Closing again does nothing.
         store.close(&uri("file:///a.crn"));
     }
 }

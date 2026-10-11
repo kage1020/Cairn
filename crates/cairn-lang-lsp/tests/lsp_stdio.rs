@@ -1,9 +1,5 @@
-//! The `cairn-lsp` binary over stdio, spoken to in Content-Length framed
-//! JSON-RPC: the `initialize` handshake, the exit code and stderr of each
-//! way a session ends (a transport failure included), the stderr line for
-//! each notification the server drops, and the `--stdio` flag a client
-//! appends. What the dispatch loop answers is tested in-process, beside
-//! `server.rs`.
+//! The `cairn-lsp` binary over stdio: how each way a session ends exits and logs, and the line each
+//! dropped notification logs. What the dispatch loop answers is tested beside `server.rs`.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -26,21 +22,10 @@ struct s size=2x2
 ";
 const TEST_URI: &str = "file:///test.crn";
 
-/// How long a test waits for a message before declaring the server stuck.
-///
-/// The failures here are messages that never arrive, and a blocking read
-/// turns each into a hang with no failing test name.
+/// How long a test waits for a message, so one that never arrives fails rather than hangs.
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// A spawned `cairn-lsp` with framed stdin access and its two output
-/// streams drained by threads.
-///
-/// Both streams need a reader of their own: stdout because a blocking
-/// read is what the timeout exists to avoid, and stderr because the drop
-/// paths this crate takes report themselves there and nowhere else — a
-/// test that cannot see stderr cannot tell "ignored, and said so" from
-/// "ignored in silence". Draining stderr also keeps a chatty server from
-/// filling the pipe buffer and blocking on its own log line.
+/// A spawned `cairn-lsp` whose stdout and stderr are drained by threads.
 struct Server {
     child: Child,
     stdin: ChildStdin,
@@ -49,14 +34,12 @@ struct Server {
 }
 
 impl Server {
-    /// Spawn the binary and run the `initialize`/`initialized` handshake,
-    /// returning the server plus the raw `initialize` response.
+    /// Spawn the binary and run the handshake, returning it and the raw `initialize` response.
     fn start() -> (Self, serde_json::Value) {
         Self::start_with_args(&[])
     }
 
-    /// [`Server::start`] with `args` on the command line, for the argv an
-    /// LSP client builds rather than the bare one a test would pick.
+    /// [`Server::start`] with `args` on the command line.
     fn start_with_args(args: &[&str]) -> (Self, serde_json::Value) {
         let mut child = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
             .args(args)
@@ -70,9 +53,6 @@ impl Server {
         let (message_tx, messages) = channel();
         let mut out = BufReader::new(child.stdout.take().expect("piped stdout"));
         thread::spawn(move || {
-            // Stops on the first short read: the server has exited, and
-            // every pending `recv_timeout` then fails immediately with
-            // `Disconnected` instead of waiting out the timeout.
             while let Some(message) = read_framed(&mut out) {
                 if message_tx.send(message).is_err() {
                     return;
@@ -119,8 +99,7 @@ impl Server {
         self.stdin.flush().expect("flush server stdin");
     }
 
-    /// Write `bytes` to stdin as they are, framing and all, for a frame a
-    /// conforming client would never send.
+    /// Write `bytes` to stdin as they are, for a frame no conforming client would send.
     fn send_raw(&mut self, bytes: &[u8]) {
         self.stdin.write_all(bytes).expect("write to server stdin");
         self.stdin.flush().expect("flush server stdin");
@@ -145,27 +124,13 @@ impl Server {
         }
     }
 
-    /// Every stderr line that has already reached the channel.
-    ///
-    /// Best-effort, and only for panic messages: a failing test says what
-    /// the server had managed to log, and a snapshot that misses a line
-    /// still in flight costs nothing there. It is not a way to assert
-    /// anything. To wait for a line, use [`Server::read_stderr_until`]; to
-    /// assert a finished session logged nothing, collect the channel
-    /// (`server.stderr.iter().collect()`), which blocks until the reader
-    /// thread disconnects — `child.wait()` returning says nothing about
-    /// whether that thread has finished sending.
+    /// The stderr lines that have already arrived, for panic messages only: a line can still be in
+    /// flight, so a test waits with [`Server::read_stderr_until`] or collects the channel.
     fn drain_stderr(&mut self) -> Vec<String> {
         self.stderr.try_iter().collect()
     }
 
-    /// Wait for a stderr line containing `needle`, and return every line
-    /// seen up to and including it.
-    ///
-    /// The server writes stderr and stdout down two different pipes, and a
-    /// reader thread carries each to its own channel, so reading a response
-    /// says nothing about whether a line logged *before* it has been
-    /// delivered yet; taking whatever has arrived would be a race.
+    /// Wait for a stderr line containing `needle`, and return every line up to and including it.
     fn read_stderr_until(&mut self, needle: &str) -> Vec<String> {
         let mut seen = Vec::new();
         loop {
@@ -187,8 +152,7 @@ impl Server {
         }
     }
 
-    /// Read messages until one with the given method arrives, skipping
-    /// unrelated server chatter (e.g. window/logMessage).
+    /// Read messages until one with the given method arrives.
     fn read_until_method(&mut self, method: &str) -> serde_json::Value {
         loop {
             let message = self.read_message();
@@ -213,9 +177,7 @@ impl Server {
         }));
     }
 
-    /// Send `shutdown` and consume its response, asserting the `null`
-    /// result the spec requires. Leaves the server running so a test can
-    /// drive the window between `shutdown` and `exit`.
+    /// Send `shutdown` and assert its `null` result, leaving the server running until `exit`.
     fn request_shutdown(&mut self) {
         self.send(&serde_json::json!({
             "jsonrpc": "2.0",
@@ -230,8 +192,7 @@ impl Server {
         );
     }
 
-    /// Read messages until the response carrying `id` arrives, skipping
-    /// server-initiated notifications.
+    /// Read messages until the response carrying `id` arrives.
     fn read_response(&mut self, id: i64) -> serde_json::Value {
         loop {
             let message = self.read_message();
@@ -308,8 +269,6 @@ fn initialize_advertises_full_sync_and_completion_and_shuts_down_clean() {
 
 #[test]
 fn exit_without_shutdown_exits_nonzero() {
-    // The LSP spec requires `exit` without a preceding `shutdown` request
-    // to terminate the process with a non-zero code.
     let (mut server, _) = Server::start();
     server.send(&serde_json::json!({
         "jsonrpc": "2.0",
@@ -325,9 +284,6 @@ fn exit_without_shutdown_exits_nonzero() {
 
 #[test]
 fn malformed_notifications_are_logged_and_skipped() {
-    // Notifications are fire-and-forget: a payload that does not match the
-    // method's schema, or a didChange with empty contentChanges, is skipped
-    // with a line on stderr rather than taking the server down.
     let (mut server, _) = Server::start();
     server.send(&serde_json::json!({
         "jsonrpc": "2.0",
@@ -346,8 +302,6 @@ fn malformed_notifications_are_logged_and_skipped() {
     server.read_stderr_until(
         "ignoring `textDocument/didChange` notification with empty contentChanges",
     );
-    // Still serving: a valid didOpen after the malformed traffic publishes
-    // as usual.
     server.did_open(CLEAN, 3);
     let message = server.read_until_method("textDocument/publishDiagnostics");
     assert_eq!(diagnostics_of(&message).len(), 0);
@@ -373,10 +327,7 @@ fn a_change_to_a_closed_document_is_logged_with_its_uri() {
             "contentChanges": [{ "text": DUPLICATE }],
         },
     }));
-    // One line names the method, the URI and the reason.
-    // `read_stderr_until` returns the matching line last, so asserting on
-    // `last()` keeps all three on the same line — `any()` would accept a
-    // URI mentioned by some earlier line about a different document.
+    // `last()` is the line with the reason, so the method and URI must be on it too.
     let logged = server.read_stderr_until("the document is not open");
     assert!(
         logged.last().is_some_and(|line| line.contains(&format!(
@@ -389,7 +340,6 @@ fn a_change_to_a_closed_document_is_logged_with_its_uri() {
 
 #[test]
 fn closing_stdin_without_exit_says_the_session_ended_abnormally() {
-    // An editor that was killed rather than one that quit.
     let (mut server, _) = Server::start();
     server.did_open(CLEAN, 1);
     server.read_until_method("textDocument/publishDiagnostics");
@@ -411,10 +361,6 @@ fn closing_stdin_without_exit_says_the_session_ended_abnormally() {
 
 #[test]
 fn closing_stdin_after_shutdown_is_not_abnormal() {
-    // `run` checks for a missing `shutdown` once the I/O threads are joined.
-    // A client that says `shutdown` and then closes stdin reaches that check
-    // with the flag set, so it has to stay quiet here; without this test,
-    // "always warn" passes the one above.
     let (mut server, _) = Server::start();
     server.did_open(CLEAN, 1);
     server.read_until_method("textDocument/publishDiagnostics");
@@ -431,8 +377,6 @@ fn closing_stdin_after_shutdown_is_not_abnormal() {
 
 #[test]
 fn a_clean_session_says_nothing_on_stderr() {
-    // The control for the abnormal-end line: it has to be absent from the
-    // handshake it is meant to distinguish.
     let (mut server, _) = Server::start();
     server.did_open(CLEAN, 1);
     server.read_until_method("textDocument/publishDiagnostics");
@@ -449,11 +393,6 @@ fn a_clean_session_says_nothing_on_stderr() {
 
 #[test]
 fn the_stdio_flag_a_client_appends_still_starts_the_server() {
-    // vscode-languageclient appends `--stdio` to an `Executable`'s argv
-    // whenever its transport is `TransportKind.stdio`. Stdio is the only
-    // transport this server speaks, so the flag must start the same session
-    // the bare command does — including the diagnostics that are the reason
-    // an editor starts it at all.
     let (mut server, response) = Server::start_with_args(&["--stdio"]);
     assert_eq!(response.get("id"), Some(&serde_json::json!(1)));
     assert_eq!(
@@ -472,11 +411,7 @@ fn the_stdio_flag_a_client_appends_still_starts_the_server() {
 
 #[test]
 fn a_refused_revision_is_logged_with_the_event_and_the_lines_there_were() {
-    // A revision whose range the text does not have is dropped with one
-    // line on stderr naming the event it refused. The second revision is a
-    // valid insert followed by a refused range: the line count is the one
-    // the insert left, five lines where the opened text has four, because
-    // the first event was applied before the second was read.
+    // The second revision's insert is applied before its refused event, so the text has 5 lines.
     let (mut server, _) = Server::start();
     server.did_open("@cairn 2026.06\nstruct s size=3x3\n  bogus!!\n", 1);
     server.read_until_method("textDocument/publishDiagnostics");
@@ -536,10 +471,6 @@ fn a_refused_revision_is_logged_with_the_event_and_the_lines_there_were() {
 
 #[test]
 fn an_unreadable_frame_is_not_reported_as_the_client_closing_stdin() {
-    // An unreadable frame ends `lsp-server`'s reader with an error, and the
-    // dispatch loop sees that exactly as it sees end of input. The reader's
-    // error is the only line: a "client closed stdin" line would say the
-    // opposite of what happened.
     for frame in [
         &b"Content-Length: 10\r\n\r\n{not json}"[..],
         &b"Content-Length: abc\r\n\r\n"[..],
@@ -563,19 +494,13 @@ fn an_unreadable_frame_is_not_reported_as_the_client_closing_stdin() {
 
 #[test]
 fn a_writer_failure_before_shutdown_still_says_the_session_ended_without_it() {
-    // The editor is gone with a message in flight: the server's write to
-    // stdout fails, then stdin closes. `lsp-server` hands the writer's
-    // error back from the same join as the reader's, and without saying
-    // which thread it came from, so the one line the session gets has to
-    // say what is true of both: the error, and that `shutdown` never came.
     let mut child = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn cairn-lsp");
-    // Closing the read end before sending anything makes the server's
-    // first write, the `initialize` response, fail.
+    // The server's first write, the `initialize` response, fails.
     drop(child.stdout.take());
     let mut stdin = child.stdin.take().expect("piped stdin");
     for message in [

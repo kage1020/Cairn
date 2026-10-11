@@ -1,8 +1,5 @@
-//! The `cairn-lsp` command-line surface a user meets: `--version`/`-V`,
-//! `--help`/`-h`, and exit 2 for an unknown argument or a second argument
-//! after any flag. The version is compared against the number cargo derived
-//! for this crate rather than the `CAIRN_VERSION` the binary prints, so a
-//! constant that stops tracking `[workspace.package] version` shows up here.
+//! The `cairn-lsp` command line a user meets. The version is checked against the one cargo
+//! derived, so a `CAIRN_VERSION` that stops tracking the workspace shows up here.
 
 use std::process::Command;
 
@@ -64,9 +61,7 @@ fn help_flag_prints_usage_and_exits_zero() {
             stdout.contains("--version") && stdout.contains("--help"),
             "{flag} output missing flag documentation: {stdout}",
         );
-        // `--stdio` also appears in prose; the row under `OPTIONS:` is the
-        // one a reader scans, so pin that the flag has a row of its own
-        // with a description beside it.
+        // `--stdio` also appears in prose, so look for its row under `OPTIONS:`.
         let options: Vec<&str> = stdout
             .lines()
             .skip_while(|line| *line != "OPTIONS:")
@@ -114,12 +109,6 @@ fn unknown_flag_exits_with_code_two_and_names_the_flag() {
 
 #[test]
 fn extra_arguments_after_any_flag_are_rejected_naming_both() {
-    // Every flag takes no further argument, `--stdio` included: it is
-    // accepted because it names the only transport the server speaks, not
-    // as a gate that lets anything after it through. An argument after any
-    // flag is refused rather than silently dropped, and the message names
-    // both the leftover and the flag it followed, so `--help garbage` is
-    // not told that `--help` itself is unknown.
     for flag in ["-V", "--version", "-h", "--help", "--stdio"] {
         let output = Command::new(env!("CARGO_BIN_EXE_cairn-lsp"))
             .args([flag, "garbage"])

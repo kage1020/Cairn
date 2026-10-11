@@ -1,7 +1,6 @@
 //! Documents the unit tests open.
 
-/// A document with a finding on every line: two `size=` on one line, two
-/// `height=` on the next, and one door id declared twice.
+/// A document with a finding on every line.
 pub(crate) const DUPLICATE: &str = "\
 struct s size=4x4 size=5x5
   walls height=4 height=5

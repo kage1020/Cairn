@@ -1,17 +1,6 @@
-//! Byte-offset to LSP position conversion.
+//! Byte offsets ↔ LSP positions, which count 0-based lines and UTF-16 code-unit columns.
 //!
-//! `cairn-lang-core` reports every finding as a byte [`Span`] into the source
-//! text, and its own [`cairn_lang_core::check::LineStarts`] converts those
-//! into 1-based line / Unicode-scalar-value columns for the CLI. The LSP wire
-//! protocol instead mandates 0-based lines and **UTF-16 code unit** columns
-//! (the default `positionEncoding`), so this module owns that conversion —
-//! keeping UTF-16 knowledge out of `cairn-lang-core`, which stays
-//! editor-agnostic.
-//!
-//! What it does *not* own is where a line ends. That comes from
-//! [`cairn_lang_core::lines`], which breaks on `\r\n|\r|\n` as VS Code and
-//! Monaco do, because an editor compares a diagnostic's line number against
-//! the line under its own cursor.
+//! Lines end where [`cairn_lang_core::lines`] ends them, at `\r\n`, `\r` or `\n`, as editors do.
 
 use cairn_lang_core::Span;
 use cairn_lang_core::lines::LineStarts;
@@ -23,7 +12,7 @@ pub struct LineIndex {
 }
 
 impl LineIndex {
-    /// Build the index by walking the source exactly once.
+    /// Indexes the line starts of `source`.
     #[must_use]
     pub fn new(source: &str) -> Self {
         Self {
@@ -31,15 +20,12 @@ impl LineIndex {
         }
     }
 
-    /// How many lines the text has, counting the empty line after a
-    /// trailing terminator: `"abc\n"` has 2, and `""` has 1.
+    /// How many lines the text has: `"abc\n"` has 2, and `""` has 1.
     pub(crate) fn line_count(&self) -> usize {
         self.starts.line_starts().len()
     }
 
-    /// Convert a byte offset into a 0-based line / UTF-16 code-unit column
-    /// [`lsp_types::Position`]. Offsets past the end of `source` clamp to
-    /// the final position.
+    /// The protocol position of `byte_offset`, clamped to the end of `source`.
     #[must_use]
     pub fn position(&self, source: &str, byte_offset: usize) -> lsp_types::Position {
         let clamped = byte_offset.min(source.len());
@@ -52,8 +38,7 @@ impl LineIndex {
         }
     }
 
-    /// Convert both ends of a core byte [`Span`] into an
-    /// [`lsp_types::Range`].
+    /// Both ends of `span` as a protocol range.
     #[must_use]
     pub fn range(&self, source: &str, span: &Span) -> lsp_types::Range {
         lsp_types::Range {
@@ -62,28 +47,8 @@ impl LineIndex {
         }
     }
 
-    /// Inverse of [`LineIndex::position`]: recover the byte offset of a
-    /// protocol position (0-based line, UTF-16 code-unit column).
-    ///
-    /// Columns clamp within a line that exists: a column past the end of
-    /// the line clamps to the line end (before its terminator), and a
-    /// column landing between the two UTF-16 units of an astral char
-    /// clamps down to that char's start so the result is always a char
-    /// boundary. Both keep an off-by-a-keystroke column usable.
-    ///
-    /// A *line* the document does not have returns `None`, so the caller
-    /// can refuse the request rather than answer about a line that is not
-    /// there. Which lines a document has comes from
-    /// [`cairn_lang_core::lines::starts`], and includes the empty line
-    /// after a trailing terminator — `"abc\n"` has lines 0 and 1.
-    ///
-    /// Note the asymmetry with `LineStarts::offset_of` in
-    /// `cairn-lang-core`, which clamps an
-    /// out-of-range line to `source.len()` instead. That one converts a
-    /// position the *compiler* produced, where a line outside the source
-    /// is an internal inconsistency with no client to tell; this one
-    /// converts a position a *client* sent, where saying so is the whole
-    /// point.
+    /// The byte offset of a protocol position, its column clamped to a char boundary on the line,
+    /// or `None` for a line the document does not have.
     #[must_use]
     pub fn offset_at(&self, source: &str, position: lsp_types::Position) -> Option<usize> {
         let line = position.line as usize;
@@ -127,8 +92,6 @@ mod tests {
 
     #[test]
     fn position_clamps_past_eof_to_final_position() {
-        // Offsets beyond the source clamp to the last
-        // position instead of panicking on the slice.
         let source = "abc\n";
         let index = LineIndex::new(source);
         assert_eq!(
@@ -142,9 +105,6 @@ mod tests {
 
     #[test]
     fn position_counts_utf16_code_units_not_bytes_or_scalars() {
-        // 'é' is 2 bytes / 1 scalar / 1 UTF-16 unit; '😀' (U+1F600) is
-        // 4 bytes / 1 scalar / 2 UTF-16 units. The
-        // astral char advances `character` by 2.
         let source = "é😀x\n";
         let index = LineIndex::new(source);
         let x_offset = source.find('x').expect("x in source");
@@ -161,7 +121,6 @@ mod tests {
     fn position_on_crlf_line_boundary() {
         let source = "ab\r\ncd\n";
         let index = LineIndex::new(source);
-        // Offset of 'c': after "ab\r\n" = byte 4, line 1 col 0.
         assert_eq!(
             index.position(source, 4),
             lsp_types::Position {
@@ -169,7 +128,6 @@ mod tests {
                 character: 0,
             },
         );
-        // The '\r' itself still belongs to line 0.
         assert_eq!(
             index.position(source, 2),
             lsp_types::Position {
@@ -202,13 +160,7 @@ mod tests {
 
     #[test]
     fn the_empty_line_after_a_trailing_terminator_is_a_line() {
-        // The invariant that makes refusing an out-of-range line safe: a
-        // file ending in a newline has a line *after* the newline, and a
-        // cursor sitting there is the ordinary "start typing at the end of
-        // the file" position. If `lines::starts` ever stopped yielding it,
-        // completion would begin refusing the end of every
-        // newline-terminated document and nothing else here would notice —
-        // the other fixtures in this module all end mid-line.
+        // Typing at the end of a newline-terminated file happens on this line.
         for source in ["abc\n", "abc\r\n", "abc\r"] {
             let index = LineIndex::new(source);
             assert_eq!(
@@ -234,7 +186,6 @@ mod tests {
                 "for {source:?}",
             );
         }
-        // An empty document has line 0 and nothing else.
         let index = LineIndex::new("");
         assert_eq!(
             index.offset_at(
@@ -260,10 +211,6 @@ mod tests {
 
     #[test]
     fn offset_at_round_trips_with_position() {
-        // For every char boundary (and EOF), converting the byte offset to
-        // an LSP position and back recovers the original offset. Non-ASCII
-        // chars included so UTF-16 column arithmetic is exercised in both
-        // directions.
         let source = "é😀x\nfoo\nβar";
         let index = LineIndex::new(source);
         let boundaries = source.char_indices().map(|(i, _)| i).chain([source.len()]);
@@ -281,8 +228,6 @@ mod tests {
     fn offset_at_clamps_column_line_and_surrogate_interior() {
         let source = "a😀\r\ncd";
         let index = LineIndex::new(source);
-        // Column past the end of line 0 clamps to the line end, before the
-        // `\r\n` terminator.
         assert_eq!(
             index.offset_at(
                 source,
@@ -293,10 +238,6 @@ mod tests {
             ),
             Some(5),
         );
-        // A line the document does not have is refused, whether it is one
-        // past the last or far beyond it: clamping the near miss would give
-        // an offset on the *previous* line, and completion edits anchored
-        // there would not contain the requested position.
         for line in [2, 3, 99] {
             assert_eq!(
                 index.offset_at(source, lsp_types::Position { line, character: 0 }),
@@ -304,8 +245,7 @@ mod tests {
                 "line {line} is past the two this source has",
             );
         }
-        // A column landing between the two UTF-16 units of 😀 clamps down
-        // to the char's start so the result is always a char boundary.
+        // Column 2 falls between the two UTF-16 units of 😀.
         assert_eq!(
             index.offset_at(
                 source,
@@ -317,8 +257,6 @@ mod tests {
             Some(1),
         );
     }
-
-    // -- the lone `\r` ----------------------------------------------------
 
     #[test]
     fn a_lone_carriage_return_starts_a_line() {
@@ -334,9 +272,6 @@ mod tests {
         }
     }
 
-    /// An editor splits on `\r\n|\r|\n`, so an index that splits on `\n`
-    /// alone would report a diagnostic one line (in a CR-only document,
-    /// every line) above where the editor draws it.
     #[test]
     fn line_numbers_match_the_core_resolver_for_every_line_ending() {
         let base = "struct s size=2x2\n  floor mat_slot=f\nstruct t size=3x3\n";
@@ -351,8 +286,7 @@ mod tests {
             for (offset, _) in source.char_indices().chain([(source.len(), ' ')]) {
                 let mine = index.position(source, offset);
                 let theirs = core.position(source, offset);
-                // ASCII fixture, so a UTF-16 unit is a scalar is a byte and
-                // the only difference left is the 0- versus 1-based origin.
+                // ASCII, so only the 0- versus 1-based origin differs.
                 assert_eq!(
                     (mine.line + 1, mine.character + 1),
                     (theirs.line.get(), theirs.col.get()),
@@ -364,20 +298,13 @@ mod tests {
 
     #[test]
     fn position_and_offset_at_round_trip_across_mixed_line_endings() {
-        // On a `\r`-terminated line, a `line_end` that disagrees with the
-        // index about where the line ended puts `offset_at` short of
-        // `position`.
         for source in ["ab\r", "a\rb\r\nc\nd", "\r\r", "\r\n\r", "a\r\r\nb"] {
             let index = LineIndex::new(source);
             let boundaries = source
                 .char_indices()
                 .map(|(i, _)| i)
                 .chain([source.len()])
-                // The `\n` of a `\r\n` is not a position the protocol can
-                // name: the pair is one line break, and a range that ended
-                // between its halves would split it. Such an offset clamps
-                // to the line end rather than round-tripping, which is the
-                // documented behaviour for any column past a line's text.
+                // The `\n` of a `\r\n` is no position the protocol can name.
                 .filter(|&i| i == 0 || !source.as_bytes()[i - 1..].starts_with(b"\r\n"));
             for offset in boundaries {
                 let position = index.position(source, offset);

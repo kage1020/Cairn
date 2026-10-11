@@ -1,9 +1,4 @@
-//! `cairn-lsp` — the Cairn language server binary.
-//!
-//! Speaks the Language Server Protocol over stdio. Editors (or an LLM
-//! acting through one) spawn this binary and receive push diagnostics for
-//! every open `.crn` document; see the crate documentation for the module
-//! layout.
+//! `cairn-lsp`, the Cairn language server, speaking the Language Server Protocol over stdio.
 
 use std::process::ExitCode;
 
@@ -25,12 +20,7 @@ this binary and communicate via Content-Length framed JSON-RPC.
 ";
 
 fn main() -> ExitCode {
-    // Editors spawn `cairn-lsp` either with no arguments or with `--stdio`:
-    // an LSP client told to use the stdio transport appends that flag to the
-    // command line (vscode-languageclient does), and stdio is the only
-    // transport this server speaks, so the flag names what happens anyway.
-    // The other flags are a support-triage affordance (log the version at
-    // activation, print help when a user runs the binary by hand).
+    // An LSP client appends `--stdio` for the stdio transport, the only one this server speaks.
     let mut args = std::env::args().skip(1);
     if let Some(arg) = args.next() {
         let extra = args.next();

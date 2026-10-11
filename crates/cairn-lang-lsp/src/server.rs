@@ -1,13 +1,4 @@
-//! Stdio JSON-RPC server loop.
-//!
-//! Owns the transport half of the language server: capability negotiation,
-//! pushing [`crate::diagnostics::compute_diagnostics`] results to the client
-//! via `textDocument/publishDiagnostics`, and answering
-//! `textDocument/completion` from [`crate::completion::completions`] against
-//! the [`DocumentStore`]-held text. The loop is synchronous (one message at
-//! a time) — the compiler pipeline is fast enough that full recomputation
-//! per keystroke stays well under interactive latency for the file sizes
-//! `.crn` sources reach.
+//! The stdio JSON-RPC loop: diagnostics pushed on each change, completion from the stored text.
 
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::notification::{
@@ -20,17 +11,10 @@ use crate::completion::completions;
 use crate::diagnostics::compute_diagnostics;
 use crate::store::DocumentStore;
 
-/// Errors the transport layer can surface. Boxed because every failure mode
-/// here (broken pipe, malformed JSON, protocol violation) is terminal for
-/// the process — the binary prints it and exits non-zero.
+/// A transport or protocol failure, which ends the process.
 type DynError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Capabilities advertised in the `initialize` response: full-content
-/// document sync with open/close notifications, and completion triggered by
-/// the characters that open a closed-vocabulary position (`@` a material
-/// token, `=` a `mat_slot` value, `.` a segment inside an abstract token).
-/// A ranged `didChange` is still applied as a range
-/// ([`DocumentStore::apply`]).
+/// The capabilities the `initialize` response advertises.
 fn server_capabilities() -> lsp_types::ServerCapabilities {
     lsp_types::ServerCapabilities {
         text_document_sync: Some(lsp_types::TextDocumentSyncCapability::Options(
@@ -48,43 +32,22 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
     }
 }
 
-/// Run the language server over stdio until the client sends `exit`.
-///
-/// Performs the `initialize` handshake, then processes messages until the
-/// `shutdown`/`exit` sequence completes. Returns an error only on transport
-/// or protocol failures — a clean client-driven exit returns `Ok(())`, and
-/// so does input that closes before `shutdown`, after one line on stderr
-/// saying so.
+/// Runs the language server over stdio until the client sends `exit`.
 ///
 /// # Errors
 ///
-/// Propagates I/O failures on stdin/stdout, JSON (de)serialisation failures
-/// on the server's own outgoing messages, protocol violations detected by
-/// `lsp-server` (e.g. messages before `initialize`), and an `exit`
-/// notification arriving without a preceding `shutdown` request — the LSP
-/// spec requires that sequence to end the process with a non-zero code.
-///
-/// An unreadable frame ends the reader and closes the loop's receiver just
-/// as closed input does; only joining the I/O threads tells the two apart,
-/// so the join comes before anything is reported. The join does not say
-/// whether the reader or the writer failed, so an error after a loop that
-/// ended before `shutdown` gets "the session ended without `shutdown`"
-/// appended, which is true of either.
+/// A transport or protocol failure, or an `exit` that no `shutdown` preceded.
 pub fn run() -> Result<(), DynError> {
     let (connection, io_threads) = Connection::stdio();
     let capabilities = serde_json::to_value(server_capabilities())?;
     connection.initialize(capabilities)?;
     let teardown = main_loop(&connection)?;
-    // The writer thread only terminates once the outgoing channel closes,
-    // which happens when the `Connection` (and with it `sender`) drops —
-    // joining before that would deadlock the shutdown.
+    // The writer thread ends only once `connection` drops.
     drop(connection);
     match (io_threads.join(), teardown) {
         (Ok(()), Teardown::AfterShutdown) => Ok(()),
         (Ok(()), Teardown::WithoutShutdown) => {
-            // The input closed without `shutdown`: an editor that was
-            // killed rather than one that quit. Nobody is left to answer,
-            // so not an error, but stderr says it was not orderly.
+            // A killed editor: nobody is left to tell, so not an error.
             eprintln!(
                 "cairn-lsp: client closed stdin without `{}`; the session ended abnormally",
                 Shutdown::METHOD,
@@ -98,44 +61,22 @@ pub fn run() -> Result<(), DynError> {
     }
 }
 
-/// How [`main_loop`] ended, when it ended without an error: the one bit the
-/// loop has is whether `shutdown` came first.
+/// How [`main_loop`] ended without an error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Teardown {
-    /// `shutdown` was requested, and the loop then ended on `exit` or on
-    /// its receiver closing.
     AfterShutdown,
-    /// The receiver closed before any `shutdown`: the input closed, or the
-    /// reader failed on a frame. Only joining the reader tells which, so
-    /// [`run`] reports it once it has.
+    /// The input closed, or the reader failed on a frame, before any `shutdown`.
     WithoutShutdown,
 }
 
-/// Dispatch loop: requests are answered (`shutdown` and `completion` are
-/// known), notifications keep the document store in sync and drive
-/// diagnostics publishing.
-///
-/// `shutdown` does not end the loop — it moves the server into a state the
-/// spec describes precisely: further requests are refused with
-/// `InvalidRequest`, further notifications are ignored, and `exit` ends
-/// the session. `lsp_server::Connection::handle_shutdown` models
-/// that window as "the very next message is `exit`", which no real client
-/// guarantees: `$/cancelRequest` may arrive at any time, and an editor
-/// closing its last buffer sends `didClose` on the way out. Under that
-/// model each is a `ProtocolError` that ends the process with code 1
-/// before the `exit` behind it is read, and the editor reports a crash.
-///
-/// The loop ends without an error on `exit` after `shutdown` or when its
-/// receiver closes; whether `shutdown` came first comes back as a
-/// [`Teardown`].
+/// Dispatches messages until `exit` or closed input. Not `Connection::handle_shutdown`: it fails
+/// on any message between `shutdown` and `exit`, and editors send `didClose` there.
 fn main_loop(connection: &Connection) -> Result<Teardown, DynError> {
     let mut store = DocumentStore::new();
     let mut shutdown_requested = false;
     for message in &connection.receiver {
         match message {
-            // Checked before the method, so a second `shutdown` is refused
-            // like any other post-shutdown request rather than answered
-            // twice.
+            // Ahead of the `shutdown` arm, so a second `shutdown` is refused.
             Message::Request(request) if shutdown_requested => {
                 let response = Response::new_err(
                     request.id,
@@ -155,26 +96,18 @@ fn main_loop(connection: &Connection) -> Result<Teardown, DynError> {
             }
             Message::Request(request) => handle_request(connection, &store, request)?,
             Message::Notification(notification) if notification.method == Exit::METHOD => {
-                // The one message that ends the loop, and only after
-                // `shutdown`: the spec requires an `exit` without one to
-                // terminate the process with a non-zero code.
                 return if shutdown_requested {
                     Ok(Teardown::AfterShutdown)
                 } else {
                     Err("exit notification received before shutdown request".into())
                 };
             }
-            // Dropped here rather than inside `handle_notification`: the
-            // store write and the `publishDiagnostics` push both live down
-            // that path, and a squiggle arriving after `shutdown` is an
-            // observable violation of "notifications are ignored".
             Message::Notification(_) if shutdown_requested => {}
             Message::Notification(notification) => {
                 handle_notification(connection, &mut store, notification)?;
             }
             Message::Response(_) => {
-                // The server sends no requests, so no responses are
-                // expected; ignore rather than fail on a confused client.
+                // The server sends no requests.
             }
         }
     }
@@ -185,10 +118,7 @@ fn main_loop(connection: &Connection) -> Result<Teardown, DynError> {
     })
 }
 
-/// Answer one client request. Every request gets a response — a silent
-/// server leaves the client blocked on the response id forever — so unknown
-/// methods are refused with `MethodNotFound` and a completion request whose
-/// params or document are unusable is refused with `InvalidParams`.
+/// Answers one request; a request left unanswered blocks the client on its id forever.
 fn handle_request(
     connection: &Connection,
     store: &DocumentStore,
@@ -205,9 +135,6 @@ fn handle_request(
                 let position = params.text_document_position.position;
                 let uri = params.text_document_position.text_document.uri;
                 match store.get(&uri) {
-                    // Asking about a document the client never synced is a
-                    // client-side protocol violation; refuse it loud instead
-                    // of answering from nothing.
                     None => Response::new_err(
                         request.id,
                         ErrorCode::InvalidParams as i32,
@@ -215,8 +142,6 @@ fn handle_request(
                     ),
                     Some(source) => match completions(source, position) {
                         Some(items) => Response::new_ok(request.id, items),
-                        // A position far past the document is a client bug,
-                        // not a revision race — refused, not clamped.
                         None => Response::new_err(
                             request.id,
                             ErrorCode::InvalidParams as i32,
@@ -242,11 +167,7 @@ fn handle_request(
     Ok(())
 }
 
-/// Deserialise a notification's params, logging and discarding the
-/// notification when the payload does not match the method's schema.
-/// Notifications are fire-and-forget — one malformed message from a buggy
-/// client must not take down the server (and with it every open document's
-/// diagnostics).
+/// A notification's params, or `None`, logged, when they do not match the method's schema.
 fn parse_params<T: serde::de::DeserializeOwned>(
     method: &str,
     params: serde_json::Value,
@@ -260,11 +181,7 @@ fn parse_params<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// React to one client notification: mirror the document text into the
-/// store (completion requests identify their document by URI alone, so the
-/// server has to remember the last synced revision), then republish
-/// diagnostics for the affected document. Unknown notifications are ignored
-/// per the LSP spec.
+/// Mirrors one notification's text into the store and republishes that document's diagnostics.
 fn handle_notification(
     connection: &Connection,
     store: &mut DocumentStore,
@@ -295,8 +212,6 @@ fn handle_notification(
             ) else {
                 return Ok(());
             };
-            // An empty `contentChanges` changes nothing, and publishing would
-            // repeat the last diagnostics under a new version.
             if params.content_changes.is_empty() {
                 eprintln!(
                     "cairn-lsp: ignoring `{}` notification with empty contentChanges",
@@ -305,10 +220,7 @@ fn handle_notification(
                 return Ok(());
             }
             let uri = params.text_document.uri;
-            // A refused revision publishes nothing: for a document that is
-            // not open, a squiggle would land on a file the editor has no
-            // buffer for and no way to clear; for a range the text does not
-            // have, the stored text stays the last one that could be built.
+            // A refused revision publishes nothing: the editor may have no buffer to clear it from.
             let source = match store.apply(&uri, params.content_changes) {
                 Ok(source) => source,
                 Err(refused) => {
@@ -336,8 +248,7 @@ fn handle_notification(
                 return Ok(());
             };
             store.close(&params.text_document.uri);
-            // Publish an empty set so the editor clears stale squiggles
-            // for the closed document.
+            // An empty set clears the closed document's squiggles.
             publish(connection, params.text_document.uri, None, Vec::new())?;
         }
         _ => {}
