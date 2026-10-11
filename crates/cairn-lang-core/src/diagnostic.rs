@@ -1305,6 +1305,13 @@ impl Diagnostic {
     }
 }
 
+/// Sort `diagnostics` into source order by primary span, `(start, end)`.
+///
+/// Stable, so two findings on one span keep the order they were raised in.
+pub(crate) fn sort_by_position(diagnostics: &mut [Diagnostic]) {
+    diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
+}
+
 /// JSON-friendly rendering of a [`Diagnostic`] with line/col populated.
 ///
 /// Built via [`Diagnostic::render`]. The `code` field serialises to the same

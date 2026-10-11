@@ -1,6 +1,6 @@
 //! Cutting the opening of a `door` member.
 
-use crate::check::Diagnostic;
+use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::PaletteIndex;

@@ -1,7 +1,7 @@
 //! The paint set of a body: which members it holds, which phase paints
 //! each, and the material each one reads.
 
-use crate::check::Diagnostic;
+use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole, ValueWithSpan};
 use crate::resolve::ScopeResolution;
 

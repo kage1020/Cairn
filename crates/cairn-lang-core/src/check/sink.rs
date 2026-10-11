@@ -1,6 +1,6 @@
 //! Accumulator that the `check` passes push [`Diagnostic`]s into.
 
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Diagnostic, sort_by_position};
 
 /// Collector that gathers diagnostics from one or more passes without
 /// short-circuiting.
@@ -48,7 +48,7 @@ impl DiagnosticSink {
     /// same span preserve their push order.
     #[must_use]
     pub fn into_sorted(mut self) -> Vec<Diagnostic> {
-        self.diags.sort_by_key(|d| (d.span.start, d.span.end));
+        sort_by_position(&mut self.diags);
         self.diags
     }
 }

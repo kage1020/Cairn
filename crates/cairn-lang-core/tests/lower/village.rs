@@ -69,9 +69,9 @@ fn village_emits_three_placements_and_two_walkways() {
                 // past the floor's x∈[1,9]), north to z=-6, back west
                 // to the port at x=5. The east side wins the
                 // equal-length tie against the west side because the
-                // router expands +x first — these pins depend on the
-                // `STEP_DIRS` order in `block_array::walkway` (unit
-                // test `route_path_breaks_symmetric_ties_toward_positive_x`
+                // router expands +x first, so these pins depend on its
+                // direction order (the unit test
+                // `route_path_breaks_symmetric_ties_toward_positive_x`
                 // pins the same tie-break in isolation).
                 assert_eq!(
                     walkway.origin,

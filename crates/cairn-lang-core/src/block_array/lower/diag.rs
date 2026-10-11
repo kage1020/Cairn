@@ -1,7 +1,7 @@
 //! Findings about a body or member lowering skips, and about a scope
 //! with no theme to paint with.
 
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{DefIr, Member, MemberRole, StructIr};
 

@@ -237,14 +237,7 @@ fn shape(ir: &BlockArrayIr) -> String {
             .palette
             .entries
             .iter()
-            .map(|e| {
-                let props: Vec<String> = e
-                    .properties
-                    .iter()
-                    .map(|(k, v)| format!("{k}={v}"))
-                    .collect();
-                format!("{}[{}]", e.id, props.join(","))
-            })
+            .map(|e| format!("{}[{}]", e.id, e.properties_text()))
             .collect();
         out.push(format!(
             "{key}: dims={}x{}x{} painted={} palette={}",

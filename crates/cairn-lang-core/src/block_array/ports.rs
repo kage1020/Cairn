@@ -19,7 +19,7 @@
 use std::collections::HashSet;
 use std::hash::BuildHasher;
 
-use crate::check::DiagnosticNote;
+use crate::diagnostic::DiagnosticNote;
 use crate::error::Span;
 use crate::ids::PortId;
 use crate::intent::{DefIr, Member, MemberRole};
@@ -46,7 +46,7 @@ const PORT_GROUND_V: u32 = 0;
 /// shifted it and the row is `super::lower::door::carve_door`'s `y_offset + 1`
 /// with `y_offset = 0`. That is an invariant of port *resolution*, not of
 /// this module: a door nested under a `level` is refused as a port
-/// outright, which `tests/door_wall_fit.rs` pins, because a lookup that
+/// outright, which `tests/lower/door_wall_fit.rs` pins, because a lookup that
 /// walked the flattened members would resolve one and leave this
 /// constant disagreeing with the row `carve_door` asks about. It is
 /// where the masonry has to be, not where the strip lands — that is

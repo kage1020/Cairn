@@ -2,7 +2,7 @@
 //! `circuit` region and a door's actuator patch.
 
 use crate::ast::{SIGNAL_HEAD, ValueKind};
-use crate::check::{Diagnostic, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticNote};
 use crate::intent::{Member, MemberRole, PatchTargetError, actuator_patch_target};
 
 use crate::block_array::args::{NonNegRead, diag_deferred_member_reason, nonneg_int_or_defer};

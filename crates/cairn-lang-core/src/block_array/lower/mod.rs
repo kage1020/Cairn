@@ -71,7 +71,7 @@ use std::collections::HashSet;
 
 use indexmap::IndexMap;
 
-use crate::check::Diagnostic;
+use crate::diagnostic::{Diagnostic, sort_by_position};
 use crate::ids::{PlaceId, SiteName, WalkwayScopeKey};
 use crate::intent::{DefIr, IntentModule, MemberRole, SiteIr, StructIr};
 use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
@@ -97,7 +97,7 @@ use site_floor::{PlacedBody, collect_floor_cells};
 ///
 /// The list is not self-verifying: a new hardcoded id that nobody adds here
 /// is caught by
-/// `cairn-lang-formats/tests/pack_ids_exist.rs::every_id_the_examples_intern_exists_in_its_target`,
+/// `cairn-lang-formats/tests/packs/ids_exist.rs::every_id_the_examples_intern_exists_in_its_target`,
 /// which lowers real sources and reads the palette rather than trusting a
 /// list. This one stays because it covers the three ids no example is
 /// obliged to reach.
@@ -203,13 +203,13 @@ fn lower_to_block_array_within(
         &mut diagnostics,
     );
 
-    // Report in source order, the way `check::Sink::into_sorted` does. This
+    // Report in source order, the way `check::DiagnosticSink` does. This
     // pass emits in pass order — flatten before dims before phases, scope
     // after scope — so which finding comes first has never tracked which
     // line comes first, and a reader working down a file has to jump
     // around. The sort is stable, so two findings on one span keep the
     // order the passes raised them in.
-    diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
+    sort_by_position(&mut diagnostics);
     // A lowering diagnostic's identity is the diagnostic. Two that agree on
     // code, span, message, notes and data are one finding reported twice,
     // and the second copy is an artifact of how this pass walks rather than
@@ -223,8 +223,8 @@ fn lower_to_block_array_within(
     // The rule holds only while every finding that is not a repeat says so
     // in its own text, which is a live obligation on the messages here and
     // not a property of the walk: `geometry_material_id`'s deferral names
-    // its theme for exactly this reason. `tests/def_member_lowering_diagnostics.rs`
-    // holds the cases that must stay apart, and `resolve::resolver`'s module
+    // its theme for exactly this reason. The `lowering` module of
+    // `tests/resolve/def_member.rs` holds the cases that must stay apart, and `resolve::resolver`'s module
     // doc says why that stage keeps ledgers instead.
     //
     // `retain` rather than a rebuild, so what is left keeps its order.

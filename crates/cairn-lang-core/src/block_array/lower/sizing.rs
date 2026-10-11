@@ -1,7 +1,7 @@
 //! How the `walls` and `roof` members of a paint set size its volume.
 
 use crate::ast::ValueKind;
-use crate::check::Diagnostic;
+use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 use crate::resolve::ScopeResolution;
 

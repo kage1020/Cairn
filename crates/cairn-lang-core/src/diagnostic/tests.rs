@@ -246,36 +246,6 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
     );
 }
 
-/// `origin` and `token` are two fields with one job between them, so
-/// the pairs a consumer may rely on are pinned here rather than left
-/// to the two call sites to agree on by hand.
-#[test]
-fn every_id_origin_has_a_wire_name_and_the_token_that_goes_with_it() {
-    use crate::block_array::IdOrigin;
-
-    let cases = [
-        (IdOrigin::Authored, "authored", None),
-        (
-            IdOrigin::Catalog {
-                token: "floor.stone.smooth".to_owned(),
-            },
-            "catalog",
-            Some("floor.stone.smooth"),
-        ),
-        (
-            IdOrigin::Builtin {
-                token: "pressure_plate.default",
-            },
-            "builtin",
-            Some("pressure_plate.default"),
-        ),
-    ];
-    for (origin, kind, token) in cases {
-        assert_eq!(origin.kind(), kind);
-        assert_eq!(origin.token(), token);
-    }
-}
-
 #[test]
 fn rendered_diagnostic_omits_data_key_when_payload_absent() {
     // `data: None` must serialise to *no key at all* so existing

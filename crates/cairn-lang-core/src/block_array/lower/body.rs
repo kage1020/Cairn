@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{Member, MemberRole, Size};
 use crate::resolve::ScopeResolution;

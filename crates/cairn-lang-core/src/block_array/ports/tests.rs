@@ -35,7 +35,7 @@ fn port_at(
 /// materials resolved, which walls a `level` block carries — is
 /// [`super::super::lower`]'s answer, and the tests that pin the port
 /// against *that* drive the whole pass
-/// (`tests/port_reads_the_wall_that_paints.rs`).
+/// (`tests/lower/port_reads_the_wall_that_paints.rs`).
 fn declared_column(def: &DefIr) -> WallColumn {
     WallColumn::from_walls(
         def.members

@@ -12,7 +12,7 @@ use crate::block_array::roof::is_stair;
 use crate::block_array::walkway::{ROUTE_AREA_CAP, SearchRect, l_path_area};
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{BlockState, Dims, Footprint, Palette, PaletteFull, PaletteIndex};
-use crate::check::{DiagnosticCode, DiagnosticData, Severity};
+use crate::diagnostic::{DiagnosticCode, DiagnosticData, Severity};
 use crate::intent::ValueWithSpan;
 
 /// [`PlaceAnchor::origin`] measures the far edge as `origin + dims − 1`,
@@ -305,7 +305,7 @@ fn assert_defers_on(src: &str, out: &BlockArrayIr, line: &str, needle: &str) {
     );
 }
 
-/// The three properties `tests/diagnostic_text.rs` holds every string
+/// The three properties `tests/check/diagnostic_text.rs` holds every string
 /// its corpus renders to. That corpus lowers at [`PALETTE_CAPACITY`],
 /// so it cannot reach `W_PALETTE_TOO_LARGE`, and its text is checked
 /// here instead.
@@ -390,7 +390,7 @@ fn the_palette_refusal_renders_as_prose() {
     assert_reads_as_prose("W_PALETTE_TOO_LARGE note 0", &refused[0].notes[0].message);
 }
 
-/// The `def` path to the same refusal, as `tests/structure_volume.rs`
+/// The `def` path to the same refusal, as `tests/lower/structure_volume.rs`
 /// covers it for the extent: a `place` paints its `def` through the body
 /// lowering a `struct` uses, and a refused body places nothing. The
 /// finding names the row and anchors on it.
@@ -466,7 +466,7 @@ fn lowered_with_resolver(source: &str, resolver: &dyn TargetRegistry) -> BlockAr
 /// In-memory registry for the lowering tests. Declares no id table,
 /// so these tests exercise lowering the way `cairn check` runs it —
 /// with no target pinned and no id refuted. The `E_UNKNOWN_ID` path
-/// has its own tests in `material.rs` and `cli_block_ids.rs`.
+/// has its own tests in `material.rs` and `cairn-lang-cli/tests/cli/compile/block_ids.rs`.
 struct FakeResolver {
     entries: Vec<(&'static str, &'static str)>,
 }
@@ -2535,7 +2535,7 @@ fn a_sym_window_that_coincides_with_its_mirror_is_reported() {
 }
 
 // The one-row course under a roof, and the struct with no walls at
-// all, live in `tests/door_wall_fit.rs`, which holds each to its own
+// all, live in `tests/lower/door_wall_fit.rs`, which holds each to its own
 // sentence: a door with no wall anywhere and a door with no wall at its
 // row are two findings, and a check for "walls" in the message would
 // pass for either.
@@ -3337,7 +3337,7 @@ fn walkway_blocked_cells_skip_with_w_walkway_blocked_count() {
     // lowering — any future caller that wires the JSON formatter
     // around `lower_to_block_array` inherits the same contract.
     let source = walkway_with_unroutable_port_source();
-    let lines = crate::check::LineStarts::new(source);
+    let lines = crate::lines::LineStarts::new(source);
     let rendered = blocked[0].render(source, &lines);
     let value = serde_json::to_value(&rendered).expect("rendered serialises");
     assert_eq!(

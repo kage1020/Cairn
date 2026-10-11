@@ -2,7 +2,7 @@
 //! eave `stair`.
 
 use crate::ast::ValueKind;
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::intent::{Member, ValueWithSpan};
 use crate::resolve::ScopeResolution;
 

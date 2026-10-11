@@ -171,10 +171,7 @@ fn a_folded_literal_reads_back_as_the_properties_it_was_written_with() {
         let rendered = format!(
             "@{}[{}]",
             id.trim_start_matches("minecraft:"),
-            read.iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect::<Vec<_>>()
-                .join(","),
+            state.properties_text(),
         );
         assert_eq!(
             state_of(&rendered),

@@ -404,3 +404,31 @@ fn an_unknown_id_with_no_close_candidate_carries_no_suggestion() {
         other => panic!("expected UnknownId, got {other:?}"),
     }
 }
+
+/// `origin` and `token` are two fields with one job between them, so
+/// the pairs a consumer may rely on are pinned here rather than left
+/// to the two call sites to agree on by hand.
+#[test]
+fn every_id_origin_has_a_wire_name_and_the_token_that_goes_with_it() {
+    let cases = [
+        (IdOrigin::Authored, "authored", None),
+        (
+            IdOrigin::Catalog {
+                token: "floor.stone.smooth".to_owned(),
+            },
+            "catalog",
+            Some("floor.stone.smooth"),
+        ),
+        (
+            IdOrigin::Builtin {
+                token: "pressure_plate.default",
+            },
+            "builtin",
+            Some("pressure_plate.default"),
+        ),
+    ];
+    for (origin, kind, token) in cases {
+        assert_eq!(origin.kind(), kind);
+        assert_eq!(origin.token(), token);
+    }
+}

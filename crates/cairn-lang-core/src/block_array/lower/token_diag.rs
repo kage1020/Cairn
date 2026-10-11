@@ -2,7 +2,7 @@
 //! that wrote it.
 
 use crate::ast::ValueKind;
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::ValueWithSpan;
 use crate::suggest::{candidate_list, did_you_mean_note};

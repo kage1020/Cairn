@@ -5,7 +5,7 @@ use std::hash::BuildHasher;
 
 use indexmap::IndexMap;
 
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::ids::{PlaceId, PortId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 use crate::intent::DefIr;
 use crate::prose::and_list;

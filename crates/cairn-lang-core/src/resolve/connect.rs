@@ -313,15 +313,15 @@ fn validate_port(
     // variant's doc calls unreachable because this lookup refuses the
     // miss. Past that, the lowering side reads a port's member as one no
     // `level y=N` has shifted, and each of these would go wrong without an
-    // error: `walkway::DOOR_PORT_BASE_V` is `carve_door`'s `y_offset + 1`
-    // only at `y_offset = 0`; a window port's `contains_rows(y, ..)` asks
-    // about the rows `cut_window`'s `contains_rows(y + y_offset, ..)` cuts
-    // only at `y_offset = 0` too; and the strip itself lies on the
-    // placement's ground row, not on the base row of the member's
+    // error: `block_array::ports::DOOR_PORT_BASE_V` is `carve_door`'s
+    // `y_offset + 1` only at `y_offset = 0`; a window port's
+    // `contains_rows(y, ..)` asks about the rows `cut_window` cuts from
+    // `y + y_offset` only at `y_offset = 0` too; and the strip itself lies
+    // on the placement's ground row, not on the base row of the member's
     // `level`: `port_world_position` returns `place_origin.1` for every
-    // port, and `walkway::PORT_GROUND_V`, the `v` the window path maps
-    // with, is the constant whose doc names it as the place a raised port
-    // re-binds.
+    // port, and `block_array::ports::PORT_GROUND_V`, the `v` the window
+    // path maps with, is the constant whose doc names it as the place a
+    // raised port re-binds.
     let count = def
         .members
         .iter()

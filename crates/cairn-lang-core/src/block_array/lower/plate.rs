@@ -1,7 +1,7 @@
 //! Placing a `pressure_plate` member.
 
 use crate::ast::ValueKind;
-use crate::check::Diagnostic;
+use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::BlockState;

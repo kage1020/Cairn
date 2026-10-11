@@ -11,7 +11,7 @@
 //! sits below all three and depends on none of them.
 
 use crate::ast::ValueKind;
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{Member, ValueWithSpan};
 

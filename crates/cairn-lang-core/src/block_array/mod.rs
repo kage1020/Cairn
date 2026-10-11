@@ -43,7 +43,7 @@ pub use roof::is_stair;
 // which nothing outside this module holds. Exporting it invited the
 // second derivation the port used to carry.
 
-use crate::check::Diagnostic;
+use crate::diagnostic::Diagnostic;
 use crate::ids::{PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 
 /// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
@@ -260,7 +260,7 @@ impl Dims {
     /// Whether this extent is within [`MAX_STRUCTURE_VOLUME`].
     ///
     /// Callers that are about to allocate must ask this first; the lowering
-    /// pass reports [`crate::check::DiagnosticCode::StructureTooLarge`] and
+    /// pass reports [`crate::diagnostic::DiagnosticCode::StructureTooLarge`] and
     /// skips the scope when it says no.
     #[must_use]
     pub fn fits_volume_budget(self) -> bool {

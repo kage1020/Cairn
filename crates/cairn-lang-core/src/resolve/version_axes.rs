@@ -450,8 +450,9 @@ pub struct DegradedEntry {
     /// combination.
     ///
     /// Pre-joined while [`Self::dropped`] is structured, because this one
-    /// is a rendering that already exists: `join_properties` writes the
-    /// same spelling for [`UnsupportedReason::StatesUnmapped`], and
+    /// is a rendering that already exists:
+    /// [`BlockState::properties_text`](crate::block_array::BlockState::properties_text)
+    /// writes the same spelling for [`UnsupportedReason::StatesUnmapped`], and
     /// splitting it here would put two spellings of one entry's states on
     /// the wire.
     pub states: String,

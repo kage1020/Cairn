@@ -5,7 +5,7 @@ use crate::intent::MemberRole;
 
 /// The dispatch side of the conditional-argument table.
 ///
-/// `tests/conditional_arguments.rs` holds the table to the lowering by
+/// `tests/lower/conditional_arguments.rs` holds the table to the lowering by
 /// building each pair twice, but every enumeration it makes starts from
 /// the table — so it catches a row edited into a lie and not a kind
 /// added here with no row at all. That kind would take the

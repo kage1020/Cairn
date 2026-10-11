@@ -1,6 +1,6 @@
 //! Painting an eave `stair` member.
 
-use crate::check::Diagnostic;
+use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 
 use crate::block_array::PaletteIndex;

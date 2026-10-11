@@ -311,7 +311,7 @@ fn route_path_pins_the_exact_tie_broken_detour() {
     // any change to the cost function, the STEP_DIRS order, or the
     // equal-cost keep-first rule shows up as a concrete
     // before/after diff instead of a distant integration failure.
-    // (The bounding-box pins in `village_lower.rs` survive a
+    // (The bounding-box pins in `tests/lower/village.rs` survive a
     // tie-break flip because both sides share a bbox; this pin does
     // not.)
     let mut blocked: HashSet<(i32, i32, i32)> = HashSet::new();
