@@ -38,7 +38,8 @@ pub struct Member {
     /// bound theme's slot table. On a role whose
     /// [`MemberRole::unread_arguments`] lists `mat_slot` it refers to
     /// nothing: the resolver does not look it up, and `check::arguments`
-    /// reports it as ignored, at the position this carries.
+    /// reports it as ignored, at the position this carries. Which of the two
+    /// a member is, [`Self::read_slot`] answers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mat_slot: Option<Label>,
     /// `[attr=value]` selector immediately after the keyword
@@ -130,6 +131,33 @@ pub enum MemberRole {
 }
 
 impl Member {
+    /// The slot name this member reads from a theme: its hoisted
+    /// [`Self::mat_slot`], unless its role's
+    /// [`MemberRole::unread_arguments`] lists `mat_slot`, where the name
+    /// changes nothing in the build.
+    ///
+    /// This is the one definition of reading a `mat_slot=`, and every
+    /// question of that shape asks it rather than [`Self::mat_slot`]. The
+    /// resolver looks up exactly the names it returns, and reports
+    /// `E_THEME_VARIANT_MISSING` for the module's theme only when a `struct`
+    /// or `def` member reads one. `block_array` reports `W_NO_THEME_BOUND` on
+    /// a body only when a member that survives its `level` flattening reads
+    /// one. A hoisted `mat_slot=` this answers `None` for is the
+    /// `W_IGNORED_ARGUMENT` that `check::arguments` reports from the same
+    /// table.
+    ///
+    /// The predicate is that table and nothing wider. An unknown keyword
+    /// ([`MemberRole::Other`]) lists nothing there, so its slot reads: the
+    /// line is refused with `E_UNKNOWN_KEYWORD` either way, and a misspelt
+    /// slot on it is one the author will need once the keyword is repaired.
+    #[must_use]
+    pub fn read_slot(&self) -> Option<&str> {
+        self.mat_slot
+            .as_ref()
+            .filter(|_| self.role.unread_argument("mat_slot").is_none())
+            .map(|slot| slot.name.as_str())
+    }
+
     /// Read `key=` as a non-negative `u32`, or `None` when the argument
     /// is absent, is not an integer, is negative, or would not fit.
     ///

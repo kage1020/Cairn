@@ -321,8 +321,21 @@ pub enum DiagnosticCode {
     /// Where it sits against `spec/lint` "Error vs warning", and why it is a
     /// warning, is argued once on [`Self::severity`] rather than twice.
     IgnoredArgument,
-    /// A struct/def scope has no theme bound to it, so every `mat_slot=`
-    /// member silently degrades to air during block-array lowering.
+    /// A `struct` body, or a `place`'s instance of a `def`, has no theme
+    /// bound to it while a member in it reads a `mat_slot=`. No slot
+    /// resolves, so every reader degrades the way `spec/lint` "Materials and
+    /// targets" describes, a `floor` to air and a `roof` to its default block
+    /// among them.
+    ///
+    /// Pushed once per body, by `block_array`'s `lower_body_to_block_array`,
+    /// and only when a member `flatten_members` keeps reads a slot as
+    /// `crate::intent::Member::read_slot` defines it. A member under a
+    /// `level` counts; one the `level` drops paints nothing whatever the
+    /// theme, and does not. A body that reads none is not reported: an
+    /// empty one, one built only from fallback materials such as a bare
+    /// `roof kind=flat`, or one whose every `mat_slot=` sits on a keyword
+    /// that reads none, such as a `door` or a `circuit`, and is
+    /// [`Self::IgnoredArgument`].
     NoThemeBound,
     /// A `mat_slot=` resolved to an abstract material token
     /// (`@floor.wood.broadleaf`) and no registry pack materials catalog was
