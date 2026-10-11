@@ -42,27 +42,6 @@ fn route_from_unrouted_transitions_to_routed() {
 }
 
 #[test]
-#[should_panic(expected = "routing must run exactly once per placement")]
-fn route_from_routed_panics() {
-    let mut phase = routed();
-    phase.route(5);
-}
-
-#[test]
-#[should_panic(expected = "routing must run exactly once per placement")]
-fn route_from_delayed_panics() {
-    let mut phase = delayed();
-    phase.route(5);
-}
-
-#[test]
-#[should_panic(expected = "routing must run exactly once per placement")]
-fn route_from_legalized_panics() {
-    let mut phase = legalized();
-    phase.route(5);
-}
-
-#[test]
 fn delay_from_routed_transitions_to_delayed_and_preserves_wire_length() {
     let mut phase = PlacementPhase::Routed { wire_length: 9 };
     phase.delay(4);
@@ -73,27 +52,6 @@ fn delay_from_routed_transitions_to_delayed_and_preserves_wire_length() {
             local_delay_ticks: 4,
         },
     );
-}
-
-#[test]
-#[should_panic(expected = "delay insertion must run exactly once per routed IR")]
-fn delay_from_unrouted_panics() {
-    let mut phase = PlacementPhase::Unrouted;
-    phase.delay(2);
-}
-
-#[test]
-#[should_panic(expected = "delay insertion must run exactly once per routed IR")]
-fn delay_from_delayed_panics() {
-    let mut phase = delayed();
-    phase.delay(2);
-}
-
-#[test]
-#[should_panic(expected = "delay insertion must run exactly once per routed IR")]
-fn delay_from_legalized_panics() {
-    let mut phase = legalized();
-    phase.delay(2);
 }
 
 #[test]
@@ -134,27 +92,6 @@ fn legalize_from_delayed_with_empty_buffers_stays_legalized() {
             ..
         } if bc.is_empty()
     ));
-}
-
-#[test]
-#[should_panic(expected = "crossing legalization must run exactly once per delayed IR")]
-fn legalize_from_unrouted_panics() {
-    let mut phase = PlacementPhase::Unrouted;
-    phase.legalize(vec![]);
-}
-
-#[test]
-#[should_panic(expected = "crossing legalization must run exactly once per delayed IR")]
-fn legalize_from_routed_panics() {
-    let mut phase = routed();
-    phase.legalize(vec![]);
-}
-
-#[test]
-#[should_panic(expected = "crossing legalization must run exactly once per delayed IR")]
-fn legalize_from_legalized_panics() {
-    let mut phase = legalized();
-    phase.legalize(vec![]);
 }
 
 fn probe_scope() -> ScopedPlacementIrEntry {
@@ -224,36 +161,6 @@ fn route_at_from_unrouted_transitions_to_routed() {
 }
 
 #[test]
-#[should_panic(
-    expected = "for cell #7 at (1,0,2) in struct `probe` — routing must run exactly once per placement"
-)]
-fn route_at_from_routed_panics_with_cell_identity() {
-    let scope = probe_scope();
-    let mut phase = routed();
-    phase.route_at(5, probe_identity(&scope));
-}
-
-#[test]
-#[should_panic(
-    expected = "for cell #7 at (1,0,2) in struct `probe` — routing must run exactly once per placement"
-)]
-fn route_at_from_delayed_panics_with_cell_identity() {
-    let scope = probe_scope();
-    let mut phase = delayed();
-    phase.route_at(5, probe_identity(&scope));
-}
-
-#[test]
-#[should_panic(
-    expected = "for cell #7 at (1,0,2) in struct `probe` — routing must run exactly once per placement"
-)]
-fn route_at_from_legalized_panics_with_cell_identity() {
-    let scope = probe_scope();
-    let mut phase = legalized();
-    phase.route_at(5, probe_identity(&scope));
-}
-
-#[test]
 fn delay_at_from_routed_transitions_and_preserves_wire_length() {
     let scope = probe_scope();
     let mut phase = PlacementPhase::Routed { wire_length: 9 };
@@ -265,36 +172,6 @@ fn delay_at_from_routed_transitions_and_preserves_wire_length() {
             local_delay_ticks: 4,
         },
     );
-}
-
-#[test]
-#[should_panic(
-    expected = "for cell #7 at (1,0,2) in struct `probe` — delay insertion must run exactly once per routed IR"
-)]
-fn delay_at_from_unrouted_panics_with_cell_identity() {
-    let scope = probe_scope();
-    let mut phase = PlacementPhase::Unrouted;
-    phase.delay_at(2, probe_identity(&scope));
-}
-
-#[test]
-#[should_panic(
-    expected = "for cell #7 at (1,0,2) in struct `probe` — delay insertion must run exactly once per routed IR"
-)]
-fn delay_at_from_delayed_panics_with_cell_identity() {
-    let scope = probe_scope();
-    let mut phase = delayed();
-    phase.delay_at(2, probe_identity(&scope));
-}
-
-#[test]
-#[should_panic(
-    expected = "for cell #7 at (1,0,2) in struct `probe` — delay insertion must run exactly once per routed IR"
-)]
-fn delay_at_from_legalized_panics_with_cell_identity() {
-    let scope = probe_scope();
-    let mut phase = legalized();
-    phase.delay_at(2, probe_identity(&scope));
 }
 
 #[test]
@@ -317,36 +194,6 @@ fn legalize_at_from_delayed_transitions_and_preserves_prior_fields() {
             buffer_coords: coords,
         },
     );
-}
-
-#[test]
-#[should_panic(
-    expected = "for cell #7 at (1,0,2) in struct `probe` — crossing legalization must run exactly once per delayed IR"
-)]
-fn legalize_at_from_unrouted_panics_with_cell_identity() {
-    let scope = probe_scope();
-    let mut phase = PlacementPhase::Unrouted;
-    phase.legalize_at(vec![], probe_identity(&scope));
-}
-
-#[test]
-#[should_panic(
-    expected = "for cell #7 at (1,0,2) in struct `probe` — crossing legalization must run exactly once per delayed IR"
-)]
-fn legalize_at_from_routed_panics_with_cell_identity() {
-    let scope = probe_scope();
-    let mut phase = routed();
-    phase.legalize_at(vec![], probe_identity(&scope));
-}
-
-#[test]
-#[should_panic(
-    expected = "for cell #7 at (1,0,2) in struct `probe` — crossing legalization must run exactly once per delayed IR"
-)]
-fn legalize_at_from_legalized_panics_with_cell_identity() {
-    let scope = probe_scope();
-    let mut phase = legalized();
-    phase.legalize_at(vec![], probe_identity(&scope));
 }
 
 /// One of the three transitions, as a value, so a test can drive
@@ -419,6 +266,27 @@ fn refusals() -> [(Transition, PlacementPhase); 9] {
         (Transition::Legalize, routed()),
         (Transition::Legalize, legalized()),
     ]
+}
+
+/// Every refusal panics in both the context-free and the `*_at` form,
+/// naming the pass that ran out of order; the `*_at` form puts the
+/// cell's identity in front of that clause.
+#[test]
+fn every_refused_transition_panics_naming_the_pass() {
+    let scope = probe_scope();
+    for (transition, phase) in refusals() {
+        let clause = match transition {
+            Transition::Route => "routing must run exactly once per placement",
+            Transition::Delay => "delay insertion must run exactly once per routed IR",
+            Transition::Legalize => "crossing legalization must run exactly once per delayed IR",
+        };
+        let bare = panic_message(|| transition.panicking(&mut phase.clone()));
+        assert!(bare.contains(clause), "{bare:?} lacks {clause:?}");
+        let identified = format!("for cell #7 at (1,0,2) in struct `probe` — {clause}");
+        let at =
+            panic_message(|| transition.panicking_at(&mut phase.clone(), probe_identity(&scope)));
+        assert!(at.contains(&identified), "{at:?} lacks {identified:?}");
+    }
 }
 
 #[test]
