@@ -25,8 +25,7 @@ include = [
 [lib]
 path = "bindings/rust/lib.rs"
 
-# The workspace lints, with `unsafe_code` at `deny` instead of `forbid` so the
-# `ffi` module can lift it. `cargo xtask lint` keeps this a copy.
+# The workspace lints, with `unsafe_code` at `deny` so the `ffi` module can lift it.
 [lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"

@@ -1,17 +1,11 @@
-//! Line endings through the external scanner's two line-break paths (the
-//! NEWLINE branch and the blank/comment-only-line skip loop), and node
-//! positions against the reference lexer. Built in Rust because
-//! `.gitattributes` normalises every text file to LF, so a `\r\n` in a
-//! `test/corpus/` fixture would become `\n` on commit.
+//! Line endings through the external scanner, and node positions against the reference lexer.
+//! Not corpus cases, since `.gitattributes` normalises a fixture's `\r\n` to `\n`.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use tree_sitter::Parser;
 
-/// Exercises both scanner line-break paths in one file: a nested indent
-/// (NEWLINE plus INDENT/DEDENT), a blank line and a comment-only line (the
-/// skip loop), and a trailing comment (the normal lexer's `comment` extra,
-/// whose regex also has to stop at `\r`).
+/// Crosses both of the scanner's line-break paths, and ends a line in a comment.
 const LF_SOURCE: &str = concat!(
     "@cairn 2026.06\n",
     "struct keep size=5x5\n",
@@ -22,10 +16,6 @@ const LF_SOURCE: &str = concat!(
     "    door id=entry side=front  # eol note\n",
 );
 
-/// `label` names which line-ending variant is being parsed, and the source is
-/// printed escaped: a rejection here can come from either side of the
-/// comparison below, and a raw `\r` is invisible in panic output, so neither
-/// the failing variant nor its bytes would otherwise be identifiable.
 fn parse_to_sexp(label: &str, source: &str) -> String {
     let mut parser = Parser::new();
     parser
@@ -40,30 +30,13 @@ fn parse_to_sexp(label: &str, source: &str) -> String {
     root.to_sexp()
 }
 
-/// A CRLF file must produce the same tree as its LF twin — not merely an
-/// error-free one. Comparing the whole s-expression catches a `\r` that is
-/// consumed as a separate NEWLINE (which would double every line break) or
-/// left behind for the normal lexer (which would surface as an extra node).
 #[test]
 fn crlf_source_parses_identically_to_lf() {
     let crlf = LF_SOURCE.replace('\n', "\r\n");
     assert_eq!(parse_to_sexp("CRLF", &crlf), parse_to_sexp("LF", LF_SOURCE));
 }
 
-/// A lone `\r` must too, and this variant is the one that needs the whole
-/// s-expression rather than an error check.
-///
-/// `get_column()` restarts at `\n` and at nothing else, so in a `\r`-only
-/// file every line is measured against a column that has been climbing
-/// since the file began. Getting that wrong does not reliably fail the
-/// parse — it can just as easily nest a member one level too deep, which
-/// nothing but a tree comparison sees.
-///
-/// `LF_SOURCE` is the right fixture because it already holds a blank line
-/// and a comment-only line, and those are what carry the scanner across a
-/// second line break before it measures the next one — the case where the
-/// count has to be taken afresh on the line it lands on, since the column
-/// cannot supply it.
+/// A column mismeasured after a lone `\r` can nest a member too deep without any parse error.
 #[test]
 fn lone_cr_source_parses_identically_to_lf() {
     let cr = LF_SOURCE.replace('\n', "\r");
@@ -73,10 +46,6 @@ fn lone_cr_source_parses_identically_to_lf() {
     );
 }
 
-/// The last line of a file need not be terminated; dropping the final line
-/// break is what makes the scanner synthesize its zero-width EOF NEWLINE, and
-/// that path has to behave the same whichever line ending the rest of the
-/// file uses.
 #[test]
 fn crlf_source_without_final_line_break_parses_identically_to_lf() {
     let lf = LF_SOURCE.trim_end_matches('\n');
@@ -88,23 +57,9 @@ fn crlf_source_without_final_line_break_parses_identically_to_lf() {
 }
 
 // -- node positions -------------------------------------------------------
-//
-// The tree being identical is not the same claim as the *positions* being
-// right. An editor that drives highlighting from this grammar reads
-// `Point.row` / `Point.column`, and compares them against the line numbers
-// `cairn check` prints from `cairn-lang-core`. Those two have to name the
-// same place.
+// An editor compares a node's `Point` with the line numbers `cairn check` prints.
 
-/// Where each leaf starts, keyed by byte offset: the 1-based row and column
-/// tree-sitter reports for it.
-///
-/// Keyed by offset rather than compared position-by-position because the two
-/// implementations do not agree on token *boundaries* — the grammar splits
-/// `5x5` into two integers around a literal `x` where the lexer produces one
-/// `Size`, and `2026.06` is one `directive_literal` against the lexer's
-/// `Int` / `Dot` / `Int`. Those are tokenisation differences, not position
-/// defects; the claim under test is that wherever both name the same byte,
-/// they name the same place in the file.
+/// Each leaf's 1-based row and column, keyed by start byte, since the two tokenisers differ.
 fn leaf_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
     let mut parser = Parser::new();
     parser
@@ -131,17 +86,7 @@ fn leaf_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
     leaves
 }
 
-/// The same, from the reference lexer.
-///
-/// `Point.column` counts bytes and a `Position` counts characters, so the
-/// two agree on columns only while the line is ASCII —
-/// `a_non_ascii_line_shifts_every_column_after_it` below pins where they
-/// stop. `LF_SOURCE` is ASCII, so the comparisons here are of line numbers
-/// and of columns alike.
-///
-/// Tokens whose text is only whitespace are dropped: the synthetic
-/// `Indent` / `Dedent` / `Newline` have no node to be compared against, and
-/// a `Newline` spans its terminator, so an empty-span filter would miss it.
+/// The same from the reference lexer, without whitespace-only tokens, which have no node.
 fn core_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
     cairn_lang_core::lex::lex(source)
         .expect("the reference lexer accepts the fixture")
@@ -156,10 +101,8 @@ fn core_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
         .collect()
 }
 
-/// One byte offset both implementations start a token at, and where each
-/// says that offset is.
+/// A byte offset both implementations start a token at, and where each says it is.
 struct SharedPosition {
-    /// Byte offset into the source — the key the two are joined on.
     offset: usize,
     /// 1-based line and column from the reference lexer.
     reference: (u32, u32),
@@ -189,10 +132,7 @@ fn node_positions_match_the_reference_lexer_for_lf_and_crlf() {
         ("CRLF", LF_SOURCE.replace('\n', "\r\n")),
     ] {
         let shared = shared_positions(&source);
-        // Every line of the fixture that holds a token has to be
-        // represented, or a comparison that only ever saw line 1 would pass
-        // on a broken row counter. Lines 4 and 5 are the blank and the
-        // comment-only line; neither produces one.
+        // Lines 4 and 5 are the blank and the comment-only line.
         let rows: BTreeSet<u32> = shared.iter().map(|s| s.reference.0).collect();
         assert_eq!(
             rows,
@@ -209,37 +149,8 @@ fn node_positions_match_the_reference_lexer_for_lf_and_crlf() {
     }
 }
 
-/// A lone `\r` is where their *lines* part, and the grammar cannot close
-/// the gap.
-///
-/// `Point.row` is maintained by the tree-sitter *runtime*'s lexer, which
-/// advances it on `\n` and nothing else; an external scanner is handed
-/// `advance` and `get_column`, not the point. So a CR-only file parses to
-/// the right tree — `lone_cr_source_parses_identically_to_lf` above — while
-/// every node stays on the first row and its column keeps climbing across
-/// what should have been a line break.
-///
-/// Both halves hold in runtime 0.26.11 (the lockfile's) and 0.27.0:
-///
-/// - The row is incremented in exactly one place in the runtime's
-///   `lib/src/lexer.c`, under a `lookahead == '\n'` test. Every other write
-///   to the lexer's position copies a point the caller handed in (an
-///   included range's `start_point` or `end_point`) or a `Length` the lexer
-///   computed earlier.
-/// - `TSLexer`, the whole external-scanner surface in `parser.h`, carries
-///   `lookahead`, `result_symbol`, `advance`, `mark_end`, `get_column`,
-///   `is_at_included_range_start`, `eof` and `log`: no accessor for the
-///   point.
-///
-/// A caller could fake the rows with one included range per line, but only
-/// tests here build a `tree_sitter::Parser`, and editors hand their runtime
-/// the buffer as one range. Upstream declined to widen the line rule
-/// (<https://github.com/tree-sitter/tree-sitter/issues/4467>, closed as not
-/// planned), and `spec/syntax` "Literals and separators" records the
-/// limitation.
-///
-/// If a runtime widens its line rule this test fails: delete it then and
-/// fold the CR case into the parity test above.
+/// The runtime advances `Point.row` on `\n` alone, and no scanner can move it (`spec/syntax`
+/// "Literals and separators"). Once a runtime does, delete this and test lone `\r` above.
 #[test]
 fn a_lone_carriage_return_leaves_every_node_on_the_first_row() {
     let cr = LF_SOURCE.replace('\n', "\r");
@@ -250,9 +161,6 @@ fn a_lone_carriage_return_leaves_every_node_on_the_first_row() {
         BTreeSet::from([1]),
         "the runtime advanced a row on a lone `\\r`; the divergence this pins is gone",
     );
-    // The column keeps climbing rather than restarting, which is the other
-    // half of the same defect and the half a row check cannot see: the last
-    // token of the file is reported further right than the file is wide.
     let widest = nodes.values().map(|(_, col)| *col).max().expect("nodes");
     let longest_line = LF_SOURCE
         .lines()
@@ -263,8 +171,6 @@ fn a_lone_carriage_return_leaves_every_node_on_the_first_row() {
         widest > longest_line,
         "columns restarted somewhere: widest {widest} against a longest line of {longest_line}",
     );
-    // And the reference lexer does place them on separate lines, so the
-    // two really are describing the same file differently.
     let reference: BTreeSet<u32> = core_positions(&cr)
         .into_values()
         .map(|(line, _)| line)
@@ -272,14 +178,7 @@ fn a_lone_carriage_return_leaves_every_node_on_the_first_row() {
     assert!(reference.len() > 1, "{reference:?}");
 }
 
-/// And a non-ASCII character is where their *columns* part.
-///
-/// `Point.column` is a byte count; a `Position` column is a character
-/// count. Neither is wrong — tree-sitter's API is byte-addressed
-/// throughout, and a consumer converts — but the parity test above holds
-/// only because its fixture is ASCII, and a Japanese label in a `.crn` file
-/// is an ordinary thing to write in this project. Pinned so that claim
-/// cannot quietly widen.
+/// `Point.column` counts bytes and a `Position` characters, so the parity above needs ASCII.
 #[test]
 fn a_non_ascii_line_shifts_every_column_after_it() {
     let source = "struct s size=3x3 label=\"日本\" id=x\n";
@@ -291,8 +190,6 @@ fn a_non_ascii_line_shifts_every_column_after_it() {
         .expect("both name the `id` token");
     // Two three-byte characters where the lexer counted two: four columns.
     assert_eq!(entry.node.1 - entry.reference.1, 4);
-    // Everything before the label still agrees, so the shift is the label's
-    // and not a whole-line offset.
     for shared in shared.iter().filter(|s| s.offset < id) {
         assert_eq!(
             shared.reference, shared.node,
