@@ -22,7 +22,7 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 
 `compile` writes gzipped `.nbt` for `--edition java` and uncompressed `.mcstructure` for `--edition bedrock`, one file per scope, plus `<source>.lock` next to the source. A Bedrock blockstate property the backend cannot translate is a hard error; intent it can only approximate (stair `shape`) is dropped with a `W_INTENT_DEGRADED` warning rather than in silence.
 
-`check --edition E --target V` pins the same `(edition, version)` pair a compile pins, which is what lets it reach the lowering-stage findings — `E_UNKNOWN_ID` above all — without building anything. That is the shape a CI gate wants: `cairn check` going green on a source `cairn compile` refuses is the gap the flag closes. What it does not take on is anything `compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement (`E_VERSION_CAP`), since holding `--target` to the floors belongs to the command that certifies a build.
+`check --edition E --target V` pins the same `(edition, version)` pair a compile pins, which is what lets it reach the lowering-stage findings — `E_UNKNOWN_ID` above all — without building anything. That is the shape a CI gate wants, since an unpinned `cairn check` can go green on a source `cairn compile` refuses. What it does not take on is anything `compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement (`E_VERSION_CAP`), since holding `--target` to the floors belongs to the command that certifies a build.
 
 ## Targeting rules
 
