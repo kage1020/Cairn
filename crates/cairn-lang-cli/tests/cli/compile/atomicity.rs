@@ -38,9 +38,8 @@ struct Build {
     _tmp: TempDir,
     source: PathBuf,
     out_dir: PathBuf,
-    /// The lockfile lives beside the *source*, not in `out_dir`. Scratch
-    /// left next to it is therefore invisible to a snapshot of `out_dir`
-    /// alone, which is how a leaked `village.crn.lock.tmp` went unnoticed.
+    /// The lockfile lives beside the *source*, not in `out_dir`, so scratch
+    /// left next to it is invisible to a snapshot of `out_dir` alone.
     lock: PathBuf,
 }
 
@@ -78,9 +77,8 @@ impl Build {
         (field("source_hash:"), field("resolved_ir_hash:"))
     }
 
-    /// Compile the source again over this build: the exit code, and stderr
-    /// so an assertion failure carries the CLI's own account of what went
-    /// wrong instead of only the resulting directory listing.
+    /// Compile the source again over this build, returning the exit code
+    /// and stderr.
     fn rebuild(&self) -> (Option<i32>, String) {
         self.rebuild_with_lock(&self.lock)
     }
@@ -134,7 +132,6 @@ fn change_the_source(source: &Path) {
 /// Where a directory gets planted, and therefore which step fails.
 const OBSTRUCTIONS: &[&str] = &[
     // Commit fails on the lockfile, after every artifact has been staged.
-    // This is the reported case.
     "lockfile",
     // Commit fails on one artifact, with others already committed.
     "artifact",
@@ -145,12 +142,11 @@ const OBSTRUCTIONS: &[&str] = &[
     // and nothing committed — the branch every other case skips past.
     "first-artifact",
     // A leftover backup blocks the *displace* step rather than the place
-    // step, so a failure reported against the file being placed names the
-    // wrong path entirely.
+    // step.
     "artifact-backup",
 ];
 
-/// The suffixes this code appends while a build is in flight. Either one
+/// The suffixes staging appends while a build is in flight. Either one
 /// surviving the run means the set was not cleaned up.
 fn is_scratch(name: &str) -> bool {
     Path::new(name)
@@ -238,14 +234,8 @@ fn a_failed_build_leaves_the_previous_one_untouched() {
 
 #[test]
 fn a_failed_build_leaves_no_scratch_files_behind() {
-    // A retry has to start from a clean slate: an orphaned `.tmp` or `.bak`
-    // accumulates, and a `.bak` in particular is a copy of the previous
-    // build under a name that reads as scratch to anything scanning the
-    // output.
-    //
-    // Both directories, because the lockfile does not live in `--out`: a
-    // leaked `village.crn.lock.tmp` is invisible to a snapshot of the
-    // artifact directory, which is where it hid.
+    // An orphaned `.tmp` or `.bak` accumulates across retries, and a `.bak`
+    // is a copy of the previous build under a name that reads as scratch.
     for label in OBSTRUCTIONS {
         let build = first_successful_build();
         arrange_failure(&build, label);
@@ -268,10 +258,8 @@ stderr={stderr}",
 
 #[test]
 fn a_failed_build_says_which_file_stopped_it() {
-    // The obstruction is the thing to fix, so it is the thing to name. A
-    // stale `home2.nbt.bak` blocking the displace step is not a failure
-    // writing `home2.nbt`, which would send the operator to a file that is
-    // fine.
+    // A stale `home2.nbt.bak` blocking the displace step is not a failure
+    // writing `home2.nbt`, which is fine.
     let build = first_successful_build();
     arrange_failure(&build, "artifact-backup");
     let (code, stderr) = build.rebuild();
@@ -281,8 +269,7 @@ fn a_failed_build_says_which_file_stopped_it() {
         "the refusal must name the path that actually blocked it; got {stderr}",
     );
 
-    // And the lockfile keeps its own noun through both phases: a commit-time
-    // failure on it reads differently from an artifact's.
+    // The lockfile keeps its own noun through both phases.
     let build = first_successful_build();
     arrange_failure(&build, "lockfile");
     let (code, stderr) = build.rebuild();
@@ -316,8 +303,6 @@ fn a_failed_first_build_leaves_nothing_at_all() {
 
 #[test]
 fn a_successful_rebuild_replaces_everything_and_cleans_up() {
-    // The other side of the contract: with nothing obstructing it the commit
-    // has to land in full and leave no bookkeeping behind.
     let build = first_successful_build();
     let before = snapshot(&build.out_dir);
     let before_hashes = build.lock_hashes();
@@ -338,9 +323,7 @@ fn a_successful_rebuild_replaces_everything_and_cleans_up() {
             .any(|(name, bytes)| before.get(name) != Some(bytes)),
         "the edited source must produce different artifact bytes, or this test proves nothing",
     );
-    // Not `lock.is_file()`: the lockfile from the *first* build satisfies
-    // that whether or not the second one replaced it, so a commit that
-    // rolled the lockfile back while keeping the new artifacts would pass.
+    // Not `lock.is_file()`, which the *first* build's lockfile satisfies.
     assert_ne!(
         build.lock_hashes(),
         before_hashes,
@@ -352,12 +335,9 @@ fn a_successful_rebuild_replaces_everything_and_cleans_up() {
 
 #[test]
 fn a_lock_path_that_collides_with_an_artifact_is_refused() {
-    // Two set entries sharing a destination staged over each other and then
-    // fought over one backup during the commit, which deleted the previous
-    // artifact with no copy left anywhere — the same loss this suite exists
-    // to prevent, reached through an argument the CLI accepted in silence.
-    //
-    // The scratch names collide just as destructively, one phase earlier.
+    // Two set entries sharing a destination stage over each other and fight
+    // over one backup during the commit, losing the previous artifact. The
+    // scratch names collide the same way, one phase earlier.
     for suffix in ["", ".tmp", ".bak"] {
         let build = first_successful_build();
         let before = snapshot(&build.out_dir);
@@ -421,8 +401,8 @@ fn assert_refused_by_the_guard(
         Some(1),
         "{args} names an artifact and must be refused; stderr={stderr}",
     );
-    // Keyed on the guard's own wording: the unguarded run also exits 1, from
-    // the failed commit, after the artifact is already gone.
+    // Keyed on the guard's own wording: an unguarded run also exits 1, from
+    // the failed commit, after the artifact is gone.
     let expected = format!(
         "collides with an artifact this build writes (`{}`)",
         artifact.display(),
@@ -452,10 +432,8 @@ fn assert_lock_spelling_is_refused(spell: impl FnOnce(&Path) -> (String, String)
 
 #[test]
 fn a_lock_spelled_differently_from_its_artifact_is_still_refused() {
-    // The guard compared paths as spelled, so only the byte-identical
-    // `out/home1.nbt` was refused. Every spelling below names that same
-    // file, and each one reached the commit and destroyed the previous
-    // artifact with no backup left.
+    // Each spelling names the file `out/home1.nbt` does, so a guard that
+    // compared paths as spelled would let it reach the commit.
     for lock in ["./out/home1.nbt", "out/./home1.nbt", "out/../out/home1.nbt"] {
         assert_lock_spelling_is_refused(|_| ("out".into(), lock.into()));
     }
@@ -527,8 +505,8 @@ fn a_bare_lock_name_collides_with_the_default_out() {
 
 #[test]
 fn a_lock_sharing_only_the_artifacts_name_still_builds() {
-    // The control for the tests above: the key is the parent *and* the name,
-    // so the artifact's name in another directory is a different file.
+    // The control: the key is the parent *and* the name, so the artifact's
+    // name in another directory is a different file.
     let build = first_successful_build();
     let dir = build.source.parent().expect("source has a parent");
     fs::create_dir(dir.join("other")).expect("mkdir other");
@@ -570,11 +548,9 @@ fn a_lock_reached_through_a_junction_is_refused() {
 #[test]
 fn two_artifacts_differing_only_in_case_are_refused_on_every_host() {
     // `home1` and `HOME1` are distinct ids, but `home1.nbt` and `HOME1.nbt`
-    // are one directory entry on macOS and Windows. Staged together there
-    // they overwrote each other and the commit lost both, the previous one
-    // included; on Linux they built as two files. The names are compared
-    // ignoring case before lowering, so every host refuses the source and
-    // the previous build stays as it was.
+    // are one directory entry on macOS and Windows, where staging both
+    // loses the previous build. Names are compared ignoring case before
+    // lowering, so every host refuses the source.
     let build = first_successful_build();
     let before = snapshot(&build.out_dir);
     let body = fs::read_to_string(&build.source).expect("read source");
@@ -589,7 +565,6 @@ fn two_artifacts_differing_only_in_case_are_refused_on_every_host() {
 
     let (code, stderr) = build.rebuild();
     assert_eq!(code, Some(1), "stderr={stderr}");
-    // The refusal is the case-folded name collision.
     assert_stream(&stderr, &[(24, 3, "error", "E_OUTPUT_NAME_COLLISION")]);
     assert!(stderr.contains("differ only in case"), "got {stderr}");
     assert_eq!(

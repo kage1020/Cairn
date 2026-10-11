@@ -16,10 +16,9 @@ use crate::common::{
 
 /// The version cargo derived for this crate from `[workspace.package]`.
 ///
-/// The lockfile records the compiler that produced it, so the number has to be
-/// the release's, not a constant maintained beside it. Comparing against
-/// `cairn-lang-core`'s `CAIRN_VERSION` would only restate whatever the binary
-/// already wrote.
+/// The lockfile records the compiler that produced it, so the number has to
+/// be the release's; `cairn-lang-core`'s `CAIRN_VERSION` would only restate
+/// whatever the binary wrote.
 const WORKSPACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[test]
@@ -212,10 +211,8 @@ fn either_spelling_of_a_target_builds_the_row_it_names() {
 
 #[test]
 fn bedrock_compiles_stateless_example_to_mcstructure() {
-    // roof-flat.crn resolves entirely to bare (stateless) block ids —
-    // planks and cobblestone — so it is the smallest example the Bedrock
-    // backend can round-trip end-to-end. The compile must exit 0, write a
-    // `roof_flat.mcstructure`, and lower without any deferred warnings.
+    // `roof-flat.crn` resolves entirely to stateless block ids, the
+    // smallest example the Bedrock backend round-trips.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("roof-flat.crn");
     fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
@@ -310,10 +307,9 @@ fn bedrock_lockfile_records_bedrock_target_and_pack_hash() {
 
 #[test]
 fn bedrock_cottage_maps_stair_states_without_degradation() {
-    // cottage.crn resolves a gable roof to `*_stairs` with `facing`/`half`/
-    // `shape=straight` properties. The Bedrock backend maps facing/half to
-    // Bedrock `states` and drops the (straight, i.e. default) shape without a
-    // note, so the compile succeeds cleanly and writes the artifact.
+    // The gable roof's `*_stairs` carry `facing`/`half`/`shape=straight`.
+    // Bedrock maps `facing`/`half` and drops `shape=straight`, its default,
+    // without a note.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("cottage.crn");
     fs::copy(examples_dir().join("cottage.crn"), &dst).expect("copy cottage");
@@ -345,12 +341,9 @@ fn bedrock_cottage_maps_stair_states_without_degradation() {
 
 #[test]
 fn bedrock_themed_tower_degrades_stair_shape_but_compiles() {
-    // themed-tower.crn's eave stairs use non-straight shapes
-    // (`outer_left`/`outer_right`), which Bedrock has no state for. The
-    // compile still succeeds (exit 0) but surfaces a W_INTENT_DEGRADED
-    // warning per dropped shape (`spec/versioning-editions`
-    // "Backend = data tables" `dropped_states:[shape]` and
-    // "Java / Bedrock portability"), and the artifact is written.
+    // The eave stairs' `outer_left`/`outer_right` shapes have no Bedrock
+    // state, so each is a `W_INTENT_DEGRADED` (`spec/versioning-editions`
+    // "Backend = data tables" and "Java / Bedrock portability").
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("themed-tower.crn");
     fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
@@ -443,7 +436,7 @@ fn unknown_target_exits_one_with_supported_list() {
 fn parse_error_surfaces_file_line_col() {
     let tmp = TempDir::new().expect("tempdir");
     let bad = tmp.path().join("bad.crn");
-    // `;;;` is not a valid Cairn token — guarantees a lex/parse failure.
+    // `;;;` is no Cairn token.
     fs::write(&bad, "struct cottage size=2x2\n;;;\n").expect("write");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -467,7 +460,6 @@ fn parse_error_surfaces_file_line_col() {
             continue;
         }
         let rest = &line[line.find(&bad_display).unwrap() + bad_display.len()..];
-        // Pattern: ":line:col:"
         let mut parts = rest.splitn(4, ':');
         let (_empty, line_no, col_no) = (parts.next(), parts.next(), parts.next());
         if line_no.is_some_and(|s| s.trim().parse::<u32>().is_ok())
@@ -527,16 +519,9 @@ fn the_lockfile_on_disk_ends_with_a_newline() {
 
 #[test]
 fn compile_is_byte_reproducible() {
-    // Two compiles of the same source against the same target must
-    // produce byte-identical `.nbt` files and byte-identical lockfiles.
-    // This is the central promise of the lockfile design — without it the
-    // lockfile carries no useful diff information.
-    //
-    // The whole file, not two of its fields. "Regenerating the lockfile is
-    // a no-op" is a statement about the bytes: a field that varies between
-    // runs — an absolute path, an iteration order, a timestamp — is exactly
-    // what a hash-only comparison cannot see, and exactly what would make a
-    // committed lockfile impossible to keep.
+    // The whole lockfile, not two of its fields: an absolute path, an
+    // iteration order or a timestamp is what a hash-only comparison cannot
+    // see, and what would make a committed lockfile impossible to keep.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_a = TempDir::new().expect("out a");
     let out_b = TempDir::new().expect("out b");
@@ -584,11 +569,8 @@ fn compile_is_byte_reproducible() {
 
 #[test]
 fn compile_rolls_back_on_lockfile_failure() {
-    // If the lockfile write fails, the `.nbt` files already written must
-    // be removed so the on-disk state stays consistent (either every
-    // artifact + lock, or none). We force the failure by pointing
-    // `--lock` at a directory that exists; `serde_norway::to_string` +
-    // `fs::write` then fails with "is a directory".
+    // Every artifact and the lock, or none. `--lock` at an existing
+    // directory forces the lockfile write to fail.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_as_dir = out_dir.path().join("lock-is-a-dir");
@@ -614,10 +596,8 @@ fn compile_rolls_back_on_lockfile_failure() {
 
 #[test]
 fn compile_does_not_print_wrote_before_lockfile_success() {
-    // Regression for the silent failure described in the review: stdout
-    // must announce written files only AFTER every artifact and the
-    // lockfile have landed. So when the lockfile step fails (directory
-    // collision above), stdout must be empty of `wrote …` lines.
+    // `wrote …` is announced only after every artifact and the lockfile
+    // land, so a failed lockfile step prints none.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_as_dir = out_dir.path().join("lock-dir");
@@ -643,12 +623,8 @@ fn compile_does_not_print_wrote_before_lockfile_success() {
 
 #[test]
 fn compile_all_examples_exit_zero() {
-    // Every example must compile clean even when its source uses members
-    // or material tokens the Java backend can't fully realise — abstract
-    // tokens and unsupported roles degrade to air with a warning at the
-    // lowering step, so the palette that reaches the Java backend is
-    // already concrete. A non-zero exit here means a regression in either
-    // the lowering pass or the abstract-id guard at the backend.
+    // Abstract tokens and unsupported roles degrade to air with a warning
+    // at lowering, so the palette reaching the Java backend is concrete.
     for path in crn_examples() {
         let name = path.file_name().expect("named").to_string_lossy();
         let out_dir = TempDir::new().expect("out tempdir");
@@ -674,8 +650,8 @@ fn compile_all_examples_exit_zero() {
 }
 
 /// `(example, the artifact its one struct writes)` for every example whose
-/// members the voxel lowering covers end-to-end, so the per-member
-/// `W_DEFERRED_MEMBER` stream earlier milestones emitted must be empty.
+/// members the voxel lowering covers end to end, so its
+/// `W_DEFERRED_MEMBER` stream is empty.
 ///
 /// - `cottage.crn`: floor, walls, door, window, gable roof with overhang.
 /// - `themed-tower.crn`: `level y=N` grouping, per-level walls, an eave
@@ -684,8 +660,8 @@ fn compile_all_examples_exit_zero() {
 /// - `redstone-door.crn`: two `pressure_plate` fixtures with the compound
 ///   `at=<side>.outside` / `at=inside.<side>` anchor, a `circuit
 ///   region=floor void=2` routing marker, and a `door[id=front]
-///   opened_by=sig.open` actuator patch — the plate paints its voxels and
-///   the other two are surface-guards for the logic pipeline.
+///   opened_by=sig.open` actuator patch; the plate paints its voxels and
+///   the other two only guard the logic pipeline.
 /// - `roof-shed/hip/flat.crn`: the roof voxelisers of `spec/compilation`
 ///   ("Shed roof voxel rules", "Hip roof voxel rules" and
 ///   "Flat roof voxel rules").
@@ -733,9 +709,8 @@ fn covered_examples_compile_without_deferred_warnings() {
 
 #[test]
 fn lockfile_registry_pack_hash_is_populated() {
-    // The registry pack ingest replaces the hardcoded data_version table,
-    // and the lockfile must pin the bytes the compile resolved against.
-    // The `constraint_catalog_hash` stays zero until that catalog lands.
+    // The lockfile pins the registry pack the compile resolved against.
+    // `constraint_catalog_hash` is zero while there is no catalog.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("pack.lock");
@@ -767,9 +742,7 @@ fn lockfile_registry_pack_hash_is_populated() {
 
 #[test]
 fn unknown_abstract_token_compile_exits_nonzero() {
-    // Compile must propagate the new E_UNKNOWN_ABSTRACT_TOKEN as a hard
-    // failure — a build that silently fell back to air on a typo would
-    // hide the bug downstream.
+    // A build that fell back to air on a typo would hide it downstream.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("typo.crn");
     fs::write(
@@ -808,14 +781,8 @@ fn unknown_abstract_token_compile_exits_nonzero() {
     );
 }
 
-/// Copy any example file alongside its dependencies into a fresh temp dir.
-/// Mirrors `cottage_in_tempdir` but parameterised so the village / themed-tower
-/// tests can land in their own writable scratch space without polluting the
-/// repo with `.lock` artefacts.
 #[test]
 fn compile_village_emits_three_nbt() {
-    // Each of village.crn's three placements lowers to a sibling `.nbt`,
-    // and the build exits 0.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -846,12 +813,9 @@ fn compile_village_emits_three_nbt() {
 
 #[test]
 fn village_lockfile_records_placements() {
-    // The lockfile carries the resolved per-place origin so a downstream
-    // consumer can rebuild the village layout without re-running the
-    // coordinate solver. Origins are derived from the topological chain in
-    // examples/village.crn: home1 sits at origin, home2 sits east of home1
-    // past its full inflated width (11) plus gap=4 = 15, home3 sits north
-    // of home1 minus its full depth (9) minus gap=5 = -14.
+    // From `examples/village.crn`: home1 sits at origin, home2 east of it
+    // past its inflated width (11) plus gap=4 = 15, home3 north of it minus
+    // its depth (9) minus gap=5 = -14.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("village.lock");
@@ -892,10 +856,7 @@ fn village_lockfile_records_placements() {
 
 #[test]
 fn village_lockfile_round_trips_through_yaml() {
-    // Pin that the new `placements` section survives a YAML round-trip:
-    // serde_norway must encode and decode every field the schema declares so a
-    // CI annotator or LSP that reads the file gets the same record the
-    // compiler wrote.
+    // A reader of the file gets the `placements` record the compiler wrote.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("rt.lock");
@@ -920,11 +881,8 @@ fn village_lockfile_round_trips_through_yaml() {
 
 #[test]
 fn village_lowers_connect_rows_into_walkway_artifacts() {
-    // The two `connect` rows in village.crn lower into per-walkway `.nbt`
-    // artifacts (one per row) rather than degrading to W_DEFERRED_MEMBER.
-    // The home1↔home3 row detours around home1's floor, so the whole
-    // example compiles without a single W_WALKWAY_BLOCKED: village is a
-    // warning-free example.
+    // The home1↔home3 row detours around home1's floor, so village
+    // compiles with no `W_WALKWAY_BLOCKED`.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -949,8 +907,6 @@ fn village_lowers_connect_rows_into_walkway_artifacts() {
         0,
         "the home1↔home3 walkway must route around home1 instead of warning; stderr={stderr}",
     );
-    // The two `connect` rows land as `hamlet_walkway_*.nbt` files
-    // alongside the three placement files.
     let written: Vec<_> = std::fs::read_dir(out_dir.path())
         .expect("read out_dir")
         .filter_map(Result::ok)
@@ -973,10 +929,6 @@ fn village_lowers_connect_rows_into_walkway_artifacts() {
 
 #[test]
 fn unknown_def_in_place_errors_with_suggestion() {
-    // `use=cottag` typo → resolver fail-loud with a `did you mean
-    // `cottage`?` suggestion via the existing nearest_match helper.
-    // `cairn check` reports its text diagnostics on stderr, like every
-    // other subcommand, so the assertions look there.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("typo_use.crn");
     fs::write(
@@ -1016,8 +968,6 @@ fn unknown_def_in_place_errors_with_suggestion() {
 
 #[test]
 fn unknown_theme_in_place_errors_with_suggestion() {
-    // `theme=medeival` typo → fail-loud + did-you-mean note for the only
-    // declared theme.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("typo_theme.crn");
     fs::write(
@@ -1048,8 +998,6 @@ fn unknown_theme_in_place_errors_with_suggestion() {
 
 #[test]
 fn east_of_unknown_ref_errors_with_suggestion() {
-    // `east_of=home9` does not name a prior place id in the same site →
-    // fail-loud, with `home1` as the nearest-match suggestion.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("east_typo.crn");
     fs::write(
@@ -1183,9 +1131,7 @@ fn a_reference_to_a_place_refused_for_its_id_is_a_cascade_on_its_own_row() {
 
 /// `refused_place_ids` fills in source order, like the ids it shadows, so a
 /// reference *above* the refused row names no prior place and is reported
-/// as any other forward reference is. A refactor that collects every
-/// refused id in one pass first would turn this into a cascade too, and
-/// the "declare the target above this line" note with it.
+/// as any other forward reference is.
 #[test]
 fn a_reference_above_the_row_refused_for_its_id_names_no_prior_place() {
     let (code, reported) = check_rows(&[
@@ -1296,13 +1242,11 @@ fn assert_place_id_refused(id: &str, shown: &str) {
     );
 }
 
-// The characters a Windows file name cannot carry are refused like the path
-// separators, on every host: an id is the stem of the artifact's file name,
-// and an id Linux accepts would otherwise fail on Windows with a bare OS
-// error. `"`
-// is in the rule too, but a source string literal cannot carry one; the
-// lockfile reader is where it is reached. U+0001 is one of the controls
-// Windows reserves, and is quoted as its escape.
+// The characters a Windows file name cannot carry are refused like the
+// path separators, on every host: an id is the stem of the artifact's file
+// name. `"` is in the rule too, but a source string literal cannot carry
+// one, so the lockfile reader is where it is reached. U+0001 is one of the
+// controls Windows reserves, and is quoted as its escape.
 
 #[test]
 fn a_place_id_carrying_a_star_is_refused_on_every_host() {
@@ -1356,12 +1300,8 @@ fn a_place_id_carrying_an_ideographic_space_is_refused_and_escaped() {
 
 #[test]
 fn bare_def_without_place_emits_w_unused_def_and_no_nbt() {
-    // A def that no site references is a noop (templates compile to no
-    // voxels). The resolver flags it as `W_UNUSED_DEF` so a typo on the
-    // `place use=` side does not silently produce an empty build. The
-    // warning rides the same diagnostic stream as `W_DEFERRED_MEMBER` —
-    // resolver diagnostics merge into the lowering output so `cairn compile`
-    // surfaces them too.
+    // A def no site references compiles to no voxels; `W_UNUSED_DEF` keeps
+    // a typo on the `place use=` side from silently building nothing.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("orphan_def.crn");
     fs::write(
@@ -1411,9 +1351,8 @@ fn bare_def_without_place_emits_w_unused_def_and_no_nbt() {
 
 #[test]
 fn unknown_def_in_place_compile_exits_nonzero() {
-    // `cairn compile` must propagate resolver Error-severity diagnostics
-    // through to the exit code — without the resolver→lowering diagnostic
-    // merge, this would silently succeed with zero `.nbt` files.
+    // Resolver errors reach the exit code through their merge into the
+    // lowering stream.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("typo_use_compile.crn");
     fs::write(
@@ -1463,12 +1402,8 @@ fn unknown_def_in_place_compile_exits_nonzero() {
 
 #[test]
 fn home2_nbt_uses_resolved_theme_palette() {
-    // Cross-scope theme resolution proof: home2's palette must contain
-    // the canonical id `medieval` binds to (`@cobblestone` →
-    // `minecraft:cobblestone`). Reading the gzip-decoded NBT and grepping
-    // the palette is heavier than this test wants; the lockfile-equivalent
-    // check is to assert the build wrote a non-trivial gzip stream and that
-    // the resolved_ir_hash differs from a hypothetical empty-IR build.
+    // The palette is not read: a non-trivial gzip stream and a non-zero
+    // `resolved_ir_hash` stand in for it.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("village.lock");
@@ -1501,10 +1436,7 @@ fn home2_nbt_uses_resolved_theme_palette() {
 
 #[test]
 fn compile_overwrites_existing_output() {
-    // A second compile into the same directory must overwrite the .nbt
-    // and the lockfile rather than refusing or appending. Without this,
-    // an interactive workflow (edit `.crn`, rerun) would fail on every
-    // iteration after the first.
+    // An edit-and-rerun loop compiles into the same directory every time.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let nbt_path = out_dir.path().join("cottage.nbt");
@@ -1534,8 +1466,7 @@ fn compile_overwrites_existing_output() {
 
 #[test]
 fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
-    // The third of the three commands whose note loop dropped
-    // `note.span`. `cairn compile` reaches it through
+    // `cairn compile` reaches the note through
     // `report_lowering_diagnostics`, which `lower` and `info` do not use.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("conflict.crn");
@@ -1621,12 +1552,10 @@ fn a_walkway_port_named_underscore_is_refused_rather_than_panicking_the_namer() 
 #[test]
 fn walkway_ids_that_would_alias_across_the_separator_are_each_named() {
     // `a.p_ → b.p` and `a.p → _b.p` would share the scope key
-    // `walkway::s::a.p___b.p`, the second row replacing the first and one
-    // `.nbt` written for two rows with no finding. Each is named on its
-    // own line, and again among the losses that refuse the
-    // build: the name a loss is reported under is the row's own ports,
-    // not the key the two rows would both have spelled. The sound third
-    // row laid its walkway, so it is not among them.
+    // `walkway::s::a.p___b.p`, one `.nbt` for two rows. Each is named on its
+    // own line and among the losses that refuse the build, under its own
+    // ports rather than the shared key. The sound third row lays its
+    // walkway.
     let fixture = Fixture::new(concat!(
         "def hut size=5x5:\n",
         "  walls id=w mat_slot=wall height=3\n",
@@ -1893,7 +1822,6 @@ fn walkways_that_flatten_to_one_filename_are_refused_before_anything_is_written(
     let result = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
-    // The collision is the only finding.
     assert!(!stderr.contains("warning["), "stderr={stderr}");
     assert_eq!(stderr.matches("error[").count(), 1, "stderr={stderr}");
     assert!(
@@ -1933,20 +1861,16 @@ fn files_under(root: &std::path::Path) -> Vec<String> {
 /// let the source choose where the compiler writes. `check` refuses it and
 /// `compile` writes nothing — neither the artifact nor the lock.
 ///
-/// Each row is set up so the build would have succeeded before the rule
-/// existed: the absolute id's directory exists outside `--out`, and `out/`
-/// holds both the `sub/` the relative id names and the `a/` that `a\b`
-/// names on Windows. The Windows separator is a plain character on Unix,
-/// and refused there too so whether an id is accepted does not depend on
-/// the host.
+/// Each row would build without the rule: the absolute id's directory
+/// exists outside `--out`, and `out/` holds both the `sub/` the relative id
+/// names and the `a/` that `a\b` names on Windows. `\` is refused on Unix
+/// too, so acceptance does not depend on the host.
 ///
-/// Each row pins the character the diagnostic names. The absolute id is
-/// the tempdir's own path, so on Windows it begins with a drive and is
-/// refused on that `:`, a rule older than the path separators; there the
-/// relative and Windows-style rows are what exercise `/` and `\`.
-/// Elsewhere the tempdir is named without the `.` `TempDir::new` puts in
-/// front of it, so the absolute id carries no character the older rule
-/// refused, and that is asserted rather than assumed.
+/// Each row pins the character the diagnostic names. On Windows the
+/// absolute id begins with a drive and is refused on its `:`, so the
+/// relative and Windows-style rows exercise `/` and `\` there. Elsewhere
+/// the tempdir is named without the `.` `TempDir::new` puts in front, so
+/// the absolute id carries no other refused character, which is asserted.
 #[test]
 fn a_place_id_carrying_a_path_separator_writes_nothing() {
     let tmp = tempfile::Builder::new()

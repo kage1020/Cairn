@@ -15,12 +15,9 @@ fn fixtures_dir() -> PathBuf {
         .join("check")
 }
 
-/// `check` reports on stderr, as `lower`, `info`, `compile` and `synth` do,
-/// so `cairn check f.crn > out` cannot swallow a finding: one gcc-style
-/// `FILE:LINE:COL: SEVERITY[CODE]: ...` line each, in source order, and
-/// nothing on stdout. Only the text format goes there; `--format json` is
-/// the machine payload and belongs on stdout, where a consumer redirects
-/// it deliberately.
+/// On stderr, as every subcommand reports, so `cairn check f.crn > out`
+/// cannot swallow a finding; `--format json`, the machine payload, stays
+/// on stdout.
 #[test]
 fn text_findings_go_to_stderr_one_located_line_each() {
     let path = fixtures_dir().join("duplicate.crn");
@@ -46,24 +43,17 @@ fn text_findings_go_to_stderr_one_located_line_each() {
 
 #[test]
 fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
-    // `@cairn` is provenance: the value reaches no pass, so a value no
-    // compiler can read costs the build nothing and the finding is a
-    // warning. The exit code is the part worth pinning end to end —
-    // promoting the code would turn every file carrying a typo'd header
-    // into a refused build, and the severity table alone does not say
-    // what `cairn check` does with it.
+    // `@cairn` is provenance that reaches no pass, so an unreadable value
+    // costs the build nothing.
     let path = fixtures_dir().join("cairn_version.crn");
     let out = cairn("check", &[path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
-    // The warning still reaches the author.
     assert_stream(&stderr, &[(1, 1, "warning", "W_INVALID_CAIRN_VERSION")]);
 }
 
-/// A `@cairn` value holding a character no token starts with is still a
-/// header that names no version, and so still a warning: the build goes
-/// on. Pinned end to end because the difference is the exit code: a lexer
-/// refusing the value ahead of the check pass would make it an error.
+/// A value holding a character no token starts with must reach the check
+/// pass rather than be refused by the lexer as an error.
 #[test]
 fn an_unlexable_cairn_value_is_a_warning_and_the_build_goes_on() {
     let fixture = Fixture::new("@cairn 2026.6+build\n\ntheme t:\n  slot wall -> @stone\n");
@@ -74,8 +64,8 @@ fn an_unlexable_cairn_value_is_a_warning_and_the_build_goes_on() {
     assert_stream(&stderr, &[(1, 1, "warning", "W_INVALID_CAIRN_VERSION")]);
 }
 
-/// The same for a floor: `~=` is an operator Cairn does not define, which
-/// is `E_INVALID_REQUIRES` whether or not the lexer has a token for `~`.
+/// `~=` is an operator Cairn does not define, which is `E_INVALID_REQUIRES`
+/// whether or not the lexer has a token for `~`.
 #[test]
 fn an_unlexable_requires_value_is_an_invalid_floor_rather_than_a_parse_error() {
     for (label, source, at) in [
@@ -113,8 +103,6 @@ fn clean_example_exits_zero_and_says_nothing_on_either_stream() {
         stdout.trim().is_empty(),
         "clean example should produce no stdout, got: {stdout}",
     );
-    // The load-bearing half, since diagnostics live on stderr: a clean
-    // input has nothing to report anywhere.
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
         stderr.trim().is_empty(),
@@ -139,8 +127,6 @@ fn clean_fixture_json_output_is_empty_array() {
 
 #[test]
 fn parse_failure_exits_one_with_parse_style_message() {
-    // A file the parser rejects must still hand the user a gcc-style
-    // location, just like `cairn parse` does today.
     let fixture = Fixture::new("@unknown_directive nope\n");
     let bad = fixture.source();
     let out = cairn("check", &[bad.to_str().unwrap()]);
@@ -152,14 +138,9 @@ fn parse_failure_exits_one_with_parse_style_message() {
     );
 }
 
-/// A parse error at the end of a line names that line, in the output the
-/// user actually reads.
-///
-/// The layer below is covered by `cairn-lang-core`'s `line_positions`
-/// tests; this one exists because the file the CLI is handed is the one an
-/// editor wrote, terminator and all. The whole of `def foo bar\n` is on
-/// line 1, and a gcc-style prefix reading `:2:1` would send a reader, or a
-/// model repairing its own output, to a line holding none of it.
+/// The CLI is handed the file an editor wrote, terminator and all: the
+/// whole of `def foo bar\n` is on line 1, so a `:2:1` prefix would point at
+/// a line holding none of it.
 #[test]
 fn end_of_line_parse_error_names_the_line_that_has_it() {
     for (label, source) in [
@@ -211,10 +192,6 @@ fn unknown_keyword_fixture_lists_known_keywords_in_a_note() {
 
 #[test]
 fn json_output_carries_line_and_col_for_every_diagnostic() {
-    // The `--format json` contract is that downstream tooling (LSP, CI
-    // gates) receives the same position information as the text format.
-    // Without `line` / `col` the JSON form would be useless to anything
-    // that wants to underline the offending range.
     let path = fixtures_dir().join("duplicate.crn");
     let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);
     assert_eq!(out.status.code(), Some(1));
@@ -239,19 +216,10 @@ fn json_output_carries_line_and_col_for_every_diagnostic() {
             "code should be the E_-prefixed string, got: {}",
             entry["code"],
         );
-        // Codes without a structured payload must
-        // omit the `data` key entirely so the JSON contract stays
-        // additive for consumers that pin a fixed key set. The
-        // `duplicate.crn` fixture only triggers `E_DUPLICATE_*` codes,
-        // none of which carry a payload today, so any `data` here would
-        // mean one of two regressions:
-        //   (a) the `serde(skip_serializing_if = "Option::is_none")`
-        //       wiring on `Diagnostic::data` was dropped or inverted, or
-        //   (b) a future change attached a payload to one of the
-        //       `E_DUPLICATE_*` codes without updating this fixture and
-        //       its assertion in step.
-        // Either case should fail loud here rather than ship a
-        // silently-changed JSON contract.
+        // A code without a payload omits `data`, keeping the contract
+        // additive. No `E_DUPLICATE_*` code carries one, so a `data` key
+        // here means `Diagnostic::data`'s `skip_serializing_if` broke, or
+        // one of them gained a payload without this fixture following.
         assert!(
             entry.get("data").is_none(),
             "diagnostic without a payload must omit the `data` key, got: {entry}",

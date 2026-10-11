@@ -49,13 +49,12 @@ fn json_format_is_valid_version_axes() {
     }
     let compat = &parsed["registry_compat"];
     assert_eq!(compat["max"], "latest");
-    // Cottage example pins `@requires version>=1.20`.
+    // `cottage.crn` declares `@requires version>=1.20`.
     assert_eq!(compat["min"], "1.20");
 
     let portability = parsed["edition_portability"]
         .as_array()
         .expect("portability is an array");
-    // Default `--editions java,bedrock` → two entries.
     assert_eq!(portability.len(), 2);
     for entry in portability {
         for key in ["edition", "portable", "degraded", "unsupported"] {
@@ -68,8 +67,7 @@ fn json_format_is_valid_version_axes() {
     let sensitive = parsed["semantic_sensitive"]
         .as_array()
         .expect("semantic_sensitive is an array");
-    // The semantic-sensitivity catalog has not landed yet, so this list
-    // stays empty.
+    // Nothing populates the semantic-sensitivity catalog, so this is empty.
     assert!(sensitive.is_empty());
 }
 
@@ -111,11 +109,9 @@ fn all_examples_exit_zero() {
 
 #[test]
 fn registry_compatibility_renders_as_single_range_line() {
-    // The declared range is edition-agnostic — it reads only the floors
-    // that name no edition, so a single `min/max` pair is the answer and
-    // not a placeholder. The text output must not duplicate it per
-    // edition: that misled reviewers into reading a per-edition
-    // divergence that the row does not carry.
+    // The declared range reads only the floors that name no edition, so
+    // one `min/max` pair is the answer; repeated per edition it would read
+    // as a divergence the row does not carry.
     let path = examples_dir().join("cottage.crn");
     let out = cairn("info", &[path.to_str().unwrap()]);
     assert!(out.status.success());
@@ -124,8 +120,7 @@ fn registry_compatibility_renders_as_single_range_line() {
         .lines()
         .find(|l| l.starts_with("registry compatibility:"))
         .expect("registry compatibility line");
-    // One range, no `Java:` / `Bedrock:` prefix here — those belong on
-    // axis 2 (edition portability) only.
+    // Edition prefixes belong to the edition portability row only.
     assert!(line.contains("1.20 .. latest"), "got: {line}");
     assert!(
         !line.contains("Java:"),
@@ -216,12 +211,11 @@ fn requires_floor_reaches_the_registry_range_however_it_is_spaced() {
 /// The `buildable targets` row is per edition, and so is the floor it is
 /// weighed against.
 ///
-/// `1.21.4` is Java's newest release and names no Bedrock release at all
-/// — Bedrock ships `1.21.0 / 1.21.40 / 1.21.60`. The dotted-decimal
-/// comparison this replaced read `1.21.40` as satisfying the floor on
-/// `40 > 4` and reported two Bedrock targets as buildable; ordering by
-/// `DataVersion` has no answer here and reports none, with the reason on
-/// stderr rather than an empty row nobody can read.
+/// `1.21.4` is Java's newest release and names no Bedrock release; Bedrock
+/// ships `1.21.0 / 1.21.40 / 1.21.60`. Compared as dotted decimals,
+/// `1.21.40` would satisfy the floor on `40 > 4`. Ordered by `DataVersion`
+/// there is no answer, so no Bedrock target is buildable and stderr says
+/// why.
 #[test]
 fn a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() {
     let fixture = Fixture::new(&format!("@requires version>=1.21.4\n{PAINTED_STRUCT}"));
@@ -251,7 +245,7 @@ fn a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() {
     );
 }
 
-/// And a floor scoped to one edition leaves the other alone.
+/// A floor scoped to one edition leaves the other alone.
 #[test]
 fn a_scoped_floor_is_weighed_only_against_its_own_edition() {
     let fixture = Fixture::new(&format!("@requires java version>=1.21.4\n{PAINTED_STRUCT}"));
@@ -274,9 +268,8 @@ fn a_scoped_floor_is_weighed_only_against_its_own_edition() {
         row.contains("Java: 1.21.4") && row.contains("Bedrock: 1.21.0, 1.21.40, 1.21.60"),
         "a Java-scoped floor says nothing about Bedrock: {row}",
     );
-    // And the edition-neutral row takes only the unscoped floors, so a
-    // floor written in one edition's numbering does not become the file's
-    // range.
+    // The edition-neutral row takes only the unscoped floors, so a floor
+    // in one edition's numbering does not become the file's range.
     let json = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8(json.stdout).expect("utf-8")).expect("valid JSON");
@@ -286,10 +279,8 @@ fn a_scoped_floor_is_weighed_only_against_its_own_edition() {
 /// The note under `buildable targets` names the floor that refused, not
 /// only the versions it refused.
 ///
-/// A module may declare several floors and only one of them refuse. "These
-/// versions are below the floor this file declares" then leaves the reader
-/// to work out which line they have to edit, which is the half of the
-/// report they can act on.
+/// A module may declare several floors and only one of them refuse, and
+/// the line to edit is the half of the report the reader can act on.
 #[test]
 fn the_floor_note_names_the_line_that_refused() {
     let fixture = Fixture::new(
@@ -316,9 +307,9 @@ fn the_floor_note_names_the_line_that_refused() {
 /// `registry compatibility: 0.0` beside a `buildable targets` row that
 /// refuses versions is two true lines that disagree on their face.
 ///
-/// The row is edition-neutral so only unscoped floors feed it, and `0.0`
-/// therefore has two causes — no `@requires` line, and only scoped ones.
-/// The reader is told which, rather than left to work it out.
+/// The row is edition-neutral, so only unscoped floors feed it, and `0.0`
+/// has two causes: no `@requires` line, or only scoped ones. The reader is
+/// told which.
 #[test]
 fn a_scoped_only_file_says_why_the_neutral_row_is_empty() {
     let fixture = Fixture::new("@requires java version>=1.21.4\nstruct s size=4x4\n");
@@ -348,9 +339,8 @@ fn a_scoped_only_file_says_why_the_neutral_row_is_empty() {
 /// A requirement `cairn check` rejects stops `cairn info` too, in both
 /// output formats.
 ///
-/// `info` runs the check passes, so an `Error`-severity code reaches it,
-/// and reporting a version range derived from a file whose version
-/// declaration is itself a mistake is the confident-wrong answer the code
+/// `info` runs the check passes, and a version range derived from a
+/// mistaken version declaration is the confident-wrong answer the code
 /// exists to stop.
 #[test]
 fn a_rejected_requirement_stops_info_in_both_formats() {
@@ -421,10 +411,8 @@ fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
 ///
 /// `spec/versioning-editions` "Fail-loud and minimum-version inference" makes
 /// the minimum version of a composite the max of its parts, so a floor a
-/// `def` declares reaches the row of every module that places it. Reading
-/// only the file's own `@requires` lines reported `0.0 .. latest` beside a
-/// `buildable targets` row that refuses versions — two true lines that
-/// disagree on their face.
+/// `def` declares reaches the row of every module that places it, as it
+/// reaches the `buildable targets` row beside it.
 #[test]
 fn the_neutral_row_reads_a_floor_a_placed_def_declares() {
     let fixture = Fixture::new(
@@ -458,13 +446,10 @@ fn the_neutral_row_reads_a_floor_a_placed_def_declares() {
 /// A theme the two editions bind differently is left out of the neutral
 /// row, and stderr says so.
 ///
-/// `registry compatibility` is one row for a file it may be reporting
-/// against both editions at once, so a floor only one of them inherits
-/// cannot feed it. Picking a variant by the unpinned order instead put a
-/// floor no Bedrock build is held to onto the row, contradicting the
-/// `buildable targets` line beside it — and, in the mirror case, left
-/// `0.0` on a file a Java build *is* held to, which `--format json`
-/// carries as `registry_compat.min` with nothing on the row to correct it.
+/// `registry compatibility` is one row for a file it may report against
+/// both editions at once, so a floor only one of them inherits cannot feed
+/// it: either variant would contradict one edition's `buildable targets`
+/// line.
 #[test]
 fn a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
     let fixture = Fixture::new(
@@ -495,28 +480,15 @@ fn a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
     );
 }
 
-/// `registry compatibility` reports what the file declares. It is not an
-/// answer about which versions can build the file, and the two can
-/// disagree on the same run.
-///
-/// The claim `spec/versioning-editions` "The `registry compatibility` row"
-/// makes, held against the shipped packs rather than asserted in prose.
-/// An intersection of `since` / `until` over the blocks the source uses is
-/// a derivation nothing performs, and one either source here would
-/// contradict:
-/// `pale_moss_block` arrives in Java 1.21.4 and Bedrock 1.21.60.
-///
-/// `file_without_requires_defaults_min_to_zero_zero` runs
-/// `--format json` with no `--editions`, so it never sees the `buildable
-/// targets` row at all; `a_source_no_supported_version_can_build_says_so`
-/// in `info/parity.rs` uses a narrow palette but asserts only the
-/// portability and buildable rows.
+/// `registry compatibility` reports what the file declares, not which
+/// versions can build it, and the two can disagree on the same run: the
+/// claim `spec/versioning-editions` "The `registry compatibility` row"
+/// makes, held against the shipped packs. `pale_moss_block` arrives in
+/// Java 1.21.4 and Bedrock 1.21.60.
 #[test]
 fn the_declared_range_is_not_an_answer_about_which_versions_build() {
-    // The sharper of the two: a floor every supported version clears,
-    // beside a palette only the newest one has. `1.20.4 .. latest` reads
-    // as an authoritative answer, and the row two below disproves it —
-    // with `1.20.4` itself among the refusals.
+    // A floor every supported version clears, beside a palette only the
+    // newest has: `1.20.4 .. latest`, with `1.20.4` among the refusals.
     let floored_fixture = Fixture::new(
         "@requires version>=1.20.4\n\ntheme pale:\n  slot floor -> @pale_moss_block\n\
          \x20\x20slot wall -> @cobblestone\n\
@@ -524,18 +496,15 @@ fn the_declared_range_is_not_an_answer_about_which_versions_build() {
     );
     let floored = floored_fixture.source();
     let stdout = info_rows(&floored, "java");
-    // The claim first, taken off both rows rather than written twice: the
-    // version the declared range opens at is one a build refuses. No
-    // reading of axis 1 as an answer about buildability survives that,
-    // and it is what fails if the edge ever starts being derived — a
-    // literal below would only report that some string moved.
+    // Read off both rows, so this fails if the edge is ever derived from
+    // buildability, where the literals below would only report a moved
+    // string.
     let (edge, refused) = declared_edge_and_refusals(&stdout);
     assert!(
         refused.contains(&edge.as_str()),
         "the row's own lower edge is among the versions that refuse: {stdout}",
     );
-    // Then both rows whole, the way this file pins `1.21.4` at `:444` and
-    // the Bedrock list at `:488`.
+    // Then both rows whole, as the tests above pin them.
     assert!(
         stdout.contains("registry compatibility:  1.20.4 .. latest"),
         "the declared floor is the row's lower edge: {stdout}",
@@ -545,9 +514,8 @@ fn the_declared_range_is_not_an_answer_about_which_versions_build() {
         "and the derived row names what actually builds: {stdout}",
     );
 
-    // And the case where the row has nothing to report: `0.0` is the
-    // widest range it can print, beside four refusals across two
-    // editions.
+    // Nothing to report: `0.0`, the widest range the row prints, beside
+    // four refusals across two editions.
     let floorless_fixture = Fixture::new(
         "theme pale:\n  slot floor -> @pale_moss_block\n  slot wall -> @cobblestone\n\
          \nstruct hut size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n",

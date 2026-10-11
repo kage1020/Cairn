@@ -1,10 +1,7 @@
 //! `cairn --version` prints `cairn-lang-core`'s `CAIRN_VERSION`, compared
-//! here against the version cargo derived for *this* crate: a second route
-//! out of the same `[workspace.package] version`, so a constant that stops
-//! tracking the workspace disagrees from across a crate boundary. By
-//! construction this cannot see the workspace version drifting from the
-//! released tag, nor the constant reset to a literal equal to the current
-//! number.
+//! against the version cargo derived for this crate, a second route out of
+//! `[workspace.package] version`. It cannot see that version drift from the
+//! released tag, nor the constant reset to a literal of the current number.
 
 use crate::common::cairn_argv;
 

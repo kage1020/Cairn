@@ -1,8 +1,8 @@
 //! `@intended_targets` against the floors the same file declares, as the
 //! commands that report it see it: which commands weigh the header, in
 //! which edition's table, and that a file whose two version headers
-//! contradict each other exits 1. What each header earns is the core
-//! pass's, pinned in `cairn-lang-core/tests/intended_targets.rs`.
+//! contradict each other exits 1. What each header earns is pinned in
+//! `cairn-lang-core/tests/resolve/intended_targets.rs`.
 
 use std::process::Command;
 
@@ -37,9 +37,6 @@ fn run(command: &str, fixture: &Fixture, args: &[&str]) -> (Option<i32>, String,
     )
 }
 
-/// The file declares a floor and an intent that cannot both hold, so
-/// `cairn check` exits 1 on it, as `cairn compile --target 1.20.4` refuses
-/// it.
 #[test]
 fn a_floor_above_every_intended_target_stops_check_exiting_zero() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
@@ -52,10 +49,6 @@ fn a_floor_above_every_intended_target_stops_check_exiting_zero() {
     );
 }
 
-/// No pin, and the answer still arrives. The contradiction is inside the
-/// file — a floor refusing every version the same file says it is for is a
-/// mistake in one of two lines however it is later built — so the plain
-/// `cairn check` an author runs is where it has to show up.
 #[test]
 fn the_contradiction_needs_no_edition_pin() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
@@ -65,9 +58,8 @@ fn the_contradiction_needs_no_edition_pin() {
     assert_eq!(bare, Some(1), "got: {bare_err}");
 }
 
-/// Part of the list below the floor leaves the rest buildable, so the
-/// exit code does not move — the header is a hint, and a hint stated too
-/// widely is not a file that cannot be built.
+/// The header is a hint, and one stated too widely does not make the file
+/// unbuildable.
 #[test]
 fn part_of_the_list_below_the_floor_is_a_warning_and_exits_zero() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n");
@@ -76,17 +68,11 @@ fn part_of_the_list_below_the_floor_is_a_warning_and_exits_zero() {
     assert_stream(&stderr, &[(2, 1, "warning", "W_INTENDED_TARGET_CAP")]);
 }
 
-/// A version no `--target` names is a question about one edition's pack,
-/// so it is answered only when one edition is in scope. With both, a
-/// version Java cannot build is routinely the Bedrock target the author
-/// means, and answering anyway would report every cross-edition list as a
-/// mistake.
 #[test]
 fn a_version_no_target_names_is_reported_only_with_one_edition_in_scope() {
     let fixture = fixture("@intended_targets [\"1.19\"]\n");
     let (bare_code, _, bare_err) = run("check", &fixture, &[]);
     assert_eq!(bare_code, Some(0), "got: {bare_err}");
-    // Unpinned, nobody has said which edition is being asked.
     assert_stream(&bare_err, &[]);
     let (code, _, stderr) = run("check", &fixture, &["--edition", "java"]);
     assert_eq!(
@@ -104,15 +90,12 @@ fn a_version_no_target_names_is_reported_only_with_one_edition_in_scope() {
     );
 }
 
-/// The two editions number their releases differently, and the finding is
-/// weighed in the table of the edition that was asked: `1.21.4` is Java's
-/// newest release and names no Bedrock release at all.
+/// `1.21.4` is a Java release and names no Bedrock one.
 #[test]
 fn the_pinned_edition_decides_which_table_weighs_the_list() {
     let fixture = fixture("@intended_targets [\"1.21.4\"]\n");
     let (java, _, java_err) = run("check", &fixture, &["--edition", "java"]);
     assert_eq!(java, Some(0));
-    // 1.21.4 is an ordinary Java target.
     assert_stream(&java_err, &[]);
     let (bedrock, _, bedrock_err) = run("check", &fixture, &["--edition", "bedrock"]);
     assert_eq!(bedrock, Some(0));
@@ -122,10 +105,8 @@ fn the_pinned_edition_decides_which_table_weighs_the_list() {
     );
 }
 
-/// `compile` runs the same gate `check` does, so a source `check` refuses
-/// does not compile — including for a `--target` the floor is fine with.
-/// The contradiction is between two lines of the file and no target
-/// resolves it.
+/// `--target 1.21` satisfies the floor; the contradiction is between two
+/// lines of the file, which no target resolves.
 #[test]
 fn compile_refuses_the_source_check_refuses() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
@@ -148,9 +129,6 @@ fn compile_refuses_the_source_check_refuses() {
     );
 }
 
-/// `cairn info` reports what the file says it is for beside what it can be
-/// built for. Without the row, the one declaration that names versions
-/// would be the one the report never mentions.
 #[test]
 fn info_prints_the_declared_targets_beside_the_buildable_ones() {
     let fixture = fixture("@requires version>=1.20\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n");
@@ -166,9 +144,6 @@ fn info_prints_the_declared_targets_beside_the_buildable_ones() {
     );
 }
 
-/// A file declaring none still gets the row, saying so. An absent row and
-/// a row reading `(none declared)` are different reports, and only the
-/// second one answers the question.
 #[test]
 fn info_says_so_when_no_targets_are_declared() {
     let fixture = fixture("");
@@ -180,8 +155,6 @@ fn info_says_so_when_no_targets_are_declared() {
     );
 }
 
-/// The JSON document carries the same fact, under a key of its own, so a
-/// consumer reads the declaration without parsing the text rows.
 #[test]
 fn the_json_report_carries_the_declared_targets() {
     let fixture = fixture("@intended_targets [\"1.21.4\"]\n");
@@ -196,9 +169,6 @@ fn the_json_report_carries_the_declared_targets() {
     );
 }
 
-/// The finding is machine-readable the way every other one is: the code,
-/// the versions it is about, and the floor that refuses them, without a
-/// consumer taking the sentence apart.
 #[test]
 fn the_finding_carries_a_structured_payload() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
@@ -217,14 +187,9 @@ fn the_finding_carries_a_structured_payload() {
     );
 }
 
-/// One line to fix, one finding. Without a pin both editions weigh the
-/// header, and a file both of them judge the same way would otherwise be
-/// reported twice for one mistake.
-///
-/// A floor above every release either edition ships is what makes them
-/// agree: `1.21` is a target both can build (Bedrock spells it `1.21.0`,
-/// and trailing zeros are not a different version), and nothing satisfies
-/// the floor anywhere.
+/// `1.21` is a target both editions build (Bedrock's `1.21.0`; trailing
+/// zeros are not a different version), and the floor is above every
+/// release of either, so both judge the header alike.
 #[test]
 fn a_header_both_editions_judge_alike_is_reported_once() {
     let fixture = fixture("@requires version>=99.0\n@intended_targets [\"1.21\"]\n");
@@ -239,12 +204,8 @@ fn a_header_both_editions_judge_alike_is_reported_once() {
     );
 }
 
-/// Two editions can disagree about *reach* rather than about whether
-/// there is a contradiction at all, and the span still gets one answer.
 /// Java keeps a buildable version above its floor and earns the warning;
-/// Bedrock has nothing left and earns the error. Printing both would put
-/// a warning and an error on one line, one of them saying the other is
-/// too weak.
+/// Bedrock has nothing left and earns the error.
 #[test]
 fn two_editions_disagreeing_about_reach_report_the_error() {
     let fixture = fixture(
@@ -260,10 +221,6 @@ fn two_editions_disagreeing_about_reach_report_the_error() {
     assert_eq!(findings[0]["data"]["edition"], "bedrock");
 }
 
-/// A report scoped to one edition is weighed in that edition's table and
-/// no other. A finding only Java's table reaches does not refuse
-/// `--editions bedrock`, which would leave stdout empty, not one row
-/// computed, for a file Bedrock has nothing to say against.
 #[test]
 fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
@@ -273,8 +230,7 @@ fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
         stdout.contains("buildable targets:"),
         "the report has to be produced: {stdout}",
     );
-    // One edition in scope is one edition asked, so the version Bedrock
-    // cannot build is named.
+    // One edition in scope, so the version Bedrock cannot build is named.
     assert_stream(
         &stderr,
         &[(2, 1, "warning", "W_INTENDED_TARGET_UNSUPPORTED")],
@@ -285,9 +241,6 @@ fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
     assert_stream(&java_err, &[(2, 1, "error", "E_INTENDED_TARGET_CAP")]);
 }
 
-/// The default `--editions java,bedrock` keeps both in scope, so the
-/// version one of them cannot build stays unreported: it is routinely the
-/// other's target, and nobody has said which is being asked.
 #[test]
 fn info_across_both_editions_does_not_name_an_unbuildable_version() {
     let fixture = fixture("@intended_targets [\"1.20.4\"]\n");
@@ -296,16 +249,10 @@ fn info_across_both_editions_does_not_name_an_unbuildable_version() {
     assert_stream(&stderr, &[]);
 }
 
-/// A name repeated in `--editions` is still one edition in scope, so
-/// `--editions bedrock,bedrock` names the version Bedrock cannot build, as
-/// `--editions bedrock` does. Counted as two editions, the list would leave
-/// that version unnamed, as the two-edition default above does.
 #[test]
 fn info_naming_one_edition_twice_still_names_an_unbuildable_version() {
     let fixture = fixture("@intended_targets [\"1.20.4\"]\n");
     let (code, stdout, stderr) = run("info", &fixture, &["--editions", "bedrock,bedrock"]);
-    // One edition named twice is one edition asked, so the version
-    // Bedrock cannot build is named.
     assert_stream(
         &stderr,
         &[(1, 1, "warning", "W_INTENDED_TARGET_UNSUPPORTED")],

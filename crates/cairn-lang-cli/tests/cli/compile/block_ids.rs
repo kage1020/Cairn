@@ -65,14 +65,9 @@ fn a_typo_is_answered_with_the_id_the_target_does_spell() {
     );
 }
 
-/// A rename is answered from the pack's alias table, which is the case a
-/// typo finder structurally cannot reach.
-///
 /// Bedrock spells Java's `light` `light_block_0` … `light_block_15`, eight
-/// edits away and sixteen ids wide. No distance threshold that keeps
-/// `oak_plank` → `oak_planks` honest will ever connect the two, so the
-/// answer has to come from a table that states outright that these names
-/// are one block.
+/// edits away, beyond any distance threshold that keeps `oak_plank` →
+/// `oak_planks` honest, so only the pack's alias table can answer.
 #[test]
 fn a_rename_is_answered_with_the_name_the_target_uses() {
     let fixture = Fixture::new(&source_binding("light"));
@@ -113,12 +108,8 @@ fn the_same_group_answers_from_either_edition() {
     );
 }
 
-/// An id no group names still says plainly that it has no candidate.
-///
-/// The alias table is not a second guess at what an author meant — it
-/// answers where the pack knows the block under another name and says
-/// nothing where it does not, which leaves the original message intact for
-/// an id that is simply not a block.
+/// The alias table answers only where the pack knows the block under
+/// another name.
 #[test]
 fn an_id_no_group_names_still_says_it_has_no_candidate() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
@@ -130,8 +121,6 @@ fn an_id_no_group_names_still_says_it_has_no_candidate() {
     );
 }
 
-/// A version inside one edition's own supported range can rename a block.
-///
 /// Bedrock 1.21.0 predates the flattening wave that turned `stonebrick`
 /// into `stone_bricks`, so an id table folded flat across the edition would
 /// accept both spellings everywhere and catch neither mistake.
@@ -175,14 +164,9 @@ fn a_material_token_follows_the_rename_across_its_editions_range() {
     }
 }
 
-/// A `cairn check` that pins no target runs no block-array lowering, so no
-/// lowering-stage code reaches it — `E_UNKNOWN_ID` included. A source
-/// `compile` refuses for an unknown id therefore still passes it.
-///
-/// Worth pinning rather than leaving implicit: it is a real hole for
-/// anyone gating CI on the unpinned command. `cairn check --edition E
-/// --target V` is the invocation that closes it, pinned in
-/// `check/pinned.rs`.
+/// An unpinned `check` runs no block-array lowering, so a source `compile`
+/// refuses for an unknown id passes it; `check --edition E --target V`
+/// closes that gap.
 #[test]
 fn check_stays_silent_about_ids_because_it_does_not_lower() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
@@ -192,18 +176,12 @@ fn check_stays_silent_about_ids_because_it_does_not_lower() {
         .output()
         .expect("failed to invoke cairn binary");
     let stderr = stderr_of(&out);
-    // Check has no target to check against.
     assert_stream(&stderr, &[]);
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
 }
 
-/// A walkway's `path=@ID` reaches the check by a second route.
-///
-/// `lower_connects` resolves it outside `resolve_member_state`, so the
-/// member arm passing says nothing about this one. Losing it would put a
-/// walkway strip of a non-existent block into a `.nbt` at exit 0 — and
-/// unlike a member, a walkway that quietly does not appear is easy to
-/// mistake for a routing decision.
+/// `lower_connects` resolves `path=@ID` outside `resolve_member_state`, so
+/// the member tests say nothing about it.
 #[test]
 fn a_walkway_path_id_is_checked_too() {
     let fixture = Fixture::new(&two_huts_joined_by("totally_not_a_block"));
@@ -228,21 +206,15 @@ fn a_walkway_path_id_is_checked_too() {
     );
 }
 
-/// A theme selector binding's value is not an id anything checks.
-///
-/// Selector bindings are reserved: no lowering reads one, and what a key
-/// like `frame=` would paint is not specified, so there is no block for
-/// the value to name yet. The row is reported as `W_IGNORED_ARGUMENT`
-/// whatever its value, and a value the target lacks does not turn text the
-/// build never reads into a refused build. The slot tests above are the
-/// control: the same id on a `slot` is still `E_UNKNOWN_ID`.
+/// Selector bindings are reserved and no lowering reads one, so their value
+/// names no block. The slot tests above are the control: the same id on a
+/// `slot` is `E_UNKNOWN_ID`.
 #[test]
 fn a_theme_selector_binding_id_does_not_refuse_the_build() {
     let fixture = Fixture::new(&window_bound_to("totally_not_a_block"));
     let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = stderr_of(&out);
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
-    // The row says it does nothing, and nothing judges its value.
     assert_stream(&stderr, &[(4, 32, "warning", "W_IGNORED_ARGUMENT")]);
     assert!(
         fixture
@@ -256,13 +228,9 @@ fn a_theme_selector_binding_id_does_not_refuse_the_build() {
     );
 }
 
-/// A binding in a `def` nothing places, beside a `mat_slot=` naming a slot
-/// whose block the target lacks.
-///
-/// The slot's value would decide a block if the window ever lowered, and it
-/// is silent because the def is never placed. The binding decides no block
-/// in any case, so it may not be the louder of the two: pinned `check`
-/// reports the row and the unused def as warnings and exits 0.
+/// The slot beside the binding is silent because the def is never placed;
+/// the binding decides no block in any case, so it may not be the louder
+/// of the two.
 #[test]
 fn a_binding_in_a_def_nothing_places_is_not_an_error() {
     let fixture = Fixture::new(
@@ -283,7 +251,6 @@ fn a_binding_in_a_def_nothing_places_is_not_an_error() {
     ]);
     let stderr = stderr_of(&out);
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
-    // Both warnings are said.
     assert_stream(
         &stderr,
         &[
@@ -315,11 +282,8 @@ fn buildable_row(fixture: &Fixture) -> String {
         .to_owned()
 }
 
-/// `cairn info` weighs every version by lowering against it, so a binding
-/// id the lowering refused would take every version out of `buildable
-/// targets`.
-/// A binding builds nothing, so the row is exactly what the same source
-/// without the binding row gets.
+/// `info` lowers against every version, so a refused binding id would
+/// empty `buildable targets`.
 #[test]
 fn a_bad_binding_id_leaves_every_target_buildable() {
     let with = Fixture::new(&window_bound_to("totally_not_a_block"));
@@ -335,9 +299,8 @@ fn a_bad_binding_id_leaves_every_target_buildable() {
     assert_eq!(with, without);
 }
 
-/// A misspelled abstract token in a binding. Unpinned `check`, pinned
-/// `check` and `info` have to agree on it, so a CI gating on the unpinned command does not
-/// pass a file a later command refuses.
+/// So a CI gate on the unpinned command cannot pass a file a later command
+/// refuses.
 #[test]
 fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
     let fixture = Fixture::new(
@@ -356,7 +319,6 @@ fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
         let out = cairn_argv(argv);
         let stderr = stderr_of(&out);
         assert_eq!(out.status.code(), Some(0), "{argv:?}: {stderr}");
-        // Nothing judges the binding's token.
         assert_stream(&stderr, &[(3, 30, "warning", "W_IGNORED_ARGUMENT")]);
     }
 }
@@ -387,8 +349,6 @@ fn two_huts_joined_by(path: &str) -> String {
     )
 }
 
-/// `cairn lower` takes no `--target` at all, so it is in the same position
-/// as `info` — it lowers, but against no version.
 #[test]
 fn lower_stays_silent_about_ids_because_it_takes_no_target() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
@@ -397,7 +357,6 @@ fn lower_stays_silent_about_ids_because_it_takes_no_target() {
         .arg(fixture.source())
         .output()
         .expect("failed to invoke cairn binary");
-    // Lower has no target to check against.
     let stderr = stderr_of(&out);
     assert_stream(&stderr, &[]);
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -405,15 +364,9 @@ fn lower_stays_silent_about_ids_because_it_takes_no_target() {
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
 }
 
-/// `cairn info` never says an id is unknown without naming the target that
-/// says so.
-///
-/// The range-wide pass gets no id table, so an id valid for part of the
-/// range would be refused against a version nobody chose; the `buildable
-/// targets` row pins each supported version in turn instead. What must not
-/// appear is a bare `E_UNKNOWN_ID` about the *source*; what may appear is
-/// one about a named version, which is exactly what `compile --target`
-/// would print for that version.
+/// The range-wide pass gets no id table; the `buildable targets` row pins
+/// each version in turn, so an `E_UNKNOWN_ID` may appear only under the
+/// version that raised it, as `compile --target` would print it.
 #[test]
 fn info_blames_a_named_target_or_says_nothing_about_ids() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
@@ -444,12 +397,8 @@ fn info_blames_a_named_target_or_says_nothing_about_ids() {
     );
 }
 
-/// An unresolvable `--target` leaves nothing to check ids against, and the
-/// message the user gets must still be the one about their `--target`.
-///
-/// The target is resolved before lowering, so reporting the resolution
-/// failure at the point it happens would move this message ahead of every
-/// parse and lowering diagnostic.
+/// The target is resolved before lowering but reported after it, and with
+/// no version there is no id to find.
 #[test]
 fn an_unresolvable_target_is_still_reported_as_a_target_problem() {
     let fixture = Fixture::new(&source_binding("oak_planks"));
@@ -460,17 +409,13 @@ fn an_unresolvable_target_is_still_reported_as_a_target_problem() {
         stderr.contains("1.99"),
         "expected the unsupported-target message, got: {stderr}",
     );
-    // And no id finding: there is no version to check ids against.
     assert_stream(&stderr, &[]);
 }
 
-/// The refusal points at the `slot` line that names the material, not at
-/// the member that uses it or at the file as a whole.
-///
 /// The worked example in `spec/versioning-editions` "Fail-loud and
-/// minimum-version inference" is `E_UNKNOWN_ID line 12: ...` — a line the
-/// author can go and edit. The theme sits on line 2 of `source_binding`, and
-/// the `@id` it resolves to starts at column 17.
+/// minimum-version inference" is `E_UNKNOWN_ID line 12: ...`, a line the
+/// author can edit. The slot sits on line 2 of `source_binding`, its `@id`
+/// at column 17.
 #[test]
 fn the_refusal_points_at_the_line_that_names_the_material() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));

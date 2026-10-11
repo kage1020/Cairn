@@ -13,9 +13,8 @@ use crate::common::{assert_stream, cairn, crn_examples, examples_dir};
 const UNKNOWN_ID: &str =
     "theme t:\n  slot floor -> @totally_not_a_block\nstruct s size=2x2\n  floor mat_slot=floor\n";
 
-/// A slot bound to the id Bedrock only learned to spell in 1.21.40. The
-/// interesting half of the check: not a typo, and correct on one target of
-/// the very edition the other one refuses it on.
+/// A slot bound to an id Bedrock spells only from 1.21.40: not a typo, and
+/// right on one target of the edition whose other target refuses it.
 const RENAMED_ID: &str =
     "theme t:\n  slot floor -> @stone_bricks\nstruct s size=2x2\n  floor mat_slot=floor\n";
 
@@ -105,10 +104,7 @@ fn a_pinned_target_reports_an_id_that_target_does_not_declare() {
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    // The pinned check reaches the lowering-stage finding.
     assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
-    // The registry the answer is about is named, so the reader knows which
-    // of the two pins decided it.
     assert!(
         stderr.contains("java 1.21.4"),
         "the refusal names the pinned target, got: {stderr}",
@@ -117,17 +113,12 @@ fn a_pinned_target_reports_an_id_that_target_does_not_declare() {
 
 #[test]
 fn without_a_target_the_same_source_still_passes() {
-    // The flag is opt-in: with no version pinned there is nothing to
-    // check the id against, and guessing one would refuse ids that are
-    // fine on the target the author actually compiles for.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
     let out = cairn("check", &[src.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
-    // And an `--edition` pin alone is still not a version: it picks theme
-    // variants and the table `@intended_targets` is weighed in, neither of
-    // which is an id table.
+    // An `--edition` pin alone is not a version either.
     let out = cairn("check", &[src.to_str().unwrap(), "--edition", "java"]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
@@ -135,11 +126,8 @@ fn without_a_target_the_same_source_still_passes() {
 
 #[test]
 fn a_renamed_id_is_judged_per_version_not_per_edition() {
-    // One id, one edition, two answers. This is why the flag pins a
-    // version rather than reusing `--edition`, and why checking against
-    // every version the edition ships (`spec/versioning-editions`
-    // "Fail-loud and minimum-version inference") would have said nothing
-    // here.
+    // One id, one edition, two answers: hence a version pin, rather than
+    // an edition pin or every version the edition ships.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), RENAMED_ID);
 
@@ -155,10 +143,8 @@ fn a_renamed_id_is_judged_per_version_not_per_edition() {
     );
     let stderr = String::from_utf8(refused.stderr).expect("utf-8");
     assert_eq!(refused.status.code(), Some(1), "stderr={stderr}");
-    // 1.21.0 does not declare it.
     assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
-    // A rename is answered from the pack's alias table rather than by a
-    // distance search, so the older spelling is offered by name.
+    // From the pack's alias table, not a distance search.
     assert!(
         stderr.contains("stonebrick"),
         "the older spelling is the repair, got: {stderr}",
@@ -180,10 +166,8 @@ fn a_renamed_id_is_judged_per_version_not_per_edition() {
 
 #[test]
 fn the_json_report_carries_the_unknown_id_payload() {
-    // `DiagnosticData::UnknownId` (`spec/lint` "Machine-readable payload")
-    // was documented and unreachable from any CLI JSON output: `compile`
-    // prints text and `check --format json` never produced the code. This
-    // is the run that makes the documented shape observable.
+    // The one CLI run whose JSON carries `DiagnosticData::UnknownId`
+    // (`spec/lint` "Machine-readable payload"): `compile` prints text.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
     let out = cairn(
@@ -217,10 +201,8 @@ fn the_json_report_carries_the_unknown_id_payload() {
 
 #[test]
 fn target_without_edition_is_refused_as_a_usage_error() {
-    // `spec/compilation` "Target axes": `--target` alone is forbidden,
-    // because "1.21" names different releases on Java and Bedrock. Exit 2
-    // is the usage-error code, not the "your file has a problem" one — the
-    // file was never read.
+    // `spec/compilation` "Target axes" forbids `--target` alone. Exit 2,
+    // a usage error: the file is never read.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
     let out = cairn("check", &[src.to_str().unwrap(), "--target", "1.21.4"]);
@@ -234,9 +216,6 @@ fn target_without_edition_is_refused_as_a_usage_error() {
 
 #[test]
 fn a_target_the_edition_does_not_ship_refuses_the_run() {
-    // A check that could not check the ids it was asked to must not exit
-    // 0: the caller asked a question about a version, and "that version
-    // does not exist" is not an answer that clears the file.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
     let out = cairn(
@@ -259,12 +238,8 @@ fn a_target_the_edition_does_not_ship_refuses_the_run() {
 
 #[test]
 fn a_target_that_does_not_resolve_still_lowers_the_file() {
-    // The refusal is about the command line; the findings are about the
-    // file, and they are true whatever `--target` says. `run_compile`
-    // lowers against the unpinned view when resolution fails and reports
-    // everything that needs no id table, and this run must too — otherwise
-    // the author fixes the flag, re-runs, and only then meets a pile of
-    // findings that were true the first time.
+    // The file's findings are true whatever `--target` says, so they are
+    // reported before the author fixes the flag, as `run_compile` does.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), ABSTRACT_TOKEN_TYPO);
     let out = cairn(
@@ -286,21 +261,16 @@ fn a_target_that_does_not_resolve_still_lowers_the_file() {
         .find("unsupported java target")
         .unwrap_or_else(|| panic!("premise: the target is still refused: {stderr}"));
     assert!(finding < refusal, "the file comes first, got: {stderr}");
-    // Not `E_UNKNOWN_ID`: that one is the answer a version gives, and no
-    // version was pinned. Reporting it here would be the guess
+    // No `E_UNKNOWN_ID`: no version is pinned, and guessing one is what
     // `spec/versioning-editions` "Fail-loud and minimum-version inference"
-    // rules out, dressed as a check.
+    // rules out.
     assert_stream(&stderr, &[(4, 17, "error", "E_UNKNOWN_ABSTRACT_TOKEN")]);
 }
 
 #[test]
 fn the_json_report_of_an_unshipped_target_is_the_findings_and_the_exit_code() {
-    // The decision this pins: a `--target` the edition does not ship is a
-    // fact about the command line, not a finding at a span in the file, so
-    // it is stderr and an exit code in both formats rather than an element
-    // of the array — the shape `compile` gives it. What the array does
-    // carry is every finding the unpinned lowering reached, so the product
-    // is a truthful report of what was checked rather than an empty one.
+    // An unshipped target is not a finding at a span, so it stays out of
+    // the array, which carries what the unpinned lowering found.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), ABSTRACT_TOKEN_TYPO);
     let out = cairn(
@@ -337,20 +307,16 @@ fn the_json_report_of_an_unshipped_target_is_the_findings_and_the_exit_code() {
 
 #[test]
 fn a_json_consumer_tells_a_run_level_refusal_by_the_exit_over_an_errorless_array() {
-    // The rule `spec/lint` "Machine-readable payload" gives a consumer that
-    // does not parse stderr: exit 1 over an array with no error-severity
-    // element is a run-level refusal. Both refusals are driven on a source
-    // whose own findings are warnings at most, so if either stopped failing
-    // the run, or started arriving as an error element, the rule would no
-    // longer say what the spec says it does.
+    // `spec/lint` "Machine-readable payload": exit 1 over an array with no
+    // error element is a run-level refusal. Both sources raise warnings at
+    // most, so each refusal has to fail the run without being an element.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let partial = fixture(tmp.path(), ONE_SCOPE_WITHOUT_A_SIZE);
     let clean = tmp.path().join("clean.crn");
     std::fs::write(&clean, NOTHING_TO_REPORT).expect("write fixture");
 
-    // Each row names the codes its array carries, so each stands for its
-    // own half of the paragraph: the lost scope's array still reports what
-    // was checked, and the clean source's is the `[]` the refusal leaves.
+    // The lost scope's array still reports what was checked; the clean
+    // source's is `[]`.
     let rows: [(&PathBuf, &str, &str, &[&str]); 2] = [
         (
             &partial,
@@ -390,10 +356,8 @@ fn a_json_consumer_tells_a_run_level_refusal_by_the_exit_over_an_errorless_array
 
 #[test]
 fn a_lowering_finding_that_is_not_an_id_verdict_reaches_a_pinned_check() {
-    // `check_lowering`'s doc argues that filtering the lowering stream down
-    // to `E_UNKNOWN_ID` — the code the flag is named for — would be the
-    // same silence the flag exists to end. Without these two, that
-    // narrowing passes every other test in this file.
+    // Without these two, filtering the pinned lowering down to
+    // `E_UNKNOWN_ID` would pass every other test here.
     let tmp = tempfile::TempDir::new().expect("tempdir");
 
     let token = fixture(tmp.path(), ABSTRACT_TOKEN_TYPO);
@@ -431,9 +395,6 @@ fn a_lowering_finding_that_is_not_an_id_verdict_reaches_a_pinned_check() {
 
 #[test]
 fn a_lost_scope_refuses_the_pinned_check_as_it_refuses_the_compile() {
-    // A scope that lowers to nothing is `E_PARTIAL_BUILD` at exit 1 from
-    // `cairn compile`, so a pinned check that passed it would gate green
-    // on a source the compile refuses.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), ONE_SCOPE_WITHOUT_A_SIZE);
     let out = cairn(
@@ -461,8 +422,8 @@ fn a_lost_scope_refuses_the_pinned_check_as_it_refuses_the_compile() {
         !stderr.contains("refusing to certify"),
         "that is the compile's reason, not this one, got: {stderr}",
     );
-    // And the unpinned run is unchanged: no lowering, so nothing is lost
-    // and the warning alone does not fail the gate.
+    // Unpinned, nothing lowers, so nothing is lost and the warning alone
+    // does not fail the gate.
     let out = cairn("check", &[src.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
@@ -471,10 +432,8 @@ fn a_lost_scope_refuses_the_pinned_check_as_it_refuses_the_compile() {
 
 #[test]
 fn latest_pins_a_version_like_any_other_target() {
-    // The invocation a CI job actually writes — "does this still build
-    // against current" — and the one spelling of `--target` that is not a
-    // version string. It resolves through the edition's data table, so the
-    // id check runs and names the version it resolved to.
+    // The one `--target` spelling that is not a version string; it
+    // resolves through the data table, so the id check runs.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
     let out = cairn(
@@ -490,8 +449,6 @@ fn latest_pins_a_version_like_any_other_target() {
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
-    // The alias is resolved before the report, so the reader is told which
-    // version answered rather than being handed the word back.
     assert!(
         !stderr.contains("java latest"),
         "the refusal names the resolved version, got: {stderr}",
@@ -500,9 +457,7 @@ fn latest_pins_a_version_like_any_other_target() {
 
 #[test]
 fn a_bad_target_is_reported_after_the_findings_in_the_file() {
-    // The ordering `run_compile` keeps, for the same reason: the lines the
-    // author edits come first, and a command-line mistake printed above
-    // them buries the syntax error that is also true.
+    // As in `run_compile`: the lines the author edits come first.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     // The theme gives the floor a block: a struct of air is a lost scope,
     // whose `E_PARTIAL_BUILD` would end the run before the target is
@@ -534,14 +489,9 @@ fn a_bad_target_is_reported_after_the_findings_in_the_file() {
 
 #[test]
 fn every_shipped_example_passes_the_pinned_check_on_both_editions() {
-    // One example at one pin says nothing about the per-edition variant
-    // path `check_lowering` resolves for: `edition-fallback.crn` and
-    // `themed-tower.crn` are the sources whose slots differ per edition,
-    // and it is the Bedrock half of them that nothing else here runs.
-    //
-    // `latest` on both, because the point is the pass rather than a
-    // particular release, and a pack that adds a version should not need
-    // this list edited.
+    // `edition-fallback.crn` and `themed-tower.crn` have per-edition slots,
+    // and only this runs their Bedrock half pinned. `latest`, so a pack
+    // that adds a version needs no edit here.
     for path in crn_examples() {
         for edition in ["java", "bedrock"] {
             let out = cairn(
@@ -567,9 +517,8 @@ fn every_shipped_example_passes_the_pinned_check_on_both_editions() {
 
 #[test]
 fn a_clean_example_passes_the_pinned_check_and_writes_nothing() {
-    // `check --target` runs the lowering `compile` runs; what it must not
-    // acquire is `compile`'s output. Run from a scratch directory so an
-    // artifact or lockfile written next to the source would show up here.
+    // From a scratch directory, so an artifact or lockfile written next to
+    // the source would show up.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = tmp.path().join("cottage.crn");
     std::fs::copy(examples_dir().join("cottage.crn"), &src).expect("copy example");
@@ -601,15 +550,8 @@ fn a_clean_example_passes_the_pinned_check_and_writes_nothing() {
     assert_eq!(left, vec!["cottage.crn".to_owned()], "check writes nothing");
 }
 
-/// The pinned path reports an id the target does not declare once, however
-/// many `place` rows reach it.
-///
-/// The count is the whole point here: the three copies were byte-identical,
-/// because nothing in `E_UNKNOWN_ID` names the placement — it is about a
-/// resolved id and the target it was weighed against, and both are the same
-/// on every row. `--target` is what makes this reachable at all, which is
-/// why the case lives in this file rather than beside the lowering unit
-/// tests: without a pin there is no id table and no finding to count.
+/// `E_UNKNOWN_ID` names no placement, so a copy per `place` row would be
+/// identical. Only a pin makes the finding reachable, hence a CLI test.
 #[test]
 fn a_pinned_target_reports_an_unknown_id_once_per_source_line() {
     let tmp = tempfile::TempDir::new().expect("tempdir");

@@ -33,11 +33,9 @@ fn string_tag(key: &str, value: &str) -> Vec<u8> {
     tag
 }
 
-/// `info` answers with a figure, exit 0, where `compile --edition bedrock`
-/// refuses the build, exit 1: the first counts an entry the backend cannot
-/// map, the second is the backend. A backend that started dropping the
-/// properties instead would leave `info`'s answer standing and turn this
-/// one green-to-red.
+/// `info` counts the entry the backend cannot map and exits 0; the backend
+/// itself refuses it. A backend that dropped the properties instead would
+/// fail here while `info`'s answer stood.
 #[test]
 fn bedrock_refuses_to_compile_the_entry_info_counts_unsupported() {
     let tmp = TempDir::new().expect("tempdir");
@@ -69,9 +67,9 @@ fn bedrock_refuses_to_compile_the_entry_info_counts_unsupported() {
     );
 }
 
-/// Java writes a literal as given, a value no `oak_log` has included —
-/// which is what `spec/syntax` says it does until `E_STATE_DOMAIN` lands —
-/// and says so on the literal rather than in silence.
+/// Java writes a literal as given, even a value no `oak_log` has, as
+/// `spec/syntax` says it does until `E_STATE_DOMAIN` exists, and warns on
+/// the literal.
 #[test]
 fn java_writes_an_unchecked_literal_as_given_and_says_so() {
     let tmp = TempDir::new().expect("tempdir");
@@ -144,6 +142,5 @@ fn a_well_formed_literal_passes_check() {
     );
     let stderr = stderr_of(&pinned);
     assert_eq!(pinned.status.code(), Some(0), "{stderr}");
-    // Only the unchecked literal.
     assert_stream(&stderr, &[(2, 13, "warning", "W_STATE_LITERAL_UNCHECKED")]);
 }

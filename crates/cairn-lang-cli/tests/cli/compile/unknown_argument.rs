@@ -1,9 +1,7 @@
 //! `E_UNKNOWN_ARGUMENT` end to end: a misspelled `key=` refuses `check`
-//! and `compile`, and `compile`, which lowers after the check findings,
-//! prints the typo ahead of the warning it causes. That warning names the
-//! argument that is *absent* (`W_DEFERRED_MEMBER` on a member,
-//! `W_STRUCT_NO_SIZE` on a `struct` header), so it reads right only after
-//! the typo.
+//! and `compile`, and `compile` prints the typo ahead of the warning it
+//! causes, which names the argument as absent (`W_DEFERRED_MEMBER`,
+//! `W_STRUCT_NO_SIZE`) and so reads right only after the typo.
 
 use crate::common::{assert_stream, cairn, compile, write_source};
 
@@ -34,10 +32,6 @@ fn compile_reports_the_misspelling_before_the_absence_it_causes() {
     let out = compile(&src, "java", "1.21", &out_dir, None);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    // The typo and the deferral it causes are both printed, and the order
-    // is what makes the pair readable: the repair first, its consequence
-    // after. Reversed, the author is told to add a `height=` that is
-    // already on the line.
     assert_stream(
         &stderr,
         &[
@@ -67,17 +61,12 @@ fn check_without_a_target_reports_a_header_misspelling_alone() {
 
 #[test]
 fn compile_reports_a_header_misspelling_before_the_missing_size_it_causes() {
-    // The header twin of the member case above. `W_STRUCT_NO_SIZE` is
-    // accurate — the struct has no size — but its note says to add a
-    // `size=WxH` header to a line that already carries `siz=5x5`, so it
-    // only reads right after the error that names the typo.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = write_source(tmp.path(), "typo.crn", HEADER_TYPO);
     let out_dir = tmp.path().join("out");
     let out = compile(&src, "java", "1.21", &out_dir, None);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    // The misspelling first, then the sizeless struct it leaves.
     assert_stream(
         &stderr,
         &[

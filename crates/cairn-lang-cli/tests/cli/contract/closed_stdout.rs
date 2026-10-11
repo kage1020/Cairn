@@ -1,9 +1,8 @@
 //! Every subcommand that writes to stdout, plus clap's `--version` and
 //! `--help`, run with a stdout whose reader has already gone (`cairn lower
 //! f.crn | head -1` once `head` exits). The exit code is a Stable surface
-//! (the CLI README's "Exit codes"), so the run ends with the code it
-//! decides with stdout open and says the same on stderr, rather than
-//! panicking on the failed write.
+//! (the CLI README's "Exit codes"), so the run ends with the code and the
+//! stderr it gives with stdout open, rather than panicking.
 
 use std::process::{Command, Output, Stdio};
 
@@ -140,7 +139,6 @@ fn a_run_that_warns_says_so_with_stdout_closed() {
         ["info", source, "--format", "text"],
     ] {
         let open = same_argv(&argv, 0);
-        // A run that does not warn holds the stderr comparison trivially.
         assert_stream(&stderr_of(&open), &[(7, 3, "warning", "W_DEFERRED_MEMBER")]);
     }
 }
@@ -186,9 +184,8 @@ fn synth_keeps_its_exit_code() {
 
 #[test]
 fn clap_keeps_its_exit_code() {
-    // clap writes these itself and discards its own write error, so they
-    // never went through `outln!`. Pinned so a clap bump that stops
-    // discarding it fails here.
+    // clap writes these itself, bypassing `outln!`, and discards its own
+    // write error; a clap bump that stops discarding it fails here.
     same_argv(&["--version"], 0);
     same_argv(&["--help"], 0);
 }

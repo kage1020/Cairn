@@ -61,9 +61,8 @@ pub fn write_source(dir: &Path, name: &str, source: &str) -> PathBuf {
     path
 }
 
-/// Every `.crn` under `examples/`, sorted, so a sweep covers a new example
-/// the moment it lands. Refuses a set too small to be the shipped one: a
-/// sweep over nothing passes.
+/// Every `.crn` under `examples/`, sorted. Refuses any count but
+/// [`SHIPPED_EXAMPLES`], since a sweep over nothing passes.
 pub fn crn_examples() -> Vec<PathBuf> {
     let dir = examples_dir();
     let entries =
@@ -117,9 +116,8 @@ impl Fixture {
 
     /// Every file the compile could have produced.
     ///
-    /// Every I/O failure panics rather than reading as "nothing there":
-    /// the absence of artifacts is what some of these tests observe, and a
-    /// walk that quietly gives up folds them toward passing.
+    /// Every I/O failure panics rather than reading as "nothing there",
+    /// which is what some tests assert.
     pub fn artifacts(&self) -> Vec<String> {
         fn walk(dir: &Path, into: &mut Vec<String>) {
             let entries = fs::read_dir(dir)

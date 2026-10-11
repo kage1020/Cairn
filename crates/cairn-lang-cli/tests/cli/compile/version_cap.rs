@@ -22,15 +22,9 @@ fn a_target_below_the_declared_floor_is_refused() {
     assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
 }
 
-/// `cairn check --target` names a target too and is deliberately not held
-/// to the floors.
-///
-/// The decision, not an oversight: a floor bounds what a *lockfile* may
-/// certify, and a check writes none. Pinned here because it is the one
-/// asymmetry between the two commands' `--target` that reads like a bug —
-/// someone taking `check --target` for "compile without writing" would
-/// close it, and this says the difference was chosen. See
-/// `enforce_version_floor`, whose single caller is `run_compile`.
+/// `cairn check --target` is deliberately not held to the floors: a floor
+/// bounds what a *lockfile* may certify, and a check writes none.
+/// `enforce_version_floor`'s single caller is `run_compile`.
 #[test]
 fn a_pinned_check_is_not_held_to_the_floor_the_compile_is_held_to() {
     let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
@@ -52,12 +46,10 @@ fn a_pinned_check_is_not_held_to_the_floor_the_compile_is_held_to() {
         .expect("run cairn");
     let stderr = String::from_utf8(checked.stderr).expect("utf-8");
     assert_eq!(checked.status.code(), Some(0), "stderr={stderr}");
-    // The cap belongs to the command that writes the lock.
     assert_stream(&stderr, &[]);
 }
 
-/// The message has to carry all three of what is needed to act: the floor,
-/// the target that missed it, and what to do — the shape
+/// The floor, the target that missed it, and the fix: the shape
 /// `spec/versioning-editions` "Fail-loud and minimum-version inference" uses
 /// for this code.
 #[test]
@@ -75,11 +67,8 @@ fn the_refusal_names_the_floor_the_target_and_the_fix() {
     );
 }
 
-/// And it has to point at the `@requires` line, not at the file.
-///
-/// The floor's span is the only thing carrying that; a diagnostic anchored
-/// at the start of the file reads the same on a one-line source and sends
-/// a reader to the wrong place on every other one.
+/// On line 3, since a diagnostic anchored at the start of the file would
+/// pass on a one-line source.
 #[test]
 fn the_refusal_points_at_the_line_that_set_the_floor() {
     let source = format!("@cairn 2026.7\n\n@requires version>=1.21\n{BUILD}");
@@ -91,12 +80,9 @@ fn the_refusal_points_at_the_line_that_set_the_floor() {
     );
 }
 
-/// The suggestion has to be a target that exists.
-///
 /// `spec/lint` "Machine-readable payload" makes the candidates valid in the
-/// target part of the message. Echoing the floor back as `--target >=99.0`
-/// sends the author to an unsupported-target error, which is a second
-/// failure and no closer to a build.
+/// target part of the message; `--target >=99.0` would only lead to an
+/// unsupported-target error.
 #[test]
 fn an_unsatisfiable_floor_says_so_instead_of_suggesting_a_target() {
     let fixture = Fixture::new(&format!("@requires version>=99.0\n{BUILD}"));
@@ -165,8 +151,6 @@ fn a_floor_above_every_supported_target_refuses_all_of_them() {
     }
 }
 
-/// The floor only applies when one is declared. Nothing about this check
-/// may make an ordinary file harder to compile.
 #[test]
 fn a_source_with_no_requirement_compiles_against_any_target() {
     let fixture = Fixture::new(BUILD);
@@ -180,31 +164,21 @@ fn a_source_with_no_requirement_compiles_against_any_target() {
     }
 }
 
-/// A malformed requirement is named once, and as the thing it is.
-///
-/// It declares no floor, so it must not surface as `E_VERSION_CAP` — that
-/// would tell the author their target is too low when the actual mistake is
-/// on the `@requires` line. The compile still stops, because the
-/// requirement is an error in its own right.
+/// A malformed requirement declares no floor, so it must not surface as
+/// `E_VERSION_CAP`, which would blame the target; it still stops the
+/// compile.
 #[test]
 fn a_malformed_requirement_is_reported_as_itself_not_as_a_cap() {
     let fixture = Fixture::new(&format!("@requires version<1.20\n{BUILD}"));
     let out = compile_as(&fixture, "java", "1.20.4");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    // The requirement itself is named, and no cap: a requirement that
-    // declares no floor cannot cap a target.
     assert_stream(&stderr, &[(1, 1, "error", "E_INVALID_REQUIRES")]);
 }
 
-/// The same, on a file that *does* declare a floor the target misses.
-///
-/// The test above cannot see the ordering it is named for: with only a
-/// malformed line the module has no floor at all, so the enforcement
-/// returns before it compares anything and `E_VERSION_CAP` is absent for a
-/// reason that has nothing to do with which check runs first. Adding a
-/// well-formed line below makes the cap genuinely available, and the file
-/// still has to hear about the mistake it can act on.
+/// The same, on a file that *does* declare a floor the target misses: with
+/// only a malformed line there is no floor, so the test above cannot see
+/// which check runs first.
 #[test]
 fn a_malformed_requirement_is_reported_before_a_cap_it_would_also_trigger() {
     let source = format!("@requires version<1.20\n@requires version>=1.21\n{BUILD}");
@@ -212,8 +186,6 @@ fn a_malformed_requirement_is_reported_before_a_cap_it_would_also_trigger() {
     let out = compile_as(&fixture, "java", "1.20.4");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    // The mistake in the file, and no cap: the target is a consequence,
-    // not the thing to fix.
     assert_stream(&stderr, &[(1, 1, "error", "E_INVALID_REQUIRES")]);
 }
 
@@ -231,13 +203,8 @@ fn equal_floors_report_at_the_first_of_them() {
     );
 }
 
-/// The target the refusal offers has to be one that builds, not one that
-/// clears the floor being reported.
-///
-/// Floors compose by intersection, so a module may declare two and only
-/// the first be reported. Offering the candidates of that one alone sends
-/// the author to `--target 1.21`, where the second floor refuses them —
-/// the second error the candidate list exists to prevent, one floor along.
+/// Floors compose by intersection, so the offered target has to clear the
+/// floor that is not reported too: `1.21` clears only the first here.
 #[test]
 fn the_offered_target_clears_every_floor_not_only_the_reported_one() {
     let source = format!("@requires version>=1.21\n@requires version>=1.21.4\n{BUILD}");
@@ -255,8 +222,6 @@ fn the_offered_target_clears_every_floor_not_only_the_reported_one() {
         stderr.contains("fix: --target 1.21.4"),
         "and the fix has to name a target that builds: {stderr}",
     );
-    // Following the advice has to end in a build, which is the assertion
-    // the string match above is a proxy for.
     let out = compile_as(&fixture, "java", "1.21.4");
     assert!(
         out.status.success(),
@@ -290,10 +255,8 @@ fn latest_is_held_to_the_floor_like_any_other_target() {
 
 // -- the two editions ------------------------------------------------------
 //
-// Everything above compiles Java. Bedrock numbers its releases differently
-// — `1.21.0 / 1.21.40 / 1.21.60` against Java's `1.20.4 / 1.21 / 1.21.4` —
-// and a floor carries no edition, so the comparison runs across two
-// unrelated schemes.
+// Bedrock numbers its releases `1.21.0 / 1.21.40 / 1.21.60` against Java's
+// `1.20.4 / 1.21 / 1.21.4`, and an unscoped floor carries no edition.
 
 /// The comparison works where the two schemes happen to agree.
 #[test]
@@ -307,9 +270,8 @@ fn a_bedrock_target_is_held_to_the_floor_too() {
         stderr.contains("no supported bedrock target satisfies it"),
         "the candidates have to be the target edition's: {stderr}",
     );
-    // The versions, not only the word: naming the edition while listing
-    // the other one's releases is worse than listing neither, because it
-    // reads as a closed set the author can choose from.
+    // The other edition's releases would read as a closed set to choose
+    // from.
     assert!(
         stderr.contains("1.21.0, 1.21.40, 1.21.60"),
         "should list Bedrock's releases: {stderr}",
@@ -336,25 +298,18 @@ fn a_bedrock_target_equal_to_the_floor_but_for_a_trailing_zero_compiles() {
 
 /// A floor written in Java's numbering is not evaluated against Bedrock's.
 ///
-/// Bedrock numbers its patch releases in tens — `1.21.0`, `1.21.20`,
-/// `1.21.40` — so Java's `1.21.4` names no Bedrock release at all.
-/// Compared as dotted decimals, `40 > 4` would let the build through, and a
-/// file declaring `version>=1.21.4` would compile to a Bedrock structure
-/// and a lock reading `verified: true` for a target the source rules out.
-///
-/// Ordering by `DataVersion` has no answer to give here, and says so: Java's
-/// newest release names no Bedrock row and sits between two that exist, so
-/// it has no `DataVersion` in this edition's table and cannot be given one.
+/// Bedrock numbers its patch releases in tens, so Java's `1.21.4` names no
+/// Bedrock release; compared as dotted decimals, `40 > 4` would lock
+/// `verified: true` for a target the source rules out. It falls between two
+/// Bedrock rows, so it has no `DataVersion` to order by either.
 #[test]
 fn a_java_shaped_floor_is_not_evaluated_against_bedrock_numbering() {
     let fixture = Fixture::new(&format!("@requires version>=1.21.4\n{BUILD}"));
     let out = compile_as(&fixture, "bedrock", "1.21.40");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    // The floor is not a cap on this edition, it names no version of it:
-    // `--target` is not the thing to change.
+    // Not a cap: `--target` is not the thing to change.
     assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
-    // And nothing was written, so no lock can say `verified: true` for it.
     assert_eq!(
         fixture.artifacts(),
         Vec::<String>::new(),
@@ -362,13 +317,9 @@ fn a_java_shaped_floor_is_not_evaluated_against_bedrock_numbering() {
     );
 }
 
-/// The refusal has to be actionable, and the action is on the `@requires`
-/// line: name the edition the floor is written in, or name a release of
-/// the one being built.
-///
-/// The advice is followed all the way to a build rather than only matched
-/// as text. A message that reads right and leads nowhere is the failure
-/// mode this shape of test exists to catch.
+/// The repair is on the `@requires` line: name the edition the floor is
+/// written in, or a release of the one being built. The advice is followed
+/// to a build, not only matched as text.
 #[test]
 fn the_unorderable_refusal_offers_a_scope_that_works() {
     let fixture = Fixture::new(&format!("@requires version>=1.21.4\n{BUILD}"));
@@ -382,15 +333,12 @@ fn the_unorderable_refusal_offers_a_scope_that_works() {
         stderr.contains(":1:1:"),
         "should point at the `@requires` line: {stderr}",
     );
-    // The two releases it falls between, rather than the whole table: the
-    // pack names every Bedrock release, and dozens of them say no more than
-    // these two do.
+    // The two releases it falls between, not the whole table.
     assert!(
         stderr.contains("1.21.0 and then 1.21.20"),
         "should name the releases it falls between: {stderr}",
     );
 
-    // Now take the advice, and check it builds.
     let repaired = Fixture::new(&format!("@requires java version>=1.21.4\n{BUILD}"));
     let out = compile_as(&repaired, "bedrock", "1.21.40");
     assert!(
@@ -400,11 +348,9 @@ fn the_unorderable_refusal_offers_a_scope_that_works() {
     );
 }
 
-/// The scope is only offered when the *other* edition names the label.
-///
-/// Offering it otherwise recommends a guess: scoped to an edition that
-/// does not name it either, the floor goes inert there and the constraint
-/// the author wrote evaporates into a `verified: true` build.
+/// The scope is only offered when the *other* edition names the label:
+/// scoped to an edition that does not name it either, the floor goes inert
+/// there and the build locks `verified: true`.
 #[test]
 fn a_label_no_edition_can_place_is_not_answered_with_a_scope() {
     let fixture = Fixture::new(&format!("@requires version>=24w14a\n{BUILD}"));
@@ -424,8 +370,8 @@ fn a_label_no_edition_can_place_is_not_answered_with_a_scope() {
 /// A Java build refusing a floor the Bedrock table orders without naming it,
 /// asserting no Bedrock scope is offered and the one repair left is.
 ///
-/// The refusal is checked whole: exit code `1` and nothing written, so a
-/// regression that prints the refusal and then builds anyway fails here.
+/// Checked whole, so a refusal printed ahead of a build that goes on anyway
+/// fails.
 fn assert_no_bedrock_scope_is_offered(label: &str) {
     let fixture = Fixture::new(&format!("@requires version>={label}\n{BUILD}"));
     let out = compile_as(&fixture, "java", "1.21.4");
@@ -451,10 +397,10 @@ fn assert_no_bedrock_scope_is_offered(label: &str) {
 /// A label Bedrock's table places below every row is not one of its
 /// releases, so it gets no Bedrock scope.
 ///
-/// Scoped to Bedrock, the floor would be met by every Bedrock target, while
-/// the Java builds the author was constraining lose it entirely. The label
-/// has to stay below every Bedrock row and inside Java's span, naming no
-/// Java release; the Bedrock table only grows upward, so that holds.
+/// Scoped to Bedrock, the floor would be met by every Bedrock target and
+/// lost from the Java builds it constrains. The label sits inside Java's
+/// span, naming no Java release, and below every Bedrock row, which holds
+/// because the Bedrock table only grows upward.
 #[test]
 fn a_label_below_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
     assert_no_bedrock_scope_is_offered("1.14.5");
@@ -463,25 +409,21 @@ fn a_label_below_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
 /// A label Bedrock's table places above every row is not one of its
 /// releases either, so it gets no Bedrock scope.
 ///
-/// Scoped to Bedrock, the floor would be met by no Bedrock target, while
-/// the Java builds lose it. The label has to stay above every Bedrock row
-/// and inside Java's span, naming no Java release. It is chosen far above
-/// Bedrock's newest row so the next pack refresh does not give Bedrock a
-/// row it names; if this starts offering a scope, check that premise before
-/// the code.
+/// Scoped to Bedrock, the floor would be met by no Bedrock target and lost
+/// from the Java builds. The label sits inside Java's span, naming no Java
+/// release, and far above Bedrock's newest row so a pack refresh does not
+/// make it one; if this starts offering a scope, check that premise first.
 #[test]
 fn a_label_above_every_row_of_the_other_edition_is_not_answered_with_a_scope() {
     assert_no_bedrock_scope_is_offered("1.99");
 }
 
 /// A label the other edition's table carries as a row gets the scope, and
-/// the line saying whose release it is. Positive half of the two tests
-/// above: without it, their negative assertions on `is a bedrock release`
-/// would pass just as well against a message reworded to anything else.
+/// the line saying whose release it is: the positive half that keeps the
+/// two tests above from passing against any rewording.
 ///
-/// The row is one Bedrock's pack orders but cannot build for, so this also
-/// pins that the offer is made for any row the table names, not only the
-/// targetable ones. And the advice is taken, to a build.
+/// The row is one Bedrock's pack orders but cannot build for, so the offer
+/// covers every row the table names. The advice is taken to a build.
 #[test]
 fn a_label_naming_a_row_of_the_other_edition_is_offered_its_scope() {
     let fixture = Fixture::new(&format!("@requires version>=1.21.20\n{BUILD}"));
@@ -550,7 +492,6 @@ fn a_floor_naming_a_release_the_pack_cannot_build_for_still_orders() {
         "1.21.4 is above 1.21.1 by DataVersion: {}",
         String::from_utf8_lossy(&out.stderr),
     );
-    // And below it is still below it.
     let below = compile_as(&fixture, "java", "1.21");
     assert_eq!(below.status.code(), Some(1));
     let stderr = String::from_utf8(below.stderr).expect("utf-8");
@@ -574,8 +515,8 @@ fn an_orderable_but_unbuildable_release_is_not_offered_as_a_target() {
     );
 }
 
-/// And the scope is the repair, so it has to work: the same floor, scoped
-/// to Java, builds Bedrock because it says nothing about Bedrock.
+/// The scope is the repair: scoped to Java, the floor says nothing about
+/// Bedrock.
 #[test]
 fn a_java_scoped_floor_is_inert_on_a_bedrock_build() {
     let fixture = Fixture::new(&format!("@requires java version>=1.21.4\n{BUILD}"));
@@ -585,7 +526,6 @@ fn a_java_scoped_floor_is_inert_on_a_bedrock_build() {
         "stderr={}",
         String::from_utf8_lossy(&out.stderr),
     );
-    // And it is still enforced where it does apply.
     let java = compile_as(&fixture, "java", "1.21");
     assert_eq!(java.status.code(), Some(1));
     let stderr = String::from_utf8(java.stderr).expect("utf-8");
@@ -655,7 +595,6 @@ fn a_pre_release_floor_is_met_by_the_release_it_names() {
         "stderr={}",
         String::from_utf8_lossy(&out.stderr),
     );
-    // And a target below the release it precedes still misses it.
     let below = compile_as(&fixture, "java", "1.21");
     assert_eq!(below.status.code(), Some(1));
     let stderr = String::from_utf8(below.stderr).expect("utf-8");
@@ -663,13 +602,9 @@ fn a_pre_release_floor_is_met_by_the_release_it_names() {
 }
 
 /// A build placing a `def` that declares a floor is held to it, and the
-/// refusal names the part rather than only the number.
-///
-/// The whole value of a composite floor (`spec/versioning-editions`
-/// "Fail-loud and minimum-version inference") is knowing which piece of the
-/// build wants it: a target refused by a floor written inside a template
-/// is not actionable as a bare version, because the repair is at the other
-/// end of the `place use=` that inherited it.
+/// refusal names the part: the repair for a composite floor
+/// (`spec/versioning-editions` "Fail-loud and minimum-version inference")
+/// is at the other end of the `place use=` that inherited it.
 #[test]
 fn a_floor_a_def_declares_refuses_the_target_and_names_the_def() {
     let fixture = Fixture::new(
@@ -681,8 +616,6 @@ fn a_floor_a_def_declares_refuses_the_target_and_names_the_def() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_stream(&stderr, &[(5, 3, "error", "E_VERSION_CAP")]);
-    // The primary says whose floor it is, not "this file": a floor the file
-    // inherited from a part is the reading the composite rule corrects.
     assert!(
         stderr.contains("`def cottage` requires version>=1.21.4"),
         "the primary has to name the part: {stderr}",
@@ -691,8 +624,7 @@ fn a_floor_a_def_declares_refuses_the_target_and_names_the_def() {
         stderr.contains("`def cottage` declares it, and every `place use=cottage` inherits it"),
         "the refusal has to name the route: {stderr}",
     );
-    // And the repair points at the line the floor is on, which is not the
-    // directive.
+    // The floor is on a `requires` line, not the directive.
     assert!(stderr.contains("or lower the `requires` floor"), "{stderr}");
     assert!(
         fixture.artifacts().is_empty(),
@@ -720,9 +652,8 @@ fn a_floor_a_bound_theme_declares_refuses_the_target() {
 /// Where a header floor and an inherited one both apply and only the
 /// inherited one refuses, the refusal reports the one that refused.
 ///
-/// Floors compose by intersection, so any one of them refusing is the build
-/// refused; naming the wrong line sends the author to edit a floor every
-/// target already clears.
+/// Floors compose by intersection, so naming the first one sends the
+/// author to edit a floor every target already clears.
 #[test]
 fn the_refusal_names_the_floor_that_refused_not_the_first_one() {
     let fixture = Fixture::new(
@@ -791,26 +722,19 @@ fn pale_moss_under(floors: &str) -> String {
     )
 }
 
-/// The block the floor's version is the first to declare is the usual
-/// reason for declaring the floor, so a target below it lacks that block
-/// too. The cap is the finding the author can act on; an `E_UNKNOWN_ID` for
-/// the block would tell them to replace the block they declared the floor
-/// for. So the id check is suspended for that target, and a suspended run
-/// is refused and writes nothing.
+/// The block a floor's version first declares is the usual reason for the
+/// floor, so a target below it lacks the block too. The cap is the finding
+/// to act on, so the id check is suspended for that target, and a
+/// suspended run is refused and writes nothing.
 ///
-/// The missing `E_UNKNOWN_ID` only means something if 1.20.4 lacks pale
-/// moss, and this test does not show that: the build at 1.21.4 below shows
-/// the floor's version declares the block, which is a different fact. The
-/// control, `a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks`,
-/// is what supplies the premise.
+/// That 1.20.4 lacks pale moss is the premise, supplied by
+/// `a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks`.
 #[test]
 fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks() {
     let fixture = Fixture::new(&pale_moss_under("@requires version>=1.21.4\n"));
     let out = compile_as(&fixture, "java", "1.20.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    // The floor refuses the target, and the block the refused target lacks
-    // is moot.
     assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
     // Before the build below, which writes into this same fixture.
     assert_eq!(
@@ -828,44 +752,33 @@ fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks()
     );
 }
 
-/// The control for the test above, and the test that supplies its premise:
-/// 1.20.4 has no pale moss.
+/// The control for the test above, and its premise: 1.20.4 has no pale
+/// moss.
 ///
-/// The id check runs at a `--target` that resolves and that every floor
-/// lets through. It is off at one that does not resolve, which leaves no
-/// version to check against, and at one the floors refuse — one below a
-/// floor, or any target while a floor names a version the edition's table
-/// cannot place — where the build is refused on the floor instead. Here the
-/// target resolves and clears the only floor, so the block it lacks is
-/// still `E_UNKNOWN_ID`.
+/// The id check runs only at a `--target` that resolves and that every
+/// floor lets through; this one clears the only floor.
 #[test]
 fn a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks() {
     let fixture = Fixture::new(&pale_moss_under("@requires version>=1.20.4\n"));
     let out = compile_as(&fixture, "java", "1.20.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    // 1.20.4 has no pale moss, and clears the floor.
     assert_stream(&stderr, &[(3, 17, "error", "E_UNKNOWN_ID")]);
 }
 
 /// A floor the edition's table cannot place refuses every target, as
 /// `E_REQUIRES_UNORDERABLE`, so it suspends the id check as a cap does.
 ///
-/// Were the id check to run, Bedrock 1.21.40 would report the pale moss as
-/// `E_UNKNOWN_ID`, and the advice to compile against a target that declares
-/// the block would lead to a build refused on the `@requires` line, which is
-/// the repair. The second half takes the refusal's own advice: scoped to the
-/// numbering it is written in, the floor is inert on Bedrock, the target is
-/// pinned, and the block 1.21.40 lacks is reported. That is also the
-/// premise the first half's missing `E_UNKNOWN_ID` rests on.
+/// An `E_UNKNOWN_ID` for the pale moss would point away from the
+/// `@requires` line, which is the repair. The second half takes the
+/// refusal's advice, and its `E_UNKNOWN_ID` is the premise the first half's
+/// absence rests on.
 #[test]
 fn an_unplaceable_floor_suspends_the_block_id_check_too() {
     let fixture = Fixture::new(&pale_moss_under("@requires version>=1.21.4\n"));
     let out = compile_as(&fixture, "bedrock", "1.21.40");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    // The floor names no bedrock release; the repair is on the `@requires`
-    // line, not the block.
     assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     assert_eq!(
         fixture.artifacts(),
@@ -882,24 +795,20 @@ fn an_unplaceable_floor_suspends_the_block_id_check_too() {
     assert_stream(&stderr, &[(3, 17, "error", "E_UNKNOWN_ID")]);
 }
 
-/// Compile `floors` — Java's `1.21.4`, which Bedrock's table cannot place,
-/// and Bedrock's `1.21.60`, above the target, in the order given — against
-/// Bedrock 1.21.40, and require the unplaceable one, on `line`, to be what
-/// is reported.
+/// Compile `floors` (Java's `1.21.4`, which Bedrock's table cannot place,
+/// and Bedrock's `1.21.60`, above the target) against Bedrock 1.21.40, and
+/// require the unplaceable one, on `line`, to be what is reported.
 ///
-/// The report puts any unplaceable floor ahead of a below-target one,
-/// wherever each sits, and the id-check gate asks the same question. Both
-/// orders are run because the order is what a helper answering "the first
-/// floor in source order that refuses" gets wrong: it names the cap when
-/// the cap comes first.
+/// The unplaceable floor is reported ahead of a below-target one wherever
+/// each sits, so both orders are run: "the first floor in source order
+/// that refuses" names the cap when it comes first.
 fn assert_the_unplaceable_floor_is_reported_beside_a_cap(floors: &str, line: u64) {
     let fixture = Fixture::new(&pale_moss_under(floors));
     let out = compile_as(&fixture, "bedrock", "1.21.40");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    // The floor no target can satisfy is the line to fix: no cap, since
-    // raising `--target` cannot clear it, and no unknown id, since a block
-    // checked against a target the floors refuse is moot.
+    // No cap, since raising `--target` cannot clear it, and no unknown id,
+    // since the floors refuse the target.
     assert_stream(&stderr, &[(line, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     assert_eq!(
         fixture.artifacts(),

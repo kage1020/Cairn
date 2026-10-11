@@ -80,12 +80,9 @@ fn bedrock_compile_writes_the_bedrock_wall_sign_and_not_the_java_one() {
 
     let structure = out_dir.path().join("shop.mcstructure");
     let bytes = fs::read(&structure).expect("read artifact");
-    // Bedrock has no `oak_wall_sign` at all — it spells the block
-    // `wall_sign`, and the Java spelling handed to the `.mcstructure`
-    // writer produces a file the game loads as air.
-    // `oak_wall_sign` contains `wall_sign` as a substring, so a plain
-    // `wall_sign` hit does not by itself prove the Java id is gone;
-    // counting `oak_` separately is what distinguishes them.
+    // Bedrock spells the block `wall_sign` and loads the Java spelling as
+    // air. `oak_wall_sign` contains `wall_sign`, so the two are counted
+    // separately.
     let java_spelling_hits = bytes
         .windows(b"oak_wall_sign".len())
         .filter(|w| *w == b"oak_wall_sign")
@@ -106,13 +103,8 @@ fn bedrock_compile_writes_the_bedrock_wall_sign_and_not_the_java_one() {
 
 #[test]
 fn check_edition_flag_wires_strict_variant_pin_through_cli() {
-    // Wiring guard: a file whose only `floating_text` binding lives in the
-    // Bedrock variant must pass `check --edition bedrock` and pass
-    // `check` (no pin, sibling-slot union), but fail `check --edition java`
-    // with `E_UNRESOLVED_SLOT`. Without this pin, a CLI dispatch bug that
-    // forwarded `None` regardless of the `--edition` flag would still pass
-    // every resolver-level unit test (which invoke `resolve` directly) —
-    // only the CLI wiring test catches it.
+    // Resolver unit tests call `resolve` directly, so only this catches a
+    // dispatch that forwards `None` whatever `--edition` says.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let path = tmp.path().join("bedrock_only_slot.crn");
     std::fs::write(
@@ -137,8 +129,6 @@ fn check_edition_flag_wires_strict_variant_pin_through_cli() {
     .expect("write test crn");
     let path_str = path.to_str().unwrap();
 
-    // 1. `check --edition bedrock` succeeds: the Bedrock variant declares
-    //    the slot.
     let out = Command::new(cargo_bin())
         .args(["check", "--edition", "bedrock", path_str])
         .output()
@@ -149,7 +139,6 @@ fn check_edition_flag_wires_strict_variant_pin_through_cli() {
         String::from_utf8_lossy(&out.stderr),
     );
 
-    // 2. `check` (no pin) succeeds: the sibling-slot union covers the slot.
     let out = Command::new(cargo_bin())
         .args(["check", path_str])
         .output()
@@ -160,16 +149,11 @@ fn check_edition_flag_wires_strict_variant_pin_through_cli() {
         String::from_utf8_lossy(&out.stderr),
     );
 
-    // 3. `check --edition java` fails with `E_UNRESOLVED_SLOT`: the Java
-    //    variant does not declare `bedrock_only`, and the strict-pin path
-    //    disables the sibling-slot union.
+    // A pin disables the sibling-slot union.
     let out = Command::new(cargo_bin())
         .args(["check", "--edition", "java", path_str])
         .output()
         .expect("run cairn");
-    // `cairn check` writes its text diagnostics to stderr, like every other
-    // subcommand, and reserves stdout for the machine payload
-    // (`--format json`). The code assertion below therefore reads stderr.
     assert_eq!(
         out.status.code(),
         Some(1),
@@ -183,10 +167,6 @@ fn check_edition_flag_wires_strict_variant_pin_through_cli() {
 
 #[test]
 fn check_exits_zero_across_all_three_edition_states() {
-    // `cairn check` on the fallback example succeeds under Java,
-    // Bedrock, and no `--edition` — the sibling-slot union handles the
-    // no-pin case, and each explicit edition sees its variant declare
-    // every referenced slot.
     let src = examples_dir().join("edition-fallback.crn");
     let src_str = src.to_str().unwrap();
     let cases: [&[&str]; 3] = [
@@ -209,10 +189,8 @@ fn check_exits_zero_across_all_three_edition_states() {
 
 #[test]
 fn cottage_still_compiles_under_both_editions() {
-    // Sanity: the existing `theme medieval:` cottage (unsuffixed theme,
-    // no per-edition variants) must keep working under both editions —
-    // regression guard for the sibling-slot pathway inadvertently gating
-    // the single-theme path.
+    // An unsuffixed theme with no per-edition variants is not gated by
+    // the sibling-slot path.
     let src = examples_dir().join("cottage.crn");
     let tmp = TempDir::new().expect("tempdir");
     let copied = tmp.path().join("cottage.crn");
@@ -238,10 +216,8 @@ fn cottage_still_compiles_under_both_editions() {
     }
 }
 
-// ----------------------------------------------------------------------
 // The pin reaches the site placement path, and a pin the module cannot
 // satisfy stops the build instead of building it out of air.
-// ----------------------------------------------------------------------
 
 /// A module whose logical theme `shop` exists in `variants`, placed through
 /// a site under `theme={reference}`. Each variant binds a different block so
@@ -270,10 +246,8 @@ fn placed_source(reference: &str, variants: &[&str]) -> String {
 
 #[test]
 fn a_java_build_writes_the_java_variants_block_whatever_the_place_named() {
-    // The defect, end to end: `theme=shop_bedrock` bound verbatim on the
-    // site path, so a `--edition java` artifact carried the Bedrock
-    // variant's material. The guard that was supposed to prevent it
-    // (`pick_variant`) was never reached from here.
+    // The site path has to reach `pick_variant` too, or
+    // `theme=shop_bedrock` binds verbatim into a Java artifact.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(
         tmp.path(),
@@ -306,15 +280,12 @@ fn a_java_build_writes_the_java_variants_block_whatever_the_place_named() {
         !bytes_contain(&nbt, "minecraft:dark_oak_planks"),
         "the Bedrock variant's material must not reach a Java artifact",
     );
-    // Swapping the named variant is worth saying out loud.
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_stream(&stderr, &[(13, 3, "warning", "W_THEME_VARIANT_REBOUND")]);
 }
 
 #[test]
 fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
-    // `check --edition` is the gate a CI job runs; it has to see this, and
-    // the same source without a pin has nothing to fail against.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(
         tmp.path(),
@@ -325,8 +296,6 @@ fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
         .args(["check", src.to_str().unwrap(), "--edition", "java"])
         .output()
         .expect("run cairn");
-    // Every command reports on stderr; a build command's stdout carries
-    // the artifact report instead.
     let report = String::from_utf8_lossy(&pinned.stderr);
     assert_eq!(pinned.status.code(), Some(1), "report={report}");
     assert_stream(&report, &[(3, 1, "error", "E_THEME_VARIANT_MISSING")]);
@@ -357,8 +326,7 @@ fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
 #[test]
 fn a_place_naming_the_logical_theme_builds_under_both_editions() {
     // The spelling `spec/versioning-editions` "Java / Bedrock portability"
-    // prescribes, though no theme is declared under the bare logical name:
-    // the site path resolves it to the pinned edition's variant.
+    // prescribes, though no theme carries the bare logical name.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(
         tmp.path(),
@@ -391,7 +359,6 @@ fn a_place_naming_the_logical_theme_builds_under_both_editions() {
             .expect("run cairn");
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(result.status.success(), "--edition {edition}: {stderr}");
-        // The neutral spelling names no variant, so none was swapped.
         assert_stream(&stderr, &[]);
         let artifact = out_dir.path().join(if edition == "java" {
             "home.nbt"
@@ -410,12 +377,8 @@ fn a_place_naming_the_logical_theme_builds_under_both_editions() {
 
 #[test]
 fn a_misspelled_variant_is_a_diagnostic_and_not_a_crash() {
-    // `theme=shop_java` against a module that declares only `shop_bedrock`,
-    // with no `--edition`. Routing the reference through variant selection
-    // reaches a rebind with no edition to name in the message; a panic
-    // there turns a typo into exit 101 on `check`, on `lower` (which has no
-    // `--edition` at all), and inside the language server, whose
-    // diagnostics pass calls the resolver with `None`.
+    // Variant selection reaches a rebind with no edition to name. `lower`
+    // has no `--edition`, and the language server resolves with `None`.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(
         tmp.path(),
@@ -431,17 +394,14 @@ fn a_misspelled_variant_is_a_diagnostic_and_not_a_crash() {
             .output()
             .expect("run cairn");
         let code = result.status.code();
-        // Not `assert_ne!(code, Some(101))`: the release profile builds this
-        // binary with `panic = "abort"`, so a panic arrives as a signal and
-        // `code` is `None` — which that comparison would have accepted. Assert
-        // the process exited on its own terms, then that the code is not 101.
+        // Not `assert_ne!(code, Some(101))`: under the release profile's
+        // `panic = "abort"` a panic is a signal and `code` is `None`.
         assert!(
             matches!(code, Some(c) if c != 101),
             "`cairn {}` must not panic; exit={code:?} stderr={}",
             args[0],
             String::from_utf8_lossy(&result.stderr),
         );
-        // The undeclared theme is named.
         assert_stream(
             &stderr_of(&result),
             &[(10, 3, "error", "E_UNRESOLVED_THEME_REF")],
@@ -451,10 +411,8 @@ fn a_misspelled_variant_is_a_diagnostic_and_not_a_crash() {
 
 #[test]
 fn the_lockfile_names_the_theme_the_artifact_was_built_from() {
-    // A rebind leaves one warning on stderr and nothing else. The lockfile
-    // is the record that survives the terminal, so naming the written
-    // variant there would point a later reader at materials the artifact
-    // does not contain.
+    // A rebind's only other trace is one warning on stderr, and the lock
+    // outlives the terminal.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(
         tmp.path(),
@@ -488,8 +446,6 @@ fn the_lockfile_names_the_theme_the_artifact_was_built_from() {
         !lock.contains("theme: shop_bedrock"),
         "the lock must not name the variant the build did not use; got:\n{lock}",
     );
-    // And the artifact agrees with the lock, which is the claim that makes
-    // the field worth anything.
     let nbt = nbt_body(&out_dir.path().join("home.nbt"));
     assert!(bytes_contain(&nbt, "minecraft:spruce_planks"));
 }

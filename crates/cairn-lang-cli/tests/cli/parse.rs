@@ -1,7 +1,4 @@
-//! `cairn parse <file>` end to end, against every shipped example, so
-//! "the source parses" holds at the CLI surface and not only through the
-//! library API. That a missing file exits 2 is pinned for every subcommand
-//! at once in `contract/json.rs`.
+//! `cairn parse <file>` end to end, against every shipped example.
 
 use crate::common::{cairn, crn_examples, examples_dir};
 
@@ -28,11 +25,7 @@ fn every_example_parses_to_a_json_module() {
 
 #[test]
 fn debug_format_runs_successfully() {
-    // `--format debug` is a developer-facing escape hatch; its concrete shape
-    // is whatever `{:?}` happens to produce and is not part of the CLI
-    // contract. We only assert that the subcommand exits successfully and
-    // writes non-empty UTF-8 to stdout, so the test does not couple to the
-    // derived `Debug` representation of internal AST types.
+    // The debug shape is `{:?}` of internal types, not a contract.
     let path = examples_dir().join("cottage.crn");
     let out = cairn("parse", &[path.to_str().unwrap(), "--format", "debug"]);
     assert!(

@@ -23,9 +23,8 @@ fn info_json(file: &str, editions: &str) -> Value {
 /// checking that each per-edition axis has one entry per distinct edition
 /// in `editions`.
 ///
-/// [`buildable_entry`] and [`portability_entry`] find an edition's entry by
-/// name, which cannot see a second one, so without the count here a test
-/// reading through them would pass with an edition listed twice.
+/// [`buildable_entry`] and [`portability_entry`] find an entry by name and
+/// cannot see a second one.
 fn info_json_at(path: &std::path::Path, editions: &str) -> Value {
     let out = Command::new(cargo_bin())
         .args([
@@ -99,11 +98,9 @@ fn strings(value: &Value, key: &str) -> Vec<String> {
 
 /// Whether `cairn compile` accepts this source for one pinned target.
 ///
-/// `--lock` is pointed inside `out` rather than left to default. Without
-/// it the lockfile lands next to the source, which for a source under
-/// `examples/` means writing into the working tree — and `report_previous_target`
-/// reads that file, so calls would communicate through it and become
-/// order-dependent.
+/// `--lock` goes inside `out`: the default lands beside the source, in
+/// `examples/` for most callers, and `report_previous_target` reading it
+/// back would make calls order-dependent.
 fn compile_accepts(
     path: &std::path::Path,
     edition: &str,
@@ -170,9 +167,7 @@ fn cottage_bedrock_has_no_unsupported_entries() {
         0,
         "cottage on Bedrock must not report unsupported entries",
     );
-    // `degraded` is a real measurement — pin exactly whatever the current
-    // roof lowering produces so a future regression that inflates it
-    // (e.g. a gable-corner promotion) trips this AC on purpose.
+    // A real measurement: a gable-corner promotion, say, would inflate it.
     let degraded = as_u64(bedrock, "degraded");
     assert!(
         degraded <= 1,
@@ -183,14 +178,10 @@ fn cottage_bedrock_has_no_unsupported_entries() {
 #[test]
 fn the_java_axis_is_pure_portable_for_a_source_java_can_build() {
     // Java is the base edition (`spec/versioning-editions`
-    // "Backend = data tables"), so no state ever degrades there and a
-    // palette of blocks Java declares classifies as portable throughout.
-    // Pin it on the two files carrying the widest block variety.
-    //
-    // "Pure portable" is a property of these sources, not of the Java
-    // axis: an id Java has never had counts as unsupported on Java too,
-    // which `a_bedrock_only_block_is_not_reported_as_java_portable`
-    // exercises below.
+    // "Backend = data tables"), so no state degrades there. "Pure portable"
+    // is still a property of these sources: an id Java lacks is
+    // unsupported on Java too
+    // (`a_bedrock_only_block_is_not_reported_as_java_portable`).
     for file in ["themed-tower.crn", "cottage.crn"] {
         let axes = info_json(file, "java");
         let java = portability_entry(&axes, "java");
@@ -231,17 +222,9 @@ fn degraded_warnings(example: &str) -> Vec<String> {
 
 #[test]
 fn info_degraded_count_matches_compile_intent_degraded_warnings() {
-    // Info↔compile cross-consistency: `portability_for_bedrock` and
-    // `build_mcstructure_tag` share `translate_states` as the source of
-    // truth. If `cairn info` reports `degraded >= 1` on Bedrock, then
-    // `cairn compile --edition bedrock` on the same file must emit at
-    // least one `W_INTENT_DEGRADED` warning. Without this pin, the two
-    // sides could drift silently — e.g. an internal refactor that adds
-    // a degradation source to `translate_states` in the compile path but
-    // not the info path (or vice versa) would let the parity table
-    // undercount vs. what the writer actually degrades.
-
-    // 1. Info-side degraded count.
+    // `portability_for_bedrock` and `build_mcstructure_tag` share
+    // `translate_states`, so a degradation added to one path alone shows
+    // up here.
     let axes = info_json("themed-tower.crn", "bedrock");
     let degraded = as_u64(portability_entry(&axes, "bedrock"), "degraded");
     assert!(
@@ -249,7 +232,6 @@ fn info_degraded_count_matches_compile_intent_degraded_warnings() {
         "expected themed-tower Bedrock degraded >= 1 for cross-consistency check, got {degraded}",
     );
 
-    // 2. Compile-side warning count.
     let warnings = degraded_warnings("themed-tower.crn");
     assert!(
         !warnings.is_empty(),
@@ -260,11 +242,8 @@ fn info_degraded_count_matches_compile_intent_degraded_warnings() {
 
 #[test]
 fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
-    // `roof-hip`'s four degraded entries are four states of one id, so a
-    // warning naming the id alone would print two pairs of identical
-    // lines. Each warning names the Java state, the way
-    // `info`'s note does, so the lines are distinct and each can be
-    // matched to the note about the same entry.
+    // `roof-hip`'s four degraded entries are four states of one id, so each
+    // warning names the Java state, as `info`'s note does.
     let axes = info_json("roof-hip.crn", "bedrock");
     let entries = portability_entry(&axes, "bedrock")["degraded_entries"]
         .as_array()
@@ -300,15 +279,10 @@ fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
 #[test]
 fn an_edition_specific_resolve_failure_is_reported_not_counted_away() {
     // `info` gates on the edition-neutral pass, which unions slot names
-    // across per-edition theme variants. A slot only one variant declares
-    // therefore resolves there and fails only in the strict per-edition
-    // pass the parity dry-run runs.
-    //
-    // Reporting nothing made the failure indistinguishable from a design
-    // choice: the member that could not resolve just lowered a smaller
-    // `portable` count for that edition, with `degraded: 0
-    // unsupported: 0` beside it. The one command whose job is showing
-    // per-edition divergence was the one that could not show it.
+    // across per-edition theme variants, so a slot only one variant
+    // declares fails only in the parity dry-run's strict pass. Unreported,
+    // it would read as a smaller `portable` count beside `degraded: 0
+    // unsupported: 0`.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = tmp.path().join("split.crn");
     std::fs::write(
@@ -326,8 +300,7 @@ fn an_edition_specific_resolve_failure_is_reported_not_counted_away() {
     .expect("write split source");
     let path = src.to_str().unwrap();
 
-    // The edition-neutral gate sees a slot declared by one variant, so it
-    // passes — this is the premise that makes the case interesting.
+    // Premise: the edition-neutral gate passes.
     let check = Command::new(cargo_bin())
         .args(["check", path])
         .output()
@@ -374,9 +347,8 @@ fn an_edition_specific_resolve_failure_is_reported_not_counted_away() {
 // -- buildable targets ----------------------------------------------------
 
 /// The portability row asks of the *edition*, so a block one part of the
-/// range spells differently is not missing from it. Two entries can each
-/// answer yes while no single version declares both, and the report was
-/// clean for a source every supported target refuses.
+/// range spells differently is not missing from it: two entries can each
+/// answer yes while no single version declares both.
 #[test]
 fn a_source_no_supported_version_can_build_says_so() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -392,9 +364,8 @@ fn a_source_no_supported_version_can_build_says_so() {
     )
     .expect("write source");
 
-    // The two counters still answer their own question, and it is not this
-    // one: both blocks exist on Bedrock, each on a different part of its
-    // range.
+    // The counters answer their own question: both blocks exist on
+    // Bedrock, on different parts of its range.
     let axes = info_json_at(&src, "bedrock");
     assert_eq!(
         as_u64(portability_entry(&axes, "bedrock"), "unsupported"),
@@ -410,8 +381,7 @@ fn a_source_no_supported_version_can_build_says_so() {
         ["1.21.0", "1.21.40", "1.21.60"]
     );
 
-    // The premise the test name rests on, asked of the command that
-    // decides it rather than assumed.
+    // The premise, asked of the command that decides it.
     let out = tmp.path().join("out");
     for version in ["1.21.0", "1.21.40", "1.21.60"] {
         assert!(
@@ -420,8 +390,7 @@ fn a_source_no_supported_version_can_build_says_so() {
         );
     }
 
-    // And the text row says it rather than leaving it to the JSON. Matched
-    // as a whole line: `none` on its own is in every run's output, under
+    // Matched as a whole line: `none` alone is in every run's output, under
     // `semantic-sensitive`.
     let (code, stdout, stderr) = info_raw(&src, "bedrock");
     assert_eq!(
@@ -435,8 +404,7 @@ fn a_source_no_supported_version_can_build_says_so() {
         ),
         "the row must carry the same answer the JSON does, got: {stdout}",
     );
-    // The reason is printed too, since nothing else in the run would show
-    // it and a bare `none` is not a report.
+    // A bare `none` is not a report.
     assert_stream(
         &stderr,
         &[
@@ -452,11 +420,9 @@ fn a_source_no_supported_version_can_build_says_so() {
     );
 }
 
-/// The intersection of the range-wide palette's id sets is empty for this
-/// source, and one target builds it: with no target pinned every material
-/// takes its default mapping, and `@floor.stone.smooth` is respelled at
-/// 1.21.0. This is the case that separates the sound answer from the cheap
-/// one.
+/// The range-wide palette's id sets never overlap for this source, yet one
+/// target builds it: unpinned, every material takes its default mapping,
+/// and `@floor.stone.smooth` is respelled at 1.21.0.
 #[test]
 fn a_palette_whose_default_ids_never_overlap_can_still_have_a_buildable_target() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -529,18 +495,13 @@ fn every_example_lists_every_supported_target() {
     }
 }
 
-/// The claim under the row: the set is what `compile --target` accepts.
-/// Asserted against the command rather than against a second copy of the
-/// rule, which is the only way the two cannot drift together.
+/// The claim under the row: the set is what `compile --target` accepts,
+/// asserted against the command rather than a second copy of the rule.
 ///
-/// Fixture-driven rather than corpus-driven. Every shipped example
-/// declares `@requires version>=1.20`, below every supported target on
-/// both editions; none has a scope that fails to lower; and every id they
-/// use is in both packs' base table. So all 24 corpus pairs collapse to
-/// `buildable == considered == accepted`, and a filter that reported every
-/// version unconditionally would pass. Each source below refuses on a
-/// different gate, and the clean one is there so a filter that refuses
-/// everything fails too.
+/// Fixtures, not the corpus: every shipped example builds at every
+/// supported target, so a filter reporting every version would pass there.
+/// Each source below refuses on a different gate, and the clean one fails
+/// a filter that refuses everything.
 #[test]
 fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -588,11 +549,9 @@ fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
              struct nosize\n\
              \x20\x20floor mat_slot=floor\n",
         ),
-        // A floor no edition's table can place. It is the one gate that
-        // answers for every version at once — `weigh_versions` returns
-        // before it lowers anything — so the row is empty for a reason
-        // the loop below never reaches, and `compile --target` has to
-        // agree on every version rather than on none of them.
+        // A floor no edition's table can place answers for every version
+        // at once (`weigh_versions` returns before it lowers anything), so
+        // `compile --target` has to agree on every version.
         (
             "unorderable.crn",
             "@requires version>=24w14a\n\n\
@@ -612,7 +571,7 @@ fn the_buildable_set_is_the_set_of_targets_compile_accepts() {
              struct hut size=5x5\n\
              \x20\x20floor mat_slot=floor\n",
         ),
-        // And one that builds everywhere, so "refuse everything" fails.
+        // One that builds everywhere, so "refuse everything" fails.
         (
             "clean.crn",
             "theme t:\n\
@@ -709,12 +668,11 @@ fn floors(value: &Value, key: &str) -> Vec<(String, u64, u64)> {
         .collect()
 }
 
-/// An empty `buildable` had four causes and named none of them: a consumer
-/// reading the JSON and discarding stderr saw `[]` and could not tell
-/// which of four different things to edit.
+/// An empty `buildable` has four causes, and a consumer reading the JSON
+/// without stderr has to tell which to edit.
 ///
-/// This one is the edition's rather than any release's — a floor naming no
-/// release of the edition can be weighed against none of them — so it is
+/// This one is the edition's rather than any release's (a floor naming no
+/// release of the edition is weighed against none of them), so it is
 /// reported once, beside the per-version list rather than inside it.
 #[test]
 fn a_floor_this_edition_cannot_place_says_so_for_the_edition() {
@@ -747,11 +705,8 @@ fn a_floor_this_edition_cannot_place_says_so_for_the_edition() {
     );
 }
 
-/// The floor an edition cannot place answers for the edition, but it is
-/// not the only thing a file can have wrong, and the release that also
-/// refuses an id has to say so in the same run. Otherwise the author
-/// repairs the floor, runs again, and meets the ids for the first time —
-/// the loop this row exists to close.
+/// The release that also refuses an id says so in the same run as the
+/// unplaceable floor, not after the floor is repaired.
 #[test]
 fn an_unplaceable_floor_does_not_hide_what_each_version_refused() {
     let (_tmp, row) = buildable_row(
@@ -791,15 +746,13 @@ fn an_unplaceable_floor_does_not_hide_what_each_version_refused() {
     );
 }
 
-/// The floor that *is* placeable, and refuses every release. Different
-/// news and a different repair — raise the target, or build the other
-/// edition — so it reads as a different tag.
+/// The floor that *is* placeable, and refuses every release: a different
+/// repair (raise the target, or build the other edition), so a different
+/// tag.
 ///
-/// Two floors at different heights, because that is the only shape in
-/// which a version's `floors` differs from the edition's: `1.21.0` is
-/// under both and the two after it only under the second. With one floor
-/// the per-version list and the edition-wide set are the same bytes, and
-/// a test using it would pass against either.
+/// Two floors at different heights, the only shape in which a version's
+/// `floors` differs from the edition's: `1.21.0` is under both and the two
+/// after it only under the second.
 #[test]
 fn a_floor_above_every_release_names_the_line_under_each_version() {
     let (_tmp, row) = buildable_row(
@@ -842,9 +795,8 @@ fn a_floor_above_every_release_names_the_line_under_each_version() {
             "only the floor that refuses this version: {row}",
         );
     }
-    // A floor a build inherited from a part is repaired in that part, and
-    // "this file requires ..." is the reading the composite rule exists to
-    // correct. The header floor above carries no `declared_by` at all.
+    // An inherited floor is repaired in the part that declares it. The
+    // header floor carries no `declared_by`.
     let header = &row["reason"]["versions"][0]["floors"][0];
     let inherited = &row["reason"]["versions"][0]["floors"][1];
     assert!(header.get("declared_by").is_none(), "{row}");
@@ -954,11 +906,9 @@ fn a_floor_does_not_hide_a_scope_that_produced_no_voxels() {
     );
 }
 
-/// The fourth: the pinned lowering raised errors, which is usually a
-/// material or an id and differs per version. The findings ride along in
-/// the shape `spec/lint` "Machine-readable payload" gives them, because
-/// naming the version without naming what it refused leaves the reader
-/// exactly where the bare `[]` did.
+/// The fourth: the pinned lowering raised errors, usually a material or an
+/// id, differing per version. The findings ride along in the shape
+/// `spec/lint` "Machine-readable payload" gives them.
 #[test]
 fn a_refused_lowering_names_what_each_version_refused() {
     let (_tmp, row) = buildable_row(
@@ -987,17 +937,14 @@ fn a_refused_lowering_names_what_each_version_refused() {
         finding["data"]["registry"], "bedrock 1.21.0",
         "the registry that refused it, so two versions' findings are not read as one: {row}",
     );
-    // The id `1.21.0` refuses is not the id `1.21.40` refuses. One tag for
-    // the edition would have had to pick one of them to report.
+    // The id `1.21.0` refuses is not the id `1.21.40` refuses, so one tag
+    // for the edition would have to pick one.
     let later = &row["reason"]["versions"][1]["findings"][0];
     assert_eq!(later["data"]["id"], "minecraft:stonebrick", "{row}");
 }
 
-/// Two causes in one run, which is the whole reason the per-version answer
-/// is per version: the floor refuses the oldest release and an id refuses
-/// the two after it. A single tag for the edition would report one and
-/// hide the other, and a reader who fixed only that one would still have
-/// no buildable target.
+/// Two causes in one run, which is why the answer is per version: the
+/// floor refuses the oldest release and an id the two after it.
 #[test]
 fn versions_refused_for_different_reasons_each_carry_their_own() {
     let (_tmp, row) = buildable_row(
@@ -1099,10 +1046,8 @@ fn one_slot_source(dir: &std::path::Path, name: &str, id: &str) -> PathBuf {
 /// Assert that a build of `path` refuses `id`, named at `at`, as unknown to
 /// that target.
 ///
-/// The premise these tests rest on is not "the build failed" — any
-/// diagnostic exits 1, including ones about something else entirely — but
-/// "the build failed *on this id*". Naming the code and the id is what
-/// makes the portability row a claim `compile` actually contradicts.
+/// Any diagnostic exits 1, so the premise is that the build fails *on this
+/// id*.
 fn assert_build_refuses_the_id(
     path: &std::path::Path,
     edition: &str,
@@ -1118,7 +1063,6 @@ fn assert_build_refuses_the_id(
         Some(1),
         "premise: the build must fail; stderr={stderr}"
     );
-    // Premise: it fails because the target has no such id.
     assert_stream(&stderr, &[(at.0, at.1, "error", "E_UNKNOWN_ID")]);
     assert!(
         stderr.contains(id),
@@ -1128,12 +1072,10 @@ fn assert_build_refuses_the_id(
 
 #[test]
 fn a_java_only_block_is_not_reported_as_bedrock_portable() {
-    // `minecraft:oak_sign` is a Java spelling; Bedrock calls that block
-    // `standing_sign` and has never had this id. It carries no properties,
-    // so `translate_states` returns a clean translation for it and the
-    // Bedrock row read `portable` — the one command whose job is answering
-    // "will this port?" answering yes about a block the edition does not
-    // have.
+    // `minecraft:oak_sign` is a Java spelling; Bedrock calls the block
+    // `standing_sign`. It carries no properties, so `translate_states`
+    // translates it cleanly and only the id check keeps it out of
+    // `portable`.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
 
@@ -1165,11 +1107,8 @@ fn a_java_only_block_is_not_reported_as_bedrock_portable() {
 
 #[test]
 fn a_bedrock_only_block_is_not_reported_as_java_portable() {
-    // The mirror. Java is the base edition for *states*, which is why it
-    // never degrades — it is not a base edition for ids, and a theme
-    // resolving a slot to a Bedrock spelling puts one into a Java palette
-    // exactly the way the case above puts a Java spelling into a Bedrock
-    // one.
+    // Java is the base edition for *states*, not for ids: a theme resolving
+    // a slot to a Bedrock spelling puts one into a Java palette.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "bedrockonly.crn", "standing_sign");
 
@@ -1198,13 +1137,10 @@ fn a_bedrock_only_block_is_not_reported_as_java_portable() {
 
 #[test]
 fn a_block_only_part_of_the_range_declares_stays_portable() {
-    // `stone_bricks` does not exist on Bedrock 1.21.0 — it is `stonebrick`
-    // there — and the pack carries a per-version override so each target
-    // gets its own spelling. `info` pins no version and therefore lowers
-    // the default one, so an id axis asking "does *every* supported
-    // version declare this" would report the shipped mapping as
-    // unsupported on an edition that builds it cleanly on all three
-    // targets. The axis asks "does the edition have the block at all".
+    // `stone_bricks` is `stonebrick` on Bedrock 1.21.0, and a per-version
+    // override gives each target its spelling. `info` lowers the default
+    // mapping, so the axis asks whether the edition has the block at all,
+    // not whether every version declares that spelling.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "renamed.crn", "floor.stone.smooth");
     for target in ["1.21.0", "1.21.40", "1.21.60"] {
@@ -1236,9 +1172,7 @@ fn stdout_rows(stdout: &str) -> Vec<&str> {
 #[test]
 fn the_unsupported_figure_names_the_entry_and_the_reason() {
     // `unsupported: 1` is one integer over three failures with three
-    // different repairs. Everything needed to say which entry and which
-    // failure is in hand where the count is incremented, so the command
-    // says it.
+    // different repairs.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
     let (code, stdout, stderr) = info_raw(&src, "bedrock");
@@ -1266,10 +1200,8 @@ fn the_unsupported_figure_names_the_entry_and_the_reason() {
 
 #[test]
 fn naming_the_entry_does_not_move_the_rows() {
-    // The rows are the stdout contract — `--format json`'s text twin, and
-    // what a reader greps. The names go to stderr beside every other
-    // `note:` this command prints, so nothing that consumes the rows has
-    // to change.
+    // The rows are the stdout contract, so the names go to stderr beside
+    // every other `note:`.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let clean = one_slot_source(tmp.path(), "clean.crn", "cobblestone");
     let named = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
@@ -1307,11 +1239,9 @@ fn naming_the_entry_does_not_move_the_rows() {
 
 #[test]
 fn an_entry_is_named_even_when_no_target_was_weighed() {
-    // The `buildable targets` row already prints `E_UNKNOWN_ID` per
-    // version, which names an absent id in the ordinary case — but only
-    // when a version was lowered at all. A floor above every supported
-    // version skips all of them, and then the portability count is the
-    // only thing left saying anything is wrong. It has to say what.
+    // `buildable targets` names an absent id only for a version it
+    // lowers. A floor above every version skips them all, leaving the
+    // portability count as the only report.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "floored.crn", "oak_sign");
     let body = std::fs::read_to_string(&src).expect("read the probe source back");
@@ -1337,9 +1267,8 @@ fn an_entry_is_named_even_when_no_target_was_weighed() {
 
 #[test]
 fn the_json_row_names_exactly_what_its_count_counts() {
-    // A tool reading `--format json` gets the same answer the text does.
-    // The list is asserted against the row's own figure rather than
-    // against a literal, so the two cannot be right about different things.
+    // Against the row's own figure rather than a literal, so the two
+    // cannot be right about different things.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
     let axes = info_json_at(&src, "java,bedrock");
@@ -1393,11 +1322,8 @@ fn the_json_row_names_exactly_what_its_count_counts() {
 
 #[test]
 fn the_degraded_figure_names_the_entry_and_what_it_lost() {
-    // The other integer over entries the command can name. `roof-hip` is
-    // a shipped example reporting `degraded: 4`, and without the names
-    // the only way to find the four is to compile and read
-    // `W_INTENT_DEGRADED` —
-    // which is the run `info` exists to be read before.
+    // Without the names, finding `roof-hip`'s four means compiling and
+    // reading `W_INTENT_DEGRADED`, the run `info` exists to be read before.
     let axes = info_json("roof-hip.crn", "bedrock");
     let bedrock = portability_entry(&axes, "bedrock");
     let entries = bedrock["degraded_entries"]
@@ -1459,11 +1385,8 @@ fn the_degraded_figure_names_the_entry_and_what_it_lost() {
 
 #[test]
 fn the_degraded_notes_and_the_build_share_one_wording() {
-    // Two moments, one reader, one wording: the note here and the build's
-    // `W_INTENT_DEGRADED` come off the same function, so `info` cannot
-    // start describing a loss differently from the compile that hits it.
-    // Checked against that function rather than a literal, which is what
-    // makes this a claim about the seam and not about a string.
+    // The note and the build's `W_INTENT_DEGRADED` come off one function,
+    // checked against it rather than a literal.
     const HEADER: &str = "note: what `degraded: ";
     let (code, stdout, stderr) = info_raw(&examples_dir().join("roof-hip.crn"), "bedrock");
     assert_eq!(code, Some(0), "info reports; it does not refuse: {stderr}");
@@ -1535,12 +1458,9 @@ fn the_degraded_notes_and_the_build_share_one_wording() {
 
 #[test]
 fn a_source_info_refuses_prints_no_rows_at_all() {
-    // The four rows are a guarantee about a run that finishes, not about
-    // every invocation: a finding the strict per-edition pass raises
-    // returns before `print_text`, and stdout is then empty rather than
-    // short one row. The spec says so, and the two tests either side of
-    // this one compare sources that parse and resolve, so neither could
-    // notice.
+    // The four rows are a guarantee about a run that finishes: a finding
+    // the strict per-edition pass raises returns before `print_text`, so
+    // stdout is empty rather than short one row.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = tmp.path().join("unresolved.crn");
     std::fs::write(
@@ -1565,8 +1485,7 @@ fn an_unsupported_entry_is_a_figure_not_a_gate() {
     // `info` reports; it does not refuse. The example output in the
     // three-answers section of `spec/versioning-editions` carries
     // `unsupported: 1`, and a caller that wants the build to fail runs the
-    // build. Exiting non-zero here would also make the count unreadable
-    // from a shell pipeline that checks status first.
+    // build.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = one_slot_source(tmp.path(), "javaonly.crn", "oak_sign");
     let out = Command::new(cargo_bin())
@@ -1595,14 +1514,10 @@ fn an_unsupported_entry_is_a_figure_not_a_gate() {
 
 #[test]
 fn a_walkway_path_material_reaches_the_portability_row() {
-    // A walkway's `path=@ID` resolves through the registry exactly the way
-    // a member's `mat_slot=` does, and its strip is lowered into its own
-    // `BlockArray`. Whether that array reaches the counters is a fact about
-    // the lowering, not about the fold — `non_air_entries` never looks at a
-    // key — so only a source that really lays a walkway can establish it.
-    //
-    // Every shipped example paves with `@gravel`, which both editions have,
-    // so nothing else here could ever raise the count.
+    // A walkway's strip is lowered into its own `BlockArray`, and
+    // `non_air_entries` never looks at a key, so only a source that lays a
+    // walkway shows the strip reaching the counters. Every shipped example
+    // paves with `@gravel`, which both editions have.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = tmp.path().join("walkway.crn");
     std::fs::write(

@@ -26,11 +26,9 @@ fn roofed_source(material: &str) -> String {
 
 #[test]
 fn a_non_stair_roof_material_stops_the_build_on_both_editions() {
-    // Both, because a source's materials are an edition-neutral question:
-    // there is no version of either edition where a cobblestone carries a
-    // stair's `shape`. Java would write the impossible state and exit 0;
-    // Bedrock's state translator would refuse it, which is true of the
-    // translator and the wrong layer to be reading about.
+    // No version of either edition has a cobblestone with a stair's
+    // `shape`. Unchecked, Java would write the impossible state and exit 0,
+    // and Bedrock's state translator would refuse it at the wrong layer.
     for (edition, target) in [("java", "1.21.4"), ("bedrock", "1.21.60")] {
         let tmp = TempDir::new().expect("tempdir");
         let src = write_source(tmp.path(), "hut.crn", &roofed_source("cobblestone"));
@@ -56,10 +54,8 @@ fn a_non_stair_roof_material_stops_the_build_on_both_editions() {
 
 #[test]
 fn the_refusal_points_at_the_theme_line_and_names_the_slot() {
-    // The member only names a slot; the binding is what needs editing, and
-    // every member reading that slot has the same problem. Anchoring on the
-    // member line would send the author to the wrong file position and
-    // report the same edit once per reader.
+    // The binding is what needs editing, and every member reading the slot
+    // shares it, so the finding anchors on the theme line, once.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(tmp.path(), "hut.crn", &roofed_source("cobblestone"));
     let out = TempDir::new().expect("out tempdir");
@@ -76,10 +72,7 @@ fn the_refusal_points_at_the_theme_line_and_names_the_slot() {
 
 #[test]
 fn a_stair_species_reaches_the_artifact_unremarked() {
-    // The other half of the contract, and what makes this a family test
-    // rather than an equality test against one hardcoded id: choosing a
-    // species is what binding a roof slot is for, and the registry pack
-    // ships four of them.
+    // Any stair species is a free choice, not one hardcoded id.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(tmp.path(), "hut.crn", &roofed_source("dark_oak_stairs"));
     let out = TempDir::new().expect("out tempdir");

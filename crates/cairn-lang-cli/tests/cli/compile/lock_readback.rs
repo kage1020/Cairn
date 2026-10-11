@@ -19,10 +19,8 @@ fn warning_lines(stderr: &str) -> Vec<&str> {
 
 #[test]
 fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
-    // The exact line `spec/versioning-editions` "Provenance and lock" shows.
-    // The second half deliberately drops the `DataVersion` word — the spec
-    // prints `now 1.21.4/3955.` — so this pins the punctuation as well as
-    // the numbers.
+    // The exact line `spec/versioning-editions` "Provenance and lock"
+    // shows, whose second half drops the `DataVersion` word.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
@@ -43,8 +41,6 @@ fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
         "stderr does not carry the spec's line: {}",
         second.stderr,
     );
-    // A finding is a report, and stdout carries the artifact lines a
-    // pipeline consumes.
     assert!(
         !second.stdout.contains("W_PREVIOUSLY_VERIFIED_TARGET"),
         "the warning must not reach stdout: {}",
@@ -54,8 +50,6 @@ fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
 
 #[test]
 fn a_recompile_for_the_same_target_says_nothing() {
-    // The warning is about divergence. Firing it on every rebuild would
-    // train the reader to skip it, which is the same as not having it.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
@@ -72,9 +66,7 @@ fn a_recompile_for_the_same_target_says_nothing() {
 
 #[test]
 fn a_change_of_edition_names_both_editions() {
-    // Two editions number their releases differently, so the version pair
-    // alone reads as noise — `1.21.4` and `1.21.60` are not comparable
-    // numbers. The edition is what makes the line mean something.
+    // `1.21.4` and `1.21.60` are not comparable without their editions.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
@@ -101,12 +93,9 @@ fn a_change_of_edition_names_both_editions() {
 
 #[test]
 fn the_verified_side_names_the_field_the_recorded_edition_actually_has() {
-    // The left half of the line names the version integer; Bedrock's is the
-    // block palette's own `version`, not Minecraft's `DataVersion`, and
-    // calling it `DataVersion` would name the Java concept for a number
-    // that is not one. Only a Bedrock lockfile on the *left* shows this —
-    // the edition-change test above has Bedrock on the right, where the
-    // integer is printed bare.
+    // Bedrock's integer is the block palette's `version`, not
+    // `DataVersion`. Only the left half names the field, so the Bedrock
+    // lock has to be the recorded one.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
@@ -130,11 +119,9 @@ fn the_verified_side_names_the_field_the_recorded_edition_actually_has() {
 
 #[test]
 fn the_sensitivity_list_reported_is_the_one_the_lockfile_recorded() {
-    // `member_version_sensitivity` is empty until the constraint-catalog
-    // ingest lands, so the compiler cannot produce a populated one — but a
-    // lockfile that carries entries is exactly the case the second warning
-    // exists for, and what it reports has to be what was recorded rather
-    // than anything synthesised here.
+    // The compiler records an empty `member_version_sensitivity`, so the
+    // entries come from a doctored lock, and the warning has to report
+    // what was recorded.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
@@ -171,8 +158,6 @@ fn the_sensitivity_list_reported_is_the_one_the_lockfile_recorded() {
 
 #[test]
 fn one_recorded_member_reads_as_one_member() {
-    // Every other line this command prints is pinned verbatim; this one
-    // would have said `1 members`.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
@@ -202,16 +187,13 @@ fn one_recorded_member_reads_as_one_member() {
 
 #[test]
 fn nothing_is_said_about_sensitivity_when_the_lockfile_recorded_none() {
-    // The paired half of the test above: the second warning is not a
-    // fixed companion of the first.
+    // The second warning is not a fixed companion of the first.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
 
     compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock));
     let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
-    // The target warning still fires, and no members were recorded, so
-    // there is nothing else to report.
     assert_eq!(
         warning_lines(&second.stderr),
         [PREVIOUS_TARGET],
@@ -222,10 +204,8 @@ fn nothing_is_said_about_sensitivity_when_the_lockfile_recorded_none() {
 
 #[test]
 fn a_lockfile_that_does_not_parse_is_reported_rather_than_discarded() {
-    // "A stale or tampered lockfile is silently discarded rather than
-    // detected" is the defect. It stays a warning: the compile itself is
-    // valid, and an unrelated corrupt file next to the source is no reason
-    // to refuse to build.
+    // A warning, not a refusal: the compile itself is valid, and a corrupt
+    // file next to the source is no reason to refuse to build.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
@@ -247,9 +227,7 @@ fn a_lockfile_that_does_not_parse_is_reported_rather_than_discarded() {
 
 #[test]
 fn a_lockfile_from_a_newer_schema_is_reported_rather_than_read() {
-    // The schema version exists so a later format is not read as if the
-    // field names still meant the same thing. Reaching the compile path
-    // proves the check is not confined to the library.
+    // A later format's field names need not mean the same thing.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
     let lock = out_dir.path().join("cottage.lock");
@@ -262,9 +240,7 @@ fn a_lockfile_from_a_newer_schema_is_reported_rather_than_read() {
 
     let run = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
-    // Told apart from a corrupt file in words, not only in kind: a document
-    // written by a newer Cairn is not malformed, and replacing it does lose
-    // something.
+    // A newer document is not malformed, and replacing it loses something.
     assert!(
         run.stderr
             .contains("the existing lockfile is schema version 99 and this build reads 1"),
@@ -290,9 +266,7 @@ fn a_lockfile_from_a_newer_schema_is_reported_rather_than_read() {
 
 #[test]
 fn the_default_lock_path_is_read_back_too() {
-    // `--lock` is optional; compile writes `<source>.lock` beside the
-    // source without it. A read-back that only ran under the explicit flag
-    // would miss the path almost every build uses.
+    // Without `--lock`, `<source>.lock`: the path almost every build uses.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out");
 
@@ -372,11 +346,10 @@ fn assert_refused_but_read(run: &Run, replaced: &str, id: &str, ch: &str) {
 }
 
 // A lock an earlier Cairn wrote can record an id this build's identifier
-// rule refuses. That lock is not
-// corrupt, and the target it was verified for is still compared. A
-// placement id and a walkway port are both covered, since they are read
-// by different arms of the probe, and so is each half of the rule's
-// reasons: a path separator, and a character Windows reserves.
+// rule refuses; it is not corrupt, and its target is still compared. A
+// placement id and a walkway port are read by different arms of the
+// probe, and the rule refuses both a path separator and a character
+// Windows reserves.
 
 #[test]
 fn a_lock_recording_a_placement_id_the_rule_refuses_is_still_read() {
@@ -408,9 +381,9 @@ fn a_lock_recording_a_no_break_space_quotes_it_as_its_escape() {
 
 #[test]
 fn a_lock_with_a_refused_id_still_reports_the_sensitive_members_it_recorded() {
-    // `report_target_change` is called from both the strict path and this
-    // one, and the strict path's sensitivity tests go through `cottage.crn`.
-    // Passing an empty list here by mistake would fail nothing else.
+    // `report_target_change` is also called from the strict path, whose
+    // sensitivity tests go through `cottage.crn`; an empty list passed from
+    // this one would fail nothing else.
     let id = "sub/home1";
     let (run, replaced) = recompile_village_over(|written| {
         let sensitive = with_line(
@@ -484,9 +457,8 @@ fn a_lock_with_a_malformed_hash_is_unreadable_despite_a_refused_id() {
 
 #[test]
 fn a_lock_whose_schema_version_does_not_parse_is_unreadable_despite_a_refused_id() {
-    // The worst of them: the schema version was never validated, so the
-    // target beside it (here a `DataVersion` no release has) is not one
-    // to print as fact.
+    // An unparsed schema version vouches for nothing, so the target beside
+    // it (here a `DataVersion` no release has) is not one to print as fact.
     let (run, _) = recompile_village_over(|written| {
         let unversioned = with_line(
             written,

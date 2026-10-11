@@ -55,12 +55,8 @@ fn json_format_round_trips_as_block_array_ir() {
 
 #[test]
 fn deferred_member_warnings_print_to_stderr() {
-    // The carrier is a `stair kind=stairs shape=inner_left`.
-    // `fill_stair` accepts only `shape=straight` / `outer_left` /
-    // `outer_right`, so an `inner_*` shape still emits a targeted
-    // `W_DEFERRED_MEMBER` — that is what this test pins. Kept in-line
-    // rather than as an example so we do not commit an example the
-    // docs would then need to describe.
+    // Stair lowering takes only `shape=straight` / `outer_left` /
+    // `outer_right`, so `inner_left` defers.
     let source = concat!(
         "theme t:\n",
         "  slot floor -> spruce_planks\n",
@@ -104,11 +100,7 @@ fn all_examples_exit_zero() {
 
 #[test]
 fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
-    // `W_PHASE_CONFLICT` names the member that was overwritten in a note,
-    // and a note saying "declared here" without a *here* sends the reader
-    // nowhere. Every command renders its notes through one renderer, and
-    // this pins that the location travels with `lower`'s notes as it does
-    // with `check`'s.
+    // `W_PHASE_CONFLICT`'s note points at the overwritten member.
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("conflict.crn");
     fs::write(
@@ -141,9 +133,7 @@ fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
         stderr.contains(":7:3:   note: overwritten member declared here"),
         "the note must carry the `door` line's position, got: {stderr}",
     );
-    // The other branch of the same renderer: a footer points at no second
-    // location, so it stays indented and unprefixed rather than reading as
-    // a second pointer at the primary span.
+    // A span-less footer stays indented and unprefixed.
     assert!(
         stderr.contains(
             "

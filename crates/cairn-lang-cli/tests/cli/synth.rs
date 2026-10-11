@@ -26,8 +26,7 @@ const NEUTRAL_STAGE: &str = "netlist";
 
 #[test]
 fn requires_experimental_flag() {
-    // The subcommand is internal-tier; a caller invoking it without the
-    // opt-in flag must exit 2 with a usage hint on stderr so the gate
+    // Internal-tier: without the opt-in flag, a usage error, so the gate
     // cannot be missed silently.
     let path = examples_dir().join("redstone-door.crn");
     let out = cairn("synth", &[path.to_str().unwrap()]);
@@ -99,14 +98,11 @@ fn an_edition_tagged_stage_without_edition_is_a_usage_error() {
 #[test]
 fn the_missing_edition_is_reported_ahead_of_the_sources_findings() {
     // Each source has a finding (see `FINDING_SOURCES`), and the usage
-    // error still has to be the one line, with the usage exit code. That
-    // holds for the warning-only source too, which does not stop a run:
-    // its warning is not printed ahead of the usage error.
+    // error is still the one line, with the usage exit code; the
+    // warning-only source's warning is not printed ahead of it either.
     //
-    // Each source is also run with `--edition java`, the CONTROL: without
-    // the usage error in the way, its finding is what surfaces, with the
-    // exit code its severity gives. A source that stopped carrying its
-    // finding would still pass the usage-error assertions.
+    // The control runs each source with `--edition java`, where its finding
+    // surfaces, so a source that lost its finding cannot pass.
     let dir = tempfile::tempdir().expect("temp dir");
     for (name, path, code) in &write_finding_sources(dir.path()) {
         let out = cairn(
@@ -141,15 +137,10 @@ fn the_missing_edition_is_reported_ahead_of_the_sources_findings() {
 
 #[test]
 fn the_missing_edition_is_reported_ahead_of_a_missing_file() {
-    // A path that names nothing exits 2, as the usage error does, so the
-    // exit code cannot tell the two apart and only stderr can. The usage
-    // error is decided from argv alone, before the file is read, so it is
-    // the one a caller who got both wrong hears first, and the read is
-    // never attempted.
-    //
-    // The CONTROL runs the same path with `--edition java`, where the read
-    // is what fails. Without it, the first half would pass just as well on
-    // a path that exists.
+    // A missing path exits 2 as the usage error does, so only stderr tells
+    // them apart. The usage error is decided from argv alone, before the
+    // file is read; the control runs the path with `--edition java`, where
+    // the read is what fails.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("missing.crn");
     let out = cairn(
@@ -193,11 +184,10 @@ fn the_missing_edition_is_reported_ahead_of_a_missing_file() {
 
 #[test]
 fn a_stray_edition_on_an_edition_neutral_stage_is_a_usage_error() {
-    // The refusing half of `--edition`'s contract; why the flag is refused
-    // rather than ignored is `synth_edition`'s to say. The refusal has to
-    // be the one stderr line whatever the file holds, so it is also run
-    // over `FINDING_SOURCES`; the CONTROL runs each source on that stage
-    // without `--edition`, where its finding is what surfaces.
+    // Why the flag is refused rather than ignored is `synth_edition`'s to
+    // say. The refusal is the one stderr line whatever the file holds, so
+    // it is also run over `FINDING_SOURCES`, with a control that drops
+    // `--edition`.
     let path = examples_dir().join("redstone-door.crn");
     let dir = tempfile::tempdir().expect("temp dir");
     let mut sources: Vec<(&str, PathBuf, Option<&str>)> = vec![("redstone-door.crn", path, None)];
@@ -503,10 +493,6 @@ fn every_stage_prints_the_ir_the_redstone_passes_build() {
 
 #[test]
 fn stage_placement_missing_region_exits_one() {
-    // A scope with cells but no `circuit region=` line surfaces
-    // `E_NO_CIRCUIT_REGION` on stderr and exits 1 — the symmetric E2E
-    // gate to the congestion case below, so both fail-loud paths are
-    // wired through the CLI in the same shape.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("noregion.crn");
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
@@ -542,10 +528,6 @@ fn stage_placement_missing_region_exits_one() {
 
 #[test]
 fn stage_placement_congestion_exits_one() {
-    // A scope whose synthesised netlist overflows its `circuit
-    // region=... void=N` reservation should fail loud with
-    // `E_ROUTE_CONGESTION` on stderr and exit 1 — the same convention
-    // the synth pass's earlier fail-loud diagnostics follow.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("tiny.crn");
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
@@ -584,10 +566,8 @@ fn stage_placement_congestion_exits_one() {
 
 #[test]
 fn stage_route_congestion_exits_one() {
-    // A scope that passes placement at the cell-only budget boundary
-    // but overflows once routing lays wires must fail loud with
-    // `E_ROUTE_CONGESTION` on stderr and exit 1 — the same convention
-    // the earlier stages follow.
+    // Placement passes at the cell-only budget boundary; the wires
+    // overflow it.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("pack.crn");
     // Two cells in the shortest row that holds them, in the shallowest
@@ -633,13 +613,9 @@ fn stage_route_congestion_exits_one() {
 
 #[test]
 fn stage_delay_inherits_upstream_congestion_failure() {
-    // A scope that fails at the routing stage (E_ROUTE_CONGESTION) is
-    // elided from routing's output. The delay stage runs on the elided
-    // set, so its own diagnostics list is empty; but the routing
-    // failure was already reported and the process exits 1. Pins the
-    // "delay stage inherits upstream fail-loud" contract so an author
-    // running `--stage delay` sees the same congestion errors they
-    // would have seen from `--stage route`.
+    // A scope routing refuses is elided from its output, so the delay
+    // stage has nothing of its own to report; the routing error still
+    // reaches `--stage delay`.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("pack.crn");
     // Two cells in the shortest row that holds them, in the shallowest
@@ -682,19 +658,13 @@ fn stage_delay_inherits_upstream_congestion_failure() {
 
 #[test]
 fn stage_delay_attenuation_limit_exits_one() {
-    // A scope whose output-pad segment exceeds the v1 attenuation cap
-    // must fail loud with `E_ATTENUATION_LIMIT` on stderr and exit 1.
-    // Uses a 300-block-wide region so the `sig.out` output driver spans
-    // the full x-axis to the right-edge output pad — that segment
-    // (~300 blocks) sits well past the 256-block cap.
+    // A 300-block-wide region puts the `sig.out` driver's segment to the
+    // right-edge pad well past the 256-block cap.
     //
-    // `--stage delay` is asked for, but the refusal comes from the
-    // routing pass: the straight line alone is already over the cap, so
-    // stage 2's gate answers first and the CLI stops there. Hence the
-    // `placed` noun below — the cells are still `Unrouted` when it
-    // fires. The delay pass's own routed-length check is exercised by
-    // the detour fixtures in `cairn-lang-redstone`, where the straight
-    // line fits and only the route does not.
+    // The straight line alone is over the cap, so routing's gate refuses
+    // it before the delay pass runs, hence `placed` below. The delay
+    // pass's routed-length check is exercised by the detour fixtures in
+    // `cairn-lang-redstone`.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("wide.crn");
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
@@ -809,10 +779,6 @@ fn stage_route_refuses_a_detour_past_the_attenuation_cap() {
 
 #[test]
 fn unparseable_source_exits_one() {
-    // Parse-level failure follows the same exit-code convention as
-    // `cairn parse` / `check`: exit 1 (build problem), position-anchored
-    // error on stderr. Using a scratch file rather than a fixture so the
-    // test does not add a permanent broken example under `tests/`.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("broken.crn");
     std::fs::write(&path, "@cairn 2026.06\n\nstruct 3xnot-a-size\n").expect("write scratch file");
@@ -827,20 +793,11 @@ fn unparseable_source_exits_one() {
 
 #[test]
 fn stage_crossing_inherits_upstream_attenuation_failure() {
-    // `--stage crossing` runs stages 1-4 in sequence, so an
-    // Error-severity diagnostic from any prior stage (here, the
-    // routing pass's `E_ATTENUATION_LIMIT` on a 300-block-wide region)
-    // short-circuits with exit 1 before stage 4 runs. The stderr
-    // still names the origin stage so a downstream reader can tell
-    // which pass tripped.
-    //
-    // Stage 2 answers first for a segment whose straight line alone is
-    // over the cap, and every `.crn` that reaches this code does so by
-    // that route. A scope that passes the straight-line gate and fails
-    // only the routed-length one cannot be written in `.crn` at all, so
-    // "crossing inherits a *delay* failure" is exercised by a
-    // hand-built two-scope fixture in `cairn-lang-redstone`'s
-    // `tests/redstone/delay.rs` rather than here.
+    // Every `.crn` over the cap fails routing's straight-line gate first;
+    // a scope failing only the routed-length check cannot be written in
+    // `.crn`, so "crossing inherits a *delay* failure" is exercised by a
+    // hand-built fixture in `cairn-lang-redstone`'s
+    // `tests/redstone/delay.rs`.
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("wide.crn");
     let source = "@cairn 2026.06\n@requires version>=1.20\n\n\
@@ -879,13 +836,9 @@ fn stage_crossing_inherits_upstream_attenuation_failure() {
 #[test]
 fn stage_crossing_two_nets_over_one_coord_exits_one() {
     // Two nets that want one coord, with no layer above the plane to
-    // escape onto. The compiler refuses the scope rather than emitting
-    // a layout in which those two signals are one strand of dust, and
-    // the refusal has to reach the caller through `--stage crossing`
-    // the way every earlier stage's does: exit 1, code on stderr,
-    // nothing on stdout. Without this case a dropped diagnostic report
-    // between the pipeline and the JSON dump would let a refused scope
-    // be printed as a legalized IR.
+    // escape onto, are refused rather than laid as one strand of dust,
+    // and the refusal reaches the caller through `--stage crossing` like
+    // every earlier stage's.
     //
     // One cell, two sensors, two actuators, one service layer. `sig.a`
     // drives both the cell and the back door, so it is laid first, and
@@ -939,12 +892,9 @@ struct crossbar size=4x4
             (18, 3, "error", "E_ROUTE_CONGESTION"),
         ],
     );
-    // `placed`, not `routed`: `--stage crossing` runs the whole pipeline
-    // and the CLI stops at the first Error-severity stage, so this scope
-    // never reaches the crossing pass — the routing pass refuses it while
-    // laying nets over a netlist whose cells are still unrouted. The noun
-    // names the netlist the refusing pass read, which is the only way to
-    // tell from the message where in the pipeline the scope died.
+    // `placed`, not `routed`: routing refuses the scope before the crossing
+    // pass runs, and the noun is the only way to tell from the message
+    // where in the pipeline it stopped.
     assert!(
         stderr.contains("placed netlist for struct `crossbar`")
             && stderr.contains("another net's dust, on the coord or one step from it")
