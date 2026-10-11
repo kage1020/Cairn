@@ -79,8 +79,7 @@ fn an_unlexable_requires_value_is_a_floor_that_declares_nothing() {
     }
 }
 
-/// A comment ends the value, so what follows it is no part of the text a
-/// raw value takes — and was never lexed at all.
+/// A comment ends the value, so what follows it is never lexed.
 #[test]
 fn a_comment_after_the_value_is_still_a_comment() {
     assert_eq!(codes(&format!("@cairn 2026.6 # $ ~\n{BODY}")), []);
@@ -90,10 +89,10 @@ fn a_comment_after_the_value_is_still_a_comment() {
 /// runs to end of line, so the comment is part of the stretch the lexer
 /// refused, and the value takes it whole.
 ///
-/// This pins today's reading, not an intended one. The tree-sitter grammar
-/// reads the same source the other way: `directive_literal` stops at the
-/// `#` and the rest is a comment. Both parsers accept the file; only the
-/// value text differs.
+/// This pins the reference parser's reading, which is not a designed one:
+/// the tree-sitter grammar's `directive_literal` stops at the `#` and reads
+/// the rest as a comment. Both parsers accept the file; only the value text
+/// differs.
 #[test]
 fn a_comment_inside_an_unterminated_quote_is_part_of_the_value() {
     let source = format!("@cairn 2026.6 \"draft # note\n{BODY}");

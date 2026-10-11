@@ -7,18 +7,15 @@ use cairn_lang_core::{Diagnostic, Severity, diagnose_parse_failure, parse};
 
 /// One source per shape a parse can fail in.
 ///
-/// The third column names the variant it must produce, so a source that
-/// stops reaching its variant — because the lexer got stricter, or the
-/// parser started recovering — fails here rather than quietly leaving that
-/// variant unrendered.
+/// The third column names the variant each source must produce, so one
+/// that stops reaching it fails here rather than leaving that variant
+/// unrendered.
 ///
 /// `LexError::UnmatchedDedent` has no row because no source reaches it. A
 /// level only enters the indent stack through an indent of exactly one
 /// level, and an odd count is refused before the comparison, so every even
-/// level below the current one is already on the stack and the arm that
-/// raises it cannot be taken. Written down rather than left as a gap: if
-/// the indent rules change, this is the note that says the row is
-/// missing.
+/// level below the current one is already on the stack. If the indent rules
+/// change, this is the note that says the row is missing.
 const REFUSED: &[(&str, &str, &str)] = &[
     ("tab_indent", "theme t:\n\tslot a -> @b\n", "TabIndent"),
     ("odd_indent", "theme t:\n   slot a -> @b\n", "OddIndent"),
@@ -50,15 +47,12 @@ const REFUSED: &[(&str, &str, &str)] = &[
     ),
     ("syntax", "widget w\n  floor mat_slot=f\n", "Syntax"),
     // The largest class: the parser reaches the end of a line wanting
-    // something more. It is reported *at* that end, so its span is empty —
-    // the row that keeps the assertions below honest about what "to the
-    // end of its line" is worth when the line has already ended.
+    // something more, and reports *at* that end with an empty span.
     ("end_of_line", "struct s size=\n", "Syntax"),
 ];
 
-/// A value nested past the parser's depth limit, built rather than written
-/// out: the limit is a constant, and a literal deep enough to pass it today
-/// would stop passing it the moment the constant moves.
+/// A value nested past the parser's depth limit, built from the constant so
+/// it stays past the limit when the limit moves.
 fn nested_too_deep() -> String {
     let depth = cairn_lang_core::MAX_NESTING_DEPTH + 6;
     format!(
@@ -124,8 +118,6 @@ fn every_refusal_carries_the_parse_code() {
     }
 }
 
-/// The table above still reaches every shape it names, and the generated
-/// source still reaches the depth limit.
 #[test]
 fn the_refusals_cover_the_shapes_they_claim() {
     for (name, source, expected) in REFUSED {
@@ -145,11 +137,9 @@ fn the_refusals_cover_the_shapes_they_claim() {
 /// The diagnostic starts where the error says it does and never crosses a
 /// line break.
 ///
-/// Not "and reaches the end of the line", which is what a parse failure's
-/// span is *bounded* by rather than what it always is: an error reported
-/// at the end of a line — `expected X, got end of line`, the largest class
-/// — starts there and ends there, and the `end_of_line` row above is in
-/// the table so that case is measured rather than assumed away.
+/// Not "and reaches the end of the line": the end of the line *bounds* the
+/// span, and an error reported there, the largest class, starts and ends
+/// there, as the `end_of_line` row measures.
 #[test]
 fn the_span_starts_where_the_error_does_and_stays_on_its_line() {
     for (name, source) in rows() {
@@ -201,9 +191,8 @@ fn the_message_is_the_error_without_its_position() {
 /// the picture it should draw.
 ///
 /// A caret where something is missing, rather than a squiggle under text
-/// that is not wrong. Asserted rather than left to the bound above, which
-/// an implementation widening every span to at least one character would
-/// still satisfy.
+/// that is not wrong. The bound above would still pass with every span
+/// widened to one character.
 #[test]
 fn an_error_at_the_end_of_a_line_underlines_nothing() {
     let source = "struct s size=\n";
@@ -217,10 +206,8 @@ fn an_error_at_the_end_of_a_line_underlines_nothing() {
 
 /// A parse failure obeys the prose rules every other diagnostic obeys.
 ///
-/// `diagnostic_text.rs` sweeps the check pass's findings, and it cannot
-/// reach these: its corpus parses first. The same rules are asserted here
-/// so a message with a dropped `\` continuation, or one that breaks the
-/// one-diagnostic-per-line shape, fails somewhere.
+/// `check/diagnostic_text.rs` sweeps the check pass's findings and cannot
+/// reach these, because its corpus parses first.
 #[test]
 fn no_refusal_message_breaks_the_line_it_is_rendered_on() {
     for (name, source) in rows() {

@@ -103,12 +103,7 @@ fn odd_indent_is_rejected() {
 
 #[test]
 fn double_indent_is_rejected() {
-    // Going from 0 to 4 spaces in one step is an indent of 2 levels.
-    //
-    // Its own variant rather than `OddIndent`, whose message ("must be a
-    // multiple of 2 spaces") states a rule that 4 already satisfies.
-    // The `refusals` module below carries the rest, including what the
-    // message has to name for the repair to be actionable.
+    // 0 to 4 spaces in one step opens two levels.
     let err = lex("struct keep\n    floor mat_slot=floor\n").unwrap_err();
     assert!(
         matches!(
@@ -156,8 +151,7 @@ fn tracks_line_and_column() {
 
 #[test]
 fn accepts_crlf_line_endings() {
-    // Same as the simple-command test but with Windows-style line endings —
-    // must not regress on `core.autocrlf=true` checkouts.
+    // What a `core.autocrlf=true` checkout hands the lexer.
     let kinds = kinds("walls class=outer height=4\r\nfloor mat_slot=floor\r\n");
     assert!(
         kinds
@@ -189,8 +183,6 @@ fn accepts_lone_cr_line_endings() {
 
 #[test]
 fn col_counts_characters_not_bytes_in_strings() {
-    // Multi-byte (3-byte UTF-8) characters inside a string must not throw
-    // off the column counter for the next token.
     let source = "@intended_targets [\"日本語\"]\n@cairn 2026.06\n";
     let tokens = lex(source).expect("lex");
     let cairn = tokens
@@ -202,8 +194,6 @@ fn col_counts_characters_not_bytes_in_strings() {
 
 #[test]
 fn non_ascii_outside_string_is_reported_as_character() {
-    // A non-ASCII character not inside a string literal should error with
-    // the actual `char`, not a corrupted single byte.
     let err = lex("struct あ size=1x1\n").unwrap_err();
     match err {
         LexError::UnexpectedChar { ch, .. } => assert_eq!(ch, 'あ'),
@@ -219,8 +209,7 @@ fn unterminated_string_is_reported() {
 
 #[test]
 fn dedent_emits_per_level_closed() {
-    // `struct s\n  level y=0\n    door\nstruct t\n` exits two indent levels
-    // on the line `struct t`, so two Dedent tokens are emitted on it.
+    // `struct t` closes two levels at once.
     let source = "struct s\n  level y=0\n    door side=front\nstruct t\n";
     let kinds = kinds(source);
     let dedents = kinds
@@ -230,13 +219,9 @@ fn dedent_emits_per_level_closed() {
     assert_eq!(dedents, 2);
 }
 
-/// A `-` that is not the head of an `->` is a token of its own.
-///
-/// An `UnexpectedChar` there would put a version label's pre-release
-/// suffix out of reach of the directive that reads it, as in
-/// `@requires version>=1.21.4-rc1`. For why that label shape has to be
-/// readable, see `spec/versioning-editions` "The target is a compile-time
-/// parameter".
+/// An `UnexpectedChar` would put a pre-release suffix such as `-rc1` out
+/// of reach of `@requires`, and `spec/versioning-editions` "The target is a
+/// compile-time parameter" counts such labels as real versions.
 #[test]
 fn a_lone_dash_lexes_as_a_token_rather_than_failing() {
     let suffixed = kinds("@requires version>=1.21.4-rc1\n");
@@ -296,9 +281,8 @@ mod refusals {
         );
     }
 
-    /// The same defect wearing a different character: any identifier byte
-    /// continues the run the author was writing, so the literal they meant is
-    /// not the one the token would hold.
+    /// Any identifier byte continues the run the author was writing, so the
+    /// token would not hold the literal they meant.
     #[test]
     fn a_size_literal_followed_by_a_word_character_is_refused() {
         for source in [
@@ -306,9 +290,8 @@ mod refusals {
             "struct s size=2x2_\n",
             "struct s size=2x2x\n",
         ] {
-            // The variant, not merely a refusal: `2x2_` becoming an
-            // `UnexpectedChar` would still be an error and would still be
-            // wrong about what the author needs to change.
+            // The variant, not merely a refusal: an `UnexpectedChar` would
+            // be wrong about what the author needs to change.
             let err = lex(source).unwrap_err();
             assert!(
                 matches!(err, LexError::TrailingSizeSegment { .. }),
@@ -317,22 +300,17 @@ mod refusals {
         }
     }
 
-    /// The refusal is a variant of its own, so a quick-fix can dispatch on it
-    /// without reading prose.
     #[test]
     fn the_trailing_segment_refusal_names_the_character_it_found() {
         let text = message("struct s size=2x2x9\n");
-        // The literal as written and the character that ended it. Quoting
-        // `2x2` alone would leave the author guessing which `x` was the
-        // problem, and `contains('x')` on its own is implied by `2x2`.
+        // Quoting `2x2` alone would leave the author guessing which `x` was
+        // the problem, and a bare `contains('x')` is implied by `2x2`.
         assert!(
             text.contains("`2x2`") && text.contains("`x`"),
             "the message should quote the literal and the character after it: {text}",
         );
     }
 
-    /// A delimiter ends the literal rather than continuing it, so the ordinary
-    /// forms keep working.
     #[test]
     fn a_size_literal_ends_at_a_delimiter() {
         for source in [
@@ -346,8 +324,7 @@ mod refusals {
         }
     }
 
-    /// Leading zeros in an extent are not a second literal, and were never the
-    /// thing being refused.
+    /// Leading zeros are part of the extent, not a trailing segment.
     #[test]
     fn leading_zeros_in_an_extent_still_lex() {
         assert_eq!(kinds("9x0007\n")[0], TokenKind::Size(9, 7));
@@ -369,13 +346,9 @@ mod refusals {
         );
     }
 
-    /// A digit run past `i64` is not the lexer's to refuse.
-    ///
-    /// Parsing every run into an `i64` would make the token type a range
-    /// check on text the lexer cannot type: a truth-table row is digits too,
-    /// and `11111111111111111111` is a legal twenty-input pattern rather than
-    /// an overflow. The refusal belongs where a value is actually asked for,
-    /// which reports `IntContext::IntLiteral`.
+    /// A truth-table row is digits too, and `11111111111111111111` is a legal
+    /// twenty-input pattern rather than an overflow. The refusal belongs where
+    /// a value is asked for, which reports `IntContext::IntLiteral`.
     #[test]
     fn an_integer_past_i64_still_lexes() {
         assert_eq!(
@@ -389,9 +362,9 @@ mod refusals {
         );
     }
 
-    /// The size literal is the other way round, and stays that way: `WxH` is
-    /// a size in every position it can appear, so the lexer builds one and
-    /// reports an extent it cannot hold.
+    /// The size literal is the other way round: `WxH` is a size in every
+    /// position it can appear, so the lexer builds one and reports an extent
+    /// it cannot hold.
     #[test]
     fn an_extent_past_u32_is_still_the_lexers_to_refuse() {
         let err = lex("struct s size=99999999999999999999x9\n").unwrap_err();
@@ -400,9 +373,8 @@ mod refusals {
 
     // -- indentation ----------------------------------------------------------
 
-    /// A 4-space indent is a multiple of 2, so "indentation must be a multiple
-    /// of 2 spaces (got 4)" tells the author to do what they already did. The
-    /// two conditions get separate variants for that reason.
+    /// "indentation must be a multiple of 2 spaces (got 4)" would tell the
+    /// author to do what they already did, so a jump has a variant of its own.
     #[test]
     fn a_multi_level_jump_is_not_reported_as_odd_indentation() {
         let err = lex("struct keep size=3x3\n    floor mat_slot=wall\n").unwrap_err();
@@ -419,23 +391,19 @@ mod refusals {
         );
     }
 
-    /// The message has to name the width that would work, since naming the
-    /// rule alone is what made the old one unactionable.
     #[test]
     fn the_jump_refusal_names_the_width_that_would_work() {
         let text = message("struct keep size=3x3\n    floor mat_slot=wall\n");
-        // Both numbers *and* which is which: `contains('2') && contains('4')`
-        // passes just as well with the two swapped, which is the one way this
-        // message can be wrong and still look right.
+        // Which number is which: swapped is the one way this message can be
+        // wrong and still look right.
         assert!(
             text.contains("got 4") && text.contains("expected 2"),
             "the message should name the width found and the width expected, in that order: {text}",
         );
     }
 
-    /// The expected width is relative to the level currently open, not a
-    /// constant — jumping to 6 is a different repair from inside a body than
-    /// from the top level.
+    /// Jumping to 6 is a different repair from inside a body than from the top
+    /// level.
     #[test]
     fn the_expected_width_follows_the_enclosing_level() {
         let from_top = lex("struct keep size=3x3\n      floor mat_slot=wall\n").unwrap_err();
@@ -466,17 +434,14 @@ mod refusals {
         );
     }
 
-    /// Odd indentation keeps its own variant and its own message: that one was
-    /// always actionable.
     #[test]
     fn odd_indentation_is_still_its_own_refusal() {
         let err = lex("theme medieval:\n   slot floor -> @x\n").unwrap_err();
         assert!(matches!(err, LexError::OddIndent { got: 3, .. }), "{err:?}");
     }
 
-    /// An odd width that is *also* more than one level deep reports the odd
-    /// count, because rounding to a legal width is the first repair and the
-    /// level is only meaningful once the width is.
+    /// Rounding to a legal width is the first repair, and the level means
+    /// something only once the width does.
     #[test]
     fn an_odd_jump_reports_the_odd_width() {
         let err = lex("struct keep size=3x3\n     floor mat_slot=wall\n").unwrap_err();
@@ -498,17 +463,13 @@ mod refusals {
         assert_eq!(strip(with_bom), strip(without));
     }
 
-    /// Only at offset 0. A BOM in the middle of a file is a real stray
-    /// character and stays one: skipping it anywhere would silently accept a
-    /// file with a mark buried in it, which is a corruption worth reporting.
+    /// A mark past offset 0 is a stray character, and skipping it would
+    /// accept a corrupted file in silence.
     #[test]
     fn a_byte_order_mark_after_the_start_is_still_refused() {
         let err = lex("struct s\u{feff} size=3x3\n").unwrap_err();
-        // The position as well as the variant. Testing "it is refused" alone
-        // still passes when the skip is keyed on the mark appearing
-        // *anywhere* rather than at the start: the file is still rejected,
-        // but three bytes of real text have been skipped off the front and
-        // every position after them is wrong.
+        // The position too: a skip keyed on a mark anywhere still refuses
+        // this file, but with three bytes of real text skipped off the front.
         assert!(
             matches!(
                 err,
@@ -521,9 +482,8 @@ mod refusals {
         );
     }
 
-    /// U+00A0 renders as a space, so quoting it verbatim produced a message
-    /// saying a space was unexpected. Unprintable and space-confusable
-    /// characters are named by codepoint instead.
+    /// U+00A0 renders as a space, so quoted verbatim the message would say a
+    /// space was unexpected.
     #[test]
     fn an_invisible_character_is_named_by_codepoint() {
         let text = message("struct s\u{a0}size=3x3\n");
@@ -533,11 +493,9 @@ mod refusals {
         );
     }
 
-    /// A visible character keeps its glyph. The codepoint rides along
-    /// because the characters most worth reporting are the ones that look
-    /// like another: a full-width `＝` is the likeliest way to break a file
-    /// in a project whose docs are written in Japanese, and it is
-    /// indistinguishable from `=` in the message without one.
+    /// The codepoint rides along because the characters most worth reporting
+    /// look like another: a full-width `＝` is the likeliest break in a
+    /// project whose docs are in Japanese, and reads as `=` without one.
     #[test]
     fn a_visible_unexpected_character_keeps_its_glyph() {
         for (source, glyph, codepoint) in [
@@ -553,12 +511,9 @@ mod refusals {
         }
     }
 
-    /// A BOM occupies a column in every span-derived position — `LineStarts`
-    /// here and `LineIndex` in the LSP both count characters from the line's
-    /// start — so the lexer counts it too. Skipping it in one layer and not
-    /// the others puts a lexer error one column left of a check diagnostic
-    /// about the same character, on the first line of exactly the files a
-    /// Windows editor produces.
+    /// `LineStarts` here and `LineIndex` in the LSP both count the mark, so a
+    /// lexer that skipped it would put its errors one column left of every
+    /// other layer's on the first line.
     #[test]
     fn a_byte_order_mark_occupies_a_column() {
         let with_bom = lex("\u{feff}struct s size=3x3\n").expect("lex");
@@ -570,10 +525,8 @@ mod refusals {
         );
     }
 
-    /// Spans stay offsets into the string the caller handed us, which is what
-    /// lets an editor highlight a diagnostic without knowing whether a mark
-    /// was skipped. Trimming the source instead would shift every span by
-    /// three bytes and break nothing else in this file.
+    /// Spans stay offsets into the string the caller handed us, so an editor
+    /// highlights a diagnostic without knowing whether a mark was skipped.
     #[test]
     fn a_byte_order_mark_shifts_every_span_by_its_own_width() {
         let with_bom = lex("\u{feff}struct s size=3x3\n").expect("lex");
@@ -588,8 +541,8 @@ mod refusals {
         }
     }
 
-    /// A file holding nothing but a mark holds no tokens, and one whose first
-    /// line is indented is still refused for that.
+    /// A file holding nothing but a mark holds no tokens, and the mark adds
+    /// nothing to the first line's indentation.
     #[test]
     fn a_byte_order_mark_alone_is_an_empty_file() {
         assert!(lex("\u{feff}").expect("lex").is_empty());

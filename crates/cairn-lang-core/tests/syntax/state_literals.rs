@@ -136,11 +136,10 @@ fn the_order_a_literal_spells_its_properties_in_reaches_no_artifact() {
     );
 }
 
-/// What the parser folds, the material layer reads back: the properties
-/// the source wrote, sorted by name, and rendering them as a literal again
-/// parses to the same state. Every literal here reaches the material
-/// layer's debug assertion on the folded shape, so a fold that drifted
-/// from what it reads would fail here in a debug build too.
+/// The material layer reads back the properties the source wrote, sorted by
+/// name, and rendering them as a literal again parses to the same state.
+/// Every literal here also reaches the material layer's debug assertion on
+/// the folded shape.
 #[test]
 fn a_folded_literal_reads_back_as_the_properties_it_was_written_with() {
     for (target, id, pairs) in [
@@ -198,9 +197,9 @@ fn a_well_formed_literal_is_clean_through_check() {
     }
 }
 
-/// Nothing checks a literal against the target yet, so the lowering says
-/// so on the value itself, where `E_UNKNOWN_ID` points for a mistake left
-/// of the `[`. A token without a literal is not told.
+/// No pass checks a literal against the target, so the lowering says so on
+/// the value itself, where `E_UNKNOWN_ID` points for a mistake left of the
+/// `[`. A token without a literal is not told.
 #[test]
 fn an_unchecked_literal_is_announced_on_its_value() {
     let source = floored("@oak_log[axis=q]");
@@ -304,10 +303,9 @@ fn a_literal_cut_short_by_the_end_of_the_file_reports_end_of_line() {
     }
 }
 
-/// A dotted token is abstract and names no block, so it has no literal,
-/// and a touching `[` is left to whatever reads next — exactly as the
-/// grammar leaves it. In a slot nothing may follow the token, so the row
-/// is refused there as it always was.
+/// A dotted token is abstract and names no block, so it has no literal, and
+/// a touching `[` is left to whatever reads next. In a slot nothing may
+/// follow the token, so the row is refused.
 #[test]
 fn an_abstract_token_leaves_a_touching_bracket_alone() {
     let (message, at) = refusal("@floor.wood[axis=x]");
@@ -350,7 +348,7 @@ fn a_bracket_touching_a_dotted_token_opens_what_follows() {
 }
 
 /// A `[` after a space is not the token's: a slot takes one value, so the
-/// row ends at the token and the bracket is refused as it always was.
+/// row ends at the token and the bracket is refused.
 #[test]
 fn a_bracket_after_a_space_is_not_a_state_literal() {
     let (message, at) = refusal("@oak_log [axis=x]");
@@ -358,9 +356,8 @@ fn a_bracket_after_a_space_is_not_a_state_literal() {
     assert_eq!(at, 22);
 }
 
-/// Commas are optional in a value list, so a token and a nested list used
-/// to be two items whether or not a space stood between them. Apart they
-/// still are; touching, the `[` is the token's and `b` is no property.
+/// Commas are optional in a value list, so a token and a nested list apart
+/// are two items; touching, the `[` is the token's and `b` is no property.
 #[test]
 fn a_value_list_reads_a_touching_bracket_as_the_tokens() {
     let apart = parse("struct s size=3x3\n  thing mat=[@a [b]]\n").expect("two items");

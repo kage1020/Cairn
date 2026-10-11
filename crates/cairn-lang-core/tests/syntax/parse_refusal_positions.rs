@@ -32,7 +32,6 @@ fn a_bad_truth_output_is_reported_at_the_output() {
     );
 }
 
-/// A misspelled form is wrong in the word after `assert`.
 #[test]
 fn a_misspelled_assert_form_is_reported_at_the_form() {
     assert_eq!(
@@ -207,10 +206,9 @@ fn a_requires_member_with_a_body_still_parses_where_no_floor_may_stand() {
 // -- size literals ----------------------------------------------------------
 
 /// `9x` is an integer and an `x`. In the forms where every argument needs
-/// its `=` — an item header, a `[…]` list, a `theme` binding — the `x`
-/// would be a key with no `=`, and the refusal names the literal rather
-/// than the `=` such a key would need. Each form reaches the check, so
-/// moving it into one of them cannot pass.
+/// its `=` (an item header, a `[…]` list, a `theme` binding) the `x` would
+/// be a key with no `=`, and the refusal names the literal rather than the
+/// `=`. Every form is listed, so a check placed in only one of them fails.
 #[test]
 fn a_size_with_no_height_is_named_as_one() {
     for (source, at) in [
@@ -239,8 +237,8 @@ fn a_size_with_no_height_is_named_under_any_key() {
 }
 
 /// An `x` that has its `=` is an argument of its own, so `size=9x=2` is a
-/// `size=9` and an `x=2`, judged by the checks as before. `codes` panics
-/// if the source does not parse.
+/// `size=9` and an `x=2`, judged by the checks like any other. `codes`
+/// panics if the source does not parse.
 #[test]
 fn a_glued_x_with_its_own_value_is_an_argument() {
     let found = codes("struct s size=9x=2\n");

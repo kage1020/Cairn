@@ -31,8 +31,7 @@ fn statement_generic_span_round_trips_to_surface_text() {
 
 #[test]
 fn value_variants_each_carry_their_token_span() {
-    // One source sample per non-list `ValueKind`, asserting that the
-    // value's `span` recovers exactly the surface lexeme.
+    // One source sample per non-list `ValueKind`.
     let src = "struct s size=2x3\n  walls flag=true height=4 mat_slot=wall token=@oak tag=front.outside name=\"label\"\n";
     let module = parse(src).expect("parse");
     let Item::Struct { args, body, .. } = &module.items[0] else {
@@ -63,7 +62,6 @@ fn value_variants_each_carry_their_token_span() {
     assert!(matches!(by_key("name"), ValueKind::Str(s) if s == "label"));
 
     for arg in walls_args {
-        // Every value's span yields a non-empty slice of the source.
         let span = arg.value.span.clone();
         assert!(span.start < span.end, "value span empty for {arg:?}");
         assert!(span.end <= src.len(), "value span runs past EOF: {arg:?}");

@@ -72,9 +72,7 @@ fn an_unterminated_last_line_still_ends_where_its_text_ends() {
 
 // -- the two layers agree -------------------------------------------------
 
-/// The general invariant, which subsumes the specific cases above: a
-/// token's recorded position is the position of its span. It holds for
-/// synthetic tokens too — `Indent` and `Dedent` span the leading
+/// Synthetic tokens included: `Indent` and `Dedent` span the leading
 /// whitespace, and the `Newline` spans its terminator.
 #[test]
 fn every_token_position_is_the_position_of_its_span() {
@@ -106,7 +104,7 @@ fn a_lone_carriage_return_starts_a_line_in_both_layers() {
 
 // -- what the author reads ------------------------------------------------
 
-/// The reported defect: the trailing newline every real file has moved the
+/// Every real file ends in a newline, which must not move an end-of-line
 /// error off the line that caused it.
 #[test]
 fn a_trailing_newline_does_not_move_an_end_of_line_error() {
@@ -117,14 +115,9 @@ fn a_trailing_newline_does_not_move_an_end_of_line_error() {
     assert_eq!((position.line.get(), position.col.get()), (1, 12));
 }
 
-/// And it must name a line that holds some of the offending text. A file
-/// ending in a terminator does have an empty line after it — that is where
-/// a cursor sits at the end of such a file, and `lines::starts` counts it —
-/// but nothing on it is wrong, so an error reported there sends a reader,
-/// or a model repairing its own output, somewhere blank.
-///
-/// `lines::split` drops that trailing empty line, which is exactly the
-/// count wanted here: the lines with text on them.
+/// A file ending in a terminator has an empty line after it, which
+/// `lines::starts` counts, but nothing on it is wrong. `lines::split` drops
+/// that line, so its count is the lines with text on them.
 #[test]
 fn an_end_of_line_error_names_a_line_with_text_on_it() {
     for source in [
@@ -139,8 +132,6 @@ fn an_end_of_line_error_names_a_line_with_text_on_it() {
             reported <= lines,
             "{source:?} has {lines} lines with text, error reported at line {reported}",
         );
-        // And specifically at the end of the offending line, one column
-        // past its last character.
         let offending = cairn_lang_core::lines::split(source)
             .nth(reported - 1)
             .expect("the reported line exists");
@@ -152,7 +143,6 @@ fn an_end_of_line_error_names_a_line_with_text_on_it() {
     }
 }
 
-/// Whichever way the file is written.
 #[test]
 fn an_end_of_line_error_reports_the_same_place_for_every_line_ending() {
     let mut reported = Vec::new();

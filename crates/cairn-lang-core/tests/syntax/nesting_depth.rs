@@ -95,11 +95,9 @@ fn a_flat_chain_at_the_expression_limit_parses() {
 
 #[test]
 fn one_term_past_the_expression_limit_is_refused() {
-    // The bound this pins is not the parser's own stack — `or` iterates, so
-    // the parser is happy at any length. It is the tree handed back, which
-    // `Serialize`, the check passes, and `Box`'s recursive `Drop` all walk.
-    // Left unbounded, `cairn parse` overflowed at roughly 570 terms while
-    // the parser itself reported no problem at all.
+    // Not the parser's own stack, since `or` iterates: the tree handed back,
+    // which `Serialize`, the check passes, and `Box`'s recursive `Drop` all
+    // walk.
     match parse(&flat_or_chain(MAX_EXPR_DEPTH + 1)) {
         Err(ParseError::NestingTooDeep { limit, .. }) => assert_eq!(
             limit, MAX_EXPR_DEPTH,
@@ -109,14 +107,14 @@ fn one_term_past_the_expression_limit_is_refused() {
     }
 }
 
-/// Terms at which a debug build of `cairn parse` overflowed while
-/// serialising the tree, before `MAX_EXPR_DEPTH` existed.
+/// Terms at which a debug build of `cairn parse` overflows serialising an
+/// unbounded tree, as measured.
 const MEASURED_CONSUMER_OVERFLOW: usize = 570;
 
-// Guards the margin itself, at compile time since both sides are constants.
-// Raising `MAX_EXPR_DEPTH` towards the measured overflow would let the
-// parser hand back a tree `cairn parse` cannot serialise — the failure
-// reappears downstream of the guard, where it is far harder to attribute.
+// At compile time, since both sides are constants. A `MAX_EXPR_DEPTH` near
+// the measured overflow would hand back a tree `cairn parse` cannot
+// serialise, failing downstream of the guard where it is far harder to
+// attribute.
 const _: () = assert!(
     MAX_EXPR_DEPTH * 4 <= MEASURED_CONSUMER_OVERFLOW,
     "MAX_EXPR_DEPTH leaves under 4x margin against the term count at which a debug build of \
@@ -148,8 +146,7 @@ fn the_message_tells_the_author_how_to_unwind() {
 fn the_refusal_points_inside_the_offending_construct() {
     // Not at the opening bracket: the guard fires once the level has been
     // entered, so the position is the first token of the level that went one
-    // too far. Pinned because an editor squiggle is only useful where it
-    // lands predictably.
+    // too far.
     let err = parse(&nested_list(MAX_NESTING_DEPTH + 1)).expect_err("past the limit");
     let position = err.position();
     assert_eq!(position.line.get(), 2, "the offending value is on line 2");
@@ -163,9 +160,8 @@ fn the_refusal_points_inside_the_offending_construct() {
 
 #[test]
 fn sibling_values_do_not_accumulate_depth() {
-    // Depth is per path, not per node: a list of many shallow items is fine.
-    // A counter incremented without a matching decrement would fail here
-    // while every nesting test above still passed.
+    // Depth is per path, not per node. A counter incremented without a
+    // matching decrement fails here and nowhere else.
     let items = std::iter::repeat_n("[a]", MAX_NESTING_DEPTH * 4)
         .collect::<Vec<_>>()
         .join(", ");
@@ -178,8 +174,6 @@ fn sibling_values_do_not_accumulate_depth() {
 
 #[test]
 fn sibling_blocks_do_not_accumulate_depth() {
-    // The same property for the production guarded last: many commands in
-    // one body are siblings, not nesting.
     let mut source = String::from("struct a size=1x1\n");
     for _ in 0..MAX_NESTING_DEPTH * 4 {
         source.push_str("  level y=0\n");
