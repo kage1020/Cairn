@@ -57,12 +57,30 @@ pub(super) struct StructCtx<'a> {
     pub(super) wall_column: WallColumn,
 }
 
+/// A phase of `spec/compilation` "Phase evaluation" that paints voxels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Phase {
     Massing,
     Envelope,
     Openings,
     Fixtures,
+}
+
+impl Phase {
+    /// How many phases paint: one past the highest [`Self::index`].
+    pub(super) const COUNT: usize = 4;
+
+    /// This phase's position in the order `spec/compilation` "Phase
+    /// evaluation" runs the phases in, counting from `0`. A list indexed by
+    /// it and walked front to back visits the phases in that order.
+    pub(super) const fn index(self) -> usize {
+        match self {
+            Self::Massing => 0,
+            Self::Envelope => 1,
+            Self::Openings => 2,
+            Self::Fixtures => 3,
+        }
+    }
 }
 
 /// What the phase model does with a member.
@@ -107,10 +125,10 @@ pub(super) enum MemberDisposition {
 ///   all, so it is reported as unknown by the allowlist pass on top of the
 ///   deferral here.
 ///
-/// The four `lower_*_member` matches spell every role out with no wildcard
-/// so a role added here fails the compile there rather than reaching a
-/// user's source and panicking. `Level` never arrives: flattening runs
-/// first, so one that does means a caller skipped it.
+/// [`paint_member`]'s match spells every role out with no wildcard so a
+/// role added here fails the compile there rather than reaching a user's
+/// source and panicking. `Level` never arrives: flattening runs first, so
+/// one that does means a caller skipped it.
 pub(super) fn member_disposition(role: &MemberRole) -> MemberDisposition {
     match role {
         MemberRole::Floor | MemberRole::Walls => MemberDisposition::Paints(Phase::Massing),
@@ -254,7 +272,16 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
     }
 }
 
-pub(super) fn lower_massing_member(
+/// Paint one member of the paint set with the generator its role names.
+///
+/// Which phase runs it is [`member_disposition`]'s answer, not this
+/// function's: [`run_phase`] hands members over a phase at a time, and the
+/// match here only picks the painter. The roles no phase paints are
+/// spelled out with no wildcard, for the reason [`member_disposition`]
+/// gives.
+///
+/// [`run_phase`]: super::body::run_phase
+pub(super) fn paint_member(
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
@@ -294,115 +321,21 @@ pub(super) fn lower_massing_member(
             };
             fill_walls(ctx, height, y_offset, idx, canvas);
         }
-        // No wildcard: see [`member_disposition`].
-        MemberRole::Roof
-        | MemberRole::Stair
-        | MemberRole::Door
-        | MemberRole::Window
-        | MemberRole::PressurePlate
-        | MemberRole::Level
-        | MemberRole::Circuit
-        | MemberRole::Place
-        | MemberRole::Connect
-        | MemberRole::Other(_) => {
-            unreachable!(
-                "the massing bucket holds no `{}`",
-                MemberRole::keyword(&member.role)
-            )
-        }
-    }
-}
-
-pub(super) fn lower_envelope_member(
-    member: &Member,
-    y_offset: u32,
-    ctx: &StructCtx<'_>,
-    palette: &mut ScopePalette,
-    canvas: &mut MemberCanvas<'_>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    match &member.role {
         // Always the struct's own roof plane: `flatten_members` drops a
         // `roof` at a non-zero offset before it reaches a phase.
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, canvas, diagnostics),
-        // No wildcard: see [`member_disposition`].
-        MemberRole::Floor
-        | MemberRole::Walls
-        | MemberRole::Door
-        | MemberRole::Window
-        | MemberRole::PressurePlate
-        | MemberRole::Level
-        | MemberRole::Circuit
-        | MemberRole::Place
-        | MemberRole::Connect
-        | MemberRole::Other(_) => {
-            unreachable!(
-                "the envelope bucket holds no `{}`",
-                MemberRole::keyword(&member.role)
-            )
-        }
-    }
-}
-
-pub(super) fn lower_opening_member(
-    member: &Member,
-    y_offset: u32,
-    ctx: &StructCtx<'_>,
-    palette: &mut ScopePalette,
-    canvas: &mut MemberCanvas<'_>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    match &member.role {
         MemberRole::Door => carve_door(member, y_offset, ctx, canvas, diagnostics),
         MemberRole::Window => fill_window(member, y_offset, ctx, palette, canvas, diagnostics),
-        // No wildcard: see [`member_disposition`].
-        MemberRole::Floor
-        | MemberRole::Walls
-        | MemberRole::Roof
-        | MemberRole::Stair
-        | MemberRole::PressurePlate
-        | MemberRole::Level
-        | MemberRole::Circuit
-        | MemberRole::Place
-        | MemberRole::Connect
-        | MemberRole::Other(_) => {
-            unreachable!(
-                "the openings bucket holds no `{}`",
-                MemberRole::keyword(&member.role)
-            )
-        }
-    }
-}
-
-pub(super) fn lower_fixture_member(
-    member: &Member,
-    y_offset: u32,
-    ctx: &StructCtx<'_>,
-    palette: &mut ScopePalette,
-    canvas: &mut MemberCanvas<'_>,
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    match &member.role {
         MemberRole::PressurePlate => {
             fill_pressure_plate(member, y_offset, ctx, palette, canvas, diagnostics);
         }
-        // No wildcard: see [`member_disposition`].
-        MemberRole::Floor
-        | MemberRole::Walls
-        | MemberRole::Roof
-        | MemberRole::Stair
-        | MemberRole::Door
-        | MemberRole::Window
-        | MemberRole::Level
+        MemberRole::Level
         | MemberRole::Circuit
         | MemberRole::Place
         | MemberRole::Connect
         | MemberRole::Other(_) => {
-            unreachable!(
-                "the fixtures bucket holds no `{}`",
-                MemberRole::keyword(&member.role)
-            )
+            unreachable!("no phase paints a `{}`", MemberRole::keyword(&member.role))
         }
     }
 }
@@ -445,8 +378,8 @@ impl MemberFallback {
     /// The consequence for a member of this role.
     ///
     /// Only the six roles whose painters call [`resolve_member_state`] reach
-    /// here. The rest are spelled out with no wildcard, as in the four
-    /// `lower_*_member` matches, so a role added later fails the compile
+    /// here. The rest are spelled out with no wildcard, as in
+    /// [`paint_member`]'s match, so a role added later fails the compile
     /// here rather than borrowing another role's sentence: a `door` is
     /// carved and reads no material, a `circuit` reserves a region, a
     /// `place` or `connect` is a site row, `Other` is a keyword the role

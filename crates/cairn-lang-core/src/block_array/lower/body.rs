@@ -12,12 +12,11 @@ use crate::block_array::material::TargetRegistry;
 use crate::block_array::wall_column::WallColumn;
 use crate::block_array::{BlockArray, Dims, MAX_STRUCTURE_VOLUME, PaletteFull};
 
-use super::canvas::{Canvas, MemberCanvas, ScopePalette, prune_unreferenced};
+use super::canvas::{Canvas, ScopePalette, prune_unreferenced};
 use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circuit_region};
 use super::diag::{diag_deferred_member, diag_no_theme_bound_generic};
 use super::members::{
-    MemberDisposition, Phase, StructCtx, flatten_members, lower_envelope_member,
-    lower_fixture_member, lower_massing_member, lower_opening_member, member_disposition,
+    MemberDisposition, Phase, StructCtx, flatten_members, member_disposition, paint_member,
 };
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
 
@@ -267,56 +266,22 @@ fn paint_phases(
     palette: &mut ScopePalette,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Canvas {
-    let PhaseBuckets {
-        massing,
-        envelope,
-        openings,
-        fixtures,
-        phases,
-    } = buckets;
+    let PhaseBuckets { by_phase, phases } = buckets;
     let mut canvas = Canvas::new(ctx.dims, phases);
-    run_phase(
-        massing,
-        lower_massing_member,
-        ctx,
-        palette,
-        &mut canvas,
-        diagnostics,
-    );
-    run_phase(
-        envelope,
-        lower_envelope_member,
-        ctx,
-        palette,
-        &mut canvas,
-        diagnostics,
-    );
-    run_phase(
-        openings,
-        lower_opening_member,
-        ctx,
-        palette,
-        &mut canvas,
-        diagnostics,
-    );
-    run_phase(
-        fixtures,
-        lower_fixture_member,
-        ctx,
-        palette,
-        &mut canvas,
-        diagnostics,
-    );
+    // `by_phase` is indexed by `Phase::index`, so front to back is the
+    // spec's order.
+    for bucket in by_phase {
+        run_phase(bucket, ctx, palette, &mut canvas, diagnostics);
+    }
     canvas
 }
 
 /// The paint set filed by phase, each entry keeping its position in the
 /// flattened list so the canvas can name it in a finding.
 struct PhaseBuckets<'a> {
-    massing: Vec<(u32, u32, &'a Member)>,
-    envelope: Vec<(u32, u32, &'a Member)>,
-    openings: Vec<(u32, u32, &'a Member)>,
-    fixtures: Vec<(u32, u32, &'a Member)>,
+    /// Indexed by [`Phase::index`]: the members each phase paints, as
+    /// `(index in the flattened list, y_offset, member)`.
+    by_phase: [Vec<(u32, u32, &'a Member)>; Phase::COUNT],
     /// One entry per member of the flattened list, in the same order:
     /// which phase evaluates it, or `None` when none does. Handed to the
     /// [`Canvas`] so a voxel can carry its writer's index alone.
@@ -335,10 +300,7 @@ fn bucket_members<'a>(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> PhaseBuckets<'a> {
     let mut buckets = PhaseBuckets {
-        massing: Vec::new(),
-        envelope: Vec::new(),
-        openings: Vec::new(),
-        fixtures: Vec::new(),
+        by_phase: Default::default(),
         phases: Vec::with_capacity(flattened.len()),
     };
     for (index, &(y_offset, member)) in flattened.iter().enumerate() {
@@ -365,17 +327,8 @@ fn bucket_members<'a>(
             MemberDisposition::Reserves | MemberDisposition::NotLowered => None,
         });
         match disposition {
-            MemberDisposition::Paints(Phase::Massing) => {
-                buckets.massing.push((index, y_offset, member));
-            }
-            MemberDisposition::Paints(Phase::Envelope) => {
-                buckets.envelope.push((index, y_offset, member));
-            }
-            MemberDisposition::Paints(Phase::Openings) => {
-                buckets.openings.push((index, y_offset, member));
-            }
-            MemberDisposition::Paints(Phase::Fixtures) => {
-                buckets.fixtures.push((index, y_offset, member));
+            MemberDisposition::Paints(phase) => {
+                buckets.by_phase[phase.index()].push((index, y_offset, member));
             }
             // `circuit region=<label> void=<N>` reserves a routing region
             // for the future `logic_synth → logic_place → logic_route`
@@ -391,19 +344,14 @@ fn bucket_members<'a>(
     buckets
 }
 
-/// Lower one phase's bucket, opening a [`MemberCanvas`] per member so
-/// every write it makes is filed under it. A bucket cannot forget: the
-/// borrow is the only route to a write, and it closes with the member.
+/// Paint one phase's bucket with [`paint_member`], opening a
+/// [`MemberCanvas`] per member so every write it makes is filed under it.
+/// A bucket cannot forget: the borrow is the only route to a write, and it
+/// closes with the member.
+///
+/// [`MemberCanvas`]: super::canvas::MemberCanvas
 pub(super) fn run_phase(
     bucket: Vec<(u32, u32, &Member)>,
-    lower: fn(
-        &Member,
-        u32,
-        &StructCtx<'_>,
-        &mut ScopePalette,
-        &mut MemberCanvas<'_>,
-        &mut Vec<Diagnostic>,
-    ),
     ctx: &StructCtx<'_>,
     palette: &mut ScopePalette,
     canvas: &mut Canvas,
@@ -411,7 +359,7 @@ pub(super) fn run_phase(
 ) {
     for (index, y_offset, member) in bucket {
         let mut member_canvas = canvas.for_member(index);
-        lower(
+        paint_member(
             member,
             y_offset,
             ctx,
