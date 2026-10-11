@@ -850,8 +850,7 @@ fn floor_and_walls_combine() {
 }
 
 #[test]
-fn unknown_role_warns_and_skips() {
-    // A `stair` with no `kind=` defers without touching a voxel.
+fn a_stair_without_kind_defers_without_touching_a_voxel() {
     let src = theme_t!(
         "f",
         "\nstruct s size=3x3\n  floor mat_slot=f\n  stair side=front\n"
@@ -4072,8 +4071,7 @@ fn window_repeat_step_leaves_columns_between_stamps_alone() {
 }
 
 #[test]
-fn window_without_mat_slot_carves_air_regression() {
-    // One stamp, without the `repeat=` series.
+fn a_window_without_mat_slot_carves_one_stamp_to_air() {
     let src = theme_t!(
         "w",
         "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  window side=front y=1 offset=2 size=1x1\n"

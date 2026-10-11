@@ -429,9 +429,9 @@ pub fn route_path<S: BuildHasher>(
 /// # Panics
 ///
 /// Panics when `voxel_world` is empty, rather than placing an empty
-/// walkway at a made-up origin, or when its bounding box is wider than
-/// `i32::MAX` on an axis. Paths from [`l_path`] and [`route_path`] do
-/// neither.
+/// walkway at a made-up origin, or when its bounding box spans every `i32`
+/// on an axis, which no `u32` extent holds. Paths from [`l_path`] and
+/// [`route_path`] do neither.
 #[must_use]
 pub fn build_walkway_array<S: BuildHasher>(
     voxel_world: &[(i32, i32, i32)],
@@ -454,10 +454,14 @@ pub fn build_walkway_array<S: BuildHasher>(
         max_z = max_z.max(z);
     }
     // Unreachable panics, but they name the scope so one is locatable.
-    let dx = u32::try_from(max_x - min_x + 1)
-        .unwrap_or_else(|_| panic!("walkway `{scope_key}` x span exceeds u32 ({min_x}..={max_x})"));
-    let dz = u32::try_from(max_z - min_z + 1)
-        .unwrap_or_else(|_| panic!("walkway `{scope_key}` z span exceeds u32 ({min_z}..={max_z})"));
+    let dx = max_x
+        .abs_diff(min_x)
+        .checked_add(1)
+        .unwrap_or_else(|| panic!("walkway `{scope_key}` x span exceeds u32 ({min_x}..={max_x})"));
+    let dz = max_z
+        .abs_diff(min_z)
+        .checked_add(1)
+        .unwrap_or_else(|| panic!("walkway `{scope_key}` z span exceeds u32 ({min_z}..={max_z})"));
     let dims = Dims { x: dx, y: 1, z: dz };
     let origin = (min_x, first.1, min_z);
 
@@ -470,11 +474,7 @@ pub fn build_walkway_array<S: BuildHasher>(
             blocked_count += 1;
             continue;
         }
-        let lx = u32::try_from(wx - min_x)
-            .unwrap_or_else(|_| panic!("walkway `{scope_key}` cell x={wx} below min={min_x}"));
-        let lz = u32::try_from(wz - min_z)
-            .unwrap_or_else(|_| panic!("walkway `{scope_key}` cell z={wz} below min={min_z}"));
-        if let Some(i) = dims.index(lx, 0, lz) {
+        if let Some(i) = dims.index(wx.abs_diff(min_x), 0, wz.abs_diff(min_z)) {
             voxels[i] = mat_idx;
         }
     }

@@ -83,7 +83,7 @@ pub fn wall_length(side: WallSide, interior_w: u32, interior_h: u32) -> u32 {
 /// `plate_voxel_position`) report author errors in that check, so a `None`
 /// here is a compiler bug; at the sites tagged
 /// `INVARIANT(wall-grid-validated)` they `debug_assert!` and drop the cell
-/// in a release build. `ports::window_world_xz` propagates it with `?`.
+/// in a release build. `ports::wall_world_xz` propagates it with `?`.
 #[must_use]
 pub fn wall_local_to_grid(
     side: WallSide,

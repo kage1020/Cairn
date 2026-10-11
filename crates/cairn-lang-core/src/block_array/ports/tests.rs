@@ -801,12 +801,11 @@ fn port_world_position_refuses_a_coordinate_past_i32_as_out_of_range() {
     let ir = crate::lower(&module);
     let def = ir.defs.first().expect("def lowered");
     let dims = Dims { x: 3, y: 5, z: 3 };
-    // The right wall's sum `origin.x + 3 - 1` overflows inside
-    // `door_world_xz`, before the step out of the wall, which the next
-    // test reaches.
+    // The right wall's `origin.x + 2` overflows inside `wall_world_xz`,
+    // before the step out of the wall, which the next test reaches.
     assert_eq!(
         port_at(
-            (i32::MAX - 2, 0, 0),
+            (i32::MAX - 1, 0, 0),
             dims,
             def,
             &pid("e"),

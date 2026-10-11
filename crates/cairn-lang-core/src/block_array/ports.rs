@@ -328,12 +328,20 @@ pub(super) fn port_world_position<S: BuildHasher>(
             });
         }
         opening_was_cut(member, "door", cut)?;
-        door_world_xz(side, u, overhang, interior_w, interior_h, place_origin)
-            .ok_or(PortRejection::OutOfRange)?
+        wall_world_xz(
+            side,
+            u,
+            overhang,
+            interior_w,
+            interior_h,
+            place_dims,
+            place_origin,
+        )
+        .ok_or(PortRejection::OutOfRange)?
     } else {
         let u = window_center_offset(member, len, walls)?;
         opening_was_cut(member, "window", cut)?;
-        window_world_xz(
+        wall_world_xz(
             side,
             u,
             overhang,
@@ -364,49 +372,6 @@ fn opening_was_cut<S: BuildHasher>(
             member: member.span.clone(),
         })
     }
-}
-
-fn door_world_xz(
-    side: WallSide,
-    u: u32,
-    overhang: u32,
-    interior_w: u32,
-    interior_h: u32,
-    origin: (i32, i32, i32),
-) -> Option<(i32, i32)> {
-    let u_i = i32::try_from(u).ok()?;
-    let w_i = i32::try_from(interior_w).ok()?;
-    let h_i = i32::try_from(interior_h).ok()?;
-    let o = i32::try_from(overhang).ok()?;
-    // The sums are checked too, like `window_world_xz`'s: a `place` far
-    // enough out (`gap=2147483647`) overflows them, which would panic in a
-    // debug build and wrap in a release one. The caller reports `None` as
-    // `PortRejection::OutOfRange`.
-    let (x, z) = match side {
-        WallSide::Front => (
-            origin.0.checked_add(o)?.checked_add(u_i)?,
-            origin.2.checked_add(o)?.checked_add(h_i)?.checked_sub(1)?,
-        ),
-        WallSide::Back => (
-            origin
-                .0
-                .checked_add(o)?
-                .checked_add(w_i.checked_sub(1)?.checked_sub(u_i)?)?,
-            origin.2.checked_add(o)?,
-        ),
-        WallSide::Left => (
-            origin.0.checked_add(o)?,
-            origin.2.checked_add(o)?.checked_add(u_i)?,
-        ),
-        WallSide::Right => (
-            origin.0.checked_add(o)?.checked_add(w_i)?.checked_sub(1)?,
-            origin
-                .2
-                .checked_add(o)?
-                .checked_add(h_i.checked_sub(1)?.checked_sub(u_i)?)?,
-        ),
-    };
-    Some((x, z))
 }
 
 /// A window port's wall-local `u`, its rectangle's centre
@@ -466,13 +431,13 @@ fn window_center_offset(
     Ok(offset + sw / 2)
 }
 
-/// Window counterpart of [`door_world_xz`], through [`wall_local_to_grid`]
-/// so the port and the window cut share one mapping.
+/// The world `(x, z)` of wall-local `u` on the ground row, through
+/// [`wall_local_to_grid`] so ports and the openings pass share one mapping.
 ///
-/// `None` means the world coordinate overflowed: [`window_center_offset`]
-/// already put `u` inside the wall, so [`wall_local_to_grid`]'s own `None`
-/// is unreachable.
-fn window_world_xz(
+/// `None` means the world coordinate overflowed: [`door_anchor_offset`] and
+/// [`window_center_offset`] already put `u` inside the wall, so
+/// [`wall_local_to_grid`]'s own `None` is unreachable.
+fn wall_world_xz(
     side: WallSide,
     u: u32,
     overhang: u32,
