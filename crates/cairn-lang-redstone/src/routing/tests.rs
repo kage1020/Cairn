@@ -14,15 +14,6 @@ use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
 use crate::placement_ir::{CellCoord, PlacedCellNode, PlacementIr, PlacementPhase};
 use crate::test_fixtures::{ROUTED, placed_cell, reservation, scoped};
 
-/// `wire_length` reports the dust that feeds a cell, so it counts
-/// the routed path and not the straight line between the driver's
-/// source and the cell. The sink here is 14 blocks from its pad
-/// with something standing halfway, so it is fed by 16 blocks of
-/// dust; a record carrying 14 beside a `local_delay_ticks` charged for
-/// 16 describes no single layout.
-///
-/// The blocker drives nothing — a block is all the fixture needs,
-/// and a driver would make it a second sink of the same net.
 /// No net in the example corpus has dust drawn inside a component.
 ///
 /// The property the router exists for, checked against every `.crn`
@@ -37,17 +28,12 @@ use crate::test_fixtures::{ROUTED, placed_cell, reservation, scoped};
 #[test]
 fn no_example_draws_dust_inside_a_component() {
     use std::collections::{HashMap, HashSet};
-    use std::path::PathBuf;
 
     use cairn_lang_core::{lower, parse};
 
     use crate::grid::{PadColumn, input_pad, manhattan};
     use crate::routing_geometry::{Router, block_sites, collect_nets, net_trees};
 
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples");
     // What the corpus is worth is what it still routes. A count of
     // wire coords would stay comfortably positive while an example
     // slid into `E_ROUTE_CONGESTION` and vanished from the walk, so
@@ -58,13 +44,9 @@ fn no_example_draws_dust_inside_a_component() {
     let mut routed_scopes = 0usize;
     let mut detours = 0usize;
     let mut climbs = 0usize;
-    for file in std::fs::read_dir(&dir).expect("read examples") {
-        let path = file.expect("dir entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("crn") {
-            continue;
-        }
-        let source = std::fs::read_to_string(&path).expect("read example");
-        let Ok(module) = parse(&source) else { continue };
+    for (path, source) in examples() {
+        let module =
+            parse(&source).unwrap_or_else(|err| panic!("{} must parse: {err}", path.display()));
         let intent = lower(&module);
         let synth = crate::synth::synthesize(&intent);
         for edition in [Edition::Java, Edition::Bedrock] {
@@ -141,6 +123,28 @@ fn no_example_draws_dust_inside_a_component() {
          no longer shown by any `.crn` that ships and the byte-identity \
          test named for it is measuring a scope without one",
     );
+}
+
+/// Every `.crn` under `examples/`, with its path.
+fn examples() -> Vec<(std::path::PathBuf, String)> {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("examples");
+    let mut found = Vec::new();
+    for file in std::fs::read_dir(&dir).expect("read examples") {
+        let path = file.expect("dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) == Some("crn") {
+            let source = std::fs::read_to_string(&path).expect("read example");
+            found.push((path, source));
+        }
+    }
+    assert!(
+        found.len() >= 12,
+        "the walk reads every `.crn` under `examples/`: {} found",
+        found.len(),
+    );
+    found
 }
 
 /// One net's dust, checked against the nets already claimed and
@@ -352,6 +356,15 @@ fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
     assert!(legalized.scoped.scopes.is_empty());
 }
 
+/// `wire_length` reports the dust that feeds a cell, so it counts
+/// the routed path and not the straight line between the driver's
+/// source and the cell. The sink here is 14 blocks from its pad
+/// with something standing halfway, so it is fed by 16 blocks of
+/// dust; a record carrying 14 beside a `local_delay_ticks` charged for
+/// 16 describes no single layout.
+///
+/// The blocker drives nothing — a block is all the fixture needs,
+/// and a driver would make it a second sink of the same net.
 #[test]
 fn wire_length_counts_the_routed_path() {
     let mut ir = PlacementIr::new(Edition::Java);
