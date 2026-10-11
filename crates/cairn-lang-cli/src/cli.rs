@@ -109,8 +109,7 @@ pub(crate) enum Command {
         /// edition does not ship still lowers, against the same unpinned
         /// view `cairn lower` uses, so every finding that needs no id
         /// table is reported before the target is refused. Leaving the
-        /// flag off keeps the check a syntax-and-resolution gate, and no
-        /// source that passes today starts failing.
+        /// flag off keeps the check a syntax-and-resolution gate.
         #[arg(long, requires = "edition")]
         target: Option<String>,
         /// Output format for the diagnostics.
@@ -228,8 +227,8 @@ pub(crate) enum Command {
     /// `delay`, and `crossing` modes and refused otherwise (the
     /// earlier stages are edition-neutral by contract).
     /// **Internal / experimental** — the shape of the output is not
-    /// covered by the stable compatibility tier and may change at any time
-    /// as the route / simulator stages land. Requires
+    /// covered by the stable compatibility tier and may change at any time.
+    /// Requires
     /// `--experimental-logic-synth` so a caller cannot end up depending on
     /// it accidentally.
     ///
@@ -250,13 +249,9 @@ pub(crate) enum Command {
         /// tier; without it the subcommand exits 2 with a hint.
         #[arg(long)]
         experimental_logic_synth: bool,
-        /// Which pipeline stage to print. Adding stages here as they
-        /// land is preferred over a new subcommand per stage — it keeps
-        /// the internal surface area (and `--help` output) contained.
-        /// For the four Placement IR stages the value chosen here is
-        /// echoed back as every cell's `"stage"` key, so the flag and
-        /// the dump share one vocabulary
-        /// ([`cairn_lang_redstone::PlacementStage`]).
+        /// Which pipeline stage to print. For the four Placement IR stages
+        /// the value chosen here is echoed back as every cell's `"stage"`
+        /// key, so the flag and the dump share one vocabulary.
         #[arg(long, value_enum, default_value_t = SynthStage::Logic)]
         stage: SynthStage,
         /// Target edition for the Edition Netlist IR / Placement IR /
@@ -296,8 +291,8 @@ pub(crate) enum SynthStage {
     /// from that net's source into the cell; `local_delay_ticks` stays
     /// `None` until the delay-insertion pass (stage 3) runs. Refuses
     /// with `E_ATTENUATION_LIMIT` before laying a route when a sink is
-    /// further from its driver, in a straight line, than the v1 sanity
-    /// cap [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`]: no route
+    /// further from its driver, in a straight line, than
+    /// `MAX_ATTENUATION_SEGMENT` steps: no route
     /// is shorter than that line, so stage 3 would refuse it anyway,
     /// after laying it.
     Route,
@@ -305,17 +300,14 @@ pub(crate) enum SynthStage {
     /// IR against `--edition`. Stage 3 of the pipeline `spec/redstone`
     /// "Place-and-route" lays out. Fills every cell's `local_delay_ticks`
     /// with the sum (a per-cell wire cost, not an arrival time) of
-    /// the cell's physical base delay
-    /// ([`cairn_lang_redstone::EditionCell::base_delay_ticks`]) and
-    /// each implicit buffer repeater's
-    /// [`cairn_lang_redstone::BUFFER_REPEATER_TICKS`] contribution
-    /// implied by each driving net's segment that carries more than
-    /// [`cairn_lang_redstone::DUST_ATTENUATION_LIMIT`] blocks of dust —
+    /// the cell's physical base delay and each implicit buffer repeater's
+    /// `BUFFER_REPEATER_TICKS` contribution implied by each driving net's
+    /// segment that carries more than `DUST_ATTENUATION_LIMIT` blocks of
+    /// dust —
     /// from a fresh source, a segment of more than
     /// `DUST_ATTENUATION_LIMIT + 1` steps; refuses with
     /// `E_ATTENUATION_LIMIT` when a segment's routed length in steps
-    /// exceeds the v1 sanity cap
-    /// [`cairn_lang_redstone::MAX_ATTENUATION_SEGMENT`], or when a
+    /// exceeds `MAX_ATTENUATION_SEGMENT`, or when a
     /// stretch of dust past the limit has no coord a repeater can stand
     /// on.
     Delay,
@@ -349,7 +341,7 @@ pub(crate) enum SynthStage {
 
 #[derive(Copy, Clone, ValueEnum)]
 pub(crate) enum ParseFormat {
-    /// Pretty JSON (default; matches future programmatic consumers).
+    /// Pretty JSON (default).
     Json,
     /// Rust `{:#?}` debug formatting (developer-facing).
     Debug,
