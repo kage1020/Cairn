@@ -229,9 +229,67 @@ fn placed_overwriting_walls(states: usize) -> String {
     source
 }
 
+/// `theme t` binding slot `$slot` to `@$block` (`@cobblestone` when no
+/// block is given), followed by `$rest`, as one `&'static str`: the
+/// theme most sources here open with.
+macro_rules! theme_t {
+    ($slot:literal, $rest:literal $(,)?) => {
+        theme_t!($slot -> "cobblestone", $rest)
+    };
+    ($slot:literal -> $block:literal, $rest:literal $(,)?) => {
+        concat!("theme t:\n  slot ", $slot, " -> @", $block, "\n", $rest)
+    };
+}
+
 /// The findings of `code` in `ir`.
 fn findings(ir: &BlockArrayIr, code: DiagnosticCode) -> Vec<&Diagnostic> {
     ir.diagnostics.iter().filter(|d| d.code == code).collect()
+}
+
+/// The `W_DEFERRED_MEMBER` findings in `out`.
+fn deferrals(out: &BlockArrayIr) -> Vec<&Diagnostic> {
+    findings(out, DiagnosticCode::DeferredMember)
+}
+
+/// How many `W_DEFERRED_MEMBER` findings `out` holds.
+fn deferred_count(out: &BlockArrayIr) -> usize {
+    deferrals(out).len()
+}
+
+/// The `E_INCOMPATIBLE_MATERIAL` findings in `out`.
+fn refusals(out: &BlockArrayIr) -> Vec<&Diagnostic> {
+    findings(out, DiagnosticCode::IncompatibleMaterial)
+}
+
+/// The primaries of the findings of `code` in `out`.
+fn primaries_of(out: &BlockArrayIr, code: DiagnosticCode) -> Vec<&str> {
+    findings(out, code)
+        .into_iter()
+        .map(|d| d.primary.as_str())
+        .collect()
+}
+
+/// Each `W_DEFERRED_MEMBER` `src` lowered to, as the text of `src` its
+/// span covers and its primary.
+fn deferred_lines<'a>(src: &'a str, out: &'a BlockArrayIr) -> Vec<(&'a str, &'a str)> {
+    deferrals(out)
+        .into_iter()
+        .map(|d| (&src[d.span.start..d.span.end], d.primary.as_str()))
+        .collect()
+}
+
+/// Asserts `out` holds a `W_DEFERRED_MEMBER` on the member written as
+/// `line` in `src`, whose primary contains `needle`.
+#[track_caller]
+fn assert_defers_on(src: &str, out: &BlockArrayIr, line: &str, needle: &str) {
+    let found = deferred_lines(src, out);
+    assert!(
+        found
+            .iter()
+            .any(|&(at, primary)| at == line && primary.contains(needle)),
+        "expected a deferral on `{line}` saying `{needle}`, got {found:#?}\nall findings: {:#?}",
+        out.diagnostics,
+    );
 }
 
 /// The three properties `tests/diagnostic_text.rs` holds every string
@@ -420,8 +478,8 @@ impl TargetRegistry for FakeResolver {
 /// A registry whose tokens carry blockstates.
 ///
 /// [`FakeResolver`] answers with `BlockState::bare`, as the real
-/// `PackView` does, so the branch that keeps a binding's id while
-/// dropping its properties had no way to run.
+/// `PackView` does, so it cannot reach the branch that keeps a binding's
+/// id while dropping its properties.
 struct StatefulResolver {
     token: &'static str,
     id: &'static str,
@@ -519,11 +577,7 @@ struct UnknownIdPayload {
 }
 
 fn unknown_id_payload(out: &BlockArrayIr) -> UnknownIdPayload {
-    let found: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::UnknownId)
-        .collect();
+    let found = findings(out, DiagnosticCode::UnknownId);
     assert_eq!(
         found.len(),
         1,
@@ -630,9 +684,7 @@ fn a_member_default_from_the_pack_is_checked_like_any_other_id() {
     );
     let out = lowered_with_resolver(plate, &right);
     assert!(
-        !out.diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::UnknownId),
+        findings(&out, DiagnosticCode::UnknownId).is_empty(),
         "a pack that spells it the way the target does must not be refused: {:?}",
         out.diagnostics
             .iter()
@@ -710,12 +762,9 @@ fn a_split_is_summarised_in_the_note_and_kept_whole_in_the_payload() {
 /// The one note the `E_UNKNOWN_ID` finding carries about candidates —
 /// the last one, after the origin note the two pack-chosen origins add.
 fn unknown_id_note(out: &BlockArrayIr) -> String {
-    let found = out
-        .diagnostics
-        .iter()
-        .find(|d| d.code == DiagnosticCode::UnknownId)
-        .expect("an E_UNKNOWN_ID finding");
-    found
+    findings(out, DiagnosticCode::UnknownId)
+        .first()
+        .expect("an E_UNKNOWN_ID finding")
         .notes
         .last()
         .expect("the candidate note")
@@ -729,24 +778,9 @@ fn block_id(ba: &BlockArray, x: u32, y: u32, z: u32) -> &str {
     ba.palette.entries[usize::from(pi.0)].id.as_str()
 }
 
-fn deferred_count(out: &BlockArrayIr) -> usize {
-    out.diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .count()
-}
-
-fn primaries_of(out: &BlockArrayIr, code: DiagnosticCode) -> Vec<&str> {
-    out.diagnostics
-        .iter()
-        .filter(|d| d.code == code)
-        .map(|d| d.primary.as_str())
-        .collect()
-}
-
 #[test]
 fn floor_only_fills_y_zero_plane() {
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n";
+    let src = theme_t!("f", "\nstruct s size=3x3\n  floor mat_slot=f\n");
     let out = lowered(src);
     let ba = out.structures.get("struct::s").expect("structure lowered");
     assert_eq!(ba.dims, Dims { x: 3, y: 1, z: 3 });
@@ -764,8 +798,7 @@ fn floor_only_fills_y_zero_plane() {
 
 #[test]
 fn walls_only_fills_outline_above_floor() {
-    let src =
-        "theme t:\n  slot w -> @cobblestone\n\nstruct s size=3x3\n  walls mat_slot=w height=2\n";
+    let src = theme_t!("w", "\nstruct s size=3x3\n  walls mat_slot=w height=2\n");
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(ba.dims, Dims { x: 3, y: 3, z: 3 });
@@ -813,7 +846,10 @@ fn floor_and_walls_combine() {
 fn unknown_role_warns_and_skips() {
     // `stair` is in the keyword table but no phase claims it yet, so
     // it must surface as DeferredMember without touching voxels.
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  stair side=front\n";
+    let src = theme_t!(
+        "f",
+        "\nstruct s size=3x3\n  floor mat_slot=f\n  stair side=front\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(deferred_count(&out), 1);
@@ -829,7 +865,10 @@ fn circuit_region_recognised_without_deferred_warning() {
     // `circuit region=<label> void=<N>` is a routing marker for the
     // future logic passes; block-array lowering must accept it
     // silently without a `W_DEFERRED_MEMBER`.
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=2\n";
+    let src = theme_t!(
+        "f",
+        "\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=2\n"
+    );
     let out = lowered(src);
     assert_eq!(
         deferred_count(&out),
@@ -839,119 +878,88 @@ fn circuit_region_recognised_without_deferred_warning() {
     );
 }
 
-#[test]
-fn circuit_without_region_defers() {
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit void=2\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("region="),
-        "expected the primary to mention region=, got {}",
-        deferred[0].primary,
-    );
+/// A member that lowering defers, and what the one `W_DEFERRED_MEMBER`
+/// it earns says.
+struct OneDeferral {
+    /// The member lines, after the source's shared head.
+    members: &'static str,
+    /// Text the primary contains.
+    says: &'static [&'static str],
+    /// Text the primary does not contain.
+    never: &'static [&'static str],
+    /// A note the finding carries, word for word.
+    note: Option<&'static str>,
+}
+
+impl OneDeferral {
+    /// A row that checks only what the primary says.
+    const fn says(members: &'static str, says: &'static [&'static str]) -> Self {
+        Self {
+            members,
+            says,
+            never: &[],
+            note: None,
+        }
+    }
+}
+
+/// Lowers `head` followed by each row's members, and checks that each
+/// earns exactly one `W_DEFERRED_MEMBER`, saying what its row says.
+fn assert_each_defers_once(head: &str, rows: &[OneDeferral]) {
+    for row in rows {
+        let src = format!("{head}{}", row.members);
+        let out = lowered(&src);
+        let deferred = deferrals(&out);
+        assert_eq!(deferred.len(), 1, "{src}{:#?}", out.diagnostics);
+        let primary = &deferred[0].primary;
+        for text in row.says {
+            assert!(
+                primary.contains(text),
+                "expected the primary to name `{text}`, got {primary}\n{src}",
+            );
+        }
+        for text in row.never {
+            assert!(
+                !primary.contains(text),
+                "expected the primary not to say `{text}`, got {primary}\n{src}",
+            );
+        }
+        if let Some(note) = row.note {
+            assert!(
+                deferred[0].notes.iter().any(|n| n.message == note),
+                "expected the note {note:?}, got {:?}\n{src}",
+                deferred[0].notes,
+            );
+        }
+    }
 }
 
 #[test]
-fn circuit_without_void_defers() {
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("void="),
-        "expected the primary to mention void=, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn circuit_with_zero_void_defers() {
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=0\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("void=0"),
-        "expected the primary to mention void=0, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn circuit_with_nonu32_void_defers() {
-    // `void=` values that overflow `u32` land in
-    // `NonNegRead::Deferred`; `nonneg_int_or_defer` owns the primary
-    // so `recognize_circuit_region` must not also push its own —
-    // exactly one diagnostic naming `void=` should fire.
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=floor void=99999999999\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("void="),
-        "expected the primary to mention void=, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn circuit_with_empty_region_defers() {
-    // Empty `region=""` is reachable through `ValueKind::Str("")`
-    // and must earn its own primary distinct from "region= absent".
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=\"\" void=2\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("non-empty"),
-        "expected the primary to say `region=` must be non-empty, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn circuit_with_non_label_region_defers() {
-    // `region=42` is well-formed but the wrong kind — the recogniser
-    // must distinguish "kind mismatch" from "missing key" so an
-    // author sees a targeted primary that names the offending kind.
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=f\n  circuit region=42 void=2\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("identifier or string label"),
-        "expected the primary to explain the region= label requirement, got {}",
-        deferred[0].primary,
-    );
-    assert!(
-        deferred[0].primary.contains("integer"),
-        "expected the primary to name the offending kind, got {}",
-        deferred[0].primary,
+fn a_malformed_circuit_defers_once_and_names_its_fault() {
+    assert_each_defers_once(
+        theme_t!("f", "\nstruct s size=3x3\n  floor mat_slot=f\n"),
+        &[
+            OneDeferral::says("  circuit void=2\n", &["region="]),
+            OneDeferral::says("  circuit region=floor\n", &["void="]),
+            OneDeferral::says("  circuit region=floor void=0\n", &["void=0"]),
+            // `void=` values that overflow `u32` land in
+            // `NonNegRead::Deferred`; `nonneg_int_or_defer` owns the
+            // primary so `recognize_circuit_region` must not also push its
+            // own — exactly one diagnostic naming `void=` should fire.
+            OneDeferral::says("  circuit region=floor void=99999999999\n", &["void="]),
+            // Empty `region=""` is reachable through `ValueKind::Str("")`
+            // and must earn its own primary distinct from "region= absent",
+            // saying `region=` must be non-empty.
+            OneDeferral::says("  circuit region=\"\" void=2\n", &["non-empty"]),
+            // `region=42` is well-formed but the wrong kind — the
+            // recogniser must distinguish "kind mismatch" from "missing
+            // key" so an author sees a targeted primary that explains the
+            // label requirement and names the offending kind.
+            OneDeferral::says(
+                "  circuit region=42 void=2\n",
+                &["identifier or string label", "integer"],
+            ),
+        ],
     );
 }
 
@@ -962,10 +970,13 @@ fn actuator_patch_opened_by_recognised_without_deferred_warning() {
     // Block-array lowering routes the patch out of the openings phase
     // so `carve_door` never sees it — no "missing side=" defer, no
     // duplicate carve.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=front] opened_by=sig.open\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  \
+         walls mat_slot=w height=3\n  \
+         door id=front side=front at=center\n  \
+         door[id=front] opened_by=sig.open\n"
+    );
     let out = lowered(src);
     assert_eq!(
         deferred_count(&out),
@@ -976,190 +987,126 @@ fn actuator_patch_opened_by_recognised_without_deferred_warning() {
 }
 
 #[test]
-fn actuator_patch_unknown_selector_key_defers() {
-    // A door patch line whose `[selector]` carries anything beyond
-    // the whitelisted `id=` key would silently drop the extra
-    // attribute — including a future actuator selector before its
-    // support lands. The recogniser rejects the shape with a
-    // primary that both names the offending key and reminds the
-    // author which selector attribute IS accepted.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=front class=main] opened_by=sig.open\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("class"),
-        "expected the primary to name the unknown selector key `class`, got {}",
-        deferred[0].primary,
+fn a_malformed_actuator_patch_defers_once_and_names_its_fault() {
+    // Rows below run in a 5x5 walled struct whose front door is labelled
+    // `front`.
+    assert_each_defers_once(
+        theme_t!(
+            "w",
+            "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  \
+             door id=front side=front at=center\n",
+        ),
+        &[
+            // A door patch line whose `[selector]` carries anything beyond
+            // the whitelisted `id=` key would silently drop the extra
+            // attribute — including a future actuator selector before its
+            // support lands. The recogniser rejects the shape with a
+            // primary that both names the offending key `class` and
+            // reminds the author of the `id=<label>` selector shape.
+            OneDeferral::says(
+                "  door[id=front class=main] opened_by=sig.open\n",
+                &["class", "id="],
+            ),
+            // `door[]` — the parser accepts an empty selector, but there is
+            // no id to bind against. This exercises the "id missing" branch
+            // on its own (without also tripping the unknown-key branch the
+            // row above covers) so a regression that collapses the two arms
+            // into one still fails here: the primary names the missing
+            // `id=` key and does not route through the unknown-key branch.
+            OneDeferral {
+                members: "  door[] opened_by=sig.open\n",
+                says: &["id="],
+                never: &["unknown attribute"],
+                note: None,
+            },
+            // `door[id=3] opened_by=sig.open` — the selector is present but
+            // its value is not a label. Mirrors circuit's kind-mismatch arm:
+            // the primary names the offending kind.
+            OneDeferral::says("  door[id=3] opened_by=sig.open\n", &["integer"]),
+            // The selector `id=back` names no physical door in the same
+            // struct. The recogniser must fail loud with a primary that both
+            // names the unknown id and lists the ids that ARE declared, so
+            // the author can spot the near-miss without scrolling back.
+            OneDeferral::says("  door[id=back] opened_by=sig.open\n", &["back", "front"]),
+            // A `door[id=front]` line with no `opened_by=` — currently the
+            // only recognised actuator key on doors — carries no metadata to
+            // record. Silent acceptance would drop the author's intent, so
+            // the recogniser defers with a primary that names the missing
+            // `opened_by=` key.
+            OneDeferral::says("  door[id=front]\n", &["opened_by"]),
+            // `opened_by=3` — the value is not a signal reference. The
+            // recogniser must name the required `sig.<name>` shape and the
+            // offending kind.
+            OneDeferral::says("  door[id=front] opened_by=3\n", &["sig.", "integer"]),
+            // `opened_by=foo.bar` parses as a two-segment DotRef but the
+            // head is not `sig`, so it cannot be a signal reference under
+            // the namespace of `spec/redstone` "Signal binding".
+            OneDeferral::says("  door[id=front] opened_by=foo.bar\n", &["sig."]),
+            // `door[id=front] opened_by=sig.x powered_by=sig.y` — the
+            // recogniser accepts only `opened_by=`. Silently allowing a
+            // `powered_by=` on doors would let a later extension that gives
+            // the key a meaning silently change the meaning of source that
+            // shipped meanwhile. The shape is rejected with a primary that
+            // names the unknown attribute and reminds the author which key
+            // IS recognised (`spec/redstone` "Signal binding").
+            OneDeferral::says(
+                "  door[id=front] opened_by=sig.open powered_by=sig.on\n",
+                &["powered_by", "opened_by"],
+            ),
+            // `opened_by=sig.a.b` — the head is `sig` but the tail has more
+            // than one segment, so this is not a signal reference under
+            // `spec/redstone` "Signal binding". Silently accepting a
+            // longer-than-expected DotRef would let a future guard that
+            // degrades to `head() == "sig"` (dropping the segment-count
+            // check) slip through unnoticed; the primary names the
+            // two-segment requirement and renders the offending path
+            // verbatim.
+            OneDeferral::says(
+                "  door[id=front] opened_by=sig.open.extra\n",
+                &["two-segment", "sig.open.extra"],
+            ),
+            // A second `door id=front` nested under a `level y=0` makes two
+            // physical doors with the same id after `flatten_members` runs.
+            // The `duplicate` check pass scopes id-uniqueness per body, so
+            // it does NOT flag this shape. Silently binding the patch to
+            // whichever door sorted first would drop the author's intent —
+            // the recogniser must flag the ambiguity, and the repair is a
+            // note of its own telling the author to tell the doors apart.
+            OneDeferral {
+                members: "  level y=0\n    door id=front side=back at=center\n  \
+                          door[id=front] opened_by=sig.open\n",
+                says: &["2 physical doors"],
+                never: &[],
+                note: Some(
+                    "Fix: give the 2 `door` members distinct ids, so the selector names one.",
+                ),
+            },
+        ],
     );
-    assert!(
-        deferred[0].primary.contains("id="),
-        "expected the primary to remind the author about the `id=<label>` selector shape, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn actuator_patch_empty_selector_defers() {
-    // `door[]` — the parser accepts an empty selector, but there is
-    // no id to bind against. This exercises the "id missing"
-    // branch on its own (without also tripping the unknown-key
-    // branch that `actuator_patch_unknown_selector_key_defers`
-    // covers) so a regression that collapses the two arms into
-    // one still fails on this test.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[] opened_by=sig.open\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("id="),
-        "expected the primary to name the missing `id=` selector key, got {}",
-        deferred[0].primary,
-    );
-    assert!(
-        !deferred[0].primary.contains("unknown attribute"),
-        "empty selector should NOT route through the unknown-key branch, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn actuator_patch_selector_id_non_label_defers() {
-    // `door[id=3] opened_by=sig.open` — the selector is present but
-    // its value is not a label. Mirrors circuit's kind-mismatch arm.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=3] opened_by=sig.open\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("integer"),
-        "expected the primary to name the offending kind, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn actuator_patch_unknown_id_defers_with_known_ids_note() {
-    // The selector `id=back` names no physical door in the same
-    // struct. The recogniser must fail loud with a primary that both
-    // names the unknown id and lists the ids that ARE declared, so
-    // the author can spot the near-miss without scrolling back.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=back] opened_by=sig.open\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("back"),
-        "expected the primary to name the unknown id `back`, got {}",
-        deferred[0].primary,
-    );
-    assert!(
-        deferred[0].primary.contains("front"),
-        "expected the primary to list `front` as a known door id, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn actuator_patch_without_actuator_key_defers() {
-    // A `door[id=front]` line with no `opened_by=` — currently the
-    // only recognised actuator key on doors — carries no metadata to
-    // record. Silent acceptance would drop the author's intent, so
-    // the recogniser defers with a primary that names `opened_by`.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=front]\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("opened_by"),
-        "expected the primary to name the missing `opened_by=` key, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn actuator_patch_opened_by_non_signal_defers() {
-    // `opened_by=3` — the value is not a signal reference. The
-    // recogniser must name the offending kind and the required
-    // `sig.<name>` shape.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=front] opened_by=3\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("sig."),
-        "expected the primary to name the required `sig.<name>` shape, got {}",
-        deferred[0].primary,
-    );
-    assert!(
-        deferred[0].primary.contains("integer"),
-        "expected the primary to name the offending kind, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn actuator_patch_opened_by_non_sig_dotref_defers() {
-    // `opened_by=foo.bar` parses as a two-segment DotRef but the
-    // head is not `sig`, so it cannot be a signal reference under the
-    // namespace of `spec/redstone` "Signal binding".
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=front] opened_by=foo.bar\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("sig."),
-        "expected the primary to name the required `sig.<name>` shape, got {}",
-        deferred[0].primary,
+    // Rows below run in the same struct with no labelled door.
+    assert_each_defers_once(
+        theme_t!("w", "\nstruct s size=5x5\n  walls mat_slot=w height=3\n"),
+        &[
+            // A door declared without `id=` can never be picked, but it is
+            // a door: the primary counts it rather than saying none is
+            // declared, and the note points at labelling it.
+            OneDeferral {
+                members: "  door side=front at=center\n  door[id=front] opened_by=sig.open\n",
+                says: &["1 physical door is declared in this scope, without an `id=`"],
+                never: &[],
+                note: Some("Fix: add `id=front` to the `door` this patch is meant to bind."),
+            },
+            // An actuator patch in a scope with no physical doors at all
+            // exercises the empty-`known_list` branch of the unknown-id
+            // recogniser. The primary must call that scope shape out
+            // explicitly ("no physical door members are declared") rather
+            // than render an empty "known door ids: " suffix that reads
+            // like a truncation.
+            OneDeferral::says(
+                "  door[id=front] opened_by=sig.open\n",
+                &["no physical door"],
+            ),
+        ],
     );
 }
 
@@ -1172,175 +1119,20 @@ fn actuator_patch_selects_door_declared_inside_level() {
     // tripping the wall-top interaction that a higher y would
     // introduce; `flatten_members` treats every level the same
     // regardless of `y=`, so the visibility guarantee generalises.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               level y=0\n    \
-                 door id=inner side=front at=center\n  \
-               door[id=inner] opened_by=sig.tick\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  \
+         walls mat_slot=w height=3\n  \
+         level y=0\n    \
+           door id=inner side=front at=center\n  \
+         door[id=inner] opened_by=sig.tick\n"
+    );
     let out = lowered(src);
     assert_eq!(
         deferred_count(&out),
         0,
         "actuator patch should resolve a level-nested door id, got {:?}",
         out.diagnostics,
-    );
-}
-
-#[test]
-fn actuator_patch_unknown_intent_key_defers() {
-    // `door[id=front] opened_by=sig.x powered_by=sig.y` — the
-    // recogniser accepts only `opened_by=` today. Silently allowing
-    // a `powered_by=` on doors would let a later extension that
-    // gives the key a meaning silently change the meaning of source
-    // that shipped meanwhile. Reject the shape now with a primary
-    // that names the offending key(s) and points at `spec/redstone`
-    // "Signal binding".
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=front] opened_by=sig.open powered_by=sig.on\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("powered_by"),
-        "expected the primary to name the unknown attribute `powered_by`, got {}",
-        deferred[0].primary,
-    );
-    assert!(
-        deferred[0].primary.contains("opened_by"),
-        "expected the primary to remind the author which key IS recognised, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn actuator_patch_ambiguous_id_defers() {
-    // A `door id=front` at the top level plus another `door id=front`
-    // nested under a `level y=0` produces two physical doors with
-    // the same id after `flatten_members` runs. The `duplicate`
-    // check pass scopes id-uniqueness per body, so it does NOT flag
-    // this shape. Silently binding the patch to whichever door
-    // sorted first would drop the author's intent — the recogniser
-    // must defer with an explicit "ambiguous" primary.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               level y=0\n    \
-                 door id=front side=back at=center\n  \
-               door[id=front] opened_by=sig.open\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("2 physical doors"),
-        "expected the primary to flag the ambiguity, got {}",
-        deferred[0].primary,
-    );
-    // The reason states the fault; the repair is a note of its own.
-    assert!(
-        deferred[0].notes.iter().any(|n| n.message
-            == "Fix: give the 2 `door` members distinct ids, so the selector names one."),
-        "expected a note telling the author to tell the doors apart, got {:?}",
-        deferred[0].notes,
-    );
-}
-
-#[test]
-fn actuator_patch_beside_unlabelled_door_defers_with_add_id_note() {
-    // A door declared without `id=` can never be picked, but it is a
-    // door: the primary counts it rather than saying none is declared,
-    // and the note points at labelling it.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door side=front at=center\n  \
-               door[id=front] opened_by=sig.open\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0]
-            .primary
-            .contains("1 physical door is declared in this scope, without an `id=`"),
-        "got {}",
-        deferred[0].primary,
-    );
-    assert!(
-        deferred[0]
-            .notes
-            .iter()
-            .any(|n| n.message == "Fix: add `id=front` to the `door` this patch is meant to bind."),
-        "got {:?}",
-        deferred[0].notes,
-    );
-}
-
-#[test]
-fn actuator_patch_no_physical_doors_defers() {
-    // An actuator patch in a scope with no physical doors at all
-    // exercises the empty-`known_list` branch of the unknown-id
-    // recogniser. The primary must call that scope shape out
-    // explicitly ("no physical door members are declared") rather
-    // than render an empty "known door ids: " suffix that reads
-    // like a truncation.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door[id=front] opened_by=sig.open\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("no physical door"),
-        "expected the primary to name the empty-scope shape, got {}",
-        deferred[0].primary,
-    );
-}
-
-#[test]
-fn actuator_patch_three_segment_sig_defers() {
-    // `opened_by=sig.a.b` — the head is `sig` but the tail has more
-    // than one segment, so this is not a signal reference under
-    // `spec/redstone` "Signal binding". Silently accepting a
-    // longer-than-expected DotRef would let a future guard that
-    // degrades to `head() == "sig"` (dropping the segment-count
-    // check) slip through unnoticed; pin the segment-count arm
-    // explicitly.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=front] opened_by=sig.open.extra\n";
-    let out = lowered(src);
-    let deferred: Vec<&Diagnostic> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect();
-    assert_eq!(deferred.len(), 1);
-    assert!(
-        deferred[0].primary.contains("two-segment"),
-        "expected the primary to name the two-segment requirement, got {}",
-        deferred[0].primary,
-    );
-    assert!(
-        deferred[0].primary.contains("sig.open.extra"),
-        "expected the primary to render the offending path verbatim, got {}",
-        deferred[0].primary,
     );
 }
 
@@ -1352,10 +1144,13 @@ fn actuator_patch_does_not_repaint_the_door_voxels() {
     // no palette entry added. Assert both cells stay air, the wall
     // material lives at every other front-wall cell, and the palette
     // still holds exactly {air, wall}.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  \
-               walls mat_slot=w height=3\n  \
-               door id=front side=front at=center\n  \
-               door[id=front] opened_by=sig.open\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  \
+         walls mat_slot=w height=3\n  \
+         door id=front side=front at=center\n  \
+         door[id=front] opened_by=sig.open\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(block_id(ba, 2, 1, 4), BlockState::AIR_ID);
@@ -1370,11 +1165,7 @@ fn missing_theme_warns_and_air_fills() {
     let src = "struct s size=3x3\n  floor mat_slot=f\n";
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::NoThemeBound),
-    );
+    assert!(!findings(&out, DiagnosticCode::NoThemeBound).is_empty());
     for z in 0..3 {
         for x in 0..3 {
             assert_eq!(block_id(ba, x, 0, z), BlockState::AIR_ID);
@@ -1675,13 +1466,11 @@ fn already_diagnosed_slot_does_not_re_warn() {
     // `W_ABSTRACT_TOKEN_DEFERRED` for the same span — double diagnosis
     // would teach a user there are two unrelated problems when there
     // is one.
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s size=3x3\n  floor mat_slot=missing\n";
+    let src = theme_t!("f", "\nstruct s size=3x3\n  floor mat_slot=missing\n");
     let out = lowered(src);
     assert!(
-        !out.diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::DeferredMember
-                || d.code == DiagnosticCode::AbstractTokenDeferred),
+        deferrals(&out).is_empty()
+            && findings(&out, DiagnosticCode::AbstractTokenDeferred).is_empty(),
         "no follow-on diagnostics expected, got {:?}",
         out.diagnostics,
     );
@@ -1706,9 +1495,7 @@ fn abstract_token_lifts_through_supplied_resolver() {
                walls mat_slot=w height=2\n";
     let out = lowered_with_resolver(src, &resolver);
     assert!(
-        out.diagnostics
-            .iter()
-            .all(|d| d.code != DiagnosticCode::AbstractTokenDeferred),
+        findings(&out, DiagnosticCode::AbstractTokenDeferred).is_empty(),
         "no abstract-token deferral expected when the resolver covers every token, got {:?}",
         out.diagnostics,
     );
@@ -1895,10 +1682,8 @@ fn unknown_abstract_token_emits_e_unknown_abstract_token() {
                struct s size=3x3\n  \
                floor mat_slot=f\n";
     let out = lowered_with_resolver(src, &resolver);
-    let diag = out
-        .diagnostics
-        .iter()
-        .find(|d| d.code == DiagnosticCode::UnknownAbstractToken)
+    let diag = *findings(&out, DiagnosticCode::UnknownAbstractToken)
+        .first()
         .expect("expected E_UNKNOWN_ABSTRACT_TOKEN, got {:?}");
     assert_eq!(diag.severity(), Severity::Error);
     assert!(
@@ -1914,14 +1699,10 @@ fn unknown_abstract_token_emits_e_unknown_abstract_token() {
 
 #[test]
 fn struct_without_size_is_skipped_with_warning() {
-    let src = "theme t:\n  slot f -> @cobblestone\n\nstruct s\n  floor mat_slot=f\n";
+    let src = theme_t!("f", "\nstruct s\n  floor mat_slot=f\n");
     let out = lowered(src);
     assert!(!out.structures.contains_key("struct::s"));
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.code == DiagnosticCode::StructNoSize),
-    );
+    assert!(!findings(&out, DiagnosticCode::StructNoSize).is_empty());
 }
 
 #[test]
@@ -1952,7 +1733,10 @@ fn phase_order_independent_of_source_order() {
     // door is written BEFORE walls in source; phase ordering must still
     // run massing first, then openings, so the door's AIR carve survives
     // through the wall fill.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  door side=front at=center\n  walls mat_slot=w height=3\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  door side=front at=center\n  walls mat_slot=w height=3\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     // Front wall is z = dims.z - 1 = 4. Center x = (5-1)/2 = 2. Door y=1,2.
@@ -1967,7 +1751,10 @@ fn roof_increases_dims_y_by_ceil_half_span() {
     // size=9x7, walls height=4, kind=gable, overhang=0.
     // roof bbox short axis = min(9, 7) = 7 → ridge_extra = ceil(7/2) = 4.
     // dims.y = 1 + 4 + 4 = 9.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(ba.dims, Dims { x: 9, y: 9, z: 7 });
@@ -2015,26 +1802,13 @@ fn ids_carrying_properties(out: &BlockArrayIr) -> Vec<String> {
         .collect()
 }
 
-fn deferrals(out: &BlockArrayIr) -> Vec<&Diagnostic> {
-    out.diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .collect()
-}
-
-fn refusals(out: &BlockArrayIr) -> Vec<&Diagnostic> {
-    out.diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::IncompatibleMaterial)
-        .collect()
-}
-
 /// A struct whose roof and eave read `slot r`, bound to `material`.
 fn roofed(kind: &str, material: &str) -> String {
     format!(
-        "theme t:\n  slot w -> @cobblestone\n  slot r -> @{material}\n\n\
+        "{}  slot r -> @{material}\n\n\
          struct s size=9x7\n  walls mat_slot=w height=4\n  \
-         roof kind={kind} mat_slot=r overhang=1\n"
+         roof kind={kind} mat_slot=r overhang=1\n",
+        theme_t!("w", ""),
     )
 }
 
@@ -2095,9 +1869,12 @@ fn a_sloped_roof_takes_any_stair_species_without_comment() {
 
 #[test]
 fn a_roof_with_no_material_binding_keeps_the_fallback_silently() {
-    let src = "theme t:\n  slot w -> @cobblestone\n\n\
-               struct s size=9x7\n  walls mat_slot=w height=4\n  \
-               roof kind=gable overhang=1\n";
+    let src = theme_t!(
+        "w",
+        "\n\
+         struct s size=9x7\n  walls mat_slot=w height=4\n  \
+         roof kind=gable overhang=1\n"
+    );
     let out = lowered(src);
     assert!(out.diagnostics.is_empty(), "got {:?}", out.diagnostics);
     let stated = ids_carrying_properties(&out);
@@ -2113,9 +1890,12 @@ fn a_roof_whose_binding_resolves_to_nothing_still_says_so() {
     // A distinct failure from an unusable material, with a distinct
     // fix: here the slot names nothing at all. Folding the two messages
     // together would send the author looking for the wrong thing.
-    let src = "theme t:\n  slot w -> @cobblestone\n\n\
-               struct s size=9x7\n  walls mat_slot=w height=4\n  \
-               roof kind=gable mat_slot=nosuchslot overhang=1\n";
+    let src = theme_t!(
+        "w",
+        "\n\
+         struct s size=9x7\n  walls mat_slot=w height=4\n  \
+         roof kind=gable mat_slot=nosuchslot overhang=1\n"
+    );
     let out = lowered(src);
     assert!(
         deferrals(&out)
@@ -2184,11 +1964,14 @@ fn an_eave_stair_refuses_a_material_that_is_not_a_stair() {
     // own arguments rather than from a slope, and attaches them to
     // whatever it paints just the same. The obligation follows the
     // states, not the member kind.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\
-               \x20\x20slot trim -> @cobblestone\n\n\
-               struct s size=9x7\n  walls mat_slot=w height=4\n  \
-               roof kind=gable mat_slot=r overhang=1\n  \
-               stair id=e kind=stairs mat_slot=trim side=front half=top shape=outer_left\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\
+         \x20\x20slot trim -> @cobblestone\n\n\
+         struct s size=9x7\n  walls mat_slot=w height=4\n  \
+         roof kind=gable mat_slot=r overhang=1\n  \
+         stair id=e kind=stairs mat_slot=trim side=front half=top shape=outer_left\n"
+    );
     let out = lowered(src);
     assert!(
         refusals(&out)
@@ -2212,10 +1995,13 @@ fn an_eave_stair_with_no_binding_falls_back_to_the_stair_id() {
     // `spruce_planks[facing=…]` in a palette, which is the shape this
     // whole check exists to refuse. The roof binds a *different*
     // species so the eave's fallback is identifiable in the palette.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @dark_oak_stairs\n\n\
-               struct s size=9x7\n  walls mat_slot=w height=4\n  \
-               roof kind=gable mat_slot=r overhang=1\n  \
-               stair id=e kind=stairs side=front half=top shape=outer_left\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @dark_oak_stairs\n\n\
+         struct s size=9x7\n  walls mat_slot=w height=4\n  \
+         roof kind=gable mat_slot=r overhang=1\n  \
+         stair id=e kind=stairs side=front half=top shape=outer_left\n"
+    );
     let out = lowered(src);
     assert!(out.diagnostics.is_empty(), "got {:?}", out.diagnostics);
     let stated = ids_carrying_properties(&out);
@@ -2231,11 +2017,14 @@ fn an_eave_stair_with_no_binding_falls_back_to_the_stair_id() {
 
 #[test]
 fn an_eave_stair_takes_any_stair_species_without_comment() {
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\
-               \x20\x20slot trim -> @birch_stairs\n\n\
-               struct s size=9x7\n  walls mat_slot=w height=4\n  \
-               roof kind=gable mat_slot=r overhang=1\n  \
-               stair id=e kind=stairs mat_slot=trim side=front half=top shape=outer_left\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\
+         \x20\x20slot trim -> @birch_stairs\n\n\
+         struct s size=9x7\n  walls mat_slot=w height=4\n  \
+         roof kind=gable mat_slot=r overhang=1\n  \
+         stair id=e kind=stairs mat_slot=trim side=front half=top shape=outer_left\n"
+    );
     let out = lowered(src);
     assert!(deferrals(&out).is_empty(), "got {:?}", deferrals(&out));
     assert!(
@@ -2253,9 +2042,12 @@ fn a_binding_inside_the_family_keeps_its_id_and_loses_its_states() {
     // asked for its own; the id survives and the states do not, which
     // is a smaller thing than the material being the wrong shape and so
     // stays a warning.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @roof.fancy\n\n\
-               struct s size=9x7\n  walls mat_slot=w height=4\n  \
-               roof kind=gable mat_slot=r overhang=1\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @roof.fancy\n\n\
+         struct s size=9x7\n  walls mat_slot=w height=4\n  \
+         roof kind=gable mat_slot=r overhang=1\n"
+    );
     let out = lowered_with_resolver(
         src,
         &StatefulResolver {
@@ -2383,7 +2175,10 @@ fn gable_roof_places_stairs_with_facing() {
 
 #[test]
 fn door_carves_opening_through_front_wall() {
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=center\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=center\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     // Front wall at z=6 (no overhang). Center x = (9-1)/2 = 4. y=1,2.
@@ -2400,12 +2195,15 @@ fn door_at_left_carves_first_column_of_front_wall() {
     // (u = 0). Front wall sits at z=6 (no overhang); the door
     // should AIR x=0 at y=1,2 while the rest of the row remains
     // wall material.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=left\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=left\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(block_id(ba, 0, 1, 6), BlockState::AIR_ID);
     assert_eq!(block_id(ba, 0, 2, 6), BlockState::AIR_ID);
-    // Centre column stays solid (the previous default position).
+    // The centre column, where `at=center` would cut, stays solid.
     assert_eq!(block_id(ba, 4, 1, 6), "minecraft:cobblestone");
     assert_eq!(deferred_count(&out), 0);
 }
@@ -2415,7 +2213,10 @@ fn door_at_right_carves_last_column_of_front_wall() {
     // `at=right` pins the carve column to `wall_length - 1`.
     // Front wall length = 9 → x = 8. Same vertical band as the
     // centred door.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=right\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=right\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(block_id(ba, 8, 1, 6), BlockState::AIR_ID);
@@ -2430,7 +2231,10 @@ fn door_at_unknown_value_defers_with_named_anchors_in_note() {
     // `at=middle` is not one of `center | left | right`. Lowering
     // must defer (no AIR carved) and the defer message must list
     // the accepted anchors so the user can self-correct.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=middle\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=9x7\n  walls mat_slot=w height=4\n  door side=front at=middle\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(deferred_count(&out), 1);
@@ -2438,16 +2242,21 @@ fn door_at_unknown_value_defers_with_named_anchors_in_note() {
     for x in 0..9 {
         assert_eq!(block_id(ba, x, 1, 6), "minecraft:cobblestone");
     }
-    let primary = &out.diagnostics[0].primary;
-    assert!(
-        primary.contains("at=center | left | right"),
-        "expected anchor list in defer message, got {primary}",
+    // The anchor list in the defer message.
+    assert_defers_on(
+        src,
+        &out,
+        "door side=front at=middle",
+        "at=center | left | right",
     );
 }
 
 #[test]
 fn window_places_glass_with_symmetry() {
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  window side=front offset=2 y=2 size=2x2 sym=true mat_slot=g\n";
+    let src = theme_t!(
+        "w",
+        "  slot g -> @glass_pane\n\nstruct s size=9x7\n  walls mat_slot=w height=4\n  window side=front offset=2 y=2 size=2x2 sym=true mat_slot=g\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     // Front wall at z=6. Primary rectangle: x∈[2,4), y∈[2,4).
@@ -2478,7 +2287,10 @@ fn window_places_glass_with_symmetry() {
 
 #[test]
 fn window_out_of_bounds_warns_and_skips() {
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\nstruct s size=5x5\n  walls mat_slot=w height=4\n  window side=front offset=3 y=2 size=3x2 mat_slot=g\n";
+    let src = theme_t!(
+        "w",
+        "  slot g -> @glass_pane\n\nstruct s size=5x5\n  walls mat_slot=w height=4\n  window side=front offset=3 y=2 size=3x2 mat_slot=g\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     let deferred = deferred_count(&out);
@@ -2495,7 +2307,10 @@ fn unknown_roof_kind_warns_and_skips() {
     // so lowering must surface a deferred-member warning and emit no
     // roof voxels (dims.y stays at `1 + wall_height` because the
     // unknown kind contributes 0 to `max_roof_extra_height`).
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=4\n  roof kind=pyramid mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=4\n  roof kind=pyramid mat_slot=r\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(deferred_count(&out), 1);
@@ -2508,7 +2323,10 @@ fn shed_roof_voxelises_with_slope_to_front() {
     // slope_span = roof_h = 5 → extra_height = 5 → dims.y = 1 + 3 + 5 = 9.
     // Slope axis is z (Front=+z). Layer 0 (y=4) sits at z=0; apex
     // (y=8) sits at z=4. Stairs facing south.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=shed slope_to=front mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=shed slope_to=front mat_slot=r\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(ba.dims.y, 9);
@@ -2522,14 +2340,13 @@ fn shed_roof_voxelises_with_slope_to_front() {
 
 #[test]
 fn shed_roof_without_slope_to_emits_deferred_warning() {
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=shed mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=shed mat_slot=r\n"
+    );
     let out = lowered(src);
     assert_eq!(deferred_count(&out), 1);
-    let primary = &out.diagnostics[0].primary;
-    assert!(
-        primary.contains("slope_to"),
-        "expected slope_to mention, got {primary}",
-    );
+    assert_defers_on(src, &out, "roof kind=shed mat_slot=r", "slope_to");
 }
 
 #[test]
@@ -2537,7 +2354,10 @@ fn hip_roof_voxelises_square_footprint() {
     // size=5x5, walls height=3. hip_extra_height = ceil(5/2) = 3.
     // dims.y = 1 + 3 + 3 = 7 (so highest valid y is 6). Apex sits at
     // y = wall_top + extra_height = 6, single cell at (2, 6, 2).
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=hip mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=hip mat_slot=r\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(ba.dims.y, 7);
@@ -2554,7 +2374,10 @@ fn hip_roof_voxelises_square_footprint() {
 fn flat_roof_voxelises_single_layer_of_planks() {
     // size=5x5, walls height=3, flat → extra_height=1, dims.y = 5.
     // Every cell at y=4 is spruce_planks.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_planks\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_planks\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(ba.dims.y, 5);
@@ -2573,7 +2396,10 @@ fn flat_roof_honours_bound_mat_slot_id() {
     // including a stair id, which is then simply a stair in its
     // default state. `FLAT_BASE_ID` is what a deck falls back to with
     // no binding, not a species it is held to.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n"
+    );
     let out = lowered(src);
     assert_eq!(
         deferred_count(&out),
@@ -2592,21 +2418,20 @@ fn block_state_at(ba: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
     &ba.palette.entries[usize::from(pi.0)]
 }
 
-// --- regression coverage for review feedback ----------------------------
+// --- an opening that cannot be cut says so ------------------------------
 
 #[test]
 fn door_without_side_emits_deferred_warning() {
-    // A `door at=center` line with no `side=` used to drop silently
-    // because `side_of` short-circuited on the missing key. Every
-    // dropped member must surface a diagnostic.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  door at=center\n";
+    // A `door at=center` line with no `side=` names no wall, so
+    // `side_of` cannot place it. Every dropped member must surface a
+    // diagnostic, here the missing-side reason.
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  door at=center\n"
+    );
     let out = lowered(src);
     assert_eq!(deferred_count(&out), 1);
-    let primary = &out.diagnostics[0].primary;
-    assert!(
-        primary.contains("missing `side="),
-        "expected missing-side reason, got {primary}",
-    );
+    assert_defers_on(src, &out, "door at=center", "missing `side=");
 }
 
 #[test]
@@ -2614,16 +2439,18 @@ fn window_with_non_ident_side_emits_deferred_warning() {
     // `side=` present but typed wrong (here as an integer literal).
     // The `wrong type` branch in `side_of` must fire so the user
     // hears about it.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  window side=3 offset=1 y=1 size=1x1 mat_slot=g\n";
+    let src = theme_t!(
+        "w",
+        "  slot g -> @glass_pane\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  window side=3 offset=1 y=1 size=1x1 mat_slot=g\n"
+    );
     let out = lowered(src);
     let deferred = deferred_count(&out);
     assert!(deferred >= 1, "expected a side= diagnostic, got {deferred}");
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("`side=`")),
-        "expected a `side=` mention in diagnostics: {:?}",
-        out.diagnostics,
+    assert_defers_on(
+        src,
+        &out,
+        "window side=3 offset=1 y=1 size=1x1 mat_slot=g",
+        "`side=`",
     );
 }
 
@@ -2633,15 +2460,17 @@ fn sym_window_overlap_skips_mirror_with_warning() {
     // [2..5) and [1..4) overlap — the mirror would fuse with the
     // primary into one wide span. We diagnose and keep only the
     // primary so the user notices.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\nstruct s size=6x5\n  walls mat_slot=w height=4\n  window side=front offset=2 y=2 size=3x1 sym=true mat_slot=g\n";
+    let src = theme_t!(
+        "w",
+        "  slot g -> @glass_pane\n\nstruct s size=6x5\n  walls mat_slot=w height=4\n  window side=front offset=2 y=2 size=3x1 sym=true mat_slot=g\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("overlap")),
-        "expected overlap diagnostic, got {:?}",
-        out.diagnostics,
+    assert_defers_on(
+        src,
+        &out,
+        "window side=front offset=2 y=2 size=3x1 sym=true mat_slot=g",
+        "overlap",
     );
     // Primary rectangle [x=2..5, y=2] painted.
     for x in 2..5 {
@@ -2662,9 +2491,10 @@ fn a_sym_window_that_coincides_with_its_mirror_is_reported() {
     // at 0, the floor its `saturating_sub` clamps to.
     for (offset, width) in [(2, 1), (1, 3), (0, 5)] {
         let src = format!(
-            "theme t:\n  slot w -> @cobblestone\n  slot g -> @glass_pane\n\n\
+            "{}  slot g -> @glass_pane\n\n\
              struct s size=5x5\n  walls mat_slot=w height=3\n  \
-             window side=front offset={offset} y=1 size={width}x1 sym=true mat_slot=g\n"
+             window side=front offset={offset} y=1 size={width}x1 sym=true mat_slot=g\n",
+            theme_t!("w", ""),
         );
         let out = lowered(&src);
         let found: Vec<_> = out
@@ -2692,19 +2522,20 @@ fn a_sym_window_that_coincides_with_its_mirror_is_reported() {
 }
 
 // The one-row course under a roof, and the struct with no walls at
-// all, live in `tests/door_wall_fit.rs`. Both were asserted here too
-// loosely to hold what this file now decides: the cap test named
-// `wall_top` for a mechanism that is the course's, and the
-// no-walls test matched any message containing "walls", which both
-// branches of the gate satisfy — so the split between "nowhere" and
-// "not here" went unguarded on the side that has its own sentence.
+// all, live in `tests/door_wall_fit.rs`, which holds each to its own
+// sentence: a door with no wall anywhere and a door with no wall at its
+// row are two findings, and a check for "walls" in the message would
+// pass for either.
 
 #[test]
 fn at_center_picks_right_of_centre_on_even_width_walls() {
     // size=8x5 → wall length 8. `at=center` should pick column 4 (the
     // right half-block of the geometric centre), not column 3, so the
     // door is consistent with round-half-up semantics.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=8x5\n  walls mat_slot=w height=3\n  door side=front at=center\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=8x5\n  walls mat_slot=w height=3\n  door side=front at=center\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     // Front wall z=4. y=1 air at x=4, cobblestone at x=3.
@@ -2718,7 +2549,10 @@ fn gable_honours_bound_mat_slot_id() {
     // every gable voxel instead of the hardcoded spruce_stairs.
     // Nothing is reported: the binding is inside the stair family, so
     // it is used verbatim, which is what choosing a species means.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @oak_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @oak_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r\n"
+    );
     let out = lowered(src);
     assert_eq!(
         deferred_count(&out),
@@ -2745,7 +2579,10 @@ fn gable_honours_bound_mat_slot_id() {
 fn gable_with_matching_mat_slot_stays_silent() {
     // The cottage case: theme binds the slot to spruce_stairs, the
     // generator emits spruce_stairs — no warning.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r\n"
+    );
     let out = lowered(src);
     assert_eq!(
         deferred_count(&out),
@@ -2759,7 +2596,10 @@ fn gable_with_matching_mat_slot_stays_silent() {
 fn even_span_gable_apex_uses_half_top() {
     // size=8x4 → roof span (short axis) = 4 (even). The apex layer
     // must cap with two half=top rows or the ridge has an open V.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=8x4\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=8x4\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     // gable_extra_height(4) = 2 layers. Apex layer at y = 4+2 = 6.
@@ -2845,10 +2685,12 @@ fn even_span_gable_apex_rows_face_away_from_the_ridge() {
     //
     // The ridge runs between z=1 and z=2, so the low row points -z and
     // the high row +z: each cap turns its open half under the ridge.
-    // Pointing them inward instead — which is what the table used to
-    // do — leaves that open half on the outer face, a 0.5 x 0.5
-    // undercut running the length of the roof.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=8x4\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n";
+    // Pointing them inward instead leaves that open half on the outer
+    // face, a 0.5 x 0.5 undercut running the length of the roof.
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=8x4\n  walls mat_slot=w height=4\n  roof kind=gable mat_slot=r\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
     let apex_low = block_state_at(ba, 0, 6, 1);
@@ -3048,11 +2890,10 @@ fn north_of_leaves_exactly_gap_rows_between_unequal_depths() {
 
 #[test]
 fn east_of_leaves_exactly_gap_columns_between_unequal_widths() {
-    // A guard, not a regression test: `east_of` was already right, and
-    // this pins it against being "symmetrised" onto the new body's
-    // dims to match `north_of`. It moves past the prior placement's
-    // width, so the step is the prior's lowered `dims.x` — `eaved` is 5
-    // wide, not its `size=` 3.
+    // `east_of` is not the mirror image of `north_of`, and this pins it
+    // against being "symmetrised" onto the new body's dims to match. It
+    // moves past the prior placement's width, so the step is the
+    // prior's lowered `dims.x` — `eaved` is 5 wide, not its `size=` 3.
     //
     // `b_x` is `b`'s origin at gap=0: `prior.dims.x`, since `a` sits at 0.
     for (a_def, b_def, b_x) in [
@@ -3106,11 +2947,7 @@ fn duplicate_connect_emits_w_duplicate_walkway_and_lays_one_strip() {
         "  connect a.entry to b.entry path=@gravel\n  connect a.entry to b.entry path=@gravel\n",
     );
     let out = lowered(&src);
-    let dup_count = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DuplicateWalkway)
-        .count();
+    let dup_count = findings(&out, DiagnosticCode::DuplicateWalkway).len();
     assert_eq!(dup_count, 1, "expected exactly one W_DUPLICATE_WALKWAY");
     assert_eq!(out.walkways.len(), 1, "second row must not lay a strip");
 }
@@ -3125,11 +2962,7 @@ fn reverse_connect_dedupes_against_first_row() {
         "  connect a.entry to b.entry path=@gravel\n  connect b.entry to a.entry path=@gravel\n",
     );
     let out = lowered(&src);
-    let dup_count = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DuplicateWalkway)
-        .count();
+    let dup_count = findings(&out, DiagnosticCode::DuplicateWalkway).len();
     assert_eq!(
         dup_count, 1,
         "expected exactly one W_DUPLICATE_WALKWAY on the reversed row",
@@ -3166,9 +2999,8 @@ fn a_row_refused_after_the_dedup_check_leaves_its_pair_to_the_next_row() {
 
 /// The `W_INVALID_WALKWAY_IDENT` findings on `out`, as `(primary, notes)`.
 fn invalid_walkway_ident_findings(out: &BlockArrayIr) -> Vec<(String, Vec<String>)> {
-    out.diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::InvalidWalkwayIdent)
+    findings(out, DiagnosticCode::InvalidWalkwayIdent)
+        .into_iter()
         .map(|d| {
             (
                 d.primary.clone(),
@@ -3245,10 +3077,9 @@ fn walkway_ids_with_an_edge_underscore_are_named_rather_than_aliased() {
 #[test]
 fn a_port_named_underscore_is_named_rather_than_lowered_to_an_unparseable_key() {
     // A port called `_` gives `walkway::s::a.___b._`, which splits
-    // back at the first `__` into an empty port; the artifact
-    // namer then tripped a debug assertion on it. The row must be
-    // dropped at lowering with a finding naming `_`, beside a sound
-    // row that still lays.
+    // back at the first `__` into an empty port, a key the artifact
+    // namer cannot name. The row must be dropped at lowering with a
+    // finding naming `_`, beside a sound row that still lays.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -3287,7 +3118,7 @@ fn a_port_named_underscore_is_named_rather_than_lowered_to_an_unparseable_key() 
 
 #[test]
 fn a_walkway_id_containing_dunder_is_named_with_the_dunder_repair() {
-    // The `__` arm of the same finding, which had no lowering test:
+    // The `__` arm of the same finding:
     // its note names the `__` repair, not the edge-`_` one.
     let src = concat!(
         "theme t:\n",
@@ -3361,9 +3192,7 @@ fn walkway_routes_around_obstructed_l_path_without_warning() {
     // unbroken instead of shipping with a hole through the building.
     let out = lowered(walkway_with_blocked_l_path_source());
     assert!(
-        out.diagnostics
-            .iter()
-            .all(|d| d.code != DiagnosticCode::WalkwayBlocked),
+        findings(&out, DiagnosticCode::WalkwayBlocked).is_empty(),
         "detourable row must not warn, got {:?}",
         out.diagnostics,
     );
@@ -3455,11 +3284,7 @@ fn walkway_blocked_cells_skip_with_w_walkway_blocked_count() {
     // silently would leave the lockfile claiming voxels the on-disk
     // NBT does not actually carry.
     let out = lowered(walkway_with_unroutable_port_source());
-    let blocked: Vec<_> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::WalkwayBlocked)
-        .collect();
+    let blocked = findings(&out, DiagnosticCode::WalkwayBlocked);
     assert_eq!(
         blocked.len(),
         1,
@@ -3482,9 +3307,9 @@ fn walkway_blocked_cells_skip_with_w_walkway_blocked_count() {
         "note must point at the buried port, got {note}",
     );
     // The `primary` string is part of the gcc-style
-    // text-format contract that humans (and existing pre-payload test
-    // harnesses) read; the structured `data` is meant to *augment* it,
-    // not replace it. Asserting both keeps a regression that drops
+    // text-format contract that humans and text-matching harnesses
+    // read; the structured `data` is meant to *augment* it, not
+    // replace it. Asserting both keeps a regression that drops
     // `{skipped}` from the format string — or changes the
     // `port_label` shape — from sliding past CI.
     assert!(
@@ -3507,7 +3332,7 @@ fn walkway_blocked_cells_skip_with_w_walkway_blocked_count() {
         serde_json::json!({"kind": "walkway_blocked", "skipped": 5}),
         "JSON `data` payload must match the structured contract, got {value}",
     );
-    // AC3 negative-case ride-along: every *other* diagnostic emitted by
+    // The negative case: every *other* diagnostic emitted by
     // this fixture must leave `data` unset. A regression where some
     // code starts attaching a payload it should not — say, copying
     // the WalkwayBlocked shape into an unrelated cascade — would
@@ -3563,11 +3388,7 @@ fn walkway_blocked_cells_skip_with_w_walkway_blocked_count() {
 /// The note of the one `W_WALKWAY_BLOCKED` `source` lowers to.
 fn walkway_blocked_note_of(source: &str) -> String {
     let out = lowered(source);
-    let blocked: Vec<_> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::WalkwayBlocked)
-        .collect();
+    let blocked = findings(&out, DiagnosticCode::WalkwayBlocked);
     assert_eq!(blocked.len(), 1, "diagnostics={:?}", out.diagnostics);
     assert_eq!(blocked[0].notes.len(), 1, "{:?}", blocked[0]);
     blocked[0].notes[0].message.clone()
@@ -3769,11 +3590,7 @@ fn a_straight_l_past_the_area_cap_is_not_laid_and_says_why() {
         "  place id=b use=hut theme=t north_of=q gap=2100\n",
         "  connect a.front to b.back path=@gravel\n",
     ));
-    let blocked: Vec<_> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::WalkwayBlocked)
-        .collect();
+    let blocked = findings(&out, DiagnosticCode::WalkwayBlocked);
     assert_eq!(blocked.len(), 1, "{:?}", out.diagnostics);
     let area = l_path_area((1, 0, 3), (2104, 0, -2104));
     assert_eq!(
@@ -3871,10 +3688,8 @@ fn walkway_abstract_path_lifts_through_registry_pack() {
     let src = walkway_pair_source("@walkway.gravel");
     let out = lowered_with_resolver(&src, &resolver);
     assert!(
-        out.diagnostics
-            .iter()
-            .all(|d| d.code != DiagnosticCode::AbstractTokenDeferred
-                && d.code != DiagnosticCode::UnknownAbstractToken),
+        findings(&out, DiagnosticCode::AbstractTokenDeferred).is_empty()
+            && findings(&out, DiagnosticCode::UnknownAbstractToken).is_empty(),
         "no abstract-token diagnostics expected, got {:?}",
         out.diagnostics,
     );
@@ -3899,10 +3714,8 @@ fn walkway_abstract_path_without_pack_emits_w_abstract_token_deferred() {
     // so the lockfile does not pin a strip that has no material.
     let src = walkway_pair_source("@walkway.gravel");
     let out = lowered(&src);
-    let diag = out
-        .diagnostics
-        .iter()
-        .find(|d| d.code == DiagnosticCode::AbstractTokenDeferred)
+    let diag = *findings(&out, DiagnosticCode::AbstractTokenDeferred)
+        .first()
         .unwrap_or_else(|| {
             panic!(
                 "expected W_ABSTRACT_TOKEN_DEFERRED on the connect row, got {:?}",
@@ -3933,10 +3746,8 @@ fn walkway_unknown_abstract_path_emits_e_unknown_abstract_token() {
     };
     let src = walkway_pair_source("@walkway.grvl");
     let out = lowered_with_resolver(&src, &resolver);
-    let diag = out
-        .diagnostics
-        .iter()
-        .find(|d| d.code == DiagnosticCode::UnknownAbstractToken)
+    let diag = *findings(&out, DiagnosticCode::UnknownAbstractToken)
+        .first()
         .unwrap_or_else(|| {
             panic!(
                 "expected E_UNKNOWN_ABSTRACT_TOKEN on the connect row, got {:?}",
@@ -3994,14 +3805,12 @@ fn sized_then_sizeless_defs() -> &'static str {
     )
 }
 
+/// The `W_DEFERRED_MEMBER` a walkway against a placement that did not
+/// lower earns.
 fn cascade_warning(out: &BlockArrayIr) -> &Diagnostic {
-    out.diagnostics
-        .iter()
-        .find(|d| {
-            d.code == DiagnosticCode::DeferredMember
-                && d.primary.contains("walkway")
-                && d.primary.contains("did not lower")
-        })
+    deferrals(out)
+        .into_iter()
+        .find(|d| d.primary.contains("walkway") && d.primary.contains("did not lower"))
         .unwrap_or_else(|| {
             panic!(
                 "expected a cascade W_DEFERRED_MEMBER, got {:?}",
@@ -4093,11 +3902,10 @@ fn walkway_endpoint_skipped_both_sides_cascades_w_deferred_member() {
 #[test]
 fn east_of_skipped_prior_does_not_silently_stack_at_origin() {
     // Prior place `a` references a sizeless def, so it earns
-    // `W_DEF_NO_SIZE` and never lands in `placements`. The
-    // `east_of=a` lookup on `b` would silently fall back to `(0, 0,
-    // 0)` under the old code path, stacking both buildings on top
-    // of each other. The new path emits W_DEFERRED_MEMBER and skips
-    // the placement instead.
+    // `W_DEF_NO_SIZE` and never lands in `placements`. Falling back to
+    // `(0, 0, 0)` for the `east_of=a` lookup on `b` would stack both
+    // buildings on top of each other, so `b` earns W_DEFERRED_MEMBER
+    // and is skipped instead.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -4117,11 +3925,9 @@ fn east_of_skipped_prior_does_not_silently_stack_at_origin() {
         !out.placements.contains_key("site::s::b"),
         "placement b must be skipped, not silently stacked at origin",
     );
-    let cascade = out.diagnostics.iter().any(|d| {
-        d.code == DiagnosticCode::DeferredMember
-            && d.primary.contains("east_of")
-            && d.primary.contains("origin cannot be resolved")
-    });
+    let cascade = deferrals(&out)
+        .iter()
+        .any(|d| d.primary.contains("east_of") && d.primary.contains("origin cannot be resolved"));
     assert!(
         cascade,
         "expected a cascade W_DEFERRED_MEMBER mentioning the unresolvable origin, got {:?}",
@@ -4129,64 +3935,67 @@ fn east_of_skipped_prior_does_not_silently_stack_at_origin() {
     );
 }
 
-// --- level flattening / y_offset coverage (CG-1, IG-1) ------------------
+// --- level flattening and its y offset ----------------------------------
 
 #[test]
 fn level_without_y_defers_and_drops_its_children() {
     // `level` without `y=` cannot place its children, so the whole
     // subtree drops with a single defer at the level's span.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2\n    walls id=upper mat_slot=w height=2\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2\n    walls id=upper mat_slot=w height=2\n"
+    );
     let out = lowered(src);
-    let defers: Vec<&str> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .map(|d| d.primary.as_str())
-        .collect();
+    let defers = deferred_lines(src, &out);
     assert_eq!(
         defers.len(),
         1,
         "level with missing y= should defer once, got {defers:?}",
     );
+    assert_eq!(
+        defers[0].0, "level id=floor2",
+        "the defer sits on the level"
+    );
     assert!(
-        defers[0].contains("level requires `y="),
+        defers[0].1.contains("level requires `y="),
         "defer reason should mention required y=; got {}",
-        defers[0],
+        defers[0].1,
     );
 }
 
 #[test]
 fn level_with_non_integer_y_defers_with_generic_reason() {
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2 y=top\n    walls id=upper mat_slot=w height=2\n";
-    let out = lowered(src);
-    let defers: Vec<&str> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .map(|d| d.primary.as_str())
-        .collect();
-    assert!(
-        defers.iter().any(|d| d.contains("`y=`")),
-        "expected a defer mentioning `y=` on a non-integer value, got {defers:?}",
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=floor2 y=top\n    walls id=upper mat_slot=w height=2\n"
     );
+    let out = lowered(src);
+    // A defer mentioning `y=` on a non-integer value.
+    assert_defers_on(src, &out, "level id=floor2 y=top", "`y=`");
 }
 
 #[test]
 fn nested_level_defers_per_inner_level_child() {
     // Two inner `level` children → two defers, so the count reflects
     // how many subtrees were skipped.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=outer y=0\n    level id=inner1 y=1\n      walls id=a mat_slot=w height=1\n    level id=inner2 y=2\n      walls id=b mat_slot=w height=1\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=outer y=0\n    level id=inner1 y=1\n      walls id=a mat_slot=w height=1\n    level id=inner2 y=2\n      walls id=b mat_slot=w height=1\n"
+    );
     let out = lowered(src);
-    let nested: Vec<&str> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember && d.primary.contains("nested"))
-        .map(|d| d.primary.as_str())
+    let nested: Vec<(&str, &str)> = deferred_lines(src, &out)
+        .into_iter()
+        .filter(|(_, primary)| primary.contains("nested"))
         .collect();
     assert_eq!(
         nested.len(),
         2,
         "one defer per inner level expected, got {nested:?}",
+    );
+    assert_eq!(
+        nested.iter().map(|&(line, _)| line).collect::<Vec<_>>(),
+        ["level id=inner1 y=1", "level id=inner2 y=2"],
+        "each defer sits on its inner level",
     );
 }
 
@@ -4196,7 +4005,10 @@ fn max_wall_top_aggregates_across_level_walls() {
     // at y=9. `dims.y = 1 + 9 + gable_extra` with roof_w=5, roof_h=5
     // (no overhang) so ridge span=5 and gable_extra = ceil(5/2) = 3.
     // dims.y = 1 + 9 + 3 = 13.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=5\n  roof kind=gable mat_slot=r\n  level id=floor2 y=5\n    walls id=upper mat_slot=w height=4\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=5\n  roof kind=gable mat_slot=r\n  level id=floor2 y=5\n    walls id=upper mat_slot=w height=4\n"
+    );
     let out = lowered(src);
     let ba = out.structures.get("struct::s").expect("structure lowered");
     assert_eq!(ba.dims.y, 13);
@@ -4213,74 +4025,51 @@ fn max_wall_top_aggregates_across_level_walls() {
     }
 }
 
-// --- fill_stair unhappy path coverage (CG-2, CG-3) ----------------------
+// --- fill_stair unhappy paths -------------------------------------------
+
+/// A 5x5 struct under a gable with `overhang=1`, so an eave `stair` has
+/// a band to sit in, followed by `stair`.
+fn eave_stair_source(stair: &str) -> String {
+    format!(
+        "{}  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  \
+         roof kind=gable mat_slot=r overhang=1\n  {stair}\n",
+        theme_t!("w", ""),
+    )
+}
 
 #[test]
 fn stair_without_kind_defers() {
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e mat_slot=r side=front half=top facing=out\n";
-    let out = lowered(src);
-    let defers: Vec<&str> = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .map(|d| d.primary.as_str())
-        .collect();
-    assert!(
-        defers.iter().any(|d| d.contains("stair without `kind=`")),
-        "expected `stair without kind=` defer, got {defers:?}",
-    );
+    let stair = "stair id=e mat_slot=r side=front half=top facing=out";
+    let src = eave_stair_source(stair);
+    assert_defers_on(&src, &lowered(&src), stair, "stair without `kind=`");
 }
 
 #[test]
 fn stair_with_unknown_kind_defers() {
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=spiral mat_slot=r side=front half=top\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("stair `kind=spiral`")),
-        "expected defer for kind=spiral, got {:?}",
-        out.diagnostics,
-    );
+    let stair = "stair id=e kind=spiral mat_slot=r side=front half=top";
+    let src = eave_stair_source(stair);
+    assert_defers_on(&src, &lowered(&src), stair, "stair `kind=spiral`");
 }
 
 #[test]
 fn stair_with_unknown_half_defers() {
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=middle\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("stair `half=middle`")),
-        "expected defer for half=middle, got {:?}",
-        out.diagnostics,
-    );
+    let stair = "stair id=e kind=stairs mat_slot=r side=front half=middle";
+    let src = eave_stair_source(stair);
+    assert_defers_on(&src, &lowered(&src), stair, "stair `half=middle`");
 }
 
 #[test]
 fn stair_with_unknown_facing_defers() {
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=north\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("stair `facing=north`")),
-        "expected defer for facing=north, got {:?}",
-        out.diagnostics,
-    );
+    let stair = "stair id=e kind=stairs mat_slot=r side=front half=top facing=north";
+    let src = eave_stair_source(stair);
+    assert_defers_on(&src, &lowered(&src), stair, "stair `facing=north`");
 }
 
 #[test]
 fn stair_with_unknown_shape_defers() {
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("stair `shape=inner_left`")),
-        "expected defer for shape=inner_left, got {:?}",
-        out.diagnostics,
-    );
+    let stair = "stair id=e kind=stairs mat_slot=r side=front half=top facing=out shape=inner_left";
+    let src = eave_stair_source(stair);
+    assert_defers_on(&src, &lowered(&src), stair, "stair `shape=inner_left`");
 }
 
 #[test]
@@ -4290,23 +4079,25 @@ fn stair_without_overhang_defers() {
     // which contributes none however large its `overhang=` — and an
     // author who wrote `overhang=2` must not be told the key is
     // missing.
+    let stair = "stair id=e kind=stairs mat_slot=r side=front half=top facing=out";
     for roof in ["roof kind=flat mat_slot=r", "roof mat_slot=r overhang=2"] {
         let src = format!(
-            "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  {roof}\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out\n"
+            "{}  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  \
+             {roof}\n  {stair}\n",
+            theme_t!("w", ""),
         );
         let out = lowered(&src);
-        let reason = out
-            .diagnostics
-            .iter()
-            .find(|d| d.primary.contains("eave `stair`"))
+        let reason = deferred_lines(&src, &out)
+            .into_iter()
+            .find(|&(line, primary)| line == stair && primary.contains("eave `stair`"))
             .unwrap_or_else(|| {
                 panic!(
                     "expected the eave to defer under `{roof}`, got {:?}",
                     out.diagnostics
                 )
             })
-            .primary
-            .clone();
+            .1
+            .to_owned();
         assert!(
             reason.contains("draws an overhang"),
             "the reason must name the overhang a roof draws, not the key the author may well have written: {reason}",
@@ -4319,20 +4110,25 @@ fn stair_with_y_out_of_bounds_defers() {
     // struct walls height=3, roof kind=flat → dims.y = 1 + 3 + 1 = 5.
     // A stair at y=99 (well past dims.y) must defer instead of
     // silently painting into thin air.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out y=99\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=out y=99\n"
+    );
     let out = lowered(src);
-    assert!(
-        out.diagnostics.iter().any(|d| d.primary.contains("y=99")),
-        "expected defer mentioning y=99, got {:?}",
-        out.diagnostics,
+    assert_defers_on(
+        src,
+        &out,
+        "stair id=e kind=stairs mat_slot=r side=front half=top facing=out y=99",
+        "y=99",
     );
 }
 
 #[test]
 fn stair_facing_in_paints_the_inward_cardinal() {
     // side=front + facing=in → the stair riser points -z (north).
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=gable mat_slot=r overhang=1\n  stair id=e kind=stairs mat_slot=r side=front half=top facing=in\n";
-    let out = lowered(src);
+    let out = lowered(&eave_stair_source(
+        "stair id=e kind=stairs mat_slot=r side=front half=top facing=in",
+    ));
     assert_eq!(
         deferred_count(&out),
         0,
@@ -4349,59 +4145,43 @@ fn stair_facing_in_paints_the_inward_cardinal() {
     );
 }
 
-// --- fill_window unhappy path coverage (CG-4) ---------------------------
+// --- fill_window unhappy paths ------------------------------------------
+
+/// A 6x5 struct walled three high, followed by `window`.
+fn walled_6x5_source(window: &str) -> String {
+    format!(
+        "{}\nstruct s size=6x5\n  walls mat_slot=w height=3\n  {window}\n",
+        theme_t!("w", ""),
+    )
+}
 
 #[test]
 fn window_repeat_zero_defers() {
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=0\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("repeat=0")),
-        "expected defer for repeat=0, got {:?}",
-        out.diagnostics,
-    );
+    let window = "window side=front y=1 size=1x1 repeat=0";
+    let src = walled_6x5_source(window);
+    assert_defers_on(&src, &lowered(&src), window, "repeat=0");
 }
 
 #[test]
 fn window_repeat_without_step_defers() {
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=3\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("requires a positive `step=`")),
-        "expected defer for repeat without step, got {:?}",
-        out.diagnostics,
-    );
+    let window = "window side=front y=1 size=1x1 repeat=3";
+    let src = walled_6x5_source(window);
+    assert_defers_on(&src, &lowered(&src), window, "requires a positive `step=`");
 }
 
 #[test]
 fn window_repeat_with_sym_defers() {
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=2 step=2 sym=true\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("`repeat=` and `sym=true`")),
-        "expected defer for repeat+sym, got {:?}",
-        out.diagnostics,
-    );
+    let window = "window side=front y=1 size=1x1 repeat=2 step=2 sym=true";
+    let src = walled_6x5_source(window);
+    assert_defers_on(&src, &lowered(&src), window, "`repeat=` and `sym=true`");
 }
 
 #[test]
 fn window_span_beyond_wall_defers() {
     // wall length 6, size=2, repeat=4 step=2 → span_end = 0 + 3*2 + 2 = 8 > 6.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=2x1 repeat=4 step=2\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("extends beyond")),
-        "expected span-overrun defer, got {:?}",
-        out.diagnostics,
-    );
+    let window = "window side=front y=1 size=2x1 repeat=4 step=2";
+    let src = walled_6x5_source(window);
+    assert_defers_on(&src, &lowered(&src), window, "extends beyond");
 }
 
 #[test]
@@ -4409,8 +4189,9 @@ fn window_repeat_step_leaves_columns_between_stamps_alone() {
     // repeat=2 step=3 size=1x1 offset=0 on a 6-wide front wall:
     // stamps at u=0 and u=3. Wall x mapping: overhang=0, interior_w=6,
     // z=interior_h - 1 = 4. Column at u=1 must remain cobblestone.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=6x5\n  walls mat_slot=w height=3\n  window side=front y=1 size=1x1 repeat=2 step=3\n";
-    let out = lowered(src);
+    let out = lowered(&walled_6x5_source(
+        "window side=front y=1 size=1x1 repeat=2 step=3",
+    ));
     assert_eq!(
         deferred_count(&out),
         0,
@@ -4430,7 +4211,10 @@ fn window_repeat_step_leaves_columns_between_stamps_alone() {
 fn window_without_mat_slot_carves_air_regression() {
     // A single-stamp mat_slot-less window should carve air (not
     // silently drop). Independent of the arrow-slit repeat pattern.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  window side=front y=1 offset=2 size=1x1\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  window side=front y=1 offset=2 size=1x1\n"
+    );
     let out = lowered(src);
     assert_eq!(
         deferred_count(&out),
@@ -4439,7 +4223,7 @@ fn window_without_mat_slot_carves_air_regression() {
         out.diagnostics
     );
     let ba = out.structures.get("struct::s").unwrap();
-    // The cell that used to be a wall voxel is now air.
+    // The wall cell the window cuts is air.
     assert_eq!(block_id(ba, 2, 1, 4), BlockState::AIR_ID);
 }
 
@@ -4449,13 +4233,17 @@ fn window_carve_stops_at_the_top_of_the_wall_not_the_top_of_the_volume() {
     // y=4 and takes dims.y to 5. A mat_slot-less window at y=3 size=1x2
     // carves to air, so gating on the volume rather than on the wall
     // would punch a hole through the deck. It must defer.
-    let src = "theme t:\n  slot w -> @cobblestone\n  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n  window side=front y=3 size=1x2\n";
+    let src = theme_t!(
+        "w",
+        "  slot r -> @spruce_stairs\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  roof kind=flat mat_slot=r\n  window side=front y=3 size=1x2\n"
+    );
     let out = lowered(src);
     assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary
-                == "window rows y=3..=4 are not all inside one wall course (size=1x2; the walls occupy y=1..=3)"),
+        deferred_lines(src, &out).contains(&(
+            "window side=front y=3 size=1x2",
+            "window rows y=3..=4 are not all inside one wall course (size=1x2; the walls \
+             occupy y=1..=3)",
+        )),
         "expected wall-column defer, got {:?}",
         out.diagnostics,
     );
@@ -4469,17 +4257,31 @@ fn door_defers_when_its_level_sits_at_or_above_the_wall_it_would_carve() {
     // y=3`: the door opens at world y=4, which is above the course
     // and inside no other. The defer names the row and the rows the
     // walls do occupy instead of silently painting AIR over air.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=roofline y=3\n    door id=hole side=front at=center\n";
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=roofline y=3\n    door id=hole side=front at=center\n"
+    );
     let out = lowered(src);
     assert!(
-        out.diagnostics.iter().any(|d| d.primary
-            == "door opens at y=4, which is not inside any wall course (the walls occupy y=1..=3)"),
+        deferred_lines(src, &out).contains(&(
+            "door id=hole side=front at=center",
+            "door opens at y=4, which is not inside any wall course (the walls occupy y=1..=3)",
+        )),
         "expected a wall-course defer, got {:?}",
         out.diagnostics,
     );
 }
 
 // --- pressure_plate lowering --------------------------------------------
+
+/// A 3x3 struct walled two high in `@oak_pressure_plate`, followed by
+/// `member`.
+fn plate_walled_3x3(member: &str) -> String {
+    format!(
+        "{}\nstruct s size=3x3\n  walls mat_slot=p height=2\n  {member}\n",
+        theme_t!("p" -> "oak_pressure_plate", ""),
+    )
+}
 
 #[test]
 fn pressure_plate_outside_with_overhang_paints_in_the_overhang_column() {
@@ -4489,8 +4291,9 @@ fn pressure_plate_outside_with_overhang_paints_in_the_overhang_column() {
     // overhang column is at z=4. `at=front.outside offset=0 y=0`
     // must land in that exterior column, not fall back to the wall
     // row.
-    let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  roof kind=flat mat_slot=p overhang=1\n  pressure_plate at=front.outside offset=0 y=0\n";
-    let out = lowered(src);
+    let out = lowered(&plate_walled_3x3(
+        "roof kind=flat mat_slot=p overhang=1\n  pressure_plate at=front.outside offset=0 y=0",
+    ));
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(ba.dims.x, 5);
     assert_eq!(ba.dims.z, 5);
@@ -4505,8 +4308,9 @@ fn pressure_plate_outside_at_y_zero_without_overhang_falls_back_to_foundation() 
     // `at=front.outside offset=0 y=0` cannot reach an exterior cell,
     // so the foundation fallback paints on the wall's own y=0 column
     // (still floor material at that row).
-    let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=front.outside offset=0 y=0\n";
-    let out = lowered(src);
+    let out = lowered(&plate_walled_3x3(
+        "pressure_plate at=front.outside offset=0 y=0",
+    ));
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(ba.dims.x, 3);
     assert_eq!(ba.dims.z, 3);
@@ -4519,16 +4323,10 @@ fn pressure_plate_outside_above_ground_without_overhang_defers() {
     // A plate at `y=1` with no overhang would clobber the wall block
     // the massing phase painted directly above the foundation. The
     // fallback is restricted to y=0 for that reason and higher plates
-    // must defer.
-    let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=front.outside offset=0 y=1\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("has no exterior voxel")),
-        "expected an exterior-voxel defer at y=1, got {:?}",
-        out.diagnostics,
-    );
+    // must defer, with an exterior-voxel reason.
+    let plate = "pressure_plate at=front.outside offset=0 y=1";
+    let src = plate_walled_3x3(plate);
+    assert_defers_on(&src, &lowered(&src), plate, "has no exterior voxel");
 }
 
 #[test]
@@ -4537,16 +4335,11 @@ fn pressure_plate_outside_saturating_shift_defers_above_ground() {
     // back to x=0, which is a valid dims cell but *not* an exterior
     // voxel. At y=1 the saturating shift must NOT silently overwrite
     // the wall block — the anchor defers instead.
-    let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=left.outside offset=0 y=1\n";
-    let out = lowered(src);
+    let plate = "pressure_plate at=left.outside offset=0 y=1";
+    let src = plate_walled_3x3(plate);
+    let out = lowered(&src);
     let ba = out.structures.get("struct::s").unwrap();
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("has no exterior voxel")),
-        "expected saturating-shift defer, got {:?}",
-        out.diagnostics,
-    );
+    assert_defers_on(&src, &out, plate, "has no exterior voxel");
     // And the wall block above the foundation must survive intact.
     assert_eq!(block_id(ba, 0, 1, 1), "minecraft:oak_pressure_plate");
 }
@@ -4555,8 +4348,9 @@ fn pressure_plate_outside_saturating_shift_defers_above_ground() {
 fn pressure_plate_inside_paints_one_voxel_toward_the_interior() {
     // The front wall's middle cell is (1, 0, 2); one step in is the
     // struct's only interior cell.
-    let src = "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=1 y=0\n";
-    let out = lowered(src);
+    let out = lowered(&plate_walled_3x3(
+        "pressure_plate at=inside.front offset=1 y=0",
+    ));
     let ba = out.structures.get("struct::s").unwrap();
     assert_eq!(block_id(ba, 1, 0, 1), "minecraft:oak_pressure_plate");
     assert_eq!(deferred_count(&out), 0);
@@ -4587,11 +4381,9 @@ fn lowered_plate(size: &str, members: &str, plate: &str) -> (BlockArrayIr, Vec<S
          pressure_plate {plate}\n",
     );
     let out = lowered(&src);
-    let reasons = out
-        .diagnostics
-        .iter()
-        .filter(|d| d.code == DiagnosticCode::DeferredMember)
-        .map(|d| d.primary.clone())
+    let reasons = primaries_of(&out, DiagnosticCode::DeferredMember)
+        .into_iter()
+        .map(str::to_owned)
         .collect();
     (out, reasons)
 }
@@ -4891,80 +4683,57 @@ fn pressure_plate_inside_reports_a_thin_axis_and_a_corner_in_one_pass() {
 
 #[test]
 fn pressure_plate_rejects_missing_and_malformed_anchors() {
-    for (source, needle) in [
+    for (plate, needle) in [
+        ("pressure_plate offset=0 y=0", "without `at=`"),
         (
-            "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate offset=0 y=0\n",
-            "without `at=`",
-        ),
-        (
-            "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=center offset=0 y=0\n",
+            "pressure_plate at=center offset=0 y=0",
             "must be `<side>.outside`",
         ),
         (
-            "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=up.outside offset=0 y=0\n",
+            "pressure_plate at=up.outside offset=0 y=0",
             "is not one of front, back, left, right",
         ),
     ] {
-        let out = lowered(source);
-        assert!(
-            out.diagnostics.iter().any(|d| d.primary.contains(needle)),
-            "expected `{needle}` in diagnostics for source={source:?}, got {:?}",
-            out.diagnostics,
-        );
+        let src = plate_walled_3x3(plate);
+        assert_defers_on(&src, &lowered(&src), plate, needle);
     }
 }
 
 #[test]
 fn pressure_plate_out_of_range_offset_or_y_defers() {
-    // offset=99 past a 3-length front wall.
-    let out = lowered(
-        "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=99 y=0\n",
-    );
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("runs past the front wall")),
-        "expected offset-out-of-range defer, got {:?}",
-        out.diagnostics,
-    );
-    // offset=3 is the first column past a 3-length wall: the boundary
-    // `wall_local_to_grid` refuses on, so it has to be refused here
-    // first — the arm after the helper call asserts rather than reports
-    // (`INVARIANT(wall-grid-validated)`).
-    let out = lowered(
-        "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=3 y=0\n",
-    );
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("`offset=3` runs past the front wall")),
-        "expected the boundary offset to be refused, got {:?}",
-        out.diagnostics,
-    );
-    // y=99 past the struct's dims.y.
-    let out = lowered(
-        "theme t:\n  slot p -> @oak_pressure_plate\n\nstruct s size=3x3\n  walls mat_slot=p height=2\n  pressure_plate at=inside.front offset=0 y=99\n",
-    );
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("does not fit in the struct")),
-        "expected y-out-of-range defer, got {:?}",
-        out.diagnostics,
-    );
+    for (plate, needle) in [
+        // offset=99 past a 3-length front wall.
+        (
+            "pressure_plate at=inside.front offset=99 y=0",
+            "runs past the front wall",
+        ),
+        // offset=3 is the first column past a 3-length wall: the
+        // boundary `wall_local_to_grid` refuses on, so it has to be
+        // refused here first — the arm after the helper call asserts
+        // rather than reports (`INVARIANT(wall-grid-validated)`).
+        (
+            "pressure_plate at=inside.front offset=3 y=0",
+            "`offset=3` runs past the front wall",
+        ),
+        // y=99 past the struct's dims.y.
+        (
+            "pressure_plate at=inside.front offset=0 y=99",
+            "does not fit in the struct",
+        ),
+    ] {
+        let src = plate_walled_3x3(plate);
+        assert_defers_on(&src, &lowered(&src), plate, needle);
+    }
 }
 
 #[test]
 fn nonneg_int_rejects_values_that_do_not_fit_in_u32() {
     // 5_000_000_000 exceeds u32::MAX (~4.29 * 10^9); it defers via
     // `nonneg_int_or_defer` at the level's `y=`.
-    let src = "theme t:\n  slot w -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=huge y=5000000000\n    walls id=upper mat_slot=w height=1\n";
-    let out = lowered(src);
-    assert!(
-        out.diagnostics
-            .iter()
-            .any(|d| d.primary.contains("fits in u32")),
-        "expected overflow defer, got {:?}",
-        out.diagnostics,
+    let src = theme_t!(
+        "w",
+        "\nstruct s size=5x5\n  walls mat_slot=w height=3\n  level id=huge y=5000000000\n    walls id=upper mat_slot=w height=1\n"
     );
+    let out = lowered(src);
+    assert_defers_on(src, &out, "level id=huge y=5000000000", "fits in u32");
 }
