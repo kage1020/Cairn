@@ -61,7 +61,7 @@
 //! table only places below or above every row is a comparison there, not a
 //! release, and gets no such answer.
 
-use super::requires_parse::{compare_versions, is_dotted_decimal};
+use super::requirement::{compare_versions, is_dotted_decimal};
 
 /// One edition's `(version label, DataVersion)` table, as an ordering.
 ///

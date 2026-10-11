@@ -11,6 +11,7 @@ pub mod ast;
 pub mod block_array;
 pub mod calver;
 pub mod check;
+pub(crate) mod diagnostic;
 pub mod edition;
 pub mod error;
 pub mod ids;
@@ -22,6 +23,7 @@ pub mod parse;
 pub(crate) mod prose;
 pub mod resolve;
 pub mod suggest;
+pub(crate) mod version;
 
 pub use ast::{DottedRef, Module, Statement};
 pub use block_array::{

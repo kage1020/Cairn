@@ -20,10 +20,11 @@
 //! onto its item rather than into the body.
 
 use crate::ast::{Header, Module};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData};
 use crate::error::Span;
-use crate::resolve::{RequirementError, parse_requirement};
+use crate::version::{RequirementError, parse_requirement};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticSink};
+use super::DiagnosticSink;
 
 pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
     for header in &module.headers {

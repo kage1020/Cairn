@@ -8,7 +8,7 @@
 //! `b'\n'` misses it entirely.
 //!
 //! Every layer that turns a byte offset into a `line:column` — the lexer as
-//! it walks, [`crate::check::LineStarts`] from a span, `LineIndex` in the
+//! it walks, [`LineStarts`] from a span, `LineIndex` in the
 //! language server, and the completion scanner — has to agree, because a
 //! diagnostic's position is compared against an editor's cursor. They agree
 //! by taking the rule from here rather than each re-deciding it.
@@ -17,6 +17,10 @@
 //! `Point.row` comes from the tree-sitter runtime's own lexer, which
 //! advances the row on `\n` only, and an external scanner cannot override
 //! it.
+
+use std::num::NonZeroU32;
+
+use crate::error::Position;
 
 /// Byte length of the line terminator beginning at `offset` — 2 for a
 /// `\r\n` pair, 1 for a lone `\r` or a `\n` — or `None` when no terminator
@@ -199,6 +203,137 @@ impl std::iter::FusedIterator for Split<'_> {}
 fn trailing_terminator_len(source: &str) -> Option<usize> {
     matches!(source.as_bytes().last()?, b'\r' | b'\n')
         .then(|| source.len() - end_before(source, source.len()))
+}
+
+/// Precomputed line-start byte offsets for a source string.
+///
+/// Construct once with [`LineStarts::new`], then look up many byte offsets
+/// via [`LineStarts::position`]. Reduces an N-diagnostic conversion from
+/// `O(N * file_len)` (re-walking the source per call) to
+/// `O(file_len + N * log L)` where `L` is the line count.
+#[derive(Debug, Clone)]
+pub struct LineStarts {
+    /// Byte offset of the first character of each line (line 1 starts at
+    /// offset 0; subsequent entries are the byte after each line break).
+    starts: Vec<usize>,
+}
+
+impl LineStarts {
+    /// Build the index by walking the source exactly once.
+    #[must_use]
+    pub fn new(source: &str) -> Self {
+        Self {
+            starts: starts(source),
+        }
+    }
+
+    /// The byte offset each line begins at, as [`crate::lines::starts`]
+    /// computed them.
+    ///
+    /// For a caller that wants the *text* of a line rather than a position
+    /// in it, and already holds this index. Handing back the slice keeps
+    /// the line-break rule where `crate::lines` puts it: the alternative
+    /// is a second walk of the source deciding again where a line ends,
+    /// which is what that module exists to prevent.
+    #[must_use]
+    pub fn line_starts(&self) -> &[usize] {
+        &self.starts
+    }
+
+    /// Resolve a byte offset into a 1-based `line:column` [`Position`].
+    ///
+    /// `byte_offset` must be a character boundary — every offset in this
+    /// crate comes from a [`Span`](crate::error::Span), which is built from
+    /// one. Offsets past the end of `source` clamp to the final position; an
+    /// offset inside a character does not, and panics on the slice.
+    ///
+    /// Line and column saturate at `u32::MAX` rather than wrapping. Each
+    /// needs its own four billion — of lines in the file, of characters on
+    /// the line — and a source that reaches either has worse problems than
+    /// a truncated position.
+    #[must_use]
+    pub fn position(&self, source: &str, byte_offset: usize) -> Position {
+        let clamped = byte_offset.min(source.len());
+        let line_index = self.line_of(clamped);
+        let line_start = self.starts[line_index];
+        let column_chars = source[line_start..clamped].chars().count() + 1;
+        let line = NonZeroU32::new(u32::try_from(line_index + 1).unwrap_or(u32::MAX))
+            .unwrap_or(NonZeroU32::MIN);
+        let col = NonZeroU32::new(u32::try_from(column_chars).unwrap_or(u32::MAX))
+            .unwrap_or(NonZeroU32::MIN);
+        Position { line, col }
+    }
+
+    /// Resolve a 1-based `line:column` back to a byte offset — the inverse
+    /// of [`LineStarts::position`].
+    ///
+    /// Needed by anything holding a [`Position`] and wanting a
+    /// [`Span`](crate::error::Span): the parser reports where it stopped,
+    /// not the range it stopped over, so a renderer has to put the two back
+    /// together.
+    ///
+    /// Out-of-range inputs clamp rather than panic, which is what a
+    /// position from a *different* source than the one indexed here
+    /// amounts to. A line past the end resolves to the end of the source;
+    /// a column past the end of its line resolves to that line's end,
+    /// before the terminator, so the result never lands inside a line
+    /// break or past one.
+    #[must_use]
+    pub fn offset_of(&self, source: &str, position: Position) -> usize {
+        let line_index = position.line.get() as usize - 1;
+        let Some(&line_start) = self.starts.get(line_index) else {
+            return source.len();
+        };
+        let line_end = self.line_end(source, line_start);
+        let mut offset = line_start;
+        for _ in 1..position.col.get() {
+            let Some(c) = source[offset..line_end].chars().next() else {
+                break;
+            };
+            offset += c.len_utf8();
+        }
+        offset
+    }
+
+    /// Byte offset of the end of the line `byte_offset` sits on, before
+    /// that line's terminator.
+    ///
+    /// The terminator is excluded so a span built from this cannot cross
+    /// into the next line — an editor rendering one that did would
+    /// underline the following row's first column.
+    #[must_use]
+    pub fn line_end(&self, source: &str, byte_offset: usize) -> usize {
+        let clamped = byte_offset.min(source.len());
+        self.starts
+            .get(self.line_of(clamped) + 1)
+            .map_or(source.len(), |&next| end_before(source, next))
+    }
+
+    /// The 0-based index of the line `byte_offset` sits on.
+    ///
+    /// An offset past the end of the indexed source lands on its last line,
+    /// the one [`LineStarts::position`] clamps such an offset to. An offset
+    /// on the `\n` of a `\r\n` pair is on the line that pair ends, since
+    /// the break is one terminator and the next line begins after it.
+    #[must_use]
+    pub fn line_of(&self, byte_offset: usize) -> usize {
+        // `partition_point` counts the line starts at or before the offset,
+        // and the line holding it is the last of those. The count is never
+        // 0: `starts[0]` is 0, which is `<= byte_offset` for every offset.
+        self.starts.partition_point(|&s| s <= byte_offset) - 1
+    }
+}
+
+/// Compute a 1-based `line:column` for a byte offset into `source`.
+///
+/// The one-shot convenience over [`LineStarts`], not a second answer to the
+/// same question — computing the line here independently is how the two
+/// came to disagree about a lone `\r`. It builds and discards an index per
+/// call, so prefer holding one when converting many offsets from the same
+/// source; the O(`source.len()`) cost per call is unchanged.
+#[must_use]
+pub fn position_at(source: &str, byte_offset: usize) -> Position {
+    LineStarts::new(source).position(source, byte_offset)
 }
 
 #[cfg(test)]
@@ -409,5 +544,141 @@ mod tests {
                 "{source:?}"
             );
         }
+    }
+
+    fn position(line: u32, col: u32) -> Position {
+        Position {
+            line: NonZeroU32::new(line).expect("line"),
+            col: NonZeroU32::new(col).expect("col"),
+        }
+    }
+
+    /// Every byte offset survives the trip out to a position and back.
+    ///
+    /// The two conversions are written separately — one walks the line
+    /// starts forward, the other counts characters along a line — so
+    /// nothing but this says they agree. Non-ASCII on both sides of a
+    /// break, because the column counts Unicode scalar values and a
+    /// byte-counting version passes an ASCII-only round trip.
+    #[test]
+    fn a_byte_offset_survives_the_round_trip_through_a_position() {
+        let source = "α\nfoo\nβar\n";
+        let index = LineStarts::new(source);
+        for (offset, _) in source.char_indices() {
+            assert_eq!(
+                index.offset_of(source, index.position(source, offset)),
+                offset,
+                "round trip failed at byte {offset}",
+            );
+        }
+    }
+
+    /// A position from outside the source clamps instead of panicking.
+    ///
+    /// Nothing in this crate can reach it — a `ParseError` reports a
+    /// position into the source it failed on — so the guard exists for the
+    /// caller holding a position from a *different* revision of a
+    /// document, which an editor does between a keystroke and a re-parse.
+    /// Asserted here because there is nowhere else it can be.
+    #[test]
+    fn a_position_from_outside_the_source_clamps() {
+        let source = "ab\ncd";
+        let index = LineStarts::new(source);
+        assert_eq!(
+            index.offset_of(source, position(1, 99)),
+            2,
+            "a column past the end of its line clamps to that line's end, \
+             before the terminator",
+        );
+        assert_eq!(
+            index.offset_of(source, position(9, 1)),
+            source.len(),
+            "a line past the end of the source clamps to its end",
+        );
+    }
+
+    #[test]
+    fn position_at_handles_unicode_columns() {
+        // Two-byte UTF-8 character: the column count must advance by 1
+        // (one Unicode scalar value), not by the byte length.
+        let source = "α\nβ\n";
+        let pos_after_alpha = position_at(source, 2); // byte 2 = start of '\n'
+        assert_eq!(pos_after_alpha.line.get(), 1);
+        assert_eq!(pos_after_alpha.col.get(), 2);
+
+        let pos_on_beta = position_at(source, 3); // byte 3 = start of 'β'
+        assert_eq!(pos_on_beta.line.get(), 2);
+        assert_eq!(pos_on_beta.col.get(), 1);
+    }
+
+    #[test]
+    fn position_at_for_offset_past_end_clamps_to_eof() {
+        let source = "abc\n";
+        let pos = position_at(source, 99);
+        assert_eq!(pos.line.get(), 2);
+        assert_eq!(pos.col.get(), 1);
+    }
+
+    #[test]
+    fn position_agrees_with_a_direct_walk_of_the_source() {
+        // The index exists so N diagnostics do not re-walk the source N
+        // times, and the walk is what it has to reproduce: step one
+        // character at a time, bumping the line at each break and the
+        // column otherwise. Comparing against `position_at` instead would
+        // now be comparing the index with itself — there is one
+        // implementation, which is the point of having one rule.
+        for source in ["α\nfoo\nbar\nβaz\n", "a\r\nb\rc", "\r\r\n", "", "no break"] {
+            let lines = LineStarts::new(source);
+            let (mut line, mut col, mut offset) = (1_u32, 1_u32, 0_usize);
+            loop {
+                let expected = Position {
+                    line: NonZeroU32::new(line).expect("1-based"),
+                    col: NonZeroU32::new(col).expect("1-based"),
+                };
+                assert_eq!(
+                    lines.position(source, offset),
+                    expected,
+                    "{source:?} at byte {offset}",
+                );
+                if offset == source.len() {
+                    break;
+                }
+                if let Some(len) = terminator_len(source, offset) {
+                    offset += len;
+                    line += 1;
+                    col = 1;
+                } else {
+                    offset += source[offset..]
+                        .chars()
+                        .next()
+                        .expect("offset is inside the source")
+                        .len_utf8();
+                    col += 1;
+                }
+            }
+        }
+    }
+
+    /// `line_of` is the line `position` reports, counted from zero, at
+    /// every offset under each break style and past the end of the source.
+    #[test]
+    fn line_of_is_the_zero_based_line_of_position() {
+        for source in ["α\nfoo\nbar\nβaz\n", "a\r\nb\rc", "\r\r\n", "", "no break"] {
+            let lines = LineStarts::new(source);
+            for offset in
+                (0..=source.len() + 2).filter(|&o| o > source.len() || source.is_char_boundary(o))
+            {
+                let line = lines.position(source, offset).line.get() as usize;
+                assert_eq!(
+                    lines.line_of(offset),
+                    line - 1,
+                    "{source:?} at byte {offset}"
+                );
+            }
+        }
+        let crlf = LineStarts::new("a\r\nb");
+        assert_eq!(crlf.line_of(1), 0, "the `\\r` is on the line it ends");
+        assert_eq!(crlf.line_of(2), 0, "so is the `\\n` after it");
+        assert_eq!(crlf.line_of(3), 1);
     }
 }

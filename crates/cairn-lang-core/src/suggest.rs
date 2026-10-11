@@ -18,7 +18,7 @@
 
 use strsim::damerau_levenshtein;
 
-use crate::check::DiagnosticNote;
+use crate::diagnostic::DiagnosticNote;
 
 /// The "did you mean X?" note every unknown-identifier diagnostic
 /// attaches, with `suggested` already spelled the way the source would

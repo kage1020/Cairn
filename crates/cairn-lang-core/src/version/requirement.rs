@@ -12,7 +12,7 @@
 //! The same chapter's "The target is a compile-time parameter" makes
 //! `DataVersion` canonical precisely so ordering survives Minecraft's move
 //! from semver-ish to date-based version labels, and
-//! [`super::version_order::VersionOrder`] is what does the ordering — over
+//! [`super::order::VersionOrder`] is what does the ordering — over
 //! a table this crate cannot hold, since the table ships in the registry
 //! pack and `core` does not depend on `cairn-lang-formats`. What is left
 //! here is the two halves that are about the *text*: reading the directive,
@@ -381,7 +381,7 @@ pub fn parse_min_version(raw: &str) -> Option<Requirement<'_>> {
 /// Compare two version labels by their text.
 ///
 /// **This is not the ordering key.** `DataVersion` is
-/// ([`super::version_order::VersionOrder`]), and this is what that falls
+/// ([`super::order::VersionOrder`]), and this is what that falls
 /// back on for the one question a table of known versions cannot answer
 /// from its rows: where a label it has never seen sits relative to the
 /// ones it has. `VersionOrder` only trusts the answer where it cannot be
@@ -509,7 +509,7 @@ fn is_zero(s: &str) -> bool {
 
 /// Whether a label is dot-separated decimals and nothing else.
 ///
-/// [`super::version_order`] asks this before trusting [`compare_versions`]
+/// [`super::order`] asks this before trusting [`compare_versions`]
 /// to place a label outside a table's rows: two dotted decimals are one
 /// numbering scheme and compare meaningfully, while a dotted decimal against
 /// a date-based or snapshot label is exactly the comparison
@@ -959,7 +959,7 @@ mod tests {
         assert_eq!(compare_versions("1.0", "1."), Ordering::Less);
     }
 
-    /// What `version_order` asks before trusting the text: one numbering
+    /// What `order` asks before trusting the text: one numbering
     /// scheme, not two.
     #[test]
     fn dotted_decimal_is_what_it_says() {

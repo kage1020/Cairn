@@ -17,10 +17,12 @@ use crate::ast::{
     Arg, DottedRef, Expr, Header, Item, MemberRequires, Module, RawRequirement, RawVersion,
     Statement, ThemeRule, TruthRow, Value, ValueKind,
 };
-use crate::check::{Diagnostic, DiagnosticCode, LineStarts};
+use crate::calver::future_version_note;
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::error::{IntContext, ParseError, Position};
 use crate::lex::{Lexed, Token, TokenKind, lex, lex_deferring};
-use crate::resolve::parse_requirement;
+use crate::lines::LineStarts;
+use crate::version::parse_requirement;
 use indexmap::IndexSet;
 
 /// The word that introduces a version floor, as a directive name after the
@@ -207,7 +209,7 @@ pub fn diagnose_parse_failure(source: &str, lines: &LineStarts, err: &ParseError
         // the span; `ParseError`'s own `Display` prefixes it too, which is
         // why this reads `user_message` rather than `to_string`.
         primary: err.user_message(),
-        notes: crate::check::cairn_version::future_version_note(source, lines.line_starts())
+        notes: future_version_note(source, lines.line_starts())
             .into_iter()
             .collect(),
         // No structured payload. A consumer that wants to branch on which

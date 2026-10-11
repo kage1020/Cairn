@@ -35,10 +35,11 @@
 //! be telling them the wrong thing.
 
 use crate::ast::SIGNAL_HEAD;
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{IntentModule, Member, MemberRole, SENSOR_HOSTS};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     for s in &ir.structs {

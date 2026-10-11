@@ -47,12 +47,13 @@
 use indexmap::IndexMap;
 
 use crate::ast::{Arg, Header, Item, ItemKind, Module, Statement, ThemeRule, ValueKind};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{IntentModule, MemberRole, SelectorRule, ThemeIr, role_of};
 use crate::prose::{and_list, selector_text};
 use crate::resolve::select_the_same_members;
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink) {
     check_headers(&module.headers, sink);

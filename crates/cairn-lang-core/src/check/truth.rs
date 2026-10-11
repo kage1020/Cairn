@@ -17,7 +17,7 @@
 //! * a pattern assigned twice, the two rows disagreeing;
 //! * combinations left unassigned, which are the ones a bug hides in.
 //!
-//! Severity follows what is provable, the split [`super::diagnostic`]
+//! Severity follows what is provable, the split [`crate::diagnostic`]
 //! records per code. A repeated input is an error: the header alone shows
 //! the table is written for combinations the circuit does not have, and
 //! reading the list as one input instead would give the rows a meaning the
@@ -51,11 +51,12 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::ast::{DottedRef, TruthRow};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{AssertIr, IntentModule, Member, MemberBody};
 use crate::prose::and_list;
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 /// How many unassigned combinations a finding names, in the sentence and
 /// in the payload alike.

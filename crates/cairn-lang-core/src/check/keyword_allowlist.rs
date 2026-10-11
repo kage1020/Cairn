@@ -17,10 +17,11 @@
 //! it is matched against members of every body, so its vocabulary stays
 //! the whole table.
 
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{BodyKind, IntentModule, Member, MemberRole, known_keywords, role_of};
 use crate::suggest::{did_you_mean_note, nearest_match};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     for s in &ir.structs {

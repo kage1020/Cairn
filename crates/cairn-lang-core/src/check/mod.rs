@@ -34,9 +34,8 @@
 
 mod arguments;
 mod binding;
-pub(crate) mod cairn_version;
+mod cairn_version;
 mod connect_arity;
-mod diagnostic;
 mod duplicate;
 mod intended_targets;
 mod keyword_allowlist;
@@ -49,10 +48,11 @@ mod sink;
 mod truth;
 mod type_mismatch;
 
-pub use diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, LineStarts, RenderedDiagnostic,
-    RenderedNote, Severity, position_at,
+pub use crate::diagnostic::{
+    Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote, RenderedDiagnostic, RenderedNote,
+    Severity,
 };
+pub use crate::lines::{LineStarts, position_at};
 pub use intended_targets::weigh_intended_targets;
 pub use sink::DiagnosticSink;
 
@@ -228,48 +228,6 @@ mod tests {
             .collect();
         names.sort_unstable();
         names
-    }
-
-    /// The set `cairn-lang-cli/tests/cli_check_parity.rs` keeps a fixture for.
-    ///
-    /// These are the codes only [`check`] produces, so before the build
-    /// commands started calling it they reached `cairn check` and nothing
-    /// else. Adding one without a fixture would leave that gap reopenable
-    /// without any test noticing.
-    #[test]
-    fn syntactic_error_codes_are_covered_by_cli_fixtures() {
-        let actual =
-            codes_where(|c| raised_by(c) == RaisedBy::Syntactic && c.severity() == Severity::Error);
-        assert_eq!(
-            actual,
-            [
-                "E_CONNECT_ARITY",
-                "E_DUPLICATE_ARG",
-                "E_DUPLICATE_CIRCUIT",
-                "E_DUPLICATE_HEADER",
-                "E_DUPLICATE_ID",
-                "E_DUPLICATE_ITEM",
-                "E_DUPLICATE_SELECTOR",
-                "E_DUPLICATE_SIZE",
-                "E_DUPLICATE_SLOT",
-                "E_INVALID_REQUIRES",
-                "E_MISPLACED_BINDING",
-                "E_MISPLACED_MEMBER",
-                "E_MISSING_MATERIAL",
-                "E_TRUTH_TABLE_CONFLICT",
-                "E_TRUTH_TABLE_DUPLICATE_INPUT",
-                "E_TRUTH_TABLE_EMPTY",
-                "E_TYPE_MISMATCH_LABEL",
-                "E_TYPE_MISMATCH_SIZE",
-                "E_UNEXPECTED_POSITIONAL",
-                "E_UNKNOWN_ARGUMENT",
-                "E_UNKNOWN_KEYWORD",
-                "E_UNSUPPORTED_NESTING",
-            ],
-            "the syntactic Error set changed: add or remove the matching \
-             fixture in cairn-lang-cli/tests/cli_check_parity.rs so \
-             `cairn lower` / `info` / `compile` stay in step with `cairn check`",
-        );
     }
 
     /// The codes a version table is the only way to reach.

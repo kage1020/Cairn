@@ -47,10 +47,11 @@
 //! so.
 
 use crate::ast::{Value, ValueKind};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{ConnectEnd, IntentModule, Member, MemberRole};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     // `connect` carries semantic meaning only at site placement scope,

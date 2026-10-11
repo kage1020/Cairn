@@ -58,10 +58,11 @@
 //! into a body that is already dropped would count one mistake once per
 //! member inside it.
 
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
 use crate::intent::{BodyKind, IntentModule, Member, MemberRole};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 /// Why an indented body will not reach the build.
 #[derive(Debug, Clone, Copy)]

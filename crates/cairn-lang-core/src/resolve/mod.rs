@@ -31,16 +31,15 @@
 //! this module enforces.
 
 mod binding;
-mod requires_parse;
 mod resolver;
 mod theme_variant;
 mod version_axes;
-mod version_order;
 
-pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
-pub use requires_parse::{
-    Requirement, RequirementError, compare_versions, parse_min_version, parse_requirement,
+pub use crate::version::{
+    FloorPlacement, FloorVerdict, Requirement, RequirementError, VersionOrder, compare_versions,
+    parse_min_version, parse_requirement,
 };
+pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
 pub(crate) use resolver::select_the_same_members;
 pub use resolver::{
     PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,
@@ -53,4 +52,3 @@ pub use version_axes::{
     VersionAxes, VersionFloor, compute_axes, declared_version_floors, unscoped_version_floors,
     versions_satisfying,
 };
-pub use version_order::{FloorPlacement, FloorVerdict, VersionOrder};

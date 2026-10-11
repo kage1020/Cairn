@@ -40,15 +40,14 @@ use std::collections::HashSet;
 use serde::Serialize;
 
 use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement};
-use crate::check::RenderedDiagnostic;
+use crate::diagnostic::RenderedDiagnostic;
 use crate::edition::Edition;
 use crate::error::{Position, Span};
 use crate::intent::IntentModule;
+use crate::version::{FloorVerdict, VersionOrder, compare_versions, parse_min_version};
 
-use super::requires_parse::{compare_versions, parse_min_version};
 use super::resolver::Resolution;
 use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};
-use super::version_order::{FloorVerdict, VersionOrder};
 
 /// The three-axis answer to "which version is this `.crn` for?".
 ///

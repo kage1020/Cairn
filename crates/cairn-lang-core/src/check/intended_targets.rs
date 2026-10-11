@@ -57,14 +57,11 @@
 //! answering for half the list made it read as half a problem.
 
 use crate::ast::{Header, Module};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
-use crate::resolve::{
-    FloorVerdict, VersionFloor, VersionOrder, compare_versions, declared_version_floors,
-    versions_satisfying,
-};
-
-use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
+use crate::resolve::{VersionFloor, declared_version_floors, versions_satisfying};
+use crate::version::{FloorVerdict, VersionOrder, compare_versions};
 
 /// Weigh every `@intended_targets` version a module declares against the
 /// floors a build of `edition` is held to.

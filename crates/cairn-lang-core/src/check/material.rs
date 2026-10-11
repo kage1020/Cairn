@@ -47,9 +47,10 @@
 //! reads whatever `intent::lower` produced, so what has to hold is that
 //! edits are applied there rather than downstream.
 
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{BodyKind, IntentModule, Member, MemberRole};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     let has_a_theme = !ir.themes.is_empty();

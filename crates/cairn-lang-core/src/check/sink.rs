@@ -1,6 +1,6 @@
 //! Accumulator that the `check` passes push [`Diagnostic`]s into.
 
-use super::Diagnostic;
+use crate::diagnostic::Diagnostic;
 
 /// Collector that gathers diagnostics from one or more passes without
 /// short-circuiting.
@@ -56,7 +56,7 @@ impl DiagnosticSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::{DiagnosticCode, Severity};
+    use crate::diagnostic::{DiagnosticCode, Severity};
 
     fn diag(start: usize, end: usize, code: DiagnosticCode, msg: &str) -> Diagnostic {
         Diagnostic {

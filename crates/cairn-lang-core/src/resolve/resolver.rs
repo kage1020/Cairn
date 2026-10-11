@@ -60,7 +60,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::ast::{Value, ValueKind};
-use crate::check::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::ids::{
@@ -2529,7 +2529,7 @@ fn check_unmatched_selectors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::check::Severity;
+    use crate::diagnostic::Severity;
     use crate::{lower, parse};
 
     fn ir(source: &str) -> IntentModule {

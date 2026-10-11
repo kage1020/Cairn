@@ -95,6 +95,7 @@ use std::collections::{BTreeSet, HashMap};
 use indexmap::IndexMap;
 
 use crate::ast::ValueKind;
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{
     IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS, Unread, ValueWithSpan,
     role_of,
@@ -102,7 +103,7 @@ use crate::intent::{
 use crate::prose::or_list;
 use crate::suggest::{did_you_mean_note, nearest_match};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 /// Keys the module's theme selectors match on, per keyword they name.
 ///

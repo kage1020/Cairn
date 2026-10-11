@@ -45,9 +45,10 @@
 //! lost, which is why the walk asks that pass before descending.
 
 use crate::ast::{SIGNAL_HEAD, ValueKind};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{BodyKind, IntentModule, Member, MemberRole};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticNote, DiagnosticSink};
+use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     for s in &ir.structs {

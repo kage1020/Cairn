@@ -7,8 +7,9 @@
 //! original value type is still attached to its span.
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticSink};
+use super::DiagnosticSink;
 
 /// Keys whose value is a label and whose mistyping is otherwise silent.
 ///
