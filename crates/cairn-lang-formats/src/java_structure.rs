@@ -24,6 +24,7 @@ use cairn_lang_nbt::{
 };
 use thiserror::Error;
 
+use crate::block_id::is_concrete_id;
 use crate::data_version::JavaTarget;
 use crate::dims::{VolumeError, dim_to_i32, dims_to_i32, fits_list_limit, list_volume};
 
@@ -412,18 +413,6 @@ pub fn output_filename(source_scope: &str, ext: OutputExt) -> String {
         cairn_lang_core::artifact_stem(source_scope),
         ext.as_str()
     )
-}
-
-pub(crate) fn is_concrete_id(id: &str) -> bool {
-    // A concrete Minecraft id always carries exactly one `:` separating a
-    // non-empty namespace from a non-empty path. Abstract tokens lowered
-    // from `@cobblestone` look like `@cobblestone` — no colon at all — and
-    // a stray empty side (`:foo` / `foo:`) is treated as abstract too so a
-    // typo never reaches the NBT layer silently.
-    let mut parts = id.splitn(2, ':');
-    let ns = parts.next().unwrap_or("");
-    let path = parts.next();
-    matches!(path, Some(p) if !ns.is_empty() && !p.is_empty())
 }
 
 fn palette_list(entries: &[BlockState]) -> List {

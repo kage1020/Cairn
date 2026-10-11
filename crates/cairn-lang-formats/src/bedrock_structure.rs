@@ -42,9 +42,9 @@ use cairn_lang_nbt::{
 use thiserror::Error;
 
 use crate::bedrock_state::{BedrockStateError, degradation_message, java_state, translate_states};
+use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
-use crate::java_structure::is_concrete_id;
 
 /// A palette entry whose intent was degraded to fit Bedrock — surfaced by the
 /// caller as `W_INTENT_DEGRADED`. The serialiser has no source span (a

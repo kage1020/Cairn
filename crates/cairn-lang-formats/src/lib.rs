@@ -8,6 +8,7 @@
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
+mod block_id;
 pub mod data_version;
 mod dims;
 pub mod java_structure;
