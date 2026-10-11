@@ -417,11 +417,10 @@ fn closing_stdin_without_exit_says_the_session_ended_abnormally() {
 
 #[test]
 fn closing_stdin_after_shutdown_is_not_abnormal() {
-    // `exit` returns out of the dispatch loop, so only a closed pipe reaches
-    // the check at its bottom, and a client that says `shutdown` and then
-    // closes stdin reaches it with the flag set. That is the arrangement
-    // where the check has to stay quiet; without it, "always warn" passes
-    // the test above.
+    // `run` checks for a missing `shutdown` once the I/O threads are joined.
+    // A client that says `shutdown` and then closes stdin reaches that check
+    // with the flag set, so it has to stay quiet here; without this test,
+    // "always warn" passes the one above.
     let (mut server, _) = Server::start();
     server.did_open(CLEAN, 1);
     server.read_until_method("textDocument/publishDiagnostics");
