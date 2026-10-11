@@ -11,9 +11,7 @@ use cairn_lang_core::resolve::{
     VersionAxes, compute_axes, declared_version_floors, resolve,
 };
 use cairn_lang_core::suggest::candidate_list;
-use cairn_lang_core::{
-    Diagnostic, Edition, Module, Severity, diagnose_parse_failure, lower, parse,
-};
+use cairn_lang_core::{Diagnostic, Edition, Module, Severity, lower};
 use cairn_lang_formats::bedrock_state::degradation_detail;
 use cairn_lang_formats::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
@@ -26,7 +24,7 @@ use crate::floors::{
     weigh_versions,
 };
 use crate::pipeline::{
-    RequestedEditions, build_diagnostics, builtin_pack, dropped_scopes, read_source,
+    RequestedEditions, build_diagnostics, builtin_pack, dropped_scopes, load_module,
     requested_editions, supported_versions,
 };
 use crate::report::{
@@ -35,37 +33,16 @@ use crate::report::{
 };
 
 pub(crate) fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
-    // Reject empty edition entries early so they cannot leak into the
-    // output. `--editions ""` and `--editions java,,bedrock` both produce
-    // empty strings under the comma value-delimiter, which would render
-    // as `: 1.20 .. latest` rows or `"edition":""` JSON.
-    if editions.iter().any(|e| e.trim().is_empty()) {
-        eprintln!("error: --editions value must not contain empty entries");
-        return ExitCode::from(2);
-    }
-    // Reject unknown edition names before the (expensive) dry-run lowering.
-    // The parity table's contract is "every entry is a real portability
-    // figure"; letting an unknown edition through would either silently
-    // produce zeros or a Java-flavoured fallback the caller couldn't
-    // distinguish from a real portable-only classification.
-    for e in editions {
-        if let Err(err) = e.parse::<Edition>() {
-            eprintln!("error: {err}");
+    let asked = match requested_editions(editions) {
+        Ok(asked) => asked,
+        Err(message) => {
+            eprintln!("error: {message}");
             return ExitCode::from(2);
         }
-    }
-
-    let source = match read_source(file) {
-        Ok(source) => source,
-        Err(code) => return code,
     };
-    let module = match parse(&source) {
-        Ok(m) => m,
-        Err(err) => {
-            let lines = LineStarts::new(&source);
-            let parse_failure = [diagnose_parse_failure(&source, &lines, &err)];
-            return report_failure_document(file, &source, format.failure_report(), &parse_failure);
-        }
+    let (source, module) = match load_module(file, format.failure_report()) {
+        Ok(loaded) => loaded,
+        Err(code) => return code,
     };
     let ir = lower(&module);
 
@@ -93,7 +70,6 @@ pub(crate) fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> 
     // reaches would refuse the command before a single row was computed.
     // The resolver stays unpinned regardless — that gate is edition-neutral
     // by design, and the strict per-edition pass runs inside the dry-run.
-    let asked: RequestedEditions = requested_editions(editions);
     let combined = build_diagnostics(
         &module,
         &ir,

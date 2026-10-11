@@ -422,7 +422,8 @@ mod requested {
         }
     }
 
-    /// Read an `--editions` list as the editions it asks about.
+    /// Read an `--editions` list as the editions it asks about, or the
+    /// message refusing it.
     ///
     /// Deduplicated because the list is a user's, and `--editions java,java`
     /// asks about Java once. A repeat would walk the edition twice, giving
@@ -432,19 +433,31 @@ mod requested {
     /// decides whether `W_INTENDED_TARGET_UNSUPPORTED` has been asked for
     /// at all.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// If an entry does not parse. The caller validates the list and exits
-    /// 2 before reaching here.
-    pub(crate) fn requested_editions(editions: &[String]) -> RequestedEditions {
+    /// An empty entry, or a name that is not an edition. The caller prints
+    /// the message and exits 2 before reading the source.
+    pub(crate) fn requested_editions(editions: &[String]) -> Result<RequestedEditions, String> {
+        // Reject empty edition entries early so they cannot leak into the
+        // output. `--editions ""` and `--editions java,,bedrock` both produce
+        // empty strings under the comma value-delimiter, which would render
+        // as `: 1.20 .. latest` rows or `"edition":""` JSON.
+        if editions.iter().any(|e| e.trim().is_empty()) {
+            return Err("--editions value must not contain empty entries".to_owned());
+        }
+        // Reject unknown edition names before the (expensive) dry-run lowering.
+        // The parity table's contract is "every entry is a real portability
+        // figure"; letting an unknown edition through would either silently
+        // produce zeros or a Java-flavoured fallback the caller couldn't
+        // distinguish from a real portable-only classification.
         let mut asked: Vec<Edition> = Vec::with_capacity(editions.len());
         for name in editions {
-            let edition: Edition = name.parse().expect("validated by the caller");
+            let edition: Edition = name.parse().map_err(|err| format!("{err}"))?;
             if !asked.contains(&edition) {
                 asked.push(edition);
             }
         }
-        RequestedEditions(asked)
+        Ok(RequestedEditions(asked))
     }
 }
 
@@ -550,4 +563,15 @@ pub(crate) fn load_and_lower(
         dropped_scopes,
         version_floors,
     })
+}
+
+/// `struct probe size=3x3` with walls, lowered for `edition` against that
+/// edition's pack with no version pinned: one structure, for the unit tests
+/// that need a real lowering to rekey or corrupt.
+#[cfg(test)]
+pub(crate) fn lowered_probe(edition: Edition) -> BlockArrayIr {
+    let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, Some(edition));
+    lower_to_block_array(&ir, &resolution, Some(&builtin_pack(edition).view(None)))
 }

@@ -1,10 +1,9 @@
 use cairn_lang_core::resolve::DroppedIntent;
 
-use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::{lower, parse};
 use cairn_lang_formats::registry::builtin_bedrock;
 
 use super::*;
+use crate::pipeline::lowered_probe;
 
 /// The whole note block, header included.
 ///
@@ -116,11 +115,8 @@ fn the_degraded_notes_answer_the_figure_they_sit_under() {
 fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
     use cairn_lang_core::block_array::BlockState;
 
-    let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, Some(Edition::Bedrock));
     let pack = builtin_bedrock();
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&pack.view(None)));
+    let mut block_ir = lowered_probe(Edition::Bedrock);
     let mut leaked = BlockState::bare("minecraft:oak_stairs");
     leaked
         .properties

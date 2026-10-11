@@ -1,8 +1,6 @@
-use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::resolve::resolve;
-use cairn_lang_core::{Edition, lower, parse};
-use cairn_lang_formats::registry::builtin_java;
+use cairn_lang_core::Edition;
 
+use crate::pipeline::lowered_probe;
 use crate::target::resolve_target;
 
 use super::*;
@@ -60,31 +58,16 @@ fn an_artifact_file_name_that_is_not_plain_is_refused() {
 /// not exist, so the key's file name is the only thing left to refuse.
 #[test]
 fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
-    let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, Some(Edition::Java));
-    let block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
     let target = resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
     let out_dir = Path::new("out");
-    let rekeyed = |key: &str| {
-        let mut ir = block_ir.clone();
-        let array = ir
-            .structures
-            .values()
-            .next()
-            .expect("the probe lowers to one structure")
-            .clone();
-        ir.structures = [(key.to_owned(), array)].into_iter().collect();
-        ir
-    };
 
     for key in ["site::s::/abs/hut", "site::s::sub/hut", "site::s::a\\b"] {
         assert!(
-            prepare_artifacts(&rekeyed(key), &target, out_dir).is_err(),
+            prepare_artifacts(&rekeyed_probe(&[key]), &target, out_dir).is_err(),
             "scope `{key}` must be refused rather than written outside `out`",
         );
     }
-    let plain = rekeyed("site::s::hut");
+    let plain = rekeyed_probe(&["site::s::hut"]);
     let prepared = prepare_artifacts(&plain, &target, out_dir)
         .unwrap_or_else(|_| panic!("a plain id prepares"));
     let paths: Vec<&Path> = prepared.iter().map(|(path, _)| path.as_path()).collect();
@@ -95,10 +78,7 @@ fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
 /// hand to `prepare_artifacts`. Rekeying a real lowering is the only
 /// way to reach a refusal no source reaches.
 fn rekeyed_probe(keys: &[&str]) -> BlockArrayIr {
-    let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, Some(Edition::Java));
-    let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+    let mut block_ir = lowered_probe(Edition::Java);
     let array = block_ir
         .structures
         .values()

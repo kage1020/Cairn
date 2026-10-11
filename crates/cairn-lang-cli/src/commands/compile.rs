@@ -128,12 +128,10 @@ fn check_and_write(
 
 #[cfg(test)]
 mod tests {
-    use cairn_lang_core::block_array::lower_to_block_array;
-    use cairn_lang_core::resolve::resolve;
-    use cairn_lang_core::{Edition, lower, parse};
-    use cairn_lang_formats::registry::builtin_java;
+    use cairn_lang_core::Edition;
 
     use super::*;
+    use crate::pipeline::lowered_probe;
 
     /// A structure the backend refuses stops the build before anything is
     /// staged, including the structures ahead of it that pass. The passing
@@ -142,10 +140,7 @@ mod tests {
     /// its dims, which the backend refuses rather than reading past.
     #[test]
     fn a_structure_the_backend_refuses_leaves_out_dir_and_lockfile_untouched() {
-        let module = parse("struct probe size=3x3\n  walls height=2\n").expect("the probe parses");
-        let ir = lower(&module);
-        let resolution = resolve(&ir, Some(Edition::Java));
-        let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
+        let mut block_ir = lowered_probe(Edition::Java);
         let target =
             resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
         let array = block_ir
