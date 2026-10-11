@@ -53,7 +53,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::edition_netlist_ir::EditionCell;
-use crate::logic_ir::ScopeKind;
+use crate::logic_ir::{ScopeKind, Scoped, ScopedEntry};
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 
 /// Which of the three pseudo-2.5D layers in `spec/redstone`
@@ -1738,22 +1738,15 @@ impl PlacementIr {
     }
 }
 
-/// Ordered list of `(scope kind, scope name)` → [`PlacementIr`] entries
-/// covering an entire `.crn` module.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct ScopedPlacementIr {
-    /// Per-scope Placement IR, in source order across the whole module.
-    pub scopes: Vec<ScopedPlacementIrEntry>,
-}
+/// Every scope's [`PlacementIr`], in source order across the whole
+/// module.
+pub type ScopedPlacementIr = Scoped<PlacementIr>;
+
+/// One entry in a [`ScopedPlacementIr`]: the Placement IR laid out from
+/// one scope's Edition Netlist IR.
+pub type ScopedPlacementIrEntry = ScopedEntry<PlacementIr>;
 
 impl ScopedPlacementIr {
-    /// Empty list.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Append one scope's Placement IR. Empty scopes are elided so a
     /// module without any redstone renders as `[]`, matching the
     /// sibling IRs' elision.
@@ -1773,23 +1766,6 @@ impl ScopedPlacementIr {
         }
         self.scopes.push(ScopedPlacementIrEntry { kind, name, ir });
     }
-
-    /// `true` when no scope produced a non-empty Placement IR.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.scopes.is_empty()
-    }
-}
-
-/// One entry in a [`ScopedPlacementIr`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ScopedPlacementIrEntry {
-    /// Which family of scope this Placement IR came from.
-    pub kind: ScopeKind,
-    /// Source-level name of the scope.
-    pub name: String,
-    /// Placement IR laid out from the scope's Edition Netlist IR.
-    pub ir: PlacementIr,
 }
 
 #[cfg(test)]

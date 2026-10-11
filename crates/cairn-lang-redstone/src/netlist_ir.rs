@@ -25,7 +25,7 @@ use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::logic_ir::ScopeKind;
+use crate::logic_ir::{ScopeKind, Scoped, ScopedEntry};
 
 /// A reference to a driving net, resolved to either a top-level input port
 /// (a sensor emitting `-> sig.X`) or a cell output.
@@ -220,22 +220,14 @@ impl Default for NetlistIr {
     }
 }
 
-/// Ordered list of `(scope kind, scope name)` → [`NetlistIr`] entries
-/// covering an entire `.crn` module.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct ScopedNetlistIr {
-    /// Per-scope Netlist IR, in source order across the whole module.
-    pub scopes: Vec<ScopedNetlistIrEntry>,
-}
+/// Every scope's [`NetlistIr`], in source order across the whole module.
+pub type ScopedNetlistIr = Scoped<NetlistIr>;
+
+/// One entry in a [`ScopedNetlistIr`]: the Netlist IR synthesised from
+/// one scope's Logic IR.
+pub type ScopedNetlistIrEntry = ScopedEntry<NetlistIr>;
 
 impl ScopedNetlistIr {
-    /// Empty list.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Append one scope's Netlist IR. Empty scopes are elided so a
     /// module without any redstone renders as `[]`, matching the Logic
     /// IR's elision.
@@ -255,21 +247,4 @@ impl ScopedNetlistIr {
         }
         self.scopes.push(ScopedNetlistIrEntry { kind, name, ir });
     }
-
-    /// `true` when no scope produced a non-empty Netlist IR.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.scopes.is_empty()
-    }
-}
-
-/// One entry in a [`ScopedNetlistIr`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ScopedNetlistIrEntry {
-    /// Which family of scope this Netlist IR came from.
-    pub kind: ScopeKind,
-    /// Source-level name of the scope.
-    pub name: String,
-    /// Netlist IR synthesised from the scope's Logic IR.
-    pub ir: NetlistIr,
 }

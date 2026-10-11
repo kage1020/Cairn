@@ -298,8 +298,8 @@ impl ScopeKind {
     }
 }
 
-/// Ordered list of `(scope kind, scope name)` → [`LogicIr`] entries
-/// covering an entire `.crn` module.
+/// Ordered list of `(scope kind, scope name)` → IR entries covering an
+/// entire `.crn` module, one per scope that produced a non-empty IR.
 ///
 /// A module can host redstone at multiple scopes at once (a `site` has
 /// `logic` lines coordinating placements, a `struct` has its own local
@@ -309,21 +309,65 @@ impl ScopeKind {
 /// not the synth pass. Downstream consumers that need lookup should build
 /// their own map keyed on `(entry.kind, entry.name.as_str())` and decide
 /// their duplicate policy explicitly.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+///
+/// Every IR layer names its own instance — [`ScopedLogicIr`],
+/// [`ScopedNetlistIr`], [`ScopedEditionNetlistIr`] and
+/// [`ScopedPlacementIr`] — and gives it the `push` that knows which of
+/// its IRs count as empty.
+///
+/// [`ScopedNetlistIr`]: crate::netlist_ir::ScopedNetlistIr
+/// [`ScopedEditionNetlistIr`]: crate::edition_netlist_ir::ScopedEditionNetlistIr
+/// [`ScopedPlacementIr`]: crate::placement_ir::ScopedPlacementIr
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
-pub struct ScopedLogicIr {
-    /// Per-scope Logic IR, in source order across the whole module.
-    pub scopes: Vec<ScopedLogicIrEntry>,
+pub struct Scoped<T> {
+    /// Per-scope IR, in source order across the whole module.
+    pub scopes: Vec<ScopedEntry<T>>,
 }
 
-impl ScopedLogicIr {
-    /// Empty list. Equivalent to `ScopedLogicIr::default()` but spells out
-    /// the intent at call sites.
+// Written out because the derive would ask `T: Default`, which a
+// `PlacementIr` (it needs an edition) does not offer.
+impl<T> Default for Scoped<T> {
+    fn default() -> Self {
+        Self { scopes: Vec::new() }
+    }
+}
+
+impl<T> Scoped<T> {
+    /// Empty list. Equivalent to `Scoped::default()` but spells out the
+    /// intent at call sites.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// `true` when no scope produced a non-empty IR.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.scopes.is_empty()
+    }
+}
+
+/// One entry in a [`Scoped`] list. Kept as a struct rather than a tuple
+/// so the JSON wire form carries labelled fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ScopedEntry<T> {
+    /// Which family of scope this IR came from.
+    pub kind: ScopeKind,
+    /// Source-level name of the scope (`gatehouse`, `entry`, ...).
+    pub name: String,
+    /// The scope's IR.
+    pub ir: T,
+}
+
+/// Every scope's [`LogicIr`], in source order across the whole module.
+pub type ScopedLogicIr = Scoped<LogicIr>;
+
+/// One entry in a [`ScopedLogicIr`]: the Logic IR synthesised from one
+/// scope's body.
+pub type ScopedLogicIrEntry = ScopedEntry<LogicIr>;
+
+impl ScopedLogicIr {
     /// Append one scope's Logic IR. Empty scopes are elided so a module
     /// without any redstone renders as `[]`.
     pub fn push(&mut self, kind: ScopeKind, name: String, ir: LogicIr) {
@@ -332,22 +376,4 @@ impl ScopedLogicIr {
         }
         self.scopes.push(ScopedLogicIrEntry { kind, name, ir });
     }
-
-    /// `true` when no scope produced a non-empty Logic IR.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.scopes.is_empty()
-    }
-}
-
-/// One entry in a [`ScopedLogicIr`]. Kept as a struct rather than a tuple
-/// so the JSON wire form carries labelled fields.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ScopedLogicIrEntry {
-    /// Which family of scope this Logic IR came from.
-    pub kind: ScopeKind,
-    /// Source-level name of the scope (`gatehouse`, `entry`, ...).
-    pub name: String,
-    /// Logic IR synthesised from the scope's body.
-    pub ir: LogicIr,
 }

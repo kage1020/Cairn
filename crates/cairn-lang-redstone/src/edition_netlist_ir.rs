@@ -29,7 +29,7 @@ use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::logic_ir::ScopeKind;
+use crate::logic_ir::{ScopeKind, Scoped, ScopedEntry};
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 
 /// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`]
@@ -337,23 +337,15 @@ impl EditionNetlistIr {
     }
 }
 
-/// Ordered list of `(scope kind, scope name)` → [`EditionNetlistIr`]
-/// entries covering an entire `.crn` module.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct ScopedEditionNetlistIr {
-    /// Per-scope Edition Netlist IR, in source order across the whole
-    /// module.
-    pub scopes: Vec<ScopedEditionNetlistIrEntry>,
-}
+/// Every scope's [`EditionNetlistIr`], in source order across the whole
+/// module.
+pub type ScopedEditionNetlistIr = Scoped<EditionNetlistIr>;
+
+/// One entry in a [`ScopedEditionNetlistIr`]: the Edition Netlist IR
+/// selected from one scope's Netlist IR.
+pub type ScopedEditionNetlistIrEntry = ScopedEntry<EditionNetlistIr>;
 
 impl ScopedEditionNetlistIr {
-    /// Empty list.
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Append one scope's Edition Netlist IR. Empty scopes are elided so
     /// a module without any redstone renders as `[]`, matching the
     /// Netlist IR's elision.
@@ -369,21 +361,4 @@ impl ScopedEditionNetlistIr {
         self.scopes
             .push(ScopedEditionNetlistIrEntry { kind, name, ir });
     }
-
-    /// `true` when no scope produced a non-empty Edition Netlist IR.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.scopes.is_empty()
-    }
-}
-
-/// One entry in a [`ScopedEditionNetlistIr`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct ScopedEditionNetlistIrEntry {
-    /// Which family of scope this Edition Netlist IR came from.
-    pub kind: ScopeKind,
-    /// Source-level name of the scope.
-    pub name: String,
-    /// Edition Netlist IR selected from the scope's Netlist IR.
-    pub ir: EditionNetlistIr,
 }

@@ -84,8 +84,8 @@ pub use edition_netlist_ir::{
     ScopedEditionNetlistIrEntry,
 };
 pub use logic_ir::{
-    GateKind, GateNode, InputPort, LogicIr, OutputPort, ScopeKind, ScopedLogicIr,
-    ScopedLogicIrEntry, SignalRef,
+    GateKind, GateNode, InputPort, LogicIr, OutputPort, ScopeKind, Scoped, ScopedEntry,
+    ScopedLogicIr, ScopedLogicIrEntry, SignalRef,
 };
 pub use netlist::compile_netlist;
 pub use netlist_ir::{
