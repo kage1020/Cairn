@@ -28,13 +28,12 @@ pub(super) fn fill_roof(
     let Some(kind) = parse_roof_kind(member, diagnostics) else {
         return;
     };
-    // Resolved behind [`roof_draws`], the gate the volume goes through, and
-    // not before it. A `shed` with no usable `slope_to=` draws nothing, and
-    // resolving it anyway reported a material for a roof that is not there:
-    // `W_ABSTRACT_TOKEN_DEFERRED` saying it is built from its default block,
-    // and `geometry_material_id`'s `W_DEFERRED_MEMBER` naming that block.
-    // `parse_roof_kind` has read a kind, so that shed is the one roof turned
-    // away here, and [`shed_slope_to`] is what says why.
+    // The material is resolved only past `roof_draws`, the volume's gate:
+    // a `shed` with no usable `slope_to=` draws nothing, and resolving it
+    // would report a material (`W_ABSTRACT_TOKEN_DEFERRED`, then
+    // `geometry_material_id`'s `W_DEFERRED_MEMBER`) for a roof that is not
+    // there. With a kind read, that shed is the only roof turned away
+    // here, and `shed_slope_to` says why.
     if roof_draws(member).is_none() {
         shed_slope_to(member, diagnostics);
         return;
@@ -84,11 +83,9 @@ pub(super) fn fill_roof(
             );
         }
         RoofKind::Hip => {
-            // Hip and gable share the same long-axis-wins-with-x-tiebreak
-            // ridge rule (`spec/compilation` "Hip roof voxel rules" falls
-            // through to "Gable roof voxel rules"). Reusing
-            // `gable_ridge_axis` keeps the two paths from drifting if the
-            // tiebreak rule ever changes.
+            // Hip takes gable's ridge rule, so it shares `gable_ridge_axis`
+            // (`spec/compilation` "Hip roof voxel rules" falls through to
+            // "Gable roof voxel rules").
             let ridge_axis = gable_ridge_axis(roof_w, roof_h);
             paint_roof(
                 hip_voxels(roof_w, roof_h, wall_top),
@@ -114,23 +111,18 @@ pub(super) fn fill_roof(
 /// Paint a roof's voxels, each with its face's blockstate under the id
 /// `base_id`.
 ///
-/// One `palette.intern` per face rather than one per voxel — a 99-voxel
-/// cottage roof needs four — but claimed on first use, not up front. A roof
-/// need not emit every face its kind has: an odd ridge span converges on a
-/// single row, so a gable that has one (a 3x3 struct) emits three of the
-/// five faces and never the apex pair; and a shed one deep is a single apex
-/// row with no slope under it, since the layer count is the slope span
-/// floored at one and the topmost layer is always the apex. An entry no
-/// voxel references is not free: it reaches the `.nbt` palette, the
-/// `resolved_ir_hash`, and the per-entry counts `cairn info` reports. A flat
-/// deck's one slot is claimed from inside its first write the same way, so
-/// the rule "no entry without a voxel" holds at every generator.
+/// One `palette.intern` per face rather than per voxel (a 99-voxel cottage
+/// roof needs four), claimed on first use rather than up front, since a
+/// roof need not emit every face its kind has. An odd ridge span converges
+/// on one row, so a gable with one (a 3x3 struct) emits three of its five
+/// faces and never the apex pair; a shed one deep is a lone apex row, the
+/// layer count being the slope span floored at one with the apex on top. A
+/// flat deck claims its one slot the same way, so no generator leaves an
+/// entry without a voxel.
 ///
-/// Claiming on demand also means the palette lays out in the order the
-/// generator first visits each face, which is fixed by its layer
-/// iteration, so the layout stays deterministic. A claim is looked up by
-/// the face itself rather than through a face → slot table, so a face enum
-/// that grows or reorders cannot send one face to another's slot.
+/// A claim is found by the face itself, not through a face → slot table,
+/// so a face enum that grows or reorders cannot send one face to another's
+/// slot.
 fn paint_roof<F: Copy + PartialEq>(
     voxels: impl IntoIterator<Item = RoofVoxel<F>>,
     state_of: impl Fn(F) -> BlockState,
@@ -208,14 +200,12 @@ pub(super) fn geometry_material_id<'a>(
 ) -> &'a str {
     let Some(state) = resolved else {
         if member.mat_slot.is_some() {
-            // The theme is named because it is the thing the author edits,
-            // and because without it two placements under two themes write
-            // the same sentence. This is the arm sibling-variant softening
-            // reaches: with no `--edition` pin the resolver stays silent on
-            // a slot only the sibling variant declares, so lowering is the
-            // only reporter, and the member line is shared by every
-            // placement of the `def`. Two broken themes then differ in
-            // nothing at all, and fixing one of them changes no output.
+            // Names the theme, which is what the author edits, and without
+            // which two placements under two themes write one sentence.
+            // Sibling-variant softening reaches this arm: with no
+            // `--edition` pin the resolver is silent on a slot only the
+            // sibling variant declares, so lowering alone reports it, on a
+            // member line every placement of the `def` shares.
             let under = scope
                 .and_then(|scope| scope.bound_theme.as_deref())
                 .map_or_else(String::new, |theme| format!(" under theme `{theme}`"));
@@ -304,17 +294,14 @@ fn diag_incompatible_material(
 ///
 /// Pushes a `W_DEFERRED_MEMBER` warning and returns `None` when the
 /// `kind=` is missing, typed wrong, or names a kind outside the supported
-/// set. Keeping the dispatch table in [`RoofKind::from_ident`] and the
-/// diagnostic phrasing here lets each side stay self-contained.
+/// set.
 fn parse_roof_kind(member: &Member, diagnostics: &mut Vec<Diagnostic>) -> Option<RoofKind> {
     let Some(raw) = member.ident_value("kind") else {
         // A value of the wrong shape is named by its shape, not by the
-        // closed set: `kind="shed"` spells a kind that is in the set, and
-        // being told the set again answers a question the author did not
-        // ask. `recognize_circuit_region` words the same case the same way.
-        // It matters more since `check::arguments` began deferring to this
-        // finding — a `kind=` naming no rule is where the conditional
-        // argument check stays quiet, so this is the whole repair.
+        // closed set: `kind="shed"` spells a kind in the set, and being
+        // told the set again answers a question the author did not ask.
+        // `check::arguments` stays quiet on a `kind=` naming no rule, so
+        // this finding is the whole repair.
         let reason = match member.intent_state.get("kind") {
             Some(raw) => format!(
                 "roof `kind=` must be an identifier naming one of {}, got {}",

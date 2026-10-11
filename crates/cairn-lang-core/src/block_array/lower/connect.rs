@@ -54,14 +54,11 @@ pub(super) struct ConnectInputs<'a> {
 /// that endpoint's [`PortRejection`]. Emits a `W_DUPLICATE_WALKWAY` when
 /// the same `(from, to)` pair has already been laid in the same site.
 ///
-/// Every finding raised here anchors on `ValidatedConnect::span`, which
-/// the resolver sets to one `connect` member's span, and this loop runs
-/// once per row — so two rows never share a span, and the dedup at the end
-/// of [`lower_to_block_array`] cannot reach them. That holds because
-/// `connect` is one row per pair. A block form, where several pairs sat
-/// under one header, would give them a shared span and two identical
-/// `W_WALKWAY_BLOCKED` warnings would collapse into one, `skipped` count
-/// and all.
+/// Every finding here anchors on `ValidatedConnect::span`, one `connect`
+/// row's own, so the dedup at the end of [`lower_to_block_array`] never
+/// merges two rows. That rests on one pair per row: a block form putting
+/// several pairs under one header would share a span, and two equal
+/// `W_WALKWAY_BLOCKED` warnings would collapse, `skipped` count and all.
 ///
 /// [`MemberRole::Door`]: crate::intent::MemberRole::Door
 /// [`MemberRole::Window`]: crate::intent::MemberRole::Window
@@ -82,11 +79,9 @@ pub(super) fn lower_connects(
     } = inputs;
     let blocked = &floor.cells;
     let mut seen_pairs: HashSet<(SiteName, PlaceId, PortId, PlaceId, PortId)> = HashSet::new();
-    // Index the blocked set once for every row: the router needs the
-    // per-plane bounding rectangle, and deriving it per row would
-    // re-scan the whole set — a large site with many colliding rows
-    // would multiply one linear scan into an effective DoS on user
-    // input. See `BlockedIndex` for the cost contract.
+    // Indexed once for every row: a per-row scan for the router's
+    // rectangle would let a large site with many colliding rows multiply
+    // one linear scan into a denial of service on user input.
     let blocked_index = BlockedIndex::new(blocked);
 
     for connect in &resolution.connects {
@@ -98,14 +93,10 @@ pub(super) fn lower_connects(
             continue;
         };
 
-        // Duplicate guard: pin on (site, from_place, from_port,
-        // to_place, to_port). `walkway_pair` sorts the two ends so
-        // `a.entry → b.entry` and `b.entry → a.entry` count as the
-        // same walkway — laying the strip both ways would be a silent
-        // double-write. The pair is recorded only once its strip is
-        // laid, at the bottom of this loop: an earlier row with the same
-        // pair that the checks below refused laid nothing, so this row
-        // is not a duplicate of it.
+        // `walkway_pair` sorts the two ends, so `a.entry → b.entry` and
+        // `b.entry → a.entry` are one walkway. A pair is recorded only
+        // once its strip is laid: an earlier row refused below laid
+        // nothing, so this row does not duplicate it.
         let dedup_key = connect.walkway_pair();
         if seen_pairs.contains(&dedup_key) {
             diagnostics.push(diag_duplicate_walkway(connect));
@@ -136,10 +127,8 @@ pub(super) fn lower_connects(
             blocked_count: skipped,
         } = build_walkway_array(&path, material, blocked, &scope_key);
         if routed {
-            // Both the collision-free straight L and a router detour
-            // are collision-free by construction; a skipped cell here
-            // means the router returned a path that crosses `blocked`,
-            // which is an algorithm bug, not an input condition.
+            // A straight L reaches here only collision-free and a detour
+            // is so by construction, so a skipped cell is a router bug.
             debug_assert_eq!(
                 skipped, 0,
                 "walkway `{scope_key}` laid a routed path with {skipped} collisions",
@@ -162,12 +151,11 @@ pub(super) fn lower_connects(
             diagnostics.push(diag_walkway_blocked(connect, skipped, note));
         }
         let footprint = walkway_footprint(array.dims);
-        // `from_parts` refuses every id that could alias another row's key
-        // (`W_INVALID_WALKWAY_IDENT` above), so a replaced entry here means
-        // that rule has a hole: the earlier row's walkway would vanish from
-        // the build. The `insert` is bound first because a `debug_assert!`
-        // around it would drop the insert in release builds, and a release
-        // build still reports the loss, as `W_WALKWAY_BLOCKED` does above.
+        // `from_parts` refuses every id that could alias another row's key,
+        // so a replaced entry means that rule has a hole and the earlier
+        // walkway vanished. The `insert` is bound first, since inside a
+        // `debug_assert!` it would not run in release builds, which still
+        // report the loss.
         let replaced = structures.insert(scope_key.as_str().to_owned(), array);
         debug_assert!(
             replaced.is_none(),
@@ -205,12 +193,9 @@ fn place_ports(
     let from_body = inputs.placed.get(from_key);
     let to_body = inputs.placed.get(to_key);
     let (Some(from_body), Some(to_body)) = (from_body, to_body) else {
-        // At least one placement was rejected upstream (sizeless def,
-        // unresolved theme, broken origin chain). The connect itself
-        // resolved, so without a follow-up warning the walkway would
-        // vanish silently — emit a cascade `W_DEFERRED_MEMBER` that
-        // names the offending side so the user can see *why* the
-        // strip was not laid.
+        // A placement was refused upstream (sizeless def, unresolved
+        // theme, broken origin chain) but the connect resolved, so the
+        // cascade names the side, or the walkway would vanish silently.
         diagnostics.push(diag_walkway_endpoint_skipped(
             connect,
             from_body.is_none(),
@@ -225,11 +210,8 @@ fn place_ports(
             .find(|d| d.name == body.placement.source_def)
     };
     let (Some(from_def), Some(to_def)) = (source_def(from_body), source_def(to_body)) else {
-        // Invariant: `lower_site` only inserts a `Placement` after
-        // resolving its `use=DEF` against `defs`, so a placement
-        // pointing at an absent def cannot exist here. Encode that
-        // as a `debug_assert!` so a future refactor that breaks the
-        // chain fails loud in tests instead of dropping the strip.
+        // INVARIANT: `lower_site` inserts a `Placement` only after
+        // finding its `use=DEF` in `defs`.
         debug_assert!(
             false,
             "connect `{}` to `{}` references placements whose source def is missing from `defs`",
@@ -255,13 +237,11 @@ fn place_ports(
         &to_body.cut,
     );
     // One note per refused endpoint, naming the reason
-    // `port_world_position` gave for it rather than every contract a
-    // port has. Where the reason is on a member, the note points at
-    // that member's line — which, for a side, argument or masonry
-    // fault, carries the member's own deferral too, since the opening
-    // was not cut either. Each refusing arm is spelled out and builds
-    // its notes from the `Err`s it matched, so a defer with a primary
-    // and no note under it is not a shape this can produce.
+    // `port_world_position` gave rather than every contract a port has.
+    // Where the reason is on a member, the note points at its line, which
+    // for a side, argument or masonry fault carries the member's own
+    // deferral too, the opening being uncut. Each arm builds its notes
+    // from the `Err`s it matched, so no defer lacks a note.
     let (notes, noun, (from_refused, to_refused)) = match (from_pos, to_pos) {
         (Ok(from_pos), Ok(to_pos)) => return Some((from_pos, to_pos)),
         (Err(from_err), Err(to_err)) => (
@@ -393,16 +373,11 @@ fn walkway_material(
         }
         Err(MaterialDeferred::AlreadyDiagnosed) => {
             // INVARIANT(upstream-diagnosed): `resolve_block_state`
-            // returns `AlreadyDiagnosed` only when the input value's
-            // `ValueKind` is not a token (see
-            // `material::resolve_block_state` /
-            // `TokenKind::NotAToken`). The resolver's connect-row pass
-            // (`resolve::resolver::resolve_connect_row`) rejects every
-            // non-token `path=` shape with `E_MISSING_PATH_MATERIAL`
-            // before the row enters `resolution.connects`, so we
-            // cannot legitimately reach this arm. A future change that
-            // bypasses that check would otherwise drop the strip
-            // silently — fail loud in debug builds instead.
+            // answers `AlreadyDiagnosed` only for a value that is not a
+            // token (`TokenKind::NotAToken`), and
+            // `resolve::connect::resolve_connect_row` refuses every such
+            // `path=` with `E_MISSING_PATH_MATERIAL` before the row
+            // reaches `resolution.connects`.
             debug_assert!(
                 false,
                 "connect `{from}` to `{to}` in site `{site}` returned AlreadyDiagnosed for path; \
@@ -427,19 +402,15 @@ fn walkway_path<S: BuildHasher>(
     blocked_index: &BlockedIndex<'_, S>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<Cell>, Option<RoutePathError>)> {
-    // Straight Manhattan L first — the cheap path, and identity for
-    // every unobstructed row (existing lockfiles stay byte-stable).
-    // Only when the L collides with a placement floor does the
-    // ground-plane router search for a detour; a `RoutePathError`
-    // (endpoint buried, target enclosed, area cap, coordinate
-    // overflow) falls back to the L with skipped cells so the row
-    // still lays and earns its `W_WALKWAY_BLOCKED` in `lower_connects`,
-    // with a note matched to the error.
+    // The straight Manhattan L first, which is cheap and is what every
+    // unobstructed row lays. Only an L that crosses a placement floor
+    // goes to the router; a `RoutePathError` falls back to the L with
+    // skipped cells, so the row still lays and earns its
+    // `W_WALKWAY_BLOCKED`, with a note matched to the error.
     //
-    // Measure the L before building it. `route_path` refuses on the
-    // same quantity, but it runs second and only when the straight L
-    // is obstructed, so an unobstructed pair would otherwise size a
-    // voxel buffer from the bounding box directly.
+    // The L is measured before it is built: `route_path` refuses on the
+    // same quantity but runs only for an obstructed L, so an unobstructed
+    // pair would otherwise size a voxel buffer from its bounding box.
     let straight_area = l_path_area(from_pos, to_pos);
     if straight_area > ROUTE_AREA_CAP {
         diagnostics.push(Diagnostic {
@@ -542,10 +513,9 @@ struct SiteFloor<'a> {
 
 /// Note text for a `W_WALKWAY_BLOCKED` warning on a row whose obstructed
 /// straight L sent it to the router, matched to why the router could not
-/// detour. The remedies differ per cause — widening the gap fixes an
-/// enclosed target but does nothing for a buried port or a site past the
-/// area cap — so a single catch-all suggestion would misdirect the author
-/// on three of the four arms.
+/// detour: widening the gap frees an enclosed target but not a buried port
+/// or a site past the area cap, so one catch-all would misdirect three of
+/// the four arms.
 fn walkway_blocked_note(
     connect: &crate::resolve::ValidatedConnect,
     route_failure: Option<RoutePathError>,
@@ -574,11 +544,9 @@ fn walkway_blocked_note(
              move the site closer to the origin"
                 .to_owned()
         }
-        // `TargetUnreachable` and `None` share the generic remedy: the
-        // ports are fine but every route between them is walled off.
-        // (`None` with skipped cells cannot happen — the router is only
-        // bypassed when the straight L is collision-free — but the
-        // catch-all keeps the note truthful if that wiring ever drifts.)
+        // The ports are fine but every route is walled off. `None` with
+        // skipped cells cannot happen, since only a collision-free L skips
+        // the router; sharing the arm keeps the note truthful if it does.
         Some(RoutePathError::TargetUnreachable) | None => {
             "no unobstructed route exists between the two ports; widen the placement gap so \
              the walkway can round the obstacle"

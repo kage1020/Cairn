@@ -117,8 +117,8 @@ impl PlaceAnchor {
     ///
     /// The sum is taken in `i128`, where no `i32` origin, `u32` extent and
     /// `i64` gap can overflow, and refused when it leaves `i32` rather than
-    /// saturated: a saturated origin put two placements on one coordinate,
-    /// the second stacked inside the first, and nothing said so. The body's
+    /// saturated: a saturated origin would silently stack two placements on
+    /// one coordinate. The body's
     /// far edge, `origin + dims − 1` on `x` and `z`, is refused the same
     /// way, since a cell past it has no world coordinate either. `y` is not
     /// checked, because every placement's `y` is the `0` of the `at=origin`
@@ -170,10 +170,10 @@ impl PlaceAnchor {
 ///
 /// On a relative (`east_of` / `north_of`) row the anchor is `None` when the
 /// prior place it names did not lower, which the caller reports before
-/// skipping the row. A row with no usable selector
-/// never gets here: the resolver refuses it with `E_INVALID_PLACE_ORIGIN`,
-/// or with `E_UNRESOLVED_PLACE_REF` when the selector names no prior place,
-/// and binds no scope for it. The front-is-`+z` convention of
+/// skipping the row. A row with no usable selector never gets here: the
+/// resolver refuses it (`E_INVALID_PLACE_ORIGIN`, or
+/// `E_UNRESOLVED_PLACE_REF` when it names no prior place) and binds no
+/// scope for it. The front-is-`+z` convention of
 /// `spec/components-editing-sites` "Multi-building with `site`" is why
 /// `north_of` retreats along `-z`.
 ///

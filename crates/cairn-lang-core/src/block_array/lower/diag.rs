@@ -42,14 +42,12 @@ pub(super) fn diag_no_theme_bound_generic(
         ),
         notes: vec![DiagnosticNote {
             span: None,
-            // Describes what makes a theme bind rather than naming one
-            // cause, because this pass cannot tell the causes apart: the
-            // module may declare no theme, or several logical ones with no
-            // `theme=` to choose between them, or exactly one whose
-            // variants the pinned edition cannot bind
-            // (`E_THEME_VARIANT_MISSING`, reported by the resolver). Asking
-            // for "exactly one `theme NAME:`" told the author of that third
-            // file to add what they already had.
+            // Says what makes a theme bind rather than naming a cause,
+            // which this pass cannot tell apart: no theme, several logical
+            // ones with no `theme=` to choose, or exactly one with no
+            // variant for the pinned edition (`E_THEME_VARIANT_MISSING`,
+            // from the resolver). Asking for "exactly one `theme NAME:`"
+            // would send that third author after what they already have.
             message: "a scope binds a theme when the module declares exactly one logical theme, \
                       or the `place` names one with `theme=`; under a `--edition` pin that theme \
                       must also have a variant for that edition"

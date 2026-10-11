@@ -15,21 +15,15 @@ use crate::block_array::roof::{
 
 use super::members::member_will_paint;
 
-/// Highest wall voxel Y across every walls member the flatten pass surfaced.
+/// Highest wall voxel Y across the [`painting_walls`] pairs, `0` with
+/// none.
 ///
-/// The struct's roof plane must sit above the tallest wall column, and a
-/// level-scoped `walls id=upper height=H` inside a `level y=N` block extends
-/// the wall column up to `y = N + H`. Returning the maximum over the
-/// `(y_offset, height)` pairs from the flattened member list keeps the
-/// dim math correct when a struct mixes struct-scoped and level-scoped
-/// walls. Members without a positive `height=` contribute `0`; the
-/// `W_DEFERRED_MEMBER` for that member fires later in the massing phase
-/// so a hand-built sizeless `walls` still surfaces its own diagnostic.
-///
-/// Members whose material will not resolve are absent from the list for
-/// the same reason a heightless one is: they paint no row. A themeless
-/// struct used to reserve the full wall height for walls that lowered to
-/// air, so the artifact was as tall as the building it did not contain.
+/// The roof plane sits above the tallest wall column, and a `walls
+/// height=H` inside `level y=N` reaches `y = N + H`, hence the maximum over
+/// `(y_offset, height)`. A `walls` with no positive `height=` or no
+/// resolvable material paints no row and is absent, so the artifact is not
+/// as tall as a building it does not contain; a heightless one earns its
+/// `W_DEFERRED_MEMBER` in the massing phase.
 pub(super) fn max_wall_top(painting: &[(u32, u32)]) -> u32 {
     painting
         .iter()
@@ -45,7 +39,7 @@ pub(super) fn max_wall_top(painting: &[(u32, u32)]) -> u32 {
 /// `spec/compilation` "Level grouping and volume derivation" makes them two
 /// readings of a single list and rests the "no member paints past the end of
 /// the array" invariant on their agreeing. Filtering one and not the other
-/// would leave the window carve writing rows the array no longer has.
+/// would leave the window carve writing rows the array does not have.
 /// `max_wall_top` collapses the pairs to their maximum, which sizes the volume
 /// and seats the roof; the column keeps the spans, which is what decides
 /// whether a rectangle cut into a wall lands in masonry.
@@ -68,17 +62,14 @@ pub(super) fn painting_walls<'a>(
 ///
 /// Two concerns over one walk, and they cover different members.
 ///
-/// The **contribution** is filtered through [`roof_draws`], the same
-/// question [`max_roof_extra_height`] asks: a roof that will not draw must
-/// not widen the array. Without the filter it gave the footprint its eaves
-/// and the height nothing, so the walls moved inward and a ring of air
-/// surrounded them.
+/// The **contribution** is filtered through [`roof_draws`], as
+/// [`max_roof_extra_height`] is: a roof that will not draw would otherwise
+/// widen the footprint but not the height, moving the walls inward inside
+/// a ring of air.
 ///
-/// The **validation** is not filtered, because this is the only place
-/// `overhang=` is read: a value nothing here looks at is a value nothing
-/// anywhere reports. It walks the flattened list for the same reason — a
-/// roof this function cannot see is a roof whose `overhang=` nothing
-/// validates.
+/// The **validation** is not filtered, and walks the whole flattened list,
+/// because this is the only place `overhang=` is read: a value not looked
+/// at here is reported nowhere.
 pub(super) fn max_roof_overhang(
     flattened: &[(u32, &Member)],
     diagnostics: &mut Vec<Diagnostic>,
@@ -88,10 +79,8 @@ pub(super) fn max_roof_overhang(
         .map(|(_, m)| *m)
         .filter(|m| matches!(m.role, MemberRole::Roof))
         .filter_map(|m| {
-            // The consequence differs by member, so it is worked out here
-            // rather than written once: a roof that draws is in the build
-            // flush with the wall line, and a roof that does not is
-            // already earning its own finding from the envelope phase.
+            // A roof that draws is built flush with the wall line; one that
+            // does not earns its own finding in the envelope phase.
             let draws = roof_draws(m);
             let consequence = if draws.is_some() {
                 "the roof is drawn flush with the wall line"
@@ -106,11 +95,9 @@ pub(super) fn max_roof_overhang(
 }
 
 /// Maximum vertical contribution from any roof member the pass will draw
-/// ([`roof_draws`]). A roof that draws nothing contributes `0` here; its
-/// `W_DEFERRED_MEMBER` warning fires later, during the envelope phase,
-/// against the actual member span. Computing the dim from the inflated
-/// roof bounding box (interior + 2 * overhang on each axis) keeps the math
-/// consistent with each per-kind generator.
+/// ([`roof_draws`]); one that draws nothing contributes `0` and is reported
+/// in the envelope phase. Measured on the inflated roof box (interior + 2 *
+/// overhang on each axis), as each per-kind generator is.
 pub(super) fn max_roof_extra_height(
     flattened: &[(u32, &Member)],
     interior_w: u32,
@@ -132,15 +119,10 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
     match kind {
         RoofKind::Gable => gable_extra_height(roof_w.min(roof_h)),
         RoofKind::Shed => {
-            // Shed's slope axis depends on `slope_to=`. We do not have
-            // diagnostics here (the dim pass runs before envelope-phase
-            // diagnostics), so an unrecognised or missing `slope_to=`
-            // contributes `0`; the same member will surface a
-            // `W_DEFERRED_MEMBER` in `fill_roof` and lower to no
-            // voxels, keeping the dim math conservative. The axis
-            // choice goes through `shed_slope_span` — the same helper
-            // `shed_voxels` uses — so the dim and the generator cannot
-            // disagree on which axis the slope runs along.
+            // An unusable `slope_to=` contributes `0`; `fill_roof` reports
+            // it and paints nothing. `shed_slope_span` is the helper
+            // `shed_voxels` uses, so the dim and the generator agree on the
+            // slope axis.
             match member
                 .ident_value("slope_to")
                 .and_then(WallSide::from_ident)
@@ -159,11 +141,9 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
 ///
 /// Not [`roof_kind_of`], which answers "does the kind table know this
 /// name". A `shed` with no usable `slope_to=` is a name the table knows
-/// and a member [`fill_roof`] returns from without painting a voxel,
-/// and [`roof_extra_height`]'s shed arm already gives it `0`. Both roof
-/// walks go through here so the footprint and the height cannot disagree
-/// about which roofs are real — the disagreement that let a roof widen an
-/// array it put nothing in.
+/// and a member [`fill_roof`] paints nothing for. Both roof walks go
+/// through here so the footprint and the height agree on which roofs are
+/// real; otherwise a roof could widen an array it puts nothing in.
 ///
 /// Silent, unlike [`shed_slope_to`]: this is the question, and the answer
 /// is reported by the pass that tries to draw.

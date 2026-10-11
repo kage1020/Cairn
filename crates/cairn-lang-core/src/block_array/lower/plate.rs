@@ -16,13 +16,11 @@ use super::token_diag::diag_unknown_id;
 
 /// Catalog token a `pressure_plate` member's default material comes from.
 ///
-/// The id itself is edition-specific — Java spells it
-/// `oak_pressure_plate`, Bedrock `wooden_pressure_plate` — and lowering
-/// has no edition of its own to decide with. Reading it out of the pack
-/// keeps the knowledge in the one place that is already per-edition, at
-/// the cost of the token also being writable by an author as
-/// `@pressure_plate.default`. That is accepted: the alternative is a
-/// second pack component whose only member is this one row.
+/// The id is edition-specific (Java `oak_pressure_plate`, Bedrock
+/// `wooden_pressure_plate`) and lowering has no edition to decide with, so
+/// the pack, already per-edition, supplies it. An author can write the
+/// token too, as `@pressure_plate.default`, which beats a second pack
+/// component holding this one row.
 pub(super) const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
 
 /// Pressure plate id used when the pack cannot supply one — no registry
@@ -32,10 +30,11 @@ pub(super) const PRESSURE_PLATE_TOKEN: &str = "pressure_plate.default";
 /// data tables" makes Java the base, so the Java spelling is the honest
 /// default. It is still checked against the pinned target before it reaches a
 /// palette.
-/// Species-specific plates (spruce, dark oak, ...) still come from a
-/// `mat_slot=` binding, which is honoured verbatim — mirroring
-/// [`FLAT_BASE_ID`]'s contract, not [`STAIR_BASE_ID`]'s. A plate attaches
-/// no blockstates, so it has nothing to require of the block it names.
+///
+/// Species-specific plates (spruce, dark oak, ...) come from a `mat_slot=`
+/// binding, honoured verbatim as [`FLAT_BASE_ID`]'s contract is, not
+/// [`STAIR_BASE_ID`]'s: a plate attaches no blockstates, so it requires
+/// nothing of the block it names.
 ///
 /// [`FLAT_BASE_ID`]: crate::block_array::roof::FLAT_BASE_ID
 /// [`STAIR_BASE_ID`]: crate::block_array::roof::STAIR_BASE_ID
@@ -54,14 +53,11 @@ fn shift_inward(side: WallSide, x: u32, z: u32) -> (u32, u32) {
 
 /// Which side of the wall a `pressure_plate at=…` anchor sits on.
 ///
-/// The DSL spells this as a two-segment `DotRef`:
-/// - `at=<side>.outside` — plate sits on the exterior overhang column
-///   adjacent to `<side>`. When the struct has no overhang the plate
-///   falls back to the wall's own foundation cell (the floor voxel
-///   directly beneath the wall column) so authors can still write
-///   `at=front.outside` on a plain flat-roof gatehouse.
-/// - `at=inside.<side>` — plate sits one voxel toward the interior from
-///   the wall's own column.
+/// Written as a two-segment `DotRef`:
+/// - `at=<side>.outside`: the overhang cell just outside `<side>`, or, on
+///   the floor row of a struct with no overhang, the wall's foundation
+///   cell.
+/// - `at=inside.<side>`: one voxel inward from the wall's column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PlateAnchor {
     Outside(WallSide),
@@ -78,9 +74,7 @@ impl PlateAnchor {
 
 /// Parse a `pressure_plate at=…` value into a [`PlateAnchor`].
 ///
-/// Returns `Err(reason)` when the `at=` argument is not a two-segment
-/// dotted reference of the shape the DSL accepts. The caller turns the
-/// reason into a `W_DEFERRED_MEMBER` diagnostic anchored on the member.
+/// `Err` carries the `W_DEFERRED_MEMBER` reason for any other shape.
 fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, String> {
     let raw = member
         .intent_state
@@ -99,9 +93,6 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, String> {
         ));
     }
     let (head, tail) = (segments[0].as_str(), segments[1].as_str());
-    // `<side>.outside` — the head names the wall side, the tail is the
-    // literal `outside`. Everything else fails through to the paired
-    // `inside.<side>` shape below.
     if tail == "outside" {
         return WallSide::from_ident(head)
             .map(PlateAnchor::Outside)
@@ -128,21 +119,16 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, String> {
 /// Paint a `pressure_plate` fixture onto the block array as a single
 /// vanilla plate voxel.
 ///
-/// Only the compound-anchor subset the intent IR currently exposes is
-/// honoured:
+/// Honours:
 /// - `at=<side>.outside` / `at=inside.<side>` compound anchors,
-/// - `offset=N` and `y=N` non-negative integer offsets along the wall's
-///   axis and the vertical axis (both default to 0 when absent),
-/// - an optional `mat_slot=` that resolves to a bare block id (no
-///   `[property=…]` state literal). Anything else emits a
-///   `W_DEFERRED_MEMBER` warning so the fixture is loud about what it
-///   dropped.
+/// - `offset=N` and `y=N`, non-negative offsets along the wall and up
+///   (both `0` when absent),
+/// - an optional `mat_slot=` resolving to a bare block id (no
+///   `[property=…]` state literal).
 ///
-/// The `-> sig.<name>` signal binding on `member.binding` is parsed but
-/// not consumed here — sensor/actuator wiring belongs to the redstone
-/// lowering pass that voxelises `logic` / `assert` / `circuit` items.
-/// The physical block is placed regardless, mirroring `carve_door`'s
-/// handling of `mat_slot=`.
+/// Anything else defers with `W_DEFERRED_MEMBER`. The `-> sig.<name>`
+/// binding on `member.binding` is the redstone pass's to wire; the block
+/// is placed regardless.
 pub(super) fn fill_pressure_plate(
     member: &Member,
     y_offset: u32,
@@ -165,10 +151,9 @@ pub(super) fn fill_pressure_plate(
     let Some(base_id) = plate_id_for_member(member, ctx, diagnostics) else {
         return;
     };
-    // Interned only once the cell is known to exist. `plate_voxel_position`
-    // already rejects every out-of-range anchor it can name, so this arm is
-    // the guard against a future one it cannot — and a guard that leaves a
-    // palette entry behind reports a block the structure does not contain.
+    // Interned only once the cell exists, so a refusal leaves no palette
+    // entry. `plate_voxel_position` refuses every out-of-range anchor it
+    // can name; this catches one it cannot.
     if !canvas.try_paint((x, y_world, z), || {
         palette.intern(BlockState::bare(base_id))
     }) {
@@ -249,14 +234,10 @@ fn plate_voxel_position(
         ctx.interior_h,
         ctx.dims,
     ) else {
-        // INVARIANT(wall-grid-validated): the two refusals above
-        // (`y_world >= dims.y`, `offset >= length`) each pushed their own
-        // diagnostic and returned, and they are every rejection
-        // `wall_local_to_grid` performs — so it has nothing to reject.
-        // Reaching here means one of them stopped agreeing with the
-        // helper, which is a compiler bug, not something the author can
-        // act on, so it is an assertion rather than a warning. Loud in
-        // debug builds; release builds drop the plate.
+        // INVARIANT(wall-grid-validated): the two refusals above are
+        // every rejection `wall_local_to_grid` makes, so reaching here is
+        // a compiler bug, not the author's: an assertion rather than a
+        // warning. Release builds drop the plate.
         debug_assert!(
             false,
             "pressure_plate cell u={offset} y={y_world} on the {} wall is outside the wall grid; \
@@ -269,20 +250,16 @@ fn plate_voxel_position(
     match anchor {
         PlateAnchor::Outside(_) => {
             let (sx, sz) = shift_outward(side, wx, wz);
-            // The shift succeeds only when it produces a genuinely new
-            // voxel that lives in dims. A saturating shift that lands
-            // back on the wall column (Left/Back walls at coordinate 0
-            // when overhang=0) is not a real exterior cell, so treat it
-            // as "no exterior available" just like an out-of-dims shift.
+            // A saturating shift that stays on the wall column (left or
+            // back wall at coordinate 0 with no overhang) reaches no
+            // exterior cell, like a shift out of dims.
             let shift_reached_exterior =
                 (sx, sz) != (wx, wz) && ctx.dims.index(sx, y_world, sz).is_some();
             if shift_reached_exterior {
                 Some((sx, y_world, sz))
             } else if y_world == 0 {
-                // Foundation fallback: the wall column's y=0 cell is
-                // still floor material (walls start at y=1), so
-                // replacing it with a plate is honest to the anchor
-                // name.
+                // The wall column's y=0 cell is floor (walls start at
+                // y=1), so a plate there is still at the wall's foot.
                 Some((wx, y_world, wz))
             } else {
                 diagnostics.push(diag_deferred_member_reason(
@@ -407,24 +384,16 @@ fn inside_plate_refusal(
 /// [`PRESSURE_PLATE_BASE_ID`] when no binding is present or the resolver
 /// returned no state.
 ///
-/// `resolve_member_state` already emits `W_ABSTRACT_TOKEN_DEFERRED` /
-/// `E_UNKNOWN_ABSTRACT_TOKEN` for abstract-token failures, and a missing
-/// theme is the scope's `W_NO_THEME_BOUND`: a `pressure_plate` reads its
-/// `mat_slot=`, so `lower_body_to_block_array` pushed one for the body a
-/// plate carrying one sits in. A `None` return here is therefore already
-/// diagnosed upstream — echoing the failure with another
-/// `W_DEFERRED_MEMBER` would just double up on the same root cause.
-/// Falling back to `PRESSURE_PLATE_BASE_ID` keeps the fixture visible
-/// in-game so authors can still read the artefact.
+/// A `None` from `resolve_member_state` is already reported: a token
+/// failure by it, a missing theme as the body's `W_NO_THEME_BOUND`, since
+/// a plate reads its `mat_slot=`. Another `W_DEFERRED_MEMBER` would report
+/// one cause twice. The default keeps the fixture visible in-game.
 ///
-/// A resolved state with non-empty `properties` still defers *and*
-/// skips the paint: the block-array IR has no handling for bracketed
-/// state literals on plates, so silently reducing a `plate[...]`
-/// binding to a plain plate would drop the author's intent. This is
-/// stricter than `fill_stair`'s current behaviour (which defers but
-/// keeps painting) — `pressure_plate` has no geometry-derived state
-/// axis of its own, so the plain-plate fallback carries less signal
-/// than the stair band's does.
+/// A resolved state with `properties` defers *and* skips the paint:
+/// reducing a `plate[...]` binding to a plain plate would drop the
+/// author's intent. That is stricter than `fill_stair`, which defers but
+/// keeps painting, because a plate has no geometry-derived state, so a
+/// plain one carries less of what was asked than the stair band does.
 pub(super) fn plate_id_for_member(
     member: &Member,
     ctx: &StructCtx<'_>,
@@ -464,12 +433,10 @@ pub(super) fn plate_id_for_member(
 /// `--edition bedrock` stops emitting the Java-only `oak_pressure_plate`.
 ///
 /// The result goes through [`validated_id`] because it reaches the palette
-/// without passing [`resolve_block_state`]. Skipping it would leave one
-/// path in the build — the one whose default is edition-specific and
-/// whose fallback is a Java spelling — writing an id nothing verified,
-/// which is the failure this whole pass exists to remove. Returns `None`
-/// after diagnosing, so the plate is dropped rather than painted with an
-/// id the target has no block for.
+/// without passing [`resolve_block_state`]; skipping it would leave the
+/// one path with an edition-specific default and a Java fallback writing
+/// an unverified id. `None` after diagnosing, so the plate is dropped
+/// rather than painted with an id the target has no block for.
 ///
 /// [`resolve_block_state`]: crate::block_array::material::resolve_block_state
 fn pack_plate_default(
@@ -497,10 +464,9 @@ fn pack_plate_default(
             diagnostics.push(diag_unknown_id(member.span.clone(), &unknown));
             None
         }
-        // INVARIANT(validated-id-refuses-one-way): `validated_id` returns either
-        // the state or `UnknownId`; it has no path to the three deferral
-        // variants, which describe how a `mat_slot=` value failed to
-        // resolve and there is no such value here.
+        // INVARIANT(validated-id-refuses-one-way): `validated_id` answers
+        // the state or `UnknownId`; the other variants describe a
+        // `mat_slot=` value, and there is none here.
         Err(other) => {
             debug_assert!(
                 false,

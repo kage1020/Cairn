@@ -32,14 +32,11 @@ pub(super) fn carve_door(
         return;
     };
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
-    // `at=` is read by `block_array::openings::door_anchor_offset`, the function
-    // a `connect` port on this door reads it with, and a refusal is worded
-    // by `door_at_deferral` from the same classification the port's note
-    // uses — so the cut, the walkway and both messages cannot disagree
-    // about what `at=` says. Asked before the wall below, the way
-    // `fill_window` reads its rectangle before asking where the masonry
-    // is, so an `at=` typo is reported as one on a body whose walls are
-    // also wrong.
+    // A `connect` port on this door reads `at=` and words its refusal
+    // through these same functions, so the cut, the walkway and both
+    // messages agree. Asked before the wall, as `fill_window` reads its
+    // rectangle first, so an `at=` typo is reported even on a body whose
+    // walls are wrong too.
     let at = match door_anchor_offset(member, len) {
         Ok(at) => at,
         Err(written) => {
@@ -50,23 +47,18 @@ pub(super) fn carve_door(
             return;
         }
     };
-    // Gate and cap both come from the course holding the row this door
-    // opens at — `y_offset + 1`, one above the level's base plane, which
-    // the floor slab owns — and never from the struct's tallest wall
-    // row: what stands over a shorter course is the gap above it or the
-    // roof the envelope phase wrote at `wall_top + 1`, so a door judged
-    // against `wall_top` carved that air, and one gated on "does the
-    // column hold anything" carved it without a word. `fill_window` asks
-    // the same column where its rectangle lands, so the two members
-    // answer one question.
+    // Gate and cap come from the course holding the row the door opens
+    // at, `y_offset + 1` (the floor slab owns the base plane), never from
+    // the tallest wall row: over a shorter course stands the gap or the
+    // roof at `wall_top + 1`, which a door judged against `wall_top` would
+    // carve. `fill_window` asks the same column, so the two agree.
     let base_row = y_offset.saturating_add(1);
     let Some(course_top) = ctx.wall_column.course_top_at(base_row) else {
         // "Nowhere" and "not here" are different findings. An empty
-        // column means no `walls` member paints at all — which a
-        // positive `height=` does not settle, since a `mat_slot=` that
-        // does not resolve empties it too, and naming only the height
-        // would send an author who wrote `height=4` over a themeless
-        // struct to the wrong line. Same split as `fill_window`'s.
+        // column means no `walls` paints, which a positive `height=` does
+        // not settle: an unresolved `mat_slot=` empties it too, so naming
+        // only the height would send the author of `height=4` over a
+        // themeless struct to the wrong line. Same split as `fill_window`'s.
         let reason = if ctx.wall_column.is_empty() {
             "door requires a `walls` member that paints — a positive `height=` and a `mat_slot=` that resolves — to carve into".to_owned()
         } else {
@@ -78,11 +70,10 @@ pub(super) fn carve_door(
         diagnostics.push(diag_deferred_member_reason(member, &reason));
         return;
     };
-    // The door block itself (`oak_door`, hinge / half / facing / open) is
-    // not yet placed; that landed deferred along with per-theme door
-    // materials. A door's `mat_slot=` is the material that block would
-    // read, which is why `MemberRole::unread_arguments` lists it as
-    // unreached on a `door`: placing the block is the day that entry goes.
+    // Only the opening is cut; no door block (`oak_door` with hinge,
+    // half, facing, open) is placed. A door's `mat_slot=` is what that
+    // block would read, so `MemberRole::unread_arguments` lists it as
+    // unreached on a `door`.
     let door_height = course_top
         .saturating_sub(base_row)
         .saturating_add(1)
@@ -98,14 +89,10 @@ pub(super) fn carve_door(
             ctx.interior_h,
             ctx.dims,
         ) else {
-            // INVARIANT(wall-grid-validated): `at` is below `len` by the
-            // match above, and every row the loop asks for is at most
-            // `course_top` because `door_height` is clamped to the course
-            // holding `base_row` — so the helper has nothing to reject.
-            // Reaching here means one of those two stopped agreeing with
-            // `wall_local_to_grid`'s `u < length` / `v < dims.y`. Loud in
-            // debug builds; release builds skip the cell rather than panic
-            // over one voxel.
+            // INVARIANT(wall-grid-validated): `at < len` by the match
+            // above and `door_height` keeps every row within `course_top`,
+            // so `wall_local_to_grid`'s `u < length` / `v < dims.y` cannot
+            // refuse. Release builds skip the cell rather than panic.
             debug_assert!(
                 false,
                 "door row y={v} at u={at} on the {} wall is outside the wall grid; \

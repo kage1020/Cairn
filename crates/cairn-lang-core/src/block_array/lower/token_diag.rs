@@ -123,13 +123,12 @@ pub(super) fn diag_unknown_abstract_token(
 /// Say that a state literal was taken as written, when `value` carries one.
 ///
 /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
-/// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, and
-/// nothing raises it yet: no table this compiler holds says which
-/// properties a block has or which values each takes. Until one does, the
-/// literal reaches the palette and the structure file unchanged, right or
-/// wrong, and this warning is what keeps that from being silent. It
-/// anchors on the value the way `E_UNKNOWN_ID` does, so the mistake right
-/// of the `[` is pointed at from the same place as one left of it.
+/// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, but no
+/// table this compiler holds says which properties a block has or which
+/// values each takes. So the literal reaches the palette and the structure
+/// file unchanged, right or wrong, and this warning keeps that from being
+/// silent. It anchors on the value as `E_UNKNOWN_ID` does, so a mistake
+/// right of the `[` is pointed at from the same place as one left of it.
 ///
 /// Only a canonical token folds a `[` into its text, so a state that came
 /// from anywhere else — a catalog lookup, a member default — is not one.
@@ -165,11 +164,10 @@ pub(super) fn diag_state_literal_unchecked(
 
 /// Report a block id the compile's target does not declare.
 ///
-/// One builder serves both the member and the walkway site: the span
-/// differs and nothing else does. The prose fork that matters is not which
-/// statement the id sat on but *who chose it* — an author can correct what
-/// they typed, while a catalog mapping is not theirs to edit and a message
-/// that blames their token sends them to the wrong file.
+/// Serves the member and the walkway site alike, which differ only in the
+/// span. The prose forks on *who chose* the id: an author can correct what
+/// they typed, but a catalog mapping is not theirs to edit, and blaming
+/// their token would send them to the wrong file.
 pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
     let UnknownId {
         id,
@@ -194,11 +192,10 @@ pub(super) fn diag_unknown_id(span: Span, unknown: &UnknownId) -> Diagnostic {
             ),
         }),
     }
-    // One note, and the alias table wins it when it has anything to say.
-    // The two answers are not additive: a reader handed "this target calls
-    // it X" and "the nearest spelling is Y" has to work out which of the
-    // two the compiler believes, and the answer is always the first. The
-    // payload still carries both, for a consumer that can show them apart.
+    // One note, and the alias table wins it: handed both "this target
+    // calls it X" and "the nearest spelling is Y", a reader must guess
+    // which the compiler believes, and it is always the first. The payload
+    // carries both, for a consumer that can show them apart.
     notes.push(DiagnosticNote {
         span: None,
         message: match (aliases.as_slice(), suggestion) {

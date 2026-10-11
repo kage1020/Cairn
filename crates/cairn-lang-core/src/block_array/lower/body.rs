@@ -20,15 +20,12 @@ use super::members::{
 };
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
 
-/// Which lowering entry point produced this body. Lets diagnostic messages
-/// distinguish a sizeless struct from a sizeless def without adding two
-/// near-identical helpers, and lets a future fixtures pass switch on the
-/// host when origin conventions differ.
+/// Which lowering entry point produced this body, for the findings that
+/// name the host.
 ///
 /// Distinct from [`crate::intent::BodyKind`], which splits `struct` / `def`
-/// from `site` by what the author wrote. This one splits by what is being
-/// voxelised, and a `place` voxelises a `def` — so the two disagree on
-/// every placement and were worth separate names.
+/// from `site` by what the author wrote. This splits by what is voxelised,
+/// and a `place` voxelises a `def`, so the two disagree on every placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum VoxelSource {
     Struct,
@@ -72,11 +69,10 @@ pub(super) struct BodyDescriptor<'a> {
 /// were painted against.
 ///
 /// The column comes back out because the `connect` pass asks a
-/// placement's masonry the same question the openings phase asked it,
-/// and one answer is what keeps them from disagreeing. Deriving it a
-/// second time from the `def` would be this rule written twice — which
-/// is how a strip came to be laid to a window the openings phase had
-/// deferred, and refused to one it had cut.
+/// placement's masonry what the openings phase asked it, and one answer
+/// keeps them from disagreeing. Derived again from the `def`, the two
+/// could lay a strip to a window the openings phase deferred, or refuse
+/// one it cut.
 pub(super) struct LoweredBody {
     pub(super) array: BlockArray,
     pub(super) walls: WallColumn,
@@ -109,21 +105,15 @@ pub(super) fn lower_body_to_block_array<'a>(
 
     let theme_missing = scope.is_none_or(|sc| sc.bound_theme.is_none());
 
-    // Flatten `level y=N` grouping once, here. The result is the set of
-    // members this body paints, and everything below reads it: the dim math
-    // (which has to size a volume that holds them) and the phase buckets
-    // (which need each member's y-offset). Deriving the dims from any other
-    // list is how a roof came to paint into a volume too short to hold it.
-    // `flatten_members` also emits the `W_DEFERRED_MEMBER` for every member
-    // it drops, so its side effects need to happen exactly once per call.
+    // Flattened once: the dim math and the phase buckets both read this
+    // paint set, since dims from any other list could leave a roof a volume
+    // too short to hold it, and `flatten_members` reports what it drops.
     let flattened = flatten_members(body.members, diagnostics);
     // `spec/lint` "Materials and targets": a scope that reads no
-    // `mat_slot=` has nothing to lower to air, so a missing theme costs it
-    // nothing and is not reported. "Reads" is `Member::read_slot`, so a
-    // `mat_slot=` on a role that reads none, such as a `door`'s, does not
-    // count. Asked of the flattened list because a `level` is where the only
-    // reader can sit, and a member it drops paints nothing whatever the
-    // theme.
+    // `mat_slot=` loses nothing to a missing theme, so it is not reported.
+    // "Reads" is `Member::read_slot`, so a `door`'s `mat_slot=` does not
+    // count. Asked of the flattened list because the only reader may sit
+    // in a `level`, and a dropped member paints nothing whatever the theme.
     if theme_missing && flattened.iter().any(|(_, m)| m.read_slot().is_some()) {
         diagnostics.push(diag_no_theme_bound_generic(
             body.kind,
@@ -131,17 +121,14 @@ pub(super) fn lower_body_to_block_array<'a>(
             body.header_span,
         ));
     }
-    // Inflate the struct's footprint by the maximum `overhang=` across all
-    // roof members so the roof's eaves and gable-end overhangs have voxel
-    // room outside the wall ring. Floors, walls, doors, and windows are
-    // authored against the *interior* size and shifted inward by this
-    // amount in their respective fill helpers.
+    // The footprint grows by the largest roof `overhang=` on every side, so
+    // eaves have room outside the wall ring. Floors, walls, doors and
+    // windows are authored against the *interior* size and shifted inward
+    // by this amount.
     let overhang = max_roof_overhang(&flattened, diagnostics);
-    // One walk over the walls, read twice. `resolve_member_state` is not
-    // free — the abstract-token miss path builds the whole catalogue to
-    // pick a suggestion from — and asking it once per member here is also
-    // what makes "the volume and the carve read one list" true of the
-    // run and not only of the rule.
+    // One walk over the walls, read twice: `resolve_member_state` is not
+    // free (a token miss builds the whole catalogue for a suggestion), and
+    // one answer per member keeps the volume and the carve on one list.
     let painting_walls: Vec<(u32, u32)> =
         painting_walls(&flattened, scope, registry, theme_missing).collect();
     let max_wall_top = max_wall_top(&painting_walls);
@@ -219,11 +206,8 @@ pub(super) fn lower_body_to_block_array<'a>(
         entities: Vec::new(),
         source_scope: body.source_scope,
     };
-    // Last, and after the prune: the grid is finished, so this is the
-    // point where the palette can be a rendering of what the body
-    // contains instead of a log of the order the paints ran in. Doing it
-    // before the prune would sort entries that are about to be dropped
-    // and renumber twice for the same answer.
+    // After the prune, on the finished grid: earlier would sort entries
+    // about to be dropped and renumber twice.
     array.canonicalize_palette();
 
     Some(LoweredBody {
@@ -236,30 +220,20 @@ pub(super) fn lower_body_to_block_array<'a>(
 /// Paint one body's members onto a fresh canvas, phase by phase in the
 /// order `spec/compilation` "Phase evaluation" fixes.
 ///
-/// That order is the whole content of this helper: a `door` written
-/// before `walls` in the source still cuts through the resulting wall
-/// because openings run after massing, whatever the lines say. It owns
-/// the canvas because a canvas outlives no phase — it is created from
-/// the same buckets that are about to be painted onto it, and handing
-/// the two to a caller separately is an order for the caller to get
-/// right.
+/// Openings run after massing, so a `door` written before `walls` still
+/// cuts the wall. The canvas is made here from the buckets about to be
+/// painted onto it, so no caller has an order to get right.
 ///
-/// None of the three adjacent swaps — massing/envelope,
-/// envelope/openings, openings/fixtures — is observable with today's
-/// generators, because no two neighbouring phases write the same cell.
-/// A roof starts at `wall_top + 1` and an eave `stair` is shifted a
-/// voxel outside the wall line into an overhang it defers without, while
-/// every opening is cut into the wall ring at or below `wall_top`; a
-/// `pressure_plate` is shifted a voxel in or out for the same reason;
-/// and a `floor` is the single interior plane at row 0, which no opening
-/// reaches. Separation in y for some of those pairs, in x/z for the
-/// others.
-///
-/// What the corpus does see is massing running after openings — a
-/// two-step move rather than a swap — which fills a carved opening back
-/// in. So the order here is the spec's, held by the argument above
-/// rather than by a test, which is what a generator that grows into a
-/// neighbour's cells will change.
+/// No adjacent swap (massing/envelope, envelope/openings,
+/// openings/fixtures) is observable, because no two neighbouring phases'
+/// generators write the same cell: a roof starts at `wall_top + 1`; an
+/// eave `stair` sits a voxel outside the wall line, in an overhang it
+/// defers without; every opening is cut into the wall ring at or below
+/// `wall_top`; a `pressure_plate` is shifted a voxel in or out; a `floor`
+/// is the interior plane at row 0, which no opening reaches. Massing after
+/// openings, a two-step move, does show: it refills a carved opening. So
+/// this argument, not a test, holds the order until a generator grows
+/// into a neighbour's cells.
 fn paint_phases(
     buckets: PhaseBuckets<'_>,
     ctx: &StructCtx<'_>,
@@ -304,18 +278,15 @@ fn bucket_members<'a>(
         phases: Vec::with_capacity(flattened.len()),
     };
     for (index, &(y_offset, member)) in flattened.iter().enumerate() {
-        // `u32` because that is what a voxel stores. A paint set longer
-        // than `u32::MAX` would need a source of `level` blocks measured
-        // in gigabytes, and the volume such a body asks for is refused by
-        // `MAX_STRUCTURE_VOLUME` long before this point.
+        // `u32` because that is what a voxel stores. A longer paint set
+        // needs gigabytes of `level` blocks, and `MAX_STRUCTURE_VOLUME`
+        // refuses such a body first.
         let index = u32::try_from(index).expect("the paint set is far shorter than u32::MAX");
-        // Actuator patches (`door[id=X] opened_by=sig.Y`) are metadata
-        // overlays on an already-declared physical door — they carry
-        // neither `side=` nor `at=` and must not enter the openings
-        // phase, or `carve_door`'s `side_of` guard would false-positive
-        // "missing side=". The recogniser handles the surface shape
-        // here; the wired signal graph is threaded on by the future
-        // redstone lowering pipeline (`spec/redstone` "Signal binding").
+        // An actuator patch (`door[id=X] opened_by=sig.Y`) overlays a door
+        // declared elsewhere and has neither `side=` nor `at=`, so in the
+        // openings phase `side_of` would report a missing `side=`. Only
+        // its surface shape is checked here; the signal binding is
+        // redstone's (`spec/redstone` "Signal binding").
         if is_actuator_patch(member) {
             recognize_actuator_patch(member, flattened, diagnostics);
             buckets.phases.push(None);
@@ -331,12 +302,9 @@ fn bucket_members<'a>(
                 buckets.by_phase[phase.index()].push((index, y_offset, member));
             }
             // `circuit region=<label> void=<N>` reserves a routing region
-            // for the future `logic_synth → logic_place → logic_route`
-            // passes (`spec/redstone` "Place-and-route" and "Connection to
-            // the IR and phases"). Nothing lands in the block array from this
-            // member; the recognizer only checks the surface shape so a valid
-            // fixture stays quiet while a malformed one still surfaces a
-            // targeted `W_DEFERRED_MEMBER`.
+            // for place-and-route (`spec/redstone` "Place-and-route" and
+            // "Connection to the IR and phases") and paints nothing; only
+            // its surface shape is checked.
             MemberDisposition::Reserves => recognize_circuit_region(member, diagnostics),
             MemberDisposition::NotLowered => diagnostics.push(diag_deferred_member(member)),
         }

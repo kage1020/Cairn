@@ -15,21 +15,16 @@ use super::members::{StructCtx, resolve_member_state, side_name, side_of};
 use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
 
 /// Voxelise a `stair` member as a horizontal band of stair blocks along one
-/// wall — the eave pattern the `themed-tower` example uses to trim the
-/// transition between floors.
+/// wall: the eave `themed-tower.crn` uses to trim between floors.
 ///
-/// Only the subset the example exercises is implemented: `kind=stairs`, a
-/// `side=` naming one of the four cardinal walls, an optional
-/// `half=top|bottom` (defaults to `top` so a plain `stair` reads as an
-/// inverted eave), an optional `facing=out|in` (defaults to `out`) that
-/// rotates the stair so its riser points away from the interior, and an
-/// optional `shape=straight|outer_left|outer_right` (defaults to
-/// `straight`). Any other `kind=` / `facing=` / `shape=` fires
-/// `W_DEFERRED_MEMBER`. The row lands at `y = y_offset + (local y | 0)`
-/// in the overhang column one voxel outside the wall (so it does not
-/// overwrite the wall itself). Overhang has to be at least 1 for the
-/// eave to sit outside the wall; without one the stair collapses onto
-/// the wall row and a `W_DEFERRED_MEMBER` fires instead.
+/// Reads `kind=stairs`, a `side=` naming a wall, `half=top|bottom`
+/// (default `top`, so a plain `stair` is an inverted eave), `facing=out|in`
+/// (default `out`, the riser away from the interior) and
+/// `shape=straight|outer_left|outer_right` (default `straight`); any other
+/// `kind=`, `half=`, `facing=` or `shape=` defers with `W_DEFERRED_MEMBER`.
+/// The row lands at `y_offset + y=` (default `0`) in the overhang column
+/// one voxel outside the wall, so with no overhang the stair defers rather
+/// than overwrite the wall.
 pub(super) fn fill_stair(
     member: &Member,
     y_offset: u32,
@@ -106,10 +101,9 @@ fn draw_eave_band(
     let Some(y_world) = eave_row(member, y_offset, ctx, diagnostics) else {
         return false;
     };
-    // An eave band is a row of stairs whose `facing` / `half` / `shape`
-    // come from the member's own arguments rather than from a slope, but
-    // they are states this pass attaches to whatever it paints just the
-    // same — so the material has to be able to carry them.
+    // The band's `facing` / `half` / `shape` come from its own arguments
+    // rather than a slope, but are attached all the same, so the material
+    // must be able to carry them.
     let resolved = resolve_member_state(
         member,
         ctx.scope,
@@ -125,8 +119,7 @@ fn draw_eave_band(
         &GeometryMemberDescription {
             subject: "eave `stair`".to_owned(),
             states_from: "its own arguments",
-            // An eave is a row of stairs by construction — `fill_stair`
-            // refuses any `kind=` but `stairs` well above here.
+            // `eave_kind_is_stairs` has refused any other `kind=`.
             requires_stair: true,
         },
         diagnostics,
@@ -268,12 +261,9 @@ fn paint_eave_band(
             ctx.interior_h,
             ctx.dims,
         ) else {
-            // INVARIANT(wall-grid-validated): `u` walks `0..length`, the
-            // same length the helper checks, and any `y_world >= dims.y`
-            // was refused by `eave_row` with a diagnostic — so the helper
-            // has nothing to reject. Reaching here means one of those
-            // stopped agreeing with `wall_local_to_grid`. Loud in debug
-            // builds; release builds skip the cell rather than panic.
+            // INVARIANT(wall-grid-validated): `u` walks the length the
+            // helper checks, and `eave_row` refused `y_world >= dims.y`.
+            // Release builds skip the cell rather than panic.
             debug_assert!(
                 false,
                 "eave stair cell u={u} y={y_world} on the {} wall is outside the wall grid; \
@@ -290,10 +280,9 @@ fn paint_eave_band(
 
 /// Opposite of the wall's outward normal — used for `facing=in`.
 ///
-/// The `facing=out` case reuses [`shed_high_side`] because a shed roof's
-/// high edge points in the same cardinal as a wall's outward normal
-/// (both are "the direction the wall or slope faces the sky").
-/// Duplicating the mapping in a second helper would let the two drift.
+/// `facing=out` reuses [`shed_high_side`], since a shed's high edge points
+/// the cardinal of the wall's outward normal; a second copy of that
+/// mapping could drift.
 fn inward_cardinal(side: WallSide) -> Cardinal {
     match side {
         WallSide::Front => Cardinal::North,

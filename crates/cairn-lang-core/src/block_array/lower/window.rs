@@ -24,11 +24,10 @@ pub(super) fn fill_window(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // An unreadable `sym=` (`sym=yes`, `sym="true"`) draws the window
-    // unmirrored, except on a window with `repeat=` greater than 1, which
-    // `sym=true` refuses: that one is refused. Read before anything can
+    // unmirrored, unless its `repeat=` is above 1, which `sym=true`
+    // refuses, and then the window is refused. Read before anything can
     // refuse the window, so it is reported in the same compile as a
-    // refusal, with a note that says which of the three [`WindowCut`]
-    // outcomes happened.
+    // refusal, with a note saying which `WindowCut` happened.
     let (sym, sym_unread) = match read_or_ignore(
         member,
         "sym",
@@ -90,13 +89,10 @@ fn cut_window(
     let Some(side) = side_of(member, diagnostics) else {
         return WindowCut::Refused;
     };
-    // `offset=` defaults to 0 (the wall-local axis origin) when absent, so a
-    // decorative repeat=N series can be authored as `window ... repeat=N
-    // step=M size=WxH` without a redundant `offset=0`; `y=` and `size=` are
-    // required. A key that is present but ill-shaped defers, with a reason
-    // that says so rather than calling it missing. Read by
-    // `block_array::openings::read_window_args`, which a `connect` port on this
-    // window reads the same three with.
+    // `offset=` defaults to `0`, so a `repeat=N step=M` series needs no
+    // `offset=0`; `y=` and `size=` are required, and a key present but
+    // ill-shaped defers as such, not as missing. A `connect` port on this
+    // window reads all three through `read_window_args` too.
     let WindowArgs {
         offset,
         y: y_start_local,
@@ -121,18 +117,13 @@ fn cut_window(
         diagnostics.push(diag_deferred_member_reason(member, &reason));
         return WindowCut::Refused;
     }
-    // Resolved below the two geometry checks above, not before them: both
-    // return without painting, and a palette entry claimed on the way to
-    // one of them is a block `cairn info` counts and the `.nbt` ships for a
-    // window that was never cut.
+    // Resolved after the geometry checks, which return without painting,
+    // so a refused window claims no palette entry.
     //
-    // A window without a `mat_slot=` is an *opening* rather than a fill:
-    // the rectangle is carved to air, giving the `class=arrow_slit`
-    // pattern themed-tower uses a way to punch narrow slits through a
-    // stone wall without also picking a decorative species. Windows with
-    // an explicit `mat_slot=` continue to resolve through the palette;
-    // resolution failure still short-circuits so the resolver's own
-    // diagnostic isn't shadowed here.
+    // A window with no `mat_slot=` is an *opening*, carved to air, as
+    // `themed-tower.crn`'s `class=arrow_slit` slits are. One with a
+    // `mat_slot=` resolves through the palette, and a failure, already
+    // reported, refuses the window.
     let idx = if member.mat_slot.is_some() {
         let Some(idx) = palette_index_for(
             member,
@@ -181,20 +172,10 @@ fn window_series(
     sym: Option<bool>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u32, u32), WindowCut> {
-    // `repeat=` stamps the same rectangle multiple times along the wall,
-    // separated by `step=` voxels. Both keys are optional: an absent
-    // `repeat` collapses to a single instance (the pre-repeat
-    // behaviour). Present-but-invalid keys defer via
-    // `nonneg_int_or_defer` so a typo like `repeat=abc` earns a
-    // diagnostic instead of silently rounding to 1. `repeat=0` also
-    // defers because "stamp zero times" is almost always a bug (an
-    // author who wants no window just deletes the line). `step=0
-    // repeat>=2` would stamp on top of itself, which is caught below.
-    // The `shape=` key (used by `class=arrow_slit` as `shape=slit`) is
-    // read only for source-level acceptance — the block-array pass
-    // doesn't alter the palette based on it yet, so it neither defers
-    // nor changes the voxel output. The slit look-and-feel is a
-    // follow-up.
+    // An invalid `repeat=` or `step=` defers rather than rounding to one
+    // window. `repeat=0` defers too: stamping nothing is almost always a
+    // typo, since an author who wants no window drops the line. A `shape=`
+    // key is accepted and changes no voxel.
     let repeat = match nonneg_int_or_defer(member, "repeat", diagnostics) {
         NonNegRead::Valid(0) => {
             diagnostics.push(diag_deferred_member_reason(
@@ -213,9 +194,8 @@ fn window_series(
         NonNegRead::Deferred => return Err(WindowCut::Refused),
     };
     // Before `sym=`: a series without a positive `step=` is refused
-    // whatever `sym=` says, so an unreadable `sym=` is not why it is not
-    // cut, and the author hears about `step=` now rather than after
-    // repairing `sym=`.
+    // whatever `sym=` says, so the author hears about `step=` in this
+    // compile rather than after repairing `sym=`.
     if repeat > 1 && step == 0 {
         diagnostics.push(diag_deferred_member_reason(
             member,
@@ -278,24 +258,18 @@ fn window_course_refusal(
     (sw, sh): (u32, u32),
     ctx: &StructCtx<'_>,
 ) -> Option<String> {
-    // A window is a rectangle cut into a wall, so every row it cuts has
-    // to be a row some `walls` member painted — not merely a row below
-    // the roof. The three ways to leave the masonry all cut silently
-    // before this asked the whole question: below the first course the
-    // rectangle carves through the floor slab, above the top course it
-    // punches through the roof voxels the envelope phase wrote at
-    // `y = wall_top + 1`, and between two `level` courses it hangs its
-    // glass in open air.
+    // Every row a window cuts must be one a `walls` member painted, not
+    // merely one below the roof: below the first course it would carve
+    // the floor slab, above the top course the roof at `wall_top + 1`,
+    // and between two `level` courses it would hang in open air.
     if ctx.wall_column.contains_rows(y_start, sh) {
         return None;
     }
     Some(if ctx.wall_column.is_empty() {
-        // The column holds the rows the walls will *paint*, so an
-        // empty one means "no walls member puts a block anywhere" —
-        // a `mat_slot=` that does not resolve empties it as surely
-        // as a missing `height=` does, and naming only the height
-        // sends an author who wrote one to the wrong line. Same
-        // reason `carve_door`'s gate says the same thing.
+        // An empty column means no `walls` paints: an unresolved
+        // `mat_slot=` empties it as surely as a missing `height=`, so
+        // naming only the height would send an author who wrote one to
+        // the wrong line. `carve_door` words it the same way.
         format!(
             "window at y={y_start} size={sw}x{sh} has no wall to cut into (this struct declares no `walls` that paints — one with a positive `height=` and a `mat_slot=` that resolves)",
         )
@@ -305,7 +279,7 @@ fn window_course_refusal(
             ctx.wall_column,
         )
     } else {
-        // Saturating here printed `y=4294967295..=4294967294`, a range
+        // Saturating would print `y=4294967295..=4294967294`, a range
         // that ends before it starts.
         format!(
             "window rows from y={y_start} run past the highest row a build can address (size={sw}x{sh}; the walls occupy {})",
@@ -332,17 +306,13 @@ fn cut_window_mirror(
         ..
     } = rect;
     let mirror_offset = len.saturating_sub(offset).saturating_sub(sw);
-    // Reject overlapping mirrors: a `sym=true` window asks for a
-    // *pair*, not one wide span. The `span_end` guard in
+    // A `sym=true` window asks for a *pair*, not one wide span.
     // `window_span_refusal` refused `offset + size_w > wall_length`, so
-    // neither subtraction saturates, and the two rectangles intersect
-    // exactly when the window straddles the wall's midpoint
-    // (2*offset < wall_length < 2*(offset + size_w)) — diagnose and
-    // skip the mirror so the primary is still emitted cleanly. A
-    // centred window (2*offset + size_w == wall_length) has a mirror
-    // that is the same rectangle, the fullest overlap there is: the
-    // author still asked for two windows and got one, so it is
-    // reported like the rest.
+    // neither subtraction saturates, and the two intersect exactly when
+    // the window straddles the midpoint
+    // (2*offset < wall_length < 2*(offset + size_w)); the mirror is then
+    // skipped and the primary kept. A centred window's mirror is the same
+    // rectangle: two windows asked for, one got, so it is reported too.
     let primary_end = offset.saturating_add(sw);
     let mirror_end = mirror_offset.saturating_add(sw);
     let overlap = offset < mirror_end && mirror_offset < primary_end;
@@ -396,13 +366,9 @@ fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut MemberC
                 ctx.dims,
             ) else {
                 // INVARIANT(wall-grid-validated): `fill_window` refused any
-                // span past the wall (`span_end = offset + step*(repeat-1) +
-                // size.w` is at most the wall length, which also bounds the
-                // `sym=true` mirror) and any row outside a wall course before
-                // it got here — so the helper has nothing to reject. Reaching
-                // here means one of those checks stopped agreeing with
-                // `wall_local_to_grid`. Loud in debug builds; release builds
-                // skip the cell rather than panic.
+                // span past the wall (`offset + step*(repeat-1) + size.w`,
+                // which also bounds the mirror) and any row outside a wall
+                // course. Release builds skip the cell rather than panic.
                 debug_assert!(
                     false,
                     "window cell u={along} y={row} on the {} wall is outside the wall grid; \

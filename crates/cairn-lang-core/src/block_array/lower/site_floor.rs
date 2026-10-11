@@ -12,18 +12,14 @@ use crate::block_array::{BlockArray, PaletteIndex, Placement};
 
 /// One `place` row that lowered, and the masonry its body lowered with.
 ///
-/// The column travels beside the placement rather than in a map of its
-/// own so the two cannot disagree about which bodies exist: a key in one
-/// and not the other would be a `connect` port judged against a body
-/// that is in no artifact, and two `place` rows sharing an `id=` is the
-/// shape that produces it — the resolver refuses the duplicate, the
-/// second body still lowers, and only the first is kept.
+/// The column travels with the placement, not in a map of its own, so the
+/// two cannot disagree about which bodies exist: a key in only one would
+/// judge a `connect` port against a body in no artifact, as when a second
+/// `place` row reuses an `id=` and its body lowers but is not kept.
 ///
 /// Not a field on [`Placement`]: that record is hashed into
-/// `resolved_ir_hash`, and the rows a wall occupies must not move it.
-/// The lockfile's own `LockPlacement` is a named projection that would
-/// not carry them anyway, and [`WallColumn`] derives no `Serialize`, so
-/// the question would not compile before it could be decided.
+/// `resolved_ir_hash`, which the rows a wall occupies must not move (and
+/// [`WallColumn`] derives no `Serialize`).
 pub(super) struct PlacedBody {
     pub(super) placement: Placement,
     /// The rows this body's `walls` painted — the value the openings
@@ -40,16 +36,13 @@ pub(super) struct PlacedBody {
 /// overwrite, who lays each one, and how far each placement's share of it
 /// reaches.
 pub(super) struct FloorPlan {
-    /// World-space `(x, y, z)` of every non-air voxel on the y=0 plane of
-    /// every placement. The walkway voxeliser uses this set to skip cells
-    /// that would overwrite an existing floor tile — a strip ducking under
-    /// a corner of a building still completes, but the colliding cell
-    /// stays air and the row earns a `W_WALKWAY_BLOCKED` warning.
+    /// World-space `(x, y, z)` of every non-air voxel on row 0 of every
+    /// placement. A walkway leaves these cells air, and a row that would
+    /// overwrite one earns a `W_WALKWAY_BLOCKED` warning.
     pub(super) cells: HashSet<(i32, i32, i32)>,
-    /// For each cell in [`Self::cells`], what lays it, in placement
-    /// order. Recorded as the cell is
-    /// inserted, so a note naming what covers a port reads the same
-    /// derivation the router was blocked by.
+    /// For each cell in [`Self::cells`], what lays it, in placement order.
+    /// Recorded as the cell is inserted, so a note naming what covers a
+    /// port reads the derivation the router was blocked by.
     pub(super) owners: HashMap<(i32, i32, i32), Vec<FloorOwner>>,
     /// Per placement that put at least one cell in [`Self::cells`], under
     /// its `site::SITE::PLACE_ID` key, the box those cells span. The
@@ -96,10 +89,8 @@ pub(super) fn collect_floor_cells(
             debug_assert!(false, "placement `{key}` has no structure");
             continue;
         };
-        // Only the y=0 plane matters: walkways sit at the ports' shared
-        // Y (=0 for every example). 3D path search (staircases, multi-level
-        // walkways) is intentionally out of scope so the port surface lands
-        // in one piece.
+        // Only row 0: a walkway runs on its ports' shared plane, and the
+        // router searches no other.
         for z in 0..ba.dims.z {
             for x in 0..ba.dims.x {
                 let Some(i) = ba.dims.index(x, 0, z) else {

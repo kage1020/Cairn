@@ -9,20 +9,19 @@ use super::members::Phase;
 /// Drop the palette slots a later phase covered, and remap the voxels
 /// onto the survivors.
 ///
-/// A member may paint a cell a later phase then covers — a `window` set
-/// into a `walls` ring takes those cells for good — and when a member's
-/// last cell goes, its material is left in the palette describing a block
-/// the structure does not contain. That entry is not free: the Java writer
-/// emits it into the `.nbt`, `cairn info` reports a portability row for
-/// it, and `resolved_ir_hash` covers it, so two sources that differ only
-/// in which member lost would hash apart.
+/// A member's cells may all be covered by a later phase (a `window` set
+/// into a `walls` ring), leaving its material in the palette for a block
+/// the structure does not contain. The Java writer would emit that entry,
+/// `cairn info` would report a portability row for it, and
+/// `resolved_ir_hash` would cover it, so sources differing only in which
+/// member lost would hash apart.
 ///
 /// Slot 0 stays whatever happens: [`Palette::new_with_air`] puts air there
 /// before any member runs, and a fully paved volume names it nowhere.
 ///
-/// A slot that was **never painted at all** is a generator bug, not a
-/// covered cell, and is left in place so `tests/palette_is_referenced`
-/// can catch it; such slots are returned for the caller to assert on.
+/// A slot **never painted at all** is a generator bug, not a covered
+/// cell: it is kept, so `tests/lower/palette_is_referenced.rs` can catch
+/// it, and returned for the caller to assert on.
 pub(super) fn prune_unreferenced(
     palette: &mut Palette,
     canvas: &Canvas,
@@ -60,15 +59,13 @@ pub(super) fn prune_unreferenced(
 /// panicking once it holds its capacity: [`PALETTE_CAPACITY`] entries
 /// from [`lower_to_block_array`].
 ///
-/// Every paint interns its state, including one a later member then
-/// covers, so what fills the palette is the states *written*, not the
-/// states the finished body keeps, and the overflow has to be caught at
-/// paint time. A paint past the capacity gets air in place of its state
-/// and records the refusal; [`Self::into_palette`] then answers with it,
-/// and the body is refused with `W_PALETTE_TOO_LARGE` before its grid is
-/// read. Holding the refusal here, rather than threading a `Result` out
-/// of every generator, is what lets the generators keep their infallible
-/// `intern`, and the type is what keeps them off the panicking
+/// Every paint interns its state, covered later or not, so the palette
+/// fills with the states *written* and overflow is caught at paint time.
+/// A paint past the capacity gets air and records the refusal, which
+/// [`Self::into_palette`] answers with, and the body is refused with
+/// `W_PALETTE_TOO_LARGE` before its grid is read. Holding the refusal here
+/// lets generators keep an infallible `intern` without a `Result` threaded
+/// out of each, and the type keeps them off the panicking
 /// [`Palette::intern`].
 ///
 /// [`PALETTE_CAPACITY`]: crate::block_array::PALETTE_CAPACITY
@@ -95,11 +92,8 @@ impl ScopePalette {
     }
 
     pub(super) fn intern(&mut self, state: BlockState) -> PaletteIndex {
-        // Once a paint has overflowed, `into_palette` discards the palette
-        // and the body is refused, so which states the palette holds from
-        // here on, and which index a later paint gets, is never read. Air
-        // without the scan, which would otherwise walk every entry on each
-        // remaining paint of an already refused body.
+        // After an overflow the body is refused and the palette never
+        // read, so air without scanning every entry on each later paint.
         if self.overflow.is_some() {
             return PaletteIndex::AIR;
         }
@@ -131,16 +125,12 @@ impl ScopePalette {
 /// separate them. The canvas can tell the two apart because it remembers the
 /// writer, and reports the second kind rather than resolving it silently.
 ///
-/// **Which palette slots a write has named.** An entry no voxel references
-/// reaches the `.nbt`, the `resolved_ir_hash`, and `cairn info`'s per-entry
-/// rows, so it is a block the tooling counts for a build that does not
-/// contain it. There are two ways to get one and they are not the same
-/// mistake: a generator claiming a material for geometry it never emits is
-/// a bug in the generator, while a member painting a cell a later phase
-/// then covers is the layering doing its job. [`prune_unreferenced`] drops
-/// the second and leaves the first where the artifact still shows it,
-/// which is why the flag is kept at all rather than deriving everything
-/// from the finished grid.
+/// **Which palette slots a write has named.** An entry no voxel
+/// references comes two ways: a generator claiming a material for geometry
+/// it never emits (a bug), or a member's cells covered by a later phase
+/// (the layering working). [`prune_unreferenced`] drops the second and
+/// keeps the first where the artifact shows it, which the finished grid
+/// alone cannot tell apart.
 ///
 /// Nothing paints through a `Canvas` directly: [`Self::for_member`] hands
 /// out a [`MemberCanvas`], and that is the only type with a write on it.
@@ -150,30 +140,25 @@ pub(super) struct Canvas {
     /// Per voxel: `0` while nothing has written it, and `n + 1` once the
     /// member at index `n` of the flattened paint list has.
     ///
-    /// One `u32` rather than the `(phase, index)` pair this began as. The
-    /// pair is 16 bytes at align 8, which over a volume at the
-    /// [`MAX_STRUCTURE_VOLUME`] cap is 256 MB of bookkeeping against
-    /// 32 MB of voxels — a cap chosen against the grid alone would no
-    /// longer mean what it was set to mean. The phase comes from
-    /// [`Self::phases`] instead, which is one entry per member rather
-    /// than one per cell.
+    /// One `u32` rather than a `(phase, index)` pair, which at 16 bytes
+    /// (align 8) would be 256 MB of bookkeeping against 32 MB of voxels at
+    /// the [`MAX_STRUCTURE_VOLUME`] cap, a cap chosen against the grid
+    /// alone. The phase comes from [`Self::phases`], one entry per member.
     ///
     /// [`MAX_STRUCTURE_VOLUME`]: crate::block_array::MAX_STRUCTURE_VOLUME
     owners: Vec<u32>,
-    /// Phase of each member of the flattened paint list, by that member's
-    /// index. `None` for the members no phase evaluates — they never
-    /// paint, so the entry exists only to keep the indices aligned.
+    /// Phase of each member of the flattened paint list, by index. `None`
+    /// for a member no phase evaluates, which never paints; the entry
+    /// keeps the indices aligned.
     phases: Vec<Option<Phase>>,
     /// Indexed by palette slot: `true` once a write has named that slot.
     painted: Vec<bool>,
     /// Indexed like [`Self::phases`]: `true` once that member has written
-    /// a cell, whatever a later write did to it. How the pass knows which
-    /// openings were cut, for the `connect` rows that anchor on them.
+    /// a cell, whatever a later write did to it: which openings were cut,
+    /// for the `connect` rows that anchor on them.
     pub(super) wrote: Vec<bool>,
     /// `(overridden, overriding)` member pairs to the number of voxels the
-    /// second took from the first. Insertion-ordered so the diagnostics
-    /// come out in the order the phases discovered them, then sorted by
-    /// span with the rest of the pass's findings.
+    /// second took from the first, in discovery order.
     pub(super) conflicts: IndexMap<(u32, u32), u32>,
 }
 
@@ -193,10 +178,10 @@ impl Canvas {
     /// Borrow the canvas as the member at `index` of the flattened paint
     /// list sees it.
     ///
-    /// The only way to reach a write. A generator cannot paint without a
-    /// member to file the write under, and cannot file it under the wrong
-    /// one by forgetting to update a field: [`run_phase`] opens the scope
-    /// once per member and the borrow closes it.
+    /// The only way to reach a write, so a generator cannot paint without
+    /// a member to file it under, nor file it under a stale one:
+    /// [`run_phase`] opens the scope once per member and the borrow closes
+    /// it.
     ///
     /// [`run_phase`]: super::body::run_phase
     pub(super) fn for_member(&mut self, index: u32) -> MemberCanvas<'_> {
@@ -238,14 +223,11 @@ impl MemberCanvas<'_> {
     /// Paint one voxel, claiming its palette slot only once the cell is
     /// known to exist.
     ///
-    /// Every generator derives its coordinates from the same [`Dims`] the
+    /// Every generator derives its coordinates from the [`Dims`] the
     /// volume was allocated against, so a coordinate outside it means the
-    /// dim math and the generator disagree. That disagreement is what a
-    /// `roof` under `level y=0` used to be: a full set of stair entries
-    /// reached the palette and not one stair reached the structure, with
-    /// nothing said. The write is still clipped rather than panicking a
-    /// release build, and the `debug_assert!` turns the disagreement into
-    /// a test failure instead of a silent drop.
+    /// dim math and the generator disagree. The write is clipped rather
+    /// than panicking a release build, and the `debug_assert!` makes the
+    /// disagreement a test failure rather than a silent drop.
     pub(super) fn paint(&mut self, pos: (u32, u32, u32), claim: impl FnOnce() -> PaletteIndex) {
         if !self.try_paint(pos, claim) {
             debug_assert!(
@@ -260,7 +242,7 @@ impl MemberCanvas<'_> {
     /// author's to get wrong: a `pressure_plate` anchors at `at=`, so an
     /// out-of-range cell there earns a diagnostic rather than an assertion.
     /// Answers whether the cell existed; `claim` runs only when it did,
-    /// which is what keeps the palette free of entries no voxel names.
+    /// so the palette gains no entry no voxel names.
     pub(super) fn try_paint(
         &mut self,
         pos: (u32, u32, u32),
@@ -283,21 +265,17 @@ impl MemberCanvas<'_> {
         let before = canvas.voxels[i];
         canvas.voxels[i] = after;
         let previous = std::mem::replace(&mut canvas.owners[i], member + 1);
-        // A write that changes nothing is not a contest: two `walls`
-        // members of one material meeting at a corner leave the same block
-        // whichever order they run in, and a `window` whose `repeat=` /
-        // `step=` stamps overlap covers its own cells with its own
-        // material.
+        // A write that changes nothing is not a contest: two `walls` of one
+        // material meeting at a corner, or a `window` whose `repeat=` /
+        // `step=` stamps overlap.
         if before == after || previous == 0 {
             return true;
         }
-        // The member check is the other half of that and is unreachable
-        // from today's generators — none writes one cell to two different
-        // blocks, so a same-member pair never gets past the line above.
-        // It stays because the finding is a statement about two members:
-        // reported against itself it would read "`roof` overwrites 3
-        // voxels that `roof` painted", which is a generator emitting two
-        // faces onto one cell and not something an author can move.
+        // No generator writes one cell to two different blocks, so a
+        // same-member pair stops above. The check stays because the
+        // finding is about two members: against itself it would read
+        // "`roof` overwrites 3 voxels that `roof` painted", a generator
+        // fault no author can move.
         let overridden = previous - 1;
         if overridden != member && canvas.same_phase(overridden, member) {
             *canvas.conflicts.entry((overridden, member)).or_default() += 1;
