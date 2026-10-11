@@ -58,11 +58,10 @@ use crate::placement_ir::{
 };
 use crate::routing_geometry::{net_order, sum_over_driving_nets, tile_layer_clearance};
 
-/// Per-cell footprint used by the post-routing congestion budget.
-/// Re-exports [`crate::placement::CELL_FOOTPRINT`] so this pass carries
-/// the same footprint model the placement pass used and adds wire
-/// occupancy on top.
-pub const CELL_FOOTPRINT: u32 = crate::placement::CELL_FOOTPRINT;
+/// Per-cell footprint used by the post-routing congestion budget: the
+/// placement pass's own, so this pass carries the same footprint model
+/// and adds wire occupancy on top.
+pub use crate::placement::CELL_FOOTPRINT;
 
 /// Output of a [`compile_routing`] run.
 ///
