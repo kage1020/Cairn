@@ -37,6 +37,12 @@ pub(crate) fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlac
 /// A cell's phase as stage 2 hands it on, with nothing measured.
 pub(crate) const ROUTED: PlacementPhase = PlacementPhase::Routed { wire_length: 0 };
 
+/// A cell's phase as stage 3 hands it on, with nothing measured.
+pub(crate) const DELAYED: PlacementPhase = PlacementPhase::Delayed {
+    wire_length: 0,
+    local_delay_ticks: 0,
+};
+
 /// A cell of kind `cell` standing on `coord`, driven by `drivers`, in
 /// `phase`.
 pub(crate) fn placed_cell(

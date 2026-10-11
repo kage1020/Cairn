@@ -14,7 +14,7 @@ use crate::placement_ir::{
     CellCoord, PlacedCellNode, PlacedOutputNode, PlacementIr, PlacementPhase, ScopedPlacementIr,
 };
 use crate::test_fixtures::{
-    CollapsedRow, DanglingNet, FarSink, collapsed_pad_row, dangling_net, far_sink,
+    CollapsedRow, DanglingNet, FarSink, collapsed_pad_row, dangling_net, far_sink, placed_cell,
     regionless_scope, reservation, scoped,
 };
 
@@ -223,15 +223,22 @@ fn a_scope_that_earns_both_refusals_is_refused_over_the_pad_row() {
             CellCoord::new(2, 0, 1),
             CellCoord::new(3, 0, 1),
         ] {
-            ir.cells.push(cell(coord, Vec::new()));
+            ir.cells.push(placed_cell(
+                EditionCell::JavaRepeaterOr,
+                coord,
+                Vec::new(),
+                PlacementPhase::Unrouted,
+            ));
         }
         for coord in [CellCoord::new(2, 0, 0), CellCoord::new(3, 0, 0)] {
-            ir.cells.push(cell(
+            ir.cells.push(placed_cell(
+                EditionCell::JavaRepeaterOr,
                 coord,
                 vec![CellPortDriver {
                     port: PortName::A,
                     net: NetRef::Input(0),
                 }],
+                PlacementPhase::Unrouted,
             ));
         }
 
@@ -491,17 +498,6 @@ fn a_sink_exactly_at_the_cap_is_routed_rather_than_refused() {
             );
             assert_eq!(kept, vec!["wide".to_owned()]);
         }
-    }
-}
-
-/// An unrouted cell at `coord`, driven by `drivers`.
-fn cell(coord: CellCoord, drivers: Vec<CellPortDriver>) -> PlacedCellNode {
-    PlacedCellNode {
-        cell: EditionCell::JavaRepeaterOr,
-        drivers,
-        coord,
-        phase: PlacementPhase::Unrouted,
-        span: Span::default(),
     }
 }
 

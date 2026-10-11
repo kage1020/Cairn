@@ -20,24 +20,7 @@ use crate::placement_ir::{
 };
 use crate::routing::compile_routing;
 use crate::routing_geometry::{Router, block_sites, collect_nets, net_trees};
-use crate::test_fixtures::{reservation, scoped, staircase};
-
-fn placed_cell(
-    cell: EditionCell,
-    coord: CellCoord,
-    drivers: Vec<CellPortDriver>,
-) -> PlacedCellNode {
-    PlacedCellNode {
-        cell,
-        drivers,
-        coord,
-        phase: PlacementPhase::Delayed {
-            wire_length: 0,
-            local_delay_ticks: 0,
-        },
-        span: Span::default(),
-    }
-}
+use crate::test_fixtures::{DELAYED, placed_cell, reservation, scoped, staircase};
 
 #[test]
 fn no_scopes_input_yields_no_scopes_output() {
@@ -88,6 +71,7 @@ fn single_net_no_buffer_is_untouched() {
             port: PortName::A,
             net: NetRef::Input(0),
         }],
+        DELAYED,
     ));
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "single", ir));
     assert!(
@@ -127,6 +111,7 @@ fn long_segment_places_buffer_on_plane() {
             port: PortName::A,
             net: NetRef::Input(0),
         }],
+        DELAYED,
     ));
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "long", ir));
     assert!(
@@ -202,6 +187,7 @@ fn walled_scope(void: u32) -> ScopedPlacementIr {
         EditionCell::JavaRepeaterOr,
         CellCoord::new(7, 0, 0),
         Vec::new(),
+        DELAYED,
     ));
     ir.cells.push(placed_cell(
         EditionCell::JavaRepeaterOr,
@@ -210,6 +196,7 @@ fn walled_scope(void: u32) -> ScopedPlacementIr {
             port: PortName::A,
             net: NetRef::Input(0),
         }],
+        DELAYED,
     ));
     scoped(ScopeKind::Struct, "walled", ir)
 }
@@ -261,6 +248,7 @@ fn two_net_walled_scope() -> ScopedPlacementIr {
             port: PortName::A,
             net: NetRef::Input(1),
         }],
+        DELAYED,
     ));
     scope
 }
@@ -439,6 +427,7 @@ fn two_nets_that_want_one_row_scope(void: u32) -> ScopedPlacementIr {
             port: PortName::A,
             net: NetRef::Input(1),
         }],
+        DELAYED,
     ));
     // #1 asks for (15,0,1) first and is lifted off it, because the
     // wire cell #0 drives runs through the coord on its way back
@@ -450,6 +439,7 @@ fn two_nets_that_want_one_row_scope(void: u32) -> ScopedPlacementIr {
             port: PortName::A,
             net: NetRef::Input(0),
         }],
+        DELAYED,
     ));
     // #2 is fed by cell #0 across 20 blocks and wants the same
     // coord, with `sig.a`'s wire on the plane below it.
@@ -460,6 +450,7 @@ fn two_nets_that_want_one_row_scope(void: u32) -> ScopedPlacementIr {
             port: PortName::A,
             net: NetRef::Cell(0),
         }],
+        DELAYED,
     ));
     scoped(ScopeKind::Struct, "shared", ir)
 }
@@ -588,6 +579,7 @@ fn a_shared_prefix_carries_one_repeater_however_many_sinks_hang_off_it() {
                     port: PortName::A,
                     net: NetRef::Input(0),
                 }],
+                DELAYED,
             ));
         }
         let legalized = compile_crossing(&scoped(ScopeKind::Struct, "fanout", ir));
@@ -669,6 +661,7 @@ fn cell_on_the_fifteen_step_point() -> ScopedPlacementIr {
             port: PortName::A,
             net: NetRef::Input(1),
         }],
+        DELAYED,
     ));
     ir.cells.push(placed_cell(
         EditionCell::JavaRepeaterOr,
@@ -677,6 +670,7 @@ fn cell_on_the_fifteen_step_point() -> ScopedPlacementIr {
             port: PortName::A,
             net: NetRef::Input(0),
         }],
+        DELAYED,
     ));
     scoped(ScopeKind::Struct, "packed", ir)
 }
@@ -985,6 +979,7 @@ fn mux_ports_each_keep_the_coord_their_own_segment_reaches() {
             port: PortName::A,
             net: NetRef::Input(1),
         }],
+        DELAYED,
     ));
     ir.cells.push(placed_cell(
         EditionCell::JavaMuxUnpinned,
@@ -1003,6 +998,7 @@ fn mux_ports_each_keep_the_coord_their_own_segment_reaches() {
                 net: NetRef::Input(3),
             },
         ],
+        DELAYED,
     ));
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "mux", ir));
     assert!(
@@ -1056,6 +1052,7 @@ fn re_running_crossing_pass_panics_loudly() {
             port: PortName::A,
             net: NetRef::Input(0),
         }],
+        DELAYED,
     ));
     let first = compile_crossing(&scoped(ScopeKind::Struct, "twice", ir));
     let _second = compile_crossing(&first.scoped);
@@ -1071,6 +1068,7 @@ fn missing_region_with_cells_fires_no_circuit_region() {
         EditionCell::JavaRepeaterOr,
         CellCoord::new(0, 0, 0),
         vec![],
+        DELAYED,
     ));
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "roomless", ir));
     let diag = legalized
@@ -1262,6 +1260,7 @@ fn buffer_coord_index_at_kth_boundary() {
             port: PortName::A,
             net: NetRef::Input(0),
         }],
+        DELAYED,
     ));
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "boundary", ir));
     assert!(
@@ -1310,6 +1309,7 @@ fn buffer_coord_index_at_max_segment_boundary() {
             port: PortName::A,
             net: NetRef::Input(0),
         }],
+        DELAYED,
     ));
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "max_boundary", ir));
     assert!(
@@ -1343,6 +1343,7 @@ fn out_of_range_net_ref_cell_panics_loudly() {
             port: PortName::A,
             net: NetRef::Cell(u32::MAX),
         }],
+        DELAYED,
     ));
     let _ = compile_crossing(&scoped(ScopeKind::Struct, "broken", ir));
 }
@@ -1365,9 +1366,14 @@ fn legalize_panic_names_the_offending_cell_not_the_first_one() {
         EditionCell::JavaRepeaterOr,
         CellCoord::new(0, 0, 0),
         vec![],
+        DELAYED,
     ));
-    let mut already_legalized =
-        placed_cell(EditionCell::JavaRepeaterOr, CellCoord::new(4, 0, 1), vec![]);
+    let mut already_legalized = placed_cell(
+        EditionCell::JavaRepeaterOr,
+        CellCoord::new(4, 0, 1),
+        vec![],
+        DELAYED,
+    );
     already_legalized.phase = PlacementPhase::Legalized {
         wire_length: 0,
         local_delay_ticks: 0,

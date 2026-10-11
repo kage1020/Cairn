@@ -12,17 +12,7 @@ use crate::edition_netlist_ir::EditionCell;
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
 use crate::placement_ir::{CellCoord, PlacedCellNode, PlacementIr, PlacementPhase};
-use crate::test_fixtures::{reservation, scoped};
-
-fn placed_cell(coord: CellCoord, phase: PlacementPhase) -> PlacedCellNode {
-    PlacedCellNode {
-        cell: EditionCell::JavaRepeaterOr,
-        drivers: vec![],
-        coord,
-        phase,
-        span: Span::default(),
-    }
-}
+use crate::test_fixtures::{ROUTED, placed_cell, reservation, scoped};
 
 /// `wire_length` reports the dust that feeds a cell, so it counts
 /// the routed path and not the straight line between the driver's
@@ -213,7 +203,12 @@ fn a_scope_with_several_unwireable_sinks_counts_them() {
         CellCoord::new(2, 0, 1),
         CellCoord::new(3, 0, 1),
     ] {
-        ir.cells.push(placed_cell(coord, PlacementPhase::Unrouted));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            coord,
+            vec![],
+            PlacementPhase::Unrouted,
+        ));
     }
     for coord in [CellCoord::new(2, 0, 0), CellCoord::new(3, 0, 0)] {
         ir.cells.push(PlacedCellNode {
@@ -270,7 +265,12 @@ fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
     // leaves the sink at (2,0,0) with no free neighbour, and
     // `void=1` reserves no layer to come in over the top.
     for coord in [CellCoord::new(1, 0, 0), CellCoord::new(2, 0, 1)] {
-        ir.cells.push(placed_cell(coord, PlacementPhase::Unrouted));
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            coord,
+            vec![],
+            PlacementPhase::Unrouted,
+        ));
     }
     ir.cells.push(PlacedCellNode {
         cell: EditionCell::JavaRepeaterOr,
@@ -361,7 +361,9 @@ fn wire_length_counts_the_routed_path() {
         span: Span::default(),
     });
     ir.cells.push(placed_cell(
+        EditionCell::JavaRepeaterOr,
         CellCoord::new(7, 0, 0),
+        vec![],
         PlacementPhase::Unrouted,
     ));
     ir.cells.push(PlacedCellNode {
@@ -404,12 +406,16 @@ fn route_panic_names_the_offending_cell_not_the_first_one() {
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(8, 3, 2));
     ir.cells.push(placed_cell(
+        EditionCell::JavaRepeaterOr,
         CellCoord::new(0, 0, 0),
+        vec![],
         PlacementPhase::Unrouted,
     ));
     ir.cells.push(placed_cell(
+        EditionCell::JavaRepeaterOr,
         CellCoord::new(4, 0, 1),
-        PlacementPhase::Routed { wire_length: 0 },
+        vec![],
+        ROUTED,
     ));
     let _ = compile_routing(&scoped(ScopeKind::Struct, "mixed", ir));
 }
