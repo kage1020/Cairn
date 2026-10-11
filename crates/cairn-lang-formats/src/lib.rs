@@ -21,7 +21,6 @@ pub use bedrock_structure::{
 };
 pub use data_version::{
     BedrockTarget, JavaTarget, UnsupportedTarget, resolve_bedrock_target, resolve_java_target,
-    supported_list,
 };
 pub use java_structure::{
     Compound, JavaStructure, JavaStructureError, OutputExt, build_structure_tag, output_filename,

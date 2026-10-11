@@ -82,14 +82,6 @@ impl fmt::Display for UnsupportedTarget {
 
 impl std::error::Error for UnsupportedTarget {}
 
-/// Human-readable list of supported `mc_version` strings (built-in pack),
-/// joined for error messages. Public so the CLI can print the same list
-/// in `--help`-style contexts without re-deriving it.
-#[must_use]
-pub fn supported_list() -> String {
-    crate::registry::builtin_java().supported_list()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
