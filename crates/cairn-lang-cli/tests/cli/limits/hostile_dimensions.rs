@@ -274,6 +274,7 @@ fn hostile_sources() -> Vec<(&'static str, String, Findings)> {
         ),
     ]
 }
+
 /// A `circuit region=` inside a struct whose `size=` is hostile.
 ///
 /// The reservation takes the floor's extent, so `region=` is as wide as

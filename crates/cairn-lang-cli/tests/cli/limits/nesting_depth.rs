@@ -144,8 +144,7 @@ fn every_command_refuses_deep_nesting_instead_of_aborting() {
             assert_eq!(
                 code,
                 Some(1),
-                "{shape}: `{}` should refuse with a diagnostic; got {code:?} \
-                 (see the table at the top of this file)\nstderr={}",
+                "{shape}: `{}` should refuse with a diagnostic; got {code:?}\nstderr={}",
                 args[0],
                 String::from_utf8_lossy(&out.stderr),
             );
@@ -338,7 +337,7 @@ fn a_chain_of_one_operator_bindings_reaches_the_limit_where_the_doc_says() {
             code,
             want,
             "a reverse chain of {stages} bindings should {} — the doc puts the limit \
-             at {quoted}; got {code:?} (see the table at the top of this file)\nstderr={}",
+             at {quoted}; got {code:?}\nstderr={}",
             if want_refusal { "be refused" } else { "lower" },
             String::from_utf8_lossy(&out.stderr),
         );

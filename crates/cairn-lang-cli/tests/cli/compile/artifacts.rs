@@ -10,8 +10,8 @@ use cairn_lang_core::lock::{HashHex, Lockfile};
 use tempfile::TempDir;
 
 use crate::common::{
-    Fixture, assert_stream, cairn, compile_as, crn_examples, example_in_tempdir, examples_dir,
-    write_source,
+    Fixture, assert_stream, bytes_contain, cairn, compile_as, crn_examples, example_in_tempdir,
+    examples_dir, nbt_body, write_source,
 };
 
 /// The version cargo derived for this crate from `[workspace.package]`.
@@ -1402,8 +1402,6 @@ fn unknown_def_in_place_compile_exits_nonzero() {
 
 #[test]
 fn home2_nbt_uses_resolved_theme_palette() {
-    // The palette is not read: a non-trivial gzip stream and a non-zero
-    // `resolved_ir_hash` stand in for it.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("village.lock");
@@ -1419,19 +1417,18 @@ fn home2_nbt_uses_resolved_theme_palette() {
             lock_path.to_str().unwrap(),
         ],
     );
-    let home2 = out_dir.path().join("home2.nbt");
-    let bytes = fs::read(&home2).expect("read home2.nbt");
-    assert!(
-        bytes.len() > 64,
-        "home2.nbt should carry real palette + voxel data, got {} bytes",
-        bytes.len(),
-    );
-    let lf = Lockfile::read_from_path(&lock_path).expect("read lock");
-    assert_ne!(
-        lf.resolved_ir_hash.as_str(),
-        HashHex::ZERO_STR,
-        "resolved_ir_hash must reflect lowered voxels, not an empty IR",
-    );
+    let body = nbt_body(&out_dir.path().join("home2.nbt"));
+    for id in [
+        "minecraft:oak_planks",
+        "minecraft:cobblestone",
+        "minecraft:spruce_stairs",
+        "minecraft:glass_pane",
+    ] {
+        assert!(
+            bytes_contain(&body, id),
+            "home2.nbt has no `{id}` in its palette"
+        );
+    }
 }
 
 #[test]
