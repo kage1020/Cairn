@@ -1,5 +1,4 @@
-//! Unit coverage for the argument-surface invariants the end-to-end
-//! tests under `tests/cli/` can only assert circumstantially, by
+//! Argument-surface invariants the end-to-end tests could only assert by
 //! hard-coding both sides of a pairing.
 
 use clap::CommandFactory;
@@ -8,15 +7,9 @@ use crate::cli::Cli;
 
 use super::*;
 
-/// The four Placement IR stages spell their `--stage` value, the
-/// `--stage <name>` fragment `require_edition` prints, and the
-/// `"stage"` key of the JSON dump the same way. `stage_cli_name`
-/// already derives the second from the third, but the first is
-/// clap's own kebab-casing of the variant identifier, which no
-/// type ties to either — renaming `SynthStage::Route` to
-/// `Routing` would silently start accepting `--stage routing`
-/// while the dump kept saying `route`. Reading the name back out
-/// of `ValueEnum` is the only way to pin that.
+/// clap kebab-cases the variant identifier, which no type ties to the
+/// dump's `"stage"` key: renaming `SynthStage::Route` to `Routing` would
+/// accept `--stage routing` while the dump kept saying `route`.
 #[test]
 fn placement_stage_names_match_clap() {
     for (stage, placement) in [
@@ -33,9 +26,8 @@ fn placement_stage_names_match_clap() {
     }
 }
 
-/// The edition-neutral stages have no Placement IR counterpart,
-/// so their spellings stay literals in `stage_cli_name` — pinned
-/// here against clap for the same reason.
+/// Without a Placement IR counterpart, these spellings are literals in
+/// `stage_cli_name`.
 #[test]
 fn edition_neutral_stage_names_match_clap() {
     for stage in [SynthStage::Logic, SynthStage::Netlist, SynthStage::Edition] {
@@ -46,13 +38,8 @@ fn edition_neutral_stage_names_match_clap() {
     }
 }
 
-/// `stage_requires_edition` decides two user-visible behaviours at
-/// once — whether `--edition` is refused as stray and whether its
-/// absence is a usage error — so the set it names is pinned here
-/// against the `--stage` spellings a caller actually types. The
-/// loop walks `ValueEnum`'s full variant list rather than a
-/// hand-written one, so a stage added without a decision on its
-/// edition-dependence fails here instead of quietly joining the
+/// Walks `ValueEnum`'s full variant list, so a stage added without a
+/// decision on its edition-dependence fails here instead of joining the
 /// edition-neutral side.
 #[test]
 fn edition_required_stages_match_the_documented_set() {
@@ -74,11 +61,7 @@ fn edition_required_stages_match_the_documented_set() {
     }
 }
 
-/// The stray-`--edition` message reads its two stage lists off
-/// `stage_requires_edition`, which keeps them honest but puts the
-/// English between them — the commas, the conjunction, the
-/// backticks — under no other check. Pinned here so the derivation
-/// cannot start producing a list that is correct and unreadable.
+/// The lists are derived; this pins the English between their items.
 #[test]
 fn stray_edition_message_lists_read_as_english() {
     assert_eq!(
@@ -89,17 +72,10 @@ fn stray_edition_message_lists_read_as_english() {
     assert_eq!(edition_neutral_stage_list(), "`logic` and `netlist`");
 }
 
-/// `--help` is what a caller reads before getting `--edition` wrong,
-/// and it describes the partition in doc-comment prose that nothing
-/// derives from `stage_requires_edition`. Rendering the lists from
-/// the function and looking for them in clap's own help text is what
-/// ties the two: a stage moved across the partition fails here
-/// instead of leaving `--help` naming the old set.
-///
-/// `synth`'s description only enumerates the required side and calls
-/// the rest "the earlier stages", which holds only while every
-/// edition-neutral stage precedes every edition-tagged one in
-/// `--stage`'s order — so that ordering is pinned too.
+/// The `--help` prose naming the partition is hand-written, so the lists
+/// rendered from `stage_requires_edition` are looked for in clap's help
+/// text. `synth`'s description calls the neutral side "the earlier
+/// stages", so the stage order is pinned too.
 #[test]
 fn synth_help_names_the_edition_partition() {
     let command = Cli::command();

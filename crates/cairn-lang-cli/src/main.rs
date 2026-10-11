@@ -1,16 +1,12 @@
 //! Cairn command-line entry point.
 
-// Stdout goes through `outln!`, which keeps the exit code when the reader
-// has gone; a bare `println!` would panic there instead.
+// Stdout goes through `outln!`, because `println!` panics once the reader has gone.
 #![deny(clippy::print_stdout)]
 
-/// `println!` for everything the commands write to stdout, except that a
-/// reader who has closed the pipe (`cairn lower f.crn | head -1`) is not
-/// a failure: the line is dropped and the command carries on to the exit
-/// code it decides, so the process ends with that code rather than a
-/// panic (an abort in release builds). Every later line fails the same
-/// way and is dropped the same way. Any other write error still panics
-/// with `println!`'s message.
+/// `println!` for command output, except that a closed pipe
+/// (`cairn lower f.crn | head -1`) is not a failure: the line is dropped
+/// and the process ends with the exit code the command decides rather
+/// than a panic (an abort in release builds).
 macro_rules! outln {
     ($($arg:tt)*) => {
         $crate::write_stdout_line(format_args!($($arg)*))
@@ -49,8 +45,6 @@ fn write_stdout_line(line: std::fmt::Arguments<'_>) {
 fn write_line(out: &mut impl std::io::Write, line: std::fmt::Arguments<'_>) {
     match writeln!(out, "{line}") {
         Ok(()) => {}
-        // The reader is gone. Drop the line; the command keeps the code it
-        // decides.
         Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => {}
         Err(err) => panic!("failed printing to stdout: {err}"),
     }

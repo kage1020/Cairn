@@ -21,12 +21,10 @@ pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
     };
     let ir = lower(&module);
     let resolution = resolve(&ir, None);
-    // `lower` takes no `--target` at all, so there is no version to
-    // check ids against; see the note in `run_info`.
+    // No `--target`, so no version to check ids against.
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&builtin_java().view(None)));
-    // Mirror `load_and_lower`: the check pass gates the pipeline, and the
-    // lowering deferrals its findings tend to cascade into follow on the
-    // same stream.
+    // As in `load_and_lower`, the check pass gates the output, ahead of the
+    // lowering deferrals its findings cascade into.
     block_ir.diagnostics = build_diagnostics(
         &module,
         &ir,
@@ -35,12 +33,9 @@ pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         std::mem::take(&mut block_ir.diagnostics),
     );
 
-    // Refuse before printing, the way `run_info` and `run_compile` do. The
-    // exit code alone does not protect a redirect: `cairn lower f.crn
-    // --format json > ir.json` creates the file before the process ends, so
-    // emitting the IR anyway hands a pipeline a well-formed artifact built
-    // from a source `cairn check` rejects. What goes out instead is the
-    // failure document, so the redirect holds a JSON file that says why.
+    // Refuse before printing: `> ir.json` creates the file whatever the
+    // exit code, so it gets the failure document rather than IR built from
+    // a source `cairn check` rejects.
     let has_error = block_ir
         .diagnostics
         .iter()
@@ -54,13 +49,9 @@ pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         );
     }
 
-    // Warnings on a run that still has a product keep going to stderr as
-    // text, whichever format the dump takes. For `json` the reason is
-    // `run_info`'s: folding them into the dump would change a document
-    // downstream tooling already reads. For `ascii` and `debug` there is
-    // no document to fold them into, and stdout is the product either
-    // way — a finding written among the voxels is a finding a pipe
-    // swallows.
+    // Warnings go to stderr as text in every format: folded into the JSON
+    // they would change a document tools already read, and among the
+    // voxels a pipe would swallow them.
     let lines = LineStarts::new(&source);
     report_diagnostics(file, &source, &lines, &block_ir.diagnostics);
 
@@ -114,13 +105,9 @@ fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
 
 const ASCII_ALPHABET: &[u8] = b"#abcdefghijklmnopqrstuvwxyz0123456789";
 
-/// Glyph for a palette index in ASCII slice output: air → `.`, anything
-/// else → `#` for the first non-air, then digits/letters so a slice with
-/// many distinct materials still reads. Any palette entry past index 36
-/// renders as `?` — debug-format only, and well above the per-structure
-/// palette size the current examples use (cottage uses 3 entries), but
-/// worth a glance before reading a `?`-heavy slice as evidence of broken
-/// lowering.
+/// Glyph for a palette index in an ASCII slice: `.` for air at index 0,
+/// then `#`, letters and digits. Every entry past index 36 renders as `?`,
+/// so a `?`-heavy slice means a large palette, not broken lowering.
 fn ascii_glyph(palette_index: usize) -> char {
     if palette_index == 0 {
         return '.';

@@ -22,34 +22,24 @@ pub(crate) fn run_synth(
     edition: Option<EditionArg>,
 ) -> ExitCode {
     if !experimental_logic_synth {
-        // Gated behind `--experimental-logic-synth` because the redstone
-        // pipeline is still Internal-tier (`spec/compatibility`) — the
-        // Logic IR wire form will grow the netlist / placement / route
-        // layers over later changes, and every intermediate shape is fair
-        // game for a breaking change. Exit 2 (usage error) so a script
-        // that accidentally reaches this subcommand does not read the
-        // gate as a warning it can ignore.
+        // The redstone pipeline is Internal-tier (`spec/compatibility`),
+        // so any intermediate shape may break. Exit 2, a usage error, so a
+        // script cannot read the gate as a warning to ignore.
         eprintln!(
             "error: `cairn synth` is an internal / experimental surface; pass --experimental-logic-synth to opt in",
         );
         return ExitCode::from(2);
     }
 
-    // Both halves of the stage-vs-edition rule are argv-only, so both are
-    // decided before the file is read: a caller who got the flag wrong
-    // hears about the flag, not about whatever the source has to say.
     let edition = match synth_edition(stage, edition) {
         Ok(edition) => edition,
         Err(code) => return code,
     };
 
-    // Every refusal from here on is prose on stderr, with no failure
-    // document on stdout. `run_lower` writes one under `--format json`
-    // because that flag commits a command to one JSON document per input,
-    // a refused one included (`spec/lint` "Machine-readable payload");
-    // `synth` takes no `--format` and has no such commitment to honour.
-    // Its stdout is the dump or nothing, so a redirect of a refused run
-    // holds zero bytes, which no JSON reader takes for an IR.
+    // Refusals are prose on stderr with no failure document: `synth` takes
+    // no `--format`, so it owes no JSON document per input (`spec/lint`
+    // "Machine-readable payload"), and a refused run's redirect holds zero
+    // bytes, which no reader takes for an IR.
     let (source, module) = match load_module(file, FailureReport::Text) {
         Ok(loaded) => loaded,
         Err(code) => return code,
@@ -57,12 +47,8 @@ pub(crate) fn run_synth(
     let ir = lower(&module);
     let lines = LineStarts::new(&source);
 
-    // Mirror `run_check` / `run_lower` / `run_compile`: surface the check
-    // diagnostics before running the redstone synth. A `.crn` whose only
-    // problem is `E_UNRESOLVED_SLOT` or a typo caught by `check` would
-    // otherwise exit 0 through the synth path with a partially resolved
-    // IR, which is a poor CI gate. Synth does not lower to block arrays,
-    // so there are no lowering diagnostics to append here.
+    // The check gate, as in `check`, `lower` and `compile`. Synth does not
+    // lower to block arrays, so there are no lowering diagnostics.
     let diagnostics = build_diagnostics(&module, &ir, None, &weighed_editions(None), Vec::new());
     if report_diagnostics(file, &source, &lines, &diagnostics) {
         return ExitCode::from(1);
@@ -92,19 +78,14 @@ pub(crate) fn run_synth(
 
 /// The edition `stage` runs for, from the `--edition` the caller passed.
 ///
-/// [`StageEdition::Neutral`] for an edition-neutral stage, which refuses a
-/// stray `--edition` rather than silently ignoring it — a caller who
-/// passed the flag there almost certainly expected it to shape the output,
-/// and swallowing the mistake would make the CLI's stage-vs-edition axis
-/// ambiguous. [`StageEdition::Tagged`] for an edition-tagged stage, which
-/// requires the flag.
+/// An edition-neutral stage refuses a stray `--edition` rather than
+/// ignoring a flag the caller expected to shape the output; an
+/// edition-tagged stage requires it.
 ///
-/// Must be called before `load_module`: both refusals are usage errors
-/// (exit 2) decided from argv alone, and a call any later would put them
-/// behind the read and the passes after it, where an error found in the
-/// file ends the run before either refusal is reached and a warning is
-/// printed ahead of the refusal. Being ahead of the read also means a
-/// path that names nothing is reported only once `--edition` is right.
+/// Called before `load_module`: both refusals are usage errors decided
+/// from argv, and any later an error in the file would end the run first,
+/// or a warning print ahead of the refusal. So a path that names nothing is
+/// reported only once `--edition` is right.
 fn synth_edition(stage: SynthStage, edition: Option<EditionArg>) -> Result<StageEdition, ExitCode> {
     if !stage_requires_edition(stage) {
         if edition.is_some() {
@@ -121,9 +102,8 @@ fn synth_edition(stage: SynthStage, edition: Option<EditionArg>) -> Result<Stage
         .map(|edition| StageEdition::Tagged(edition.as_edition()))
 }
 
-/// [`synth_edition`]'s answer for a stage, which nothing else builds:
-/// which side of `stage_requires_edition`'s partition the stage is on, and
-/// for an edition-tagged stage the edition it runs for.
+/// [`synth_edition`]'s answer: which side of `stage_requires_edition`'s
+/// partition the stage is on, and for an edition-tagged stage its edition.
 #[derive(Clone, Copy)]
 enum StageEdition {
     /// An edition-neutral stage, run without `--edition`.
@@ -152,13 +132,10 @@ fn dispatch_synth_stage(
     }
 
     let netlist = compile_netlist(&synth.scoped);
-    // Dispatch on the stage, with `synth_edition`'s answer checked against
-    // it, rather than on the answer alone. The two agree today, but only
-    // the stage makes a stage added later get an arm of its own here (a
-    // bare `Neutral` arm would hand it the Netlist payload, under the
-    // Netlist label, with exit 0), and only the stage stops a `Tagged`
-    // answer for `Netlist` here, naming the contract it broke, rather than
-    // after every later pass has run, at the `Crossing` guard below.
+    // Matched on the stage as well as the answer, so a new stage needs an
+    // arm of its own (a bare `Neutral` arm would hand it the Netlist
+    // payload with exit 0), and a `Tagged` answer for `Netlist` stops here
+    // rather than at the `Crossing` guard after every pass.
     let edition = match (stage, edition) {
         (SynthStage::Netlist, StageEdition::Neutral) => {
             return Ok((serde_json::to_string_pretty(&netlist), "Netlist IR"));
@@ -247,14 +224,11 @@ fn dispatch_synth_stage(
     }
 }
 
-/// The spelling clap accepts for `--stage`, for the messages this binary
-/// composes at runtime. The four Placement IR stages read theirs from
-/// [`PlacementStage::as_str`] so the word here and the dump's `"stage"`
-/// key cannot drift; `placement_stage_names_match_clap` pins the clap
-/// derivation. The `--help` prose spells every stage by hand and does
-/// not call this at runtime, but `synth_help_names_the_edition_partition`
-/// renders its expected lists through here (via `join_stages`), so
-/// renaming a stage fails that test until the help follows.
+/// The spelling clap accepts for `--stage`, for runtime messages. The
+/// Placement IR stages read theirs from [`PlacementStage::as_str`], so the
+/// flag and the dump's `"stage"` key cannot drift. The `--help` prose
+/// spells every stage by hand, and `synth_help_names_the_edition_partition`
+/// fails on a renamed stage until it follows.
 fn stage_cli_name(stage: SynthStage) -> &'static str {
     match stage {
         SynthStage::Logic => "logic",
@@ -270,24 +244,14 @@ fn stage_cli_name(stage: SynthStage) -> &'static str {
 /// Whether `--stage <stage>` reads the target-edition cell library and
 /// therefore needs `--edition <java|bedrock>` alongside it.
 ///
-/// One partition drives both halves of the flag's contract, and
-/// [`synth_edition`] applies both: it refuses a stray `--edition` on the
-/// `false` stages and demands the flag on the `true` ones, and the
-/// stray-`--edition` message it prints renders both lists from here. The
-/// exhaustive `match` makes a new variant a compile error rather than a
-/// silent default.
-///
-/// The `--help` prose spells the same partition by hand: `synth`'s own
-/// description names the required stages and calls the rest "earlier",
-/// and `--edition`'s names both sides. Those sentences stay doc comments
-/// rather than `long_about` / `long_help` expressions so the source keeps
-/// reading as the help it renders; `synth_help_names_the_edition_partition`
-/// checks each one against this function instead, so moving a stage
-/// across fails a test until the prose follows. The check is verbatim
-/// containment of `join_stages`'s rendering, so the prose has to match
-/// its conjunction and Oxford-comma style exactly: a third
-/// edition-neutral stage makes `--edition`'s sentence read
-/// "`a`, `b`, and `c`" whatever reads best there.
+/// [`synth_edition`] refuses a stray `--edition` on the `false` stages and
+/// demands it on the `true` ones, and its message renders both lists from
+/// here. The `--help` prose names the same partition by hand, kept in doc
+/// comments so the source reads as the help it renders, and
+/// `synth_help_names_the_edition_partition` checks it verbatim against
+/// `join_stages`'s rendering: moving a stage across, or adding a third
+/// edition-neutral one (which brings the Oxford comma), fails that test
+/// until the prose follows.
 fn stage_requires_edition(stage: SynthStage) -> bool {
     match stage {
         SynthStage::Logic | SynthStage::Netlist => false,
@@ -308,9 +272,8 @@ fn edition_required_stage_list() -> String {
 }
 
 /// `` `a` and `b` `` over the stages that refuse `--edition`, for the
-/// same message. Renders bare stage names because that half of the
-/// sentence talks about the stages themselves rather than about the
-/// flag a caller would have typed.
+/// same message: bare names, since this half is about the stages, not the
+/// flag.
 fn edition_neutral_stage_list() -> String {
     join_stages(
         |stage| !stage_requires_edition(stage),
@@ -321,9 +284,8 @@ fn edition_neutral_stage_list() -> String {
 
 /// Render the `--stage` values matching `select` as an English list,
 /// in the order clap declares them, with each name passed through
-/// `render` first. Walking `ValueEnum` rather than a literal list is
-/// what lets the stray-`--edition` message pick up a stage the day it
-/// lands instead of naming a set that has since moved on.
+/// `render` first. Walks `ValueEnum` rather than a literal list, so a new
+/// stage is listed without an edit here.
 fn join_stages(
     select: impl Fn(SynthStage) -> bool,
     conjunction: &str,
@@ -343,11 +305,8 @@ fn join_stages(
     }
 }
 
-/// Enforce the `--edition <java|bedrock>` requirement for the
-/// edition-tagged stages. The stage name is baked into the error
-/// message so a caller sees exactly which stage tripped the gate,
-/// plus a short "why" hint so a caller who doesn't know the pipeline
-/// still connects the flag to the edition-specific cell library.
+/// Enforce `--edition` for an edition-tagged stage, naming the stage and
+/// why it needs the flag.
 fn require_edition(edition: Option<EditionArg>, stage_name: &str) -> Result<EditionArg, ExitCode> {
     edition.ok_or_else(|| {
         eprintln!(

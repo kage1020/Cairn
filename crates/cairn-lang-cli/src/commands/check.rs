@@ -24,18 +24,13 @@ pub(crate) fn run_check(
         Ok(source) => source,
         Err(code) => return code,
     };
-    // A parse failure pre-empts any check pass — the AST/IR has to be
-    // well-formed before invariant-collecting can run. Surface it under the
-    // same exit code as a check-level error so a CI pipeline gating on
-    // `cairn check` does not silently pass a file that the parser rejected.
+    // A parse failure exits 1 like a check error, so a CI gate on
+    // `cairn check` cannot pass a file the parser rejects.
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            // The product of `check --format json` is the diagnostics
-            // array, so a parse failure is that array with one element in
-            // it. Nothing about the shape changes; what changes is that
-            // the most common way a source fails stops being the one input
-            // the flag answers with an empty stream.
+            // Under JSON a parse failure is the diagnostics array with one
+            // element, not an empty stream.
             match format {
                 CheckFormat::Text => report_parse_failure(file, &source, &err),
                 CheckFormat::Json => {
@@ -53,11 +48,9 @@ pub(crate) fn run_check(
         }
     };
     let ir = lower(&module);
-    // Through `build_diagnostics` rather than `check` directly: `cairn
-    // check` sees both version headers, and the `@intended_targets`
-    // findings are the one part of its report that `check` cannot produce
-    // on its own. The lowering list it merges is empty unless `--target`
-    // pinned a version to lower against.
+    // Through `build_diagnostics` rather than `check`, which cannot produce
+    // the `@intended_targets` findings. The lowering list is empty unless
+    // `--target` pinned a version.
     let pin = edition.map(EditionArg::as_edition);
     let CheckLowering {
         diagnostics: lowering,
@@ -67,21 +60,12 @@ pub(crate) fn run_check(
     } = check_lowering(&ir, edition, target);
     let diagnostics = build_diagnostics(&module, &ir, pin, &weighed_editions(pin), lowering);
     let has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
-    // Build the line-start index once and reuse it for every diagnostic /
-    // note position lookup. Without this we'd re-walk the entire source for
-    // each position computation, which gets expensive when a single file
-    // produces many diagnostics (e.g. a registry pack ingest run).
     let lines = LineStarts::new(&source);
 
     match format {
-        // Diagnostics are the report, not the product. Every other
-        // subcommand sends theirs to stderr, and `check` sending its text
-        // form to stdout meant `cairn check f.crn > out` swallowed them
-        // while still exiting 1 — a CI step that captured stdout for
-        // something else saw a bare exit code and no reason.
-        //
-        // `--format json` stays on stdout: that one *is* the product, and a
-        // consumer redirects it deliberately.
+        // Text diagnostics go to stderr, as every subcommand's do, so
+        // `cairn check f.crn > out` still shows why it exited 1. JSON stays
+        // on stdout: there the findings are the product.
         CheckFormat::Text => {
             for d in &diagnostics {
                 report_diagnostic(file, &source, &lines, d);
@@ -97,19 +81,15 @@ pub(crate) fn run_check(
         }
     }
 
-    // Both refusals come after the report, not before it: the file's own
-    // findings are what the author edits, and a run-level failure printed
-    // above them would bury the line that has to change. Neither joins the
-    // `--format json` array — see the `Check` doc — so both are stderr in
-    // both formats, which is the shape `compile` gives them.
+    // Both refusals come after the file's own findings, which are what the
+    // author edits. Neither joins the `--format json` array (see the
+    // `Check` doc), so both are stderr in both formats, as in `compile`. A
+    // lost scope comes first, in `run_compile`'s order: it is about the
+    // file, the target about the command line.
     //
-    // A lost scope first, in `run_compile`'s order: it is a fact about the
-    // file, and the target that could not be resolved is a fact about the
-    // command line.
-    //
-    // The verdict, and not the reason, is `compile`'s: this run is not held
+    // The verdict is `compile`'s but not the reason: this run is not held
     // to the floors, and a `compile` whose floors refuse the target checks
-    // no id, so it can refuse on the floor without losing this scope.
+    // no id, so it may refuse on the floor instead.
     if !dropped_scopes.is_empty() {
         report_partial_build(
             file,

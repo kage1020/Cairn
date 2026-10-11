@@ -57,9 +57,8 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
         return Some(p.to_path_buf());
     }
     let parent = source.parent()?;
-    // `Path::parent` returns `Some("")` for a bare filename like `foo.crn`;
-    // treat that as "current directory" so the obvious one-file invocation
-    // still works.
+    // `Path::parent` is `Some("")` for a bare `foo.crn`: the current
+    // directory.
     Some(if parent.as_os_str().is_empty() {
         PathBuf::from(".")
     } else {
@@ -67,14 +66,12 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
-/// Check every structure against the backend up front. A backend error
-/// here (abstract palette entry, stateful Bedrock entry, dimension
-/// overflow, a grid that disagrees with its dims) must not leave
-/// half-written artifacts behind, so the function holds off all I/O until
-/// it knows the IR is serialisable: once every structure is prepared, only
-/// I/O can fail its write. It builds no per-voxel tag tree: a structure's
-/// per-voxel lists are encoded while it is written, so a build holds one
-/// voxel's entry at a time rather than every structure's tree at once.
+/// Check every structure against the backend before any I/O, so a backend
+/// error (abstract palette entry, stateful Bedrock entry, dimension
+/// overflow, a grid that disagrees with its dims) leaves no half-written
+/// artifacts: once every structure is prepared, only I/O can fail a write.
+/// No per-voxel tag tree is built; a structure is encoded as it is
+/// written.
 pub(crate) fn prepare_artifacts<'a>(
     block_ir: &'a BlockArrayIr,
     target: &ResolvedTarget,
@@ -91,9 +88,8 @@ pub(crate) fn prepare_artifacts<'a>(
             ExitCode::from(1)
         })?;
         for note in degraded {
-            // `id` is the block id, so a tool can group the warnings by
-            // block as well as by scope. The message names the entry itself,
-            // as `id[states]`, so the id is on the line twice.
+            // The id field repeats the message's `id[states]` so a tool can
+            // group the warnings by block.
             eprintln!(
                 "warning[W_INTENT_DEGRADED]: {scope}: {id}: {message}",
                 id = note.id,
@@ -101,17 +97,11 @@ pub(crate) fn prepare_artifacts<'a>(
             );
         }
         let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
-        // Distinct scope keys can name one file, because
-        // `cairn_lang_core::artifact_stem` drops what keeps them apart: a
-        // placement is named after its `id=` without its site, so it
-        // meets a struct or another site's placement of that name, and a
-        // walkway joins place and port with the `_` an id may itself
-        // carry. The resolver refuses each such pair it counts as
-        // `E_OUTPUT_NAME_COLLISION`, but it counts the scopes it resolved,
-        // and these keys come from lowering, which is a different set. So
-        // this check is what is left if a future source of scope keys
-        // skips the resolver's, and it is the last point before the
-        // second file overwrites the first in the commit.
+        // Distinct scope keys can name one file: `cairn_lang_core::artifact_stem`
+        // drops a placement's site, and a walkway joins place and port with
+        // a `_` an id may carry. The resolver's `E_OUTPUT_NAME_COLLISION`
+        // counts resolved scopes, but these keys come from lowering, so this
+        // is the last check before the commit overwrites the first file.
         let location = entry_location(&path).map_err(|err| {
             eprintln!(
                 "error: cannot resolve where artifact `{}` would be written: {err}",
@@ -201,10 +191,9 @@ enum ArtifactNameRefusal {
 
 /// Decide whether `file_name` is a single plain file name.
 ///
-/// The separator check comes first and is textual, so the same names are
-/// refused on every host: `Path::components` alone is host-dependent, since
-/// on Unix `C:hut` and `a\b` are each one `Normal` component. What remains
-/// is the shapes with no separator that are still not a file.
+/// The separator check is textual, so the same names are refused on every
+/// host: on Unix, `Path::components` reads `C:hut` and `a\b` as one
+/// `Normal` component each.
 fn artifact_name_refusal(file_name: &str) -> Option<ArtifactNameRefusal> {
     if let Some(ch) = file_name.chars().find(|c| matches!(c, '/' | '\\' | ':')) {
         return Some(ArtifactNameRefusal::Separator(ch));
@@ -220,23 +209,15 @@ fn artifact_name_refusal(file_name: &str) -> Option<ArtifactNameRefusal> {
 /// Join an artifact's file name onto `--out`, refusing any name that is not
 /// a single plain file name.
 ///
-/// `check` already refuses a `place id=` carrying a path separator
-/// (`E_INVALID_PLACE_ID`), so this is the second line rather than the first:
-/// it keeps a future source of file names that skips the identifier
-/// newtypes from choosing the directory the compiler writes to. The file
-/// name is checked rather than the joined path, because `Path::join` with
-/// an absolute argument discards `out_dir` and a relative one with a
-/// separator lands in a subdirectory. [`artifact_name_refusal`] refuses
-/// `/`, `\` and `:` textually, so a name refused on one host is refused on
-/// every host.
+/// A second line behind `check`'s `E_INVALID_PLACE_ID`, so that no source
+/// of file names skipping the identifier newtypes can choose the directory
+/// the compiler writes to. The name is checked rather than the joined
+/// path, because `Path::join` with an absolute argument discards `out_dir`.
 ///
-/// It is narrower than the identifier rule, and does not share its
-/// predicate, on purpose. That rule also refuses `.`, which every artifact
-/// name carries before its extension, and the characters a Windows file
-/// name cannot carry, which make the write fail rather than land somewhere
-/// else — and a failed write is reported. This line is about where the
-/// file goes, so it holds for those three characters only, and the rest of
-/// the identifier rule has one line, not two.
+/// Narrower than the identifier rule on purpose: that rule also refuses
+/// `.`, which every artifact name carries, and characters Windows cannot
+/// store, which make the write fail and be reported rather than land
+/// elsewhere. This line is only about where the file goes.
 fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf, ExitCode> {
     match artifact_name_refusal(file_name) {
         None => Ok(out_dir.join(file_name)),
@@ -269,24 +250,18 @@ fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf
     }
 }
 
-/// Refuse a `--lock` that would land on a path the artifacts already own.
+/// Refuse a `--lock` that would land on a path the artifacts already own,
+/// scratch names included.
 ///
 /// Two staged entries with one destination overwrite each other's bytes,
-/// and during the commit the second deletes the backup the first took —
-/// destroying the previous build's artifact with no copy left. The scratch
-/// names count too: `--lock out/home1.nbt.tmp` collides during staging
-/// rather than during the commit.
+/// and during the commit the second deletes the backup the first took,
+/// destroying the previous build's artifact. Paths are compared by the
+/// directory entry they name, not by spelling ([`entry_location`]).
 ///
-/// Paths are compared by the directory entry they name, not by how they are
-/// spelled: `./out/home1.nbt`, an absolute path, and one through a symlinked
-/// `--out` all name the same file as `out/home1.nbt`. See
-/// [`entry_location`].
-///
-/// A location that cannot be resolved is not treated as free, since a key
-/// that could not be computed is one that cannot match. For an artifact it
-/// is an error: `--out` was just created, so failing to resolve it is not an
-/// ordinary state. For the lockfile it is a warning that the check could not
-/// be made, and the build goes on as it did before the check existed.
+/// A location that cannot be resolved is not treated as free, since an
+/// uncomputed key cannot match. For an artifact that is an error, as
+/// `--out` was just created; for the lockfile it is a warning that the
+/// check could not be made, and the build goes on.
 pub(crate) fn check_lock_path_is_free(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
     lock_path: &Path,
@@ -337,29 +312,21 @@ pub(crate) fn check_lock_path_is_free(
 /// The directory entry `path` names, as a key two spellings of one file
 /// compare equal on: the canonical parent directory and the file name.
 ///
-/// Only the parent is canonicalised. The file itself usually does not exist
-/// yet, and when it is a symlink the commit renames the link rather than
-/// writing through it, so the entry — not what it points at — is what two
-/// staged files would fight over. Every path this is asked about either has
-/// an existing parent or is already doomed: `--out` has been created by the
-/// time it runs, and a lockfile whose directory is missing fails while
-/// staging, before anything is renamed. So only `NotFound` falls back, to
-/// the parent's absolute spelling, which still makes `./x` and `x` agree.
-/// Any other failure is returned rather than papered over, as the staging
-/// module's `occupant` does: a key computed some other way would not match
-/// the canonical one for the same file, and the caller would read that as
-/// "no collision".
+/// Only the parent is canonicalised: the file usually does not exist yet,
+/// and the commit renames a symlink rather than writing through it, so the
+/// entry is what two staged files fight over. Only `NotFound` falls back,
+/// to the parent's absolute spelling, since `--out` exists by now and a
+/// lockfile whose directory is missing fails while staging. Any other
+/// failure is returned: a key computed another way would not match the
+/// canonical one and would read as "no collision".
 ///
-/// macOS and Windows file systems are case-insensitive by default, so there
-/// the file name is compared case-folded: `OUT/HOME1.nbt` is `out/home1.nbt`.
-/// Only the name needs folding, because `canonicalize` returns the directory
-/// in the case the file system recorded it, so `OUT` and `out` already
-/// resolve alike. `to_lowercase` is not the file system's own fold (NTFS's
-/// upcase table, APFS's fold plus normalisation), but artifact names come
-/// from ASCII identifiers, where the two agree. The choice is by platform,
-/// not by volume: a case-sensitive volume on either costs at most a spurious
-/// refusal, and a case-insensitive one elsewhere (casefold ext4, exFAT or
-/// CIFS on Linux) is not folded, so the collision there goes unseen.
+/// On macOS and Windows, case-insensitive by default, the file name is
+/// compared lowercased; `canonicalize` already returns the directory in its
+/// recorded case. `to_lowercase` is not the file system's own fold, but
+/// artifact names come from ASCII identifiers, where the two agree. The
+/// choice is by platform, not volume: a case-sensitive volume there costs
+/// at most a spurious refusal, and a case-insensitive one elsewhere
+/// (casefold ext4, exFAT or CIFS on Linux) goes unfolded.
 fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)> {
     let resolve = |dir: &Path| {
         let dir = if dir.as_os_str().is_empty() {
@@ -388,15 +355,11 @@ fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)>
 /// Write the prepared structure files and the lockfile as one set: either
 /// every artifact plus the lock, or the directory exactly as it was.
 ///
-/// Two phases. Staging writes each file beside where it belongs, so every
-/// way the encode or the write can fail happens while the previous build is
-/// still untouched. Committing is renames only; [`staging::StagedSet::commit`]
-/// describes what makes that step recoverable.
-///
-/// What the phases buy is a place to fail from. The single-phase version
-/// wrote each artifact atomically but *individually*, so by the time the
-/// lockfile failed some destinations had already been overwritten, and the
-/// only undo available was deleting them.
+/// Staging writes each file beside where it belongs, so every encode or
+/// write failure happens while the previous build is untouched; writing
+/// each file in place on its own would leave earlier destinations
+/// overwritten when a later one failed. Committing is renames only;
+/// [`staging::StagedSet::commit`] describes what makes it recoverable.
 pub(crate) fn write_artifacts_and_lock(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
     source: &str,
@@ -405,8 +368,6 @@ pub(crate) fn write_artifacts_and_lock(
     target: &ResolvedTarget,
     lock_path: &Path,
 ) -> ExitCode {
-    // Phase 1 — stage. Nothing a previous build produced is touched, so a
-    // failure here costs only our own scratch.
     let mut staged = staging::StagedSet::default();
     for (path, structure) in prepared {
         if let Err(err) = staged.stage(path, staging::Kind::Artifact, |file| structure.write(file))
@@ -417,8 +378,8 @@ pub(crate) fn write_artifacts_and_lock(
         }
     }
 
-    // Encode before touching the filesystem: a hash or YAML failure has to
-    // be indistinguishable from never having started.
+    // Encoded before the commit, so a hash or YAML failure leaves the
+    // directory as it was.
     let lock_body = match build_lockfile(source, block_ir, edition, target)
         .map_err(|err| err.to_string())
         .and_then(|lockfile| lockfile.to_yaml().map_err(|err| err.to_string()))
@@ -438,8 +399,6 @@ pub(crate) fn write_artifacts_and_lock(
         return ExitCode::from(1);
     }
 
-    // Phase 2 — commit. Renames only, each keeping what it replaces until
-    // the whole set has landed.
     match staged.commit() {
         Ok(written) => {
             for path in written {

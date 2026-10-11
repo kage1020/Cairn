@@ -5,17 +5,8 @@ use crate::target::resolve_target;
 
 use super::*;
 
-/// Every file name that would leave `--out` is refused, and a plain one
-/// joins onto it unchanged.
-///
-/// The refused rows are the shapes a separator gives a name: absolute
-/// (which `Path::join` lets replace `out_dir`), relative with a
-/// directory, Windows-style, a drive prefix (on Windows `C:hut.nbt`
-/// joins to `C:hut.nbt` and drops `out_dir`) and an alternate data
-/// stream, then the names that are not a file at all. Each row pins the
-/// reason, not just the refusal, and every host takes the same one: on
-/// Unix the `\` and `:` rows are single `Normal` components that only
-/// the textual check refuses.
+/// Each row pins the reason, which every host shares: on Unix the `\` and
+/// `:` rows are single `Normal` components only the textual check refuses.
 #[test]
 fn an_artifact_file_name_that_is_not_plain_is_refused() {
     let out_dir = Path::new("out");
@@ -43,19 +34,11 @@ fn an_artifact_file_name_that_is_not_plain_is_refused() {
     );
 }
 
-/// `prepare_artifacts` routes every scope through [`artifact_path`], so a
-/// scope key whose id carries a separator is refused before any I/O.
-///
-/// No source reaches this: the resolver refuses such an id with
-/// `E_INVALID_PLACE_ID` and the lowering pass skips it. Rekeying a real
-/// lowering is the only way to ask what the compiler does if a future
-/// source of scope keys skips that gate.
-///
-/// `prepare_artifacts` has three other refusals: the tag build, the
-/// directory-entry lookup and the collision check. The plain key below
-/// runs the same structure through all three and passes, and the
-/// lookup falls back to `std::path::absolute` for a directory that does
-/// not exist, so the key's file name is the only thing left to refuse.
+/// No source reaches this, since the resolver refuses such an id with
+/// `E_INVALID_PLACE_ID`, so a real lowering is rekeyed. The plain key
+/// passes `prepare_artifacts`' other refusals (tag build, directory-entry
+/// lookup, which falls back to `std::path::absolute` for a missing `out`,
+/// and collision check), so the file name is the only thing left to refuse.
 #[test]
 fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
     let target = resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
@@ -74,9 +57,7 @@ fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
     assert_eq!(paths, [out_dir.join("hut.nbt").as_path()]);
 }
 
-/// The probe's one lowered structure under each of `keys`, ready to
-/// hand to `prepare_artifacts`. Rekeying a real lowering is the only
-/// way to reach a refusal no source reaches.
+/// The probe's one lowered structure under each of `keys`.
 fn rekeyed_probe(keys: &[&str]) -> BlockArrayIr {
     let mut block_ir = lowered_probe(Edition::Java);
     let array = block_ir
@@ -100,15 +81,10 @@ fn prepared_paths(
     result.map(|prepared| prepared.into_iter().map(|(path, _)| path).collect())
 }
 
-/// Two scopes that name one file are refused before any I/O.
-///
-/// No source reaches this either: the resolver refuses the pair with
-/// `E_OUTPUT_NAME_COLLISION`, so `cairn compile` stops before it lowers.
-/// The check here is what is left if a future source of scope keys
-/// skips that one. The two keys are the shape the resolver's own
-/// finding is about, a struct and a placement of one name, and the
-/// same structure under two names that do not meet prepares, so the
-/// refusal is the collision's.
+/// No source reaches this: the resolver refuses the pair with
+/// `E_OUTPUT_NAME_COLLISION`. The control pair shows the same structure
+/// prepares under two names that do not meet, so the refusal is the
+/// collision's.
 #[test]
 fn two_scopes_that_name_one_file_are_refused_before_any_io() {
     let target = resolve_target(EditionArg::Java, "latest").expect("the latest target resolves");
@@ -141,10 +117,6 @@ fn two_scopes_that_name_one_file_are_refused_before_any_io() {
     }
 }
 
-/// Where the file system folds case, two keys whose stems differ only in
-/// case are one directory entry, and the guard compares entries, not
-/// spellings. On Linux `entry_location` does not fold, so the two are
-/// two files there and this is not asserted.
 #[cfg(any(target_os = "macos", windows))]
 #[test]
 fn two_scopes_whose_names_differ_only_in_case_are_refused_where_case_is_folded() {

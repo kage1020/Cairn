@@ -25,14 +25,10 @@ pub(crate) fn run_compile(
     out: Option<&Path>,
     lock: Option<&Path>,
 ) -> ExitCode {
-    // Resolved before lowering because lowering checks every block id
-    // against the pinned version's table, and reported below rather than
-    // here — see `resolve_target`. A target that does not resolve leaves
-    // lowering with nothing to check against, which is the same "no version
-    // pinned" mode `cairn lower` runs in. So does a target the declared
-    // floors refuse, so the refusal `enforce_version_floor` reports for it
-    // is not preceded by an id finding that refusal makes moot; see
-    // `load_and_lower`.
+    // Resolved before lowering, which checks ids against the pinned
+    // version, but reported below; `resolve_target` says why, and
+    // `load_and_lower` why an unresolved or floor-refused target lowers
+    // unpinned.
     let resolved_target = resolve_target(edition, target);
     let Lowered {
         source,
@@ -51,18 +47,11 @@ pub(crate) fn run_compile(
     ) {
         return ExitCode::from(1);
     }
-    // A lockfile records that a specific resolved IR was built for a
-    // specific target, so it must not certify a build that is missing part
-    // of what the source asked for. Every code that drops a scope
-    // (`W_STRUCT_NO_SIZE`, `W_DEF_NO_SIZE`, ...) is Warning severity, so
-    // without this the exit code stays 0 and the lockfile still reads
-    // `verified: true` — the same shape of defect as compiling a source
-    // `cairn check` rejects.
-    //
-    // Declaring nothing is not the same as losing something: a source that
-    // is only templates and themes requests no scopes, produces none, and
-    // still compiles (see
-    // `bare_def_without_place_emits_w_unused_def_and_no_nbt`).
+    // A lockfile must not certify a build missing part of what the source
+    // asked for, and every code that drops a scope (`W_STRUCT_NO_SIZE`,
+    // `W_DEF_NO_SIZE`, ...) is a warning, so this is what refuses it. A
+    // source of only templates and themes requests no scopes and still
+    // compiles.
     if !dropped_scopes.is_empty() {
         report_partial_build(
             file,
@@ -97,10 +86,9 @@ pub(crate) fn run_compile(
 
 /// Check every structure, then write them all and the lockfile.
 ///
-/// The order is the point: [`prepare_artifacts`] refuses a structure the
-/// backend cannot write before [`write_artifacts_and_lock`] stages a byte
-/// of any of them, so a refusal leaves `out_dir` and the lockfile as they
-/// were.
+/// [`prepare_artifacts`] refuses a structure the backend cannot write
+/// before [`write_artifacts_and_lock`] stages a byte, so a refusal leaves
+/// `out_dir` and the lockfile as they were.
 fn check_and_write(
     block_ir: &BlockArrayIr,
     source: &str,
@@ -133,11 +121,9 @@ mod tests {
     use super::*;
     use crate::pipeline::lowered_probe;
 
-    /// A structure the backend refuses stops the build before anything is
-    /// staged, including the structures ahead of it that pass. The passing
-    /// one comes first, so a check folded into the write loop would reach
-    /// it with nothing refused yet; the refused one has a grid shorter than
-    /// its dims, which the backend refuses rather than reading past.
+    /// The passing structure comes first, so a check folded into the write
+    /// loop would stage it before reaching the refused one, whose grid is
+    /// shorter than its dims.
     #[test]
     fn a_structure_the_backend_refuses_leaves_out_dir_and_lockfile_untouched() {
         let mut block_ir = lowered_probe(Edition::Java);

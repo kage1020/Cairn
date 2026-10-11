@@ -394,9 +394,8 @@ impl EditionArg {
         }
     }
 
-    /// Convert to the core-crate [`Edition`] marker so the resolver's
-    /// per-edition theme-variant selection sees the same value the compile
-    /// backend does.
+    /// The core [`Edition`] this names, so the resolver's theme-variant
+    /// selection and the backend see the same value.
     pub(crate) fn as_edition(self) -> Edition {
         match self {
             EditionArg::Java => Edition::Java,
@@ -411,10 +410,6 @@ impl EditionArg {
     }
 
     /// The edition this one is not.
-    ///
-    /// Asked when a floor this edition cannot place might be a release of
-    /// the other one, which is the difference between offering an edition
-    /// scope and guessing at one.
     pub(crate) fn other(self) -> Self {
         match self {
             EditionArg::Java => EditionArg::Bedrock,

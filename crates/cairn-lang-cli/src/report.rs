@@ -11,21 +11,16 @@ use cairn_lang_core::{Diagnostic, ParseError, Severity, diagnose_parse_failure};
 /// its product: as prose on stderr, or as the `{"diagnostics": [...]}`
 /// document on stdout.
 ///
-/// One type rather than a branch per format enum, because the answer is
-/// the same for every command that routes through here — `spec/lint`
-/// "Machine-readable payload" promises one JSON document on stdout for
-/// every input, and a failure is the run where that promise is easiest
-/// to break.
-///
-/// Not every command that takes `--format json` is one of them. `check`
-/// writes a bare array rather than this document and so has no
-/// `failure_report()` at all, and `synth` reads its module as
-/// [`Self::Text`] whatever it will go on to print. Both are stated where
-/// they are done rather than promised here.
+/// One type rather than a branch per format enum, because every command
+/// routed here owes the same answer: `spec/lint` "Machine-readable
+/// payload" promises one JSON document on stdout for every input,
+/// failures included. `check` writes a bare array instead and has no
+/// `failure_report()`, and `synth` reads its module as [`Self::Text`]
+/// whatever it prints.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub(crate) enum FailureReport {
-    /// Findings as prose on stderr. What every format that is not JSON
-    /// does, and what a command with no `--format` at all does.
+    /// Findings as prose on stderr: every format but JSON, and every
+    /// command without `--format`.
     Text,
     /// The failure document on stdout.
     Json,
@@ -36,10 +31,6 @@ pub(crate) enum FailureReport {
 /// `source` is what the offset is into, and `report` says whether an
 /// error-severity finding prints at all or is held for the failure
 /// document. A warning prints on stderr whatever `report` holds.
-///
-/// A bundle rather than four parameters in a fixed order, and only where
-/// the list is long enough that the order would be the only thing holding
-/// it together: the free functions that report still take them one by one.
 #[derive(Copy, Clone)]
 pub(crate) struct Reporting<'a> {
     pub(crate) file: &'a Path,
@@ -132,12 +123,9 @@ pub(crate) fn report_parse_failure(file: &Path, source: &str, err: &ParseError) 
     report_diagnostic(file, source, &lines, &diagnostic);
 }
 
-/// Render diagnostics into the wire form `--format json` ships.
-///
-/// The `RenderedDiagnostic` form rather than the `Diagnostic` one, because
-/// that is what carries `line` / `col` / `end_line` / `end_col`: serialising
-/// the diagnostic itself would ship `code` / `severity` / `primary` /
-/// `notes` with no source position at all.
+/// Render diagnostics into the wire form `--format json` ships, which
+/// carries the `line` / `col` / `end_line` / `end_col` a serialised
+/// [`Diagnostic`] lacks.
 pub(crate) fn render_diagnostics(
     source: &str,
     lines: &LineStarts,
@@ -165,11 +153,7 @@ pub(crate) fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(
     }
 }
 
-/// The document `info --format json` writes where it has no report.
-///
-/// A struct rather than a `serde_json::json!` object or a format string,
-/// so the findings render through the same serializer as every other
-/// document.
+/// The document a `--format json` command writes in place of its product.
 #[derive(serde::Serialize)]
 struct DiagnosticsDocument {
     diagnostics: Vec<RenderedDiagnostic>,
@@ -178,18 +162,12 @@ struct DiagnosticsDocument {
 /// Report the findings that stopped a command from producing its
 /// product, and give back its exit code.
 ///
-/// `info`'s product is the `VersionAxes` document, `parse`'s is the AST
-/// and `lower`'s is the block-array IR. None of the three is a
-/// diagnostics list, so a failure cannot be "the product with a hole in
-/// it". Under `--format json` it is a document of its own —
-/// `{"diagnostics": [ ... ]}`, told apart from a product by its keys and
-/// by the exit code — which is what keeps the flag's promise of one JSON
-/// document on stdout for every input. Every other format reads as it
-/// always has, on stderr.
-///
-/// `check` is the one command that does not come through here: its
-/// product *is* the findings, so a failure is that array with one more
-/// element in it rather than a document of another shape.
+/// The products of `info`, `parse` and `lower` are not diagnostics lists,
+/// so under `--format json` a failure is a `{"diagnostics": [ ... ]}`
+/// document of its own, told apart by its keys and the exit code; stdout
+/// still carries one JSON document for every input. `check` does not come
+/// through here: its product is the findings, so a failure is that array
+/// with one more element.
 pub(crate) fn report_failure_document(
     file: &Path,
     source: &str,
@@ -217,10 +195,9 @@ pub(crate) fn report_failure_document(
 
 /// Print one finding's `note:` lines under its primary.
 ///
-/// A note that carries a span is printed with that position, the way the
-/// primary is: it names a second place in the file the reader has to go
-/// look at. A note without one is indented and left unprefixed, so a
-/// footer does not read as a second pointer at the primary span.
+/// A note with a span prints its position, since it names a second place
+/// to look. One without is indented and unprefixed, so a footer does not
+/// read as a second pointer at the primary span.
 fn report_notes(file: &Path, source: &str, lines: &LineStarts, notes: &[Note]) {
     for note in notes {
         match note.span.as_ref() {
