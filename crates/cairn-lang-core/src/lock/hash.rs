@@ -1,10 +1,8 @@
 //! sha256 hashing used by [`super::Lockfile`].
 //!
-//! Hex-encoded with a `sha256:` prefix so swapping in a different algorithm
-//! later (BLAKE3, multibase) only touches this file. The two public
-//! entrypoints map to the lockfile fields they feed: [`hash_source`] over
-//! raw `.crn` bytes for `source_hash`, [`hash_resolved_ir`] over the lowered
-//! block-array IR for `resolved_ir_hash`.
+//! Hex-encoded with a `sha256:` prefix so a different algorithm (BLAKE3, multibase) only touches
+//! this file. [`hash_source`] hashes the raw `.crn` bytes for `source_hash`, and
+//! [`hash_resolved_ir`] the lowered block-array IR for `resolved_ir_hash`.
 
 use std::fmt;
 
@@ -18,14 +16,13 @@ use crate::block_array::BlockArrayIr;
 const PREFIX: &str = "sha256:";
 const HEX_LEN: usize = 64;
 
-/// Hex-encoded sha256 with the `sha256:` prefix `spec/versioning-editions`
-/// "Provenance and lock" gives it.
+/// Hex-encoded sha256 with the `sha256:` prefix `spec/versioning-editions` "Provenance and lock"
+/// gives it.
 ///
-/// Newtype rather than a bare `String` so a future algorithm switch is one
-/// `impl From` away, and so a caller cannot accidentally hand an arbitrary
-/// string where a hash is expected. The field stays private; construction
-/// goes through [`HashHex::from_bytes`] / [`HashHex::zero`] (which
-/// guarantee the shape) or through [`HashHex::parse`] (which validates).
+/// A newtype rather than a bare `String`, so another algorithm is one `impl From` away and an
+/// arbitrary string cannot be handed over where a hash is expected. The field is private:
+/// [`HashHex::from_bytes`] and [`HashHex::zero`] guarantee the shape, and [`HashHex::parse`]
+/// validates it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HashHex(String);
 
@@ -50,10 +47,9 @@ pub enum HashParseError {
 }
 
 impl HashHex {
-    /// Canonical zero hash written into [`super::LockInputs`] for inputs
-    /// that don't exist yet (registry pack, constraint catalog). Carrying a
-    /// zero rather than `Option::None` keeps the lockfile shape stable: the
-    /// fields will gain real values once those inputs land.
+    /// Canonical zero hash written into [`super::LockInputs`] for inputs not yet hashed (registry
+    /// pack, constraint catalog). A zero rather than `None` keeps the lockfile shape stable when
+    /// they gain real values.
     pub const ZERO_STR: &'static str =
         "sha256:0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -70,16 +66,15 @@ impl HashHex {
         Self(hex)
     }
 
-    /// `sha256:000...000`. Used for not-yet-populated inputs.
+    /// `sha256:000...000`, for inputs not yet populated.
     #[must_use]
     pub fn zero() -> Self {
         Self(Self::ZERO_STR.to_owned())
     }
 
-    /// Parse a `sha256:<hex64>` literal, validating both the prefix and
-    /// the 64-character hex body. Used by [`Deserialize`] and by any
-    /// caller that has the literal from outside (a lockfile read manually,
-    /// a CLI flag, etc.).
+    /// Parse a `sha256:<hex64>` literal, validating both the prefix and the 64-character hex body.
+    /// [`Deserialize`] goes through it, as does any caller holding a literal from outside (a
+    /// lockfile read by hand, a CLI flag).
     ///
     /// # Errors
     ///
@@ -132,10 +127,8 @@ impl<'de> Deserialize<'de> for HashHex {
 /// Errors raised while hashing inputs into a [`HashHex`].
 #[derive(Debug, Error)]
 pub enum HashError {
-    /// Serialisation of the block-array IR failed. JSON serialisation of
-    /// the IR can fail in practice when a float field carries `NaN` or
-    /// `±Infinity` (entity coordinates etc.), so this surface is here to
-    /// turn that into a build error rather than a process panic.
+    /// Serialising the block-array IR failed, as JSON does on a `NaN` or infinite float; this makes
+    /// it a build error rather than a panic.
     #[error("hashing resolved IR: {0}")]
     SerialiseIr(#[from] serde_json::Error),
 }
@@ -151,19 +144,16 @@ pub fn hash_source(src: &str) -> HashHex {
 
 /// Hash the lowered block-array IR.
 ///
-/// JSON serialisation via `serde_json::to_vec` is the canonical input
-/// rather than a custom binary encoder: it walks `BlockArrayIr` in
-/// `IndexMap`-insertion order and the IR's own ordering is already stable
-/// (palette by intern order, voxels by `(y, z, x)`), so the resulting byte
-/// stream is deterministic without an extra normalisation pass. Field
-/// additions to `BlockArrayIr` flow into the hash automatically.
+/// `serde_json::to_vec` is the canonical input rather than a custom binary encoder: it walks
+/// `BlockArrayIr` in `IndexMap` insertion order and the IR's own order is stable (palette by intern
+/// order, voxels by `(y, z, x)`), so the bytes are deterministic without a normalisation pass, and
+/// a field added to `BlockArrayIr` reaches the hash on its own.
 ///
 /// # Errors
 ///
-/// Returns [`HashError::SerialiseIr`] if `serde_json` cannot encode the
-/// IR. This cannot fire today — the IR is integer-only — but the result
-/// surface is here so a future entity coordinate that turns out to be
-/// `NaN` fails the build cleanly instead of panicking inside the CLI.
+/// Returns [`HashError::SerialiseIr`] if `serde_json` cannot encode the IR. The IR is integer-only,
+/// so this cannot fire; the `Result` lets a float that turns out `NaN` fail the build rather than
+/// panic inside the CLI.
 pub fn hash_resolved_ir(ir: &BlockArrayIr) -> Result<HashHex, HashError> {
     let bytes = serde_json::to_vec(ir)?;
     Ok(HashHex::from_bytes(&bytes))

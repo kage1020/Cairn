@@ -1,10 +1,8 @@
 //! `build.cairn.lock` YAML schema.
 //!
-//! Field order in [`Lockfile`] is deliberate: `serde_norway` writes structs in
-//! declaration order, so this matches the sample in
-//! `spec/versioning-editions` "Provenance and lock" byte-for-byte. Changing the
-//! order breaks downstream tools that grep the lockfile, so it is also
-//! exercised by an AC.
+//! Field order in [`Lockfile`] is deliberate: `serde_norway` writes structs in declaration order,
+//! so this matches the sample in `spec/versioning-editions` "Provenance and lock" byte for byte,
+//! and downstream tools that grep the lockfile depend on it.
 
 use serde::{Deserialize, Serialize};
 
@@ -14,32 +12,26 @@ use crate::ids::{IdError, PlaceId, PortId, SiteName, WalkwayEndpoint};
 
 /// The lockfile schema this build reads and writes.
 ///
-/// Version 1 is the shape that shipped before the number was recorded, so a
-/// document without the field is that version rather than an unknown one —
-/// refusing those would mean refusing files this compiler wrote. A document
-/// declaring anything higher is refused rather than read as if the field
-/// names still meant the same thing.
+/// A document without the field is version 1, the shape this compiler wrote before it recorded the
+/// number, so it is that version rather than an unknown one; refusing it would refuse files this
+/// compiler wrote. A document declaring anything higher is refused rather than read as if the field
+/// names meant the same thing.
 pub const LOCK_SCHEMA_VERSION: u32 = 1;
 
 /// Default for a document written before the version was recorded.
 ///
-/// The literal `1`, not [`LOCK_SCHEMA_VERSION`]: the meaning being pinned
-/// is "the shape that shipped before the field existed", which stays
-/// version 1 forever. Tracking the constant would silently re-read every
-/// v1 document as v2 the day the constant moves.
+/// The literal `1`, not [`LOCK_SCHEMA_VERSION`]: an unversioned document stays version 1 forever,
+/// and tracking the constant would re-read every v1 document as v2 once the constant moves.
 fn assume_unversioned_schema() -> u32 {
     1
 }
 
 /// Just the leading field, read without the strict field check.
 ///
-/// `deny_unknown_fields` fails *during* deserialisation, so a realistic
-/// later format — one that adds a key — would be rejected as malformed
-/// YAML before its version was ever compared, and its author told the
-/// document was broken when the truth is that this build is too old.
-/// Reading the version on its own is what makes [`Lockfile`]'s first
-/// field mean what its doc says: a reader decides whether it understands
-/// the rest before parsing the rest.
+/// `deny_unknown_fields` fails *during* deserialisation, so a later format that adds a key would be
+/// rejected as malformed before its version was compared, telling its author the document is broken
+/// when this build is too old. Reading the version alone lets a reader decide whether it
+/// understands the rest before parsing it, which is what [`Lockfile`]'s first field promises.
 #[derive(Deserialize)]
 struct SchemaVersionProbe {
     #[serde(default = "assume_unversioned_schema")]
@@ -52,17 +44,14 @@ pub(super) fn declared_schema_version(body: &str) -> Result<u32, serde_norway::E
     Ok(probe.lock_schema_version)
 }
 
-/// What a lockfile still says about its build when it records an identifier
-/// this build refuses.
+/// What a lockfile still says about its build when it records an identifier this build refuses.
 ///
-/// Returned by [`super::Lockfile::refused_identifier`]. The identifier rule
-/// has tightened over releases, so a lock an earlier Cairn wrote can name a
-/// place, port or site the current rule refuses. It is returned only for a
-/// document that is a valid lockfile in every other respect — every field
-/// present, every value in its domain, no key the schema does not declare,
-/// a schema version this build reads — so the strict read failed on the
-/// identifier rule and on nothing else. The target it was verified for is
-/// still worth comparing against, which is why this carries it.
+/// Returned by [`super::Lockfile::refused_identifier`]. The identifier rule has tightened over
+/// releases, so a lock an earlier Cairn wrote can name a place, port or site the current rule
+/// refuses. It is returned only for a document valid in every other respect (every field present,
+/// every value in its domain, no undeclared key, a schema version this build reads), so the strict
+/// read failed on the identifier rule alone, and the target it was verified for is still worth
+/// comparing against.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefusedIdentifierLock {
     /// The first recorded identifier the current rule refuses, in the order
@@ -76,18 +65,16 @@ pub struct RefusedIdentifierLock {
     pub member_version_sensitivity: Vec<MemberSensitivity>,
 }
 
-/// [`Lockfile`] with its seven identifier fields read as plain strings, so
-/// the identifier rule does not stop the read, and nothing else loosened.
+/// [`Lockfile`] with its seven identifier fields read as plain strings, so the identifier rule does
+/// not stop the read, and nothing else loosened.
 ///
-/// Every other field has the type, the default and the unknown-key refusal
-/// [`Lockfile`] gives it, nested types included, so a document this reads
-/// is one the strict read would take but for its identifiers. That is what
-/// lets [`RefusedIdentifierLock`] call the rest of the document valid: a
-/// missing field, a malformed hash or a stray key fails here exactly as it
-/// fails there. The schema version is gated before this is read, as
-/// [`super::Lockfile::from_yaml`] gates it. `mirrors_the_strict_schema`
-/// below destructures each strict struct field by field, so a field added
-/// there fails to compile until it is added here.
+/// Every other field has the type, the default and the unknown-key refusal [`Lockfile`] gives it,
+/// nested types included, so a document this reads is one the strict read would take but for its
+/// identifiers. That lets [`RefusedIdentifierLock`] call the rest of the document valid: a missing
+/// field, a malformed hash or a stray key fails here exactly as there. The schema version is gated
+/// before this is read, as [`super::Lockfile::from_yaml`] gates it. The tests' `mirror`
+/// destructures each strict struct field by field, so a field added there fails to compile until it
+/// is added here.
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LockfileProbe {
@@ -177,19 +164,15 @@ pub(super) fn refused_identifier(
 
 /// The whole lockfile, as written to `build.cairn.lock`.
 ///
-/// `verified: true` is the default after a successful compile; a future
-/// `--no-verify` workflow will flip it to `false` and the same struct
-/// shape will roundtrip without changes.
+/// `verified` is `true` after a successful compile; the field leaves room for an opt-out that
+/// writes `false` with the same shape.
 ///
 /// This struct, every type it nests, and the probe that mirrors them for
-/// [`super::Lockfile::refused_identifier`] deny unknown fields. The one
-/// reader in this file that does not is `SchemaVersionProbe`, which reads
-/// the version alone to decide whether to read the rest. A lockfile is a
-/// claim about what was built, and one carrying keys the reader silently
-/// ignores is a document whose meaning depends on who is reading it — a
-/// tampered file used to deserialise as `Ok` with `verified: true` alongside
-/// whatever else it liked. Tampering is not confined to the top level, so
-/// neither is the check.
+/// [`super::Lockfile::refused_identifier`] deny unknown fields; only `SchemaVersionProbe`, which
+/// reads the version alone, does not. A lockfile is a claim about what was built, and one carrying
+/// keys its reader ignores means whatever the reader decides: a tampered file would deserialise as
+/// `Ok` with `verified: true` beside whatever else it liked. Tampering is not confined to the top
+/// level, so neither is the check.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lockfile {
@@ -204,27 +187,23 @@ pub struct Lockfile {
     pub cairn_version: String,
     /// Target edition + Minecraft version + `DataVersion`.
     pub target: LockTarget,
-    /// Registry / catalog input hashes. Zero until those inputs are wired.
+    /// Registry and catalog input hashes, zero while those inputs are not hashed.
     pub inputs: LockInputs,
     /// sha256 over the lowered block-array IR. The core of reproducibility.
     pub resolved_ir_hash: HashHex,
     /// `true` for a successful build; reserved for a later opt-out flow.
     pub verified: bool,
-    /// Members whose meaning may drift across a Minecraft version bump.
-    /// Empty until the constraint catalog ingest lands.
+    /// Members whose meaning may drift across a Minecraft version bump. Empty while no constraint
+    /// catalog is ingested.
     pub member_version_sensitivity: Vec<MemberSensitivity>,
-    /// Per-`place` site coordinates resolved from the `at=` / `east_of=` /
-    /// `north_of=` constraint chain. Empty for sources that declare no
-    /// `site` block, which keeps the lockfile shape byte-identical to
-    /// cottage / themed-tower builds that pre-date the site surface.
+    /// Per-`place` site coordinates resolved from the `at=` / `east_of=` / `north_of=` constraint
+    /// chain; empty, and left out of the document, for a source with no `site` block.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placements: Vec<LockPlacement>,
-    /// Per-`connect` walkway records. Each entry pins both ports, the
-    /// world-space origin / dims of the walkway block array, and the
-    /// canonical path material so the lockfile alone is enough to
-    /// reproduce the strip without re-running the resolver. Empty for
-    /// sources that declare no `connect` lines, preserving lockfile
-    /// shape parity with cottage / themed-tower builds.
+    /// Per-`connect` walkway records. Each pins both ports, the world-space origin and dims of the
+    /// walkway block array, and the canonical path material, so the lockfile alone reproduces the
+    /// strip without re-running the resolver. Empty, and left out of the document, for a source
+    /// with no `connect` lines.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub walkways: Vec<LockWalkway>,
 }
@@ -263,22 +242,18 @@ pub struct LockPlacement {
     pub dims: [u32; 3],
 }
 
-/// One `connect from.port to to.port` row resolved into a walkway
-/// strip's world-space origin, dims, and path material.
+/// One `connect from.port to to.port` row resolved into a walkway strip's world-space origin, dims,
+/// and path material.
 ///
-/// Mirrors [`LockPlacement`]'s shape so `(site, id, def, theme,
-/// origin, dims)` becomes `(site, from, to, path_material, origin,
-/// dims)` — same five disk axes, just oriented around the two ports
-/// the row connects.
+/// Mirrors [`LockPlacement`]'s shape, `(site, from, to, path_material, origin, dims)` for `(site,
+/// id, def, theme, origin, dims)`, oriented around the two ports the row connects.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LockWalkway {
     /// `site` name the walkway belongs to (bare, no `site::` prefix).
     pub site: SiteName,
-    /// `from` endpoint as a `{ place, port }` pair. Stored as a
-    /// structured object rather than a `"PLACE.PORT"` string so a port
-    /// id is never re-parsed from a `.`-separated token — the type
-    /// boundary catches the silent disaster the string form risked.
+    /// `from` endpoint as a `{ place, port }` pair. Structured rather than a `"PLACE.PORT"` string,
+    /// so a port id is never re-parsed from a `.`-separated token.
     pub from: WalkwayEndpoint,
     /// `to` endpoint, same shape as [`Self::from`].
     pub to: WalkwayEndpoint,
@@ -343,14 +318,12 @@ mod tests {
     use super::super::{LockError, Lockfile};
     use super::*;
 
-    /// What a strict document reads as through [`LockfileProbe`]: every
-    /// field carried over, the identifiers as their strings.
+    /// What a strict document reads as through [`LockfileProbe`]: every field carried over, the
+    /// identifiers as their strings.
     ///
-    /// Each strict struct is destructured field by field, with no `..`, and
-    /// each probe is built the same way. A field added to `Lockfile`,
-    /// `LockPlacement`, `LockWalkway` or `WalkwayEndpoint` is a compile
-    /// error here until the probe has it too, which is what keeps an added
-    /// identifier field from being missed by the probe in silence.
+    /// Each strict struct is destructured field by field, with no `..`, and each probe built the
+    /// same way, so a field added to `Lockfile`, `LockPlacement`, `LockWalkway` or
+    /// `WalkwayEndpoint` does not compile here until the probe has it too.
     fn mirror(lock: Lockfile) -> LockfileProbe {
         let Lockfile {
             lock_schema_version,
@@ -515,8 +488,6 @@ mod tests {
 
     #[test]
     fn mirrors_the_strict_schema() {
-        // What a valid document reads as through the probe is what the
-        // strict read gives, field for field.
         let body = sample().to_yaml().expect("encode");
         let probe: LockfileProbe = serde_norway::from_str(&body).expect("the probe reads it");
         assert_eq!(probe, mirror(sample()));
@@ -602,9 +573,8 @@ mod tests {
 
     #[test]
     fn an_unreadable_target_is_the_reason_given_not_the_identifier() {
-        // The strict read meets the refused id first and reports it; the
-        // reason this document cannot be read is the missing target, and
-        // that is what comes back.
+        // The strict read meets the refused id first and reports it, but the reason this document
+        // cannot be read is the missing target.
         let mut doc = sample_doc();
         *at(&mut doc, "placements.0.id") = Value::String("sub/home1".to_owned());
         doc.as_mapping_mut()
