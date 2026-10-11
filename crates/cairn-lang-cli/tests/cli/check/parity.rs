@@ -65,12 +65,6 @@ impl Source {
 
 /// One fixture per `Error`-severity code the syntactic passes inside
 /// `check` emit.
-///
-/// `cairn_lang_core`'s `syntactic_error_codes_are_covered_by_cli_fixtures`
-/// pins that set by iterating the `DiagnosticCode` enum, and names this file
-/// when the two disagree. Adding a variant there forces a classification;
-/// classifying it as a syntactic `Error` then fails that assertion until a
-/// fixture lands here.
 const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
     (
         "E_DUPLICATE_SIZE",
