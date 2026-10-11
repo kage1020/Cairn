@@ -16,7 +16,7 @@ use cairn_lang_redstone::{DiagnosticCode, PlacedCellNode, ScopedPlacementIr, com
 
 mod common;
 
-use common::{load_example, normalize_stage_tags, placement_from_source};
+use common::{load_example, normalize_stage_tags, placement_from_source, strip_int_field};
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java routes its
 /// sole `JavaRepeaterOr` cell with `wire_length = Some(4)`: the sum of
@@ -461,28 +461,12 @@ fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_sta
     // `,"wire_length":<int>`. Strip that pattern, normalise the stage
     // tag each side carries, and the routed and placement bytes must
     // match exactly.
-    let stripped_routed = normalize_stage_tags(&strip_wire_length(&routed_json));
+    let stripped_routed = normalize_stage_tags(&strip_int_field(&routed_json, "wire_length"));
     assert_eq!(
         stripped_routed,
         normalize_stage_tags(&placement_json),
         "routing must not perturb placement fields — routed compact JSON with wire_length stripped and the stage tag normalised should match placement compact JSON byte-for-byte",
     );
-}
-
-fn strip_wire_length(compact: &str) -> String {
-    const PATTERN: &str = ",\"wire_length\":";
-    let mut out = String::with_capacity(compact.len());
-    let mut rest = compact;
-    while let Some(idx) = rest.find(PATTERN) {
-        out.push_str(&rest[..idx]);
-        let after = &rest[idx + PATTERN.len()..];
-        let end = after
-            .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(after.len());
-        rest = &after[end..];
-    }
-    out.push_str(rest);
-    out
 }
 
 /// AC8 — two non-empty scopes route independently. A clean scope

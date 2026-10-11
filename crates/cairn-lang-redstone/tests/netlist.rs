@@ -6,7 +6,6 @@
 //! the parser-unreachable `Mux`), the topological invariant carried
 //! across from the Logic IR, and empty-scope elision.
 
-use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{
     CellNode, GateKind, GateNode, InputPort, LogicIr, LogicalCell, NetRef, OutputPort, PortName,
@@ -14,7 +13,7 @@ use cairn_lang_redstone::{
 };
 
 mod common;
-use common::{load_example, synth_source};
+use common::{load_example, sig, synth_source};
 
 fn find_cell_port(cell: &CellNode, port: PortName) -> NetRef {
     cell.drivers
@@ -22,12 +21,6 @@ fn find_cell_port(cell: &CellNode, port: PortName) -> NetRef {
         .find(|d| d.port == port)
         .unwrap_or_else(|| panic!("port {port:?} missing from cell {:?}", cell.cell))
         .net
-}
-
-fn sig(name: &str) -> DottedRef {
-    let mut parts = name.split('.').map(str::to_owned);
-    let head = parts.next().expect("dotted ref has head");
-    DottedRef::new(head, parts.collect())
 }
 
 /// AC1 — `examples/redstone-door.crn` produces one `OR` cell with two

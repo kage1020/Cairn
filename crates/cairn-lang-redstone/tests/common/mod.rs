@@ -1,14 +1,15 @@
 //! Helpers shared by the redstone integration test binaries.
 //!
-//! Two kinds of thing live here. The fixture builders — `load_example`,
-//! `synth_source` and the `*_from_source` ladder — pin one prefix of the
-//! pipeline each, and every rung is the previous one plus a stage and the
-//! assertion that the stage ran clean, so a change to a pass's signature
-//! or to what "clean" means for a fixture lands in one place rather than
-//! in each binary downstream of it. And `normalize_stage_tags` is
-//! machinery whose *correctness* is shared: it has to agree with the JSON
-//! wire form across every stage, and would rot silently if each binary
-//! kept its own copy.
+//! The fixture builders — `load_example`, `synth_source`, `gate_source`
+//! and the `*_from_source` ladder — pin one prefix of the pipeline each,
+//! and every rung is the previous one plus a stage and the assertion that
+//! the stage ran clean, so a change to a pass's signature or to what
+//! "clean" means for a fixture lands in one place rather than in each
+//! binary downstream of it. `normalize_stage_tags` and `strip_int_field`
+//! are machinery whose *correctness* is shared: they have to agree with
+//! the JSON wire form across every stage, and would rot silently if each
+//! binary kept its own copy. The rest read a result back the same way in
+//! every binary that asks.
 
 // Every test binary compiles this module on its own and calls a subset of
 // it, so the unused-item lint would fire per binary. The workspace has no
@@ -19,12 +20,13 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
+use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{Edition, IntentModule, lower, parse};
 use cairn_lang_redstone::{
-    DiagnosticCode, ScopedEditionNetlistIr, ScopedPlacementIr, SynthOutput, compile_crossing,
-    compile_delay, compile_edition_netlist, compile_netlist, compile_placement, compile_routing,
-    synthesize,
+    Diagnostic, DiagnosticCode, ScopedEditionNetlistIr, ScopedPlacementIr, SynthOutput,
+    compile_crossing, compile_delay, compile_edition_netlist, compile_netlist, compile_placement,
+    compile_routing, synthesize,
 };
 
 /// Load `examples/<name>` relative to the workspace root.
@@ -48,6 +50,46 @@ pub fn synth_source(source: &str) -> SynthOutput {
 /// 1-based line of a byte offset, counted the way the source reads.
 pub fn line_of(source: &str, offset: usize) -> usize {
     source[..offset].bytes().filter(|b| *b == b'\n').count() + 1
+}
+
+const GATE_PRELUDE: &str = concat!(
+    "@cairn 2026.06\n",
+    "\n",
+    "theme t:\n",
+    "  slot wall -> @cobblestone\n",
+    "\n",
+    "struct gate size=5x5\n",
+    "  walls class=outer mat_slot=wall height=3\n",
+);
+
+/// A walled `struct gate` with `body` as the rest of its members.
+pub fn gate_source(body: &str) -> String {
+    format!("{GATE_PRELUDE}{body}")
+}
+
+/// Every finding's code, in the order `out` carries them.
+pub fn codes(out: &SynthOutput) -> Vec<&'static str> {
+    out.diagnostics.iter().map(|d| d.code.as_str()).collect()
+}
+
+/// The one finding of `code` in `out`, failing on none or several.
+pub fn only(out: &SynthOutput, code: DiagnosticCode) -> &Diagnostic {
+    let found: Vec<_> = out.diagnostics.iter().filter(|d| d.code == code).collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "expected one {code:?}: {:#?}",
+        out.diagnostics
+    );
+    found[0]
+}
+
+/// `name` (`sig.open`) as the `DottedRef` the IRs key their signal maps
+/// by.
+pub fn sig(name: &str) -> DottedRef {
+    let mut parts = name.split('.').map(str::to_owned);
+    let head = parts.next().expect("dotted ref has head");
+    DottedRef::new(head, parts.collect())
 }
 
 /// Synthesise and compile `source` to the Edition Netlist IR for
@@ -202,6 +244,25 @@ pub fn normalize_stage_tags(json: &str) -> String {
         out.push_str(&after[..open]);
         out.push_str("\"<stage>\"");
         rest = &after[open + close + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Drop every `,"<key>":<unsigned int>` from compact JSON, so a stage's
+/// dump can be byte-compared with the previous stage's on everything but
+/// the integer field the pass adds.
+pub fn strip_int_field(compact: &str, key: &str) -> String {
+    let pattern = format!(",\"{key}\":");
+    let mut out = String::with_capacity(compact.len());
+    let mut rest = compact;
+    while let Some(idx) = rest.find(&pattern) {
+        out.push_str(&rest[..idx]);
+        let after = &rest[idx + pattern.len()..];
+        let end = after
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after.len());
+        rest = &after[end..];
     }
     out.push_str(rest);
     out

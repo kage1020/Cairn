@@ -21,7 +21,7 @@
 use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput};
 
 mod common;
-use common::synth_source;
+use common::{codes, only, synth_source};
 
 const PRELUDE: &str = concat!(
     "theme t:\n",
@@ -36,21 +36,6 @@ const PRELUDE: &str = concat!(
 
 fn source(body: &str) -> String {
     format!("{PRELUDE}{body}  circuit region=floor void=2\n")
-}
-
-fn codes(out: &SynthOutput) -> Vec<&'static str> {
-    out.diagnostics.iter().map(|d| d.code.as_str()).collect()
-}
-
-fn only(out: &SynthOutput, code: DiagnosticCode) -> &Diagnostic {
-    let found: Vec<_> = out.diagnostics.iter().filter(|d| d.code == code).collect();
-    assert_eq!(
-        found.len(),
-        1,
-        "expected one {code:?}: {:#?}",
-        out.diagnostics
-    );
-    found[0]
 }
 
 fn slice<'s>(src: &'s str, d: &Diagnostic) -> &'s str {

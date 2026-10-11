@@ -16,28 +16,10 @@
 //! *whole* finding list, because "the code I asked about is present" is
 //! exactly the assertion a leaked cascade slips past.
 
-use cairn_lang_redstone::{ScopeKind, SynthOutput};
+use cairn_lang_redstone::ScopeKind;
 
 mod common;
-use common::synth_source;
-
-fn codes(out: &SynthOutput) -> Vec<&'static str> {
-    out.diagnostics.iter().map(|d| d.code.as_str()).collect()
-}
-
-const PRELUDE: &str = concat!(
-    "@cairn 2026.06\n",
-    "\n",
-    "theme t:\n",
-    "  slot wall -> @cobblestone\n",
-    "\n",
-    "struct gate size=5x5\n",
-    "  walls class=outer mat_slot=wall height=3\n",
-);
-
-fn source(body: &str) -> String {
-    format!("{PRELUDE}{body}")
-}
+use common::{codes, gate_source, synth_source};
 
 /// A sensor and a `logic` line over it, so a fixture below can hang a
 /// binding off a *derived* signal rather than off the sensor's own — the
@@ -56,7 +38,9 @@ fn an_unknown_keyword_that_would_have_consumed_a_signal_leaves_no_unused_warning
     // this pass says nothing about it. But the author *did* wire `sig.x`,
     // and telling them it is unconsumed on top of telling them `lamp` does
     // not exist is the same mistake reported twice.
-    let out = synth_source(&source(&format!("{DERIVED}  lamp id=l1 lit_by=sig.x\n")));
+    let out = synth_source(&gate_source(&format!(
+        "{DERIVED}  lamp id=l1 lit_by=sig.x\n"
+    )));
     assert!(out.diagnostics.is_empty(), "{:#?}", out.diagnostics);
 }
 
@@ -66,7 +50,7 @@ fn an_unknown_keyword_that_would_have_driven_a_signal_leaves_no_unbound_error() 
     // `spec/redstone` "Signal binding" and not a keyword, so the tail is
     // skipped — and the `logic` line reading `sig.w` must not be told the
     // signal does not exist.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  lever id=v side=front offset=1 y=1 -> sig.w\n",
         "  logic sig.x = not sig.w\n",
         "  door id=front side=front at=center\n",
@@ -82,7 +66,7 @@ fn a_misplaced_actuator_on_a_derived_signal_leaves_no_unused_warning() {
     // `opened_by=` on a `window` is refused, and `sig.x` — a `logic` name,
     // so the unused audit does walk it — must not then be reported as
     // unconsumed.
-    let out = synth_source(&source(&format!(
+    let out = synth_source(&gate_source(&format!(
         "{DERIVED}  window side=front y=1 offset=1 size=1x1 mat_slot=wall opened_by=sig.x\n",
     )));
     assert_eq!(
@@ -101,7 +85,7 @@ fn an_actuator_reading_a_signal_a_refused_tail_would_have_driven_is_not_reported
     // would have emitted. The tail itself is `check`'s
     // `E_MISPLACED_BINDING`, so the whole list here is what the cascade
     // would have added, and it is empty.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
         "  door id=front side=front at=center\n",
         "  door[id=front] opened_by=sig.w\n",
@@ -113,7 +97,7 @@ fn an_actuator_reading_a_signal_a_refused_tail_would_have_driven_is_not_reported
 fn a_refused_logic_line_still_counts_as_reading_its_right_hand_side() {
     // The left-hand side is what `foo.bar` gets wrong; `sig.a` on the
     // right is a signal this line reads either way.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic foo.bar = not sig.a\n",
     )));
@@ -133,7 +117,7 @@ fn a_scope_whose_only_content_is_an_assert_is_still_checked() {
     // actuator, and no `logic` line — so the one shape where an `assert`
     // is the *only* redstone content was the one shape nothing checked it
     // in.
-    let out = synth_source(&source(
+    let out = synth_source(&gate_source(
         "  assert always(sig.zzz -> eventually sig.qqq within 3)\n",
     ));
     assert_eq!(
@@ -146,7 +130,7 @@ fn a_scope_whose_only_content_is_an_assert_is_still_checked() {
 
 #[test]
 fn an_assert_naming_one_signal_twice_reports_it_once() {
-    let out = synth_source(&source(
+    let out = synth_source(&gate_source(
         "  assert always(sig.zzz -> eventually sig.zzz within 3)\n",
     ));
     assert_eq!(
@@ -164,7 +148,7 @@ fn an_assert_over_a_binding_that_failed_to_lower_adds_nothing() {
     // false as well as second, and the candidate list would then offer
     // `sig.x` as a valid signal in the same finding that called it
     // undefined.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  logic sig.x = not sig.undef\n",
         "  assert always(sig.x -> eventually sig.x within 3)\n",
     )));
@@ -192,7 +176,7 @@ fn a_candidate_list_never_offers_a_signal_the_pass_has_refused() {
     // moment `sig.x` is a binding like any other; the contradiction the
     // filter closes is a later reader being offered a name the pass has
     // since refused.
-    let source = source(concat!(
+    let source = gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.undef\n",
         "  door id=front side=front at=center\n",
@@ -221,7 +205,7 @@ fn an_assert_counts_as_a_consumer() {
     // A property observes a wire. Checking the references an `assert`
     // names and then not counting them would warn that a signal is unused
     // in the one place the author wrote down what it is for.
-    let out = synth_source(&source(&format!(
+    let out = synth_source(&gate_source(&format!(
         "{DERIVED}  assert always(sig.a -> eventually sig.x within 2)\n",
     )));
     assert!(out.diagnostics.is_empty(), "{:#?}", out.diagnostics);
@@ -231,7 +215,7 @@ fn an_assert_counts_as_a_consumer() {
 fn an_assert_inside_a_level_is_collected_with_the_rest() {
     // `collect_member` gained the nested-`assert` walk in this change; the
     // old code discarded a `level` block's asserts outright.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  level y=0\n",
         "    assert always(sig.zzz -> eventually sig.qqq within 3)\n",
     )));
@@ -251,7 +235,7 @@ fn a_sensor_whose_signal_nothing_reads_is_reported() {
     // output is a plate in the build wired to nothing, which is the
     // silence this whole pass exists to break — and it is the shape every
     // "the value is not a `sig.` reference" hole ends up in.
-    let out = synth_source(&source(
+    let out = synth_source(&gate_source(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
     ));
     assert_eq!(
@@ -333,7 +317,7 @@ fn findings_from_two_collection_phases_come_out_in_line_order() {
     // Collection raises its findings before the phases run, so without a
     // sort a refusal on the last line precedes a driver collision on the
     // first.
-    let source = source(concat!(
+    let source = gate_source(concat!(
         "  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n",
         "  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.a\n",
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",

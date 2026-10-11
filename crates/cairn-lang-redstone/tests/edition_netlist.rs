@@ -11,7 +11,6 @@
 //! `edition` field on the JSON wire form, and empty-scope elision.
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{
     EditionCell, EditionCellNode, GateKind, GateNode, InputPort, LogicIr, NetRef, OutputPort,
@@ -20,13 +19,7 @@ use cairn_lang_redstone::{
 };
 
 mod common;
-use common::{load_example, synth_source};
-
-fn sig(name: &str) -> DottedRef {
-    let mut parts = name.split('.').map(str::to_owned);
-    let head = parts.next().expect("dotted ref has head");
-    DottedRef::new(head, parts.collect())
-}
+use common::{load_example, sig, synth_source};
 
 fn find_cell_port(cell: &EditionCellNode, port: PortName) -> NetRef {
     cell.drivers

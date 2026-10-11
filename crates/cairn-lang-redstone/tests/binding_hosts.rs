@@ -32,34 +32,10 @@
 //! fault of its own, and the fixtures below assert that silence rather
 //! than a finding.
 
-use cairn_lang_redstone::{DiagnosticCode, SynthOutput};
+use cairn_lang_redstone::DiagnosticCode;
 
 mod common;
-use common::synth_source;
-
-fn codes(out: &SynthOutput) -> Vec<&'static str> {
-    out.diagnostics.iter().map(|d| d.code.as_str()).collect()
-}
-
-fn only(out: &SynthOutput, code: DiagnosticCode) -> &cairn_lang_redstone::Diagnostic {
-    let found: Vec<_> = out.diagnostics.iter().filter(|d| d.code == code).collect();
-    assert_eq!(found.len(), 1, "expected one {code:?}: {:#?}", codes(out));
-    found[0]
-}
-
-const PRELUDE: &str = concat!(
-    "@cairn 2026.06\n",
-    "\n",
-    "theme t:\n",
-    "  slot wall -> @cobblestone\n",
-    "\n",
-    "struct gate size=5x5\n",
-    "  walls class=outer mat_slot=wall height=3\n",
-);
-
-fn source(body: &str) -> String {
-    format!("{PRELUDE}{body}")
-}
+use common::{codes, gate_source, only, synth_source};
 
 // --- the value axis ------------------------------------------------------
 
@@ -94,7 +70,7 @@ fn a_sensor_tail_that_names_no_signal_is_refused_whatever_it_names() {
         ("2x2", "size `2x2`"),
         ("[a,b]", "a list"),
     ] {
-        let out = synth_source(&source(&format!(
+        let out = synth_source(&gate_source(&format!(
             "  pressure_plate id=p at=front.outside offset=0 y=0 -> {tail}\n",
         )));
         assert_eq!(
@@ -121,7 +97,7 @@ fn a_sensor_tail_that_names_no_signal_is_refused_whatever_it_names() {
 /// than being offered `sig.sig`.
 #[test]
 fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
-    let named = synth_source(&source(
+    let named = synth_source(&gate_source(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> a\n",
     ));
     let d = only(&named, DiagnosticCode::LogicInvalidSignal);
@@ -132,7 +108,7 @@ fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
     );
 
     for (tail, absent) in [("3", "sig.3"), ("sig", "sig.sig")] {
-        let unnamed = synth_source(&source(&format!(
+        let unnamed = synth_source(&gate_source(&format!(
             "  pressure_plate id=p at=front.outside offset=0 y=0 -> {tail}\n",
         )));
         let d = only(&unnamed, DiagnosticCode::LogicInvalidSignal);
@@ -162,7 +138,9 @@ fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
 /// the value under it.
 #[test]
 fn a_tail_on_the_wrong_host_draws_no_value_side_finding() {
-    let out = synth_source(&source("  walls class=inner mat_slot=wall height=1 -> a\n"));
+    let out = synth_source(&gate_source(
+        "  walls class=inner mat_slot=wall height=1 -> a\n",
+    ));
     assert_eq!(codes(&out), Vec::<&str>::new(), "{:#?}", out.diagnostics);
 }
 
@@ -182,7 +160,7 @@ fn an_actuator_argument_that_names_no_signal_is_refused() {
         ("2x2", "size `2x2`"),
         ("[a,b]", "a list"),
     ] {
-        let out = synth_source(&source(&format!(
+        let out = synth_source(&gate_source(&format!(
             "  door id=d side=front at=center mat_slot=wall opened_by={value}\n",
         )));
         assert_eq!(
@@ -203,7 +181,7 @@ fn an_actuator_argument_that_names_no_signal_is_refused() {
 /// fault, for the same reason the sensor tail is.
 #[test]
 fn an_actuator_argument_on_the_wrong_host_is_a_host_fault_even_when_it_names_no_signal() {
-    let out = synth_source(&source(
+    let out = synth_source(&gate_source(
         "  window side=front y=1 offset=1 size=2x2 mat_slot=wall opened_by=a\n",
     ));
     assert_eq!(codes(&out), ["E_LOGIC_MISPLACED_BINDING"]);
@@ -219,7 +197,7 @@ fn an_actuator_argument_on_the_wrong_host_is_a_host_fault_even_when_it_names_no_
 /// door patch alone.
 #[test]
 fn a_binding_inside_the_selector_is_refused_and_counts_as_wired() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  door id=front side=front at=center mat_slot=wall\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front,opened_by=sig.a]\n",
@@ -250,7 +228,7 @@ fn a_binding_inside_the_selector_is_refused_and_counts_as_wired() {
 /// it.
 #[test]
 fn a_bracketed_pair_is_answered_by_the_fault_that_survives_unbracketing() {
-    let wrong_host = synth_source(&source(concat!(
+    let wrong_host = synth_source(&gate_source(concat!(
         "  door id=front side=front at=center mat_slot=wall\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front,lit_by=sig.a]\n",
@@ -264,7 +242,7 @@ fn a_bracketed_pair_is_answered_by_the_fault_that_survives_unbracketing() {
         only(&wrong_host, DiagnosticCode::LogicMisplacedBinding).primary,
     );
 
-    let typo = synth_source(&source(concat!(
+    let typo = synth_source(&gate_source(concat!(
         "  door id=front side=front at=center mat_slot=wall\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front,oepend_by=sig.a]\n",
@@ -288,7 +266,7 @@ fn a_bracketed_pair_is_answered_by_the_fault_that_survives_unbracketing() {
 /// whatever this pass said about it.
 #[test]
 fn a_signal_under_the_one_key_the_brackets_read_is_not_blamed_on_the_brackets() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  door id=front side=front at=center mat_slot=wall\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=sig.a]\n",
@@ -310,7 +288,7 @@ fn a_signal_under_the_one_key_the_brackets_read_is_not_blamed_on_the_brackets() 
 /// still unconsumed and says so. The order is the order of the lines.
 #[test]
 fn a_selector_binding_with_no_name_leaves_the_signal_unconsumed() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  door id=front side=front at=center mat_slot=wall\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front,opened_by=a]\n",
@@ -331,7 +309,7 @@ fn a_selector_binding_with_no_name_leaves_the_signal_unconsumed() {
 /// has its own test above; the selector walk is newer and had none.
 #[test]
 fn a_selector_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  widget[id=w1,opened_by=sig.a]\n",
     )));
@@ -354,7 +332,7 @@ fn a_selector_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
 /// `id=` and the rest of the selector stay legal.
 #[test]
 fn a_selector_that_binds_nothing_is_left_alone() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  door id=front side=front at=center mat_slot=wall\n",
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door[id=front] opened_by=sig.a\n",
@@ -374,7 +352,7 @@ fn a_selector_that_binds_nothing_is_left_alone() {
 /// being said the moment the first is fixed.
 #[test]
 fn a_malformed_value_and_the_signal_it_leaves_unconsumed_are_both_reported() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door id=d side=front at=center mat_slot=wall opened_by=a\n",
     )));
@@ -395,7 +373,7 @@ fn a_malformed_value_and_the_signal_it_leaves_unconsumed_are_both_reported() {
 /// the half that stays here.
 #[test]
 fn a_sensor_tail_on_a_wall_registers_no_input_and_no_cascade() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
         "  logic sig.x = not sig.w\n",
     )));
@@ -413,7 +391,7 @@ fn a_sensor_tail_on_a_wall_registers_no_input_and_no_cascade() {
 
 #[test]
 fn a_sensor_tail_on_a_pressure_plate_still_lowers() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.a\n",
         "  door id=front side=front at=center\n",
@@ -427,7 +405,7 @@ fn a_sensor_tail_on_a_pressure_plate_still_lowers() {
 
 #[test]
 fn opened_by_on_a_window_names_the_component_it_belongs_to() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  window side=front y=1 offset=1 size=1x1 mat_slot=wall opened_by=sig.a\n",
     )));
@@ -458,7 +436,7 @@ fn the_three_keys_with_no_keyword_to_host_them_say_so() {
         ("lit_by", "lamp"),
         ("fired_by", "dispenser"),
     ] {
-        let out = synth_source(&source(&format!(
+        let out = synth_source(&gate_source(&format!(
             "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n  \
              door id=front side=front at=center {key}=sig.a\n",
         )));
@@ -480,7 +458,7 @@ fn the_three_keys_with_no_keyword_to_host_them_say_so() {
 
 #[test]
 fn opened_by_on_a_door_still_lowers() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  door id=front side=front at=center\n",
         "  door[id=front] opened_by=sig.a\n",
@@ -496,7 +474,7 @@ fn a_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
     // component that does not exist — and `widget` is deliberately not one
     // of the four hosts, so what keeps this quiet is the role guard rather
     // than the keyword happening to match the key's host.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  widget id=w1 lit_by=sig.a\n",
     )));
@@ -511,7 +489,7 @@ fn an_unknown_keyword_that_matches_a_future_host_is_still_skipped() {
     // `E_UNKNOWN_KEYWORD`, and the front end must not build a port on it.
     // Without the role guard this line registers a live output on a member
     // that does not exist.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  lamp id=l1 lit_by=sig.a\n",
     )));
@@ -527,7 +505,7 @@ fn an_unknown_keyword_that_matches_a_future_host_is_still_skipped() {
 
 #[test]
 fn a_typoed_actuator_key_is_refused_with_the_key_it_meant() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.a\n",
         "  door id=front side=front at=center\n",
@@ -550,7 +528,7 @@ fn a_typoed_actuator_key_is_refused_with_the_key_it_meant() {
 fn a_key_from_no_vocabulary_at_all_gets_the_list_instead() {
     // Too far from any actuator key for a suggestion; the finding still
     // has to say what the legal keys are.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.a\n",
         "  door id=front side=front at=center\n",
@@ -572,7 +550,7 @@ fn a_non_signal_value_under_an_unknown_key_is_not_this_pass_business() {
     // ordinary argument — `mat_slot=`, `height=`, an unknown one holding a
     // number — is somebody else's to validate, and a schema for that does
     // not exist yet.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.a\n",
         "  door id=front side=front at=center\n",
@@ -585,7 +563,7 @@ fn a_non_signal_value_under_an_unknown_key_is_not_this_pass_business() {
 
 #[test]
 fn a_logic_lhs_outside_the_sig_namespace_is_refused_and_lowers_no_gate() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic foo.bar = not sig.a\n",
     )));
@@ -678,7 +656,7 @@ fn a_logic_lhs_that_is_not_one_segment_after_sig_is_refused() {
             "keep one segment after `sig.`, as in `sig.x` or `sig.x_y_z`",
         ),
     ] {
-        let out = synth_source(&source(body));
+        let out = synth_source(&gate_source(body));
         assert_eq!(codes(&out), ["E_LOGIC_INVALID_SIGNAL"], "{body}");
         let d = only(&out, DiagnosticCode::LogicInvalidSignal);
         assert!(
@@ -702,7 +680,7 @@ fn a_logic_lhs_that_is_not_one_segment_after_sig_is_refused() {
 /// side's `sig.a` is not reported as unused.
 #[test]
 fn an_actuator_reading_a_refused_lhs_is_refused_by_the_same_rule() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x.y = not sig.a\n",
         "  door id=front side=front at=center\n",
@@ -720,7 +698,7 @@ fn an_actuator_reading_a_refused_lhs_is_refused_by_the_same_rule() {
 /// with the same refused name are two refusals and not two drivers.
 #[test]
 fn two_lines_with_the_same_refused_lhs_are_two_refusals() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x.y = not sig.a\n",
         "  logic sig.x.y = sig.a\n",
@@ -764,7 +742,7 @@ fn an_unbound_reference_is_offered_only_the_repairs_that_exist() {
                 ),
                 line = line,
             );
-            let out = synth_source(&source(&body));
+            let out = synth_source(&gate_source(&body));
             let found: Vec<_> = out
                 .diagnostics
                 .iter()
@@ -794,7 +772,7 @@ fn an_unbound_reference_is_offered_only_the_repairs_that_exist() {
 
 #[test]
 fn an_assert_over_signals_nothing_defines_is_reported() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.a\n",
         "  door id=front side=front at=center\n",
@@ -820,7 +798,7 @@ fn an_assert_over_signals_nothing_defines_is_reported() {
 fn an_assert_truth_row_checks_every_reference_it_names() {
     // The other assert form, and the input list rather than the single
     // output — a walk that only read the output would pass the test above.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.a\n",
         "  door id=front side=front at=center\n",
@@ -844,7 +822,7 @@ fn an_assert_truth_row_checks_every_reference_it_names() {
 fn an_assert_over_defined_signals_stays_silent() {
     // `redstone-door.crn` ships both assert forms over signals that exist;
     // this is the same shape, so the check cannot be firing on those.
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.a\n",
         "  door id=front side=front at=center\n",
@@ -857,7 +835,7 @@ fn an_assert_over_defined_signals_stays_silent() {
 
 #[test]
 fn an_assert_naming_a_signal_a_refused_binding_would_have_driven_is_not_a_second_finding() {
-    let out = synth_source(&source(concat!(
+    let out = synth_source(&gate_source(concat!(
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
         "  assert always(sig.w -> eventually sig.w within 1)\n",
     )));

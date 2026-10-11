@@ -25,7 +25,9 @@ use cairn_lang_redstone::{
 
 mod common;
 
-use common::{load_example, normalize_stage_tags, placement_from_source, routed_from_source};
+use common::{
+    load_example, normalize_stage_tags, placement_from_source, routed_from_source, strip_int_field,
+};
 
 /// AC1 — `examples/redstone-door.crn` compiled for Java: the sole
 /// `JavaRepeaterOr` cell picks up `local_delay_ticks = Some(1)` — base 1 tick
@@ -625,28 +627,13 @@ fn delay_leaves_routed_fields_byte_identical_apart_from_local_delay_ticks_and_st
     // `,"local_delay_ticks":<int>`. Strip that pattern, normalise the stage
     // tag each side carries, and the delayed and routed bytes must
     // match exactly.
-    let stripped_delayed = normalize_stage_tags(&strip_local_delay_ticks(&delayed_json));
+    let stripped_delayed =
+        normalize_stage_tags(&strip_int_field(&delayed_json, "local_delay_ticks"));
     assert_eq!(
         stripped_delayed,
         normalize_stage_tags(&routed_json),
         "delay must not perturb routed fields — delayed compact JSON with local_delay_ticks stripped and the stage tag normalised should match routed compact JSON byte-for-byte",
     );
-}
-
-fn strip_local_delay_ticks(compact: &str) -> String {
-    const PATTERN: &str = ",\"local_delay_ticks\":";
-    let mut out = String::with_capacity(compact.len());
-    let mut rest = compact;
-    while let Some(idx) = rest.find(PATTERN) {
-        out.push_str(&rest[..idx]);
-        let after = &rest[idx + PATTERN.len()..];
-        let end = after
-            .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(after.len());
-        rest = &after[end..];
-    }
-    out.push_str(rest);
-    out
 }
 
 /// AC9 — Java and Bedrock `InverterTorch` both carry base 1 tick, so
