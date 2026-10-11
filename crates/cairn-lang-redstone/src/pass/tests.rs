@@ -18,35 +18,15 @@ use crate::test_fixtures::{
     regionless_scope, reservation, scoped,
 };
 
-/// A reservation too shallow to hold its pad row is refused by
-/// stage 2, stage 3 and stage 4 alike, and the scope is elided
-/// rather than measured against a collapsed layout.
+/// A reservation too shallow to hold its pad row is refused by stages 2, 3 and 4 alike, and the
+/// scope is dropped rather than measured against a collapsed layout, where an actuator pad and a
+/// cell body share a voxel and the numbers look plausible.
 ///
-/// What the refusal prevents is an IR whose actuator pad and cell
-/// body are one voxel carrying a `wire_length` and a tick count
-/// measured against itself. Nothing downstream says so: the
-/// numbers are small and plausible, and the dump reads as a
-/// layout. The stages that can be handed one without stage 2
-/// having run are stages 3 and 4, reached by a caller that
-/// assembled the IR itself — an in-crate test, or a library
-/// consumer calling `compile_delay` or `compile_crossing`, which
-/// the crate root re-exports.
-///
-/// Written per stage rather than per pass because what is being
-/// held is that the three answer one geometry the same way; a case
-/// that asked only the stage under test could not fail on two of
-/// them at once. Both ends of the pad column are rowed, because
-/// they saturate onto different things — the actuator column onto
-/// a cell, the sensor column onto its own previous pad — and
-/// the message names which. `input_pad` and `output_pad` are
-/// tested as pure functions in `routing_geometry`; what their
-/// saturation feeds into is this refusal.
-///
-/// Hand-built, because the placement pass refuses a region this
-/// small one stage earlier and the CLI always runs it. That is not
-/// a reason to leave the shape untested: it is the shape a library
-/// consumer reaches, and until this change two of the three stages
-/// took it without a word.
+/// Asked of every stage at once, since what is held is that the three answer one geometry the
+/// same way. Both ends of the pad column are rowed, because they saturate onto different things
+/// (the actuator column onto a cell, the sensor column onto its own previous pad) and the message
+/// names which. Hand-built, because the placement pass refuses this region first; stages 3 and 4
+/// meet it from a library caller of `compile_delay` or `compile_crossing`.
 #[test]
 fn every_stage_refuses_a_reservation_too_shallow_for_its_pad_row() {
     let stages = stages();
@@ -70,11 +50,8 @@ fn every_stage_refuses_a_reservation_too_shallow_for_its_pad_row() {
                 "the {stage} pass names which pad could not fit, where, and why: {}",
                 refusal.primary,
             );
-            // The one word that is *meant* to differ between the
-            // three. Asserted here, and stripped before the
-            // cross-stage comparison below, so "one geometry, one
-            // sentence" is checked on the sentence rather than
-            // defeated by the noun.
+            // The netlist noun is meant to differ between stages, so it is asserted and stripped
+            // before the sentences are compared.
             let prefix = format!("{netlist} netlist for ");
             let rest = refusal.primary.strip_prefix(&prefix).unwrap_or_else(|| {
                 panic!(
@@ -88,8 +65,7 @@ fn every_stage_refuses_a_reservation_too_shallow_for_its_pad_row() {
                 vec!["roomy".to_owned()],
                 "the {stage} pass elides the refused scope and only that one",
             );
-            // The fix line and the span are what an author acts on, and
-            // nothing else in the crate asserts either. The span is the
+            // The fix line and the span are what an author acts on; the span is the
             // reservation's, because `size=` is the edit.
             let footer = refusal
                 .notes
@@ -110,9 +86,8 @@ fn every_stage_refuses_a_reservation_too_shallow_for_its_pad_row() {
         said.push((row, primaries));
     }
 
-    // One geometry, one sentence. A stage that refused for the
-    // right reason in different words would still leave an author
-    // comparing two messages to see they are the same finding.
+    // One geometry, one sentence, so an author never compares two messages to see they are one
+    // finding.
     for (row, primaries) in said {
         assert!(
             primaries.windows(2).all(|w| w[0] == w[1]),
@@ -122,17 +97,9 @@ fn every_stage_refuses_a_reservation_too_shallow_for_its_pad_row() {
     }
 }
 
-/// A cell-less scope one column wide collapses its sensor pad and
-/// its actuator pad onto `(0,0,0)` at any depth, and every stage
-/// says so with a fix line that asks for the width rather than for
-/// rows the region already has.
-///
-/// The region is four rows deep, and one pad on each edge wants one.
-/// A fix line that named only the depth rule would send the author
-/// to deepen a region whose depth is not the problem.
-///
-/// Hand-built, because the placement pass refuses a region this
-/// small one stage earlier and the CLI always runs it.
+/// A cell-less scope one column wide collapses its sensor pad and its actuator pad onto `(0,0,0)`
+/// at any depth, and every stage asks for the width rather than for rows the region already has:
+/// the region is four rows deep, and one pad on each edge wants one.
 #[test]
 fn every_stage_asks_a_one_column_identity_wire_for_a_second_column() {
     let region = reservation(1, 4, 2);
@@ -179,30 +146,18 @@ fn every_stage_asks_a_one_column_identity_wire_for_a_second_column() {
     }
 }
 
-/// A scope that collapses its pad row *and* strands a sink is
-/// refused over the pad row.
+/// A scope that collapses its pad row *and* strands a sink is refused over the pad row.
 ///
-/// Both are `E_ROUTE_CONGESTION`, so the code tells the author
-/// nothing about which they have, and both have one cause and one
-/// edit: the reserved area is too small. The pad-row message says
-/// that and names the `size=` line. The stranded-sink message
-/// describes a sink the router gave up on, which is a symptom of
-/// the same shortage and sends the author looking at their cells.
-/// Only one comes out — the pass returns at the first — so which
-/// one is a decision, made here by asking the pad row before the
-/// trees are grown.
-///
-/// The one-input row is the control: the same walls, the same
-/// boxed sinks, a pad column that fits. It has to keep reporting
-/// the stranded sink, or the rule above collapses into "always say
-/// congestion".
+/// Both are `E_ROUTE_CONGESTION` with one cause, a reserved area too small; the pad-row message
+/// says that and names the `size=` line, while the stranded-sink message describes a symptom and
+/// sends the author to their cells. Only the first refusal comes out, so the pad row is asked
+/// before the trees are grown. The one-input row, with a pad column that fits, is the control
+/// and still reports the stranded sink.
 #[test]
 fn a_scope_that_earns_both_refusals_is_refused_over_the_pad_row() {
     for (inputs, names, why) in [
-        // `cannot reach (x,y,z)`, not `cannot be reached`: the
-        // latter is only in the plural suffix, so a row keyed on
-        // it would pass on the count of stranded sinks rather than
-        // on the finding being the stranded-sink one.
+        // `cannot reach (x,y,z)` rather than `cannot be reached`, which is only in the plural
+        // suffix and would key the row on the count of stranded sinks.
         (1, "cannot reach (2,0,0)", "a pad column that fits"),
         (3, "input pad #2", "input #2 saturating onto input #1"),
     ] {
@@ -252,8 +207,7 @@ fn a_scope_that_earns_both_refusals_is_refused_over_the_pad_row() {
             primaries.len() == 1 && primaries[0].contains(names),
             "{inputs} input(s), {why}: expected the one refusal naming `{names}`, got {primaries:?}",
         );
-        // The premise of the paragraph above: one code for both, so
-        // the message is all the author has to tell them apart.
+        // One code for both, so the message is all that tells them apart.
         assert_eq!(
             routed.diagnostics[0].code,
             DiagnosticCode::RouteCongestion,
@@ -262,19 +216,10 @@ fn a_scope_that_earns_both_refusals_is_refused_over_the_pad_row() {
     }
 }
 
-/// The three stages that lay nets, each with the phase it expects
-/// to be handed and a reader for what it produced.
-///
-/// The shared shape of the cross-stage tests below: a scope's
-/// geometry does not vary with the phase, so one fixture can be put
-/// to all three, and a case that asked only one stage could not
-/// fail on two of them at once — which is the whole subject here,
-/// three passes that were answering one shape three ways.
-///
-/// The second field is the noun that pass's refusals name — the
-/// netlist it read. It is carried here rather than derived from the
-/// stage name so a test can assert the noun as part of the message
-/// instead of stripping it off to compare the rest.
+/// The three stages that lay nets, each with the phase it expects, the netlist noun its refusals
+/// name, and a reader for what it produced. A scope's geometry does not vary with the phase, so
+/// one fixture is put to all three; the noun is carried so a test can assert it as part of the
+/// message.
 type Stage = (
     &'static str,
     &'static str,
@@ -321,17 +266,9 @@ fn stages() -> [Stage; 3] {
     ]
 }
 
-/// A scope with cells and no reservation is `E_NO_CIRCUIT_REGION`
-/// at whichever stage meets it, and the scope is elided.
-///
-/// The routing pass used to pass this through: a `debug_assert!`
-/// that the scope was empty, and in release a scope handed on
-/// carrying cells that were never routed. Nothing downstream said
-/// so — the delay pass met the same scope and refused it there, one
-/// stage later, naming its own stage. What each pass writes is
-/// promised by the producer↔variant table on `PlacementPhase` after
-/// its own stage, so the pass that cannot write it is the pass that
-/// has to say why.
+/// A scope with cells and no reservation is `E_NO_CIRCUIT_REGION` at whichever stage meets it,
+/// and the scope is dropped: each pass writes a phase field `PlacementPhase` promises after its
+/// stage, so the pass that cannot write it says why.
 #[test]
 fn every_stage_refuses_a_scope_with_cells_and_no_region() {
     for (stage, _, phase, run) in &stages() {
@@ -355,12 +292,8 @@ fn every_stage_refuses_a_scope_with_cells_and_no_region() {
     }
 }
 
-/// And a scope with no reservation *and* nothing to lay out is
-/// still handed back, at every stage.
-///
-/// The guard above fires on cells or outputs, not on the absent
-/// region, so this is the case that says the refusal is keyed on
-/// what the scope carries rather than on what it lacks.
+/// A scope with no reservation and nothing to lay out is handed back at every stage: the refusal
+/// is keyed on what the scope carries, not on what it lacks.
 #[test]
 fn every_stage_passes_an_empty_regionless_scope_through() {
     for (stage, _, _, run) in &stages() {
@@ -377,19 +310,10 @@ fn every_stage_passes_an_empty_regionless_scope_through() {
     }
 }
 
-/// A driver naming a net no list can answer panics at every stage,
-/// naming the variant, the index, and the length it ran past.
-///
-/// Not a diagnostic: no edit to the source produces or repairs it,
-/// because no source produces it. It is a caller-side hand-built IR,
-/// and the crate's convention for one is to assert.
-///
-/// Both variants, because they used to fail differently and one of
-/// them did not fail at all. `Cell(j)` saturated onto the last cell
-/// in the routing pass's release build, rooting the net in the wrong
-/// corridor and laying its dust down the wrong one; `Input(i)`
-/// answered for any index in all three, with a pad coord standing in
-/// no block `block_sites` emitted.
+/// A driver naming a net no list can answer panics at every stage, naming the variant, the index
+/// and the length it ran past. Not a diagnostic: no source produces it, only a hand-built IR, and
+/// the crate asserts on those. Both variants, because clamping either would root the net
+/// somewhere plausible.
 #[test]
 fn every_stage_panics_on_a_net_index_the_ir_cannot_answer() {
     for which in [DanglingNet::Cell, DanglingNet::Input] {
@@ -414,20 +338,10 @@ fn every_stage_panics_on_a_net_index_the_ir_cannot_answer() {
     }
 }
 
-/// A sink the cap already puts out of reach is refused before a
-/// route to it is laid, at every stage that lays one.
-///
-/// The cap is on the routed segment, and the straight line between
-/// two coords is a floor on every route between them, so a sink
-/// further away than the cap has no route any stage would accept.
-/// Stage 3 used to be the one that said so, after stage 2 had laid
-/// the wire and stage 3 had laid it again: a `circuit region=`
-/// taken from a four-million-wide `size=` spent over a minute of a
-/// debug build doing that before answering.
-///
-/// Asked of all three because the check sits in the routine all
-/// three call to lay their nets, and the reason it sits there is
-/// that all three pay the cost.
+/// A sink the cap already puts out of reach is refused before a route to it is laid, at every
+/// stage that lays one: the straight line is a floor on every route, and laying the wire first
+/// costs a coord of search per block, which a `region=` taken from a wide `size=` makes millions.
+/// The check sits in the routine all three call, because all three would pay that.
 #[test]
 fn every_stage_refuses_a_sink_further_than_the_cap_can_reach() {
     // One block past the cap, not comfortably past: the bound is
@@ -452,10 +366,8 @@ fn every_stage_refuses_a_sink_further_than_the_cap_can_reach() {
                 "the {stage} pass names the sink, the distance and the cap: {}",
                 refusal.primary,
             );
-            // Which netlist the refusing pass read. A constant noun
-            // here would name the delay pass on the two paths that
-            // are not it, and the common one — `--stage route` over
-            // any `.crn` — is one of those two.
+            // A constant noun would name the delay pass on the other two paths, `--stage route`
+            // over any `.crn` among them.
             assert!(
                 refusal
                     .primary
@@ -477,14 +389,8 @@ fn every_stage_refuses_a_sink_further_than_the_cap_can_reach() {
     }
 }
 
-/// And a sink exactly at the cap is routed rather than refused, at
-/// every stage.
-///
-/// The boundary is the whole content of the check: one block closer
-/// and the wire is laid, measured, and accepted. A gate that
-/// refused here would be refusing layouts the language allows,
-/// which is the cost of putting a cheap test in front of an exact
-/// one.
+/// A sink exactly at the cap is routed rather than refused, at every stage: a cheap gate in front
+/// of the exact check must not refuse a layout the language allows.
 #[test]
 fn a_sink_exactly_at_the_cap_is_routed_rather_than_refused() {
     let width = MAX_ATTENUATION_SEGMENT + 1;
@@ -501,17 +407,10 @@ fn a_sink_exactly_at_the_cap_is_routed_rather_than_refused() {
     }
 }
 
-/// A scope carrying *both* an over-cap sink and a stranded one is
-/// answered by the cap, not by congestion.
-///
-/// The two repairs point opposite ways: `E_ROUTE_CONGESTION` tells
-/// the author to enlarge the reservation, and enlarging is exactly
-/// what cannot fix a straight line already over the cap — for the
-/// shape that raises it most often, a `region=` as wide as the
-/// `size=` it came from, enlarging makes it worse. So the order in
-/// [`lay_nets`] is a decision, and this is the fixture that holds
-/// it: the same scope minus its far sink earns the other code, so
-/// both faults really are present and the precedence is what picks.
+/// A scope carrying both an over-cap sink and a stranded one is answered by the cap: congestion
+/// says to enlarge the reservation, which cannot shorten a straight line already over the cap.
+/// The same scope minus its far sink earns congestion, so both faults are present and the order
+/// in [`lay_nets`] is what picks.
 #[test]
 fn an_over_cap_sink_outranks_a_stranded_one() {
     // `void=1` reserves no layer to come in over the top, so
@@ -591,16 +490,9 @@ fn an_over_cap_sink_outranks_a_stranded_one() {
     );
 }
 
-/// The walk names a cell before an actuator pad, and names the
-/// cell and port it actually reached.
-///
-/// Every other fixture here carries one cell or one output, so the
-/// index in `cell #N port #M` is always `#0` and "cells before
-/// outputs" is never put to the test: a walk that visited outputs
-/// first, or that reported the loop counter of the enclosing scope,
-/// would read identically. This scope carries two cells and an
-/// output pad, all three over the cap, so only one ordering and one
-/// pair of indices produces the sentence asserted below.
+/// The walk names a cell before an actuator pad, and the cell and port it actually reached. Two
+/// cells and an output pad, all over the cap, so only one ordering and one pair of indices
+/// produces the sentence asserted.
 #[test]
 fn the_walk_names_the_cell_it_reached_before_any_pad() {
     let width = MAX_ATTENUATION_SEGMENT + 44;

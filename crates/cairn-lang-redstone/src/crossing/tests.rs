@@ -24,10 +24,6 @@ use crate::test_fixtures::{DELAYED, placed_cell, reservation, scoped, staircase}
 
 #[test]
 fn no_scopes_input_yields_no_scopes_output() {
-    // A module without any redstone (upstream stages already
-    // elided every empty scope through `ScopedPlacementIr::push`)
-    // survives crossing legalization as a no-op, matching the
-    // delay pass's shape.
     let legalized = compile_crossing(&ScopedPlacementIr::new());
     assert!(legalized.diagnostics.is_empty());
     assert!(legalized.scoped.scopes.is_empty());
@@ -35,12 +31,7 @@ fn no_scopes_input_yields_no_scopes_output() {
 
 #[test]
 fn empty_scope_passes_through_untouched() {
-    // A caller-side hand-built input that hands the pass a scope
-    // with no cells and no outputs must return that scope verbatim
-    // — the "empty" elision is `ScopedPlacementIr::push`'s job on
-    // the input side, not this pass's. Mirrors the delay pass's
-    // pass-through so a downstream reader sees consistent
-    // behaviour across stages.
+    // Dropping an empty scope is `ScopedPlacementIr::push`'s job, not this pass's.
     let ir = PlacementIr::new(Edition::Java);
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "empty", ir));
     assert!(legalized.diagnostics.is_empty());
@@ -50,20 +41,14 @@ fn empty_scope_passes_through_untouched() {
 
 #[test]
 fn single_net_no_buffer_is_untouched() {
-    // 1 cell driven from Input(0), routed segment <= 15 → no
-    // buffer coord, no crossing. `buffer_coords` stays empty.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(5, 3, 2));
     ir.inputs.push(crate::netlist_ir::NetlistInput {
         name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
         span: Span::default(),
     });
-    // `(1, 0, 1)` is what the placement pass stamps for the first
-    // cell of a scope. The pad column is `x = 0`, so a cell at the
-    // origin stands on input pad #0 — which every stage refuses,
-    // and which this fixture is not about. It would also make the
-    // assertion below vacuous: pad and cell on one coord is a
-    // zero-length net, which needs no buffer whatever the rule is.
+    // `(1, 0, 1)` is where placement stamps the first cell. At the origin it would stand on input
+    // pad #0, a zero-length net that needs no buffer whatever the rule.
     ir.cells.push(placed_cell(
         EditionCell::JavaRepeaterOr,
         CellCoord::new(1, 0, 1),
@@ -94,10 +79,8 @@ fn single_net_no_buffer_is_untouched() {
 
 #[test]
 fn long_segment_places_buffer_on_plane() {
-    // A routed driver segment of 17 steps carries 16 blocks of
-    // dust, one past the attenuation limit → exactly one buffer
-    // coord, in place of the 16th block, 16 steps along the route.
-    // No collision → the buffer sits on `RouteLayer::Plane`.
+    // 17 steps carry 16 blocks of dust, one past the attenuation limit, so one buffer stands in
+    // place of the 16th block.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(20, 3, 2));
     ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -136,46 +119,28 @@ fn long_segment_places_buffer_on_plane() {
         BufferSegment::Port(PortName::A),
         "buffer preserves its driver port on the plane placement path",
     );
-    // Pins the `PlacedCellNode` `Serialize` impl's widest path
-    // (stage + cell + drivers + coord + wire_length + local_delay_ticks
-    // + buffer_coords). Without this, no test would exercise the
-    // full `Legalized { buffer_coords: <non-empty> }` JSON shape —
-    // only the narrower `Legalized { buffer_coords: empty }` case
-    // is covered by the byte-identity tests. A regression that
-    // dropped `buffer_coords` (or announced the wrong
-    // `field_count`) would slip past every other assertion here.
+    // The widest `Serialize` path, `Legalized` with a non-empty `buffer_coords`, which no
+    // byte-identity test reaches.
     let json = serde_json::to_string(&legalized.scoped)
         .expect("legalized scoped IR must serialise cleanly");
     assert!(
         json.contains("\"buffer_coords\":[{\"port\":\"a\",\"coord\":{\"x\":16,\"y\":0,\"z\":0}}]"),
         "expected buffer_coords entry to appear in JSON verbatim, got {json}",
     );
-    // The stage tag and a populated `buffer_coords` coexist: no
-    // `.crn` example reaches this path (every fixture's segments
-    // sit below the attenuation limit), so this hand-built IR is
-    // the only place the pairing is observable.
+    // No `.crn` example has a segment past the attenuation limit, so only this fixture shows the
+    // stage tag beside a populated `buffer_coords`.
     assert!(
         json.contains("\"stage\":\"crossing\""),
         "expected the crossing stage tag alongside buffer_coords, got {json}",
     );
 }
 
-/// A sink fifteen blocks from its driver with something standing
-/// halfway.
+/// A sink fifteen blocks from its driver with a block halfway.
 ///
-/// The pad is at `(0,0,0)` and the sink at `(15,0,0)`, so the
-/// straight line between them is 15 steps, 14 blocks of dust, and
-/// asks for no buffer repeater at all. A block at `(7,0,0)` sends
-/// the wire around it, and the two steps that costs put the segment
-/// over the attenuation limit: 17 steps, 16 blocks of dust, and one
-/// repeater on them.
-/// That gap between the straight line and the route is what every
-/// measurement in this pass has to be taken along.
-///
-/// The blocker drives nothing. A block is all the fixture needs,
-/// and a driver would make it a sink of the net under test — a
-/// different layout, and one with wire of its own running through
-/// the coords the assertions are about.
+/// The pad is at `(0,0,0)` and the sink at `(15,0,0)`: 15 steps in a straight line, 14 blocks of
+/// dust, no buffer. The block at `(7,0,0)` sends the wire round it, and the two steps that costs
+/// make 17 steps, 16 blocks of dust and one repeater. The blocker drives nothing, so no wire of
+/// its own runs through the coords under test.
 fn walled_scope(void: u32) -> ScopedPlacementIr {
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(20, 3, void));
@@ -204,17 +169,10 @@ fn walled_scope(void: u32) -> ScopedPlacementIr {
 /// The index of the sink in [`walled_scope`]'s cell list.
 const WALLED_SINK: usize = 1;
 
-/// The buffer materialises on the dust the signal actually
-/// travels, on the 17-step route.
-///
-/// The straight line from the pad to this sink is 15 steps, so
-/// measuring it asks for no buffer at all: 16 blocks of dust with
-/// nothing refreshing it, which is the signal never arriving. The
-/// coord is pinned rather than derived so a change to the axis
-/// order or the tie-break has to say so here. It is 15 steps along
-/// rather than 16: the route comes back along `z=1` and turns into
-/// the sink at `(15,0,1)`, and a repeater on the turn would face
-/// away from it.
+/// The straight line from the pad would ask for no buffer, leaving 16 blocks of dust unrefreshed.
+/// The coord is pinned so a change to the axis order or tie-break shows here. It is 15 steps along
+/// rather than 16 because the route comes back along `z=1` and turns into the sink at `(15,0,1)`,
+/// and a repeater on the turn would face away from it.
 #[test]
 fn buffer_lands_on_the_routed_path_not_the_straight_line() {
     let legalized = compile_crossing(&walled_scope(2));
@@ -230,10 +188,8 @@ fn buffer_lands_on_the_routed_path_not_the_straight_line() {
     assert_eq!(buffers[0].coord.layer, RouteLayer::Plane);
 }
 
-/// A second net over the walled fixture, so the "no buffer sits on
-/// a foreign net's dust" half of `every_buffer_stands_on_dust_the_
-/// routing_pass_laid` has something to reject. `sig.b` runs from
-/// its own pad along the row the `sig.a` route comes back down.
+/// [`walled_scope`] with a second net, `sig.b`, along the row the `sig.a` route comes back down,
+/// so a buffer on a foreign net's dust has something to stand on.
 fn two_net_walled_scope() -> ScopedPlacementIr {
     let mut scope = walled_scope(2);
     let ir = &mut scope.scopes[0].ir;
@@ -253,22 +209,12 @@ fn two_net_walled_scope() -> ScopedPlacementIr {
     scope
 }
 
-/// Every buffer stands on dust **stage 2 laid** — on the plane, a
-/// coord of its own net's [`NetTree::wire_path`]; on a bridge, a
-/// layer above one in the same column — and never on a coord
-/// another net's wire runs through, whichever layer that is.
+/// Every buffer stands on dust stage 2 laid (a coord of its own net's [`NetTree::wire_path`], or a
+/// layer above one in the same column, since the routed wire itself climbs) and never on a coord
+/// another net's wire runs through.
 ///
-/// "A layer above one in the same column" rather than "the plane
-/// coord below it", because the routed wire itself climbs now: a
-/// candidate the router lifted over a block is a bridge coord, and
-/// a repeater escaping that stands over a bridge rather than over
-/// the ground layer.
-///
-/// Checked against `wire_path` rather than against the `route_to`
-/// the allocator itself reads: comparing the production path to
-/// itself would assert nothing, and the failure this guards is
-/// precisely a route that wanders off the wire the routing pass
-/// put in the occupancy set.
+/// Checked against `wire_path` rather than the `route_to` the allocator reads, since comparing
+/// that path to itself would assert nothing.
 #[test]
 fn every_buffer_stands_on_dust_the_routing_pass_laid() {
     let legalized = compile_crossing(&two_net_walled_scope());
@@ -345,25 +291,14 @@ fn every_buffer_stands_on_dust_the_routing_pass_laid() {
     );
 }
 
-/// Stage 3 charges ticks for the repeaters a cell's signals pass
-/// through and stage 4 materialises them; the two counts are one
-/// number or the delay is a fiction.
+/// Stage 3 charges ticks for the repeaters a cell's signals pass through and stage 4 lays them, so
+/// the two counts must agree.
 ///
-/// Distinct coords rather than `buffer_coords().len()`, because
-/// the vector attributes one entry per driver segment and two
-/// segments of one net share the repeater standing on their
-/// prefix — see [`BufferCoord`]. Every cell in this fixture has a
-/// single driver, so the two counts coincide here;
-/// `ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust`
-/// is where they come apart.
-///
-/// `phase4_invariant` already property-tests that agreement, but
-/// its strategy seeds sinks along one row from one pad, and an
-/// unobstructed layout is exactly where the straight line and the
-/// route coincide — the invariant held there before this pass read
-/// the route at all. The walled fixture is the discriminating
-/// case: Manhattan says 15 steps and no buffer, the route says 17
-/// and one.
+/// Distinct coords rather than `buffer_coords().len()`, because two segments of one net share the
+/// repeater on their prefix; every cell here has one driver, and
+/// `ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust` is where the two differ. The
+/// proptest seeds unobstructed layouts, where the straight line and the route mostly coincide;
+/// here Manhattan says 15 steps and no buffer, and the route says 17 and one.
 #[test]
 fn the_buffer_count_matches_the_ticks_delay_charged() {
     let mut routed = walled_scope(2);
@@ -398,17 +333,9 @@ fn the_buffer_count_matches_the_ticks_delay_charged() {
     }
 }
 
-/// Two nets want the same 15-block point, and the reservation
-/// decides whether the second one fits.
-///
-/// `sig.a` runs left-to-right from its pad along `z=1` and cell #0
-/// drives right-to-left, and the straight line each of them would
-/// take is the same row. One of them gets it.
-///
-/// Both sinks sit one row off that shared row so neither cell body
-/// stands on the other net's line — a block in the way would send
-/// the router round it, and the two nets would stop wanting the
-/// same coords for a reason this fixture is not about.
+/// Two nets whose straight lines share one row, `z=1`: `sig.a` runs left to right from its pad and
+/// cell #0 drives right to left. Both sinks sit one row off it, so neither cell body stands on the
+/// other net's line and sends the router round for an unrelated reason.
 fn two_nets_that_want_one_row_scope(void: u32) -> ScopedPlacementIr {
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(40, 4, void));
@@ -418,8 +345,6 @@ fn two_nets_that_want_one_row_scope(void: u32) -> ScopedPlacementIr {
             span: Span::default(),
         });
     }
-    // #0 is the far driver; its own segment buffers off to the
-    // side, on the `sig.b` pad row.
     ir.cells.push(placed_cell(
         EditionCell::JavaRepeaterOr,
         CellCoord::new(30, 0, 1),
@@ -429,9 +354,6 @@ fn two_nets_that_want_one_row_scope(void: u32) -> ScopedPlacementIr {
         }],
         DELAYED,
     ));
-    // #1 asks for (15,0,1) first and is lifted off it, because the
-    // wire cell #0 drives runs through the coord on its way back
-    // down the row.
     ir.cells.push(placed_cell(
         EditionCell::JavaRepeaterOr,
         CellCoord::new(20, 0, 0),
@@ -441,8 +363,6 @@ fn two_nets_that_want_one_row_scope(void: u32) -> ScopedPlacementIr {
         }],
         DELAYED,
     ));
-    // #2 is fed by cell #0 across 20 blocks and wants the same
-    // coord, with `sig.a`'s wire on the plane below it.
     ir.cells.push(placed_cell(
         EditionCell::JavaRepeaterOr,
         CellCoord::new(10, 0, 2),
@@ -455,24 +375,13 @@ fn two_nets_that_want_one_row_scope(void: u32) -> ScopedPlacementIr {
     scoped(ScopeKind::Struct, "shared", ir)
 }
 
-/// Two nets that want one row are laid apart, and the row goes to
-/// one of them.
+/// Two nets that want one row are laid apart, the row going to one of them. Stage 2 answers this,
+/// so the assertion is about the wires and there is no finding.
 ///
-/// This is the shape the crossing pass used to report and could
-/// not repair: two signals on one strand of dust. Stage 2 is where
-/// it is answered now, so the assertion is about the wires rather
-/// than about a finding — there is no finding, and that is the
-/// point.
-///
-/// The fixture checks itself: routing each net against the blocks
-/// alone — which is what the pass did before — puts them both on
-/// the same coord, so the disjointness below is the change and not
-/// the geometry.
-///
-/// The region is roomy, so the second net goes round rather than
-/// over; the climb is the same rule where there is no room, and
-/// `a_net_with_no_way_round_climbs_over_the_dust_in_its_way` in
-/// `routing_geometry` is where that half is pinned.
+/// Routing each net against the blocks alone puts both on one coord, which the test asserts
+/// first, so the disjointness below is the rule at work rather than the geometry. The region is
+/// roomy, so the second net goes round; `a_net_with_no_way_round_climbs_over_the_dust_in_its_way`
+/// in `routing_geometry` pins the climb.
 #[test]
 fn two_nets_that_want_one_row_are_laid_apart() {
     let scope = two_nets_that_want_one_row_scope(3);
@@ -515,12 +424,8 @@ fn two_nets_that_want_one_row_are_laid_apart() {
          coord when each is routed against the blocks alone",
     );
 
-    // The third hand-copy of the adjacency rule, and the reason
-    // `routing_geometry`'s doc counts two: this one is an
-    // integration-level check on the pass, so going through
-    // `beside` would let a mutant that empties it pass here as
-    // well as in the sweeps. Widening the rule means editing three
-    // places, not two.
+    // The adjacency rule written out rather than through `beside`, so a mutant that empties
+    // `beside` cannot pass here too.
     let dust: Vec<(NetRef, Vec<CellCoord>)> = trees
         .iter()
         .map(|(net, tree)| (*net, router.dust(tree)))
@@ -540,28 +445,13 @@ fn two_nets_that_want_one_row_are_laid_apart() {
     }
 }
 
-/// A fan-out's shared prefix carries one repeater, and every sink
-/// past it is fed by that one.
+/// A fan-out's shared prefix carries one repeater, and every sink past it is fed by that one.
 ///
-/// The first cell ends the straight run at `(16,0,0)`, and the
-/// route to every later one leaves the row at `(15,0,0)` to go
-/// round it, so that coord is a fork. A repeater there would face
-/// one branch and starve the other; the one on the trunk just
-/// before it, at `(14,0,0)`, refreshes the signal for all of them,
-/// and a second sink asking for one is asking for a block that is
-/// already in the layout.
-///
-/// The `void` column is what the rows are for. Escaping around
-/// the repeater needs a layer above the plane, so two sinks used
-/// to cost two blocks under `void=3` and three sinks were refused
-/// under `void=2` for wanting a third layer. Reuse needs no layer
-/// at all, which is why `void=1` is a row here.
-///
-/// The coord is compared whole rather than by `x`/`z`: a
-/// `CellCoord::new` is on [`RouteLayer::Plane`] by construction
-/// and `layer` is part of the comparison, so a buffer that
-/// escaped upward fails this assertion rather than passing it on
-/// its footprint.
+/// The first cell ends the straight run at `(16,0,0)` and the route to every later one leaves the
+/// row at `(15,0,0)` to go round it, so that coord is a fork, where a repeater would starve one
+/// branch. The one on the trunk at `(14,0,0)` refreshes the signal for all of them. Reuse needs no
+/// layer above the plane, which is why `void=1` is among the cases. The coord is compared whole,
+/// `layer` included, so a buffer that escaped upward fails.
 #[test]
 fn a_shared_prefix_carries_one_repeater_however_many_sinks_hang_off_it() {
     for (sinks, void) in [(2u32, 3u32), (3, 2), (2, 1), (3, 1)] {
@@ -604,18 +494,12 @@ fn a_shared_prefix_carries_one_repeater_however_many_sinks_hang_off_it() {
     }
 }
 
-/// A buffer candidate is never a component.
+/// A buffer candidate is never a component: a candidate sits strictly between the ends of a
+/// route, and the router keeps those coords off the blocks. With each net owning its dust alone,
+/// this pass has no coord to contest.
 ///
-/// A candidate sits strictly between the ends of a route, and the
-/// router keeps every coord strictly between them off the blocks —
-/// so the coord a repeater lands on is wire, never a cell body or a
-/// pad. That, together with each net owning its dust alone, is why
-/// this pass has no coord to contest and no escape to make.
-///
-/// The layout below is the one that used to refuse: `sig.a`'s route
-/// ran straight down the row and its 15-step point landed inside
-/// `sig.b`'s cell, with `void=1` reserving no layer to lift the
-/// repeater onto.
+/// Here `sig.a`'s straight-line 15-step point is `sig.b`'s cell body, with `void=1` leaving no
+/// layer above it.
 #[test]
 fn a_buffer_candidate_is_never_a_cell_body() {
     let legalized = compile_crossing(&cell_on_the_fifteen_step_point());
@@ -643,8 +527,7 @@ fn a_buffer_candidate_is_never_a_cell_body() {
     );
 }
 
-/// `sig.b`'s cell standing where `sig.a`'s route used to put its
-/// repeater.
+/// `sig.b`'s cell standing on `sig.a`'s straight-line 15-step point.
 fn cell_on_the_fifteen_step_point() -> ScopedPlacementIr {
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(20, 3, 1));
@@ -675,43 +558,13 @@ fn cell_on_the_fifteen_step_point() -> ScopedPlacementIr {
     scoped(ScopeKind::Struct, "packed", ir)
 }
 
-/// Two ports of one cell on one net are fed by one strand of
-/// dust: two attributions, one block, one charge.
+/// A cell fed by two *distinct* nets is charged for every buffer standing on both.
 ///
-/// Threaded through routing → delay → crossing rather than handed
-/// a `Delayed` fixture, because the three numbers this pins are
-/// written by three different passes — `wire_length` by stage 2,
-/// `local_delay_ticks` by stage 3, `buffer_coords` by stage 4 — and the
-/// defect was that each of them counted the one segment once per
-/// port.
-///
-/// `JavaComparatorAnd` rather than a Mux so the base delay is a
-/// pinned 1 rather than the `_Unpinned` sentinel, and because
-/// `sig.s0 = sig.a and sig.a` is how a `.crn` reaches this shape —
-/// see `ports_sharing_a_net_are_measured_once` in
-/// `tests/redstone/routing.rs`.
-/// A cell fed by two *distinct* nets is charged for every buffer
-/// standing on both of them.
-///
-/// `phase4_buffer_tick_invariant_holds` generates every cell from
-/// one net, so on its cases a sum over the driving nets and a max
-/// over them are the same number and the proptest cannot tell
-/// them apart. This is the shape where they differ, and it is the
-/// shape the stage-3 / stage-4 identity is actually load-bearing
-/// on: `sig.a` reaches the comparator over 42 blocks of dust and
-/// two buffers, the upstream cell over 20 blocks and one, so the
-/// figure is `base + 3` where a max would write `base + 2` and
-/// leave the block on the shorter segment standing under no tick
-/// at all.
-///
-/// Threaded through routing → delay → crossing rather than handed
-/// a `Delayed` fixture, for the reason
-/// `ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust`
-/// is: the tick figure and the blocks it is checked against are
-/// written by two different passes, and a fixture that skipped
-/// one would check a pass against itself. `cells[0]` drives the
-/// comparator without being driven itself, which is what makes
-/// its segment short while `sig.a` runs the width of the region.
+/// The proptest drives every cell from one net, where a sum and a max over the driving nets agree.
+/// Here `sig.a` reaches the comparator over 42 blocks of dust and two buffers and the upstream
+/// cell over 20 blocks and one, so the figure is `base + 3` where a max would write `base + 2`.
+/// Threaded through all three passes so the ticks and the blocks come from different passes.
+/// `cells[0]` drives the comparator without being driven, which keeps its segment short.
 #[test]
 fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -762,9 +615,8 @@ fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
             .filter(|b| b.port == BufferSegment::Port(port))
             .count()
     };
-    // The counts, not just the total: equal counts would make the
-    // sum and the max differ by an amount this fixture could not
-    // attribute to either net.
+    // Per port, not just the total, so the sum and the max differ by an amount attributable to
+    // one net.
     assert_eq!(
         (per_port(PortName::A), per_port(PortName::B)),
         (1, 2),
@@ -787,8 +639,7 @@ fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
         blocks * BUFFER_REPEATER_TICKS,
         "every block stage 4 laid is a tick stage 3 charged",
     );
-    // And the figure a max would have written, so the test fails
-    // rather than narrows if the fold ever changes.
+    // And not the figure a max over the driving nets would write.
     let widest = u32::try_from(per_port(PortName::A).max(per_port(PortName::B)))
         .expect("two buffers fit in u32");
     assert_ne!(
@@ -798,6 +649,13 @@ fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
     );
 }
 
+/// Two ports of one cell on one net are fed by one strand of dust: two attributions, one block,
+/// one charge.
+///
+/// Threaded through routing, delay and crossing because `wire_length`, `local_delay_ticks` and
+/// `buffer_coords` are written by three passes, each of which must count the segment once.
+/// `JavaComparatorAnd` so the base delay is a pinned 1; `sig.s0 = sig.a and sig.a` is how a `.crn`
+/// reaches this shape (`ports_sharing_a_net_are_measured_once` in `tests/redstone/routing.rs`).
 #[test]
 fn ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -863,24 +721,13 @@ fn ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust() {
     );
 }
 
-/// The wire out to an actuator records a repeater a *cell*
-/// segment placed.
+/// The wire out to an actuator records a repeater a *cell* segment placed.
 ///
-/// One placer walks the cells and then the actuator pads, so this
-/// is the only direction the two segment kinds can meet: the cell
-/// takes the plane coord, and the pad's route reaches it 15 steps
-/// along as well. The reverse cannot happen, because no cell is
-/// allocated after an output.
-///
-/// The pad's route is longer than the cell's by more than the 13
-/// blocks between them, because the cell is a block on the row and
-/// the wire out now steps around it — so the pad's segment asks for
-/// a second repeater of its own past the shared one.
-///
-/// The route forks at `(16,0,0)`, into the cell and round it, so the
-/// shared repeater stands on the trunk one coord before the fork.
-/// The second stands at `(29,0,1)`, the last straight coord before
-/// the wire turns at `(30,0,1)` into the pad at `(30,0,0)`.
+/// Cells are placed before actuator pads, so this is the only direction the two can meet. The
+/// cell is a block on the row, so the pad's wire steps round it and needs a second repeater past
+/// the shared one. The route forks at `(16,0,0)`, into the cell and round it, so the shared
+/// repeater stands one coord before the fork; the second stands at `(29,0,1)`, the last straight
+/// coord before the turn at `(30,0,1)` into the pad at `(30,0,0)`.
 #[test]
 fn an_actuator_segment_records_the_repeater_a_cell_segment_placed() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -940,28 +787,16 @@ fn an_actuator_segment_records_the_repeater_a_cell_segment_placed() {
     );
 }
 
-/// Every port spelling reaches the push site and the wire form.
+/// Every port spelling reaches the push site and the wire form. Every other buffer test drives a
+/// single `A`; here the three drivers are on three different nets, so each port carries its own
+/// coord out.
 ///
-/// A regression that hard-coded `PortName::A` would slip past
-/// every other buffer test, which drives a single `A`. The three
-/// drivers are on three *different* nets, so the three segments
-/// are three routes rather than one shared prefix, and each port
-/// has to carry its own coord out.
-///
-/// The four nets contend for the rows across the region. Their pads
-/// stand at `z=0`, `2`, `3` and `4`, the column stepping over the
-/// cell row. `sig.sel` is laid first — same fanout, lowest
-/// [`crate::grid::net_ref_key`] — and runs out along
-/// `z=0`; `sig.blocker` takes the row at `z=2`, and `sig.port_a`,
-/// whose pad stands beside that row, has no row left and climbs at
-/// its own pad; `sig.port_b` runs out along `z=4`. Every repeater
-/// still stands on its own port's route, and the one on
-/// [`RouteLayer::Bridge`] is that rule holding through the escape —
-/// `CellCoord::new` decides the layer from the height, so the
-/// comparison below carries it. `sig.sel` turns off `z=0` at
-/// `(14,0,0)` and back east at `(14,0,1)`, and its repeater falls
-/// due 16 steps along, on `(15,0,1)`, where the wire runs straight
-/// again past both turns.
+/// The four nets contend for the rows. Their pads stand at `z=0`, `2`, `3` and `4`, stepping over
+/// the cell row. `sig.sel` is laid first (same fanout, lowest [`crate::grid::net_ref_key`]) along
+/// `z=0`; `sig.blocker` takes `z=2`; `sig.port_a`, whose pad stands beside that row, has no row
+/// left and climbs at its own pad; `sig.port_b` runs along `z=4`. The [`RouteLayer::Bridge`]
+/// repeater is the same rule holding through the climb. `sig.sel` turns off `z=0` at `(14,0,0)`
+/// and back east at `(14,0,1)`, so its repeater, due 16 steps along, stands on `(15,0,1)`.
 #[test]
 fn mux_ports_each_keep_the_coord_their_own_segment_reaches() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -1031,14 +866,8 @@ fn mux_ports_each_keep_the_coord_their_own_segment_reaches() {
     expected = "for cell #0 at (16,0,1) in struct `twice` — crossing legalization must run exactly once per delayed IR"
 )]
 fn re_running_crossing_pass_panics_loudly() {
-    // Chaining `compile_crossing(&legalized.scoped)` is forbidden
-    // by the producer↔variant table on `PlacementPhase`. Loud in
-    // release so
-    // a caller cannot silently double-populate `buffer_coords`.
-    // The expected substring pins the cell identity as well as the
-    // invariant: the breadcrumb is what tells an operator which
-    // cell tripped the guard without walking the backtrace back
-    // into the IR.
+    // The expected text pins the cell identity too, which tells an operator which cell tripped
+    // the guard.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(20, 3, 2));
     ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -1060,9 +889,7 @@ fn re_running_crossing_pass_panics_loudly() {
 
 #[test]
 fn missing_region_with_cells_fires_no_circuit_region() {
-    // Hand-built `PlacementIr` with cells but no region reaches
-    // crossing because it skipped placement. Mirrors the delay
-    // pass's hardening.
+    // Only an IR that skipped placement has cells and no region.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.cells.push(placed_cell(
         EditionCell::JavaRepeaterOr,
@@ -1089,11 +916,7 @@ fn missing_region_with_cells_fires_no_circuit_region() {
 
 #[test]
 fn missing_region_empty_scope_passes_through() {
-    // No region + no cells + no outputs = harmless empty scope
-    // that the pass returns verbatim. Prior stages will not
-    // produce this shape, but a hand-built input reaching here
-    // must not trip the `NoCircuitRegion` refusal — that guard
-    // only fires when the scope carries cells or outputs.
+    // Prior stages never produce this, and the refusal is only for a scope with cells or outputs.
     let ir = PlacementIr::new(Edition::Java);
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "harmless", ir));
     assert!(legalized.diagnostics.is_empty());
@@ -1103,10 +926,7 @@ fn missing_region_empty_scope_passes_through() {
 
 #[test]
 fn output_only_scope_with_missing_region_refuses() {
-    // Outputs but no cells with no region: still a phase-table
-    // violation because `PlacementIr::is_empty` returns false as
-    // long as outputs exist. Should refuse with `NoCircuitRegion`
-    // for parity with the delay pass.
+    // `PlacementIr::is_empty` is false while outputs exist, so this is not the empty pass-through.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.outputs.push(PlacedOutputNode::new(
         cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["x".into()]),
@@ -1125,14 +945,9 @@ fn output_only_scope_with_missing_region_refuses() {
     );
 }
 
-/// Stage 4 refuses a stretch no repeater can stand on as stage 3
-/// does, on the tree stage 2 laid.
-///
-/// Stage 3 refuses the scope, so nothing hands stage 4 a delayed
-/// staircase; the routed one is promoted by hand, which is the IR
-/// `--stage crossing` would be given without stage 3 having run.
-/// The two refusals agree word for word but for the netlist they
-/// name.
+/// Stage 4 refuses a stretch no repeater can stand on as stage 3 does, word for word but for the
+/// netlist named. Stage 3 refuses the staircase, so the routed one is promoted by hand: what
+/// `--stage crossing` would get without stage 3.
 #[test]
 fn a_stretch_with_nowhere_for_a_repeater_is_refused() {
     let routed = compile_routing(&staircase(&PlacementPhase::Unrouted));
@@ -1178,16 +993,13 @@ fn a_stretch_with_nowhere_for_a_repeater_is_refused() {
     assert_eq!(survivors, vec!["roomy"]);
 }
 
-/// A route that turns at the 16-step point takes a second repeater
-/// its length alone does not ask for, and stage 3 charges for it.
+/// A route that turns at the 16-step point takes a second repeater its length alone does not ask
+/// for, and stage 3 charges for it.
 ///
-/// 32 steps from `(0,0,0)` to `(16,0,16)`, east then south. The
-/// first repeater falls due 16 steps along, on the corner, so it
-/// stands one short of it; the 16 blocks of dust it leaves ahead
-/// are one too many, and the second stands on `(16,0,15)`, the last
-/// coord before the sink. `buffer_count_for_segment(32)` is 1, so a
-/// delay pass that still counted from the length would charge one
-/// tick for two blocks.
+/// 32 steps from `(0,0,0)` to `(16,0,16)`, east then south. The first repeater falls due on the
+/// corner, so it stands one short of it; the 16 blocks of dust it leaves ahead are one too many,
+/// and the second stands on `(16,0,15)`. `buffer_count_for_segment(32)` is 1, so counting from
+/// the length would charge one tick for two blocks.
 #[test]
 fn a_turn_at_the_limit_costs_the_route_a_second_repeater() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -1235,18 +1047,10 @@ fn a_turn_at_the_limit_costs_the_route_a_second_repeater() {
 
 #[test]
 fn buffer_coord_index_at_kth_boundary() {
-    // A routed driver segment of 49 steps trips the attenuation
-    // limit three times, so three buffer coords land. The delay
-    // pass has a mirrored boundary-row test on the tick side
-    // (`s → buffers`); this is its mirror on the coord side.
-    //
-    // The route `(0, 0, 0) → (48, 0, 1)` walks x++ 48 steps then
-    // z++ 1 step. The first two repeaters stand on the straight
-    // run at `path[16]` and `path[32]`. `path[48]` is `(48, 0, 0)`,
-    // where the wire turns towards the sink: a repeater there
-    // would drive into `(49, 0, 0)`, which is not the wire, so the
-    // third stands on `(47, 0, 0)`, the last straight coord before
-    // the turn. No collision → every buffer stays on plane.
+    // 49 steps trip the attenuation limit three times; the delay tests' tick-side table has the
+    // same row. The route walks x 48 steps then z 1 step. The first two repeaters stand at
+    // `path[16]` and `path[32]`; `path[48]` is the turn, where a repeater would drive off the
+    // wire, so the third stands one short of it.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(52, 3, 3));
     ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -1289,13 +1093,8 @@ fn buffer_coord_index_at_kth_boundary() {
 
 #[test]
 fn buffer_coord_index_at_max_segment_boundary() {
-    // Companion to `buffer_coord_index_at_kth_boundary`, at the far
-    // end of the range the delay pass's `MAX_ATTENUATION_SEGMENT =
-    // 256` sanity cap permits. A segment of exactly 256 steps
-    // yields 15 buffers, matching the tick-side boundary table row
-    // for that segment, all at `k * 16` on the straight run: the
-    // turn at `path[255]` is not one of those, so nothing steps
-    // back.
+    // The far end of the range `MAX_ATTENUATION_SEGMENT` permits: 256 steps take 15 buffers, as
+    // in the tick-side table, all at `k * 16` on the straight run.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(256, 3, 3));
     ir.inputs.push(crate::netlist_ir::NetlistInput {
@@ -1329,11 +1128,6 @@ fn buffer_coord_index_at_max_segment_boundary() {
 #[test]
 #[should_panic(expected = "topological invariant broken")]
 fn out_of_range_net_ref_cell_panics_loudly() {
-    // Mirrors `delay.rs`'s equivalent guard: a hand-built IR with
-    // `NetRef::Cell(u32::MAX)` violates the synthesis-side
-    // topological invariant, and the crossing pass panics loud so
-    // a caller-side bug cannot produce silently wrong
-    // `buffer_coords`.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(5, 3, 2));
     ir.cells.push(placed_cell(
@@ -1353,13 +1147,8 @@ fn out_of_range_net_ref_cell_panics_loudly() {
     expected = "for cell #1 at (4,0,1) in struct `mixed` — crossing legalization must run exactly once per delayed IR"
 )]
 fn legalize_panic_names_the_offending_cell_not_the_first_one() {
-    // Re-running the whole pass always trips on `cells[0]`, which
-    // would let a regression that hardcoded the index to zero — or
-    // that read the coord off the wrong cell — pass unnoticed. A
-    // hand-built IR whose first cell is still `Delayed` while the
-    // second is already `Legalized` forces the panic past the head
-    // of the loop, so both the index and the coord have to be
-    // threaded from the cell actually being transitioned.
+    // Re-running the whole pass trips on `cells[0]`, which cannot tell a hard-coded index from the
+    // real one; a `Delayed` first cell and a `Legalized` second one put the panic on `cells[1]`.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(8, 3, 2));
     ir.cells.push(placed_cell(
@@ -1384,16 +1173,10 @@ fn legalize_panic_names_the_offending_cell_not_the_first_one() {
 }
 
 mod strand_invariant {
-    //! The attenuation limit holds along whole strands, across the
-    //! cells that pass strength on — checked by a walk written out
-    //! here rather than through the placer's own budgets, so a
-    //! placer that stopped carrying the dust across a cell fails.
-    //!
-    //! "Strand" here is the run of dust counted from the last block
-    //! that restored strength, which carries on through a cell that
-    //! passes strength on. It is not the physically contiguous dust
-    //! the rest of this module means when it keeps two signals off
-    //! one strand: a cell's body stands in the middle of this one.
+    //! The attenuation limit holds along whole strands, across the cells that pass strength on,
+    //! checked by a walk written out here rather than through the placer's budgets. "Strand" here
+    //! is the dust counted from the last block that restored strength, through such cells, not
+    //! the contiguous dust the rest of this module keeps two signals off.
 
     use std::collections::HashMap;
     use std::fmt::Write as _;
@@ -1437,31 +1220,18 @@ mod strand_invariant {
         legalized.scoped.scopes[0].ir.clone()
     }
 
-    /// Walks every net in topological order, carrying the dust spent
-    /// since the last block that restores strength — a sensor pad, a
-    /// repeater, or a cell whose output is at full strength — across
-    /// the cells that pass it on, and asserts that no block of dust
-    /// is past the limit, and no sink or repeater is reached over
-    /// more than the limit's worth of dust. Returns how many buffer
-    /// repeaters it met, so a caller can tell the walk saw some.
+    /// Walks every net in topological order, carrying the dust spent since the last block that
+    /// restores strength across the cells that pass it on, and asserts that no block of dust is
+    /// past the limit and no sink or repeater is reached over more than the limit's worth.
+    /// Returns how many buffer repeaters it met.
     ///
-    /// What it catches: it reads the repeaters out of the IR and
-    /// never calls the placer, so a repeater missing where the dust
-    /// runs past the limit fails it, and so does a placer that stops
-    /// carrying the count across a cell. What it does not:
+    /// It reads the repeaters out of the IR and never calls the placer. It does not catch:
     ///
-    /// - It tells dust from a sink or a repeater by the same rule as
-    ///   the placer: a coord the tree runs on past, unless a repeater
-    ///   stands there. So it holds the placer to the placer's own
-    ///   idea of which coords are dust, and were that idea off by one
-    ///   — as counting the sink as a block of dust once was — the two
-    ///   would agree and it would not notice.
-    /// - It is one-sided. It asserts that no strand runs too far, not
-    ///   that every repeater is needed, so a placer that stood a
-    ///   repeater on every coord that could hold one would pass it.
-    ///   [`a_strand_through_a_dust_merge_steps_back_off_a_turn_once`]
-    ///   and [`a_strand_through_a_comparator_steps_back_off_a_fork_once`]
-    ///   pin that side, by exact equality, on a turn and on a fork.
+    /// - an off-by-one in which coords are dust, since it tells dust from a sink or a repeater by
+    ///   the placer's own rule;
+    /// - a repeater too many, since it is one-sided.
+    ///   [`a_strand_through_a_dust_merge_steps_back_off_a_turn_once`] and
+    ///   [`a_strand_through_a_comparator_steps_back_off_a_fork_once`] pin that side exactly.
     fn assert_no_strand_runs_past_the_limit(ir: &PlacementIr, label: &str) -> usize {
         let region = ir.region.clone().expect("the fixture carries a region");
         let nets = collect_nets(ir);
@@ -1673,15 +1443,10 @@ struct chain size=60x5
         )
     }
 
-    /// The upper bound the strand walk does not pin, on a turn. A
-    /// Bedrock OR, a dust merge, stands 6 steps from the sensor and
-    /// drives a pad at `(16, 0, 2)`, which its wire reaches by running
-    /// east to `(16, 0, 0)` and turning south. The strand runs on
-    /// through the merge, its 6th block of dust, so its 16th is the
-    /// corner, and the repeater steps back to `(15, 0, 0)`. That is
-    /// the only one in the scope: the strand walk passes this, and
-    /// would pass it as well with a repeater on every straight coord;
-    /// the count and the exact lists are what would not.
+    /// The upper bound the strand walk does not pin, on a turn. A Bedrock OR, a dust merge, stands
+    /// 6 steps from the sensor and drives a pad at `(16, 0, 2)`, reached east to `(16, 0, 0)` then
+    /// south. The strand runs on through the merge as its 6th block of dust, so its 16th is the
+    /// corner, and the repeater steps back to `(15, 0, 0)`, the only one in the scope.
     #[test]
     fn a_strand_through_a_dust_merge_steps_back_off_a_turn_once() {
         let ir = one_cell_by_hand(
@@ -1746,12 +1511,9 @@ struct chain size=60x5
 }
 
 mod phase4_invariant {
-    //! Property tests for the crossing / delay agreement invariant
-    //! (see the `phase4_buffer_tick_invariant_holds` doc). Kept
-    //! inside the crossing pass's own crate-internal test module so
-    //! the strategy can hand-build `Unrouted` [`PlacedCellNode`]s
-    //! (the `PlacementPhase` variants and the `pub(crate)`
-    //! `phase` field are not reachable from `tests/redstone/crossing.rs`).
+    //! Property tests for the crossing and delay agreement, here rather than in
+    //! `tests/redstone/crossing.rs` because the strategy hand-builds `Unrouted`
+    //! [`PlacedCellNode`]s through the `pub(crate)` `phase` field.
     use proptest::prelude::*;
 
     use super::{
@@ -1765,45 +1527,19 @@ mod phase4_invariant {
     use crate::routing::compile_routing;
     use crate::routing_geometry::NetTree;
 
-    /// Strategy over sink positions for the phase-4 invariant
-    /// property test. Each `(x, z)` in the returned `Vec` seeds one
-    /// cell at `(x, 0, z)` driven from `Input(0)` at `(0, 0, 0)`.
-    /// `x` in `1..=99` covers both the sub-limit segments (zero
-    /// buffers) and the multi-boundary ones, so `buffer_total` is
-    /// non-zero on most cases and the invariant discriminates.
+    /// Sink positions for the stage-4 invariant: each `(x, z)` seeds a cell at `(x, 0, z)` driven
+    /// from `Input(0)` at `(0, 0, 0)`. `x` in `1..=99` spans sub-limit segments and several
+    /// boundaries, so most cases carry buffers.
     ///
-    /// `z` varies rather than sitting at 0. A row of collinear
-    /// sinks is the one shape where every strand runs along a
-    /// single axis, which is where a route and the straight line
-    /// between its ends coincide — and coinciding is what hid the
-    /// bug this suite missed. Off-axis terminals are what let the
-    /// two differ.
+    /// `z` varies because collinear sinks are the one shape where a route and the straight line
+    /// coincide. The `bool` gives a cell a second port on the *same* net, so the block count and
+    /// the attribution count can differ.
     ///
-    /// The `bool` gives a cell a second port on the *same* net.
-    /// Without it every cell has one driver, and the block count
-    /// and the attribution count coincide for the whole strategy
-    /// — which is how the invariant below could be stated in
-    /// attributions and still hold.
-    ///
-    /// Duplicate `(x, z)` pairs are dropped, because two cells on
-    /// one coord is not a scope the placement pass can emit — it
-    /// derives a cell's column from its topological index — and
-    /// `collapsed_block` asserts on one. Before that assert
-    /// existed a repeated pair generated a degenerate scope, two
-    /// blocks on one voxel with a zero-length net between them,
-    /// and the invariant held over it without meaning much. The
-    /// first of each pair is kept, so at least one cell survives.
-    ///
-    /// The dedup is a `prop_map` over the same tuple rather than a
-    /// constrained strategy on purpose: changing the tuple
-    /// invalidates every persisted seed in
-    /// `proptest-regressions/crossing.txt`, because a seed is an
-    /// RNG state and replays as an unrelated value under a
-    /// different shape rather than failing to load. Mapping the
-    /// generated value leaves the draw identical, so the seeds
-    /// still replay the cases they were recorded for. Anything a
-    /// retired seed was holding has to be written as a named test
-    /// before the shape itself changes.
+    /// Duplicate `(x, z)` pairs are dropped, keeping the first: two cells on one coord is not a
+    /// scope placement emits, and `collapsed_block` asserts on one. The dedup is a `prop_map` over
+    /// the same tuple so every seed in `proptest-regressions/crossing.txt` still replays the case
+    /// it was recorded for; a seed is an RNG state and replays as an unrelated value under a
+    /// different shape.
     fn phase4_scope_strategy() -> impl Strategy<Value = Vec<(u32, u32, bool)>> {
         prop::collection::vec((1u32..=99u32, 0u32..8u32, prop::bool::ANY), 1..=3).prop_map(
             |mut cells| {
@@ -1845,10 +1581,9 @@ mod phase4_invariant {
         ir
     }
 
-    /// What `phase4_buffer_tick_invariant_holds` asserts, over one
-    /// draw of [`phase4_scope_strategy`]. A function of its own so
-    /// a named test can replay a draw that once failed without
-    /// leaning on the regressions file to keep it.
+    /// What `phase4_buffer_tick_invariant_holds` asserts, over one draw of
+    /// [`phase4_scope_strategy`], as a function so a named test can replay a draw without the
+    /// regressions file.
     fn check_phase4_scope(xs: &[(u32, u32, bool)]) -> Result<(), TestCaseError> {
         let case = format!("xs={xs:?}");
         let legalized = legalize_phase4(phase4_ir(xs), &case)?;
@@ -1881,19 +1616,13 @@ mod phase4_invariant {
             delayed.diagnostics,
         );
         let legalized = compile_crossing(&delayed.scoped);
-        // A refused scope is elided, and an elided scope
-        // carries no buffers to check. Off-axis terminals make
-        // two sinks share a route prefix often enough that
-        // `void=3` runs out of bridge layers, and refusing is
-        // the documented answer there — so the case is
-        // rejected rather than failed.
+        // A refused scope is dropped and has no buffers to check; refusing is a correct answer
+        // for some layouts, so the case is rejected rather than failed.
         prop_assume!(legalized.diagnostics.is_empty());
         Ok(legalized.scoped)
     }
 
-    /// Where the buffers landed, not just how many. Totals alone
-    /// let a coord move anywhere as long as the count holds, which
-    /// is exactly the shape of the bug this suite missed.
+    /// Where the buffers landed, not just how many: totals alone let a coord move anywhere.
     fn check_buffer_sites(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
         let (router, trees) = laid_trees(entry);
         for cell in &entry.ir.cells {
@@ -1970,12 +1699,8 @@ mod phase4_invariant {
             on.net,
             on.case,
         );
-        // And on *this* segment's route, not just somewhere on
-        // the net. The two differ for an entry the placer took
-        // from a memo rather than from the route it was walking:
-        // `wire_path` is every coord of the net and would accept a
-        // coord that refreshes a sibling sink instead of this
-        // one.
+        // And on *this* segment's route: `wire_path` would accept a coord that refreshes a
+        // sibling sink instead.
         let route: HashSet<CellCoord> = tree
             .route_to(sink)
             .expect("every cell is a terminal of the net driving it")
@@ -2062,14 +1787,9 @@ mod phase4_invariant {
         .collect()
     }
 
-    /// The buffer touches no block of its net but the two it
-    /// joins: no dust, and no cell body or pad of the net either.
-    /// A repeater severs every face but its front and back, so a
-    /// block of the same net on any other face would be cut off
-    /// even where the tree does not link the two — which is why
-    /// this is asked of the grid, not of the tree the placer
-    /// walked. `net` is every coord of the net, terminals
-    /// included.
+    /// The buffer touches no block of its net but the two it joins. A repeater severs every face
+    /// but its front and back, so this is asked of the grid, not the tree. `net` is every coord
+    /// of the net, terminals included.
     fn check_nothing_of_its_net_beside(
         on: &Buffer<'_>,
         net: &HashSet<CellCoord>,
@@ -2100,11 +1820,8 @@ mod phase4_invariant {
                 .local_delay_ticks()
                 .expect("legalized cells carry Some(local_delay_ticks)");
             let base = cell.cell.base_delay_ticks();
-            // `checked_sub` here as well as in the scope total: a
-            // cell that regressed below its edition base would
-            // clamp to zero and match a cell with no buffers,
-            // which is the failure the per-cell check exists to
-            // name.
+            // `checked_sub` here too: a cell below its edition base would clamp to zero and match
+            // a cell with no buffers.
             let delta = dt.checked_sub(base);
             prop_assert!(
                 delta.is_some(),
@@ -2178,9 +1895,8 @@ mod phase4_invariant {
         Ok(())
     }
 
-    /// Replays a pinned shape. A rejected case has stopped reaching
-    /// the assertions at all, which is not the invariant breaking,
-    /// so it says so rather than reporting a failure.
+    /// Replays a pinned shape. A rejected case never reached the assertions, which is not the
+    /// invariant breaking, so it is reported as such.
     fn replay(result: Result<(), TestCaseError>, case: &str) {
         match result {
             Ok(()) => {}
@@ -2518,38 +2234,18 @@ mod phase4_invariant {
     proptest! {
         #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
 
-        /// Crossing / delay agreement invariant: on every emitted
-        /// scope, `Σ (blocks under cell.buffer_coords()) ×
-        /// BUFFER_REPEATER_TICKS` must equal `Σ (cell.local_delay_ticks()
-        /// − cell.cell.base_delay_ticks())`, where the blocks under
-        /// a cell are its buffer coords deduplicated: the vector
-        /// attributes an entry per driver segment, and segments of
-        /// one net share the repeater on their prefix. The sum is
-        /// over cells rather than over the scope's blocks, because
-        /// what it adds up is the per-cell wire cost — a repeater
-        /// two cells hang off is charged to both of them. A drift in either
-        /// pass's repeater count, in `BUFFER_REPEATER_TICKS`, or in the
-        /// per-edition base-delay table trips this shared
-        /// assertion rather than each pass's own boundary rows
-        /// in isolation.
+        /// On every emitted scope, `Σ (blocks under cell.buffer_coords()) ×
+        /// BUFFER_REPEATER_TICKS` equals `Σ (cell.local_delay_ticks() −
+        /// cell.cell.base_delay_ticks())`. The blocks under a cell are its buffer coords
+        /// deduplicated, since segments of one net share the repeater on their prefix; the sum is
+        /// over cells because a repeater two cells hang off is charged to both. A drift in either
+        /// pass's repeater count, in `BUFFER_REPEATER_TICKS` or in the base-delay table trips this
+        /// one assertion.
         ///
-        /// Every cell this strategy builds is driven by one net
-        /// (`Input(0)`, sometimes on both ports), so a sum over
-        /// the driving nets and a max over them agree on every
-        /// case it generates and this proptest cannot tell them
-        /// apart — changing the fold to a max leaves it green.
-        /// `two_distinct_nets_charge_a_cell_for_every_buffer_under_it`
-        /// covers the multi-net shape, which is where the two
-        /// part company and where this identity is what keeps
-        /// stage 3 a sum.
-        ///
-        /// Uses hand-built `Unrouted` cells threaded through
-        /// `compile_routing → compile_delay → compile_crossing`.
-        /// `checked_sub` / `checked_mul` refuse to silently clamp
-        /// on the failure direction the invariant is meant to
-        /// catch (a delay pass regressing below the edition
-        /// `base_delay_ticks`, or a buffer count overflowing
-        /// `u32`).
+        /// Every cell here is driven by one net, so a sum and a max over the driving nets agree;
+        /// `two_distinct_nets_charge_a_cell_for_every_buffer_under_it` covers the multi-net shape.
+        /// `checked_sub` and `checked_mul` refuse to clamp a delay below the edition base or a
+        /// count past `u32`.
         #[test]
         fn phase4_buffer_tick_invariant_holds(xs in phase4_scope_strategy()) {
             check_phase4_scope(&xs)?;

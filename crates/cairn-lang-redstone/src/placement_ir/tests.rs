@@ -1,12 +1,7 @@
-//! Direct coverage for [`PlacementPhase`] — the four legal
-//! transitions, the nine illegal ones the transition methods must
-//! reject (with a release-loud panic, or with a
-//! [`PlacementPhaseTransitionError`] from the `try_*` mirrors), and
-//! the flat accessor projections. Each pipeline pass (`routing.rs`
-//! / `delay.rs` / `crossing.rs`) has its own end-to-end coverage;
-//! this module pins the state-machine invariants of the enum itself
-//! so a regression that loosens a transition guard is caught here
-//! rather than at the far end of the pipeline.
+//! Direct coverage for [`PlacementPhase`]: the four legal transitions, the nine illegal ones the
+//! transition methods reject (with a panic, or a [`PlacementPhaseTransitionError`] from the
+//! `try_*` forms), the flat accessors and the JSON round trip. The passes have end-to-end coverage
+//! of their own; this pins the state machine itself.
 use super::phase::TRANSITION_CARDINALITY;
 use super::*;
 
@@ -22,9 +17,7 @@ fn delayed() -> PlacementPhase {
 }
 
 fn legalized() -> PlacementPhase {
-    // `PortName::A` is fixture noise — none of the state-machine
-    // tests below assert on the driver port; they only care about
-    // the buffer-coord vector's shape and identity round-trip.
+    // The port is noise: no test below asserts on it.
     PlacementPhase::Legalized {
         wire_length: 3,
         local_delay_ticks: 1,
@@ -135,11 +128,8 @@ fn cell_identity_renders_every_scope_kind() {
     }
 }
 
-/// A cell coord is `Plane` by construction, so the layer stays
-/// suppressed on every real breadcrumb. A hand-built IR that
-/// breaks that invariant must not print a coord that reads as a
-/// plane coord, so the escape layer surfaces rather than being
-/// dropped.
+/// A cell coord is `Plane` by construction, so the layer stays out of every real breadcrumb; a
+/// hand-built coord on another layer shows it rather than reading as a plane coord.
 #[test]
 fn cell_identity_surfaces_a_non_plane_layer() {
     let scope = probe_scope();
@@ -350,11 +340,9 @@ fn try_legalize_from_delayed_with_empty_buffers_stays_legalized() {
     ));
 }
 
-/// A refused transition must leave the subject exactly as it found
-/// it. The panicking forms never had to promise this — the process
-/// is going down — but a caller that recovers from the `Err` goes
-/// on to use the phase, so a half-applied write here would hand it
-/// a state the producer↔variant table says cannot exist.
+/// A refused transition leaves the subject exactly as it found it: a caller that recovers from
+/// the `Err` goes on to use the phase, so a half-applied write would hand it a state
+/// `PlacementPhase` says cannot exist.
 #[test]
 fn try_route_from_every_other_phase_errs_without_mutating() {
     for phase in [routed(), delayed(), legalized()] {
@@ -477,11 +465,9 @@ fn transition_error_is_a_comparable_std_error() {
     }
 }
 
-/// The context-free transition forms must not grow a dangling
-/// separator now that the `*_at` variants splice one in. Pinned by
-/// reading the panic payload directly rather than through
-/// `#[should_panic]`, which can only assert on a substring that is
-/// present — never on one that is absent.
+/// The context-free transition forms carry no dangling separator where the `*_at` forms splice in
+/// an identity. Read from the panic payload, since `#[should_panic]` can only assert that a
+/// substring is present.
 #[test]
 fn context_free_transitions_panic_without_an_identity_clause() {
     let payloads = [
@@ -512,16 +498,9 @@ fn context_free_transitions_panic_without_an_identity_clause() {
     );
 }
 
-/// Pin that all nine entry points quote one shared clause, so a
-/// transition added beside these three cannot spell its own.
-///
-/// Asserting on the const puts it on both sides, so this test
-/// cannot tell what the clause *says*; the exact-match array in
-/// [`context_free_transitions_panic_without_an_identity_clause`]
-/// is what pins the wording itself. The entry points are listed
-/// by hand, so a transition that bypassed [`TransitionMessage`]
-/// would escape both — the const is the structural guard, and
-/// these two tests only keep its reach honest.
+/// All nine entry points quote one shared clause, so a transition added beside them cannot spell
+/// its own. Asserting on the const cannot tell what the clause says; the exact-match array in
+/// [`context_free_transitions_panic_without_an_identity_clause`] pins the wording.
 #[test]
 fn every_transition_message_shares_one_cardinality_clause() {
     let scope = probe_scope();
@@ -642,11 +621,8 @@ fn stage_renders_the_cli_flag_vocabulary() {
     assert_eq!(PlacementStage::Crossing.as_str(), "crossing");
 }
 
-/// Every variant serialises as a bare string, not as a tagged
-/// object — pinning it here keeps a future refactor from silently
-/// reshaping the tag. All four are covered rather than one
-/// representative, so a variant renamed away from its wire word is
-/// caught.
+/// Every variant serialises as a bare string, not a tagged object; all four, so a variant renamed
+/// away from its wire word is caught.
 #[test]
 fn every_stage_serialises_as_a_bare_string() {
     for (stage, expected) in [
@@ -662,8 +638,7 @@ fn every_stage_serialises_as_a_bare_string() {
     }
 }
 
-/// The reason the tag exists: before it, these two phases produced
-/// identical JSON.
+/// The reason the tag exists: without it, these two phases dump identical JSON.
 #[test]
 fn delayed_and_legalized_with_zero_buffers_serialise_differently() {
     let delayed_json =
@@ -684,9 +659,7 @@ fn delayed_and_legalized_with_zero_buffers_serialise_differently() {
         legalized_json.contains("\"stage\":\"crossing\""),
         "legalized cell must carry the crossing tag: {legalized_json}",
     );
-    // The tag is the *only* difference: `buffer_coords` still
-    // serde-skips when empty, so the sentinel-array alternative
-    // stays unadopted.
+    // The tag is the only difference: `buffer_coords` still serde-skips when empty.
     assert!(
         !legalized_json.contains("buffer_coords"),
         "empty buffer_coords must still serde-skip: {legalized_json}",
@@ -701,19 +674,13 @@ fn delayed_and_legalized_with_zero_buffers_serialise_differently() {
     );
 }
 
-/// `reserved_area` saturates rather than overflowing, which is what
-/// a reservation taken from a hostile `size=` makes it do.
+/// `reserved_area` saturates rather than overflowing, as a reservation from a hostile `size=`
+/// makes it.
 ///
-/// `u64` holds `u32::MAX` squared within a rounding error — `2^33 - 2`
-/// short of `u64::MAX` — so the third factor is where this goes,
-/// and the last row is the one that matters. A product that merely
-/// exceeds `u64::MAX` wraps to something large and plausible, which
-/// a release build carries all the way to a clean exit; a product
-/// that is an exact multiple of `2^64` wraps to **zero**, and a
-/// zero reservation divides by itself in the congestion ratio.
-/// `2147483648^2 * 4` is exactly `2^64`, the smallest such shape a
-/// `size=` can reach, and it is the row that fails again if anyone
-/// puts `wrapping_mul` back on the third factor.
+/// `u64` holds `u32::MAX` squared, so the third factor is where it overflows. A wrapped product
+/// past `u64::MAX` lands somewhere plausible, and one that is an exact multiple of `2^64` wraps to
+/// zero, which divides by itself in the congestion ratio. `2147483648^2 * 4` is exactly `2^64`,
+/// the smallest such shape a `size=` reaches, so the last row is the one that matters.
 #[test]
 fn reserved_area_saturates_on_a_reservation_no_u64_can_hold() {
     let region = |width: u32, depth: u32, void: u32| CircuitRegionReservation {

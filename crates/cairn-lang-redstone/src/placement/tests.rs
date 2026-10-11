@@ -119,36 +119,19 @@ fn chain(cells: usize, sensors: usize, doors: usize, width: usize, depth: u32) -
     source
 }
 
-/// No pad stands face to face with a cell or on another block, at
-/// any width the row check accepts, and at the narrowest the end
-/// cells stand exactly one diagonal step from the pads.
+/// No pad stands face to face with a cell or on another block, at any width the row check
+/// accepts, and at the narrowest the end cells stand exactly one diagonal step from the pads.
 ///
-/// A pad is a terminal of the one net it carries, and the router's
-/// one-step rule keeps one net's dust away from another's rather
-/// than a pad away from a cell, so a pad against a cell of a net it
-/// has nothing to do with would take one of that cell's faces where
-/// no pass looks. The pad columns stand at `x = 0` and
-/// `x = width - 1`, and at the narrowest row the end cells stand in
-/// the columns beside them; what keeps the two apart is that the
-/// pads skip the cell row. Asserted against every cell, not only the
-/// ones of other nets, because the layout gives the stronger answer.
-///
-/// "Not touching" alone is one-sided: pads moved far from the cells,
-/// or all onto one coord, would pass it. So the sweep also holds the
-/// distance to exactly 2 at the narrowest width, and every block to a
-/// coord of its own.
-///
-/// The sweep starts at zero cells, where there is no row to step
-/// over and the region is exactly as deep as the pads, so a column
-/// that skipped a row it does not have would be refused or would
-/// stack its last two pads. A cell-less scope starts at two columns:
-/// at one, the sensor and actuator columns are the same column, which
-/// this pass refuses (see [`super::pad_column_diagnostic`]).
+/// The router keeps one net's dust off another's, not a pad off a cell, so a pad against a cell
+/// of another net would take one of that cell's faces where no pass looks; the pads skip the cell
+/// row to stay clear. Distance exactly 2 at the narrowest width, and a coord per block, keep the
+/// check from passing pads moved far away or stacked. The sweep starts at zero cells, where the
+/// region is exactly as deep as the pads; a cell-less scope starts at two columns, since one is
+/// refused (see [`super::pad_column_diagnostic`]).
 #[test]
 fn no_pad_stands_against_a_cell() {
-    // Reported with this source, where `sig.b`'s sensor pad and its
-    // door's pad both stood against an inverter that reads only
-    // `sig.a`.
+    // The narrowest row, where a pad on the cell row would stand against the inverter, which
+    // reads only `sig.a`, while carrying `sig.b`.
     let reported = "\
 theme t:
   slot wall -> @oak_planks

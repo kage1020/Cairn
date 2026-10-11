@@ -863,20 +863,14 @@ fn a_budget_no_straight_coord_can_meet_is_refused() {
     );
 }
 
-/// A cell that passes strength on, whose own wire out cannot reach
-/// its sink even from one block spent, is refused on its own net —
-/// the wire out is what has no room, and the wire in could not help
-/// however short it were.
+/// A cell that passes strength on, whose own wire out cannot reach its sink even from one block
+/// spent, is refused on its own net: the wire out has no room, however short the wire in.
 ///
-/// A Java comparator AND at `(0,0,0)`, 1 block from its sensor,
-/// drives a gate up a staircase, every coord of which turns. At 17
-/// steps that is 16 blocks of dust, one too many from a fresh
-/// source, so no budget in `1..=15` is met. At 16 it is the
-/// budget-zero case: it
-/// would be met from nothing spent, which no cell ever is, so it is
-/// refused on the comparator's net too, rather than handed a budget
-/// of zero that sends the refusal upstream to a wire that cannot
-/// help.
+/// A Java comparator AND at `(0,0,0)`, 1 block from its sensor, drives a gate up a staircase,
+/// every coord of which turns. At 17 steps that is 16 blocks of dust, one too many from a fresh
+/// source, so no budget in `1..=15` is met. At 16 it would be met only from nothing spent, which
+/// no cell ever is, so it is refused on the comparator's net too rather than given a budget of
+/// zero that blames the wire in.
 #[test]
 fn a_cell_whose_own_wire_has_no_room_is_refused_on_its_own_net() {
     let cell = CellCoord::new(0, 0, 0);

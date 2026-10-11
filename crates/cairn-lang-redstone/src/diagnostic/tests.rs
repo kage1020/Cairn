@@ -2,12 +2,9 @@ use strum::IntoEnumIterator;
 
 use super::{DiagnosticCode, Severity};
 
-/// The prefix is the contract downstream tooling filters on: a CI
-/// annotator that treats `E_` as failing and `W_` as advisory reads the
-/// string, not `severity()`. Nothing tied the two together, so a new
-/// code could ship announcing the opposite of what it is — and the
-/// walk is over every variant, not a hand-written list, so the one
-/// added last cannot be the one left out.
+/// The prefix is the contract tooling filters on: a CI annotator treats `E_` as failing and `W_`
+/// as advisory by the string, not by `severity()`. The walk covers every variant, so the newest
+/// one cannot be left out.
 #[test]
 fn the_code_prefix_agrees_with_the_severity() {
     for code in DiagnosticCode::iter() {

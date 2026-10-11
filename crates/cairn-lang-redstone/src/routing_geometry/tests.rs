@@ -27,12 +27,10 @@ fn region(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
 
 /// A router over `region` with a cell body on each of `blocks`.
 ///
-/// What kind of block it is only matters to the diagnostic that
-/// names it, so the fixtures below say `Cell` and mean "something
-/// is standing here". Every fixture lists its own source and sinks
-/// among them, because the pipeline's are components: a sink that
-/// is not a block would be walked through rather than ended at, and
-/// [`Router::tree`] debug-asserts against exactly that.
+/// The block kind matters only to the diagnostic that names it, so the fixtures say `Cell` for
+/// "something stands here". Each fixture lists its own source and sinks among the blocks, since
+/// the pipeline's are components: a sink that is not a block would be walked through rather than
+/// ended at, and [`Router::tree`] debug-asserts against that.
 fn router(region: &CircuitRegionReservation, blocks: &[CellCoord]) -> Router {
     let sites: Vec<BlockSite> = blocks
         .iter()
@@ -48,10 +46,8 @@ fn router(region: &CircuitRegionReservation, blocks: &[CellCoord]) -> Router {
 
 /// No net laid before this one.
 ///
-/// Spelled at every call rather than defaulted, so a test whose
-/// subject is the router against the blocks says that it is, and
-/// the tests whose subject is the dust of an earlier net read as
-/// the other case of the same question.
+/// Spelled at every call rather than defaulted, so a test about the router against blocks says
+/// so, and the tests about an earlier net's dust read as the other case of the same question.
 fn nothing_in_the_way() -> HashSet<CellCoord> {
     HashSet::new()
 }
@@ -72,16 +68,12 @@ fn keep_out(router: &Router, source: CellCoord, sinks: &[CellCoord]) -> HashSet<
         .collect()
 }
 
-/// The fold charges each net once however far apart its ports sit
-/// in the driver list.
+/// The fold charges each net once however far apart its ports sit in the driver list.
 ///
-/// The two passes that call this both reach it with the repeated
-/// net *adjacent* — a cell whose `a` and `b` read one signal — so
-/// a seen-list that only remembered the previous driver would
-/// satisfy every fixture in the crate while charging a Mux shaped
-/// `[Sel → net 0, A → net 1, B → net 0]` twice for one strand.
-/// Called directly because that shape has no producer to reach it
-/// through.
+/// Both passes that call it reach it with the repeated net *adjacent* (a cell whose `a` and `b`
+/// read one signal), so a seen-list that remembered only the previous driver would pass every
+/// fixture in the crate while charging a Mux shaped `[Sel → net 0, A → net 1, B → net 0]` twice
+/// for one strand. Called directly because no producer reaches that shape.
 #[test]
 fn each_driving_net_is_charged_once_however_the_ports_are_ordered() {
     let drivers = vec![
@@ -115,12 +107,10 @@ fn each_driving_net_is_charged_once_however_the_ports_are_ordered() {
     assert_eq!(total, 13, "10 for the repeated net, once, plus 3");
 }
 
-/// Where nothing is in the way the search lays the L-shape the
-/// passes were built around: x, then z, then y.
+/// Where nothing is in the way the search lays an L-shape: x, then z, then y.
 ///
-/// The axis order is a regression fence — every pinned
-/// `wire_length` in the crate, and the coord each buffer repeater
-/// stands on, is measured along whatever shape this produces.
+/// Every pinned `wire_length` in the crate, and the coord each buffer repeater stands on, is
+/// measured along this shape, so the axis order is pinned.
 #[test]
 fn a_clear_run_is_the_l_shape_the_passes_were_built_around() {
     let region = region(4, 3, 2);
@@ -139,9 +129,8 @@ fn a_clear_run_is_the_l_shape_the_passes_were_built_around() {
     );
 }
 
-/// The axis order is a preference between axes, not between
-/// directions, so a net that runs the other way lays the mirror of
-/// the same shape rather than a different one.
+/// The axis order is a preference between axes, not between directions, so a net that runs the
+/// other way lays the mirror of the same shape.
 #[test]
 fn a_clear_run_backwards_still_walks_x_before_z() {
     let region = region(4, 3, 1);
@@ -160,9 +149,8 @@ fn a_clear_run_backwards_still_walks_x_before_z() {
     );
 }
 
-/// The defect this module was rewritten for, in its smallest form:
-/// a block on the straight line between two terminals. The wire
-/// goes around it, and pays the two blocks that costs.
+/// A block on the straight line between two terminals: the wire goes around it and pays the two
+/// blocks that costs.
 #[test]
 fn the_wire_goes_around_a_block_rather_than_through_it() {
     let region = region(5, 3, 1);
@@ -192,10 +180,9 @@ fn the_wire_goes_around_a_block_rather_than_through_it() {
     );
 }
 
-/// With no room beside the block, the wire climbs over it — and
-/// what it climbs onto is a bridge coord, the same layer the
-/// crossing pass lifts a repeater to. One rule for the height, so
-/// the two cannot key past each other.
+/// With no room beside the block, the wire climbs over it onto a bridge coord, the layer the
+/// crossing pass lifts a repeater to. One rule for the height, so the two cannot key past each
+/// other.
 #[test]
 fn a_wire_with_no_room_beside_a_block_climbs_over_it() {
     let region = region(3, 1, 2);
@@ -218,13 +205,9 @@ fn a_wire_with_no_room_beside_a_block_climbs_over_it() {
     );
 }
 
-/// A sink is where the dust ends. The signal into the far cell of
-/// a row does not pass through the near ones — a comparator hands
-/// on its own output, not the wire that fed it — so every sink is
-/// a leaf and the trunk runs beside the row.
-///
-/// This is the shape the router was rewritten for: the spanning
-/// tree it replaced reached the far cell *through* the near ones.
+/// A sink is where the dust ends. The signal into the far cell of a row does not pass through the
+/// near ones (a comparator hands on its own output, not the wire that fed it), so every sink is a
+/// leaf and the trunk runs beside the row rather than through the near cells.
 #[test]
 fn a_row_of_sinks_is_fed_from_beside_it_and_never_through_itself() {
     let region = region(6, 3, 1);
@@ -258,9 +241,8 @@ fn a_row_of_sinks_is_fed_from_beside_it_and_never_through_itself() {
     );
 }
 
-/// A second sink hangs off the dust the first one laid rather than
-/// getting a strand of its own — which is what makes one repeater
-/// serve both.
+/// A second sink hangs off the dust the first one laid rather than getting a strand of its own,
+/// which is what lets one repeater serve both.
 #[test]
 fn a_second_sink_hangs_off_the_trunk_the_first_one_laid() {
     let region = region(8, 2, 1);
@@ -281,14 +263,10 @@ fn a_second_sink_hangs_off_the_trunk_the_first_one_laid() {
 
 /// The tree lists each of its coords once.
 ///
-/// A consumer that folds `wire_path` into a per-coord map reads
-/// this as "one net is recorded at one coord once", and stage 4
-/// does exactly that to find the coords two nets share — a coord a
-/// net was listed at twice would read as that net crossing itself.
-/// The layout carries all three ways a coord enters the tree: a
-/// straight run, a search around a block, and a sink with no way
-/// in at all, which is attached to the source by a different path
-/// than the other two.
+/// Stage 4 folds `wire_path` into a per-coord map to find the coords two nets share, so a coord
+/// listed twice would read as the net crossing itself. The layout carries all three ways a coord
+/// enters the tree: a straight run, a search around a block, and a sink with no way in, which is
+/// attached to the source by a different path.
 #[test]
 fn a_tree_lists_each_of_its_coords_once() {
     let region = region(5, 3, 2);
@@ -317,10 +295,8 @@ fn a_tree_lists_each_of_its_coords_once() {
     assert_eq!(seen.len(), path.len(), "a coord is listed once: {path:?}");
 }
 
-/// A sink walled in on every side is refused rather than wired
-/// through what walls it in. The tree still answers for it so both
-/// projections stay total; what the routing pass reads is
-/// `unreachable`.
+/// A sink walled in on every side is refused rather than wired through what walls it in. The tree
+/// still answers for it so both projections stay total; the routing pass reads `unreachable`.
 #[test]
 fn a_walled_in_sink_is_reported_rather_than_wired_through() {
     let region = region(3, 2, 1);
@@ -342,9 +318,8 @@ fn a_walled_in_sink_is_reported_rather_than_wired_through() {
     );
 }
 
-/// The same layout with one layer more has somewhere to go, so the
-/// refusal above is about the reservation rather than about the
-/// sink.
+/// The same layout with one layer more has somewhere to go, so the refusal above is about the
+/// reservation rather than the sink.
 #[test]
 fn the_same_sink_is_reachable_once_there_is_a_layer_to_climb_to() {
     let region = region(3, 2, 2);
@@ -372,12 +347,10 @@ fn the_same_sink_is_reachable_once_there_is_a_layer_to_climb_to() {
     );
 }
 
-/// A wall across a one-layer reservation from `x = 0` to
-/// `x = width - 2`, between a source at `(0,0,0)` and a sink at
-/// `(0,0,sink_z)`, with `sink_z` 3 or 4. The only way round is the gap
-/// at `x = width - 1`, so the route is `2 * (width - 1) + sink_z`
-/// blocks while the straight line stays `sink_z`. Both parities are
-/// here because one alone builds only every other length.
+/// A wall across a one-layer reservation from `x = 0` to `x = width - 2`, between a source at
+/// `(0,0,0)` and a sink at `(0,0,sink_z)`, with `sink_z` 3 or 4. The only way round is the gap at
+/// `x = width - 1`, so the route is `2 * (width - 1) + sink_z` blocks while the straight line
+/// stays `sink_z`. Both parities, because one alone builds only every other length.
 fn detour(width: u32, sink_z: u32) -> (Router, CellCoord, CellCoord) {
     let source = CellCoord::new(0, 0, 0);
     let sink = CellCoord::new(0, 0, sink_z);
@@ -386,24 +359,22 @@ fn detour(width: u32, sink_z: u32) -> (Router, CellCoord, CellCoord) {
     (router(&region(width, sink_z + 1, 1), &blocks), source, sink)
 }
 
-/// The `sink_z` and width at which [`detour`] routes exactly
-/// `length` blocks: 3 for an odd length, 4 for an even one.
+/// The `sink_z` and width at which [`detour`] routes exactly `length` blocks: 3 for an odd length,
+/// 4 for an even one.
 fn detour_for(length: u32) -> (u32, u32) {
     let sink_z = 3 + (length + 1) % 2;
     (detour_width(length, sink_z), sink_z)
 }
 
-/// The width at which [`detour`] routes exactly `length` blocks
-/// round to a sink at `sink_z`.
+/// The width at which [`detour`] routes exactly `length` blocks round to a sink at `sink_z`.
 fn detour_width(length: u32, sink_z: u32) -> u32 {
     assert_eq!((length - sink_z) % 2, 0, "{length} is the other parity");
     (length - sink_z) / 2 + 1
 }
 
-/// The bound drops only what the delay pass would refuse. A detour
-/// of exactly [`MAX_ATTENUATION_SEGMENT`] blocks is still laid; one
-/// of a block more, and one of two more, are not, and what strands
-/// them is the cap rather than a wall.
+/// The bound drops only what the delay pass would refuse. A detour of exactly
+/// [`MAX_ATTENUATION_SEGMENT`] blocks is still laid; one or two blocks more are not, and what
+/// strands them is the cap rather than a wall.
 #[test]
 fn a_detour_is_laid_up_to_the_cap_and_no_further() {
     let cap = MAX_ATTENUATION_SEGMENT;
@@ -450,15 +421,12 @@ fn pocket(depth: u32) -> (Router, CellCoord, CellCoord) {
     )
 }
 
-/// Giving up on a sink costs the same whatever the size of the
-/// reservation around it. Unbounded, the search gave up only once it
-/// had settled every free coord it could reach, so the work grew with
-/// `width × depth × void` rather than with the distance.
+/// Giving up on a sink costs the same whatever the size of the reservation around it: the work
+/// grows with the distance, not with `width × depth × void`.
 ///
-/// The ceiling is the `g + h <= cap` diamond in a strip
-/// [`POCKET_WIDTH`] wide, which a bound twice the cap would overrun.
-/// The far reservation is millions of coords; [`Router`] holds only
-/// its blocks, so that costs the test nothing but the search.
+/// The ceiling is the `g + h <= cap` diamond in a strip [`POCKET_WIDTH`] wide, which a bound twice
+/// the cap would overrun. The far reservation is millions of coords; [`Router`] holds only its
+/// blocks, so that costs the test nothing but the search.
 #[test]
 fn giving_up_on_a_pocket_does_not_grow_with_the_reservation() {
     let cap = MAX_ATTENUATION_SEGMENT;
@@ -481,13 +449,11 @@ fn giving_up_on_a_pocket_does_not_grow_with_the_reservation() {
     );
 }
 
-/// Whether the search empties its frontier first or stops at the
-/// cap first, the pocket is proved walled in: by the search itself
-/// when it settled every coord the tree can reach, and otherwise by
-/// the flood out of the sink, which runs out of coords after the one
-/// pocket coord at any size of reservation. The verdict used to
-/// follow whether anything had been pruned on the way, which is to
-/// say the reservation's size.
+/// Whether the search empties its frontier first or stops at the cap first, the pocket is proved
+/// walled in: by the search itself when it settled every coord the tree can reach, and otherwise
+/// by the flood out of the sink, which runs out of coords after the one pocket coord at any size
+/// of reservation. The verdict does not follow whether anything was pruned on the way, which
+/// would make it follow the reservation's size.
 #[test]
 fn a_pocket_is_walled_in_whatever_the_reservation() {
     let cap = MAX_ATTENUATION_SEGMENT;
@@ -519,13 +485,10 @@ fn a_pocket_is_walled_in_whatever_the_reservation() {
     }
 }
 
-/// The flood's budget is the cap, to the block. A sink at the end of
-/// a dead-end corridor `length` coords long, in a one-wide
-/// reservation that runs on past the corridor's closed end to the
-/// source: a corridor as long as the cap is proved walled in, and
-/// one a coord longer is not — the flood cannot see its end without
-/// going past the cap, so all it can say is that nothing within the
-/// cap reaches the sink.
+/// The flood's budget is the cap, to the block. A sink at the end of a dead-end corridor `length`
+/// coords long, in a one-wide reservation that runs on past the corridor's closed end to the
+/// source: a corridor as long as the cap is proved walled in, and one a coord longer is not, since
+/// the flood cannot see its end without going past the cap.
 #[test]
 fn the_flood_sees_a_pocket_exactly_as_deep_as_the_cap() {
     let cap = MAX_ATTENUATION_SEGMENT;
@@ -545,9 +508,8 @@ fn the_flood_sees_a_pocket_exactly_as_deep_as_the_cap() {
     }
 }
 
-/// When the free coords round a sink run on past the cap, the flood
-/// stops there, so classifying it costs the cap's neighbourhood of
-/// the sink and not the reservation.
+/// When the free coords round a sink run on past the cap, the flood stops there, so classifying
+/// it costs the cap's neighbourhood of the sink and not the reservation.
 #[test]
 fn classifying_a_sink_beyond_the_cap_does_not_grow_with_the_reservation() {
     let cap = MAX_ATTENUATION_SEGMENT;
@@ -594,9 +556,8 @@ fn a_sink_with_no_free_face_is_walled_in_without_a_search() {
     assert_eq!(tree.stranded_by(sink), Some(Unreached::WalledIn));
 }
 
-/// A sink sealed on every face keeps its own verdict when the same
-/// net has another sink the search has to look for. One arrivable
-/// target is enough to run the search, and its one answer used to
+/// A sink sealed on every face keeps its own verdict when the same net has another sink the search
+/// has to look for: one arrivable target is enough to run the search, and its one answer must not
 /// overwrite the cause of every sink it stranded.
 #[test]
 fn a_sealed_sink_stays_walled_in_beside_a_sink_that_is_searched_for() {
@@ -740,10 +701,9 @@ fn a_walled_in_net_anchors_the_refusal_over_one_beyond_the_cap() {
     );
 }
 
-/// A face the tree itself stands on is a way in, though it is a
-/// block: the search leaves from a seed without asking whether it is
-/// free. Only the faces nothing could step off count against the
-/// sink.
+/// A face the tree itself stands on is a way in, though it is a block: the search leaves from a
+/// seed without asking whether it is free. Only the faces nothing could step off count against
+/// the sink.
 #[test]
 fn a_sink_open_only_to_the_tree_is_not_walled_in() {
     let source = CellCoord::new(1, 0, 1);
@@ -760,10 +720,9 @@ fn a_sink_open_only_to_the_tree_is_not_walled_in() {
     assert_eq!(found, Ok((0, vec![source, sink])));
 }
 
-/// Stage 2 refuses a sink beyond the cap under the cap's own code,
-/// which the delay pass gave it when the detour was laid for it to
-/// measure. The sentence stops at the cap, the fix line is the one
-/// for a long way round, and the count of the rest is kept.
+/// Stage 2 refuses a sink beyond the cap under the cap's own code, the one the delay pass raises
+/// for a laid detour over the cap. The sentence stops at the cap, the fix line is the one for a
+/// long way round, and the count of the rest is kept.
 #[test]
 fn a_sink_beyond_the_cap_is_refused_as_the_attenuation_limit() {
     let cap = MAX_ATTENUATION_SEGMENT;
@@ -884,9 +843,8 @@ fn a_net_with_no_sinks_still_occupies_its_source() {
     assert_eq!(tree.route_to(source), Some(vec![source]));
 }
 
-/// The source is its own sink at distance zero — the case a driver
-/// whose sink coincides with its source takes, and the one that
-/// must not report a buffer's worth of dust.
+/// The source is its own sink at distance zero, the case a driver whose sink coincides with its
+/// source takes, and it must not report a buffer's worth of dust.
 #[test]
 fn a_sink_that_is_the_source_is_a_single_coord() {
     let region = region(4, 2, 1);
@@ -897,9 +855,8 @@ fn a_sink_that_is_the_source_is_a_single_coord() {
     assert_eq!(tree.route_to(source), Some(vec![source]));
 }
 
-/// A coord that is not part of this net gets no route rather than a
-/// plausible-looking one. The callers turn `None` into a panic
-/// naming the disagreement, which beats measuring a segment
+/// A coord that is not part of this net gets no route rather than a plausible-looking one. The
+/// callers turn `None` into a panic naming the disagreement rather than measuring a segment
 /// against a net that does not reach it.
 #[test]
 fn route_to_a_foreign_sink_is_none() {
@@ -910,10 +867,9 @@ fn route_to_a_foreign_sink_is_none() {
     assert_eq!(tree.route_to(CellCoord::new(4, 0, 2)), None);
 }
 
-/// Two detours of equal length exist around this block — over the
-/// top and around the side. Which one the router takes is a fact
-/// every pinned coord downstream depends on, so it is pinned here
-/// rather than left to whichever the search reached first.
+/// Two detours of equal length exist around this block, over the top and around the side. Every
+/// pinned coord downstream depends on which one the router takes, so it is pinned here rather
+/// than left to whichever the search reached first.
 #[test]
 fn equally_short_detours_are_decided_by_the_axis_order() {
     let region = region(3, 2, 2);
@@ -933,23 +889,17 @@ fn equally_short_detours_are_decided_by_the_axis_order() {
     );
 }
 
-/// A coord reached twice for the same cost keeps the parent that
-/// got there first.
+/// A coord reached twice for the same cost keeps the parent that got there first.
 ///
-/// The search relaxes on a strictly cheaper `g`, so a second route
-/// arriving at the same price is dropped. Relaxing on a tie instead
-/// leaves the wire identical — the same coords in the same order —
-/// and moves the *routes* through it: on this layout the sink at
-/// `(4,0,1)` would hang off `(2,0,1)` and read six blocks where it
-/// reads eight here. `wire_length`, `local_delay_ticks`, and every buffer
-/// coord are measured along that path, so the tie is not free to
-/// drift.
+/// The search relaxes on a strictly cheaper `g`, so a second route arriving at the same price is
+/// dropped. Relaxing on a tie instead leaves the wire identical (the same coords in the same
+/// order) and moves the *routes* through it: on this layout the sink at `(4,0,1)` would hang off
+/// `(2,0,1)` and read six blocks where it reads eight here. `wire_length`, `local_delay_ticks` and
+/// every buffer coord are measured along that path, so the tie is not free to drift.
 ///
-/// Neither answer is shorter wire and neither is wrong; what is
-/// wrong is the number changing without anyone saying so. Found by
-/// sweeping the two relaxations over random layouts and diffing the
-/// routes — 5 of 4000 differ, and no fixture in the crate was one
-/// of them.
+/// Neither answer is shorter wire and neither is wrong; what is wrong is the number changing
+/// unannounced. The two relaxations differ on about 5 random layouts in 4000 and on no fixture in
+/// the crate, hence a layout of its own.
 #[test]
 fn a_coord_reached_twice_for_one_price_keeps_the_first_parent() {
     let region = region(6, 4, 1);
@@ -979,9 +929,8 @@ fn a_coord_reached_twice_for_one_price_keeps_the_first_parent() {
     );
 }
 
-/// The tree is a function of its terminals as a set. Asking for the
-/// same sinks in another order is the same wire, so two passes
-/// walking the same layout cannot disagree about it.
+/// The tree is a function of its terminals as a set: the same sinks in another order are the same
+/// wire, so two passes walking the same layout cannot disagree about it.
 #[test]
 fn the_order_the_sinks_are_asked_for_does_not_change_the_wire() {
     let region = region(8, 4, 2);
@@ -1001,14 +950,11 @@ fn the_order_the_sinks_are_asked_for_does_not_change_the_wire() {
     );
 }
 
-/// A net does not run in the lane beside another net's dust, even
-/// when that lane is empty.
+/// A net does not run in the lane beside another net's dust, even when that lane is empty.
 ///
-/// The coord-disjoint rule would let the second net take the row
-/// next door and call it wired; two strands one step apart are one
-/// strand carrying two signals. `void=1`, so the way round is on
-/// the plane or nowhere — this is about the width of the obstacle
-/// set, not about the escape.
+/// The coord-disjoint rule would let the second net take the row next door and call it wired;
+/// two strands one step apart are one strand carrying two signals. `void=1`, so the way round is
+/// on the plane or nowhere: this is about the width of the obstacle set, not about the escape.
 #[test]
 fn a_net_does_not_run_in_the_lane_beside_another_nets_dust() {
     let region = region(5, 4, 1);
@@ -1054,12 +1000,10 @@ fn a_net_does_not_run_in_the_lane_beside_another_nets_dust() {
 
 /// A net is not kept out by its own dust.
 ///
-/// The rule is between nets, not inside one: consecutive coords of
-/// one strand are one step apart by definition, so a strand runs
-/// beside itself the whole way. That is why [`net_trees`] widens
-/// the obstacle set once a net is laid rather than as each coord
-/// goes into it — the second assertion is what widening on the way
-/// would do to every net there is.
+/// The rule is between nets, not inside one: consecutive coords of one strand are one step apart,
+/// so a strand runs beside itself the whole way. That is why [`net_trees`] widens the obstacle set
+/// once a net is laid rather than as each coord goes in; the second assertion is what widening on
+/// the way would do to every net.
 #[test]
 fn a_net_is_not_kept_out_by_its_own_dust() {
     // One row and one layer, so the keep-out set has nowhere to
@@ -1093,16 +1037,13 @@ fn a_net_is_not_kept_out_by_its_own_dust() {
 
 /// A net is named for taking a face it never stands on.
 ///
-/// The refusal asks the question the router routes by: a face is
-/// unusable when another net's dust is on it *or* [`beside`] it, so
-/// the nets it can name are two steps from the sink and not only
-/// one. Without the second half `sig.a` below goes unnamed and the
-/// message says only that the sink is walled in, leaving the author
-/// the one net they could have moved.
+/// The refusal asks the question the router routes by: a face is unusable when another net's dust
+/// is on it *or* [`beside`] it, so the nets it can name are two steps from the sink and not only
+/// one. Otherwise `sig.a` below goes unnamed and the message says only that the sink is walled
+/// in, hiding the one net the author could move.
 ///
-/// `sig.a` runs down the far row and never touches a face of the
-/// sink; what it takes is `(2,0,1)`, the one face two blocks left
-/// free, by standing one step from it.
+/// `sig.a` runs down the far row and never touches a face of the sink; it takes `(2,0,1)`, the
+/// one face two blocks left free, by standing one step from it.
 #[test]
 fn a_net_that_takes_a_face_without_standing_on_it_is_named() {
     let region = region(5, 3, 1);
@@ -1150,24 +1091,18 @@ fn a_net_that_takes_a_face_without_standing_on_it_is_named() {
 
 /// Two strands one layer apart are named rather than kept apart.
 ///
-/// Not keeping them apart is a decision, not an oversight: whether
-/// dust at `y + 1` reads the dust below it depends on what is
-/// standing between them, and the pseudo-2.5D model carries no
-/// answer, so `spec/redstone` "Place-and-route" makes separating
-/// them the physical tile layer's obligation. Recorded as a test
-/// because the alternative is a reader finding [`IN_PLANE`] and
-/// taking four steps for an oversight of six.
+/// Whether dust at `y + 1` reads the dust below it depends on what stands between them, which the
+/// pseudo-2.5D model does not carry, so `spec/redstone` "Place-and-route" makes separating
+/// them the physical tile layer's obligation. [`IN_PLANE`] taking four steps rather than six is
+/// that decision, not an oversight.
 ///
-/// What the pass owes is saying which pairs carry the obligation,
-/// and [`tile_layer_pairs`] is that list. Counted here twice over —
-/// once by hand off the two nets' dust, once by the function the
-/// finding is built from — because a list checked against itself
-/// would agree with any rule at all.
+/// What the pass owes is saying which pairs carry the obligation, and [`tile_layer_pairs`] is
+/// that list. Counted twice over, once by hand off the two nets' dust and once by the function the
+/// finding is built from, because a list checked against itself would agree with any rule.
 ///
-/// The escape is what produces both shapes. A net climbing to clear
-/// another lands directly over it once and one step across from it
-/// twice — the second is a redstone staircase, and it is the more
-/// common of the two.
+/// The escape produces both shapes: a net climbing to clear another lands directly over it once
+/// and one step across from it twice. The second is a redstone staircase, the more common of the
+/// two.
 #[test]
 fn two_strands_one_layer_apart_are_named_rather_than_kept_apart() {
     let region = region(3, 3, 2);
@@ -1177,10 +1112,8 @@ fn two_strands_one_layer_apart_are_named_rather_than_kept_apart() {
     let wall_sink = CellCoord::new(2, 0, 1);
     let router = router(&region, &[source, sink, wall_source, wall_sink]);
 
-    // Laid through `net_trees` rather than by hand so the wire is
-    // the one the routing pass would lay: equal fanout, so
-    // `net_order` puts `Input(0)` first and the second net is the
-    // one that has to climb.
+    // Laid through `net_trees` rather than by hand so the wire is the one the routing pass would
+    // lay: equal fanout, so `net_order` puts `Input(0)` first and the second net has to climb.
     let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
     nets.insert(NetRef::Input(0), vec![wall_sink]);
     nets.insert(NetRef::Cell(0), vec![sink]);
@@ -1265,9 +1198,8 @@ fn two_strands_one_layer_apart_are_named_rather_than_kept_apart() {
     );
 }
 
-/// A scope entry a finding can name nets out of: one sensor input,
-/// one cell, and no geometry — [`net_label`] reads the input row
-/// and nothing else.
+/// A scope entry a finding can name nets out of: one sensor input, one cell, and no geometry.
+/// [`net_label`] reads the input row and nothing else.
 fn entry_for(nets: &HashMap<NetRef, Vec<CellCoord>>, name: &str) -> ScopedPlacementIrEntry {
     use cairn_lang_core::Edition;
     use cairn_lang_core::ast::DottedRef;
@@ -1276,9 +1208,8 @@ fn entry_for(nets: &HashMap<NetRef, Vec<CellCoord>>, name: &str) -> ScopedPlacem
     use crate::netlist_ir::NetlistInput;
 
     let mut ir = PlacementIr::new(Edition::Java);
-    // `sig.a`, `sig.b`, ... one per net of the scope, which is more
-    // inputs than any of them drives — `net_label` reads the row by
-    // index and asks for nothing else.
+    // `sig.a`, `sig.b`, ... one per net of the scope, more inputs than any of them drives;
+    // `net_label` reads the row by index.
     for letter in "abcdefghijklmnopqrstuvwxyz".chars().take(nets.len()) {
         ir.inputs.push(NetlistInput {
             name: DottedRef::new("sig".into(), vec![letter.to_string()]),
@@ -1294,11 +1225,9 @@ fn entry_for(nets: &HashMap<NetRef, Vec<CellCoord>>, name: &str) -> ScopedPlacem
 
 /// A net that climbs over its own dust is a wire, not a pair.
 ///
-/// Every climb puts one of a net's own coords a layer under
-/// another, so counting those would report an obligation on every
-/// escape in the corpus and bury the two-signal pairs the tile
-/// layer actually has to separate. One net, one signal: there is
-/// nothing to keep apart.
+/// Every climb puts one of a net's own coords a layer under another, so counting those would
+/// report an obligation on every escape in the corpus and bury the two-signal pairs the tile layer
+/// has to separate.
 #[test]
 fn a_strand_that_climbs_over_its_own_dust_is_not_a_pair() {
     // One row deep, so the way past the block in the middle of the
@@ -1332,19 +1261,15 @@ fn a_strand_that_climbs_over_its_own_dust_is_not_a_pair() {
     );
 }
 
-/// A clear straight line is not clear when another net is on it,
-/// or one step from it.
+/// A clear straight line is not clear when another net is on it, or one step from it.
 ///
-/// The shortcut that answers an unobstructed run without searching
-/// has its own view of what is in the way, so it needs the same
-/// obstacle set the search gets. Without it a run whose ends are
-/// clear lays this net's dust straight over the last net's, and
-/// nothing downstream ever asks again.
+/// The shortcut that answers an unobstructed run without searching has its own view of what is in
+/// the way, so it needs the obstacle set the search gets; otherwise a run whose ends are clear
+/// lays this net's dust straight over the last net's, and nothing downstream asks again.
 #[test]
 fn a_straight_run_does_not_cross_the_dust_already_laid() {
-    // `void=1`, so the way round is on the plane or nowhere: this
-    // test is about the shortcut's own view of the obstacle set,
-    // not about the escape.
+    // `void=1`, so the way round is on the plane or nowhere: this is about the shortcut's view of
+    // the obstacle set, not about the escape.
     let region = region(5, 3, 1);
     let source = CellCoord::new(2, 0, 0);
     let sink = CellCoord::new(2, 0, 2);
@@ -1384,16 +1309,13 @@ fn a_straight_run_does_not_cross_the_dust_already_laid() {
 
 /// With nowhere to go round, the way out is up.
 ///
-/// `spec/redstone` "Place-and-route" calls it an escape, and it is
-/// the search already climbing over a block, asked the same question
-/// about a signal. The layer is what makes the coord `Bridge`, so the
-/// assertion spells the layer rather than reading it off the
-/// height the way the constructor does.
+/// `spec/redstone` "Place-and-route" calls it an escape: the search climbing over a block, asked
+/// the same question about a signal. The layer is what makes the coord `Bridge`, so the assertion
+/// spells the layer rather than reading it off the height as the constructor does.
 ///
-/// The run at `y=1` passes directly over the wall's dust at
-/// `(1,0,1)`, which is the per-plane half of the rule in the one
-/// place it decides an answer: were up and down in [`beside`],
-/// there would be no escape at all.
+/// The run at `y=1` passes directly over the wall's dust at `(1,0,1)`, the per-plane half of the
+/// rule in the one place it decides an answer: were up and down in [`beside`], there would be no
+/// escape at all.
 #[test]
 fn a_net_with_no_way_round_climbs_over_the_dust_in_its_way() {
     let region = region(3, 3, 2);
@@ -1425,11 +1347,9 @@ fn a_net_with_no_way_round_climbs_over_the_dust_in_its_way() {
 
 /// Two drivers of one cell both arrive.
 ///
-/// A cell body is a terminal of every net that drives it, and the
-/// obstacle set is dust — so the coord where the first net ends is
-/// not something the second has to go round. Keeping the terminals
-/// in would strand the second driver of every two-input gate there
-/// is, which is most of them.
+/// A cell body is a terminal of every net that drives it, and the obstacle set is dust, so the
+/// coord where the first net ends is not something the second goes round. Keeping the terminals
+/// in would strand the second driver of every two-input gate.
 #[test]
 fn a_second_driver_of_one_cell_still_arrives_at_it() {
     let region = region(4, 3, 2);
@@ -1451,12 +1371,9 @@ fn a_second_driver_of_one_cell_still_arrives_at_it() {
     );
 }
 
-/// A net with nowhere left to go is stranded rather than laid over
-/// what is in its way.
-///
-/// This is the trade the pipeline makes: a layout whose last net
-/// cannot be wired is refused by `unroutable` at stage 2 instead of
-/// compiling into two signals on one strand of dust.
+/// A net with nowhere left to go is stranded rather than laid over what is in its way: a layout
+/// whose last net cannot be wired is refused by `unroutable` at stage 2 instead of compiling into
+/// two signals on one strand of dust.
 #[test]
 fn a_net_with_nowhere_left_to_go_is_stranded_rather_than_shorted() {
     let region = region(3, 3, 1);
@@ -1480,14 +1397,12 @@ fn a_net_with_nowhere_left_to_go_is_stranded_rather_than_shorted() {
     );
 }
 
-/// [`net_trees`] lays the nets in [`net_order`], so the net with
-/// the wider fanout keeps the direct run and the other goes round.
+/// [`net_trees`] lays the nets in [`net_order`], so the net with the wider fanout keeps the direct
+/// run and the other goes round.
 ///
-/// Reversing the order would be just as deterministic and would
-/// produce a different layout, which is why this pins which of the
-/// two it is: the three passes that call this each rebuild the
-/// trees, and a disagreement between them is a dump whose ticks
-/// and coords describe different circuits.
+/// The reverse order would be just as deterministic with a different layout, hence the pin: the
+/// three passes that call this each rebuild the trees, and a disagreement between them is a dump
+/// whose ticks and coords describe different circuits.
 #[test]
 fn the_wider_fanout_is_laid_first_and_keeps_its_run() {
     let region = region(5, 3, 2);
@@ -1520,9 +1435,8 @@ fn the_wider_fanout_is_laid_first_and_keeps_its_run() {
 
 /// [`Router::dust`] is the tree without its terminals.
 ///
-/// Derived rather than tracked: a path this router laid runs
-/// through no block and ends at one, so the blocks on a tree are
-/// exactly its source and its sinks.
+/// Derived rather than tracked: a path this router laid runs through no block and ends at one, so
+/// the blocks on a tree are exactly its source and its sinks.
 #[test]
 fn the_dust_of_a_tree_is_everything_but_its_terminals() {
     let region = region(4, 2, 1);
@@ -1554,12 +1468,10 @@ fn collect_nets_maps_cell_drivers_to_bodies_and_outputs_to_pads() {
 
 /// Two ports of one cell on one net are one sink.
 ///
-/// `sig.a and sig.a` reaches the placement IR as a cell with two
-/// drivers on one net, and one strand of dust arrives at one block.
-/// The list's length is the fanout [`net_order`] sorts on, so a
-/// duplicate here would lay this net before one that really does
-/// feed two sinks — and after this change the order is where every
-/// net's dust goes.
+/// `sig.a and sig.a` reaches the placement IR as a cell with two drivers on one net, and one
+/// strand of dust arrives at one block. The list's length is the fanout [`net_order`] sorts on, so
+/// a duplicate would lay this net before one that really feeds two sinks, and the order decides
+/// where every net's dust goes.
 #[test]
 fn two_ports_of_one_cell_on_one_net_are_one_sink() {
     let region = reservation(8, 4);
@@ -1585,16 +1497,13 @@ fn two_ports_of_one_cell_on_one_net_are_one_sink() {
 
 /// A net is not reported as standing in its own way.
 ///
-/// For a sink inside the reservation the question cannot arise: a
-/// coord of this net's dust one step from the sink is a coord the
-/// router could have stepped off, so the sink would not be
-/// stranded. What is left is a sink outside the reservation, which
-/// a hand-built IR can carry and which `step` refuses to enter —
-/// and there the net's own dust really can run beside it.
+/// For a sink inside the reservation the question cannot arise: this net's dust one step from the
+/// sink is a coord the router could have stepped off. What is left is a sink outside the
+/// reservation, which a hand-built IR can carry and `step` refuses to enter, and there the net's
+/// own dust can run beside it.
 ///
-/// `sig.b` here reaches its first sink along the row and strands on
-/// a second one past the edge, with the coord it laid at `(3,0,0)`
-/// next to it. Naming itself would answer "why can `sig.b` not get
+/// `sig.b` here reaches its first sink along the row and strands on a second past the edge, with
+/// the coord it laid at `(3,0,0)` next to it. Naming itself would answer "why can `sig.b` not get
 /// there" with "`sig.b` is in the way".
 #[test]
 fn a_stranded_net_is_not_named_as_crowding_its_own_sink() {
@@ -1649,9 +1558,8 @@ fn a_stranded_net_is_not_named_as_crowding_its_own_sink() {
     );
 }
 
-/// `block_sites` is the other half of the same contract: the coords
-/// the router must not draw dust through, in one list so the three
-/// passes cannot disagree about what is standing where.
+/// `block_sites` is the other half of the same contract: the coords the router must not draw dust
+/// through, in one list so the three passes cannot disagree about what is standing where.
 #[test]
 fn block_sites_lists_cells_then_input_pads_then_output_pads() {
     let region = reservation(8, 4);
@@ -1704,9 +1612,8 @@ fn one_cell_ir(region: &CircuitRegionReservation) -> PlacementIr {
     ir
 }
 
-/// Net order is fanout descending, ties by [`net_ref_key`]. Pinned
-/// because three passes walk it and a `HashMap`'s own order would
-/// make their outputs differ run to run.
+/// Net order is fanout descending, ties by [`net_ref_key`]. Pinned because three passes walk it
+/// and a `HashMap`'s own order would make their outputs differ run to run.
 #[test]
 fn net_order_sorts_by_fanout_then_key() {
     let mut nets: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
@@ -1723,12 +1630,10 @@ fn net_order_sorts_by_fanout_then_key() {
 }
 
 mod route_invariants {
-    //! Property coverage for the facts every consumer of
-    //! [`NetTree`] leans on: a route is part of the wire, it is a
-    //! walk, it ends where the dust ends, and it never crosses a
-    //! block. The example fixtures above are all layouts a v1
-    //! placement produces — a row of cells and a column of pads —
-    //! and the router has to be right about the ones it does not.
+    //! Property coverage for the facts every consumer of [`NetTree`] leans on: a route is part of
+    //! the wire, it is a walk, it ends where the dust ends, and it never crosses a block. The
+    //! example fixtures above are all layouts the placement pass produces (a row of cells and a
+    //! column of pads), and the router has to be right about the others too.
     use proptest::prelude::*;
 
     use super::{
@@ -1739,11 +1644,9 @@ mod route_invariants {
     const WIDTH: u32 = 9;
     const DEPTH: u32 = 4;
 
-    /// A source, up to four sinks, and up to six loose blocks on
-    /// the ground layer of a 9x2x4 box, which is where the
-    /// placement pass puts every block there is. The box is small
-    /// enough that they regularly wall something in, and the second
-    /// layer is there for the router to climb to.
+    /// A source, up to four sinks, and up to six loose blocks on the ground layer of a 9x2x4 box,
+    /// where the placement pass puts every block. The box is small enough that they regularly wall
+    /// something in, and the second layer is there for the router to climb to.
     fn layout() -> impl Strategy<Value = (u32, CellCoord, Vec<CellCoord>, Vec<CellCoord>)> {
         let coord = (0u32..WIDTH, 0u32..DEPTH).prop_map(|(x, z)| CellCoord::new(x, 0, z));
         (
@@ -1787,9 +1690,8 @@ mod route_invariants {
         )
     }
 
-    /// The fewest steps from any seed to any target, over the
-    /// same free space the router walks — a breadth-first sweep
-    /// with nothing else in it.
+    /// The fewest steps from any seed to any target over the free space the router walks: a
+    /// breadth-first sweep with nothing else in it.
     fn breadth_first(router: &Router, seeds: &[CellCoord], targets: &[CellCoord]) -> Option<u32> {
         let mut seen: HashSet<CellCoord> = seeds.iter().copied().collect();
         let mut frontier: Vec<CellCoord> = seeds.to_vec();
@@ -1847,25 +1749,19 @@ mod route_invariants {
             }
         }
 
-        /// Every attachment is as short as a plain breadth-first
-        /// walk, whichever tier answered.
+        /// Every attachment is as short as a plain breadth-first walk, whichever tier answered.
         ///
-        /// `straight_run` is allowed to skip `search` only because
-        /// a clear line between the closest pair is already a
-        /// shortest path; `search` is hand-rolled A* with a
-        /// non-standard tie-break and a stale-entry skip in place
-        /// of decrease-key. Neither had anything to check it
-        /// against — a tie-break edit that quietly added a block
-        /// would move `wire_length`, the buffer counts, and every
-        /// pinned buffer coord, and the only things that would
-        /// notice are fixtures a well-meaning author would
-        /// "fix" by updating the number.
+        /// `straight_run` may skip `search` only because a clear line between the closest pair is
+        /// already a shortest path; `search` is hand-rolled A* with a non-standard tie-break and
+        /// a stale-entry skip in place of decrease-key. A tie-break edit that quietly added a
+        /// block would move `wire_length`, the buffer counts and every pinned buffer coord, and
+        /// otherwise only fixtures would notice, which an author might "fix" by updating the
+        /// number.
         ///
-        /// The walk below is the oracle: no heuristic, no ordering,
-        /// no reuse of the router's own bookkeeping beyond what a
-        /// coord *is*. Driven through [`Router::reach`] so the real
-        /// tier choice is what gets measured, round after round,
-        /// including every round the shortcut declines.
+        /// The walk below is the oracle: no heuristic, no ordering, no reuse of the router's own
+        /// bookkeeping beyond what a coord *is*. Driven through [`Router::reach`] so the real tier
+        /// choice is what gets measured, round after round, including every round the shortcut
+        /// declines.
         #[test]
         fn every_attachment_is_as_short_as_a_breadth_first_walk(
             (void, source, sinks, loose) in layout()
@@ -1907,36 +1803,24 @@ mod route_invariants {
             }
         }
 
-        /// No two nets of one scope run within one step of
-        /// each other in one plane.
+        /// No two nets of one scope run within one step of each other in one plane.
         ///
-        /// The whole change rests on this: dust joins the dust
-        /// beside it, so two nets one step apart are one strand
-        /// carrying two signals as surely as two nets on one
-        /// coord, and the crossing pass no longer looks for either
-        /// because [`net_trees`] no longer produces them. Nothing
-        /// else checks it over arbitrary geometry, so it is
-        /// checked here, over layouts the example corpus does not
-        /// have.
+        /// Dust joins the dust beside it, so two nets one step apart are one strand carrying two
+        /// signals as surely as two nets on one coord. The crossing pass does not look for either
+        /// because [`net_trees`] does not produce them, and nothing else checks it over arbitrary
+        /// geometry, so it is checked here over layouts the example corpus does not have.
         ///
-        /// Up and down are not checked, because the router does
-        /// not claim them: `spec/redstone` "Place-and-route" leaves
-        /// what a strand at `y + 1` reads to the physical tile layer.
+        /// Up and down are not checked, because the router does not claim them: `spec/redstone`
+        /// "Place-and-route" leaves what a strand at `y + 1` reads to the physical tile layer.
         ///
-        /// Three nets rather than two, because two only ever
-        /// exercises "avoid the one before me". The third has to
-        /// avoid the union of the two before it, which is the case
-        /// where the accumulating obstacle set could go wrong and
-        /// a per-net one would not.
+        /// Three nets, because two only exercise "avoid the one before me"; the third has to
+        /// avoid the union of the two before it, where an accumulating obstacle set could go
+        /// wrong and a per-net one would not. All three are drawn from the same block set, as a
+        /// scope's nets end at each other's terminals, and a terminal is not dust.
         ///
-        /// All three are drawn from the same block set, which is
-        /// what makes the case realistic: a scope's nets end at
-        /// each other's terminals, and a terminal is not dust.
-        ///
-        /// `prop_assume!` rather than an early return, so a case
-        /// with too few blocks to build three nets from is counted
-        /// as a reject rather than as a pass — the vacuity is in
-        /// proptest's own rejection rate instead of hidden.
+        /// `prop_assume!` rather than an early return, so a case with too few blocks for three
+        /// nets counts as a reject rather than a pass and the vacuity shows in proptest's
+        /// rejection rate.
         #[test]
         fn no_two_nets_of_a_scope_run_within_one_step_in_one_plane(
             (void, source, sinks, loose) in layout()
@@ -1999,13 +1883,11 @@ mod route_invariants {
     }
 }
 
-/// A block standing on a coord another block already holds is
-/// found; a list where every block has a coord of its own is not.
+/// A block standing on a coord another block already holds is found; a list where every block
+/// has a coord of its own is not.
 ///
-/// The `None` row is the one that matters for the three passes
-/// that ask: every scope the pipeline actually produces takes it,
-/// so a predicate that answered `Some` on a sound layout would
-/// refuse every circuit in the corpus.
+/// The `None` row is the one that matters: every scope the pipeline produces takes it, so a
+/// predicate that answered `Some` on a sound layout would refuse every circuit in the corpus.
 #[test]
 fn a_block_on_a_taken_coord_is_found_and_a_clear_layout_is_not() {
     let clear = [
@@ -2031,18 +1913,13 @@ fn a_block_on_a_taken_coord_is_found_and_a_clear_layout_is_not() {
     );
 }
 
-/// Two cells on one coord assert rather than returning a pad
-/// refusal or a quiet `None`.
+/// Two cells on one coord assert rather than returning a pad refusal or a quiet `None`.
 ///
-/// No `size=` repairs it — a cell's coord comes from its
-/// topological index, not from the reservation — so there is no
-/// diagnostic to raise and nothing for an author to act on. A
-/// `None` would leave the pair standing: one net whose source and
-/// sink are the same coord, and a dump that reads as a layout,
-/// which is the failure the pad refusal exists to prevent.
-///
-/// The message names the coord, because a caller assembling a
-/// block list by hand has nothing else to go on.
+/// No `size=` repairs it (a cell's coord comes from its topological index, not from the
+/// reservation), so there is no diagnostic for an author to act on. A `None` would leave the pair
+/// standing: one net whose source and sink are the same coord, and a dump that reads as a layout,
+/// which the pad refusal exists to prevent. The message names the coord, because a caller
+/// assembling a block list by hand has nothing else to go on.
 #[test]
 #[should_panic(expected = "two cells stand on (1,0,1)")]
 fn two_cells_on_one_coord_is_a_caller_bug_and_says_so() {
@@ -2053,13 +1930,10 @@ fn two_cells_on_one_coord_is_a_caller_bug_and_says_so() {
     let _ = collapsed_block(&two_cells);
 }
 
-/// The cell fault is found even when a pad fault stands later in
-/// the list.
+/// The cell fault is found even when a pad fault stands later in the list.
 ///
-/// [`block_sites`] lists cells first, so the assert is reached
-/// before any pad repeat. Reporting the pad instead would hand the
-/// author a `size=` to enlarge for an IR that enlarging cannot
-/// fix.
+/// [`block_sites`] lists cells first, so the assert is reached before any pad repeat. Reporting
+/// the pad would hand the author a `size=` to enlarge for an IR that enlarging cannot fix.
 #[test]
 #[should_panic(expected = "two cells stand on (1,0,1)")]
 fn a_cell_fault_outranks_a_pad_fault_later_in_the_list() {
@@ -2071,8 +1945,8 @@ fn a_cell_fault_outranks_a_pad_fault_later_in_the_list() {
     let _ = collapsed_block(&both);
 }
 
-/// One cell with a pad on it is still the pad refusal, so the
-/// assert did not widen into "any repeat is a caller bug".
+/// One cell with a pad on it is still the pad refusal, so not every repeat is treated as a caller
+/// bug.
 #[test]
 fn a_pad_on_a_single_cell_is_still_the_pad_refusal() {
     let cell_then_pad = [
@@ -2085,21 +1959,16 @@ fn a_pad_on_a_single_cell_is_still_the_pad_refusal() {
     );
 }
 
-/// Two blocks on one voxel are one collision however their coords
-/// were spelled.
+/// Two blocks on one voxel are one collision however their coords were spelled.
 ///
-/// [`CellCoord`]'s fields are public, so a struct literal can
-/// write `(x, 0, z, Bridge)` where [`CellCoord::new`] would have
-/// derived `Plane` from the height. [`Router::new`] keys its
-/// obstacle set through [`keyed`], which collapses the two
-/// spellings back into one; a refusal comparing the raw coords
-/// would call them two blocks and let the pair through to a router
-/// that treats them as one. This asks for the same reading in both
-/// places.
+/// [`CellCoord`]'s fields are public, so a struct literal can write `(x, 0, z, Bridge)` where
+/// [`CellCoord::new`] would have derived `Plane` from the height. [`Router::new`] keys its
+/// obstacle set through [`keyed`], which collapses the two spellings into one; a refusal comparing
+/// raw coords would call them two blocks and let the pair through to a router that treats them as
+/// one.
 ///
-/// The control is the other direction: two genuinely different
-/// voxels that `keyed` leaves apart, so the fix is not "call
-/// everything at one `(x, z)` a collision".
+/// The control is the other direction: two genuinely different voxels that `keyed` leaves apart,
+/// so the check is not "everything at one `(x, z)` collides".
 #[test]
 fn a_coord_is_read_the_way_the_router_keys_it() {
     let mislabelled = CellCoord {
@@ -2136,9 +2005,7 @@ fn a_coord_is_read_the_way_the_router_keys_it() {
 
 /// A block at `coord`, for the [`collapsed_block`] rows above.
 ///
-/// Built as a struct literal rather than through [`block_sites`]
-/// because the coords these rows need are ones no IR produces —
-/// that is what they are for.
+/// A struct literal rather than [`block_sites`], because these rows need coords no IR produces.
 fn site(kind: BlockKind, index: usize, coord: CellCoord) -> BlockSite {
     BlockSite { coord, kind, index }
 }

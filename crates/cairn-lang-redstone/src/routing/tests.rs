@@ -1,8 +1,5 @@
-//! Crate-internal coverage for the routing pass's phase-transition
-//! commit. `tests/redstone/routing.rs` drives real synth fixtures and can
-//! only ever hand this pass a uniformly `Unrouted` IR; building a
-//! scope whose cells sit in different phases needs the
-//! `pub(crate)` `phase` field, so it lives here.
+//! Routing behaviours that need crate-internal access: the wire coords themselves, which the IR
+//! does not carry, and scopes whose cells sit in different phases.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::error::Span;
@@ -14,17 +11,9 @@ use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
 use crate::placement_ir::{CellCoord, PlacedCellNode, PlacementIr, PlacementPhase};
 use crate::test_fixtures::{ROUTED, placed_cell, reservation, scoped};
 
-/// No net in the example corpus has dust drawn inside a component.
-///
-/// The property the router exists for, checked against every `.crn`
-/// that ships rather than against generated layouts: a coord of a
-/// net's wire is either free space, that net's own source, or one
-/// of its own sinks. Anything else is a strand of redstone inside a
-/// comparator or a pressure plate.
-///
-/// A unit test rather than one in `tests/redstone/routing.rs` because the
-/// wire coords are crate-internal — the routed IR carries lengths,
-/// not paths.
+/// No net in the example corpus has dust drawn inside a component: every coord of a net's wire
+/// is free space, its own source or one of its own sinks. A unit test because the wire coords
+/// are crate-internal.
 #[test]
 fn no_example_draws_dust_inside_a_component() {
     use std::collections::{HashMap, HashSet};
@@ -34,12 +23,9 @@ fn no_example_draws_dust_inside_a_component() {
     use crate::grid::{PadColumn, input_pad, manhattan};
     use crate::routing_geometry::{Router, block_sites, collect_nets, net_trees};
 
-    // What the corpus is worth is what it still routes. A count of
-    // wire coords would stay comfortably positive while an example
-    // slid into `E_ROUTE_CONGESTION` and vanished from the walk, so
-    // the guards below are the scopes placement laid against the
-    // scopes routing kept, and the number of strands that actually
-    // go round something.
+    // A count of wire coords would stay positive while an example slid into
+    // `E_ROUTE_CONGESTION` and left the walk, so the guards compare the scopes placed with the
+    // scopes routed, and count the strands that go round something.
     let mut placed_scopes = 0usize;
     let mut routed_scopes = 0usize;
     let mut detours = 0usize;
@@ -147,18 +133,11 @@ fn examples() -> Vec<(std::path::PathBuf, String)> {
     found
 }
 
-/// One net's dust, checked against the nets already claimed and
-/// then added to them.
-///
-/// Two nets on one coord, or one step apart in one plane, are two
-/// signals on one strand of dust. The proptest in
-/// `routing_geometry` holds this over generated boxes; the walk
-/// below holds it over the geometry the placement pass actually
-/// produces, which is where the corpus's shorts used to come from.
-///
-/// `owner` holds dust and the reach is asked about per coord, so
-/// two strands two apart — each reaching the coord between them —
-/// are not mistaken for one.
+/// One net's dust, checked against the nets already claimed and then added to them. Two nets on
+/// one coord, or one step apart in one plane, are two signals on one strand. The proptest in
+/// `routing_geometry` holds this over generated boxes; this holds it over the geometry placement
+/// produces. `owner` holds dust and the reach is asked per coord, so two strands two apart are
+/// not mistaken for one.
 fn claim(
     owner: &mut std::collections::HashMap<CellCoord, NetRef>,
     net: NetRef,
@@ -184,13 +163,9 @@ fn claim(
     }
 }
 
-/// A scope with several unwireable sinks says how many, so sizing
-/// it is one decision rather than a fix-one-recompile loop.
-///
-/// `Router::tree` strands every sink still unconnected the moment
-/// one round of the search comes back empty, so `unreachable()`
-/// holds them in batches; naming only the first would send the
-/// author round again for each.
+/// A scope with several unwireable sinks says how many, so sizing it is one decision.
+/// `Router::tree` strands every remaining sink when a round of the search comes back empty, so
+/// naming only the first would send the author round again for each.
 #[test]
 fn a_scope_with_several_unwireable_sinks_counts_them() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -247,16 +222,10 @@ fn a_scope_with_several_unwireable_sinks_counts_them() {
     );
 }
 
-/// A sink the reservation cannot reach is refused by every pass
-/// that would measure it, naming the same two coords.
-///
-/// Stage 2 elides the scope, so stages 3 and 4 never see one in a
-/// real run. They rebuild the trees from the IR, though, and a
-/// caller who skipped stage 2 would hand them one. The tree answers
-/// for a stranded sink — one step, straight to the source — so
-/// without the check the later stages would not panic; they would
-/// write a tick count and a buffer list for a circuit that cannot
-/// be wired, and nothing in the dump would say so.
+/// A sink the reservation cannot reach is refused by every pass that would measure it, naming the
+/// same two coords. Stage 2 drops such a scope, but stages 3 and 4 rebuild the trees from a
+/// caller's IR, and the tree answers for a stranded sink with one step straight to the source,
+/// so without the check they would write ticks and buffers for a circuit that cannot be wired.
 #[test]
 fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -320,11 +289,7 @@ fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
         .unwrap_or_else(|| panic!("stage 2 reads a placed netlist: {}", refusal.primary))
         .to_owned();
 
-    // The same layout handed straight to stage 3, and then to
-    // stage 4, as a caller who skipped stage 2 would. Each rebuilds
-    // the trees, and each has to reach the same verdict: the
-    // alternative is a dump whose ticks and buffer coords describe
-    // a circuit nothing can build.
+    // The same layout handed straight to stages 3 and 4, as a caller who skipped stage 2 would.
     for cell in &mut ir.cells {
         cell.phase = PlacementPhase::Routed { wire_length: 0 };
     }
@@ -409,13 +374,8 @@ fn wire_length_counts_the_routed_path() {
     expected = "for cell #1 at (4,0,1) in struct `mixed` — routing must run exactly once per placement"
 )]
 fn route_panic_names_the_offending_cell_not_the_first_one() {
-    // Re-running the whole pass always trips on `cells[0]`, which
-    // would let a regression that hardcoded the index to zero — or
-    // that read the coord off the wrong cell — pass unnoticed. A
-    // hand-built IR whose first cell is still `Unrouted` while the
-    // second is already `Routed` forces the panic past the head of
-    // the loop, so both the index and the coord have to be
-    // threaded from the cell actually being transitioned.
+    // Re-running the whole pass trips on `cells[0]`, which cannot tell a hard-coded index from the
+    // real one; an `Unrouted` first cell and a `Routed` second one put the panic on `cells[1]`.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(8, 3, 2));
     ir.cells.push(placed_cell(
