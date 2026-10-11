@@ -1,6 +1,6 @@
-//! Unit coverage for the argument-surface invariants the
-//! end-to-end `tests/cli_*.rs` binaries can only assert
-//! circumstantially, by hard-coding both sides of a pairing.
+//! Unit coverage for the argument-surface invariants the end-to-end
+//! tests under `tests/cli/` can only assert circumstantially, by
+//! hard-coding both sides of a pairing.
 
 use clap::CommandFactory;
 
