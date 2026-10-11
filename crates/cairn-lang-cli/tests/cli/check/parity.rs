@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use crate::common::{Reported, cairn_argv, crn_examples, stderr_stream};
+use crate::common::{Reported, cairn_argv, crn_examples, json_stream, stderr_stream};
 
 /// Shared prologue so each fixture differs only in the construct that trips
 /// its diagnostic. Named for its role rather than for the `@directive`
@@ -49,13 +49,13 @@ theme t:\n\
 /// first item; and a selector fixture has to add rows to the file's *only*
 /// theme, because a second `theme` block leaves no theme auto-bound and the
 /// rows then reach no member. Both own their whole source.
-enum Source {
+pub(crate) enum Source {
     WithPrologue(&'static str),
     Whole(&'static str),
 }
 
 impl Source {
-    fn text(&self) -> String {
+    pub(crate) fn text(&self) -> String {
         match self {
             Self::WithPrologue(body) => format!("{PROLOGUE}{body}"),
             Self::Whole(text) => (*text).to_owned(),
@@ -287,9 +287,19 @@ const RESOLVER_FIXTURES: &[(&str, Source)] = &[
              \nsite s:\n  place id=\"home.1\" use=hut theme=t at=origin\n",
         ),
     ),
+    (
+        // A `struct hut` and a `place id=hut` both write `hut.nbt`.
+        "E_OUTPUT_NAME_COLLISION",
+        Source::WithPrologue(
+            "struct hut size=3x3\n  floor mat_slot=floor\n\
+             \ndef house size=3x3:\n  floor mat_slot=floor\n\
+             \nsite s:\n  place id=hut use=house theme=t at=origin\n",
+        ),
+    ),
 ];
 
-fn all_fixtures() -> impl Iterator<Item = &'static (&'static str, Source)> {
+/// Every fixture, each a source `check` refuses with the one code it names.
+pub(crate) fn all_fixtures() -> impl Iterator<Item = &'static (&'static str, Source)> {
     SYNTACTIC_FIXTURES.iter().chain(RESOLVER_FIXTURES)
 }
 
@@ -314,21 +324,7 @@ fn exit_code(out: &std::process::Output) -> i32 {
 /// Diagnostics from `cairn check --format json`, in emission order.
 fn check_stream(path: &Path) -> Vec<Reported> {
     let out = cairn_argv(&["check", path.to_str().unwrap(), "--format", "json"]);
-    let stdout = String::from_utf8(out.stdout).expect("utf-8");
-    let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-    parsed
-        .as_array()
-        .expect("array of diagnostics")
-        .iter()
-        .map(|d| {
-            (
-                d["line"].as_u64().expect("line"),
-                d["col"].as_u64().expect("col"),
-                d["severity"].as_str().expect("severity").to_owned(),
-                d["code"].as_str().expect("code").to_owned(),
-            )
-        })
-        .collect()
+    json_stream(&String::from_utf8(out.stdout).expect("utf-8"))
 }
 
 /// The four subcommands, and how to invoke each against a fixture.
@@ -436,44 +432,6 @@ fn parity_3_build_commands_refuse_every_check_error() {
 }
 
 #[test]
-fn parity_4_a_refused_compile_leaves_no_artifact_and_no_lockfile() {
-    let tmp = TempDir::new().expect("tempdir");
-    for (index, (code, body)) in all_fixtures().enumerate() {
-        let path = write_fixture(tmp.path(), index, body);
-        // Pre-create the output directory so its emptiness is a real
-        // observation rather than the read failing on a missing path.
-        let out_dir = path.parent().expect("fixture dir").join("out");
-        fs::create_dir_all(&out_dir).expect("create out dir");
-
-        let out = cairn_argv(&[
-            "compile",
-            path.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.to_str().unwrap(),
-        ]);
-        assert_eq!(exit_code(&out), 1, "{code}: compile should refuse");
-
-        let lock = path.with_extension("crn.lock");
-        assert!(
-            !lock.exists(),
-            "{code}: a refused compile must not certify the source with {}",
-            lock.display(),
-        );
-        let artifacts: Vec<PathBuf> = fs::read_dir(&out_dir)
-            .expect("out dir exists")
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .collect();
-        assert!(
-            artifacts.is_empty(),
-            "{code}: a refused compile must not leave artifacts, found {artifacts:?}",
-        );
-    }
-}
-
-#[test]
 fn parity_5_a_template_only_library_compiles_to_nothing_without_complaint() {
     // The case `c26_bare_def_without_place_emits_w_unused_def_and_no_nbt`
     // pins: a `def` no site instantiates is a template, templates lower to
@@ -532,7 +490,6 @@ fn parity_6_a_partially_lowered_source_is_not_certified() {
     )
     .expect("write partial source");
     let out_dir = tmp.path().join("out");
-    fs::create_dir_all(&out_dir).expect("create out dir");
 
     let out = cairn_argv(&[
         "compile",
@@ -547,19 +504,6 @@ fn parity_6_a_partially_lowered_source_is_not_certified() {
     assert!(
         stderr.contains("E_PARTIAL_BUILD") && stderr.contains("struct::bad"),
         "the refusal must name the scope that went missing; stderr={stderr}",
-    );
-    assert!(
-        !path.with_extension("crn.lock").exists(),
-        "a partial build must not be certified by a lockfile",
-    );
-    let artifacts: Vec<PathBuf> = fs::read_dir(&out_dir)
-        .expect("out dir exists")
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .collect();
-    assert!(
-        artifacts.is_empty(),
-        "the structure that did lower must not be written either, found {artifacts:?}",
     );
 }
 
@@ -626,54 +570,44 @@ fn parity_8_a_pinned_check_reports_exactly_what_the_compile_reports() {
         let path = write_fixture(tmp.path(), index, body);
         let source = path.to_str().unwrap();
         let out_dir = path.parent().expect("fixture dir").join("out");
+        for edition in ["java", "bedrock"] {
+            let checked = cairn_argv(&[
+                "check",
+                source,
+                "--edition",
+                edition,
+                "--target",
+                "latest",
+                "--format",
+                "json",
+            ]);
+            let checked_code = exit_code(&checked);
+            let expected = json_stream(&String::from_utf8(checked.stdout).expect("utf-8"));
+            assert!(
+                !expected.is_empty(),
+                "{code} on {edition}: pinned check reports nothing"
+            );
 
-        let checked = cairn_argv(&[
-            "check",
-            source,
-            "--edition",
-            "java",
-            "--target",
-            "latest",
-            "--format",
-            "json",
-        ]);
-        let checked_code = exit_code(&checked);
-        let stdout = String::from_utf8(checked.stdout).expect("utf-8");
-        let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-        let expected: Vec<Reported> = parsed
-            .as_array()
-            .expect("array of diagnostics")
-            .iter()
-            .map(|d| {
-                (
-                    d["line"].as_u64().expect("line"),
-                    d["col"].as_u64().expect("col"),
-                    d["severity"].as_str().expect("severity").to_owned(),
-                    d["code"].as_str().expect("code").to_owned(),
-                )
-            })
-            .collect();
-        assert!(!expected.is_empty(), "{code}: pinned check reports nothing");
-
-        let out = cairn_argv(&[
-            "compile",
-            source,
-            "--edition",
-            "java",
-            "--out",
-            out_dir.to_str().unwrap(),
-        ]);
-        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-        assert_eq!(
-            stderr_stream(&stderr),
-            expected,
-            "{code}: the pinned check and the compile must report the same \
-             stream\n  check: {expected:?}\n  compile stderr:\n{stderr}",
-        );
-        assert_eq!(
-            checked_code,
-            exit_code(&out),
-            "{code}: and refuse the same source\n  compile stderr:\n{stderr}",
-        );
+            let out = cairn_argv(&[
+                "compile",
+                source,
+                "--edition",
+                edition,
+                "--out",
+                out_dir.to_str().unwrap(),
+            ]);
+            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+            assert_eq!(
+                stderr_stream(&stderr),
+                expected,
+                "{code} on {edition}: the pinned check and the compile must report the same \
+                 stream\n  check: {expected:?}\n  compile stderr:\n{stderr}",
+            );
+            assert_eq!(
+                checked_code,
+                exit_code(&out),
+                "{code} on {edition}: and refuse the same source\n  compile stderr:\n{stderr}",
+            );
+        }
     }
 }

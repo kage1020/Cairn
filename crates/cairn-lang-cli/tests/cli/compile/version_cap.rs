@@ -64,30 +64,6 @@ fn a_pinned_check_is_not_held_to_the_floor_the_compile_is_held_to() {
     );
 }
 
-/// Exiting non-zero while leaving a lock behind would still leave
-/// `verified: true` on disk for the next reader.
-///
-/// The empty output directory counts. `--out` is created before the
-/// structure tags are built, so a check placed even one step later than it
-/// is leaves that directory behind — a file count alone cannot tell the
-/// two orderings apart, and the ordering is the whole point of running
-/// before any of it.
-#[test]
-fn a_refused_target_writes_nothing() {
-    let fixture = Fixture::new(&format!("@requires version>=1.21\n{BUILD}"));
-    let out = compile_as(&fixture, "java", "1.20.4");
-    assert_eq!(out.status.code(), Some(1));
-    assert_eq!(
-        fixture.artifacts(),
-        Vec::<String>::new(),
-        "a refused compile must leave no artifact and no lock",
-    );
-    assert!(
-        !fixture.out().exists(),
-        "a refused compile must not create its output directory either",
-    );
-}
-
 /// The message has to carry all three of what is needed to act: the floor,
 /// the target that missed it, and what to do — the shape
 /// `spec/versioning-editions` "Fail-loud and minimum-version inference" uses

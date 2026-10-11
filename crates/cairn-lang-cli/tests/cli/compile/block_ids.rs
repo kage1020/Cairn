@@ -35,24 +35,6 @@ fn an_id_no_edition_has_is_refused_rather_than_written() {
     );
 }
 
-/// Exiting non-zero while leaving a structure or a lock behind still leaves
-/// a file the next reader takes for a finished build.
-///
-/// The empty `--out` directory counts as an artifact here for the same
-/// reason it does in `cli_version_cap`: it is created before the structure
-/// tags are built, so a check placed one step later leaves it behind.
-#[test]
-fn a_refused_id_writes_nothing() {
-    let fixture = Fixture::new(&source_binding("totally_not_a_block"));
-    let out = compile_as(&fixture, "java", "1.21.4");
-    assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
-    assert_eq!(
-        fixture.artifacts(),
-        Vec::<String>::new(),
-        "a refused compile must leave no structure and no lock behind",
-    );
-}
-
 #[test]
 fn a_java_only_block_is_refused_on_bedrock_and_compiles_on_java() {
     // `minecraft:light` is Java's light block. Bedrock 1.21.60 has no id of

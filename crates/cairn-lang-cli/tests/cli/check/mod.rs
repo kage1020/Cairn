@@ -2,5 +2,5 @@
 //! the commands that build on it.
 
 mod findings;
-mod parity;
+pub(crate) mod parity;
 mod pinned;

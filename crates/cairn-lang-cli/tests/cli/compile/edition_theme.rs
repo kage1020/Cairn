@@ -318,48 +318,6 @@ fn a_java_build_writes_the_java_variants_block_whatever_the_place_named() {
 }
 
 #[test]
-fn a_build_whose_pin_has_no_variant_stops_before_writing_anything() {
-    // Every `mat_slot=` fell back to air here and the build still wrote a
-    // structure plus a `verified: true` lockfile. The refusal now happens
-    // in the resolver, so nothing is written at all.
-    let tmp = TempDir::new().expect("tempdir");
-    let src = write_source(
-        tmp.path(),
-        "bedrock-only.crn",
-        &placed_source("shop_bedrock", &["_bedrock"]),
-    );
-    let out_dir = TempDir::new().expect("out tempdir");
-    let result = Command::new(cargo_bin())
-        .args([
-            "compile",
-            src.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-        ])
-        .output()
-        .expect("run cairn");
-    let stderr = String::from_utf8_lossy(&result.stderr);
-    assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
-    assert!(
-        stderr.contains("E_THEME_VARIANT_MISSING"),
-        "stderr={stderr}",
-    );
-    assert!(
-        fs::read_dir(out_dir.path())
-            .expect("out dir readable")
-            .next()
-            .is_none(),
-        "no artifact may be written for a build that cannot bind its theme",
-    );
-    assert!(
-        !tmp.path().join("bedrock-only.crn.lock").exists(),
-        "no lockfile may certify a build that did not happen",
-    );
-}
-
-#[test]
 fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
     // `check --edition` is the gate a CI job runs; it has to see this, and
     // the same source without a pin has nothing to fail against.

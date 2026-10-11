@@ -18,7 +18,8 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use crate::common::{cargo_bin, compile, examples_dir, stderr_of};
+use crate::check::parity::all_fixtures;
+use crate::common::{Fixture, cargo_bin, compile, compile_as, examples_dir, stderr_of};
 
 /// Every regular file under `dir`, keyed by name, so a snapshot can be
 /// compared byte-for-byte before and after a failed run.
@@ -630,4 +631,123 @@ fn atomic_12_a_lock_whose_location_cannot_be_resolved_is_reported_not_passed() {
         before,
         "the failed build changed the previous one"
     );
+}
+
+/// Sources a compile refuses before writing anything, each as a label, the
+/// source, the edition and target it is compiled for, and the code it is
+/// refused with.
+const REFUSED: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "an id no edition has",
+        "theme t:\n  slot floor -> @totally_not_a_block\n\
+         struct s size=2x2\n  floor mat_slot=floor\n",
+        "java",
+        "1.21.4",
+        "E_UNKNOWN_ID",
+    ),
+    (
+        "a target below the declared floor",
+        "@requires version>=1.21\ntheme t:\n  slot floor -> @oak_planks\n\
+         struct s size=2x2\n  floor mat_slot=floor\n",
+        "java",
+        "1.20.4",
+        "E_VERSION_CAP",
+    ),
+    (
+        "a struct and a place writing one file name, on Bedrock",
+        OUTPUT_NAME_COLLISION,
+        "bedrock",
+        "1.21.60",
+        "E_OUTPUT_NAME_COLLISION",
+    ),
+    (
+        "a place naming the one theme variant the edition lacks",
+        "@cairn 2026.06\n\ntheme shop_bedrock:\n  slot floor -> @dark_oak_planks\n\n\
+         def hut size=4x4:\n  floor mat_slot=floor\n\n\
+         site s:\n  place id=home use=hut theme=shop_bedrock at=origin\n",
+        "java",
+        "latest",
+        "E_THEME_VARIANT_MISSING",
+    ),
+    (
+        "a sloped roof of a whole block, on Java",
+        COBBLESTONE_ROOF,
+        "java",
+        "1.21.4",
+        "E_INCOMPATIBLE_MATERIAL",
+    ),
+    (
+        "a sloped roof of a whole block, on Bedrock",
+        COBBLESTONE_ROOF,
+        "bedrock",
+        "1.21.60",
+        "E_INCOMPATIBLE_MATERIAL",
+    ),
+    (
+        "a struct with no size beside one that lowers",
+        "@cairn 2026.06\n\ntheme t:\n  slot wall -> @cobblestone\n\n\
+         struct good size=4x4\n  walls class=outer mat_slot=wall height=3\n\n\
+         struct bad\n  walls class=outer mat_slot=wall height=3\n",
+        "java",
+        "latest",
+        "E_PARTIAL_BUILD",
+    ),
+];
+
+/// A `struct hut` and a `place id=hut` both write `hut.nbt`.
+const OUTPUT_NAME_COLLISION: &str = "@cairn 2026.06\n\n\
+theme t:\n  slot floor -> @oak_planks\n\n\
+struct hut size=3x3\n  floor mat_slot=floor\n\n\
+def house size=3x3:\n  floor mat_slot=floor\n\n\
+site s:\n  place id=hut use=house theme=t at=origin\n";
+
+/// A gable roof bound to cobblestone, which has no stair states to carry.
+const COBBLESTONE_ROOF: &str = "@cairn 2026.06\n\n\
+theme t:\n  slot floor -> @oak_planks\n  slot wall  -> @cobblestone\n  slot roof  -> @cobblestone\n\n\
+struct hut size=5x3\n  floor mat_slot=floor\n  walls class=outer mat_slot=wall height=3\n  \
+roof  kind=gable mat_slot=roof overhang=0\n";
+
+/// A compile refused for its source or its target leaves nothing the next
+/// reader could take for a finished build: no structure, no lockfile, and
+/// no output directory. `--out` is created after every refusal is decided,
+/// so a check moved one step later leaves the directory behind, which a
+/// count of files alone cannot see.
+///
+/// Every source `check` refuses is a row too, compiled for Java at the
+/// default target.
+#[test]
+fn a_refused_compile_writes_nothing() {
+    let rows = REFUSED
+        .iter()
+        .map(|&(label, source, edition, target, code)| {
+            (label.to_owned(), source.to_owned(), edition, target, code)
+        })
+        .chain(all_fixtures().map(|(code, source)| {
+            (
+                format!("the check fixture for {code}"),
+                source.text(),
+                "java",
+                "latest",
+                *code,
+            )
+        }));
+    for (label, source, edition, target, code) in rows {
+        let fixture = Fixture::new(&source);
+        let out = compile_as(&fixture, edition, target);
+        let stderr = stderr_of(&out);
+        assert_eq!(out.status.code(), Some(1), "{label}: stderr={stderr}");
+        assert!(
+            stderr.contains(&format!("error[{code}]")),
+            "{label}: refused for {code}; stderr={stderr}",
+        );
+        assert_eq!(
+            fixture.artifacts(),
+            Vec::<String>::new(),
+            "{label}: a refused compile must leave no structure and no lockfile",
+        );
+        assert!(
+            !fixture.out().exists(),
+            "{label}: a refused compile must not create its output directory",
+        );
+    }
 }

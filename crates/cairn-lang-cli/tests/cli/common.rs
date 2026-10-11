@@ -220,6 +220,25 @@ pub fn bytes_contain(hay: &[u8], needle: impl AsRef<[u8]>) -> bool {
 /// left out; the code, not the wording, is the contract.
 pub type Reported = (u64, u64, String, String);
 
+/// Diagnostics from a `--format json` array on stdout, in emission order.
+pub fn json_stream(stdout: &str) -> Vec<Reported> {
+    let parsed: serde_json::Value = serde_json::from_str(stdout)
+        .unwrap_or_else(|err| panic!("stdout is not JSON: {err}\n{stdout}"));
+    parsed
+        .as_array()
+        .unwrap_or_else(|| panic!("stdout is not a JSON array: {stdout}"))
+        .iter()
+        .map(|d| {
+            (
+                d["line"].as_u64().expect("line"),
+                d["col"].as_u64().expect("col"),
+                d["severity"].as_str().expect("severity").to_owned(),
+                d["code"].as_str().expect("code").to_owned(),
+            )
+        })
+        .collect()
+}
+
 /// Diagnostics parsed back out of a command's stderr, in emission order.
 /// Lines that are not `FILE:LINE:COL: SEVERITY[CODE]: ...` (notes,
 /// `wrote ...`, plain `error:` messages) are skipped.
