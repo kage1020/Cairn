@@ -24,14 +24,8 @@ use crate::suggest::{did_you_mean_note, nearest_match};
 use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    for s in &ir.structs {
-        walk(&s.members, BodyKind::Geometry, sink);
-    }
-    for d in &ir.defs {
-        walk(&d.members, BodyKind::Geometry, sink);
-    }
-    for s in &ir.sites {
-        walk(&s.placements, BodyKind::Site, sink);
+    for body in ir.bodies() {
+        walk(body.members, body.kind, sink);
     }
     for theme in &ir.themes {
         for rule in &theme.selectors {

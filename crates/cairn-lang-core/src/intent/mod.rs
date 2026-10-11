@@ -62,6 +62,44 @@ pub struct IntentModule {
     pub structs: Vec<StructIr>,
 }
 
+impl IntentModule {
+    /// Every `struct`, `def` and `site` body, in that order, each in source
+    /// order.
+    ///
+    /// For the passes that hold all three to one rule and differ only in
+    /// the vocabulary a body reads, which [`ItemBody::kind`] carries.
+    pub(crate) fn bodies(&self) -> impl Iterator<Item = ItemBody<'_>> {
+        let structs = self.structs.iter().map(|s| ItemBody {
+            kind: BodyKind::Geometry,
+            members: &s.members,
+            asserts: &s.asserts,
+        });
+        let defs = self.defs.iter().map(|d| ItemBody {
+            kind: BodyKind::Geometry,
+            members: &d.members,
+            asserts: &d.asserts,
+        });
+        let sites = self.sites.iter().map(|s| ItemBody {
+            kind: BodyKind::Site,
+            members: &s.placements,
+            asserts: &s.asserts,
+        });
+        structs.chain(defs).chain(sites)
+    }
+}
+
+/// One `struct`, `def` or `site` body, as [`IntentModule::bodies`] yields
+/// it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ItemBody<'a> {
+    /// Which roles the body has a reader for.
+    pub(crate) kind: BodyKind,
+    /// The body's top-level members: a `site`'s are its placements.
+    pub(crate) members: &'a [Member],
+    /// The body's top-level `assert` properties.
+    pub(crate) asserts: &'a [AssertIr],
+}
+
 /// `theme NAME:` block, normalised so slot bindings live in a map and
 /// selector bindings keep their full surface shape.
 #[derive(Debug, Clone, PartialEq, Serialize)]

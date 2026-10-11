@@ -85,14 +85,8 @@ const POSITION_SAMPLE: usize = 4;
 const DECIMAL_TOTAL_MAX_INPUTS: u32 = 32;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    for def in &ir.defs {
-        walk(&def.members, &def.asserts, sink);
-    }
-    for item in &ir.structs {
-        walk(&item.members, &item.asserts, sink);
-    }
-    for site in &ir.sites {
-        walk(&site.placements, &site.asserts, sink);
+    for body in ir.bodies() {
+        walk(body.members, body.asserts, sink);
     }
 }
 

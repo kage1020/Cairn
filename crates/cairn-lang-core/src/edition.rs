@@ -16,7 +16,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 
 /// A Minecraft edition Cairn can target.
 ///
@@ -25,23 +25,18 @@ use serde::{Serialize, Serializer};
 /// (`spec/versioning-editions` "Backend = data tables") — Java sorts first
 /// when the ordering is otherwise arbitrary.
 ///
-/// The [`Serialize`] impl emits the canonical lowercase string
-/// (`"java"` / `"bedrock"`) rather than the derived variant name so JSON
+/// [`Serialize`] emits the canonical lowercase string
+/// (`"java"` / `"bedrock"`) rather than the variant name so JSON
 /// consumers of `cairn info` / lockfile-adjacent payloads see the same
 /// spelling the CLI accepts — enabling a wire-compatible upgrade from an
 /// older `edition: String` field to this enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Edition {
     /// Java Edition. Emits gzip-compressed vanilla `.nbt` structures.
     Java,
     /// Bedrock Edition. Emits uncompressed little-endian `.mcstructure`.
     Bedrock,
-}
-
-impl Serialize for Edition {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.as_str())
-    }
 }
 
 impl Edition {

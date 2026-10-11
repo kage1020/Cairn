@@ -1291,16 +1291,13 @@ impl Diagnostic {
             notes: self
                 .notes
                 .iter()
-                .map(|n| RenderedNote {
-                    line: n
-                        .span
-                        .as_ref()
-                        .map(|s| lines.position(source, s.start).line.get()),
-                    col: n
-                        .span
-                        .as_ref()
-                        .map(|s| lines.position(source, s.start).col.get()),
-                    message: n.message.clone(),
+                .map(|n| {
+                    let at = n.span.as_ref().map(|s| lines.position(source, s.start));
+                    RenderedNote {
+                        line: at.map(|p| p.line.get()),
+                        col: at.map(|p| p.col.get()),
+                        message: n.message.clone(),
+                    }
                 })
                 .collect(),
             data: self.data.clone(),

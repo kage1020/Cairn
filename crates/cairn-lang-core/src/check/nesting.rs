@@ -76,14 +76,8 @@ enum Loss {
 }
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    for s in &ir.structs {
-        walk(&s.members, BodyKind::Geometry, false, sink);
-    }
-    for d in &ir.defs {
-        walk(&d.members, BodyKind::Geometry, false, sink);
-    }
-    for s in &ir.sites {
-        walk(&s.placements, BodyKind::Site, false, sink);
+    for body in ir.bodies() {
+        walk(body.members, body.kind, false, sink);
     }
 }
 

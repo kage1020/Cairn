@@ -33,14 +33,8 @@ use crate::intent::{IntentModule, Member, MemberRole};
 use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    for s in &ir.structs {
-        walk(&s.members, sink);
-    }
-    for d in &ir.defs {
-        walk(&d.members, sink);
-    }
-    for s in &ir.sites {
-        walk(&s.placements, sink);
+    for body in ir.bodies() {
+        walk(body.members, sink);
     }
 }
 

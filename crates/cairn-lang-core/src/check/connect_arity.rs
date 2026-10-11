@@ -63,14 +63,8 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     // about whether the row would have been well-formed where it belongs.
     // Walk every scope here so a stray row gets both halves at once,
     // instead of an arity error appearing only after the first is fixed.
-    for s in &ir.structs {
-        walk(&s.members, sink);
-    }
-    for d in &ir.defs {
-        walk(&d.members, sink);
-    }
-    for s in &ir.sites {
-        walk(&s.placements, sink);
+    for body in ir.bodies() {
+        walk(body.members, sink);
     }
 }
 

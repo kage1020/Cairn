@@ -54,20 +54,12 @@ use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     let has_a_theme = !ir.themes.is_empty();
-    for s in &ir.structs {
-        walk(&s.members, BodyKind::Geometry, false, has_a_theme, sink);
-    }
-    for d in &ir.defs {
-        walk(&d.members, BodyKind::Geometry, false, has_a_theme, sink);
-    }
     // A `site` body reads neither of the roles this pass reports, so the
-    // `is_read_in` gate below empties this loop. It is here because every
-    // other pass walks all three bodies and a reader should not have to
-    // work out whether the omission was deliberate — and because the
-    // emptiness is a fact about `MemberRole::is_read_in`, which can change,
-    // rather than about this pass.
-    for s in &ir.sites {
-        walk(&s.placements, BodyKind::Site, false, has_a_theme, sink);
+    // `is_read_in` gate below skips every row of one. It is not filtered
+    // out here because that is a fact about `MemberRole::is_read_in`,
+    // which can change, rather than about this pass.
+    for body in ir.bodies() {
+        walk(body.members, body.kind, false, has_a_theme, sink);
     }
 }
 
