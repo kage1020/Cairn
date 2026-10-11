@@ -811,7 +811,7 @@ impl DiagnosticCode {
     /// which partitions the whole enum rather than whatever a corpus happens
     /// to reach — with [`Diagnostic::severity`] reading this function there is
     /// no per-finding value left for a fixture to disagree with, which
-    /// `tests/diagnostic_text.rs` records from the other side.
+    /// `tests/check/diagnostic_text.rs` records from the other side.
     ///
     /// `spec/lint` "Error vs warning" draws the line at the *build*: a finding
     /// is an error when leaving it alone yields something other than what the

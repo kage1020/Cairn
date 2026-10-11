@@ -50,7 +50,7 @@ pub(crate) fn select_the_same_members(a: &SelectorRule, b: &SelectorRule) -> boo
 /// against an [`crate::intent::IntentState`] entry by [`ValueKind`], where
 /// the two spellings are different values.
 /// `ds_*_value_form_matters_exactly_where_the_matcher_says_it_does` in
-/// `tests/check_duplicate_selector.rs` pins that pair of answers from the
+/// `tests/check/duplicate.rs` pins that pair of answers from the
 /// outside, by checking `E_THEME_SELECTOR_UNMATCHED` alongside the
 /// finding.
 ///

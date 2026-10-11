@@ -286,7 +286,7 @@ fn span_of(src: &str, needle: &str) -> Span {
 #[test]
 fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
     // A `level` may go without `id=`, so the refusal names it by its
-    // keyword. `tests/door_wall_fit.rs` pins the named case. The
+    // keyword. `tests/lower/door_wall_fit.rs` pins the named case. The
     // refusal underlines the endpoint, as the "not declared" one does,
     // and its note points at the nested door.
     let src = concat!(

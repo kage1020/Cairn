@@ -133,7 +133,7 @@ enum WithoutAMaterial {
 /// same tie: a role that grows a fallback material moves from
 /// [`WithoutAMaterial::PaintsNothing`] to
 /// [`WithoutAMaterial::PaintsAFallback`], and
-/// `tests/check_missing_material.rs` measures the pairing against the
+/// `tests/check/missing_material.rs` measures the pairing against the
 /// lowered structure rather than trusting either list.
 ///
 /// The `level`, `circuit`, `place` and `connect` reasons below are also the

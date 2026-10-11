@@ -69,8 +69,8 @@ pub(super) fn resolve_connect_row(
     // and laid a walkway for a row `check` calls an error, which is a
     // disagreement about well-formedness between the two layers rather
     // than a difference in how loudly they say so. Pinned by
-    // `tests/silent_skip_arms.rs` (resolver-only) and
-    // `tests/check_connect_arity.rs` (full pipeline).
+    // `tests/resolve/silent_skip_arms.rs` (resolver-only) and
+    // `tests/check/connect_arity.rs` (full pipeline).
     let [from_value, separator, to_value] = member.positional.as_slice() else {
         return;
     };
@@ -181,8 +181,8 @@ fn port_ref_from_value(
     // who writes `connect a to b` now gets that advice from
     // `check::connect_arity`, anchored on the value itself.
     //
-    // Pinned by `tests/silent_skip_arms.rs` (resolver-only) and
-    // `tests/check_connect_arity.rs` (full pipeline).
+    // Pinned by `tests/resolve/silent_skip_arms.rs` (resolver-only) and
+    // `tests/check/connect_arity.rs` (full pipeline).
     let ValueKind::DotRef(dot) = &raw.kind else {
         return None;
     };

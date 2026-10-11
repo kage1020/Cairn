@@ -740,7 +740,7 @@ fn derive_min_version(module: &Module) -> String {
 /// They are reported by `check::requires` at `Error` severity, which is
 /// what stops a compile before it can be held to half of an expression that
 /// has already been called a mistake — see
-/// `crates/cairn-lang-core/tests/silent_skip_arms.rs` for the caller that
+/// `crates/cairn-lang-core/tests/resolve/silent_skip_arms.rs` for the caller that
 /// bypasses `check` and what it gets instead.
 #[must_use]
 pub fn declared_version_floors(module: &Module, edition: Edition) -> Vec<VersionFloor> {

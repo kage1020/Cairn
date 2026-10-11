@@ -147,8 +147,8 @@ pub(super) struct ResolveCtx<'a> {
 /// from another is a wrong build, not a stylistic difference. `first`
 /// is the one `defs.iter().find` (the `place use=` lookup) already
 /// takes, and the one `E_DUPLICATE_ITEM` tells the author about.
-/// `tests/check_duplicate_items.rs` records the shape that made the
-/// choice necessary.
+/// `tests/check/duplicate.rs` records the shape that made the choice
+/// necessary.
 ///
 /// INVARIANT(upstream-diagnosed): a skipped binding is not reported from
 /// here. `check::duplicate` has already pushed `E_DUPLICATE_ITEM` into
@@ -158,8 +158,8 @@ pub(super) struct ResolveCtx<'a> {
 /// and the pass that owns it can anchor on the name token, which the IR
 /// no longer carries. This is the same division of labour the silent
 /// arms in `resolve_connect_row` follow, and it is pinned the same
-/// way, by `tests/silent_skip_arms.rs` for the resolver-only path and
-/// `tests/check_duplicate_items.rs` for the full pipeline. A
+/// way, by `tests/resolve/silent_skip_arms.rs` for the resolver-only path
+/// and `tests/check/duplicate.rs` for the full pipeline. A
 /// `debug_assert` on the skip is deliberately absent: the condition is
 /// ordinary malformed input, and aborting on it would take down the LSP
 /// on a file the author is halfway through editing.
@@ -439,7 +439,7 @@ fn resolve_members(
         //    `W_IGNORED_ARGUMENT` for it into the same sink, and a slot name
         //    the theme lacks changes nothing on such a role. A library
         //    caller that runs `resolve` without `check` gets no signal;
-        //    `tests/silent_skip_arms.rs` carries the arm in its matrix.
+        //    `tests/resolve/silent_skip_arms.rs` carries the arm in its matrix.
         if let Some(slot_name) = member.read_slot()
             && let Some((tname, slots)) = bound
         {
@@ -451,7 +451,7 @@ fn resolve_members(
                 // identical triple can only be here because a copy is
                 // already in `ctx.diagnostics`, which is built and
                 // returned by the same call. See
-                // [`ResolveCtx::diagnosed`]; `tests/silent_skip_arms.rs`
+                // [`ResolveCtx::diagnosed`]; `tests/resolve/silent_skip_arms.rs`
                 // carries it in the matrix of resolver arms that drop
                 // something without reporting it.
                 None => {

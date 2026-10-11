@@ -5,12 +5,9 @@
 //! reads the same `examples/` tree. The plumbing lives once so a change to
 //! a pass's signature, or to where the examples are found, lands in one
 //! place.
-
-// Every test binary compiles this module on its own and calls a subset of
-// it, so the unused-item lint would fire per binary. The workspace has no
-// other `#![allow]`; the fix that removes this one is a dev-dependency
-// helper crate, worth doing if the set keeps growing.
-#![allow(dead_code)]
+//!
+//! Each binary declares this module `pub`, so a helper one binary leaves
+//! unused is not dead code there.
 
 use std::path::PathBuf;
 
@@ -31,6 +28,10 @@ pub fn examples_dir() -> PathBuf {
 }
 
 /// The source of `examples/<name>`.
+///
+/// # Panics
+///
+/// When the file cannot be read.
 pub fn read_example(name: &str) -> String {
     let path = examples_dir().join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
@@ -38,8 +39,11 @@ pub fn read_example(name: &str) -> String {
 
 /// Every `.crn` under `examples/`, as `(file name, source)`, sorted by name.
 ///
-/// Refuses to return a set too small to be the shipped one: every sweep is
-/// a loop over this, and a loop over nothing passes.
+/// # Panics
+///
+/// When `examples/` cannot be read, or holds other than
+/// [`SHIPPED_EXAMPLES`] files: every sweep is a loop over this, and a loop
+/// over nothing passes.
 pub fn examples() -> Vec<(String, String)> {
     let dir = examples_dir();
     let entries =
@@ -73,8 +77,12 @@ pub fn examples() -> Vec<(String, String)> {
 }
 
 /// Parse, lower and run the check passes over `source` with no registry
-/// pack. A parse failure panics with the source so the fixture is in the
-/// failure message.
+/// pack.
+///
+/// # Panics
+///
+/// When `source` does not parse, with the source in the message so the
+/// fixture is in the failure.
 pub fn diagnose(source: &str) -> Vec<Diagnostic> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
@@ -95,6 +103,10 @@ pub fn slice<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
 /// Byte offset of the `n`th (0-based) occurrence of `needle`, so a test
 /// says which of several equal tokens a span starts at rather than relying
 /// on "first" or "last".
+///
+/// # Panics
+///
+/// When `source` holds fewer than `n + 1` occurrences.
 pub fn nth(source: &str, needle: &str, n: usize) -> usize {
     source
         .match_indices(needle)
@@ -108,7 +120,11 @@ pub fn notes(diag: &Diagnostic) -> Vec<&str> {
     diag.notes.iter().map(|n| n.message.as_str()).collect()
 }
 
-/// The single finding in `found`, or a panic listing what was there.
+/// The single finding in `found`.
+///
+/// # Panics
+///
+/// When there is not exactly one, listing what was there.
 pub fn exactly_one(mut found: Vec<Diagnostic>) -> Diagnostic {
     assert_eq!(found.len(), 1, "expected one finding, got {found:#?}");
     found.remove(0)
@@ -116,6 +132,10 @@ pub fn exactly_one(mut found: Vec<Diagnostic>) -> Diagnostic {
 
 /// Parse, lower, resolve and lower `source` to the block-array IR with no
 /// registry pack. Only the block-array pass's own diagnostics are kept.
+///
+/// # Panics
+///
+/// When `source` does not parse.
 pub fn lowered(source: &str) -> BlockArrayIr {
     let module = parse(source).expect("parse");
     let ir = lower(&module);
@@ -125,6 +145,10 @@ pub fn lowered(source: &str) -> BlockArrayIr {
 
 /// [`lowered`], with the resolver's diagnostics merged in front of the
 /// block-array pass's the way the CLI reports them.
+///
+/// # Panics
+///
+/// When `source` does not parse.
 pub fn lowered_with_resolver_diagnostics(source: &str) -> BlockArrayIr {
     let module = parse(source).expect("parse");
     let ir = lower(&module);
@@ -137,6 +161,10 @@ pub fn lowered_with_resolver_diagnostics(source: &str) -> BlockArrayIr {
 }
 
 /// The single structure `ir` holds, for sources that declare exactly one.
+///
+/// # Panics
+///
+/// When `ir` holds more or fewer.
 pub fn only_structure(ir: &BlockArrayIr) -> &BlockArray {
     assert_eq!(
         ir.structures.len(),

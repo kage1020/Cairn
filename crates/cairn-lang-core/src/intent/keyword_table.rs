@@ -257,7 +257,7 @@ impl MemberRole {
     /// omits refuses a source the compiler is built to accept, which is
     /// what `stair y=` did between two commits of the branch that added
     /// this table; `the_table_and_the_sweep_agree_key_for_key` in
-    /// `tests/check_arguments.rs` walks every keyword and compares this
+    /// `tests/check/arguments.rs` walks every keyword and compares this
     /// list against a line that writes it, in both directions. A key this
     /// role accepts that nothing reads is the other direction, and it is
     /// deliberate. One listed here is a key the specification defines and
@@ -331,7 +331,7 @@ impl MemberRole {
     /// the name up, so a name the theme lacks is not a refusal over an
     /// argument that changes nothing, and the member alone does not earn a
     /// scope with no theme bound a `W_NO_THEME_BOUND`. What holds the
-    /// `mat_slot` entries to the lowering is `tests/unread_mat_slot.rs`,
+    /// `mat_slot` entries to the lowering is `tests/lower/unread_mat_slot.rs`,
     /// which builds each of those roles under two slot names that resolve
     /// to different blocks and compares the builds.
     ///
@@ -412,7 +412,7 @@ impl MemberRole {
     /// Spelled out rather than derived, for the reason
     /// [`Self::unread_arguments`] is: which pass reads what is not a fact
     /// any table can compute about itself. What holds it to the dispatch it
-    /// describes is `tests/conditional_arguments.rs`, which writes each
+    /// describes is `tests/lower/conditional_arguments.rs`, which writes each
     /// pair at a value a reader would notice and lowers the source twice,
     /// with the argument and without it. An arm this table says reads the
     /// key has to build something different; an arm it says does not has to

@@ -173,7 +173,7 @@ fn validate(member: &Member, sink: &mut DiagnosticSink) {
 /// `end` comes first so the call site reads in the order the row does.
 /// It cannot be made unswappable — the two call sites below could hand
 /// over the wrong slot and still typecheck — so the pairing is pinned
-/// by the per-slot message assertions in `tests/check_connect_arity.rs`
+/// by the per-slot message assertions in `tests/check/connect_arity.rs`
 /// instead of by the signature.
 fn validate_endpoint(end: ConnectEnd, value: &Value, sink: &mut DiagnosticSink) {
     let got = match &value.kind {
