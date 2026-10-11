@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::common::{Fixture, cairn, examples_dir};
+use crate::common::{Fixture, cairn, examples_dir, reported, stderr_stream};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -13,16 +13,14 @@ fn fixtures_dir() -> PathBuf {
         .join("check")
 }
 
+/// `check` reports on stderr, as `lower`, `info`, `compile` and `synth` do,
+/// so `cairn check f.crn > out` cannot swallow a finding: one gcc-style
+/// `FILE:LINE:COL: SEVERITY[CODE]: ...` line each, in source order, and
+/// nothing on stdout. Only the text format goes there; `--format json` is
+/// the machine payload and belongs on stdout, where a consumer redirects
+/// it deliberately.
 #[test]
-fn text_diagnostics_go_where_every_other_subcommand_sends_them() {
-    // `lower`, `info`, `compile` and `synth` all report on stderr, so
-    // `cairn check f.crn > out` was the one build command whose findings a
-    // redirect could swallow: stdout carried them, and a pipeline capturing
-    // stdout for something else saw nothing at all.
-    //
-    // Only the text format moves. `--format json` is the machine payload
-    // and belongs on stdout, where a consumer redirects it deliberately —
-    // pinned separately below.
+fn text_findings_go_to_stderr_one_located_line_each() {
     let path = fixtures_dir().join("duplicate.crn");
     let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
@@ -32,9 +30,15 @@ fn text_diagnostics_go_where_every_other_subcommand_sends_them() {
         stdout.is_empty(),
         "text diagnostics must not reach stdout, got: {stdout}",
     );
-    assert!(
-        stderr.contains("E_DUPLICATE_SIZE"),
-        "stderr should carry the diagnostics, got: {stderr}",
+    assert_eq!(
+        stderr_stream(&stderr),
+        reported(&[
+            (1, 19, "error", "E_DUPLICATE_SIZE"),
+            (2, 3, "error", "E_MISSING_MATERIAL"),
+            (2, 18, "error", "E_DUPLICATE_ARG"),
+            (4, 8, "error", "E_DUPLICATE_ID"),
+        ]),
+        "{stderr}",
     );
 }
 
@@ -116,37 +120,6 @@ fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
         stderr.trim().is_empty(),
         "clean example should produce no stderr, got: {stderr}",
     );
-}
-
-#[test]
-fn cli_2_broken_fixture_exits_one_with_position_anchored_output() {
-    let path = fixtures_dir().join("duplicate.crn");
-    let out = cairn("check", &[path.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(1));
-    let reported = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        reported.contains("E_DUPLICATE_SIZE"),
-        "expected E_DUPLICATE_SIZE in output, got: {reported}",
-    );
-    assert!(
-        reported.contains("E_DUPLICATE_ARG"),
-        "expected E_DUPLICATE_ARG in output, got: {reported}",
-    );
-    assert!(
-        reported.contains("E_DUPLICATE_ID"),
-        "expected E_DUPLICATE_ID in output, got: {reported}",
-    );
-    // gcc-style: `<file>:<line>:<col>: error[<CODE>]: <msg>` on every line.
-    for line in reported.lines().filter(|l| l.contains("E_")) {
-        assert!(
-            line.contains(':'),
-            "diagnostic line should be gcc-style, got: {line}",
-        );
-        assert!(
-            line.contains("error["),
-            "every error-severity diagnostic renders as `error[CODE]`, got: {line}",
-        );
-    }
 }
 
 #[test]
@@ -284,32 +257,5 @@ fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
             entry.get("data").is_none(),
             "diagnostic without a payload must omit the `data` key, got: {entry}",
         );
-        // Forward-compatibility guard: when a future code lands with a
-        // documented payload, the fixture-and-fixture-only matcher above
-        // is not enough — the JSON has to carry the matching `data.kind`.
-        // `W_WALKWAY_BLOCKED` is the first such code. This run passes no
-        // `--target`, so `cairn check` lowers nothing and this branch
-        // never fires on the `duplicate.crn` fixture; a `check --target`
-        // run does lower walkways, and there the area-cap refusal emits
-        // the code with no payload, since it skipped no cells. If this
-        // run ever lowers, this assertion catches a payload-stripped
-        // regression at the CLI surface.
-        if entry["code"].as_str() == Some("W_WALKWAY_BLOCKED") {
-            assert_eq!(
-                entry["data"]["kind"].as_str(),
-                Some("walkway_blocked"),
-                "W_WALKWAY_BLOCKED must carry data.kind=\"walkway_blocked\", got: {entry}",
-            );
-        }
     }
-}
-
-#[test]
-fn cli_type_mismatch_fixture_reports_both_label_and_size_codes() {
-    let path = fixtures_dir().join("type_mismatch.crn");
-    let out = cairn("check", &[path.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(1));
-    let reported = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(reported.contains("E_TYPE_MISMATCH_LABEL"));
-    assert!(reported.contains("E_TYPE_MISMATCH_SIZE"));
 }

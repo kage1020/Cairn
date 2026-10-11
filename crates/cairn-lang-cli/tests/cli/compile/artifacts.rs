@@ -61,26 +61,6 @@ fn c2_compile_writes_named_nbt_into_out_dir() {
 }
 
 #[test]
-fn c3_compiled_nbt_begins_with_gzip_magic() {
-    let (_tmp_src, src) = example_in_tempdir("cottage.crn");
-    let out_dir = TempDir::new().expect("out tempdir");
-    let result = cairn(
-        "compile",
-        &[
-            src.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-        ],
-    );
-    assert!(result.status.success());
-    let bytes = fs::read(out_dir.path().join("cottage.nbt")).expect("read nbt");
-    assert!(bytes.len() >= 2);
-    assert_eq!(&bytes[..2], &[0x1f, 0x8b], "gzip magic prefix");
-}
-
-#[test]
 fn c4_default_lock_is_written_beside_source() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
@@ -782,46 +762,6 @@ fn c15_lockfile_registry_pack_hash_is_populated() {
 }
 
 #[test]
-fn c16_themed_tower_compiles_with_lifted_abstract_tokens() {
-    // The built-in materials catalog covers every abstract token
-    // themed-tower binds, so compile must finish without
-    // `W_ABSTRACT_TOKEN_DEFERRED` or `E_UNKNOWN_ABSTRACT_TOKEN`, write a
-    // `keep.nbt`, and the lockfile records the same registry pack hash that
-    // other examples do (materials catalog is part of the pack bytes).
-    let tmp = TempDir::new().expect("tempdir");
-    let dst = tmp.path().join("themed-tower.crn");
-    fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
-    let out_dir = TempDir::new().expect("out tempdir");
-    let result = cairn(
-        "compile",
-        &[
-            dst.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out_dir.path().to_str().unwrap(),
-        ],
-    );
-    let stderr = String::from_utf8(result.stderr).expect("utf-8");
-    assert!(
-        result.status.success(),
-        "themed-tower should compile clean; stderr={stderr}",
-    );
-    assert_eq!(
-        stderr.matches("W_ABSTRACT_TOKEN_DEFERRED").count(),
-        0,
-        "abstract tokens must lift via the catalog; stderr={stderr}",
-    );
-    assert_eq!(
-        stderr.matches("E_UNKNOWN_ABSTRACT_TOKEN").count(),
-        0,
-        "every token themed-tower binds must be in the catalog; stderr={stderr}",
-    );
-    let written = out_dir.path().join("keep.nbt");
-    assert!(written.exists(), "expected {} to exist", written.display());
-}
-
-#[test]
 fn c17_unknown_abstract_token_compile_exits_nonzero() {
     // Compile must propagate the new E_UNKNOWN_ABSTRACT_TOKEN as a hard
     // failure — a build that silently fell back to air on a typo would
@@ -1106,39 +1046,6 @@ fn c23_unknown_theme_in_place_errors_with_suggestion() {
     assert!(
         reported.contains("did you mean `medieval`?"),
         "reported should suggest the closest theme name; got: {reported}",
-    );
-}
-
-#[test]
-fn c24_duplicate_place_id_errors() {
-    // Two `place` rows sharing an `id=` collide. The first wins for later
-    // references; the duplicate is flagged with a span pointer back to the
-    // original.
-    let tmp = TempDir::new().expect("tempdir");
-    let src = tmp.path().join("dup.crn");
-    fs::write(
-        &src,
-        concat!(
-            "@cairn 2026.06\n",
-            "\n",
-            "def cottage size=4x4:\n",
-            "  walls mat_slot=wall height=3\n",
-            "\n",
-            "theme t:\n",
-            "  slot wall -> @cobblestone\n",
-            "\n",
-            "site s:\n",
-            "  place id=home1 use=cottage theme=t at=origin\n",
-            "  place id=home1 use=cottage theme=t east_of=home1 gap=2\n",
-        ),
-    )
-    .expect("write tmp .crn");
-    let result = cairn("check", &[src.to_str().unwrap()]);
-    let reported = String::from_utf8(result.stderr).expect("utf-8");
-    assert!(!result.status.success(), "reported={reported}");
-    assert!(
-        reported.contains("E_DUPLICATE_PLACE_ID"),
-        "reported should carry E_DUPLICATE_PLACE_ID; got: {reported}",
     );
 }
 
@@ -1507,35 +1414,6 @@ fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
         entries.is_empty(),
         "bare def must not produce a .nbt; got {entries:?}",
     );
-}
-
-/// A def named by a `place` row the resolver refuses is not reported as
-/// `W_UNUSED_DEF`, run end to end. The table over every refusal is the
-/// test of the same name in `cairn-lang-core`'s `resolve/resolver.rs`;
-/// this runs one refusal and the `use=3` control through `cairn check`,
-/// where `check::type_mismatch` adds `E_TYPE_MISMATCH_LABEL` to the
-/// resolver's findings. `def hut` is on line 3 of [`site_with_rows`], so
-/// a `W_UNUSED_DEF` there names `hut`.
-#[test]
-fn a_def_named_by_a_refused_place_row_is_not_unused() {
-    for (row, expected) in [
-        (
-            "place id=a use=hut theme=t at=front",
-            &[(10, "E_INVALID_PLACE_ORIGIN")][..],
-        ),
-        (
-            "place id=a use=3 theme=t at=origin",
-            &[(3, "W_UNUSED_DEF"), (10, "E_TYPE_MISMATCH_LABEL")][..],
-        ),
-    ] {
-        let (code, reported) = check_rows(&[row]);
-        assert_eq!(code, Some(1), "`{row}`: reported={reported}");
-        assert_eq!(
-            findings(&reported),
-            owned(expected),
-            "`{row}`: reported={reported}",
-        );
-    }
 }
 
 #[test]

@@ -220,6 +220,15 @@ pub fn bytes_contain(hay: &[u8], needle: impl AsRef<[u8]>) -> bool {
 /// left out; the code, not the wording, is the contract.
 pub type Reported = (u64, u64, String, String);
 
+/// `expected` in the shape [`stderr_stream`] and [`json_stream`] return,
+/// for an `assert_eq!` against either.
+pub fn reported(expected: &[(u64, u64, &str, &str)]) -> Vec<Reported> {
+    expected
+        .iter()
+        .map(|&(line, col, severity, code)| (line, col, severity.to_owned(), code.to_owned()))
+        .collect()
+}
+
 /// Diagnostics from a `--format json` array on stdout, in emission order.
 pub fn json_stream(stdout: &str) -> Vec<Reported> {
     let parsed: serde_json::Value = serde_json::from_str(stdout)
