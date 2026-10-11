@@ -642,11 +642,10 @@ fn stage_renders_the_cli_flag_vocabulary() {
 }
 
 /// Every variant serialises as a bare string, not as a tagged
-/// object — a derived `Serialize` on a fieldless enum would also
-/// produce a string, but pinning it here keeps a future refactor
-/// from silently reshaping the tag. All four are covered rather
-/// than one representative: `Serialize` routes through `as_str`'s
-/// `match`, so a single sample cannot catch a mis-wired arm.
+/// object — pinning it here keeps a future refactor from silently
+/// reshaping the tag. All four are covered rather than one
+/// representative, so a variant renamed away from its wire word is
+/// caught.
 #[test]
 fn every_stage_serialises_as_a_bare_string() {
     for (stage, expected) in [
