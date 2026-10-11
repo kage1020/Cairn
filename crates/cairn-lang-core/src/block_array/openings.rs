@@ -11,8 +11,17 @@
 //!
 //! Kept in its own module so doors and windows share one mapping instead of
 //! re-deriving it twice with subtle sign errors.
+//!
+//! The arguments that place an opening on its wall — a door's `at=`, a
+//! window's `offset=` / `y=` / `size=` — are read here too, once, for the
+//! cut and for a `connect` port anchored on the opening alike, so the two
+//! accept the same values and refuse the same first one in the same words.
+
+use crate::ast::ValueKind;
+use crate::intent::Member;
 
 use super::Dims;
+use super::args::size_value;
 
 /// Which wall of a struct an opening cuts through.
 ///
@@ -101,7 +110,7 @@ pub fn wall_length(side: WallSide, interior_w: u32, interior_h: u32) -> u32 {
 ///   message naming the check it relied on, then drops the cell (or the
 ///   plate) in release builds rather than panicking over one voxel. The
 ///   sites are tagged `INVARIANT(wall-grid-validated)`.
-/// - `walkway::window_world_xz` propagates the `None` with `?`. Its `u`
+/// - `ports::window_world_xz` propagates the `None` with `?`. Its `u`
 ///   comes from `window_center_offset`, already bounded by the wall, and its
 ///   `v` is the ground row `0`, so that `None` is unreachable too.
 #[must_use]
@@ -146,6 +155,188 @@ pub fn wall_local_to_grid(
             let z = overhang.saturating_add(mirrored);
             Some((x, v, z))
         }
+    }
+}
+
+/// How a member argument a port reads was written, when it was not written
+/// in a shape the port can use.
+///
+/// Kept apart from the value itself so the note can say *which* of the
+/// three it was — an author who left `side=` off and one who typed
+/// `side=frnt` are fixing different things.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Written {
+    /// The key is not on the line.
+    Absent,
+    /// The key carries an identifier the port does not accept.
+    Ident(String),
+    /// The key carries a value of some other shape (a number, a string, …).
+    OtherShape,
+}
+
+impl Written {
+    pub(super) fn of_ident(member: &Member, key: &str) -> Self {
+        match member.intent_state.get(key).map(|v| &v.value.kind) {
+            None => Self::Absent,
+            Some(ValueKind::Ident(s)) => Self::Ident(s.clone()),
+            Some(_) => Self::OtherShape,
+        }
+    }
+}
+
+/// What is wrong with a door's `at=`, as the rest of a sentence whose
+/// subject is the door.
+///
+/// One wording for both places that say it — the door's own
+/// `W_DEFERRED_MEMBER` ([`door_at_deferral`]) and the note a `connect` row
+/// naming the door carries (`ports::PortRejection::note`) — because both read
+/// `at=` through [`door_anchor_offset`], so they cannot classify it
+/// differently, and with one sentence they cannot describe it differently
+/// either.
+pub(super) fn door_at_clause(written: &Written) -> String {
+    match written {
+        Written::Absent => "has no `at=`".to_owned(),
+        Written::Ident(s) => format!("has `at={s}`, which is not one of center, left, right"),
+        Written::OtherShape => "has an `at=` that is not one of center, left, right (numeric \
+                                offsets are reserved)"
+            .to_owned(),
+    }
+}
+
+/// The reason `super::lower::carve_door` defers a door whose `at=`
+/// [`door_anchor_offset`] refused.
+pub(super) fn door_at_deferral(written: &Written) -> String {
+    format!(
+        "door {} — use `at=center | left | right`",
+        door_at_clause(written)
+    )
+}
+
+/// The one window argument [`read_window_args`] could not use, and how it
+/// was written. One variant per case rather than a key and a flag, so an
+/// `offset=` that is absent — which is not a fault, it reads as `0` — has
+/// no variant to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WindowArgFault {
+    /// `offset=` is present and not a non-negative integer.
+    OffsetMalformed,
+    /// No `y=`.
+    YAbsent,
+    /// `y=` is present and not a non-negative integer.
+    YMalformed,
+    /// No `size=`.
+    SizeAbsent,
+    /// `size=` is present and not a `WxH`.
+    SizeMalformed,
+}
+
+impl WindowArgFault {
+    /// What is wrong, as the rest of a sentence whose subject is the
+    /// window — the same single wording source [`door_at_clause`] is.
+    pub(super) fn clause(self) -> &'static str {
+        match self {
+            Self::OffsetMalformed => {
+                "has an `offset=` that is not a non-negative integer that fits in u32"
+            }
+            Self::YAbsent => "has no `y=`",
+            Self::YMalformed => "has a `y=` that is not a non-negative integer that fits in u32",
+            Self::SizeAbsent => "has no `size=WxH`",
+            Self::SizeMalformed => "has a `size=` that is not a `WxH` of two positive integers",
+        }
+    }
+
+    /// The reason `super::lower::cut_window` defers the window.
+    pub(super) fn deferral(self) -> String {
+        format!("window {}", self.clause())
+    }
+}
+
+/// The window arguments a port and a cut both need, read once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct WindowArgs {
+    /// `offset=`, `0` when absent.
+    pub(super) offset: u32,
+    /// `y=`, relative to the member's own level.
+    pub(super) y: u32,
+    /// `size=`'s `W`.
+    pub(super) width: u32,
+    /// `size=`'s `H`.
+    pub(super) height: u32,
+}
+
+/// Read a window's `offset=`, `y=` and `size=`, in that order, refusing
+/// at the first one that cannot be used.
+///
+/// `super::lower::cut_window` and `ports::window_center_offset`, which
+/// `ports::port_world_position` asks for a window port, both call this, so the
+/// cut and the port accept one set and name one first fault.
+/// `repeat=`, `step=` and `sym=` are not read here: only the cut uses them,
+/// and a window they defer is refused as a port by
+/// `ports::PortRejection::NotCut` rather than by a reason of its own.
+///
+/// # Errors
+///
+/// The [`WindowArgFault`] for the first argument that cannot be used.
+pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgFault> {
+    let offset = if member.intent_state.contains_key("offset") {
+        member
+            .nonneg_u32("offset")
+            .ok_or(WindowArgFault::OffsetMalformed)?
+    } else {
+        0
+    };
+    let y = match (
+        member.intent_state.contains_key("y"),
+        member.nonneg_u32("y"),
+    ) {
+        (_, Some(y)) => y,
+        (false, None) => return Err(WindowArgFault::YAbsent),
+        (true, None) => return Err(WindowArgFault::YMalformed),
+    };
+    let (width, height) = match (
+        member.intent_state.contains_key("size"),
+        size_value(member, "size"),
+    ) {
+        (_, Some(size)) => size,
+        (false, None) => return Err(WindowArgFault::SizeAbsent),
+        (true, None) => return Err(WindowArgFault::SizeMalformed),
+    };
+    Ok(WindowArgs {
+        offset,
+        y,
+        width,
+        height,
+    })
+}
+
+/// Wall-local `u` anchor for a door port. Accepts the three named
+/// anchors the spec defines for `at=`:
+///
+/// * `center` — `len / 2` (integer division, so even widths land at
+///   the column one cell `+u` of the midpoint, matching the
+///   convention `super::lower::carve_door` uses when cutting the
+///   opening; `spec/syntax` "Selectors" calls this "round-half-up").
+/// * `left`   — `0`, the wall-local axis origin.
+/// * `right`  — `len - 1`, the far corner. The `len.saturating_sub(1)`
+///   guard returns `0` for a hypothetical `len == 0` rather than
+///   underflowing `u32`, but `len == 0` is unreachable in practice:
+///   `DefIr.size.w` / `.h` are `NonZeroU32`, and `wall_length` is one
+///   of them — so every shipping caller has `len ≥ 1` and the
+///   `right` anchor lands on a valid column.
+///
+/// Numeric offsets (`at=N`) are reserved for a future extension and
+/// are refused with how `at=` was [`Written`] rather than silently
+/// rounded to centre, as is a missing `at=` or any other value.
+///
+/// `super::lower::carve_door` cuts the doorway at this column and defers
+/// with [`door_at_deferral`] of this refusal, so the cut, the port and
+/// both of their messages read `at=` once.
+pub(super) fn door_anchor_offset(member: &Member, len: u32) -> Result<u32, Written> {
+    match member.ident_value("at") {
+        Some("center") => Ok(len / 2),
+        Some("left") => Ok(0),
+        Some("right") => Ok(len.saturating_sub(1)),
+        _ => Err(Written::of_ident(member, "at")),
     }
 }
 
