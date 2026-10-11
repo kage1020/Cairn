@@ -52,10 +52,17 @@ cargo xtask lint
 
 The code says how, the commit message says what, and a comment says only the why the code cannot.
 
-- Never restate the code, narrate history ("used to", "no longer", "previously"), or mention an
-  issue, pull request, milestone, acceptance id or anything else that only means something to the
-  session that wrote it.
+- Default to no comment. Write one where a reader would otherwise make a wrong change, in a line.
+- A `///` doc is one sentence of what the item is or returns; `# Errors` and `# Panics` get a line
+  each.
+- Never defend the code: no alternatives weighed, no "rather than", no list of callers, no
+  restating what a name, type, assertion or test name already says.
+- Never narrate history ("used to", "no longer", "previously"), or mention an issue, pull request,
+  milestone, acceptance id or anything else that only means something to the session that wrote
+  it.
 - Cite the spec by chapter and section title, never by number: `spec/lint` "Error vs warning".
+- `cargo xtask lint comment-length` caps a block at 3 lines of `//`, 4 of `///` and 10 of `//!`.
+  The cap is a ceiling, not a target.
 - A change that makes a comment false fixes the comment.
 
 ## Tests
