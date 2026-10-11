@@ -7,6 +7,7 @@
 //! this module pins the state-machine invariants of the enum itself
 //! so a regression that loosens a transition guard is caught here
 //! rather than at the far end of the pipeline.
+use super::phase::TRANSITION_CARDINALITY;
 use super::*;
 
 fn routed() -> PlacementPhase {
