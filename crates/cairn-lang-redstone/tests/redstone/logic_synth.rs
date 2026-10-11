@@ -190,7 +190,7 @@ struct s size=1x1
 /// `E_UNSUPPORTED_NESTING`'s note says these members produce no blocks, not that they are gone;
 /// this holds the note to that.
 #[test]
-fn ac6b_signals_reach_synthesis_from_a_body_that_produces_no_blocks() {
+fn signals_reach_synthesis_from_a_body_that_produces_no_blocks() {
     let source = "@cairn 2026.06
 
 struct s size=1x1
