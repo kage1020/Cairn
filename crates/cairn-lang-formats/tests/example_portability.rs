@@ -24,30 +24,15 @@
 
 use std::collections::BTreeMap;
 
-use cairn_lang_core::block_array::{BlockArrayIr, BlockState, lower_to_block_array};
-use cairn_lang_core::{Edition, lower, parse, resolve};
+use cairn_lang_core::Edition;
+use cairn_lang_core::block_array::{BlockArrayIr, BlockState};
 use cairn_lang_formats::portability::{
     PortabilityReport, portability_for_bedrock, portability_for_java,
 };
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
 mod common;
-use common::{examples, supported_versions};
-
-/// The block-array IR for one source, lowered the way the named command
-/// does: `None` for `cairn info`'s range-wide pass, `Some(version)` for a
-/// build pinned to that target.
-fn lower_for(
-    source: &str,
-    edition: Edition,
-    pack: &RegistryPack,
-    target: Option<&str>,
-) -> BlockArrayIr {
-    let module = parse(source).expect("shipped example parses");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, Some(edition));
-    lower_to_block_array(&ir, &resolution, Some(&pack.view(target)))
-}
+use common::{examples, lower_source, supported_versions};
 
 /// Every structure's extent, keyed by scope so a comparison cannot pass
 /// by two scopes swapping sizes.
@@ -110,7 +95,7 @@ fn report_for(
 fn no_shipped_example_reports_an_unsupported_entry() {
     for (name, source) in &examples() {
         for (edition, pack) in editions() {
-            let block_ir = lower_for(source, edition, pack, None);
+            let block_ir = lower_source(source, edition, None);
             let counts = report_for(edition, pack, &block_ir, name).counts();
             assert_eq!(
                 counts.unsupported, 0,
@@ -133,10 +118,10 @@ fn no_shipped_example_reports_an_unsupported_entry() {
 fn the_reported_entry_count_matches_what_a_pinned_build_emits() {
     for (name, source) in &examples() {
         for (edition, pack) in editions() {
-            let unpinned = lower_for(source, edition, pack, None);
+            let unpinned = lower_source(source, edition, None);
             let reported = report_for(edition, pack, &unpinned, name).counts().total();
             for version in supported_versions(pack) {
-                let built = lower_for(source, edition, pack, Some(version));
+                let built = lower_source(source, edition, Some(version));
                 assert!(
                     built.diagnostics.is_empty(),
                     "{name} does not build for {edition} {version}: {:?}",

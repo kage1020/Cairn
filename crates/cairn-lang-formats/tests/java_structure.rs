@@ -1,11 +1,15 @@
 //! AC F1–F11 for the Java vanilla structure backend.
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_java_target};
 use cairn_lang_formats::java_structure::{
     JavaStructureError, OutputExt, build_structure_tag, output_filename, write_structure_gzip,
 };
 use cairn_lang_nbt::tag::Tag;
+
+mod common;
+use common::{latest, lower_example};
 
 fn target_1_21_4() -> JavaTarget {
     resolve_java_target("1.21.4").expect("known target")
@@ -371,27 +375,10 @@ fn f11_unit_air_debug_snapshot_is_stable() {
     insta::assert_debug_snapshot!(root);
 }
 
-/// Run the full pipeline (parse → lower → resolve → block-array →
-/// structure tag) so the cottage example reaches the Java backend through
-/// the same code path the CLI uses. Built locally rather than imported
-/// because the formats crate intentionally only depends on the IR + NBT
-/// codec; the test layer is the right place to reach across into the parser.
+/// The cottage example's structure tag, built from the block array
+/// `cairn compile --edition java` lowers it to.
 fn cottage_structure_tag() -> cairn_lang_formats::java_structure::Compound {
-    use cairn_lang_core::block_array::lower_to_block_array;
-    use cairn_lang_core::{lower, parse, resolve};
-
-    let source = std::fs::read_to_string(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("examples")
-            .join("cottage.crn"),
-    )
-    .expect("read cottage.crn");
-    let module = parse(&source).expect("parse");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let block_array = lower_to_block_array(&ir, &resolution, None);
+    let block_array = lower_example("cottage.crn", Edition::Java, Some(latest(Edition::Java)));
     let ba = block_array
         .structures
         .get("struct::cottage")

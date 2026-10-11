@@ -9,25 +9,19 @@
 //! logic-graph signal. Line-number references are intentionally avoided
 //! so the tests survive edits to the fixture.
 
-use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::Edition;
+use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
-use cairn_lang_core::{lower, parse, resolve};
-use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
 mod common;
-use common::examples_dir;
+use common::{example_source, latest, lower_example, lower_source, pack_for, supported_versions};
 
 fn lower_redstone_door() -> BlockArrayIr {
-    lower_redstone_door_with(builtin_java(), &builtin_java().data_versions.latest)
-}
-
-fn lower_redstone_door_with(pack: &RegistryPack, mc_version: &str) -> BlockArrayIr {
-    let source = std::fs::read_to_string(examples_dir().join("redstone-door.crn"))
-        .expect("redstone-door.crn readable");
-    let module = parse(&source).expect("parse redstone-door");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    lower_to_block_array(&ir, &resolution, Some(&pack.view(Some(mc_version))))
+    lower_example(
+        "redstone-door.crn",
+        Edition::Java,
+        Some(latest(Edition::Java)),
+    )
 }
 
 #[test]
@@ -65,18 +59,11 @@ fn redstone_door_palette_contains_oak_pressure_plate() {
 /// lowering pass actually reads it.
 #[test]
 fn the_bedrock_pack_plates_with_the_bedrock_id_on_every_supported_target() {
-    let pack = builtin_bedrock();
     // The buildable rows only: the table also carries the releases the
     // pack can order a floor against but has no block data for, and
     // pinning a lowering to one of those checks nothing.
-    for version in pack
-        .data_versions
-        .versions
-        .iter()
-        .filter(|e| e.targetable)
-        .map(|e| &e.mc_version)
-    {
-        let out = lower_redstone_door_with(pack, version);
+    for version in supported_versions(pack_for(Edition::Bedrock)) {
+        let out = lower_example("redstone-door.crn", Edition::Bedrock, Some(version));
         let ba = out.structures.get("struct::gatehouse").unwrap();
         let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
         assert!(
@@ -204,18 +191,9 @@ fn redstone_door_actuator_patch_bad_id_emits_actuator_shaped_primary() {
     // fixture's real door id `front`). Filtering on the "actuator patch"
     // substring keeps the assertion targeted at this recogniser rather
     // than any other deferral upstream.
-    let mut source = std::fs::read_to_string(examples_dir().join("redstone-door.crn"))
-        .expect("redstone-door.crn readable");
+    let mut source = example_source("redstone-door.crn");
     source.push_str("  door[id=nonexistent] opened_by=sig.open\n");
-    let module = cairn_lang_core::parse(&source).expect("parse redstone-door canary");
-    let ir = cairn_lang_core::lower(&module);
-    let resolution = cairn_lang_core::resolve(&ir, None);
-    let pack = builtin_java();
-    let out = lower_to_block_array(
-        &ir,
-        &resolution,
-        Some(&pack.view(Some(&pack.data_versions.latest))),
-    );
+    let out = lower_source(&source, Edition::Java, Some(latest(Edition::Java)));
 
     let actuator_defers: Vec<&cairn_lang_core::check::Diagnostic> = out
         .diagnostics

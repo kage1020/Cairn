@@ -11,7 +11,10 @@
 
 use std::path::PathBuf;
 
-use cairn_lang_formats::registry::RegistryPack;
+use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::{Edition, lower, parse, resolve};
+use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
+use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
 
 /// The repository's `examples/` directory.
@@ -64,17 +67,77 @@ pub fn examples() -> Vec<(String, String)> {
     found
 }
 
+/// The source of the shipped example `name` (`"cottage.crn"`).
+pub fn example_source(name: &str) -> String {
+    let path = examples_dir().join(name);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("cannot read {}: {err}", path.display()))
+}
+
+/// The built-in pack a build for `edition` reads.
+pub fn pack_for(edition: Edition) -> &'static RegistryPack {
+    match edition {
+        Edition::Java => builtin_java(),
+        Edition::Bedrock => builtin_bedrock(),
+    }
+}
+
+/// The version `--target latest` pins on `edition`.
+pub fn latest(edition: Edition) -> &'static str {
+    &pack_for(edition).data_versions.latest
+}
+
+/// The block-array IR `cairn compile --edition <edition>` lowers `source`
+/// to: resolved for that edition, through that edition's built-in pack,
+/// with the id table of `mc_version`. `None` pins no version, which is how
+/// `cairn info` lowers.
+pub fn lower_source(source: &str, edition: Edition, mc_version: Option<&str>) -> BlockArrayIr {
+    let module = parse(source).unwrap_or_else(|err| panic!("source does not parse: {err}"));
+    let ir = lower(&module);
+    let resolution = resolve(&ir, Some(edition));
+    lower_to_block_array(&ir, &resolution, Some(&pack_for(edition).view(mc_version)))
+}
+
+/// [`lower_source`] over the shipped example `name`.
+pub fn lower_example(name: &str, edition: Edition, mc_version: Option<&str>) -> BlockArrayIr {
+    lower_source(&example_source(name), edition, mc_version)
+}
+
 /// Every version the pack can build for, as the `--target` strings a user
-/// types. The `targetable` rows only — an ordering row exists so the pack
-/// can order an `@requires` floor against it, has no block table, and so
-/// declares nothing a test could walk.
+/// types.
 pub fn supported_versions(pack: &RegistryPack) -> Vec<&str> {
-    pack.data_versions
-        .versions
-        .iter()
-        .filter(|e| e.targetable)
+    pack.targetable()
+        .into_iter()
         .map(|e| e.mc_version.as_str())
         .collect()
+}
+
+/// The `structure` compound of a `.mcstructure` root.
+pub fn structure_compound(root: &Compound) -> &Compound {
+    match root.entries.get("structure") {
+        Some(Tag::Compound(c)) => c,
+        other => panic!("structure is not a Compound: {other:?}"),
+    }
+}
+
+/// The `structure.palette.default` compound of a `.mcstructure` root.
+pub fn default_palette(root: &Compound) -> &Compound {
+    match structure_compound(root).entries.get("palette") {
+        Some(Tag::Compound(p)) => match p.entries.get("default") {
+            Some(Tag::Compound(d)) => d,
+            other => panic!("palette.default is not a Compound: {other:?}"),
+        },
+        other => panic!("palette is not a Compound: {other:?}"),
+    }
+}
+
+/// The `structure.palette.default.block_palette` entries of a
+/// `.mcstructure` root.
+pub fn block_palette(root: &Compound) -> &[Tag] {
+    match default_palette(root).entries.get("block_palette") {
+        Some(Tag::List(l)) => &l.items,
+        other => panic!("block_palette is not a List: {other:?}"),
+    }
 }
 
 /// A blockstate property map from `(key, value)` pairs, in the order given.

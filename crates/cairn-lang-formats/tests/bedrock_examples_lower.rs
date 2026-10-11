@@ -11,29 +11,17 @@
 //! failing loud, so `cottage` compiles cleanly and `themed-tower` compiles
 //! with exactly the shape-drop degradation its eave corners incur.
 
-use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
-use cairn_lang_core::{lower, parse, resolve};
+use cairn_lang_core::Edition;
+use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
 use cairn_lang_formats::data_version::resolve_bedrock_target;
-use cairn_lang_formats::registry::builtin_bedrock;
 
 mod common;
-use common::examples_dir;
+use common::{block_palette, latest, lower_example};
 
-/// Lower an example through the Bedrock materials pack, the same way
-/// `cairn compile --edition bedrock` does.
+/// Lower an example the way `cairn compile --edition bedrock` does.
 fn lower_bedrock(example: &str) -> BlockArrayIr {
-    let source =
-        std::fs::read_to_string(examples_dir().join(example)).expect("example .crn readable");
-    let module = parse(&source).expect("parse example");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let pack = builtin_bedrock();
-    lower_to_block_array(
-        &ir,
-        &resolution,
-        Some(&pack.view(Some(&pack.data_versions.latest))),
-    )
+    lower_example(example, Edition::Bedrock, Some(latest(Edition::Bedrock)))
 }
 
 #[test]
@@ -79,25 +67,12 @@ fn cottage_roof_stairs_carry_bedrock_states() {
         .id;
     let (root, _notes) = build_mcstructure_tag(ba, &target).expect("build");
 
-    // Walk root.structure.palette.default.block_palette to the entry named
-    // `stair_id`, then to its states. Found by `name` rather than by the
-    // Java palette index: translation can merge Java entries into one
-    // `block_palette` entry, so the two lists need not line up.
-    let structure = match root.entries.get("structure") {
-        Some(Tag::Compound(c)) => c,
-        other => panic!("structure: {other:?}"),
-    };
-    let block_palette = match structure.entries.get("palette") {
-        Some(Tag::Compound(p)) => match p.entries.get("default") {
-            Some(Tag::Compound(d)) => match d.entries.get("block_palette") {
-                Some(Tag::List(l)) => &l.items,
-                other => panic!("block_palette: {other:?}"),
-            },
-            other => panic!("default: {other:?}"),
-        },
-        other => panic!("palette: {other:?}"),
-    };
-    let stair = block_palette
+    // The `block_palette` entry named `stair_id`, then its states. Found by
+    // `name` rather than by the Java palette index: translation can merge
+    // Java entries into one `block_palette` entry, so the two lists need not
+    // line up.
+    let palette = block_palette(&root);
+    let stair = palette
         .iter()
         .find_map(|entry| match entry {
             Tag::Compound(c) => match c.entries.get("name") {
@@ -107,7 +82,7 @@ fn cottage_roof_stairs_carry_bedrock_states() {
             },
             other => panic!("palette entry: {other:?}"),
         })
-        .unwrap_or_else(|| panic!("no block_palette entry is named {stair_id}: {block_palette:?}"));
+        .unwrap_or_else(|| panic!("no block_palette entry is named {stair_id}: {palette:?}"));
     let states = match stair.entries.get("states") {
         Some(Tag::Compound(s)) => s,
         other => panic!("states: {other:?}"),

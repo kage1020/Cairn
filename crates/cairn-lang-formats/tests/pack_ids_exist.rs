@@ -8,12 +8,12 @@
 //! one, because a rename inside an edition's own range (`stonebrick` →
 //! `stone_bricks` at Bedrock 1.21.40) is invisible to a spot check.
 
-use cairn_lang_core::block_array::{BUILTIN_BLOCK_IDS, lower_to_block_array};
-use cairn_lang_core::{Edition, lower, parse, resolve};
+use cairn_lang_core::Edition;
+use cairn_lang_core::block_array::BUILTIN_BLOCK_IDS;
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 
 mod common;
-use common::{examples, supported_versions};
+use common::{examples, lower_source, supported_versions};
 
 fn edition(pack: &RegistryPack) -> &'static str {
     pack.manifest.edition.label()
@@ -191,10 +191,7 @@ fn every_id_the_examples_intern_exists_in_its_target() {
             (builtin_bedrock(), Edition::Bedrock),
         ] {
             for version in supported_versions(pack) {
-                let module = parse(source).unwrap_or_else(|err| panic!("parse {name}: {err}"));
-                let ir = lower(&module);
-                let resolution = resolve(&ir, Some(pinned_edition));
-                let out = lower_to_block_array(&ir, &resolution, Some(&pack.view(Some(version))));
+                let out = lower_source(source, pinned_edition, Some(version));
                 let ids = pack
                     .blocks
                     .ids_for(version)

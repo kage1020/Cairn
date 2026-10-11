@@ -10,25 +10,18 @@
 //! pattern. Zero `W_DEFERRED_MEMBER` at the top level is what this file
 //! pins, replacing an older "at least one deferred" expectation.
 
-use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::Edition;
+use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
-use cairn_lang_core::{lower, parse, resolve};
-use cairn_lang_formats::registry::builtin_java;
 
 mod common;
-use common::examples_dir;
+use common::{latest, lower_example};
 
 fn lower_themed_tower() -> BlockArrayIr {
-    let source = std::fs::read_to_string(examples_dir().join("themed-tower.crn"))
-        .expect("themed-tower.crn readable");
-    let module = parse(&source).expect("parse themed-tower");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let pack = builtin_java();
-    lower_to_block_array(
-        &ir,
-        &resolution,
-        Some(&pack.view(Some(&pack.data_versions.latest))),
+    lower_example(
+        "themed-tower.crn",
+        Edition::Java,
+        Some(latest(Edition::Java)),
     )
 }
 

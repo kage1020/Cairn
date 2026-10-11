@@ -14,6 +14,9 @@ use cairn_lang_formats::data_version::{BedrockTarget, resolve_bedrock_target};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_nbt::tag::{Compound, Tag};
 
+mod common;
+use common::{block_palette, default_palette, structure_compound};
+
 fn target_1_21_60() -> BedrockTarget {
     resolve_bedrock_target("1.21.60").expect("known target")
 }
@@ -48,13 +51,6 @@ fn asymmetric_array() -> (BlockArray, PaletteIndex) {
         },
         planks,
     )
-}
-
-fn structure_compound(root: &Compound) -> &Compound {
-    match root.entries.get("structure") {
-        Some(Tag::Compound(c)) => c,
-        other => panic!("structure is not a Compound: {other:?}"),
-    }
 }
 
 #[test]
@@ -135,17 +131,7 @@ fn m3_palette_entries_carry_name_empty_states_and_version() {
         other => panic!("entities is not a List: {other:?}"),
     }
 
-    let default = match structure.entries.get("palette") {
-        Some(Tag::Compound(p)) => match p.entries.get("default") {
-            Some(Tag::Compound(d)) => d,
-            other => panic!("palette.default is not a Compound: {other:?}"),
-        },
-        other => panic!("palette is not a Compound: {other:?}"),
-    };
-    let entries = match default.entries.get("block_palette") {
-        Some(Tag::List(l)) => &l.items,
-        other => panic!("block_palette is not a List: {other:?}"),
-    };
+    let entries = block_palette(&root);
     assert_eq!(entries.len(), 2);
     let expected_names = ["minecraft:air", "minecraft:oak_planks"];
     for (entry, expected_name) in entries.iter().zip(expected_names) {
@@ -166,7 +152,7 @@ fn m3_palette_entries_carry_name_empty_states_and_version() {
             Some(&Tag::Int(target.block_version))
         );
     }
-    match default.entries.get("block_position_data") {
+    match default_palette(&root).entries.get("block_position_data") {
         Some(Tag::Compound(c)) => assert!(c.entries.is_empty()),
         other => panic!("block_position_data is not a Compound: {other:?}"),
     }
@@ -188,19 +174,7 @@ fn single_stateful_array(state: BlockState) -> BlockArray {
 
 /// The typed `states` compound of the last (non-air) block-palette entry.
 fn last_palette_states(root: &Compound) -> &Compound {
-    let structure = structure_compound(root);
-    let default = match structure.entries.get("palette") {
-        Some(Tag::Compound(p)) => match p.entries.get("default") {
-            Some(Tag::Compound(d)) => d,
-            other => panic!("palette.default is not a Compound: {other:?}"),
-        },
-        other => panic!("palette is not a Compound: {other:?}"),
-    };
-    let entries = match default.entries.get("block_palette") {
-        Some(Tag::List(l)) => &l.items,
-        other => panic!("block_palette is not a List: {other:?}"),
-    };
-    match entries.last() {
+    match block_palette(root).last() {
         Some(Tag::Compound(c)) => match c.entries.get("states") {
             Some(Tag::Compound(s)) => s,
             other => panic!("states is not a Compound: {other:?}"),
@@ -382,22 +356,6 @@ fn row_of(states: &[BlockState]) -> BlockArray {
         block_entities: vec![],
         entities: vec![],
         source_scope: "struct::row".to_owned(),
-    }
-}
-
-/// The `block_palette` entries of a built root.
-fn block_palette(root: &Compound) -> &[Tag] {
-    let palette = match structure_compound(root).entries.get("palette") {
-        Some(Tag::Compound(palette)) => palette,
-        other => panic!("palette is not a Compound: {other:?}"),
-    };
-    let default = match palette.entries.get("default") {
-        Some(Tag::Compound(default)) => default,
-        other => panic!("palette.default is not a Compound: {other:?}"),
-    };
-    match default.entries.get("block_palette") {
-        Some(Tag::List(entries)) => &entries.items,
-        other => panic!("block_palette is not a List: {other:?}"),
     }
 }
 

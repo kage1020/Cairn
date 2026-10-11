@@ -18,10 +18,8 @@
 //! limit, one shorter than its dims, and a palette string the encoder
 //! refuses.
 
-use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockState, Dims, Palette, PaletteIndex, lower_to_block_array,
-};
-use cairn_lang_core::{Edition, lower, parse, resolve};
+use cairn_lang_core::Edition;
+use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_formats::bedrock_structure::{
     BedrockStructureError, ParityNote, build_mcstructure_tag, prepare_mcstructure,
     write_mcstructure,
@@ -31,23 +29,10 @@ use cairn_lang_formats::java_structure::{
     JavaStructureError, build_structure_tag, prepare_structure, write_compound_gzip,
     write_structure_gzip,
 };
-use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
 use cairn_lang_nbt::NbtIoError;
-use cairn_lang_nbt::tag::{Compound, Tag};
 
 mod common;
-use common::examples;
-
-fn lower_latest(source: &str, edition: Edition, pack: &RegistryPack) -> BlockArrayIr {
-    let module = parse(source).expect("shipped example parses");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, Some(edition));
-    lower_to_block_array(
-        &ir,
-        &resolution,
-        Some(&pack.view(Some(&pack.data_versions.latest))),
-    )
-}
+use common::{block_palette, examples, latest, lower_source};
 
 /// Assert two encodings are the same bytes, reporting the lengths and the
 /// first offset where they part rather than two megabyte-scale buffers.
@@ -88,26 +73,6 @@ fn assert_java_streams_the_tree(label: &str, array: &BlockArray) {
     assert_same_bytes(label, "write_structure_gzip", &one_step, &tree);
 }
 
-/// The `block_palette` entries of a built `.mcstructure` root.
-fn block_palette(root: &Compound) -> &[Tag] {
-    let structure = match root.entries.get("structure") {
-        Some(Tag::Compound(structure)) => structure,
-        other => panic!("structure is not a Compound: {other:?}"),
-    };
-    let palette = match structure.entries.get("palette") {
-        Some(Tag::Compound(palette)) => palette,
-        other => panic!("palette is not a Compound: {other:?}"),
-    };
-    let default = match palette.entries.get("default") {
-        Some(Tag::Compound(default)) => default,
-        other => panic!("palette.default is not a Compound: {other:?}"),
-    };
-    match default.entries.get("block_palette") {
-        Some(Tag::List(entries)) => &entries.items,
-        other => panic!("block_palette is not a List: {other:?}"),
-    }
-}
-
 /// Assert the Bedrock write path agrees with the tree for `array`, and
 /// that the `block_palette` it writes lists no block twice. Returns the
 /// parity notes `prepare_mcstructure` raised and how many palette entries
@@ -138,15 +103,12 @@ fn assert_bedrock_streams_the_tree(label: &str, array: &BlockArray) -> (Vec<Pari
 
 #[test]
 fn every_shipped_structure_streams_the_bytes_its_tree_writes() {
-    for (edition, pack) in [
-        (Edition::Java, builtin_java()),
-        (Edition::Bedrock, builtin_bedrock()),
-    ] {
+    for edition in [Edition::Java, Edition::Bedrock] {
         let mut compared = 0;
         let mut notes = 0;
         let mut merged = 0;
         for (name, source) in examples() {
-            let ir = lower_latest(&source, edition, pack);
+            let ir = lower_source(&source, edition, Some(latest(edition)));
             for (scope, array) in &ir.structures {
                 let label = format!("{name} {scope} ({edition:?})");
                 match edition {
