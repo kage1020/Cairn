@@ -156,8 +156,7 @@ fn translate_stair(
     Ok(StateTranslation { states, degraded })
 }
 
-/// Java `facing` to `weirdo_direction`, as the wiki's `Stairs/BS` listing for Bedrock 1.21.60
-/// gives it; the spec's portability example uses other values.
+/// Java `facing` to `weirdo_direction`, as Bedrock 1.21.60's stair states number them.
 fn weirdo_direction(id: &str, facing: &str) -> Result<i32, BedrockStateError> {
     match facing {
         "east" => Ok(0),

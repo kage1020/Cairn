@@ -694,7 +694,7 @@ edition", not "guarantee the same result".
 intent_state: { primitive: stairs, corner: inner_left, facing: east }   # edition-neutral
 resolved_state:
   java:    { facing: east, half: bottom, shape: inner_left }
-  bedrock: { weirdo_direction: 1, upside_down_bit: false }              # no shape → corners don't join
+  bedrock: { weirdo_direction: 0, upside_down_bit: false }              # no shape → corners don't join
 ```
 
 When a resolved difference becomes a visual or functional one, the build says so. `themed-tower`'s
