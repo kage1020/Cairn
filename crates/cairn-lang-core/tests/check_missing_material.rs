@@ -466,34 +466,3 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         );
     }
 }
-
-/// The shipped examples carry no bare `floor` or `walls`, so the refusal
-/// costs the corpus nothing.
-///
-/// Every `.crn` in the directory is read and every one is parsed — a
-/// source that stops parsing fails here rather than being skipped past,
-/// which `cli_check_parity`'s "every example passes all four commands"
-/// requires of them anyway.
-#[test]
-fn no_shipped_example_names_a_member_with_no_material() {
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples");
-    let paths: Vec<std::path::PathBuf> = std::fs::read_dir(root)
-        .expect("the examples directory is there")
-        .map(|entry| entry.expect("read the entry").path())
-        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("crn"))
-        .collect();
-    assert!(!paths.is_empty(), "premise: the corpus was actually read");
-
-    for path in paths {
-        let source = std::fs::read_to_string(&path).expect("read the example");
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-        let module = parse(&source).unwrap_or_else(|e| panic!("{name} must parse: {e}"));
-        let ir = lower(&module);
-        let found: Vec<String> = check(&module, &ir, None)
-            .iter()
-            .filter(|d| d.code == DiagnosticCode::MissingMaterial)
-            .map(|d| d.primary.clone())
-            .collect();
-        assert!(found.is_empty(), "{name}: {found:?}");
-    }
-}

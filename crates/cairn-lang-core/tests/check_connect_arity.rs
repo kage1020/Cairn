@@ -217,26 +217,6 @@ fn ca_8_over_arity_with_two_extras_underlines_the_full_run() {
     );
 }
 
-/// Existing examples must continue to pass the arity check. Pins the
-/// regression surface — a future change to the pass that over-fires
-/// would break `cargo run -p cairn-lang-cli -- check examples/...`.
-#[test]
-fn ca_9_examples_village_and_l_walkway_are_arity_clean() {
-    for path in ["examples/village.crn", "examples/l-walkway.crn"] {
-        let src = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join(path),
-        )
-        .unwrap_or_else(|e| panic!("read {path}: {e}"));
-        let arity = arity_only(diagnose(&src));
-        assert!(
-            arity.is_empty(),
-            "{path} must be arity-clean, got: {arity:#?}",
-        );
-    }
-}
-
 /// Byte range of the slot that follows `prefix` on the `connect` row.
 ///
 /// Locating by the text that precedes the slot rather than by the slot
