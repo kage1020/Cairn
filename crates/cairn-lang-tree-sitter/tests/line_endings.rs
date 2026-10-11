@@ -1,12 +1,8 @@
-//! Line-ending regression test for the external scanner.
-//!
-//! `src/scanner.c` accepts `\r\n` as well as `\n` on both of its line-break
-//! paths: the NEWLINE branch, and the blank/comment-only-line skip loop that
-//! precedes indent counting. Nothing else pins that behaviour — the corpus
-//! under `test/corpus/` cannot, because the repository's `.gitattributes`
-//! normalizes every text file to LF on commit, so a `\r\n` written into a
-//! corpus fixture would silently become `\n` and stop testing anything. The
-//! source is therefore built here, in Rust, where the bytes are literal.
+//! Line endings through the external scanner's two line-break paths (the
+//! NEWLINE branch and the blank/comment-only-line skip loop), and node
+//! positions against the reference lexer. Built in Rust because
+//! `.gitattributes` normalises every text file to LF, so a `\r\n` in a
+//! `test/corpus/` fixture would become `\n` on commit.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -145,8 +141,7 @@ fn leaf_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
 ///
 /// Tokens whose text is only whitespace are dropped: the synthetic
 /// `Indent` / `Dedent` / `Newline` have no node to be compared against, and
-/// since the fix a `Newline` spans its terminator rather than nothing, so
-/// "has an empty span" would no longer select them.
+/// a `Newline` spans its terminator, so an empty-span filter would miss it.
 fn core_positions(source: &str) -> BTreeMap<usize, (u32, u32)> {
     cairn_lang_core::lex::lex(source)
         .expect("the reference lexer accepts the fixture")
@@ -224,57 +219,27 @@ fn node_positions_match_the_reference_lexer_for_lf_and_crlf() {
 /// every node stays on the first row and its column keeps climbing across
 /// what should have been a line break.
 ///
-/// Both halves of that were read rather than assumed, because "the grammar
-/// cannot close the gap" is the kind of claim worth checking before someone
-/// spends a day trying. Checked against 0.26.11 — the runtime this crate's
-/// tests link, per the lockfile — and against 0.27.0, the newest release at
-/// the time:
+/// Both halves hold in runtime 0.26.11 (the lockfile's) and 0.27.0:
 ///
 /// - The row is incremented in exactly one place in the runtime's
-///   `lib/src/lexer.c`, under a `lookahead == '\n'` test (the `column = 0`
-///   beside it is the same branch). Every other write to the lexer's
-///   position copies a point the caller handed in — an included range's
-///   `start_point` or `end_point` — or repositions to a `Length` the lexer
-///   computed earlier. Ranges are set by whoever calls the parser, not by
-///   the grammar.
-/// - `TSLexer`, the whole of the external-scanner surface in `parser.h`,
-///   carries `lookahead`, `result_symbol`, `advance`, `mark_end`,
-///   `get_column`, `is_at_included_range_start`, `eof` and `log`. There is
-///   no accessor for the point, so a scanner cannot set the row either.
+///   `lib/src/lexer.c`, under a `lookahead == '\n'` test. Every other write
+///   to the lexer's position copies a point the caller handed in (an
+///   included range's `start_point` or `end_point`) or a `Length` the lexer
+///   computed earlier.
+/// - `TSLexer`, the whole external-scanner surface in `parser.h`, carries
+///   `lookahead`, `result_symbol`, `advance`, `mark_end`, `get_column`,
+///   `is_at_included_range_start`, `eof` and `log`: no accessor for the
+///   point.
 ///
-/// A caller *can* fake the rows, by splitting the source into one included
-/// range per line so that the range-transition copy hands each `\r` a fresh
-/// `start_point`. Nothing in this repository is that caller: only tests
-/// build a `tree_sitter::Parser`, and the crate exports the language and its
-/// queries and nothing else. The editors that drive highlighting from this
-/// grammar hand their runtime the buffer as one range.
+/// A caller could fake the rows with one included range per line, but only
+/// tests here build a `tree_sitter::Parser`, and editors hand their runtime
+/// the buffer as one range. Upstream declined to widen the line rule
+/// (<https://github.com/tree-sitter/tree-sitter/issues/4467>, closed as not
+/// planned), and `spec/syntax` "Literals and separators" records the
+/// limitation.
 ///
-/// So there is nothing here to reach for: a lone `\r` cannot be spelled in a
-/// way the runtime counts as a line. The fix is upstream — the runtime
-/// widening its line rule, or exposing the point to scanners — and neither
-/// is on its way. The ask has already been filed, as
-/// <https://github.com/tree-sitter/tree-sitter/issues/4467>, which reports
-/// this exact defect from the other end — a CR-only file, every node left on
-/// row 0, against a different grammar — and it was closed as not planned.
-///
-/// That is worth having written down, because it changes what this comment
-/// is recording: not a fix in flight, but a standing upstream decision. The
-/// note here before it, and the issue that prompted that note, both read as
-/// though the widening were merely unfiled and waiting for someone to ask.
-/// It was asked. The paragraph in the syntax spec recording the limitation
-/// stands with it, and a CR-only file keeps highlighting as one long line in
-/// every editor that hands its runtime the buffer whole.
-///
-/// Re-checked 2026-09-14 against `tree-sitter/tree-sitter@master`, and again
-/// against 0.26.11 and 0.27.0 — still the newest release: one
-/// `extent.row++`, still under a `lookahead == '\n'` test, and a `TSLexer`
-/// still carrying no accessor for the point. (`parser.h` has moved to
-/// `lib/src/parser.h` on trunk; the struct itself is unchanged.)
-///
-/// Pinned rather than left implicit: if a future runtime widens its line
-/// rule this test fails, which is the signal to delete it and fold the CR
-/// case into the parity test above. Closed as not planned is a decision and
-/// not a guarantee, so the tripwire stays armed.
+/// If a runtime widens its line rule this test fails: delete it then and
+/// fold the CR case into the parity test above.
 #[test]
 fn a_lone_carriage_return_leaves_every_node_on_the_first_row() {
     let cr = LF_SOURCE.replace('\n', "\r");

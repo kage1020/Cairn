@@ -15,13 +15,11 @@
   value: (identifier) @local.definition.member
   (#eq? @_key "id"))
 
-; Deliberately no `@local.reference` pattern here. A pattern that captured
-; every non-"id" identifier attribute value (the previous approach) was
-; over-broad: it tagged coincidental text matches like `side=front` as a
-; reference to an unrelated `id=front` in the same statement, since most
-; attribute values are enum literals (side=, class=, kind=, mat_slot=, ...),
-; not id lookups. The grammar has no concrete list of attribute keys that
-; reliably hold an id reference (e.g. `opened_by=` takes a signal_ref, not
-; an id). Ship only `@local.definition.member` until specific
-; reference-bearing keys are identified, then add a narrow pattern keyed on
-; those exact attribute names.
+; Deliberately no `@local.reference` pattern here. Capturing every non-"id"
+; identifier attribute value is over-broad: it tags coincidental text like
+; `side=front` as a reference to an unrelated `id=front` in the same
+; statement, since most attribute values are enum literals (side=, class=,
+; kind=, mat_slot=, ...), not id lookups. The grammar has no list of
+; attribute keys that reliably hold an id reference (`opened_by=` takes a
+; signal_ref, not an id), so a reference pattern has to be keyed on exact
+; attribute names.

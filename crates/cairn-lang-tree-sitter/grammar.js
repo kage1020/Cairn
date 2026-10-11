@@ -62,12 +62,10 @@ module.exports = grammar({
     //
     // Blank and comment lines after a declaration are crossed by the
     // scanner on the way to the construct behind them. At the end of a
-    // file there is no such construct, so with nothing to cross to the
-    // layout was left with no token that could consume it and a file
-    // ending that way was refused. A declaration whose body holds a row
-    // absorbs its own trailing layout through that body's
-    // `repeat1($._newline)`, and a directive through its own, which is
-    // why this was the last position in the class.
+    // file there is no such construct, so this token consumes the layout.
+    // A declaration whose body holds a row absorbs its own trailing layout
+    // through that body's `repeat1($._newline)`, and a directive through
+    // its own.
     //
     // An external token rather than a `repeat($._newline)` here, because
     // the question is one only the scanner can answer. That repeat is
@@ -143,7 +141,7 @@ module.exports = grammar({
     // ends instead of falling into it.
     //
     // `bit` is external too: an output ends where its digits do, and
-    // `/[01]/` took the `1` of `101` and left `01` to start another row.
+    // `/[01]/` would take the `1` of `101` and leave `01` to start a row.
     // Saying "one digit, and no digit after it" needs lookahead a token
     // regex does not have. See the scanner.
     truth_row: $ => seq(

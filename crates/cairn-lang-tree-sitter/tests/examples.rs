@@ -154,12 +154,9 @@ fn cottage_highlight_golden_is_stable() {
             "tree-sitter"
         });
 
-    // The CLI is installed by `pnpm install` in this crate; the workspace-wide
-    // `cargo test --workspace` in `.github/workflows/ci.yml` runs without a
-    // Node setup, so the binary is absent there. Skip in that case — the
-    // dedicated `tree-sitter.yml` workflow (which does `pnpm install`) is the
-    // authoritative gate for highlight-golden drift; with the variable set, a
-    // broken install there fails rather than passing as a skip.
+    // `cargo test --workspace` in `.github/workflows/ci.yml` runs without
+    // Node, so the CLI is absent there; `tree-sitter.yml` installs it and
+    // sets the variable, so a broken install there fails rather than skips.
     if !cli.exists() {
         assert!(
             std::env::var_os(REQUIRE_CLI).is_none_or(|v| v.is_empty()),

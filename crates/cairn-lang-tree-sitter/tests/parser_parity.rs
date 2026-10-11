@@ -1,23 +1,10 @@
 //! Accept/reject parity with the reference parser.
 //!
-//! The grammar in this crate is a second implementation of the language
-//! `cairn-lang-core` defines, so any source the two disagree about is a
-//! bug in one of them — and the reference parser is by design the one
-//! that is right. Nothing else in the crate compares them:
-//! `tests/examples.rs` checks the grammar accepts every file in
-//! `examples/`, which is one direction over a corpus of twelve valid
-//! files, and `test/corpus/` pins trees this grammar builds without
-//! consulting the other side at all.
-//!
-//! Every fixture below is fed to both parsers and their verdicts compared.
-//! The expected verdict is written out too, so a fixture that silently
-//! flips in *both* parsers still fails: agreeing on the wrong answer is
-//! the failure mode a differential test alone cannot see.
-//!
-//! Divergences that remain live in [`KNOWN_DIVERGENCES`], each with the
-//! reason it is still there. That list is asserted, not skipped: a
-//! divergence that gets fixed fails the test that holds it, so the list
-//! shrinks deliberately rather than drifting.
+//! The grammar is a second implementation of the language `cairn-lang-core`
+//! defines, and the reference parser is by design the one that is right.
+//! Every fixture is fed to both parsers and checked against a written
+//! verdict, so one that flips in *both* still fails; the divergences that
+//! remain live in [`KNOWN_DIVERGENCES`], asserted rather than skipped.
 
 use std::fmt::Write as _;
 
@@ -54,10 +41,8 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ),
     ("requires_other_prefix", "@requires mc>=1.20\n", Accept),
     ("requires_bare", "@requires 1.20\n", Accept),
-    // A pre-release label carries a `-`, which the reference lexer used to
-    // refuse outright while `directive_literal` (`[^#\r\n \t]+`) has always
-    // taken it — a live divergence that was never in `KNOWN_DIVERGENCES`
-    // because no fixture held a `-` outside an `->`. Both accept it now.
+    // A pre-release label carries a `-`, which `directive_literal`
+    // (`[^#\r\n \t]+`) takes and the reference parser keeps in the value.
     (
         "requires_prerelease",
         "@requires version>=1.21.4-rc1\n",
@@ -65,7 +50,7 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ),
     // The rest of that class: a character no token starts with, and an
     // unterminated `"`. The reference parser keeps what it cannot lex as
-    // part of the value, the way `directive_literal` always has.
+    // part of the value, as `directive_literal` does.
     ("cairn_unlexable_value", "@cairn 2026.6+build\n", Accept),
     (
         "cairn_unterminated_quote",
@@ -220,9 +205,8 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme t:\n  slot f -> @oak_log[axis=\"x\"]\n",
         Reject,
     ),
-    // In a value list a token and a nested list used to be two items
-    // whether or not a space stood between them. Touching, the `[` is now
-    // the token's, and `b` is no `key=value`; apart, they are still two.
+    // In a value list a touching `[` is the token's, and `b` is no
+    // `key=value`; apart, the token and the nested list are two items.
     (
         "value_list_token_then_list_touching",
         "struct s size=3x3\n  thing mat=[@a[b]]\n",
@@ -274,7 +258,7 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     //
     // `spec/versioning-editions` "Fail-loud and minimum-version inference"
     // gives `def` and `theme` a floor of their own. Its expression is the
-    // opaque rest-of-line slice `@requires` takes, so the grammar\'s job
+    // opaque rest-of-line slice `@requires` takes, so the grammar's job
     // here is *where* the line may stand, not what is on it.
     (
         "def_member_requires",
@@ -310,7 +294,7 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Accept,
     ),
     // A `struct` and a `site` are the build rather than a part of one, so
-    // the floor on them is the file\'s and is spelled `@requires`.
+    // the floor on them is the file's and is spelled `@requires`.
     (
         "struct_member_requires",
         "struct s size=3x3\n  requires version>=1.21\n",
@@ -355,9 +339,8 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ),
     // A grouping member with a blank line in front of it, a sibling
     // before that, and a second group after. Both parsers accept it
-    // either way; what moves is where the rows land, so only the depth
-    // walk sees it — the group used to end up bodyless with its first row
-    // adopting the second.
+    // either way; what can move is where the rows land (a bodyless group
+    // whose first row adopts the second), so only the depth walk sees it.
     (
         "blank_line_before_a_grouping_member",
         "struct s size=3x3\n  a x=1\n\n  b y=0\n    c x=1\n    d x=2\n\n  e y=5\n    f x=1\n",
@@ -553,9 +536,8 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a.b, c.d -> e.f) { 01 -> 1 }\n",
         Accept,
     ),
-    // A row's pattern is bounded by the input arity and nothing else.
-    // Twenty ones used to overflow the `i64` `scan_number` parsed every
-    // digit run into, a ceiling this grammar never had.
+    // A row's pattern is bounded by the input arity and nothing else, so
+    // twenty ones, past `i64`, are a pattern on both sides.
     (
         "truth_row_wider_than_i64",
         "struct s size=3x3\n  assert truth(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t -> z) { 11111111111111111111 -> 1 }\n",
@@ -707,13 +689,9 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=03x3\n  floor mat_slot=f\n",
         Accept,
     ),
-    // Both refuse this, but not for the reason it looks like: a
-    // declaration header refuses *any* trailing bare token, so
-    // `size=2x2 junk` fails here identically. The size rule is not
-    // consulted, which is why the real case lives in
     // The other half of the `-` pair: it lexes, and no value position
     // reads one. Tree-sitter's `identifier` is `[A-Za-z_][A-Za-z0-9_]*` so
-    // the grammar stops at `a`, and the reference parser now lexes `a`,
+    // the grammar stops at `a`, and the reference parser lexes `a`,
     // `Minus`, `b` and refuses the token. They agree on the answer for
     // different reasons, which is what this suite is for.
     (
@@ -721,6 +699,10 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme t:\n  slot a-b -> @c\n",
         Reject,
     ),
+    // Both refuse this, but not for the reason it looks like: a
+    // declaration header refuses *any* trailing bare token, so
+    // `size=2x2 junk` fails here identically. The size rule is not
+    // consulted, which is why the real case lives in
     // `KNOWN_DIVERGENCES` — see `size_with_a_third_extent`.
     (
         "a_header_refuses_a_trailing_token",
@@ -739,9 +721,9 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ),
     // `size_spaced` is refused on the right of the separator — the
     // scanner declines an `x` with no digit directly behind it — so it
-    // says nothing about the left. This one does: the separator is an external token consulted before any
-    // run of spaces is read, and reading the run first would let a
-    // separator cross one.
+    // says nothing about the left. This one does: the separator is an
+    // external token consulted before any run of spaces is read, and
+    // reading the run first would let a separator cross one.
     (
         "size_space_before_x",
         "struct s size=9 x7\n  floor mat_slot=f\n",
@@ -921,10 +903,8 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "theme a:\nstruct s size=3x3\n  floor a=1\n",
         Accept,
     ),
-    // The same shapes with nothing behind the layout at all. These were
-    // the last position in the class: with no construct to cross to, the
-    // trailing run had no token that could consume it until `_file_end`
-    // closed it.
+    // The same shapes with nothing behind the layout at all: with no
+    // construct to cross to, only `_file_end` can consume the trailing run.
     (
         "bodyless_decl_then_blank_line_at_eof",
         "theme a:\n\n",
@@ -1153,8 +1133,8 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  level y=0\n    room\n        f m=1\n",
         Reject,
     ),
-    // The keyword redesign's boundary: any identifier opens a statement
-    // except the two the reference parser dispatches elsewhere.
+    // Any identifier opens a statement except the two the reference
+    // parser dispatches elsewhere.
     (
         "member_logic_needs_its_own_shape",
         "struct s size=3x3\n  logic a=1\n",
@@ -1219,11 +1199,9 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
 /// parsers still disagree about — the reference parser's verdict being
 /// the opposite of the one recorded here.
 ///
-/// Both directions appear, so this is the full inventory and not only the
-/// half that is comfortable. Each entry is asserted rather than skipped:
-/// the divergence must still exist, in the direction stated. Fixing one
-/// therefore fails this test, which is the point — the list is meant to
-/// shrink on purpose.
+/// Both directions appear. Each entry is asserted to still diverge in the
+/// direction stated, so fixing one fails the test and the list shrinks on
+/// purpose.
 const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     // -- value ranges, which no grammar can express -------------------
     //
@@ -1338,10 +1316,10 @@ fn both_parsers_reach_the_written_verdict() {
 /// An indent too deep for the scanner's `uint16_t` levels is refused, not
 /// wrapped round to a shallow one.
 ///
-/// 131072 spaces is level 65536, which narrowed to 16 bits before the
-/// comparison read as level 0, a second top-level declaration; 131074
-/// read as level 1, an ordinary body line. Built here rather than listed
-/// in `FIXTURES` because the source is 128 KiB of spaces.
+/// 131072 spaces is level 65536, which narrowed to 16 bits would read as
+/// level 0, a second top-level declaration; 131074 as level 1, an ordinary
+/// body line. Built here rather than listed in `FIXTURES` because the
+/// source is 128 KiB of spaces.
 #[test]
 fn an_indent_past_sixteen_bits_of_levels_is_refused() {
     let mut parser = new_parser();
@@ -1373,11 +1351,9 @@ fn an_indent_past_sixteen_bits_of_levels_is_refused() {
 /// Without the guard the scanner answers mid-recovery, and the layout
 /// state it leaves behind describes a line the parse already discarded.
 ///
-/// It is asserted this way because a coarser test cannot see it: 546
-/// malformed sources were swept with and without the guard and *no
-/// accept/reject verdict* changed, so no fixture in `FIXTURES` can pin
-/// it. 208 of 300 recovery trees did change, which is where the risk
-/// lives.
+/// No fixture in `FIXTURES` can pin it: sweeping malformed sources with
+/// and without the guard changes no accept/reject verdict, only the
+/// recovery trees, which is where the risk lives.
 #[test]
 fn a_broken_line_does_not_displace_the_lines_after_it() {
     let mut parser = new_parser();
@@ -1464,28 +1440,22 @@ fn a_tab_indented_line_does_not_close_the_body_around_it() {
 /// An illegally indented line is refused on its own row, and the lines
 /// around it keep their shape.
 ///
-/// The scanner used to read one line ahead of every line break and
-/// withhold the NEWLINE when the line behind it was indented illegally.
-/// That could refuse no file the scanner does not refuse anyway:
-/// `body()` and `source_file` in `grammar.js` put `_line_start` in front
-/// of every construct that starts a line, so the scanner is always asked
-/// at a content line's start, and there the odd-count and
-/// more-than-one-level tests read the same predicate against the same
-/// indent stack the lookahead read one line earlier — nothing pops in
-/// between, and blank and comment lines answered `false` in the old
-/// check too. So only where the error sits could move, and on the break
-/// it took the line in front down with the one it was meant to protect.
+/// Withholding the NEWLINE in front of an illegally indented line would
+/// refuse no file the scanner does not refuse anyway: `body()` and
+/// `source_file` in `grammar.js` put `_line_start` in front of every
+/// construct that starts a line, so the odd-count and more-than-one-level
+/// tests already run at the line's start. It would only move the error
+/// onto the line in front.
 ///
 /// Asserted here and not in `FIXTURES` because the verdict is `Reject`
 /// either way. Each source is parsed in all three line endings, because
-/// the break the lookahead sat behind is spelled three ways and each is
-/// a path it could come back on.
+/// the break is spelled three ways.
 #[test]
 fn a_bad_indent_errors_on_its_own_row() {
     let mut parser = new_parser();
     for ending in ["\n", "\r\n", "\r"] {
         // The header in front of the offending line survives it. With the
-        // break withheld, the whole file was one `ERROR`.
+        // break withheld, the whole file would be one `ERROR`.
         let source = "theme t:\n    walls b=2\n".replace('\n', ending);
         let tree = parser.parse(&source, None).expect("parse produced no tree");
         let root = tree.root_node();
@@ -1507,10 +1477,9 @@ fn a_bad_indent_errors_on_its_own_row() {
         );
 
         // The rows behind it are read as rows. With the break withheld,
-        // the offending row's keyword and argument were folded into the
-        // row in front as two more arguments, so `walls` disappeared as a
-        // member. Keywords only: the depth a recovery gives a row written
-        // at an illegal indent is not something to pin.
+        // the offending row's keyword and argument would fold into the row
+        // in front as two more arguments. Keywords only: the depth a
+        // recovery gives a row written at an illegal indent is not pinned.
         let source =
             "struct s size=3x3\n  floor a=1\n      walls b=2\n  door x=1\n".replace('\n', ending);
         let tree = parser.parse(&source, None).expect("parse produced no tree");
@@ -1529,7 +1498,7 @@ fn a_bad_indent_errors_on_its_own_row() {
 
         // An odd indent across a blank line between two rows. Both rows
         // stay whole statements; with the break withheld, the row in front
-        // lost its statement to the error and only its keyword survived.
+        // would lose its statement to the error.
         let source = "struct s size=3x3\n  floor a=1\n\n   walls b=2\n".replace('\n', ending);
         let tree = parser.parse(&source, None).expect("parse produced no tree");
         assert!(
@@ -1595,13 +1564,11 @@ fn listed_divergences_still_diverge() {
 
 /// Where each member sits agrees too, not just the yes/no.
 ///
-/// Acceptance parity alone would be satisfied by a grammar that accepts
-/// the right files and builds the wrong tree for them — which is exactly
-/// what a multi-level dedent used to do: the file parsed, and the member
-/// after the dedent ended up a level too deep. The *deepest* nesting is
-/// unchanged by that (the sibling sinks into a body that already exists),
-/// so the comparison has to be per member: every keyword in document
-/// order, each with the depth it sits at.
+/// Acceptance parity alone would be satisfied by a grammar that builds the
+/// wrong tree, such as a multi-level dedent that leaves the member after it
+/// a level too deep. The *deepest* nesting is unchanged by that (the
+/// sibling sinks into a body that already exists), so the comparison is per
+/// member: every keyword in document order, each with its depth.
 ///
 /// Keyword and depth are the two things both parsers name the same way;
 /// node kinds and argument shapes are each parser's own business.
@@ -1740,8 +1707,8 @@ fn grammar_rows(node: tree_sitter::Node<'_>, source: &str) -> Vec<String> {
 ///   makes a bug outright.
 /// - among sources both accept, every member lands at the same depth.
 ///   Acceptance parity does not imply it: a grammar can take the right
-///   files and nest them wrongly, which is what a blank line in front of a
-///   grouping member used to do.
+///   files and nest them wrongly, as around a blank line in front of a
+///   grouping member.
 ///
 /// The other direction is not asserted, and cannot be: the grammar refuses
 /// sources the reference parser accepts on purpose, and `KNOWN_DIVERGENCES`
