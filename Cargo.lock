@@ -194,7 +194,6 @@ version = "2026.10.0"
 dependencies = [
  "flate2",
  "indexmap",
- "insta",
  "thiserror",
 ]
 

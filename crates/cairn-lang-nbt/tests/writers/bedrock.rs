@@ -1,13 +1,15 @@
-//! AC B1–B7 for the Bedrock NBT writer.
+//! The Bedrock writer's little-endian byte stream.
 //!
 //! Bedrock NBT shares the Java tag-id vocabulary but stores every numeric
 //! payload and length prefix little-endian, and `.mcstructure` files are
 //! written uncompressed (wiki.bedrock.dev, "mcstructure" format page). The
-//! tests mirror `java_writer.rs` so a divergence between the two writers
+//! tests mirror the Java ones so a divergence between the two writers
 //! beyond byte order fails loudly on the exact byte.
 
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 use cairn_lang_nbt::{NbtIoError, write_bedrock_uncompressed, write_java_uncompressed};
+
+use crate::find_subsequence;
 
 fn encode(name: &str, root: &Compound) -> Vec<u8> {
     let mut buf = Vec::new();
@@ -16,16 +18,16 @@ fn encode(name: &str, root: &Compound) -> Vec<u8> {
 }
 
 #[test]
-fn b1_empty_root_emits_header_plus_end() {
-    // AC B1: empty Compound root with empty name. A zero u16 length is the
+fn empty_root_emits_header_plus_end() {
+    // Empty Compound root with empty name. A zero u16 length is the
     // same two bytes in either endianness, so this matches the Java bytes.
     let buf = encode("", &Compound::new());
     assert_eq!(buf, vec![0x0a, 0x00, 0x00, 0x00]);
 }
 
 #[test]
-fn b2_named_int_root_matches_known_bytes() {
-    // AC B2: {name: Int(42)} with root name "name", little-endian.
+fn named_int_root_matches_known_bytes() {
+    // {name: Int(42)} with root name "name", little-endian.
     // Layout:
     //   0x0a                       — root tag id (Compound)
     //   0x04 0x00 "name"           — root name, u16 length little-endian
@@ -51,8 +53,8 @@ fn b2_named_int_root_matches_known_bytes() {
 }
 
 #[test]
-fn b3_string_length_prefix_is_little_endian() {
-    // AC B3: TAG_String is u16 length (little-endian) + ASCII-range UTF-8.
+fn string_length_prefix_is_little_endian() {
+    // TAG_String is u16 length (little-endian) + ASCII-range UTF-8.
     let mut root = Compound::new();
     root.insert("s", Tag::String("hi".to_owned()));
     let buf = encode("", &root);
@@ -62,9 +64,9 @@ fn b3_string_length_prefix_is_little_endian() {
 }
 
 #[test]
-fn b4_numeric_types_are_little_endian() {
-    // AC B4: numeric payloads are little-endian regardless of host
-    // endianness. Mirrors java_writer.rs::n8 with reversed expectations.
+fn numeric_types_are_little_endian() {
+    // Numeric payloads are little-endian regardless of host
+    // endianness. Mirrors the Java numeric test with reversed expectations.
     let mut root = Compound::new();
     root.insert("i16", Tag::Short(0x1234));
     root.insert("i32", Tag::Int(0x1234_5678));
@@ -93,8 +95,8 @@ fn b4_numeric_types_are_little_endian() {
 }
 
 #[test]
-fn b5_int_list_and_array_lengths_are_little_endian() {
-    // AC B5: the i32 length prefixes of lists and arrays flip byte order
+fn int_list_and_array_lengths_are_little_endian() {
+    // The i32 length prefixes of lists and arrays flip byte order
     // alongside the element payloads.
     let mut root = Compound::new();
     root.insert("xs", Tag::List(List::of_ints([1, 2])));
@@ -122,8 +124,8 @@ fn b5_int_list_and_array_lengths_are_little_endian() {
 }
 
 #[test]
-fn b6_same_tree_through_both_writers_differs_only_in_byte_order() {
-    // AC B6: the writers share structure byte-for-byte; every multi-byte
+fn same_tree_through_both_writers_differs_only_in_byte_order() {
+    // The writers share structure byte-for-byte; every multi-byte
     // scalar — the entry-name u16 length prefix included — flips, and
     // nothing else moves. Pinning both full streams keeps the shared-core
     // contract honest on the exact bytes.
@@ -147,8 +149,8 @@ fn b6_same_tree_through_both_writers_differs_only_in_byte_order() {
 }
 
 #[test]
-fn b7_string_and_list_validation_matches_java() {
-    // AC B7: `InvalidString` and `HeterogeneousList` fire identically —
+fn string_and_list_validation_matches_java() {
+    // `InvalidString` and `HeterogeneousList` fire identically —
     // validation lives in the shared writer core, not per-endianness.
     let mut root = Compound::new();
     root.insert("bad", Tag::String("a\0b".to_owned()));
@@ -184,10 +186,4 @@ fn b7_string_and_list_validation_matches_java() {
         }
         other => panic!("expected HeterogeneousList, got {other:?}"),
     }
-}
-
-fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
 }

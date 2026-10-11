@@ -1,15 +1,17 @@
-//! AC N1–N8 for the Java NBT writer.
+//! The Java writer's big-endian byte stream.
 //!
-//! Spec references for the wire format come from the Notch-era NBT spec
-//! reprinted in `minecraft.wiki/w/NBT_format`. We exercise the byte stream
-//! directly rather than round-tripping because there is no reader yet —
-//! the binary shape is what matters for `assert_binary_snapshot` and the
-//! lockfile's `resolved_ir_hash`.
+//! Wire-format references come from the Notch-era NBT spec reprinted in
+//! `minecraft.wiki/w/NBT_format`. The crate writes NBT and does not read
+//! it, so the tests check the byte stream directly rather than
+//! round-tripping — the binary shape is what the written files and the
+//! lockfile's `resolved_ir_hash` rest on.
 
 use std::io::Read;
 
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 use cairn_lang_nbt::{NbtIoError, write_java_gzip, write_java_uncompressed};
+
+use crate::find_subsequence;
 
 fn encode(name: &str, root: &Compound) -> Vec<u8> {
     let mut buf = Vec::new();
@@ -18,16 +20,16 @@ fn encode(name: &str, root: &Compound) -> Vec<u8> {
 }
 
 #[test]
-fn n1_empty_root_emits_header_plus_end() {
-    // AC N1: empty Compound root with empty name.
+fn empty_root_emits_header_plus_end() {
+    // Empty Compound root with empty name.
     // TAG_Compound (0x0a) + name length (0x0000) + TAG_End (0x00).
     let buf = encode("", &Compound::new());
     assert_eq!(buf, vec![0x0a, 0x00, 0x00, 0x00]);
 }
 
 #[test]
-fn n2_named_int_root_matches_known_bytes() {
-    // AC N2: {name: Int(42)} with root name "name".
+fn named_int_root_matches_known_bytes() {
+    // {name: Int(42)} with root name "name".
     // Layout:
     //   0x0a                       — root tag id (Compound)
     //   0x00 0x04 "name"           — root name
@@ -53,8 +55,8 @@ fn n2_named_int_root_matches_known_bytes() {
 }
 
 #[test]
-fn n3_string_is_length_prefixed_utf8() {
-    // AC N3: TAG_String is u16 length (big-endian) + ASCII-range UTF-8.
+fn string_is_length_prefixed_utf8() {
+    // TAG_String is u16 length (big-endian) + ASCII-range UTF-8.
     let mut root = Compound::new();
     root.insert("s", Tag::String("hi".to_owned()));
     let buf = encode("", &root);
@@ -66,8 +68,8 @@ fn n3_string_is_length_prefixed_utf8() {
 }
 
 #[test]
-fn n4_empty_int_list_uses_end_element_id() {
-    // AC N4: spec mandates element_type_id = 0 for an empty list.
+fn empty_int_list_uses_end_element_id() {
+    // Spec mandates element_type_id = 0 for an empty list.
     let mut root = Compound::new();
     root.insert("xs", Tag::List(List::empty()));
     let buf = encode("", &root);
@@ -78,8 +80,8 @@ fn n4_empty_int_list_uses_end_element_id() {
 }
 
 #[test]
-fn n5_compound_list_elements_inline_with_end() {
-    // AC N5: TAG_List<TAG_Compound> writes each element inline (no extra
+fn compound_list_elements_inline_with_end() {
+    // TAG_List<TAG_Compound> writes each element inline (no extra
     // tag id, body terminated by TAG_End).
     let mut inner = Compound::new();
     inner.insert("x", Tag::Byte(1));
@@ -102,8 +104,8 @@ fn n5_compound_list_elements_inline_with_end() {
 }
 
 #[test]
-fn n6_gzip_decompresses_to_uncompressed_form() {
-    // AC N6: gzip-wrapped output, once decoded, is bit identical to the
+fn gzip_decompresses_to_uncompressed_form() {
+    // Gzip-wrapped output, once decoded, is bit identical to the
     // raw NBT byte stream.
     let mut root = Compound::new();
     root.insert("DataVersion", Tag::Int(3955));
@@ -121,8 +123,8 @@ fn n6_gzip_decompresses_to_uncompressed_form() {
 }
 
 #[test]
-fn n7_string_with_nul_byte_rejected() {
-    // AC N7: NUL is not encodable in Java Modified UTF-8.
+fn string_with_nul_byte_rejected() {
+    // NUL is not encodable in Java Modified UTF-8.
     let mut root = Compound::new();
     root.insert("bad", Tag::String("a\0b".to_owned()));
     let mut buf = Vec::new();
@@ -137,8 +139,8 @@ fn n7_string_with_nul_byte_rejected() {
 }
 
 #[test]
-fn n8_numeric_types_are_big_endian() {
-    // AC N8: numeric payloads are big-endian regardless of host endianness.
+fn numeric_types_are_big_endian() {
+    // Numeric payloads are big-endian regardless of host endianness.
     let mut root = Compound::new();
     root.insert("i16", Tag::Short(0x1234));
     root.insert("i32", Tag::Int(0x1234_5678));
@@ -165,12 +167,6 @@ fn n8_numeric_types_are_big_endian() {
         &buf[f64_off..f64_off + 8],
         &[0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF]
     );
-}
-
-fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
 }
 
 #[test]
@@ -229,19 +225,24 @@ fn an_empty_list_claiming_an_element_type_is_rejected() {
 }
 
 #[test]
-fn length_overflow_message_names_the_context() {
-    // We can't actually allocate a `Vec<i32>` of `i32::MAX + 1` to trigger
-    // the overflow path, so this test only locks down the error's `context`
-    // field via Display so a debug log meaningfully points at the offending
-    // tag.
-    let err = NbtIoError::LengthOverflow {
-        context: "string",
-        len: 1 << 17,
-        limit: u16::MAX as usize,
-    };
-    let msg = err.to_string();
-    assert!(msg.contains("string"), "context should appear, got: {msg}");
-    assert!(msg.contains(&(u16::MAX as usize).to_string()));
+fn a_string_past_the_u16_length_prefix_is_a_length_overflow() {
+    let long = "a".repeat(usize::from(u16::MAX) + 1);
+    let mut root = Compound::new();
+    root.insert("s", Tag::String(long));
+    let mut buf = Vec::new();
+    let err = write_java_uncompressed(&mut buf, "", &root).expect_err("too long");
+    match err {
+        NbtIoError::LengthOverflow {
+            context,
+            len,
+            limit,
+        } => {
+            assert_eq!(context, "string");
+            assert_eq!(len, usize::from(u16::MAX) + 1);
+            assert_eq!(limit, usize::from(u16::MAX));
+        }
+        other => panic!("expected LengthOverflow, got {other:?}"),
+    }
 }
 
 #[test]
