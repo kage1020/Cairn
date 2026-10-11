@@ -1,12 +1,4 @@
-//! Endian-parameterised NBT writer core shared by [`crate::java`] and
-//! [`crate::bedrock`].
-//!
-//! The two on-disk dialects are byte-identical in structure — tag ids,
-//! nesting, length-prefix widths, validation rules — and differ only in
-//! the byte order of multi-byte scalars (numeric payloads and the u16 /
-//! i32 length prefixes). One implementation keeps the validation rules
-//! (string encoding, list homogeneity, length overflow) identical for both
-//! editions.
+//! The NBT encoder both dialects share; they differ only in the byte order of multi-byte scalars.
 
 use std::io::Write;
 
@@ -18,63 +10,55 @@ use crate::tag::{Compound, List, Tag};
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum NbtIoError {
-    /// A string held a NUL or non-ASCII byte. The encoder accepts only
-    /// non-NUL ASCII, the range on which Java's Modified UTF-8 and Bedrock's
-    /// UTF-8 coincide, so one validator covers both dialects.
+    /// A string held a NUL or non-ASCII byte, outside the range where Java's Modified UTF-8 and
+    /// Bedrock's UTF-8 agree.
     #[error("nbt: string contains byte 0x{byte:02x} at index {index}, not encodable here")]
     InvalidString {
-        /// Offending byte.
+        /// The rejected byte.
         byte: u8,
-        /// Byte index within the string.
+        /// Its byte index in the string.
         index: usize,
     },
     /// A [`List`] declared one element type but an item carried another.
     #[error("nbt: list declared element type {declared} but item {index} has type {actual}")]
     HeterogeneousList {
-        /// Declared element type id.
+        /// The declared element type id.
         declared: u8,
-        /// Index of the mismatching item.
+        /// The mismatching item's index.
         index: usize,
-        /// Actual element type id of the mismatching item.
+        /// The mismatching item's type id.
         actual: u8,
     },
-    /// A [`List`] with no items declared an element type other than
-    /// `TAG_End`, which the NBT format requires of an empty list.
-    ///
-    /// The writer checks this rather than a constructor because `List`'s
-    /// fields are public.
+    /// An empty [`List`] declared an element type other than `TAG_End`.
     #[error("nbt: empty list declared element type {declared}, expected 0 (TAG_End)")]
     EmptyListWithElementType {
-        /// Declared element type id.
+        /// The declared element type id.
         declared: u8,
     },
-    /// An NBT length prefix (i32 / u16) overflowed the on-wire width.
+    /// A length overflowed its wire prefix.
     #[error("nbt: {context} length {len} exceeds wire limit {limit}")]
     LengthOverflow {
-        /// Which tag's length overflowed (`"string"`, `"byte_array"`,
-        /// `"int_array"`, `"long_array"`, `"list"`).
+        /// What the length measures, such as `"string"` or `"list"`.
         context: &'static str,
-        /// Requested length.
+        /// The length.
         len: usize,
-        /// Hard wire-level limit (`i32::MAX` or `u16::MAX`).
+        /// The prefix's maximum.
         limit: usize,
     },
-    /// Underlying I/O failure (file write, gzip flush, ...).
+    /// An I/O failure.
     #[error("nbt I/O: {0}")]
     Io(#[from] std::io::Error),
 }
 
-/// Byte order of every multi-byte scalar in the output stream.
+/// The byte order of every multi-byte scalar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Endian {
-    /// Java on-disk NBT (big-endian).
+    /// Java.
     Big,
-    /// Bedrock on-disk NBT (little-endian).
+    /// Bedrock.
     Little,
 }
 
-/// One `write_<scalar>` method per multi-byte scalar type, each emitting
-/// the value in `self`'s byte order.
 macro_rules! scalar_writers {
     ($($name:ident: $ty:ty),* $(,)?) => {
         impl Endian {
@@ -99,7 +83,6 @@ scalar_writers! {
     write_f64: f64,
 }
 
-/// Write a root-level named compound in the given byte order.
 pub(crate) fn write_named_root<W: Write>(
     writer: &mut W,
     endian: Endian,
@@ -117,19 +100,11 @@ pub(crate) fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError
     Ok(())
 }
 
-/// Check that `s` can be written as an NBT string, in either dialect,
-/// without writing it.
-///
-/// The writers apply this same check to every string they write, a tag
-/// name or a [`Tag::String`] payload, so a caller holding strings it will
-/// write later can refuse them up front with the error the writer would
-/// raise.
+/// Checks that the writers would accept `s` as an NBT string, without writing it.
 ///
 /// # Errors
 ///
-/// [`NbtIoError::InvalidString`] for a NUL or non-ASCII byte, and
-/// [`NbtIoError::LengthOverflow`] for a string longer than the `u16`
-/// length prefix can carry.
+/// [`NbtIoError::InvalidString`] for a NUL or non-ASCII byte, or [`NbtIoError::LengthOverflow`].
 pub fn check_string(s: &str) -> Result<(), NbtIoError> {
     string_len(s).map(drop)
 }
@@ -169,7 +144,7 @@ pub(crate) fn write_payload<W: Write>(
         Tag::Double(v) => endian.write_f64(w, *v)?,
         Tag::ByteArray(bytes) => {
             write_array_len(w, endian, "byte_array", bytes.len())?;
-            // A single byte has no byte order; the sign is not on the wire.
+            // A single byte has no byte order.
             for &b in bytes {
                 w.write_all(&b.to_ne_bytes())?;
             }
@@ -217,11 +192,6 @@ fn write_list<W: Write>(w: &mut W, endian: Endian, list: &List) -> Result<(), Nb
     Ok(())
 }
 
-/// Write a list's element type and length prefix, refusing an empty list
-/// that declares an element type other than `TAG_End`.
-///
-/// The tree writer and the streaming writer both frame a list here, so the
-/// empty-list rule and the length limit have one implementation.
 pub(crate) fn write_list_header<W: Write>(
     w: &mut W,
     endian: Endian,
@@ -237,9 +207,6 @@ pub(crate) fn write_list_header<W: Write>(
     write_array_len(w, endian, "list", len)
 }
 
-/// Refuse item `index` of a list declaring `declared` when the item's type
-/// id is `actual` and the two differ. Shared by the tree writer and the
-/// streaming writer, so list homogeneity has one implementation.
 pub(crate) fn check_item_type(declared: u8, index: usize, actual: u8) -> Result<(), NbtIoError> {
     if actual == declared {
         Ok(())

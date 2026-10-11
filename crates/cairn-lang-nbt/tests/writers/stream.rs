@@ -1,9 +1,4 @@
-//! The streaming writers against the tree writers.
-//!
-//! A streamed root is only useful if it is the file the tree writer would
-//! have produced, so every byte-level test here streams a tree and compares
-//! with the tree writer's bytes rather than restating a layout. The
-//! remaining tests pin how the stream refuses what it cannot write.
+//! The streaming writers against the tree writers' bytes.
 
 use std::io::Write;
 
@@ -13,10 +8,7 @@ use cairn_lang_nbt::{
     write_bedrock_uncompressed, write_java_uncompressed,
 };
 
-/// Stream `tag` under `name` through the structural calls — a compound as
-/// [`CompoundStream::compound`], a list as [`CompoundStream::list`] with each
-/// item streamed in turn — so the comparison exercises every entry point
-/// rather than only [`CompoundStream::tag`].
+/// Streams `tag` through the structural calls, so the comparison reaches every entry point.
 fn stream_entry<W: Write>(
     compound: &mut CompoundStream<'_, W>,
     name: &str,
@@ -54,9 +46,7 @@ fn stream_items<W: Write>(stream: &mut ListStream<'_, W>, list: &List) -> Result
     Ok(())
 }
 
-/// A root holding every shape the structure backends stream: scalars, a
-/// string, an empty list, a list of ints, a list of compounds each holding
-/// a list, a nested compound, and a list of lists.
+/// A root holding every shape the structure backends stream.
 fn every_shape() -> Compound {
     let mut entry = Compound::new();
     entry.insert("state", Tag::Int(2));
@@ -228,7 +218,6 @@ impl Write for FillsUp {
 
 #[test]
 fn a_writer_failing_inside_a_list_returns_its_error_rather_than_panicking() {
-    // The failed write leaves the list short of its declared count.
     let mut disk = FillsUp { budget: 64 };
     let err = stream_bedrock_uncompressed(&mut disk, "", |root| {
         root.list("layer", 3, 1000, |layer| {

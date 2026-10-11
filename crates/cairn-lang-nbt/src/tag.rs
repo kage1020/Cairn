@@ -1,51 +1,40 @@
-//! NBT tag tree shared by every writer in this crate.
-//!
-//! The tree owns its data — callers construct a [`Tag`] / [`Compound`] /
-//! [`List`] in memory and hand it to a writer. Output too large to hold as a
-//! tree — a list with an entry per voxel — goes through [`crate::stream`]
-//! instead, which writes each tag as it is handed one.
+//! The in-memory NBT tag tree the writers encode.
 
 use indexmap::IndexMap;
 
-/// Whether a string can be written as an NBT string, checked by the rule
-/// the writers apply to every string they write.
 pub use crate::writer::check_string;
 
-/// A single NBT tag.
-///
-/// Variants mirror the Java vanilla tag ids 1..=12; `TAG_End` (0) is implicit
-/// in [`Compound`] termination and is not surfaced here so a caller cannot
-/// construct an out-of-place end marker.
+/// An NBT tag; `TAG_End` exists only as a compound's terminator, so it has no variant.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tag {
-    /// Signed 8-bit integer (`TAG_Byte`, id 1).
+    /// `TAG_Byte`.
     Byte(i8),
-    /// Signed 16-bit integer (`TAG_Short`, id 2).
+    /// `TAG_Short`.
     Short(i16),
-    /// Signed 32-bit integer (`TAG_Int`, id 3).
+    /// `TAG_Int`.
     Int(i32),
-    /// Signed 64-bit integer (`TAG_Long`, id 4).
+    /// `TAG_Long`.
     Long(i64),
-    /// IEEE 754 single (`TAG_Float`, id 5).
+    /// `TAG_Float`.
     Float(f32),
-    /// IEEE 754 double (`TAG_Double`, id 6).
+    /// `TAG_Double`.
     Double(f64),
-    /// Length-prefixed signed byte array (`TAG_Byte_Array`, id 7).
+    /// `TAG_Byte_Array`.
     ByteArray(Vec<i8>),
-    /// Length-prefixed Modified UTF-8 string (`TAG_String`, id 8).
+    /// `TAG_String`.
     String(String),
-    /// Homogeneous list (`TAG_List`, id 9). See [`List`].
+    /// `TAG_List`.
     List(List),
-    /// Keyed collection of named tags (`TAG_Compound`, id 10).
+    /// `TAG_Compound`.
     Compound(Compound),
-    /// Length-prefixed `i32` array (`TAG_Int_Array`, id 11).
+    /// `TAG_Int_Array`.
     IntArray(Vec<i32>),
-    /// Length-prefixed `i64` array (`TAG_Long_Array`, id 12).
+    /// `TAG_Long_Array`.
     LongArray(Vec<i64>),
 }
 
 impl Tag {
-    /// Wire tag id, the same in both dialects.
+    /// The wire tag id, the same in both dialects.
     #[must_use]
     pub fn type_id(&self) -> u8 {
         match self {
@@ -65,25 +54,21 @@ impl Tag {
     }
 }
 
-/// An ordered map of named NBT tags.
-///
-/// Entries are written in insertion order. The game accepts any key order,
-/// but two compiles of the same source must produce the same bytes.
+/// Named NBT tags, written in insertion order so one source always compiles to the same bytes.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Compound {
-    /// Named entries in insertion order.
+    /// The entries, in insertion order.
     pub entries: IndexMap<String, Tag>,
 }
 
 impl Compound {
-    /// Empty compound.
+    /// An empty compound.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Insert or replace a named entry, returning `self` for chaining. A
-    /// replaced entry keeps its original position.
+    /// Inserts or replaces `name`; a replaced entry keeps its position.
     pub fn insert(&mut self, name: impl Into<String>, value: Tag) -> &mut Self {
         self.entries.insert(name.into(), value);
         self
@@ -91,20 +76,16 @@ impl Compound {
 }
 
 /// A homogeneous list of tags.
-///
-/// `element_type_id` is stored rather than inferred from the items because
-/// the wire carries it even for an empty list, where the format requires `0`
-/// (`TAG_End`). A populated list declares the id every item carries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct List {
-    /// Wire id of every item. `0` for an empty list (spec).
+    /// The wire id of every item, `0` (`TAG_End`) for an empty list.
     pub element_type_id: u8,
-    /// List items, all of the same wire type.
+    /// The items.
     pub items: Vec<Tag>,
 }
 
 impl List {
-    /// Empty list with the spec-mandated `element_type_id = 0`.
+    /// An empty list.
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -113,27 +94,19 @@ impl List {
         }
     }
 
-    /// Build a `List<TAG_Int>` from integers. An empty input declares
-    /// `TAG_End`, as in [`List::of_tags`].
+    /// A `TAG_Int` list, built as [`List::of_tags`] builds one.
     #[must_use]
     pub fn of_ints(values: impl IntoIterator<Item = i32>) -> Self {
         Self::of_tags(3, values.into_iter().map(Tag::Int).collect())
     }
 
-    /// Build a `List<TAG_Compound>` from [`Compound`]s. An empty input
-    /// declares `TAG_End`, as in [`List::of_tags`].
+    /// A `TAG_Compound` list, built as [`List::of_tags`] builds one.
     #[must_use]
     pub fn of_compounds(items: Vec<Compound>) -> Self {
         Self::of_tags(10, items.into_iter().map(Tag::Compound).collect())
     }
 
-    /// Build a list declaring `element_type_id`, or `TAG_End` when `items`
-    /// is empty: a reader trusts the declared id, and an empty list has no
-    /// items for it to describe.
-    ///
-    /// A struct literal bypasses this constructor, so the writer enforces
-    /// the same rule
-    /// ([`EmptyListWithElementType`](crate::NbtIoError::EmptyListWithElementType)).
+    /// A list of `items` declaring `element_type_id`, or `TAG_End` when `items` is empty.
     #[must_use]
     pub fn of_tags(element_type_id: u8, items: Vec<Tag>) -> Self {
         if items.is_empty() {
@@ -161,7 +134,6 @@ mod tests {
 
     #[test]
     fn a_list_declares_the_element_id_of_what_built_it() {
-        // Every route to an empty list declares `TAG_End`.
         for (label, list, element_type_id, len) in [
             ("empty", List::empty(), 0, 0),
             ("of_ints of nothing", List::of_ints([]), 0, 0),

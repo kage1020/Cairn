@@ -1,14 +1,5 @@
-//! NBT codec for the Cairn language.
-//!
-//! Encodes Minecraft NBT in both on-disk dialects: Java big-endian
-//! (gzip-wrapped) and Bedrock little-endian (uncompressed). The tag tree
-//! in [`tag`] is endian-neutral, and both writers share one
-//! endian-parameterised encoder. Each uncompressed writer also has a
-//! streaming form ([`stream`]) that encodes a root entry by entry, for
-//! output too large to build as a tree first.
-//!
-//! `cairn-lang-formats` is the only caller; the CLI reaches NBT through the
-//! structure writers there.
+//! NBT codec: Java big-endian (gzip-wrapped) and Bedrock little-endian (uncompressed), each with
+//! a streaming form for output too large to build as a tree first.
 
 pub mod bedrock;
 pub mod java;

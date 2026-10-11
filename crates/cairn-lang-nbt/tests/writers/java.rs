@@ -1,6 +1,4 @@
-//! The Java writer's big-endian byte stream, checked byte by byte against
-//! the NBT format at `minecraft.wiki/w/NBT_format`, since the crate has no
-//! reader to round-trip through.
+//! The Java writer's big-endian byte stream, against `minecraft.wiki/w/NBT_format`.
 
 use std::io::Read;
 
@@ -17,21 +15,12 @@ fn encode(name: &str, root: &Compound) -> Vec<u8> {
 
 #[test]
 fn empty_root_emits_header_plus_end() {
-    // TAG_Compound (0x0a) + name length (0x0000) + TAG_End (0x00).
     let buf = encode("", &Compound::new());
     assert_eq!(buf, vec![0x0a, 0x00, 0x00, 0x00]);
 }
 
 #[test]
 fn named_int_root_matches_known_bytes() {
-    // {name: Int(42)} with root name "name".
-    // Layout:
-    //   0x0a                       — root tag id (Compound)
-    //   0x00 0x04 "name"           — root name
-    //   0x03                       — entry tag id (Int)
-    //   0x00 0x04 "name"           — entry name (also "name" here)
-    //   0x00 0x00 0x00 0x2a        — payload 42 big-endian
-    //   0x00                       — TAG_End
     let mut root = Compound::new();
     root.insert("name", Tag::Int(42));
     let buf = encode("name", &root);
@@ -54,10 +43,8 @@ fn string_is_length_prefixed_utf8() {
     let mut root = Compound::new();
     root.insert("s", Tag::String("hi".to_owned()));
     let buf = encode("", &root);
-    // root header (1+2 = 3 with empty name) + entry: tag id (1) + name len
-    // (2) + name "s" (1) + payload: u16 length (2) + "hi" (2) + TAG_End (1) = 12.
+    // Root header, entry id, name length, "s", string length, "hi", TAG_End.
     assert_eq!(buf.len(), 3 + 1 + 2 + 1 + 2 + 2 + 1);
-    // The string payload (length + bytes) starts at offset 3 + 4 = 7.
     assert_eq!(&buf[7..11], &[0x00, 0x02, b'h', b'i']);
 }
 
@@ -66,22 +53,18 @@ fn empty_int_list_uses_end_element_id() {
     let mut root = Compound::new();
     root.insert("xs", Tag::List(List::empty()));
     let buf = encode("", &root);
-    // After root header (3 with empty name) + entry tag id (1) + name
-    // length (2) + "xs" (2) = offset 8, the list payload begins:
-    // element id (1) + length (4) = five zero bytes.
+    // Offset 8 is past the root header and the entry's id and name.
     assert_eq!(&buf[8..13], &[0x00, 0x00, 0x00, 0x00, 0x00]);
 }
 
 #[test]
 fn compound_list_elements_inline_with_end() {
-    // Each element is a compound body with no tag id or name of its own.
     let mut inner = Compound::new();
     inner.insert("x", Tag::Byte(1));
     let mut root = Compound::new();
     root.insert("items", Tag::List(List::of_compounds(vec![inner])));
     let buf = encode("", &root);
-    // Locate the list payload: root header (3 with empty name) + entry tag
-    // (1) + name length (2) + "items" (5) = offset 11.
+    // Past the root header, entry id, name length and "items".
     let off = 3 + 1 + 2 + 5;
     assert_eq!(buf[off], 10, "element type id = TAG_Compound");
     assert_eq!(
@@ -89,8 +72,6 @@ fn compound_list_elements_inline_with_end() {
         &[0x00, 0x00, 0x00, 0x01],
         "list length = 1"
     );
-    // Inline compound starts at offset off+5: TAG_Byte (1) + name length (2)
-    // + "x" (1) + payload (1) + TAG_End (1) = 6 bytes total.
     let body = &buf[off + 5..off + 5 + 6];
     assert_eq!(body, &[0x01, 0x00, 0x01, b'x', 0x01, 0x00]);
 }
@@ -114,7 +95,6 @@ fn gzip_decompresses_to_uncompressed_form() {
 
 #[test]
 fn string_with_nul_byte_rejected() {
-    // NUL is not encodable in Java Modified UTF-8.
     let mut root = Compound::new();
     root.insert("bad", Tag::String("a\0b".to_owned()));
     let mut buf = Vec::new();
@@ -138,7 +118,6 @@ fn numeric_types_are_big_endian() {
     root.insert("f64", Tag::Double(f64::from_bits(0xCAFE_BABE_DEAD_BEEF)));
     let buf = encode("", &root);
 
-    // Find each named entry by scanning for its name (each unique here).
     let find = |needle: &[u8]| -> usize { find_subsequence(&buf, needle).expect("found") };
     let i16_off = find(b"i16") + 3;
     assert_eq!(&buf[i16_off..i16_off + 2], &[0x12, 0x34]);
@@ -186,8 +165,7 @@ fn heterogeneous_list_rejected_with_index_and_actual_type() {
 
 #[test]
 fn an_empty_list_claiming_an_element_type_is_rejected() {
-    // `List`'s fields are public, so a struct literal bypasses the
-    // constructors.
+    // A struct literal bypasses `List::of_tags`.
     let mut root = Compound::new();
     root.insert(
         "xs",
@@ -202,7 +180,6 @@ fn an_empty_list_claiming_an_element_type_is_rejected() {
         NbtIoError::EmptyListWithElementType { declared } => assert_eq!(declared, 3),
         other => panic!("expected EmptyListWithElementType, got {other:?}"),
     }
-    // The spec-shaped empty list still writes.
     let mut ok_root = Compound::new();
     ok_root.insert("xs", Tag::List(List::empty()));
     let mut ok_buf = Vec::new();
@@ -239,8 +216,6 @@ fn non_ascii_string_rejected_with_offending_byte_index() {
     match err {
         NbtIoError::InvalidString { byte, index } => {
             assert!(byte >= 0x80);
-            // "café" → bytes are [0x63, 0x61, 0x66, 0xC3, 0xA9]; first
-            // non-ASCII byte is at index 3.
             assert_eq!(index, 3);
         }
         other => panic!("expected InvalidString, got {other:?}"),

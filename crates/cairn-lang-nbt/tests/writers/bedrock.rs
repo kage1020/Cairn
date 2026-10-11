@@ -1,9 +1,4 @@
 //! The Bedrock writer's little-endian byte stream.
-//!
-//! Bedrock NBT shares the Java tag-id vocabulary but stores every numeric
-//! payload and length prefix little-endian, uncompressed (wiki.bedrock.dev,
-//! "mcstructure" format page). The tests mirror the Java ones, so a
-//! divergence beyond byte order fails on the exact byte.
 
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 use cairn_lang_nbt::{NbtIoError, write_bedrock_uncompressed, write_java_uncompressed};
@@ -18,22 +13,12 @@ fn encode(name: &str, root: &Compound) -> Vec<u8> {
 
 #[test]
 fn empty_root_emits_header_plus_end() {
-    // A zero u16 length is the same in either byte order, so this matches
-    // the Java bytes.
     let buf = encode("", &Compound::new());
     assert_eq!(buf, vec![0x0a, 0x00, 0x00, 0x00]);
 }
 
 #[test]
 fn named_int_root_matches_known_bytes() {
-    // {name: Int(42)} with root name "name", little-endian.
-    // Layout:
-    //   0x0a                       — root tag id (Compound)
-    //   0x04 0x00 "name"           — root name, u16 length little-endian
-    //   0x03                       — entry tag id (Int)
-    //   0x04 0x00 "name"           — entry name
-    //   0x2a 0x00 0x00 0x00        — payload 42 little-endian
-    //   0x00                       — TAG_End
     let mut root = Compound::new();
     root.insert("name", Tag::Int(42));
     let buf = encode("name", &root);
@@ -53,12 +38,10 @@ fn named_int_root_matches_known_bytes() {
 
 #[test]
 fn string_length_prefix_is_little_endian() {
-    // TAG_String is u16 length (little-endian) + ASCII-range UTF-8.
     let mut root = Compound::new();
     root.insert("s", Tag::String("hi".to_owned()));
     let buf = encode("", &root);
-    // Root header (3 with empty name) + entry tag id (1) + name length (2)
-    // + name "s" (1) = offset 7, then the string payload.
+    // Offset 7 is past the root header and the entry's id and name.
     assert_eq!(&buf[7..11], &[0x02, 0x00, b'h', b'i']);
 }
 
@@ -99,7 +82,6 @@ fn int_list_and_array_lengths_are_little_endian() {
     let buf = encode("", &root);
 
     let find = |needle: &[u8]| -> usize { find_subsequence(&buf, needle).expect("found") };
-    // List payload: element id (1) + length i32 LE + items.
     let xs_off = find(b"xs") + 2;
     assert_eq!(
         &buf[xs_off..xs_off + 13],
@@ -110,7 +92,6 @@ fn int_list_and_array_lengths_are_little_endian() {
             0x02, 0x00, 0x00, 0x00, // item 2 LE
         ]
     );
-    // IntArray payload: length i32 LE + items.
     let arr_off = find(b"arr") + 3;
     assert_eq!(
         &buf[arr_off..arr_off + 8],
@@ -120,8 +101,6 @@ fn int_list_and_array_lengths_are_little_endian() {
 
 #[test]
 fn same_tree_through_both_writers_differs_only_in_byte_order() {
-    // Every multi-byte scalar flips, the entry-name length prefix
-    // included, and nothing else moves.
     let mut root = Compound::new();
     root.insert("i", Tag::Int(0x0102_0304));
     let mut java = Vec::new();
