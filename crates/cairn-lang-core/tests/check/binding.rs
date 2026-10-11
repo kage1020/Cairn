@@ -23,10 +23,7 @@ fn a_tail_on_a_member_that_cannot_emit_is_refused() {
 
 #[test]
 fn the_finding_lands_on_the_tail_and_not_on_the_line() {
-    // The member carries four other fields and none of them is wrong; a
-    // span covering the statement would make the reader find the tail
-    // again. The value is what the author deletes or moves, so it is what
-    // the finding underlines.
+    // The value is what the author deletes or moves.
     let src = "struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n";
     let d = exactly_one(diagnose(src));
     assert_eq!(slice(src, &d), "sig.w");
@@ -34,10 +31,8 @@ fn the_finding_lands_on_the_tail_and_not_on_the_line() {
 
 #[test]
 fn the_repair_names_the_hosts_that_exist_and_the_ones_reserved() {
-    // Either may be what the author meant: to move the tail onto the
-    // plate they already have, or to write the `lever` the surface has
-    // not reached. A note naming only the first would read as a refusal
-    // of the second.
+    // Either may be what the author meant, so naming only the plate would
+    // read as a refusal of the reserved ones.
     let d = exactly_one(diagnose(
         "struct s size=5x5\n  walls mat_slot=wall height=3 -> sig.w\n",
     ));
@@ -56,13 +51,9 @@ fn a_tail_on_a_sensor_is_accepted() {
     );
 }
 
-/// A tail on a sensor whose value names no signal is not this pass's.
-///
-/// `-> a` is a real mistake and `E_LOGIC_INVALID_SIGNAL` is its code; the
-/// `sig.` namespace is a question about the Logic IR, which `check` does
-/// not build. Pinned from this side so a later widening of this pass into
-/// the value is a decision rather than a slip — the two would then both
-/// fire on one line.
+/// `-> a` is `E_LOGIC_INVALID_SIGNAL`'s, a question about the Logic IR,
+/// which `check` does not build. Widening this pass into the value would
+/// make both fire on one line.
 #[test]
 fn a_tail_on_a_sensor_naming_no_signal_is_left_to_the_redstone_pipeline() {
     assert_eq!(
@@ -81,12 +72,8 @@ fn a_tail_on_the_wrong_host_naming_no_signal_is_still_one_finding() {
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
 }
 
-/// A keyword the role table does not know is left to `E_UNKNOWN_KEYWORD`.
-///
-/// `lever` is the case that matters: `spec/redstone` "Signal binding"
-/// lists it as a sensor and the surface has not reached it, so telling
-/// its author that the host cannot emit would be telling them the wrong
-/// thing. The keyword's own finding carries the repair.
+/// `spec/redstone` "Signal binding" lists `lever` as a sensor the surface
+/// has not reached, so saying its host cannot emit would be wrong.
 #[test]
 fn a_tail_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
     assert!(
@@ -99,11 +86,7 @@ fn a_tail_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
     );
 }
 
-/// The walk reaches a member nested under a grouping keyword.
-///
-/// `level y=N` is the one construct that nests today, and a pass that
-/// only read the top level would let the same tail through one indent
-/// deeper.
+/// `level` is the one construct that nests.
 #[test]
 fn a_tail_under_a_level_is_reached() {
     let d = exactly_one(diagnose(concat!(
@@ -114,14 +97,10 @@ fn a_tail_under_a_level_is_reached() {
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
 }
 
-/// A `def` body and a `site` body are walked too.
-///
-/// The three member lists are separate fields of the IR, so covering one
-/// says nothing about the other two.
+/// The three member lists are separate fields of the IR.
 #[test]
 fn a_tail_in_a_def_or_a_site_body_is_reached() {
-    // `W_UNUSED_DEF` rides along on any `def` nothing places, so this
-    // half asserts the presence of the code rather than the whole list.
+    // An unplaced `def` also earns `W_UNUSED_DEF`.
     let in_def = diagnose(concat!(
         "def hut size=3x3:\n",
         "  walls mat_slot=wall height=2 -> sig.w\n",
@@ -148,14 +127,8 @@ fn a_tail_in_a_def_or_a_site_body_is_reached() {
     );
 }
 
-/// Every sensor host is a keyword the role table knows.
-///
-/// A tail sits on the member rather than on an argument, so there is no
-/// vocabulary entry to hold the table against. What must hold is that
-/// each host is a real keyword: the pass refuses a `->` on everything
-/// else, and a host the role table has never heard of would refuse every
-/// source that used it — the `Other` arm returns before the host is even
-/// consulted.
+/// A host the role table does not know would refuse every source that used
+/// it, because the `Other` arm returns before the host is consulted.
 #[test]
 fn every_sensor_host_is_a_keyword_the_role_table_knows() {
     assert!(
@@ -171,9 +144,8 @@ fn every_sensor_host_is_a_keyword_the_role_table_knows() {
     }
 }
 
-/// A sensor keyword in the selector form carries no sensor binding — no
-/// sensor patch exists — so the tail is on no sensor line. It became a
-/// netlist input all the same.
+/// No sensor patch exists for the selector form, so the tail is on no
+/// sensor line.
 #[test]
 fn a_tail_on_a_sensor_keyword_in_the_selector_form_is_refused() {
     let src = "struct s size=5x5\n  pressure_plate[id=nope] -> sig.b\n";

@@ -52,8 +52,7 @@ fn floor_with_no_mat_slot_is_refused() {
 
 #[test]
 fn a_window_with_no_mat_slot_is_an_opening_and_not_a_mistake() {
-    // `examples/themed-tower.crn` writes exactly this to punch arrow slits
-    // through a stone wall without picking a species for them.
+    // `examples/themed-tower.crn` cuts its arrow slits this way.
     let src = format!(
         "{THEME}struct s size=6x6\n  \
 walls mat_slot=m height=4\n  \
@@ -68,10 +67,8 @@ window class=arrow_slit side=front repeat=3 step=2 y=2 size=1x2\n"
 
 #[test]
 fn the_roles_that_paint_a_fallback_are_left_alone() {
-    // The `roof` carries no `mat_slot=` either, and its `overhang=1` is
-    // what lets the eave `stair` band sit outside the wall — without it
-    // lowering defers the stair, and this test would assert nothing about
-    // a fallback.
+    // The roof's `overhang=1` lets the eave `stair` sit outside the wall;
+    // without it lowering defers the stair.
     let src = format!(
         "{THEME}struct s size=6x6\n  \
 floor mat_slot=m\n  \
@@ -87,8 +84,8 @@ pressure_plate id=p at=front.outside offset=0 y=0\n"
         codes(&diagnose(&src)),
     );
 
-    // And they really do put one down. Without this the assertion above
-    // holds just as well for a fixture lowering refuses outright.
+    // Otherwise the assertion above would hold just as well for a fixture
+    // lowering refuses outright.
     let painted = footprint(&src);
     assert_eq!(
         painted.2, 0,
@@ -128,14 +125,10 @@ fn a_slot_no_theme_declares_is_the_resolvers_finding_and_not_this_one() {
     );
 }
 
-/// The other present-but-unusable shape, and the one the `mat_slot` field
-/// cannot see.
-///
-/// `intent::lower` hoists a value into `Member::mat_slot` only when it is
-/// an identifier or a string, so these two leave the field empty while the
-/// key is plainly on the line. A rule reading the field alone would say
-/// "has no `mat_slot=`" about a source that has one, and tell the author
-/// to add a key they already wrote.
+/// `intent::lower` hoists only an identifier or a string into
+/// `Member::mat_slot`, so these leave the field empty while the key is on
+/// the line; a rule reading the field alone would ask for a key the author
+/// already wrote.
 #[test]
 fn a_mat_slot_whose_value_is_not_a_label_is_the_type_findings_and_not_this_one() {
     for value in ["@oak_planks", "foo.bar"] {
@@ -160,14 +153,11 @@ fn a_mat_slot_whose_value_is_not_a_label_is_the_type_findings_and_not_this_one()
 
 #[test]
 fn a_module_with_no_theme_still_names_the_missing_material() {
-    // Nothing here depends on a theme: the member names no material at
-    // all, which is true of a module that declares none and of one that
-    // declares ten.
     let src = "struct s size=3x3\n  walls height=4\n";
     let found = of_code(src, DiagnosticCode::MissingMaterial);
     assert_eq!(found.len(), 1, "got {:?}", codes(&diagnose(src)));
-    // The advice has to be followable. "Name a slot the applied theme
-    // declares" is not, in a file with no theme to declare one.
+    // "Name a slot the applied theme declares" cannot be followed in a file
+    // with no theme.
     let note = &found[0].notes[0].message;
     assert!(
         note.contains("declares no `theme`"),
@@ -201,17 +191,9 @@ floor id=inner\n"
     );
 }
 
-/// A body another pass has already dropped is not walked.
-///
-/// Each of these earns one finding, from the pass that owns the row:
-/// `check::member_scope` for a geometry keyword in a `site` and for
-/// anything under a row its body cannot read, `check::nesting` for an
-/// indented body nothing groups, `check::keyword_allowlist` for a keyword
-/// with no vocabulary. Adding this code on top would bill one mistake
-/// twice — and the repairs disagree, which is the sharper half: adding a
-/// `mat_slot=` to a `floor` written into a `site` body silences this code
-/// and leaves `E_MISPLACED_MEMBER` saying the row still produces no
-/// blocks.
+/// The pass that dropped the row owns it, and the repairs would disagree:
+/// a `mat_slot=` on a `floor` in a `site` body would silence this code and
+/// leave `E_MISPLACED_MEMBER` saying the row still produces no blocks.
 #[test]
 fn a_body_another_pass_has_dropped_earns_nothing_here() {
     let cases = [
@@ -249,18 +231,11 @@ site x:\n  floor\n"
 }
 
 /// One row per role that can paint inside a `struct` body, written without
-/// a `mat_slot=`, plus whatever that role needs present to reach its
-/// painter at all.
+/// a `mat_slot=`, plus the support it needs to reach its painter.
 ///
-/// The support goes into both sides of the comparison, so it never shows
-/// up as a change. It exists because a member lowering *defers* is
-/// indistinguishable, in the array, from a member that painted nothing —
-/// so a deferred fixture would let a role escape the refusal set for a
-/// reason that has nothing to do with materials.
-///
-/// The roles absent from this table are absent because they lay no block
-/// of their own, and [`every_role_is_either_measured_here_or_paints_nothing`]
-/// is what stops one being forgotten.
+/// A deferred member looks, in the array, like one that painted nothing,
+/// so the support is needed; it goes into both sides of the comparison.
+/// The roles absent here lay no block of their own.
 const PAINTERS: &[(&str, &str, &str)] = &[
     ("floor", "floor id=extra", ""),
     ("walls", "walls class=inner height=2", ""),
@@ -287,20 +262,13 @@ const PAINTERS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// What the lowered structure looks like: its extents, the block ids it
-/// painted, and how much lowering had to say about it.
+/// The lowered structure's extents, its painted block ids, and how many
+/// findings lowering raised.
 ///
-/// The ids are sorted rather than positional because a member that carves
-/// removes blocks and a member that paints adds them; either way the
-/// multiset moves, and a member that does nothing leaves it alone. What
-/// sorting costs is position: a member that only *relocated* blocks whose
-/// ids are already in the palette would read as having changed nothing.
-/// No role does that today, and one that did would need position back.
-///
-/// The diagnostic count is here so a caller can assert lowering deferred
-/// nothing. It is deliberately *not* part of what "changed the build"
-/// means — a deferral is a member that did not paint, and letting it count
-/// as a change is how a fixture escapes the comparison it exists for.
+/// The ids are sorted, so a member that only relocated blocks already in
+/// the palette would read as unchanged; no role does that. The finding
+/// count is for asserting nothing was deferred, and is not part of what
+/// changed the build.
 fn footprint(src: &str) -> (String, Vec<String>, usize) {
     let module = parse(src).expect("parse");
     let ir = lower(&module);
@@ -365,12 +333,8 @@ fn check_refuses_exactly_the_bare_members_that_change_nothing() {
     }
 }
 
-/// Every [`MemberRole`] is either measured by [`PAINTERS`] or named here
-/// with the reason it lays no block of its own.
-///
-/// The match is exhaustive so a new role stops this file compiling until
-/// someone decides which side it is on — the same device
-/// `check::tests`'s `RaisedBy` uses for a new diagnostic code.
+/// The match is exhaustive, so a new role stops this file compiling until
+/// someone decides which side it is on.
 #[test]
 fn every_role_is_either_measured_here_or_paints_nothing() {
     fn measured(role: &MemberRole) -> bool {
@@ -382,13 +346,11 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Roof
             | MemberRole::Stair
             | MemberRole::PressurePlate => true,
-            // `level` groups its children and lays nothing of its own;
-            // `circuit` reserves a volume the redstone phases paint into
-            // later and lays no block itself; `place` instantiates a def
-            // whose members carry their own materials; `connect` lays a
-            // walkway out of `path=@MAT`, a different key with a code of
-            // its own; and a keyword the role table does not know is
-            // `E_UNKNOWN_KEYWORD`'s, with no painter reached.
+            // `level` groups its children; `circuit` reserves a volume the
+            // redstone phases paint into; `place` instantiates a def whose
+            // members carry their own materials; `connect` lays its walkway
+            // from `path=@MAT`; and an unknown keyword is
+            // `E_UNKNOWN_KEYWORD`'s.
             MemberRole::Level
             | MemberRole::Circuit
             | MemberRole::Place

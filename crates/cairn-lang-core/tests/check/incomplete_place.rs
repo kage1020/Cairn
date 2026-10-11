@@ -15,11 +15,8 @@ fn site_with(row: &str) -> String {
     format!("{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  {row}\n")
 }
 
-/// Every arity of the missing-key list, with the exact sentence each
-/// renders. Table-driven because the join has three branches and the two-key
-/// one — the shape a user hits most, writing the position first and the body
-/// later — is the one that read `` `id=`, and `use=` `` until a reviewer
-/// caught it: the serial comma is a three-or-more rule.
+/// The join has three branches, and the serial comma is a three-or-more
+/// rule, so the two-key arm must not read `` `id=`, and `use=` ``.
 #[test]
 fn the_missing_key_list_reads_at_every_arity() {
     for (row, listed) in [
@@ -67,10 +64,8 @@ fn the_missing_key_list_reads_at_every_arity() {
     }
 }
 
-/// Each note says what its own key is for. Without this the note bodies are
-/// pinned by nothing — `every_missing_key_is_named_at_once` counts them and `diagnostic_text.rs` only
-/// checks formatting — so a build emitting the `theme=` sentence on a
-/// `use=`-less row passes the whole suite.
+/// Nothing else pins the note bodies: the other tests count them, and
+/// `check/diagnostic_text.rs` checks only their formatting.
 #[test]
 fn each_note_explains_the_key_it_belongs_to() {
     for (row, needle) in [
@@ -98,9 +93,8 @@ fn each_note_explains_the_key_it_belongs_to() {
     }
 }
 
-/// The structured payload carries the key set, so a quick-fix does not have
-/// to parse the sentence back apart — which is what
-/// `spec/lint` "Machine-readable payload" exists to stop consumers doing.
+/// So a quick-fix does not parse the sentence back apart, which
+/// `spec/lint` "Machine-readable payload" exists to stop.
 #[test]
 fn the_payload_lists_the_missing_keys() {
     let src = site_with("place east_of=anchor gap=4");
@@ -112,9 +106,8 @@ fn the_payload_lists_the_missing_keys() {
     );
 }
 
-/// A row short of every key is one finding, not three: the author fixes
-/// one line once rather than re-running the compiler to discover the next
-/// omission.
+/// The author fixes the line once rather than re-running the compiler to
+/// find the next omission.
 #[test]
 fn every_missing_key_is_named_at_once() {
     let src = site_with("place east_of=anchor gap=4");
@@ -130,10 +123,6 @@ fn every_missing_key_is_named_at_once() {
     );
 }
 
-/// The negative space: a site whose every row is complete says nothing.
-/// The tests above already rule out a report-everything implementation —
-/// `one_of_code(, DiagnosticCode::IncompletePlace)` counts across the whole source, and `site_with`'s anchor row is
-/// complete — so what this adds is the case with no incomplete row at all.
 #[test]
 fn a_complete_row_is_not_reported() {
     let src = site_with("place id=b use=hut theme=plain east_of=anchor gap=4");
@@ -144,10 +133,9 @@ fn a_complete_row_is_not_reported() {
     );
 }
 
-/// Absence is read off the surface key, not off the lifted value. A
-/// mistyped key is present — calling it missing would send the author to
-/// add a key that is already on the line, and `E_TYPE_MISMATCH_LABEL`
-/// already names it.
+/// Absence is read off the surface key, not off the lifted value: calling
+/// a mistyped key missing would send the author to add a key already on
+/// the line.
 #[test]
 fn a_mistyped_key_is_not_a_missing_one() {
     for row in [
@@ -170,8 +158,7 @@ fn a_mistyped_key_is_not_a_missing_one() {
     }
 }
 
-/// The span underlines the offending row. A renderer pointing at the
-/// `site` header would send the author to a line that is correct.
+/// Not the `site` header: that line is correct.
 #[test]
 fn the_span_underlines_the_offending_row() {
     let src = site_with("place id=b use=hut east_of=anchor gap=4");
@@ -182,9 +169,7 @@ fn the_span_underlines_the_offending_row() {
     );
 }
 
-/// An incomplete row that still has an `id=` keeps its registration, so a
-/// later `east_of=` naming it resolves exactly as it did. Dropping the
-/// registration would turn one mistake into a cascade of unresolved
+/// Dropping the registration would turn one mistake into unresolved
 /// references down the rest of the site.
 #[test]
 fn an_incomplete_row_with_an_id_still_registers_its_name() {
@@ -205,10 +190,9 @@ fn an_incomplete_row_with_an_id_still_registers_its_name() {
     );
 }
 
-/// A `connect` naming an incomplete place keeps its own cascade. The two
-/// findings are not a duplicate: one says which row is short of a key, the
-/// other which walkway went missing because of it — the same pairing an
-/// unresolved `use=DEF` already produces.
+/// Not a duplicate: one finding says which row is short of a key, the
+/// other which walkway went missing because of it, as with an unresolved
+/// `use=DEF`.
 #[test]
 fn a_connect_naming_the_row_still_cascades() {
     let src = format!(
@@ -221,10 +205,7 @@ fn a_connect_naming_the_row_still_cascades() {
     assert!(codes.contains(&"W_DEFERRED_CONNECT"), "got {codes:?}");
 }
 
-/// The premise, measured on the build rather than on the diagnostic: the
-/// row really does produce no placement. Every assertion above filters to
-/// a code and never lowers, so none of them would notice if an incomplete
-/// row started building something.
+/// Measured on the build: every other test here reads only findings.
 #[test]
 fn an_incomplete_row_builds_nothing() {
     let build = |source: &str| {
@@ -254,9 +235,6 @@ fn an_incomplete_row_builds_nothing() {
     assert_eq!(build(&alone), 0);
 }
 
-/// Every incomplete row in a site is reported, not just the first. This is
-/// the row-wise version of the loop the code closes: a `reported_once` flag
-/// would leave the second author-written row as invisible as it was before.
 #[test]
 fn every_incomplete_row_is_reported() {
     let src = format!(
@@ -273,11 +251,8 @@ fn every_incomplete_row_is_reported() {
     );
 }
 
-/// The finding coexists with the other `place`-row errors rather than
-/// masking them or being masked. Each pair is a different check on a
-/// `place` row, and each is on the same line the author has
-/// to edit — so batching them is the same promise the multi-key message
-/// makes, extended across codes.
+/// Each is a different check on the line the author has to edit, so they
+/// are reported together.
 #[test]
 fn it_coexists_with_the_other_place_row_errors() {
     for (row, other) in [
@@ -292,9 +267,8 @@ fn it_coexists_with_the_other_place_row_errors() {
             "E_DUPLICATE_PLACE_ID",
         ),
         // The origin check sits behind the `id=` gate, so a row with no
-        // `id=` at all is the shape that could lose it: adding the `id=`
-        // this code asks for would surface a brand-new error on the line
-        // just fixed.
+        // `id=` could lose it, and adding the `id=` would then surface a
+        // new error on the line just fixed.
         (
             "place use=hut theme=plain at=middle",
             "E_INVALID_PLACE_ORIGIN",

@@ -37,8 +37,7 @@ fn unknown_keyword_inside_nested_level_is_still_flagged() {
 
 #[test]
 fn unknown_keyword_note_carries_no_secondary_span() {
-    // `expected one of: ...` is informational, not locational — its span
-    // is `None` so renderers do not print a second `file:L:C` pointer at
+    // A note span would make renderers print a second `file:L:C` pointer at
     // the primary span.
     let src = "struct s size=1x1\n  mystery foo=1\n";
     let diags = diagnose(src);
@@ -52,9 +51,8 @@ fn unknown_keyword_note_carries_no_secondary_span() {
 
 #[test]
 fn theme_selector_with_unknown_keyword_is_flagged() {
-    // A typo in the leading keyword of a `theme` selector is just as
-    // wrong as a typo in a struct body — the lowering step keeps the raw
-    // string and the keyword_allowlist pass must re-check it.
+    // Lowering keeps a theme selector's keyword as a raw string, so this
+    // pass re-checks it.
     let src = "theme medieval:\n  windoe[class=small] -> frame=@spruce_wood\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
@@ -68,9 +66,7 @@ fn theme_selector_with_unknown_keyword_is_flagged() {
 
 #[test]
 fn close_typo_attaches_did_you_mean_note() {
-    // `wals` is one deletion away from `walls`; the suggest pass must lead
-    // the notes with a targeted "did you mean" line, keeping the broader
-    // candidate listing as a fallback.
+    // `wals` is one deletion away from `walls`.
     let src = "struct s size=4x4\n  wals mat_slot=wall height=3\n";
     let diags = diagnose(src);
     let kw = diags
@@ -97,9 +93,7 @@ fn close_typo_attaches_did_you_mean_note() {
 
 #[test]
 fn distant_typo_skips_the_suggestion() {
-    // `mystery` is 4+ edits away from every known keyword, so the suggest
-    // pass must not invent a guess — the candidate listing alone is the
-    // right surface for the user to scan.
+    // `mystery` is 4+ edits away from every known keyword.
     let src = "struct s size=1x1\n  mystery foo=1\n";
     let diags = diagnose(src);
     let kw = diags
@@ -117,9 +111,6 @@ fn distant_typo_skips_the_suggestion() {
 
 #[test]
 fn every_known_keyword_is_silent() {
-    // Build a source that uses every keyword in the known-keyword table.
-    // None should trigger `E_UNKNOWN_KEYWORD`. `place` and `connect` live
-    // in a site; everything else lives in a struct.
     let src = "\
 struct s size=4x4
   floor

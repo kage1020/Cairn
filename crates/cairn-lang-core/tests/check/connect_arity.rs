@@ -15,10 +15,8 @@ site h:\n  \
 place id=a use=hut at=origin\n  \
 place id=b use=hut east_of=a gap=4\n  ";
 
-/// A fully-formed `connect` row passes the arity pass silently. Anchors
-/// the negative space for the broken-row assertions below — without this
-/// the "exactly one `E_CONNECT_ARITY`" claims could not distinguish a real
-/// signal from a pass that always fires.
+/// Without this, the tests below could not tell a real finding from a pass
+/// that always fires.
 #[test]
 fn well_formed_connect_emits_no_arity_diagnostic() {
     let src = format!("{PROLOGUE}connect a.entry to b.entry path=@gravel\n");
@@ -29,9 +27,6 @@ fn well_formed_connect_emits_no_arity_diagnostic() {
     );
 }
 
-/// `connect` with zero positional arguments has no `from.port` and no
-/// `to.port`. The pass anchors the diagnostic at the keyword span (the
-/// member-level span) so the user sees the whole row underlined.
 #[test]
 fn bare_connect_emits_arity_with_keyword_span() {
     let src = format!("{PROLOGUE}connect path=@gravel\n");
@@ -56,10 +51,7 @@ fn bare_connect_emits_arity_with_keyword_span() {
     );
 }
 
-/// `connect FROM.PORT` is missing the `to TO.PORT` half. The diagnostic
-/// is anchored at a zero-width span right after the from value so the
-/// `file:L:C` pointer lands at the cursor position where the missing
-/// half should go.
+/// Zero-width, so the `file:L:C` pointer lands where the missing half goes.
 #[test]
 fn only_from_emits_arity_anchored_after_from() {
     let src = format!("{PROLOGUE}connect a.entry path=@gravel\n");
@@ -81,9 +73,6 @@ fn only_from_emits_arity_anchored_after_from() {
     );
 }
 
-/// `connect FROM.PORT to` has the `to` keyword but no `TO.PORT`. The
-/// diagnostic is anchored at a zero-width span right after the `to`
-/// token, mirroring the missing-from-half cursor placement.
 #[test]
 fn to_without_target_emits_arity_anchored_after_to() {
     let src = format!("{PROLOGUE}connect a.entry to path=@gravel\n");
@@ -105,10 +94,6 @@ fn to_without_target_emits_arity_anchored_after_to() {
     );
 }
 
-/// `connect FROM.PORT xxx TO.PORT` has all three positional slots filled
-/// but the middle keyword is not the literal `to`. The diagnostic is
-/// anchored at the offending token, and the message names the expected
-/// keyword so the user can correct it without re-reading the spec.
 #[test]
 fn wrong_separator_emits_arity_anchored_at_middle_token() {
     let src = format!("{PROLOGUE}connect a.entry xxx b.entry path=@gravel\n");
@@ -127,11 +112,8 @@ fn wrong_separator_emits_arity_anchored_at_middle_token() {
     );
 }
 
-/// `connect FROM.PORT xxx` (only two positionals and the middle one is
-/// not `to`) reports the wrong-separator diagnostic rather than the
-/// missing-target one — the user needs to fix the separator first, and
-/// surfacing two findings for what reads as a single row would be
-/// noise.
+/// The separator has to be fixed first, so the missing target is not
+/// reported beside it.
 #[test]
 fn wrong_separator_with_missing_target_prefers_separator_message() {
     let src = format!("{PROLOGUE}connect a.entry xxx path=@gravel\n");
@@ -146,14 +128,8 @@ fn wrong_separator_with_missing_target_prefers_separator_message() {
     );
 }
 
-/// `connect FROM.PORT to TO.PORT EXTRA` carries an extra positional
-/// past the `to TO.PORT` shape. The grammar caps at three positionals
-/// (anything else belongs in `key=value` arguments), so this is a
-/// silent-failure shape: without the diagnostic the resolver would
-/// read `positional[0..3]` and drop `EXTRA` on the floor, leaving the
-/// author with one less walkway than they wrote. The pass underlines
-/// the run of extras as a single span so the fix surface is the whole
-/// offending suffix.
+/// The resolver reads `positional[0..3]`, so without this the extra would
+/// be dropped silently.
 #[test]
 fn over_arity_emits_arity_anchored_at_extras() {
     let src = format!("{PROLOGUE}connect a.entry to b.entry c.exit path=@gravel\n");
@@ -172,9 +148,7 @@ fn over_arity_emits_arity_anchored_at_extras() {
     );
 }
 
-/// Two trailing extras land in one diagnostic spanning the whole
-/// suffix. Surfacing one diagnostic per extra would noise up a row
-/// that reads as a single mistake.
+/// One finding, because the row reads as a single mistake.
 #[test]
 fn over_arity_with_two_extras_underlines_the_full_run() {
     let src = format!("{PROLOGUE}connect a.entry to b.entry c.exit d.exit path=@gravel\n");
@@ -190,12 +164,8 @@ fn over_arity_with_two_extras_underlines_the_full_run() {
 
 /// Byte range of the slot that follows `prefix` on the `connect` row.
 ///
-/// Locating by the text that precedes the slot rather than by the slot
-/// text itself keeps a one-character endpoint (`a`, `1`) from matching
-/// an earlier occurrence — `a` appears in `place id=a` and again inside
-/// the from-side `a.entry` before it appears as the to-side endpoint.
-/// The `starts_with` assertion makes a mis-specified prefix a test
-/// failure rather than a silently misplaced expectation.
+/// Located by the text before the slot, so a one-character endpoint such
+/// as `a` does not match an earlier occurrence.
 fn slot_span(src: &str, prefix: &str, text: &str) -> std::ops::Range<usize> {
     let start = src
         .rfind(prefix)
@@ -217,18 +187,12 @@ fn to_slot(src: &str, from: &str, text: &str) -> std::ops::Range<usize> {
     slot_span(src, &format!("connect {from} to "), text)
 }
 
-/// Every non-reference value the parser accepts in the from-slot. Each
-/// entry is `(source text, expected kind word)`; the kind word is
-/// `Value::kind_name`, which the message quotes so the author can tell
-/// `1` (integer) from `"1"` (string) without opening the file.
+/// Every non-reference value the parser accepts in the from-slot, as
+/// `(source text, Value::kind_name)`.
 ///
-/// A list is absent here on purpose: `connect [a.entry] to b.entry`
-/// fails in the parser before this pass runs. A `[` immediately after
-/// the keyword opens a selector (`connect[...]` reads as an attribute
-/// filter), and a selector body is a `key=value` list,
-/// so the parser stops at the `.` asking for an `=`. The to-slot covers
-/// the list shape instead — see
-/// `to_side_non_reference_endpoints_are_flagged`.
+/// No list: a `[` after the keyword opens a selector, whose body is a
+/// `key=value` list, so `connect [a.entry]` fails in the parser. The
+/// to-slot covers lists.
 const NON_REFERENCE_ENDPOINTS: &[(&str, &str)] = &[
     ("a", "identifier"),
     ("true", "boolean"),
@@ -238,10 +202,7 @@ const NON_REFERENCE_ENDPOINTS: &[(&str, &str)] = &[
     ("\"a.entry\"", "string"),
 ];
 
-/// A from-slot that is not a `<place>.<port>` reference earns one
-/// `E_CONNECT_ARITY` anchored on the offending value. Each of these rows
-/// lowers to zero walkways, the same silent drop as a wrong positional
-/// count, reached through the endpoint slot.
+/// Each of these rows would otherwise lower to zero walkways, silently.
 #[test]
 fn from_side_non_reference_endpoints_are_flagged() {
     for (text, kind) in NON_REFERENCE_ENDPOINTS {
@@ -272,10 +233,8 @@ fn from_side_non_reference_endpoints_are_flagged() {
     }
 }
 
-/// Mirror of the from-slot matrix on the to-slot, plus the list shape
-/// that only reaches this pass from the to-slot. The two slots are
-/// separate call sites, so a fix applied to one and not the other would
-/// leave half the silent drops in place.
+/// Plus the list shape, which only reaches this pass from the to-slot.
+/// The two slots are separate call sites.
 #[test]
 fn to_side_non_reference_endpoints_are_flagged() {
     let cases: Vec<(&str, &str)> = NON_REFERENCE_ENDPOINTS
@@ -302,8 +261,7 @@ fn to_side_non_reference_endpoints_are_flagged() {
             "message should name the actual kind `{kind}` for `{text}`, got: {}",
             d.primary,
         );
-        // A list has no bounded surface form, so it is named by kind
-        // alone; every other shape must carry the text as written.
+        // A list has no bounded surface form, so it is named by kind alone.
         assert_eq!(
             d.primary.contains(&format!("`{text}`")),
             kind != "list",
@@ -313,11 +271,8 @@ fn to_side_non_reference_endpoints_are_flagged() {
     }
 }
 
-/// Both halves broken earns one diagnostic per half, in source order.
-/// The two endpoints are independent fix sites — unlike the separator
-/// case, neither has to be corrected before the other is interpretable
-/// — so reporting only the first would send the author round the
-/// edit-check loop twice for one line.
+/// Unlike the separator, neither endpoint has to be fixed before the other
+/// is interpretable.
 #[test]
 fn both_endpoints_broken_earn_one_diagnostic_each() {
     let src = format!("{PROLOGUE}connect 1 to 2 path=@gravel\n");
@@ -329,12 +284,8 @@ fn both_endpoints_broken_earn_one_diagnostic_each() {
     assert!(arity[1].primary.contains("`<to>.<port>`"));
 }
 
-/// A reference with a second dot is worse than a dropped row: read up to
-/// its first segment, `a.entry.typo` would lay the walkway `a.entry`
-/// lays, and the author's mistake would compile into a valid-looking
-/// build. The message
-/// names the segment count so the extra dot is visible in the log
-/// without the source alongside.
+/// Read up to its first segment, `a.entry.typo` would lay the walkway
+/// `a.entry` lays, so the mistake would compile into a valid-looking build.
 #[test]
 fn from_side_reference_with_extra_segment_is_flagged() {
     let src = format!("{PROLOGUE}connect a.entry.x to b.entry path=@gravel\n");
@@ -347,7 +298,6 @@ fn from_side_reference_with_extra_segment_is_flagged() {
     );
 }
 
-/// The to-slot mirror of the extra-segment case.
 #[test]
 fn to_side_reference_with_extra_segment_is_flagged() {
     let src = format!("{PROLOGUE}connect a.entry to b.entry.x path=@gravel\n");
@@ -360,12 +310,8 @@ fn to_side_reference_with_extra_segment_is_flagged() {
     );
 }
 
-/// Trailing extras and broken endpoints are independent mistakes, so
-/// the row reports all three. This is the one arm where the pass emits
-/// more than one finding for a row without the halves being separate
-/// slots: removing `c.exit` does not make `1` or `2` a port reference,
-/// so withholding the endpoint findings would only hide work the author
-/// still has to do.
+/// Removing `c.exit` does not make `1` or `2` a port reference, so
+/// withholding the endpoint findings would only hide work.
 #[test]
 fn over_arity_also_reports_broken_endpoints() {
     let src = format!("{PROLOGUE}connect 1 to 2 c.exit path=@gravel\n");
@@ -375,10 +321,8 @@ fn over_arity_also_reports_broken_endpoints() {
     assert_eq!(spans, vec!["1", "2", "c.exit"]);
 }
 
-/// A wrong separator suppresses the endpoint findings: until the
-/// author writes `to`, which positional is the target is a guess, and
-/// the pass would be reporting on slots it cannot yet identify. Pins
-/// the boundary of the previous test's "report everything" rule.
+/// Until the author writes `to`, which positional is the target is a
+/// guess.
 #[test]
 fn wrong_separator_suppresses_endpoint_findings() {
     let src = format!("{PROLOGUE}connect 1 xxx 2 path=@gravel\n");
@@ -386,11 +330,8 @@ fn wrong_separator_suppresses_endpoint_findings() {
     assert_eq!(slice(&src, &d), "xxx");
 }
 
-/// A row missing its second half reports the missing half only. The
-/// same reasoning as the separator case: the author's next edit adds
-/// the `to <to>.<port>` text, and an endpoint complaint about the half
-/// that is already written would be answered by a line they have not
-/// finished typing.
+/// The author's next edit is the missing half, on a line not yet
+/// finished.
 #[test]
 fn missing_half_suppresses_endpoint_findings() {
     let src = format!("{PROLOGUE}connect 1 path=@gravel\n");
@@ -402,12 +343,8 @@ fn missing_half_suppresses_endpoint_findings() {
     );
 }
 
-/// The `to` keyword present with no target is the other suppression
-/// arm: the row stops mid-shape, so the endpoint that *is* written
-/// stays unreported until the author finishes the line. Sits beside
-/// `missing_half_suppresses_endpoint_findings` because the two arms are
-/// reached by different positional counts and a refactor could easily fix
-/// one and drop the other.
+/// A separate arm from the missing half, reached by a different
+/// positional count.
 #[test]
 fn to_without_target_suppresses_endpoint_findings() {
     let src = format!(
@@ -422,11 +359,7 @@ fn to_without_target_suppresses_endpoint_findings() {
     );
 }
 
-/// `connect a.entry "to" b.entry` keeps its quotes in the message, so it
-/// does not read as ``expected `to` ... got `to` ``. `spec/lint` requires
-/// messages an author can act on without re-reading the source, and a
-/// message that asks for the thing it says it received cannot be acted on
-/// at all.
+/// Otherwise the message would read ``expected `to` ... got `to` ``.
 #[test]
 fn string_separator_renders_distinctly_from_the_bare_keyword() {
     let quoted = format!("{PROLOGUE}connect a.entry \"to\" b.entry path=@gravel\n");
@@ -444,11 +377,8 @@ fn string_separator_renders_distinctly_from_the_bare_keyword() {
     );
 }
 
-/// `connect` lowers to `MemberRole::Connect` in every scope, so a row
-/// inside a `def` body reaches this pass too (see the pass doc). The
-/// endpoint check must fire there as well — a stray `connect` with a
-/// broken endpoint is no more useful than a well-formed one in the
-/// wrong scope, and the arity arms already report at this position.
+/// `connect` lowers to `MemberRole::Connect` in every scope, so a row in a
+/// `def` body reaches this pass too.
 #[test]
 fn endpoint_check_reaches_connect_rows_outside_a_site() {
     let src = "def d size=3x3:\n  \
@@ -458,11 +388,7 @@ connect 1 to 2 path=@gravel\n";
     assert_eq!(arity.len(), 2, "got: {arity:#?}");
 }
 
-/// The notes carry the shape-specific repair, not just the generic
-/// example: a bare identifier is missing its port, a quoted reference
-/// only has to lose its quotes, and an extra dot has to go. Each is a
-/// single edit the author can apply from the message alone, which is
-/// what `spec/lint` asks of a diagnostic.
+/// Each is a single edit the author can apply from the message alone.
 #[test]
 fn endpoint_notes_name_the_repair_for_the_shape_at_hand() {
     let cases = [
@@ -482,15 +408,10 @@ fn endpoint_notes_name_the_repair_for_the_shape_at_hand() {
     }
 }
 
-/// A prologue whose places actually resolve.
+/// A prologue whose places resolve.
 ///
-/// [`PROLOGUE`] declares a `struct`, but `place use=` looks for a
-/// `def`, so every source built on it carries two
-/// `E_UNRESOLVED_PLACE_REF`s and the resolver abandons each placement
-/// before it ever reads a `connect` endpoint. Every assertion above
-/// filters to `E_CONNECT_ARITY`, so none of them can see what the two
-/// layers do to one row together. This prologue gives the resolver
-/// something to resolve.
+/// [`PROLOGUE`]'s `place use=` names a `struct`, not a `def`, so the
+/// resolver abandons each placement before it reads a `connect` endpoint.
 const RESOLVING_PROLOGUE: &str = "def hut size=3x3:\n  \
 floor id=floor mat_slot=floor\n  \
 walls id=walls class=outer mat_slot=wall height=3\n  \
@@ -502,14 +423,9 @@ site duo:\n  \
 place id=anchor use=hut theme=plain at=origin\n  \
 place id=peer   use=hut theme=plain east_of=anchor gap=4\n  ";
 
-/// One mistake earns one diagnostic once both layers have run.
-///
-/// The endpoint check and the resolver's endpoint guard look at the
-/// same slot, and the resolver's silent return is justified in its own
-/// comment by "re-pushing here would report one mistake twice". Nothing
-/// pinned that: with a resolvable prologue, a malformed endpoint must
-/// produce `E_CONNECT_ARITY` and nothing else, and the well-formed row
-/// must produce nothing at all.
+/// The endpoint check and the resolver's endpoint guard look at the same
+/// slot, and the resolver stays silent so one mistake is not reported
+/// twice.
 #[test]
 fn one_endpoint_mistake_earns_one_diagnostic_across_both_layers() {
     let clean = format!("{RESOLVING_PROLOGUE}connect anchor.entry to peer.entry path=@gravel\n");
@@ -537,11 +453,8 @@ fn one_endpoint_mistake_earns_one_diagnostic_across_both_layers() {
     assert_eq!(codes(&both), ["E_CONNECT_ARITY", "E_CONNECT_ARITY"]);
 }
 
-/// The division of labour holds in the other direction too: a row whose
-/// endpoints are the right *shape* but name the wrong thing belongs to
-/// the resolver, and this pass must stay quiet. Without this, widening
-/// the endpoint check until it swallowed the resolver's cases would
-/// look like progress.
+/// A well-shaped endpoint that names the wrong thing is the resolver's to
+/// report.
 #[test]
 fn well_shaped_endpoints_that_do_not_resolve_stay_with_the_resolver() {
     for (row, expected) in [

@@ -52,9 +52,6 @@ fn duplicate_arg_inside_statement_args() {
 
 #[test]
 fn duplicate_id_in_same_body_scope() {
-    // Diagnostic spans target the `id=NAME` attribute itself (tighter than
-    // the surrounding statement), so a UI rendering an underline only
-    // highlights the offending assignment.
     let src = "struct s size=3x3\n  door id=front\n  door id=front\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
@@ -74,8 +71,6 @@ fn duplicate_id_in_same_body_scope() {
 
 #[test]
 fn id_in_nested_scope_does_not_clash_with_outer() {
-    // Per-immediate-body id scoping: the outer `door id=front` and the
-    // inner one in `level y=0` are independent namespaces.
     let src = "struct s size=3x3\n  door id=front\n  level y=0\n    door id=front\n";
     let diags = diagnose(src);
     assert!(
@@ -95,12 +90,8 @@ fn duplicate_selector_attribute_is_reported() {
 
 #[test]
 fn duplicate_header_arg_other_than_size_is_arg_not_size() {
-    // Header has a repeated non-`size` arg; the code should be the generic
-    // `E_DUPLICATE_ARG`, not the size-specific `E_DUPLICATE_SIZE`. The
-    // header vocabulary is closed at `size=` and `class=`, so `class=` is
-    // the only key left to repeat: any other, `wood=` included, is also an
-    // `E_UNKNOWN_ARGUMENT`. No pass reads a header's `class=` yet, so the
-    // arguments pass reports the surviving value beside the duplicate.
+    // `class=` is the header's only other key, and no pass reads it, so the
+    // surviving value is also `W_IGNORED_ARGUMENT`.
     let src = "struct s size=1x1 class=house class=hut\n  floor mat_slot=m\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 2, "got {diags:#?}");
@@ -150,11 +141,9 @@ fn note_text<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
 
 #[test]
 fn a_repeated_place_id_is_reported_once_as_duplicate_place_id() {
-    // `E_DUPLICATE_PLACE_ID` is the code `spec/lint` "Sites and
-    // placements" gives this case, and the one that names the site; the
-    // generic `E_DUPLICATE_ID` beside it billed one repair twice. The
-    // finding that stays spans the whole second row, and its note the
-    // whole first row, where `E_DUPLICATE_ID` spanned their `id=`.
+    // `spec/lint` "Sites and placements" gives this case
+    // `E_DUPLICATE_PLACE_ID`, which names the site; `E_DUPLICATE_ID` beside
+    // it would bill one repair twice.
     let src = format!(
         "{HUT}site v:\n  place id=a use=hut theme=t at=origin\n  \
          place id=a use=hut theme=t east_of=a gap=2\n"
@@ -175,12 +164,8 @@ fn a_repeated_place_id_is_reported_once_as_duplicate_place_id() {
 
 #[test]
 fn a_site_body_still_reports_a_repeated_id_on_rows_other_than_place() {
-    // Only `place` rows of a `site` body are left to the resolver. It reads
-    // a `connect` row but not its `id=`
-    // (`a_place_row_and_a_connect_row_sharing_an_id_are_duplicate_id`), and
-    // skips a row the body has no reader for entirely, which is
-    // `E_MISPLACED_MEMBER` (one per `door` here), so a repeat on either is
-    // still this pass's to report.
+    // Only `place` rows of a `site` body are left to the resolver; each
+    // `door` here is `E_MISPLACED_MEMBER`.
     let src = "site v:\n  door id=x\n  door id=x\n";
     let diags = diagnose(src);
     assert_eq!(
@@ -201,8 +186,8 @@ fn a_site_body_still_reports_a_repeated_id_on_rows_other_than_place() {
 #[test]
 fn a_place_row_and_a_connect_row_sharing_an_id_are_duplicate_id() {
     // The resolver's ledger holds `place` rows only, so a `place` row's id
-    // has to stay in this pass's ledger too: skipping it there lost the
-    // repeat on the `connect` row from both passes.
+    // stays in this pass's ledger too, or the repeat on the `connect` row
+    // would reach neither pass.
     let src = format!(
         "{HUT}site v:\n  place id=a use=hut theme=t at=origin\n  \
          place id=b use=hut theme=t east_of=a gap=2\n  \
@@ -222,8 +207,7 @@ fn a_place_row_and_a_connect_row_sharing_an_id_are_duplicate_id() {
 
 #[test]
 fn a_place_row_and_a_misplaced_row_sharing_an_id_are_duplicate_id() {
-    // Either order: the exemption needs both rows to be `place` rows, not
-    // just the first or just the repeat.
+    // Either order: the exemption needs both rows to be `place` rows.
     for (rows, repeat) in [
         (
             "  place id=a use=hut theme=t at=origin\n  door id=a\n",
@@ -254,9 +238,8 @@ fn a_place_row_and_a_misplaced_row_sharing_an_id_are_duplicate_id() {
 
 #[test]
 fn place_rows_nested_in_a_site_body_are_still_duplicate_id() {
-    // The resolver's placement loop walks the `site` body one level deep,
-    // so the two `place` rows under `level` never reach it: this pass is
-    // the only reporter, whatever kind of body the rows sit in.
+    // The resolver walks a `site` body one level deep, so rows under
+    // `level` never reach it.
     let src = format!(
         "{HUT}site v:\n  level y=0\n    place id=a use=hut theme=t at=origin\n    \
          place id=a use=hut theme=t east_of=a gap=2\n"
@@ -292,10 +275,9 @@ fn place_rows_in_a_def_body_are_still_duplicate_id() {
 
 #[test]
 fn a_repeated_string_place_id_is_reported_once_as_duplicate_place_id() {
-    // This pass leaves the pair to the resolver, so the resolver has to see
-    // the same id: this pass and the lowering to the intent IR both read
-    // a string `id=` as well as an identifier. Were either to stop, this
-    // would be no finding at all, or two.
+    // This pass leaves the pair to the resolver, so both it and the intent
+    // lowering read a string `id=` as well as an identifier; were either to
+    // stop, this would be no finding, or two.
     let src = format!(
         "{HUT}site v:\n  place id=\"a\" use=hut theme=t at=origin\n  \
          place id=\"a\" use=hut theme=t east_of=a gap=2\n"
@@ -307,10 +289,9 @@ fn a_repeated_string_place_id_is_reported_once_as_duplicate_place_id() {
 
 #[test]
 fn a_place_row_repeating_a_connect_row_and_a_place_row_is_reported_twice() {
-    // The edge of comparing a repeat with the first row only. After
-    // `connect id=a`, both `place` rows repeat the `connect` row here; the
-    // last one also repeats the `place` row above it in the resolver, so
-    // that row carries both codes, with notes on different rows.
+    // Both `place` rows repeat the `connect` row, and the last also repeats
+    // the `place` row above it in the resolver, so it carries both codes
+    // with notes on different rows.
     let src = format!(
         "{HUT}site v:\n  place id=b use=hut theme=t at=origin\n  \
          connect id=a b.entry to b.entry\n  \
@@ -343,9 +324,7 @@ fn a_place_row_repeating_a_connect_row_and_a_place_row_is_reported_twice() {
 #[test]
 fn a_repeated_refused_place_id_is_still_duplicate_place_id() {
     // The resolver compares an id `PlaceId` refuses with the refused ids
-    // above it, so the second row carries `E_DUPLICATE_PLACE_ID` beside its
-    // own `E_INVALID_PLACE_ID`, and renaming both rows to one usable id
-    // raises nothing new. This pass still leaves the pair alone.
+    // above it, so renaming both rows to one usable id raises nothing new.
     let src = format!(
         "{HUT}site v:\n  place id=anchor use=hut theme=t at=origin\n  \
          place id=\"a.b\" use=hut theme=t east_of=anchor gap=2\n  \
@@ -372,10 +351,8 @@ const DUPLICATE_CIRCUIT_PRIMARY: &str =
 const DUPLICATE_CIRCUIT_REPAIR: &str = "delete one of the two lines, or split the logic across \
                                         several scopes, each with its own `circuit` line";
 
-/// A second `circuit` line in a scope is refused on that line, with a
-/// note on the first and a note on the repair, rather than dropped:
-/// place-and-route reads one reservation per scope. A third is refused
-/// too, against the same first line.
+/// Place-and-route reads one reservation per scope. A third line is
+/// refused against the same first line.
 #[test]
 fn a_second_circuit_line_in_a_scope_is_refused_against_the_first() {
     let src = "struct s size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
@@ -397,9 +374,8 @@ fn a_second_circuit_line_in_a_scope_is_refused_against_the_first() {
     }
 }
 
-/// Every `circuit` line counts, whether or not it is a usable
-/// reservation and in a `def` as in a `struct`: the first line here is
-/// not usable, and the second is still a second line.
+/// Every `circuit` line counts, usable or not, and in a `def` as in a
+/// `struct`.
 #[test]
 fn a_circuit_line_after_an_unusable_one_is_still_a_second_line() {
     let src = "def d size=7x5\n  floor mat_slot=m\n  circuit region=floor void=0\n  \
@@ -411,10 +387,8 @@ fn a_circuit_line_after_an_unusable_one_is_still_a_second_line() {
     assert_eq!(note_text(src, found[0]), "circuit region=floor void=0");
 }
 
-/// One `circuit` line per scope is not a duplicate across scopes, and a
-/// `circuit` line under a `level` is in that level's body, not among the
-/// scope's own members, which are all this check counts. The source
-/// raises nothing else either, so a finding of any code here fails.
+/// A `circuit` line under a `level` is in that level's body, not among the
+/// scope's own members, which are all this check counts.
 #[test]
 fn one_circuit_line_per_scope_is_not_a_duplicate() {
     let src = "struct a size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n\n\
@@ -424,9 +398,7 @@ fn one_circuit_line_per_scope_is_not_a_duplicate() {
     assert!(diags.is_empty(), "{diags:#?}");
 }
 
-/// A `circuit` line written with a `[...]` selector is a `circuit` line
-/// all the same: it reserves the scope's region as the bare form does,
-/// so it counts as a second line after one.
+/// A `[...]` selector does not change what the line reserves.
 #[test]
 fn a_circuit_line_with_a_selector_counts() {
     let src = "struct s size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
@@ -439,11 +411,9 @@ fn a_circuit_line_with_a_selector_counts() {
     assert_eq!(note_text(src, found[0]), "circuit region=floor void=1");
 }
 
-/// A scope with no `size=` reserves nothing from any of its `circuit`
-/// lines, and two of them are refused all the same: adding the header
-/// would leave the scope two reservations. The missing header is
-/// `W_STRUCT_NO_SIZE`, which block-array lowering raises and `check`
-/// does not, so this is the only finding here.
+/// Adding the header would leave the scope two reservations. The missing
+/// header is `W_STRUCT_NO_SIZE`, which block-array lowering raises and
+/// `check` does not.
 #[test]
 fn two_circuit_lines_in_a_scope_with_no_size_are_refused() {
     let src = "struct s\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
@@ -456,10 +426,8 @@ fn two_circuit_lines_in_a_scope_with_no_size_are_refused() {
     assert_eq!(note_text(src, found[0]), "circuit region=floor void=1");
 }
 
-/// A second `circuit` line that carries an indented body is refused as a
-/// second line, and the body under it is refused on its own as
-/// `E_UNSUPPORTED_NESTING`: the two findings are separate repairs, and
-/// the span of this one is the keyword line, not the body.
+/// The body is a separate repair, and this finding's span is the keyword
+/// line, not the body.
 #[test]
 fn a_second_circuit_line_with_an_indented_body_is_refused_beside_the_nesting() {
     let src = "struct s size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
@@ -491,13 +459,9 @@ mod items {
 
     const THEME: &str = "theme t:\n  slot floor -> @oak_planks\n\n";
 
-    /// Two items of the same kind sharing a name earn one error, anchored on
-    /// the *second* name token — the word the author would rename — with a
-    /// note on the first.
-    ///
-    /// One case per kind because the four are separate namespaces with
-    /// separate resolver code paths; a fix applied to the map for one kind
-    /// says nothing about the other three.
+    /// Anchored on the second name token, the word the author would rename.
+    /// One case per kind, because the four are separate namespaces with
+    /// separate resolver code paths.
     #[test]
     fn each_item_kind_reports_its_own_duplicate_name() {
         let cases = [
@@ -582,12 +546,9 @@ site s:
         }
     }
 
-    /// The anchor survives extra whitespace between keyword and name.
-    ///
-    /// This is the case `name_span` exists for: the alternative was to
-    /// rebuild the header line as `span.start + keyword.len() + 1`, which
-    /// silently slides off the name as soon as the author lines their
-    /// declarations up.
+    /// The case `name_span` exists for: an anchor computed as
+    /// `span.start + keyword.len() + 1` slides off the name once the author
+    /// lines declarations up.
     #[test]
     fn the_anchor_follows_the_name_through_padded_whitespace() {
         let src = format!(
@@ -603,9 +564,8 @@ struct   s size=5x5
         assert_eq!(slice(&src, &found[0]), "s");
     }
 
-    /// Three declarations earn two errors, not one. Reporting only the first
-    /// repeat would send the author round the edit-check loop once per extra
-    /// copy.
+    /// Reporting only the first repeat would send the author round the
+    /// edit-check loop once per extra copy.
     #[test]
     fn every_repeat_after_the_first_is_reported() {
         let src = format!(
@@ -623,10 +583,7 @@ struct   s size=5x5
         );
     }
 
-    /// The four kinds are separate namespaces, so one name on all four is
-    /// legal and must stay silent. Without this, the obvious implementation —
-    /// one map keyed by name — would look correct against every other test
-    /// here.
+    /// Without this, one map keyed by name would pass every other test here.
     #[test]
     fn the_same_name_on_different_kinds_is_not_a_collision() {
         let src = "theme x:\n  slot floor -> @oak_planks\n\n\
@@ -637,8 +594,7 @@ site x:\n  place id=a use=x theme=x at=origin\n";
         assert!(found.is_empty(), "got {found:#?}");
     }
 
-    /// Duplicates need not be adjacent. A pass that compared each item with
-    /// its predecessor rather than with everything seen so far would pass the
+    /// A pass comparing each item only with its predecessor would pass the
     /// cases above and miss this one.
     #[test]
     fn duplicates_separated_by_other_items_are_still_reported() {
@@ -653,11 +609,8 @@ site x:\n  place id=a use=x theme=x at=origin\n";
         );
     }
 
-    /// A single-valued `@directive` may be declared once.
-    ///
-    /// `@cairn` and `@intended_targets` each answer a one-answer question,
-    /// and neither has a consumer in the compiler yet — so nothing would
-    /// choose between two of them.
+    /// `@cairn` and `@intended_targets` each answer a one-answer question, so
+    /// nothing could choose between two of them.
     #[test]
     fn each_repeated_single_valued_header_is_reported() {
         let cases = [
@@ -702,15 +655,9 @@ site x:\n  place id=a use=x theme=x at=origin\n";
         }
     }
 
-    /// `@requires` is exempt, and that is not an oversight.
-    ///
-    /// `resolve::version_axes` folds every `version>=X` floor to the
-    /// strictest across all of them — the conjunction of the constraints,
-    /// not a choice between them — which `RegistryRange`'s doc states and
-    /// that module's tests pin. Reporting a repeat here would make an error
-    /// of a shape the rest of the crate defines as meaningful, and the
-    /// collision would not show up in either test suite because neither
-    /// crosses the other's layer. This test is that crossing.
+    /// Every `version>=X` floor folds to the strictest, the conjunction of
+    /// the constraints rather than a choice between them, as
+    /// `RegistryRange`'s doc states.
     #[test]
     fn repeated_requires_is_legal_because_its_floors_compose() {
         let src = format!(
@@ -731,8 +678,6 @@ site x:\n  place id=a use=x theme=x at=origin\n";
         );
     }
 
-    /// Three different directives together are the normal case and must stay
-    /// silent — the negative space for the test above.
     #[test]
     fn distinct_header_directives_are_not_duplicates() {
         let src = format!(
@@ -767,12 +712,8 @@ site x:\n  place id=a use=x theme=x at=origin\n";
         (d.x, d.y, d.z)
     }
 
-    /// The first `def` of a name is the one a `place use=` instantiates *and*
-    /// the one the scopes map holds.
-    ///
     /// Sizing the placement from one body and resolving its members from the
-    /// other is not a diagnostic problem, it is a wrong build, so it is
-    /// pinned separately from the diagnostic above.
+    /// other would be a wrong build.
     #[test]
     fn the_first_def_binds_for_both_the_placement_and_the_scope() {
         let src = format!(
@@ -798,8 +739,6 @@ site x:\n  place id=a use=x theme=x at=origin\n";
         }
     }
 
-    /// A duplicate `theme` name: the first binding supplies the slot value,
-    /// so the lowered palette carries oak rather than stone.
     #[test]
     fn the_first_theme_supplies_the_slot_value() {
         let src = "theme t:
@@ -824,11 +763,8 @@ struct s size=3x3
         );
     }
 
-    /// A duplicate `struct` name: the first header supplies `size=`.
-    ///
-    /// This one goes through block-array lowering's own `structures` map,
-    /// not the resolver's. The resolver's half is invisible in the dims, so
-    /// a fix applied only there would leave this test red.
+    /// This goes through block-array lowering's own `structures` map, not
+    /// the resolver's, whose choice does not show in the dims.
     #[test]
     fn the_first_struct_supplies_the_size() {
         let src = format!(
@@ -843,9 +779,8 @@ struct s size=3x3
         assert_eq!(dims(&block, "struct::s"), (9, 1, 9));
     }
 
-    /// Two `site` blocks of one name whose places collide on `id=`: the
-    /// binding key is `site::NAME::PLACE_ID`, so this is the only site shape
-    /// where first-wins has anything to decide.
+    /// The binding key is `site::NAME::PLACE_ID`, so this is the only site
+    /// shape where first-wins has anything to decide.
     #[test]
     fn a_place_id_repeated_across_site_blocks_keeps_the_first() {
         let src = format!(
@@ -871,13 +806,9 @@ site s:
         );
     }
 
-    /// Two `site` blocks of one name whose places do *not* collide: nothing
-    /// is dropped. Both build, under one shared `site::s::` namespace.
-    ///
-    /// This is the shape the diagnostic's note has to describe correctly.
-    /// An author told "the first `site s` is the one that resolves" would
-    /// delete the second block and lose a placement that was in the build —
-    /// so the claim is pinned here rather than left to the prose.
+    /// The shape the diagnostic's note has to describe correctly: an author
+    /// told the first `site s` is the one that resolves would delete the
+    /// second block and lose a placement.
     #[test]
     fn site_blocks_of_one_name_merge_rather_than_shadow() {
         let src = format!(
@@ -905,16 +836,12 @@ site s:
             "both places must resolve, got {:?}",
             resolution.scopes.keys().collect::<Vec<_>>(),
         );
-        // The collision is still worth reporting: the namespace is shared
-        // but `east_of=` is not, so the two blocks cannot reference each
-        // other's places.
+        // Still reported: the namespace is shared but `east_of=` is not, so
+        // the two blocks cannot reference each other's places.
         assert!(codes(&src).contains(&"E_DUPLICATE_ITEM"));
     }
 
-    /// Binding the first declaration does not mean ignoring the rest. The
-    /// duplicate's body is still walked, so problems inside it surface in the
-    /// same run as the collision that hides it — otherwise fixing the name
-    /// would reveal a fresh wave of errors the author never saw.
+    /// Otherwise fixing the name would reveal errors the author never saw.
     #[test]
     fn the_duplicate_body_still_contributes_its_own_diagnostics() {
         let struct_src = format!(
@@ -931,9 +858,8 @@ struct s size=3x3
             "expected both the collision and the duplicate body's own error, got {found:?}",
         );
 
-        // `theme` is the kind where this is not free. Theme findings are
-        // driven by the bound map, which holds one entry per name, so the
-        // shadowed body's bad slot value must not vanish with it.
+        // Theme findings are driven by the bound map, which holds one entry
+        // per name, so for `theme` this is not free.
         let theme_src = "theme t:
   slot floor -> @oak_planks
 
@@ -965,13 +891,10 @@ mod selector {
     /// Every code `source` raises but the `W_IGNORED_ARGUMENT` each selector
     /// binding earns.
     ///
-    /// Every row in this file binds something, no pass lowers a binding, and
-    /// `check/arguments.rs` pins that finding; counting one per binding in each
-    /// table below would make it restate how many bindings its rows carry. What
-    /// is dropped is still checked: exactly one binding finding per binding the
-    /// rows carry after the merge into a map, and nothing else, so a regression
-    /// that adds or loses one, or hides another `W_IGNORED_ARGUMENT` in here,
-    /// fails.
+    /// `check/arguments.rs` pins the binding finding, so listing one per
+    /// binding here would only restate how many bindings the rows carry. The
+    /// dropped findings are still counted: exactly one per binding after the
+    /// merge into a map, and nothing else.
     fn row_codes(source: &str) -> Vec<&'static str> {
         let found = diagnose(source);
         let (dropped, kept): (Vec<_>, Vec<_>) = found
@@ -998,10 +921,9 @@ mod selector {
         kept.iter().map(|d| d.code.as_str()).collect()
     }
 
-    /// The selector rows are the variable; the struct below them carries one
-    /// `window` every row in this file selects. A control that reports nothing
-    /// is then a control whose rows *matched* and were still judged distinct,
-    /// rather than one whose rows reached no member at all.
+    /// `rows` above a struct with one `window` every row in this file
+    /// selects, so a control that reports nothing matched and was still
+    /// judged distinct.
     fn theme_with(rows: &str) -> String {
         format!(
             "theme medieval:\n  \
@@ -1014,8 +936,7 @@ mod selector {
         )
     }
 
-    /// The reported row is the later one — the line the author edits — and the
-    /// finding is an error, like every other duplicate this pass reports.
+    /// The later row is the line the author edits.
     #[test]
     fn the_rebinding_row_is_reported_once_as_an_error() {
         let src = theme_with(
@@ -1030,10 +951,9 @@ mod selector {
         );
     }
 
-    /// Every arity of the rebound-key list, with the sentence each renders.
-    /// Table-driven because the join has three branches and the serial comma is
-    /// a three-or-more rule: the two-key arm is the one that reads
-    /// `` `frame=`, and `sill=` `` when the branch is written as one `join`.
+    /// The join has three branches and the serial comma is a three-or-more
+    /// rule: written as one `join`, the two-key arm reads
+    /// `` `frame=`, and `sill=` ``.
     #[test]
     fn the_rebound_key_list_reads_at_every_arity() {
         for (second, listed) in [
@@ -1062,9 +982,8 @@ mod selector {
         }
     }
 
-    /// The notes: where the displaced binding is, why nothing can still read
-    /// it, and what to do. The first is anchored so an editor can jump to the
-    /// line whose value is being thrown away.
+    /// The first note is anchored so an editor can jump to the line whose
+    /// value is thrown away.
     #[test]
     fn the_notes_point_at_the_displaced_binding_and_say_what_to_do() {
         let src = theme_with(
@@ -1095,9 +1014,8 @@ mod selector {
         );
     }
 
-    /// Notes are one per displaced *row*, not one per displaced key. Two keys
-    /// taken from one row read as one sentence about that line; two keys taken
-    /// from two rows are two notes, each naming only what its own line lost.
+    /// Not one per displaced key: two keys taken from one row read as one
+    /// sentence about that line.
     #[test]
     fn the_anchored_notes_are_one_per_displaced_row() {
         let from_one_row = theme_with(
@@ -1113,8 +1031,7 @@ mod selector {
         assert_eq!(d.notes.len(), 3, "and no second anchor: {:#?}", d.notes);
 
         // The offending row binds `sill=` first, so insertion order would put
-        // the note about line 3 ahead of the one about line 2. Notes are sorted
-        // by span instead, so they read down the file.
+        // line 3's note ahead of line 2's; notes are sorted by span instead.
         let from_two_rows = theme_with(
             "  window[class=small] -> frame=@spruce_wood\n  \
          window[class=small] -> sill=@oak_slab\n  \
@@ -1136,9 +1053,7 @@ mod selector {
         );
     }
 
-    /// Attribute order is not part of the selector. `window[class=small,side=front]`
-    /// and `window[side=front,class=small]` are the same filter, because the
-    /// matcher tests every attribute independently.
+    /// The matcher tests every attribute independently.
     #[test]
     fn attribute_order_does_not_make_two_selectors_different() {
         let src = theme_with(
@@ -1152,17 +1067,12 @@ mod selector {
         );
     }
 
-    /// Whether `small` and `"small"` are the same attribute is a property of
-    /// the *matcher*, not of this pass, and it differs by key: `id` / `class` /
-    /// `mat_slot` are compared as label text, everything else by value kind.
-    /// Both halves check the matcher's own answer alongside the finding —
-    /// `E_THEME_SELECTOR_UNMATCHED` is the matcher saying, in the second half,
-    /// that the quoted row reaches no member the bare one reaches.
+    /// Whether `small` and `"small"` are the same attribute is the matcher's
+    /// property, not this pass's, and it differs by key.
     #[test]
     fn value_form_matters_exactly_where_the_matcher_says_it_does() {
-        // `id` / `class` / `mat_slot` are lifted onto the member during
-        // lowering and compared as label text, so the quotes are not part of
-        // the filter and the rows coincide.
+        // `id`, `class` and `mat_slot` are lifted onto the member and compared
+        // as label text, so the quotes are not part of the filter.
         for attr in ["id=front", "class=small", "mat_slot=glass"] {
             let src = theme_with(&rows_quoting(attr));
             assert_eq!(
@@ -1171,8 +1081,7 @@ mod selector {
                 "a quoted `{attr}` selects the same members, and nothing went unmatched",
             );
         }
-        // Every other attribute stays a generic `key=value` and is compared by
-        // value kind, where the two spellings are two values. The lone
+        // Every other attribute is compared by value kind. The
         // `E_THEME_SELECTOR_UNMATCHED` is the matcher's own answer that the
         // quoted row reaches nothing the bare one reaches.
         for attr in ["side=front", "offset=2"] {
@@ -1195,9 +1104,8 @@ mod selector {
         )
     }
 
-    /// A selector that differs in any attribute is a different selector, even
-    /// when one row's members are a subset of the other's: the members only the
-    /// wider row selects still read its binding.
+    /// Even when one row's members are a subset of the other's, the members
+    /// only the wider row selects still read its binding.
     #[test]
     fn rows_with_different_attributes_are_not_a_pair() {
         for second in [
@@ -1216,9 +1124,8 @@ mod selector {
         }
     }
 
-    /// Two rows with one selector and no key in common compose. Nothing is
-    /// displaced, so nothing is reported — the same exemption `@requires` has
-    /// from `E_DUPLICATE_HEADER`.
+    /// Nothing is displaced: the same exemption `@requires` has from
+    /// `E_DUPLICATE_HEADER`.
     #[test]
     fn rows_that_bind_different_keys_compose() {
         let src = theme_with(
@@ -1232,8 +1139,7 @@ mod selector {
         );
     }
 
-    /// Only the shared keys are named. A row that rebinds one key and adds
-    /// another is half a duplicate, and the message has to say which half.
+    /// A row that rebinds one key and adds another is half a duplicate.
     #[test]
     fn only_the_keys_both_rows_bind_are_listed() {
         let src = theme_with(
@@ -1248,10 +1154,8 @@ mod selector {
         );
     }
 
-    /// With three rows the note points at the row whose value is actually being
-    /// replaced, which is the most recent row to bind the key rather than the
-    /// first row of the group. Pointing at the first would name a value that
-    /// was already gone. The middle row displaces nothing and says nothing.
+    /// The most recent row to bind the key, not the first of the group, whose
+    /// value is already gone.
     #[test]
     fn the_note_names_the_binding_that_is_actually_replaced() {
         let src = theme_with(
@@ -1294,9 +1198,7 @@ mod selector {
         );
     }
 
-    /// Selectors are scoped to their theme, so two themes binding the same key
-    /// with the same filter are two independent overlays and neither displaces
-    /// the other.
+    /// Selectors are scoped to their theme.
     #[test]
     fn identical_rows_in_two_themes_are_not_a_pair() {
         let src = "theme medieval:\n  \
@@ -1314,8 +1216,7 @@ mod selector {
         );
     }
 
-    /// The keyword is half the filter: two rows that agree on attributes but
-    /// name different roles never select one member in common.
+    /// The keyword is half the filter.
     #[test]
     fn rows_with_different_keywords_are_not_a_pair() {
         let src = theme_with(
@@ -1329,9 +1230,8 @@ mod selector {
         );
     }
 
-    /// The payload carries the rebound keys, so a quick-fix does not parse the
-    /// sentence back apart — what `spec/lint` "Machine-readable payload" exists
-    /// to stop.
+    /// So a quick-fix does not parse the sentence back apart, which
+    /// `spec/lint` "Machine-readable payload" exists to stop.
     #[test]
     fn the_payload_lists_the_rebound_keys() {
         let src = theme_with(
@@ -1347,9 +1247,8 @@ mod selector {
         );
     }
 
-    /// The finding coexists with the arg-level duplicate inside one row rather
-    /// than masking it: the two are different scopes, and both are on lines the
-    /// author has to edit.
+    /// The two are different scopes, and both are on lines the author has to
+    /// edit.
     #[test]
     fn it_coexists_with_a_key_repeated_inside_one_row() {
         let src = theme_with(
@@ -1361,11 +1260,9 @@ mod selector {
         assert_eq!(seen, vec!["E_DUPLICATE_ARG", "E_DUPLICATE_SELECTOR"]);
     }
 
-    /// The selector is rendered, not elided, so two distinct pairs in one
-    /// theme do not produce byte-identical primaries, the same reason
-    /// `E_INCOMPLETE_PLACE` names its row. The rendering keeps source
-    /// order and the source spelling of each value, so it reads as the line
-    /// the author has to find.
+    /// Rendered so two pairs in one theme do not produce identical
+    /// primaries, in source order and spelling so it reads as the line the
+    /// author has to find.
     #[test]
     fn the_primary_renders_the_selector_that_identifies_the_row() {
         let src = theme_with(
@@ -1388,12 +1285,9 @@ mod selector {
         assert_eq!(rendered, ["window[class=small]", "window[side=front,y=2]"]);
     }
 
-    /// A label key holding a non-label value pairs with nothing — not even a
-    /// byte-identical row. A label key matches such a value on no member,
-    /// so neither row binds anything the other could take over, and two
-    /// equal rows do not even count as selecting the same members. The rows are
-    /// already an error by a different scope, which is what keeps the gap from
-    /// costing the author anything.
+    /// Not even a byte-identical row: such a value matches no member, so
+    /// neither row binds anything the other could take over. The rows are
+    /// already `E_TYPE_MISMATCH_LABEL`, so the gap costs the author nothing.
     #[test]
     fn a_label_key_holding_a_non_label_value_pairs_with_nothing() {
         for attr in ["id=5", "class=5", "mat_slot=5", "class=true"] {
@@ -1416,11 +1310,9 @@ mod selector {
         }
     }
 
-    /// A `theme` block whose name lost the binding is still checked. `lower`
-    /// keeps one `ThemeIr` per block with no keying by name, and this pass
-    /// walks that list — the resolver's first-write-wins dedupe happens later
-    /// and elsewhere. Without this, keying themes by name in `lower` would
-    /// silently stop checking the shadowed body.
+    /// `lower` keeps one `ThemeIr` per block and this pass walks that list,
+    /// so keying themes by name in `lower` would silently stop checking the
+    /// shadowed body.
     #[test]
     fn a_theme_whose_name_lost_the_binding_is_still_checked() {
         let src = "theme medieval:\n  \
@@ -1441,10 +1333,9 @@ mod selector {
         );
     }
 
-    /// Two coinciding rows that reach no member are still a pair. The pass is
-    /// syntactic — it reads the theme body, not the struct bodies — and the
-    /// rows are as redundant with no member as with one. `W_`-style reporting
-    /// of the dead rows is `E_THEME_SELECTOR_UNMATCHED`'s job, and both fire.
+    /// The pass reads the theme body, not the struct bodies, and the rows are
+    /// as redundant with no member as with one. The dead rows are
+    /// `E_THEME_SELECTOR_UNMATCHED`'s to report.
     #[test]
     fn a_pair_that_matches_nothing_is_still_a_pair() {
         let src = theme_with(

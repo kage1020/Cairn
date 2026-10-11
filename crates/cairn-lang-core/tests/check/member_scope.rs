@@ -34,8 +34,6 @@ fn site_with(row: &str) -> String {
     )
 }
 
-/// The bug as reported: `place` and `connect` written into a `struct` or
-/// `def` body. `cairn check` exited 0 on this source.
 #[test]
 fn a_site_row_in_a_geometry_body_is_an_error() {
     for row in SITE_ROWS {
@@ -52,8 +50,6 @@ fn a_site_row_in_a_geometry_body_is_an_error() {
     }
 }
 
-/// The half with no reporter at all: a geometry keyword among a site's
-/// placements produced no voxels and no diagnostic at either stage.
 #[test]
 fn a_geometry_row_in_a_site_body_is_an_error() {
     for row in GEOMETRY_ROWS {
@@ -68,8 +64,8 @@ fn a_geometry_row_in_a_site_body_is_an_error() {
     }
 }
 
-/// The negative space. Without this, a pass that reported every member
-/// would satisfy the two tests above.
+/// Without this, a pass that reported every member would pass the two
+/// tests above.
 #[test]
 fn a_row_the_body_reads_is_not_reported() {
     for row in GEOMETRY_ROWS {
@@ -91,9 +87,8 @@ fn a_row_the_body_reads_is_not_reported() {
     }
 }
 
-/// A `level y=N` groups members inside the geometry body it already sits
-/// in, its children joining the same phase buckets as their siblings, so
-/// nesting does not open a body with different rules.
+/// A `level` groups members inside the body it sits in, so nesting does
+/// not open a body with different rules.
 #[test]
 fn the_body_kind_carries_through_a_level() {
     let src = format!(
@@ -104,9 +99,8 @@ fn the_body_kind_carries_through_a_level() {
     assert!(d.primary.contains("lowers `place`"), "got {:?}", d.primary);
 }
 
-/// One finding per misplaced subtree. Everything indented under a row
-/// this body cannot read goes with it, so descending would bill one
-/// mistake once per line underneath.
+/// Everything indented under a row this body cannot read goes with it, so
+/// descending would bill one mistake once per line underneath.
 #[test]
 fn a_subtree_is_reported_once_at_its_root() {
     let src = format!(
@@ -128,9 +122,8 @@ fn a_subtree_is_reported_once_at_its_root() {
     );
 }
 
-/// `nesting` and `member_scope` do not both fire on one row. The nesting
-/// advice ("dedent these") does not fit a row that cannot be in this body
-/// at any indentation.
+/// The nesting advice, "dedent these", does not fit a row that cannot be
+/// in this body at any indentation.
 #[test]
 fn nesting_does_not_also_report_a_misplaced_row() {
     let src = format!(
@@ -148,8 +141,7 @@ fn nesting_does_not_also_report_a_misplaced_row() {
     );
 }
 
-/// An unknown keyword is `keyword_allowlist`'s finding in either body:
-/// the repair is the word, and there is no role to measure against the
+/// The repair is the word, and there is no role to measure against the
 /// body's readers.
 #[test]
 fn an_unknown_keyword_is_left_to_the_allowlist() {
@@ -171,9 +163,8 @@ fn an_unknown_keyword_is_left_to_the_allowlist() {
     }
 }
 
-/// `logic` and `assert` lines are not members — `intent::lower` sorts
-/// them into `MemberBody`'s own fields, so they never reach this walk —
-/// and the pass must not touch them.
+/// `intent::lower` sorts them into `MemberBody`'s own fields, so they never
+/// reach this walk.
 #[test]
 fn logic_and_assert_lines_are_not_members() {
     let src = format!(
@@ -187,10 +178,8 @@ fn logic_and_assert_lines_are_not_members() {
     );
 }
 
-/// The advice for a `level` in a `site` body is written separately: its
-/// children are usually `place` rows that belong exactly where they are,
-/// one indent to the left, and the generic "move it into a struct"
-/// advice would cost the author the placement.
+/// Its children are usually `place` rows that belong one indent to the
+/// left, and "move it into a struct" would cost the author the placement.
 #[test]
 fn a_level_in_a_site_body_says_dedent_rather_than_relocate() {
     let src = format!(
@@ -207,8 +196,6 @@ fn a_level_in_a_site_body_says_dedent_rather_than_relocate() {
     );
 }
 
-/// The "expected one of" note is the closed set for the body the author
-/// is actually in, not the whole keyword table.
 #[test]
 fn the_candidate_list_is_scoped_to_the_body() {
     let geometry = one_of_code(
@@ -233,9 +220,7 @@ fn the_candidate_list_is_scoped_to_the_body() {
     );
 }
 
-/// The span underlines the offending row, not the whole body. A renderer
-/// pointing at the `struct` header would send the author to a line that
-/// is correct.
+/// Not the whole body: the header is a line that is correct.
 #[test]
 fn the_span_underlines_the_offending_row() {
     let src = site_with("floor id=stray mat_slot=floor");
@@ -243,9 +228,7 @@ fn the_span_underlines_the_offending_row() {
     assert_eq!(&src[d.span.clone()], "floor id=stray mat_slot=floor");
 }
 
-/// A `def` body is walked apart from a `struct` body, and a `def` is what
-/// a `site` instantiates, so the geometry half of this code reaches users
-/// through it first.
+/// A `def` body is walked by a loop of its own.
 #[test]
 fn the_def_loop_is_walked() {
     let d = one_of_code(
@@ -260,11 +243,9 @@ fn the_def_loop_is_walked() {
     );
 }
 
-/// "Produces nothing" is about the block array. Redstone synthesis
-/// collects members whatever their role and walks a site's rows, so a
-/// `-> sig.NAME` tail on a misplaced row does still reach
-/// synthesis — the message says so rather than overclaiming, and says why
-/// that is not a reason to keep the row where it is.
+/// "Produces nothing" is about the block array: redstone synthesis walks a
+/// site's rows whatever their role, so a `-> sig.NAME` tail on a misplaced
+/// row still reaches it.
 #[test]
 fn a_signal_bearing_row_is_not_told_it_reaches_nothing() {
     let hedge = "the `sig.` reference on this line does still reach redstone synthesis — but the block it would sense or drive is the one being dropped, so move the member and the signal keeps working";
@@ -274,9 +255,8 @@ fn a_signal_bearing_row_is_not_told_it_reaches_nothing() {
     );
     assert!(notes(&sensor).contains(&hedge), "got {:#?}", notes(&sensor));
 
-    // An actuator argument counts too, and a row with no signal at all
-    // must not carry the note — otherwise it would be noise on every
-    // finding rather than a correction on the ones that need it.
+    // A row with no signal must not carry the note, or it would be noise on
+    // every finding.
     let actuator = one_of_code(
         &site_with("door[id=entry] opened_by=sig.open"),
         DiagnosticCode::MisplacedMember,
@@ -293,10 +273,8 @@ fn a_signal_bearing_row_is_not_told_it_reaches_nothing() {
     assert!(!notes(&plain).contains(&hedge), "got {:#?}", notes(&plain));
 }
 
-/// The lost-member count covers the whole subtree. Counting direct
-/// children only would report "the 1 member indented under it" for a
-/// three-deep run — understating the cost by exactly the part the author
-/// cannot see from the reported line.
+/// Counting direct children only would understate the cost by exactly the
+/// part the author cannot see from the reported line.
 #[test]
 fn the_nested_count_covers_the_whole_subtree() {
     let src = format!(
@@ -311,10 +289,8 @@ fn the_nested_count_covers_the_whole_subtree() {
     );
 }
 
-/// The other half of `nesting_does_not_also_report_a_misplaced_row`: a row this body *does* read, whose indented
-/// body `nesting` is about to declare lost. Descending into it would bill
-/// one mistake twice with repairs that disagree — following nesting's
-/// "dedent these" leaves the `E_MISPLACED_MEMBER` standing.
+/// The body reads this row, and `nesting` declares its indented body lost;
+/// descending would bill one mistake twice with repairs that disagree.
 #[test]
 fn a_child_of_a_lost_body_is_left_to_nesting() {
     let src = format!(
@@ -337,9 +313,8 @@ fn a_child_of_a_lost_body_is_left_to_nesting() {
     );
 }
 
-/// A subtree hanging off an unknown keyword is skipped by this pass, as
-/// it is by `nesting`: the row names nothing the compiler builds, so the
-/// repair is the word and everything below it is re-judged afterwards.
+/// As in `nesting`: the repair is the word, and everything below it is
+/// judged again afterwards.
 #[test]
 fn a_subtree_under_an_unknown_keyword_is_left_alone() {
     let src = format!(
@@ -358,9 +333,8 @@ fn a_subtree_under_an_unknown_keyword_is_left_alone() {
     );
 }
 
-/// The two row tables above are hand-written, and a new `MemberRole` would
-/// shrink the matrix without failing anything. Their combined length is the
-/// table's, so an addition has to land in one of them.
+/// The two row tables are hand-written, so a new role has to land in one
+/// of them.
 #[test]
 fn the_row_tables_cover_every_known_keyword() {
     assert_eq!(
@@ -378,9 +352,8 @@ mod lowering {
 
     use crate::common::{PRELUDE, lowered, solid_cells};
 
-    /// A geometry row among a site's placements lays no voxels. Same source,
-    /// same site, one row apart — and the site's own placement is unchanged,
-    /// so the row contributed nothing rather than displacing something.
+    /// The site's own placement is unchanged, so the row contributed nothing
+    /// rather than displacing something.
     #[test]
     fn a_geometry_row_in_a_site_body_builds_nothing() {
         let without =
@@ -413,10 +386,8 @@ mod lowering {
         );
     }
 
-    /// A `place` in a `def` body produces no placement, and a `connect`
-    /// there lays no walkway. Both are what `W_DEFERRED_MEMBER` says during
-    /// `cairn lower` — the code `cairn check` never sees, which is why the
-    /// same fact needs a check-layer owner.
+    /// `W_DEFERRED_MEMBER` says so during `cairn lower`, but `cairn check`
+    /// never sees it.
     #[test]
     fn a_site_row_in_a_geometry_body_builds_nothing() {
         let src = format!(
@@ -437,9 +408,7 @@ mod lowering {
         );
     }
 
-    /// The other half of the message's claim: a `place` in a geometry body
-    /// is dropped from the build, not from resolution. The struct's own
-    /// members still resolve around it, so the finding is about the one row.
+    /// The row is dropped from the build, not from resolution.
     #[test]
     fn a_misplaced_row_does_not_disturb_its_siblings() {
         let src = format!(

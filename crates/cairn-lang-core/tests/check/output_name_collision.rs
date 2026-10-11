@@ -10,8 +10,6 @@ use cairn_lang_core::{
 
 use crate::common::{PRELUDE, codes, lowered, notes, of_code, one_of_code, slice};
 
-/// The simplest shape: a `struct` and a `place id=` of one name both
-/// write `hut`.
 #[test]
 fn a_struct_and_a_place_of_one_name_collide() {
     let source = format!(
@@ -286,8 +284,7 @@ fn a_walkway_to_a_dropped_placement_does_not_collide() {
 
 /// A `connect` row whose scope key cannot be built is skipped here because
 /// lowering builds the same key, reports `W_INVALID_WALKWAY_IDENT` and lays
-/// nothing. If lowering ever laid such a row, this test fails on the
-/// structures it writes.
+/// nothing; the structures assertion holds lowering to that.
 #[test]
 fn a_walkway_whose_key_is_refused_writes_no_file() {
     let source = format!(

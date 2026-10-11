@@ -24,8 +24,8 @@ fn complete_plus(extra: &str) -> String {
     table("sig.a, sig.b", &format!("{extra}; 01->0; 10->0; 11->0"))
 }
 
-/// The one finding a source is expected to raise, with nothing else
-/// alongside it — the count is part of what these tests pin.
+/// The one finding `source` raises; the count is part of what these tests
+/// pin.
 fn only(source: &str) -> Diagnostic {
     let found = diagnose(source);
     assert_eq!(
@@ -71,7 +71,6 @@ fn found_covers(found: &Diagnostic) -> String {
 
 // -- a table that says something -----------------------------------------
 
-/// The shape every other test is a deviation from.
 #[test]
 fn a_complete_table_is_quiet() {
     assert!(codes(&table("sig.a, sig.b", "00->0; 01->0; 10->0; 11->0")).is_empty());
@@ -113,9 +112,8 @@ fn an_empty_table_is_not_also_reported_as_partial() {
     assert_eq!(codes(&table("sig.a, sig.b", "")), ["E_TRUTH_TABLE_EMPTY"]);
 }
 
-/// One input is one input, and the sentence around the count has to
-/// agree with it. The two messages that carry a count are the two that
-/// have somewhere for a verb to disagree.
+/// The empty and the partial finding are the two messages that carry a
+/// count, so the two whose wording can disagree with it.
 #[test]
 fn a_table_with_one_input_reads_as_a_sentence() {
     for source in [table("sig.a", ""), table("sig.a", "0->1")] {
@@ -153,9 +151,7 @@ fn a_pattern_assigned_two_different_outputs_is_refused() {
     );
 }
 
-/// Nothing reads a truth table yet — the evaluator is unbuilt — so a
-/// message that says which of the two rows would be used is describing a
-/// program that does not exist.
+/// No evaluator reads a truth table, so neither row is the one used.
 #[test]
 fn the_conflict_does_not_say_which_row_would_win() {
     let text = rendered(&only(&complete_plus("00->0; 00->1")));
@@ -180,9 +176,7 @@ fn a_pattern_assigned_the_same_output_twice_is_a_warning() {
     );
 }
 
-/// Each repeat that agrees is judged against the *first* row carrying its
-/// pattern, so every repeat of a pattern sends the author to the same
-/// place to look.
+/// Every repeat of a pattern sends the author to the same place.
 #[test]
 fn a_repeat_is_judged_against_the_first_row_with_its_pattern() {
     let source = complete_plus("00->0; 00->0; 00->0");
@@ -201,11 +195,9 @@ fn a_repeat_is_judged_against_the_first_row_with_its_pattern() {
     }
 }
 
-/// A row that flips an assignment back agrees with the first row and
-/// contradicts the one it flips back from — and a contradiction with any
-/// earlier row is a conflict, whichever row the table opened with. The
-/// note goes to the row it contradicts, since that is the pair the
-/// author has to decide between.
+/// A contradiction with any earlier row is a conflict, even when the row
+/// agrees with the first. The note goes to the row it contradicts, since
+/// that is the pair the author has to decide between.
 #[test]
 fn a_row_that_flips_back_contradicts_the_row_it_flips_back_from() {
     let source = complete_plus("00->0; 00->1; 00->0");
@@ -228,9 +220,7 @@ fn a_row_that_flips_back_contradicts_the_row_it_flips_back_from() {
     );
 }
 
-/// The other half of that rule: two rows that agree with each other and
-/// disagree with the first are two conflicts, not one conflict and one
-/// duplicate.
+/// Two conflicts, not one conflict and one duplicate.
 #[test]
 fn two_repeats_that_agree_with_each_other_still_answer_to_the_first_row() {
     let found = codes(&complete_plus("00->0; 00->1; 00->1"));
@@ -261,11 +251,9 @@ fn a_table_short_of_a_combination_is_a_warning() {
     );
 }
 
-/// The sentence says "and N more" only when there is an N, and the
-/// boundary is the cap itself. Three inputs are eight combinations, so a
-/// table covering four leaves exactly the cap and one covering three
-/// leaves one past it — the pair that tells a cap of four from a cap of
-/// three or five, which nothing else here does.
+/// Three inputs have eight combinations, so covering four leaves exactly
+/// the cap missing and covering three leaves one past it: the pair that
+/// tells a cap of four from one of three or five.
 #[test]
 fn the_sample_says_it_is_a_sample_only_when_it_is_one() {
     let whole = rendered(&only(&table(
@@ -286,12 +274,8 @@ fn the_sample_says_it_is_a_sample_only_when_it_is_one() {
     );
 }
 
-/// A repeated row does not fill the slot it repeats, so the two findings
-/// stand together: one row to delete, three to write.
-///
-/// The coverage finding comes first because `check` sorts by span and the
-/// statement opens before any of its rows — the row-level finding sits
-/// inside the range of the table-level one.
+/// One row to delete, three to write. The coverage finding comes first
+/// because `check` sorts by span and the statement opens before its rows.
 #[test]
 fn a_repeated_row_leaves_the_combination_it_repeats_uncovered() {
     let found = diagnose(&table("sig.a, sig.b", "00->0; 00->0"));
@@ -306,9 +290,8 @@ fn a_repeated_row_leaves_the_combination_it_repeats_uncovered() {
     );
 }
 
-/// Twenty inputs is a million combinations. The finding still fires and
-/// still names the total, but nothing here walks that space: the count is
-/// arithmetic and the sample stops at the cap.
+/// Twenty inputs are a million combinations: the count is arithmetic and
+/// the sample stops at the cap.
 #[test]
 fn a_wide_table_is_counted_rather_than_enumerated() {
     let names: Vec<String> = (0..20).map(|i| format!("sig.a{i}")).collect();
@@ -325,9 +308,8 @@ fn a_wide_table_is_counted_rather_than_enumerated() {
     );
 }
 
-/// Wide enough that the number of combinations does not fit any integer
-/// the compiler carries. The grammar permits it, so it must not panic and
-/// must not print a number it cannot compute.
+/// The number of combinations fits no integer the compiler carries, and
+/// the grammar permits the table.
 #[test]
 fn a_table_too_wide_to_count_says_so_symbolically() {
     let names: Vec<String> = (0..130).map(|i| format!("sig.a{i}")).collect();
@@ -343,9 +325,9 @@ fn a_table_too_wide_to_count_says_so_symbolically() {
     );
 }
 
-/// The decimal gives way to a power at the boundary the pass chooses, not
-/// at the point where no integer holds the count — those sit 95 inputs
-/// apart, and only a table between them tells the two apart.
+/// The boundary the pass chooses sits 95 inputs below the point where no
+/// integer holds the count, and only a table between the two tells them
+/// apart.
 #[test]
 fn the_total_becomes_a_power_before_it_stops_fitting_an_integer() {
     for (arity, expected, absent) in [(32usize, "4294967296", "2^32"), (33, "2^33", "8589934592")] {
@@ -361,10 +343,8 @@ fn the_total_becomes_a_power_before_it_stops_fitting_an_integer() {
 
 // -- the input list -------------------------------------------------------
 
-/// A signal listed twice is one input written twice, so the table has two
-/// columns for it and its rows describe combinations the circuit does not
-/// have. The table is refused for the list, and the coverage finding that
-/// would ask for `01` and `10` is not raised beside it.
+/// A signal listed twice gives the table two columns for one input, so
+/// `01` and `10` are combinations the circuit does not have.
 #[test]
 fn a_signal_listed_twice_is_refused_and_not_asked_for_impossible_rows() {
     let found = only(&table("sig.a, sig.a", "00 -> 0; 11 -> 1"));
@@ -383,10 +363,8 @@ fn a_signal_listed_twice_is_refused_and_not_asked_for_impossible_rows() {
     );
 }
 
-/// A table whose rows raise nothing when its columns are read as separate
-/// inputs: `-0` and `-1` share no combination, and between them they
-/// assign all four. Its meaning still depends on which of the two columns
-/// is read as `sig.a`, so it is refused for the list like any other.
+/// Read as two inputs, `-0` and `-1` share no combination and assign all
+/// four, but the meaning still depends on which column is `sig.a`.
 #[test]
 fn a_repeated_input_is_refused_where_its_rows_raise_nothing() {
     let source = table("sig.a, sig.a", "-0 -> 0; -1 -> 1");
@@ -397,8 +375,7 @@ fn a_repeated_input_is_refused_where_its_rows_raise_nothing() {
     assert_eq!(only(&source).code.as_str(), "E_TRUTH_TABLE_DUPLICATE_INPUT");
 }
 
-/// Each repeated signal is its own finding, in the order the signals
-/// first appear, and a table with no rows is refused for its list alone.
+/// A table with no rows is refused for its list alone.
 #[test]
 fn each_repeated_signal_is_reported_once_in_list_order() {
     let found = diagnose(&table("sig.b, sig.a, sig.b, sig.a, sig.a", ""));
@@ -421,10 +398,9 @@ fn each_repeated_signal_is_reported_once_in_list_order() {
     );
 }
 
-/// The input list carries no span of its own, so the finding stands on
-/// the whole statement, and the sentence names the positions instead.
-/// Nothing else holds the span: the finding is the only one its table
-/// gets, so no sibling's order would notice it moving.
+/// The input list carries no span of its own, so the sentence names the
+/// positions. The finding is its table's only one, so no sibling's order
+/// would notice its span moving.
 #[test]
 fn a_repeated_input_stands_on_the_whole_statement() {
     let source = table("sig.a, sig.a", "00 -> 0; 11 -> 1");
@@ -436,13 +412,9 @@ fn a_repeated_input_stands_on_the_whole_statement() {
     );
 }
 
-/// Every other finding reads the rows against the input list, so a table
-/// that repeats a signal gets the repeat and nothing else, whatever its
-/// rows: a conflict on a combination the circuit does see, no rows at all,
-/// and coverage short of reachable combinations as well as impossible
-/// ones. Each table raises its own code once the list is repaired, which
-/// the second half asserts so the first is not passing on a table that was
-/// quiet anyway.
+/// Every other finding reads the rows against the input list. Each table
+/// raises its own code once the list is repaired, so the first half is not
+/// passing on a table that was quiet anyway.
 #[test]
 fn a_repeated_input_is_the_only_finding_its_table_gets() {
     for (inputs, rows, repaired_inputs, repaired_rows, deferred) in [
@@ -475,9 +447,8 @@ fn a_repeated_input_is_the_only_finding_its_table_gets() {
     }
 }
 
-/// A signal listed many times names its first few positions and counts
-/// the rest, the shape the coverage finding's sample takes, so a long
-/// list does not become a long sentence. The column count stays whole.
+/// The same shape as the coverage finding's sample, so a long list does
+/// not become a long sentence.
 #[test]
 fn a_repeated_input_names_four_positions_and_counts_the_rest() {
     for (times, listed) in [
@@ -508,10 +479,8 @@ fn a_repeated_input_names_four_positions_and_counts_the_rest() {
 
 // -- where the table sits -------------------------------------------------
 
-/// The findings are about the statement, so indentation does not change
-/// them. Redstone synthesis already reads a nested `assert` — its
-/// `collect_member` extends the scope's list with `children.asserts` — so
-/// a table under a `level` is as real as one at the top of the body.
+/// Redstone synthesis reads a nested `assert`, so a table under a `level`
+/// is as real as one at the top of the body.
 #[test]
 fn a_table_nested_under_a_level_is_checked() {
     let source = "struct s size=3x3\n  level y=1\n    assert truth(sig.a -> sig.o) { }\n";
@@ -524,9 +493,8 @@ fn a_table_in_a_site_body_is_checked() {
     assert_eq!(codes(source), ["E_TRUTH_TABLE_EMPTY"]);
 }
 
-/// A `def` no `site` places also earns `W_UNUSED_DEF`, which is about the
-/// block and not about the table, so this one reads the truth findings out
-/// of the list rather than asserting its length.
+/// A `def` no `site` places also earns `W_UNUSED_DEF`, so this reads only
+/// the truth findings.
 #[test]
 fn a_table_in_a_def_body_is_checked() {
     let source = "def d size=3x3:\n  assert truth(sig.a -> sig.o) { }\n";
@@ -558,9 +526,8 @@ fn the_partial_finding_carries_the_rows_to_write() {
     assert_eq!(missing, ["01", "10", "11"]);
 }
 
-/// The payload's sample is capped for the same reason the sentence's is,
-/// so a consumer must read the total off `inputs` and `covered` rather
-/// than off the length of the list.
+/// A consumer reads the total off `inputs` and `covered`, not off the
+/// length of the list.
 #[test]
 fn the_payload_sample_is_capped_and_says_nothing_about_the_total() {
     let names: Vec<String> = (0..20).map(|i| format!("sig.a{i}")).collect();
@@ -584,26 +551,19 @@ fn the_payload_sample_is_capped_and_says_nothing_about_the_total() {
 
 // -- don't-care rows ------------------------------------------------------
 
-/// A `-` stands for both values of its input, so one row can close what
-/// would otherwise be two.
+/// A `-` stands for both values of its input.
 #[test]
 fn a_dont_care_row_stands_for_the_rows_it_replaces() {
     assert!(codes(&table("sig.a, sig.b", "0- -> 0; 1- -> 1")).is_empty());
     assert!(codes(&table("sig.a, sig.b, sig.c", "--0 -> 0; --1 -> 1")).is_empty());
 }
 
-/// And a row of nothing but don't-cares closes the table on its own.
-///
-/// A complete table, so no sample is wanted: the count returns before the
-/// search is called, and a pattern that fixes nothing fills every prefix,
-/// so the descent would pass over the whole space even if it were.
 #[test]
 fn a_row_of_only_dont_cares_completes_the_table() {
     assert!(codes(&table("sig.a, sig.b, sig.c", "--- -> 1")).is_empty());
 }
 
-/// Coverage counts combinations rather than rows, so a partial table with
-/// a don't-care reports what the row actually assigns.
+/// Coverage counts combinations, not rows.
 #[test]
 fn a_dont_care_row_is_counted_as_the_combinations_it_assigns() {
     let found = only(&table("sig.a, sig.b, sig.c", "0-- -> 0"));
@@ -615,12 +575,9 @@ fn a_dont_care_row_is_counted_as_the_combinations_it_assigns() {
     );
 }
 
-/// Two rows may not both assign one combination, and a `-` is what makes
-/// that possible without writing the combination out.
-///
 /// The conflict names the combination the two share rather than either
-/// pattern: `0-` and `-1` are different strings, and quoting one of them
-/// would send the author looking for a row that disagrees with itself.
+/// pattern: quoting `0-` or `-1` would send the author looking for a row
+/// that disagrees with itself.
 #[test]
 fn two_rows_that_cross_and_disagree_are_a_conflict() {
     let found = only(&table("sig.a, sig.b", "0- -> 0; -1 -> 1"));
@@ -633,10 +590,8 @@ fn two_rows_that_cross_and_disagree_are_a_conflict() {
     );
 }
 
-/// A row inside an earlier one asserts nothing the earlier one does not,
-/// and is told so in those words — the repair is to delete this row,
-/// which is not what the reader of a bare "repeats an earlier one" would
-/// go looking for.
+/// Said in those words because the repair is to delete this row, which a
+/// bare "repeats an earlier one" would not send the reader looking for.
 #[test]
 fn a_row_inside_an_earlier_one_asserts_nothing_new() {
     let found = only(&table("sig.a, sig.b", "0- -> 0; 01 -> 0; 10 -> 0; 11 -> 0"));
@@ -648,8 +603,7 @@ fn a_row_inside_an_earlier_one_asserts_nothing_new() {
     );
 }
 
-/// An exact repeat keeps the sentence it has always had, because the
-/// repair has not changed: delete either line.
+/// The repair for an exact repeat is to delete either line.
 #[test]
 fn an_exact_repeat_still_reads_as_a_repeat() {
     let found = only(&complete_plus("00->0; 00->0"));
@@ -661,12 +615,9 @@ fn an_exact_repeat_still_reads_as_a_repeat() {
     );
 }
 
-/// Two rows that merely cross are reported even when they agree.
-///
-/// Nothing orders the rows, so there is no reading under which the second
-/// wins and none under which the pair is shorthand for anything. The fix
-/// says to narrow one rather than to delete one, because deleting either
-/// would lose the combinations only it assigns.
+/// Nothing orders the rows, so the pair is shorthand for nothing. The fix
+/// says to narrow one, because deleting either would lose the combinations
+/// only it assigns.
 #[test]
 fn two_rows_that_cross_are_reported_even_when_they_agree() {
     let found = only(&table("sig.a, sig.b", "0- -> 0; -1 -> 0"));
@@ -678,41 +629,28 @@ fn two_rows_that_cross_are_reported_even_when_they_agree() {
     );
 }
 
-/// And a crossing pair silences the coverage finding rather than
-/// answering it with a count that is wrong.
-///
-/// `0-` and `-1` assign `00`, `01` and `11` between them, so the only
-/// combination missing is `10`. Counting the accepted rows alone would
-/// report two of four and name `11` — which the source assigns on the
-/// line above. The assertion is that exactly one finding comes back, and
-/// that it is the overlap.
+/// `0-` and `-1` leave only `10` missing, but counting the accepted rows
+/// alone would report two of four and name `11`, so the count is withheld.
 #[test]
 fn a_crossing_pair_does_not_also_earn_a_coverage_count() {
     let found = only(&table("sig.a, sig.b", "0- -> 0; -1 -> 0"));
     assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
 }
 
-/// A row that is dropped for sitting inside another still leaves the
-/// count right, so the coverage finding stays.
+/// A row dropped for sitting inside another leaves the count right.
 #[test]
 fn a_row_inside_another_still_leaves_the_coverage_finding() {
     let found = codes(&table("sig.a, sig.b", "0- -> 0; 01 -> 0"));
-    // Ordered by where each one points: the coverage finding underlines
-    // the whole `assert truth`, which opens before the row the repeat is
-    // reported on.
+    // Ordered by span: the coverage finding underlines the whole statement.
     assert_eq!(
         found,
         vec!["W_TRUTH_TABLE_PARTIAL", "W_TRUTH_TABLE_DUPLICATE_ROW"],
     );
 }
 
-/// One row whose nineteen don't-cares stand for half a million
-/// combinations, every one of them below the first one missing. What this
-/// pins is the exact payload: the count, and the four lowest combinations
-/// the row does not assign, in order. It does not pin how they are found.
-/// A search that stepped through the row one combination at a time would
-/// return the same payload, only visibly slower at this width, and nothing
-/// here times it.
+/// Nineteen don't-cares put half a million combinations below the first
+/// one missing. This pins the payload, not the search: nothing here times
+/// it.
 #[test]
 fn the_payload_above_a_row_of_half_a_million_combinations_is_exact() {
     let names: Vec<String> = (0..20).map(|i| format!("sig.a{i}")).collect();
@@ -738,23 +676,14 @@ fn the_payload_above_a_row_of_half_a_million_combinations_is_exact() {
     );
 }
 
-/// Two rows fixing one input or two each, with don't-cares above the
-/// lowest position each row fixes: the shape the step-capped search lost
-/// its finding on. The first missing combination is `10…01`, and in front
-/// of it sits every combination up to and including the first of the
-/// upper half, `2^(n-1) + 1` of them, each assigned by one row or the
-/// other — at fifteen inputs 16 385, past that search's 10 000 steps. The
-/// count is exact and so is the sample, at fifteen inputs and at forty:
-/// the finding does not depend on how many combinations sit in front of
-/// the first one missing.
+/// Two rows with don't-cares above the lowest position each fixes. The
+/// first missing combination is `10…01`, and the `2^(n-1) + 1` in front of
+/// it are each assigned by one row or the other: 16 385 at fifteen inputs.
 ///
-/// The forty is the witness that no step cap can come back, and it fails
-/// by hanging. A check for a filled prefix that stops recognising one the
-/// two rows fill between them does not fail this test with a wrong
-/// sample: at fifteen inputs the descent still reaches the right four,
-/// through every combination in front of them, and at forty it does not
-/// finish. Nothing bounds a test's time here, so that lands as a CI run
-/// that hangs rather than as a failed assertion.
+/// At forty inputs a search that visits every combination in front of the
+/// gap does not finish, so a filled-prefix check that stops recognising a
+/// prefix the two rows fill between them shows up as a hung run, not a
+/// failed assertion.
 #[test]
 fn a_two_row_table_reports_its_gap_however_many_combinations_precede_it() {
     for arity in [15usize, 40] {
@@ -792,9 +721,7 @@ fn a_two_row_table_reports_its_gap_however_many_combinations_precede_it() {
     }
 }
 
-/// Fewer combinations missing than the sample holds, scattered so that
-/// each sits under a different prefix: the search finds every one, in
-/// ascending order, and stops there.
+/// The missing combinations each sit under a different prefix.
 #[test]
 fn a_sample_smaller_than_the_cap_names_every_missing_combination() {
     let found = only(&table(
@@ -811,17 +738,11 @@ fn a_sample_smaller_than_the_cap_names_every_missing_combination() {
     assert_eq!(missing, ["001", "100", "111"]);
 }
 
-/// One row fixing every one of thirty-two thousand inputs: the search for
-/// a sample holds its place on the heap, so its depth on the call stack
-/// does not grow with the width.
-///
-/// A search that recursed once per input fails this without failing an
-/// assertion. A stack overflow aborts the process, so it takes the whole
-/// test binary down, the way it takes every pass's findings for the file
-/// in `cairn check` and the server itself in the language server.
-/// Measured on such a recursion in a debug build, a libtest thread's
-/// 2 MiB ran out near 4 500 inputs and an 8 MiB thread, the usual size
-/// of a Linux main thread's, near 18 000, so thirty-two thousand is past
+/// A search recursing once per input overflows the stack, which aborts
+/// the whole test binary rather than failing an assertion (and takes down
+/// `cairn check` or the language server the same way). In a debug build
+/// such a recursion ran out near 4 500 inputs on libtest's 2 MiB thread
+/// and near 18 000 on an 8 MiB main thread, so thirty-two thousand is past
 /// both.
 #[test]
 fn a_table_thirty_two_thousand_inputs_wide_is_searched_without_recursing() {
@@ -848,15 +769,9 @@ fn a_table_thirty_two_thousand_inputs_wide_is_searched_without_recursing() {
 
 // -- don't-care outputs ---------------------------------------------------
 
-/// The shape this construct exists for: a table whose author means to
-/// constrain half the combinations and to say nothing about the other
-/// half.
-///
-/// Three inputs, one of them an enable, and every combination with the
-/// enable low deliberately unconstrained. Without the `-` output the four
-/// enabled rows raise `W_TRUTH_TABLE_PARTIAL`, and the only ways to answer
-/// it would be to assert four outputs the author does not mean or to leave
-/// the warning standing.
+/// The case a `-` output exists for: every combination with the enable low
+/// left unconstrained, which otherwise could only be answered by asserting
+/// outputs the author does not mean.
 #[test]
 fn a_dash_output_answers_the_coverage_finding() {
     let enabled = "001 -> 0; 011 -> 1; 101 -> 1; 111 -> 1";
@@ -874,8 +789,7 @@ fn a_dash_output_answers_the_coverage_finding() {
 }
 
 /// A `-` output covers its combinations without asserting anything about
-/// them, so it moves the coverage finding and nothing else: the two
-/// combinations `01-` stands for join the count and leave the sample.
+/// them.
 #[test]
 fn a_dash_output_counts_toward_coverage_like_any_other_row() {
     let without = only(&table("sig.a, sig.b, sig.c", "00- -> 0"));
@@ -894,8 +808,7 @@ fn a_dash_output_counts_toward_coverage_like_any_other_row() {
 }
 
 /// A table of nothing but `-` outputs is the empty table written at
-/// length, and earns the empty table's error rather than a coverage
-/// warning it would pass.
+/// length.
 #[test]
 fn a_table_of_only_dash_outputs_verifies_nothing() {
     let found = only(&table("sig.a, sig.b", "0- -> -; 1- -> -"));
@@ -908,8 +821,8 @@ fn a_table_of_only_dash_outputs_verifies_nothing() {
     );
 }
 
-/// The table above is complete by the coverage arithmetic, which is
-/// exactly why the finding cannot be left to it.
+/// Such a table is complete by the coverage arithmetic, which is why the
+/// finding cannot be left to it.
 #[test]
 fn a_complete_table_of_dash_outputs_is_still_refused() {
     assert_eq!(
@@ -918,9 +831,8 @@ fn a_complete_table_of_dash_outputs_is_still_refused() {
     );
 }
 
-/// A `-` asserts nothing for a concrete output to contradict, so the pair
-/// is not a circuit asked for two things — but it is not two rows saying
-/// the same thing either, and the finding has to say which.
+/// The pair is neither a contradiction nor two rows saying the same thing,
+/// so the finding says which row does which.
 #[test]
 fn a_dash_output_contradicts_nothing_and_agrees_with_nothing() {
     let source = complete_plus("00 -> 0; 00 -> -");
@@ -935,9 +847,8 @@ fn a_dash_output_contradicts_nothing_and_agrees_with_nothing() {
     assert_eq!(underlined(&source, &found.span), "00 -> -");
 }
 
-/// And the same pair the other way round, which is the reading the fix
-/// sentence turns on: whichever row stays, the table says something
-/// different, so "delete either row" would be wrong here.
+/// Whichever row stays, the table says something different, so "delete
+/// either row" would be wrong.
 #[test]
 fn a_row_under_an_earlier_dash_output_names_the_earlier_row_as_the_lenient_one() {
     let source = table("sig.a, sig.b", "0- -> -; 01 -> 1; 10 -> 0; 11 -> 0");
@@ -958,8 +869,7 @@ fn a_row_under_an_earlier_dash_output_names_the_earlier_row_as_the_lenient_one()
     assert_eq!(underlined(&source, &found.span), "01 -> 1");
 }
 
-/// Two `-` rows over one combination *do* say the same thing, so that
-/// pair keeps the duplicate-row family's own repair.
+/// Two `-` rows over one combination do say the same thing.
 #[test]
 fn two_dash_outputs_over_one_combination_are_an_ordinary_repeat() {
     let source = table("sig.a, sig.b", "0- -> -; 01 -> -; 10 -> 0; 11 -> 0");
@@ -973,18 +883,10 @@ fn two_dash_outputs_over_one_combination_are_an_ordinary_repeat() {
     );
 }
 
-/// A broad `-` row written first does not make the table empty.
-///
-/// The shape every other `-`-output fixture here misses, because each
-/// pads its table with concrete rows the overlap scan keeps. Acceptance
-/// is first-come, so the row dropped for overlapping is the *later*
-/// one — write `--` first and the concrete row after it is the one that
-/// goes, leaving nothing but `-` outputs among the survivors while the
-/// author is looking at a `1` in the source.
-///
-/// `-` first with the exceptions after is the ordinary way to write a
-/// default-plus-exception table, so this is a habit rather than a
-/// contrivance.
+/// Acceptance is first-come, so the concrete row after `--` is the one
+/// dropped for overlapping, leaving only `-` outputs among the kept rows
+/// while the source has a `1`. A default first and its exceptions after is
+/// the ordinary way to write such a table.
 #[test]
 fn a_broad_dash_row_written_first_does_not_empty_the_table() {
     assert_eq!(
@@ -994,11 +896,7 @@ fn a_broad_dash_row_written_first_does_not_empty_the_table() {
     );
 }
 
-/// And the coverage count stays right through it.
-///
-/// `0-` covers `00` and `01` and nothing else, so `10` and `11` really
-/// are unassigned — the overlap that drops `01` is subsumed, which is
-/// what keeps the count exact.
+/// The overlap that drops `01` is subsumed, which keeps the count exact.
 #[test]
 fn a_broad_dash_row_written_first_still_earns_its_coverage_finding() {
     let found = diagnose(&table("sig.a, sig.b", "0- -> -; 01 -> 1"));
@@ -1015,7 +913,6 @@ fn a_broad_dash_row_written_first_still_earns_its_coverage_finding() {
     );
 }
 
-/// A `-` output does not launder a real contradiction sitting beside it.
 #[test]
 fn a_dash_output_elsewhere_leaves_a_conflict_a_conflict() {
     assert_eq!(
@@ -1077,7 +974,7 @@ fn per_row_codes(source: &str, written: &[String], found: &[Diagnostic]) -> Vec<
 }
 
 /// Every order of `rows` reports, row by row, what the enumeration says
-/// that order should — not only that some conflict survives somewhere.
+/// that order should.
 fn assert_every_order_matches_the_enumeration(rows: &[&str], orders_expected: usize) {
     let orders = permutations(rows);
     assert_eq!(
@@ -1111,12 +1008,9 @@ fn assert_every_order_matches_the_enumeration(rows: &[&str], orders_expected: us
     }
 }
 
-/// Whether a table is refused cannot depend on the order its rows are
-/// written in.
-///
 /// `0- -> 1` agrees with `00 -> 1` and contradicts `01 -> 0`. Compared
-/// with only the first earlier row it overlaps, it is refused when that
-/// row is `01` and passes when it is `00`.
+/// with only the first earlier row it overlaps, its verdict would depend
+/// on the order the rows are written in.
 #[test]
 fn a_row_overlapping_several_earlier_rows_is_compared_with_each() {
     assert_every_order_matches_the_enumeration(
@@ -1125,19 +1019,15 @@ fn a_row_overlapping_several_earlier_rows_is_compared_with_each() {
     );
 }
 
-/// A row dropped for overlapping is still a row the author wrote, and a
-/// later row contradicting it is a conflict.
-///
-/// `-0` is dropped for crossing `0-`, and `10` meets nothing else: it
-/// overlaps `-0` and nothing the table kept.
+/// A dropped row is still a row the author wrote. `-0` is dropped for
+/// crossing `0-`, and `10` overlaps `-0` and nothing the table kept.
 #[test]
 fn a_row_contradicting_a_dropped_row_is_a_conflict() {
     assert_every_order_matches_the_enumeration(&["0- -> 1", "-0 -> 1", "10 -> 0", "11 -> 0"], 24);
 }
 
-/// And the conflict is noted at that dropped row, with the output it
-/// assigns — the path the note's wording argues about, since the row the
-/// later one contradicts is not one the table kept.
+/// The row contradicted is not one the table kept, which is the case the
+/// note's wording has to handle.
 #[test]
 fn a_conflict_with_a_dropped_row_is_noted_at_the_dropped_row() {
     let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 10 -> 0; 11 -> 0");
@@ -1158,8 +1048,7 @@ fn a_conflict_with_a_dropped_row_is_noted_at_the_dropped_row() {
     assert_eq!(note.message, "first row assigning `10` the output `1` here");
 }
 
-/// The conflict names the row it contradicts, and the output that row
-/// assigns, rather than the first row the later one happens to overlap.
+/// Not at the first row the later one happens to overlap.
 #[test]
 fn a_conflict_is_noted_at_the_row_it_contradicts() {
     let source = table(
@@ -1185,9 +1074,7 @@ fn a_conflict_is_noted_at_the_row_it_contradicts() {
     );
 }
 
-/// A row contradicting several earlier rows is noted at the first of
-/// them, which is the first row assigning the combination the other
-/// output: `00 -> 0` contradicts both `0-` and `-0`.
+/// `00 -> 0` contradicts both `0-` and `-0`.
 #[test]
 fn a_conflict_with_several_rows_is_noted_at_the_first() {
     let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 00 -> 0; 11 -> 0");
@@ -1206,9 +1093,8 @@ fn a_conflict_with_several_rows_is_noted_at_the_first() {
     );
 }
 
-/// A `-` output written first does not stand between two rows that
-/// contradict each other under it: both are compared with the `-` row,
-/// which neither contradicts, and the second is compared with the first.
+/// Both rows are compared with the `-` row, which neither contradicts, and
+/// the second is also compared with the first.
 #[test]
 fn a_dash_output_row_written_first_does_not_hide_a_conflict_under_it() {
     let source = table("sig.a, sig.b", "0- -> -; 00 -> 0; 00 -> 1; 1- -> 0");
@@ -1229,12 +1115,8 @@ fn a_dash_output_row_written_first_does_not_hide_a_conflict_under_it() {
     assert_eq!(noted(&found[1]), "00 -> 0");
 }
 
-/// Every finding about one combination sends the author to the same row,
-/// and that row is the first to assign it — even when that row was
-/// dropped for overlapping a row before it.
-///
-/// `0-` crosses `00` and is dropped; both `01` rows fall inside it, and
-/// both are noted there rather than the second at the first `01`.
+/// Even when that row was dropped: `0-` crosses `00` and is dropped, and
+/// both `01` rows are noted there rather than the second at the first.
 #[test]
 fn every_finding_about_a_combination_is_noted_at_the_first_row_assigning_it() {
     let source = table(
@@ -1262,13 +1144,8 @@ fn every_finding_about_a_combination_is_noted_at_the_first_row_assigning_it() {
     }
 }
 
-/// The advice a row gets never leans on an earlier row that is itself
-/// being asked to change.
-///
-/// `10` is inside `-0`, so on its own it would be told to delete itself
-/// because `-0` stands for it. But `-0` is told to narrow away from
-/// `0-`, and following both would leave `10` unassigned. The repair is
-/// to settle `-0` first.
+/// `10` is inside `-0`, which is told to narrow away from `0-`, so
+/// deleting `10` as well would leave it unassigned.
 #[test]
 fn a_row_inside_a_reported_row_is_told_to_settle_that_row_first() {
     let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 10 -> 1; 11 -> 0");
@@ -1292,9 +1169,8 @@ fn a_row_inside_a_reported_row_is_told_to_settle_that_row_first() {
     );
 }
 
-/// The same for a `-` output under a reported row, whose usual repair —
-/// delete whichever of the two you did not mean — would also send the
-/// author to a row that is separately being asked to narrow.
+/// The usual repair, delete whichever of the two you did not mean, would
+/// also send the author to a row that is being asked to narrow.
 #[test]
 fn a_dash_output_inside_a_reported_row_is_told_to_settle_that_row_first() {
     let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 10 -> -");
@@ -1313,13 +1189,8 @@ fn a_dash_output_inside_a_reported_row_is_told_to_settle_that_row_first() {
     );
 }
 
-/// A row can be accepted and still carry a finding, when every row it
-/// overlaps was dropped — and that does not make the coverage count
-/// speak.
-///
-/// `0-0` crosses `00-` and is dropped; `010` overlaps only `0-0`, so it is
-/// accepted with a finding. The accepted rows cover 3 of 8, but the
-/// crossing already withheld the count, and it stays withheld.
+/// `0-0` crosses `00-` and is dropped, and `010` overlaps only `0-0`, so it
+/// is accepted with a finding. The crossing has withheld the count.
 #[test]
 fn a_row_accepted_with_a_finding_does_not_earn_a_coverage_count() {
     assert_eq!(
@@ -1488,9 +1359,8 @@ fn assert_table_findings_are_sound(
             Some(other) => panic!("unexpected payload {other:?}: {source}"),
         }
     }
-    // The loop above only asks whether the findings it was given are sound.
-    // A table no row finding was raised on has no dropped rows, so its count
-    // is countable, and an incomplete one has to be reported.
+    // A table with no row finding has no dropped rows, so its count is
+    // exact and an incomplete one has to be reported.
     if !all_dash && row_findings == 0 && assigned.len() < total {
         assert_eq!(
             partial_findings, 1,
@@ -1508,18 +1378,8 @@ fn assert_table_findings_are_sound(
     partial_findings
 }
 
-/// The overlap verdicts, compared with a combination-by-combination
-/// enumeration over tables of one to four inputs, and the table-level
-/// findings checked against the same enumeration.
-///
-/// The tables are drawn from a fixed-seed generator, so a failure replays.
-/// Every row gets a verdict: which finding, if any, is reported on it.
-/// Every other finding is about the table, and has to be one the
-/// enumeration allows: the empty-table error exactly when no row has a
-/// concrete output, and a coverage warning only with the true count and
-/// naming the lowest combinations no row assigns, up to [`SAMPLE_CAP`]
-/// of them, in order. A table with no row finding and a combination left
-/// over gets that warning exactly once.
+/// Tables of one to four inputs from a fixed-seed generator, so a failure
+/// replays.
 #[test]
 fn every_row_verdict_matches_an_enumeration_of_its_combinations() {
     let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
@@ -1530,12 +1390,9 @@ fn every_row_verdict_matches_an_enumeration_of_its_combinations() {
         state % bound
     };
     let digit = |n: u64| ['0', '1', '-'][usize::try_from(n).expect("below three")];
-    // The shapes this check exists for, counted so the generator cannot
-    // drift away from them while still producing ordinary conflicts: a
-    // row that agrees with the first earlier row it overlaps and
-    // contradicts a later one, and a row whose noted row itself overlaps
-    // a row before it. The seed reaches 709 and 1366 of them, and 1021
-    // coverage findings; the floors below are about half of each.
+    // Counted so the generator cannot drift away from the shapes this check
+    // exists for. The seed reaches 709 and 1366 of them, and 1021 coverage
+    // findings; the floors below are about half of each.
     let mut contradicts_past_its_first_overlap = 0;
     let mut noted_at_an_overlapping_row = 0;
     let mut partial_findings = 0;

@@ -55,9 +55,7 @@ fn struct_size_set_to_integer_is_flagged() {
 
 #[test]
 fn window_size_with_proper_literal_passes() {
-    // `at=` is a door anchor (`spec/syntax` "Selectors") and a window does
-    // not read it; the second argument is here only so the line under test
-    // carries more than the one key it is about.
+    // `side=` is here only so the line carries more than the key under test.
     let src = "struct s size=4x4\n  window size=2x2 side=front\n";
     let diags = diagnose(src);
     assert!(
@@ -68,8 +66,6 @@ fn window_size_with_proper_literal_passes() {
 
 #[test]
 fn duplicate_size_and_size_mismatch_pass_independently() {
-    // `struct s size=2x2 size=foo` is BOTH a duplicate size= AND a
-    // size= with the wrong value type. The two passes are independent.
     let src = "struct s size=2x2 size=foo\n  floor\n";
     let diags = diagnose(src);
     let codes: Vec<_> = diags.iter().map(|d| d.code).collect();
@@ -90,11 +86,9 @@ slot floor -> @oak_planks\n\n\
 def hut size=3x3:\n  \
 floor id=floor mat_slot=floor\n\n";
 
-/// `use=` and `theme=` are label-typed like `id=` / `class=` /
-/// `mat_slot=`, but they were outside `LABEL_KEYS` because lowering does
-/// not hoist them onto `Member`'s own fields. The author cannot see that
-/// difference; what they saw was the resolver's silent `continue`, which
-/// drops the entire placement.
+/// `use=` and `theme=` stay in `intent_state` rather than on `Member`'s own
+/// fields, and the resolver drops a placement whose value is not a label
+/// without a word, so this finding is what says why.
 #[test]
 fn place_use_and_theme_with_a_non_label_value_are_flagged() {
     for (row, offending) in [
@@ -125,9 +119,8 @@ fn place_use_and_theme_accept_identifiers_and_strings() {
     }
 }
 
-/// An absent key is a different case from a mistyped one: `use=` is
-/// optional in the surface grammar, and the resolver's skip for it is
-/// deliberate. Only the present-but-wrong shape belongs to this pass.
+/// An absent key is `E_INCOMPLETE_PLACE`'s; only the present-but-wrong
+/// shape belongs to this pass.
 #[test]
 fn an_absent_use_or_theme_is_not_a_type_mismatch() {
     for row in [
