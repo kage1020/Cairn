@@ -1,13 +1,8 @@
-//! Integration tests for `cairn_lang_redstone::compile_crossing`.
-//!
-//! Locks the observable behaviours of the crossing-legalization slice
-//! (stage 4 of the pipeline `spec/redstone` "Place-and-route"), among
-//! them the `examples/redstone-door.crn` happy path (per edition), the
-//! JSON wire form staying byte-identical to the delayed IR apart from
-//! the `stage` tag when no buffer coord landed (the field serde-skips
-//! on its default), the tag itself keeping a zero-buffer legalized dump
-//! distinguishable from its delayed input, and the loud refusal of a
-//! second run over the pass's own output.
+//! `compile_crossing`, stage 4 of the pipeline `spec/redstone`
+//! "Place-and-route", over real synth fixtures: each example per edition,
+//! a wire form that differs from the delayed IR only in the `stage` tag
+//! when no buffer coord landed, and the refusal of a second run over the
+//! pass's own output.
 //!
 //! `examples/crossbar.crn` makes a net go round others: `cell #0`'s run
 //! climbs onto the bridge layer to clear the two sensor lanes, the
@@ -271,7 +266,7 @@ fn cells_that_restore_strength_start_the_count_again() {
     }
 }
 
-/// AC1 — `examples/redstone-door.crn` compiled for Java survives
+/// `examples/redstone-door.crn` compiled for Java survives
 /// crossing legalization: every driver segment sits under the
 /// dust-attenuation limit of 15, and its one cell, an `or`, lowers to
 /// `JavaRepeaterOr`, which restores strength — so no run of dust
@@ -321,7 +316,7 @@ fn redstone_door_java_carries_no_buffers() {
     );
 }
 
-/// AC2 — the same example compiled for Bedrock legalizes identically:
+/// The same example compiled for Bedrock legalizes identically:
 /// the cell realisation swaps and the geometry does not, so the same
 /// nets take the same coords. `wire_length` and `local_delay_ticks` are
 /// preserved verbatim from the delayed IR.
@@ -354,7 +349,7 @@ fn redstone_door_bedrock_carries_no_buffers() {
     assert!(cell.buffer_coords().is_empty(), "no buffer expected");
 }
 
-/// AC4 — apart from the `stage` tag, the JSON wire form of the
+/// Apart from the `stage` tag, the JSON wire form of the
 /// legalized IR equals the delayed IR verbatim when no crossing /
 /// buffer coord landed on a non-`Plane` layer. Both `buffer_coords`
 /// (empty) and `layer` (Plane) serde-skip under those conditions, so

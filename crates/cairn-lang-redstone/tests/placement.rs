@@ -1,15 +1,8 @@
-//! Integration tests for `cairn_lang_redstone::compile_placement`.
-//!
-//! Locks the observable behaviours of the Placement IR slice
-//! (stage 1 of the pipeline `spec/redstone` "Place-and-route"): the
-//! `examples/redstone-door.crn` happy path (per edition), 1D topological
-//! coordinate assignment across a multi-cell scope, `E_ROUTE_CONGESTION`
-//! when the netlist exceeds the reservation, `E_NO_CIRCUIT_REGION` when
-//! a scope has cells but no usable `circuit region=` line (on the line
-//! that reserves nothing, with its reason, or on what needed the
-//! reservation when there is no line), empty-scope elision, the JSON
-//! wire form, and per-scope independence when a module carries more than
-//! one scope.
+//! `compile_placement`, stage 1 of the pipeline `spec/redstone`
+//! "Place-and-route": cell coordinates inside each scope's
+//! `circuit region=` reservation, `E_ROUTE_CONGESTION` for a netlist the
+//! reservation cannot hold, and `E_NO_CIRCUIT_REGION` for a scope with no
+//! usable reservation.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
@@ -19,7 +12,7 @@ use cairn_lang_redstone::{DiagnosticCode, EditionCell, ScopedEditionNetlistIr, c
 mod common;
 use common::{edition_netlist_from_source, load_example};
 
-/// AC1 — `examples/redstone-door.crn` compiled for Java places its lone
+/// `examples/redstone-door.crn` compiled for Java places its lone
 /// `JavaRepeaterOr` cell one column in from the pad column of its
 /// `circuit region=floor void=2` reservation, and the reservation
 /// copies the enclosing struct's `size=7x5` footprint. `wire_length`
@@ -67,9 +60,9 @@ fn redstone_door_java_places_or_cell_beside_the_pad_column() {
     );
 }
 
-/// AC2 — the same example compiled for Bedrock places its `BedrockTorchOr`
+/// The same example compiled for Bedrock places its `BedrockTorchOr`
 /// cell at the same coordinate against the same reservation; only the
-/// `cell` tag and the `edition` field differ from AC1.
+/// `cell` tag and the `edition` field differ from the Java layout.
 #[test]
 fn redstone_door_bedrock_matches_java_layout_apart_from_cell_tag() {
     let source = load_example("redstone-door.crn");
@@ -100,7 +93,7 @@ fn redstone_door_bedrock_matches_java_layout_apart_from_cell_tag() {
     }
 }
 
-/// AC3 — a scope whose logic produces three distinct cells lays them
+/// A scope whose logic produces three distinct cells lays them
 /// out at `x = 1, 3, 5` in the same topological order the Netlist IR
 /// carried through, on the one row at `y = 0`, `z = 1` (1D placement).
 #[test]
@@ -153,7 +146,7 @@ struct sim size=7x5
     }
 }
 
-/// AC4 — a scope whose synthesised netlist needs more area than its
+/// A scope whose synthesised netlist needs more area than its
 /// reservation offers fires `E_ROUTE_CONGESTION`, anchors the primary
 /// span at the `circuit region=` line, quotes the ratio in the primary
 /// prose per `spec/redstone` "Place-and-route", carries the three-fix
@@ -250,8 +243,8 @@ struct tiny size=3x3
     );
 }
 
-/// AC5 — a scope with cells to place but no `circuit region=` line
-/// fires `E_NO_CIRCUIT_REGION`. Same elision policy as AC4: the failed
+/// A scope with cells to place but no `circuit region=` line
+/// fires `E_NO_CIRCUIT_REGION`. Same elision policy as congestion: the failed
 /// scope drops out so a caller cannot mistake a partial layout for a
 /// finished one.
 #[test]
@@ -291,7 +284,7 @@ struct nomarker size=7x5
     );
 }
 
-/// AC6 — a scope whose Edition Netlist IR was empty stays elided in
+/// A scope whose Edition Netlist IR was empty stays elided in
 /// the Placement IR (nothing to place, nothing to say).
 #[test]
 fn empty_edition_netlist_produces_no_placement_entry() {
@@ -304,7 +297,7 @@ fn empty_edition_netlist_produces_no_placement_entry() {
     assert!(out.scoped.scopes.is_empty());
 }
 
-/// AC7 — the JSON dump carries `edition`, a `region` object with the
+/// The JSON dump carries `edition`, a `region` object with the
 /// four reservation fields, a per-cell `coord` object, and the
 /// `stage` tag naming the pass that produced it. `wire_length` and
 /// `local_delay_ticks` are absent (the phase this stage stamps carries
@@ -344,7 +337,7 @@ fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
     );
 }
 
-/// `AC5b` — a scope that DECLARED a `circuit region=` line but has no
+/// A scope that DECLARED a `circuit region=` line but has no
 /// `size=WxH` header (here a `def`) cannot be placed:
 /// there is no reservation footprint to budget against, so the pass
 /// falls back to `E_NO_CIRCUIT_REGION`. The finding stands on that
@@ -405,7 +398,7 @@ fn fix_line(diagnostic: &cairn_lang_redstone::Diagnostic) -> &str {
         .message
 }
 
-/// `AC5c` — a scope that declared `circuit region=floor void=0` must
+/// A scope that declared `circuit region=floor void=0` must
 /// not silently look like "no reservation declared". The parser accepts
 /// the line; the intent lift (`circuit_lines`) is what finds `void=0`
 /// reserves nothing. The `E_NO_CIRCUIT_REGION` finding stands on the
@@ -870,7 +863,7 @@ struct dup size=7x5
     assert_eq!(region.void, 2);
 }
 
-/// AC8 — two non-empty scopes are placed independently: each looks up
+/// Two non-empty scopes are placed independently: each looks up
 /// its own reservation, one scope's failure does not poison the other,
 /// and per-scope contents do not bleed across.
 #[test]

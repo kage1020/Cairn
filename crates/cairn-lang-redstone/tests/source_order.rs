@@ -1,18 +1,12 @@
-//! The synth walk has to come out in the order the file reads.
+//! The synth walk comes out in the order the file reads.
 //!
-//! Two readers depend on it and say so. `LogicIr`'s node list is
-//! documented as reading top-to-bottom the way the source does, and
-//! `ScopedLogicIr` as holding its scopes "in source order across the whole
-//! module". Neither held: `IntentModule` files scopes into three vectors by
-//! kind, and a body into a members vector and a logic vector, so the walk
-//! recovered a grouping rather than an order.
-//!
-//! The visible cost was not the dump. `E_LOGIC_MULTIPLE_DRIVERS` reports at
-//! the redefinition and notes "first declared here" at the original — so
-//! when a `level`-nested binding was collected ahead of a top-level one
-//! written above it, the finding accused the earlier line of redefining
-//! what the later line declared, and told the author to look down the file
-//! for the definition that was above them all along.
+//! `LogicIr`'s node list reads top-to-bottom the way the source does, and
+//! `ScopedLogicIr` holds its scopes in source order across the whole
+//! module, although `IntentModule` files scopes into three vectors by
+//! kind and a body into a members vector and a logic vector. The order is
+//! what `E_LOGIC_MULTIPLE_DRIVERS` leans on to report at the redefinition
+//! and note "first declared here" at the original, including for a
+//! `level`-nested binding written below a top-level one.
 
 use cairn_lang_redstone::{DiagnosticCode, ScopeKind, SignalRef};
 

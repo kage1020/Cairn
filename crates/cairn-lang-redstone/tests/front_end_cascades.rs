@@ -1,6 +1,6 @@
 //! What each refusal takes away, and what it must not take away with it.
 //!
-//! The front end declines a binding in four ways now — a sensor tail on a
+//! The front end declines a binding in four ways — a sensor tail on a
 //! member that cannot emit, an actuator key on the wrong component, a
 //! signal-valued key nothing reads, and a `logic` left-hand side outside
 //! the `sig.` namespace — and a member whose keyword the role table does

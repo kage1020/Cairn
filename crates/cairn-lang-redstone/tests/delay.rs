@@ -1,16 +1,9 @@
-//! Integration tests for `cairn_lang_redstone::compile_delay`.
-//!
-//! Locks the observable behaviours of the delay-insertion slice
-//! (stage 3 of the pipeline `spec/redstone` "Place-and-route"): the
-//! `examples/redstone-door.crn` happy path (per edition),
-//! multi-cell cascade `local_delay_ticks` attribution pinned to base delay
-//! plus implicit buffer repeaters, `E_ATTENUATION_LIMIT` when a driver
-//! segment exceeds the v1 sanity cap, pass-through of scopes elided by
-//! upstream stages, the JSON wire form growing a `local_delay_ticks` field,
-//! a wire form otherwise byte-identical to the routed IR apart from
-//! the `stage` tag (delay writes nothing but `local_delay_ticks`), and
-//! per-scope independence when
-//! a module carries more than one scope.
+//! `compile_delay`, stage 3 of the pipeline `spec/redstone`
+//! "Place-and-route": each cell's `local_delay_ticks` as its base delay
+//! plus the implicit buffer repeaters on the nets feeding it,
+//! `E_ATTENUATION_LIMIT` past the segment cap, and a wire form that
+//! differs from the routed IR only in `local_delay_ticks` and the `stage`
+//! tag.
 //!
 //! Every figure asserted here is a local wire cost, not an arrival
 //! time; the `cairn_lang_redstone::delay` module doc sets out the
@@ -29,7 +22,7 @@ use common::{
     load_example, normalize_stage_tags, placement_from_source, routed_from_source, strip_int_field,
 };
 
-/// AC1 — `examples/redstone-door.crn` compiled for Java: the sole
+/// `examples/redstone-door.crn` compiled for Java: the sole
 /// `JavaRepeaterOr` cell picks up `local_delay_ticks = Some(1)` — base 1 tick
 /// from the repeater realisation, zero implicit buffer repeaters
 /// because both driver segments (2 blocks each) sit under the
@@ -69,7 +62,7 @@ fn redstone_door_java_local_delay_ticks_equal_base_repeater_delay() {
     );
 }
 
-/// AC2 — the same example compiled for Bedrock: the sole
+/// The same example compiled for Bedrock: the sole
 /// `BedrockTorchOr` cell picks up `local_delay_ticks = Some(0)` — dust-merge
 /// realisation carries no cell tick, and both driver segments (2
 /// blocks each) are under the attenuation limit so no buffer ticks
@@ -109,7 +102,7 @@ fn redstone_door_bedrock_local_delay_ticks_are_zero() {
     );
 }
 
-/// AC3 — a scope whose logic produces three cascaded cells fills
+/// A scope whose logic produces three cascaded cells fills
 /// every cell's `local_delay_ticks` with a pinned tick sum. Same 3-cell
 /// fixture the routing suite pins: `sig.and_ab = sig.a and sig.b`,
 /// `sig.or_ab = sig.a or sig.b`, `sig.combined = sig.and_ab and
@@ -176,7 +169,7 @@ struct sim size=7x5
     );
 }
 
-/// AC4 — a scope whose routed output-pad segment exceeds
+/// A scope whose routed output-pad segment exceeds
 /// [`MAX_ATTENUATION_SEGMENT`] fires `E_ATTENUATION_LIMIT`, elides
 /// the failed scope, and never writes a partial `local_delay_ticks` set.
 /// The fixture uses a very wide region (width > 256) so the sole
@@ -302,7 +295,7 @@ struct narrow_pack size=20x5
     );
 }
 
-/// AC5 — a scope with a cascaded chain long enough to push at least
+/// A scope with a cascaded chain long enough to push at least
 /// one cell's shared driver segment past
 /// [`DUST_ATTENUATION_LIMIT`] but not past
 /// [`MAX_ATTENUATION_SEGMENT`] gets `local_delay_ticks` bumped by the
@@ -409,7 +402,7 @@ struct chain size=40x5
     );
 }
 
-/// `AC5b` — `sig.and_ab = sig.a and sig.b` on Bedrock lowers to
+/// `sig.and_ab = sig.a and sig.b` on Bedrock lowers to
 /// `BedrockTorchAnd` whose `base_delay_ticks() = 2` (two-torch
 /// NAND→NAND stacked in series). Pins the only pinned base delay
 /// that is neither 0 nor 1 — without this fixture a typo swapping
@@ -450,7 +443,7 @@ struct band size=5x5
     );
 }
 
-/// `AC5c` — output-pad routed segment of exactly
+/// Output-pad routed segment of exactly
 /// `MAX_ATTENUATION_SEGMENT` blocks passes cleanly; one more block
 /// fails. Pins the `>` vs `>=` boundary in `delay_scope`'s sanity
 /// check so a future rewrite cannot silently slide the cap by one.
@@ -521,7 +514,7 @@ fn max_attenuation_segment_boundary_at_257_is_exclusive() {
     assert_eq!(MAX_ATTENUATION_SEGMENT, 256);
 }
 
-/// AC6 — an empty `ScopedPlacementIr` (no scopes) delays to an empty
+/// An empty `ScopedPlacementIr` (no scopes) delays to an empty
 /// `ScopedPlacementIr` with zero diagnostics: delay insertion is a
 /// per-scope map, so no scopes ⇒ no work ⇒ no findings.
 #[test]
@@ -532,7 +525,7 @@ fn empty_placement_ir_produces_empty_delay_output() {
     assert!(delayed.scoped.scopes.is_empty());
 }
 
-/// AC7 — a scope whose Placement IR carries inputs and outputs but no
+/// A scope whose Placement IR carries inputs and outputs but no
 /// cells (identity wire) reaches the delay pass now that placement
 /// gives its actuator a pad. Across a 5-wide region the segment is four
 /// blocks, well inside the attenuation limit, so it is charged nothing:
@@ -571,7 +564,7 @@ struct wire size=5x5
     );
 }
 
-/// AC8 — the JSON dump of a delayed Placement IR carries both
+/// The JSON dump of a delayed Placement IR carries both
 /// `"wire_length"` (routing's field) and `"local_delay_ticks"` (this pass's
 /// field) on every cell object. Pins the wire-form contract that
 /// distinguishes `--stage route` (no `local_delay_ticks`) from `--stage
@@ -597,7 +590,7 @@ fn json_dump_carries_local_delay_ticks_and_preserves_wire_length() {
     );
 }
 
-/// `AC8b` — delay insertion must not perturb any Placement IR field
+/// Delay insertion must not perturb any Placement IR field
 /// other than `local_delay_ticks` and the `stage` tag. Serialise the routed
 /// and delayed outputs to compact JSON, strip the delayed side's
 /// `,"local_delay_ticks":<int>` entries, normalise both sides' stage tags,
@@ -636,7 +629,7 @@ fn delay_leaves_routed_fields_byte_identical_apart_from_local_delay_ticks_and_st
     );
 }
 
-/// AC9 — Java and Bedrock `InverterTorch` both carry base 1 tick, so
+/// Java and Bedrock `InverterTorch` both carry base 1 tick, so
 /// a `sig.x = not sig.a` fixture produces matching `local_delay_ticks` on
 /// both editions even though the cell tag differs. Pins the "delay
 /// is edition-specific by cell choice, but edition-agnostic when the
@@ -684,7 +677,7 @@ struct inv size=5x5
     );
 }
 
-/// AC10 — one scope's refusal does not disturb its sibling. A clean
+/// One scope's refusal does not disturb its sibling. A clean
 /// scope passes through with `local_delay_ticks` populated while the
 /// scope that trips the attenuation cap elides; scope order for
 /// survivors matches input order.
@@ -772,7 +765,7 @@ struct wide_pack size=300x5
     );
 }
 
-/// AC11 — chaining `compile_delay(&delayed.scoped)` is forbidden by
+/// Chaining `compile_delay(&delayed.scoped)` is forbidden by
 /// the producer↔variant table on `PlacementPhase`, and the panic it
 /// raises names
 /// the cell that tripped it. Mirrors the routing pass's equivalent

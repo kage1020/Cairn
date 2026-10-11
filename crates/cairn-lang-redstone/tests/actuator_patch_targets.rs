@@ -3,20 +3,12 @@
 //!
 //! `spec/redstone` "Signal binding": a binding written where no component
 //! reads it "would put a port in the netlist with no component behind
-//! it". The front end used to register an actuator from the line it was
-//! written on and nothing else, so two shapes got a port and a placed pad
-//! with nothing behind them, both exiting 0:
-//!
-//! - a selector-form patch whose `[id=]` names no physical door — which
-//!   block-array lowering already deferred, from a lookup of its own that
-//!   the front end never asked; and
-//! - a second binding on one door, which became a second output port
-//!   into it: a wired OR the logic layer never states.
-//!
-//! The third shape the same gap let through, a `->` tail on a sensor
-//! keyword in the selector form, is `check`'s `E_MISPLACED_BINDING` now
-//! (`cairn-lang-core/tests/check_binding.rs`); what this pass owes such a
-//! line is the input it no longer registers.
+//! it". Two shapes are refused here: a selector-form patch whose `[id=]`
+//! names no physical door, and a second binding on one door, which would
+//! be a second output port into it — a wired OR the logic layer never
+//! states. A `->` tail on a sensor keyword in the selector form is
+//! `check`'s `E_MISPLACED_BINDING` (`cairn-lang-core/tests/check_binding.rs`);
+//! what this pass owes such a line is the input it does not register.
 
 use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput};
 

@@ -1,36 +1,22 @@
 //! A signal binding sits on the component that carries it.
 //!
-//! `spec/redstone` "Signal binding" does not offer `-> sig.X` and the four
-//! actuator keys as free-floating attributes: it writes each one on one
-//! component —
+//! `spec/redstone` "Signal binding" writes each binding on one component —
 //! a sensor emits, `door ... opened_by=`, `lamp ... lit_by=`,
-//! `piston ... powered_by=`, `dispenser ... fired_by=`. The front end read
-//! only the *value*, so any member carrying a `sig.`-valued argument became
-//! an output port and any member with a `sig.` tail became an input port.
-//! `walls ... powered_by=sig.x` and `walls ... -> sig.w` both reached
-//! placement as live ports on members with no component behind them.
-//!
-//! The same read is what let a typo vanish: `oepend_by=sig.x` matched no
-//! key, so the actuator silently disappeared and the only trace was a
-//! warning that the signal it would have driven was unconsumed.
-//!
-//! Reading only the value left the mirror of that open. Spell the key
-//! right and the value wrong — `opened_by=a`, `-> foo.bar` — and no
-//! branch was entered at all, so the binding vanished with no trace
-//! whatever. A pair is now read as a binding from either side, and the
-//! tests below cover the value axis: what a value has to be, which fault
-//! is reported when the host is wrong too, and the one place a
+//! `piston ... powered_by=`, `dispenser ... fired_by=` — rather than
+//! offering `-> sig.X` and the four actuator keys as free-floating
+//! attributes. A pair is read as a binding from either side, so a
+//! misspelt key (`oepend_by=sig.x`) and a value that names no signal
+//! (`opened_by=a`, `-> foo.bar`) are both reported rather than dropped.
+//! The tests below cover the value axis: what a value has to be, which
+//! fault is reported when the host is wrong too, and the one place a
 //! well-formed binding is still in the wrong place — inside the
 //! `[selector]`.
 //!
-//! One of the two host questions is no longer asked here. A `->` tail on
-//! a member that cannot emit is `check`'s `E_MISPLACED_BINDING`, because
-//! the answer needs no Logic IR and every command should have it;
-//! `cairn-lang-core/tests/check_binding.rs` holds those assertions. What
-//! this pass still owes such a line is what it takes away: the driver
-//! comes out of the scope so nothing downstream reports the hole as a
-//! fault of its own, and the fixtures below assert that silence rather
-//! than a finding.
+//! A `->` tail on a member that cannot emit is `check`'s
+//! `E_MISPLACED_BINDING` (`cairn-lang-core/tests/check_binding.rs`). What
+//! this pass owes such a line is taking the driver out of the scope, so
+//! nothing downstream reports the hole as a fault of its own; the
+//! fixtures assert that silence rather than a finding.
 
 use cairn_lang_redstone::DiagnosticCode;
 

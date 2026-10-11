@@ -1,14 +1,7 @@
-//! Integration tests for `cairn_lang_redstone::compile_edition_netlist`.
-//!
-//! Locks the observable behaviours of the Edition Netlist IR slice
-//! (`spec/redstone` "Edition differences", `Logical Cell → Edition Cell →
-//! Physical Tile`, second tier): the `examples/redstone-door.crn` happy
-//! path, per-edition mapping for every reachable `LogicalCell` (`And` /
-//! `Or` / `Not`), the
-//! canonical port order carried through from the Netlist IR, the
-//! per-edition `*Unpinned` placeholders that stand in for the
-//! parser-unreachable cells (`Xor` / `Nand` / `Nor` / `Mux`), the
-//! `edition` field on the JSON wire form, and empty-scope elision.
+//! `compile_edition_netlist`, the second tier of `spec/redstone` "Edition
+//! differences" (`Logical Cell → Edition Cell → Physical Tile`): every
+//! Logical Cell mapped to its realisation for the target edition, the
+//! nets carried over verbatim, and the `edition` the JSON dump records.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
@@ -29,7 +22,7 @@ fn find_cell_port(cell: &EditionCellNode, port: PortName) -> NetRef {
         .net
 }
 
-/// AC1 — `examples/redstone-door.crn` compiled for Java tags its lone
+/// `examples/redstone-door.crn` compiled for Java tags its lone
 /// `Or` cell as `JavaRepeaterOr` and carries the same `[A, B]` driver
 /// shape through from the Netlist IR.
 #[test]
@@ -78,7 +71,7 @@ fn redstone_door_java_maps_or_to_java_repeater_or() {
     );
 }
 
-/// AC2 — the same example compiled for Bedrock picks the Bedrock
+/// The same example compiled for Bedrock picks the Bedrock
 /// realisation, `BedrockTorchOr`. The rest of the IR shape (inputs,
 /// outputs, driver arity) is edition-independent and stays put.
 #[test]
@@ -97,7 +90,7 @@ fn redstone_door_bedrock_maps_or_to_bedrock_torch_or() {
     assert_eq!(entry.ir.cells[0].drivers[1].port, PortName::B);
 }
 
-/// AC3 — every `NetRef` / `CellPortDriver` from the source Netlist IR is
+/// Every `NetRef` / `CellPortDriver` from the source Netlist IR is
 /// copied verbatim into the Edition Netlist IR: driver arrays, inputs,
 /// outputs, and `signal_defs` all round-trip byte-for-byte. Pins the
 /// "structural rewrite only" contract.
@@ -137,7 +130,7 @@ struct sim size=5x5
     }
 }
 
-/// AC4 — the reachable `LogicalCell` variants (`And`, `Or`, `Not`) each
+/// The reachable `LogicalCell` variants (`And`, `Or`, `Not`) each
 /// pick their Java realisation, and the parser-unreachable cells
 /// (`Xor` / `Nand` / `Nor` / `Mux`) fall through to their `Java*Unpinned`
 /// placeholders so a future parser expansion cannot silently emit a
@@ -190,7 +183,7 @@ fn java_mapping_is_exhaustive_over_logical_cells() {
     );
 }
 
-/// AC5 — Bedrock realisations pick their own edition-tagged variants for
+/// Bedrock realisations pick their own edition-tagged variants for
 /// every reachable cell; the unreachable cells fall through to
 /// `Bedrock*Unpinned` — the container edition tag is baked into the
 /// variant name, so a downstream consumer cannot mistake a Java placeholder
@@ -243,7 +236,7 @@ fn bedrock_mapping_is_exhaustive_over_logical_cells() {
     );
 }
 
-/// AC6 — scopes whose Netlist IR was empty produce no Edition Netlist IR
+/// Scopes whose Netlist IR was empty produce no Edition Netlist IR
 /// entry, matching the Logic IR / Netlist IR elision contract.
 #[test]
 fn empty_netlist_scopes_produce_no_edition_entry() {
@@ -253,7 +246,7 @@ fn empty_netlist_scopes_produce_no_edition_entry() {
     assert!(out.scopes.is_empty());
 }
 
-/// AC7 — the JSON dump carries an `edition` key on every scope entry
+/// The JSON dump carries an `edition` key on every scope entry
 /// (canonical lowercase name, `"java"` / `"bedrock"`) and the `cell`
 /// values render as `snake_case` so downstream tooling has one stable
 /// vocabulary to key off.
@@ -465,8 +458,8 @@ fn unpinned_variants_serialise_as_snake_case() {
 
 /// Build a single-gate Netlist IR around `kind`, run
 /// `compile_edition_netlist` for `edition`, and return the resulting cell
-/// tag. Lets AC4 / AC5 hit the `*Unpinned` variants without going through
-/// the surface parser.
+/// tag. Lets the exhaustive mapping tests hit the `*Unpinned` variants
+/// without going through the surface parser.
 fn edition_cell_for(kind: GateKind, edition: Edition) -> EditionCell {
     let mut ir = LogicIr::new();
     let mut input_count = 0u32;

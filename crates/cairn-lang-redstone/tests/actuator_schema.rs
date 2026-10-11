@@ -11,7 +11,7 @@
 //! against the constant itself rather than a copy of it — a local
 //! restatement would go stale on a change to `synth.rs` without failing
 //! here, which is the failure this exists to catch. The sensor half of the
-//! pair is `core`'s table now, and its own test sits beside it in
+//! pair is `core`'s table, and its own test sits beside it in
 //! `cairn-lang-core/tests/check_binding.rs`.
 
 use cairn_lang_core::intent::{MemberRole, role_of};

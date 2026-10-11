@@ -1,14 +1,8 @@
-//! Integration tests for `cairn_lang_redstone::compile_routing`.
-//!
-//! Locks the observable behaviours of the Steiner-routing slice
-//! (stage 2 of the pipeline `spec/redstone` "Place-and-route"): the
-//! `examples/redstone-door.crn` happy path (per edition), single-cell
-//! `wire_length` attribution, multi-cell cascades whose
-//! `wire_length` values are pinned to exact routed sums,
-//! `E_ROUTE_CONGESTION` when the post-routing footprint exceeds the
-//! reservation, pass-through of scopes elided by upstream stages,
-//! the JSON wire form growing a `wire_length` field, and per-scope
-//! independence when a module carries more than one scope.
+//! `compile_routing`, stage 2 of the pipeline `spec/redstone`
+//! "Place-and-route": each cell's `wire_length` from its routed Steiner
+//! trees, `E_ROUTE_CONGESTION` when the routed footprint outgrows the
+//! reservation, and a wire form that differs from the placed IR only in
+//! `wire_length` and the `stage` tag.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
@@ -18,7 +12,7 @@ mod common;
 
 use common::{load_example, normalize_stage_tags, placement_from_source, strip_int_field};
 
-/// AC1 — `examples/redstone-door.crn` compiled for Java routes its
+/// `examples/redstone-door.crn` compiled for Java routes its
 /// sole `JavaRepeaterOr` cell with `wire_length = Some(4)`: the sum of
 /// the routed lengths from each input pad into the cell coord
 /// `(1, 0, 1)`. The pads step along `z` from `0` and skip the cell row,
@@ -58,10 +52,10 @@ fn redstone_door_java_fills_wire_length_from_input_pads() {
     );
 }
 
-/// AC2 — the same example compiled for Bedrock produces the same
+/// The same example compiled for Bedrock produces the same
 /// `wire_length` because the pad and cell coordinates are
 /// edition-independent by the placement-pass layout contract. Only
-/// the cell tag and edition field differ from AC1.
+/// the cell tag and edition field differ from the Java run.
 #[test]
 fn redstone_door_bedrock_matches_java_wire_length() {
     let source = load_example("redstone-door.crn");
@@ -84,7 +78,7 @@ fn redstone_door_bedrock_matches_java_wire_length() {
     }
 }
 
-/// AC3 — a scope whose logic produces three cascaded cells fills
+/// A scope whose logic produces three cascaded cells fills
 /// every cell's `wire_length` with a pinned routed sum, so a
 /// regression in the input-pad coordinate convention, the cell-row
 /// spacing, or the per-driver attribution walk trips this test. Cell
@@ -249,7 +243,7 @@ struct dup size=20x5
     );
 }
 
-/// AC4 — a scope whose synthesised netlist packs cells to the cell-only
+/// A scope whose synthesised netlist packs cells to the cell-only
 /// budget boundary (`cells.len() * CELL_FOOTPRINT == reserved_area`)
 /// passes placement but fires `E_ROUTE_CONGESTION` once the routing
 /// pass adds any wire on top. The reservation footprint fits the
@@ -345,7 +339,7 @@ struct pack size=5x3
     );
 }
 
-/// AC5 — an empty `ScopedPlacementIr` (no scopes) routes to an empty
+/// An empty `ScopedPlacementIr` (no scopes) routes to an empty
 /// `ScopedPlacementIr` with zero diagnostics: routing is a
 /// per-scope map, so no scopes ⇒ no work ⇒ no findings.
 #[test]
@@ -356,7 +350,7 @@ fn empty_placement_ir_produces_empty_routing_output() {
     assert!(routed.scoped.scopes.is_empty());
 }
 
-/// AC6 — a scope whose Placement IR carries inputs and outputs but no
+/// A scope whose Placement IR carries inputs and outputs but no
 /// cells (a pressure-plate wired straight to a door via `sig.a`) has
 /// one segment to route: sensor pad to actuator pad. Its length is the
 /// number the delay pass charges buffer repeaters against.
@@ -394,7 +388,7 @@ struct wire size=5x5
     );
 }
 
-/// AC7 — the JSON dump of a routed Placement IR carries a
+/// The JSON dump of a routed Placement IR carries a
 /// `"wire_length": N` field on every cell object, while `local_delay_ticks`
 /// stays elided (`skip_serializing_if = "Option::is_none"`). Pins the
 /// wire-form contract that distinguishes `--stage placement` (no
@@ -431,7 +425,7 @@ fn json_dump_carries_wire_length_and_omits_local_delay_ticks() {
     );
 }
 
-/// `AC7b` — routing must not perturb any Placement IR field other than
+/// Routing must not perturb any Placement IR field other than
 /// `wire_length` and the `stage` tag. Serialise the placement and
 /// routing outputs to compact JSON, strip the routing side's
 /// `,"wire_length":<int>` entries, normalise both sides' stage tags,
@@ -469,7 +463,7 @@ fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_sta
     );
 }
 
-/// AC8 — two non-empty scopes route independently. A clean scope
+/// Two non-empty scopes route independently. A clean scope
 /// passes through with `wire_length` populated; a scope that fails
 /// congestion elides without poisoning the sibling. The scope order
 /// on the output matches the input order for the survivors.
@@ -512,7 +506,7 @@ struct beta size=8x3
         "every alpha cell must carry a routed wire_length",
     );
 
-    // beta hits congestion (same shape as AC4) → elided with a
+    // beta hits congestion (the post-routing congestion shape) → elided with a
     // diagnostic without shifting alpha.
     assert!(
         routed.scoped.scopes.iter().all(|e| e.name != "beta"),
@@ -530,7 +524,7 @@ struct beta size=8x3
     );
 }
 
-/// AC9 — Placement IR guarantees Java and Bedrock produce the same
+/// Placement IR guarantees Java and Bedrock produce the same
 /// per-cell coordinate given the same source. Routing therefore
 /// produces the same `wire_length` values on both editions; only the
 /// cell tag and edition field differ. Pins the "routing is
@@ -551,7 +545,7 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
     }
 }
 
-/// AC10 — chaining `compile_routing(&routed.scoped)` is forbidden by
+/// Chaining `compile_routing(&routed.scoped)` is forbidden by
 /// the producer↔variant table on `PlacementPhase`, and the panic it
 /// raises names
 /// the cell that tripped it. `#[track_caller]` alone would put only
@@ -568,7 +562,7 @@ fn re_running_routing_pass_panics_loudly() {
     let _twice = compile_routing(&routed.scoped);
 }
 
-/// AC11 — `examples/crossbar.crn` earns
+/// `examples/crossbar.crn` earns
 /// `W_ROUTE_CROSS_LAYER_CLEARANCE`, and the finding names the pairs
 /// the physical tile layer has to separate.
 ///

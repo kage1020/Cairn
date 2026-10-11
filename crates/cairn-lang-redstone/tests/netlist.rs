@@ -1,10 +1,6 @@
-//! Integration tests for `cairn_lang_redstone::compile_netlist`.
-//!
-//! Locks the observable behaviours of the Netlist IR slice: the
-//! `examples/redstone-door.crn` happy path, the Logic-IR-to-Netlist-IR
-//! 1-to-1 rewrite, canonical port ordering per logical cell (including
-//! the parser-unreachable `Mux`), the topological invariant carried
-//! across from the Logic IR, and empty-scope elision.
+//! `compile_netlist`: each scope's Logic IR rewritten one gate to one
+//! Logical Cell, with ports in canonical order, every cell driven only by
+//! earlier ones, `signal_defs` pointing at nets, and an empty scope elided.
 
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{
@@ -23,7 +19,7 @@ fn find_cell_port(cell: &CellNode, port: PortName) -> NetRef {
         .net
 }
 
-/// AC1 — `examples/redstone-door.crn` produces one `OR` cell with two
+/// `examples/redstone-door.crn` produces one `OR` cell with two
 /// sensor-driven `A`/`B` inputs and one actuator output driven by that
 /// cell.
 #[test]
@@ -84,7 +80,7 @@ fn redstone_door_lowers_to_a_single_or_cell() {
     );
 }
 
-/// AC2 — the Netlist IR keeps a strict 1-to-1 mapping with the source
+/// The Netlist IR keeps a strict 1-to-1 mapping with the source
 /// Logic IR (no CSE, no fusion in this pass). Both counts and per-index
 /// gate → cell correspondence are checked, so a future accidental
 /// re-CSE or reorder would flag on the specific position that moved.
@@ -147,7 +143,7 @@ struct sim size=5x5
             // land alongside a corresponding LogicalCell mapping and a
             // new arm here — reaching the wildcard signals that the
             // per-index correspondence is no longer being verified.
-            _ => panic!("unhandled GateKind variant in AC2 mapping: {:?}", gate.kind),
+            _ => panic!("unhandled GateKind variant in the mapping: {:?}", gate.kind),
         };
         assert_eq!(
             cell.cell, expected,
@@ -156,7 +152,7 @@ struct sim size=5x5
     }
 }
 
-/// AC3 — And2 lowers to `LogicalCell::And` with a canonical `[A, B]` port
+/// And2 lowers to `LogicalCell::And` with a canonical `[A, B]` port
 /// order; Not lowers to `LogicalCell::Not` with a single `[A]` port.
 #[test]
 fn and_and_not_land_with_canonical_port_order() {
@@ -218,7 +214,7 @@ struct sim size=5x5
     assert_eq!(not_cell.drivers[0].port, PortName::A);
 }
 
-/// AC4 — every `NetRef::Cell(j)` in `cells[i]` satisfies `j < i`; the
+/// Every `NetRef::Cell(j)` in `cells[i]` satisfies `j < i`; the
 /// topological invariant survives the rewrite.
 #[test]
 fn cells_preserve_topological_order() {
@@ -253,7 +249,7 @@ struct sim size=5x5
     }
 }
 
-/// AC5 — the parser-unreachable `GateKind::Mux` variant lowers with the
+/// The parser-unreachable `GateKind::Mux` variant lowers with the
 /// canonical `[Sel, A, B]` port order when hand-built. Exercises the
 /// enum path that a future parser change will make reachable.
 #[test]
@@ -306,7 +302,7 @@ fn mux_gate_lowers_with_sel_a_b_port_order() {
     assert_eq!(cell.drivers[2].net, NetRef::Input(2));
 }
 
-/// AC6 — scopes whose Logic IR was empty produce no Netlist IR entry.
+/// Scopes whose Logic IR was empty produce no Netlist IR entry.
 #[test]
 fn empty_logic_scopes_produce_no_netlist_entry() {
     let source = r"
@@ -325,7 +321,7 @@ struct plain size=3x3
     );
 }
 
-/// AC7 — `signal_defs` is rewritten in place, keyed by the dotted signal
+/// `signal_defs` is rewritten in place, keyed by the dotted signal
 /// name and mapping to the corresponding [`NetRef`]. Locks the JSON
 /// shape that the CLI's `synth --stage netlist` will emit.
 #[test]

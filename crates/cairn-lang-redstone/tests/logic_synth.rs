@@ -1,11 +1,7 @@
-//! Integration tests for `cairn_lang_redstone::synthesize`.
-//!
-//! Locks the observable behaviours of the combinational synth slice:
-//! happy path over `examples/redstone-door.crn`, unbound / duplicate /
-//! cyclic / unused signal diagnostics, nested-body traversal,
-//! common-subexpression sharing (including commutativity), gate arity
-//! per primitive, topological ordering across out-of-order declarations,
-//! and cascade-suppression so a single root cause fires one diagnostic.
+//! `synthesize`: each scope's Logic IR, with gates in topological order
+//! whatever order the source declares them in, common subexpressions
+//! shared, and one diagnostic per root cause for an unbound, duplicate,
+//! cyclic or unused signal.
 
 use std::fmt::Write as _;
 
@@ -20,7 +16,7 @@ fn count_code(out: &cairn_lang_redstone::SynthOutput, code: DiagnosticCode) -> u
 }
 
 #[test]
-fn ac1_redstone_door_synthesises_two_inputs_one_or_gate_one_output() {
+fn redstone_door_synthesises_two_inputs_one_or_gate_one_output() {
     let source = load_example("redstone-door.crn");
     let out = synth_source(&source);
 
@@ -72,7 +68,7 @@ fn ac1_redstone_door_synthesises_two_inputs_one_or_gate_one_output() {
 }
 
 #[test]
-fn ac2_unbound_signal_reports_e_logic_unbound_signal() {
+fn unbound_signal_reports_e_logic_unbound_signal() {
     let source = "\
 @cairn 2026.06
 
@@ -101,7 +97,7 @@ struct s size=1x1
 }
 
 #[test]
-fn ac3_multiple_drivers_report_e_logic_multiple_drivers() {
+fn multiple_drivers_report_e_logic_multiple_drivers() {
     let source = "\
 @cairn 2026.06
 
@@ -135,7 +131,7 @@ struct s size=1x1
 }
 
 #[test]
-fn ac4_cyclic_bindings_report_e_logic_cycle() {
+fn cyclic_bindings_report_e_logic_cycle() {
     let source = "\
 @cairn 2026.06
 
@@ -159,7 +155,7 @@ struct s size=1x1
 }
 
 #[test]
-fn ac5_unused_logic_binding_warns_and_still_synthesises() {
+fn unused_logic_binding_warns_and_still_synthesises() {
     let source = "\
 @cairn 2026.06
 
@@ -232,7 +228,7 @@ struct s size=1x1
 }
 
 #[test]
-fn ac6_nested_level_body_collects_signals() {
+fn nested_level_body_collects_signals() {
     let source = "\
 @cairn 2026.06
 
@@ -262,7 +258,7 @@ struct s size=1x1
 }
 
 #[test]
-fn ac7_common_subexpressions_share_a_single_gate() {
+fn common_subexpressions_share_a_single_gate() {
     let source = "\
 @cairn 2026.06
 

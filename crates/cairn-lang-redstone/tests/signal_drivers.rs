@@ -1,20 +1,9 @@
 //! A signal carries one driver, and the finding names both of them.
 //!
-//! A signal is driven by a sensor's `-> sig.X` tail or by a `logic` line's
-//! left-hand side. The front end used to check the two with different
-//! passes in a fixed order — sensors registered first, `logic` duplicates
-//! second, sensor-versus-`logic` third, sharing one "already reported" set
-//! — and each of the three defects below fell out of that arrangement:
-//!
-//! - sensor-versus-sensor was the pairing nobody checked, so the second
-//!   plate was dropped in silence while the block stayed in the build;
-//! - a signal driven by a sensor *and* two `logic` lines reported only the
-//!   `logic` pair, because the earlier pass had claimed the name in the
-//!   shared set — the root cause was the one thing not mentioned;
-//! - "first" meant "sensor", so a `logic` line written above the sensor it
-//!   collides with was the line accused of the collision.
-//!
-//! One driver list ordered by span answers all three, and these tests
+//! A signal is driven by a sensor's `-> sig.X` tail or by a `logic`
+//! line's left-hand side, and every pairing is checked — sensor against
+//! sensor, `logic` against `logic`, and one against the other — with the
+//! driver written first in the file named as the original. These tests
 //! come in mirrored pairs because a rule that always blames the sensor,
 //! or always blames the `logic` line, would satisfy either half alone.
 
