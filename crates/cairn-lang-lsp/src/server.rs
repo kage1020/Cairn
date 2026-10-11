@@ -389,3 +389,6 @@ fn publish(
         .send(Message::Notification(notification))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

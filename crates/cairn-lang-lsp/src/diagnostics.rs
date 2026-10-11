@@ -205,8 +205,39 @@ mod tests {
     }
 
     #[test]
+    fn artifacts_that_share_a_file_name_report_e_output_name_collision() {
+        // The resolver raises the collision and `check` returns it, so an
+        // editor sees it without a build. The finding sits on the `place`,
+        // with a related pointer at the struct.
+        let source = "theme t:\n  slot floor -> @oak_planks\n\n\
+                      struct hut size=3x3\n  floor mat_slot=floor\n\n\
+                      def house size=3x3:\n  floor mat_slot=floor\n\n\
+                      site s:\n  place id=hut use=house theme=t at=origin\n";
+        let diagnostics = compute_diagnostics(&uri(), source);
+        let found: Vec<&lsp_types::Diagnostic> = diagnostics
+            .iter()
+            .filter(|d| code_of(d) == "E_OUTPUT_NAME_COLLISION")
+            .collect();
+        assert_eq!(found.len(), 1, "one collision expected: {diagnostics:?}");
+        assert_eq!(
+            found[0].severity,
+            Some(lsp_types::DiagnosticSeverity::ERROR)
+        );
+        assert_eq!(found[0].range.start.line, 10);
+        let related = found[0]
+            .related_information
+            .as_ref()
+            .expect("relatedInformation present");
+        assert_eq!(
+            related[0].location.range.start.line, 3,
+            "the related pointer names the struct",
+        );
+    }
+
+    #[test]
     fn clean_fixture_reports_no_diagnostics() {
-        // Mirrors cli_4_clean_fixture_json_output_is_empty_array.
+        // The editor's side of `cairn check --json` printing `[]` for the
+        // same document.
         assert_eq!(compute_diagnostics(&uri(), CLEAN), vec![]);
     }
 
