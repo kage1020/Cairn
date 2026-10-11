@@ -14,7 +14,7 @@ a reader with the code in hand looks it up. Both land in the same pull request a
    code's severity does not follow from its `E_` / `W_` prefix, say why under "Error vs warning".
    The redstone pipeline's `E_LOGIC_*` / `W_LOGIC_*` codes are Internal tier and get no row.
 2. **Enum.** In `crates/cairn-lang-core/src/diagnostic.rs`:
-   - add the variant to `DiagnosticCode`, documented with what it means and what it does not cover;
+   - add the variant to `DiagnosticCode` with a one-line doc of what it reports;
    - add its string to `as_str` and its severity to `severity`. The severity follows `spec/lint`
      "Error vs warning", not the prefix;
    - add a `DiagnosticData` variant only when a consumer needs a field it would otherwise have to
