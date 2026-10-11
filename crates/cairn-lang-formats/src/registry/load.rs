@@ -11,14 +11,14 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::block_array::{BlockIdSet, BlockState, TargetRegistry};
 use cairn_lang_core::lock::HashHex;
-use cairn_lang_core::resolve::compare_versions;
+use cairn_lang_core::resolve::{VersionOrder, compare_versions};
 use cairn_lang_core::suggest::nearest_match;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
 use super::aliases::{AliasError, AliasIndex};
 use super::blocks::{BlocksError, BlocksIndex};
-use super::data_versions::DataVersionTable;
+use super::data_versions::{DataVersionEntry, DataVersionTable};
 use super::hash::pack_hash;
 use super::manifest::{PackEdition, PackManifest};
 use super::materials::{MaterialsError, MaterialsIndex};
@@ -495,13 +495,51 @@ impl RegistryPack {
     /// against are left out: no spelling of one resolves.
     fn suggestion_for(&self, requested: &str) -> Option<String> {
         let pool = self
-            .data_versions
-            .versions
-            .iter()
-            .filter(|e| e.targetable)
+            .targetable()
+            .into_iter()
             .map(|e| e.mc_version.as_str())
             .chain(std::iter::once("latest"));
         nearest_match(requested, pool).map(str::to_owned)
+    }
+
+    /// The rows `--target` may name, ascending by `data_version`.
+    ///
+    /// The buildable rows, not every row: the table also carries the
+    /// releases the pack can order an `@requires` floor against but has no
+    /// block table for, and offering one of those as a `--target` would pin
+    /// a compile to a version whose id check cannot run.
+    ///
+    /// Sorted rather than taken as written, so a list shown to a reader
+    /// does not follow the order a pack's JSON happens to list its rows in.
+    #[must_use]
+    pub fn targetable(&self) -> Vec<&DataVersionEntry> {
+        let mut rows: Vec<&DataVersionEntry> = self
+            .data_versions
+            .versions
+            .iter()
+            .filter(|entry| entry.targetable)
+            .collect();
+        rows.sort_by_key(|entry| entry.data_version);
+        rows
+    }
+
+    /// The whole version table as the ordering
+    /// `spec/versioning-editions` "The target is a compile-time parameter"
+    /// makes canonical, which is what an `@requires` floor is placed
+    /// against.
+    ///
+    /// **Every** row, including the ones `--target` may not name: building
+    /// for a version and ordering a floor against it are different
+    /// questions, and whether a floor can be placed at all depends on where
+    /// every release sits.
+    #[must_use]
+    pub fn version_order(&self) -> VersionOrder {
+        VersionOrder::new(
+            self.data_versions
+                .versions
+                .iter()
+                .map(|entry| (entry.mc_version.clone(), i64::from(entry.data_version))),
+        )
     }
 
     /// The view of this pack that block-array lowering consults.
@@ -578,14 +616,12 @@ impl RegistryPack {
     /// [`crate::data_version::UnsupportedTarget`]'s error message.
     #[must_use]
     pub fn supported_list(&self) -> String {
-        let mut entries: Vec<String> = self
-            .data_versions
-            .versions
-            .iter()
-            .filter(|e| e.targetable)
-            .map(|e| e.mc_version.clone())
+        let mut entries: Vec<&str> = self
+            .targetable()
+            .into_iter()
+            .map(|e| e.mc_version.as_str())
             .collect();
-        entries.push("latest".to_owned());
+        entries.push("latest");
         entries.join(", ")
     }
 }
@@ -1698,6 +1734,52 @@ mod tests {
             } if token == "x.y"
         ));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn targetable_rows_are_the_buildable_ones_in_data_version_order() {
+        let java: Vec<&str> = builtin_java()
+            .targetable()
+            .into_iter()
+            .map(|e| e.mc_version.as_str())
+            .collect();
+        assert_eq!(java, ["1.20.4", "1.21", "1.21.4"]);
+        let bedrock: Vec<&str> = builtin_bedrock()
+            .targetable()
+            .into_iter()
+            .map(|e| e.mc_version.as_str())
+            .collect();
+        assert_eq!(bedrock, ["1.21.0", "1.21.40", "1.21.60"]);
+    }
+
+    #[test]
+    fn targetable_rows_sort_by_data_version_whatever_the_table_order() {
+        let mut pack = load_builtin_java().expect("builtin java");
+        pack.data_versions.versions.reverse();
+        let rows: Vec<i32> = pack
+            .targetable()
+            .into_iter()
+            .map(|e| e.data_version)
+            .collect();
+        assert!(rows.is_sorted(), "{rows:?}");
+        assert_eq!(rows.len(), 3);
+    }
+
+    #[test]
+    fn version_order_carries_every_row_including_the_untargetable_ones() {
+        for pack in [builtin_java(), builtin_bedrock()] {
+            let order = pack.version_order();
+            assert_eq!(order.rows().count(), pack.data_versions.versions.len());
+            assert!(pack.data_versions.versions.iter().any(|e| !e.targetable));
+            for entry in &pack.data_versions.versions {
+                assert_eq!(
+                    order.key_of(&entry.mc_version),
+                    Some(i64::from(entry.data_version)),
+                    "{}",
+                    entry.mc_version,
+                );
+            }
+        }
     }
 
     #[test]
