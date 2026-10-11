@@ -3,21 +3,11 @@ use std::collections::BTreeSet;
 use super::*;
 use crate::intent::MemberRole;
 
-/// The dispatch side of the conditional-argument table.
-///
-/// `tests/lower/conditional_arguments.rs` holds the table to the lowering by
-/// building each pair twice, but every enumeration it makes starts from
-/// the table — so it catches a row edited into a lie and not a kind
-/// added here with no row at all. That kind would take the
-/// `arm(...) == None` path in `check::arguments` and go back to
-/// dropping `slope_to=` in silence, which is the defect the table
-/// exists to end.
-///
-/// Here rather than beside the other guards because this is the one
-/// assertion that needs [`RoofKind`], which is this module's and not
-/// part of the crate's public surface. `stair` gets no equivalent: its
-/// kinds are a string literal in `fill_stair` rather than a closed
-/// type, so there is nothing to enumerate until that changes.
+/// `tests/lower/conditional_arguments.rs` enumerates from the table, so
+/// it cannot see a kind added here with no row, which `check::arguments`
+/// would let drop `slope_to=` silently. A unit test because [`RoofKind`]
+/// is not public. `stair` has no equivalent: its kinds are a string
+/// literal in `fill_stair`, not a closed type.
 #[test]
 fn every_roof_kind_the_dispatch_knows_has_an_arm() {
     let conditional = MemberRole::Roof.conditional_arguments();
@@ -38,8 +28,7 @@ fn every_roof_kind_the_dispatch_knows_has_an_arm() {
         from_dispatch, from_table,
         "`RoofKind` and `MemberRole::Roof.conditional_arguments()` disagree about the kinds",
     );
-    // And every arm names a kind the parser accepts, so the two cannot
-    // agree on a set and disagree on a spelling.
+    // Every arm also parses, so `name` and `from_ident` agree on spelling.
     for name in from_table {
         assert!(
             RoofKind::from_ident(name).is_some(),
@@ -112,12 +101,6 @@ fn odd_span_apex_caps_with_single_top_stair() {
         assert_eq!(v.face, StairFace::Apex);
         assert_eq!(v.pos.2, 4);
     }
-    // A converged cap is one cell wide, so both of its faces are outer
-    // ones and a stair serves only one. `spec/compilation` "Gable roof
-    // voxel rules" settles it on the low slope's facing, which is the
-    // reason it is a face of its own rather than the even-span pair's low
-    // half — the pair's outward rule has two sides to choose between and
-    // this has none to spare.
     let state = gable_stair_state(Axis::X, StairFace::Apex);
     assert_eq!(state.properties.get("half").unwrap(), "top");
     assert_eq!(state.properties.get("facing").unwrap(), "south");
@@ -209,12 +192,8 @@ fn shed_extra_height_equals_slope_span() {
 
 #[test]
 fn shed_voxels_climb_one_layer_per_step_toward_high_side() {
-    // Invariant: layer L sits at distance L from the low edge along
-    // the slope axis. For `slope_to=front` the low edge is the back
-    // wall (z=0) and the high edge is the front wall (z=slope_span-1).
-    // So layer 0 sits at z=0 with the lowest y, and the apex sits at
-    // z=slope_span-1 with the highest y. `roof_w=5, roof_h=4,
-    // slope_to=front` → 4 layers × 5 perpendicular cells.
+    // `slope_to=front`: the low edge is the back wall (z=0).
+    // `roof_w=5, roof_h=4` → 4 layers × 5 perpendicular cells.
     let voxels = shed_voxels(5, 4, 4, WallSide::Front);
     assert_eq!(voxels.len(), 4 * 5);
     let l0: Vec<&ShedVoxel> = voxels.iter().filter(|v| v.pos.1 == 5).collect();
@@ -229,7 +208,6 @@ fn shed_voxels_climb_one_layer_per_step_toward_high_side() {
         assert_eq!(v.pos.2, 3, "apex sits at the high edge (z=slope_span-1)");
         assert_eq!(v.face, ShedFace::Apex);
     }
-    // Stairs face the high side: slope_to=front → facing=south.
     let slope_state = shed_stair_state(WallSide::Front, ShedFace::Slope);
     assert_eq!(slope_state.properties.get("facing").unwrap(), "south");
     assert_eq!(slope_state.properties.get("half").unwrap(), "bottom");
@@ -248,7 +226,6 @@ fn shed_voxels_left_high_runs_along_x() {
     for v in &l0 {
         assert_eq!(v.pos.0, 3, "low side at x=3 for slope_to=left");
     }
-    // Stair facing for Left high side = west (-x).
     let state = shed_stair_state(WallSide::Left, ShedFace::Slope);
     assert_eq!(state.properties.get("facing").unwrap(), "west");
 }
@@ -257,7 +234,7 @@ fn shed_voxels_left_high_runs_along_x() {
 
 #[test]
 fn hip_extra_height_matches_gable_short_span_formula() {
-    assert_eq!(hip_extra_height(11, 9), 5); // square ceil(9/2)
+    assert_eq!(hip_extra_height(11, 9), 5); // ceil(9/2)
     assert_eq!(hip_extra_height(11, 11), 6);
     assert_eq!(hip_extra_height(5, 5), 3);
 }
@@ -287,12 +264,9 @@ fn hip_square_4x4_caps_with_two_by_two_apex() {
 fn hip_rectangular_even_short_span_emits_two_row_ridge_band_single_facing() {
     // roof_w=8, roof_h=4 → short=4 (even), extra_height=2. Apex layer
     // L=1 leaves the inset rectangle `lo_x=1..=hi_x=6` (6 cells along
-    // x) × `lo_z=1..=hi_z=2` (2 cells along z). The two-row ridge
-    // band must all carry `HipFace::ApexRidge` and `hip_stair_state`
-    // must give every cell `facing=south, half=top`, matching the
-    // single-facing rule of `spec/compilation` "Hip roof voxel rules" (no
-    // opposite-facing close-up like gable's even-span apex). This pins the
-    // "open V on even short span" behaviour as deliberate.
+    // x) × `lo_z=1..=hi_z=2` (2 cells along z). The whole band takes one
+    // facing (`spec/compilation` "Hip roof voxel rules"), unlike a gable's
+    // even-span pair: the open V is deliberate.
     let voxels = hip_voxels(8, 4, 4);
     let apex_y = 4 + hip_extra_height(8, 4);
     assert_eq!(apex_y, 6);
@@ -332,7 +306,6 @@ fn hip_layer_zero_has_four_corners_and_four_edge_rows() {
     let voxels = hip_voxels(9, 5, 4);
     let l0: Vec<&HipVoxel> = voxels.iter().filter(|v| v.pos.1 == 5).collect();
     assert_eq!(l0.len(), 2 * 9 + 2 * 5 - 4);
-    // Each corner present and unique.
     assert!(
         l0.iter()
             .any(|v| v.pos == (0, 5, 0) && v.face == HipFace::CornerNorthWest)
@@ -382,11 +355,6 @@ fn flat_voxels_cover_full_inflated_bbox_at_single_layer() {
 
 #[test]
 fn the_stair_family_is_keyed_off_the_identifier_path() {
-    // A namespace must not be able to smuggle a non-stair past the
-    // geometry pass, and a bare id with no namespace has to answer the
-    // same question as a namespaced one — a roof that accepted
-    // `mystairs` would put `facing` / `half` / `shape` onto a block
-    // that has none of them.
     for id in [
         "minecraft:oak_stairs",
         "minecraft:dark_oak_stairs",
@@ -400,8 +368,6 @@ fn the_stair_family_is_keyed_off_the_identifier_path() {
         "minecraft:stairs",
         "mystairs",
         "minecraft:oak_stairs_slab",
-        // The case path-keying exists for: the family word is in the
-        // namespace and the block is not a stair at all.
         "weird_stairs:cobblestone",
         "create:cogwheel",
         "",

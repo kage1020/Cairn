@@ -1,28 +1,19 @@
 //! Walkway routing and voxelisation for site `connect` rows.
 //!
-//! Each `connect from.port to to.port path=@MAT` row lays a 1-block-wide
-//! gravel-like strip between the two named ports, once [`super::ports`] has
-//! placed them in world space. The work splits into two pieces, each
-//! unit-tested in isolation so a coordinate sign error or off-by-one fails
-//! loudly here rather than only at the full-village integration boundary:
+//! Each `connect from.port to to.port path=@MAT` row lays a one-block-wide
+//! strip between the two ports [`super::ports`] placed in world space:
 //!
-//! 1. [`l_path`] walks a Manhattan L (x-axis first, then z-axis) between
-//!    two world voxels at a constant Y; every coordinate appears once,
-//!    the corner included. When the L collides with an
-//!    existing structure, [`route_path`] searches the ground plane for a
-//!    deterministic shortest detour around the obstacle instead.
-//! 2. [`build_walkway_array`] turns the path into a [`BlockArray`] whose
-//!    voxel grid bounds the strip's bounding box, returning the world-
-//!    space origin so the lockfile can pin where the array lives. Cells
-//!    that overlap an existing structure (`blocked` in the signature)
-//!    are skipped and counted so the caller can emit one
-//!    `W_WALKWAY_BLOCKED` warning per row — with [`route_path`] in
-//!    front, that only happens when no unobstructed route exists at all.
+//! 1. [`l_path`] walks a Manhattan L (x first, then z) at a constant Y.
+//!    When the L collides with a structure, [`route_path`] searches the
+//!    ground plane for a deterministic shortest detour instead.
+//! 2. [`build_walkway_array`] turns the path into a [`BlockArray`] over the
+//!    strip's bounding box, with the world origin the lockfile pins. Cells
+//!    overlapping a structure are skipped and counted for the row's one
+//!    `W_WALKWAY_BLOCKED`, which with [`route_path`] in front happens only
+//!    when no clear route exists.
 //!
-//! The walkway always sits at the two ports' shared Y. 3D path search
-//! (staircases, multi-level walkways) is intentionally out of scope so
-//! the port surface lands in one piece; every shipping example lays its
-//! walkways flat against `y = 0`.
+//! The walkway sits at the two ports' shared Y; 3D search (staircases,
+//! multi-level walkways) is out of scope.
 
 use std::collections::HashSet;
 use std::hash::BuildHasher;
@@ -32,13 +23,6 @@ use crate::ids::WalkwayScopeKey;
 use super::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 
 /// Output of [`build_walkway_array`].
-///
-/// Bundles the lowered [`BlockArray`], the world-space origin the array
-/// pins to, and the number of cells the lay-pass skipped because they
-/// collided with an existing structure. Named struct rather than a
-/// bare `(BlockArray, (i32, i32, i32), usize)` so a future axis-order
-/// shuffle or extra return value (e.g. per-cell skip mask) cannot
-/// silently re-bind callers to the wrong slot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WalkwayLayout {
     /// The voxelised walkway.
@@ -46,19 +30,16 @@ pub struct WalkwayLayout {
     /// Absolute `(x, y, z)` origin the [`BlockArray`] lives at — the
     /// `(min_x, port_y, min_z)` corner of the bounding box.
     pub origin: (i32, i32, i32),
-    /// Number of cells dropped because they overlapped a placement
-    /// floor (one per `W_WALKWAY_BLOCKED` collision).
+    /// Number of cells skipped because they overlapped a placement floor.
     pub blocked_count: usize,
 }
 
 /// Walk a Manhattan L between two world voxels at a fixed Y, x-axis
-/// first then z-axis. Every coordinate, the corner included, appears in
-/// the returned `Vec` exactly once.
+/// first then z-axis. Every coordinate, the corner and both endpoints
+/// included, appears in the returned `Vec` exactly once.
 ///
-/// The two endpoints are included in the output. Caller is expected to
-/// have already validated that `from.1 == to.1`; mismatched Y values
-/// would still produce a connected path, just landing at the `from`
-/// Y for the whole strip.
+/// The whole strip takes `from`'s Y; the caller checks the two agree, and
+/// asks [`l_path_area`] against [`ROUTE_AREA_CAP`] first.
 #[must_use]
 pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)> {
     debug_assert!(
@@ -66,15 +47,13 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
         "l_path called past the cap; callers must ask `l_path_area` first",
     );
     let y = from.1;
-    // The path is exactly `|dx| + |dz| + 1` cells long. Summed in u64 so
-    // two i32 spans cannot overflow; the size is only a capacity hint, so
-    // a length that does not fit `usize` falls back to growing.
+    // Summed in u64 so two i32 spans cannot overflow. Only a capacity
+    // hint, so a length past `usize` falls back to growing.
     let len = u64::from(from.0.abs_diff(to.0)) + u64::from(from.2.abs_diff(to.2)) + 1;
     let mut voxels: Vec<(i32, i32, i32)> = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
     let (x0, z0) = (from.0, from.2);
     let (x1, z1) = (to.0, to.2);
 
-    // x-axis leg: walk from (x0, z0) to (x1, z0), inclusive.
     let mut x = x0;
     voxels.push((x, y, z0));
     let step_x: i32 = match x1.cmp(&x0) {
@@ -87,13 +66,9 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
         voxels.push((x, y, z0));
     }
 
-    // z-axis leg: walk from (x1, z0) toward (x1, z1). The cell at
-    // (x1, z0) is the corner already laid down at the end of the
-    // x-leg, so the loop steps z BEFORE pushing. That order is the
-    // whole corner dedup: every x-leg cell has `z == z0` and every
-    // z-leg cell has `z != z0`, so no cell can appear twice and no
-    // lookup into `voxels` is needed. A lookup would be a linear scan
-    // per step, which makes a long north–south strip quadratic.
+    // The z leg steps before it pushes, skipping the corner the x leg
+    // laid, so no cell repeats without a lookup into `voxels`, which
+    // would make a long north–south strip quadratic.
     let mut z = z0;
     let step_z: i32 = match z1.cmp(&z0) {
         std::cmp::Ordering::Equal => 0,
@@ -107,26 +82,22 @@ pub fn l_path(from: (i32, i32, i32), to: (i32, i32, i32)) -> Vec<(i32, i32, i32)
     voxels
 }
 
-/// Upper bound on the search rectangle, in cells, that [`route_path`]
-/// is willing to explore. The rectangle is the bounding box of the
-/// blocked cells on the walk plane plus the two endpoints, inflated by
-/// one cell — for every shipping example that is a few hundred cells.
-/// The cap only exists so a pathological source (two ports megametres
-/// apart with a pebble between them) degrades to the skip-and-warn
-/// fallback instead of allocating the world.
+/// Most cells a walkway's bounding box, or [`route_path`]'s search
+/// rectangle, may cover. It exists so a pathological source (two ports
+/// megametres apart with a pebble between them) degrades to the
+/// skip-and-warn fallback instead of allocating the world.
 pub const ROUTE_AREA_CAP: u64 = 4_000_000;
 
 /// Ground-plane cells the straight L between these two ports would span,
 /// as a bounding-box area.
 ///
-/// Area, not path length, because area is what gets allocated:
-/// `build_walkway_array` sizes its voxel buffer from the bounding box, and
-/// `route_path` measures the same quantity against the same cap. A pair
-/// `2_000_000` cells apart on each axis has a path length of 4M — inside a
-/// length-based bound — and a bounding box of 4x10^12.
+/// Area, not path length, because area is what gets allocated: ports
+/// `2_000_000` cells apart on each axis are a 4M-cell path over a
+/// bounding box of 4x10^12. [`route_path`] measures the same area against
+/// the same cap.
 ///
-/// Saturates at `u64::MAX` if the product overflows, which is the sentinel
-/// [`RoutePathError::AreaCapExceeded`] already documents for that field.
+/// Saturates at `u64::MAX`, as [`RoutePathError::AreaCapExceeded`]
+/// documents.
 #[must_use]
 pub fn l_path_area(from: (i32, i32, i32), to: (i32, i32, i32)) -> u64 {
     let dx = u128::from(from.0.abs_diff(to.0)) + 1;
@@ -134,11 +105,10 @@ pub fn l_path_area(from: (i32, i32, i32), to: (i32, i32, i32)) -> u64 {
     u64::try_from(dx * dz).unwrap_or(u64::MAX)
 }
 
-/// Direction of travel between two 4-neighbour ground-plane cells.
-/// Carried in the search state so the cost function can count turns:
-/// among equal-length routes the fewest-turns one wins, which keeps
-/// the laid strip looking like a hand-drawn path (long straight runs)
-/// instead of a staircase zigzag.
+/// Direction of a step between neighbouring ground-plane cells, carried in
+/// the search state so the cost can count turns: among equal-length routes
+/// the fewest turns wins, giving long straight runs rather than a
+/// staircase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum StepDir {
     PosX,
@@ -148,17 +118,12 @@ enum StepDir {
 }
 
 impl StepDir {
-    /// The `(x, z)` cell one step from this cell in this direction, or
-    /// `None` when that step leaves `i32`. [`search_rect`] only
-    /// guarantees that the inflated rectangle itself fits in `i32`, so
-    /// a cell on its edge can sit at `i32::MIN` or `i32::MAX`; the
-    /// neighbour past that edge is outside the rectangle anyway, and
-    /// the caller skips it like any other out-of-bounds cell.
+    /// The `(x, z)` cell one step away, or `None` past `i32`.
     ///
-    /// Only the expansion loop in [`route_path`] can see `None`.
-    /// [`search_rect`] folds both endpoints into the rectangle before
-    /// adding the margin, so a start cell is never on the rectangle's
-    /// edge and its first steps all stay inside `i32`.
+    /// A cell on the search rectangle's edge can sit at `i32::MIN` or
+    /// `i32::MAX`; its neighbour beyond is outside the rectangle anyway,
+    /// so the caller skips it. A start cell is never on the edge, since
+    /// [`search_rect`] adds its margin around both endpoints.
     fn step(self, (x, z): (i32, i32)) -> Option<(i32, i32)> {
         match self {
             Self::PosX => Some((x.checked_add(1)?, z)),
@@ -169,26 +134,20 @@ impl StepDir {
     }
 }
 
-/// Fixed neighbour expansion order. Part of the determinism contract:
-/// together with the monotonic queue sequence number it fully orders
-/// equal-cost candidates, so the same source always lowers to the same
-/// strip and the lockfile stays reproducible. Reordering the variants
-/// changes which of two equal-cost detours wins — `+x` first is why
-/// `village.crn`'s home1↔home3 walkway rounds home1's *east* face —
-/// so a shuffle here breaks the village integration pins and every
-/// lockfile that recorded a tie-broken detour.
+/// Fixed neighbour expansion order. With the queue sequence number it
+/// orders equal-cost candidates, so the same source lays the same strip.
+/// Reordering changes which equal-cost detour wins (`+x` first is why
+/// `village.crn`'s home1↔home3 walkway rounds home1's *east* face),
+/// breaking the village pins and every lockfile holding a tie-broken
+/// detour.
 const STEP_DIRS: [StepDir; 4] = [StepDir::PosX, StepDir::NegX, StepDir::PosZ, StepDir::NegZ];
 
-/// Why [`route_path`] could not produce a detour. Each variant maps to
-/// a different author-facing remedy, so the caller can write a
-/// `W_WALKWAY_BLOCKED` note that names the actual problem instead of
-/// suggesting a gap widening that may not help.
+/// Why [`route_path`] found no detour: one variant per remedy, so the
+/// `W_WALKWAY_BLOCKED` note names the actual problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutePathError {
-    /// One or both port cells are themselves inside the blocked set —
-    /// a port buried under another placement's floor. No search can
-    /// leave (or reach) a buried cell, so the flags say which side to
-    /// fix.
+    /// A port cell is inside the blocked set, buried under another
+    /// placement's floor; the flags say which.
     EndpointBlocked {
         /// `from` is a blocked cell.
         from_blocked: bool,
@@ -200,9 +159,8 @@ pub enum RoutePathError {
     TargetUnreachable,
     /// The search rectangle exceeds `ROUTE_AREA_CAP`: the two ports, or
     /// the placement floors on the walk plane, are too spread out to
-    /// route. Carries the offending area so the caller can surface both
-    /// numbers, and the rectangle it measured so the caller can say what
-    /// set its edges.
+    /// route. Carries the rectangle so the note can say what set its
+    /// edges.
     AreaCapExceeded {
         /// Cells the rectangle would cover (`u64::MAX` when the
         /// span product itself overflowed).
@@ -232,14 +190,10 @@ pub struct SearchRect {
     pub max_z: i32,
 }
 
-/// Pre-indexed view of the blocked-cell set, built **once** per
-/// lowering with [`BlockedIndex::new`] and shared by every `connect`
-/// row. [`route_path`] needs the bounding rectangle of the blocked
-/// cells on its walk plane; deriving that inside the router would
-/// re-scan the whole set per row, letting a large site with many
-/// colliding rows multiply one linear scan into billions of iterations
-/// — the pre-computed per-plane bounds keep the router's per-row cost
-/// bounded by `ROUTE_AREA_CAP` alone.
+/// The blocked-cell set with each plane's bounding rectangle precomputed,
+/// built once per lowering and shared by every `connect` row, so a row's
+/// routing cost is bounded by [`ROUTE_AREA_CAP`] rather than by a scan of
+/// the whole set.
 pub struct BlockedIndex<'a, S: BuildHasher> {
     cells: &'a HashSet<(i32, i32, i32), S>,
     /// `y → (min_x, max_x, min_z, max_z)` over the blocked cells on
@@ -281,9 +235,7 @@ impl<'a, S: BuildHasher> BlockedIndex<'a, S> {
 
 /// Inflated search rectangle for [`route_path`]: bbox(blocked cells on
 /// the walk plane ∪ both endpoints) + 1 cell on every side, so a route
-/// can always hug the outside of the outermost obstacle. Rejects a
-/// rectangle that steps past the `i32` coordinate space or covers more
-/// than [`ROUTE_AREA_CAP`] cells.
+/// can always hug the outside of the outermost obstacle.
 ///
 /// # Errors
 ///
@@ -313,10 +265,8 @@ fn search_rect(
     ) else {
         return Err(RoutePathError::CoordinateOverflow);
     };
-    // Spans fit u64 by construction (an i32 range is at most 2^32
-    // wide); only the *product* can overflow, and an overflowing
-    // product is by definition far past the cap — saturating to
-    // u64::MAX keeps the reported area honest about "too big".
+    // Only the product can overflow, and saturated it still reads as
+    // past the cap.
     let span_x = u64::try_from(i64::from(max_x) - i64::from(min_x) + 1)
         .expect("i32 bbox span is non-negative and fits u64");
     let span_z = u64::try_from(i64::from(max_z) - i64::from(min_z) + 1)
@@ -338,42 +288,29 @@ fn search_rect(
 }
 
 /// Deterministic shortest detour between two world voxels at a shared
-/// Y, avoiding blocked cells. The fallback [`l_path`] cannot route
-/// around obstacles; this search can, so `connect` rows whose straight
-/// L would cut through a placement floor still lay an unbroken strip.
+/// Y, avoiding blocked cells: the cells from `from` to `to` inclusive.
 ///
-/// The search is Dijkstra over `(cell, incoming direction)` states with
-/// the lexicographic cost `(path length, turn count)` — shortest first,
-/// and among equal-length routes the one with the fewest direction
-/// changes. Ties beyond that are broken by the fixed `STEP_DIRS`
-/// expansion order and a monotonic queue sequence number, never by hash
-/// iteration order, so the result is fully deterministic (a lockfile
-/// requirement).
+/// Dijkstra over `(cell, incoming direction)` states with the
+/// lexicographic cost `(path length, turn count)`. Remaining ties go to
+/// the fixed `STEP_DIRS` order and a monotonic queue sequence number,
+/// never to hash order, so the lockfile is reproducible.
 ///
-/// The searchable area is the `search_rect` rectangle: blocked cells
-/// on other Y planes neither obstruct nor inflate the search. The two
-/// endpoints are expected to share a Y (ports are pinned to their
-/// placements' shared ground row); a mismatch is a caller bug and
-/// trips a `debug_assert`.
-///
-/// Returns the cell sequence from `from` to `to` inclusive.
+/// Only the walk plane is searched, within [`SearchRect`]: blocked cells
+/// on other planes neither obstruct nor widen it. The endpoints must
+/// share a Y, which a `debug_assert` checks.
 ///
 /// # Errors
 ///
-/// A [`RoutePathError`] naming why no detour exists — a buried
-/// endpoint, an enclosed target, the area cap, or coordinate
-/// overflow; see the variant docs for the author-facing remedy each
-/// one maps to. The caller is expected to fall back to [`l_path`] with
-/// skipped cells and a `W_WALKWAY_BLOCKED` warning whose note reflects
-/// the variant.
+/// A [`RoutePathError`] naming why no detour exists. The caller falls
+/// back to [`l_path`], skipping blocked cells, with a `W_WALKWAY_BLOCKED`
+/// note for the variant.
 ///
 /// # Panics
 ///
-/// Panics when an internal search invariant breaks (state count or
-/// path length exceeding the `4 * ROUTE_AREA_CAP` bound, or a
-/// parent-chain cycle). These are algorithm bugs, not input
-/// conditions — degrading them to an `Err` would silently swap the
-/// deterministic shortest detour for the skip-and-warn fallback.
+/// Panics when a search invariant breaks: more states or a longer path
+/// than `4 * ROUTE_AREA_CAP`, or a cycle in the parent chain. Those are
+/// algorithm bugs, and an `Err` would quietly swap the shortest detour
+/// for the fallback.
 pub fn route_path<S: BuildHasher>(
     from: (i32, i32, i32),
     to: (i32, i32, i32),
@@ -401,35 +338,25 @@ pub fn route_path<S: BuildHasher>(
         return Ok(vec![from]);
     }
 
-    // The per-plane bounds come pre-computed from the index so the
-    // rectangle stays O(1) per row regardless of how many cells the
-    // site blocks.
     let (min_x, max_x, min_z, max_z) = search_rect(from, to, blocked.plane_bounds(y))?;
     let in_bounds = |(x, z): (i32, i32)| x >= min_x && x <= max_x && z >= min_z && z <= max_z;
 
-    // Dijkstra over (cell, dir). `best` keeps the smallest (len, turns)
-    // seen per state; on an exact cost tie the first-queued candidate
-    // wins (the relaxation below never replaces on equality), which
-    // pins the tie-break to the deterministic queue order.
+    // `best` holds the smallest `(len, turns)` per state; on a tie the
+    // first-queued candidate keeps it (see the strict `<` below).
     let mut best: HashMap<(Cell, StepDir), (u32, u32)> = HashMap::new();
     let mut parent: HashMap<(Cell, StepDir), (Cell, StepDir)> = HashMap::new();
-    // The heap orders by (len, turns, seq); `states[seq]` carries the
-    // matching (cell, dir) payload so the heap entries stay `Copy` and
-    // totally ordered without a custom `Ord` impl. Every count below —
-    // states, seq, path length — is bounded by 4 directions ×
-    // ROUTE_AREA_CAP cells = 16M, comfortably inside u32, so the
-    // `expect`s are unreachable unless the cap or the dedup in `best`
-    // regresses; that is an algorithm bug and must fail loud (see the
-    // `# Panics` section).
+    // The heap holds `(len, turns, seq)` and `states[seq]` the matching
+    // state, so entries are `Copy` and ordered without a custom `Ord`.
+    // Every count (states, seq, path length) is at most
+    // 4 × `ROUTE_AREA_CAP` = 16M, inside `u32`.
     let mut heap: BinaryHeap<Reverse<(u32, u32, u32)>> = BinaryHeap::new();
     let mut states: Vec<(Cell, StepDir)> = Vec::new();
 
     let start = (from.0, from.2);
     let goal = (to.0, to.2);
     for dir in STEP_DIRS {
-        // Never `None` (see `StepDir::step`); skipped rather than
-        // unwrapped so this loop does not depend on how `search_rect`
-        // sizes the rectangle.
+        // Never `None` (see `StepDir::step`), but skipped rather than
+        // unwrapped so this loop does not rely on `search_rect`.
         let Some(cell) = dir.step(start) else {
             continue;
         };
@@ -447,8 +374,7 @@ pub fn route_path<S: BuildHasher>(
     let mut goal_state: Option<(Cell, StepDir)> = None;
     while let Some(Reverse((len, turns, seq))) = heap.pop() {
         let (cell, dir) = states[usize::try_from(seq).expect("u32 fits usize")];
-        // Stale heap entry: a cheaper cost for this state was queued
-        // after this one was pushed.
+        // Stale: a cheaper cost for this state was queued since.
         if best.get(&(cell, dir)) != Some(&(len, turns)) {
             continue;
         }
@@ -463,16 +389,11 @@ pub fn route_path<S: BuildHasher>(
             if !in_bounds(next) || blocked.contains((next.0, y, next.1)) {
                 continue;
             }
-            // `len` (and therefore `turns`) is bounded by the state
-            // count, so plain `+` cannot overflow u32 — see the bound
-            // note above the heap declaration.
+            // Bounded by the state count, so `+` cannot overflow.
             let next_cost = (len + 1, turns + u32::from(next_dir != dir));
             let key = (next, next_dir);
-            // Strict `<` is load-bearing for determinism: relaxing on
-            // equality (`<=`) would let a later-queued candidate steal
-            // an equal-cost state and re-parent the path by heap
-            // timing instead of the fixed queue order (see the
-            // tie-break note above `best`).
+            // Strict `<`: relaxing on equality would let a later
+            // candidate re-parent an equal-cost state by heap timing.
             if best.get(&key).is_none_or(|&c| next_cost < c) {
                 best.insert(key, next_cost);
                 parent.insert(key, (cell, dir));
@@ -501,26 +422,16 @@ pub fn route_path<S: BuildHasher>(
     Ok(cells)
 }
 
-/// Build a [`BlockArray`] from a path of world voxels and a palette
-/// material, returning the world-space origin and the count of cells
-/// skipped because they collided with `blocked`.
-///
-/// `voxel_world` is a flat list of `(x, y, z)` cells in world
-/// coordinates; all cells are assumed to share a Y. `blocked` is the
-/// world-space set of cells already occupied by other structures (the
-/// walkway should not overwrite a wall or floor it crosses). The
-/// returned `BlockArray`'s `voxels` grid is dimensioned to the bounding
-/// box of `voxel_world`; collided cells stay air so the lockfile sees a
-/// truthful palette.
+/// Lay `material` along `voxel_world`, world cells sharing one Y, in a
+/// [`BlockArray`] over their bounding box. Cells in `blocked`, occupied by
+/// other structures, stay air and are counted.
 ///
 /// # Panics
 ///
-/// Panics when `voxel_world` is empty: a zero-cell walkway has no
-/// meaningful bounding box, and silently producing a 1×1 placeholder at
-/// `(0, 0, 0)` would let an upstream bug pin walkway IR at the wrong
-/// origin. Also panics if the bounding-box span on either axis exceeds
-/// `u32::MAX` (i.e. an `i32` subtraction that overflows the cast); paths
-/// produced by [`l_path`] cannot exercise either condition.
+/// Panics when `voxel_world` is empty, rather than placing an empty
+/// walkway at a made-up origin, or when its bounding box is wider than
+/// `i32::MAX` on an axis. Paths from [`l_path`] and [`route_path`] do
+/// neither.
 #[must_use]
 pub fn build_walkway_array<S: BuildHasher>(
     voxel_world: &[(i32, i32, i32)],
@@ -542,12 +453,7 @@ pub fn build_walkway_array<S: BuildHasher>(
         min_z = min_z.min(z);
         max_z = max_z.max(z);
     }
-    // Both spans are positive by construction: the min/max sweep above
-    // gives `min_x ≤ max_x` and `min_z ≤ max_z`. The `u32::try_from` can
-    // only fail if `max - min + 1` overflows `i32` (a span wider than
-    // `i32::MAX`), which is unreachable from [`l_path`] for any realistic
-    // world; surface that as a panic with the scope so a future caller
-    // gets a locatable failure rather than a silent 1×1 strip.
+    // Unreachable panics, but they name the scope so one is locatable.
     let dx = u32::try_from(max_x - min_x + 1)
         .unwrap_or_else(|_| panic!("walkway `{scope_key}` x span exceeds u32 ({min_x}..={max_x})"));
     let dz = u32::try_from(max_z - min_z + 1)
@@ -564,10 +470,6 @@ pub fn build_walkway_array<S: BuildHasher>(
             blocked_count += 1;
             continue;
         }
-        // `wx`/`wz` are members of the same min/max sweep above, so
-        // `wx ≥ min_x` and `wz ≥ min_z` by construction. The same
-        // overflow story as `dx`/`dz` applies — surface the cast with
-        // the scope so an unreachable failure stays locatable.
         let lx = u32::try_from(wx - min_x)
             .unwrap_or_else(|_| panic!("walkway `{scope_key}` cell x={wx} below min={min_x}"));
         let lz = u32::try_from(wz - min_z)
@@ -584,11 +486,9 @@ pub fn build_walkway_array<S: BuildHasher>(
         entities: Vec::new(),
         source_scope: scope_key.as_str().to_owned(),
     };
-    // A one-material walkway is already in canonical order, so this is a
-    // no-op today. It is here so the order `BlockArray::palette` claims
-    // holds of every array the pass produces by construction rather than
-    // by that argument, and so a walkway that grows a second material
-    // (kerbs, railings) does not have to remember to ask.
+    // A no-op for one material, but it keeps the order
+    // `BlockArray::palette` documents true by construction should a
+    // walkway gain a second (kerbs, railings).
     array.canonicalize_palette();
     WalkwayLayout {
         array,
