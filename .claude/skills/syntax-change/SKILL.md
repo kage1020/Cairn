@@ -23,8 +23,10 @@ use. A syntax change lands in both, in one pull request, after the spec says wha
    - Add the new forms, accepted and refused, to the fixtures in `tests/parser_parity.rs`, which
      feeds each one to both parsers.
    - Update `queries/highlights.scm` when the new token should be highlighted.
-4. **Editors.** Add new keywords to `editors/vscode/syntaxes/cairn.tmLanguage.json` and to the
-   completion lists in `crates/cairn-lang-lsp/src/completion.rs`.
+4. **Editors.** Add new keywords to `editors/vscode/syntaxes/cairn.tmLanguage.json`;
+   `cargo xtask lint editor-keywords` holds its top-level and member keyword lists to core's. The
+   LSP's completions read core's lists, so check `crates/cairn-lang-lsp/src/completion.rs` only
+   for a new kind of line.
 5. **Examples.** A new file under `examples/` changes the `SHIPPED_EXAMPLES` count that the
    example sweeps in core, formats, cli and tree-sitter assert; bump all four.
 6. Run the `verify` skill, plus `pnpm test` in the tree-sitter crate.

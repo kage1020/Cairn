@@ -1,6 +1,7 @@
 //! The rules `cargo xtask lint` runs, and the finding each one reports.
 
 mod diagnostic_catalog;
+mod editor_keywords;
 mod grammar_fields;
 mod manifest;
 mod readme;
@@ -31,6 +32,7 @@ pub const RULES: &[Rule] = &[
     readme::SUBCOMMANDS,
     diagnostic_catalog::RULE,
     grammar_fields::RULE,
+    editor_keywords::RULE,
 ];
 
 pub struct Finding {
