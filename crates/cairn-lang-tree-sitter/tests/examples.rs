@@ -1,16 +1,19 @@
-//! Example integration test.
-//!
-//! For every `.crn` under `examples/` at the repo root, parse it with the
-//! tree-sitter grammar and assert the resulting syntax tree has no
-//! `ERROR` node. This is the primary regression guardrail against the
-//! reference parser: `cairn-lang-core` already accepts every file in
-//! `examples/`, so the grammar must accept them too.
+//! The grammar over the shipped examples: every `.crn` under the
+//! repository's `examples/` parses without an `ERROR` node and keeps each
+//! comment line as a `comment` node, and `tree-sitter highlight` renders
+//! `examples/cottage.crn` as the golden in `tests/data/cottage.ansi`.
+//! `cairn-lang-core` accepts every file in `examples/`, so the grammar must
+//! accept them too.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tree_sitter::Parser;
+
+/// The environment variable that turns the highlight golden's skip on a
+/// missing `tree-sitter` CLI into a failure.
+const REQUIRE_CLI: &str = "CAIRN_REQUIRE_TREE_SITTER_CLI";
 
 fn examples_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -20,13 +23,31 @@ fn examples_dir() -> PathBuf {
         .join("examples")
 }
 
+/// The number of `.crn` files `examples/` ships. Bump it with the next
+/// example; every sweep refuses a different count, and a loop over a
+/// filtered-down set passes silently.
+const SHIPPED_EXAMPLES: usize = 12;
+
+/// Every `.crn` under `examples/`, sorted, refusing a set other than the
+/// shipped one.
 fn crn_files() -> Vec<PathBuf> {
-    fs::read_dir(examples_dir())
+    let dir = examples_dir();
+    let mut found: Vec<PathBuf> = fs::read_dir(&dir)
         .expect("examples dir")
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|ext| ext == "crn"))
-        .collect()
+        .collect();
+    found.sort();
+    assert_eq!(
+        found.len(),
+        SHIPPED_EXAMPLES,
+        "found {} examples under {}, not the {SHIPPED_EXAMPLES} shipped; bump SHIPPED_EXAMPLES \
+         when adding one",
+        found.len(),
+        dir.display(),
+    );
+    found
 }
 
 #[test]
@@ -104,7 +125,7 @@ fn comment_rows(node: tree_sitter::Node<'_>, out: &mut Vec<usize>) {
     }
 }
 
-/// Regression guard for `queries/highlights.scm` and `queries/locals.scm`:
+/// `queries/highlights.scm` and `queries/locals.scm` against a golden:
 /// shells out to the locally installed `tree-sitter` CLI (a dev dependency
 /// installed via `pnpm install`) and compares its `highlight` output for
 /// `examples/cottage.crn` against the golden ANSI snapshot frozen in
@@ -117,6 +138,9 @@ fn comment_rows(node: tree_sitter::Node<'_>, out: &mut Vec<usize>) {
 /// test` never tries to parse it as a corpus file, and so the grammar's
 /// `file-types` in `tree-sitter.json` doesn't need to claim `.ansi` files
 /// just to keep the CLI happy.
+///
+/// Without the CLI the test skips, unless `CAIRN_REQUIRE_TREE_SITTER_CLI`
+/// is set to a non-empty value, which makes a missing CLI a failure.
 #[test]
 fn cottage_highlight_golden_is_stable() {
     let golden = include_str!("data/cottage.ansi");
@@ -134,8 +158,15 @@ fn cottage_highlight_golden_is_stable() {
     // `cargo test --workspace` in `.github/workflows/ci.yml` runs without a
     // Node setup, so the binary is absent there. Skip in that case — the
     // dedicated `tree-sitter.yml` workflow (which does `pnpm install`) is the
-    // authoritative gate for highlight-golden drift.
+    // authoritative gate for highlight-golden drift; with the variable set, a
+    // broken install there fails rather than passing as a skip.
     if !cli.exists() {
+        assert!(
+            std::env::var_os(REQUIRE_CLI).is_none_or(|v| v.is_empty()),
+            "{REQUIRE_CLI} is set but the tree-sitter CLI is not at {} (run `pnpm install` in \
+             this crate)",
+            cli.display(),
+        );
         eprintln!(
             "skip: tree-sitter CLI not found at {} (run `pnpm install` in this crate first)",
             cli.display()
