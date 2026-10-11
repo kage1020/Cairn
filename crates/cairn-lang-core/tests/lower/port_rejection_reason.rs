@@ -268,8 +268,7 @@ fn two_refused_ports_get_one_note_each_in_row_order() {
 #[test]
 fn a_window_without_offset_anchors_a_walkway_as_it_is_cut() {
     // The openings pass reads an absent `offset=` as `0` and cuts the
-    // window; the port refused the same member, so the strip was dropped
-    // beside a window that was there.
+    // window, so the port has to read it the same way.
     let src = site(
         &format!("{WALLS}  window id=p side=front y=1 size=1x1 mat_slot=glass\n"),
         6,
@@ -416,7 +415,7 @@ fn a_window_whose_material_does_not_resolve_anchors_no_walkway() {
 #[test]
 fn a_window_whose_rows_overflow_prints_no_backwards_range() {
     // `y=4294967295 size=1x2` has a last row past `u32`. Saturating the
-    // sum printed `y=4294967295..=4294967294` on both lines.
+    // sum would print `y=4294967295..=4294967294` on both lines.
     let src = site(
         &format!("{WALLS}  window id=p side=front offset=1 y=4294967295 size=1x2\n"),
         6,

@@ -43,16 +43,13 @@ const PANE: &str = "  window side=front y=0 offset=3 size=1x1 mat_slot=glass\n";
 fn a_plate_and_a_window_on_one_cell_lower_the_same_whichever_line_comes_first() {
     // The cell they contest is `(3, 0, 4)`: the window's authored cell on
     // the front wall, and the plate's `at=front.outside` anchor one step
-    // beyond it, which at `y=0` is the same voxel. Sharing the openings
-    // bucket, the two resolved by source order and the palette recorded
-    // whichever lost.
+    // beyond it, which at `y=0` is the same voxel.
     let plate_first = lowered(&source(&format!("{PLATE}{PANE}")));
     let pane_first = lowered(&source(&format!("{PANE}{PLATE}")));
 
     assert_eq!(only_structure(&plate_first), only_structure(&pane_first));
     // Guard: the comparison above is worth nothing if neither side painted
-    // a plate. A sensor is a fixture and a window is an opening, so the
-    // plate wins both times.
+    // a plate.
     assert!(
         ids(only_structure(&plate_first)).contains(&"minecraft:oak_pressure_plate"),
         "the plate must survive both orders, palette = {:?}",
@@ -139,13 +136,10 @@ fn every_palette_entry_of_a_permuted_pair_survives_the_permutation() {
 
 #[test]
 fn permuting_two_members_of_one_phase_that_share_no_voxel_leaves_the_array_equal() {
-    // Two windows on opposite walls: same phase, and not one cell in
-    // common, so nothing about the finished grid depends on their order.
-    // A palette numbered by first use would record it anyway, moving
-    // `glass_pane` and `oak_planks` past each other in every `.nbt` byte,
-    // `cairn info` row and `resolved_ir_hash` derived from the array.
-    // Comparing the whole `BlockArray` is the point: an assertion on the
-    // voxels alone cannot see it.
+    // Two windows on opposite walls: same phase, no cell in common. A
+    // palette numbered by first use would still record their order in every
+    // `.nbt` byte, `cairn info` row and `resolved_ir_hash`, which is why the
+    // whole `BlockArray` is compared rather than the voxels.
     let glass_first = lowered(&source(concat!(
         "  window side=front y=1 offset=1 size=1x1 mat_slot=glass\n",
         "  window side=back  y=1 offset=1 size=1x1 mat_slot=deck\n",
@@ -260,18 +254,14 @@ fn a_door_cutting_through_walls_is_not_a_conflict() {
 fn one_member_covering_its_own_cell_twice_is_not_a_conflict() {
     // `repeat=2 step=1` on a 2-wide window stamps columns `1..=2` and then
     // `2..=3`, so column 2 is written twice by one member. `step=` is only
-    // checked against zero, so this is a shape the lowering accepts rather
-    // than one contrived past a guard. (A `sym=true` window would not do:
-    // a mirror is painted only when it is disjoint from the primary and
-    // skipped when it intersects it, so it never writes one cell twice at
-    // all.)
+    // checked against zero, so the lowering accepts this shape. A `sym=true`
+    // window would not do: a mirror that intersects the primary is skipped.
     let out = lowered(&source(
         "  window side=front y=1 offset=1 size=2x1 repeat=2 step=1 mat_slot=glass\n",
     ));
     assert_eq!(conflicts(&out).len(), 0, "{:#?}", conflicts(&out));
     // Guard: a `W_DEFERRED_MEMBER` here would mean the window never
-    // painted, and a test that passes because nothing happened pins
-    // nothing.
+    // painted.
     assert_eq!(
         out.diagnostics.len(),
         0,
@@ -297,8 +287,7 @@ fn two_members_writing_the_same_block_are_not_a_conflict() {
         "  walls mat_slot=wall height=2\n  level y=0\n    walls mat_slot=wall height=3\n",
     ));
     assert_eq!(conflicts(&out).len(), 0, "{:#?}", conflicts(&out));
-    // Guard: the two really do overlap — a test that passes because one of
-    // them was deferred proves nothing.
+    // Guard: the two really do overlap rather than one being deferred.
     assert_eq!(
         only_structure(&out).dims.y,
         4,
@@ -309,9 +298,7 @@ fn two_members_writing_the_same_block_are_not_a_conflict() {
 #[test]
 fn the_conflict_warning_does_not_change_which_block_wins() {
     // `spec/compilation` "Phase evaluation" grants last-wins inside a
-    // phase; this reports it, it does not overrule it. Permuting the two
-    // lines still swaps the winner — which is exactly what the warning is
-    // there to tell the author.
+    // phase; the warning reports it and does not overrule it.
     let door_first = lowered(&source(
         "  door side=front at=center\n  \
          window side=front y=1 offset=3 size=1x2 mat_slot=glass\n",
@@ -332,13 +319,9 @@ fn the_conflict_warning_does_not_change_which_block_wins() {
 
 #[test]
 fn a_conflict_between_two_fixtures_is_reported_like_any_other() {
-    // Every conflict fixture above lands in Openings. Fixtures names the
-    // member each write belongs to the same way, so that phase is
-    // exercised on the conflict path too, not only on the "the plate wins"
-    // path.
-    //
-    // Two plates on one anchor with different materials. One voxel, so
-    // this is also where the singular wording is pinned.
+    // The conflicts above are all in Openings; this one is in Fixtures. Two
+    // plates on one anchor contest one voxel, which pins the singular
+    // wording too.
     let out = lowered(&source(
         "  pressure_plate id=a at=front.outside offset=3 y=0 mat_slot=stone_plate -> sig.x\n  \
          pressure_plate id=b at=front.outside offset=3 y=0 mat_slot=wood_plate -> sig.y\n",
@@ -385,8 +368,7 @@ fn a_conflict_between_two_massing_members_is_reported_like_any_other() {
 #[test]
 fn one_member_overwriting_two_others_is_reported_once_per_pair() {
     // `conflicts` is keyed by the pair, so a member that takes cells from
-    // two different members owes two findings — one naming each — rather
-    // than one finding with the counts added together.
+    // two different members owes one finding naming each.
     let out = lowered(&source(concat!(
         "  door side=front at=center\n",
         "  window id=low side=front y=1 offset=3 size=1x1 mat_slot=glass\n",
@@ -395,8 +377,7 @@ fn one_member_overwriting_two_others_is_reported_once_per_pair() {
     )));
     let found = conflicts(&out);
     let primaries: Vec<&str> = found.iter().map(|d| d.primary.as_str()).collect();
-    // Four pairs, not one finding with the counts added together: the
-    // `door` loses one cell to each of the two single windows, and the
+    // The `door` loses one cell to each of the two single windows, and the
     // 1x2 window then takes one cell from each of those two in turn.
     assert_eq!(found.len(), 4, "{primaries:#?}");
     let overwrote_a_door = primaries
@@ -443,8 +424,7 @@ fn one_member_overwriting_two_others_is_reported_once_per_pair() {
 #[test]
 fn a_conflict_across_a_level_anchors_at_the_member_and_not_the_level() {
     // The phase buckets hold the members, not the `level` that grouped
-    // them, so the span the finding carries is the
-    // member's own line — the one an author would move.
+    // them, so the finding carries the line an author would move.
     let src = source(concat!(
         "  window side=front y=1 offset=3 size=1x1 mat_slot=glass\n",
         "  level y=1\n",

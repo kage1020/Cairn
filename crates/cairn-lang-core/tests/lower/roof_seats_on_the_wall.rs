@@ -91,9 +91,9 @@ fn a_hip_one_course_tall_frames_its_only_layer() {
 
 #[test]
 fn a_hip_one_course_tall_on_the_other_axis_frames_its_columns() {
-    // The mirror of the case above. A frame two cells wide on x emits its
-    // west and east *columns* and no north / south rows, so a fix that
-    // only special-cased the row direction would leave this one capped.
+    // A frame two cells wide on x emits its west and east *columns* and no
+    // north / south rows, so handling only the row direction would leave
+    // this one capped.
     let out = roof("2x8", "hip");
     let ba = structure(&out);
     assert_eq!(stair_at(ba, 0, 4, 0), ("south", "bottom", "outer_left"));
@@ -185,9 +185,8 @@ fn an_even_span_gable_caps_the_ridge_with_a_pair_facing_outward() {
 #[test]
 fn an_even_span_gable_on_a_z_ridge_mirrors_the_outward_pair() {
     // `size=4x6`: the ridge runs along z, so the short axis is x and the
-    // cap pair straddles it at x=1 and x=2. The facing rule is the same
-    // rule on the other axis, and a fix applied to one arm of the table
-    // and not the other would pass the x-ridge fixture alone.
+    // cap pair straddles it at x=1 and x=2. The x-ridge fixture alone
+    // passes with only one arm of the facing table right.
     let out = roof("4x6", "gable");
     let ba = structure(&out);
     for z in 0..6 {

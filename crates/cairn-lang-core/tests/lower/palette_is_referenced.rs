@@ -53,7 +53,7 @@ fn no_shipped_example_ships_a_palette_entry_it_does_not_use() {
 #[test]
 fn a_gable_too_small_for_a_high_apex_does_not_intern_one() {
     // 3x3 leaves one ridge voxel, so the generator emits three of the four
-    // gable faces. Interning the table up front put the fourth in the
+    // gable faces. Interning the table up front would put the fourth in the
     // palette anyway.
     let ir = lowered(
         "theme t:\n  \

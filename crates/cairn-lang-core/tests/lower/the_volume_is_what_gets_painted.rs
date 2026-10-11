@@ -38,8 +38,6 @@ const THEME: &str = "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @oak_
 
 // --- A. A roof with no lowering shapes nothing ------------------------------
 
-/// `overhang=` widened the footprint for a roof that could not be drawn.
-///
 /// Sized for its overhang alone, the member would give the volume its
 /// width and nothing else: the walls move inward and a ring of air
 /// surrounds them.
@@ -201,9 +199,8 @@ fn themeless_walls_do_not_raise_the_array() {
     );
 }
 
-/// The same shape reached a different way, and this one says nothing at
-/// all: a member with no `mat_slot=` binding resolves to no block state,
-/// with no diagnostic from any pass.
+/// A member with no `mat_slot=` binding resolves to no block state.
+/// Lowering says nothing about it; `E_MISSING_MATERIAL` is the check pass's.
 #[test]
 fn walls_with_no_material_binding_do_not_raise_the_array() {
     let line = "  walls height=6\n";
@@ -230,11 +227,9 @@ fn walls_that_paint_still_raise_the_array() {
 /// A window in walls that paint nothing is deferred, and the array shrinks
 /// with it.
 ///
-/// The two halves move together: whether the rectangle lands in masonry
-/// and how tall the array is are read off the same wall column, or the
-/// carve would write rows that do not exist. What the window loses is a
-/// carve of air out of air: the lowered output is byte-identical to the
-/// same source without the window.
+/// Whether the rectangle lands in masonry and how tall the array is are
+/// read off the same wall column, or the carve would write rows that do not
+/// exist. What the window loses is a carve of air out of air.
 #[test]
 fn a_window_in_walls_that_paint_nothing_is_deferred_and_the_array_shrinks() {
     let line = "  window side=front y=1 offset=1 size=2x2 mat_slot=wall\n";
@@ -253,10 +248,9 @@ fn a_window_in_walls_that_paint_nothing_is_deferred_and_the_array_shrinks() {
 
 /// A door in the same walls defers too, and says what is actually missing.
 ///
-/// The gate reads "no walls member paints" as well as "no walls member
-/// has a positive `height=`". The author wrote
-/// a positive height, so a reason naming only that sends them to the wrong
-/// line.
+/// The gate reads "no walls member paints" as well as "no walls member has
+/// a positive `height=`". The author wrote a positive height, so a reason
+/// naming only that sends them to the wrong line.
 #[test]
 fn a_door_in_walls_that_paint_nothing_says_what_is_missing() {
     let source = "struct s size=5x5\n  walls mat_slot=wall height=4\n  door side=front at=center mat_slot=wall\n";
@@ -277,10 +271,10 @@ fn a_door_in_walls_that_paint_nothing_says_what_is_missing() {
 /// An abstract token with no registry to resolve it against falls back to
 /// air, so those walls shape nothing either.
 ///
-/// Not reachable from the CLI — every `lower_to_block_array` call site
-/// there passes a registry — but this is the library API, and the
-/// predicate covers the arm for free because it asks the painter's own
-/// question rather than enumerating the ways a material can fail.
+/// Not reachable from the CLI, which always passes a registry, but this is
+/// the library API, and the predicate covers the arm because it asks the
+/// painter's own question rather than enumerating the ways a material can
+/// fail.
 #[test]
 fn walls_whose_abstract_token_cannot_be_resolved_do_not_raise_the_array() {
     let line = "  walls mat_slot=abstract height=6\n";

@@ -11,9 +11,6 @@ use crate::common::{lowered_with_resolver_diagnostics, read_example};
 #[test]
 fn village_emits_three_placements_and_two_walkways() {
     let out = lowered_with_resolver_diagnostics(&read_example("village.crn"));
-    // Three named places — `home1`, `home2`, `home3` — should each have
-    // their own `BlockArray` and `Placement` under the matching
-    // `site::hamlet::*` key.
     for place_id in ["home1", "home2", "home3"] {
         let key = format!("site::hamlet::{place_id}");
         assert!(
@@ -25,9 +22,6 @@ fn village_emits_three_placements_and_two_walkways() {
             "missing placement record for {key}",
         );
     }
-    // Two `connect` rows → two walkway IR entries, both at the same
-    // site, with `path_material` lifted to the concrete `minecraft:gravel`
-    // canonical id.
     assert_eq!(
         out.walkways.len(),
         2,
@@ -43,8 +37,8 @@ fn village_emits_three_placements_and_two_walkways() {
         assert_eq!(walkway.from.port, "entry");
         assert_eq!(walkway.to.port, "entry");
         assert_eq!(walkway.path_material, "minecraft:gravel");
-        // Pin origin/dims so an axis swap (x↔z) or off-by-one in the
-        // overhang shift fails loud here. home1 sits at (0,0,0) with
+        // Origin and dims, so an axis swap (x↔z) or an off-by-one in the
+        // overhang shift fails here. home1 sits at (0,0,0) with
         // overhang=1, so its front port resolves to (5, 0, 8);
         // home2 east_of home1 gap=4 → origin (15, 0, 0), front port
         // (20, 0, 8); home3 north_of home1 gap=5 → origin (0, 0, -14),
@@ -100,7 +94,6 @@ fn village_walkway_block_arrays_share_keys_with_walkways_map() {
             .structures
             .get(key.as_str())
             .unwrap_or_else(|| panic!("structures missing entry for walkway key {key}"));
-        // Walkways are flat strips: dims.y == 1 by construction.
         assert_eq!(
             ba.dims.y, 1,
             "walkway {key} should be a 1-block-thick strip"
@@ -158,8 +151,8 @@ fn village_emits_zero_walkway_blocked_warnings() {
     // The two east-face corners of the U (world (10,0,8) / (10,0,-6)).
     assert_eq!(id_at(5, 14), "minecraft:gravel");
     assert_eq!(id_at(5, 0), "minecraft:gravel");
-    // A cell inside home1's floor on the straight line the old L took
-    // (world (5,0,1)) must stay air — the detour goes around it.
+    // A cell inside home1's floor on the straight L route (world (5,0,1))
+    // stays air, because the detour goes around it.
     assert_eq!(id_at(0, 7), "minecraft:air");
 }
 

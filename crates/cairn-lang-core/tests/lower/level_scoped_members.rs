@@ -31,9 +31,8 @@ fn a_roof_under_level_zero_builds_what_the_same_roof_in_the_body_builds() {
     ));
     let direct = lowered(&source("  roof kind=gable mat_slot=roof overhang=1\n"));
 
-    // Dims, palette, and every voxel — not just the extents. A volume of
-    // the right size with the roof still missing from it is the failure
-    // this whole file is about.
+    // Dims, palette and every voxel: a volume of the right size can still be
+    // missing the roof.
     assert_eq!(only_structure(&nested), only_structure(&direct));
     assert_eq!(defer_reasons(&nested), Vec::<String>::new());
     // Guard against the assertion above passing because neither side built
@@ -145,13 +144,11 @@ fn dropping_one_member_of_a_raised_level_keeps_its_siblings() {
 #[test]
 fn a_level_scoped_roofs_overhang_is_validated_exactly_once() {
     // The dim pass is the only reader of `overhang=`, so a roof it cannot
-    // see is a roof whose `overhang=` nothing validates — that is what this
-    // pins. Reading it twice is the other way to get it wrong.
+    // see is a roof whose `overhang=` nothing validates; reading it twice is
+    // the other way to get it wrong.
     //
-    // The roof is drawn, flush with the wall line, so the finding is the
-    // one for an argument the pass ignored rather than the one for a
-    // member it dropped. The code is asserted alongside the text so the
-    // wording cannot say "deferred" about a member that is in the build.
+    // The roof is drawn, flush with the wall line, so the finding is the one
+    // for an ignored argument rather than for a dropped member.
     let ir = lowered(&source(
         "\n  level id=l0 y=0\n    roof kind=gable mat_slot=roof overhang=nope\n",
     ));
@@ -188,10 +185,8 @@ fn a_malformed_overhang_on_a_dropped_roof_is_not_read_at_all() {
 
 #[test]
 fn a_pressure_plate_under_a_raised_level_lands_at_that_level() {
-    // `pressure_plate` is on the side of the rule that keeps its lowering
-    // at an offset, and nothing else in this file proves it: a mutant that
-    // moved it to the dropped side, or one that stopped adding the offset,
-    // would be caught by `walls` alone in every other test here.
+    // `pressure_plate` keeps its lowering at an offset, and every other test
+    // here would still pass if it were dropped or lost the offset.
     let raised = lowered(&source(
         "  roof kind=gable mat_slot=roof overhang=1\n\n  \
          level id=upper y=3\n    pressure_plate at=inside.front offset=1 mat_slot=deck\n",

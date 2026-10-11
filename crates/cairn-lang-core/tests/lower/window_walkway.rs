@@ -72,10 +72,9 @@ fn window_walkway_block_array_paints_ten_gravel_cells() {
 #[test]
 fn window_walkway_openings_do_not_contest_a_cell() {
     // The window sits one course above the door's opening, and the wall
-    // carries the extra course so it still fits inside. Put the window
-    // back in the doorway and `door` and `window` — both openings — decide
-    // the cell by line order. The example's header says why; this is the
-    // assertion that holds it, next to the comment.
+    // carries the extra course so it still fits inside. In the doorway,
+    // `door` and `window`, both openings, would decide the cell by line
+    // order; the example's header says why it avoids that.
     let out = lower_window_walkway();
     let contested: Vec<_> = out
         .diagnostics
@@ -127,12 +126,8 @@ place id=anchor use=hut theme=plain at=origin\n  \
 place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
 connect anchor.entry to peer.overflow path=@gravel\n";
     let out = lowered_with_resolver_diagnostics(src);
-    // Two `W_DEFERRED_MEMBER` warnings come from the def-side openings
-    // pass dropping the overflow window itself (one per placement —
-    // `anchor` and `peer` both reuse `def hut`); the cascade we are
-    // pinning is the one anchored on the `connect` row. Filtering by that
-    // anchor keeps the assertion robust against the unrelated def-side
-    // count.
+    // The def-side openings pass also defers the overflow window itself;
+    // filtering on the `connect` row's span keeps those findings out.
     let walkway_cascades: Vec<_> = out
         .diagnostics
         .iter()

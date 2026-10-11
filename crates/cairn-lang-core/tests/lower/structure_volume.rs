@@ -144,10 +144,9 @@ fn an_ordinary_scope_is_untouched_by_the_bound() {
 
 #[test]
 fn an_out_of_range_overhang_is_reported_rather_than_shrinking_the_roof() {
-    // `overhang=` is read in exactly one place, so an unusable value had
-    // nowhere else to surface: it was treated as absent and the roof quietly
-    // came back to the wall line. It still comes back to the wall line —
-    // that is the fallback — and the finding is what says so.
+    // `overhang=` is read in exactly one place, so this is where an
+    // unusable value surfaces. The roof falls back to the wall line, and the
+    // finding is what says so.
     let source = format!(
         "{THEME}struct t size=9x7\n  walls mat_slot=wall height=3\n\
          \x20\x20roof kind=flat mat_slot=wall overhang=4294967296\n"
@@ -167,9 +166,8 @@ fn an_out_of_range_overhang_is_reported_rather_than_shrinking_the_roof() {
 
 #[test]
 fn an_out_of_range_height_is_reported_rather_than_saturating() {
-    // Saturating put the wall top at `u32::MAX` because the author asked for
-    // `2^33`, which is the outcome `nonneg_int`'s own doc gives as the
-    // reason it refuses instead of clamping.
+    // Saturating would put the wall top at `u32::MAX` for the `2^33` the
+    // author asked for, which is why the reader refuses instead of clamping.
     let source = format!("{THEME}struct t size=3x3\n  walls mat_slot=wall height=5000000000\n");
     let out = lowered(&source);
     assert!(

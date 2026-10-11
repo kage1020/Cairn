@@ -17,12 +17,10 @@ const MARKER: &str = "%CONDITIONAL%";
 /// One fixture per (keyword, selector arm, conditional key) the table
 /// names.
 struct Pair {
-    /// The keyword the pair sits on.
     keyword: &'static str,
     /// How this fixture writes the selector: the identifier it carries, or
     /// `None` for the arm that answers to the selector being absent.
     selector_value: Option<&'static str>,
-    /// The conditional key under test.
     key: &'static str,
     /// What the fixture's body needs above it.
     prologue: &'static str,
@@ -276,11 +274,6 @@ fn conditional_arguments_match_the_lowering() {
         let (one, other) = pair.values;
         let first = lowered(&pair.source(one));
         let second = lowered(&pair.source(other));
-        // A member that paints nothing proves nothing: the two builds would
-        // be equally empty of it and compare equal, so every "does not read
-        // it" row would pass on a generator that had stopped drawing. The
-        // rest of the body paints either way, so the baseline is the same
-        // source with this member deleted.
         let without = lowered(&pair.source_without_member());
         for (value, ir) in [(one, &first), (other, &second)] {
             assert!(
@@ -322,8 +315,8 @@ fn conditional_arguments_match_the_lowering() {
 /// Every triple the table names has a fixture, and every fixture names a
 /// triple the table has.
 ///
-/// The guard on the guard. A new arm, or a key added to one, arrives here as
-/// a missing fixture rather than as untested prose.
+/// A new arm, or a key added to one, arrives here as a missing fixture
+/// rather than as untested prose.
 #[test]
 fn every_conditional_pair_in_the_table_has_a_fixture() {
     let mut from_table: Vec<String> = Vec::new();
@@ -358,15 +351,10 @@ fn every_conditional_pair_in_the_table_has_a_fixture() {
     );
 }
 
-/// What the author is told matches what the build did.
-///
-/// The pass and the lowering read the same table, so this is not a second
-/// derivation of the same fact: it is the join between them, and the two
-/// halves are checked in different places. `check` runs no block-array
-/// lowering, so a source that fails to *build* cannot surface here — that
-/// is what the assertions in `conditional_arguments_match_the_lowering`
-/// cover. What this pins is that every dropped pair is reported and no read
-/// pair is.
+/// The pass and the lowering read the same table, and this is the join
+/// between them. `check` runs no block-array lowering, so a source that
+/// fails to *build* cannot surface here; `conditional_arguments_match_the_lowering`
+/// covers that.
 #[test]
 fn the_pass_reports_exactly_the_pairs_the_build_drops() {
     for pair in PAIRS {
@@ -397,19 +385,15 @@ fn the_pass_reports_exactly_the_pairs_the_build_drops() {
     }
 }
 
-/// A selector naming no rule is one repair and gets one finding.
+/// A selector naming no rule is one repair and gets one finding: the member
+/// lowers to nothing, so the deferral carries the line and the argument it
+/// routed past is not a second bill. `check/arguments.rs` pins the quiet
+/// check pass; this pins that the deferral is raised.
 ///
-/// The member lowers to nothing, so the deferral is the whole story and the
-/// argument it routed past is not a second bill. `check` staying quiet is
-/// asserted in `check/arguments.rs`; what is asserted here is the other half
-/// — that the deferral it defers to is actually raised, so the case is
-/// reported once rather than not at all.
-///
-/// The spellings matter. `kind=` is written as a word no roof kind could
-/// take, so the fixture cannot quietly become a *known* kind the day the
-/// dispatch grows one; and the two non-identifier shapes are here because
-/// only an identifier `kind=` can name an arm, and nothing else pins what
-/// the other shapes do.
+/// `kind=` is written as a word no roof kind could take, so the fixture
+/// cannot become a *known* kind when the dispatch grows one. The two
+/// non-identifier shapes are here because only an identifier `kind=` can
+/// name an arm.
 #[test]
 fn the_member_that_does_not_lower_is_billed_once() {
     for kind in ["", "kind=not_a_roof_kind ", "kind=\"shed\" ", "kind=2 "] {
@@ -435,12 +419,9 @@ fn the_member_that_does_not_lower_is_billed_once() {
 /// An axis with one arm is a live configuration that reports nothing.
 ///
 /// `stair` is that shape: a stair is built for `kind=stairs` and nothing
-/// else, so every key it reads is conditional on a selector no
-/// other arm answers to. `is_conditional` therefore says `true` for all
-/// five while the finding can never fire — any other `kind=` names no rule
-/// and its deferral carries the line. Worth pinning rather than leaving to
-/// be rediscovered: the row is written for a second stair kind, and with
-/// one this is what it does.
+/// else, so `is_conditional` says `true` for all five keys while the finding
+/// can never fire, because any other `kind=` names no rule and its deferral
+/// carries the line. The row is written for a second stair kind.
 #[test]
 fn a_one_arm_axis_reports_nothing() {
     let conditional = role_of("stair").conditional_arguments();
@@ -466,12 +447,9 @@ fn a_one_arm_axis_reports_nothing() {
     }
 }
 
-/// Both halves of the `place` axis, spelled out.
-///
-/// The arm this axis needed that a `kind=` never does: the rule that reads
-/// `gap=` is the one a row reaches by *not* writing `at=`. Worth its own
-/// case beside the table-driven sweep, because it is the shape the sweep
-/// would look the same without.
+/// The rule that reads `gap=` is the one a row reaches by *not* writing
+/// `at=`, an arm no `kind=` axis has, so the repair is a way of writing the
+/// line rather than a value.
 #[test]
 fn a_place_at_the_origin_is_told_its_gap_is_ignored() {
     let ignored = format!("{SITE}  place id=a use=hut theme=t at=origin gap=5\n");

@@ -25,10 +25,9 @@ fn contains_id(ba: &BlockArray, id: &str) -> bool {
 
 #[test]
 fn a_window_on_the_floor_plane_is_refused_instead_of_carving_the_slab() {
-    // The issue's first repro. `walls height=3` paints rows 1..=3, so a
-    // rectangle starting at y=0 is one row of wall and one row of floor —
-    // and a `class=arrow_slit` window carries no `mat_slot=`, so the cut
-    // is to air and the slab loses a cell without a word.
+    // `walls height=3` paints rows 1..=3, so a rectangle starting at y=0 is
+    // one row of wall and one row of floor, and a window with no
+    // `mat_slot=` would cut the slab to air.
     let src = format!(
         "{THEME}struct t size=7x5\n  \
          floor mat_slot=floor\n  \
@@ -55,9 +54,9 @@ fn a_window_on_the_floor_plane_is_refused_instead_of_carving_the_slab() {
 
 #[test]
 fn a_window_in_the_air_between_two_courses_is_refused_instead_of_hanging_glass() {
-    // The issue's second repro. Walls at 1..=2 and 7..=8 with open air
-    // between them; the rectangle wants 3..=5, which is entirely sky. A
-    // ceiling-shaped check sees only `5 < 8` and cuts.
+    // Walls at 1..=2 and 7..=8 with open air between them; the rectangle
+    // wants 3..=5, which is entirely sky. A ceiling-shaped check would see
+    // only `5 < 8` and cut.
     let src = format!(
         "{THEME}struct t size=7x5\n  \
          walls mat_slot=wall height=2\n  \
@@ -131,11 +130,9 @@ fn a_window_one_row_past_the_top_course_is_refused() {
 #[test]
 fn a_window_across_the_seam_between_two_stacked_courses_is_carved() {
     // `walls height=5` paints 1..=5 and `level y=5 walls height=4` paints
-    // 6..=9. They abut, so the tower has one wall and a rectangle at
-    // 4..=6 is cut into masonry the whole way. Refusing it — which is
-    // what a per-member check rather than a merged column would do —
-    // would make a legal window depend on where the author put a `level`
-    // line.
+    // 6..=9. They abut, so a rectangle at 4..=6 is in masonry the whole way.
+    // A per-member check would refuse it and make a legal window depend on
+    // where the author put a `level` line.
     let src = format!(
         "{THEME}struct t size=7x5\n  \
          walls mat_slot=wall height=5\n  \
@@ -157,9 +154,8 @@ fn a_window_across_the_seam_between_two_stacked_courses_is_carved() {
 
 #[test]
 fn a_window_on_a_struct_with_no_walls_says_there_is_no_wall() {
-    // `wall_top` is 0 here, so the old bound accepted any rectangle
-    // ending at row 1 — including `y=0 size=1x1`, which painted a pane on
-    // the floor plane of a struct that has no wall to put a window in.
+    // With no wall rows at all, a bound read off the top wall row would
+    // accept `y=0 size=1x1` and paint a pane on the floor plane.
     let src = format!(
         "{THEME}struct t size=7x5\n  \
          floor mat_slot=floor\n  \
@@ -277,16 +273,11 @@ fn a_window_on_the_floor_plane_does_not_anchor_a_walkway() {
 
 #[test]
 fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
-    // The walkway-port requirement of
-    // `spec/components-editing-sites` "Ports and `connect`", asserted as an
-    // equivalence rather than as two independent lists — the failure mode it
-    // guards against is one of the two limits being edited alone, which no
-    // test of either side by itself can see.
-    //
-    // Every case here declares `walls` in the def body. The two tests
-    // below carry walls under a `level` and walls whose material does not
-    // resolve: the port reads the column the body was lowered with, so
-    // those agree too.
+    // The walkway-port requirement of `spec/components-editing-sites` "Ports
+    // and `connect`", asserted as an equivalence so that editing one of the
+    // two limits alone fails. The port reads the column the body was lowered
+    // with, so walls under a `level` and walls whose material does not
+    // resolve agree too; the two tests below cover those.
     const WALL_HEIGHT: u32 = 3;
     for (y, height) in [
         (0, 1),
@@ -382,10 +373,9 @@ fn the_walkway_defer_states_the_rule_the_window_broke() {
 
 #[test]
 fn walls_that_paint_nothing_are_masonry_to_neither_pass() {
-    // The other case past the def-body equivalence. The wall
-    // is declared with a positive `height=`, and its material is an
-    // abstract token that no registry pack is here to lift — so the pass
-    // paints no wall row, defers the cut, and the port has to agree.
+    // The wall has a positive `height=`, but its material is an abstract
+    // token no registry pack is here to lift, so the pass paints no wall
+    // row, defers the cut, and the port has to agree.
     let src = "theme t:\n  \
                slot floor -> @oak_planks\n  \
                slot wall  -> @wall.stone.cobble\n  \

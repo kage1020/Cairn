@@ -33,11 +33,8 @@ fn assert_clean(ir: &BlockArrayIr) {
 
 #[test]
 fn a_door_under_walls_that_start_a_storey_up_is_refused_instead_of_carving_air() {
-    // The issue's repro. The only masonry is `level y=6 walls height=4`,
-    // which paints rows 7..=10, and the door opens at row 1 — seven rows
-    // below the first course. The carve painted AIR over air and the
-    // author heard nothing about a door written into a building whose
-    // walls are not there yet.
+    // The only masonry is `level y=6 walls height=4`, which paints rows
+    // 7..=10, and the door opens at row 1, seven rows below the first course.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          floor mat_slot=floor\n  \
@@ -54,10 +51,8 @@ fn a_door_under_walls_that_start_a_storey_up_is_refused_instead_of_carving_air()
 
 #[test]
 fn the_door_and_the_window_on_that_body_give_the_same_answer() {
-    // The asymmetry the report is about, asserted as one source rather
-    // than two: the window's rows and the door's row are both outside
-    // every course, so both members defer and each names the rows the
-    // walls do occupy.
+    // The window's rows and the door's row are both outside every course,
+    // so both members defer and each names the rows the walls do occupy.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          level id=upper y=6\n    \
@@ -106,9 +101,9 @@ fn a_door_inside_the_level_whose_walls_it_opens_is_carved() {
 #[test]
 fn a_door_is_checked_against_its_own_course_and_not_the_tallest_one() {
     // Two courses with air between them: 1..=2 and 7..=10. A door under
-    // `level y=2` opens at row 3, which is in the gap — and a check that
-    // read the struct's highest wall row saw `10 > 3` and carved. The
-    // door one level further up opens at row 7 and is cut.
+    // `level y=2` opens at row 3, in the gap, where a check reading the
+    // struct's highest wall row would see `10 > 3` and carve. The door
+    // under `level y=6` opens at row 7 and is cut.
     let two_courses = |door_level: u32| {
         format!(
             "{THEME}struct hut size=5x5\n  \
@@ -184,12 +179,8 @@ fn a_door_on_a_struct_with_no_walls_says_there_is_no_wall() {
 #[test]
 fn a_door_under_a_one_row_course_opens_that_row_and_stops() {
     // `walls height=1` paints row 1 only, and the gable's front eave sits
-    // at row 2. The opening is the one row the course has; the row above
-    // it stays the roof it was. A sloped roof reads `facing` / `half` /
-    // `shape` off the geometry, so its slot has to be a stair family —
-    // pointed at the wall's cobblestone this source is
-    // `E_INCOMPATIBLE_MATERIAL` and the gable only draws at all through
-    // its own fallback.
+    // at row 2. The roof slot is a stair because a sloped roof reads
+    // `facing` / `half` / `shape` off the geometry.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          walls mat_slot=wall height=1\n  \
@@ -236,13 +227,10 @@ fn walkway_was_laid(source: &str) -> bool {
 
 #[test]
 fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
-    // The walkway-port requirement of
-    // `spec/components-editing-sites` "Ports and `connect`", asserted as an
-    // equivalence rather than as two independent lists — the failure mode it
-    // guards against is one of the two gates being edited alone, which no
-    // test of either side by itself can see. `level y=0` is the only level
-    // whose walls reach the row a def-body door opens at; every higher one
-    // leaves it in air.
+    // The walkway-port requirement of `spec/components-editing-sites` "Ports
+    // and `connect`", asserted as an equivalence so that editing one of the
+    // two gates alone fails. `level y=0` is the only level whose walls reach
+    // the row a def-body door opens at.
     for wall_level in 0..=3 {
         let carved = {
             let src = format!(
@@ -265,13 +253,9 @@ fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
 #[test]
 fn a_door_under_a_level_is_not_a_port_at_all() {
     // The invariant the port side's base row rests on. Port resolution
-    // walks the `def` body only, in the resolver and in lowering, so the
-    // door a port names has never been shifted by a `level`, and the row
-    // it opens at is always `1`. Pinned here because that is what makes
-    // one constant on the port side answer the same question as the
-    // openings pass's `level y + 1`: were port lookup ever to walk the
-    // flattened members, a door under `level y=6` would resolve, and the
-    // two would disagree about the row.
+    // walks the `def` body only, so the door a port names is never shifted
+    // by a `level` and opens at row `1`, which is what lets one constant on
+    // the port side agree with the openings pass's `level y + 1`.
     let src = format!(
         "{THEME}def hut size=5x5:\n  \
          walls id=w mat_slot=wall height=4\n  \
@@ -290,10 +274,8 @@ fn a_door_under_a_level_is_not_a_port_at_all() {
         .iter()
         .filter(|d| d.code == DiagnosticCode::UnresolvedPort)
         .collect();
-    // Both ends name the nested door, and the refusal says where it is and
-    // that the nesting is what is refused. The old message — `not declared`,
-    // with a note to add the `id=` the member already had — sent the author
-    // looking for a typo that was not there.
+    // Both ends name the nested door. Calling it undeclared would send the
+    // author looking for a typo in an `id=` the member already has.
     assert_eq!(refusals.len(), 2, "{:?}", resolution.diagnostics);
     for (refusal, place) in refusals.iter().zip(["a", "b"]) {
         assert_eq!(

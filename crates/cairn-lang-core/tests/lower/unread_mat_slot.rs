@@ -222,8 +222,8 @@ fn a_mat_slot_nothing_reads_leaves_the_build_as_it_was() {
 
 /// Every role whose `mat_slot` the table lists as unread has a row here.
 ///
-/// The guard on the guard: a role that joins those entries arrives as a
-/// missing fixture rather than as an untested claim.
+/// A role that joins those entries arrives as a missing fixture rather than
+/// as an untested claim.
 #[test]
 fn every_role_whose_mat_slot_is_unread_is_built_here() {
     let mut from_table: Vec<&str> = known_keywords()

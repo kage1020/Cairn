@@ -25,10 +25,9 @@ fn at_side_walkway_pins_endpoint_anchors_at_wall_corners() {
     // the two ports share their z.
     //
     // Bounding box: dx = 8 - 2 + 1 = 7, dz = 1; origin = (min_x, _,
-    // min_z) = (2, 0, 3). A regression that rounds `at=right` back to
-    // `at=center` (u = 1) would shift the west port to (1, 0, 3) and
-    // make dx = 8 - 1 + 1 = 8. A symmetric break on `at=left` would
-    // make dx = 7 - 1 = 6.
+    // min_z) = (2, 0, 3). Rounding `at=right` to `at=center` (u = 1) would
+    // shift the west port to (1, 0, 3) and make dx = 8 - 1 + 1 = 8; the
+    // same on `at=left` would make dx = 7 - 1 = 6.
     let out = lower_at_side_walkway();
     let walkway = out.walkways.get(WALKWAY_KEY).expect("walkway present");
     assert_eq!(walkway.site, "duo");
@@ -53,8 +52,8 @@ fn at_side_walkway_pins_endpoint_anchors_at_wall_corners() {
 fn at_side_walkway_paints_seven_gravel_cells_along_the_leg() {
     // x-leg of 7 cells (x = 2..=8 at z = 3) and a zero-cell z-leg (the two
     // ports share z), so every cell of the dims (7, 1, 1) BlockArray should
-    // resolve to gravel. A regression that drops the endpoints would land
-    // at 5 cells; one that off-by-ones a single anchor would land at 6 or 8.
+    // resolve to gravel. Dropping the endpoints would leave 5 cells, and an
+    // off-by-one on a single anchor 6 or 8.
     let out = lower_at_side_walkway();
     let ba = out
         .structures
