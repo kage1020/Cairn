@@ -2,25 +2,24 @@
 //! `FILE:LINE:COL: SEVERITY[CODE]` line each, or to stdout as a
 //! `--format json` array, and the exit code follows the worst severity.
 
-use std::path::PathBuf;
-
 use crate::common::{Fixture, assert_stream, cairn, examples_dir, reported, stderr_stream};
 
-fn fixtures_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("cairn-lang-core")
-        .join("tests")
-        .join("fixtures")
-        .join("check")
-}
+const DUPLICATE: &str =
+    "struct s size=4x4 size=5x5\n  walls height=4 height=5\n  door id=front\n  door id=front\n";
+
+const CAIRN_VERSION: &str = "@cairn banana\n\ntheme t:\n  slot floor -> @oak_planks\n\nstruct s size=2x2\n  floor mat_slot=floor\n";
+
+const CLEAN: &str = "struct s size=2x2\n  floor mat_slot=wall\n  walls height=4 mat_slot=wall\n";
+
+const UNKNOWN_KEYWORD: &str = "struct s size=1x1\n  mystery foo=1\n";
 
 /// On stderr, as every subcommand reports, so `cairn check f.crn > out`
 /// cannot swallow a finding; `--format json`, the machine payload, stays
 /// on stdout.
 #[test]
 fn text_findings_go_to_stderr_one_located_line_each() {
-    let path = fixtures_dir().join("duplicate.crn");
+    let fixture = Fixture::new(DUPLICATE);
+    let path = fixture.source();
     let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
@@ -45,7 +44,8 @@ fn text_findings_go_to_stderr_one_located_line_each() {
 fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
     // `@cairn` is provenance that reaches no pass, so an unreadable value
     // costs the build nothing.
-    let path = fixtures_dir().join("cairn_version.crn");
+    let fixture = Fixture::new(CAIRN_VERSION);
+    let path = fixture.source();
     let out = cairn("check", &[path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
@@ -112,7 +112,8 @@ fn clean_example_exits_zero_and_says_nothing_on_either_stream() {
 
 #[test]
 fn clean_fixture_json_output_is_empty_array() {
-    let path = fixtures_dir().join("clean.crn");
+    let fixture = Fixture::new(CLEAN);
+    let path = fixture.source();
     let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(
         out.status.success(),
@@ -163,7 +164,8 @@ fn end_of_line_parse_error_names_the_line_that_has_it() {
 
 #[test]
 fn unknown_keyword_fixture_lists_known_keywords_in_a_note() {
-    let path = fixtures_dir().join("unknown_keyword.crn");
+    let fixture = Fixture::new(UNKNOWN_KEYWORD);
+    let path = fixture.source();
     let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let reported = String::from_utf8(out.stderr).expect("utf-8");
@@ -192,7 +194,8 @@ fn unknown_keyword_fixture_lists_known_keywords_in_a_note() {
 
 #[test]
 fn json_output_carries_line_and_col_for_every_diagnostic() {
-    let path = fixtures_dir().join("duplicate.crn");
+    let fixture = Fixture::new(DUPLICATE);
+    let path = fixture.source();
     let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
