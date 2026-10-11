@@ -1,6 +1,5 @@
-//! `window-walkway.crn` lowers to a flat strip from `home1.entry`, a door, to
-//! `home2.front`, a window, which pins the window port's wall, horizontal
-//! centre and height where the door-only examples cannot reach them.
+//! `window-walkway.crn` lowers to a flat strip from a door to a window port, pinning the window
+//! port's wall, centre and height.
 
 use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex};
 use cairn_lang_core::check::{DiagnosticCode, Severity};
@@ -23,14 +22,7 @@ fn window_walkway_endpoints_pin_door_and_window_ports() {
     assert_eq!(walkway.to.place, "home2");
     assert_eq!(walkway.to.port, "front");
     assert_eq!(walkway.path_material, "minecraft:gravel");
-    // home1 origin (0,0,0), size=5x5, no roof so overhang=0; door
-    // `entry` at front + `at=center` resolves to (2, 0, 5).
-    // home2 origin (9,0,0) via `east_of=home1 gap=4`; window `front`
-    // on front wall with offset=2 size=1x1 has u = 2 + 1/2 = 2, so the
-    // wall world cell is (9 + 2, 0 + 4) = (11, 4) and the port is one
-    // step outward in +z → (11, 0, 5). The L-walkway bounding box is
-    // dx = 11 - 2 + 1 = 10, dz = 1 (single z = 5); origin pins to the
-    // (min_x, _, min_z) corner = (2, 0, 5).
+    // The door port is (2, 0, 5); the window's wall cell is (11, 4), so its port is (11, 0, 5).
     assert_eq!(
         walkway.origin,
         (2, 0, 5),
@@ -45,10 +37,7 @@ fn window_walkway_endpoints_pin_door_and_window_ports() {
 
 #[test]
 fn window_walkway_block_array_paints_ten_gravel_cells() {
-    // A pure x-leg of 10 cells at z=5 (x = 2..=11). An off-by-one or an
-    // unintended Y lift (honouring the window's authored `y=`, whatever
-    // course it sits on) would shift the strip into a blocked floor cell
-    // and drop the gravel count.
+    // A pure x-leg of 10 cells at z=5; a Y lift to the window's `y=` would drop the count.
     let out = lower_window_walkway();
     let ba = out
         .structures
@@ -71,10 +60,7 @@ fn window_walkway_block_array_paints_ten_gravel_cells() {
 
 #[test]
 fn window_walkway_openings_do_not_contest_a_cell() {
-    // The window sits one course above the door's opening, and the wall
-    // carries the extra course so it still fits inside. In the doorway,
-    // `door` and `window`, both openings, would decide the cell by line
-    // order; the example's header says why it avoids that.
+    // The window sits one course above the doorway, so no two openings share a cell.
     let out = lower_window_walkway();
     let contested: Vec<_> = out
         .diagnostics
@@ -101,16 +87,9 @@ fn window_walkway_emits_no_resolver_errors() {
     );
 }
 
-/// Walkway anchored to a window whose `offset + size.w` overflows the
-/// wall must cascade exactly one `W_DEFERRED_MEMBER`, with the door
-/// half of the row identified as the side that *did* place: a walkway
-/// dropped on its first refused port without a word fails here.
 #[test]
 fn window_walkway_overflowing_window_cascades_one_deferred_member() {
-    // size=3x3 → wall_length(Front) = 3. The overflow window declares
-    // `offset=2 size=2x2`, so `offset + size.w = 4 > 3` and the window
-    // port is refused as past the wall. The peer's door
-    // port still resolves cleanly, so the cascade names the window side.
+    // `offset + size.w = 4` overflows the 3-long front wall.
     let src = "@cairn 2026.06\n\n\
 def hut size=3x3:\n  \
 floor mat_slot=floor\n  \
@@ -126,8 +105,7 @@ place id=anchor use=hut theme=plain at=origin\n  \
 place id=peer   use=hut theme=plain east_of=anchor gap=4\n  \
 connect anchor.entry to peer.overflow path=@gravel\n";
     let out = lowered_with_resolver_diagnostics(src);
-    // The def-side openings pass also defers the overflow window itself;
-    // filtering on the `connect` row's span keeps those findings out.
+    // The openings pass also defers the window itself; the span filter keeps that out.
     let walkway_cascades: Vec<_> = out
         .diagnostics
         .iter()
@@ -140,14 +118,11 @@ connect anchor.entry to peer.overflow path=@gravel\n";
         "overflowing window must surface exactly one walkway-cascade W_DEFERRED_MEMBER, got {:#?}",
         out.diagnostics,
     );
-    // The door side resolves, so only the window side is named.
     assert_eq!(
         walkway_cascades[0].primary,
         "walkway `anchor.entry ↔ peer.overflow` was skipped because port `peer.overflow` \
          could not be placed",
     );
-    // The note names the rule this window broke, with the numbers that
-    // broke it — not every contract a port could have hit.
     let note_messages: Vec<_> = walkway_cascades[0]
         .notes
         .iter()
@@ -160,7 +135,6 @@ connect anchor.entry to peer.overflow path=@gravel\n";
              (`offset + size.w` = 2 + 2, wall length 3); the member says so on its own line too",
         ],
     );
-    // The walkway IR must drop the row rather than lay a partial strip.
     assert!(
         out.walkways.is_empty(),
         "overflowing-window row must drop its walkway, got {:?}",

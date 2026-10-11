@@ -1,7 +1,5 @@
-//! `E_OUTPUT_NAME_COLLISION`: every artifact of one build is written into one
-//! directory, a `struct` under its name, a `place` under its `id=` and a
-//! walkway under its site and endpoints, so two scopes that would write one
-//! file are reported as a pair by `cairn check`, without a `--target`.
+//! `E_OUTPUT_NAME_COLLISION`: two scopes of one build that would write one file are reported as a
+//! pair by `cairn check`, without a `--target`.
 
 use cairn_lang_core::{
     DiagnosticCode, PlaceId, PortId, Severity, SiteName, WalkwayEndpoint, WalkwayScopeKey,
@@ -39,8 +37,7 @@ fn a_struct_and_a_place_of_one_name_collide() {
     );
 }
 
-/// A placement's file name leaves its site out, so one `id=` in two sites
-/// is one file.
+/// A placement's file name leaves its site out.
 #[test]
 fn one_place_id_in_two_sites_collides() {
     let source = format!(
@@ -55,8 +52,7 @@ fn one_place_id_in_two_sites_collides() {
     );
 }
 
-/// `Hut` and `hut` are two scopes but one file wherever case is folded, and
-/// the verdict must not depend on which host checks the source.
+/// Some hosts fold case, and the verdict must not depend on the host.
 #[test]
 fn names_that_differ_only_in_case_collide() {
     let source = format!(
@@ -75,8 +71,7 @@ fn names_that_differ_only_in_case_collide() {
     );
 }
 
-/// A walkway's name joins place and port with `_`, and ids may carry `_`,
-/// so two different `connect` rows can flatten to one name.
+/// A walkway's name joins place and port with `_`, and ids may carry `_`.
 #[test]
 fn two_walkways_whose_names_flatten_alike_collide() {
     let source = "theme plain:\n  slot floor -> @oak_planks\n  slot wall -> @cobblestone\n\n\
@@ -106,8 +101,6 @@ fn two_walkways_whose_names_flatten_alike_collide() {
     );
 }
 
-/// One scope declared twice is not two artifacts: the second declaration
-/// builds nothing, and the finding that says so is someone else's.
 #[test]
 fn a_scope_declared_twice_is_left_to_the_duplicate_codes() {
     let structs = format!(
@@ -125,8 +118,6 @@ fn a_scope_declared_twice_is_left_to_the_duplicate_codes() {
     assert_eq!(of_code(&places, DiagnosticCode::OutputNameCollision), []);
 }
 
-/// Only what a build writes can collide. A `def` is a template with no
-/// file of its own, and a `place` the resolver refused has no scope.
 #[test]
 fn names_that_write_no_file_do_not_collide() {
     let def_and_struct = format!(
@@ -149,9 +140,6 @@ fn names_that_write_no_file_do_not_collide() {
     );
 }
 
-/// Structs are compared before places whatever the source order, so with
-/// the site written above the struct the finding still anchors on the
-/// `place`, and its note points down the file at the struct.
 #[test]
 fn the_finding_anchors_by_kind_not_by_source_order() {
     let source = format!(
@@ -170,9 +158,6 @@ fn the_finding_anchors_by_kind_not_by_source_order() {
     );
 }
 
-/// One scope declared twice, with a third scope sharing its name, is still
-/// one finding: the repeat is skipped whichever artifact first held the
-/// name, so the duplicate codes are left to report it.
 #[test]
 fn a_scope_declared_twice_beside_a_third_is_reported_once() {
     let structs = format!(
@@ -205,10 +190,7 @@ fn a_scope_declared_twice_beside_a_third_is_reported_once() {
     assert_eq!(counts, [1, 1, 1], "one finding per shape");
 }
 
-/// `a.entry to b.entry` and `b.entry to a.entry` ask for one walkway:
-/// lowering lays the first and drops the second as `W_DUPLICATE_WALKWAY`,
-/// so the name the second row would have had is never written, and a
-/// struct spelled like it is not a collision.
+/// Lowering drops the reversed row as `W_DUPLICATE_WALKWAY`, so its name is never written.
 #[test]
 fn a_reversed_duplicate_connect_is_one_walkway() {
     let source = format!(
@@ -233,8 +215,6 @@ fn a_reversed_duplicate_connect_is_one_walkway() {
     );
 }
 
-/// A `place` of a sizeless `def` is dropped by lowering with
-/// `W_DEF_NO_SIZE`, so it writes no file and cannot meet a struct.
 #[test]
 fn a_place_of_a_sizeless_def_does_not_collide() {
     let source = format!(
@@ -248,8 +228,6 @@ fn a_place_of_a_sizeless_def_does_not_collide() {
     assert_eq!(written, ["struct::hut"]);
 }
 
-/// A `struct` with no `size=` is dropped by lowering with
-/// `W_STRUCT_NO_SIZE`, so it writes no file and cannot meet a place.
 #[test]
 fn a_sizeless_struct_does_not_collide() {
     let source = format!(
@@ -262,8 +240,6 @@ fn a_sizeless_struct_does_not_collide() {
     assert_eq!(written, ["site::s::hut"]);
 }
 
-/// A walkway with an endpoint on a placement lowering drops is not laid,
-/// so its name is not a collision either.
 #[test]
 fn a_walkway_to_a_dropped_placement_does_not_collide() {
     let source = format!(
@@ -282,9 +258,7 @@ fn a_walkway_to_a_dropped_placement_does_not_collide() {
     );
 }
 
-/// A `connect` row whose scope key cannot be built is skipped here because
-/// lowering builds the same key, reports `W_INVALID_WALKWAY_IDENT` and lays
-/// nothing; the structures assertion holds lowering to that.
+/// Lowering builds the same key and lays nothing, as the structures assertion holds it to.
 #[test]
 fn a_walkway_whose_key_is_refused_writes_no_file() {
     let source = format!(
@@ -314,9 +288,7 @@ fn a_walkway_whose_key_is_refused_writes_no_file() {
     );
 }
 
-/// A walkway's name keeps its site, so two sites with the same rows give
-/// two walkway files. Their placements still meet, one `id=` in two sites,
-/// and those are the only findings.
+/// The placements still meet, one `id=` in two sites, and those are the only findings.
 #[test]
 fn walkways_in_two_sites_do_not_collide() {
     let site = |name: &str| {
@@ -339,8 +311,6 @@ fn walkways_in_two_sites_do_not_collide() {
     );
 }
 
-/// `struct` names and `place id=` values may carry `_`, so either can be
-/// spelled exactly like a walkway's name.
 #[test]
 fn a_struct_or_a_place_spelled_like_a_walkway_collides_with_it() {
     let sites = "site s:\n  place id=a use=hut theme=plain at=origin\n  \

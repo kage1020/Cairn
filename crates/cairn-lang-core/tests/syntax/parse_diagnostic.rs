@@ -5,17 +5,8 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::error::{LexError, ParseError};
 use cairn_lang_core::{Diagnostic, Severity, diagnose_parse_failure, parse};
 
-/// One source per shape a parse can fail in.
-///
-/// The third column names the variant each source must produce, so one
-/// that stops reaching it fails here rather than leaving that variant
-/// unrendered.
-///
-/// `LexError::UnmatchedDedent` has no row because no source reaches it. A
-/// level only enters the indent stack through an indent of exactly one
-/// level, and an odd count is refused before the comparison, so every even
-/// level below the current one is already on the stack. If the indent rules
-/// change, this is the note that says the row is missing.
+/// One source per shape a parse can fail in, with the variant it must produce.
+/// `LexError::UnmatchedDedent` has no row because no source reaches it.
 const REFUSED: &[(&str, &str, &str)] = &[
     ("tab_indent", "theme t:\n\tslot a -> @b\n", "TabIndent"),
     ("odd_indent", "theme t:\n   slot a -> @b\n", "OddIndent"),
@@ -46,13 +37,11 @@ const REFUSED: &[(&str, &str, &str)] = &[
         "InvalidInt",
     ),
     ("syntax", "widget w\n  floor mat_slot=f\n", "Syntax"),
-    // The largest class: the parser reaches the end of a line wanting
-    // something more, and reports *at* that end with an empty span.
+    // The largest class: an empty span at the end of a line that wanted more.
     ("end_of_line", "struct s size=\n", "Syntax"),
 ];
 
-/// A value nested past the parser's depth limit, built from the constant so
-/// it stays past the limit when the limit moves.
+/// A value nested past the parser's depth limit, wherever the limit moves.
 fn nested_too_deep() -> String {
     let depth = cairn_lang_core::MAX_NESTING_DEPTH + 6;
     format!(
@@ -62,7 +51,7 @@ fn nested_too_deep() -> String {
     )
 }
 
-/// The variant name a `ParseError` reports itself as, for the table above.
+/// The variant name a `ParseError` reports itself as.
 fn variant_of(err: &ParseError) -> &'static str {
     match err {
         ParseError::Lex(LexError::TabIndent { .. }) => "TabIndent",
@@ -81,7 +70,6 @@ fn variant_of(err: &ParseError) -> &'static str {
     }
 }
 
-/// The table's sources plus the generated one, as owned rows.
 fn rows() -> Vec<(&'static str, String)> {
     let mut out: Vec<(&'static str, String)> = REFUSED
         .iter()
@@ -95,12 +83,10 @@ fn refusal(source: &str) -> ParseError {
     parse(source).expect_err("the fixture is supposed to be refused; it no longer is")
 }
 
-/// The diagnostic a source's refusal renders as.
 fn diagnose(source: &str) -> Diagnostic {
     diagnose_parse_failure(source, &LineStarts::new(source), &refusal(source))
 }
 
-/// Every shape a parse fails in renders under one code.
 #[test]
 fn every_refusal_carries_the_parse_code() {
     for (name, source) in rows() {
@@ -134,12 +120,6 @@ fn the_refusals_cover_the_shapes_they_claim() {
     );
 }
 
-/// The diagnostic starts where the error says it does and never crosses a
-/// line break.
-///
-/// Not "and reaches the end of the line": the end of the line *bounds* the
-/// span, and an error reported there, the largest class, starts and ends
-/// there, as the `end_of_line` row measures.
 #[test]
 fn the_span_starts_where_the_error_does_and_stays_on_its_line() {
     for (name, source) in rows() {
@@ -165,10 +145,7 @@ fn the_span_starts_where_the_error_does_and_stays_on_its_line() {
     }
 }
 
-/// The message is the parse error's own, with no position glued to it.
-///
-/// Every renderer puts the position in front of the message from the span,
-/// so a message carrying its own `line:col` would print it twice.
+/// Every renderer puts the span's position in front of the message.
 #[test]
 fn the_message_is_the_error_without_its_position() {
     for (name, source) in rows() {
@@ -187,12 +164,6 @@ fn the_message_is_the_error_without_its_position() {
     }
 }
 
-/// An error reported at the end of a line has an empty span, and that is
-/// the picture it should draw.
-///
-/// A caret where something is missing, rather than a squiggle under text
-/// that is not wrong. The bound above would still pass with every span
-/// widened to one character.
 #[test]
 fn an_error_at_the_end_of_a_line_underlines_nothing() {
     let source = "struct s size=\n";
@@ -204,10 +175,7 @@ fn an_error_at_the_end_of_a_line_underlines_nothing() {
     );
 }
 
-/// A parse failure obeys the prose rules every other diagnostic obeys.
-///
-/// `check/diagnostic_text.rs` sweeps the check pass's findings and cannot
-/// reach these, because its corpus parses first.
+/// `check/diagnostic_text.rs` cannot reach these, because its corpus parses first.
 #[test]
 fn no_refusal_message_breaks_the_line_it_is_rendered_on() {
     for (name, source) in rows() {

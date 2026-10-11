@@ -36,11 +36,6 @@ fn one_voxel_past_the_bound_is_refused() {
 
 #[test]
 fn an_extent_whose_product_overflows_is_refused_rather_than_wrapping() {
-    // `size=4294967295x4294967295` reaches this. `checked_volume` is what
-    // makes it a refusal: the plain multiplication panics in a debug build
-    // and wraps in a release one, and a wrapped volume disagrees with
-    // `index`, which turns the mismatch into an out-of-bounds write rather
-    // than an error.
     let dims = Dims {
         x: u32::MAX,
         y: u32::MAX,
@@ -59,9 +54,7 @@ const THEME: &str = "theme t:\n  slot wall -> @cobblestone\n\n";
 
 #[test]
 fn a_scope_past_the_bound_is_skipped_and_named() {
-    // `size=` and `height=` are each a perfectly ordinary `u32`; only their
-    // product is out of reach, which is why no per-key range check catches
-    // this and the extent has to be checked where it is derived.
+    // Each key is an ordinary `u32`; only their product is out of reach.
     let source = format!("{THEME}struct huge size=100000x100000\n  walls mat_slot=wall height=3\n");
     let out = lowered(&source);
     assert!(
@@ -97,11 +90,6 @@ fn a_scope_past_the_bound_is_skipped_and_named() {
 
 #[test]
 fn a_place_past_the_bound_is_skipped_and_named() {
-    // The `def` path to the same refusal: a `place` voxelises its `def`
-    // through the body lowering a `struct` uses, and the row is dropped
-    // with nothing placed. The finding is the only thing the author gets,
-    // so a pass that lowered the body into a buffer and then dropped the
-    // buffer would leave an empty build with nothing said.
     let source = format!(
         "{THEME}def huge size=100000x100000:\n  walls mat_slot=wall height=3\n\n\
          site s:\n  place id=a use=huge theme=t at=origin\n"
@@ -125,9 +113,6 @@ fn a_place_past_the_bound_is_skipped_and_named() {
 
 #[test]
 fn an_ordinary_scope_is_untouched_by_the_bound() {
-    // The guard must not fire on anything anyone would write. This extent
-    // is four orders of magnitude inside the bound and still far larger
-    // than any shipped example.
     let source = format!("{THEME}struct roomy size=64x64\n  walls mat_slot=wall height=64\n");
     let out = lowered(&source);
     let built = out
@@ -144,9 +129,6 @@ fn an_ordinary_scope_is_untouched_by_the_bound() {
 
 #[test]
 fn an_out_of_range_overhang_is_reported_rather_than_shrinking_the_roof() {
-    // `overhang=` is read in exactly one place, so this is where an
-    // unusable value surfaces. The roof falls back to the wall line, and the
-    // finding is what says so.
     let source = format!(
         "{THEME}struct t size=9x7\n  walls mat_slot=wall height=3\n\
          \x20\x20roof kind=flat mat_slot=wall overhang=4294967296\n"
@@ -166,8 +148,6 @@ fn an_out_of_range_overhang_is_reported_rather_than_shrinking_the_roof() {
 
 #[test]
 fn an_out_of_range_height_is_reported_rather_than_saturating() {
-    // Saturating would put the wall top at `u32::MAX` for the `2^33` the
-    // author asked for, which is why the reader refuses instead of clamping.
     let source = format!("{THEME}struct t size=3x3\n  walls mat_slot=wall height=5000000000\n");
     let out = lowered(&source);
     assert!(

@@ -1,16 +1,5 @@
-//! Throughput of the front end and block-array lowering over a generated site.
-//!
-//! The passes are called in-process, since timing the CLI would mostly time process startup. An
-//! example is too small to time, so the bench generates a site large enough that parsing,
-//! resolution and block-array lowering do real work, and times each stage on its own input so a
-//! change to one, or to the release profile the bench inherits, shows up against that stage.
-//!
-//! ```sh
-//! cargo bench -p cairn-lang-core --bench lowering
-//! ```
-//!
-//! The source's shape is the only knob: a [`ROWS`] × [`COLS`] grid of `place`s alternating two
-//! `def`s, with every neighbouring pair in a row joined by a `connect`.
+//! Throughput of each front-end stage and block-array lowering, over a generated site large
+//! enough to time: `cargo bench -p cairn-lang-core --bench lowering`.
 
 use std::fmt::Write as _;
 use std::hint::black_box;
@@ -21,15 +10,11 @@ use criterion::{Criterion, criterion_group, criterion_main};
 /// Rows of `place`s in the generated site.
 const ROWS: usize = 10;
 
-/// `place`s per row, and one fewer `connect` walkways.
+/// `place`s per row.
 const COLS: usize = 10;
 
-/// A site of `rows` × `cols` placements. Two `def`s alternate so a gable and a hip roof, a door,
-/// windows and a repeated opening are in every row, and each row's placements are joined door to
-/// door by a gravel walkway: the members the lowering passes spend their time on.
-///
-/// Every id is concrete, so the build lowers without a registry pack and the bench need not
-/// depend on `cairn-lang-formats`.
+/// A site of `rows` × `cols` placements alternating two `def`s, each row joined door to door.
+/// Every id is concrete, so it lowers without a registry pack.
 fn site_source(rows: usize, cols: usize) -> String {
     let mut src = String::from(
         "@cairn 2026.06\n@requires version>=1.20\n\n\

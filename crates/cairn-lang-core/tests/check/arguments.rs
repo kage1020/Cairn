@@ -1,6 +1,5 @@
-//! `E_UNKNOWN_ARGUMENT`: a `key=` that no member of that role reads is an error
-//! at the key, so a misspelt argument is named itself rather than surfacing
-//! later as whatever the member lacks.
+//! Argument vocabularies: `E_UNKNOWN_ARGUMENT` for a key the role does not take, and
+//! `W_IGNORED_ARGUMENT` for one it takes and nothing reads.
 
 use cairn_lang_core::intent::{
     MemberRole, UNIVERSAL_ARGUMENTS, Unread, UnreadArgument, known_keywords, role_of,
@@ -9,12 +8,7 @@ use cairn_lang_core::{Diagnostic, DiagnosticCode, Edition, check, lower, parse};
 
 use crate::common::{codes, diagnose, exactly_one};
 
-/// The one finding `source` raises with `code`, beside exactly `total`
-/// findings in all, or a panic naming every finding it raised.
-///
-/// For a source that also earns, say, a selector row's `W_IGNORED_ARGUMENT`
-/// or an unplaced `def`'s `W_UNUSED_DEF`. Asserting the total still catches
-/// a finding added or lost around the one under test.
+/// The one finding `source` raises with `code`, among exactly `total` findings in all.
 fn only_with_code(source: &str, code: &str, total: usize) -> Diagnostic {
     let diags = diagnose(source);
     assert_eq!(
@@ -58,9 +52,7 @@ fn a_key_the_role_does_not_read_is_refused() {
 
 #[test]
 fn the_finding_points_at_the_argument_and_not_at_the_line() {
-    // The anchor is the value, not the key, because the IR carries no span
-    // for the key; the message names the key, so the two read as one
-    // argument.
+    // The IR carries no span for the key, so the anchor is the value.
     let src = "struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n";
     let d = exactly_one(diagnose(src));
     assert_eq!(&src[d.span.clone()], "3");
@@ -69,8 +61,7 @@ fn the_finding_points_at_the_argument_and_not_at_the_line() {
 
 #[test]
 fn the_suggestion_is_drawn_from_the_role_and_from_the_universal_keys() {
-    // `class` is a universal key, not one of `walls`' own, so only a
-    // candidate list that includes the universal keys can offer it.
+    // `class` is a universal key, not one of `walls`' own.
     let role_key = exactly_one(diagnose(
         "struct s size=5x5\n  walls mat_slot=wall hieght=3\n",
     ));
@@ -96,8 +87,6 @@ fn a_key_nothing_resembles_is_named_with_the_closed_set_and_no_suggestion() {
     ));
     let notes = notes(&d);
     assert!(!notes.contains("did you mean"), "got: {notes}");
-    // `floor` reads nothing of its own, so the closed set is the universal
-    // keys alone, and it is still printed.
     assert!(
         notes.contains(&format!(
             "expected one of: {}",
@@ -109,8 +98,6 @@ fn a_key_nothing_resembles_is_named_with_the_closed_set_and_no_suggestion() {
 
 #[test]
 fn an_unknown_keyword_answers_for_its_own_arguments() {
-    // The keyword is the mistake, and its arguments have no vocabulary to
-    // be judged against.
     assert_eq!(
         codes("struct s size=5x5\n  torch brightness=15\n"),
         ["E_UNKNOWN_KEYWORD"],
@@ -127,7 +114,6 @@ fn a_nested_member_is_checked_at_any_depth() {
 
 #[test]
 fn a_member_inside_a_def_is_checked_like_any_other() {
-    // A `def` body is walked by a loop of its own.
     let src = "def hut size=3x3:\n  walls hieght=3 mat_slot=m\n\n\
                theme t:\n  slot m -> @oak_planks\n\n\
                site v:\n  place id=a use=hut theme=t at=origin\n";
@@ -138,9 +124,7 @@ fn a_member_inside_a_def_is_checked_like_any_other() {
 
 #[test]
 fn a_struct_header_key_outside_its_vocabulary_is_refused_with_the_closed_set() {
-    // The note offers the header's closed set, not the `floor` member's, so
-    // there is no suggestion: `hieght` is too far from `size` and `class`,
-    // and `height` is a member's key.
+    // `height` is a member's key, not the header's, so nothing is suggested.
     let src = "struct s size=5x5 hieght=3\n  floor mat_slot=m\n";
     let d = exactly_one(diagnose(src));
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
@@ -185,10 +169,8 @@ fn a_misspelled_size_on_a_header_is_told_it_is_misspelled() {
 
 #[test]
 fn a_header_class_is_accepted_and_reported_as_ignored() {
-    // `spec/components-editing-sites` "`def`, the component construct"
-    // writes `def cottage class=house size=9x7:`, so refusing the unread
-    // `class=` would refuse the spec. The unplaced `def` also earns
-    // `W_UNUSED_DEF`.
+    // `spec/components-editing-sites` "`def`, the component construct" writes `class=` on a header.
+    // The unplaced `def` also earns `W_UNUSED_DEF`.
     for (src, keyword, total) in [
         (
             "def cottage class=house size=9x7:\n  floor mat_slot=m\n",
@@ -215,8 +197,6 @@ fn a_header_class_is_accepted_and_reported_as_ignored() {
 
 #[test]
 fn a_near_miss_on_a_header_class_is_offered_the_unread_key() {
-    // `class` is in the header vocabulary although no pass reads it; that
-    // it is unread is the next finding, not this one.
     let src = "struct s size=5x5 clas=house\n  floor mat_slot=m\n";
     let d = exactly_one(diagnose(src));
     assert_eq!(d.code.as_str(), "E_UNKNOWN_ARGUMENT");
@@ -230,8 +210,6 @@ fn a_near_miss_on_a_header_class_is_offered_the_unread_key() {
 
 #[test]
 fn a_header_size_of_the_wrong_shape_is_the_type_check_s_alone() {
-    // A `size=` that is not `WxH` stays in the header's residual arguments,
-    // but the key is the right word; the type check reports the value.
     assert_eq!(
         codes("struct s size=5\n  floor mat_slot=m\n"),
         ["E_TYPE_MISMATCH_SIZE"],
@@ -240,9 +218,6 @@ fn a_header_size_of_the_wrong_shape_is_the_type_check_s_alone() {
 
 #[test]
 fn a_theme_selector_widens_the_vocabulary_of_the_keyword_it_names() {
-    // No lowering rule reads `tags=`, but the resolver's selector matcher
-    // does, so in a module that selects on it, writing it is not a mistake.
-    // What remains is the row's own binding, which nothing lowers.
     let selected = "theme t:\n  slot glass -> @glass_pane\n  \
                     window[tags=[a,b]] -> frame=@spruce_wood\n\n\
                     struct s size=9x7\n  \
@@ -258,9 +233,7 @@ fn a_theme_selector_widens_the_vocabulary_of_the_keyword_it_names() {
 
 #[test]
 fn a_selector_widens_one_keyword_and_not_the_others() {
-    // Widening every keyword from any selector row would let one theme line
-    // excuse a typo on another member. The window is there so the row
-    // matches and raises no `E_THEME_SELECTOR_UNMATCHED`.
+    // The window is there so the row matches and raises no `E_THEME_SELECTOR_UNMATCHED`.
     let src = "theme t:\n  slot glass -> @glass_pane\n  \
                window[tags=[a,b]] -> frame=@spruce_wood\n\n\
                struct s size=9x7\n  \
@@ -273,9 +246,7 @@ fn a_selector_widens_one_keyword_and_not_the_others() {
 
 #[test]
 fn an_argument_the_spec_defines_and_nothing_reads_is_reported_as_ignored() {
-    // `window shape=` is in `spec/components-editing-sites` "Editing model"
-    // and no pass reads it. The key is the author's to write and the gap is
-    // the implementation's, so it is a warning.
+    // `window shape=` is in `spec/components-editing-sites` "Editing model" and no pass reads it.
     let d = exactly_one(diagnose(
         "struct s size=9x7\n  window side=front y=2 offset=2 size=2x2 shape=arch\n",
     ));
@@ -302,8 +273,6 @@ fn a_key_a_sibling_argument_routed_past_is_reported_as_ignored() {
 
 #[test]
 fn the_conditional_finding_names_both_repair_sites() {
-    // Either argument may be the mistake, which is why this is a warning;
-    // naming only one would pick for the author.
     let d = exactly_one(diagnose(
         "struct s size=9x9\n  roof kind=flat slope_to=front\n",
     ));
@@ -314,8 +283,6 @@ fn the_conditional_finding_names_both_repair_sites() {
 
 #[test]
 fn the_conditional_finding_points_at_the_value_it_is_about() {
-    // Not at the `kind=`: the likeliest repair is on the ignored argument,
-    // and the message quotes the selector.
     let src = "struct s size=9x9\n  roof kind=hip slope_to=left\n";
     let d = exactly_one(diagnose(src));
     assert_eq!(&src[d.span.clone()], "left");
@@ -327,8 +294,7 @@ fn the_rule_that_reads_the_argument_lints_clean() {
     assert_eq!(codes(src), Vec::<&str>::new(), "source:\n{src}");
 }
 
-/// The one finding is the lowering's `W_DEFERRED_MEMBER`, which `check`
-/// does not run; `lower/conditional_arguments.rs` pins that it is raised.
+/// The lowering's `W_DEFERRED_MEMBER` is the one finding, and `check` does not raise it.
 #[test]
 fn a_selector_that_names_no_rule_is_not_billed_twice() {
     // Absent.
@@ -336,8 +302,7 @@ fn a_selector_that_names_no_rule_is_not_billed_twice() {
         codes("struct s size=9x9\n  roof slope_to=front\n"),
         Vec::<&str>::new(),
     );
-    // Outside the dispatch table, spelled so no future roof kind can take
-    // it.
+    // Outside the dispatch table, spelled so no future roof kind can take it.
     assert_eq!(
         codes("struct s size=9x9\n  roof kind=not_a_roof_kind slope_to=front\n"),
         Vec::<&str>::new(),
@@ -351,8 +316,6 @@ fn a_selector_that_names_no_rule_is_not_billed_twice() {
 
 #[test]
 fn a_selector_matched_conditional_key_is_still_reported() {
-    // Selecting on `slope_to=` does not make the roof read it, and the
-    // row's binding is lowered by nothing either.
     let src = "theme t:\n  slot roof -> @spruce_stairs\n  roof[slope_to=front] -> frame=@spruce_wood\n\nstruct s size=9x9\n  roof kind=gable slope_to=front mat_slot=roof\n";
     assert_eq!(ignored_at(src), ["@spruce_wood", "front"], "source:\n{src}");
     let found = diagnose(src);
@@ -366,10 +329,7 @@ fn a_selector_matched_conditional_key_is_still_reported() {
 
 #[test]
 fn place_takes_the_closed_set_the_spec_fixes_and_nothing_else() {
-    // `spec/components-editing-sites` "Origin selectors" and "Cross-scope
-    // references": a name, what to instantiate, what to resolve materials
-    // against, and exactly one origin selector. "`def`, the component
-    // construct" reserves parameterisation, which nothing forwards.
+    // The set `spec/components-editing-sites` "Origin selectors" and "Cross-scope references" fix.
     let src = "def hut size=3x3:\n  floor mat_slot=floor\n\n\
                theme t:\n  slot floor -> @oak_planks\n\n\
                site v:\n  place id=a use=hut theme=t at=origin size=3x3\n";
@@ -378,12 +338,8 @@ fn place_takes_the_closed_set_the_spec_fixes_and_nothing_else() {
     assert!(d.primary.contains("`size=`"), "got: {}", d.primary);
 }
 
-/// One line per role, carrying every argument that role's vocabulary lists
-/// except its `unread_arguments`, which lint as `W_IGNORED_ARGUMENT`.
-///
-/// Each line is one literal with no `\` continuation: `rustfmt` reflows a
-/// continuation when the line grows, and the continued line's leading
-/// spaces then land inside the literal as indentation.
+/// One line per role, with every argument its vocabulary lists except its `unread_arguments`.
+/// No `\` continuations: rustfmt would reindent them into the literal.
 const SWEEP: &[(&str, &str)] = &[
     ("floor", "  floor id=f class=c mat_slot=m\n"),
     ("walls", "  walls id=w class=outer mat_slot=m height=3\n"),
@@ -419,7 +375,6 @@ const SWEEP: &[(&str, &str)] = &[
     ),
 ];
 
-/// The sweep line for one keyword.
 fn sweep_line(keyword: &str) -> &'static str {
     SWEEP
         .iter()
@@ -428,7 +383,6 @@ fn sweep_line(keyword: &str) -> &'static str {
         .1
 }
 
-/// The `key=` names a sweep line writes, in source order.
 fn keys_written(line: &str) -> Vec<&str> {
     line.split_whitespace()
         .filter_map(|word| word.split_once('='))
@@ -436,9 +390,6 @@ fn keys_written(line: &str) -> Vec<&str> {
         .collect()
 }
 
-/// A key a reader reads and the table omits refuses a source the compiler
-/// is built to accept, and neither the shipped examples nor a lowering test
-/// that never reaches `check` would see it.
 #[test]
 fn the_table_and_the_sweep_agree_key_for_key() {
     for (keyword, line) in SWEEP {
@@ -473,8 +424,6 @@ fn the_table_and_the_sweep_agree_key_for_key() {
 
 #[test]
 fn a_selector_matched_key_is_still_reported_as_ignored() {
-    // Selecting on `shape=` does not make the lowering read it, and the
-    // row's binding is lowered by nothing either.
     let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=slit] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=1x2 shape=slit mat_slot=glass\n";
     assert_eq!(codes(src), ["W_IGNORED_ARGUMENT", "W_IGNORED_ARGUMENT"]);
     assert_eq!(ignored_at(src), ["@spruce_wood", "slit"]);
@@ -482,8 +431,6 @@ fn a_selector_matched_key_is_still_reported_as_ignored() {
 
 #[test]
 fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
-    // Otherwise the only finding would be a `W_DEFERRED_MEMBER` about the
-    // absent `height=`.
     let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hieght=3] -> frame=@spruce_wood\n\nstruct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
     // Beside it, only the row's binding.
     let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
@@ -519,16 +466,13 @@ fn a_widened_key_appears_once_in_the_closed_set() {
 
 #[test]
 fn a_stair_reads_the_height_it_is_written_at() {
-    // The shipped `stair` line carries no `y=`.
     let src = "theme t:\n  slot m -> @spruce_stairs\n\nstruct s size=9x9\n  stair kind=stairs mat_slot=m side=front half=top facing=out y=2\n";
     assert_eq!(codes(src), Vec::<&str>::new(), "source:\n{src}");
 }
 
 #[test]
 fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() {
-    // The worked example in `spec/entities` "Anchor conventions" writes
-    // these four, which no pass reads, on known keywords. Its `painting`
-    // line is not a keyword, and `E_UNKNOWN_KEYWORD` owns it.
+    // The worked example in `spec/entities` "Anchor conventions" writes these on known keywords.
     for (line, key) in [
         (
             "  window side=front y=2 offset=4 size=3x3 shape=arch\n",
@@ -552,7 +496,6 @@ fn every_argument_the_spec_writes_on_a_known_keyword_is_accepted_and_reported() 
     }
 }
 
-/// A key the table lists that no source can legally carry fails here.
 #[test]
 fn every_argument_in_every_role_vocabulary_is_written_by_some_clean_source() {
     const PROLOGUE: &str = "theme t:\n  slot m -> @oak_planks\n\n";
@@ -568,7 +511,6 @@ fn every_argument_in_every_role_vocabulary_is_written_by_some_clean_source() {
         );
     }
 
-    // `place` and `connect` live in a `site` body and need a `def` to place.
     let site = format!(
         "def hut size=3x3:\n  floor mat_slot=m\n  door id=entry side=front at=center\n\ntheme t:\n  slot m -> @oak_planks\n\nsite v:\n{}{}",
         sweep_line("place"),
@@ -577,11 +519,6 @@ fn every_argument_in_every_role_vocabulary_is_written_by_some_clean_source() {
     assert_eq!(codes(&site), Vec::<&str>::new(), "source:\n{site}");
 }
 
-/// The invariants the vocabulary tables hold about each other: `unread` is a
-/// subset of what the role accepts and an inapplicable entry is a universal
-/// key, no role restates a universal key, the conditional table's selectors
-/// and keys are arguments the role accepts, and only an unknown keyword
-/// declines to answer.
 #[test]
 fn the_vocabulary_tables_are_consistent_with_each_other() {
     for keyword in known_keywords() {
@@ -594,15 +531,13 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
                 vocabulary.contains(key) || UNIVERSAL_ARGUMENTS.contains(key),
                 "`{keyword}` calls `{key}` unread but does not accept it",
             );
-            // A role's own key is there because the spec wrote it on this
-            // keyword, so nothing reading it is a gap, not `Inapplicable`.
+            // A role's own key is spec-written, so its being unread is a gap, not `Inapplicable`.
             assert!(
                 *why != Unread::Inapplicable || UNIVERSAL_ARGUMENTS.contains(key),
                 "`{keyword}` calls its own `{key}` inapplicable",
             );
         }
-        // The universal keys are added by `accepted_arguments`, so listing
-        // one in a role's own vocabulary would print it twice in the note.
+        // `accepted_arguments` adds the universal keys, so a role restating one prints it twice.
         for key in vocabulary {
             assert!(
                 !UNIVERSAL_ARGUMENTS.contains(key),
@@ -624,8 +559,7 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
             );
             let mut seen: Vec<Option<&str>> = Vec::new();
             for arm in axis.arms {
-                // `Absent` is one arm like any other: two of them would be
-                // two rules for the same line.
+                // Two `Absent` arms would be two rules for one line.
                 let written = arm.value.ident();
                 let spelled = written.map_or_else(
                     || format!("no `{}=`", axis.selector),
@@ -642,8 +576,7 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
                         "`{keyword}` says {spelled} reads `{key}`, which is not one of its \
                          arguments",
                     );
-                    // `unread_arguments` says no rule consults a key, and
-                    // an arm here says one does.
+                    // An arm consults the key, so `unread_arguments` must not list it.
                     assert!(
                         role.unread_argument(key).is_none(),
                         "`{keyword}` calls `{key}` unread and has {spelled} read it",
@@ -665,9 +598,7 @@ fn the_vocabulary_tables_are_consistent_with_each_other() {
 }
 
 // -- a member's own `[key=value]` -----------------------------------------
-//
-// Only the `door` actuator-patch recogniser and redstone's binding-key walk
-// read a selector's keys, so a typo in one would lose the value silently.
+// Few passes read a selector's keys, so a typo there would lose the value silently.
 
 #[test]
 fn a_selector_key_no_member_of_the_role_carries_is_refused() {
@@ -702,13 +633,12 @@ fn the_finding_lands_on_the_selector_attribute_that_carries_it() {
 
 #[test]
 fn a_selector_key_the_role_does_carry_is_accepted() {
-    // `id` is a universal key. Whether the selector binds a fresh id or
-    // references a member is undecided, and the word is read either way.
+    // A universal key.
     assert_eq!(
         codes("struct s size=9x7\n  door[id=front] side=front at=center opened_by=sig.f\n"),
         Vec::<&str>::new(),
     );
-    // A key of the role's own vocabulary, likewise.
+    // A key of the role's own vocabulary.
     assert_eq!(
         codes("struct s size=9x7\n  window[side=front] side=front offset=2 y=2 size=2x2\n"),
         Vec::<&str>::new(),
@@ -717,9 +647,7 @@ fn a_selector_key_the_role_does_carry_is_accepted() {
 
 #[test]
 fn a_theme_selector_widens_the_bracket_as_well_as_the_line() {
-    // The member carries `tags=` as an argument too: the theme selector
-    // matches arguments, not the member's own bracket, so without it the
-    // row would be `E_THEME_SELECTOR_UNMATCHED` and widen nothing.
+    // The member carries `tags=` on its line too, or the theme row would match nothing.
     let selected = "theme t:\n  slot glass -> @glass_pane\n  \
                     window[tags=[a,b]] -> frame=@spruce_wood\n\n\
                     struct s size=9x7\n  \
@@ -731,8 +659,7 @@ fn a_theme_selector_widens_the_bracket_as_well_as_the_line() {
     );
     assert_eq!(codes(selected), ["W_IGNORED_ARGUMENT"]);
 
-    // A near-miss of the role's own vocabulary is a typo written twice, in
-    // the bracket as on the line.
+    // A near-miss of the role's own vocabulary is still a typo, in the bracket as on the line.
     let near_miss = "theme t:\n  slot glass -> @glass_pane\n  \
                      window[sied=front] -> frame=@spruce_wood\n\n\
                      struct s size=9x7\n  \
@@ -761,16 +688,13 @@ fn a_theme_selector_widens_the_bracket_as_well_as_the_line() {
 
 #[test]
 fn an_unknown_keyword_answers_for_its_own_bracket() {
-    // The keyword is the repair; its selector has no vocabulary to answer
-    // to.
     assert_eq!(
         codes("struct s size=9x7\n  windwo[clas=outer] side=front\n"),
         ["E_UNKNOWN_KEYWORD"],
     );
 }
 
-/// A cottage with one theme selector row, whose binding the build never
-/// reads.
+/// A cottage with one theme selector row, whose binding the build never reads.
 const COTTAGE_WITH_A_SELECTOR_ROW: &str = "theme medieval:\n  \
     slot floor -> @oak_planks\n  slot wall  -> @cobblestone\n  \
     slot roof  -> @spruce_stairs\n  slot glass -> @glass_pane\n  \
@@ -796,8 +720,6 @@ fn a_theme_selector_binding_is_reported_as_ignored() {
         "got: {}",
         d.primary,
     );
-    // The note makes no claim about the members the row selects, since it is
-    // printed on a row that matched nothing too.
     assert_eq!(
         notes(&d),
         "the build is the same with this binding or without it; delete it, or the whole row \
@@ -808,8 +730,6 @@ fn a_theme_selector_binding_is_reported_as_ignored() {
 
 #[test]
 fn every_binding_is_reported_whatever_its_key_or_value() {
-    // No pass reads a binding, so there is no vocabulary of keys one may
-    // set.
     let src = "theme t:\n  slot glass -> @glass_pane\n  \
                window[class=small] -> frame=@spruce_wood fram=42\n\n\
                struct s size=9x7\n  \
@@ -820,7 +740,6 @@ fn every_binding_is_reported_whatever_its_key_or_value() {
 
 #[test]
 fn a_row_that_matches_nothing_is_reported_for_its_binding_too() {
-    // Matched or not, the binding reaches no block.
     let src = "theme t:\n  slot glass -> @glass_pane\n  \
                window[class=big] -> frame=@spruce_wood\n\n\
                struct s size=9x7\n  \
@@ -830,9 +749,7 @@ fn a_row_that_matches_nothing_is_reported_for_its_binding_too() {
 
 #[test]
 fn a_binding_in_a_theme_no_scope_applies_is_reported_too() {
-    // Two themes and no `theme=`: neither is applied, so
-    // `E_THEME_SELECTOR_UNMATCHED` stays quiet, and the binding is reported
-    // from the rows themselves.
+    // Two themes and no `theme=`, so neither is applied.
     let src = "theme a:\n  slot glass -> @glass_pane\n  \
                window[class=small] -> frame=@no_such_block\n\n\
                theme b:\n  slot glass -> @glass_pane\n\n\
@@ -848,7 +765,6 @@ fn a_binding_in_a_theme_no_scope_applies_is_reported_too() {
 
 #[test]
 fn a_selector_row_with_an_unknown_keyword_answers_only_for_the_keyword() {
-    // As for a member, the keyword is the repair.
     let src = "theme t:\n  slot glass -> @glass_pane\n  \
                windw[class=small] -> frame=@spruce_wood\n\n\
                struct s size=9x7\n  \
@@ -866,24 +782,19 @@ fn a_selector_row_with_an_unknown_keyword_answers_only_for_the_keyword() {
     );
 }
 
-/// A theme declaring `wall` and `door`, for the fixtures below. `door` is
-/// there so a fixture can name a slot the theme does declare and still be
-/// told it is ignored.
+/// A theme declaring `wall` and `door`; `door` lets a fixture name a declared slot.
 const SLOTS: &str = "theme t:\n  slot wall -> @oak_planks\n  slot door -> @iron_door\n\n";
 
 /// Where a fixture's `mat_slot=` value goes.
 const SLOT: &str = "%SLOT%";
 
-/// One role whose `mat_slot=` nothing reads, written so that the line
-/// carrying [`SLOT`] is the only thing in the source anything reports.
+/// One role whose `mat_slot=` nothing reads; the [`SLOT`] line is all its source reports.
 struct UnreadSlot {
     keyword: &'static str,
     /// Everything after [`SLOTS`].
     body: &'static str,
-    /// The kind of unread key the note is worded for. Written here by hand
-    /// rather than read from the table, so a table that moves a role to the
-    /// other kind fails [`every_role_whose_mat_slot_is_unread_has_a_fixture`]
-    /// instead of rewording the note under a test that agrees with it.
+    /// The kind of unread key the note is worded for, written by hand so a table change fails
+    /// [`every_role_whose_mat_slot_is_unread_has_a_fixture`].
     why: Unread,
 }
 
@@ -921,9 +832,7 @@ const UNREAD_SLOTS: &[UnreadSlot] = &[
     },
 ];
 
-/// What the finding says, by kind: the sentence, and the note that carries
-/// the repair. Spelled out in full so a note worded for the other kind
-/// fails on its text.
+/// The sentence and repair note the finding should carry for `why`, spelled out in full.
 fn expected_wording(keyword: &str, why: Unread) -> (String, String) {
     match why {
         Unread::Unreached => (
@@ -947,16 +856,13 @@ fn expected_wording(keyword: &str, why: Unread) -> (String, String) {
     }
 }
 
-/// The note every one of these carries, whichever kind it is: what not
-/// looking the name up costs.
+/// The note every one of these carries, whichever kind it is.
 const NOT_LOOKED_UP: &str =
     "the slot name is not looked up in the theme, so a misspelling of it is not caught";
 
 #[test]
 fn a_slot_name_on_a_role_that_reads_none_is_ignored_and_not_looked_up() {
-    // `spec/lint` "Error vs warning": the key is carried and never
-    // consulted, and the name is not looked up, so a slot the theme lacks
-    // refuses nothing and one it declares is ignored all the same.
+    // `spec/lint` "Error vs warning": the key is carried but never consulted.
     for fixture in UNREAD_SLOTS {
         for name in ["nosuch", "door"] {
             let src = fixture.source(name);
@@ -986,9 +892,6 @@ fn a_slot_name_on_a_role_that_reads_none_is_ignored_and_not_looked_up() {
 
 #[test]
 fn a_slot_value_that_is_no_label_is_the_type_mismatch_alone() {
-    // A `mat_slot=` that is not a label is not hoisted, and the key is not
-    // the mistake; reporting it as ignored too would put "write a label"
-    // and "drop it" on one span.
     for fixture in UNREAD_SLOTS {
         let src = fixture.source("3");
         assert_eq!(
@@ -1003,8 +906,6 @@ fn a_slot_value_that_is_no_label_is_the_type_mismatch_alone() {
 
 #[test]
 fn a_repeated_slot_is_ignored_once_beside_the_duplicate() {
-    // The first occurrence is hoisted and reported as ignored; the second
-    // stays in the fields, where `E_DUPLICATE_ARG` is its finding.
     for fixture in UNREAD_SLOTS {
         let src = fixture.source("a mat_slot=b");
         let found = diagnose(&src);
@@ -1018,8 +919,6 @@ fn a_repeated_slot_is_ignored_once_beside_the_duplicate() {
     }
 }
 
-/// A role that joins the table without a fixture fails here, and so does
-/// one that moves to the other kind without its fixture.
 #[test]
 fn every_role_whose_mat_slot_is_unread_has_a_fixture() {
     let mut from_table: Vec<(&str, Unread)> = known_keywords()
@@ -1041,7 +940,6 @@ fn every_role_whose_mat_slot_is_unread_has_a_fixture() {
 
 #[test]
 fn a_slot_name_the_theme_lacks_on_a_role_that_reads_it_is_still_refused() {
-    // Not looking the name up is per role.
     let src = format!(
         "{SLOTS}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  window side=front y=2 offset=2 size=2x1 mat_slot=nosuch\n"
     );
@@ -1050,8 +948,6 @@ fn a_slot_name_the_theme_lacks_on_a_role_that_reads_it_is_still_refused() {
 
 #[test]
 fn an_unknown_keyword_still_has_its_slot_looked_up() {
-    // An unknown keyword has no unread arguments, and the slot finding is
-    // one the author needs once the keyword is repaired.
     let src = format!("{SLOTS}struct s size=7x5\n  floor mat_slot=wall\n  torch mat_slot=nosuch\n");
     assert_eq!(
         codes(&src),
@@ -1061,7 +957,6 @@ fn an_unknown_keyword_still_has_its_slot_looked_up() {
     );
 }
 
-/// The full finding list `source` raises under `--edition java`.
 fn codes_under_java(source: &str) -> Vec<&'static str> {
     let module = parse(source).expect("parse");
     check(&module, &lower(&module), Some(Edition::Java))
@@ -1072,8 +967,7 @@ fn codes_under_java(source: &str) -> Vec<&'static str> {
 
 #[test]
 fn a_slot_nothing_reads_does_not_starve_a_struct_of_a_theme_but_a_place_still_binds_one() {
-    // A theme with only a Bedrock variant, under a Java pin. The struct's
-    // only `mat_slot=` is one nothing reads, so no slot is starved.
+    // A Bedrock-only theme under a Java pin, read only by a `mat_slot=` nothing consults.
     let theme = "theme t_bedrock:\n  slot wall -> @oak_planks\n\n";
     let in_a_struct = format!(
         "{theme}struct s size=5x5\n  pressure_plate at=front.outside offset=0 y=0\n  circuit region=floor void=2 mat_slot=wall\n"
@@ -1083,8 +977,7 @@ fn a_slot_nothing_reads_does_not_starve_a_struct_of_a_theme_but_a_place_still_bi
         ["W_IGNORED_ARGUMENT"],
         "source:\n{in_a_struct}",
     );
-    // A theme a `place` binds is more than its slots: the lockfile records
-    // it and its version floor applies, whatever its def reads.
+    // A theme a `place` binds is recorded in the lockfile whatever its def reads.
     let def = "def d size=5x5:\n  pressure_plate at=front.outside offset=0 y=0\n\n";
     let with_slot =
         format!("{theme}{def}site v:\n  place id=a use=d theme=t at=origin mat_slot=wall\n");

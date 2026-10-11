@@ -7,10 +7,7 @@ use crate::common::{lowered, read_example};
 
 #[test]
 fn cottage_lowers_to_overhang_inflated_volume() {
-    // size=9x7 walls height=4 roof kind=gable overhang=1.
-    // dims.x = 9 + 2*1 = 11. dims.z = 7 + 2*1 = 9.
-    // ridge span (short axis of inflated bbox) = min(11, 9) = 9.
-    // ridge_extra = ceil(9/2) = 5 → dims.y = 1 + 4 + 5 = 10.
+    // dims.x = 9 + 2, dims.z = 7 + 2, and dims.y = 1 + 4 + ceil(9/2).
     let out = lowered(&read_example("cottage.crn"));
     let ba = out
         .structures
@@ -31,8 +28,7 @@ fn cottage_palette_contains_all_five_materials() {
     assert!(ids.contains(&"minecraft:cobblestone"));
     assert!(ids.contains(&"minecraft:spruce_stairs"));
     assert!(ids.contains(&"minecraft:glass_pane"));
-    // spruce_stairs occurs multiple times because each (facing, half)
-    // pair is its own palette entry.
+    // Each (facing, half) pair is its own palette entry.
     let stair_entries = ba
         .palette
         .entries
@@ -77,9 +73,7 @@ fn cottage_floor_plane_fills_interior_only() {
 fn cottage_wall_ring_at_y1_has_perimeter_minus_door() {
     let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
-    // Walls form a 9x7 outline at x∈[1,9], z∈[1,7]. Perimeter cells:
-    // 2 * (9 + 7) - 4 = 28. The door at side=front (z=7) at=center
-    // (x=5) carves one cell at y=1, leaving 27.
+    // A 9x7 outline is 28 cells, less the door's one at y=1.
     let mut wall_cells = 0;
     for z in 0..ba.dims.z {
         for x in 0..ba.dims.x {
@@ -108,8 +102,7 @@ fn cottage_door_carves_front_opening() {
 fn cottage_window_pair_lowered_to_glass_panes() {
     let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
-    // Front wall at z=7. Primary x∈[3,5), y∈[2,4) (offset=2 shifted by
-    // overhang=1, size=2x2). Mirror at x∈[6,8) for sym=true.
+    // The primary at x∈[3,5), y∈[2,4), and its mirror at x∈[6,8).
     for x in [3, 4, 6, 7] {
         for y in [2, 3] {
             let i = ba.dims.index(x, y, 7).unwrap();
@@ -127,9 +120,7 @@ fn cottage_window_pair_lowered_to_glass_panes() {
 fn cottage_roof_palette_includes_stairs_with_facing() {
     let out = lowered(&read_example("cottage.crn"));
     let ba = out.structures.get("struct::cottage").unwrap();
-    // At least one entry with facing=south + half=bottom (north slope) and
-    // one with facing=north + half=bottom (south slope) and one half=top
-    // (apex cap).
+    // The north and south slopes, and the `half=top` apex cap.
     let mut north_slope = false;
     let mut south_slope = false;
     let mut apex = false;

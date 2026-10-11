@@ -1,7 +1,5 @@
-//! Every shipped walkway example lowers to exactly one walkway, under the key
-//! its `connect` row spells, with no `W_WALKWAY_BLOCKED` and no
-//! `W_DEFERRED_MEMBER`: each fixture's strip clears every footprint and each of
-//! its ports places. Each fixture's own geometry is pinned under `lower/`.
+//! Every shipped walkway example lowers to exactly the one walkway its `connect` row spells, with
+//! no `W_WALKWAY_BLOCKED` or `W_DEFERRED_MEMBER`.
 
 use cairn_lang_core::check::DiagnosticCode;
 
@@ -23,8 +21,6 @@ const WALKWAY_EXAMPLES: &[(&str, &str)] = &[
     ),
 ];
 
-/// A walkway example nobody added to the table is a fixture the sweep
-/// below never reads.
 #[test]
 fn the_table_names_every_walkway_example_shipped() {
     let on_disk: Vec<String> = examples()

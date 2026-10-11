@@ -1,9 +1,5 @@
-//! A `key=` whose value is present but unreadable is not a `key=` left off
-//! (`spec/lint` "Error vs warning"): a built member equals the build with the
-//! key left off and earns one `W_IGNORED_ARGUMENT` naming the value, and a
-//! refused member reports the value too, with a note saying whether the default
-//! would have built it. An origin or far edge past `i32` is refused rather than
-//! saturated.
+//! A present but unreadable `key=` value builds as if left off and says so (`spec/lint` "Error vs
+//! warning"), and an origin past `i32` is refused rather than saturated.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::{Diagnostic, DiagnosticCode};
@@ -25,8 +21,7 @@ fn underlined<'s>(source: &'s str, ir: &BlockArrayIr, i: usize) -> &'s str {
 
 // --- window `sym=` ---------------------------------------------------------
 
-/// A window at `offset=1` on a 7-wide front wall, so its mirror lands at
-/// `offset=5` and a mirrored build differs from an unmirrored one.
+/// A window at `offset=1` on a 7-wide wall, so a mirrored build differs from an unmirrored one.
 fn window(sym: &str) -> String {
     format!(
         "struct s size=7x3\n  \
@@ -44,8 +39,7 @@ fn an_unreadable_sym_draws_the_unmirrored_window_and_says_so() {
     let mirrored = lowered(&window(" sym=true"));
     assert_eq!(findings(&unmirrored), vec![]);
     assert_eq!(findings(&mirrored), vec![]);
-    // Guard: without this, the equality below would hold for a reader that
-    // ignored `sym=` altogether.
+    // Guard: mirroring changes the build, so the equality below is not vacuous.
     assert_ne!(only_structure(&unmirrored), only_structure(&mirrored));
 
     for (written, described) in [
@@ -73,17 +67,13 @@ fn an_unreadable_sym_draws_the_unmirrored_window_and_says_so() {
             ir.diagnostics[0].notes[0].message,
             "the window is drawn without its mirror, as `sym=false` would draw it",
         );
-        // The value, not the line: the span `check::arguments` gives the
-        // same code.
+        // The value, not the line, as `check::arguments` underlines it.
         assert_eq!(underlined(&source, &ir, 0), written);
     }
 }
 
 #[test]
 fn an_unreadable_sym_on_a_window_that_is_not_cut_is_still_reported() {
-    // Refused for its geometry: the refusal and the unreadable value are
-    // both repairs, and both arrive in one compile. The note says the
-    // window is not cut, rather than that it is drawn unmirrored.
     let src = window(" sym=yes").replace("offset=1", "offset=9");
     let ir = lowered(&src);
     let codes: Vec<&str> = findings(&ir).iter().map(|(code, _)| *code).collect();
@@ -101,10 +91,7 @@ fn an_unreadable_sym_on_a_window_that_is_not_cut_is_still_reported() {
 
 #[test]
 fn an_unreadable_sym_on_a_repeated_window_cuts_nothing() {
-    // `sym=true` refuses a window with `repeat=` greater than 1, and
-    // `sym=false` builds this one. Reading an unreadable `sym=` as `false`
-    // would build three windows the source may have refused, so nothing
-    // is cut, as for `sym=true`.
+    // `sym=true` refuses this series and `sym=false` builds it, so an unreadable one cuts nothing.
     let repeated = |sym: &str| window(&format!(" repeat=3 step=2{sym}"));
     let refused = lowered(&repeated(" sym=true"));
     let built = lowered(&repeated(" sym=false"));
@@ -140,10 +127,6 @@ fn an_unreadable_sym_on_a_repeated_window_cuts_nothing() {
 
 #[test]
 fn a_repeated_window_with_no_step_is_refused_for_the_step_first() {
-    // With no `step=`, the series is refused whatever `sym=` says. That is
-    // the refusal reported, and the unreadable `sym=` carries the note for
-    // a window that is not cut either way, not the one naming `sym=` as
-    // the reason.
     const NO_STEP: &str =
         "window `repeat=` requires a positive `step=` so instances do not overlap";
     let ir = lowered(&window(" repeat=3 sym=yes"));
@@ -161,8 +144,7 @@ fn a_repeated_window_with_no_step_is_refused_for_the_step_first() {
         ir.diagnostics[1].notes[0].message,
         "this window is not cut either way — see the finding on the same line",
     );
-    // The same order for a readable `sym=true`, which refuses the series
-    // too.
+    // The same order for a readable `sym=true`, which refuses the series too.
     assert_eq!(
         findings(&lowered(&window(" repeat=3 sym=true"))),
         vec![("W_DEFERRED_MEMBER", NO_STEP)],
@@ -173,9 +155,6 @@ fn a_repeated_window_with_no_step_is_refused_for_the_step_first() {
 
 #[test]
 fn a_side_of_the_wrong_shape_is_refused_with_the_value_written() {
-    // A quoted `"front"` names the side the author meant; the message has
-    // to show the quotes, or it reads as if `front` itself were refused. A
-    // list has no one surface form, so it is named by its kind alone.
     for (written, described) in [
         ("\"front\"", "string `\"front\"`"),
         ("3", "integer `3`"),
@@ -216,8 +195,7 @@ fn a_side_of_the_wrong_shape_is_refused_with_the_value_written() {
 
 // --- stair `facing=` / `half=` / `shape=` ----------------------------------
 
-/// An eave band on the front wall of a struct whose roof draws a
-/// one-block overhang, the least an eave needs to sit outside the wall.
+/// An eave band on a struct whose roof overhangs one block, the least an eave needs.
 fn stair(args: &str) -> String {
     format!(
         "struct s size=5x5\n  \
@@ -245,8 +223,7 @@ fn an_unreadable_stair_state_builds_the_default_and_says_so() {
             "straight",
         ),
     ] {
-        // Guard: the identifier the author meant changes the build, so the
-        // equality below is not true of a reader that ignores `key=`.
+        // Guard: the identifier meant changes the build, so the equality below is not vacuous.
         let meant = lowered(&stair(&format!(" {key}={readable}")));
         assert_eq!(findings(&meant), vec![]);
         assert_ne!(only_structure(&meant), only_structure(&defaults), "{key}");
@@ -283,8 +260,6 @@ fn an_unreadable_stair_state_builds_the_default_and_says_so() {
 
 #[test]
 fn every_unreadable_stair_state_is_reported_once_on_its_own_value() {
-    // Each finding underlines its own value, so the three are reported in
-    // the order the line writes them and an editor can tell them apart.
     let source = stair(" shape=\"outer_left\" facing=\"in\" half=\"bottom\"");
     let ir = lowered(&source);
     assert_eq!(only_structure(&ir), only_structure(&lowered(&stair(""))));
@@ -312,9 +287,6 @@ fn every_unreadable_stair_state_is_reported_once_on_its_own_value() {
 
 #[test]
 fn an_unreadable_stair_state_on_a_stair_that_is_not_built_is_still_reported() {
-    // An identifier the stair does not support defers it. The unreadable
-    // siblings are further repairs, and they arrive in the same compile
-    // rather than one compile each after the first is made.
     const NOT_BUILT: &str = "this stair is not built either way — see the finding on the same line";
     let unknown = lowered(&stair(" half=sideways facing=1 shape=\"straight\""));
     assert_eq!(
@@ -338,8 +310,7 @@ fn an_unreadable_stair_state_on_a_stair_that_is_not_built_is_still_reported() {
     assert_eq!(unknown.diagnostics[1].notes[0].message, NOT_BUILT);
     assert_eq!(unknown.diagnostics[2].notes[0].message, NOT_BUILT);
 
-    // The same holds for a stair refused after the state arguments, here
-    // for want of an overhang.
+    // The same for a stair refused after the state arguments, for want of an overhang.
     let no_overhang = lowered(&stair(" facing=1").replace(" overhang=1", ""));
     let codes: Vec<&str> = findings(&no_overhang)
         .iter()
@@ -356,9 +327,8 @@ fn an_unreadable_stair_state_on_a_stair_that_is_not_built_is_still_reported() {
 
 // --- place `gap=` ----------------------------------------------------------
 
-/// A site whose first row puts a 3-wide, 5-deep `box` at the origin, with
-/// `rows` appended after it. The body is not square, so `east_of` stepping
-/// by the width and `north_of` stepping by the depth are told apart.
+/// A site with a 3-wide, 5-deep `box` at the origin, then `rows`; the body is not square, so
+/// `east_of` and `north_of` steps are told apart.
 fn site(rows: &str) -> String {
     format!(
         "def box size=3x5:\n  \
@@ -376,12 +346,10 @@ fn origin(ir: &BlockArrayIr, id: &str) -> Option<(i32, i32, i32)> {
         .map(|p| p.origin)
 }
 
-/// The note on an unreadable `gap=` whose row is refused for a reason no
-/// `gap=` reaches.
+/// The note on an unreadable `gap=` whose row is refused for a reason no `gap=` reaches.
 const NOT_PLACED: &str = "this row is not placed either way — see the finding on the same line";
 
 /// The note on an unreadable `gap=` whose row is refused for its origin.
-/// Only `gap=0` was tried, so it claims nothing about any other value.
 const NOT_PLACED_AT_ZERO: &str = "this row is not placed at `gap=0`, the value its origin was \
      worked out with — see the finding on the same line";
 
@@ -390,8 +358,7 @@ fn an_unreadable_gap_places_the_row_edge_to_edge_and_says_so() {
     let touching = lowered(&site("  place id=b use=box theme=t east_of=a\n"));
     assert_eq!(findings(&touching), vec![]);
     assert_eq!(origin(&touching, "b"), Some((3, 0, 0)));
-    // Guard: a readable gap moves the row, so `(3, 0, 0)` below is the
-    // default and not a reader that never looked at `gap=`.
+    // Guard: a readable gap moves the row, so `(3, 0, 0)` below is not vacuous.
     let spaced = lowered(&site("  place id=b use=box theme=t east_of=a gap=4\n"));
     assert_eq!(origin(&spaced, "b"), Some((7, 0, 0)));
 
@@ -423,8 +390,7 @@ fn an_unreadable_gap_places_the_row_edge_to_edge_and_says_so() {
 
 #[test]
 fn a_placement_past_i32_refuses_the_row_instead_of_saturating() {
-    // `a` and `b` are 3 wide, so `gap=2147483642` puts `b`'s last column
-    // at exactly `i32::MAX`, and one more leaves the range.
+    // `a` and `b` are 3 wide, so this puts `b`'s last column at exactly `i32::MAX`.
     let edge = lowered(&site(
         "  place id=b use=box theme=t east_of=a gap=2147483642\n",
     ));
@@ -444,8 +410,7 @@ fn a_placement_past_i32_refuses_the_row_instead_of_saturating() {
              row or on a row it is placed relative to"
         )
     };
-    // The origin is in range and the body is not: its cells would have no
-    // world coordinate, so the row is refused all the same.
+    // The origin is in range and the body is not.
     let body_past = |reported: &str| {
         format!(
             "this placement's body reaches {reported}, past the -2147483648 to 2147483647 \
@@ -473,10 +438,6 @@ fn a_placement_past_i32_refuses_the_row_instead_of_saturating() {
 
 #[test]
 fn rows_past_the_range_are_not_stacked_on_one_coordinate() {
-    // Saturating would put `b` on `i32::MAX` and `c`, placed east of it,
-    // on the same coordinate. Neither is placed: `b` for its origin,
-    // and `c` as a row whose anchor did not lower. `c`'s unreadable `gap=`
-    // is still reported, with a note saying the row is not placed.
     let ir = lowered(&site(
         "  place id=b use=box theme=t east_of=a gap=2147483647\n  \
          place id=c use=box theme=t east_of=b gap=wide\n",
@@ -503,11 +464,7 @@ fn rows_past_the_range_are_not_stacked_on_one_coordinate() {
     assert_eq!(ir.diagnostics[2].notes[0].message, NOT_PLACED);
 }
 
-/// A site placing `bad`, whose eave band is bound to a material that is
-/// not a stair: a defect in the `def` and theme that has nothing to do
-/// with where a row lands. `bad` is placed only by row `b`, because a
-/// finding repeated word for word by a second placement of one `def` is
-/// reported once.
+/// A site placing `bad`, whose eave stair is bound to a non-stair material, once, as row `b`.
 fn with_bad_body(row: &str) -> BlockArrayIr {
     lowered(&format!(
         "def box size=5x5:\n  \
@@ -524,9 +481,7 @@ fn with_bad_body(row: &str) -> BlockArrayIr {
     ))
 }
 
-/// The `E_INCOMPATIBLE_MATERIAL` that `bad`'s stair raises, whole: its
-/// span, scope and wording, so a refused row reporting it differently from
-/// a placed one is caught as well as one not reporting it at all.
+/// The `E_INCOMPATIBLE_MATERIAL` that `bad`'s stair raises, whole.
 fn incompatible(ir: &BlockArrayIr) -> Option<Diagnostic> {
     ir.diagnostics
         .iter()
@@ -547,13 +502,10 @@ fn a_row_refused_for_its_origin_still_reports_its_body() {
         placed.diagnostics
     );
 
-    // Lowering the body takes nothing from the origin, so the refused row
-    // reports the same finding, beside the refusal.
     let refused = with_bad_body("east_of=a gap=3000000000");
     assert_eq!(origin(&refused, "b"), None);
     let codes: Vec<&str> = findings(&refused).iter().map(|(code, _)| *code).collect();
-    // Source order: the finding sits on the theme's `slot` line, above
-    // the site.
+    // Source order: the finding sits on the theme's `slot` line, above the site.
     assert_eq!(
         codes,
         vec!["E_INCOMPATIBLE_MATERIAL", "W_DEFERRED_MEMBER"],
@@ -570,8 +522,7 @@ fn a_row_refused_for_its_origin_still_reports_its_body() {
     assert_eq!(incompatible(&refused), incompatible(&placed));
 }
 
-/// A site that places `bad` only as row `c`, east of row `b`, which is
-/// placed `gap` east of `a`.
+/// A site placing `bad` only as row `c`, east of row `b`, which is `gap` east of `a`.
 fn bad_body_behind(gap: &str) -> BlockArrayIr {
     lowered(&format!(
         "def box size=5x5:\n  \
@@ -591,8 +542,7 @@ fn bad_body_behind(gap: &str) -> BlockArrayIr {
 
 #[test]
 fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
-    // Guard: with `b` in range, `c` is placed and reports its stair's
-    // material.
+    // Guard: with `b` in range, `c` is placed and reports its stair's material.
     let placed = bad_body_behind("1");
     assert!(origin(&placed, "c").is_some());
     let codes: Vec<&str> = findings(&placed).iter().map(|(code, _)| *code).collect();
@@ -603,9 +553,6 @@ fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
         placed.diagnostics
     );
 
-    // `b` is refused for its origin, so `c` has no anchor. `bad`'s stair
-    // material is a defect in the `def` and theme wherever `c` would have
-    // landed, and it is reported as the placed row reports it.
     let ir = bad_body_behind("3000000000");
     assert_eq!(origin(&ir, "c"), None);
     let codes: Vec<&str> = findings(&ir).iter().map(|(code, _)| *code).collect();
@@ -625,8 +572,7 @@ fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
         ir.diagnostics[2].primary,
     );
     assert_eq!(incompatible(&ir), incompatible(&placed));
-    // The body is lowered for its findings and then dropped: a structure
-    // with no placement would be an artifact the lockfile cannot place.
+    // A structure with no placement would be an artifact the lockfile cannot place.
     assert!(
         !ir.structures.contains_key("site::s::c"),
         "{:?}",
@@ -636,10 +582,7 @@ fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
 
 #[test]
 fn an_unreadable_gap_on_a_row_refused_for_its_origin_is_still_reported() {
-    // `b`'s last column sits exactly on `i32::MAX`, so `c` leaves the
-    // range at the `gap=0` its unreadable `gap=` falls back to. The note
-    // names that value only: it does not say whether some other `gap=`
-    // would place the row.
+    // `b`'s last column sits on `i32::MAX`, so `c` leaves the range even at `gap=0`.
     let ir = lowered(&site(
         "  place id=b use=box theme=t east_of=a gap=2147483642\n  \
          place id=c use=box theme=t east_of=b gap=wide\n",

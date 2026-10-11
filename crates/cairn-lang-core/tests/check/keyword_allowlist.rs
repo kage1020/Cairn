@@ -1,6 +1,4 @@
-//! `E_UNKNOWN_KEYWORD`: a member or selector keyword no role defines is an
-//! error at the keyword, with a did-you-mean note when a known keyword is
-//! close.
+//! `E_UNKNOWN_KEYWORD`: a member or selector keyword no role defines is an error at the keyword.
 
 use cairn_lang_core::DiagnosticCode;
 
@@ -37,8 +35,7 @@ fn unknown_keyword_inside_nested_level_is_still_flagged() {
 
 #[test]
 fn unknown_keyword_note_carries_no_secondary_span() {
-    // A note span would make renderers print a second `file:L:C` pointer at
-    // the primary span.
+    // A note span would make renderers print a second `file:L:C` pointer.
     let src = "struct s size=1x1\n  mystery foo=1\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1);
@@ -51,8 +48,7 @@ fn unknown_keyword_note_carries_no_secondary_span() {
 
 #[test]
 fn theme_selector_with_unknown_keyword_is_flagged() {
-    // Lowering keeps a theme selector's keyword as a raw string, so this
-    // pass re-checks it.
+    // Lowering keeps a selector's keyword as a raw string, so this pass re-checks it.
     let src = "theme medieval:\n  windoe[class=small] -> frame=@spruce_wood\n";
     let diags = diagnose(src);
     assert_eq!(diags.len(), 1, "got {diags:#?}");
@@ -66,7 +62,6 @@ fn theme_selector_with_unknown_keyword_is_flagged() {
 
 #[test]
 fn close_typo_attaches_did_you_mean_note() {
-    // `wals` is one deletion away from `walls`.
     let src = "struct s size=4x4\n  wals mat_slot=wall height=3\n";
     let diags = diagnose(src);
     let kw = diags
@@ -93,7 +88,6 @@ fn close_typo_attaches_did_you_mean_note() {
 
 #[test]
 fn distant_typo_skips_the_suggestion() {
-    // `mystery` is 4+ edits away from every known keyword.
     let src = "struct s size=1x1\n  mystery foo=1\n";
     let diags = diagnose(src);
     let kw = diags

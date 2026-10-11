@@ -1,8 +1,5 @@
-//! `E_MISSING_MATERIAL`: a `floor` or `walls` with no `mat_slot=` paints
-//! nothing, since a theme slot is its only route to a block, and is an error at
-//! the member. The rule is about the absent key only: a `mat_slot=` that is
-//! present but unusable or unresolvable is another code's finding, and a
-//! `window` without one is an opening carved to air.
+//! `E_MISSING_MATERIAL`: a `floor` or `walls` with no `mat_slot=` paints nothing, so it is an
+//! error at the member; a present but unusable `mat_slot=` is another code's finding.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -67,8 +64,7 @@ window class=arrow_slit side=front repeat=3 step=2 y=2 size=1x2\n"
 
 #[test]
 fn the_roles_that_paint_a_fallback_are_left_alone() {
-    // The roof's `overhang=1` lets the eave `stair` sit outside the wall;
-    // without it lowering defers the stair.
+    // The roof's `overhang=1` gives the eave `stair` somewhere to sit.
     let src = format!(
         "{THEME}struct s size=6x6\n  \
 floor mat_slot=m\n  \
@@ -84,8 +80,7 @@ pressure_plate id=p at=front.outside offset=0 y=0\n"
         codes(&diagnose(&src)),
     );
 
-    // Otherwise the assertion above would hold just as well for a fixture
-    // lowering refuses outright.
+    // Guard: lowering does not refuse this fixture outright.
     let painted = footprint(&src);
     assert_eq!(
         painted.2, 0,
@@ -125,10 +120,7 @@ fn a_slot_no_theme_declares_is_the_resolvers_finding_and_not_this_one() {
     );
 }
 
-/// `intent::lower` hoists only an identifier or a string into
-/// `Member::mat_slot`, so these leave the field empty while the key is on
-/// the line; a rule reading the field alone would ask for a key the author
-/// already wrote.
+/// `intent::lower` hoists only an identifier or a string into `Member::mat_slot`.
 #[test]
 fn a_mat_slot_whose_value_is_not_a_label_is_the_type_findings_and_not_this_one() {
     for value in ["@oak_planks", "foo.bar"] {
@@ -156,8 +148,6 @@ fn a_module_with_no_theme_still_names_the_missing_material() {
     let src = "struct s size=3x3\n  walls height=4\n";
     let found = of_code(src, DiagnosticCode::MissingMaterial);
     assert_eq!(found.len(), 1, "got {:?}", codes(&diagnose(src)));
-    // "Name a slot the applied theme declares" cannot be followed in a file
-    // with no theme.
     let note = &found[0].notes[0].message;
     assert!(
         note.contains("declares no `theme`"),
@@ -191,9 +181,6 @@ floor id=inner\n"
     );
 }
 
-/// The pass that dropped the row owns it, and the repairs would disagree:
-/// a `mat_slot=` on a `floor` in a `site` body would silence this code and
-/// leave `E_MISPLACED_MEMBER` saying the row still produces no blocks.
 #[test]
 fn a_body_another_pass_has_dropped_earns_nothing_here() {
     let cases = [
@@ -230,12 +217,8 @@ site x:\n  floor\n"
     }
 }
 
-/// One row per role that can paint inside a `struct` body, written without
-/// a `mat_slot=`, plus the support it needs to reach its painter.
-///
-/// A deferred member looks, in the array, like one that painted nothing,
-/// so the support is needed; it goes into both sides of the comparison.
-/// The roles absent here lay no block of their own.
+/// One row per role that can paint in a `struct` body, without `mat_slot=`, plus the support it
+/// needs not to be deferred.
 const PAINTERS: &[(&str, &str, &str)] = &[
     ("floor", "floor id=extra", ""),
     ("walls", "walls class=inner height=2", ""),
@@ -249,26 +232,18 @@ const PAINTERS: &[(&str, &str, &str)] = &[
     (
         "stair",
         "stair id=eave kind=stairs side=front half=top facing=out shape=outer_left",
-        // An eave band sits outside the wall, so it needs a roof drawing
-        // an overhang of at least 1 or lowering defers it.
+        // An eave band needs a roof drawing an overhang of at least 1.
         "roof id=r kind=gable overhang=1",
     ),
     (
         "pressure_plate",
-        // `<side>.outside` and `inside.<side>` are the recognised anchors;
-        // `front.inside` is neither, and is deferred.
+        // `front.inside` is not a recognised anchor and would be deferred.
         "pressure_plate id=p at=front.outside offset=0 y=0",
         "",
     ),
 ];
 
-/// The lowered structure's extents, its painted block ids, and how many
-/// findings lowering raised.
-///
-/// The ids are sorted, so a member that only relocated blocks already in
-/// the palette would read as unchanged; no role does that. The finding
-/// count is for asserting nothing was deferred, and is not part of what
-/// changed the build.
+/// The lowered structure's extents, its sorted painted block ids, and its finding count.
 fn footprint(src: &str) -> (String, Vec<String>, usize) {
     let module = parse(src).expect("parse");
     let ir = lower(&module);
@@ -333,8 +308,7 @@ fn check_refuses_exactly_the_bare_members_that_change_nothing() {
     }
 }
 
-/// The match is exhaustive, so a new role stops this file compiling until
-/// someone decides which side it is on.
+/// The match is exhaustive, so a new role has to be put on one side.
 #[test]
 fn every_role_is_either_measured_here_or_paints_nothing() {
     fn measured(role: &MemberRole) -> bool {
@@ -346,11 +320,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Roof
             | MemberRole::Stair
             | MemberRole::PressurePlate => true,
-            // `level` groups its children; `circuit` reserves a volume the
-            // redstone phases paint into; `place` instantiates a def whose
-            // members carry their own materials; `connect` lays its walkway
-            // from `path=@MAT`; and an unknown keyword is
-            // `E_UNKNOWN_KEYWORD`'s.
+            // None of these lays a block of its own material.
             MemberRole::Level
             | MemberRole::Circuit
             | MemberRole::Place

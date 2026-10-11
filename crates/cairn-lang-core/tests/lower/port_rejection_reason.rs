@@ -1,15 +1,12 @@
-//! A `connect` row whose port cannot be placed says which of the port's rules
-//! it broke, and only that one: each case builds one refusal through the whole
-//! pipeline and pins that the row names that reason, points at the member it is
-//! about, and says nothing about the rest.
+//! A `connect` row whose port cannot be placed names the one rule it broke and points at the
+//! member it is about.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, DiagnosticNote};
 
 use crate::common::lowered;
 
-/// A theme, a `hut` whose front door `e` anchors any walkway, and a
-/// `probe` def holding `walls` plus the member under test as `p`.
+/// A theme, a `hut` whose front door `e` anchors any walkway, and a `probe` def holding `p`.
 fn site(probe_members: &str, gap: u32) -> String {
     format!(
         "theme t:\n  \
@@ -29,8 +26,7 @@ fn site(probe_members: &str, gap: u32) -> String {
     )
 }
 
-/// The one walkway defer `out` carries, for one refused port or two: the
-/// `W_DEFERRED_MEMBER` anchored on the `connect` row of `src`.
+/// The one walkway defer `out` carries: the `W_DEFERRED_MEMBER` on the `connect` row of `src`.
 fn skip<'a>(src: &str, out: &'a BlockArrayIr) -> &'a Diagnostic {
     let skips: Vec<_> = out
         .diagnostics
@@ -57,9 +53,7 @@ fn skip_notes<'a>(src: &str, out: &'a BlockArrayIr) -> Vec<&'a DiagnosticNote> {
 /// The suffix a note carries when the member's own line defers too.
 const OWN_LINE: &str = "; the member says so on its own line too";
 
-/// A note that says the member's line carries a deferral is only true if
-/// one is there: the walkway defer and the member's own are two findings
-/// from two passes, and this is the check that ties them together.
+/// Asserts the member's own line really carries the deferral `note` claims it does.
 fn assert_own_line_holds(out: &BlockArrayIr, note: &DiagnosticNote) {
     if !note.message.ends_with(OWN_LINE) {
         return;
@@ -79,8 +73,7 @@ fn assert_own_line_holds(out: &BlockArrayIr, note: &DiagnosticNote) {
     );
 }
 
-/// Every contract a port has. None of them is the reason for any case
-/// here, so none may appear.
+/// Every contract a port has, none of which is the reason for any case here.
 const CHECKLIST: [&str; 4] = [
     "a `door` port requires",
     "a `window` port requires",
@@ -88,9 +81,7 @@ const CHECKLIST: [&str; 4] = [
     "cannot anchor a port yet",
 ];
 
-/// Lower `probe_members`, and assert the row carries exactly one note,
-/// that it begins with `reason`, and that it points at the line starting
-/// with `member_line` (or at nothing, when `member_line` is `None`).
+/// Asserts the row's one note begins with `reason` and points at the line starting `member_line`.
 fn assert_reason(probe_members: &str, gap: u32, reason: &str, member_line: Option<&str>) {
     let src = site(probe_members, gap);
     let out = lowered(&src);
@@ -125,8 +116,6 @@ const WALLS: &str = "  walls id=w mat_slot=wall height=3\n";
 
 #[test]
 fn a_stair_is_refused_for_its_role() {
-    // A `stair` port: the stair lowers clean, so this note is the only
-    // place the build says what is wrong.
     assert_reason(
         &format!(
             "{WALLS}  stair id=p kind=stairs side=front mat_slot=eave\n  roof id=r kind=gable mat_slot=eave overhang=1\n"
@@ -199,10 +188,7 @@ fn a_window_outside_the_courses_is_refused_with_its_rows() {
 
 #[test]
 fn a_port_past_the_coordinate_range_is_refused_as_out_of_range() {
-    // `b` is placed so far east that its last column is `i32::MAX`, so
-    // the cell outside its east door does not fit an `i32`. The note has
-    // no member to point at: the member is fine, the `place` is what moved
-    // it.
+    // `b`'s last column is `i32::MAX`, so the cell outside its east door does not fit an `i32`.
     let src = format!(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
@@ -267,8 +253,6 @@ fn two_refused_ports_get_one_note_each_in_row_order() {
 
 #[test]
 fn a_window_without_offset_anchors_a_walkway_as_it_is_cut() {
-    // The openings pass reads an absent `offset=` as `0` and cuts the
-    // window, so the port has to read it the same way.
     let src = site(
         &format!("{WALLS}  window id=p side=front y=1 size=1x1 mat_slot=glass\n"),
         6,
@@ -296,9 +280,6 @@ fn one_refused_port_is_named_in_the_singular() {
 
 #[test]
 fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
-    // `at=3` is present and not an identifier. The door's own line and
-    // the row's note are built from one reading, so neither says the door
-    // has no `at=` at all.
     let src = site(&format!("{WALLS}  door id=p side=front at=3\n"), 6);
     let out = lowered(&src);
     let clause =
@@ -324,9 +305,7 @@ fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
 
 #[test]
 fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
-    // The port reads `offset=`, `y=` and `size=`; the cut also reads
-    // `repeat=`, `step=` and `sym=`, and each of these defers the cut, so
-    // no strip may end at the wall where the window is not.
+    // The port reads `offset=`, `y=`, `size=`; the cut also defers on `repeat=`, `step=` or `sym=`.
     for (args, own_line) in [
         (
             "offset=0 y=1 size=1x1 repeat=0 mat_slot=glass",
@@ -378,9 +357,7 @@ fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
 
 #[test]
 fn a_window_whose_material_does_not_resolve_anchors_no_walkway() {
-    // Without a registry pack `@wood.dark` lowers to nothing, so the
-    // window clears every geometry check and paints no cell: the wall is
-    // still standing where the strip would arrive.
+    // Without a registry pack `@wood.dark` lowers to nothing, so the window paints no cell.
     let src = "theme t:\n  \
                slot wall -> @cobblestone\n  \
                slot trim -> @wood.dark\n  \
@@ -414,8 +391,6 @@ fn a_window_whose_material_does_not_resolve_anchors_no_walkway() {
 
 #[test]
 fn a_window_whose_rows_overflow_prints_no_backwards_range() {
-    // `y=4294967295 size=1x2` has a last row past `u32`. Saturating the
-    // sum would print `y=4294967295..=4294967294` on both lines.
     let src = site(
         &format!("{WALLS}  window id=p side=front offset=1 y=4294967295 size=1x2\n"),
         6,
@@ -441,12 +416,8 @@ fn a_window_whose_rows_overflow_prints_no_backwards_range() {
 
 #[test]
 fn a_port_one_step_past_the_coordinate_range_is_refused_as_out_of_range() {
-    // `north_of=a` puts `b`'s origin at exactly `z = i32::MIN` with
-    // `gap=2147483643` (`0 - 5 - gap`), so its back wall sits on the last
-    // addressable row and only the step out of the wall leaves the range.
-    // A debug build must not panic on that step. A larger gap does not
-    // reach here: the origin itself would leave the range, and the
-    // `place` is refused before it has a door to step from.
+    // `gap=2147483643` puts `b`'s origin at `z = i32::MIN`, so only the step out of the wall leaves
+    // the range.
     let gap = 2_147_483_643_u32;
     let src = format!(
         "theme t:\n  \

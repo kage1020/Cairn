@@ -1,9 +1,5 @@
-//! A role whose `MemberRole::unread_arguments` lists `mat_slot` builds the same
-//! blocks, palette, dims and place under two slot names the theme binds to
-//! different blocks, while a `window`, the control, builds differently. Each
-//! source is built through the pipeline and again with every binding's
-//! `slot_value` filled in by hand, since the resolver does not look these names
-//! up and a lowering that read one would otherwise see `None` both times.
+//! A role whose `MemberRole::unread_arguments` lists `mat_slot` builds the same under two slot
+//! names bound to different blocks, even with every `slot_value` filled in by hand.
 
 use std::collections::HashMap;
 
@@ -15,19 +11,16 @@ use cairn_lang_core::{BlockArrayIr, IntentModule, lower, parse, resolve};
 /// Where a fixture's slot name goes.
 const SLOT: &str = "%SLOT%";
 
-/// Two slots bound to blocks no other member of any fixture paints, and the
-/// slot the rest of each body paints with.
+/// Two slots bound to blocks no other member paints, and the slot the rest of each body paints.
 const THEME: &str = "theme t:\n  slot first -> @oak_planks\n  slot second -> @cobblestone\n  slot wall -> @stone_bricks\n\n";
 
 /// The two names each fixture is built under.
 const NAMES: (&str, &str) = ("first", "second");
 
-/// A `def` a site fixture can place: a floor, walls, and a door a `connect`
-/// can name as a port.
+/// A `def` a site fixture can place, with a door a `connect` can name.
 const HUT: &str = "def hut size=3x3:\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  door id=entry side=front at=center\n\n";
 
-/// One row per keyword whose `mat_slot=` is under test: the body after
-/// [`THEME`], with [`SLOT`] where the name goes.
+/// The body after [`THEME`] for each keyword under test, with [`SLOT`] where the name goes.
 const FIXTURES: &[(&str, &str)] = &[
     (
         "door",
@@ -49,10 +42,7 @@ const FIXTURES: &[(&str, &str)] = &[
         "connect",
         "site v:\n  place id=a use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=4\n  connect a.entry to b.entry path=@gravel mat_slot=%SLOT%\n",
     ),
-    // The control. A `window` reads its `mat_slot=`, so this row has to
-    // build differently under the two names, which is what makes the
-    // "same" of every other row evidence rather than two names that happen
-    // to resolve alike.
+    // The control: a `window` reads its `mat_slot=`, so it builds differently under the two names.
     (
         "window",
         "struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  window side=front y=1 offset=1 size=2x1 mat_slot=%SLOT%\n",
@@ -64,8 +54,7 @@ fn source(body: &str, name: &str) -> String {
     format!("{THEME}{hut}{}", body.replace(SLOT, name))
 }
 
-/// Every member of every `struct` and `def` body, at any depth, by the
-/// position the resolver keys its bindings on.
+/// Every member of every `struct` and `def` body, keyed by span start as the resolver keys them.
 fn members_by_start(ir: &IntentModule) -> HashMap<usize, &Member> {
     fn walk<'a>(members: &'a [Member], out: &mut HashMap<usize, &'a Member>) {
         for member in members {
@@ -83,12 +72,7 @@ fn members_by_start(ir: &IntentModule) -> HashMap<usize, &Member> {
     out
 }
 
-/// Give every member in every bound scope the `slot_value` its theme
-/// declares for its `mat_slot=`, whatever its role.
-///
-/// For a role that reads its slot this is what the resolver already did, so
-/// the binding is unchanged. For one that reads none it is the value the
-/// resolver did not look up, put where a lowering rule would read it.
+/// Gives every member in every bound scope the `slot_value` its theme declares, whatever its role.
 fn look_up_every_slot(ir: &IntentModule, resolution: &mut Resolution) {
     let members = members_by_start(ir);
     for scope in resolution.scopes.values_mut() {
@@ -109,8 +93,7 @@ fn look_up_every_slot(ir: &IntentModule, resolution: &mut Resolution) {
     }
 }
 
-/// The two builds of one source: as the pipeline runs it, and with every
-/// slot looked up.
+/// One source built as the pipeline runs it, and again with every slot looked up.
 fn builds(source: &str) -> (BlockArrayIr, BlockArrayIr) {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
@@ -131,11 +114,7 @@ fn builds(source: &str) -> (BlockArrayIr, BlockArrayIr) {
     (as_run, with_every_slot)
 }
 
-/// Everything about a build a `mat_slot=` could move: the blocks, where the
-/// structures carrying them were placed, and the walkways between them.
-///
-/// Compared instead of the whole [`BlockArrayIr`] because its diagnostics
-/// carry spans, and the two sources differ in length by the width of a name.
+/// Whether two builds match in blocks, placements and walkways; diagnostics carry spans.
 fn same_build(left: &BlockArrayIr, right: &BlockArrayIr) -> bool {
     left.structures == right.structures
         && left.placements == right.placements
@@ -164,10 +143,6 @@ fn palettes(ir: &BlockArrayIr) -> String {
         .join("\n")
 }
 
-/// The table's claim, made observable: under each role the table says reads
-/// no `mat_slot=`, the build does not move between two names that resolve
-/// to different blocks, whether or not the resolver looked them up; under
-/// the control, it does.
 #[test]
 fn a_mat_slot_nothing_reads_leaves_the_build_as_it_was() {
     let (one, other) = NAMES;
@@ -220,10 +195,6 @@ fn a_mat_slot_nothing_reads_leaves_the_build_as_it_was() {
     }
 }
 
-/// Every role whose `mat_slot` the table lists as unread has a row here.
-///
-/// A role that joins those entries arrives as a missing fixture rather than
-/// as an untested claim.
 #[test]
 fn every_role_whose_mat_slot_is_unread_is_built_here() {
     let mut from_table: Vec<&str> = known_keywords()

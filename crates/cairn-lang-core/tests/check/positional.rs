@@ -1,8 +1,5 @@
-//! `E_UNEXPECTED_POSITIONAL`: everything after a command keyword is `key=value`
-//! (`spec/syntax` "Lexical"), so a bare value on any row but `connect` is an
-//! error at the value. A dropped `=` is the case that matters: `walls
-//! mat_slot=wall height 3` builds no wall, and the missing `height=` alone does
-//! not say why.
+//! `E_UNEXPECTED_POSITIONAL`: everything after a command keyword is `key=value` (`spec/syntax`
+//! "Lexical"), so a bare value on any row but `connect` is an error at the value.
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
@@ -32,7 +29,6 @@ fn the_spec_forbidden_form_is_an_error() {
     }
 }
 
-/// `height 3` reads as two bare values, not as a misspelt `height=3`.
 #[test]
 fn a_dropped_equals_sign_is_reported() {
     let src = struct_with("walls mat_slot=wall height 3");
@@ -40,9 +36,7 @@ fn a_dropped_equals_sign_is_reported() {
     assert_eq!(&src[d.span.clone()], "height 3");
 }
 
-/// `connect FROM.PORT to TO.PORT` is the one form that reads positionals.
-/// A malformed row is `connect_arity`'s, whose advice is about the endpoint
-/// shape rather than `key=value`.
+/// A malformed `connect` row is `connect_arity`'s.
 #[test]
 fn connect_is_exempt_well_formed_or_not() {
     for row in [
@@ -67,9 +61,6 @@ fn connect_is_exempt_well_formed_or_not() {
     );
 }
 
-/// The parser appends to `positional` whenever the next token is not
-/// `key=`, so a bare value can sit *after* an argument, not only before
-/// the first `key=value`.
 #[test]
 fn a_positional_after_an_argument_is_still_reported() {
     let src = struct_with("window id=w side=front y=1 offset=1 size=2 x2 mat_slot=wall");
@@ -77,8 +68,6 @@ fn a_positional_after_an_argument_is_still_reported() {
     assert_eq!(&src[d.span.clone()], "x2");
 }
 
-/// The argument caught between two bare values is part of the line the
-/// author rewrites.
 #[test]
 fn the_span_covers_the_whole_run() {
     let src = struct_with("window front side=front G mat_slot=wall");
@@ -103,9 +92,6 @@ fn a_fully_keyed_line_is_not_reported() {
     }
 }
 
-/// An unknown keyword is `keyword_allowlist`'s finding: there is no
-/// reader whose argument form the bare values could be measured against,
-/// and the repair is the word.
 #[test]
 fn an_unknown_keyword_is_left_to_the_allowlist() {
     let src = struct_with("frame front 2");
@@ -121,8 +107,7 @@ fn an_unknown_keyword_is_left_to_the_allowlist() {
     );
 }
 
-/// This pass descends through a subtree `member_scope` and `nesting` have
-/// already reported, because dedenting the row leaves it just as broken.
+/// `member_scope` and `nesting` have reported the subtree, but dedenting leaves the row as broken.
 #[test]
 fn a_positional_inside_a_dropped_body_is_still_reported() {
     let src = format!(
@@ -140,8 +125,6 @@ fn a_positional_inside_a_dropped_body_is_still_reported() {
     );
 }
 
-/// Singular and plural both appear in the message, and only a rendered
-/// string shows that the verb agrees with the count.
 #[test]
 fn the_verb_agrees_with_the_count() {
     let one_value = one_of_code(
@@ -168,9 +151,6 @@ fn the_verb_agrees_with_the_count() {
     );
 }
 
-/// A `place` row takes the same treatment as a geometry row: `place hut`
-/// (the `use=` key forgotten) is a plausible typo and drops the whole
-/// placement.
 #[test]
 fn a_site_row_is_covered_too() {
     let src = duo_with("place extra theme=plain at=origin");
@@ -178,8 +158,7 @@ fn a_site_row_is_covered_too() {
     assert_eq!(&src[d.span.clone()], "extra");
 }
 
-/// The premise the message is written on, measured on the build: `walls`
-/// has no default height, so a lost `=` costs the whole wall.
+/// `walls` has no default height, so a lost `=` costs the whole wall.
 #[test]
 fn a_dropped_equals_costs_the_whole_member() {
     let solid = |source: &str| {

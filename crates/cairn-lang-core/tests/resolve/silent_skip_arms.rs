@@ -1,8 +1,5 @@
-//! The resolver drops some rows without a finding of its own, because a
-//! pass that runs ahead of it in `check` reports them. Each test pins one
-//! such arm through `resolve` alone, next to the signal it relies on, so a
-//! library caller that skips `check` has the silence written down; and a
-//! `connect` naming a `place` row that was dropped still says so itself.
+//! Rows the resolver drops without a finding because a pass ahead of it in `check` reports them,
+//! each pinned through `resolve` next to the signal it relies on.
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
@@ -31,10 +28,7 @@ theme plain:\n  \
 slot floor -> @oak_planks\n  \
 slot wall  -> @cobblestone\n\n";
 
-/// Baseline: a fully-resolved `connect` produces exactly one walkway
-/// and zero diagnostics. Anchors the negative-space assertions in the
-/// silent-arm tests below — without this, "0 walkways, 0 errors" is
-/// indistinguishable from a pipeline that no-ops on every input.
+/// Baseline for the silent arms below, so "no walkway, no finding" is not a pipeline no-op.
 #[test]
 fn fully_resolved_connect_lays_one_walkway_with_no_diagnostics() {
     let src = format!(
@@ -63,10 +57,6 @@ connect anchor.entry to peer.entry path=@gravel\n"
     );
 }
 
-/// A `place` missing `use=` keeps its id but is never placed, so a
-/// `connect` naming it is well-formed and finds no body behind the id: one
-/// `W_DEFERRED_CONNECT` at the row, beside the `E_INCOMPLETE_PLACE` at the
-/// place.
 #[test]
 fn missing_use_cascades_w_deferred_connect_with_no_walkway() {
     let src = format!(
@@ -95,9 +85,7 @@ connect anchor.entry to silent.entry path=@gravel\n"
     );
 }
 
-/// The same for a missing `theme=`. The file declaring a single theme does
-/// not stand in for the key: the row is dropped before a theme would be
-/// picked for it.
+/// The file's single theme does not stand in for the missing key.
 #[test]
 fn missing_theme_cascades_w_deferred_connect_with_no_walkway() {
     let src = format!(
@@ -126,11 +114,6 @@ connect anchor.entry to themeless.entry path=@gravel\n"
     );
 }
 
-/// An unnamed `place` row is unreachable from any `connect` row by
-/// construction (no `id=` for the dot-ref left side), so nothing can
-/// cascade from it. The contract worth pinning is that it is reported
-/// exactly once, at the row, and that the absence of a cascade is not
-/// mistaken for the absence of a finding.
 #[test]
 fn place_without_id_is_reported_once_and_cannot_cascade() {
     let src = format!(
@@ -153,10 +136,7 @@ place           use=hut theme=plain east_of=anchor gap=4\n"
     );
 }
 
-/// A `connect` row missing its `to` half returns early at the resolver
-/// without a finding: `E_CONNECT_ARITY` is `check::connect_arity`'s, which
-/// runs ahead of `resolve`. A library caller bypassing `check` sees the
-/// early return rather than a panic.
+/// `E_CONNECT_ARITY` is `check::connect_arity`'s, which runs ahead of `resolve`.
 #[test]
 fn connect_with_missing_positional_silently_returns_without_diagnostics() {
     let src = format!(
@@ -184,10 +164,6 @@ connect anchor.entry\n"
     );
 }
 
-/// `connect FROM.PORT to` (the `to` keyword present but no target port)
-/// takes the same silent return as the row with no `to` half, so a
-/// resolver that treats them differently (say, panicking when `to` is
-/// present) shows up as a deliberate test change.
 #[test]
 fn connect_with_to_keyword_only_silently_returns_without_diagnostics() {
     let src = format!(
@@ -215,9 +191,6 @@ connect anchor.entry to\n"
     );
 }
 
-/// `connect FROM.PORT xxx TO.PORT` has three positionals, but the middle
-/// one is not the `to` keyword, so the resolver reads no endpoints from it
-/// rather than guessing which words are the ends.
 #[test]
 fn connect_with_wrong_separator_silently_returns_without_diagnostics() {
     let src = format!(
@@ -246,18 +219,6 @@ connect anchor.entry xxx peer.entry path=@gravel\n"
     );
 }
 
-/// An endpoint that is not a dotted reference at all takes the same
-/// silent return as a missing positional. `check::connect_arity` owns
-/// the user-facing `E_CONNECT_ARITY`; what the resolver owes a library
-/// caller is that no walkway is laid from a row it could not read.
-///
-/// The shapes here are the parser-reachable non-reference kinds that
-/// differ in how they could plausibly be typed: a bare place id with
-/// the port forgotten (on either end, since the two ends are separate
-/// call sites), a quoted reference (the author reached for string
-/// syntax), a material token (copied from `path=`), and a literal.
-/// They share one resolver arm, so they are pinned together — a future
-/// guard that special-cases one of them shows up here.
 #[test]
 fn connect_with_non_reference_endpoint_silently_returns_without_diagnostics() {
     for row in [
@@ -282,14 +243,6 @@ fn connect_with_non_reference_endpoint_silently_returns_without_diagnostics() {
     }
 }
 
-/// A row carrying more than three positionals must not lay a walkway
-/// through the resolver-only path.
-///
-/// `check` calls `connect a.entry to b.entry c.exit` an error, so a
-/// resolver that read the first three positionals and ignored the tail
-/// would disagree with it about what is well-formed, not merely about how
-/// loudly to say so. The endpoint and separator tests above would all still
-/// pass with the count bound removed.
 #[test]
 fn connect_with_extra_positionals_lays_no_walkway() {
     let outcome = lowered_with_resolver_diagnostics(&duo_with(
@@ -308,10 +261,6 @@ fn connect_with_extra_positionals_lays_no_walkway() {
     );
 }
 
-/// An endpoint carrying a second dot must not lay a walkway either.
-/// Reading only the first segment after the place would give
-/// `anchor.entry.typo` exactly the walkway `anchor.entry` lays, so a
-/// mistyped port would compile into a build that looked correct.
 #[test]
 fn connect_with_extra_segment_endpoint_lays_no_walkway() {
     for row in [
@@ -334,16 +283,7 @@ fn connect_with_extra_segment_endpoint_lays_no_walkway() {
     }
 }
 
-/// A duplicate top-level name binds once and says nothing about it
-/// through the resolver-only path.
-///
-/// `check::duplicate` owns the diagnostic and every CLI command gates
-/// on it, so this is not a hole a user reaches. It *is* a hole a
-/// library caller reaches — `resolve` and `lower_to_block_array` are
-/// public, and the latter's own doc invites callers who assemble the
-/// pipeline themselves. Pinning it here makes the silence a decision
-/// rather than an accident, and puts the fact next to the other arms
-/// that share it.
+/// `check::duplicate` owns the diagnostic.
 #[test]
 fn duplicate_item_names_bind_once_and_stay_silent_through_resolve() {
     let src = format!(
@@ -393,17 +333,6 @@ site duo:
     );
 }
 
-/// A `place` whose `east_of=` names a row refused for its id is not placed,
-/// and says so on its own line: the cascade `W_DEFERRED_CONNECT` relies on
-/// for its note to be true.
-///
-/// The chain is three rows long and each link is pinned, since each is a
-/// place where the author could dead-end: the refused row carries the
-/// error, the row placed against it carries `W_DEFERRED_PLACE` with a note
-/// pointing back at the refused row, and the `connect` naming the second
-/// row carries `W_DEFERRED_CONNECT`. The total is pinned as well, so an
-/// `E_UNRESOLVED_PLACE_REF` (or anything else) sprouting on the middle row
-/// fails here rather than reading as one more finding.
 #[test]
 fn an_origin_naming_a_row_refused_for_its_id_reports_the_row_and_cascades() {
     let src = format!(
@@ -459,22 +388,8 @@ connect anchor.entry to peer.entry path=@gravel\n"
     );
 }
 
-/// A `use=` / `theme=` that is *present but not label-shaped* takes the
-/// same resolver arm as one that is absent: `Value::as_label_str`
-/// answers `None` either way, so the row is dropped and this layer says
-/// nothing about it.
-///
-/// Both are errors, reported above by different codes — an absent key by
-/// `E_INCOMPLETE_PLACE`, a mistyped one by `E_TYPE_MISMATCH_LABEL`. The
-/// completeness check reads the surface key rather than the lifted
-/// value, which is what keeps `use=3` from being reported as a key the
-/// author forgot to write. What is pinned here is the layer below: the
-/// resolver still treats the two identically, so a guard that starts
-/// distinguishing them shows up as a deliberate change.
-///
-/// The rows carry all three keys apart from the mistyped one, so a
-/// stray `E_INCOMPLETE_PLACE` here would mean the check had started
-/// reading values instead of keys.
+/// `Value::as_label_str` reads nothing from either, so the resolver drops both rows alike. Each
+/// row carries the other keys, so a stray `E_INCOMPLETE_PLACE` would mean the check reads values.
 #[test]
 fn non_label_use_or_theme_takes_the_same_silent_arm_as_an_absent_one() {
     for row in [
@@ -517,15 +432,7 @@ connect anchor.entry to silent.entry path=@gravel\n"
     }
 }
 
-/// A `@requires` expression the grammar refuses declares no floor, and
-/// `unscoped_version_floors` skips it without a word.
-///
-/// That skip is what keeps a caller from being held to half of an
-/// expression already called a mistake, and it is safe *only* because
-/// `check::requires` reports the same header at `Error` severity — every
-/// CLI path runs `check` before it reads a floor. A library caller that
-/// resolves version axes without running `check` gets the skip and no
-/// signal, which is the shape this file exists to write down.
+/// `check::requires` reports the refused header, which every CLI path runs first.
 #[test]
 fn a_refused_requirement_is_skipped_silently_by_the_floor_derivation() {
     let source = "@requires version<1.20\n@requires nonsense\nstruct s size=2x2\n";
@@ -537,8 +444,7 @@ fn a_refused_requirement_is_skipped_silently_by_the_floor_derivation() {
         "neither expression is a floor, so none is derived",
     );
 
-    // And the signal the skip depends on: two headers, two errors, from
-    // the pass the CLI runs first.
+    // The signal the skip relies on.
     let ir = cairn_lang_core::lower(&module);
     let reported = cairn_lang_core::check(&module, &ir, None);
     let invalid: Vec<_> = reported
@@ -555,13 +461,7 @@ fn a_refused_requirement_is_skipped_silently_by_the_floor_derivation() {
     }
 }
 
-/// A `mat_slot=` on a role that reads none is not looked up, and the
-/// resolver-only path says nothing about it.
-///
-/// `check::arguments` owns `W_IGNORED_ARGUMENT` for it, and every CLI
-/// command and the language server run `check`. A library caller that
-/// resolves and lowers without it reaches the skip and no signal, which is
-/// the shape this file writes down — next to the signal it relies on.
+/// `check::arguments` owns its `W_IGNORED_ARGUMENT`.
 #[test]
 fn a_slot_on_a_role_that_reads_none_is_skipped_silently_through_resolve() {
     let src = "theme plain:\n  slot wall -> @cobblestone\n\n\
@@ -593,7 +493,7 @@ fn a_slot_on_a_role_that_reads_none_is_skipped_silently_through_resolve() {
         out.diagnostics,
     );
 
-    // And the signal the skip depends on, from the pass the CLI runs.
+    // The signal the skip relies on.
     let reported = check(&module, &ir, None);
     assert_eq!(
         reported.iter().map(|d| d.code).collect::<Vec<_>>(),

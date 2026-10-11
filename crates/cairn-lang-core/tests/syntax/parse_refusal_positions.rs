@@ -13,8 +13,6 @@ fn refusal(source: &str) -> String {
 
 // -- truth tables ---------------------------------------------------------
 
-/// A bad output is reported at the output, not at the `}` or the next row
-/// the parser met after taking it.
 #[test]
 fn a_bad_truth_output_is_reported_at_the_output() {
     assert_eq!(
@@ -42,8 +40,6 @@ fn a_misspelled_assert_form_is_reported_at_the_form() {
 
 // -- directives -----------------------------------------------------------
 
-/// An unknown directive is refused by its name whether or not a value
-/// follows it; "requires a value" is only for the directives that exist.
 #[test]
 fn an_unknown_directive_is_named_whether_or_not_it_has_a_value() {
     assert_eq!(
@@ -57,8 +53,6 @@ fn an_unknown_directive_is_named_whether_or_not_it_has_a_value() {
     assert_eq!(refusal("@cairn\n"), "1:7: @cairn requires a value");
 }
 
-/// `@intended_targets` quotes the offending value as written and points at
-/// it, on whatever line the directive stands.
 #[test]
 fn an_intended_targets_refusal_quotes_and_points_at_the_offending_value() {
     for (source, expected) in [
@@ -88,8 +82,6 @@ fn an_intended_targets_refusal_quotes_and_points_at_the_offending_value() {
     }
 }
 
-/// Trailing text after the value is refused at that text, as the two
-/// refusals above point at their element, however the line is spaced.
 #[test]
 fn an_intended_targets_trailing_token_is_reported_at_the_token() {
     for (source, expected) in [
@@ -110,8 +102,6 @@ fn an_intended_targets_trailing_token_is_reported_at_the_token() {
 
 // -- `requires` where no floor may stand ------------------------------------
 
-/// A member's children under a `struct` or a `site` get the `@requires`
-/// repair: a dedent would land the line in a body that refuses it too.
 #[test]
 fn a_floor_under_a_member_of_the_build_is_sent_to_the_file_directive() {
     for source in [
@@ -131,7 +121,6 @@ fn a_floor_under_a_member_of_the_build_is_sent_to_the_file_directive() {
     }
 }
 
-/// Under a `def` the floor's level is one dedent away.
 #[test]
 fn a_floor_under_a_member_of_a_part_is_sent_one_level_up() {
     let message = refusal("def d size=3x3\n  level y=0\n    requires version>=1.21\n");
@@ -143,9 +132,6 @@ fn a_floor_under_a_member_of_a_part_is_sent_one_level_up() {
     assert!(!message.contains("@requires"), "{message}");
 }
 
-/// A member's children hand their own children the same repair, however
-/// deep: a grandchild of a member is in the same body as the member, so
-/// the body decides, not the depth.
 #[test]
 fn a_floor_two_members_deep_gets_its_bodys_repair() {
     for (source, to_the_file) in [
@@ -180,8 +166,6 @@ fn a_floor_two_members_deep_gets_its_bodys_repair() {
     }
 }
 
-/// A floor with an indented line under it is still recognised as a floor
-/// where it stands, not read as a member whose `>=` is then unexpected.
 #[test]
 fn a_floor_with_an_indented_line_under_it_is_refused_as_a_floor() {
     let message = refusal("struct s size=3x3\n  requires version>=1.21\n    floor a=1\n");
@@ -196,8 +180,6 @@ fn a_floor_with_an_indented_line_under_it_is_refused_as_a_floor() {
     );
 }
 
-/// A line that states no floor is still a member where no floor may stand,
-/// indented body and all.
 #[test]
 fn a_requires_member_with_a_body_still_parses_where_no_floor_may_stand() {
     parse("struct s size=3x3\n  requires a=1\n    floor b=1\n").expect("a member line");
@@ -205,10 +187,7 @@ fn a_requires_member_with_a_body_still_parses_where_no_floor_may_stand() {
 
 // -- size literals ----------------------------------------------------------
 
-/// `9x` is an integer and an `x`. In the forms where every argument needs
-/// its `=` (an item header, a `[…]` list, a `theme` binding) the `x` would
-/// be a key with no `=`, and the refusal names the literal rather than the
-/// `=`. Every form is listed, so a check placed in only one of them fails.
+/// Every form whose arguments all need their `=` is listed, so a check in only one of them fails.
 #[test]
 fn a_size_with_no_height_is_named_as_one() {
     for (source, at) in [
@@ -226,8 +205,6 @@ fn a_size_with_no_height_is_named_as_one() {
     }
 }
 
-/// The refusal is keyed off the glued `x`, not off `size=`: digits-`x`
-/// read as nothing but a size, under any key.
 #[test]
 fn a_size_with_no_height_is_named_under_any_key() {
     assert_eq!(
@@ -236,18 +213,13 @@ fn a_size_with_no_height_is_named_under_any_key() {
     );
 }
 
-/// An `x` that has its `=` is an argument of its own, so `size=9x=2` is a
-/// `size=9` and an `x=2`, judged by the checks like any other. `codes`
-/// panics if the source does not parse.
+/// `size=9x=2` is `size=9` and `x=2`; `codes` panics if the source does not parse.
 #[test]
 fn a_glued_x_with_its_own_value_is_an_argument() {
     let found = codes("struct s size=9x=2\n");
     assert!(found.contains(&"E_TYPE_MISMATCH_SIZE"), "{found:?}");
 }
 
-/// An `x` that is not glued to a value before it is an ordinary key, as
-/// is any other word glued to one, and a key with no `=` gets the ordinary
-/// refusal.
 #[test]
 fn an_x_key_apart_from_a_size_is_an_ordinary_key() {
     assert_eq!(
@@ -262,8 +234,6 @@ fn an_x_key_apart_from_a_size_is_an_ordinary_key() {
 
 // -- logic expressions ------------------------------------------------------
 
-/// `and` and `or` are operators, never a signal's name, so a missing
-/// operand is refused where it is missing.
 #[test]
 fn an_operator_is_not_read_as_a_signal() {
     for (expression, expected) in [
@@ -297,8 +267,6 @@ fn an_operator_is_not_read_as_a_signal() {
     }
 }
 
-/// A dotted name may still end in an operator word: only a signal's head
-/// stands where an operator could.
 #[test]
 fn an_operator_word_may_end_a_dotted_name() {
     parse("struct s size=3x3\n  logic sig.x = sig.a and c.or\n").expect("a dotted name");

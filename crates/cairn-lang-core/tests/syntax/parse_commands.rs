@@ -482,11 +482,6 @@ fn int_literal_overflow_surfaces_invalid_int_variant() {
     assert_eq!(kind, IntErrorKind::PosOverflow);
 }
 
-/// A `within` bound past `i64` is refused by the site that knows what the
-/// digits were for, as "invalid `within` bound", not as a bare
-/// `IntLiteral`. `within_overflow_surfaces_invalid_int_variant` above uses
-/// `4294967296`, past `u32` but inside `i64`, so it cannot tell the two
-/// apart.
 #[test]
 fn a_within_bound_past_i64_is_a_within_bound_error_not_a_literal_one() {
     let err = parse("struct s\n  assert always(a -> eventually b within 99999999999999999999)\n")
@@ -505,18 +500,12 @@ fn a_within_bound_past_i64_is_a_within_bound_error_not_a_literal_one() {
     assert_eq!(kind, IntErrorKind::PosOverflow);
 }
 
-/// A diagnostic from inside `@intended_targets` names the line the
-/// directive is on.
-///
-/// The directive re-lexes its value as a detached slice, so the sub-parse
-/// counts from its own 1:1 and every position out of it, `InvalidInt`
-/// included, has to be rebased.
+/// The directive re-lexes its value as a detached slice, so every position out of it is rebased.
 #[test]
 fn an_error_inside_intended_targets_points_at_the_directive() {
     let source = "@cairn 2026.06\n@intended_targets [\"a\", 99999999999999999999]\n";
     let err = parse(source).expect_err("overflow");
-    // Column 25 of line 2 is the first `9`: `@intended_targets ` is 18
-    // characters, the list opens at 19, and the element starts 6 further in.
+    // `@intended_targets ` is 18 characters and the list opens at 19; the `9` is 6 further in.
     assert_eq!(err.position(), pos(2, 25));
     assert_eq!(
         source.lines().nth(1).and_then(|l| l.chars().nth(24)),
@@ -525,7 +514,6 @@ fn an_error_inside_intended_targets_points_at_the_directive() {
     );
 }
 
-/// The offset is the directive's own line, not a constant.
 #[test]
 fn a_rebased_position_tracks_the_directives_own_line() {
     let err = parse(
@@ -535,8 +523,6 @@ fn a_rebased_position_tracks_the_directives_own_line() {
     assert_eq!(err.position(), pos(3, 25));
 }
 
-/// A zero extent inside `@intended_targets` is refused on the same path,
-/// so its position is rebased onto the directive's line too.
 #[test]
 fn a_zero_extent_inside_intended_targets_is_located_too() {
     let err = parse("@cairn 2026.06\n@intended_targets [\"a\", 0x3]\n").expect_err("zero extent");
@@ -547,15 +533,13 @@ fn a_zero_extent_inside_intended_targets_is_located_too() {
 fn invalid_int_carries_position() {
     let err = parse("struct s\n  assert always(a -> eventually b within 4294967296)\n")
         .expect_err("overflow");
-    // The bound `4294967296` starts at column 42; the structured error
-    // points at the offending lexeme itself, not at the next token.
+    // The bound `4294967296` starts at column 42.
     assert_eq!(err.position(), pos(2, 42));
 }
 
 #[test]
 fn invalid_int_user_message_is_string_compatible() {
-    // `cairn parse` renders `user_message()`, and downstream tooling matches
-    // on this phrasing.
+    // Downstream tooling matches on this phrasing.
     let err = parse("struct s\n  assert always(a -> eventually b within 4294967296)\n")
         .expect_err("overflow");
     let msg = err.user_message();
@@ -576,8 +560,6 @@ fn invalid_int_user_message_is_string_compatible() {
 
 #[test]
 fn dotted_ref_constructor_pins_non_empty_shape() {
-    // The head is mandatory and the tail may be empty, so `new` cannot build
-    // an empty ref.
     let single = DottedRef::new("sig".into(), Vec::new());
     assert_eq!(single.head(), "sig");
     assert!(single.tail().is_empty());
@@ -588,7 +570,6 @@ fn dotted_ref_constructor_pins_non_empty_shape() {
     assert_eq!(multi.tail(), &["step".to_owned(), "edge".to_owned()]);
     assert_eq!(multi.len().get(), 3);
 
-    // `try_from_segments` rejects empty input.
     assert!(DottedRef::try_from_segments(Vec::new()).is_none());
     assert!(DottedRef::try_from_segments(vec!["a".into()]).is_some());
 }

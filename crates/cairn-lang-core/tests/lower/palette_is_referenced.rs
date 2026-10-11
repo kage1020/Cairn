@@ -1,8 +1,5 @@
-//! Every palette entry an artifact carries is one its voxels use, since the
-//! writer emits the palette verbatim, `cairn info` reports a row per entry and
-//! `resolved_ir_hash` covers it. A generator claims a face only if its geometry
-//! emits one, and a member claims its material only once it is certain to
-//! paint.
+//! Every palette entry an artifact carries is one its voxels use: a generator claims a face only
+//! if it emits one, and a member claims its material only once it is certain to paint.
 
 use std::collections::HashSet;
 
@@ -10,12 +7,7 @@ use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState};
 
 use crate::common::{examples, lowered};
 
-/// Palette slots no voxel names, rendered for the failure message.
-///
-/// Slot 0 is exempt. `Palette::new_with_air` puts air there before any
-/// member is lowered, so a fully paved volume — every walkway — has an
-/// unreferenced air entry by construction, and the two consumers that read
-/// the palette skip that slot for the same reason.
+/// Palette slots no voxel names; slot 0 is exempt, since air is interned there up front.
 fn unreferenced(ba: &BlockArray) -> Vec<String> {
     assert_eq!(
         ba.palette.entries.first().map(|s| s.id.as_str()),
@@ -52,9 +44,7 @@ fn no_shipped_example_ships_a_palette_entry_it_does_not_use() {
 
 #[test]
 fn a_gable_too_small_for_a_high_apex_does_not_intern_one() {
-    // 3x3 leaves one ridge voxel, so the generator emits three of the four
-    // gable faces. Interning the table up front would put the fourth in the
-    // palette anyway.
+    // 3x3 leaves one ridge voxel, so only three of the four gable faces are emitted.
     let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
@@ -78,7 +68,6 @@ fn a_gable_too_small_for_a_high_apex_does_not_intern_one() {
 #[test]
 fn a_shed_shallow_enough_to_be_all_apex_does_not_intern_a_slope() {
     // A one-deep slope span is a single layer, and that layer is the apex.
-    // The slope face the other half of the table describes never appears.
     let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
@@ -101,8 +90,6 @@ fn a_shed_shallow_enough_to_be_all_apex_does_not_intern_a_slope() {
 
 #[test]
 fn a_window_that_does_not_fit_the_wall_adds_no_palette_entry() {
-    // The two geometry checks refuse to paint anything, so the material
-    // must not have been resolved into the palette on the way to them.
     let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
@@ -129,8 +116,6 @@ fn a_window_that_does_not_fit_the_wall_adds_no_palette_entry() {
 
 #[test]
 fn a_window_that_runs_past_the_wall_adds_no_palette_entry() {
-    // The other of the two checks — this one fires on the horizontal span
-    // rather than the vertical one, and they return from different places.
     let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \
@@ -156,11 +141,7 @@ fn a_window_that_runs_past_the_wall_adds_no_palette_entry() {
 
 #[test]
 fn a_pressure_plate_with_nowhere_to_sit_adds_no_palette_entry() {
-    // Above the floor row a `<side>.outside` anchor on a struct with no
-    // overhang has no exterior cell and no foundation to fall back on, so
-    // the plate defers. A deferred member must leave nothing behind: an
-    // entry in the palette is a block `cairn info` counts and the `.nbt`
-    // ships for a fixture that was never placed.
+    // With no overhang, a `<side>.outside` plate above the floor row has nowhere to sit.
     let ir = lowered(
         "theme t:\n  \
          slot wall -> @cobblestone\n  \

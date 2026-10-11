@@ -1,6 +1,4 @@
-//! `resolve` over whole sources: which theme each scope binds, what its
-//! members and selectors resolve to, which `connect` rows survive, and the
-//! findings along the way.
+//! `resolve` over whole sources: theme binding, member and selector resolution, `connect` rows.
 
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
 use cairn_lang_core::resolve::{Resolution, ScopeResolution, resolve};
@@ -45,7 +43,6 @@ fn multiple_themes_leave_struct_unbound() {
     let r = resolve(&ir(src), None);
     let scope = r.scopes.get("struct::s").unwrap();
     assert!(scope.bound_theme.is_none());
-    // No E_UNRESOLVED_SLOT because no theme was applied.
     assert!(
         !r.diagnostics
             .iter()
@@ -55,8 +52,6 @@ fn multiple_themes_leave_struct_unbound() {
 
 #[test]
 fn multi_theme_unbound_scope_gets_no_selector_extras() {
-    // A scope with no bound theme takes no theme's selectors: selectors
-    // are per theme (`spec/materials-themes`), and none applies here.
     let src = "theme a:\n  walls[class=outer] -> trim=@a_trim\ntheme b:\n  walls[class=outer] -> trim=@b_trim\n\nstruct s size=4x4\n  walls class=outer height=3\n";
     let r = resolve(&ir(src), None);
     let scope = r.scopes.get("struct::s").unwrap();
@@ -71,9 +66,6 @@ fn multi_theme_unbound_scope_gets_no_selector_extras() {
 
 #[test]
 fn unmatched_selector_warning_is_suppressed_for_unapplied_themes() {
-    // In a multi-theme file the theme is picked at the `place ... theme=X`
-    // boundary, so a struct's or def's selectors are not unmatched, only
-    // not yet bound.
     let src = "theme a:\n  walls[class=outer] -> trim=@a\ntheme b:\n  walls[class=outer] -> trim=@b\n\nstruct s size=4x4\n  walls class=outer height=3\n";
     let r = resolve(&ir(src), None);
     assert!(
@@ -115,11 +107,6 @@ fn unmatched_selector_emits_warning() {
     );
 }
 
-/// The warning names the row's attributes rather than eliding them to
-/// `[...]`. One theme can hold several rows on one keyword, and a
-/// message that cannot tell them apart makes the reader match spans by
-/// hand. `check::duplicate` renders the same way, through the same
-/// helper, so two findings on one row spell the selector alike.
 #[test]
 fn unmatched_selector_names_the_attributes_it_filtered_on() {
     let src = "theme t:\n  slot wall -> @cobblestone\n  \
@@ -144,7 +131,6 @@ fn unmatched_selector_names_the_attributes_it_filtered_on() {
 
 #[test]
 fn unresolved_slot_attaches_did_you_mean_note() {
-    // `mat_slot=wal` is one deletion away from the declared `wall` slot.
     let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=wal height=3\n";
     let r = resolve(&ir(src), None);
     let diag = r
@@ -163,7 +149,6 @@ fn unresolved_slot_attaches_did_you_mean_note() {
 
 #[test]
 fn unresolved_slot_skips_suggestion_when_pool_is_far_away() {
-    // No theme slot is close to `quartz`.
     let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=quartz height=3\n";
     let r = resolve(&ir(src), None);
     let diag = r
@@ -240,17 +225,13 @@ fn connect_unknown_port_emits_e_unresolved_port() {
         "expected nearest-match note pointing at a.entry, got {:?}",
         diag.notes,
     );
-    // The span is the `a.entr` reference, not the whole `connect` row.
     let typo_start = src.find("a.entr").expect("typo present");
     let typo_end = typo_start + "a.entr".len();
     assert_eq!(diag.span.start, typo_start);
     assert_eq!(diag.span.end, typo_end);
-    // The failed connect must not surface as resolved — walkway
-    // voxelisation only sees rows it can lay safely.
     assert!(r.connects.is_empty(), "broken connect must not resolve");
 }
 
-/// The `E_UNRESOLVED_PORT` findings `r` carries, in emission order.
 fn unresolved_ports(r: &Resolution) -> Vec<&Diagnostic> {
     r.diagnostics
         .iter()
@@ -268,10 +249,6 @@ fn span_of(src: &str, needle: &str) -> Span {
 
 #[test]
 fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
-    // A `level` may go without `id=`, so the refusal names it by its
-    // keyword. `tests/lower/door_wall_fit.rs` pins the named case. The
-    // refusal underlines the endpoint, as the "not declared" one does,
-    // and its note points at the nested door.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -319,9 +296,6 @@ fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
 
 #[test]
 fn a_port_under_a_level_inside_a_level_names_the_inner_level() {
-    // The door hangs off `inner`, which is also the `level`
-    // `E_UNSUPPORTED_NESTING` notes for this input, so the refusal
-    // names `inner` rather than `outer`.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -360,9 +334,6 @@ fn a_port_under_a_level_inside_a_level_names_the_inner_level() {
 
 #[test]
 fn a_body_port_resolves_when_a_level_carries_the_same_id() {
-    // The body's `front` is the port. The `front` under the `level` is
-    // not looked at, since the body lookup found one: a refusal here
-    // would drop a walkway the source asks for.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -390,10 +361,6 @@ fn a_body_port_resolves_when_a_level_carries_the_same_id() {
 
 #[test]
 fn a_typo_in_a_def_with_a_level_is_still_not_declared() {
-    // `frnt` is on no member, in the body or under the `level`, so the
-    // refusal is the "not declared" one, with its did-you-mean note
-    // from the body's ids and its note to add the `id=` — not the
-    // level-scoped one, which would send the author to the `level`.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -434,7 +401,6 @@ fn a_typo_in_a_def_with_a_level_is_still_not_declared() {
 
 #[test]
 fn connect_ambiguous_port_emits_e_ambiguous_port() {
-    // Two members of the def carry `id=entry`.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -487,9 +453,6 @@ fn connect_missing_path_emits_e_missing_path_material() {
 
 #[test]
 fn connect_non_token_path_emits_e_missing_path_material() {
-    // A non-token `path=` reaches the material resolver as
-    // `MaterialDeferred::AlreadyDiagnosed`, the theme-slot path, so without
-    // this finding the walkway voxeliser would drop the row in silence.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -520,8 +483,6 @@ fn connect_non_token_path_emits_e_missing_path_material() {
 
 #[test]
 fn connect_unknown_place_emits_e_unresolved_place_ref() {
-    // One code covers every unknown place, origin selectors and `connect`
-    // references alike.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -553,7 +514,6 @@ fn connect_unknown_place_emits_e_unresolved_place_ref() {
 
 #[test]
 fn connect_with_both_endpoints_unknown_emits_both_e_unresolved_place_ref() {
-    // Short-circuiting on the `from` half would lose the `to` typo.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -665,9 +625,6 @@ fn connect_unknown_place_on_from_side_emits_e_unresolved_place_ref() {
     assert!(r.connects.is_empty(), "broken connect must not resolve");
 }
 
-/// A slot bound to something that is not a material token is an
-/// error, not advisory: `walls mat_slot=wall` below lowers to air, so
-/// a `cairn check` that exited 0 would certify a hollow build.
 #[test]
 fn unknown_slot_target_emits_error() {
     let src = "theme t:\n  slot wall -> plain_ident\n\nstruct s size=4x4\n  walls mat_slot=wall height=3\n";
@@ -677,18 +634,9 @@ fn unknown_slot_target_emits_error() {
         ),);
 }
 
-// ------------------------------------------------------------------
-// Per-edition theme fallback (`spec/versioning-editions` "Java / Bedrock
-// portability"): which variant the resolver binds, and when the
-// sibling-slot union applies.
-// ------------------------------------------------------------------
+// Per-edition theme fallback: `spec/versioning-editions` "Java / Bedrock portability".
 
 fn per_edition_variants_src() -> String {
-    // One logical theme `t` split into `_java` / `_bedrock` variants.
-    // Each variant has a private slot (`java_only` / `bedrock_only`) so
-    // the variant-picking behaviour is observable via `slot_value`, and
-    // a shared slot (`floor`) confirms both variants are grouped as one
-    // logical theme.
     [
         "theme t_java:",
         "  slot floor -> @oak_planks",
@@ -727,9 +675,6 @@ fn per_edition_bedrock_picks_bedrock_variant() {
 
 #[test]
 fn per_edition_variant_binds_only_its_own_slot_under_compile() {
-    // Under Some(Java), a member referencing a slot that only the
-    // Bedrock variant declares must fail loud — sibling-slot union is
-    // reserved for the edition = None case.
     let src = [
         "theme t_java:",
         "  slot floor -> @oak_planks",
@@ -782,9 +727,6 @@ fn per_edition_check_unions_slots_across_variants() {
 
 #[test]
 fn per_edition_check_still_errors_on_slot_absent_from_all_variants() {
-    // The union softens `mat_slot=X` only when X is declared *somewhere*.
-    // A slot declared by no variant of the logical theme is still an
-    // error, so a genuine typo is still caught under `cairn check`.
     let src = [
         "theme t_java:",
         "  slot floor -> @oak_planks",
@@ -809,8 +751,6 @@ fn per_edition_check_still_errors_on_slot_absent_from_all_variants() {
 
 #[test]
 fn per_edition_falls_back_to_unsuffixed_when_variant_missing() {
-    // `theme t:`, with no variant suffix, is the shared default every
-    // shipped example uses.
     let src = [
         "theme t:",
         "  slot floor -> @oak_planks",
@@ -838,9 +778,6 @@ fn per_edition_falls_back_to_unsuffixed_when_variant_missing() {
 
 #[test]
 fn per_edition_java_preferred_over_bedrock_when_unsuffixed_absent() {
-    // `edition = None` prefers the unsuffixed variant, then Java, then
-    // Bedrock — the deterministic order avoids leaking source order
-    // into diagnostics when only variants exist.
     let src = [
         "theme t_bedrock:",
         "  slot floor -> @dark_oak_planks",
@@ -860,9 +797,6 @@ fn per_edition_java_preferred_over_bedrock_when_unsuffixed_absent() {
 
 #[test]
 fn distinct_logical_themes_still_leave_scope_unbound() {
-    // Two truly distinct logical themes (`cottage` and `keep`) remain
-    // the multi-theme deferred-selection case — the `_java`/`_bedrock`
-    // grouping must not collapse them into one.
     let src = [
         "theme cottage:",
         "  slot floor -> @oak_planks",
@@ -886,12 +820,8 @@ fn distinct_logical_themes_still_leave_scope_unbound() {
 
 #[test]
 fn per_edition_java_does_not_fall_back_to_bedrock_variant() {
-    // Silent misrouting guard: a file with only `theme t_bedrock:` must
-    // leave the scope unbound under `Some(Edition::Java)` rather than
-    // silently binding the Bedrock variant, which would route
-    // Bedrock-only slot values into a Java `.nbt`. The loud outcome
-    // `spec/versioning-editions` "Fail-loud and minimum-version
-    // inference" requires is `E_THEME_VARIANT_MISSING`, asserted below.
+    // `spec/versioning-editions` "Fail-loud and minimum-version inference" asks for
+    // `E_THEME_VARIANT_MISSING` here.
     let src = [
         "theme t_bedrock:",
         "  slot floor -> @dark_oak_planks",
@@ -908,11 +838,6 @@ fn per_edition_java_does_not_fall_back_to_bedrock_variant() {
         "Some(Java) with only `_bedrock` variant must not bind, got {:?}",
         scope.bound_theme,
     );
-    // Not `E_UNRESOLVED_SLOT`: the slot is declared and spelled
-    // correctly, and that message has to name the theme the slot is
-    // missing from — of which there is none, because the pin refused
-    // the only one. The theme is what cannot be honoured, so the
-    // finding names the theme.
     assert!(
         !r.diagnostics
             .iter()
@@ -929,8 +854,6 @@ fn per_edition_java_does_not_fall_back_to_bedrock_variant() {
 
 #[test]
 fn per_edition_bedrock_does_not_fall_back_to_java_variant() {
-    // Symmetric guard for the opposite direction — a file with only
-    // `theme t_java:` must not bind under `Some(Edition::Bedrock)`.
     let src = [
         "theme t_java:",
         "  slot floor -> @oak_planks",
@@ -952,12 +875,9 @@ fn per_edition_bedrock_does_not_fall_back_to_java_variant() {
     );
 }
 
-// ------------------------------------------------------------------
 // A pin the module cannot satisfy, and a pin on the site path.
-// ------------------------------------------------------------------
 
-/// One logical theme `shop` in the given variants, plus a def and a
-/// site that places it under `theme={reference}`.
+/// Theme `shop` in `variants`, and a site placing a def under `theme={reference}`.
 fn placed_under(reference: &str, variants: &[&str]) -> String {
     use std::fmt::Write as _;
 
@@ -985,10 +905,6 @@ fn placed_scope(r: &Resolution) -> &ScopeResolution {
 }
 
 /// No finding about variant selection, and no error of any kind.
-///
-/// Narrower than "no diagnostics at all": an advisory added for an
-/// unrelated reason would break that while saying nothing about the theme
-/// reference these tests are about.
 fn nothing_said_about_variants(r: &Resolution) -> bool {
     !r.diagnostics.iter().any(|d| {
         d.severity() == Severity::Error
@@ -1040,8 +956,6 @@ fn refuses_a_module_whose_only_variant_is_for_the_other_edition() {
 
 #[test]
 fn a_module_variant_is_only_refused_once_however_many_scopes_read_it() {
-    // The auto-pick is one decision for the whole module, so repeating
-    // the finding per struct would report one cause N times.
     let src = [
         "theme shop_bedrock:",
         "  slot floor -> @dark_oak_planks",
@@ -1066,8 +980,6 @@ fn a_module_variant_is_only_refused_once_however_many_scopes_read_it() {
 
 #[test]
 fn an_unpinned_resolve_refuses_nothing_about_variants() {
-    // The same module is fine for `cairn check` and `cairn lower`: with
-    // no edition named there is nothing the variant fails to satisfy.
     let src = [
         "theme shop_bedrock:",
         "  slot floor -> @dark_oak_planks",
@@ -1097,9 +1009,6 @@ fn an_unpinned_resolve_refuses_nothing_about_variants() {
 
 #[test]
 fn a_place_naming_the_other_editions_variant_binds_this_editions() {
-    // Bound verbatim under a Java build, `theme=shop_bedrock` would let
-    // Bedrock-only slot values reach a Java `.nbt`; a `place` row picks
-    // the variant the same way a scope does.
     let src = placed_under("shop_bedrock", &["_java", "_bedrock"]);
     let r = resolve(&ir(&src), Some(Edition::Java));
     assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop_java"));
@@ -1140,8 +1049,7 @@ fn a_place_naming_this_editions_variant_binds_it_without_comment() {
 
 #[test]
 fn a_place_naming_the_logical_theme_binds_the_pinned_variant() {
-    // The spelling `spec/versioning-editions` "Java / Bedrock portability"
-    // asks for, though no theme is named plain `shop`.
+    // No theme is named plain `shop`: `spec/versioning-editions` "Java / Bedrock portability".
     let src = placed_under("shop", &["_java", "_bedrock"]);
     for (edition, expected) in [
         (Edition::Java, "shop_java"),
@@ -1168,8 +1076,6 @@ fn a_place_naming_no_declared_theme_is_still_unresolved() {
 
 #[test]
 fn a_place_theme_binds_verbatim_without_a_pin() {
-    // Nothing argues for another variant here, and re-picking would let
-    // `cairn lower` silently swap the variant the author named.
     let src = placed_under("shop_bedrock", &["_java", "_bedrock"]);
     let r = resolve(&ir(&src), None);
     assert_eq!(
@@ -1214,16 +1120,8 @@ fn an_unsuffixed_theme_binds_under_every_pin_and_says_nothing() {
     }
 }
 
-/// A def whose member reads a slot only the Bedrock variant declares,
-/// placed under `theme={reference}`.
-///
-/// The unrelated `barn` theme is load-bearing. A def is resolved twice —
-/// once as its own top-level scope, once per placement — so with `shop`
-/// as the module's only logical theme the def's own scope auto-picks a
-/// variant and reports the slot itself. Every assertion below would then
-/// hold whatever the placement path did with its siblings. A second
-/// logical theme suppresses the auto-pick, leaving the `theme=` on the
-/// `place` as the only thing that can bind this member at all.
+/// A def reading a slot only `shop_bedrock` declares, placed under `theme={reference}`.
+/// The `barn` theme stops the def's own scope auto-picking a `shop` variant.
 fn placed_reading_a_bedrock_only_slot(reference: &str) -> String {
     format!(
         "theme shop_java:\n  slot floor -> @oak_planks\n\n\
@@ -1237,12 +1135,8 @@ fn placed_reading_a_bedrock_only_slot(reference: &str) -> String {
 
 #[test]
 fn a_logical_place_theme_is_softened_by_its_siblings_without_a_pin() {
-    // With no edition picked, a slot only one variant declares must not
-    // error through a logical `theme=` either, or a file that compiles
-    // cleanly for Bedrock fails `cairn check`.
     let r = resolve(&ir(&placed_reading_a_bedrock_only_slot("shop")), None);
-    // The logical name has to bind first, or "no unresolved slot" would
-    // hold for the uninteresting reason that no scope was built.
+    // Bound first, so "no unresolved slot" below is not vacuous.
     assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop_java"));
     assert!(
         !r.diagnostics
@@ -1270,8 +1164,6 @@ fn a_pin_makes_a_logical_place_theme_authoritative() {
 
 #[test]
 fn naming_a_variant_explicitly_keeps_its_slots_strict_without_a_pin() {
-    // The author asked about `shop_java`'s slots. Softening them
-    // against a sibling would answer a question they did not ask.
     let r = resolve(&ir(&placed_reading_a_bedrock_only_slot("shop_java")), None);
     assert!(
         r.diagnostics
@@ -1284,10 +1176,6 @@ fn naming_a_variant_explicitly_keeps_its_slots_strict_without_a_pin() {
 
 #[test]
 fn a_variant_the_module_does_not_declare_is_unresolved_without_a_pin() {
-    // The spelling and the declaration set disagree, and no edition is
-    // named to settle it. Re-picking a sibling here would swap a variant
-    // on `cairn lower`'s say-so, so the answer is the one a misspelled
-    // theme gets.
     for (reference, variants) in [
         ("shop_java", ["_bedrock"].as_slice()),
         ("shop_bedrock", ["_java"].as_slice()),
@@ -1310,10 +1198,6 @@ fn a_variant_the_module_does_not_declare_is_unresolved_without_a_pin() {
 
 #[test]
 fn a_pin_falls_back_to_the_unsuffixed_theme_and_says_the_name_was_not_declared() {
-    // `theme=shop_java` with only `theme shop:` declared. The pin has no
-    // `_java` variant to prefer, so it binds the unsuffixed theme — the
-    // rebind is real, but describing it as "names one edition's variant"
-    // would be wrong: that variant is not declared anywhere.
     let src = placed_under("shop_java", &[""]);
     let r = resolve(&ir(&src), Some(Edition::Java));
     assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop"));
@@ -1331,10 +1215,7 @@ fn a_pin_falls_back_to_the_unsuffixed_theme_and_says_the_name_was_not_declared()
 
 #[test]
 fn a_pin_prefers_the_unsuffixed_theme_over_the_other_editions_variant() {
-    // The fallback order of `spec/versioning-editions` "Fail-loud and
-    // minimum-version inference", exercised through the site path: with
-    // `shop` and `shop_bedrock` declared, a Java build binds `shop` and
-    // does not cross to `shop_bedrock`.
+    // `spec/versioning-editions` "Fail-loud and minimum-version inference", via the site path.
     let src = placed_under("shop", &["", "_bedrock"]);
     let r = resolve(&ir(&src), Some(Edition::Java));
     assert_eq!(placed_scope(&r).bound_theme.as_deref(), Some("shop"));
@@ -1347,9 +1228,6 @@ fn a_pin_prefers_the_unsuffixed_theme_over_the_other_editions_variant() {
 
 #[test]
 fn one_unbindable_theme_is_one_finding_however_many_places_read_it() {
-    // The module-level pick and both placements ask for the same edit in
-    // the same `theme` block, so three messages would differ only in their
-    // span.
     let src = concat!(
         "theme shop_bedrock:\n  slot floor -> @dark_oak_planks\n\n",
         "def hut size=4x4:\n  floor mat_slot=floor\n\n",
@@ -1367,18 +1245,12 @@ fn one_unbindable_theme_is_one_finding_however_many_places_read_it() {
         "got {:?}",
         r.diagnostics,
     );
-    // Deduplicating the sentence must not smuggle a placement into the
-    // build: both are still refused.
     assert!(r.scopes.get("site::s::a").is_none());
     assert!(r.scopes.get("site::s::b").is_none());
 }
 
 #[test]
 fn a_theme_no_member_reads_a_slot_from_is_not_refused_under_a_pin() {
-    // Nothing is starved here — every material is concrete — so the pin
-    // costs this module nothing and the build is byte-identical with or
-    // without it. Refusing would fail a theme-library file, or any
-    // module that does not use `mat_slot=`, on a `--edition` CI job.
     let src = [
         "theme shop_bedrock:",
         "  slot floor -> @dark_oak_planks",
@@ -1397,8 +1269,7 @@ fn a_theme_no_member_reads_a_slot_from_is_not_refused_under_a_pin() {
         r.diagnostics,
     );
 
-    // The same module with one `mat_slot=` is refused, so the gate is
-    // the slot and not something else about the source.
+    // Control: the same module with one `mat_slot=` is refused.
     let reading = src.replace("floor mat=@stone", "floor mat_slot=floor");
     let r = resolve(&ir(&reading), Some(Edition::Java));
     assert!(
@@ -1410,12 +1281,6 @@ fn a_theme_no_member_reads_a_slot_from_is_not_refused_under_a_pin() {
     );
 }
 
-/// The rename `E_INVALID_PLACE_ID` recommends must give an id the rest
-/// of the language can name. A `connect` endpoint is a dotted reference
-/// of lexer identifiers and may not be a string, so a recommended
-/// spelling outside that rule (`north-tower`) could be placed but never
-/// connected. The examples are read off the note itself, so changing
-/// them re-runs this check on the new ones.
 #[test]
 fn the_ids_the_invalid_place_id_note_recommends_can_be_connected() {
     let def = "def hut size=5x5:\n  floor mat_slot=floor\n  walls mat_slot=floor height=3\n  \
@@ -1458,13 +1323,9 @@ fn the_ids_the_invalid_place_id_note_recommends_can_be_connected() {
     }
 }
 
-// ------------------------------------------------------------------
 // What a `place` row's `use=` references, whatever refuses the row.
-// ------------------------------------------------------------------
 
-/// Every finding `resolve` reports for a site whose rows are `rows`, as
-/// `(code, primary)` in report order. The module declares two defs,
-/// `hut` and then `shed`, and only a row's `use=` references either.
+/// `(code, primary)` of every finding for a site of `rows` over defs `hut` and `shed`.
 fn unused_def_findings(rows: &[&str]) -> Vec<(&'static str, String)> {
     let mut src = String::from(
         "theme t:\n  slot floor -> @oak_planks\n\n\
@@ -1483,16 +1344,13 @@ fn unused_def_findings(rows: &[&str]) -> Vec<(&'static str, String)> {
         .collect()
 }
 
-/// A finding [`UNUSED_DEF_CASES`] expects: its code, and a fragment of
-/// its primary message.
+/// A finding's code and a fragment of its primary message.
 type Expected = (&'static str, &'static str);
 
 const HUT_UNUSED: Expected = ("W_UNUSED_DEF", "def `hut` is never referenced");
 const SHED_UNUSED: Expected = ("W_UNUSED_DEF", "def `shed` is never referenced");
 
-/// The cases `a_def_named_by_a_refused_place_row_is_not_unused` runs:
-/// a site's rows, and every finding `resolve` reports for them, in
-/// report order.
+/// A site's rows, and every finding `resolve` reports for them.
 const UNUSED_DEF_CASES: &[(&[&str], &[Expected])] = &[
     (
         &["place use=hut theme=t at=origin"],
@@ -1597,40 +1455,9 @@ const UNUSED_DEF_CASES: &[(&[&str], &[Expected])] = &[
     ),
 ];
 
-/// A def named by a `place` row the resolver refuses is referenced, so
-/// `W_UNUSED_DEF` does not fire on it: the finding with the repair is
-/// on the row, and removing the def, as the warning would advise, only
-/// brings it back as `E_UNRESOLVED_PLACE_REF` once the row is fixed.
-///
-/// Every way the resolver refuses the row has a case. For its id: the
-/// unnamed placement, reached both by a missing `id=` and by `id=3` (not
-/// label-shaped, so never hoisted onto `Member::id`; `check::type_mismatch`
-/// reports it, so `resolve` says nothing), an id `PlaceId` refuses, and an
-/// id already placed. For its origin: no origin selector, two, an `at=`
-/// other than `origin`, a non-label `east_of=`, an `east_of=` and a
-/// `north_of=` naming no prior place, and an `east_of=` naming a row
-/// refused for its id, the one refusal that is a warning alone.
-///
-/// The whole list is compared, so each case also pins which def every
-/// `W_UNUSED_DEF` names and, by a fragment of its message, which arm
-/// each refusal came from. That is what tells the two
-/// `E_UNRESOLVED_PLACE_REF`s apart: the origin lookup's "does not name
-/// a prior place id" and the def lookup's "references an unknown def".
-/// No row but the one under test names `hut`, and `shed`, where no row
-/// names it, is the standing control that the check still runs.
-///
-/// The last five cases are controls. An accepted row references its
-/// def, whether its `use=` is an identifier or a string. A `use=`
-/// naming no def references nothing, so `hut` is still unused. A
-/// `use=` that is neither an identifier nor a string names no def
-/// either, since `as_label_str` reads nothing from it, so the warning
-/// still fires rather than guess which def was meant: `use=3`, and
-/// `use=@hut`, whose text spells the def. The value itself is
-/// `check::type_mismatch`'s to report.
+/// The last five cases are controls; `id=3` and `use=3` are `check::type_mismatch`'s to report.
 #[test]
 fn a_def_named_by_a_refused_place_row_is_not_unused() {
-    // Every case is run before anything is asserted, so one failure
-    // does not hide the rest.
     let mismatches: Vec<String> = UNUSED_DEF_CASES
         .iter()
         .filter_map(|(rows, expected)| {

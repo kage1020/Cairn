@@ -1,17 +1,10 @@
-//! The parser checks each truth-table row against its header's input arity,
-//! which only it has in hand. Whole-table findings are `check`'s (in
-//! `check/truth_table.rs`), so a table they refuse, the empty one included,
-//! still parses here.
+//! The parser checks each truth-table row against its header's input arity; whole-table findings
+//! are `check`'s, so a table they refuse still parses.
 
 use cairn_lang_core::ast::{Item, Statement};
 use cairn_lang_core::parse::parse;
 
-/// The patterns the rows of the first `assert truth` carry, each with its
-/// output appended after a space.
-///
-/// Read back rather than asserted through `is_ok()`: `11--> 0` and `11->0`
-/// both parse under some arity, and only the pattern says which row the
-/// author got.
+/// Each row of the first `assert truth`, as its pattern, a space and its output.
 fn rows_of(source: &str) -> Vec<String> {
     let module = parse(source).expect("parse should succeed");
     let mut out = Vec::new();
@@ -44,8 +37,6 @@ fn body(rows: &str, inputs: &str) -> String {
     format!("struct s size=3x3\n  assert truth({inputs} -> sig.o) {{ {rows} }}\n")
 }
 
-/// Keyed on the alphabet rather than on `is_err()`, because a parser that
-/// stopped reading the pattern at the `2` would also refuse, for the width.
 #[test]
 fn an_input_pattern_holds_only_zero_one_and_a_dash() {
     let text = refusal(&body("2->0", "sig.a"));
@@ -55,8 +46,6 @@ fn an_input_pattern_holds_only_zero_one_and_a_dash() {
     );
 }
 
-/// A `-` stands for both values of its input, and sits wherever the
-/// author puts it.
 #[test]
 fn a_dont_care_is_read_wherever_it_sits() {
     for (rows, inputs, want) in [
@@ -70,13 +59,7 @@ fn a_dont_care_is_read_wherever_it_sits() {
     }
 }
 
-/// The lexer takes `->` greedily, so a pattern's last `-` and the arrow's
-/// first share a character run: a row ending in a don't-care is written
-/// with one more `-` than the pattern has, or with a space.
-///
-/// Both spellings must build the *same* row: a parser that read `11--> 0`
-/// as the two-wide `11` would refuse it for the width, which `is_err()`
-/// cannot tell from the right verdict.
+/// The lexer takes `->` greedily, so a row ending in a don't-care needs one more `-` or a space.
 #[test]
 fn a_dash_and_an_arrow_share_a_character() {
     let want = vec!["11- 0".to_owned()];
@@ -84,10 +67,6 @@ fn a_dash_and_an_arrow_share_a_character() {
     assert_eq!(rows_of(&body("11- -> 0", "sig.a, sig.b, sig.c")), want);
 }
 
-/// One bit short is the only width a swallowed `-` can produce, because
-/// the lexer takes the last dash of a run and no more. A pattern cut short
-/// by a space is the same width and a different mistake, and pointing its
-/// author at the arrow would send them to the wrong character.
 #[test]
 fn the_refusal_names_a_dash_the_arrow_swallowed() {
     let swallowed = refusal(&body("11->0", "sig.a, sig.b, sig.c"));
@@ -109,8 +88,6 @@ fn the_refusal_names_a_dash_the_arrow_swallowed() {
     );
 }
 
-/// `0- 1` is a two-wide pattern and a stray `1`, not a three-wide row, and
-/// the width check is what says so.
 #[test]
 fn whitespace_ends_a_pattern() {
     assert!(parse(&body("0- 1->1", "sig.a, sig.b, sig.c")).is_err());
@@ -120,12 +97,9 @@ fn whitespace_ends_a_pattern() {
     );
 }
 
-/// Three bits for one signal describes no assignment of that signal.
 #[test]
 fn an_input_pattern_is_as_wide_as_the_input_list() {
     let text = refusal(&body("000->0", "sig.a"));
-    // Both numbers and their roles: a message naming 3 and 1 in the wrong
-    // places reads as plausibly as the right one.
     assert!(
         text.contains("3 bits wide") && text.contains("1 input"),
         "the message should name the width found and the width required: {text}",
@@ -150,8 +124,6 @@ fn a_well_formed_table_still_parses() {
     }
 }
 
-/// `01` and `1` are different rows of a two-input table, which is why the
-/// parser keeps the lexeme.
 #[test]
 fn a_leading_zero_is_part_of_the_pattern() {
     assert!(parse(&body("01->1", "sig.a, sig.b")).is_ok());
@@ -161,34 +133,24 @@ fn a_leading_zero_is_part_of_the_pattern() {
     );
 }
 
-/// The tree-sitter grammar's `truth_empty` parity case has the same shape.
-/// `check::truth` refuses it, where a finding can carry a span and a repair
-/// rather than be the one hard error a parser can raise.
+/// `check::truth` refuses it, where a finding can carry a span and a repair.
 #[test]
 fn an_empty_table_still_parses() {
     assert!(parse(&body("", "sig.a")).is_ok());
 }
 
-/// No arity of zero reaches `check::truth`, so `2^0 = 1` is not a case it
-/// has to word.
 #[test]
 fn a_table_with_no_inputs_does_not_parse() {
     assert!(parse("struct s size=3x3\n  assert truth( -> sig.o) { }\n").is_err());
 }
 
-/// A bare identifier is a degenerate dotted ref, and counts as one input
-/// like any other.
 #[test]
 fn bare_identifiers_count_as_inputs() {
     assert!(parse(&body("00->1", "a, b")).is_ok());
     assert!(parse(&body("0->1", "a, b")).is_err());
 }
 
-/// A row's pattern is bounded by the input arity and by nothing else.
-///
-/// Twenty ones are past `i64` but fit a `u64`; forty ones are past
-/// `u128::MAX`, so no integer type could hold them. The all-zero row of each
-/// width pins that the verdict does not depend on the value.
+/// Twenty ones are past `i64`, and forty are past `u128::MAX`.
 #[test]
 fn a_row_wider_than_an_i64_is_a_row_like_any_other() {
     for width in [20, 40] {
@@ -202,10 +164,6 @@ fn a_row_wider_than_an_i64_is_a_row_like_any_other() {
     }
 }
 
-/// Asserted through the message rather than through `is_err()`, because
-/// twenty-one ones is past `i64` too, and an integer-range refusal would
-/// also be an error. Both numbers and their roles, as in
-/// `an_input_pattern_is_as_wide_as_the_input_list`.
 #[test]
 fn a_row_past_the_arity_is_refused_by_the_arity_and_not_by_a_ceiling() {
     let inputs: Vec<String> = (0..20).map(|i| format!("sig.s{i}")).collect();
@@ -216,9 +174,6 @@ fn a_row_past_the_arity_is_refused_by_the_arity_and_not_by_a_ceiling() {
     );
 }
 
-/// A `-` on the output side says the row's combinations are deliberately
-/// unconstrained. The arrow is already behind the parser, so `-> -` and
-/// `->-` are the same row.
 #[test]
 fn an_output_may_be_a_dash() {
     for (rows, inputs, want) in [
@@ -231,8 +186,6 @@ fn an_output_may_be_a_dash() {
     }
 }
 
-/// Keyed on the message rather than on `is_err()`: a `2` output and a
-/// missing output are both refusals, and only one is this test's subject.
 #[test]
 fn an_output_must_be_zero_one_or_a_dash() {
     let text = refusal(&body("00->2", "sig.a, sig.b"));
@@ -242,7 +195,6 @@ fn an_output_must_be_zero_one_or_a_dash() {
     );
 }
 
-/// A don't-care output is written as `-`, not left out.
 #[test]
 fn an_output_is_still_required() {
     assert!(!refusal(&body("00->", "sig.a, sig.b")).is_empty());

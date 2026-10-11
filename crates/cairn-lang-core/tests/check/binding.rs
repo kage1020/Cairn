@@ -1,7 +1,5 @@
-//! `E_MISPLACED_BINDING`: a `-> value` tail on a member that cannot emit a
-//! signal is an error. Only the host is judged here, since that needs no Logic
-//! IR; what the tail names is the redstone crate's question, so a tail on a
-//! `pressure_plate` passes here whatever it names.
+//! `E_MISPLACED_BINDING`: a `-> value` tail on a member that cannot emit a signal is an error;
+//! what the tail names is the redstone crate's question.
 
 use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::intent::{SENSOR_HOSTS, known_keywords, role_of};
@@ -23,7 +21,6 @@ fn a_tail_on_a_member_that_cannot_emit_is_refused() {
 
 #[test]
 fn the_finding_lands_on_the_tail_and_not_on_the_line() {
-    // The value is what the author deletes or moves.
     let src = "struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n";
     let d = exactly_one(diagnose(src));
     assert_eq!(slice(src, &d), "sig.w");
@@ -31,8 +28,6 @@ fn the_finding_lands_on_the_tail_and_not_on_the_line() {
 
 #[test]
 fn the_repair_names_the_hosts_that_exist_and_the_ones_reserved() {
-    // Either may be what the author meant, so naming only the plate would
-    // read as a refusal of the reserved ones.
     let d = exactly_one(diagnose(
         "struct s size=5x5\n  walls mat_slot=wall height=3 -> sig.w\n",
     ));
@@ -51,9 +46,7 @@ fn a_tail_on_a_sensor_is_accepted() {
     );
 }
 
-/// `-> a` is `E_LOGIC_INVALID_SIGNAL`'s, a question about the Logic IR,
-/// which `check` does not build. Widening this pass into the value would
-/// make both fire on one line.
+/// `-> a` is `E_LOGIC_INVALID_SIGNAL`'s, which needs the Logic IR that `check` does not build.
 #[test]
 fn a_tail_on_a_sensor_naming_no_signal_is_left_to_the_redstone_pipeline() {
     assert_eq!(
@@ -62,8 +55,6 @@ fn a_tail_on_a_sensor_naming_no_signal_is_left_to_the_redstone_pipeline() {
     );
 }
 
-/// The host is asked before the value, and on a member that cannot emit
-/// the value is not asked at all.
 #[test]
 fn a_tail_on_the_wrong_host_naming_no_signal_is_still_one_finding() {
     let d = exactly_one(diagnose(
@@ -72,8 +63,7 @@ fn a_tail_on_the_wrong_host_naming_no_signal_is_still_one_finding() {
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
 }
 
-/// `spec/redstone` "Signal binding" lists `lever` as a sensor the surface
-/// has not reached, so saying its host cannot emit would be wrong.
+/// `spec/redstone` "Signal binding" lists `lever` as a sensor the surface has not reached.
 #[test]
 fn a_tail_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
     assert!(
@@ -86,7 +76,6 @@ fn a_tail_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
     );
 }
 
-/// `level` is the one construct that nests.
 #[test]
 fn a_tail_under_a_level_is_reached() {
     let d = exactly_one(diagnose(concat!(
@@ -97,7 +86,6 @@ fn a_tail_under_a_level_is_reached() {
     assert_eq!(d.code.as_str(), "E_MISPLACED_BINDING");
 }
 
-/// The three member lists are separate fields of the IR.
 #[test]
 fn a_tail_in_a_def_or_a_site_body_is_reached() {
     // An unplaced `def` also earns `W_UNUSED_DEF`.
@@ -127,8 +115,6 @@ fn a_tail_in_a_def_or_a_site_body_is_reached() {
     );
 }
 
-/// A host the role table does not know would refuse every source that used
-/// it, because the `Other` arm returns before the host is consulted.
 #[test]
 fn every_sensor_host_is_a_keyword_the_role_table_knows() {
     assert!(
@@ -144,8 +130,6 @@ fn every_sensor_host_is_a_keyword_the_role_table_knows() {
     }
 }
 
-/// No sensor patch exists for the selector form, so the tail is on no
-/// sensor line.
 #[test]
 fn a_tail_on_a_sensor_keyword_in_the_selector_form_is_refused() {
     let src = "struct s size=5x5\n  pressure_plate[id=nope] -> sig.b\n";
@@ -166,8 +150,6 @@ fn a_tail_on_a_sensor_keyword_in_the_selector_form_is_refused() {
     );
 }
 
-/// Naming a plate that exists does not make the tail a sensor's: the
-/// line is still in the selector form.
 #[test]
 fn a_selector_tail_is_refused_even_when_the_selector_names_a_real_plate() {
     let src = concat!(
@@ -178,8 +160,6 @@ fn a_selector_tail_is_refused_even_when_the_selector_names_a_real_plate() {
     assert_eq!(codes(src), ["E_MISPLACED_BINDING"]);
 }
 
-/// On a keyword that cannot emit, the host is the fault and it is named;
-/// dropping the brackets would not repair the line.
 #[test]
 fn a_selector_tail_on_a_non_sensor_is_told_about_the_host() {
     let d = exactly_one(diagnose(

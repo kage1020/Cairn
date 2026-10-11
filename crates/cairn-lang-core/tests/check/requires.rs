@@ -1,8 +1,5 @@
-//! `@requires` declares a Minecraft capability floor, and only `version>=X` is
-//! defined (`spec/syntax` "Headers"). Any other expression is reported rather
-//! than dropped, including the shapes an author reaches for first: a floor that
-//! silently evaporates is still written in the file and still read by whoever
-//! opens it.
+//! `@requires` declares a capability floor, and only `version>=X` is defined (`spec/syntax`
+//! "Headers"); any other expression is reported rather than dropped.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::DiagnosticCode;
@@ -27,8 +24,7 @@ fn message(header: &str) -> String {
     invalid[0].primary.clone()
 }
 
-/// The strictest edition-neutral floor the module declares, as
-/// `cairn info` renders it on the `registry compatibility` row.
+/// The strictest edition-neutral floor, as `cairn info` renders the `registry compatibility` row.
 fn floor(header: &str) -> String {
     floors_for(header, None)
         .into_iter()
@@ -65,7 +61,6 @@ fn versions_for(header: &str, edition: Option<cairn_lang_core::Edition>) -> Vec<
 
 // -- the grammar ----------------------------------------------------------
 
-/// `version >= 1.21` is what a human writes first.
 #[test]
 fn whitespace_around_the_operator_does_not_change_the_floor() {
     for header in [
@@ -83,8 +78,7 @@ fn whitespace_around_the_operator_does_not_change_the_floor() {
     }
 }
 
-/// The floors compose, which is why `spec/syntax` "Headers" exempts
-/// `@requires` from `E_DUPLICATE_HEADER`.
+/// `spec/syntax` "Headers" exempts `@requires` from `E_DUPLICATE_HEADER`.
 #[test]
 fn repeated_requirements_fold_to_the_strictest() {
     let header = "@requires version>=1.20\n@requires version>=1.21\n@requires version>=1.19\n";
@@ -98,8 +92,6 @@ fn repeated_requirements_fold_to_the_strictest() {
 
 // -- what it refuses ------------------------------------------------------
 
-/// Only `>=` is defined. Dropped, the file would read as if it declared an
-/// upper bound that is never enforced.
 #[test]
 fn an_operator_other_than_at_least_is_refused() {
     for (header, operator) in [
@@ -128,7 +120,6 @@ fn an_empty_payload_is_refused() {
     }
 }
 
-/// A lexicographic fallback would order it wrongly rather than refuse it.
 #[test]
 fn a_component_that_is_not_a_number_is_refused() {
     for (header, version, component) in [
@@ -146,7 +137,6 @@ fn a_component_that_is_not_a_number_is_refused() {
             "{header:?} should name the component `{component}`: {text}",
         );
     }
-    // An empty component has no fragment to quote back.
     let text = message("@requires version>=1..2\n");
     assert!(
         text.contains("1..2") && text.contains("empty component"),
@@ -154,10 +144,7 @@ fn a_component_that_is_not_a_number_is_refused() {
     );
 }
 
-/// A snapshot, a pre-release and a date-based label are real Minecraft
-/// versions, per `spec/versioning-editions` "The target is a compile-time
-/// parameter". Whether one can be ordered is the target edition's
-/// `DataVersion` table's answer, asked where an edition is pinned.
+/// `spec/versioning-editions` "The target is a compile-time parameter" counts these as versions.
 #[test]
 fn a_label_the_spec_says_will_exist_is_not_refused_by_the_directive() {
     for (header, version) in [
@@ -174,16 +161,13 @@ fn a_label_the_spec_says_will_exist_is_not_refused_by_the_directive() {
     }
 }
 
-/// A `-` in a directive's raw value does not stop the lexer.
 #[test]
 fn a_pre_release_label_reaches_the_directive_at_all() {
     let source = with_header("@requires version>=1.21.4-rc1\n");
     parse(&source).expect("a pre-release suffix lexes");
 }
 
-/// `4294967296` is all ASCII digits, so a digit-only check passes it to a
-/// comparison that cannot order it. `compare_versions` guards too, because
-/// it is public and can be reached without this pass.
+/// `4294967296` is all ASCII digits, so a digit-only check would pass it.
 #[test]
 fn a_component_too_large_to_compare_is_refused() {
     let text = message("@requires version>=4294967296\n");
@@ -193,8 +177,7 @@ fn a_component_too_large_to_compare_is_refused() {
     );
 }
 
-/// `spec/lint` "Machine-readable payload": this one code covers several
-/// mistakes whose repairs have nothing in common.
+/// `spec/lint` "Machine-readable payload".
 #[test]
 fn the_finding_carries_the_failure_as_data() {
     use cairn_lang_core::check::DiagnosticData;
@@ -252,10 +235,7 @@ fn an_expression_that_is_not_a_version_requirement_is_refused() {
 }
 
 // -- the edition scope ---------------------------------------------------
-//
-// Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 / 1.21.40
-// / 1.21.60`, so `1.21.4` names Java's newest release and no Bedrock
-// release at all. A floor may say which numbering it is written in.
+// `1.21.4` names Java's newest release and no Bedrock release at all.
 
 #[test]
 fn a_scoped_floor_is_collected_for_the_edition_it_names() {
@@ -268,8 +248,6 @@ fn a_scoped_floor_is_collected_for_the_edition_it_names() {
     );
 }
 
-/// Otherwise a file declaring a floor per edition would be unbuildable
-/// everywhere.
 #[test]
 fn a_scoped_floor_is_not_a_floor_on_the_other_edition() {
     let header = "@requires java version>=1.21.4\n@requires bedrock version>=1.21.40\n";
@@ -277,7 +255,6 @@ fn a_scoped_floor_is_not_a_floor_on_the_other_edition() {
     assert_eq!(versions_for(header, Some(Edition::Bedrock)), ["1.21.40"]);
 }
 
-/// Beside a scoped floor, both apply to that edition.
 #[test]
 fn an_unscoped_floor_is_in_every_edition() {
     let header = "@requires version>=1.21\n@requires bedrock version>=1.21.40\n";
@@ -288,9 +265,6 @@ fn an_unscoped_floor_is_in_every_edition() {
     );
 }
 
-/// `cairn info` prints the `registry compatibility` row once for both
-/// editions, and a floor in Java's numbering says nothing about a file's
-/// Bedrock range.
 #[test]
 fn the_neutral_row_reads_only_the_unscoped_floors() {
     assert_eq!(floor("@requires java version>=1.21.4\n"), "(none)");
@@ -300,8 +274,6 @@ fn the_neutral_row_reads_only_the_unscoped_floors() {
     );
 }
 
-/// Reading it as "not a version requirement" would point at the half that
-/// is right.
 #[test]
 fn a_scope_that_is_not_an_edition_is_named() {
     let text = message("@requires jaba version>=1.21\n");
@@ -313,12 +285,10 @@ fn a_scope_that_is_not_an_edition_is_named() {
     assert_eq!(floor("@requires jaba version>=1.21\n"), "(none)");
 }
 
-/// Reporting the error and also honouring half of the expression would be
-/// the worst of both.
 #[test]
 fn a_refused_requirement_declares_no_floor() {
     assert_eq!(floor("@requires version<1.20\n"), "(none)");
-    // It does not suppress a well-formed one on another line.
+    // A well-formed floor on another line still stands.
     let mixed = "@requires version<1.20\n@requires version>=1.21\n";
     assert_eq!(floor(mixed), "1.21");
     assert_eq!(codes(&with_header(mixed)), vec!["E_INVALID_REQUIRES"]);

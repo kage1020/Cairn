@@ -1,15 +1,12 @@
-//! A `connect` row anchors its ports to the masonry the openings pass cuts,
-//! not to the masonry the source happens to spell: a port stands exactly
-//! when its door or window was cut into a wall that paints, whether that
-//! wall is top-level or inside a `level`.
+//! A `connect` row's port stands exactly when its door or window was cut into a wall that paints,
+//! top-level or inside a `level`.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
 
 use crate::common::{defers, lowered_with_resolver_diagnostics};
 
-/// The `W_DEFERRED_MEMBER` a `connect` row earns when one of its ports
-/// cannot be placed, or `None` when every port landed.
+/// The `W_DEFERRED_MEMBER` a `connect` row earns for a port that cannot be placed.
 fn port_defer(out: &BlockArrayIr) -> Option<&Diagnostic> {
     out.diagnostics
         .iter()
@@ -20,13 +17,8 @@ fn walkway_keys(out: &BlockArrayIr) -> Vec<String> {
     out.walkways.keys().map(ToString::to_string).collect()
 }
 
-/// Two placements side by side, `home1` from `solid` and `home2` from
-/// the def named by `other`, joined by one `connect` row.
-///
-/// `solid`'s walls paint: `wall` is a concrete token. `hollow`'s do not:
-/// `ghost` lifts to an abstract token, which without a registry pack
-/// defers to air. That is the shape a wall that paints nothing takes,
-/// since a bare `mat_slot=` is refused outright.
+/// `home1` from `solid` and `home2` from `other`, joined by one `connect` row. `hollow`'s `ghost`
+/// lifts to an abstract token, which defers to air without a registry pack.
 fn pair(other: &str, connect: &str) -> String {
     format!(
         "@cairn 2026.06
@@ -72,8 +64,6 @@ site pair:
 
 #[test]
 fn a_window_over_walls_that_paint_nothing_anchors_no_port() {
-    // The openings pass defers the cut, so there is no window to lay a
-    // strip to.
     let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     assert!(
         walkway_keys(&out).is_empty(),
@@ -86,7 +76,6 @@ fn a_window_over_walls_that_paint_nothing_anchors_no_port() {
 
 #[test]
 fn a_door_over_walls_that_paint_nothing_anchors_no_port() {
-    // The door asks the same column the window does.
     let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.front to home2.entry"));
     assert!(
         walkway_keys(&out).is_empty(),
@@ -98,7 +87,6 @@ fn a_door_over_walls_that_paint_nothing_anchors_no_port() {
 
 #[test]
 fn a_def_with_no_walls_anchors_neither_a_door_nor_a_window() {
-    // Same rule, reached without a material: nothing to cut into.
     for connect in [
         "home1.entry to home2.front",
         "home1.front to home2.entry",
@@ -118,10 +106,6 @@ fn a_def_with_no_walls_anchors_neither_a_door_nor_a_window() {
 
 #[test]
 fn a_door_in_level_scoped_walls_anchors_its_port() {
-    // The door asks the same column, so a `def` that keeps its walls in a
-    // `level` anchors a doorway port for the same reason it anchors a
-    // window one. Asking "are there top-level walls" instead would send the
-    // author to move a door already in masonry.
     let out = lowered_with_resolver_diagnostics(&pair("storeyed", "home1.entry to home2.entry"));
     assert_eq!(
         walkway_keys(&out),
@@ -132,9 +116,6 @@ fn a_door_in_level_scoped_walls_anchors_its_port() {
 
 #[test]
 fn a_window_cut_into_level_scoped_walls_anchors_its_port() {
-    // The openings pass cuts this window, because the `level`'s walls are
-    // masonry too, so the port anchors rather than telling the author to
-    // move a window that is already in masonry.
     let out = lowered_with_resolver_diagnostics(&pair("storeyed", "home1.entry to home2.front"));
     assert_eq!(
         walkway_keys(&out),
@@ -150,7 +131,6 @@ fn a_window_cut_into_level_scoped_walls_anchors_its_port() {
 
 #[test]
 fn the_deferral_names_only_the_endpoint_that_has_no_masonry() {
-    // `home1` is `solid`; only `home2.front` is unplaceable.
     let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     let defer = port_defer(&out).expect("the connect row defers");
     assert!(
@@ -167,9 +147,6 @@ fn the_deferral_names_only_the_endpoint_that_has_no_masonry() {
 
 #[test]
 fn the_deferral_states_the_masonry_contract() {
-    // The masonry cause's fix is not on the `connect` row, so the note says
-    // where it is instead. The row names the one cause it hit rather than
-    // every contract a port has, so this is the only note.
     let out = lowered_with_resolver_diagnostics(&pair("hollow", "home1.entry to home2.front"));
     let defer = port_defer(&out).expect("the connect row defers");
     assert_eq!(
@@ -191,8 +168,7 @@ fn the_deferral_states_the_masonry_contract() {
         masonry.contains("says so on its own line"),
         "the masonry note sends the author to the member finding: {masonry}",
     );
-    // …and the line it sends the author to has a finding on it. A note
-    // pointing at a member that says nothing is worse than no note.
+    // The line the note sends the author to has a finding on it.
     assert!(
         defers(&out)
             .iter()
@@ -202,9 +178,7 @@ fn the_deferral_states_the_masonry_contract() {
     );
 }
 
-/// Two `place` rows under one `id=`. The resolver refuses the duplicate
-/// and lowering keeps the first body; the port has to be judged against
-/// that one, not against the one that was dropped.
+/// Two `place` rows under one `id=`; lowering keeps the first body.
 const DUPLICATE_ID: &str = "@cairn 2026.06
 
 def solid size=5x5:
@@ -230,9 +204,7 @@ site pair:
 
 #[test]
 fn a_duplicate_place_id_is_judged_by_the_body_that_was_kept() {
-    // `structures` and `placements` are first-write-wins, so the
-    // column map has to be too — otherwise the port is checked against
-    // a body that is in no artifact.
+    // `structures` and `placements` are first-write-wins, so the column map has to be too.
     let out = lowered_with_resolver_diagnostics(DUPLICATE_ID);
     assert_eq!(
         walkway_keys(&out),
@@ -241,9 +213,7 @@ fn a_duplicate_place_id_is_judged_by_the_body_that_was_kept() {
     );
 }
 
-/// A window hung in the air between two courses, and one crossing the
-/// seam where two courses touch. Both questions are the column's; the
-/// port has to ask it rather than approximate it.
+/// Two courses and a window at `window_y`, the upper course under `level y={upper_level}`.
 fn two_courses(window_y: u32, upper_level: u32) -> String {
     format!(
         "@cairn 2026.06
@@ -276,17 +246,14 @@ site pair:
 
 #[test]
 fn a_window_hanging_in_the_gap_between_two_courses_anchors_no_port() {
-    // Refusing half: `height=2` plus `level y=6 height=2` leaves
-    // y=3..=6 open air, and a window at y=3 is in none of it.
+    // `height=2` and `level y=6 height=2` leave y=3..=6 open air.
     let out = lowered_with_resolver_diagnostics(&two_courses(3, 6));
     assert!(
         walkway_keys(&out).is_empty(),
         "a window in open air is not a port, got {:?}",
         walkway_keys(&out),
     );
-    // Asserted alongside, so a fixture that stops resolving upstream
-    // cannot pass this by leaving the walkway map empty for a reason
-    // that has nothing to do with the wall.
+    // Guard: the walkway map is empty because of the wall, not a fixture that stopped resolving.
     assert!(
         port_defer(&out).is_some(),
         "the row says why no strip was laid: {:?}",
@@ -296,8 +263,7 @@ fn a_window_hanging_in_the_gap_between_two_courses_anchors_no_port() {
 
 #[test]
 fn a_window_crossing_the_seam_of_two_touching_courses_anchors_its_port() {
-    // Anchoring half: `height=2` plus `level y=2 height=2` is one
-    // wall from y=1 to y=4, and a window at y=2..=3 is inside it.
+    // `height=2` and `level y=2 height=2` are one wall from y=1 to y=4.
     let out = lowered_with_resolver_diagnostics(&two_courses(2, 2));
     assert_eq!(
         walkway_keys(&out),

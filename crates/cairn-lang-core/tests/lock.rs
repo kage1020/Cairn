@@ -1,6 +1,5 @@
-//! A lockfile is a reproducibility claim: its hashes are deterministic, its
-//! YAML round-trips and keeps one shape, and a reader refuses any document
-//! it cannot vouch for rather than reading part of it.
+//! A lockfile is a reproducibility claim: deterministic hashes, a YAML round trip of one shape,
+//! and a reader that refuses any document it cannot vouch for.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
@@ -127,15 +126,12 @@ fn sample_lockfile_with_walkways() -> Lockfile {
 
 #[test]
 fn lockfile_with_walkways_roundtrips_through_yaml() {
-    // `sample_lockfile()` leaves `walkways` empty, so its round-trip never
-    // writes the section at all.
+    // `sample_lockfile()` leaves `walkways` empty, so its round trip never writes the section.
     let lf = sample_lockfile_with_walkways();
     let body = serde_norway::to_string(&lf).expect("encode");
     let parsed: Lockfile = serde_norway::from_str(&body).expect("decode");
     assert_eq!(lf, parsed);
     assert_eq!(parsed.walkways.len(), 1);
-    // Through the typed structure: a substring of the YAML body could keep
-    // matching while the wire shape changed.
     let w = &parsed.walkways[0];
     assert_eq!(w.from.place.as_str(), "home1");
     assert_eq!(w.from.port.as_str(), "entry");
@@ -145,19 +141,12 @@ fn lockfile_with_walkways_roundtrips_through_yaml() {
 
 #[test]
 fn lockfile_walkways_yaml_snapshot() {
-    // The full wire shape of a walkway-bearing lockfile: key order, nested
-    // `from`/`to` objects, `dims` as a 3-element list.
-    // `sample_lockfile_yaml_snapshot` covers the walkway-less case.
     let body = serde_norway::to_string(&sample_lockfile_with_walkways()).expect("encode");
     insta::assert_snapshot!(body);
 }
 
 #[test]
 fn lockfile_yaml_rejects_a_dotted_string_walkway_endpoint() {
-    // An endpoint is a `place`/`port` mapping, never one `"PLACE.PORT"`
-    // string: a joined string cannot say which dot splits it. The YAML is
-    // written by hand so the test does not depend on what the encoder
-    // emits.
     let body = format!(
         concat!(
             "source_hash: {zero}\ncairn_version: '2026.09'\n",
@@ -208,8 +197,6 @@ fn hash_parse_rejects_non_hex_char() {
 
 #[test]
 fn hash_parse_accepts_uppercase_hex() {
-    // A hand-written lockfile may use uppercase, and its exact bytes
-    // survive `read → write`.
     let body = "A".repeat(64);
     let parsed = HashHex::parse(&format!("sha256:{body}")).expect("uppercase ok");
     assert_eq!(parsed.as_str(), format!("sha256:{body}"));
@@ -245,9 +232,6 @@ fn lockfile_yaml_with_bad_hash_is_rejected() {
 
 #[test]
 fn the_schema_version_is_the_first_thing_a_reader_sees() {
-    // A consumer that has to decide whether it understands the document at
-    // all should not have to parse the rest of it first, and the field is
-    // useless for recognising an older format if it can move.
     let body = sample_lockfile().to_yaml().expect("encode");
     assert!(
         body.starts_with(&format!("lock_schema_version: {LOCK_SCHEMA_VERSION}\n")),
@@ -257,9 +241,6 @@ fn the_schema_version_is_the_first_thing_a_reader_sees() {
 
 #[test]
 fn a_document_without_the_field_is_the_version_that_had_none() {
-    // A document with no `lock_schema_version` is version 1, the schema
-    // this build reads, rather than "unknown": the alternative is refusing
-    // to read files the compiler itself wrote.
     let mut lf = sample_lockfile();
     lf.lock_schema_version = LOCK_SCHEMA_VERSION;
     let with_field = lf.to_yaml().expect("encode");
@@ -278,8 +259,6 @@ fn a_document_without_the_field_is_the_version_that_had_none() {
 
 #[test]
 fn a_schema_from_the_future_is_refused_by_name() {
-    // The whole point of recording the version: a later format that reuses
-    // these field names must not be read as if it were this one.
     let body = sample_lockfile().to_yaml().expect("encode").replace(
         &format!("lock_schema_version: {LOCK_SCHEMA_VERSION}"),
         "lock_schema_version: 99",
@@ -299,9 +278,7 @@ fn a_schema_from_the_future_is_refused_by_name() {
     );
 }
 
-/// A lockfile with every container populated, so a test can tamper with
-/// each one. `sample_lockfile` leaves `placements` and `walkways` empty, so
-/// their containers never appear in its YAML.
+/// A lockfile with every container populated, so a test can tamper with each one.
 fn lockfile_with_every_container() -> Lockfile {
     Lockfile {
         placements: vec![LockPlacement {
@@ -316,8 +293,8 @@ fn lockfile_with_every_container() -> Lockfile {
     }
 }
 
-/// Insert `attacker_controlled: yes` into the mapping at `path`, where
-/// each step is a key and a numeric step indexes a sequence.
+/// `body` with `attacker_controlled: yes` in the mapping at `path`; a numeric step indexes a
+/// sequence.
 fn tamper_at(body: &str, path: &[&str]) -> String {
     let mut doc: serde_norway::Value = serde_norway::from_str(body).expect("fixture parses");
     let mut cursor = &mut doc;
@@ -343,14 +320,7 @@ fn tamper_at(body: &str, path: &[&str]) -> String {
 
 #[test]
 fn a_key_the_schema_does_not_declare_is_refused_wherever_it_sits() {
-    // A lockfile is a claim about what was built; a document carrying keys
-    // the reader ignores is a document whose meaning depends on who is
-    // reading. Tampering is not confined to the top level, so neither is
-    // the check — and serde does not cascade `deny_unknown_fields`, so
-    // every container has to be listed here or the claim is only true of
-    // the ones that are. `WalkwayEndpoint` is the reason this is a table:
-    // it is the one lockfile container declared outside `lock::schema`,
-    // and it sits two levels down.
+    // serde does not cascade `deny_unknown_fields`, so every container is listed here.
     let base = lockfile_with_every_container()
         .to_yaml()
         .expect("encode fixture");
@@ -384,11 +354,6 @@ fn a_key_the_schema_does_not_declare_is_refused_wherever_it_sits() {
 
 #[test]
 fn a_newer_schema_is_recognised_even_when_it_brings_new_keys() {
-    // The realistic shape of a later format: a higher version *and* a key
-    // this build has never heard of. Read after the strict parse, the
-    // unknown key would be reported first and the reader told its document
-    // is malformed — when the truth is that this build is too old. That is
-    // the whole reason the version leads the document.
     let base = sample_lockfile().to_yaml().expect("encode");
     let body = base.replace(
         &format!("lock_schema_version: {LOCK_SCHEMA_VERSION}"),
@@ -404,15 +369,7 @@ fn a_newer_schema_is_recognised_even_when_it_brings_new_keys() {
 
 #[test]
 fn an_encoded_lockfile_ends_with_a_newline() {
-    // Not cosmetic. A file with no final newline makes `git diff` report
-    // `\ No newline at end of file` on every change, `cat` run the next
-    // file's first line onto this one's last, and a `>>` append corrupt the
-    // document.
-    //
-    // Both shapes are exercised because the trailing field is the one at
-    // risk: `member_version_sensitivity` is written last, so an encoder
-    // that closes an empty flow sequence (`[]`) without a break would end
-    // the whole document at `]`.
+    // `member_version_sensitivity` is written last, so both its empty and full shapes are tried.
     let mut without = sample_lockfile();
     without.member_version_sensitivity.clear();
     for (label, lf) in [
@@ -433,8 +390,6 @@ fn an_encoded_lockfile_ends_with_a_newline() {
 
 #[test]
 fn sample_lockfile_yaml_snapshot() {
-    // The whole document, top-level key order included, so a reshuffle is
-    // caught before tooling that greps the lockfile breaks.
     let body = serde_norway::to_string(&sample_lockfile()).expect("encode");
     insta::assert_snapshot!(body);
 }

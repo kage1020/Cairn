@@ -1,8 +1,5 @@
-//! `MemberRole::conditional_arguments` holds against the lowering it describes:
-//! where the table says a selector value's arm reads a key, two values of that
-//! key build different blocks, and where it says the arm ignores the key, both
-//! build the same blocks, palette, dims and place. Every build must also paint
-//! something and lower clean, since two empty builds compare equal.
+//! `MemberRole::conditional_arguments` holds against the lowering: a key an arm reads moves the
+//! build, and a key it ignores does not.
 
 use std::collections::BTreeSet;
 
@@ -14,20 +11,17 @@ use crate::common::{lowered, solid_cells};
 /// Where a fixture's conditional argument goes.
 const MARKER: &str = "%CONDITIONAL%";
 
-/// One fixture per (keyword, selector arm, conditional key) the table
-/// names.
+/// One fixture per (keyword, selector arm, conditional key) the table names.
 struct Pair {
     keyword: &'static str,
-    /// How this fixture writes the selector: the identifier it carries, or
-    /// `None` for the arm that answers to the selector being absent.
+    /// The selector's identifier, or `None` for the arm an absent selector reaches.
     selector_value: Option<&'static str>,
     key: &'static str,
     /// What the fixture's body needs above it.
     prologue: &'static str,
     /// The body, with [`MARKER`] where the conditional argument goes.
     body: &'static str,
-    /// Two spellings of the argument whose difference a reader would show
-    /// in the blocks. Both are valid values, so each build is a build.
+    /// Two valid values a reader would tell apart in the blocks.
     values: (&'static str, &'static str),
 }
 
@@ -40,15 +34,13 @@ const SITE: &str = "def hut size=3x3:\n  floor mat_slot=wall\n  walls mat_slot=w
 const ROOF_BODY: &str =
     "  walls mat_slot=wall height=3\n  roof kind=%KIND% mat_slot=roof overhang=1 %CONDITIONAL%\n";
 
-/// A `stair` is an eave band, so it needs walls to sit beside and a roof
-/// that draws an overhang for it to sit in.
+/// An eave band, with the walls and overhanging roof a `stair` needs.
 const STAIR_BODY: &str = "  walls mat_slot=wall height=3\n  roof kind=gable mat_slot=roof overhang=1\n  stair kind=stairs mat_slot=roof side=front %CONDITIONAL%\n";
 
 /// The same, without the `side=` the other stair fixtures carry.
 const STAIR_BODY_NO_SIDE: &str = "  walls mat_slot=wall height=3\n  roof kind=gable mat_slot=roof overhang=1\n  stair kind=stairs mat_slot=roof %CONDITIONAL%\n";
 
-/// The first row of a site places at the origin; `gap=` belongs to the
-/// rule that places relative to it.
+/// The first row of a site places at the origin, where `gap=` is not read.
 const PLACE_AT_ORIGIN: &str = "  place id=a use=hut theme=t at=origin %CONDITIONAL%\n";
 
 const PLACE_RELATIVE: &str = "  place id=a use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a %CONDITIONAL%\n";
@@ -154,14 +146,7 @@ impl Pair {
         format!("{}{body}", self.prologue)
     }
 
-    /// The same source with the member under test deleted — the line the
-    /// conditional argument is written on.
-    ///
-    /// The baseline for "this rule paints something". Comparing the two
-    /// builds against each other cannot see a generator that stopped
-    /// drawing, because the rest of the body still paints and two builds
-    /// that are equally empty of *this* member compare equal; comparing
-    /// against the body without the member can.
+    /// The source without the member under test: the baseline for "this rule paints something".
     fn source_without_member(&self) -> String {
         let written = self
             .body
@@ -173,9 +158,7 @@ impl Pair {
         format!("{}{}\n", self.prologue, kept.join("\n"))
     }
 
-    /// The axis this fixture's key is conditional on. The selector is read
-    /// from the table rather than repeated in the fixture, so the two cannot
-    /// disagree about which argument picks the rule.
+    /// The axis this fixture's key is conditional on, read from the table.
     fn axis(&self) -> &'static SelectorAxis {
         role_of(self.keyword)
             .conditional_arguments()
@@ -207,8 +190,7 @@ impl Pair {
     }
 }
 
-/// How an arm is named in a failure or a coverage listing: `kind=shed`, or
-/// `no at=` for the arm that answers to an absent selector.
+/// An arm as a failure names it: `kind=shed`, or `no at=` for an absent selector.
 fn written(selector: &str, value: Option<&str>) -> String {
     value.map_or_else(
         || format!("no {selector}="),
@@ -216,18 +198,12 @@ fn written(selector: &str, value: Option<&str>) -> String {
     )
 }
 
-/// Everything about a build that an argument could move: the blocks, and
-/// where the structures carrying them were placed.
-///
-/// Compared instead of the whole [`BlockArrayIr`] because its diagnostics
-/// carry spans, and the two sources differ in length by the width of a
-/// value.
+/// Whether two builds match in blocks and placements; diagnostics are skipped, since spans move.
 fn same_build(left: &BlockArrayIr, right: &BlockArrayIr) -> bool {
     left.structures == right.structures && left.placements == right.placements
 }
 
-/// A rendering of the build small enough to read in a failure and specific
-/// enough to say how two builds differ.
+/// A rendering of the build small enough to read in a failure.
 fn shape(ir: &BlockArrayIr) -> String {
     let mut out = Vec::new();
     for (key, ba) in &ir.structures {
@@ -261,13 +237,6 @@ fn codes(diagnostics: &[Diagnostic]) -> Vec<&str> {
     diagnostics.iter().map(|d| d.code.as_str()).collect()
 }
 
-/// The table's claim, made observable: the argument moves the build exactly
-/// where the table says a rule reads it.
-///
-/// Both directions matter and they fail differently. An arm that reads a key
-/// the table omits means the pass reports a value the build uses, which is
-/// advice to delete working source. An arm the table says reads a key and
-/// does not means the silence the whole finding exists to end.
 #[test]
 fn conditional_arguments_match_the_lowering() {
     for pair in PAIRS {
@@ -312,19 +281,12 @@ fn conditional_arguments_match_the_lowering() {
     }
 }
 
-/// Every triple the table names has a fixture, and every fixture names a
-/// triple the table has.
-///
-/// A new arm, or a key added to one, arrives here as a missing fixture
-/// rather than as untested prose.
 #[test]
 fn every_conditional_pair_in_the_table_has_a_fixture() {
     let mut from_table: Vec<String> = Vec::new();
     for keyword in known_keywords() {
         for axis in role_of(keyword).conditional_arguments() {
-            // The axis's conditional set, not the arm's: a key one arm reads
-            // is a key every other arm has to be asked about, and the arm
-            // that does not read it is exactly the case under test.
+            // The axis's conditional set, not the arm's: an arm not reading a key is the case here.
             let conditional: BTreeSet<&str> = axis
                 .arms
                 .iter()
@@ -351,10 +313,6 @@ fn every_conditional_pair_in_the_table_has_a_fixture() {
     );
 }
 
-/// The pass and the lowering read the same table, and this is the join
-/// between them. `check` runs no block-array lowering, so a source that
-/// fails to *build* cannot surface here; `conditional_arguments_match_the_lowering`
-/// covers that.
 #[test]
 fn the_pass_reports_exactly_the_pairs_the_build_drops() {
     for pair in PAIRS {
@@ -385,15 +343,7 @@ fn the_pass_reports_exactly_the_pairs_the_build_drops() {
     }
 }
 
-/// A selector naming no rule is one repair and gets one finding: the member
-/// lowers to nothing, so the deferral carries the line and the argument it
-/// routed past is not a second bill. `check/arguments.rs` pins the quiet
-/// check pass; this pins that the deferral is raised.
-///
-/// `kind=` is written as a word no roof kind could take, so the fixture
-/// cannot become a *known* kind when the dispatch grows one. The two
-/// non-identifier shapes are here because only an identifier `kind=` can
-/// name an arm.
+/// `kind=` is a word no roof kind could take, so a new kind cannot change the fixture.
 #[test]
 fn the_member_that_does_not_lower_is_billed_once() {
     for kind in ["", "kind=not_a_roof_kind ", "kind=\"shed\" ", "kind=2 "] {
@@ -416,12 +366,7 @@ fn the_member_that_does_not_lower_is_billed_once() {
     }
 }
 
-/// An axis with one arm is a live configuration that reports nothing.
-///
-/// `stair` is that shape: a stair is built for `kind=stairs` and nothing
-/// else, so `is_conditional` says `true` for all five keys while the finding
-/// can never fire, because any other `kind=` names no rule and its deferral
-/// carries the line. The row is written for a second stair kind.
+/// `stair` is built for `kind=stairs` alone, so its conditional keys can never fire.
 #[test]
 fn a_one_arm_axis_reports_nothing() {
     let conditional = role_of("stair").conditional_arguments();
@@ -447,9 +392,6 @@ fn a_one_arm_axis_reports_nothing() {
     }
 }
 
-/// The rule that reads `gap=` is the one a row reaches by *not* writing
-/// `at=`, an arm no `kind=` axis has, so the repair is a way of writing the
-/// line rather than a value.
 #[test]
 fn a_place_at_the_origin_is_told_its_gap_is_ignored() {
     let ignored = format!("{SITE}  place id=a use=hut theme=t at=origin gap=5\n");

@@ -1,6 +1,4 @@
-//! Lowering the AST to the intent IR. Every shipped example's IR is
-//! snapshotted, and the hoisting of `id` / `class` / `mat_slot`, size, nested
-//! children and unknown keywords is pinned without a snapshot.
+//! Lowering the AST to the intent IR: every shipped example's IR is snapshotted.
 
 use std::fmt::Write as _;
 use std::num::NonZeroU32;
@@ -16,8 +14,6 @@ fn lower_source(src: &str) -> cairn_lang_core::IntentModule {
     lower(&module)
 }
 
-/// One snapshot per shipped example, named `lowers_<stem>` so the fixture
-/// a diff belongs to is in its file name.
 #[test]
 fn every_shipped_example_lowers_to_its_snapshot() {
     for (name, source) in examples() {
@@ -142,8 +138,6 @@ fn level_block_recursively_lowers_its_children() {
 
 #[test]
 fn level_block_keeps_nested_logic_and_asserts() {
-    // A `level` body keeps all three statement flavours: members, `logic`
-    // and `assert`.
     let src = "\
 struct gate size=3x3
   level y=0
@@ -161,8 +155,6 @@ struct gate size=3x3
 
 #[test]
 fn duplicate_size_does_not_leak_into_residual_args() {
-    // A repeated `size=` stays out of `StructIr::args`, which holds
-    // everything except the size.
     let ir = lower_source("struct s size=4x4 size=5x5\n  floor\n");
     let s = &ir.structs[0];
     let size = s.size.as_ref().expect("first size= still hoists");
@@ -176,8 +168,7 @@ fn duplicate_size_does_not_leak_into_residual_args() {
 
 #[test]
 fn token_and_dotref_are_not_hoisted_into_label_fields() {
-    // A token or dotted reference is not a label, so it stays an argument
-    // for `check::type_mismatch` to report.
+    // Not a label, so it stays an argument for `check::type_mismatch` to report.
     let ir = lower_source("struct s size=1x1\n  walls id=@oak class=foo.bar mat_slot=wall\n");
     let member = &ir.structs[0].members[0];
     assert!(
@@ -214,8 +205,7 @@ fn pressure_plate_binding_arrow_is_kept_separate_from_intent_state() {
     );
 }
 
-/// One `circuit` line that reserves nothing: where it is written, and
-/// what [`cairn_lang_core::circuit_lines`] says about it.
+/// One `circuit` line that reserves nothing, and what [`cairn_lang_core::circuit_lines`] says.
 struct RejectedLine {
     /// `size=` header of the scope, or empty for none.
     size: &'static str,
@@ -227,8 +217,7 @@ struct RejectedLine {
     reason: &'static str,
 }
 
-/// `keyword s{size}` with a `floor` and `line` at the given depth of
-/// `level` nesting.
+/// `keyword s{size}` with a `floor`, and `line` under `levels` nested `level` blocks.
 fn scope_with_line(keyword: &str, size: &str, levels: usize, line: &str) -> String {
     let mut src = format!("{keyword} s{size}\n  floor\n");
     let mut indent = String::from("  ");
@@ -240,8 +229,7 @@ fn scope_with_line(keyword: &str, size: &str, levels: usize, line: &str) -> Stri
     src
 }
 
-/// One case per [`cairn_lang_core::CircuitRegionDefect`] variant, and
-/// a second `level` deep for the one that is about nesting.
+/// One case per [`cairn_lang_core::CircuitRegionDefect`] variant, and a second `level` deep.
 fn rejected_lines() -> [RejectedLine; 10] {
     use cairn_lang_core::CircuitRegionDefect as Defect;
 
@@ -344,14 +332,7 @@ fn rejected_lines() -> [RejectedLine; 10] {
     ]
 }
 
-/// Every `circuit` line that reserves nothing comes back as rejected,
-/// with the reason it does not, the sentence that reason prints as, and
-/// its own line as the span, so a pass that finds a scope with no
-/// reservation can point at the line that was meant to be one.
-///
-/// Each case runs under a `struct` and under a `def`: the two are walked
-/// by separate loops, and a table that put `size=` on one keyword only
-/// would exercise `NoSize` on one and every other defect on the other.
+/// Each case runs under a `struct` and under a `def`, which are walked by separate loops.
 #[test]
 fn each_circuit_line_that_reserves_nothing_is_handed_back_with_its_reason() {
     use cairn_lang_core::{ScopeKind, circuit_lines, circuit_regions};
@@ -383,9 +364,6 @@ fn each_circuit_line_that_reserves_nothing_is_handed_back_with_its_reason() {
     }
 }
 
-/// A usable `circuit` line is a reservation and is not handed back as a
-/// rejected one, while a rejected line beside it still is, each in its
-/// place in source order.
 #[test]
 fn a_usable_circuit_line_is_not_handed_back_as_rejected() {
     use cairn_lang_core::{CircuitRegionDefect, circuit_lines, circuit_regions};

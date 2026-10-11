@@ -1,6 +1,5 @@
-//! A member that paints nothing shapes nothing (`spec/compilation` "Level
-//! grouping and volume derivation"): one dropped for want of a `kind=` or a
-//! material leaves the volume exactly as the same source with its line deleted.
+//! A member that paints nothing shapes nothing (`spec/compilation` "Level grouping and volume
+//! derivation"): the volume equals the same source's with its line deleted.
 
 use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::block_array::BlockArrayIr;
@@ -19,8 +18,7 @@ fn codes(out: &BlockArrayIr) -> Vec<&str> {
     out.diagnostics.iter().map(|d| d.code.as_str()).collect()
 }
 
-/// The dims `with` produces, and the dims the same source produces with
-/// `line` deleted. A member that contributes nothing makes the two equal.
+/// The dims of `source`, and of `source` with `line` deleted.
 fn with_and_without(source: &str, line: &str, key: &str) -> ((u32, u32, u32), (u32, u32, u32)) {
     assert_eq!(
         source.matches(line).count(),
@@ -38,9 +36,6 @@ const THEME: &str = "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @oak_
 
 // --- A. A roof with no lowering shapes nothing ------------------------------
 
-/// Sized for its overhang alone, the member would give the volume its
-/// width and nothing else: the walls move inward and a ring of air
-/// surrounds them.
 #[test]
 fn a_roof_with_no_kind_does_not_widen_the_footprint() {
     let line = "  roof mat_slot=roof overhang=3\n";
@@ -57,8 +52,6 @@ fn a_roof_with_no_kind_does_not_widen_the_footprint() {
     );
 }
 
-/// The same roof with an unusable `overhang=`: the key is still read, so it
-/// is still reported, and the member still contributes nothing.
 #[test]
 fn a_roof_with_no_kind_and_an_unusable_overhang_reports_both_and_widens_nothing() {
     let line = "  roof mat_slot=roof overhang=nope\n";
@@ -82,7 +75,6 @@ fn a_roof_with_no_kind_and_an_unusable_overhang_reports_both_and_widens_nothing(
     );
 }
 
-/// The control: a roof that *is* drawn still widens by its `overhang=`.
 #[test]
 fn a_roof_that_draws_still_widens_the_footprint() {
     let line = "  roof kind=gable mat_slot=roof overhang=2\n";
@@ -97,12 +89,6 @@ fn a_roof_that_draws_still_widens_the_footprint() {
     assert!(with.1 > without.1, "and a gable is taller than no roof");
 }
 
-/// A `shed` with no `slope_to=` is a kind the table knows and a roof the
-/// pass will not draw.
-///
-/// "Is this kind known" is a different question from "will this member
-/// paint": a shed with no `slope_to=` paints no voxel, and gives the volume
-/// no height, so it gives it no footprint either.
 #[test]
 fn a_shed_with_no_slope_to_does_not_widen_the_footprint() {
     let line = "  roof kind=shed mat_slot=roof overhang=3\n";
@@ -114,8 +100,6 @@ fn a_shed_with_no_slope_to_does_not_widen_the_footprint() {
     );
 }
 
-/// The control on the other side: the same shed with a `slope_to=` draws,
-/// and widens.
 #[test]
 fn a_shed_with_a_slope_to_still_widens_the_footprint() {
     let line = "  roof kind=shed slope_to=front mat_slot=roof overhang=3\n";
@@ -125,13 +109,7 @@ fn a_shed_with_a_slope_to_still_widens_the_footprint() {
     assert!(with.1 > without.1, "and a slope over the wall top");
 }
 
-/// A `pressure_plate` outside the wall needs an overhang to stand on, and
-/// the overhang it needs is one a roof draws.
-///
-/// The same gate as the eave stair, one member over: a roof with
-/// `overhang=2` and no `kind=` contributes nothing, so the plate has
-/// nowhere to sit — and must not be told the struct has no overhang when
-/// the source says otherwise.
+/// A roof with `overhang=2` and no `kind=` draws no overhang for the plate to sit on.
 #[test]
 fn a_plate_outside_a_wall_names_the_overhang_a_roof_draws() {
     let source = format!(
@@ -153,13 +131,7 @@ fn a_plate_outside_a_wall_names_the_overhang_a_roof_draws() {
     );
 }
 
-/// A struct with one painting course and one that will not paint keeps the
-/// first and drops the second, whichever order they are written in.
-///
-/// The single-`walls` fixtures above cannot see a filter that gives up on
-/// the first miss, or one that keeps the whole list once any member
-/// paints. Both courses are level-scoped so the surviving one is not the
-/// one at offset zero.
+/// Both courses are level-scoped, so the surviving one is not the one at offset zero.
 #[test]
 fn a_mixed_wall_column_keeps_only_the_courses_that_paint() {
     for (first, second) in [
@@ -184,9 +156,6 @@ fn a_mixed_wall_column_keeps_only_the_courses_that_paint() {
 
 // --- B. Walls that paint nothing shape nothing ------------------------------
 
-/// A struct with no theme bound paints no `mat_slot=` at all, so it does
-/// not reserve the wall height: no `3x7x3` array whose palette is air and
-/// nothing else.
 #[test]
 fn themeless_walls_do_not_raise_the_array() {
     let line = "  walls mat_slot=wall height=6\n";
@@ -199,8 +168,7 @@ fn themeless_walls_do_not_raise_the_array() {
     );
 }
 
-/// A member with no `mat_slot=` binding resolves to no block state.
-/// Lowering says nothing about it; `E_MISSING_MATERIAL` is the check pass's.
+/// `E_MISSING_MATERIAL` is the check pass's, so lowering says nothing.
 #[test]
 fn walls_with_no_material_binding_do_not_raise_the_array() {
     let line = "  walls height=6\n";
@@ -209,8 +177,6 @@ fn walls_with_no_material_binding_do_not_raise_the_array() {
     assert_eq!(with, without);
 }
 
-/// The control: walls that paint raise the array, and by the height the
-/// author asked for.
 #[test]
 fn walls_that_paint_still_raise_the_array() {
     let line = "  walls mat_slot=wall height=6\n";
@@ -224,12 +190,6 @@ fn walls_that_paint_still_raise_the_array() {
     assert_eq!((with.0, with.2), (without.0, without.2));
 }
 
-/// A window in walls that paint nothing is deferred, and the array shrinks
-/// with it.
-///
-/// Whether the rectangle lands in masonry and how tall the array is are
-/// read off the same wall column, or the carve would write rows that do not
-/// exist. What the window loses is a carve of air out of air.
 #[test]
 fn a_window_in_walls_that_paint_nothing_is_deferred_and_the_array_shrinks() {
     let line = "  window side=front y=1 offset=1 size=2x2 mat_slot=wall\n";
@@ -246,11 +206,6 @@ fn a_window_in_walls_that_paint_nothing_is_deferred_and_the_array_shrinks() {
     );
 }
 
-/// A door in the same walls defers too, and says what is actually missing.
-///
-/// The gate reads "no walls member paints" as well as "no walls member has
-/// a positive `height=`". The author wrote a positive height, so a reason
-/// naming only that sends them to the wrong line.
 #[test]
 fn a_door_in_walls_that_paint_nothing_says_what_is_missing() {
     let source = "struct s size=5x5\n  walls mat_slot=wall height=4\n  door side=front at=center mat_slot=wall\n";
@@ -268,13 +223,7 @@ fn a_door_in_walls_that_paint_nothing_says_what_is_missing() {
     );
 }
 
-/// An abstract token with no registry to resolve it against falls back to
-/// air, so those walls shape nothing either.
-///
-/// Not reachable from the CLI, which always passes a registry, but this is
-/// the library API, and the predicate covers the arm because it asks the
-/// painter's own question rather than enumerating the ways a material can
-/// fail.
+/// The CLI always passes a registry; this is the library API.
 #[test]
 fn walls_whose_abstract_token_cannot_be_resolved_do_not_raise_the_array() {
     let line = "  walls mat_slot=abstract height=6\n";
@@ -289,9 +238,7 @@ fn walls_whose_abstract_token_cannot_be_resolved_do_not_raise_the_array() {
     );
 }
 
-/// A roof falls back to a material of its own where walls fall back to
-/// air, so a themeless struct with a gable still draws one, seated on the
-/// ground plane instead of on walls that are not there.
+/// A roof falls back to a material of its own where walls fall back to air.
 #[test]
 fn a_roof_still_draws_over_walls_that_paint_nothing() {
     let source = "struct s size=5x5\n  walls mat_slot=wall height=6\n  roof kind=gable mat_slot=roof overhang=1\n";

@@ -1,6 +1,5 @@
-//! `E_TYPE_MISMATCH_LABEL` and `E_TYPE_MISMATCH_SIZE`: a key that takes a label
-//! or a size literal is an error when given a value of another shape, and an
-//! absent key is not a type mismatch.
+//! `E_TYPE_MISMATCH_LABEL` and `E_TYPE_MISMATCH_SIZE`: a label or size key given a value of
+//! another shape is an error, and an absent key is not a type mismatch.
 
 use cairn_lang_core::DiagnosticCode;
 
@@ -55,7 +54,6 @@ fn struct_size_set_to_integer_is_flagged() {
 
 #[test]
 fn window_size_with_proper_literal_passes() {
-    // `side=` is here only so the line carries more than the key under test.
     let src = "struct s size=4x4\n  window size=2x2 side=front\n";
     let diags = diagnose(src);
     assert!(
@@ -79,16 +77,13 @@ fn duplicate_size_and_size_mismatch_pass_independently() {
     );
 }
 
-/// Site prologue with one def and one theme, so a `place` row can name
-/// both and only the key under test is wrong.
+/// A theme and a def a `place` row can name, so only the key under test is wrong.
 const PLACE_PRELUDE: &str = "theme plain:\n  \
 slot floor -> @oak_planks\n\n\
 def hut size=3x3:\n  \
 floor id=floor mat_slot=floor\n\n";
 
-/// `use=` and `theme=` stay in `intent_state` rather than on `Member`'s own
-/// fields, and the resolver drops a placement whose value is not a label
-/// without a word, so this finding is what says why.
+/// The resolver drops a placement whose value is not a label without a word.
 #[test]
 fn place_use_and_theme_with_a_non_label_value_are_flagged() {
     for (row, offending) in [
@@ -104,9 +99,6 @@ fn place_use_and_theme_with_a_non_label_value_are_flagged() {
     }
 }
 
-/// A string literal is a label, so the well-formed forms stay quiet —
-/// otherwise the test above would pass on a pass that flagged every
-/// `use=`.
 #[test]
 fn place_use_and_theme_accept_identifiers_and_strings() {
     for row in [
@@ -119,8 +111,7 @@ fn place_use_and_theme_accept_identifiers_and_strings() {
     }
 }
 
-/// An absent key is `E_INCOMPLETE_PLACE`'s; only the present-but-wrong
-/// shape belongs to this pass.
+/// An absent key is `E_INCOMPLETE_PLACE`'s.
 #[test]
 fn an_absent_use_or_theme_is_not_a_type_mismatch() {
     for row in [

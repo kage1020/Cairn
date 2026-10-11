@@ -6,8 +6,7 @@ use cairn_lang_core::{DiagnosticCode, Severity, lower, parse, resolve};
 
 use crate::common::{codes, diagnose};
 
-/// The `key=value` bindings a matching theme selector injected, for every
-/// member of every scope.
+/// The `key=value` bindings matching theme selectors injected, for every member of every scope.
 fn selector_extras(source: &str) -> Vec<(String, ValueKind)> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
@@ -35,8 +34,7 @@ struct s size=9x7
 
 #[test]
 fn a_list_valued_selector_attribute_matches_the_member_that_carries_it() {
-    // Only the row's own binding, which nothing lowers. A selector that
-    // failed to match would add `E_THEME_SELECTOR_UNMATCHED` here.
+    // Only the row's own binding, which nothing lowers.
     assert_eq!(
         codes(MATCHING),
         [DiagnosticCode::IgnoredArgument.as_str()],
@@ -46,10 +44,6 @@ fn a_list_valued_selector_attribute_matches_the_member_that_carries_it() {
 
 #[test]
 fn the_binding_that_selector_carries_actually_reaches_the_member() {
-    // The absence of `E_THEME_SELECTOR_UNMATCHED` is not the contract — a
-    // selector that matches is a selector whose bindings land. Reading
-    // `selector_extras` is what distinguishes "matched" from "not
-    // complained about".
     let extras = selector_extras(MATCHING);
     assert_eq!(
         extras,
@@ -63,13 +57,7 @@ fn the_binding_that_selector_carries_actually_reaches_the_member() {
 
 #[test]
 fn a_list_that_differs_still_does_not_match() {
-    // The other half: the rule is "compare what the value is", not
-    // "compare nothing". Each row rules out a different wrong reading —
-    // `shorter` a zip that truncates, `reordered` set or multiset
-    // semantics, and `longer` a containment rule, which is the reading
-    // `tags=` invites ("the selector's tags need only be among the
-    // member's") and the one no other row here can see: `[a,b]` is not
-    // contained in `[a,c]`, `[a]`, or `[b,a]`, so all three pass under it.
+    // Each row rules out a reading: a truncating zip, set semantics, and containment.
     for (label, member_tags) in [
         ("different element", "[a,c]"),
         ("shorter", "[a]"),
@@ -91,10 +79,6 @@ fn a_list_that_differs_still_does_not_match() {
 
 #[test]
 fn a_nested_list_is_compared_by_what_it_holds() {
-    // A flat list already recurses one level — its elements are `Value`s
-    // too. What nesting adds is that the recursion does not stop after
-    // that level: a list whose element is itself a list is compared all
-    // the way down.
     let source = "\
 theme t:
   slot glass -> @glass_pane
@@ -112,9 +96,6 @@ struct s size=9x7
 
 #[test]
 fn two_identical_list_valued_rows_are_a_duplicate_pair() {
-    // The inherited half. The duplicate pass compares two rows' attribute
-    // values the same way, so two byte-identical list-valued rows coincide
-    // and earn `E_DUPLICATE_SELECTOR`.
     let source = "\
 theme t:
   slot glass -> @glass_pane
@@ -124,13 +105,7 @@ theme t:
 struct s size=9x7
   window tags=[a,b] class=small side=front offset=2 y=2 size=2x2 mat_slot=glass
 ";
-    // The exact list, not "contains one": this fixture is what pins the
-    // claim that the matcher and the duplicate pass give the same answer
-    // about a value. A matcher that compared spans would add
-    // `E_THEME_SELECTOR_UNMATCHED` here, which a containment check would
-    // not see.
-    // Each row's binding is reported between them, since nothing lowers
-    // either.
+    // Each row's binding is reported between them, since nothing lowers either.
     assert_eq!(
         codes(source),
         vec![

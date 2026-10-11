@@ -1,8 +1,5 @@
-//! A composite's minimum version is the max over the `requires` floors of its
-//! parts (`spec/versioning-editions` "Fail-loud and minimum-version
-//! inference"): a part the build does not instantiate is not one, a `theme` is
-//! part of every build that binds it, and a floor naming an edition is inert in
-//! the other.
+//! A composite's minimum version: the max over the `requires` floors of the parts a build
+//! instantiates, per `spec/versioning-editions` "Fail-loud and minimum-version inference".
 
 use cairn_lang_core::ast::{Item, Statement};
 use cairn_lang_core::resolve::{
@@ -49,8 +46,6 @@ site hamlet:
 
 // -- what a build inherits ------------------------------------------------
 
-/// The point of the feature: a floor written once on the template is a
-/// floor on every site that uses it, and the fold names the template.
 #[test]
 fn a_place_inherits_the_floor_of_the_def_it_instantiates() {
     assert_eq!(
@@ -59,9 +54,6 @@ fn a_place_inherits_the_floor_of_the_def_it_instantiates() {
     );
 }
 
-/// A module's floor is the max over its own `@requires` lines and every
-/// part it instantiates — so both reach the caller that folds them, in
-/// source order, with the header first.
 #[test]
 fn the_header_and_the_parts_are_folded_together() {
     let source = format!("@requires version>=1.20\n\n{PLACED}");
@@ -74,9 +66,6 @@ fn the_header_and_the_parts_are_folded_together() {
     );
 }
 
-/// A `def` no `place` names builds nothing — it earns `W_UNUSED_DEF` — so
-/// holding the build to its floor would refuse targets over a template the
-/// author left in the file.
 #[test]
 fn a_def_nobody_places_contributes_no_floor() {
     let source = "\
@@ -88,14 +77,7 @@ def cottage size=5x5:
     assert!(codes(source).contains(&"W_UNUSED_DEF"));
 }
 
-/// The decision left open by
-/// `spec/versioning-editions` "Fail-loud and minimum-version inference":
-/// a `theme` floor applies when the theme is **bound**, not when a rule of
-/// it fires. Nothing in this module reads a slot, and the floor still
-/// applies — binding a theme is the act of taking on what it declares, and
-/// making the floor depend on which selectors matched would let one source
-/// require 1.21 on Java and nothing on Bedrock for a reason that is not
-/// about editions.
+/// Settles what `spec/versioning-editions` "Fail-loud and minimum-version inference" leaves open.
 #[test]
 fn a_bound_theme_imposes_its_floor_even_where_no_slot_is_read() {
     let source = "\
@@ -118,9 +100,6 @@ site hamlet:
     );
 }
 
-/// The module-level auto-pick binds the sole theme of a file, so a file
-/// with one theme and one struct — no `site` at all — inherits that theme's
-/// floor. A `struct` is the one scope a build lowers without a placement.
 #[test]
 fn the_sole_theme_of_a_file_is_bound_without_a_place() {
     let source = "\
@@ -140,8 +119,6 @@ struct keep size=5x5
     );
 }
 
-/// The auto-pick is read only for a `struct`, so a file of nothing but
-/// themes has nothing for it to bind to and inherits nothing.
 #[test]
 fn a_module_with_no_scope_binds_no_theme() {
     let source = "\
@@ -152,15 +129,6 @@ theme medieval:
     assert_eq!(floors(source, Edition::Java), vec![]);
 }
 
-/// **An unplaced `def` does not bind the module's theme either.**
-///
-/// The resolver's auto-pick does bind one to every `def` scope, and this
-/// fold deliberately does not follow it there. Following it would read the
-/// same `def` as instantiated enough to take on a theme's floor and not
-/// instantiated enough to be charged its own — so two files identical but
-/// for which part carries the floor, neither building a single voxel, would
-/// disagree about the same target. A placed `def` reaches the theme through
-/// its placement's own `theme=` instead, which is why nothing is lost.
 #[test]
 fn an_unplaced_def_binds_no_theme_either() {
     let source = "\
@@ -172,17 +140,11 @@ def cottage size=5x5:
   walls mat_slot=wall height=3
 ";
     assert_eq!(floors(source, Edition::Java), vec![]);
-    // The same file with the floor on the `def` instead, which
-    // `a_def_nobody_places_contributes_no_floor` pins: both read the same
-    // way, which is the point of this test.
+    // The `def` is unplaced, as in `a_def_nobody_places_contributes_no_floor`.
     assert!(codes(source).contains(&"W_UNUSED_DEF"));
 }
 
-/// The `place ... theme=NAME` route on its own, with two themes in the file
-/// so the auto-pick cannot fire and cover for it.
-///
-/// The route is load-bearing: it is how a placed `def`'s materials — and so
-/// the theme's floor — reach a build that declares no `struct`.
+/// Two themes in the file, so the auto-pick cannot cover for the `place`.
 #[test]
 fn a_place_binds_the_theme_it_names() {
     let source = "\
@@ -208,8 +170,6 @@ site hamlet:
     );
 }
 
-/// Two themes and only one bound: the auto-pick does not fire, and the
-/// theme nothing names is not part of the build.
 #[test]
 fn a_theme_nothing_binds_contributes_no_floor() {
     let source = "\
@@ -231,9 +191,6 @@ site hamlet:
 
 // -- editions -------------------------------------------------------------
 
-/// A scoped member-level floor behaves like a scoped header: it constrains
-/// its own edition's build and is inert in the other's — inert, not
-/// violated, so a def declaring one floor per edition is buildable on both.
 #[test]
 fn a_scoped_member_floor_is_inert_in_the_other_edition() {
     let source = "\
@@ -256,15 +213,10 @@ site hamlet:
         floors(source, Edition::Bedrock),
         vec![("1.21.40".to_owned(), FloorOrigin::Def("cottage".to_owned()))],
     );
-    // The `registry compatibility` row reads only the unscoped floors, and
-    // a floor written in one edition's numbering is not one of them.
+    // The `registry compatibility` row reads only the unscoped floors.
     assert_eq!(neutral_floors(source), vec![]);
 }
 
-/// A `theme=` reference names the *logical* theme, and the pin picks the
-/// variant. The floor follows the variant the build actually binds, through
-/// the same rule the resolver uses — so the two cannot bind one variant and
-/// weigh the other's floor.
 #[test]
 fn a_pin_picks_the_variant_whose_floor_applies() {
     let source = "\
@@ -291,8 +243,6 @@ site hamlet:
     assert_eq!(floors(source, Edition::Bedrock), vec![]);
 }
 
-/// The neutral row runs the same composite fold, so an unscoped floor
-/// inside a part the build instantiates does reach it.
 #[test]
 fn the_neutral_row_reads_the_inherited_floors_too() {
     assert_eq!(
@@ -301,18 +251,10 @@ fn the_neutral_row_reads_the_inherited_floors_too() {
     );
 }
 
-/// **A theme both editions do not bind alike is left out of the neutral
-/// row, in both directions.**
-///
-/// The row is one row for a file it may be reporting against both editions
-/// at once, so a floor only one of them inherits cannot feed it. Picking a
-/// variant by the unpinned order would put a floor no build is held to into
-/// the row, or leave `0.0` on a file a Java build *is* held to, which
-/// `--format json` carries as `registry_compat.min`.
+/// The neutral row may report against both editions at once, so a floor only one inherits is out.
 #[test]
 fn the_neutral_row_leaves_out_a_theme_the_two_editions_bind_differently() {
-    // Over-reporting: Java falls back to the unsuffixed `shop` and
-    // inherits the floor; Bedrock binds `shop_bedrock` and does not.
+    // Over-reporting: Java binds `shop` and inherits the floor, Bedrock binds `shop_bedrock`.
     let over = "\
 theme shop:
   requires version>=1.21.4
@@ -354,9 +296,6 @@ struct keep size=5x5
     assert_eq!(neutral_floors(under), vec![]);
 }
 
-/// A theme every edition binds alike still feeds the row. The test above
-/// says which floors the rule removes; this one says it removes no more
-/// than that.
 #[test]
 fn the_neutral_row_keeps_a_theme_both_editions_bind() {
     let source = "\
@@ -388,8 +327,6 @@ struct keep size=5x5
 
 // -- the line itself ------------------------------------------------------
 
-/// A `requires` line is not a member: it is lifted onto the item, so no
-/// geometry pass sees it and `E_UNKNOWN_KEYWORD` is not reported for it.
 #[test]
 fn the_line_leaves_the_body_it_was_written_in() {
     let module = parse(PLACED).expect("parse");
@@ -407,9 +344,6 @@ fn the_line_leaves_the_body_it_was_written_in() {
     assert!(!codes(PLACED).contains(&"E_UNKNOWN_KEYWORD"));
 }
 
-/// An expression the compiler cannot read declares nothing, and is reported
-/// wherever it is written. The message names the part, because the span
-/// alone answers "which line" without answering "whose".
 #[test]
 fn an_unreadable_member_floor_is_reported_like_the_header_form() {
     let source = "\
@@ -431,9 +365,6 @@ def cottage size=5x5:
     );
 }
 
-/// A `def` nobody places is still checked for a floor that states nothing:
-/// the mistake is in the line, and a template nobody uses yet is a template
-/// somebody is about to.
 #[test]
 fn an_unreadable_floor_is_reported_in_a_part_no_build_instantiates() {
     let source = "\
@@ -446,11 +377,6 @@ def cottage size=5x5:
 
 // -- where the line may stand ---------------------------------------------
 
-/// A `struct` and a `site` are the build rather than a part of one, so the
-/// floor on them is the file's and is spelled `@requires`. A member's own
-/// children are refused for the other reason: the floor is the part's, and
-/// a `walls` line is not a part. Two repairs, so two messages — one of them
-/// would assert something false about half the files that reach it.
 #[test]
 fn only_a_def_or_a_theme_may_declare_one() {
     for source in [
@@ -475,10 +401,6 @@ fn only_a_def_or_a_theme_may_declare_one() {
     );
 }
 
-/// The word is only reserved where it declares something. A member line
-/// whose keyword happens to be `requires` parses in the bodies that cannot
-/// hold a floor, and lands in the body as a member, which parse success
-/// alone would not show.
 #[test]
 fn the_word_is_an_ordinary_keyword_where_no_floor_may_stand() {
     for source in [
@@ -496,12 +418,7 @@ fn the_word_is_an_ordinary_keyword_where_no_floor_may_stand() {
     }
 }
 
-/// Every body of the language goes through one policy, `theme` included.
-///
-/// A `theme` body accepts the line, so the visible half is that its rules
-/// are otherwise untouched, and that a `requires` *selector* row, which
-/// `check::keyword_allowlist` refuses, still parses rather than becoming a
-/// syntax error.
+/// A `requires` selector row is `check::keyword_allowlist`'s to refuse, so it still parses.
 #[test]
 fn a_theme_body_reads_the_line_through_the_same_policy() {
     let source = "\
@@ -518,10 +435,7 @@ theme t:
     assert_eq!(body.len(), 2, "the slot and the selector both survive");
 }
 
-/// `requires` with nothing after it declares no floor, and in a body that
-/// reads floors that is the mistake rather than a member line. The caret
-/// goes on the keyword: an empty expression has no token but the newline,
-/// whose column is one past the end of the line.
+/// The caret is on the keyword, since an empty expression has no token but the newline.
 #[test]
 fn a_floor_with_no_expression_is_refused_where_floors_are_read() {
     let error = parse("def d size=3x3:\n  requires\n").expect_err("no expression");
@@ -536,9 +450,6 @@ fn a_floor_with_no_expression_is_refused_where_floors_are_read() {
     );
 }
 
-/// A floor is one line. Left to the body loop, an indented block under one
-/// comes back as `expected identifier, got indent`, which names the token
-/// the parser met rather than the thing the author wrote.
 #[test]
 fn a_floor_takes_no_indented_body() {
     let error = parse("def d size=3x3:\n  requires version>=1.21\n    x=1\n")

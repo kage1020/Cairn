@@ -1,5 +1,5 @@
 //! Every AST node carries a span that slices the source to its surface form,
-//! and the IR's [`Member`] carries its [`Statement::Generic`]'s span exactly.
+//! and the IR's [`Member`](cairn_lang_core::Member) carries its [`Statement::Generic`]'s span.
 
 use cairn_lang_core::ast::{Item, Statement, ValueKind};
 use cairn_lang_core::{lower, parse};
@@ -26,7 +26,6 @@ fn statement_generic_span_round_trips_to_surface_text() {
 
 #[test]
 fn value_variants_each_carry_their_token_span() {
-    // One source sample per non-list `ValueKind`.
     let src = "struct s size=2x3\n  walls flag=true height=4 mat_slot=wall token=@oak tag=front.outside name=\"label\"\n";
     let module = parse(src).expect("parse");
     let Item::Struct { args, body, .. } = &module.items[0] else {

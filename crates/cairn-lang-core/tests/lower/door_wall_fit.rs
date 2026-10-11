@@ -1,8 +1,5 @@
-//! A `door` opens only at a row some `walls` member paints, and is capped by
-//! that course: two rows where the course has them, one where it does not.
-//! `walls height=H` under `level y=N` paints rows `N + 1 ..= N + H`, and a
-//! walkway port draws the same line as the openings pass, so the last group
-//! compares the two answers case by case.
+//! A `door` opens only at a row some `walls` member paints, capped by that course, and a walkway
+//! port draws the same line as the openings pass.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::DiagnosticCode;
@@ -16,11 +13,7 @@ const THEME: &str = "theme t:\n  \
                      slot roof  -> @spruce_stairs\n  \
                      slot gravel -> @gravel\n\n";
 
-/// Nothing at all was reported — not a deferral and not a refusal.
-///
-/// A case that expects the carve to happen asserts on the whole list
-/// rather than on [`defers`], which filters to `W_DEFERRED_MEMBER` and so
-/// would let an `E_INCOMPATIBLE_MATERIAL` on the source pass unseen.
+/// Nothing at all was reported, where [`defers`] would see only `W_DEFERRED_MEMBER`.
 fn assert_clean(ir: &BlockArrayIr) {
     assert!(
         ir.diagnostics.is_empty(),
@@ -33,8 +26,7 @@ fn assert_clean(ir: &BlockArrayIr) {
 
 #[test]
 fn a_door_under_walls_that_start_a_storey_up_is_refused_instead_of_carving_air() {
-    // The only masonry is `level y=6 walls height=4`, which paints rows
-    // 7..=10, and the door opens at row 1, seven rows below the first course.
+    // The only course paints rows 7..=10, and the door opens at row 1.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          floor mat_slot=floor\n  \
@@ -51,8 +43,6 @@ fn a_door_under_walls_that_start_a_storey_up_is_refused_instead_of_carving_air()
 
 #[test]
 fn the_door_and_the_window_on_that_body_give_the_same_answer() {
-    // The window's rows and the door's row are both outside every course,
-    // so both members defer and each names the rows the walls do occupy.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          level id=upper y=6\n    \
@@ -72,9 +62,7 @@ fn the_door_and_the_window_on_that_body_give_the_same_answer() {
 
 #[test]
 fn a_door_inside_the_level_whose_walls_it_opens_is_carved() {
-    // The same body with the door moved under the `level` its masonry
-    // belongs to: it opens at row 7, the course runs 7..=10, and the two
-    // rows a doorway wants are cut out of the front wall.
+    // The door under the `level` opens at row 7, inside the 7..=10 course.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          floor mat_slot=floor\n  \
@@ -100,10 +88,7 @@ fn a_door_inside_the_level_whose_walls_it_opens_is_carved() {
 
 #[test]
 fn a_door_is_checked_against_its_own_course_and_not_the_tallest_one() {
-    // Two courses with air between them: 1..=2 and 7..=10. A door under
-    // `level y=2` opens at row 3, in the gap, where a check reading the
-    // struct's highest wall row would see `10 > 3` and carve. The door
-    // under `level y=6` opens at row 7 and is cut.
+    // Courses at 1..=2 and 7..=10; the `level y=2` door opens at row 3, in the gap.
     let two_courses = |door_level: u32| {
         format!(
             "{THEME}struct hut size=5x5\n  \
@@ -128,13 +113,7 @@ fn a_door_is_checked_against_its_own_course_and_not_the_tallest_one() {
 
 #[test]
 fn two_courses_that_touch_are_one_wall_to_the_doorway_too() {
-    // `walls height=1` paints row 1 and `level y=1 walls height=3` paints
-    // 2..=4; they abut, so the struct has one wall from 1 to 4 and the
-    // door opens the two rows a doorway wants — although the member it
-    // opens into paints one of them. The cap is the course's, and a
-    // course is what the merge says it is; reading the door's own
-    // `walls` member instead would make a legal opening depend on where
-    // the author put a `level` line.
+    // The courses abut at 1 and 2..=4, so the struct has one wall from 1 to 4.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          walls id=lower mat_slot=wall height=1\n  \
@@ -159,9 +138,6 @@ fn two_courses_that_touch_are_one_wall_to_the_doorway_too() {
 
 #[test]
 fn a_door_on_a_struct_with_no_walls_says_there_is_no_wall() {
-    // The empty column keeps its own sentence: "nowhere" and "not here"
-    // are different findings, and quoting `none` as the rows the walls
-    // occupy would answer a question the author did not ask.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          floor mat_slot=floor\n  \
@@ -178,9 +154,7 @@ fn a_door_on_a_struct_with_no_walls_says_there_is_no_wall() {
 
 #[test]
 fn a_door_under_a_one_row_course_opens_that_row_and_stops() {
-    // `walls height=1` paints row 1 only, and the gable's front eave sits
-    // at row 2. The roof slot is a stair because a sloped roof reads
-    // `facing` / `half` / `shape` off the geometry.
+    // `walls height=1` paints row 1 only. The roof slot is a stair, as a sloped roof needs.
     let src = format!(
         "{THEME}struct hut size=5x5\n  \
          walls mat_slot=wall height=1\n  \
@@ -196,8 +170,7 @@ fn a_door_under_a_one_row_course_opens_that_row_and_stops() {
 
 // --------------------------------------------- the walkway port agrees
 
-/// A two-hut site whose walkway anchors on `a.e`, the door of a def
-/// whose only `walls` member sits under `level y={wall_level}`.
+/// A two-hut site whose walkway anchors on a door under walls at `level y={wall_level}`.
 fn site_with_door_port(wall_level: u32) -> String {
     format!(
         "{THEME}def hut size=5x5:\n  \
@@ -213,10 +186,7 @@ fn site_with_door_port(wall_level: u32) -> String {
 
 #[test]
 fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
-    // The walkway-port requirement of `spec/components-editing-sites` "Ports
-    // and `connect`", asserted as an equivalence so that editing one of the
-    // two gates alone fails. `level y=0` is the only level whose walls reach
-    // the row a def-body door opens at.
+    // `spec/components-editing-sites` "Ports and `connect`", as an equivalence of the two gates.
     for wall_level in 0..=3 {
         let carved = {
             let src = format!(
@@ -238,10 +208,7 @@ fn the_port_anchors_exactly_the_doorways_the_openings_pass_carves() {
 
 #[test]
 fn a_door_under_a_level_is_not_a_port_at_all() {
-    // The invariant the port side's base row rests on. Port resolution
-    // walks the `def` body only, so the door a port names is never shifted
-    // by a `level` and opens at row `1`, which is what lets one constant on
-    // the port side agree with the openings pass's `level y + 1`.
+    // Port resolution walks the `def` body only, so a port's door always opens at row 1.
     let src = format!(
         "{THEME}def hut size=5x5:\n  \
          walls id=w mat_slot=wall height=4\n  \
@@ -260,8 +227,6 @@ fn a_door_under_a_level_is_not_a_port_at_all() {
         .iter()
         .filter(|d| d.code == DiagnosticCode::UnresolvedPort)
         .collect();
-    // Both ends name the nested door. Calling it undeclared would send the
-    // author looking for a typo in an `id=` the member already has.
     assert_eq!(refusals.len(), 2, "{:?}", resolution.diagnostics);
     for (refusal, place) in refusals.iter().zip(["a", "b"]) {
         assert_eq!(
@@ -284,9 +249,6 @@ fn a_door_under_a_level_is_not_a_port_at_all() {
 
 #[test]
 fn the_walkway_defer_states_the_rule_the_door_broke() {
-    // The note is where an author is told why the strip is missing, so it
-    // names the row the door opens at and the rows the walls occupy, not
-    // every contract a port has: `side=` and `at=` are already right.
     let src = site_with_door_port(6);
     let out = lowered(&src);
     let notes: Vec<_> = out
@@ -312,8 +274,7 @@ fn the_walkway_defer_states_the_rule_the_door_broke() {
         src[at].starts_with("door id=e"),
         "the note points at the door's own line"
     );
-    // …and the member that cannot be built says so on its own line, which
-    // is where the note sends the author.
+    // The member that cannot be built says so on its own line.
     assert!(
         defers(&out)
             .iter()

@@ -1,7 +1,5 @@
-//! The parser's two depth bounds hold at their exact boundaries:
-//! `MAX_NESTING_DEPTH` on how deep the parser descends, and `MAX_EXPR_DEPTH` on
-//! the boolean tree it hands back, which a flat `or`/`and` chain deepens
-//! without deepening the parser.
+//! The parser's two depth bounds hold at their exact boundaries: `MAX_NESTING_DEPTH` on descent,
+//! and `MAX_EXPR_DEPTH` on the boolean tree, which a flat `or` chain deepens without descent.
 
 use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH, ParseError, parse};
 
@@ -14,8 +12,7 @@ fn nested_list(depth: usize) -> String {
     )
 }
 
-/// `logic sig.out = ((( … sig.a … )))`. Parentheses build no AST node, so
-/// this costs descent only.
+/// `logic sig.out = ((( … sig.a … )))`, which costs descent only.
 fn nested_parens(depth: usize) -> String {
     format!(
         "struct a size=1x1\n  logic sig.out = {}sig.a{}\n",
@@ -24,8 +21,7 @@ fn nested_parens(depth: usize) -> String {
     )
 }
 
-/// `logic sig.out = not not … sig.a`. Costs descent *and* tree depth, so it
-/// meets whichever bound is lower.
+/// `logic sig.out = not not … sig.a`, which costs descent and tree depth.
 fn chained_not(depth: usize) -> String {
     format!(
         "struct a size=1x1\n  logic sig.out = {}sig.a\n",
@@ -33,8 +29,7 @@ fn chained_not(depth: usize) -> String {
     )
 }
 
-/// One indented block per level: a command and its indented body recurse
-/// into each other, the third recursive production.
+/// One indented block per level, the third recursive production.
 fn nested_blocks(depth: usize) -> String {
     let mut source = String::from("struct a size=1x1\n");
     for level in 1..=depth {
@@ -95,9 +90,7 @@ fn a_flat_chain_at_the_expression_limit_parses() {
 
 #[test]
 fn one_term_past_the_expression_limit_is_refused() {
-    // Not the parser's own stack, since `or` iterates: the tree handed back,
-    // which `Serialize`, the check passes, and `Box`'s recursive `Drop` all
-    // walk.
+    // The bound is on the tree handed back, which `Serialize`, the check passes and `Drop` walk.
     match parse(&flat_or_chain(MAX_EXPR_DEPTH + 1)) {
         Err(ParseError::NestingTooDeep { limit, .. }) => assert_eq!(
             limit, MAX_EXPR_DEPTH,
@@ -111,10 +104,7 @@ fn one_term_past_the_expression_limit_is_refused() {
 /// unbounded tree, as measured.
 const MEASURED_CONSUMER_OVERFLOW: usize = 570;
 
-// At compile time, since both sides are constants. A `MAX_EXPR_DEPTH` near
-// the measured overflow would hand back a tree `cairn parse` cannot
-// serialise, failing downstream of the guard where it is far harder to
-// attribute.
+// A `MAX_EXPR_DEPTH` near the measured overflow would fail downstream, far from this guard.
 const _: () = assert!(
     MAX_EXPR_DEPTH * 4 <= MEASURED_CONSUMER_OVERFLOW,
     "MAX_EXPR_DEPTH leaves under 4x margin against the term count at which a debug build of \
@@ -123,8 +113,6 @@ const _: () = assert!(
 
 #[test]
 fn the_message_tells_the_author_how_to_unwind() {
-    // The language is built around an LLM edit loop, so a diagnostic that
-    // only says "too deep" without the bound cannot be acted on in one pass.
     for (shape, source) in [
         ("descent", nested_list(MAX_NESTING_DEPTH + 1)),
         ("expression", flat_or_chain(MAX_EXPR_DEPTH + 1)),
@@ -144,9 +132,6 @@ fn the_message_tells_the_author_how_to_unwind() {
 
 #[test]
 fn the_refusal_points_inside_the_offending_construct() {
-    // Not at the opening bracket: the guard fires once the level has been
-    // entered, so the position is the first token of the level that went one
-    // too far.
     let err = parse(&nested_list(MAX_NESTING_DEPTH + 1)).expect_err("past the limit");
     let position = err.position();
     assert_eq!(position.line.get(), 2, "the offending value is on line 2");
@@ -160,8 +145,7 @@ fn the_refusal_points_inside_the_offending_construct() {
 
 #[test]
 fn sibling_values_do_not_accumulate_depth() {
-    // Depth is per path, not per node. A counter incremented without a
-    // matching decrement fails here and nowhere else.
+    // A counter incremented without a matching decrement fails here and nowhere else.
     let items = std::iter::repeat_n("[a]", MAX_NESTING_DEPTH * 4)
         .collect::<Vec<_>>()
         .join(", ");

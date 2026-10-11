@@ -1,8 +1,5 @@
-//! Diagnostic prose reads as prose: no primary or note the corpus below reaches
-//! carries a run of spaces, a raw line break or tab, or padding. A multi-line
-//! literal that loses its trailing `\` still compiles and says the right thing,
-//! so the rendered text is the only place it shows, and the corpus's reach is
-//! asserted so the checks cannot quietly shrink.
+//! Diagnostic prose reads as prose: no rendered primary or note carries a run of spaces, a raw
+//! line break or tab, or padding. A dropped trailing `\` shows only in the rendered text.
 
 use std::collections::BTreeSet;
 
@@ -44,8 +41,6 @@ fn no_diagnostic_text_carries_a_run_of_spaces() {
 
 #[test]
 fn no_diagnostic_text_carries_a_raw_newline_or_tab() {
-    // The renderer puts each diagnostic on its own line and indents notes,
-    // and a tab lands at a different column in every consumer.
     for (origin, text) in rendered_strings() {
         assert!(
             !text.contains('\n') && !text.contains('\t'),
@@ -62,10 +57,7 @@ fn no_diagnostic_text_is_empty_or_padded() {
     }
 }
 
-/// One code can render several sentences, and a fixture that stops
-/// reaching one takes its prose out of the checks above without changing
-/// the code set. This branch is the only finding that names a second
-/// argument.
+/// One code renders several sentences, so reaching the code does not reach this one.
 #[test]
 fn the_corpus_reaches_the_two_repair_site_branch_of_the_ignored_argument_prose() {
     let reached = rendered_strings().into_iter().any(|(origin, text)| {
@@ -78,8 +70,6 @@ fn the_corpus_reaches_the_two_repair_site_branch_of_the_ignored_argument_prose()
     );
 }
 
-/// Each note is worded per member and outcome in its own literal, and so
-/// is its own chance at a dropped continuation.
 #[test]
 fn the_corpus_reaches_every_note_an_unreadable_value_carries() {
     let rendered = rendered_strings();
@@ -122,9 +112,6 @@ fn the_corpus_reaches_every_note_an_unreadable_value_carries() {
     }
 }
 
-/// A header finding is worded apart from a member's, and both codes are
-/// reached by member findings too, so the code set would stay whole
-/// without the header fixtures.
 #[test]
 fn the_corpus_reaches_the_header_vocabulary_prose() {
     let rendered = rendered_strings();
@@ -151,11 +138,7 @@ fn the_corpus_reaches_the_header_vocabulary_prose() {
     }
 }
 
-/// A code no fixture reaches has its prose unchecked, so a fixture deleted
-/// for another reason shows up here.
-///
-/// A floor, not the full code set: codes that need a registry pack or a
-/// multi-theme file are not all represented.
+/// A floor, not the full code set: some codes need a registry pack or a multi-theme file.
 #[test]
 fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
     let mut seen: BTreeSet<&'static str> = BTreeSet::new();
@@ -211,8 +194,7 @@ const HUT: &str = "def hut size=3x3:\n\
 \x20\x20walls id=walls mat_slot=wall height=3\n\
 \x20\x20door  id=entry side=front at=center\n\n";
 
-/// A corpus chosen to light up as much of the diagnostic surface as it
-/// can; the tests above assert its reach.
+/// A corpus lighting up as much of the diagnostic surface as it can.
 fn noisy_sources() -> Vec<String> {
     let mut sources = vec![
         // Extent, saturating reads, and roof deferral.
@@ -222,8 +204,7 @@ fn noisy_sources() -> Vec<String> {
             "{THEME}struct t size=9x7\n  walls mat_slot=wall height=3\n\
              \x20\x20roof kind=flat mat_slot=wall overhang=4294967296\n"
         ),
-        // A key the roof's `kind=` routed past. `flat`, because a sloped
-        // roof on cobblestone would also earn `E_INCOMPATIBLE_MATERIAL`.
+        // `flat`, because a sloped roof on cobblestone would also earn `E_INCOMPATIBLE_MATERIAL`.
         format!(
             "{THEME}struct t size=9x7\n  walls mat_slot=wall height=3\n\
              \x20\x20roof kind=flat mat_slot=wall slope_to=front\n"
@@ -246,25 +227,21 @@ fn noisy_sources() -> Vec<String> {
         ),
         format!("{THEME}struct s size=5x5\n  torch mat_slot=wall\n"),
         format!("{THEME}struct s size=5x5\n  floor mat_slot=nosuchslot\n"),
-        // Duplicate names and headers, one source per kind because the
-        // repair note is written per kind.
+        // Duplicate names and headers, one source per kind, since the repair note is per kind.
         format!("{THEME}{HUT}def hut size=5x5:\n  floor id=floor mat_slot=floor\n"),
         format!("{THEME}struct s size=5x5\n  floor\n\nstruct s size=6x6\n  floor\n"),
         format!(
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n\nsite s:\n  place id=b use=hut theme=t at=origin\n"
         ),
         format!("@cairn 2026.06\n@cairn 2026.07\n\n{THEME}struct s size=5x5\n  floor\n"),
-        // Two coinciding selector rows over a member both select, written
-        // out because the rows belong inside the theme.
+        // Two coinciding selector rows over a member both select.
         "theme t:\n  slot wall -> @cobblestone\n  \
          window[class=small] -> frame=@spruce_wood\n  \
          window[class=small] -> frame=@dark_oak_wood\n\n\
          struct s size=5x5\n  \
          window class=small side=front offset=1 y=1 size=1x1 mat_slot=wall\n"
             .to_owned(),
-        // Unsupported nesting, one source per branch of the message: the
-        // two scopes, the two reasons a `level` loses its body, and the
-        // verb in singular and plural.
+        // Unsupported nesting, one source per branch of the message.
         format!(
             "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n    door id=d side=front at=center\n"
         ),
@@ -280,9 +257,7 @@ fn noisy_sources() -> Vec<String> {
         format!(
             "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  level\n    walls mat_slot=wall height=3\n"
         ),
-        // Misplaced members: both bodies, the `level`-in-a-site advice
-        // branch, and the note that counts what an indented body loses
-        // with its root.
+        // Misplaced members, one source per branch of the message.
         format!("{THEME}{HUT}struct s size=5x5\n  place id=a use=hut theme=t at=origin\n"),
         format!(
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n  floor mat_slot=floor\n"
@@ -291,22 +266,17 @@ fn noisy_sources() -> Vec<String> {
         format!(
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n  walls mat_slot=wall height=3\n    floor mat_slot=floor\n    door id=d side=front at=center\n"
         ),
-        // A misplaced row that carries a signal, whose message softens its
-        // claim in a sentence of its own.
+        // A misplaced row carrying a signal, whose message softens its claim.
         format!(
             "{THEME}{HUT}site s:
   place id=a use=hut theme=t at=origin
   pressure_plate id=gate at=front.outside -> sig.step
 "
         ),
-        // A `place` row short of one key, and one short of all three:
-        // the message lists them in a sentence, so singular and plural
-        // both have to read.
+        // A `place` row short of one key, and one short of all three.
         format!("{THEME}{HUT}site s:\n  place id=a theme=t at=origin\n"),
         format!("{THEME}{HUT}site s:\n  place at=origin\n"),
-        // The two-key arity of the missing-key list, which joins without a
-        // serial comma, and an id-less row whose origin selector also
-        // fails — the branch that has no name to quote.
+        // Two missing keys, joined without a serial comma, and an id-less row with a bad origin.
         format!(
             "{THEME}{HUT}site s:
   place id=b at=origin
@@ -320,8 +290,7 @@ fn noisy_sources() -> Vec<String> {
         // Positional values, singular and plural.
         format!("{THEME}struct s size=5x5\n  roof flat mat_slot=wall\n"),
         format!("{THEME}struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),
-        // A slot bound to something that is not a material token, and a
-        // selector that matches nothing.
+        // A slot bound to a non-token, and a selector that matches nothing.
         "theme t:\n  slot floor -> 42\n\nstruct s size=3x3\n  floor mat_slot=floor\n".to_owned(),
         "theme t:\n\
          \x20\x20slot floor -> @oak_planks\n\
@@ -336,12 +305,10 @@ fn noisy_sources() -> Vec<String> {
     sources
 }
 
-/// The sources for the truth-table findings, kept apart like
-/// `unreadable_value_sources` only so no list outgrows a screen.
+/// The sources for the truth-table findings.
 fn truth_table_sources() -> Vec<String> {
     vec![
-        // One source per truth-table code, since each words its repair
-        // differently.
+        // One source per truth-table code, since each words its repair differently.
         format!("{THEME}struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.o) {{ }}\n"),
         format!(
             "{THEME}struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.o) {{ 00->0; 00->1; 01->0; 10->0; 11->0 }}\n"
@@ -350,16 +317,14 @@ fn truth_table_sources() -> Vec<String> {
             "{THEME}struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.o) {{ 00->0; 00->0; 01->0; 10->0; 11->0 }}\n"
         ),
         format!("{THEME}struct s size=3x3\n  assert truth(sig.a, sig.b -> sig.o) {{ 00->0 }}\n"),
-        // Two repeated signals, so both shapes of the position list render:
-        // `sig.a` in full, and `sig.b` past the cap with a count of the rest.
+        // Two repeated signals: `sig.a` listed in full, `sig.b` past the cap with a count.
         format!(
             "{THEME}struct s size=3x3\n  assert truth(sig.a, sig.a, sig.b, sig.b, sig.b, sig.b, sig.b -> sig.o) {{ }}\n"
         ),
     ]
 }
 
-/// The sources for the `struct` / `def` header's own vocabulary: a
-/// misspelled `size=` and the unread `class=`.
+/// The sources for a misspelled header `size=` and the unread `class=`.
 fn header_sources() -> Vec<String> {
     vec![
         format!("{THEME}struct s siz=7x7\n  floor mat_slot=floor\n"),
@@ -367,16 +332,10 @@ fn header_sources() -> Vec<String> {
     ]
 }
 
-/// The sources for an unreadable value's findings, kept apart only so
-/// neither list outgrows a screen.
+/// The sources for an unreadable value's findings.
 fn unreadable_value_sources() -> Vec<String> {
     vec![
-        // `b`'s `gap=` is ignored and the row placed; `c`'s origin leaves
-        // the `i32` range; `d` is anchored on `c`, so it is not placed and
-        // its unreadable `gap=` carries a second note. `e`'s far edge sits
-        // exactly on `i32::MAX`, so `f` leaves the range at the `gap=0` its
-        // unreadable `gap=` falls back to, and carries the third. `g`'s
-        // origin is in range and its far edge is not.
+        // A row per note an unreadable `gap=` carries, and one with just its far edge out of range.
         format!(
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n\
              \x20\x20place id=b use=hut theme=t east_of=a gap=wide\n\
@@ -386,8 +345,7 @@ fn unreadable_value_sources() -> Vec<String> {
              \x20\x20place id=f use=hut theme=t east_of=e gap=wide\n\
              \x20\x20place id=g use=hut theme=t east_of=a gap=2147483644\n"
         ),
-        // Its own theme, because an eave needs a stair material and
-        // `THEME` binds none.
+        // Its own theme, since an eave needs a stair material and `THEME` binds none.
         "theme t:\n  slot wall -> @cobblestone\n  slot eave -> @oak_stairs\n\n\
          struct t size=7x5\n  walls mat_slot=wall height=3\n  \
          roof kind=flat mat_slot=wall overhang=1\n  \

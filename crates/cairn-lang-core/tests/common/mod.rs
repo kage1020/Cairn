@@ -1,16 +1,11 @@
-//! Helpers shared by the core integration test binaries, which all drive the
-//! same front half of the pipeline and read the same `examples/` tree. Each
-//! binary declares this module `pub`, so a helper one binary leaves unused is
-//! not dead code there.
+//! Helpers shared by the core integration test binaries.
 
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
 use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
 
-/// The number of `.crn` files `examples/` ships. Bump it with the next
-/// example; every sweep refuses a different count, and a loop over a
-/// filtered-down set passes silently.
+/// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
 pub const SHIPPED_EXAMPLES: usize = 12;
 
 /// The repository's `examples/` directory.
@@ -35,9 +30,7 @@ pub fn read_example(name: &str) -> String {
 ///
 /// # Panics
 ///
-/// When `examples/` cannot be read, or holds other than
-/// [`SHIPPED_EXAMPLES`] files: every sweep is a loop over this, and a loop
-/// over nothing passes.
+/// When `examples/` cannot be read, or holds other than [`SHIPPED_EXAMPLES`] files.
 pub fn examples() -> Vec<(String, String)> {
     let dir = examples_dir();
     let entries =
@@ -70,13 +63,11 @@ pub fn examples() -> Vec<(String, String)> {
     found
 }
 
-/// Parse, lower and run the check passes over `source` with no registry
-/// pack.
+/// Parse, lower and check `source` with no registry pack.
 ///
 /// # Panics
 ///
-/// When `source` does not parse, with the source in the message so the
-/// fixture is in the failure.
+/// When `source` does not parse.
 pub fn diagnose(source: &str) -> Vec<Diagnostic> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
@@ -109,15 +100,12 @@ pub fn codes(source: &str) -> Vec<&'static str> {
     diagnose(source).iter().map(|d| d.code.as_str()).collect()
 }
 
-/// The text `diag` points at, so a test can assert what a finding
-/// underlines rather than only where.
+/// The text `diag` points at.
 pub fn slice<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
     &source[diag.span.clone()]
 }
 
-/// Byte offset of the `n`th (0-based) occurrence of `needle`, so a test
-/// says which of several equal tokens a span starts at rather than relying
-/// on "first" or "last".
+/// Byte offset of the `n`th (0-based) occurrence of `needle`.
 ///
 /// # Panics
 ///
@@ -130,8 +118,7 @@ pub fn nth(source: &str, needle: &str, n: usize) -> usize {
         .0
 }
 
-/// The primaries of `found`, so a failing count shows what was reported
-/// rather than only how much of it there was.
+/// The primaries of `found`.
 pub fn primaries(found: &[Diagnostic]) -> Vec<&str> {
     found.iter().map(|d| d.primary.as_str()).collect()
 }
@@ -151,12 +138,11 @@ pub fn exactly_one(mut found: Vec<Diagnostic>) -> Diagnostic {
     found.remove(0)
 }
 
-/// Parse, lower, resolve and lower `source` to the block-array IR with no
-/// registry pack. Only the block-array pass's own diagnostics are kept.
+/// `source` lowered to the block-array IR with no registry pack; only that pass's diagnostics.
 ///
 /// # Panics
 ///
-/// When `source` does not parse, with the source in the message.
+/// When `source` does not parse.
 pub fn lowered(source: &str) -> BlockArrayIr {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
@@ -164,12 +150,11 @@ pub fn lowered(source: &str) -> BlockArrayIr {
     lower_to_block_array(&ir, &resolution, None)
 }
 
-/// [`lowered`], with the resolver's diagnostics merged in front of the
-/// block-array pass's the way the CLI reports them.
+/// [`lowered`], with the resolver's diagnostics ahead of the block-array pass's.
 ///
 /// # Panics
 ///
-/// When `source` does not parse, with the source in the message.
+/// When `source` does not parse.
 pub fn lowered_with_resolver_diagnostics(source: &str) -> BlockArrayIr {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
     let ir = lower(&module);
@@ -181,8 +166,7 @@ pub fn lowered_with_resolver_diagnostics(source: &str) -> BlockArrayIr {
     out
 }
 
-/// The primaries of the `W_DEFERRED_MEMBER` findings `ir` carries, in
-/// report order.
+/// The primaries of the `W_DEFERRED_MEMBER` findings `ir` carries.
 pub fn defers(ir: &BlockArrayIr) -> Vec<&str> {
     ir.diagnostics
         .iter()
@@ -191,13 +175,11 @@ pub fn defers(ir: &BlockArrayIr) -> Vec<&str> {
         .collect()
 }
 
-/// Whether `source` lays its walkway rather than skipping it for a port that
-/// could not be placed.
+/// Whether `source` lays its walkway rather than skipping it for an unplaceable port.
 ///
 /// # Panics
 ///
-/// When `source` does not parse, or when a walkway that was not skipped was
-/// not laid either.
+/// When `source` does not parse, or a walkway was neither skipped nor laid.
 pub fn walkway_was_laid(source: &str) -> bool {
     let out = lowered(source);
     let skipped = defers(&out)
@@ -229,7 +211,7 @@ pub fn state_at(array: &BlockArray, x: u32, y: u32, z: u32) -> &BlockState {
     &array.palette.entries[array.voxels[i].0 as usize]
 }
 
-/// The single structure `ir` holds, for sources that declare exactly one.
+/// The single structure `ir` holds.
 ///
 /// # Panics
 ///
@@ -243,8 +225,7 @@ pub fn only_structure(ir: &BlockArrayIr) -> &BlockArray {
     ir.structures.values().next().expect("one structure")
 }
 
-/// A theme and a `def` every site fixture can place: `hut` has a floor, a
-/// wall and a front door, so a placement of it is complete on its own.
+/// A theme and a complete `def hut` for site fixtures to place.
 pub const PRELUDE: &str = "theme plain:\n  \
 slot floor -> @oak_planks\n  \
 slot wall  -> @cobblestone\n\n\
@@ -258,8 +239,7 @@ pub fn struct_with(row: &str) -> String {
     format!("{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  {row}\n")
 }
 
-/// [`PRELUDE`] plus a site placing two `hut`s, `anchor` at the origin and
-/// `peer` east of it, and then `row`, so a site row can name both.
+/// [`PRELUDE`] plus a site placing `hut`s `anchor` and `peer`, then `row`.
 pub fn duo_with(row: &str) -> String {
     format!(
         "{PRELUDE}site duo:\n  place id=anchor use=hut theme=plain at=origin\n  \
@@ -267,17 +247,12 @@ pub fn duo_with(row: &str) -> String {
     )
 }
 
-/// `header` above a one-struct body, so the header lines are the only
-/// variable in a fixture about them.
+/// `header` above a one-struct body.
 pub fn with_header(header: &str) -> String {
     format!("{header}struct s size=2x2\n  floor mat_slot=f\n")
 }
 
 /// [`PRELUDE`] plus a `def` whose body is a floor and then `row`.
-///
-/// The passes walk `ir.structs` and `ir.defs` in separate loops, so a
-/// struct-only suite leaves the `def` loop unexecuted — and a `def` is the
-/// half users reach first, since a `site` is what instantiates one.
 pub fn def_with(row: &str) -> String {
     format!("{PRELUDE}def lodge size=5x5:\n  floor mat_slot=floor\n  {row}\n")
 }

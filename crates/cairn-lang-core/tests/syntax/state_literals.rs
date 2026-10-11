@@ -1,7 +1,5 @@
-//! A canonical token's block-state literal, `@oak_log[axis=x]`, parses into the
-//! token's text (`spec/materials-themes` "Canonical vocabulary"), and the
-//! parser is the one place a malformed literal is refused: the material layer
-//! reads the tail leniently on that understanding.
+//! A canonical token's block-state literal, `@oak_log[axis=x]`, folds into the token's text
+//! (`spec/materials-themes` "Canonical vocabulary"), and only the parser refuses a malformed one.
 
 use cairn_lang_core::ast::{Item, Statement, ThemeRule, Value, ValueKind};
 use cairn_lang_core::block_array::{BlockState, resolve_block_state};
@@ -11,8 +9,7 @@ use cairn_lang_core::{DiagnosticCode, parse};
 
 use crate::common::{diagnose, lowered, only_structure};
 
-/// The value bound by the one slot of a `theme t:` whose only row is
-/// `slot s -> {target}`, with the source it was parsed from.
+/// The value a one-row `slot s -> {target}` theme binds, with the source it was parsed from.
 fn slot_value(target: &str) -> (Value, String) {
     let source = format!("theme t:\n  slot s -> {target}\n");
     let module = parse(&source).unwrap_or_else(|err| panic!("{target:?}: {err}"));
@@ -25,8 +22,7 @@ fn slot_value(target: &str) -> (Value, String) {
     (value.clone(), source)
 }
 
-/// The text and source slice of the value bound by the one slot of a
-/// `theme t:` whose only row is `slot s -> {target}`.
+/// The text and source slice of the value [`slot_value`] parses.
 fn slot_target(target: &str) -> (String, String) {
     let (value, source) = slot_value(target);
     let ValueKind::Token(text) = &value.kind else {
@@ -62,8 +58,7 @@ fn the_literal_folds_into_the_token_text() {
             "@oak_stairs[half=top,facing=north]",
             "oak_stairs[half=top,facing=north]",
         ),
-        // Spaces inside the brackets are not part of the text, so the
-        // material layer never has to trim them.
+        // Spaces inside the brackets are not part of the text.
         (
             "@oak_stairs[ half = top , facing = north ]",
             "oak_stairs[half=top,facing=north]",
@@ -73,8 +68,6 @@ fn the_literal_folds_into_the_token_text() {
     ] {
         let (found, slice) = slot_target(target);
         assert_eq!(found, text, "{target:?}");
-        // The value's span runs to the `]`, so a diagnostic on it
-        // underlines the whole token.
         assert_eq!(slice, target, "{target:?}");
     }
 }
@@ -98,8 +91,7 @@ fn a_log_along_x_builds_from_the_literal() {
     );
 }
 
-/// `spec/compilation` "Within-phase conflicts and the palette": the two
-/// spellings name one block, so a build that binds both holds one entry.
+/// `spec/compilation` "Within-phase conflicts and the palette".
 #[test]
 fn two_spellings_of_one_state_are_one_palette_entry() {
     let source = "theme t:\n  slot a -> @oak_stairs[half=top,facing=north]\n  slot b -> @oak_stairs[facing=north,half=top]\n\nstruct s size=3x3\n  floor mat_slot=a\n  walls mat_slot=b height=1\n";
@@ -113,10 +105,6 @@ fn two_spellings_of_one_state_are_one_palette_entry() {
     assert_eq!(stairs.len(), 1, "{stairs:?}");
 }
 
-/// The palette is "a set with a canonical rendering": two sources that
-/// differ only in how a literal orders its properties build the same IR,
-/// so the `.nbt` written from it and the lockfile's `resolved_ir_hash`
-/// cannot tell them apart either.
 #[test]
 fn the_order_a_literal_spells_its_properties_in_reaches_no_artifact() {
     let a = lowered(&floored("@oak_stairs[half=top,facing=north]"));
@@ -136,10 +124,6 @@ fn the_order_a_literal_spells_its_properties_in_reaches_no_artifact() {
     );
 }
 
-/// The material layer reads back the properties the source wrote, sorted by
-/// name, and rendering them as a literal again parses to the same state.
-/// Every literal here also reaches the material layer's debug assertion on
-/// the folded shape.
 #[test]
 fn a_folded_literal_reads_back_as_the_properties_it_was_written_with() {
     for (target, id, pairs) in [
@@ -180,9 +164,7 @@ fn a_folded_literal_reads_back_as_the_properties_it_was_written_with() {
     }
 }
 
-/// `lowered` skips the check pass, which is where a slot's binding is
-/// judged on its own; a literal has to be clean there too. The lowering
-/// says the one thing it cannot vouch for, and nothing else.
+/// `lowered` skips the check pass, which judges a slot's binding on its own.
 #[test]
 fn a_well_formed_literal_is_clean_through_check() {
     for target in ["@oak_log[axis=x]", "@oak_stairs[half=top, facing=north]"] {
@@ -197,9 +179,6 @@ fn a_well_formed_literal_is_clean_through_check() {
     }
 }
 
-/// No pass checks a literal against the target, so the lowering says so on
-/// the value itself, where `E_UNKNOWN_ID` points for a mistake left of the
-/// `[`. A token without a literal is not told.
 #[test]
 fn an_unchecked_literal_is_announced_on_its_value() {
     let source = floored("@oak_log[axis=q]");
@@ -277,8 +256,7 @@ fn a_property_named_twice_is_refused() {
     assert_eq!(at, 29);
 }
 
-/// The lexer ends every file with a line break, so a literal the file
-/// cuts short reads like one its line cuts short.
+/// The lexer ends every file with a line break.
 #[test]
 fn a_literal_cut_short_by_the_end_of_the_file_reports_end_of_line() {
     for (target, expected) in [
@@ -303,9 +281,7 @@ fn a_literal_cut_short_by_the_end_of_the_file_reports_end_of_line() {
     }
 }
 
-/// A dotted token is abstract and names no block, so it has no literal, and
-/// a touching `[` is left to whatever reads next. In a slot nothing may
-/// follow the token, so the row is refused.
+/// A dotted token is abstract, so it has no literal.
 #[test]
 fn an_abstract_token_leaves_a_touching_bracket_alone() {
     let (message, at) = refusal("@floor.wood[axis=x]");
@@ -313,8 +289,6 @@ fn an_abstract_token_leaves_a_touching_bracket_alone() {
     assert_eq!(at, 24);
 }
 
-/// Where something may follow the token, the `[` opens it: a positional
-/// after `mat=`, a nested list inside a value list.
 #[test]
 fn a_bracket_touching_a_dotted_token_opens_what_follows() {
     let module = parse("struct s size=3x3\n  thing mat=@a.b[1]\n").expect("a positional follows");
@@ -347,8 +321,6 @@ fn a_bracket_touching_a_dotted_token_opens_what_follows() {
     assert_eq!(items[0].kind, ValueKind::Token("a.b".to_owned()));
 }
 
-/// A `[` after a space is not the token's: a slot takes one value, so the
-/// row ends at the token and the bracket is refused.
 #[test]
 fn a_bracket_after_a_space_is_not_a_state_literal() {
     let (message, at) = refusal("@oak_log [axis=x]");
@@ -356,8 +328,7 @@ fn a_bracket_after_a_space_is_not_a_state_literal() {
     assert_eq!(at, 22);
 }
 
-/// Commas are optional in a value list, so a token and a nested list apart
-/// are two items; touching, the `[` is the token's and `b` is no property.
+/// Commas are optional in a value list, so apart, a token and a nested list are two items.
 #[test]
 fn a_value_list_reads_a_touching_bracket_as_the_tokens() {
     let apart = parse("struct s size=3x3\n  thing mat=[@a [b]]\n").expect("two items");
@@ -382,9 +353,6 @@ fn a_value_list_reads_a_touching_bracket_as_the_tokens() {
     );
 }
 
-/// A theme slot is not the only place a literal is read: a walkway's
-/// `path=` resolves through the same material layer, and its state lands
-/// in the walkway's palette rather than a building's.
 #[test]
 fn a_walkway_path_carries_its_literal_into_the_walkway_palette() {
     let source = crate::common::read_example("village.crn").replace(

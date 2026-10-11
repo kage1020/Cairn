@@ -1,15 +1,11 @@
-//! `E_MISPLACED_MEMBER`: a keyword written into a body that has no reader for
-//! its role, such as a `place` in a `def` or a `floor` among a site's
-//! placements, is an error at the row, because every loop that would build it
-//! passes it by without a word.
+//! `E_MISPLACED_MEMBER`: a keyword in a body with no reader for its role, such as a `place` in a
+//! `def`, is an error at the row.
 
 use cairn_lang_core::{DiagnosticCode, Severity};
 
 use crate::common::{PRELUDE, def_with, diagnose, notes, of_code, one_of_code, struct_with};
 
-/// Every keyword the role table knows, with a well-formed argument list
-/// for each so the finding under test is the only thing wrong with the
-/// line. `connect` names the two places `site_with` declares.
+/// Every keyword the role table knows, each well-formed; `connect` names `site_with`'s places.
 const GEOMETRY_ROWS: &[&str] = &[
     "floor mat_slot=floor",
     "walls mat_slot=wall height=3",
@@ -64,8 +60,6 @@ fn a_geometry_row_in_a_site_body_is_an_error() {
     }
 }
 
-/// Without this, a pass that reported every member would pass the two
-/// tests above.
 #[test]
 fn a_row_the_body_reads_is_not_reported() {
     for row in GEOMETRY_ROWS {
@@ -87,8 +81,6 @@ fn a_row_the_body_reads_is_not_reported() {
     }
 }
 
-/// A `level` groups members inside the body it sits in, so nesting does
-/// not open a body with different rules.
 #[test]
 fn the_body_kind_carries_through_a_level() {
     let src = format!(
@@ -99,8 +91,6 @@ fn the_body_kind_carries_through_a_level() {
     assert!(d.primary.contains("lowers `place`"), "got {:?}", d.primary);
 }
 
-/// Everything indented under a row this body cannot read goes with it, so
-/// descending would bill one mistake once per line underneath.
 #[test]
 fn a_subtree_is_reported_once_at_its_root() {
     let src = format!(
@@ -122,8 +112,6 @@ fn a_subtree_is_reported_once_at_its_root() {
     );
 }
 
-/// The nesting advice, "dedent these", does not fit a row that cannot be
-/// in this body at any indentation.
 #[test]
 fn nesting_does_not_also_report_a_misplaced_row() {
     let src = format!(
@@ -141,8 +129,6 @@ fn nesting_does_not_also_report_a_misplaced_row() {
     );
 }
 
-/// The repair is the word, and there is no role to measure against the
-/// body's readers.
 #[test]
 fn an_unknown_keyword_is_left_to_the_allowlist() {
     for src in [
@@ -163,8 +149,7 @@ fn an_unknown_keyword_is_left_to_the_allowlist() {
     }
 }
 
-/// `intent::lower` sorts them into `MemberBody`'s own fields, so they never
-/// reach this walk.
+/// `intent::lower` sorts them into `MemberBody`'s own fields, so they never reach this walk.
 #[test]
 fn logic_and_assert_lines_are_not_members() {
     let src = format!(
@@ -178,8 +163,6 @@ fn logic_and_assert_lines_are_not_members() {
     );
 }
 
-/// Its children are usually `place` rows that belong one indent to the
-/// left, and "move it into a struct" would cost the author the placement.
 #[test]
 fn a_level_in_a_site_body_says_dedent_rather_than_relocate() {
     let src = format!(
@@ -220,7 +203,6 @@ fn the_candidate_list_is_scoped_to_the_body() {
     );
 }
 
-/// Not the whole body: the header is a line that is correct.
 #[test]
 fn the_span_underlines_the_offending_row() {
     let src = site_with("floor id=stray mat_slot=floor");
@@ -228,7 +210,6 @@ fn the_span_underlines_the_offending_row() {
     assert_eq!(&src[d.span.clone()], "floor id=stray mat_slot=floor");
 }
 
-/// A `def` body is walked by a loop of its own.
 #[test]
 fn the_def_loop_is_walked() {
     let d = one_of_code(
@@ -243,9 +224,7 @@ fn the_def_loop_is_walked() {
     );
 }
 
-/// "Produces nothing" is about the block array: redstone synthesis walks a
-/// site's rows whatever their role, so a `-> sig.NAME` tail on a misplaced
-/// row still reaches it.
+/// Redstone synthesis walks a site's rows whatever their role, so a signal tail still reaches it.
 #[test]
 fn a_signal_bearing_row_is_not_told_it_reaches_nothing() {
     let hedge = "the `sig.` reference on this line does still reach redstone synthesis — but the block it would sense or drive is the one being dropped, so move the member and the signal keeps working";
@@ -255,8 +234,6 @@ fn a_signal_bearing_row_is_not_told_it_reaches_nothing() {
     );
     assert!(notes(&sensor).contains(&hedge), "got {:#?}", notes(&sensor));
 
-    // A row with no signal must not carry the note, or it would be noise on
-    // every finding.
     let actuator = one_of_code(
         &site_with("door[id=entry] opened_by=sig.open"),
         DiagnosticCode::MisplacedMember,
@@ -273,8 +250,6 @@ fn a_signal_bearing_row_is_not_told_it_reaches_nothing() {
     assert!(!notes(&plain).contains(&hedge), "got {:#?}", notes(&plain));
 }
 
-/// Counting direct children only would understate the cost by exactly the
-/// part the author cannot see from the reported line.
 #[test]
 fn the_nested_count_covers_the_whole_subtree() {
     let src = format!(
@@ -289,8 +264,6 @@ fn the_nested_count_covers_the_whole_subtree() {
     );
 }
 
-/// The body reads this row, and `nesting` declares its indented body lost;
-/// descending would bill one mistake twice with repairs that disagree.
 #[test]
 fn a_child_of_a_lost_body_is_left_to_nesting() {
     let src = format!(
@@ -313,8 +286,6 @@ fn a_child_of_a_lost_body_is_left_to_nesting() {
     );
 }
 
-/// As in `nesting`: the repair is the word, and everything below it is
-/// judged again afterwards.
 #[test]
 fn a_subtree_under_an_unknown_keyword_is_left_alone() {
     let src = format!(
@@ -333,8 +304,6 @@ fn a_subtree_under_an_unknown_keyword_is_left_alone() {
     );
 }
 
-/// The two row tables are hand-written, so a new role has to land in one
-/// of them.
 #[test]
 fn the_row_tables_cover_every_known_keyword() {
     assert_eq!(
@@ -346,14 +315,11 @@ fn the_row_tables_cover_every_known_keyword() {
 }
 
 mod lowering {
-    //! What a misplaced member costs, measured on the build: each source is
-    //! lowered and compared with the same source without the row, or with the
-    //! row in the body that reads it.
+    //! What a misplaced member costs, measured by lowering each source beside the same source
+    //! without the row.
 
     use crate::common::{PRELUDE, lowered, solid_cells};
 
-    /// The site's own placement is unchanged, so the row contributed nothing
-    /// rather than displacing something.
     #[test]
     fn a_geometry_row_in_a_site_body_builds_nothing() {
         let without =
@@ -386,8 +352,7 @@ mod lowering {
         );
     }
 
-    /// `W_DEFERRED_MEMBER` says so during `cairn lower`, but `cairn check`
-    /// never sees it.
+    /// `W_DEFERRED_MEMBER` says so during `cairn lower`, which `cairn check` never runs.
     #[test]
     fn a_site_row_in_a_geometry_body_builds_nothing() {
         let src = format!(
@@ -408,7 +373,6 @@ mod lowering {
         );
     }
 
-    /// The row is dropped from the build, not from resolution.
     #[test]
     fn a_misplaced_row_does_not_disturb_its_siblings() {
         let src = format!(

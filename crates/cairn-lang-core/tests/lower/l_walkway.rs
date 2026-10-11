@@ -1,6 +1,4 @@
-//! `l-walkway.crn` lowers to a Manhattan L between `home1.entry` (front, +z)
-//! and `home3.side_entry` (left, -x), with its elbow laid once and each leg on
-//! its own axis; the middle home is placed so the elbow clears every footprint.
+//! `l-walkway.crn` lowers to a Manhattan L between a front and a left port, its elbow laid once.
 
 use cairn_lang_core::block_array::{BlockArrayIr, Footprint, PaletteIndex};
 
@@ -14,10 +12,7 @@ const WALKWAY_KEY: &str = "walkway::duo::home1.entry__home3.side_entry";
 
 #[test]
 fn l_walkway_spans_both_axes_with_pinned_bounding_box() {
-    // home1.entry resolves to (1, 0, 3); home3.side_entry to (12, 0, -12).
-    // The Manhattan L runs +x from x=1 to x=12 at z=3, then -z from z=3 to
-    // z=-12 at x=12. Bounding box is dx = 12-1+1 = 12, dz = 3-(-12)+1 = 16;
-    // origin is the (min_x, _, min_z) corner = (1, 0, -12).
+    // The L runs +x from (1, 0, 3) to x=12, then -z to (12, 0, -12).
     let out = lower_l_walkway();
     let walkway = out.walkways.get(WALKWAY_KEY).expect("walkway present");
     assert_eq!(walkway.site, "duo");
@@ -40,10 +35,7 @@ fn l_walkway_spans_both_axes_with_pinned_bounding_box() {
 
 #[test]
 fn l_walkway_block_array_corner_cell_holds_gravel() {
-    // The elbow at world (12, 0, 3) lives at local (lx=11, 0, lz=15) inside
-    // the walkway BlockArray. If `l_path` ever omits the corner cell, this
-    // index would stay AIR; if it ever writes the wrong cell, the corner
-    // would be AIR while a neighbour ends up gravel.
+    // The elbow at world (12, 0, 3) is local (11, 0, 15).
     let out = lower_l_walkway();
     let ba = out
         .structures
@@ -68,10 +60,7 @@ fn l_walkway_block_array_corner_cell_holds_gravel() {
 
 #[test]
 fn l_walkway_block_array_paints_27_gravel_cells() {
-    // x-leg of 12 cells (x=1..=12 at z=3) + z-leg of 15 fresh cells
-    // (z=2..=-12 at x=12, the corner is shared with the x-leg) = 27 gravel
-    // voxels. A leg off-by-one would shift this by ±1; an axis swap would
-    // change it to ~16 or ~12.
+    // A 12-cell x-leg and a 15-cell z-leg sharing the corner: 27 cells.
     let out = lower_l_walkway();
     let ba = out
         .structures

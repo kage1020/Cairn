@@ -1,22 +1,17 @@
-//! A `def` member's resolver findings are reported at most once per member per
-//! bound theme. A def body is resolved once as its own scope and once per
-//! `place`, so without the rule a bad slot counts one plus the placements; two
-//! themes missing one slot are still two findings, and which resolution's copy
-//! survives is not promised.
+//! A `def` member's resolver findings are reported at most once per member per bound theme,
+//! though a def body is resolved once as its own scope and once per `place`.
 
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
 use cairn_lang_core::{Edition, Resolution, lower, parse, resolve};
 
 use crate::common::primaries;
 
-/// Resolve `src` under `edition`.
 fn resolution(src: &str, edition: Option<Edition>) -> Resolution {
     let module = parse(src).expect("parse");
     resolve(&lower(&module), edition)
 }
 
-/// Every `E_UNRESOLVED_SLOT` the resolver reports for `src` under
-/// `edition`, in the order it reported them.
+/// Every `E_UNRESOLVED_SLOT` the resolver reports for `src` under `edition`.
 fn unresolved_under(src: &str, edition: Option<Edition>) -> Vec<Diagnostic> {
     resolution(src, edition)
         .diagnostics
@@ -25,8 +20,7 @@ fn unresolved_under(src: &str, edition: Option<Edition>) -> Vec<Diagnostic> {
         .collect()
 }
 
-/// [`unresolved_under`] with no edition pinned, which is what `cairn check`
-/// runs by default.
+/// [`unresolved_under`] with no edition pinned, as `cairn check` runs by default.
 fn unresolved(src: &str) -> Vec<Diagnostic> {
     unresolved_under(src, None)
 }
@@ -86,9 +80,7 @@ place id=b use=hut theme=beta east_of=a gap=5\n",
         "two themes missing the same slot are two things to fix; got {:?}",
         primaries(&found),
     );
-    // Named rather than counted: a rule that deduped on the member alone
-    // would keep exactly one of these, and the count on its own cannot
-    // tell that apart from keeping two copies of one theme.
+    // Named rather than counted: two copies of one theme would also count two.
     assert!(
         found.iter().any(|d| d.primary.contains("theme `alpha`")),
         "the finding against `alpha` must survive; got {:?}",
@@ -144,15 +136,6 @@ place id=b use=shed theme=plain east_of=a gap=5\n"
     );
 }
 
-/// A placement with no `theme=` is dropped before the def body is
-/// resolved at all, so the def's own resolution is the only one that can
-/// report what is inside it.
-///
-/// This case says nothing about *when* the ledger is written — there is no
-/// second resolution to be spoken for. What it guards is the decision to
-/// keep resolving a def as its own scope: drop that and this file stops
-/// being checked the moment a `place` mentions it, however broken the
-/// placement is.
 #[test]
 fn a_placement_the_resolver_abandons_does_not_silence_the_def() {
     let found = unresolved(&format!(
@@ -189,16 +172,7 @@ place id=home use=hut theme=plain at=origin\n"
     );
 }
 
-/// The two resolutions of one def body do not always judge a slot the
-/// same way, which is why "already reported" is recorded where a
-/// diagnostic is pushed rather than where a body is walked.
-///
-/// With no `--edition` pin the module-level pick binds `shop_java` and
-/// unions in the slots its sibling variant declares, so `bedrock_only`
-/// passes. The placement writes the variant name, which asks about that
-/// variant's slots alone — no sibling softens it, and the slot is missing.
-/// A ledger keyed on the walk would let the silent resolution speak for the
-/// strict one and the file would build with an undeclared slot.
+/// Unpinned, the module-level pick unions in sibling slots; the placement's variant name does not.
 #[test]
 fn a_stricter_later_resolution_still_reports_what_the_softer_one_passed() {
     const VARIANTS: &str = "theme shop_java:\n  slot floor -> @oak_planks\n\n\
@@ -208,8 +182,7 @@ slot bedrock_only -> @dark_oak_planks\n\n\
 def hut size=4x4:\n  \
 floor mat_slot=bedrock_only\n";
 
-    // Premise: the module-level resolution alone passes the slot, so the
-    // finding below can only come from the placement.
+    // Premise: the module-level resolution alone passes the slot.
     assert!(
         unresolved(VARIANTS).is_empty(),
         "premise: an unpinned module unions its sibling variant's slots",
@@ -244,14 +217,8 @@ floor mat_slot=missing\n"
     );
 }
 
-/// The two resolutions that disagree can both be placements.
-///
-/// `theme=shop_java` names a variant, so no sibling softens it and the
-/// slot is missing; `theme=shop` names the logical theme, so the sibling's
-/// slots are unioned in and the same member passes. Both bind `shop_java`.
-/// The rule is therefore *at most* once per member per bound theme: which
-/// of the two produced the surviving copy is not something the resolver
-/// decides, and reversing the placements must not change the count.
+/// `theme=shop_java` keeps its slots strict and `theme=shop` unions in the sibling's, though both
+/// bind `shop_java`.
 #[test]
 fn two_placements_can_bind_one_theme_and_still_disagree() {
     const VARIANTS: &str = "theme shop_java:\n  slot floor -> @oak_planks\n\n\
@@ -292,11 +259,6 @@ place id=a use=hut theme=shop_java east_of=b gap=5\n"
     }
 }
 
-/// The `--edition` path, which is what every build command runs.
-///
-/// A pin removes sibling softening on both routes, the module-level pick and
-/// the `place` row's theme, so the module and the placement both have
-/// grounds to report.
 #[test]
 fn the_count_holds_under_an_edition_pin() {
     const VARIANTS: &str = "theme shop_java:\n  slot floor -> @oak_planks\n\n\
@@ -327,10 +289,6 @@ place id=home use=hut theme=shop at=origin\n"
     );
 }
 
-/// The ledger spans the resolution, not one `site` body.
-///
-/// Two sites placing one def is the arrangement that would still pass
-/// every case above if the ledger were a local of the placement loop.
 #[test]
 fn two_sites_placing_one_def_report_it_once() {
     let found = unresolved(&format!(
@@ -350,12 +308,6 @@ place id=home use=hut theme=plain at=origin\n"
     );
 }
 
-/// Both ends of the case the spec paragraph promises silence at.
-///
-/// A def's own scope is resolved against the theme the module picks, and
-/// the module picks one only when there is exactly one logical theme to
-/// pick. With two, or with none, nothing binds and the slot names are not
-/// judged until a `place` chooses a theme.
 #[test]
 fn an_unplaced_def_is_silent_when_the_module_cannot_pick_a_theme() {
     let two = unresolved(
@@ -378,18 +330,9 @@ floor mat_slot=missing\n",
     );
 }
 
-/// A theme applied only through a `place`, carrying one selector that
-/// matches and one that does not.
-///
-/// Every other selector test uses the `struct` shape, which the
-/// module-level pick binds. Unmatched selectors are judged only for a theme
-/// some scope applied, so a resolver that reused one resolution per
-/// `(def, theme)` pair must still mark the theme applied on the reused path,
-/// or `E_THEME_SELECTOR_UNMATCHED` stops firing for it.
 #[test]
 fn a_theme_applied_only_through_a_placement_still_judges_its_selectors() {
-    // Two logical themes, so the module-level pick binds nothing and the
-    // placement is the only route into the def body.
+    // Two logical themes, so only the placement binds the def body.
     let resolved = resolution(
         "theme alpha:\n  \
 slot wall -> @cobblestone\n  \
@@ -434,16 +377,13 @@ place id=a use=hut theme=alpha at=origin\n",
 }
 
 mod lowering {
-    //! A `def` member's lowering findings are reported once however many
-    //! placements reach them. A finding's identity is the whole diagnostic
-    //! (code, span, message, notes and data), so a finding that belongs to one
-    //! placement survives by carrying it in its span or its message.
+    //! A `def` member's lowering findings are reported once however many placements reach them. A
+    //! finding's identity is the whole diagnostic: code, span, message, notes and data.
 
     use cairn_lang_core::check::{Diagnostic, DiagnosticCode};
 
     use crate::common::{lowered, primaries};
 
-    /// Just the findings of one code.
     fn of_code(src: &str, code: DiagnosticCode) -> Vec<Diagnostic> {
         lowered(src)
             .diagnostics
@@ -452,8 +392,6 @@ mod lowering {
             .collect()
     }
 
-    /// `E_INCOMPATIBLE_MATERIAL` only — a `gable` roof bound to a material
-    /// that cannot carry `facing` / `half` / `shape`.
     fn incompatible(src: &str) -> Vec<Diagnostic> {
         of_code(src, DiagnosticCode::IncompatibleMaterial)
     }
@@ -463,7 +401,6 @@ mod lowering {
 slot wall -> @cobblestone\n  \
 slot roof -> @spruce_planks\n\n";
 
-    /// A def whose `roof` reads that slot.
     const HUT: &str = "def hut size=6x6:\n  \
 walls mat_slot=wall height=3\n  \
 roof kind=gable mat_slot=roof overhang=1\n\n";
@@ -500,7 +437,6 @@ place id=b use=hut theme=plain east_of=a gap=8\n"
         );
     }
 
-    /// Three placements, so the rule cannot be an off-by-one at two.
     #[test]
     fn the_count_does_not_scale_with_the_placement_list() {
         let found = incompatible(&format!(
@@ -518,12 +454,6 @@ place id=c use=hut theme=plain east_of=b gap=8\n"
         );
     }
 
-    /// Two themes binding the roof slot to two non-stairs are two findings on
-    /// two lines, and each has to name the material its own theme bound.
-    ///
-    /// Named rather than counted: a rule that kept the first finding per
-    /// *member* would keep exactly one of these, and a count of two cannot
-    /// tell "both themes survived" apart from "one theme survived twice".
     #[test]
     fn two_themes_binding_two_materials_report_both() {
         let found = incompatible(
@@ -564,12 +494,7 @@ place id=c use=hut theme=plain east_of=b gap=8\n",
         );
     }
 
-    /// Two themes that bind the roof slot to the *same* material still earn
-    /// two findings, because the fix is two edits on two lines.
-    ///
-    /// This is the case the message alone cannot separate: both primaries name
-    /// `minecraft:spruce_planks` and both carry the same two notes. Only the
-    /// span differs, which is why the span is part of the identity.
+    /// Both primaries and both notes are identical; only the span differs.
     #[test]
     fn two_themes_binding_one_material_are_still_two_lines_to_fix() {
         let found = incompatible(
@@ -600,16 +525,7 @@ place id=b use=hut theme=other east_of=a gap=8\n",
         );
     }
 
-    /// Two defs reading one bad slot are one finding, not two.
-    ///
-    /// The opposite of the outer module's
-    /// `two_defs_reading_the_same_missing_slot_report_twice`, and deliberately
-    /// so: `E_UNRESOLVED_SLOT` is anchored on the member, because a member
-    /// naming a slot the theme does not declare is that member's mistake.
-    /// `E_INCOMPATIBLE_MATERIAL` is anchored on the theme's slot value,
-    /// because the material is wrong for every member that reads it — which is
-    /// what its second note tells the author. Two codes, two anchors, two
-    /// counts.
+    /// `E_INCOMPATIBLE_MATERIAL` is anchored on the theme's slot value, not on the member.
     #[test]
     fn two_defs_reading_one_bad_slot_report_it_once() {
         let found = incompatible(&format!(
@@ -633,15 +549,7 @@ place id=b use=shed theme=plain east_of=a gap=8\n"
         );
     }
 
-    /// A finding that belongs to one `place` row survives beside an identical
-    /// one on another row.
-    ///
-    /// `place id=a` uses a sizeless def and does not lower; `b` takes its
-    /// origin from `a` and `c` from `b`, so both earn the same deferral with
-    /// byte-identical primary and note. They are two rows the author has to
-    /// fix and the spans are the only thing that says so — a dedup keyed on
-    /// the message, or on the code, would report one and silently drop the
-    /// other.
+    /// `a` does not lower, so `b` (off `a`) and `c` (off `b`) earn byte-identical messages.
     #[test]
     fn two_place_rows_earning_one_message_both_survive() {
         let found = of_code(
@@ -669,8 +577,6 @@ place id=c use=hut theme=plain east_of=b gap=5\n"
          got {:?}",
             primaries(&found),
         );
-        // Premise for the case: without this the test would pass on a dedup
-        // that happened to keep both for some other reason.
         assert_eq!(
             cascaded[0].primary, cascaded[1].primary,
             "the two messages are identical, so only the span separates them",
@@ -681,15 +587,6 @@ place id=c use=hut theme=plain east_of=b gap=5\n"
         );
     }
 
-    /// Two members of different geometry kinds reading one theme slot earn two
-    /// findings on that one line, and two placements do not make four.
-    ///
-    /// The span here is the slot value both members reached through, so the
-    /// message is the only thing that separates them: a `gable` roof takes its
-    /// states "from the geometry" and an eave `stair` takes them "from its own
-    /// arguments". An identity of `(code, span)` would report one of these and
-    /// drop the other — the author would fix the roof, rebuild, and meet the
-    /// eave.
     #[test]
     fn two_geometry_kinds_reading_one_slot_report_once_each() {
         let src = "theme plain:\n  \
@@ -720,8 +617,7 @@ place id=b use=hut theme=plain east_of=a gap=8\n";
             "and so must the eave's; got {:?}",
             primaries(&found),
         );
-        // The premise the case rests on: both sit on the same slot value, so
-        // nothing but the message is available to keep them apart.
+        // Premise: both sit on one slot value, so only the message keeps them apart.
         assert_eq!(
             found[0].span, found[1].span,
             "both findings are anchored on the one slot line that binds the \
@@ -749,14 +645,6 @@ roof kind=gable mat_slot=roof overhang=1\n"
         );
     }
 
-    /// Two structs reading one bad slot are one finding for the same reason
-    /// two defs are: the anchor is the slot line, not the member.
-    ///
-    /// The control against the opposite failure. A struct body is walked once
-    /// each, so neither finding is a repeat of the other in the way a second
-    /// placement's is — and the rule still collapses them, because they are
-    /// byte-identical and there is one line to edit. If this ever needs to be
-    /// two, the anchor is what has to change, not the rule.
     #[test]
     fn two_structs_reading_one_bad_slot_report_it_once() {
         let found = incompatible(&format!(
@@ -776,15 +664,6 @@ roof kind=gable mat_slot=roof overhang=1\n"
         );
     }
 
-    /// Two sibling-variant themes deferring one slot report once each, naming
-    /// the theme that deferred.
-    ///
-    /// With no `--edition` pin, a slot only the `_bedrock` sibling declares
-    /// is softened at the resolver, so lowering is the only reporter, and it
-    /// anchors on the `def` body's member line, which every placement shares.
-    /// The theme in the message is what keeps the two findings apart:
-    /// without it this rule would keep one, and `cairn lower` would say the
-    /// same thing whether both themes were broken or only one.
     #[test]
     fn two_sibling_variant_themes_deferring_one_slot_report_both() {
         const VARIANTS: &str = "theme alpha_java:\n  \
@@ -824,15 +703,12 @@ place id=b use=hut theme=beta east_of=a gap=4\n";
             "the finding against `beta_java` must survive; got {:?}",
             primaries(&deferred),
         );
-        // The premise: both sit on the one `roof` line in the `def` body, so the
-        // theme in the message is the only thing separating them.
+        // Premise: both sit on the one `roof` line, so only the message's theme tells them apart.
         assert_eq!(
             deferred[0].span, deferred[1].span,
             "both are anchored on the shared member line",
         );
 
-        // And the count moves when one of the two is repaired, which is what the
-        // author needs it to do.
         let alpha_fixed = VARIANTS.replace(
             "theme alpha_java:\n  slot wall -> @cobblestone",
             "theme alpha_java:\n  slot wall -> @cobblestone\n  slot rooftrim -> @spruce_stairs",
@@ -854,18 +730,6 @@ place id=b use=hut theme=beta east_of=a gap=4\n";
         );
     }
 
-    /// Two findings that agree on code, span, primary and data, and differ only
-    /// inside a note, are two findings.
-    ///
-    /// `W_PHASE_CONFLICT` fans in on the member that overrides: one `walls` row
-    /// overwriting two earlier ones earns two warnings on its own line, with
-    /// the same voxel count in both primaries and `data: None` on both. The
-    /// only thing that separates them is `notes[0].span`, which points at the
-    /// member each one is about — two different lines to move.
-    ///
-    /// So the notes are load-bearing, and so is the code beside them. No
-    /// `place` is involved: a struct body is walked once, and the pass emits
-    /// both of these inside that one walk.
     #[test]
     fn two_phase_conflicts_differing_only_in_a_note_both_survive() {
         let found = of_code(
@@ -887,9 +751,6 @@ walls mat_slot=c height=4\n",
          a line to move; got {:?}",
             primaries(&found),
         );
-        // The premises, asserted rather than assumed: everything outside the
-        // notes agrees, so a rule that dropped the notes from the identity —
-        // or the code — would report one of these and lose the other.
         assert_eq!(found[0].span, found[1].span, "same overriding member line");
         assert_eq!(found[0].primary, found[1].primary, "same primary");
         assert_eq!(found[0].data, found[1].data, "same payload");
@@ -900,13 +761,6 @@ walls mat_slot=c height=4\n",
         );
     }
 
-    /// A sizeless `def` placed twice is one finding, on the `def` line.
-    ///
-    /// The collapse case with no theme in it: the finding is anchored on the
-    /// def header, so every placement that fails to derive a footprint
-    /// produces a copy. One header is one thing to fix. The `place` rows that
-    /// lost their origin are a separate finding each, which
-    /// `two_place_rows_earning_one_message_both_survive` covers.
     #[test]
     fn a_sizeless_def_placed_twice_reports_its_header_once() {
         let found = of_code(

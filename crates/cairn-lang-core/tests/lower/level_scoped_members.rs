@@ -1,7 +1,5 @@
-//! `level y=N` grouping does not change what the members inside it mean: a
-//! member the pass paints lowers to the volume it has written directly in the
-//! body, and a member it defers lowers to the volume of a source that never
-//! mentioned it.
+//! `level y=N` grouping does not change what its members mean: a painted member lowers as if
+//! written in the body, and a deferred one as if never written.
 
 use cairn_lang_core::block_array::BlockArrayIr;
 
@@ -11,8 +9,7 @@ fn defer_reasons(ir: &BlockArrayIr) -> Vec<String> {
     ir.diagnostics.iter().map(|d| d.primary.clone()).collect()
 }
 
-/// Body shared by every source here: a theme with the two slots the members
-/// bind, and a struct header wide enough for a roof to have a ridge.
+/// A theme binding the members' two slots, and a struct header wide enough for a roof ridge.
 const PRELUDE: &str = "theme t:\n  \
                        slot wall -> @cobblestone\n  \
                        slot roof -> @spruce_stairs\n  \
@@ -31,12 +28,10 @@ fn a_roof_under_level_zero_builds_what_the_same_roof_in_the_body_builds() {
     ));
     let direct = lowered(&source("  roof kind=gable mat_slot=roof overhang=1\n"));
 
-    // Dims, palette and every voxel: a volume of the right size can still be
-    // missing the roof.
+    // Dims, palette and every voxel: a volume of the right size can still be missing the roof.
     assert_eq!(only_structure(&nested), only_structure(&direct));
     assert_eq!(defer_reasons(&nested), Vec::<String>::new());
-    // Guard against the assertion above passing because neither side built
-    // a roof at all.
+    // Guard: neither side may pass by building no roof at all.
     assert!(
         only_structure(&direct).dims.y > 4,
         "the direct roof must raise the volume above the wall top for this comparison to mean anything",
@@ -67,9 +62,6 @@ fn a_deferred_roof_under_a_raised_level_does_not_inflate_the_volume() {
     ));
     let without = lowered(&source(""));
 
-    // A member that paints nothing must cost nothing. Reading `overhang=1`
-    // off a roof that is about to be dropped would widen the footprint by a
-    // ring of air on every side and shift the walls inward to match.
     assert_eq!(only_structure(&with_roof), only_structure(&without));
     assert_eq!(
         defer_reasons(&with_roof),
@@ -91,9 +83,7 @@ fn a_deferred_floor_under_a_raised_level_does_not_inflate_the_volume() {
 
 #[test]
 fn a_raised_level_still_paints_the_roles_that_have_a_lowering_at_an_offset() {
-    // `themed-tower.crn` puts walls, a window, and an eave stair under
-    // `level y=5`. Deferring by offset rather than by role would silently
-    // empty the upper floor of the one example that demonstrates levels.
+    // `themed-tower.crn` puts walls, a window and an eave stair under `level y=5`.
     let ir = lowered(&source(
         "  roof kind=gable mat_slot=roof overhang=1\n\n  \
          level id=upper y=4\n    \
@@ -104,8 +94,7 @@ fn a_raised_level_still_paints_the_roles_that_have_a_lowering_at_an_offset() {
     let ba = only_structure(&ir);
 
     assert_eq!(defer_reasons(&ir), Vec::<String>::new());
-    // The upper walls raise the wall top from 3 to 4+2=6, which the roof
-    // then sits on top of.
+    // The upper walls raise the wall top from 3 to 4+2=6, and the roof sits on that.
     assert!(
         ba.dims.y > 7,
         "level-scoped walls must reach the dim math, got dims.y={}",
@@ -120,9 +109,6 @@ fn a_raised_level_still_paints_the_roles_that_have_a_lowering_at_an_offset() {
 
 #[test]
 fn dropping_one_member_of_a_raised_level_keeps_its_siblings() {
-    // The drop happens while the level's body is being walked, so getting
-    // out of the loop instead of past the one member takes everything
-    // declared after it with no second diagnostic to show for it.
     let mixed = lowered(&source(
         "\n  level id=upper y=4\n    \
          roof kind=gable mat_slot=roof overhang=1\n    \
@@ -137,18 +123,12 @@ fn dropping_one_member_of_a_raised_level_keeps_its_siblings() {
         defer_reasons(&mixed),
         vec!["level-scoped `roof` is not yet supported".to_owned()],
     );
-    // 4 + 2 = 6 wall top, plus the base row.
     assert_eq!(only_structure(&mixed).dims.y, 7);
 }
 
 #[test]
 fn a_level_scoped_roofs_overhang_is_validated_exactly_once() {
-    // The dim pass is the only reader of `overhang=`, so a roof it cannot
-    // see is a roof whose `overhang=` nothing validates; reading it twice is
-    // the other way to get it wrong.
-    //
-    // The roof is drawn, flush with the wall line, so the finding is the one
-    // for an ignored argument rather than for a dropped member.
+    // The roof is drawn flush with the wall line, so the finding is for the ignored argument.
     let ir = lowered(&source(
         "\n  level id=l0 y=0\n    roof kind=gable mat_slot=roof overhang=nope\n",
     ));
@@ -168,11 +148,7 @@ fn a_level_scoped_roofs_overhang_is_validated_exactly_once() {
 
 #[test]
 fn a_malformed_overhang_on_a_dropped_roof_is_not_read_at_all() {
-    // The roof is dropped before its arguments are read, so its
-    // unreadable `overhang=` is not reported beside the drop. That is the
-    // exception `spec/lint` "Error vs warning" names to the rule that an
-    // unreadable value is reported whether or not its member is built;
-    // this pins the behaviour as it stands, not as the rule wants it.
+    // `spec/lint` "Error vs warning" names this exception to reporting unreadable values.
     let ir = lowered(&source(
         "\n  level id=upper y=5\n    roof kind=gable mat_slot=roof overhang=nope\n",
     ));
@@ -185,8 +161,6 @@ fn a_malformed_overhang_on_a_dropped_roof_is_not_read_at_all() {
 
 #[test]
 fn a_pressure_plate_under_a_raised_level_lands_at_that_level() {
-    // `pressure_plate` keeps its lowering at an offset, and every other test
-    // here would still pass if it were dropped or lost the offset.
     let raised = lowered(&source(
         "  roof kind=gable mat_slot=roof overhang=1\n\n  \
          level id=upper y=3\n    pressure_plate at=inside.front offset=1 mat_slot=deck\n",
@@ -210,10 +184,6 @@ fn a_pressure_plate_under_a_raised_level_lands_at_that_level() {
 
 #[test]
 fn findings_are_reported_in_source_order_not_pass_order() {
-    // Deciding participation during the flatten step means a level-scoped
-    // member is judged before anything the phases look at, including
-    // members written above it. The pass reports in span order so a reader
-    // can work down the file instead of jumping around it.
     let ir = lowered(&source(
         "  roof kind=bogus mat_slot=roof\n\n  \
          level id=upper y=5\n    roof kind=gable mat_slot=roof\n",
@@ -230,10 +200,6 @@ fn findings_are_reported_in_source_order_not_pass_order() {
 
 #[test]
 fn a_placed_def_flattens_its_levels_the_way_a_struct_does() {
-    // The flatten happens once, inside the body-lowering helper, so a `def`
-    // instantiated by a `place` goes through it too — and its dims feed the
-    // placement record that walkway routing collides against, not just the
-    // voxels.
     let src = concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",

@@ -1,5 +1,4 @@
-//! Every shipped example parses, and its AST is snapshotted as `parses_<stem>`
-//! so the fixture a diff belongs to is in its file name.
+//! Every shipped example parses, and its AST is snapshotted as `parses_<stem>`.
 
 use cairn_lang_core::parse;
 

@@ -1,15 +1,11 @@
-//! `E_UNSUPPORTED_NESTING`: the parser attaches an indented body to any
-//! command, but only a `level y=N` directly in a `struct` or `def` body has a
-//! reader, so any other indented body is reported. The finding is about blocks:
-//! a nested member in a `struct` or `def` body still takes a theme binding and
-//! still feeds redstone synthesis.
+//! `E_UNSUPPORTED_NESTING`: only a `level y=N` directly in a `struct` or `def` body has a reader
+//! for its indented body, so any other indented body is reported.
 
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity};
 
 use crate::common::{PRELUDE, diagnose, of_code, one_of_code, slice};
 
-/// The advice note, the one without a span. The `declared here` note
-/// quotes the same keyword, so searching every note would pass on either.
+/// The advice note, the one without a span; the `declared here` note quotes the same keyword.
 fn advice(diag: &Diagnostic) -> &str {
     diag.notes.iter().find(|n| n.span.is_none()).map_or_else(
         || panic!("no span-less advice note in {diag:#?}"),
@@ -17,7 +13,6 @@ fn advice(diag: &Diagnostic) -> &str {
     )
 }
 
-/// The cases differ only in which keyword the message quotes.
 #[test]
 fn every_nested_row_in_a_site_body_is_reported() {
     let cases = [
@@ -52,8 +47,7 @@ fn every_nested_row_in_a_site_body_is_reported() {
     }
 }
 
-/// The shape that reads most like working code: dedented by two spaces,
-/// the `door` cuts its opening.
+/// Dedented by two spaces, the `door` would cut its opening.
 #[test]
 fn a_member_nested_under_a_geometry_member_is_reported() {
     let src = format!(
@@ -80,7 +74,6 @@ fn a_member_nested_under_a_geometry_member_is_reported() {
     );
 }
 
-/// A `def` body is walked by a loop of its own.
 #[test]
 fn the_rule_reaches_def_bodies_too() {
     let src = format!(
@@ -95,7 +88,6 @@ fn the_rule_reaches_def_bodies_too() {
     );
 }
 
-/// A member nested under a member under a `level` is still lost.
 #[test]
 fn level_groups_its_children_and_the_walk_continues_inside() {
     let ok = format!(
@@ -122,8 +114,6 @@ fn level_groups_its_children_and_the_walk_continues_inside() {
     );
 }
 
-/// A site body reads only `place` and `connect` rows, so nothing unwraps a
-/// `level` there.
 #[test]
 fn level_in_a_site_body_is_reported_as_a_misplaced_row_not_as_nesting() {
     let src = format!(
@@ -148,8 +138,7 @@ fn level_in_a_site_body_is_reported_as_a_misplaced_row_not_as_nesting() {
     );
 }
 
-/// A `Member`'s own span stops at its header line, so an underline built
-/// from it alone would leave the grandchildren outside the range.
+/// A `Member`'s own span stops at its header line.
 #[test]
 fn a_subtree_is_reported_once_at_its_root_and_underlined_whole() {
     let src = format!(
@@ -169,7 +158,6 @@ fn a_subtree_is_reported_once_at_its_root_and_underlined_whole() {
     );
 }
 
-/// One mistake with one fix.
 #[test]
 fn sibling_nested_members_are_underlined_as_one_run() {
     let src = format!(
@@ -190,8 +178,7 @@ fn sibling_nested_members_are_underlined_as_one_run() {
     );
 }
 
-/// `check` does not lower, so the block-array pass's `W_DEFERRED_MEMBER`
-/// never reaches it, and a `def` no site places is not lowered at all.
+/// `check` does not lower, and a `def` no site places is not lowered at all.
 #[test]
 fn a_level_inside_a_level_is_reported_by_check_not_left_to_lowering() {
     for (label, body) in [
@@ -216,12 +203,9 @@ fn a_level_inside_a_level_is_reported_by_check_not_left_to_lowering() {
     }
 }
 
-/// "Does not group members" would be false about a construct that does.
 #[test]
 fn a_level_without_a_usable_offset_is_reported() {
-    // No negative case: no value position reads a `-`, so `y=-3` fails in
-    // the parser. The overflow case is why the reader is `u32::try_from`
-    // rather than a cast.
+    // No value position reads a `-`, so `y=-3` fails in the parser.
     for y in ["", " y=abc", " y=99999999999", " y=plain"] {
         let src = format!(
             "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  \
@@ -237,8 +221,6 @@ fn a_level_without_a_usable_offset_is_reported() {
     }
 }
 
-/// The repair is the keyword, so "move these into a `level`" would point
-/// the author at the wrong line.
 #[test]
 fn an_unknown_keyword_parent_is_left_to_the_allowlist() {
     let src = format!(
@@ -257,7 +239,6 @@ fn an_unknown_keyword_parent_is_left_to_the_allowlist() {
     );
 }
 
-/// The arity error and the nesting error are separate repairs.
 #[test]
 fn a_malformed_nested_connect_earns_both_findings_once() {
     let src = format!(
@@ -297,15 +278,12 @@ fn flat_bodies_are_silent() {
 }
 
 mod lowering {
-    //! What an indented body costs, measured on the build: each source is
-    //! lowered and compared with the same source with the indentation removed.
+    //! What an indented body costs, measured by lowering each source beside its dedented twin.
 
     use cairn_lang_core::{lower, parse, resolve};
 
     use crate::common::{PRELUDE, lowered, solid_cells};
 
-    /// One level of indentation apart, so the difference in solid cells is
-    /// the door and nothing else.
     #[test]
     fn a_nested_door_cuts_no_opening() {
         let flat = format!(
@@ -327,7 +305,6 @@ mod lowering {
         );
     }
 
-    /// The reason `level` is exempt from the nesting check.
     #[test]
     fn a_door_under_a_level_still_cuts_its_opening() {
         let flat = format!(
@@ -347,7 +324,6 @@ mod lowering {
         );
     }
 
-    /// A site body's rows are read without descending into their bodies.
     #[test]
     fn a_nested_site_row_produces_neither_a_placement_nor_a_walkway() {
         let flat = format!(
@@ -384,7 +360,6 @@ mod lowering {
         );
     }
 
-    /// The finding's note says a nested member is not gone from resolution.
     #[test]
     fn a_nested_geometry_member_still_takes_a_theme_binding() {
         let src = format!(

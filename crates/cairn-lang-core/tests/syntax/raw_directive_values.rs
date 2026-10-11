@@ -1,7 +1,5 @@
-//! `@cairn`, `@requires` and a part's `requires` take raw text to end of line,
-//! so a character no token starts with reaches the check pass that judges the
-//! value; anywhere else the same text is refused with the error [`lex`]
-//! reports, at the same position.
+//! `@cairn`, `@requires` and a part's `requires` take raw text to end of line; anywhere else the
+//! same text is refused with the error [`lex`] reports.
 
 use cairn_lang_core::ast::Header;
 use cairn_lang_core::check::DiagnosticCode;
@@ -79,20 +77,13 @@ fn an_unlexable_requires_value_is_a_floor_that_declares_nothing() {
     }
 }
 
-/// A comment ends the value, so what follows it is never lexed.
 #[test]
 fn a_comment_after_the_value_is_still_a_comment() {
     assert_eq!(codes(&format!("@cairn 2026.6 # $ ~\n{BODY}")), []);
 }
 
-/// Except where a quote opens ahead of the `#`. An unterminated string
-/// runs to end of line, so the comment is part of the stretch the lexer
-/// refused, and the value takes it whole.
-///
-/// This pins the reference parser's reading, which is not a designed one:
-/// the tree-sitter grammar's `directive_literal` stops at the `#` and reads
-/// the rest as a comment. Both parsers accept the file; only the value text
-/// differs.
+/// An unterminated quote runs to end of line. tree-sitter reads this `#` as a comment; the two
+/// parsers disagree here.
 #[test]
 fn a_comment_inside_an_unterminated_quote_is_part_of_the_value() {
     let source = format!("@cairn 2026.6 \"draft # note\n{BODY}");
@@ -107,11 +98,9 @@ fn a_comment_inside_an_unterminated_quote_is_part_of_the_value() {
 #[test]
 fn the_same_stretch_anywhere_else_is_refused() {
     for source in [
-        // Whitespace other than a space separates nothing to the lexer,
-        // and is no part of a value either.
+        // Whitespace other than a space.
         "@cairn 2026.6\tdraft\ntheme t:\n  slot wall -> @stone\n",
-        // A tab inside a stretch the lexer refused is still a tab, and
-        // still no part of a value.
+        // A tab inside a stretch the lexer refused.
         "@cairn 2026.6 \"dr\taft\ntheme t:\n  slot wall -> @stone\n",
         // Not a raw value at all.
         "theme t:\n  slot wall -> @st$one\n",
@@ -119,8 +108,7 @@ fn the_same_stretch_anywhere_else_is_refused() {
         "@intended_targets [$]\ntheme t:\n  slot wall -> @stone\n",
         // An unknown directive is not judged by any pass.
         "@foo $\ntheme t:\n  slot wall -> @stone\n",
-        // A `struct` reads no floors, so a `requires` line that declares
-        // none is an ordinary member line there, and gives its value back.
+        // A `struct` reads no floors, so this `requires` is an ordinary member line.
         "struct s size=3x3\n  requires version~=1.21\n",
         // A stray ahead of an indentation failure is still the first error.
         "theme t:\n  slot $ -> @stone\n\tslot x -> @y\n",
@@ -133,8 +121,6 @@ fn the_same_stretch_anywhere_else_is_refused() {
     }
 }
 
-/// A taken value does not excuse a later stray: the stray is the error,
-/// where `lex` alone stops at the value.
 #[test]
 fn a_stray_after_a_taken_value_is_still_refused() {
     let source = "@cairn 2026.6+build\ntheme t:\n  slot wall -> @st$one\n";
@@ -147,8 +133,6 @@ fn a_stray_after_a_taken_value_is_still_refused() {
     );
 }
 
-/// A value the parser took raw does not stand in for the indentation
-/// failure after it, which is the file's only real error.
 #[test]
 fn an_indentation_failure_after_a_taken_value_is_the_error_reported() {
     let source = "@cairn 2026.6+build\ntheme t:\n\tslot wall -> @stone\n";

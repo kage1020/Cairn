@@ -1,8 +1,5 @@
-//! A `window` is cut only where every row of `y ..= y + size.h - 1` is a row
-//! some `walls` member paints (`N + 1 ..= N + H` for `walls height=H` under
-//! `level y=N`), so neither the floor below the first course nor the air
-//! between two courses takes one. A walkway port draws the same line as the
-//! openings pass, so the last group compares the two answers case by case.
+//! A `window` is cut only where every one of its rows is a row some `walls` member paints, and a
+//! walkway port draws the same line as the openings pass.
 
 use cairn_lang_core::block_array::BlockArray;
 
@@ -25,9 +22,7 @@ fn contains_id(ba: &BlockArray, id: &str) -> bool {
 
 #[test]
 fn a_window_on_the_floor_plane_is_refused_instead_of_carving_the_slab() {
-    // `walls height=3` paints rows 1..=3, so a rectangle starting at y=0 is
-    // one row of wall and one row of floor, and a window with no
-    // `mat_slot=` would cut the slab to air.
+    // `walls height=3` paints rows 1..=3, so a rectangle from y=0 is half wall and half floor.
     let src = format!(
         "{THEME}struct t size=7x5\n  \
          floor mat_slot=floor\n  \
@@ -41,7 +36,6 @@ fn a_window_on_the_floor_plane_is_refused_instead_of_carving_the_slab() {
             "window rows y=0..=1 are not all inside one wall course (size=1x2; the walls occupy y=1..=3)"
         ],
     );
-    // The front row of the slab is unbroken: the carve never happened.
     let ba = only_structure(&out);
     for x in 0..ba.dims.x {
         assert_eq!(
@@ -54,9 +48,7 @@ fn a_window_on_the_floor_plane_is_refused_instead_of_carving_the_slab() {
 
 #[test]
 fn a_window_in_the_air_between_two_courses_is_refused_instead_of_hanging_glass() {
-    // Walls at 1..=2 and 7..=8 with open air between them; the rectangle
-    // wants 3..=5, which is entirely sky. A ceiling-shaped check would see
-    // only `5 < 8` and cut.
+    // Walls at 1..=2 and 7..=8; the rectangle wants 3..=5, which is all sky.
     let src = format!(
         "{THEME}struct t size=7x5\n  \
          walls mat_slot=wall height=2\n  \
@@ -79,9 +71,7 @@ fn a_window_in_the_air_between_two_courses_is_refused_instead_of_hanging_glass()
 
 #[test]
 fn a_window_that_fills_the_wall_end_to_end_is_carved() {
-    // The acceptance edge on both sides at once: rows 1..=3 of a wall
-    // that occupies 1..=3. A check that tightened either bound by one
-    // would refuse this and only this.
+    // Rows 1..=3 of a wall that occupies 1..=3: the acceptance edge on both sides.
     let src = format!(
         "{THEME}struct t size=7x5\n  \
          walls mat_slot=wall height=3\n  \
@@ -129,10 +119,7 @@ fn a_window_one_row_past_the_top_course_is_refused() {
 
 #[test]
 fn a_window_across_the_seam_between_two_stacked_courses_is_carved() {
-    // `walls height=5` paints 1..=5 and `level y=5 walls height=4` paints
-    // 6..=9. They abut, so a rectangle at 4..=6 is in masonry the whole way.
-    // A per-member check would refuse it and make a legal window depend on
-    // where the author put a `level` line.
+    // The courses abut at 1..=5 and 6..=9, so a rectangle at 4..=6 is in masonry throughout.
     let src = format!(
         "{THEME}struct t size=7x5\n  \
          walls mat_slot=wall height=5\n  \
@@ -154,8 +141,6 @@ fn a_window_across_the_seam_between_two_stacked_courses_is_carved() {
 
 #[test]
 fn a_window_on_a_struct_with_no_walls_says_there_is_no_wall() {
-    // With no wall rows at all, a bound read off the top wall row would
-    // accept `y=0 size=1x1` and paint a pane on the floor plane.
     let src = format!(
         "{THEME}struct t size=7x5\n  \
          floor mat_slot=floor\n  \
@@ -173,11 +158,7 @@ fn a_window_on_a_struct_with_no_walls_says_there_is_no_wall() {
 
 #[test]
 fn a_window_inside_a_level_is_checked_against_the_rows_it_lands_on() {
-    // `level y=5` shifts the rectangle to world row 5. Over a wall that
-    // reaches row 5 it is the top course and is cut; over one that stops
-    // at row 4 it is a row of sky. The level-local `y=0` is identical in
-    // both sources, so a check reading the authored number rather than
-    // the world row cannot tell them apart.
+    // `level y=5` puts the rectangle at world row 5: the top course in one source, sky in another.
     let inside = format!(
         "{THEME}struct t size=7x5\n  \
          walls mat_slot=wall height=5\n  \
@@ -206,11 +187,7 @@ fn a_window_inside_a_level_is_checked_against_the_rows_it_lands_on() {
 
 #[test]
 fn a_height_on_a_member_that_is_not_a_wall_builds_no_wall() {
-    // `height=` is not a `floor` argument, and the openings pass reads
-    // arguments by name — so a column built from every member that
-    // happens to carry one would let `floor height=3` stand in for the
-    // masonry that is not there and carve a window into open air. The
-    // roles are what make a row a wall row.
+    // `height=` is not a `floor` argument, and only the roles make a row a wall row.
     let src = format!(
         "{THEME}struct t size=5x5\n  \
          floor mat_slot=floor height=3\n  \
@@ -244,26 +221,18 @@ fn site_with_window_port(y: u32, height: u32, wall_height: u32) -> String {
 
 #[test]
 fn a_window_flush_with_the_top_course_anchors_a_walkway() {
-    // `walls height=3` paints rows 1..=3 and the window occupies row 3 —
-    // the last course the walls paint, and a cell the openings pass
-    // carves, so the port's bound reaches it too.
+    // `walls height=3` paints rows 1..=3, and the window occupies row 3.
     assert!(walkway_was_laid(&site_with_window_port(3, 1, 3)));
 }
 
 #[test]
 fn a_window_on_the_floor_plane_does_not_anchor_a_walkway() {
-    // The mirror of the case above: `y=0` is not a wall row, so the cut
-    // does not happen and the port must not pretend it did.
     assert!(!walkway_was_laid(&site_with_window_port(0, 1, 3)));
 }
 
 #[test]
 fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
-    // The walkway-port requirement of `spec/components-editing-sites` "Ports
-    // and `connect`", asserted as an equivalence so that editing one of the
-    // two limits alone fails. The port reads the column the body was lowered
-    // with, so walls under a `level` and walls whose material does not
-    // resolve agree too; the two tests below cover those.
+    // `spec/components-editing-sites` "Ports and `connect`", as an equivalence of the two limits.
     const WALL_HEIGHT: u32 = 3;
     for (y, height) in [
         (0, 1),
@@ -294,9 +263,6 @@ fn the_port_accepts_exactly_the_rectangles_the_openings_pass_carves() {
 
 #[test]
 fn walls_under_a_level_are_carved_into_and_anchor_a_port() {
-    // The equivalence reaches past the def body: the openings pass sees a
-    // `walls` under a `level`, so the port does too, and the author is not
-    // told to move a window that is already in masonry.
     let src = format!(
         "{THEME}def hut size=5x5:\n  \
          level id=up y=0\n    \
@@ -326,9 +292,6 @@ fn walls_under_a_level_are_carved_into_and_anchor_a_port() {
 
 #[test]
 fn the_walkway_defer_states_the_rule_the_window_broke() {
-    // The note is where an author is told why the strip is missing, so it
-    // names the window's rows and the rows the walls occupy, which is the
-    // check the port applied, rather than every contract a port has.
     let src = site_with_window_port(0, 1, 3);
     let out = lowered(&src);
     let notes: Vec<_> = out
@@ -359,9 +322,7 @@ fn the_walkway_defer_states_the_rule_the_window_broke() {
 
 #[test]
 fn walls_that_paint_nothing_are_masonry_to_neither_pass() {
-    // The wall has a positive `height=`, but its material is an abstract
-    // token no registry pack is here to lift, so the pass paints no wall
-    // row, defers the cut, and the port has to agree.
+    // The wall's material is an abstract token and no registry pack lifts it, so it paints nothing.
     let src = "theme t:\n  \
                slot floor -> @oak_planks\n  \
                slot wall  -> @wall.stone.cobble\n  \

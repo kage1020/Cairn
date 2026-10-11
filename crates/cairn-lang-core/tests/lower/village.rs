@@ -1,7 +1,5 @@
-//! `village.crn` lowers to one block array per place under its
-//! `site::SITE::PLACE_ID` key, one walkway per `connect` row under
-//! `walkway::SITE::FROM_PLACE.FROM_PORT__TO_PLACE.TO_PORT`, and no deferred
-//! member.
+//! `village.crn` lowers to one block array per place and one walkway per `connect` row, with no
+//! deferred member.
 
 use cairn_lang_core::block_array::Footprint;
 use cairn_lang_core::check::{DiagnosticCode, Severity};
@@ -37,12 +35,7 @@ fn village_emits_three_placements_and_two_walkways() {
         assert_eq!(walkway.from.port, "entry");
         assert_eq!(walkway.to.port, "entry");
         assert_eq!(walkway.path_material, "minecraft:gravel");
-        // Origin and dims, so an axis swap (x↔z) or an off-by-one in the
-        // overhang shift fails here. home1 sits at (0,0,0) with
-        // overhang=1, so its front port resolves to (5, 0, 8);
-        // home2 east_of home1 gap=4 → origin (15, 0, 0), front port
-        // (20, 0, 8); home3 north_of home1 gap=5 → origin (0, 0, -14),
-        // front port (5, 0, -6).
+        // home1's front port is (5, 0, 8), home2's (20, 0, 8) and home3's (5, 0, -6).
         match (walkway.from.place.as_str(), walkway.to.place.as_str()) {
             ("home1", "home2") => {
                 assert_eq!(
@@ -57,16 +50,8 @@ fn village_emits_three_placements_and_two_walkways() {
                 );
             }
             ("home1", "home3") => {
-                // A straight z run from (5, 8) to (5, -6) would cut
-                // through home1's floor, so the router detours around
-                // home1's east face: east along z=8 to x=10 (one cell
-                // past the floor's x∈[1,9]), north to z=-6, back west
-                // to the port at x=5. The east side wins the
-                // equal-length tie against the west side because the
-                // router expands +x first, so these pins depend on its
-                // direction order (the unit test
-                // `route_path_breaks_symmetric_ties_toward_positive_x`
-                // pins the same tie-break in isolation).
+                // A straight run would cut home1's floor, so the route detours round its east face:
+                // the router expands +x first, which wins the equal-length tie.
                 assert_eq!(
                     walkway.origin,
                     (5, 0, -6),
@@ -86,9 +71,6 @@ fn village_emits_three_placements_and_two_walkways() {
 #[test]
 fn village_walkway_block_arrays_share_keys_with_walkways_map() {
     let out = lowered_with_resolver_diagnostics(&read_example("village.crn"));
-    // The `BlockArray` for each walkway must live under the same scope
-    // key as its `Walkway` metadata so a downstream consumer can join the
-    // two maps without an extra translation step.
     for key in out.walkways.keys() {
         let ba = out
             .structures
@@ -111,9 +93,6 @@ fn village_walkway_block_arrays_share_keys_with_walkways_map() {
 
 #[test]
 fn village_emits_zero_walkway_blocked_warnings() {
-    // A straight L for the home1↔home3 row would cut through home1's
-    // floor; the ground-plane router detours around the building, so the
-    // whole example lowers warning-free and the laid strip is unbroken.
     let out = lowered_with_resolver_diagnostics(&read_example("village.crn"));
     let blocked: Vec<_> = out
         .diagnostics
@@ -124,8 +103,7 @@ fn village_emits_zero_walkway_blocked_warnings() {
         blocked.is_empty(),
         "village.crn must route every walkway without collisions, got {blocked:#?}",
     );
-    // The detour is a shortest route: Manhattan distance 14 plus 5 cells
-    // out to x=10 and 5 cells back → 24 steps, 25 gravel cells.
+    // Manhattan distance 14, plus 5 cells out to x=10 and 5 back: 24 steps, 25 cells.
     let ba = out
         .structures
         .get("walkway::hamlet::home1.entry__home3.entry")
@@ -137,22 +115,18 @@ fn village_emits_zero_walkway_blocked_warnings() {
         gravel_count, 25,
         "detour must lay an unbroken 25-cell gravel strip",
     );
-    // Representative cells, so a count-preserving deformation (a strip
-    // that wanders but still lays 25 cells) cannot slip past the count
-    // assertion. Local coordinates are relative to origin (5, 0, -6).
+    // Local coordinates are relative to the origin (5, 0, -6).
     let id_at = |x: u32, z: u32| -> &str {
         let i = ba.dims.index(x, 0, z).expect("in-range cell");
         ba.palette.entries[usize::from(ba.voxels[i].0)].id.as_str()
     };
-    // home3's front port (world (5,0,-6)) and home1's front port
-    // (world (5,0,8)) anchor the two ends.
+    // home3's and home1's front ports.
     assert_eq!(id_at(0, 0), "minecraft:gravel");
     assert_eq!(id_at(0, 14), "minecraft:gravel");
     // The two east-face corners of the U (world (10,0,8) / (10,0,-6)).
     assert_eq!(id_at(5, 14), "minecraft:gravel");
     assert_eq!(id_at(5, 0), "minecraft:gravel");
-    // A cell inside home1's floor on the straight L route (world (5,0,1))
-    // stays air, because the detour goes around it.
+    // Inside home1's floor, on the straight route the detour avoids.
     assert_eq!(id_at(0, 7), "minecraft:air");
 }
 
