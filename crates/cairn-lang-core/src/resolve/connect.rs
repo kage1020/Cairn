@@ -16,26 +16,17 @@ use super::site::unresolved_ref_diag;
 
 /// Validate one `connect from.port to to.port path=@MAT` row and push a
 /// matching [`ValidatedConnect`] when both ends and the path material
-/// pass every check.
+/// pass, so the walkway voxeliser sees only rows it can lay.
 ///
-/// Failures all skip the push so the walkway voxeliser only sees rows it
-/// can lay safely. Each diagnostic kind is emitted at most once per
-/// failure mode so a single broken row never reads as multiple unrelated
-/// problems:
+/// Each failure is reported once:
 ///
-/// - `E_UNRESOLVED_PLACE_REF` — `from.place_id` or `to.place_id` does
-///   not name a prior `place` in the same site;
-/// - `W_DEFERRED_CONNECT` — `from.place_id` or `to.place_id` names a
-///   prior `place` whose own row did not resolve, so there is no def to
-///   look the port up in;
-/// - `E_UNRESOLVED_PORT` — the `port_id` half names no member of the
-///   referenced def's body. When a member under a `level` carries it, the
-///   diagnostic says so, with a note at that member; otherwise it carries
-///   a nearest-match note when one sits within the spell cap;
-/// - `E_AMBIGUOUS_PORT` — multiple members of the referenced def share
-///   that `id=`; downstream lowering would have to pick one arbitrarily;
-/// - `E_MISSING_PATH_MATERIAL` — the row has no `path=` argument so
-///   walkway lowering has no material to lay.
+/// - `E_UNRESOLVED_PLACE_REF`: an endpoint's place names no prior `place`
+///   in the site;
+/// - `W_DEFERRED_CONNECT`: it names a `place` whose own row did not
+///   resolve, so there is no def to look the port up in;
+/// - `E_UNRESOLVED_PORT`: the port names no member of that def's body;
+/// - `E_AMBIGUOUS_PORT`: several members of the body carry that `id=`;
+/// - `E_MISSING_PATH_MATERIAL`: the row has no `path=` material token.
 pub(super) fn resolve_connect_row(
     member: &Member,
     site_name: &str,
@@ -45,41 +36,21 @@ pub(super) fn resolve_connect_row(
     connects: &mut Vec<ValidatedConnect>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Surface positional shape from the snapshot:
-    //   positional[0] = DotRef(from.port)
-    //   positional[1] = Ident("to")
-    //   positional[2] = DotRef(to.port)
-    //
-    // INVARIANT(upstream-diagnosed): inside the top-level `check`
-    // pipeline, `check::connect_arity` has already pushed
-    // `E_CONNECT_ARITY` into the same sink for any row whose positional
-    // shape is not `FROM.PORT to TO.PORT`, so a user running `cairn
-    // check` always sees a position-anchored signal even when these
-    // guards fire. The guards survive for library callers that invoke
-    // `resolve(ir)` directly (LSP fast paths, ad-hoc tooling): the
-    // silent return keeps walkway voxelisation from picking up a
-    // half-formed or misshapen row instead of panicking on a partial
-    // parse.
-    //
-    // The slice pattern rejects the missing-half cases and the
-    // over-arity case together, and the separator test rejects
-    // `connect a.entry xxx b.entry`. Matching an exact-length slice
-    // rather than indexing is what keeps the count bound here: reading
-    // `positional[0..3]` accepted `connect a.entry to b.entry c.exit`
-    // and laid a walkway for a row `check` calls an error, which is a
-    // disagreement about well-formedness between the two layers rather
-    // than a difference in how loudly they say so. Pinned by
-    // `tests/resolve/silent_skip_arms.rs` (resolver-only) and
-    // `tests/check/connect_arity.rs` (full pipeline).
+    // INVARIANT(upstream-diagnosed): `check::connect_arity` reports every
+    // row not shaped `FROM.PORT to TO.PORT` as `E_CONNECT_ARITY`; these
+    // guards stay silent for library callers that resolve without
+    // checking. The exact-length slice keeps the two layers agreeing on
+    // which rows are well-formed: indexing `positional[0..3]` would lay a
+    // walkway for `connect a.entry to b.entry c.exit`, which `check`
+    // refuses. Pinned by `tests/resolve/silent_skip_arms.rs`.
     let [from_value, separator, to_value] = member.positional.as_slice() else {
         return;
     };
     if !matches!(&separator.kind, ValueKind::Ident(keyword) if keyword == "to") {
         return;
     }
-    // Lift both ends before short-circuiting so a row with two broken
-    // halves earns two diagnostics, not just the first. `validate_port`
-    // already follows the same accumulate-then-decide pattern below.
+    // Both ends before short-circuiting, so two broken halves earn two
+    // findings.
     let from = port_ref_from_value(from_value, ConnectEnd::From, seen_place_ids, diagnostics);
     let to = port_ref_from_value(to_value, ConnectEnd::To, seen_place_ids, diagnostics);
     let (Some(from), Some(to)) = (from, to) else {
@@ -110,12 +81,9 @@ pub(super) fn resolve_connect_row(
         });
         return;
     };
-    // A bare label (`path=gravel`) or any other non-token kind would slip
-    // through `resolve_block_state` as `MaterialDeferred::AlreadyDiagnosed`
-    // — that arm is wired for theme slot values which the
-    // `E_UNKNOWN_SLOT_TARGET` pass already flags. `connect.path` is not in
-    // that pass's scope, so we fail loud here instead of letting the row
-    // drop silently in the walkway voxeliser.
+    // A non-token `path=` would reach `resolve_block_state`'s
+    // `AlreadyDiagnosed` arm, which assumes `E_UNKNOWN_SLOT_TARGET` reported
+    // it; that pass never sees `path=`, so it is reported here.
     if !matches!(path.value.kind, ValueKind::Token(_)) {
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::MissingPathMaterial,
@@ -146,43 +114,22 @@ pub(super) fn resolve_connect_row(
     });
 }
 
-/// Lift one positional [`Value`] into a [`PortRef`], emitting
-/// `E_UNRESOLVED_PLACE_REF` if the head segment does not name a prior
-/// place in the same site and returning `None` for any shape other than
-/// a one-dot `<place>.<port>` reference. `end` goes into the primary
-/// diagnostic so the user can tell the two ends apart at a glance.
+/// Lift one positional [`Value`] into a [`PortRef`]: `None` for any shape
+/// but a one-dot `<place>.<port>` reference, and `E_UNRESOLVED_PLACE_REF`
+/// when the place names no prior place in the site. `end` tells the two
+/// ends apart in the message.
 fn port_ref_from_value(
     raw: &Value,
     end: ConnectEnd,
     seen_place_ids: &IndexMap<String, Span>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<PortRef> {
-    // INVARIANT(upstream-diagnosed): inside the top-level `check`
-    // pipeline, `check::connect_arity` has already pushed
-    // `E_CONNECT_ARITY` into the same sink for any endpoint that is not
-    // a one-dot reference, so a user running `cairn check` always sees
-    // a position-anchored signal even when these guards fire. Re-pushing
-    // here would report one mistake twice.
-    //
-    // The guards survive for library callers that invoke `resolve(ir)`
-    // directly (LSP fast paths, ad-hoc tooling), mirroring the guards on
-    // `resolve_connect_row` above: returning `None` keeps walkway
-    // voxelisation from picking up a row whose endpoints name nothing.
-    //
-    // What each guard actually catches differs by origin. The parser
-    // builds a `DotRef` only when a `.` follows the head token, so a
-    // parsed reference always carries at least one tail segment: from
-    // source, the first guard catches every non-reference value
-    // (`connect a to b` arrives as `Ident`) and the second catches only
-    // `place.port.extra`. An empty tail is reachable just by hand-built
-    // IR, and takes the same silent path. An `E_UNRESOLVED_PORT` arm
-    // used to sit on that empty-tail case with a "missing a port id"
-    // message; it could not fire from parsed source, and the author
-    // who writes `connect a to b` now gets that advice from
-    // `check::connect_arity`, anchored on the value itself.
-    //
-    // Pinned by `tests/resolve/silent_skip_arms.rs` (resolver-only) and
-    // `tests/check/connect_arity.rs` (full pipeline).
+    // INVARIANT(upstream-diagnosed): `check::connect_arity` reports every
+    // endpoint that is not a one-dot reference; `None` keeps a library
+    // caller's walkway from naming nothing. From parsed source the first
+    // guard catches every non-reference and the second only
+    // `place.port.extra`; an empty tail comes only from hand-built IR.
+    // Pinned by `tests/resolve/silent_skip_arms.rs`.
     let ValueKind::DotRef(dot) = &raw.kind else {
         return None;
     };
@@ -205,12 +152,9 @@ fn port_ref_from_value(
         ));
         return None;
     }
-    // INVARIANT(upstream-diagnosed): the surface lexer's `Ident` rule
-    // (ASCII letters, digits and `_`) is a strict subset of what the id
-    // newtypes accept, so any `DotRef` segment that
-    // reached this point is already a valid newtype payload — the
-    // `.expect` failure mode would mean the lexer accepted a token the
-    // surface grammar forbids. Cheaper than re-validating per row.
+    // INVARIANT(upstream-diagnosed): the lexer's `Ident` (ASCII letters,
+    // digits, `_`) is a subset of what the id newtypes accept, so these
+    // cannot fail on a parsed segment.
     let place = PlaceId::new(place_str).expect("surface lexer enforces PlaceId invariants");
     let port = PortId::new(port_str).expect("surface lexer enforces PortId invariants");
     Some(PortRef {
@@ -220,22 +164,17 @@ fn port_ref_from_value(
     })
 }
 
-/// Look `port.port` up among the `id=`s of the referenced def's body — its
-/// own members, not the ones indented under a `level` or any other member
-/// — and return `true` when exactly one carries it. Otherwise push one
-/// diagnostic and return `false`:
+/// Look `port.port` up among the `id=`s of the referenced def body's own
+/// members and return `true` when exactly one carries it. Otherwise push
+/// one diagnostic and return `false`:
 ///
-/// - the `place` row did not resolve, so there is no def to look in:
-///   `W_DEFERRED_CONNECT`;
-/// - no body member carries the id and a member under a `level` does
-///   ([`level_holding`]): `E_UNRESOLVED_PORT` saying so, with a note at
-///   that member ([`diag_level_scoped_port`]);
-/// - no body member carries it otherwise: `E_UNRESOLVED_PORT` with a
-///   did-you-mean note when one of the body's ids fits the spell cap, and
-///   a note to add the `id=`. The pool is the body's ids, not the whole
-///   file's — pointing the author at an id from a sibling def would send
-///   them down a different broken path;
-/// - more than one body member carries it: `E_AMBIGUOUS_PORT`.
+/// - the `place` row did not resolve: `W_DEFERRED_CONNECT`;
+/// - only a member under a `level` carries it ([`level_holding`]):
+///   [`diag_level_scoped_port`];
+/// - no member carries it: [`diag_undeclared_port`], whose suggestions come
+///   from this body's ids only, since an id from a sibling def would send
+///   the author down another broken path;
+/// - several members carry it: `E_AMBIGUOUS_PORT`.
 ///
 /// The one `false` that pushes nothing is a `place_def` entry naming a def
 /// missing from `defs`, which `resolve_site_placements` rules out and a
@@ -247,24 +186,11 @@ fn validate_port(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
     let Some(def_name) = place_def.get(port.place.as_str()) else {
-        // `port_ref_from_value` already gates the lift on
-        // `seen_place_ids`, so reaching here means `port.place_id` is
-        // registered but its `place_def` entry never landed. Every arm in
-        // `resolve_site_placements` that skips the insert reports the row
-        // itself: an absent `use=` / `theme=` (`E_INCOMPLETE_PLACE`), a
-        // mistyped one (`E_TYPE_MISMATCH_LABEL`), a failed origin selector
-        // (`E_INVALID_PLACE_ORIGIN`), an `east_of=` / `north_of=` naming
-        // no prior place (`E_UNRESOLVED_PLACE_REF`) or one refused for its
-        // id (`W_DEFERRED_PLACE`), a `use=` naming an unknown def
-        // (`E_UNRESOLVED_PLACE_REF`), a `theme=` naming an unknown theme
-        // (`E_UNRESOLVED_THEME_REF`). There is no silent camp left.
-        //
-        // The cascade is not a duplicate of any of them. Each says which
-        // row is broken; this says which walkway went with it, which
-        // nothing else does — mirroring the `W_DEFERRED_MEMBER` cascade
-        // used for walkway endpoints in `block_array::lower`. It also keeps
-        // a future refactor that drops a normal-path `place_def.insert`
-        // from silently breaking every walkway.
+        // The place is registered but has no def: every arm of
+        // `resolve_site_placements` that skips `place_def` reports the row
+        // itself. This cascade says which walkway went with it, as
+        // `block_array::lower`'s `W_DEFERRED_MEMBER` does for walkway
+        // endpoints.
         diagnostics.push(Diagnostic {
             code: DiagnosticCode::DeferredConnect,
             span: port.span.clone(),
@@ -285,15 +211,8 @@ fn validate_port(
         return false;
     };
     let Some(def) = defs.iter().find(|d| d.name == *def_name) else {
-        // INVARIANT(structural): `resolve_site_placements` only inserts
-        // a `use_name` into `place_def` *after* `defs.iter().find(|d|
-        // d.name == use_name)` already returned `Some` in its
-        // `unresolved_ref_diag` arm (which `continue`s on miss).
-        // By construction, every `def_name` reachable here is therefore
-        // present in `defs`. A miss is a contract break in
-        // `resolve_site_placements`, not an upstream-diagnosed input —
-        // fail loud in debug builds so a future refactor that violates
-        // the construction invariant surfaces immediately.
+        // INVARIANT(structural): `resolve_site_placements` inserts into
+        // `place_def` only after finding the def in `defs`.
         debug_assert!(
             false,
             "validate_port: def `{def_name}` (used by `place {place_id}`) is in `place_def` but \
@@ -305,23 +224,13 @@ fn validate_port(
         return false;
     };
 
-    // Only the def body's own members are ports: this lookup does not
-    // descend into a `level`, or into any other member. Widening the
-    // lookup takes more than a change here. `port_world_position` looks
-    // the port up in the body again, so a level-scoped id that resolved
-    // here would first reach `PortRejection::UnknownMember`, which that
-    // variant's doc calls unreachable because this lookup refuses the
-    // miss. Past that, the lowering side reads a port's member as one no
-    // `level y=N` has shifted, and each of these would go wrong without an
-    // error: `block_array::ports::DOOR_PORT_BASE_V` is `carve_door`'s
-    // `y_offset + 1` only at `y_offset = 0`; a window port's
-    // `contains_rows(y, ..)` asks about the rows `cut_window` cuts from
-    // `y + y_offset` only at `y_offset = 0` too; and the strip itself lies
-    // on the placement's ground row, not on the base row of the member's
-    // `level`: `port_world_position` returns `place_origin.1` for every
-    // port, and `block_array::ports::PORT_GROUND_V`, the `v` the window
-    // path maps with, is the constant whose doc names it as the place a
-    // raised port re-binds.
+    // Only the body's own members are ports. Widening this lookup takes
+    // more than a change here: `port_world_position` looks the port up in
+    // the body again and treats a miss as unreachable
+    // (`PortRejection::UnknownMember`), and lowering assumes no `level y=N`
+    // has shifted a port's member, so `block_array::ports::DOOR_PORT_BASE_V`,
+    // a window port's `contains_rows` check and the strip's ground row
+    // (`PORT_GROUND_V`, `place_origin.1`) would all go silently wrong.
     let count = def
         .members
         .iter()
@@ -404,10 +313,8 @@ struct LevelScoped<'m> {
 /// `E_UNRESOLVED_PORT` for a port whose `id=` is on a member under a
 /// `level`, which is not in the def body a port is looked up in.
 ///
-/// The primary names the `level` the member sits directly under. The note
-/// points at the member itself and says what a port has to be and what to
-/// name instead. It does not suggest moving the member out of the
-/// `level`, which would change where it is built.
+/// The note does not suggest moving the member out of the `level`, which
+/// would change where it is built.
 fn diag_level_scoped_port(port: &PortRef, def: &DefIr, scoped: LevelScoped<'_>) -> Diagnostic {
     let level_label = scoped
         .level
@@ -437,24 +344,17 @@ fn diag_level_scoped_port(port: &PortRef, def: &DefIr, scoped: LevelScoped<'_>) 
     }
 }
 
-/// A member with `id=` `port_id` directly under a `level` in `members`, or
-/// under a `level` nested in one at any depth, with the `level` it sits
-/// directly under.
+/// A member with `id=` `port_id` under a `level` in `members`, at any depth
+/// of `level` nesting, with the `level` it sits directly under.
 ///
-/// The search goes through `members` in source order and, inside each
-/// `level`, asks the `level`s nested in it before its own members. So for
-/// a member under a `level` that is itself under a `level`, the inner one
-/// comes back: the one `E_UNSUPPORTED_NESTING` reports as "`level`
-/// declared here", so the two findings send the reader to the same line.
+/// Nested `level`s are asked before a `level`'s own members, so the
+/// innermost comes back: the one `E_UNSUPPORTED_NESTING` reports as
+/// "`level` declared here", sending both findings to one line.
 ///
-/// Two choices about what this does not look at:
-///
-/// - The member's role. A `walls` under a `level` comes back too, so its
-///   refusal says a member there "cannot be a port yet", though a `walls`
-///   in the body is not a port either (`PortRejection::ReservedRole`).
-/// - Nesting under anything but a `level`. A `door` indented under a
-///   `circuit` is not found, so its port gets [`diag_undeclared_port`]'s
-///   "not declared" message and its note to add the `id=`.
+/// The member's role is not looked at, so a `walls` comes back too (in the
+/// body it would be `PortRejection::ReservedRole`), and nesting under
+/// anything but a `level` is not searched, so a `door` under a `circuit`
+/// gets [`diag_undeclared_port`].
 fn level_holding<'m>(members: &'m [Member], port_id: &str) -> Option<LevelScoped<'m>> {
     members
         .iter()

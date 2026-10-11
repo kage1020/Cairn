@@ -1,58 +1,22 @@
-//! Theme-binding resolution over an [`IntentModule`].
+//! Theme-binding resolution over an [`IntentModule`]: [`resolve`] and the
+//! per-scope walk behind it.
 //!
-//! The single entry point is [`resolve`]. It walks every theme, def, struct,
-//! and site once, building a [`Resolution`] that records:
+//! Theme selection is deliberately narrow. With no theme in the file, no
+//! scope has one and every `mat_slot=` stays unresolved silently, since the
+//! file may be a library. With one logical theme, every scope picks it. With
+//! several, a `struct` or `def` picks none, and the choice waits for a
+//! `place ... theme=X`.
 //!
-//! - one [`ThemeBinding`] per theme (verbatim slots + per-selector match
-//!   tracking),
-//! - one [`ScopeResolution`] per struct/def/site (the theme chosen for that
-//!   scope plus the resolved binding per member),
-//! - and the diagnostics emitted along the way (`E_UNRESOLVED_SLOT`,
-//!   `E_UNKNOWN_SLOT_TARGET`, `E_THEME_SELECTOR_UNMATCHED`).
+//! A selector belongs to one theme (`spec/materials-themes`), so a scope
+//! with no bound theme gets no `selector_extras`, and
+//! `E_THEME_SELECTOR_UNMATCHED` is reported only for a theme some scope
+//! applied.
 //!
-//! Theme selection rule (kept deliberately narrow):
-//! - **0 themes in file** → no scope has a theme; every `mat_slot=` is left
-//!   unresolved silently (the file may be intended as a library).
-//! - **1 theme in file** → every scope picks that theme.
-//! - **multiple themes** → struct/def scopes do not auto-pick; the choice
-//!   is deferred to the `place ... theme=X` boundary on the site side.
-//!
-//! Selectors are scoped to their **bound theme only**: a scope with
-//! `bound_theme = None` gets no `selector_extras` (even if some theme in
-//! the file has a selector that would syntactically match), and
-//! `E_THEME_SELECTOR_UNMATCHED` is only reported for themes that bound to
-//! at least one scope. This honours the per-theme DI contract from
-//! `spec/materials-themes` — a selector belongs to one theme, not
-//! the union of all themes in the file.
-//!
-//! Site `place` lines are followed cross-scope: each `place` is resolved
-//! against the referenced `def`'s members with the place's own `theme=`
-//! argument applied, and lands under a dedicated `site::SITE::ID` scope
-//! key. Missing or duplicate references fail loud with
-//! `E_UNRESOLVED_PLACE_REF` / `E_UNRESOLVED_THEME_REF` /
-//! `E_DUPLICATE_PLACE_ID` / `E_INVALID_PLACE_ORIGIN`; defs that no site
-//! ever references surface as `W_UNUSED_DEF`.
-//!
-//! `connect` rows resolve at the same layer: the `from.port` / `to.port`
-//! `DotRef`s on either side of the `to` keyword are matched against the
-//! referenced placement's `def` body, producing one [`ValidatedConnect`]
-//! per row. A port id that names no member of that body fails loud with
-//! `E_UNRESOLVED_PORT`, which says so when the id is on a member under a
-//! `level` and otherwise carries a nearest-match note when one fits the
-//! spell cap; a `def` exposing the same `id=` on more than one
-//! member raises `E_AMBIGUOUS_PORT`; an absent `path=` triggers
-//! `E_MISSING_PATH_MATERIAL`. The walkway voxeliser (under
-//! `block_array`) consumes the resolved connects without re-walking the
-//! `DotRef`s.
-//!
-//! Once every scope is resolved, the artifact names they would be written
-//! under are compared: two scopes that share one file, ignoring case, are
-//! `E_OUTPUT_NAME_COLLISION` (see [`check_output_names`]).
-//!
-//! The returned [`Resolution::diagnostics`] is in **resolver-emission
-//! order**, not sorted by source span. The `check::check` pipeline runs
-//! its findings through `DiagnosticSink::into_sorted` after merging, so
-//! sorting here too would be redundant work.
+//! Each `place` resolves the referenced `def`'s members under the place's
+//! own `theme=`, in a `site::SITE::ID` scope, and each `connect` row
+//! resolves into a [`ValidatedConnect`]. Once every scope is resolved,
+//! [`check_output_names`] compares the artifact names they would be written
+//! under.
 
 use std::collections::HashSet;
 
@@ -73,17 +37,9 @@ use super::theme_reference::{
     theme_variant_missing_diag,
 };
 
-/// The state every scope resolution reads from and adds to.
-///
-/// Carried as one struct rather than threaded as five positional
-/// arguments, for the reason [`crate::block_array`]'s `StructCtx` and
-/// `cairn-lang-redstone`'s `LoweringCtx` give for the same shape: a new
-/// per-resolution field lands as one field instead of touching every
-/// signature between [`resolve`] and the walk that needs it.
-///
-/// It is also where the two say-it-once ledgers sit together. They are one
-/// device at two levels — a cause with several emission sites, reported
-/// once between them — and keeping them apart made that hard to see.
+/// The state every scope resolution reads from and adds to, including the
+/// two say-it-once ledgers: a cause with several emission sites, reported
+/// once between them.
 pub(super) struct ResolveCtx<'a> {
     /// Theme bindings by name. Mutable because selector matching records
     /// the members each selector bound to.
@@ -100,101 +56,55 @@ pub(super) struct ResolveCtx<'a> {
     /// `(member position, slot name, theme name)` triples an
     /// `E_UNRESOLVED_SLOT` has already been pushed for.
     ///
-    /// A def body is resolved once as its own scope and once more per
-    /// `place` that instantiates it, so without this the same finding is
-    /// reported once per placement — plus once more when the module can
-    /// auto-pick a theme for the def's own scope. That count is a fact
-    /// about the placement list rather than about the source the author
-    /// has to fix.
+    /// A def body is resolved as its own scope and again per `place`, so
+    /// without this one finding would repeat per placement. The triple is
+    /// the finding's identity: two placements naming two themes, or two
+    /// members reading one missing slot, earn two findings.
     ///
-    /// The triple is the finding's identity: its span is the member's, and
-    /// its message names the slot and the theme. Two placements naming two
-    /// themes resolve the same `mat_slot=` against two slot maps and earn
-    /// two findings, and two members reading one missing slot earn two as
-    /// well; only a repeat of all three says the same thing twice. The
-    /// slot name is redundant while [`Member::mat_slot`] holds at most one
-    /// name, which is a fact about the member rather than about the rule.
-    ///
-    /// Written where a diagnostic is pushed, never where a body is walked.
-    /// Two resolutions of one body can bind the same theme and still judge
-    /// a slot differently — sibling-variant softening applies to a
-    /// reference that names the logical theme and not to one that names a
-    /// variant — so a resolution that said nothing must leave the next one
-    /// free to speak.
+    /// Written where a diagnostic is pushed, never where a body is walked:
+    /// two resolutions binding the same theme can still judge a slot
+    /// differently (sibling-variant softening applies only to a reference
+    /// naming the logical theme), so a resolution that said nothing must
+    /// leave the next free to speak.
     diagnosed: &'a mut HashSet<(usize, String, String)>,
 }
 
 /// Resolve theme bindings over the given Intent IR.
 ///
-/// Always returns a [`Resolution`] — every distinct theme name appears in
-/// `.themes`, every distinct scope key appears in `.scopes`, and any
-/// problems encountered are collected into `.diagnostics`.
+/// Always returns a [`Resolution`]: every distinct theme name is in
+/// `themes`, every distinct scope key in `scopes`, and every problem in
+/// `diagnostics`, in emission order.
 ///
-/// INVARIANT(`FIRST_BINDING_WINS`): when two declarations produce the
-/// same binding key, the first one binds and the later ones are skipped.
+/// INVARIANT(`FIRST_BINDING_WINS`): when two declarations produce the same
+/// binding key, the first binds and the rest are skipped, as the
+/// `place use=` lookup does and as `E_DUPLICATE_ITEM` tells the author. A
+/// `def` sized from one body and resolved from another would be a wrong
+/// build. The key is the name for a `theme`, `struct::NAME` or `def::NAME`,
+/// and `site::NAME::PLACE_ID` for a placement, so two `site` blocks of one
+/// name share a namespace and only a repeated place id collides.
 ///
-/// The binding key is not always the item name. It is the name for
-/// `theme`, `struct::NAME` for a struct and `def::NAME` for a def — but
-/// `site::NAME::PLACE_ID` for a placement, which includes the place id.
-/// Two `site` blocks of one name therefore do not shadow each other:
-/// their places land in one shared namespace and every place with a
-/// distinct `id=` binds. Only a place id repeated across those blocks
-/// collides, and there the first wins like everywhere else.
+/// INVARIANT(upstream-diagnosed): a skipped binding is not reported here;
+/// `check::duplicate` reports it, anchored on the name token the IR no
+/// longer carries. There is no `debug_assert` on the skip: it is ordinary
+/// malformed input, and aborting would take down the language server
+/// mid-edit. Each duplicate body is still walked for its own diagnostics.
 ///
-/// The direction has to be picked because the collision is real, and
-/// picking it uniformly is what keeps the resolution readable — a `def`
-/// whose placement is sized from one body and whose members resolve
-/// from another is a wrong build, not a stylistic difference. `first`
-/// is the one `defs.iter().find` (the `place use=` lookup) already
-/// takes, and the one `E_DUPLICATE_ITEM` tells the author about.
-/// `tests/check/duplicate.rs` records the shape that made the choice
-/// necessary.
-///
-/// INVARIANT(upstream-diagnosed): a skipped binding is not reported from
-/// here. `check::duplicate` has already pushed `E_DUPLICATE_ITEM` into
-/// the same sink for every repeated name, so a user running `cairn
-/// check` — or any build command, all of which gate on it — sees a
-/// position-anchored signal. Re-pushing would report one mistake twice,
-/// and the pass that owns it can anchor on the name token, which the IR
-/// no longer carries. This is the same division of labour the silent
-/// arms in `resolve_connect_row` follow, and it is pinned the same
-/// way, by `tests/resolve/silent_skip_arms.rs` for the resolver-only path
-/// and `tests/check/duplicate.rs` for the full pipeline. A
-/// `debug_assert` on the skip is deliberately absent: the condition is
-/// ordinary malformed input, and aborting on it would take down the LSP
-/// on a file the author is halfway through editing.
-///
-/// Skipping is only about the *binding*. Each duplicate body is still
-/// walked and still contributes its own body-local diagnostics, so an
-/// author fixing the collision sees the problems inside both bodies in
-/// the same run.
-///
-/// The `edition` argument drives per-edition theme-variant selection
-/// (`spec/versioning-editions` "Java / Bedrock portability", hierarchy #2):
-/// when the file declares two themes whose names share a base and differ only
-/// by an `_java` / `_bedrock` suffix, `Some(Edition::Java)` picks the `_java`
-/// variant and `Some(Edition::Bedrock)` picks the `_bedrock` variant. `None`
-/// is the "no edition has been picked yet" case (typically `cairn check`
-/// without `--edition`) — the resolver unions slot names across variants of
-/// the same logical theme so a `mat_slot=NAME` reference that only one variant
-/// declares does not spuriously fire `E_UNRESOLVED_SLOT`.
+/// `edition` selects theme variants (`spec/versioning-editions` "Java /
+/// Bedrock portability"): of two themes named alike but for a `_java` /
+/// `_bedrock` suffix, `Some(edition)` picks that edition's. `None` (no
+/// `--edition` yet) unions slot names across a logical theme's variants, so
+/// a `mat_slot=` only one variant declares does not raise
+/// `E_UNRESOLVED_SLOT`.
 #[must_use]
 pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let mut themes: IndexMap<String, ThemeBinding> = IndexMap::new();
-    // Every declared body, including one whose name lost the binding.
-    // The map holds one entry per name, so it is not the right thing to
-    // walk for findings that are local to a body — a bad slot value in a
-    // shadowed `theme` is still a bad slot value, and the author should
-    // not have to fix the name first to be told about it.
+    // Every declared body, including one whose name lost the binding, so
+    // a shadowed theme's bad slot value is still reported.
     let mut declared: Vec<ThemeBinding> = Vec::with_capacity(ir.themes.len());
     for theme in &ir.themes {
         let binding = build_theme_binding(theme);
         declared.push(binding.clone());
-        // First-write-wins on duplicate names, as everywhere else in this
-        // function (see `FIRST_BINDING_WINS`). Keeping the map
-        // insertion-ordered means downstream consumers see the same theme
-        // order the source declared.
         themes.entry(binding.name.clone()).or_insert(binding);
     }
 
@@ -209,22 +119,11 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     let (auto_picked, auto_siblings) = match single_logical.as_deref() {
         Some(logical) => {
             let picked = pick_variant(&themes, logical, edition).map(str::to_owned);
-            // A refusal here is the module-level half of the same finding
-            // the site path reports per `place`: the module declares this
-            // theme and the pin can bind none of its variants. Left
-            // unreported it was silent — `bound_theme` stayed `None`, every
-            // `mat_slot=` skipped the branch that would have named a theme,
-            // and the build wrote the requested extent out of air.
-            //
-            // Which is also the reason it is conditional on a `mat_slot=`
-            // existing to be starved. A module that declares one edition's
-            // theme and never reads a slot from it emits no air, so a pin
-            // the theme cannot satisfy costs that module nothing — and the
-            // build it would have produced is byte-identical either way.
-            //
-            // `reported_missing` carries the finding across to the site
-            // loop, where every `place` naming this theme would otherwise
-            // repeat it verbatim against a different span.
+            // The module-level half of the finding the site path reports
+            // per `place`: no variant fits the pin, so every `mat_slot=`
+            // would build air. Raised only when some member reads a slot,
+            // since otherwise the pin costs nothing. `reported_missing`
+            // stops each `place` naming the theme from repeating it.
             if picked.is_none()
                 && let Some(pinned) = edition
                 && let Some(first) = themes.values().next()
@@ -239,10 +138,8 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
                 ));
             }
             let siblings = match (&picked, edition) {
-                // Sibling slots only gate `E_UNRESOLVED_SLOT` under the
-                // no-edition-yet case — a Some(edition) compile binds one
-                // variant authoritatively and cross-variant slots must not
-                // soften diagnostics for it.
+                // Only without a pin: a pinned build binds one variant, and
+                // other variants' slots must not soften its findings.
                 (Some(name), None) => sibling_slot_names(&themes, logical, name),
                 _ => HashSet::new(),
             };
@@ -264,14 +161,10 @@ pub fn resolve(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             resolve_struct_or_def(&s.members, auto_picked.as_deref(), &auto_siblings, &mut ctx);
         scopes.entry(struct_key(s)).or_insert(resolution);
     }
-    // A def is a template, and this walk resolves it against the theme the
-    // module auto-picks even though a `place` below will walk the same body
-    // under the placement's own theme. It stays: a file of defs and no
-    // `site` is a file worth checking, and a placement can be abandoned
-    // before it reaches the body — an absent `theme=`, an origin that does
-    // not resolve — which leaves this the only walk able to report what is
-    // inside. Where a placement does bind the same theme, `diagnosed` makes
-    // the second report cost nothing.
+    // Each `place` walks a def again under its own theme, but a file of
+    // defs and no `site` is worth checking, and a placement can be
+    // abandoned before its body (no `theme=`, an unresolvable origin).
+    // `diagnosed` drops the repeats.
     for d in &ir.defs {
         let resolution =
             resolve_struct_or_def(&d.members, auto_picked.as_deref(), &auto_siblings, &mut ctx);
@@ -332,14 +225,12 @@ fn def_key(d: &DefIr) -> String {
     format!("def::{}", d.name)
 }
 
-/// IR-side key for a single `place` inside a `site`.
+/// IR-side key for a single `place` inside a `site`, `site::SITE::ID`.
 ///
-/// Embedding the site name (`site::hamlet::home1` rather than
-/// `place::home1`) keeps the keys of one `id=` placed in two sites apart,
-/// so each placement resolves and lowers on its own. The file a placement
-/// is written to is named by [`artifact_stem`](crate::ids::artifact_stem),
-/// after its `id=` alone, so those two placements still name one file;
-/// that is `E_OUTPUT_NAME_COLLISION`.
+/// The site name keeps one `id=` placed in two sites apart in resolution
+/// and lowering. The artifact is named by
+/// [`artifact_stem`](crate::ids::artifact_stem) after the `id=` alone, so
+/// those two placements still name one file: `E_OUTPUT_NAME_COLLISION`.
 #[must_use]
 pub fn place_scope_key(site_name: &str, place_id: &str) -> String {
     format!("site::{site_name}::{place_id}")
@@ -348,29 +239,21 @@ pub fn place_scope_key(site_name: &str, place_id: &str) -> String {
 /// Resolve one struct / def / place scope against a specific picked
 /// theme name.
 ///
-/// `picked_theme_name` is a fully-qualified theme name (e.g. `shop_java`),
-/// not a logical name — variant selection is the caller's job. `sibling_slots`
-/// carries the union of slot names in sibling variants of the same logical
-/// theme, used to gate `E_UNRESOLVED_SLOT` under the edition = `None` case;
-/// pass an empty set when no siblings apply (single-variant file, or a
-/// site-side explicit `theme=X` binding).
+/// `picked_theme_name` is a variant's own name (`shop_java`), not a logical
+/// one: variant selection is the caller's job. `sibling_slots` is the union
+/// of slot names in the other variants of the same logical theme, which
+/// keeps `E_UNRESOLVED_SLOT` quiet when no edition is pinned; it is empty
+/// when no siblings apply.
 pub(super) fn resolve_struct_or_def(
     members: &[Member],
     picked_theme_name: Option<&str>,
     sibling_slots: &HashSet<String>,
     ctx: &mut ResolveCtx<'_>,
 ) -> ScopeResolution {
-    // Structural invariant: every name that reaches here came out of
-    // `themes.keys()`. The module-level auto-pick gets it from
-    // `pick_variant`, which builds its candidates by iterating those keys;
-    // the site-side branch gets it from `bind_place_theme`, which returns
-    // only what `resolve_theme_reference` read from the same map — a
-    // user-supplied `theme=X` label that names nothing there is refused
-    // up-slope instead. Reaching the `None` arm of `themes.get` would
-    // mean one of those guarantees broke — asymmetric with `validate_port`,
-    // which uses the same shape of loud fallback. `debug_assert!(false)`
-    // trips in dev / test builds; a release build silently degrades to
-    // the unbound-theme path rather than panicking on user data.
+    // Structural invariant: every name reaching here came from
+    // `themes.keys()`, through `pick_variant` or `bind_place_theme`, which
+    // refuses an unknown `theme=X` earlier. A release build degrades to the
+    // unbound path rather than panicking on user data.
     let bound = if let Some(name) = picked_theme_name {
         if let Some(t) = ctx.themes.get(name) {
             Some((name.to_owned(), t.slots.clone()))
@@ -404,14 +287,11 @@ pub(super) fn resolve_struct_or_def(
     resolution
 }
 
-/// Walk `members` under the scope's bound theme, filling `out` and
-/// pushing whatever the walk finds into `diagnostics`.
+/// Walk `members` under the scope's bound theme, filling `out` and pushing
+/// whatever the walk finds into `ctx`.
 ///
-/// `bound` carries the theme's name and its slot map together because a
-/// scope has both or neither: an unbound scope resolves no `mat_slot=` and
-/// matches no selector, and splitting the pair let a caller ask for one
-/// half.
-///
+/// `bound` pairs the theme's name with its slot map because a scope has
+/// both or neither.
 fn resolve_members(
     members: &[Member],
     bound: Option<(&str, &IndexMap<String, ValueWithSpan>)>,
@@ -422,37 +302,22 @@ fn resolve_members(
     for member in members {
         let mut binding = ResolvedMemberBinding::default();
 
-        // 1. mat_slot resolution against the scope's applied theme.
-        //    A slot the picked variant does not declare is still "known"
-        //    when a sibling variant of the same logical theme declares it,
-        //    which suppresses `E_UNRESOLVED_SLOT` for the edition-variant
-        //    themes of `spec/versioning-editions` "Java / Bedrock
-        //    portability" under `cairn check` without an `--edition` pin.
-        //    `slot_value` stays `None` in that case — the concrete binding is
-        //    edition-specific and comes into scope only once the compile picks
-        //    a variant.
+        // A slot only a sibling variant declares raises nothing and binds
+        // nothing until a pin picks a variant.
         //
-        //    INVARIANT(upstream-diagnosed): a `mat_slot=` on a role whose
-        //    `MemberRole::unread_arguments` lists it is not looked up at
-        //    all, and nothing is pushed for it here. Inside the top-level
-        //    `check` pipeline, `check::arguments` has already pushed
-        //    `W_IGNORED_ARGUMENT` for it into the same sink, and a slot name
-        //    the theme lacks changes nothing on such a role. A library
-        //    caller that runs `resolve` without `check` gets no signal;
-        //    `tests/resolve/silent_skip_arms.rs` pins the arm.
+        // INVARIANT(upstream-diagnosed): a `mat_slot=` its role does not
+        // read is not looked up; `check::arguments` reports it as
+        // `W_IGNORED_ARGUMENT`, and a library caller running `resolve`
+        // alone gets no signal (`tests/resolve/silent_skip_arms.rs`).
         if let Some(slot_name) = member.read_slot()
             && let Some((tname, slots)) = bound
         {
             match slots.get(slot_name) {
                 Some(v) => binding.slot_value = Some(v.clone()),
                 None if sibling_slots.contains(slot_name) => {}
-                // INVARIANT(already-reported): a repeat of the same
-                // finding is dropped, never the finding itself — an
-                // identical triple can only be here because a copy is
-                // already in `ctx.diagnostics`, which is built and
-                // returned by the same call. See
-                // [`ResolveCtx::diagnosed`]; `tests/resolve/def_member.rs`
-                // pins the count.
+                // INVARIANT(already-reported): only a repeat is dropped; an
+                // identical triple means a copy is already in
+                // `ctx.diagnostics` (see `ResolveCtx::diagnosed`).
                 None => {
                     let said = (member.span.start, slot_name.to_owned(), tname.to_owned());
                     if ctx.diagnosed.insert(said) {
@@ -463,9 +328,6 @@ fn resolve_members(
             }
         }
 
-        // 2. Selector matching — scoped to the bound theme only. A scope
-        //    with `bound_theme=None` (multi-theme file, no auto-pick)
-        //    gets no selector_extras, matching the per-theme DI contract.
         if let Some((tname, _)) = bound
             && let Some(theme_binding) = ctx.themes.get_mut(tname)
         {
@@ -481,7 +343,6 @@ fn resolve_members(
 
         out.members.insert(member.span.start, binding);
 
-        // 3. Recurse into nested members (e.g. `level y=...` blocks).
         let MemberBody {
             members: children, ..
         } = &member.children;

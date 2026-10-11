@@ -29,31 +29,21 @@ pub(super) fn resolve_site_placements(
     connects: &mut Vec<ValidatedConnect>,
     ctx: &mut ResolveCtx<'_>,
 ) {
-    // Local index lets each `east_of=ID` / `north_of=ID` lookup name a
-    // *prior* place in source order — re-walking `site.placements` per
-    // lookup would be quadratic and would also let a later place forward-
-    // reference an earlier one's mistakes.
+    // Filled in source order, so `east_of=` / `north_of=` can name only a
+    // prior place.
     let mut seen_place_ids: IndexMap<String, Span> = IndexMap::new();
-    // Rows refused with `E_INVALID_PLACE_ID`, by id, each with the span of
-    // the first row refused under it. Such a row is never registered in
-    // `seen_place_ids`, but a later `east_of=` / `north_of=` naming it still
-    // means that row, so the reference is reported as the cascade
-    // `W_DEFERRED_PLACE`, pointing here, rather than as an unknown id. A
-    // second row refused under an id already here is `E_DUPLICATE_PLACE_ID`,
-    // as a second row under an id in `seen_place_ids` is.
-    // Filled in source order, like `seen_place_ids`: a reference *above* the
-    // refused row names no prior place and is `E_UNRESOLVED_PLACE_REF`.
+    // Ids refused with `E_INVALID_PLACE_ID`, each with the first row refused
+    // under it, filled in source order. A later `east_of=` / `north_of=`
+    // naming one is the cascade `W_DEFERRED_PLACE` rather than an unknown
+    // id, and a second row refused under it is `E_DUPLICATE_PLACE_ID`.
     //
-    // A `connect` endpoint needs no such lookup: it is a `DotRef` whose head
-    // is a lexer `Ident`, which no refused id is, so it cannot name one. If
-    // `connect` ever takes a string, it needs this map too.
+    // A `connect` endpoint's head is a lexer `Ident`, which no refused id
+    // is, so it cannot name one; if `connect` ever takes a string, it needs
+    // this map too.
     let mut refused_place_ids: IndexMap<String, Span> = IndexMap::new();
-    // `place_id` → `use=DEF_NAME` so `connect` rows can find the def whose
-    // body exposes the named port without re-walking the placement list.
+    // `place_id` → `use=` def name, for a `connect` row's port lookup.
     let mut place_def: IndexMap<String, String> = IndexMap::new();
 
-    // Pre-built name lists so `nearest_match` candidates are stable per site
-    // rather than re-allocated per place.
     let def_names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
     let theme_names: Vec<String> = ctx.themes.keys().cloned().collect();
 
@@ -71,23 +61,15 @@ pub(super) fn resolve_site_placements(
             continue;
         }
         if !matches!(member.role, MemberRole::Place) {
-            // Everything that reaches here is a member a `site` body has no
-            // reader for — `logic` and `assert` are not members at all and
-            // live in `SiteIr`'s own fields. `check::member_scope` reports
-            // this row as `E_MISPLACED_MEMBER`; this arm is why it had to.
+            // A member a `site` body has no reader for, which
+            // `check::member_scope` reports as `E_MISPLACED_MEMBER`.
             continue;
         }
 
-        // `use=` is read once, here, for both of its readers: the reference
-        // recorded just below and the def lookup further down, so the two
-        // cannot read it differently. A row whose `use=` names a declared
-        // def references it, whatever refuses the row; every refusal of a
-        // `place` row comes after this record. `W_UNUSED_DEF` is "a `def`
-        // no `place use=` references", and on a refused row the finding
-        // with the repair is the row's own — advising the author to delete
-        // the def would send them to a line that is correct. A `use=` that
-        // is not label-shaped (`use=3`) names no def, so it records
-        // nothing.
+        // Read once for both readers, the reference recorded here and the
+        // def lookup below. The reference comes before any refusal of the
+        // row, so a refused row does not earn its correct `def` a
+        // `W_UNUSED_DEF`.
         let use_target = member
             .intent_state
             .get("use")
@@ -108,11 +90,9 @@ pub(super) fn resolve_site_placements(
         };
         seen_place_ids.insert(place_id.to_owned(), member.span.clone());
 
-        // Validate origin selectors before any cross-scope lookup so the
-        // user sees the structural problem first. An invalid origin makes
-        // the rest of the placement unsalvageable — skip the def/theme
-        // resolution and the scope insert so the lowering pass does not
-        // emit a `.nbt` for a structurally rejected placement.
+        // Before any cross-scope lookup, so the structural problem comes
+        // first. An invalid origin skips the scope insert, so no `.nbt` is
+        // written for the row.
         if !validate_place_origin(
             member,
             &site.name,
@@ -129,17 +109,9 @@ pub(super) fn resolve_site_placements(
             .get("theme")
             .and_then(|v| v.value.as_label_str());
 
-        // Both inputs that reach this arm are already reported, and by
-        // different owners: an absent `use=` by `incomplete_place_diag`
-        // above, a present-but-not-label-shaped one (`use=3`, which
-        // `as_label_str` also answers `None` for) by
-        // `check::type_mismatch`'s `E_TYPE_MISMATCH_LABEL`. Calling the
-        // second one missing would be a lie, which is why the completeness
-        // check keys on the *key* rather than on the lifted value.
-        //
-        // Skipping the rest of the pipeline prevents `place_def` and the
-        // scope map from carrying a half-built entry, so the lowering pass
-        // below does not emit a `.nbt` for a placement with no def.
+        // Already reported: an absent `use=` by `incomplete_place_diag`, a
+        // mistyped one (`use=3`) by `check::type_mismatch`. Skipping leaves
+        // no half-built entry in `place_def` or the scope map.
         let Some(use_name) = use_target else {
             continue;
         };
@@ -154,16 +126,10 @@ pub(super) fn resolve_site_placements(
             continue;
         };
 
-        // Same split as `use=` above: absent is `incomplete_place_diag`'s,
-        // mistyped is `check::type_mismatch`'s. The single-theme heuristic
-        // in `resolve_struct_or_def` does not rescue an omitted `theme=`
-        // here — it defaults a *scope*, and this arm returns before any
-        // scope is built.
-        //
-        // Skipping the rest of the pipeline here leaves `place_def` unset
-        // for this place; a downstream `connect` targeting it additionally
-        // earns the `W_DEFERRED_CONNECT` cascade in `validate_port`, the
-        // same pairing an unresolved `use=DEF` already produces.
+        // Same split as `use=`. The module's single theme does not stand in
+        // for an omitted `theme=`: that default is for struct and def
+        // scopes. A `connect` to this place earns `validate_port`'s
+        // `W_DEFERRED_CONNECT` cascade, as an unresolved `use=` does.
         let Some(theme_name) = theme_target else {
             continue;
         };
@@ -179,38 +145,29 @@ pub(super) fn resolve_site_placements(
             continue;
         };
 
-        // Cross-scope resolve: run the def's members under the picked theme,
-        // even when the file has multiple themes (the per-place `theme=`
-        // wins over the single-theme heuristic).
+        // The place's `theme=` wins over the module-level pick.
         let resolution =
             resolve_struct_or_def(&def.members, Some(bound_theme.as_str()), &siblings, ctx);
         scopes
             .entry(place_scope_key(&site.name, place_id))
             .or_insert(resolution);
-        // Record this place's def so a later `connect` row can look up
-        // the def's members without re-walking the site body.
         place_def.insert(place_id.to_owned(), use_name.to_owned());
     }
 }
 
-/// Returns `true` when the placement passes every origin-selector check, in
-/// which case `resolve_site_placements` may proceed with the cross-scope
-/// def / theme resolution and register a scope. `false` means at least one
-/// `E_INVALID_PLACE_ORIGIN`, `E_UNRESOLVED_PLACE_REF` (target reference) or
-/// `W_DEFERRED_PLACE` was emitted — the caller must skip the rest of the
-/// placement so the lowering pass does not voxelise a structurally rejected
-/// `place`.
-/// `place_id` is `None` for a row that declared no `id=`. Such a row is
-/// already reported as incomplete and can never be referenced, but its
-/// origin selector is checked anyway so every problem on the line surfaces
-/// together — the same reason the missing-key finding lists all three keys
-/// at once.
+/// Whether the placement passes every origin-selector check, so the caller
+/// may resolve its def and theme and register a scope. On `false` at least
+/// one finding was pushed, and the caller must skip the rest of the row so
+/// it is not voxelised.
 ///
-/// A target in `refused_place_ids` names a prior row already refused with
-/// `E_INVALID_PLACE_ID`. That row has no position to step from, so the
-/// answer is `false`, and the reference is reported as `W_DEFERRED_PLACE`
-/// rather than `E_UNRESOLVED_PLACE_REF`: the id does name a row, and the
-/// repair is on that row.
+/// `place_id` is `None` for a row with no `id=`, already reported as
+/// incomplete; its origin is still checked so every problem on the line
+/// surfaces together.
+///
+/// A target in `refused_place_ids` names a row refused with
+/// `E_INVALID_PLACE_ID`, which has no position to step from: `false`,
+/// reported as `W_DEFERRED_PLACE` rather than `E_UNRESOLVED_PLACE_REF`,
+/// because the repair is on that row.
 fn validate_place_origin(
     member: &Member,
     site_name: &str,
@@ -253,8 +210,7 @@ fn validate_place_origin(
         return false;
     }
 
-    // Cross-place reference validation: the target must appear before this
-    // place in source order so cycles cannot form.
+    // The target must come earlier in source order, so cycles cannot form.
     let mut origin_is_usable = true;
     for (key, value) in [("east_of", east_of), ("north_of", north_of)] {
         let Some(value) = value else {
@@ -281,9 +237,7 @@ fn validate_place_origin(
             continue;
         }
         if !seen_place_ids.contains_key(target) || Some(target) == place_id {
-            // Suggestion pool is *prior* place ids only — pointing at a
-            // later place would let cycles slip in. The same-site exclusion
-            // keeps `east_of=self` from showing up as a viable suggestion.
+            // Only prior ids, never this row's own, are suggested.
             let prior: Vec<&str> = seen_place_ids
                 .keys()
                 .filter(|id| Some(id.as_str()) != place_id)
@@ -347,11 +301,9 @@ pub(super) fn unresolved_ref_diag<'a>(
     }
 }
 
-/// `E_UNRESOLVED_PLACE_REF` with an appended ordering-only note
-/// for `east_of=` / `north_of=` failures. The nearest-match candidate pool
-/// is restricted to *earlier* place ids in the same site so cycles cannot
-/// form; without the note an ordering miss looks like the suggestion engine
-/// just gave up.
+/// `E_UNRESOLVED_PLACE_REF` for `east_of=` / `north_of=`, with a note on
+/// ordering: suggestions come only from earlier place ids, so without it a
+/// later target reads as a name nothing resembles.
 fn unresolved_place_ref_diag_with_ordering_note<'a>(
     primary: &str,
     span: Span,
@@ -375,28 +327,18 @@ fn unresolved_place_ref_diag_with_ordering_note<'a>(
 }
 
 /// Validate everything about a `place` row that can be judged from the row
-/// alone, and yield the id the rest of the loop keys on.
+/// alone, and yield the id the rest of the loop keys on. `None` means the
+/// row cannot become a placement and every reason has been reported.
 ///
-/// `None` means the row cannot become a placement and every reason has been
-/// reported. Split out from `resolve_site_placements` because it is the one
-/// stretch that needs nothing but the row and the ids seen before it — the
-/// cross-scope work below needs the def list, the theme map, and three
-/// output maps besides.
+/// Ordering is load-bearing: completeness is checked first, so the author
+/// sees every missing key before any consequence of one, and the origin
+/// selector is checked on both paths out, so adding the missing `id=` does
+/// not surface a new error on the line just fixed.
 ///
-/// Ordering is load-bearing. The completeness check runs first so the
-/// author sees every key the row is short of before any consequence of one
-/// of them, and the origin selector is checked on both paths out: without
-/// that, adding the `id=` this function just asked for would surface a
-/// *new* error on the line the author had only now fixed, which is the
-/// re-run cycle listing all three keys at once exists to avoid.
-///
-/// A row refused with `E_INVALID_PLACE_ID` has its id and span added to
-/// `refused_place_ids`, so a later row naming it is reported as the
-/// cascade `W_DEFERRED_PLACE` rather than as an id that names nothing. A
-/// second row refused under the same id is also `E_DUPLICATE_PLACE_ID`
-/// against the first, as it would be under a usable id, for the reason
-/// above: otherwise renaming both rows to one usable id would surface the
-/// duplicate for the first time on the lines the author had only now fixed.
+/// A row refused with `E_INVALID_PLACE_ID` is recorded in
+/// `refused_place_ids`. A second row refused under the same id is
+/// `E_DUPLICATE_PLACE_ID` too, for the same reason: otherwise renaming both
+/// to one usable id would surface the duplicate only then.
 fn usable_place_id<'a>(
     member: &'a Member,
     site_name: &str,
@@ -408,10 +350,8 @@ fn usable_place_id<'a>(
         diagnostics.push(diagnostic);
     }
 
-    // An unnamed placement has nothing to register, cannot be referenced by
-    // `east_of` / `north_of`, and is unreachable from any `connect` row (a
-    // dot-ref needs a name on the left side), so there is nothing further to
-    // do with it once its own line has been judged.
+    // An unnamed placement cannot be referenced, so once its own line is
+    // judged there is nothing more to do.
     let Some(place_id) = member.id.as_deref() else {
         validate_place_origin(
             member,
@@ -424,12 +364,10 @@ fn usable_place_id<'a>(
         return None;
     };
 
-    // Validate before the id becomes half of a scope key. `PlaceId` states
-    // the invariants, and `place_scope_key` joins on `::`, so an id carrying
-    // `.` or `:` produces a key nothing can parse back — which is where the
-    // lowering pass used to `expect` and panic. The id is also the stem of
-    // the artifact's file name, so a `/` or `\` in it used to put that file
-    // outside `--out`.
+    // Before the id becomes half of a scope key: `place_scope_key` joins on
+    // `::`, so a `.` or `:` makes a key nothing can parse back, and the id
+    // is the artifact's file stem, so a `/` or `\` would write outside
+    // `--out`.
     if let Err(err) = PlaceId::new(place_id) {
         diagnostics.push(invalid_place_id_diag(
             place_id,
@@ -437,9 +375,7 @@ fn usable_place_id<'a>(
             member.span.clone(),
             &err,
         ));
-        // First wins, as for `seen_place_ids`: the note on a reference
-        // points at the row refused first under that id, and a later row
-        // refused under it is a duplicate of that row.
+        // First wins, as in `seen_place_ids`.
         if let Some(first) = refused_place_ids.get(place_id) {
             diagnostics.push(duplicate_place_id_diag(
                 site_name,
@@ -464,16 +400,9 @@ fn usable_place_id<'a>(
     Some(place_id)
 }
 
-/// Keys a `place` row must declare, paired with what each one is for.
-///
-/// Ordered as an author writes them, and the order is load-bearing twice
-/// over: it fixes both the sentence the message builds and the `missing`
-/// list in the structured payload, so the same source always renders the
-/// same text.
-///
-/// Carrying the purpose here rather than in a `match` on the key is what
-/// keeps a fourth required key (`at=` is the realistic candidate) from
-/// inheriting some other key's note through a wildcard arm.
+/// Keys a `place` row must declare, each with what it is for, in the order
+/// an author writes them; the order fixes both the message and the
+/// payload's `missing` list.
 const REQUIRED_PLACE_KEYS: &[(&str, &str)] = &[
     (
         "id",
@@ -489,14 +418,11 @@ const REQUIRED_PLACE_KEYS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Whether the row carries `key=` at all, regardless of what its value is.
+/// Whether the row carries `key=` at all, whatever its value.
 ///
-/// `intent::lower` hoists a label-shaped `id=` out of `intent_state` onto
-/// [`Member::id`], so `id=b` lands in one of the two and `id=3` — not
-/// label-shaped, so not hoisted — lands in the other. Every other `place`
-/// key stays in `intent_state` either way. Asking both is what keeps a
-/// mistyped key from being reported as an absent one, which would send the
-/// author to add a key already on the line.
+/// A label-shaped `id=` is hoisted onto [`Member::id`] and a mistyped one
+/// stays in `intent_state`, so both are asked; otherwise a mistyped key
+/// would be reported as absent.
 fn member_declares(member: &Member, key: &str) -> bool {
     member.intent_state.contains_key(key) || (key == "id" && member.id.is_some())
 }
@@ -504,28 +430,20 @@ fn member_declares(member: &Member, key: &str) -> bool {
 /// Report a `place` row missing any of the keys it needs to become a
 /// placement, or `None` when it declares all three.
 ///
-/// `id=` names the `.nbt` the compiler writes for this placement
-/// (`spec/components-editing-sites` "Output naming") and is the name
-/// `east_of=` and `connect` refer to — so it cannot be auto-assigned the way
-/// that chapter's "Editing model" auto-assigns a geometry
-/// member's address, which derives from parent / role / side / level /
-/// offset and names nothing outside the body it sits in. `use=` names the
-/// `def` the placement instantiates and `theme=` the theme its `mat_slot=`
-/// members resolve against; without either there is no volume to voxelise.
+/// `id=` names the `.nbt` written for the placement
+/// (`spec/components-editing-sites` "Output naming") and is what `east_of=`
+/// and `connect` refer to, so it cannot be auto-assigned the way that
+/// chapter's "Editing model" assigns a geometry member's address.
 fn incomplete_place_diag(member: &Member, site_name: &str) -> Option<Diagnostic> {
     let missing: Vec<&(&str, &str)> = REQUIRED_PLACE_KEYS
         .iter()
         .filter(|(key, _)| !member_declares(member, key))
         .collect();
     let quoted: Vec<String> = missing.iter().map(|(key, _)| format!("`{key}=`")).collect();
-    // Returning through `and_list`'s `None` rather than an early `is_empty`
-    // guard keeps the "nothing missing" exit and the "nothing to join" exit
-    // as one branch — and keeps a `place` constructor from panicking while
-    // reporting somebody else's error.
+    // `and_list`'s `None` is the "nothing missing" exit.
     let listed = and_list(&quoted)?;
-    // Named when the row has one, matching `E_INVALID_PLACE_ORIGIN` and
-    // `E_DUPLICATE_PLACE_ID`: two incomplete rows in one site would
-    // otherwise render byte-identical primaries.
+    // Named when the row has an id, so two incomplete rows in one site
+    // read differently.
     let subject = member
         .id
         .as_deref()
@@ -543,10 +461,8 @@ fn incomplete_place_diag(member: &Member, site_name: &str) -> Option<Diagnostic>
                 message: (*purpose).to_owned(),
             })
             .collect(),
-        // The key set is what a quick-fix needs, and `spec/lint`
-        // "Machine-readable payload" asks consumers to match on
-        // `(code, data.kind)` rather than parse the prose it is also rendered
-        // into.
+        // The key set is what a quick-fix needs (`spec/lint`
+        // "Machine-readable payload").
         data: Some(DiagnosticData::IncompletePlace {
             missing: missing.iter().map(|(key, _)| (*key).to_owned()).collect(),
         }),
@@ -576,8 +492,7 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
         IdError::Empty => "it is empty".to_owned(),
         IdError::ForbiddenChar { ch, .. } => format!("it contains `{}`", shown_char(*ch)),
     };
-    // Built from the list the rule itself reads, so the advice cannot name a
-    // character the rule lets through or leave out one it refuses.
+    // From the list the rule reads, so the advice cannot drift from it.
     let marks: Vec<String> = FORBIDDEN_IDENT_PUNCTUATION
         .iter()
         .map(|mark| format!("`{mark}`"))
@@ -604,12 +519,9 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
 
 /// `W_DEFERRED_PLACE`: `key=target` names a row refused for its id.
 ///
-/// The cascade shape `W_DEFERRED_CONNECT` uses, one layer up: the row
-/// naming the refused id is correct as written and is not placed only
-/// because what it is placed against has no position. The note carries the
-/// refused row's span, so the author is sent to the row that has the
-/// repair. Renaming that row's id renames what this reference has to say,
-/// which the note says too rather than promising the row places on its own.
+/// The `W_DEFERRED_CONNECT` cascade one layer up: this row is correct as
+/// written, and the note sends the author to the refused row, which has the
+/// repair.
 fn deferred_place_diag(
     key: &str,
     target: &str,
@@ -635,9 +547,7 @@ fn deferred_place_diag(
 }
 
 fn invalid_place_origin_diag(place_id: Option<&str>, span: Span, message: &str) -> Diagnostic {
-    // A row with no `id=` is already reported as incomplete; it still gets
-    // this finding, and quoting a name it does not have would be worse than
-    // quoting none.
+    // A row with no `id=` is named by its keyword alone.
     let subject = place_id.map_or_else(
         || "`place`".to_owned(),
         |place_id| format!("`place id={place_id}`"),

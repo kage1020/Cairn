@@ -1,34 +1,18 @@
 //! Semantic layer for the Intent IR.
 //!
-//! Given a lowered [`crate::intent::IntentModule`], `resolve` walks every
-//! `theme`, `def`, `struct`, and `site` and produces a [`Resolution`] that
-//! records:
+//! [`resolve`] walks every `theme`, `def`, `struct` and `site` of a lowered
+//! [`crate::intent::IntentModule`] and returns a [`Resolution`]: each
+//! member's `mat_slot=NAME` paired with the applied theme's slot, each theme
+//! selector row paired with the members it matches, each `place` and
+//! `connect` resolved across scopes, and the diagnostics found on the way,
+//! which `crate::check` merges into `cairn check`'s output. The module also
+//! computes the version axes `cairn info` reports ([`compute_axes`]).
 //!
-//! 1. **slot bindings** — each `mat_slot=NAME` on a member is paired with
-//!    `theme.slots[NAME]` from the applied theme;
-//! 2. **selector matches** — each `KEYWORD[attrs] -> bindings` row in a theme
-//!    is paired with the member(s) it actually matches in the file;
-//! 3. **diagnostics** — `E_UNRESOLVED_SLOT` (Error) for `mat_slot=NAME` that
-//!    no theme provides, `E_UNKNOWN_SLOT_TARGET` (Error) for theme slot
-//!    targets that look like neither a canonical nor an abstract material
-//!    token, and `E_THEME_SELECTOR_UNMATCHED` (Warning) for selectors that
-//!    don't bind to anything.
+//! Per-edition blockstate (the `Lifted` semantic level) is not resolved
+//! here; `Member::resolved_state` is left untouched.
 //!
-//! The resolved data here is consumed by:
-//!
-//! - `crate::check` — merges `Resolution.diagnostics` into the full `cairn
-//!   check` output so a single CLI run reports both syntactic and
-//!   theme-binding problems together;
-//! - `cairn info` — re-uses the same [`Resolution`] when computing the three
-//!   version axes (`compute_axes`).
-//!
-//! Per-edition resolved blockstate (the `Lifted` semantic level) is the
-//! next maturity tier's responsibility — `Member.resolved_state` is left
-//! untouched here.
-//!
-//! See `spec/materials-themes` (slots, selectors, canonical vs. abstract
-//! tokens) and `spec/versioning-editions` (the three info axes) for the rules
-//! this module enforces.
+//! The rules come from `spec/materials-themes` (slots, selectors, canonical
+//! and abstract tokens) and `spec/versioning-editions` (the version axes).
 
 mod binding;
 mod connect;

@@ -1,11 +1,8 @@
 use super::*;
 use crate::parse;
 
-/// Fabricate a per-edition report matching the shape the CLI builds
-/// from `cairn-lang-formats::portability` and its own version loop.
-/// Used to keep the axis-1 / axis-3 tests independent of the axis-2
-/// data source; the version lists are left empty because those tests
-/// are not about them.
+/// A per-edition report with only the portable count set, for tests not about axis 2 or the version
+/// lists.
 fn synthetic_portability(entries: &[(Edition, u32)]) -> Vec<EditionReport> {
     entries
         .iter()
@@ -48,11 +45,6 @@ fn registry_compat_defaults_when_requires_absent() {
 
 #[test]
 fn edition_portability_is_forwarded_verbatim_from_caller() {
-    // The core-crate `compute_axes` no longer synthesises portability
-    // figures — the CLI hands in the per-edition counts (computed by
-    // `cairn-lang-formats::portability`) and this function forwards
-    // them into the output. Pin the forwarding so a future refactor
-    // can't quietly re-introduce a zero-fill or reordering.
     let src = "struct s size=4x4\n  walls height=3\n  floor\n  roof kind=gable\n";
     let m = parse(src).expect("parse");
     let axes = compute_axes(
@@ -91,9 +83,8 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
     assert_eq!(axes.edition_portability[0].unsupported, 0);
     assert_eq!(axes.edition_portability[1].edition, Edition::Bedrock);
     assert_eq!(axes.edition_portability[1].portable, 1);
-    // Both figures are the lengths of the lists beside them, which is
-    // the one thing this function decides rather than forwards: the
-    // caller has no field to disagree with them from.
+    // Both figures are the lengths of the lists beside them: the one thing this function decides
+    // rather than forwards.
     assert_eq!(axes.edition_portability[1].degraded, 1);
     assert_eq!(axes.edition_portability[1].unsupported, 2);
     assert_eq!(
@@ -104,17 +95,12 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
         axes.edition_portability[1].unsupported as usize,
         axes.edition_portability[1].unsupported_entries.len(),
     );
-    // JSON wire shape must remain unchanged so downstream consumers
-    // treating `edition_portability[].edition` as a lowercase string
-    // continue to work under the enum-typed field.
     let json = serde_json::to_string(&axes).unwrap();
     assert!(json.contains(r#""edition":"java""#), "got: {json}");
     assert!(json.contains(r#""edition":"bedrock""#), "got: {json}");
-    // The buildable row is fanned out of the same input, so it has
-    // one entry per portability row, in the same order, for the same
-    // edition — the invariant two independent `Vec` parameters could
-    // not carry. It also keeps the versions it weighed: an empty
-    // `buildable` says nothing on its own about how many there were.
+    // The buildable row is fanned out of the same input, so it matches the portability rows one for
+    // one, and keeps `considered` because an empty `buildable` alone says nothing about how many
+    // versions were weighed.
     assert_eq!(axes.buildable_targets.len(), axes.edition_portability.len());
     let editions: Vec<Edition> = axes
         .buildable_targets
@@ -135,9 +121,7 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
         json.contains(r#""considered":["1.21.0","1.21.40"]"#),
         "got: {json}",
     );
-    // The named entries ride the same forwarding, and an edition with
-    // nothing unsupported carries an empty list rather than a missing
-    // one.
+    // An edition with nothing unsupported carries an empty list, not a missing one.
     assert_eq!(
         axes.edition_portability[1].unsupported_entries,
         one_entry_per_reason(),
@@ -145,9 +129,8 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
     assert_eq!(axes.edition_portability[0].unsupported_entries, Vec::new());
 }
 
-/// One [`UnsupportedEntry`] per [`UnsupportedReason`] variant, so a
-/// test asserting something about all of them cannot quietly stop
-/// covering one.
+/// One [`UnsupportedEntry`] per [`UnsupportedReason`] variant, so a test about all of them cannot
+/// quietly stop covering one.
 fn one_entry_per_reason() -> Vec<UnsupportedEntry> {
     vec![
         UnsupportedEntry {
@@ -167,13 +150,8 @@ fn one_entry_per_reason() -> Vec<UnsupportedEntry> {
     ]
 }
 
-/// Every reason's JSON, pinned here because one of the two is
-/// unreachable from a `.crn` and so never passes through a CLI test.
-///
-/// `reason` is the internal tag and every other key is that variant's
-/// own, flattened beside it: a consumer reads the tag and then reads
-/// fields, which is the whole reason none of them carries a rendered
-/// sentence.
+/// Every reason's JSON, pinned here because one of the two is unreachable from a `.crn` and so
+/// never passes through a CLI test.
 #[test]
 fn every_unsupported_reason_carries_its_own_wire_shape() {
     let entries = serde_json::to_value(one_entry_per_reason()).expect("the entries serialize");
@@ -194,10 +172,8 @@ fn every_unsupported_reason_carries_its_own_wire_shape() {
             },
         ]),
     );
-    // `suggestion` is present and null rather than absent when there
-    // is no candidate, and `aliases` is present and empty on the same
-    // terms, so a consumer reads one shape per reason whatever the
-    // answer was.
+    // `suggestion` is null and `aliases` empty rather than absent, so a consumer reads one shape
+    // per reason.
     let absent = serde_json::to_value(UnsupportedEntry {
         id: "minecraft:nothing_like_this".to_owned(),
         reason: UnsupportedReason::AbsentFromEdition {
@@ -225,11 +201,8 @@ fn semantic_sensitive_is_empty_without_catalog() {
     assert!(axes.semantic_sensitive.is_empty());
 }
 
-/// [`FloorPart`] is the wire's copy of two words [`ItemKind`] already
-/// spells, and a copy is a thing that falls out of step. Held to the
-/// original from both sides: each variant serializes to its keyword,
-/// and every [`FloorOrigin`] that names a part is one of the two — so
-/// a fourth route added to `FloorOrigin` fails here rather than
+/// [`FloorPart`] copies two words [`ItemKind`] spells. Each variant serializes to its keyword, and
+/// every [`FloorOrigin`] naming a part is one of the two, so a new route fails here rather than
 /// reaching the wire as a new string.
 #[test]
 fn floor_part_spells_the_surface_keyword() {

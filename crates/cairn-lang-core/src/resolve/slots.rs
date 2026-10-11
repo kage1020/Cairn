@@ -19,11 +19,8 @@ pub(super) fn unresolved_slot_diag(
     member: &Member,
     available_slots: &IndexMap<String, ValueWithSpan>,
 ) -> Diagnostic {
-    // Suggestion goes ahead of the generic remediation so a top-down reader
-    // sees the targeted fix first. The suggestion pool is the *applied
-    // theme's* declared slots only — a `mat_slot=` cannot bind across
-    // themes, and proposing a slot from a different theme would point the
-    // user at code that wouldn't help.
+    // Suggestions come from the applied theme only: a `mat_slot=` cannot
+    // bind across themes.
     let mut notes = Vec::with_capacity(2);
     notes.extend(
         nearest_match(slot, available_slots.keys().map(String::as_str)).map(did_you_mean_note),
@@ -86,19 +83,12 @@ pub(super) fn check_unmatched_selectors(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for theme in themes.values() {
-        // Skip themes that were never bound to a scope — their selectors
-        // are vacuously unmatched because the resolver can't pick which
-        // struct/def they apply to (multi-theme files defer the decision
-        // to the `place ... theme=X` boundary on the site side). Warning
-        // about every selector in such a theme would be noise.
+        // A theme no scope applies matched nothing vacuously.
         if !applied_themes.contains(&theme.name) {
             continue;
         }
         for sel in &theme.selectors {
-            // Skip selectors whose keyword is itself unknown — the
-            // `keyword_allowlist` pass already flagged that with
-            // `E_UNKNOWN_KEYWORD`, and pointing at the same span a second
-            // time with "selector doesn't match" reads as noise.
+            // `E_UNKNOWN_KEYWORD` already covers this span.
             if matches!(role_of(&sel.keyword), MemberRole::Other(_)) {
                 continue;
             }

@@ -17,44 +17,26 @@ use super::resolver::{place_scope_key, struct_key};
 /// file.
 ///
 /// The artifacts are the ones a build would write, as far as resolution
-/// can tell:
+/// can tell: every `struct` with a `size=`, every resolved `place` whose
+/// `def` has a `size=`, and one walkway per endpoint pair
+/// ([`ValidatedConnect::walkway_pair`]) whose places are both counted,
+/// named after the pair's first row whose scope key can be built.
 ///
-/// - every `struct` with a `size=`. Lowering drops a sizeless one with
-///   `W_STRUCT_NO_SIZE`.
-/// - every `place` that resolved to a scope and whose `def` has a
-///   `size=`. Lowering drops a placement of a sizeless `def` with
-///   `W_DEF_NO_SIZE`.
-/// - one walkway per endpoint pair, [`ValidatedConnect::walkway_pair`],
-///   named after the first row for the pair whose scope key can be built,
-///   when both of its places are counted above. Lowering lays a pair
-///   once and reports a later row for it as `W_DUPLICATE_WALKWAY`, and
-///   lays nothing for a row whose key it cannot build or whose endpoint
-///   did not lower.
+/// That is not exactly what a build writes, which is why the finding says
+/// "would". It still counts an artifact lowering refuses for its size
+/// (`W_STRUCTURE_TOO_LARGE`, `W_WALKWAY_BLOCKED`), and when lowering
+/// refuses a pair's first row and lays a later one written the other way
+/// round, that file's name was not counted. `cairn compile` compares the
+/// names lowering produced again before writing any.
 ///
-/// Some of what lowering decides cannot be known here, so the set is not
-/// exactly what a build writes. It still counts a struct or placement
-/// past the volume budget (`W_STRUCTURE_TOO_LARGE`) and a walkway past the
-/// router's area cap (`W_WALKWAY_BLOCKED`), none of which lowering writes,
-/// which is why the finding says the two *would* share a file. In the
-/// other direction, a pair's walkway is named after its first row, and
-/// when lowering refuses that row (its `path=` material does not
-/// resolve, say) and lays a later one written the other way round, the
-/// file it writes has a name this check did not count. `cairn compile`
-/// compares the names lowering produced again before it writes any.
+/// Names are [`artifact_stem`] folded to lower case, so `Hut` and `hut`
+/// collide on every host, not only on case-insensitive file systems. A
+/// scope key already seen is one scope declared twice, which
+/// `E_DUPLICATE_ITEM` or `E_DUPLICATE_PLACE_ID` reports, so it is skipped.
 ///
-/// Each name is [`artifact_stem`] folded to lower case, so `Hut` and
-/// `hut` collide on every host rather than only on the case-insensitive
-/// file systems where they are one file. An artifact whose scope key was
-/// already seen is one scope declared twice, which `E_DUPLICATE_ITEM` or
-/// `E_DUPLICATE_PLACE_ID` already reports, so it is skipped here whichever
-/// artifact holds its name.
-///
-/// The artifacts are compared in the order the list above gives them:
-/// structs, then places, then walkways, each kind in declaration order.
-/// The finding anchors on the artifact that comes second in that order,
-/// with a note on the one that came first. That is not always the later
-/// one in the source: a `place` in a site written above a `struct` of the
-/// same name is still the one the finding anchors on.
+/// Artifacts are compared structs, then places, then walkways, each in
+/// declaration order, and the finding anchors on the second of a pair in
+/// that order, even when it comes first in the source.
 pub(super) fn check_output_names(
     ir: &IntentModule,
     scopes: &IndexMap<String, ScopeResolution>,
@@ -172,12 +154,9 @@ fn output_artifacts(
         };
         let Ok(key) = WalkwayScopeKey::from_parts(&c.site, &endpoint(&c.from), &endpoint(&c.to))
         else {
-            // Lowering builds the key from the same row with the same call
-            // and, when it is refused, reports `W_INVALID_WALKWAY_IDENT` and
-            // lays nothing (`block_array::lower`, `lower_connects`). A row
-            // with no key writes no file, so it has nothing to collide
-            // with. If the two calls ever stop agreeing, this arm is where
-            // walkways drop out of the check.
+            // Lowering refuses the same key with `W_INVALID_WALKWAY_IDENT`
+            // and writes no file (`lower_connects`), so there is nothing to
+            // collide with.
             return None;
         };
         // Recorded only for a row that gets this far, as lowering records

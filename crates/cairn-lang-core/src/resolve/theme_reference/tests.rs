@@ -6,10 +6,9 @@ use crate::{lower, parse};
 
 #[test]
 fn a_slot_read_from_a_nested_member_counts_as_reading_one() {
-    // `level y=N` groups members, so the only `mat_slot=` in a module
-    // can sit one level down. A scan that stops at the top level would
-    // let this file build its floor out of air under a pin that cannot
-    // bind the theme, which is the outcome the finding exists to stop.
+    // `level y=N` puts the module's only `mat_slot=` one level down; a
+    // top-level-only scan would build this floor out of air under a pin
+    // that binds no theme.
     let src = [
         "theme shop_bedrock:",
         "  slot floor -> @dark_oak_planks",
@@ -41,10 +40,8 @@ fn a_slot_read_from_a_nested_member_counts_as_reading_one() {
 
 #[test]
 fn a_slot_named_on_a_role_that_reads_none_does_not_count_as_reading_one() {
-    // A door carves an opening and paints nothing from its
-    // `mat_slot=`, so the build is the same whichever theme the pin
-    // leaves bound; refusing it over the missing variant would be the
-    // refusal over nothing the slot lookup itself no longer makes.
+    // A door carves an opening and paints nothing from its `mat_slot=`,
+    // so the build is the same whichever theme the pin leaves bound.
     let src = [
         "theme shop_bedrock:",
         "  slot door -> @dark_oak_door",
