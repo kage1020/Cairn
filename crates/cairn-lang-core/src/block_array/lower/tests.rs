@@ -1,6 +1,19 @@
+use super::anchor::{PlaceAnchor, PlacementCorner, PlacementOutOfRange};
+use super::canvas::{Canvas, ScopePalette, prune_unreferenced};
+use super::connect::edge_pushers;
+use super::members::Phase;
+use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
+use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
+use super::site_floor::FloorExtent;
 use super::*;
-use crate::block_array::BlockState;
-use crate::check::Severity;
+use crate::ast::ValueKind;
+use crate::block_array::material::resolve_block_state;
+use crate::block_array::roof::is_stair;
+use crate::block_array::walkway::{ROUTE_AREA_CAP, SearchRect, l_path_area};
+use crate::block_array::wall_column::WallColumn;
+use crate::block_array::{BlockState, Dims, Footprint, Palette, PaletteFull, PaletteIndex};
+use crate::check::{DiagnosticCode, DiagnosticData, Severity};
+use crate::intent::ValueWithSpan;
 
 /// [`PlaceAnchor::origin`] measures the far edge as `origin + dims − 1`,
 /// which is one cell before the origin when an extent is 0. No body has

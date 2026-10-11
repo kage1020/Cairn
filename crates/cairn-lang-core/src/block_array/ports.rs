@@ -43,7 +43,7 @@ const PORT_GROUND_V: u32 = 0;
 /// which the floor slab owns.
 ///
 /// A port names a member of the `def` body, so no `level y=N` has
-/// shifted it and the row is `super::lower::carve_door`'s `y_offset + 1`
+/// shifted it and the row is `super::lower::door::carve_door`'s `y_offset + 1`
 /// with `y_offset = 0`. That is an invariant of port *resolution*, not of
 /// this module: a door nested under a `level` is refused as a port
 /// outright, which `tests/door_wall_fit.rs` pins, because a lookup that
@@ -347,7 +347,7 @@ pub(super) fn port_world_position<S: BuildHasher>(
     let overhang = overhang_x.max(overhang_z);
     let len = wall_length(side, interior_w, interior_h);
     let (wall_x, wall_z) = if matches!(member.role, MemberRole::Door) {
-        // `at=` before the masonry, the order `super::lower::carve_door`
+        // `at=` before the masonry, the order `super::lower::door::carve_door`
         // asks in, so an `at=` typo on a body whose walls are also wrong
         // is reported as the typo here as it is on the door's own line.
         let u = door_anchor_offset(member, len).map_err(|written| PortRejection::DoorAt {
@@ -470,7 +470,7 @@ fn door_world_xz(
 /// out-of-range world coordinate.
 ///
 /// `offset=`, `y=` and `size=` are read by [`read_window_args`], the
-/// function `super::lower::cut_window` reads them with, so the two
+/// function `super::lower::window::cut_window` reads them with, so the two
 /// accept the same values and refuse the same first one. `repeat=`,
 /// `step=` and `sym=` are not read: a window they defer is refused by the
 /// caller's `cut` check instead.

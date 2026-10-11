@@ -203,7 +203,7 @@ pub(super) fn door_at_clause(written: &Written) -> String {
     }
 }
 
-/// The reason `super::lower::carve_door` defers a door whose `at=`
+/// The reason `super::lower::door::carve_door` defers a door whose `at=`
 /// [`door_anchor_offset`] refused.
 pub(super) fn door_at_deferral(written: &Written) -> String {
     format!(
@@ -245,7 +245,7 @@ impl WindowArgFault {
         }
     }
 
-    /// The reason `super::lower::cut_window` defers the window.
+    /// The reason `super::lower::window::cut_window` defers the window.
     pub(super) fn deferral(self) -> String {
         format!("window {}", self.clause())
     }
@@ -267,7 +267,7 @@ pub(super) struct WindowArgs {
 /// Read a window's `offset=`, `y=` and `size=`, in that order, refusing
 /// at the first one that cannot be used.
 ///
-/// `super::lower::cut_window` and `ports::window_center_offset`, which
+/// `super::lower::window::cut_window` and `ports::window_center_offset`, which
 /// `ports::port_world_position` asks for a window port, both call this, so the
 /// cut and the port accept one set and name one first fault.
 /// `repeat=`, `step=` and `sym=` are not read here: only the cut uses them,
@@ -314,7 +314,7 @@ pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgF
 ///
 /// * `center` — `len / 2` (integer division, so even widths land at
 ///   the column one cell `+u` of the midpoint, matching the
-///   convention `super::lower::carve_door` uses when cutting the
+///   convention `super::lower::door::carve_door` uses when cutting the
 ///   opening; `spec/syntax` "Selectors" calls this "round-half-up").
 /// * `left`   — `0`, the wall-local axis origin.
 /// * `right`  — `len - 1`, the far corner. The `len.saturating_sub(1)`
@@ -328,7 +328,7 @@ pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgF
 /// are refused with how `at=` was [`Written`] rather than silently
 /// rounded to centre, as is a missing `at=` or any other value.
 ///
-/// `super::lower::carve_door` cuts the doorway at this column and defers
+/// `super::lower::door::carve_door` cuts the doorway at this column and defers
 /// with [`door_at_deferral`] of this refusal, so the cut, the port and
 /// both of their messages read `at=` once.
 pub(super) fn door_anchor_offset(member: &Member, len: u32) -> Result<u32, Written> {

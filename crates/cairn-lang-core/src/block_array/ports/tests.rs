@@ -639,7 +639,7 @@ fn port_world_position_door_at_left_shifts_outward_past_roof_overhang() {
 
 #[test]
 fn port_world_position_door_refuses_when_the_body_paints_no_wall() {
-    // A doorway is a hole in a wall. `super::super::lower::carve_door`
+    // A doorway is a hole in a wall. `super::super::lower::door::carve_door`
     // defers on the same question, so a port that did not ask it laid
     // a strip to a doorway that was never carved.
     let src = concat!(
