@@ -1043,6 +1043,11 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
         "struct s size=0x3\n  floor mat_slot=f\n",
         Accept,
     ),
+    (
+        "integer_out_of_range",
+        "struct s size=3x3\n  floor n=99999999999999999999\n",
+        Accept,
+    ),
     // -- a size literal that runs into a word --------------------------
     // Ending the literal before the tail needs negative lookahead, which tree-sitter rejects.
     (
@@ -1060,11 +1065,6 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     (
         "truth_row_wider_than_the_input_list",
         "struct s size=3x3\n  assert truth(a.b -> c.d) { 00 -> 1 }\n",
-        Accept,
-    ),
-    (
-        "integer_out_of_range",
-        "struct s size=3x3\n  floor n=99999999999999999999\n",
         Accept,
     ),
     // -- a state literal naming one property twice ----------------------
@@ -1327,6 +1327,7 @@ fn accepted_sources_place_every_member_at_the_same_depth() {
 fn both_parsers_read_the_same_row() {
     let mut parser = new_parser();
     let mut wrong = Vec::new();
+    let mut compared = 0;
     for (name, source, expected) in FIXTURES {
         if *expected != Accept {
             continue;
@@ -1340,12 +1341,14 @@ fn both_parsers_read_the_same_row() {
             continue;
         }
         let grammar = grammar_rows(tree.root_node(), source);
+        compared += 1;
         if core != grammar {
             wrong.push(format!(
                 "{name}: the reference parser reads {core:?}, the grammar {grammar:?}\n  source: {source:?}"
             ));
         }
     }
+    assert!(compared > 0, "no fixture has a truth row to compare");
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
