@@ -483,7 +483,7 @@ fn load_from_dir_err(label: &str, write: impl FnOnce(&Path)) -> RegistryError {
 }
 
 #[test]
-fn load_builtin_java_succeeds() {
+fn the_builtin_java_pack_loads() {
     let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     assert_eq!(pack.manifest.edition, Edition::Java);
     assert_eq!(pack.manifest.name, "cairn-builtin-java");
@@ -780,7 +780,7 @@ fn pack_hash_is_deterministic() {
 }
 
 #[test]
-fn load_builtin_bedrock_succeeds() {
+fn the_builtin_bedrock_pack_loads_with_every_java_token() {
     let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
     assert_eq!(pack.manifest.edition, Edition::Bedrock);
     assert_eq!(pack.manifest.name, "cairn-builtin-bedrock");
