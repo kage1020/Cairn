@@ -1,7 +1,3 @@
-//! Direct coverage for [`PlacementPhase`]: the four legal transitions, the nine illegal ones the
-//! transition methods reject (with a panic, or a [`PlacementPhaseTransitionError`] from the
-//! `try_*` forms), the flat accessors and the JSON round trip. The passes have end-to-end coverage
-//! of their own; this pins the state machine itself.
 use super::phase::TRANSITION_CARDINALITY;
 use super::*;
 
@@ -71,9 +67,6 @@ fn legalize_from_delayed_transitions_and_preserves_prior_fields() {
 
 #[test]
 fn legalize_from_delayed_with_empty_buffers_stays_legalized() {
-    // A scope whose delay pass counted zero buffers must still
-    // transition to Legalized — an empty buffer_coords does not
-    // mean "not yet legalized".
     let mut phase = PlacementPhase::Delayed {
         wire_length: 4,
         local_delay_ticks: 0,
@@ -109,10 +102,6 @@ fn cell_identity_renders_index_coord_and_scope() {
     );
 }
 
-/// Every scope family has to render, not just the `struct` the
-/// other fixtures use — a `def` or `site` scope that fell through
-/// to a placeholder label would leave an operator unable to tell
-/// two same-named scopes apart.
 #[test]
 fn cell_identity_renders_every_scope_kind() {
     for (kind, expected) in [
@@ -128,8 +117,6 @@ fn cell_identity_renders_every_scope_kind() {
     }
 }
 
-/// A cell coord is `Plane` by construction, so the layer stays out of every real breadcrumb; a
-/// hand-built coord on another layer shows it rather than reading as a plane coord.
 #[test]
 fn cell_identity_surfaces_a_non_plane_layer() {
     let scope = probe_scope();
@@ -187,14 +174,7 @@ fn legalize_at_from_delayed_transitions_and_preserves_prior_fields() {
     );
 }
 
-/// One of the three transitions, as a value, so a test can drive
-/// every refusal through one loop instead of picking a
-/// representative per transition and leaving the other two
-/// rejected phases unrendered.
-///
-/// The fixture arguments are baked in: which `wire_length` or
-/// buffer vector a refused call was handed never reaches the
-/// message, so varying them here would only obscure the pairing.
+/// One of the three transitions, as a value, so a test can loop over every refusal.
 #[derive(Clone, Copy)]
 enum Transition {
     Route,
@@ -230,21 +210,14 @@ impl Transition {
         }
     }
 
-    /// Drive this transition against a phase that refuses it,
-    /// against a throwaway clone so the caller's phase stays
-    /// available for the next rendering of the same refusal.
+    /// This transition's refusal of `phase`, tried on a clone.
     fn refusal(self, phase: &PlacementPhase) -> PlacementPhaseTransitionError {
         self.tried(&mut phase.clone())
             .expect_err("out-of-order transition must be refused")
     }
 }
 
-/// Every (transition, phase it refuses) pair — the nine illegal
-/// edges of the four-state machine.
-///
-/// `Legalized` appears as a rejected phase for all three, which is
-/// what puts a populated `buffer_coords` through the `{current:?}`
-/// rendering the messages carry.
+/// Every (transition, phase it refuses) pair: the nine illegal edges.
 fn refusals() -> [(Transition, PlacementPhase); 9] {
     [
         (Transition::Route, routed()),
@@ -259,9 +232,6 @@ fn refusals() -> [(Transition, PlacementPhase); 9] {
     ]
 }
 
-/// Every refusal panics in both the context-free and the `*_at` form,
-/// naming the pass that ran out of order; the `*_at` form puts the
-/// cell's identity in front of that clause.
 #[test]
 fn every_refused_transition_panics_naming_the_pass() {
     let scope = probe_scope();
@@ -321,9 +291,6 @@ fn try_legalize_from_delayed_transitions_and_preserves_prior_fields() {
     );
 }
 
-/// The fallible form owes the same "empty is still legalized"
-/// promise the panicking one does — a scope whose delay pass
-/// counted zero buffers must not read as "not yet legalized".
 #[test]
 fn try_legalize_from_delayed_with_empty_buffers_stays_legalized() {
     let mut phase = PlacementPhase::Delayed {
@@ -340,9 +307,6 @@ fn try_legalize_from_delayed_with_empty_buffers_stays_legalized() {
     ));
 }
 
-/// A refused transition leaves the subject exactly as it found it: a caller that recovers from
-/// the `Err` goes on to use the phase, so a half-applied write would hand it a state
-/// `PlacementPhase` says cannot exist.
 #[test]
 fn try_route_from_every_other_phase_errs_without_mutating() {
     for phase in [routed(), delayed(), legalized()] {
@@ -388,11 +352,6 @@ fn try_legalize_from_every_other_phase_errs_without_mutating() {
     }
 }
 
-/// A phase that refused a transition must be more than *equal* to
-/// what it was — it must still work. Post-call equality alone would
-/// survive a refactor that moved out of `self` and rebuilt an equal
-/// value; carrying on into the next legal transition is what shows
-/// the subject itself came through.
 #[test]
 fn a_refused_transition_leaves_the_phase_usable() {
     let mut phase = routed();
@@ -407,15 +366,6 @@ fn a_refused_transition_leaves_the_phase_usable() {
     );
 }
 
-/// The fallible and panicking forms are two renderings of one
-/// refusal, so the error's own `Display` must reproduce the
-/// context-free panic byte for byte. Comparing against the live
-/// panic payload rather than a hard-coded string means the two can
-/// only drift by drifting together.
-///
-/// Every refusal is walked, not one per transition: the phase is
-/// rendered through `{current:?}`, so a `Legalized` subject is the
-/// only case that puts a `Vec<BufferCoord>` through it.
 #[test]
 fn try_transition_errors_render_as_the_context_free_panic() {
     for (transition, phase) in refusals() {
@@ -426,11 +376,6 @@ fn try_transition_errors_render_as_the_context_free_panic() {
     }
 }
 
-/// A caller that recovered from the `Err` still knows what it was
-/// working on, so splicing that in must land in the same place and
-/// read the same way as the `*_at` forms — otherwise an ingest
-/// diagnostic and a pipeline panic about the same cell would not
-/// look alike.
 #[test]
 fn try_transition_errors_with_context_render_as_the_at_panic() {
     let scope = probe_scope();
@@ -443,15 +388,6 @@ fn try_transition_errors_with_context_render_as_the_at_panic() {
     }
 }
 
-/// The consumers this fallible mirror exists for — cache
-/// validators, IR ingest, the language server — put the refusal on
-/// a `?` or into a `Box<dyn Error>`, and compare or stash it
-/// alongside the phase it names.
-///
-/// Walked over every refusal so [`PlacementPhaseTransitionError::current`]
-/// is exercised on all three variants: it reads them through one
-/// merged arm, which a fourth variant added without a matching arm
-/// would silently leave out.
 #[test]
 fn transition_error_is_a_comparable_std_error() {
     fn assert_std_error<E: std::error::Error + Clone + Eq>(_: &E) {}
@@ -465,9 +401,6 @@ fn transition_error_is_a_comparable_std_error() {
     }
 }
 
-/// The context-free transition forms carry no dangling separator where the `*_at` forms splice in
-/// an identity. Read from the panic payload, since `#[should_panic]` can only assert that a
-/// substring is present.
 #[test]
 fn context_free_transitions_panic_without_an_identity_clause() {
     let payloads = [
@@ -485,9 +418,7 @@ fn context_free_transitions_panic_without_an_identity_clause() {
             "context-free panic grew a double space: {payload}",
         );
     }
-    // Exact match on all three, not just one: the context-free
-    // wording is the wire format the `#[should_panic]` sites
-    // across this crate key on.
+    // The `#[should_panic]` sites across this crate key on this wording.
     assert_eq!(
         payloads,
         [
@@ -498,9 +429,6 @@ fn context_free_transitions_panic_without_an_identity_clause() {
     );
 }
 
-/// All nine entry points quote one shared clause, so a transition added beside them cannot spell
-/// its own. Asserting on the const cannot tell what the clause says; the exact-match array in
-/// [`context_free_transitions_panic_without_an_identity_clause`] pins the wording.
 #[test]
 fn every_transition_message_shares_one_cardinality_clause() {
     let scope = probe_scope();
@@ -576,10 +504,6 @@ fn stage_accessor_covers_every_variant() {
     assert_eq!(legalized().stage(), PlacementStage::Crossing);
 }
 
-/// The whole point of the tag: a scope whose delay pass counted
-/// zero buffers still reports the crossing stage, so a consumer
-/// never has to infer "did stage 4 run?" from the absence of
-/// `buffer_coords`.
 #[test]
 fn legalized_with_zero_buffers_still_reports_the_crossing_stage() {
     let empty = PlacementPhase::Legalized {
@@ -610,9 +534,6 @@ fn placed_cell_stage_accessor_projects_the_phase() {
     }
 }
 
-/// The four strings are the JSON wire form and must equal the
-/// `cairn synth --stage <s>` flag values, so they are pinned here
-/// rather than left to whatever `as_str` happens to return.
 #[test]
 fn stage_renders_the_cli_flag_vocabulary() {
     assert_eq!(PlacementStage::Placement.as_str(), "placement");
@@ -621,8 +542,6 @@ fn stage_renders_the_cli_flag_vocabulary() {
     assert_eq!(PlacementStage::Crossing.as_str(), "crossing");
 }
 
-/// Every variant serialises as a bare string, not a tagged object; all four, so a variant renamed
-/// away from its wire word is caught.
 #[test]
 fn every_stage_serialises_as_a_bare_string() {
     for (stage, expected) in [
@@ -638,7 +557,6 @@ fn every_stage_serialises_as_a_bare_string() {
     }
 }
 
-/// The reason the tag exists: without it, these two phases dump identical JSON.
 #[test]
 fn delayed_and_legalized_with_zero_buffers_serialise_differently() {
     let delayed_json =
@@ -659,28 +577,18 @@ fn delayed_and_legalized_with_zero_buffers_serialise_differently() {
         legalized_json.contains("\"stage\":\"crossing\""),
         "legalized cell must carry the crossing tag: {legalized_json}",
     );
-    // The tag is the only difference: `buffer_coords` still serde-skips when empty.
     assert!(
         !legalized_json.contains("buffer_coords"),
         "empty buffer_coords must still serde-skip: {legalized_json}",
     );
-    // Rewriting the tag's key/value pair — not the bare word
-    // `delay`, which also sits inside the `local_delay_ticks`
-    // key — turns one dump into the other exactly, so nothing
-    // else moved.
+    // Replace the pair, not the bare word `delay`, which `local_delay_ticks` also holds.
     assert_eq!(
         delayed_json.replace("\"stage\":\"delay\"", "\"stage\":\"crossing\""),
         legalized_json,
     );
 }
 
-/// `reserved_area` saturates rather than overflowing, as a reservation from a hostile `size=`
-/// makes it.
-///
-/// `u64` holds `u32::MAX` squared, so the third factor is where it overflows. A wrapped product
-/// past `u64::MAX` lands somewhere plausible, and one that is an exact multiple of `2^64` wraps to
-/// zero, which divides by itself in the congestion ratio. `2147483648^2 * 4` is exactly `2^64`,
-/// the smallest such shape a `size=` reaches, so the last row is the one that matters.
+/// `2147483648^2 * 4` is exactly `2^64`, which a wrapping product would turn into zero.
 #[test]
 fn reserved_area_saturates_on_a_reservation_no_u64_can_hold() {
     let region = |width: u32, depth: u32, void: u32| CircuitRegionReservation {
@@ -708,14 +616,11 @@ fn reserved_area_saturates_on_a_reservation_no_u64_can_hold() {
     );
 }
 
-/// `probe_cell`'s dump read back, or the deserializer's refusal
-/// rendered to a string.
+/// `probe_cell`'s dump read back, or the deserializer's refusal as a string.
 fn read_back(json: &str) -> Result<PlacedCellNode, String> {
     serde_json::from_str(json).map_err(|err| err.to_string())
 }
 
-/// Every phase — including a legalized cell with no buffers, and a
-/// buffer standing on the bridge layer — dumps and reads back equal.
 #[test]
 fn every_phase_round_trips_through_the_flat_wire_form() {
     let bridged = PlacementPhase::Legalized {
@@ -755,8 +660,6 @@ fn every_phase_round_trips_through_the_flat_wire_form() {
     }
 }
 
-/// The two phases the keys alone cannot tell apart read back as
-/// themselves, because the reader goes by the tag.
 #[test]
 fn delayed_and_legalized_with_zero_buffers_read_back_apart() {
     let empty = PlacementPhase::Legalized {
@@ -771,19 +674,11 @@ fn delayed_and_legalized_with_zero_buffers_read_back_apart() {
     }
 }
 
-/// A refusal's sentence, without the ` at line 1 column N` position
-/// `serde_json` appends to it.
+/// A refusal's sentence, without the position `serde_json` appends.
 fn sentence(err: &str) -> &str {
     err.split(" at line ").next().unwrap_or(err)
 }
 
-/// Every one of the eleven `(stage tag, payload key)` pairs the
-/// reader holds is refused, each with the whole sentence naming the
-/// tag, the key and the stage that writes it — so no guard in
-/// `PhaseFields::into_phase` can go missing without a row failing.
-///
-/// Each row breaks exactly one pair and is otherwise a valid dump of
-/// its stage.
 #[test]
 fn every_payload_key_that_disagrees_with_the_stage_is_refused() {
     let body = r#""cell":"java_repeater_or","drivers":[],"coord":{"x":0,"y":0,"z":0}"#;
@@ -859,10 +754,6 @@ fn every_payload_key_that_disagrees_with_the_stage_is_refused() {
     }
 }
 
-/// The shapes the wire form never has: no tag, an unknown tag or
-/// layer word, an unknown or repeated key, a missing identity key —
-/// and an unknown key at every nesting level a cell has, since each
-/// nested type refuses its own.
 #[test]
 fn malformed_dumps_are_refused_rather_than_guessed_at() {
     let coord = r#""coord":{"x":0,"y":0,"z":0}"#;
@@ -930,11 +821,6 @@ fn malformed_dumps_are_refused_rather_than_guessed_at() {
     }
 }
 
-/// A coord reads back as the coord [`CellCoord::new`] builds at its
-/// height: an absent `layer` is the one the height gives, an explicit
-/// one that agrees is accepted, and one that disagrees — `via`
-/// included, which no height gives — is refused rather than read as
-/// a second spelling of the same voxel.
 #[test]
 fn a_coord_reads_back_only_on_the_layer_its_height_gives() {
     let read = |json: &str| serde_json::from_str::<CellCoord>(json).map_err(|e| e.to_string());
@@ -981,11 +867,6 @@ fn a_coord_reads_back_only_on_the_layer_its_height_gives() {
     }
 }
 
-/// Every buffer a cell carries stands on one of that cell's own
-/// driver ports — the contract the crossing pass debug-asserts when
-/// it writes them — so a dump naming `out`, or a port the cell has
-/// no driver on, is refused rather than read into a cell the pass
-/// could never have produced.
 #[test]
 fn a_buffer_on_a_segment_the_cell_has_no_driver_for_is_refused() {
     let head = r#""stage":"crossing","wire_length":3,"local_delay_ticks":1,"cell":"java_repeater_or","coord":{"x":0,"y":0,"z":1},"drivers":[{"port":"a","net":{"kind":"input","index":0}}]"#;
@@ -1016,12 +897,6 @@ fn a_buffer_on_a_segment_the_cell_has_no_driver_for_is_refused() {
     }
 }
 
-/// Each wire word reads back as the variant that writes it, walking
-/// every variant through `EnumIter` rather than a list kept by hand,
-/// so a variant added later is covered the day it lands. The two enums
-/// whose `as_str` names their wire word are held to it, since serde
-/// derives that word from the variant name rather than reading
-/// `as_str`.
 #[test]
 fn every_wire_word_reads_back_as_its_variant() {
     use strum::IntoEnumIterator;
@@ -1051,8 +926,6 @@ fn every_wire_word_reads_back_as_its_variant() {
     round_trip(&BufferSegment::Out);
 }
 
-/// The word list an unknown segment's error names is every word a
-/// segment is written as, in order: every [`PortName`], then `out`.
 #[test]
 fn the_segment_vocabulary_is_every_word_a_segment_is_written_as() {
     use strum::IntoEnumIterator;

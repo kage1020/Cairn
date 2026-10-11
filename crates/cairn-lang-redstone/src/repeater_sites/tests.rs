@@ -1,6 +1,3 @@
-//! The repeater-site walk and its refusals, mostly on trees grown by
-//! hand so each shape is pinned coord by coord.
-
 use std::collections::{BTreeSet, HashMap};
 
 use cairn_lang_core::Edition;
@@ -20,8 +17,7 @@ use crate::placement_ir::{CellCoord, PlacementIr, ScopedPlacementIrEntry};
 use crate::routing_geometry::NetTree;
 use crate::test_fixtures::{ROUTED, placed_cell, reservation, routed_output};
 
-/// The coords a walk from `start` visits, `start` included, taking
-/// each `(step, count)` in turn.
+/// The coords a walk from `start` visits, `start` included, taking each `(step, count)` in turn.
 fn walk(start: (u32, u32, u32), moves: &[((i64, i64, i64), u32)]) -> Vec<CellCoord> {
     let mut at = start;
     let mut path = vec![CellCoord::new(at.0, at.1, at.2)];
@@ -41,10 +37,6 @@ const EAST: (i64, i64, i64) = (1, 0, 0);
 const SOUTH: (i64, i64, i64) = (0, 0, 1);
 const UP: (i64, i64, i64) = (0, 1, 0);
 
-/// On a straight run a repeater stands every 16 steps, in place of
-/// the block of dust past the limit, so the 15 blocks of dust before
-/// it carry the signal to it; and there are as many as the
-/// segment's length alone implies.
 #[test]
 fn a_straight_run_takes_a_repeater_every_sixteen_steps() {
     for length in [15u32, 16, 17, 32, 33, 48, 49] {
@@ -58,12 +50,8 @@ fn a_straight_run_takes_a_repeater_every_sixteen_steps() {
     }
 }
 
-/// A repeater never stands on a turn: it would drive into the
-/// coord straight ahead of it, which is not the wire.
 #[test]
 fn a_repeater_steps_back_off_a_turn() {
-    // 16 east then 2 south: the 16-step point, where the first
-    // repeater falls due, is the corner.
     let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 16), (SOUTH, 2)])]);
     assert_eq!(
         repeater_sites(&tree, 0, &HashMap::new()),
@@ -72,15 +60,8 @@ fn a_repeater_steps_back_off_a_turn() {
     );
 }
 
-/// Nor on a climb: a repeater drives only its own layer, so a
-/// coord whose wire goes up or down — straight up included — is
-/// not one it can carry.
 #[test]
 fn a_repeater_steps_back_off_a_climb() {
-    // 14 east, 2 up, 2 east. The repeater falls due on (14,2,0), the
-    // 16th block of dust, where the wire turns east off the top of
-    // the climb. (14,1,0) has the wire straight through it, but
-    // vertically; (14,0,0) is where it turns upward.
     let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 14), (UP, 2), (EAST, 2)])]);
     assert_eq!(
         repeater_sites(&tree, 0, &HashMap::new()),
@@ -89,18 +70,6 @@ fn a_repeater_steps_back_off_a_climb() {
     );
 }
 
-/// Nor on a fork: one repeater faces one branch. The one on the
-/// trunk before the fork refreshes both, so the two branches share
-/// it rather than each getting one.
-///
-/// The trunk's sink at (16,0,0) reads the 15 blocks of dust before
-/// it and needs nothing, so the repeater falls due on the branch,
-/// on (15,0,1), its 16th block of dust, where it turns. The walk
-/// back starts there, passes the fork at (15,0,0) and lands on
-/// (14,0,0).
-///
-/// This is the shape of two actuators on one sensor, one straight
-/// down the row and one a row over past the first one's pad.
 #[test]
 fn a_repeater_steps_back_off_a_fork_onto_the_trunk() {
     let trunk = walk((0, 0, 0), &[(EAST, 16)]);
@@ -113,12 +82,8 @@ fn a_repeater_steps_back_off_a_fork_onto_the_trunk() {
     );
 }
 
-/// Stepping back shortens the dust behind the repeater and
-/// lengthens the run ahead of it, so a route can need one more
-/// repeater than its length alone implies.
 #[test]
 fn stepping_back_can_cost_a_repeater_the_length_does_not_imply() {
-    // 32 steps, turning at the 16-step point.
     let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 16), (SOUTH, 16)])]);
     let sites =
         repeater_sites(&tree, 0, &HashMap::new()).expect("there is straight wire on both legs");
@@ -133,8 +98,6 @@ fn stepping_back_can_cost_a_repeater_the_length_does_not_imply() {
     );
 }
 
-/// A stretch past the limit on which every coord turns has nowhere
-/// for a repeater, and says so rather than placing one on a turn.
 #[test]
 fn a_staircase_has_nowhere_for_a_repeater() {
     let mut moves = Vec::new();
@@ -162,19 +125,6 @@ fn a_staircase_has_nowhere_for_a_repeater() {
     );
 }
 
-/// A run of dust that runs straight the whole way, but beside a
-/// second strand of its own net, is refused for touching that
-/// strand and says so — not that every coord turns, because none
-/// of them does.
-///
-/// Two strands leave the source side by side: the trunk east along
-/// `z = 0`, and a branch that steps south once and runs east along
-/// `z = 1`. Every trunk coord the walk reaches back over has a branch
-/// coord beside it, which a repeater there would cut off.
-///
-/// Hand-built: the router lays a second strand of a net away from
-/// the first wherever it can, so a `.crn` does not reliably put one
-/// beside a straight run past the limit.
 #[test]
 fn a_straight_run_beside_its_own_net_is_refused_for_touching_it() {
     let trunk = walk((0, 0, 0), &[(EAST, 17)]);
@@ -232,15 +182,6 @@ fn a_straight_run_beside_its_own_net_is_refused_for_touching_it() {
     );
 }
 
-/// A stretch on which some coords turn and the rest run straight
-/// beside their own net names both reasons, and the coord nearest
-/// the dark end that was refused for touching.
-///
-/// The trunk leaves the source east along `z = 1` and turns down a
-/// staircase at `(8,0,1)`; a branch steps north to `z = 0` and runs
-/// east beside the trunk's straight part as far as `(7,0,0)`.
-///
-/// Hand-built, as the test above is.
 #[test]
 fn a_stretch_that_turns_and_touches_names_both() {
     let mut stairs = vec![(EAST, 8)];
@@ -273,20 +214,6 @@ fn a_stretch_that_turns_and_touches_names_both() {
     );
 }
 
-/// The walk meets a coord refused for touching before one refused
-/// for bending, and the record keeps both, with the touching coord
-/// it met — not a plain "turns" for the bend met last.
-///
-/// The trunk leaves the source down a staircase to `(4,0,4)` and
-/// runs east to `(13,0,4)`. A branch leaves the trunk's far end,
-/// climbs to `y = 1` and runs back west over it as far as
-/// `(4,1,4)`. The walk back starts on `(12,0,4)`, the first block of
-/// dust past the limit, which a repeater could stand in place of; it
-/// and the coords down to `(4,0,4)` run straight under the branch,
-/// and the staircase behind them turns.
-///
-/// Hand-built: a routed tree stacks a strand over its own net only
-/// where a bridge crosses it, not along a run.
 #[test]
 fn a_touching_coord_met_before_a_bend_is_kept_with_it() {
     let mut stairs = Vec::new();
@@ -319,12 +246,6 @@ fn a_touching_coord_met_before_a_bend_is_kept_with_it() {
     );
 }
 
-/// A straight coord with its own net on two faces names the first
-/// of them in `faces` order: the one at `z - 1`, before the one at
-/// `z + 1`.
-///
-/// Hand-built: the router does not lay a strand of a net either
-/// side of another.
 #[test]
 fn a_coord_touching_its_net_on_two_faces_names_the_first() {
     let trunk = walk((0, 0, 1), &[(EAST, 3)]);
@@ -345,16 +266,14 @@ fn a_coord_touching_its_net_on_two_faces_names_the_first() {
     );
 }
 
-/// The clauses [`why_no_site`] builds its refusals from, as the
-/// tables below spell them out.
+/// The clauses [`why_no_site`] builds its refusals from.
 const STRAIGHT_CLAUSE: &str =
     "a buffer repeater carries a signal only where the wire runs straight through it at one height";
 const ON_A_FACE_CLAUSE: &str = "runs straight but touches another block of its own net on one of its faces, as (7,0,1) touches (7,0,0)";
 const CUTS_CLAUSE: &str = "a buffer repeater, which joins only the blocks at its back and front, would cut that block off from the dust it replaces";
 const TOO_WEAK_CLAUSE: &str = "and one further back would leave too little strength to get there";
 
-/// Every record of what a walk refused: nothing, bends, touches,
-/// both. The touching coord is `(7,0,1)`, beside `(7,0,0)`.
+/// Every record of what a walk refused; the touching coord is `(7,0,1)`, beside `(7,0,0)`.
 fn refusals() -> [Refused; 4] {
     let touching = Some(Touching {
         at: CellCoord::new(7, 0, 1),
@@ -377,8 +296,7 @@ fn refusals() -> [Refused; 4] {
     ]
 }
 
-/// [`why_no_site`] for a walk that left `(0,0,0)` and gave up on
-/// `(16,0,0)`, held to `allowance` and able to go `reach` steps back.
+/// [`why_no_site`] for a walk from `(0,0,0)` that gave up on `(16,0,0)`.
 fn why_from_origin(
     blocked: Blocked,
     starts_on_unpowered: bool,
@@ -397,29 +315,8 @@ fn why_from_origin(
     })
 }
 
-/// Every way a walk that started on the coord before `unpowered` can
-/// be blocked, crossed with every record of what it refused, as the
-/// clause after the refusal's colon.
-///
-/// Hand-built: [`why_no_site`] is asked directly, since no one tree
-/// reaches every pair. Two rows are in the table for completeness,
-/// since [`repeater_sites`] never builds them:
-///
-/// - `NoneCloseEnough` with nothing refused, which it would only
-///   build for an allowance of zero, and every allowance is at least
-///   one.
-/// - `NoneCloseEnough` for a sink with no budget, held to the limit
-///   and so reachable from 16 steps back. Such a sink is past its
-///   allowance only when the block before it is too: a block of
-///   dust past the limit, which is nearer the source and so is the
-///   one the walk is for, or a source with more than the limit
-///   already spent, where the walk ends at once as `NoneBetween`.
-///
-/// That second row is the one whose `reach`, 16, is not the limit's
-/// 15, so it is the row that tells a clause rendered from
-/// [`NoRepeaterSite::reach`] from one rendered from the limit.
-/// [`repeater_sites_builds_two_pairs_of_allowance_and_start`] pins
-/// the pairs the walk does build.
+/// Includes two pairs [`repeater_sites`] never builds; the sink row's `reach` of 16, not the
+/// limit's 15, tells a clause rendered from `reach` from one rendered from the limit.
 #[test]
 fn every_blocked_and_refused_pair_reads_as_one_clause() {
     let [nothing, bends, touches, both] = refusals();
@@ -429,8 +326,7 @@ fn every_blocked_and_refused_pair_reads_as_one_clause() {
         CUTS_CLAUSE,
         TOO_WEAK_CLAUSE,
     );
-    // A sink with no budget: held to the limit, and reading the dust
-    // before it, so a repeater 16 steps back still reaches it.
+    // A sink reads the dust before it, so a repeater 16 steps back still reaches it.
     let sink = (Allowance::Limit, DUST_ATTENUATION_LIMIT + 1);
     let cases = [
         (
@@ -499,24 +395,7 @@ fn every_blocked_and_refused_pair_reads_as_one_clause() {
     }
 }
 
-/// A walk that started on `unpowered` itself, a block of dust a
-/// repeater could stand in place of, names it among the coords it
-/// walked: "between the two" would leave out the first coord it
-/// asked about. Every way it can be blocked, crossed with every
-/// record of what it can refuse — never nothing, since it asked
-/// about `unpowered`.
-///
-/// Hand-built, as the table above is, and the `NoneCloseEnough` rows
-/// are in it for completeness: [`repeater_sites`] never builds them.
-/// It starts a walk on `unpowered` only when the block before it is
-/// within the limit, so the block that last restored strength is at
-/// most `DUST_ATTENUATION_LIMIT + 1` steps back, and the walk
-/// reaches it, which makes the record `NoneBetween`, no later than
-/// it runs out of coords close enough. Nor is a block of dust ever
-/// held to a budget, as two of those rows have it:
-/// [`repeater_sites_of_scope`] gives budgets only to cells.
-/// [`repeater_sites_builds_two_pairs_of_allowance_and_start`] pins
-/// the pairs the walk does build.
+/// The `NoneCloseEnough` and budget rows are ones [`repeater_sites`] never builds.
 #[test]
 fn a_walk_that_starts_on_unpowered_names_it_among_the_coords() {
     let [_, bends, touches, both] = refusals();
@@ -527,8 +406,7 @@ fn a_walk_that_starts_on_unpowered_names_it_among_the_coords() {
         TOO_WEAK_CLAUSE,
     );
     let through = "after (0,0,0) up to and including (16,0,0)";
-    // A block of dust: held to the limit, and stood in place of, so a
-    // repeater no more than 15 steps back reaches it.
+    // A block of dust is stood in place of, so a repeater at most 15 steps back reaches it.
     let dust = (Allowance::Limit, DUST_ATTENUATION_LIMIT);
     let cases = [
         (
@@ -587,20 +465,6 @@ fn a_walk_that_starts_on_unpowered_names_it_among_the_coords() {
     }
 }
 
-/// The records [`repeater_sites`] builds from the walks a scope can
-/// hand it — `spent` within the limit, and a budget only on a sink,
-/// as [`repeater_sites_of_scope`] gives them — come in two pairs of
-/// allowance and start. A walk that starts on `unpowered` does so on
-/// a block of dust, held to the limit, and reaches the block that
-/// last restored strength before it runs out of coords close enough.
-/// A walk held to a budget starts before the sink, and can end
-/// either way. Each record's `reach` is the allowance it was held
-/// to.
-///
-/// Swept over a straight run into a staircase, every coord of which
-/// turns, with the run's length, the staircase's, `spent` and the
-/// sink's budget varied. The set of what it meets is asserted equal
-/// to the three below, so the sweep is shown to reach each of them.
 #[test]
 fn repeater_sites_builds_two_pairs_of_allowance_and_start() {
     let mut met = BTreeSet::new();
@@ -646,14 +510,7 @@ fn repeater_sites_builds_two_pairs_of_allowance_and_start() {
     );
 }
 
-/// A coord past its allowance one step from the block that last
-/// restored strength leaves the walk nothing to refuse, and the
-/// refusal says there is no coord between the two rather than
-/// describing coords that are not there.
-///
-/// Hand-built with one block more spent than the limit: from the
-/// limit itself, a sink one step on still reads the last block of
-/// dust.
+/// One block more spent than the limit: from the limit, a sink one step on still reads the dust.
 #[test]
 fn a_stretch_with_no_coord_in_it_says_so() {
     let path = walk((0, 0, 0), &[(EAST, 1)]);
@@ -705,17 +562,8 @@ fn a_stretch_with_no_coord_in_it_says_so() {
     );
 }
 
-/// Dust past the limit whose block before it is past the limit too
-/// is not stood in place of: a repeater there would read that block,
-/// which the signal no longer lights. The walk starts on the coord
-/// before it, as for a sink, and here that is the source.
-///
-/// Hand-built with one block more spent than the limit, as
-/// [`a_stretch_with_no_coord_in_it_says_so`] is: the budget search
-/// never hands a walk more than the limit, so no scope gets here.
-/// Unlike that test's, `unpowered` is dust with straight wire on both
-/// sides, so a walk that started on it would stand a repeater there,
-/// and then refuse on that repeater.
+/// A repeater on `unpowered` would read a block the signal no longer lights. Hand-built: the
+/// budget search never hands a walk more than the limit.
 #[test]
 fn dust_whose_block_before_is_past_the_limit_is_walked_back_from() {
     let path = walk((0, 0, 0), &[(EAST, 6)]);
@@ -735,9 +583,6 @@ fn dust_whose_block_before_is_past_the_limit_is_walked_back_from() {
     );
 }
 
-/// The stretch a refusal names starts at the last repeater, not at
-/// the source: the wire before that repeater is already refreshed,
-/// and a coord on it cannot stand in for one past it.
 #[test]
 fn a_staircase_past_a_repeater_is_measured_from_that_repeater() {
     let mut moves = vec![(EAST, 20)];
@@ -747,8 +592,7 @@ fn a_staircase_past_a_repeater_is_measured_from_that_repeater() {
     }
     let path = walk((0, 0, 0), &moves);
     let tree = NetTree::from_paths(&[&path]);
-    // (16,0,0) first; then (19,0,0), the last straight coord before
-    // the staircase; then nothing past (19,0,0) is straight.
+    // Repeaters at (16,0,0) and (19,0,0), the last straight coord before the staircase.
     assert_eq!(
         repeater_sites(&tree, 0, &HashMap::new()),
         Err(NoRepeaterSite {
@@ -767,8 +611,6 @@ fn a_staircase_past_a_repeater_is_measured_from_that_repeater() {
     );
 }
 
-/// Dust already spent at the source brings the first repeater
-/// forward by as much.
 #[test]
 fn dust_spent_at_the_source_brings_the_first_repeater_forward() {
     let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 20)])]);
@@ -779,9 +621,6 @@ fn dust_spent_at_the_source_brings_the_first_repeater_forward() {
     );
 }
 
-/// A sink with a budget below the limit — a cell that passes its
-/// strength on — takes a repeater close enough to arrive within it,
-/// where a sink without one takes none.
 #[test]
 fn a_sink_with_a_budget_takes_a_repeater_within_it() {
     let tree = NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 10)])]);
@@ -794,13 +633,9 @@ fn a_sink_with_a_budget_takes_a_repeater_within_it() {
     );
 }
 
-/// A budget no coord near enough can meet is refused, and the
-/// refusal says so — not that every coord turns, because two of
-/// them run straight; they are just too far back.
 #[test]
 fn a_budget_no_straight_coord_can_meet_is_refused() {
-    // 3 east then 1 south: the coord before the sink is a corner,
-    // and the straight one before that is 2 blocks out.
+    // The coord before the sink is a corner, and the straight one before that is 2 blocks out.
     let path = walk((0, 0, 0), &[(EAST, 3), (SOUTH, 1)]);
     let tree = NetTree::from_paths(&[&path]);
     let sink = CellCoord::new(3, 0, 1);
@@ -863,14 +698,7 @@ fn a_budget_no_straight_coord_can_meet_is_refused() {
     );
 }
 
-/// A cell that passes strength on, whose own wire out cannot reach its sink even from one block
-/// spent, is refused on its own net: the wire out has no room, however short the wire in.
-///
-/// A Java comparator AND at `(0,0,0)`, 1 block from its sensor, drives a gate up a staircase,
-/// every coord of which turns. At 17 steps that is 16 blocks of dust, one too many from a fresh
-/// source, so no budget in `1..=15` is met. At 16 it would be met only from nothing spent, which
-/// no cell ever is, so it is refused on the comparator's net too rather than given a budget of
-/// zero that blames the wire in.
+/// At 16 steps the budget would need nothing spent, which no cell ever is.
 #[test]
 fn a_cell_whose_own_wire_has_no_room_is_refused_on_its_own_net() {
     let cell = CellCoord::new(0, 0, 0);
@@ -936,19 +764,7 @@ fn a_cell_whose_own_wire_has_no_room_is_refused_on_its_own_net() {
     }
 }
 
-/// A cell that passes strength on, whose own wire out has nowhere
-/// for a repeater, sends its repeater upstream onto the wire into
-/// it — and a cell that restores strength needs none at all.
-///
-/// The sensor is 10 blocks from the cell in a straight line, and
-/// the cell 8 from its actuator up a staircase, every coord of
-/// which turns. Measured one net at a time neither needs a
-/// repeater. Through a Bedrock OR the two are one 18-block run of dust,
-/// and the only coords a repeater can carry it through are on the
-/// sensor's straight run: the staircase can take 8 blocks already
-/// spent, so the repeater stands 1 block before the cell.
-///
-/// Trees grown by hand, so both legs are pinned coord by coord.
+/// The staircase out can take 8 blocks spent, so the repeater stands 1 block before the cell.
 #[test]
 fn a_cell_that_passes_strength_on_sends_its_repeater_upstream() {
     let cell = CellCoord::new(10, 0, 0);
@@ -1006,17 +822,7 @@ fn a_cell_that_passes_strength_on_sends_its_repeater_upstream() {
     }
 }
 
-/// A cell that passes strength on and drives nothing is held to the
-/// whole limit, counting its own coord as a block of dust, so a dust
-/// merge stays lit — not to the allowance of a sink, which reads the
-/// dust before it and would let the merge be the block past the
-/// limit.
-///
-/// The sensor is 16 steps from the cell along a straight run: 15
-/// blocks of dust, which bring a sink the signal with no repeater
-/// and leave a dust merge on the 16th. Hand-built, since no `.crn`
-/// keeps a cell that drives nothing: a `logic` binding nothing
-/// consumes draws `W_LOGIC_UNUSED_SIGNAL` and its cell is dropped.
+/// Hand-built: no `.crn` keeps a cell that drives nothing.
 #[test]
 fn a_cell_that_passes_strength_on_and_drives_nothing_is_held_to_the_limit() {
     let cell = CellCoord::new(16, 0, 0);

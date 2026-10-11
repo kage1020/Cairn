@@ -1,7 +1,3 @@
-//! The coordinate conventions asked directly: how far apart two coords
-//! are, the orders nets and coords are walked in, where each pad stands,
-//! and which coords neighbour one another.
-
 use std::collections::HashSet;
 
 use super::{PadColumn, beside, coord_key, input_pad, manhattan, net_ref_key, output_pad, under};
@@ -52,11 +48,9 @@ fn the_column_steps_over_the_cell_row_only_when_there_is_one() {
 fn input_pad_saturates_at_depth_minus_one() {
     let region = reservation(10, 4, 1);
     assert_eq!(input_pad(0, WITH_CELLS, &region), CellCoord::new(0, 0, 0));
-    // Input #1 steps over the cell row, so no pad stands face to
-    // face with the cell at the end of the row.
+    // Input #1 steps over the cell row at `z = 1`.
     assert_eq!(input_pad(1, WITH_CELLS, &region), CellCoord::new(0, 0, 2));
     assert_eq!(input_pad(2, WITH_CELLS, &region), CellCoord::new(0, 0, 3));
-    // depth-1 = 3 ceilings anything past the third input.
     assert_eq!(input_pad(5, WITH_CELLS, &region), CellCoord::new(0, 0, 3));
 }
 
@@ -69,8 +63,6 @@ fn output_pad_sits_on_right_edge_and_saturates_z() {
     assert_eq!(output_pad(5, WITH_CELLS, &region), CellCoord::new(3, 0, 3));
 }
 
-/// With no cell row to keep off, the pads take every row from
-/// `z = 0`, and saturate the same way.
 #[test]
 fn a_cell_less_column_takes_every_row() {
     let region = reservation(4, 3, 1);
@@ -80,10 +72,6 @@ fn a_cell_less_column_takes_every_row() {
     }
 }
 
-/// The rows the pad-row refusal reserves are the rows the pads
-/// stand in: the highest `z` of `n` pads, plus one, in a region deep
-/// enough not to saturate. Asked of both columns, because the
-/// refusal reads whichever one the pads were laid by.
 #[test]
 fn rows_counts_the_rows_the_pads_span() {
     let region = reservation(4, 100, 1);
@@ -98,11 +86,6 @@ fn rows_counts_the_rows_the_pads_span() {
     assert_eq!(CELL_LESS.rows(2), 2, "two pads and no cell row");
 }
 
-/// In a region exactly as deep as [`PadColumn::rows`] asks, every
-/// pad has a row of its own. This is the half a refusal reading one
-/// rule and coordinates laid by another would break: a cell-less
-/// column refused or accepted by the stepping rule would either ask
-/// for a row it does not use or stack two pads on the last one.
 #[test]
 fn a_region_as_deep_as_rows_asks_gives_every_pad_its_own_row() {
     for column in [WITH_CELLS, CELL_LESS] {
@@ -119,14 +102,7 @@ fn a_region_as_deep_as_rows_asks_gives_every_pad_its_own_row() {
     }
 }
 
-/// What a strand of dust reaches is its own plane.
-///
-/// The four in-plane steps and no others: up and down are left to
-/// the physical tile layer, because whether dust at `y + 1` reads
-/// the dust below it depends on what is standing between them and
-/// the pseudo-2.5D model does not carry that. Spelled out here
-/// rather than derived from [`STEPS`], so widening the rule to six
-/// steps has to be written down twice.
+// Spelled out, not derived from `STEPS`, so widening the rule has to be written down twice.
 #[test]
 fn a_strand_reaches_the_four_coords_in_its_own_plane() {
     let mut reached: Vec<CellCoord> = beside(CellCoord::new(2, 1, 3)).collect();
@@ -151,16 +127,7 @@ fn a_strand_reaches_the_four_coords_in_its_own_plane() {
     );
 }
 
-/// What the tile layer is handed is one layer down, and five
-/// coords wide.
-///
-/// The depth is the half [`beside`]'s own test cannot see: every
-/// fixture in this crate fits inside `void=2`, so a rule reaching
-/// two layers down would name the same pairs in all of them and
-/// nothing would fail. Spelled out as coords rather than derived
-/// from the deltas, for the reason the [`beside`] test is: the
-/// rule the tile layer is handed has to be written down twice
-/// before it can change.
+// Every fixture fits in `void=2`, so only this test sees a rule reaching two layers down.
 #[test]
 fn the_layer_handed_to_the_tile_layer_is_the_one_directly_under() {
     let mut reached: Vec<CellCoord> = under(CellCoord::new(2, 3, 3)).collect();

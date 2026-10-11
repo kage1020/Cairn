@@ -1,10 +1,5 @@
-//! Plumbing shared by the routing, delay and crossing passes: opening a scope, laying its nets,
-//! measuring each node against the routed trees, and folding the per-scope results into a pass
-//! output.
-//!
-//! The three passes rebuild the same trees from the same IR, so the steps that decide what those
-//! trees are live here once. What each pass writes into the phase, and what it refuses over, stays
-//! with the pass.
+//! Plumbing shared by the routing, delay and crossing passes, which must rebuild the same trees
+//! from the same IR.
 
 use std::collections::HashMap;
 
@@ -20,9 +15,7 @@ use crate::routing_geometry::{
 };
 use crate::saturating_index;
 
-/// Refuses a scope that reached `stage` with cells or output drivers but no reservation, under
-/// the placement pass's `E_NO_CIRCUIT_REGION` so one fault has one code across stages. Anchored on
-/// the first cell, or a default span for a scope with only outputs.
+/// Refuses a scope with cells or outputs but no reservation, under placement's own code.
 fn missing_region_diagnostic(
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
@@ -47,8 +40,7 @@ fn missing_region_diagnostic(
     )
 }
 
-/// One scope a pass is working on: the IR it writes into, cloned from the entry, the geometry
-/// every pass measures against, and the nets laid over it.
+/// One scope a pass is working on, its nets laid.
 pub(crate) struct OpenScope {
     pub(crate) ir: PlacementIr,
     pub(crate) region: CircuitRegionReservation,
@@ -58,16 +50,7 @@ pub(crate) struct OpenScope {
     pub(crate) nets: Nets,
 }
 
-/// Open `entry` for the pass that runs as `stage` over the `netlist`
-/// netlist, and lay its nets.
-///
-/// `Ok(None)` for a scope with neither cells nor actuator pads, which the pass hands back verbatim;
-/// `ScopedPlacementIr::push` drops these, so only a hand-built IR has one.
-///
-/// A scope with cells or pads but no reservation is refused rather than passed through, because
-/// each pass writes a phase field that `PlacementPhase` promises after its stage. The placement
-/// pass already refuses such a scope, so only a hand-built IR reaches this. Every other refusal is
-/// [`lay_nets`]'.
+/// Opens `entry` and lays its nets; `Ok(None)` for a scope with neither cells nor actuator pads.
 pub(crate) fn open_scope(
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
@@ -101,16 +84,9 @@ pub(crate) fn open_scope(
 
 /// `NetRef → source coord`: the input pad for a sensor, the cell body for a gate.
 ///
-/// Any IR a prior stage built is in range: `Cell(j)` by the topological invariant (`j < i` inside
-/// `cells[i]`), `Input(i)` because `inputs` is copied from the netlist the nets came from. Only
-/// the range is checked, not that `j` names an *earlier* cell: the closure has no reading cell to
-/// compare against, and it also answers for output drivers. The ordering half is the
-/// `debug_assert!`s in [`crate::netlist`].
-///
 /// # Panics
 ///
-/// Panics on either index out of range, which only a hand-built IR can cause. Clamping instead
-/// would root the net somewhere plausible, so a bug would reach the author as a circuit.
+/// On an index out of range, which only a hand-built IR can cause.
 fn source_of_net<'a>(
     region: &'a CircuitRegionReservation,
     column: PadColumn,
@@ -136,40 +112,8 @@ fn source_of_net<'a>(
     }
 }
 
-/// The router over this scope, every net and its routed tree, or the first refusal the
-/// reservation earns.
-///
-/// Four refusals under two codes: `E_ROUTE_CONGESTION` for a reservation too shallow to hold its
-/// pad row and for a sink the router proves walled in; `E_ATTENUATION_LIMIT` for a sink further
-/// from its driver than [`MAX_ATTENUATION_SEGMENT`] in a straight line, and for one no route
-/// within that cap reaches. Only one comes out, in this order:
-///
-/// 1. the collapsed pad row, the cause the others are symptoms of: a pad on a cell body strands
-///    sinks, and no distance the author changes makes it fit;
-/// 2. the sink over the cap in a straight line, because its repair is the *opposite* of a
-///    stranded sink's. Room does not shorten a straight line, and for a reservation as wide as
-///    the `size=` it came from, enlarging makes it worse, so a scope with both faults gets the
-///    fix line that is true;
-/// 3. the stranded sink, walled in or with no route within the cap, ordered by [`unroutable`].
-///    The second shape shares the cap's code but not this repair: room can give it a shorter
-///    way round.
-///
-/// All three passes ask the pad row and the stranded sink because only stage 2 refuses them
-/// otherwise, and a caller of [`crate::compile_delay`] or [`crate::compile_crossing`] with its own
-/// IR skips stage 2. Downstream, neither shows: a stranded sink's route is one step, and a
-/// collapsed pad reads as a layout. The over-cap sink is the delay pass's own refusal; asking it
-/// here only saves laying the route first.
-///
-/// The router is built here rather than by each caller, so a pass holding a [`Router`] has been
-/// through every refusal.
-///
-/// # The `netlist` noun
-///
-/// Every refusal opens with `<netlist> netlist for ...`, and `netlist` (`placed`, `routed`,
-/// `delayed`) is a parameter because all three passes arrive here. It names the netlist that was
-/// handed in, since these are the ways it cannot be wired. An advisory about the layout the router
-/// produced names that one instead, as
-/// [`crate::routing_geometry::tile_layer_clearance`] says `routed netlist`.
+/// The router and every net's routed tree, or the first refusal, cause first: a collapsed pad row,
+/// a sink over the cap in a straight line, then a stranded sink.
 pub(crate) fn lay_nets<F>(
     ir: &PlacementIr,
     blocks: &[BlockSite],
@@ -200,19 +144,8 @@ where
     })
 }
 
-/// Refuses a sink the attenuation cap already puts out of reach, before a route to it is laid.
-///
-/// [`manhattan`] is a floor on every route between two coords, so a pair further apart than
-/// [`MAX_ATTENUATION_SEGMENT`] has no route the delay pass would accept. Laying one first costs a
-/// coord of search per block of distance, which a `region=` taken from a `size=` makes millions.
-///
-/// A floor, not the measure, so this refuses strictly less than [`crate::delay`] does: a region
-/// 256 wide puts its pad 255 blocks from the driver and routes 257 to get there. The router's
-/// cap-bounded search and stage 3 catch the rest.
-///
-/// Walked in [`crate::delay`]'s order (every cell's drivers by index, then every actuator pad), so
-/// where both refuse the same sink they name it the same way. They can still name different sinks,
-/// since they measure different quantities.
+/// Refuses a sink further than the cap from its driver in a straight line, before laying a route;
+/// walked in [`crate::delay`]'s order, so both name a sink the same way.
 fn beyond_attenuation<F>(
     ir: &PlacementIr,
     entry: &ScopedPlacementIrEntry,
@@ -252,11 +185,7 @@ where
     None
 }
 
-/// The refusal [`beyond_attenuation`] returns, under the cap's own code.
-///
-/// The fix line is not [`crate::delay`]'s "enlarge `region=`": room shortens a route that goes
-/// round something, but not a straight line, and for a `region=` as wide as its `size=`, with the
-/// actuator column at `x = width - 1`, enlarging makes it worse.
+/// Its fix line is not delay's "enlarge `region=`": room cannot shorten a straight line.
 fn unreachable_sink_diagnostic(
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
@@ -278,22 +207,7 @@ fn unreachable_sink_diagnostic(
     )
 }
 
-/// Refuses a scope whose reservation collapses two blocks onto one coord, naming the block that
-/// landed second, under `E_ROUTE_CONGESTION` because the cause is the reserved area.
-///
-/// With the placement pass's coordinates, two blocks share a coord in one of two ways:
-///
-/// - a pad column taller than the region: past [`PadColumn::rows`] the pads saturate at
-///   `depth - 1`. The placement pass refuses on the same number, so both hand the author
-///   [`PadColumn::depth_rule`];
-/// - a region one column wide in a scope with no cells and both sensors and actuators: the two
-///   pad columns are one, and pad #0 of each stands at `(0,0,0)` at any depth. A scope with cells
-///   cannot reach this, because its row needs three columns or more.
-///
-/// The fix line names the width when the second applies and the depth rule always; a hand-built IR
-/// that collides some other way gets the same fix line. Through `cairn` the width branch is
-/// unreachable, since `placement::pad_column_diagnostic` refuses first; it serves a library caller
-/// with its own IR.
+/// Refuses a reservation that puts two blocks on one coord, naming the one that landed second.
 fn pad_overlap_diagnostic(
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
@@ -333,22 +247,16 @@ fn pad_overlap_diagnostic(
     )
 }
 
-/// The nets of one scope: the router they were laid with, driver → sinks, and driver → routed
-/// tree.
+/// The nets of one scope: the router they were laid with, driver → sinks, and driver → tree.
 pub(crate) struct Nets {
-    /// Kept so a caller that needs the obstacle set again (the routing pass's tile-layer advisory)
-    /// cannot build it differently.
+    /// Kept so a caller needing the obstacle set again cannot build it differently.
     pub(crate) router: Router,
     pub(crate) sinks: HashMap<NetRef, Vec<CellCoord>>,
     pub(crate) trees: HashMap<NetRef, NetTree>,
 }
 
 impl Nets {
-    /// The routed length from `net`'s source to `sink`: what stage 2 records as wire and stage 3
-    /// counts buffer repeaters against.
-    ///
-    /// `route_to` answers `None` only for a sink that is not a terminal of the net, which
-    /// [`collect_nets`] rules out by building the terminals from the same driver list.
+    /// The routed length from `net`'s source to `sink`.
     pub(crate) fn segment(&self, net: NetRef, sink: CellCoord) -> u32 {
         let route = self
             .trees
@@ -366,11 +274,7 @@ impl Nets {
     }
 }
 
-/// Measures every cell and actuator pad, each told its index so a panic can name it, then commits
-/// each figure through `commit` with the identity a phase-transition panic names.
-///
-/// The commit panics in release too: the `*_at` transitions refuse a phase the pass does not
-/// consume, which is what running a pass twice hands it.
+/// Measures every cell and actuator pad, then commits each figure into its phase through `commit`.
 pub(crate) fn attribute_nodes<T>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,
@@ -400,8 +304,7 @@ pub(crate) fn attribute_nodes<T>(
     }
 }
 
-/// Runs `lower` over every scope, keeping the IR of each one that succeeds and collecting the
-/// findings in scope order. A refused scope contributes its refusal and no IR.
+/// Runs `lower` over every scope, keeping each IR that succeeds and every finding, in scope order.
 pub(crate) fn lower_scopes<F>(
     input: &ScopedPlacementIr,
     mut lower: F,

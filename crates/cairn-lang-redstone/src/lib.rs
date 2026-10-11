@@ -1,34 +1,5 @@
-//! Redstone for Cairn.
-//!
-//! Synthesizes a signal-graph (Logic IR) into a netlist, places and routes the netlist into a
-//! voxel circuit, and verifies it with a headless per-tick simulator. The cell library is
-//! three-tier (logical cell → edition cell → physical tile) so an edition difference is
-//! confined to the library.
-//!
-//! The passes, in the order of `spec/redstone` "Connection to the IR and phases" and
-//! "Place-and-route":
-//!
-//! - [`synth::synthesize`] lowers the Intent IR's `logic` bindings, sensors and actuators into an
-//!   edition-neutral Logic IR;
-//! - [`netlist::compile_netlist`] rewrites that DAG into a Netlist IR of cells and nets;
-//! - [`edition_netlist::compile_edition_netlist`] picks each cell's realisation for a
-//!   [`cairn_lang_core::Edition`], the edition-cell tier of
-//!   `spec/redstone` "Edition differences", as an [`edition_netlist_ir::EditionNetlistIr`];
-//! - [`placement::compile_placement`], stage 1, lays the cells out inside each scope's
-//!   `circuit region=` reservation;
-//! - [`routing::compile_routing`], stage 2, lays a Steiner tree per net and fills each cell's
-//!   `wire_length`;
-//! - [`delay::compile_delay`], stage 3, fills each cell's `local_delay_ticks`, a local wire cost
-//!   rather than an arrival time;
-//! - [`crossing::compile_crossing`], stage 4, fills each cell's `buffer_coords` with the coord
-//!   of every implicit buffer repeater. Crossings are prevented rather than legalized: stage 2
-//!   lays each net around the ones before it, climbing to a
-//!   [`placement_ir::RouteLayer::Bridge`] layer where the plane has no way round.
-//!
-//! Each [`placement_ir::PlacedCellNode`] names the last pass to touch it with a
-//! [`placement_ir::PlacementStage`], which the JSON dump carries as a `stage` key in the
-//! vocabulary of `cairn synth --stage <s>`. The physical-tile layer and the simulator are not
-//! implemented here.
+//! Redstone for Cairn: lowers the Intent IR's `logic` to a Logic IR and a netlist, then places,
+//! routes, times and buffers it, in the order of `spec/redstone` "Place-and-route".
 
 pub mod crossing;
 pub mod delay;
@@ -78,9 +49,6 @@ pub use placement_ir::{
 pub use routing::{RoutingOutput, compile_routing};
 pub use synth::{SynthOutput, synthesize};
 
-/// Saturating `usize -> u32` for every index space in the crate. A `.crn` that overflows `u32`
-/// is far past any build the compiler would finish, so this clamps rather than panics on
-/// adversarial input.
 pub(crate) fn saturating_index(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }

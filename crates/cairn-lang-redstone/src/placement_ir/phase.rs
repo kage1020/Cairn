@@ -1,7 +1,5 @@
-//! The phase a placed cell or actuator pad is in as the place-and-route
-//! passes write to it, the `stage` tag that names that phase on the wire,
-//! and the transitions between phases, each of which refuses a pass run
-//! out of order.
+//! A placed node's phase through the place-and-route passes, its `stage` tag, and the transitions,
+//! which refuse a pass run out of order.
 
 use std::fmt;
 
@@ -9,35 +7,20 @@ use serde::{Deserialize, Serialize};
 
 use super::{BufferCoord, CellCoord, ScopedPlacementIrEntry};
 
-/// Which place-and-route pass last wrote to a [`PlacedCellNode`], emitted as the `stage` key of
-/// the JSON form.
-///
-/// Without it a consumer would infer the stage from which optional keys are present, and
-/// [`PlacementPhase::Delayed`] and a [`PlacementPhase::Legalized`] with no buffers carry the same
-/// keys, because an empty `buffer_coords` is skipped.
-///
-/// The words are the values `cairn synth --stage <s>` accepts, so a dump names the flag that
-/// produced it; keep them in step with the CLI's `SynthStage`, which its tests check.
-/// `#[non_exhaustive]` because edition legalization, the fifth stage, has no variant.
-///
-/// [`PlacedCellNode`]: super::PlacedCellNode
+/// Which place-and-route pass last wrote to a placed node: the JSON form's `stage` key, in the
+/// words `cairn synth --stage <s>` accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum PlacementStage {
-    /// Produced by [`crate::placement::compile_placement`] — paired
-    /// with [`PlacementPhase::Unrouted`].
+    /// Produced by [`crate::placement::compile_placement`].
     Placement,
-    /// Produced by [`crate::routing::compile_routing`] — paired with
-    /// [`PlacementPhase::Routed`].
+    /// Produced by [`crate::routing::compile_routing`].
     Route,
-    /// Produced by [`crate::delay::compile_delay`] — paired with
-    /// [`PlacementPhase::Delayed`].
+    /// Produced by [`crate::delay::compile_delay`].
     Delay,
-    /// Produced by [`crate::crossing::compile_crossing`] — paired with
-    /// [`PlacementPhase::Legalized`], whether or not that pass had any
-    /// buffer to materialise.
+    /// Produced by [`crate::crossing::compile_crossing`], buffers or none.
     Crossing,
 }
 
@@ -54,63 +37,32 @@ impl PlacementStage {
     }
 }
 
-/// Progressive state of a [`PlacedCellNode`] through the first four of the five stages of
-/// `spec/redstone` "Place-and-route"; edition legalization has no variant.
-///
-/// Every legal `(wire_length, local_delay_ticks, buffer_coords)` combination is one variant:
-///
-/// | Producer                                             | Variant                                                                     | `stage` tag   |
-/// |------------------------------------------------------|-----------------------------------------------------------------------------|---------------|
-/// | [`crate::placement::compile_placement`] (Stage 1)    | [`Self::Unrouted`]                                                          | `placement`   |
-/// | [`crate::routing::compile_routing`]     (Stage 2)    | [`Self::Routed`] `{ wire_length }`                                          | `route`       |
-/// | [`crate::delay::compile_delay`]         (Stage 3)    | [`Self::Delayed`] `{ wire_length, local_delay_ticks }`                      | `delay`       |
-/// | [`crate::crossing::compile_crossing`]   (Stage 4)    | [`Self::Legalized`] `{ wire_length, local_delay_ticks, buffer_coords }`     | `crossing`    |
-///
-/// The rightmost column is [`Self::stage`].
-///
-/// Illegal shapes, such as `local_delay_ticks` without `wire_length`, cannot be represented.
-/// [`Self::route`], [`Self::delay`] and [`Self::legalize`] are the transitions, and panic when
-/// called out of order; [`Self::try_route`], [`Self::try_delay`] and [`Self::try_legalize`] return
-/// a [`PlacementPhaseTransitionError`] instead, for a caller to whom that is recoverable input. A
-/// [`Self::Legalized`] phase may have no buffers.
-///
-/// `#[non_exhaustive]` so an edition-legalization variant is additive.
-///
-/// [`PlacedCellNode`]: super::PlacedCellNode
+/// A placed node's state through the first four stages of `spec/redstone` "Place-and-route", one
+/// variant per legal combination of `wire_length`, `local_delay_ticks` and `buffer_coords`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PlacementPhase {
     /// Fresh out of the placement pass — no wire, no delay, no buffers.
     Unrouted,
-    /// After Steiner routing: wire length is known, delay and buffers
-    /// are not yet.
+    /// After Steiner routing: wire length is known.
     Routed {
-        /// Routed wire length from every driver into this cell, per
-        /// [`crate::routing::compile_routing`].
+        /// Routed wire length from every driver into this node.
         wire_length: u32,
     },
-    /// After delay insertion: delay ticks have been folded in over the
-    /// routed wire length, per [`crate::delay::compile_delay`].
+    /// After delay insertion.
     Delayed {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
-        /// The owning node's base delay (`spec/redstone` "Time model";
-        /// zero for an actuator pad) plus `BUFFER_REPEATER_TICKS` per
-        /// implicit buffer repeater on each distinct net feeding it.
-        /// A local wire cost, not an arrival time — see the
-        /// [`crate::delay`] module doc.
+        /// Base delay plus buffer ticks on each distinct feeding net; not an arrival time.
         local_delay_ticks: u32,
     },
-    /// After crossing legalization: buffer coordinates for the implicit
-    /// repeaters the delay pass counted have been materialised, per
-    /// [`crate::crossing::compile_crossing`].
+    /// After crossing legalization: the buffer repeaters have coords.
     Legalized {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
         /// Preserved from [`Self::Delayed`].
         local_delay_ticks: u32,
-        /// The buffer repeaters the delay pass counted, empty when it counted none. See
-        /// [`BufferCoord`] for the shape and order of the entries.
+        /// The buffer repeaters the delay pass counted, possibly none.
         buffer_coords: Vec<BufferCoord>,
     },
 }
@@ -127,9 +79,7 @@ impl PlacementPhase {
         }
     }
 
-    /// Local delay ticks once delay insertion has run, `None`
-    /// otherwise. See the `local_delay_ticks` field on
-    /// [`Self::Delayed`].
+    /// Local delay ticks once delay insertion has run, `None` otherwise.
     #[must_use]
     pub const fn local_delay_ticks(&self) -> Option<u32> {
         match self {
@@ -143,11 +93,7 @@ impl PlacementPhase {
         }
     }
 
-    /// Buffer coordinates once crossing legalization has run, empty otherwise; [`Self::stage`]
-    /// tells a legalized phase without buffers from an earlier one.
-    ///
-    /// No wildcard arm, so a new variant is a compile error here rather than an empty slice that
-    /// drops its data from the dump.
+    /// Buffer coordinates once crossing legalization has run, empty otherwise.
     #[must_use]
     pub fn buffer_coords(&self) -> &[BufferCoord] {
         match self {
@@ -156,9 +102,7 @@ impl PlacementPhase {
         }
     }
 
-    /// Which pass last wrote to this cell, as the [`PlacementStage`] the JSON form carries.
-    ///
-    /// No wildcard arm, so a new variant cannot be labelled as an existing stage.
+    /// Which pass last wrote to this node.
     #[must_use]
     pub const fn stage(&self) -> PlacementStage {
         match self {
@@ -169,41 +113,31 @@ impl PlacementPhase {
         }
     }
 
-    /// [`Self::Unrouted`] → [`Self::Routed`]. A pipeline pass uses [`Self::route_at`], whose panic
-    /// also names the cell.
+    /// [`Self::Unrouted`] → [`Self::Routed`].
     ///
     /// # Panics
     ///
-    /// Panics if the phase is not [`Self::Unrouted`]: routing runs exactly once per placement.
-    /// [`Self::try_route`] returns an error instead.
+    /// If the phase is not [`Self::Unrouted`]; [`Self::try_route`] returns an error instead.
     #[track_caller]
     pub fn route(&mut self, wire_length: u32) {
         or_panic(self.try_route(wire_length), None);
     }
 
-    /// [`Self::Unrouted`] → [`Self::Routed`], naming `context` in the panic an out-of-order call
-    /// raises, since `#[track_caller]` gives only the calling line.
+    /// [`Self::route`], naming `context` in the panic.
     ///
     /// # Panics
     ///
-    /// Panics under exactly the conditions [`Self::route`] does.
+    /// As [`Self::route`].
     #[track_caller]
     pub fn route_at(&mut self, wire_length: u32, context: impl fmt::Display) {
         or_panic(self.try_route(wire_length), Some(&context));
     }
 
-    /// [`Self::Unrouted`] → [`Self::Routed`], refusing an out-of-order
-    /// call with an [`Err`] instead of a panic.
-    ///
-    /// For a caller to whom an out-of-order call is recoverable input, such as one reading a dump;
-    /// in a fresh compile it is a bug, which [`Self::route`] surfaces by panicking. A refused call
-    /// leaves the phase untouched. No wildcard arm, so a new variant forces a decision on whether
-    /// it can be routed.
+    /// [`Self::Unrouted`] → [`Self::Routed`], leaving the phase untouched on an out-of-order call.
     ///
     /// # Errors
     ///
-    /// Returns [`PlacementPhaseTransitionError::RouteOnNonUnrouted`],
-    /// carrying the phase it found, whenever the phase is not
+    /// [`PlacementPhaseTransitionError::RouteOnNonUnrouted`] when the phase is not
     /// [`Self::Unrouted`].
     pub fn try_route(&mut self, wire_length: u32) -> Result<(), PlacementPhaseTransitionError> {
         match self {
@@ -219,38 +153,31 @@ impl PlacementPhase {
         }
     }
 
-    /// [`Self::Routed`] → [`Self::Delayed`]. A pipeline pass uses [`Self::delay_at`].
+    /// [`Self::Routed`] → [`Self::Delayed`].
     ///
     /// # Panics
     ///
-    /// Panics if the phase is not [`Self::Routed`]: delay insertion runs exactly once per routed
-    /// IR. [`Self::try_delay`] returns an error instead.
+    /// If the phase is not [`Self::Routed`]; [`Self::try_delay`] returns an error instead.
     #[track_caller]
     pub fn delay(&mut self, local_delay_ticks: u32) {
         or_panic(self.try_delay(local_delay_ticks), None);
     }
 
-    /// [`Self::Routed`] → [`Self::Delayed`], naming `context` in the
-    /// panic an out-of-order call raises, as [`Self::route_at`] does.
+    /// [`Self::delay`], naming `context` in the panic.
     ///
     /// # Panics
     ///
-    /// Panics under exactly the conditions [`Self::delay`] does.
+    /// As [`Self::delay`].
     #[track_caller]
     pub fn delay_at(&mut self, local_delay_ticks: u32, context: impl fmt::Display) {
         or_panic(self.try_delay(local_delay_ticks), Some(&context));
     }
 
-    /// [`Self::Routed`] → [`Self::Delayed`], refusing an out-of-order
-    /// call with an [`Err`] instead of a panic. See [`Self::try_route`]
-    /// for which callers want this form and why the arms are
-    /// enumerated explicitly.
+    /// [`Self::Routed`] → [`Self::Delayed`], leaving the phase untouched on an out-of-order call.
     ///
     /// # Errors
     ///
-    /// Returns [`PlacementPhaseTransitionError::DelayOnNonRouted`],
-    /// carrying the phase it found, whenever the phase is not
-    /// [`Self::Routed`].
+    /// [`PlacementPhaseTransitionError::DelayOnNonRouted`] when the phase is not [`Self::Routed`].
     pub fn try_delay(
         &mut self,
         local_delay_ticks: u32,
@@ -270,42 +197,31 @@ impl PlacementPhase {
         Ok(())
     }
 
-    /// [`Self::Delayed`] → [`Self::Legalized`]. A pipeline pass uses [`Self::legalize_at`].
+    /// [`Self::Delayed`] → [`Self::Legalized`].
     ///
     /// # Panics
     ///
-    /// Panics if the phase is not [`Self::Delayed`]: crossing legalization runs exactly once per
-    /// delayed IR, so running it twice, or before delay insertion, panics rather than producing a
-    /// plausible stale IR. [`Self::try_legalize`] returns an error instead.
+    /// If the phase is not [`Self::Delayed`]; [`Self::try_legalize`] returns an error instead.
     #[track_caller]
     pub fn legalize(&mut self, buffer_coords: Vec<BufferCoord>) {
         or_panic(self.try_legalize(buffer_coords), None);
     }
 
-    /// [`Self::Delayed`] → [`Self::Legalized`], naming `context` in the
-    /// panic an out-of-order call raises, as [`Self::route_at`] does.
+    /// [`Self::legalize`], naming `context` in the panic.
     ///
     /// # Panics
     ///
-    /// Panics under exactly the conditions [`Self::legalize`] does.
+    /// As [`Self::legalize`].
     #[track_caller]
     pub fn legalize_at(&mut self, buffer_coords: Vec<BufferCoord>, context: impl fmt::Display) {
         or_panic(self.try_legalize(buffer_coords), Some(&context));
     }
 
-    /// [`Self::Delayed`] → [`Self::Legalized`], refusing an
-    /// out-of-order call with an [`Err`] instead of a panic. See
-    /// [`Self::try_route`] for which callers want this form and why the
-    /// arms are enumerated explicitly.
-    ///
-    /// A refused call drops `buffer_coords` and leaves the phase as it was; clone the vector first
-    /// to keep it.
+    /// [`Self::Delayed`] → [`Self::Legalized`]; an out-of-order call drops `buffer_coords`.
     ///
     /// # Errors
     ///
-    /// Returns
-    /// [`PlacementPhaseTransitionError::LegalizeOnNonDelayed`],
-    /// carrying the phase it found, whenever the phase is not
+    /// [`PlacementPhaseTransitionError::LegalizeOnNonDelayed`] when the phase is not
     /// [`Self::Delayed`].
     pub fn try_legalize(
         &mut self,
@@ -331,9 +247,6 @@ impl PlacementPhase {
     }
 }
 
-/// The panicking transition forms are their `try_*` mirror plus this,
-/// so the guard itself is stated once and the two forms cannot disagree
-/// about which transitions are legal.
 #[track_caller]
 fn or_panic(result: Result<(), PlacementPhaseTransitionError>, context: Option<&dyn fmt::Display>) {
     if let Err(error) = result {
@@ -342,28 +255,20 @@ fn or_panic(result: Result<(), PlacementPhaseTransitionError>, context: Option<&
 }
 
 /// Why a [`PlacementPhase`] transition refused: the transition attempted and the phase it found.
-///
-/// Returned by the `try_*` transitions and rendered by the panicking ones, so a recovered refusal
-/// and a panic read alike. Carries the whole phase rather than its name, because a consumer
-/// diagnosing a bad dump wants the values the phase got as far as. `#[non_exhaustive]` like
-/// [`PlacementPhase`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PlacementPhaseTransitionError {
-    /// [`PlacementPhase::try_route`] was called on a phase that had
-    /// already been routed, delayed, or legalized.
+    /// [`PlacementPhase::try_route`] on a phase already routed.
     RouteOnNonUnrouted {
         /// The phase found instead of [`PlacementPhase::Unrouted`].
         current: PlacementPhase,
     },
-    /// [`PlacementPhase::try_delay`] was called on a phase that had not
-    /// been routed yet, or had already been delayed or legalized.
+    /// [`PlacementPhase::try_delay`] on a phase not routed, or already delayed.
     DelayOnNonRouted {
         /// The phase found instead of [`PlacementPhase::Routed`].
         current: PlacementPhase,
     },
-    /// [`PlacementPhase::try_legalize`] was called on a phase that had
-    /// not been delayed yet, or had already been legalized.
+    /// [`PlacementPhase::try_legalize`] on a phase not delayed, or already legalized.
     LegalizeOnNonDelayed {
         /// The phase found instead of [`PlacementPhase::Delayed`].
         current: PlacementPhase,
@@ -371,8 +276,7 @@ pub enum PlacementPhaseTransitionError {
 }
 
 impl PlacementPhaseTransitionError {
-    /// The phase the refused transition found, readable without a match that
-    /// `#[non_exhaustive]` would make need a `_` arm.
+    /// The phase the refused transition found.
     #[must_use]
     pub const fn current(&self) -> &PlacementPhase {
         match self {
@@ -382,9 +286,7 @@ impl PlacementPhaseTransitionError {
         }
     }
 
-    /// Renders this refusal with `context` spliced in where [`PlacementPhase::route_at`] and the
-    /// other `*_at` forms put theirs, so a recovering caller names what it was working on in the
-    /// panics' own wording.
+    /// Renders this refusal with `context` where the `*_at` panics put theirs.
     #[must_use]
     pub fn with_context<'a, C: fmt::Display + 'a>(&'a self, context: C) -> impl fmt::Display + 'a {
         TransitionMessage {
@@ -393,8 +295,6 @@ impl PlacementPhaseTransitionError {
         }
     }
 
-    /// The transition method that refused, as it is spelled in the
-    /// message.
     const fn method(&self) -> &'static str {
         match self {
             Self::RouteOnNonUnrouted { .. } => "route",
@@ -434,18 +334,10 @@ impl fmt::Display for PlacementPhaseTransitionError {
 
 impl std::error::Error for PlacementPhaseTransitionError {}
 
-/// The cardinality clause of every refused transition's message, spelled once so every transition
-/// states the same strength.
-///
-/// "Exactly" rather than "at most", because a transition refuses a phase that never reached its
-/// source as well as a re-run: a skipped stage is as much a bug as a repeated one.
+/// The cardinality clause of every refusal: "exactly", since a skipped stage is a bug too.
 pub(super) const TRANSITION_CARDINALITY: &str = "must run exactly once per";
 
-/// The one rendering of a [`PlacementPhaseTransitionError`], so the fallible and panicking forms
-/// cannot drift apart. An absent context drops the whole ` for {context}` clause.
-///
-/// The context is a type parameter so [`PlacementPhaseTransitionError::with_context`] can own its
-/// caller's value; the panic path uses `&dyn fmt::Display`.
+/// The one rendering of a [`PlacementPhaseTransitionError`]; no context drops ` for {context}`.
 struct TransitionMessage<'a, C: fmt::Display> {
     error: &'a PlacementPhaseTransitionError,
     context: Option<C>,
@@ -471,9 +363,7 @@ impl<C: fmt::Display> fmt::Display for TransitionMessage<'_, C> {
     }
 }
 
-/// Panics for an out-of-order [`PlacementPhase`] transition, with the message a recovering
-/// caller's error renders. `#[track_caller]` on every layer down to here keeps the reported
-/// location the pass's own.
+/// Panics with the message a recovering caller's error renders.
 #[track_caller]
 fn transition_panic(
     error: &PlacementPhaseTransitionError,
@@ -482,17 +372,7 @@ fn transition_panic(
     panic!("{}", TransitionMessage { error, context });
 }
 
-/// Names a placed cell or pad in the panic of an out-of-order transition, for
-/// [`PlacementPhase::route_at`] and the other `*_at` forms.
-///
-/// A [`PlacedCellNode`] has no source-level name, so it is named by its index, coord and scope,
-/// written as the pass diagnostics write them (`cell #{index}`, `({x},{y},{z})`,
-/// ``{kind} `{name}` ``) so a panic and a diagnostic about one cell read alike. The layer is shown
-/// only off [`RouteLayer::Plane`], where a cell never is; shown rather than asserted, because a
-/// breadcrumb built for every cell of every pass must not panic itself.
-///
-/// [`PlacedCellNode`]: super::PlacedCellNode
-/// [`RouteLayer::Plane`]: super::RouteLayer::Plane
+/// Names a placed cell or pad in a transition panic, in the pass diagnostics' wording.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CellIdentity<'a> {
     index: usize,
@@ -501,8 +381,7 @@ pub(crate) struct CellIdentity<'a> {
     scope: &'a ScopedPlacementIrEntry,
 }
 
-/// Which list the index in a [`CellIdentity`] indexes, since both start at zero and "cell #0"
-/// about an actuator pad would send the reader to the wrong line.
+/// Which list the index in a [`CellIdentity`] indexes.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PlacedSubject {
     /// An entry of [`PlacementIr::cells`](super::PlacementIr::cells).
@@ -521,10 +400,7 @@ impl PlacedSubject {
 }
 
 impl<'a> CellIdentity<'a> {
-    /// Breadcrumb for the cell at `index`, whose coord is `coord`.
-    ///
-    /// The coord is passed in rather than read from `scope.ir.cells[index]` because a pass
-    /// transitions its own clone of the IR, which `scope.ir` need not match.
+    /// Breadcrumb for the cell at `index`, at `coord` in the pass's own clone of the IR.
     pub(crate) const fn new(
         index: usize,
         coord: CellCoord,

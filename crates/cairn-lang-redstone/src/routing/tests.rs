@@ -1,6 +1,3 @@
-//! Routing behaviours that need crate-internal access: the wire coords themselves, which the IR
-//! does not carry, and scopes whose cells sit in different phases.
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::error::Span;
 
@@ -11,9 +8,6 @@ use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
 use crate::placement_ir::{CellCoord, PlacedCellNode, PlacementIr, PlacementPhase};
 use crate::test_fixtures::{ROUTED, placed_cell, reservation, scoped};
 
-/// No net in the example corpus has dust drawn inside a component: every coord of a net's wire
-/// is free space, its own source or one of its own sinks. A unit test because the wire coords
-/// are crate-internal.
 #[test]
 fn no_example_draws_dust_inside_a_component() {
     use std::collections::{HashMap, HashSet};
@@ -23,9 +17,6 @@ fn no_example_draws_dust_inside_a_component() {
     use crate::grid::{PadColumn, input_pad, manhattan};
     use crate::routing_geometry::{Router, block_sites, collect_nets, net_trees};
 
-    // A count of wire coords would stay positive while an example slid into
-    // `E_ROUTE_CONGESTION` and left the walk, so the guards compare the scopes placed with the
-    // scopes routed, and count the strands that go round something.
     let mut placed_scopes = 0usize;
     let mut routed_scopes = 0usize;
     let mut detours = 0usize;
@@ -90,24 +81,16 @@ fn no_example_draws_dust_inside_a_component() {
     }
     assert_eq!(
         routed_scopes, placed_scopes,
-        "routing refused a scope placement laid out, and this walk cannot see \
-         the scopes it skips",
+        "routing refused a scope placement laid out",
     );
     assert!(
         routed_scopes >= 4,
-        "the corpus has to keep placing circuits for this to mean anything: \
-         {routed_scopes} scope(s)",
+        "the corpus places too few circuits: {routed_scopes} scope(s)",
     );
-    assert!(
-        detours > 0,
-        "no strand in the corpus goes round anything, so nothing here would \
-         notice a router that drew straight through",
-    );
+    assert!(detours > 0, "no strand in the corpus goes round anything");
     assert!(
         climbs > 0,
-        "no strand in the corpus leaves the ground layer, so the escape is \
-         no longer shown by any `.crn` that ships and the byte-identity \
-         test named for it is measuring a scope without one",
+        "no strand in the corpus leaves the ground layer",
     );
 }
 
@@ -133,11 +116,7 @@ fn examples() -> Vec<(std::path::PathBuf, String)> {
     found
 }
 
-/// One net's dust, checked against the nets already claimed and then added to them. Two nets on
-/// one coord, or one step apart in one plane, are two signals on one strand. The proptest in
-/// `routing_geometry` holds this over generated boxes; this holds it over the geometry placement
-/// produces. `owner` holds dust and the reach is asked per coord, so two strands two apart are
-/// not mistaken for one.
+/// Adds one net's dust to `owner`, panicking where it stands on or beside another net's.
 fn claim(
     owner: &mut std::collections::HashMap<CellCoord, NetRef>,
     net: NetRef,
@@ -163,9 +142,6 @@ fn claim(
     }
 }
 
-/// A scope with several unwireable sinks says how many, so sizing it is one decision.
-/// `Router::tree` strands every remaining sink when a round of the search comes back empty, so
-/// naming only the first would send the author round again for each.
 #[test]
 fn a_scope_with_several_unwireable_sinks_counts_them() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -174,9 +150,6 @@ fn a_scope_with_several_unwireable_sinks_counts_them() {
         name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
         span: Span::default(),
     });
-    // The pad lands at (0,0,0). Walling the row at (1,0,0) and the
-    // course above the two sinks leaves them nothing to be fed
-    // from, and `void=1` reserves no layer to come in over.
     for coord in [
         CellCoord::new(1, 0, 0),
         CellCoord::new(2, 0, 1),
@@ -222,10 +195,6 @@ fn a_scope_with_several_unwireable_sinks_counts_them() {
     );
 }
 
-/// A sink the reservation cannot reach is refused by every pass that would measure it, naming the
-/// same two coords. Stage 2 drops such a scope, but stages 3 and 4 rebuild the trees from a
-/// caller's IR, and the tree answers for a stranded sink with one step straight to the source,
-/// so without the check they would write ticks and buffers for a circuit that cannot be wired.
 #[test]
 fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -234,9 +203,6 @@ fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
         name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
         span: Span::default(),
     });
-    // The pad lands at (0,0,0). Walling (1,0,0) and (2,0,1) in
-    // leaves the sink at (2,0,0) with no free neighbour, and
-    // `void=1` reserves no layer to come in over the top.
     for coord in [CellCoord::new(1, 0, 0), CellCoord::new(2, 0, 1)] {
         ir.cells.push(placed_cell(
             EditionCell::JavaRepeaterOr,
@@ -280,9 +246,7 @@ fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
         routed.scoped.scopes.is_empty(),
         "the failed scope is elided rather than half-attributed",
     );
-    // Everything past the opening noun has to be identical across
-    // the three; the noun itself is what tells an author which pass
-    // refused, so it is the one word that must differ.
+    // Only the opening noun, which names the pass, may differ across the three.
     let said = refusal
         .primary
         .strip_prefix("placed netlist for ")
@@ -321,15 +285,6 @@ fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
     assert!(legalized.scoped.scopes.is_empty());
 }
 
-/// `wire_length` reports the dust that feeds a cell, so it counts
-/// the routed path and not the straight line between the driver's
-/// source and the cell. The sink here is 14 blocks from its pad
-/// with something standing halfway, so it is fed by 16 blocks of
-/// dust; a record carrying 14 beside a `local_delay_ticks` charged for
-/// 16 describes no single layout.
-///
-/// The blocker drives nothing — a block is all the fixture needs,
-/// and a driver would make it a second sink of the same net.
 #[test]
 fn wire_length_counts_the_routed_path() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -374,8 +329,7 @@ fn wire_length_counts_the_routed_path() {
     expected = "for cell #1 at (4,0,1) in struct `mixed` — routing must run exactly once per placement"
 )]
 fn route_panic_names_the_offending_cell_not_the_first_one() {
-    // Re-running the whole pass trips on `cells[0]`, which cannot tell a hard-coded index from the
-    // real one; an `Unrouted` first cell and a `Routed` second one put the panic on `cells[1]`.
+    // A `Routed` second cell, so the panic cannot name `cells[0]` by accident.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(8, 3, 2));
     ir.cells.push(placed_cell(

@@ -1,14 +1,5 @@
-//! Netlist IR: edition-neutral cells and nets over the Logic IR DAG.
-//!
-//! The netlist pass ([`crate::netlist::compile_netlist`]) rewrites each
-//! [`crate::logic_ir::GateNode`] into a [`CellNode`] tagged with a [`LogicalCell`], the top tier of
-//! the three-tier cell library (`Logical Cell → Edition Cell → Physical Tile`, `spec/redstone`
-//! "Edition differences"). The Java/Bedrock split is decided one tier down, in
-//! [`crate::edition_netlist_ir`].
-//!
-//! [`NetRef`] has the shape of the Logic IR's [`crate::logic_ir::SignalRef`]: an index into
-//! [`NetlistIr::inputs`] or [`NetlistIr::cells`], which is in topological order. Delay is not
-//! carried; per `spec/redstone` "Time model" it is first determined in the Placement IR.
+//! Netlist IR: edition-neutral cells and nets over the Logic IR DAG, the top tier of the cell
+//! library in `spec/redstone` "Edition differences". Delay is first fixed in the Placement IR.
 
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
@@ -17,10 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::logic_ir::{ScopeKind, Scoped, ScopedEntry};
 
-/// A reference to a driving net, resolved to either a top-level input port
-/// (a sensor emitting `-> sig.X`) or a cell output.
-///
-/// The two variants index separate arenas, so a consumer dispatches on the variant alone.
+/// A driving net: a top-level input port or a cell output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -32,16 +20,11 @@ use crate::logic_ir::{ScopeKind, Scoped, ScopedEntry};
 pub enum NetRef {
     /// Index into [`NetlistIr::inputs`].
     Input(u32),
-    /// Index into [`NetlistIr::cells`] — the output net of that cell.
+    /// Index into [`NetlistIr::cells`].
     Cell(u32),
 }
 
-/// Logical cell chosen for a [`CellNode`].
-///
-/// Edition-neutral: the same [`LogicalCell::And`] becomes Java `ComparatorAND` or Bedrock
-/// `TorchAND` in edition selection (`spec/redstone` "Edition differences"). `#[non_exhaustive]` so
-/// the sequential macros of `spec/redstone` "Two tiers, and the v1 boundary" (`latch`, `pulse`,
-/// `delay`, `edge_rising`, `edge_falling`, `counter`) can join without breaking a downstream match.
+/// Edition-neutral logical cell chosen for a [`CellNode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -62,10 +45,7 @@ pub enum LogicalCell {
     Mux,
 }
 
-/// Input-port name on a [`CellNode`].
-///
-/// The union over every [`LogicalCell`]: `Not` uses `A`, the two-input cells `A` and `B`, `Mux`
-/// `Sel`, `A` and `B`. `#[non_exhaustive]` so a sequential cell can add ports.
+/// Input-port name on a [`CellNode`], the union over every [`LogicalCell`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(test, derive(strum::EnumIter))]
@@ -79,8 +59,7 @@ pub enum PortName {
     Sel,
 }
 
-/// One `(port name, driving net)` pair on a [`CellNode`]; a struct so the JSON form has labelled
-/// fields.
+/// One `(port name, driving net)` pair on a [`CellNode`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CellPortDriver {
@@ -95,12 +74,9 @@ pub struct CellPortDriver {
 pub struct CellNode {
     /// Logical cell this node computes.
     pub cell: LogicalCell,
-    /// Port → net drivers, in each cell's canonical port order:
-    /// two-input gates emit `[A, B]`; `Not` emits `[A]`;
-    /// `Mux` emits `[Sel, A, B]`.
+    /// Port → net drivers in canonical order: `[A, B]`, `[A]` for `Not`, `[Sel, A, B]` for `Mux`.
     pub drivers: Vec<CellPortDriver>,
-    /// Byte range inherited from the source [`crate::logic_ir::GateNode`], which anchors later
-    /// passes' diagnostics.
+    /// Byte range of the source [`crate::logic_ir::GateNode`].
     #[serde(skip)]
     pub span: Span,
 }
@@ -136,12 +112,10 @@ pub struct NetlistIr {
     /// Actuator-driven nets, in source order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<NetlistOutput>,
-    /// Combinational cells in topological (definition) order: every driver is an input or an
-    /// earlier entry of this vector, so a consumer maps the DAG in one forward pass.
+    /// Cells in topological order: every driver is an input or an earlier cell.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cells: Vec<CellNode>,
-    /// `sig.NAME` → the net that defines it: [`crate::logic_ir::LogicIr::signal_defs`] with each
-    /// signal rewritten to a [`NetRef`], serialised the same way.
+    /// `sig.NAME` → the net that defines it.
     #[serde(
         skip_serializing_if = "IndexMap::is_empty",
         serialize_with = "crate::logic_ir::serialize_signal_defs"
@@ -177,16 +151,13 @@ impl Default for NetlistIr {
 /// Every scope's [`NetlistIr`], in source order across the whole module.
 pub type ScopedNetlistIr = Scoped<NetlistIr>;
 
-/// One entry in a [`ScopedNetlistIr`]: the Netlist IR synthesised from
-/// one scope's Logic IR.
+/// One entry in a [`ScopedNetlistIr`].
 pub type ScopedNetlistIrEntry = ScopedEntry<NetlistIr>;
 
 impl ScopedNetlistIr {
     /// Appends one scope's Netlist IR, skipping an empty one.
     pub fn push(&mut self, kind: ScopeKind, name: String, ir: NetlistIr) {
         if ir.is_empty() {
-            // Synth writes `signal_defs` only alongside an input, output or gate, so an entry here
-            // has no owner.
             debug_assert!(
                 ir.signal_defs.is_empty(),
                 "empty NetlistIr carries orphan signal_defs entries: {:?}",

@@ -1,9 +1,5 @@
-//! Where a scope's implicit buffer repeaters stand.
-//!
-//! The delay pass charges ticks for these repeaters and the crossing pass records their coords.
-//! Each builds its own [`RepeaterSites`] with [`repeater_sites_of_scope`] from the trees it
-//! rebuilt; the function is deterministic and nothing between the two stages moves a cell, so the
-//! two passes describe one circuit.
+//! Where a scope's implicit buffer repeaters stand. The delay and crossing passes each rebuild them
+//! from their own trees, so this must stay deterministic.
 
 use std::collections::{HashMap, HashSet};
 
@@ -16,15 +12,8 @@ use crate::placement_ir::{
 use crate::routing_geometry::{NetTree, net_label};
 use crate::saturating_index;
 
-/// Signal-attenuation ceiling, the attenuation limit of 15 blocks in `spec/redstone`
-/// "Place-and-route": the most blocks of dust a signal crosses since the last block that restored
-/// its strength.
-///
-/// A fresh source starts at strength 15 and dust decays one unit per block, so this many blocks
-/// carry its signal, the last at strength 1, which still drives the block after it. A segment is
-/// one step longer than its dust, so one of up to `DUST_ATTENUATION_LIMIT + 1` steps from a fresh
-/// source needs no buffer repeater. From a cell that passes on the strength it reads, the dust
-/// into the cell counts too, and a shorter segment can need one.
+/// The attenuation limit of `spec/redstone` "Place-and-route": the most blocks of dust a signal
+/// crosses since its strength was last restored.
 pub const DUST_ATTENUATION_LIMIT: u32 = 15;
 
 /// The node a segment feeds, as a panic about that segment names it.
@@ -37,9 +26,7 @@ pub(crate) enum Fed {
 }
 
 impl Fed {
-    /// Panics for a segment whose sink is not a terminal of the net that drives it, where the
-    /// driver list and the collected nets disagree. Carrying on would under-count the node's
-    /// buffers.
+    /// Panics for a segment whose sink is not a terminal of its net.
     pub(crate) fn is_not_a_terminal(self, net: NetRef, sink: CellCoord) -> ! {
         let (x, y, z) = (sink.x, sink.y, sink.z);
         match self {
@@ -53,20 +40,14 @@ impl Fed {
     }
 }
 
-/// Where every implicit buffer repeater of one scope stands, net by net, beside the tree each
-/// net's sites were walked on, so [`Self::along`] is never asked about one tree with the sites of
-/// another.
+/// Every implicit buffer repeater of one scope, net by net, kept with the tree it was walked on.
 pub(crate) struct RepeaterSites<'t> {
     per_net: HashMap<NetRef, (&'t NetTree, HashSet<CellCoord>)>,
 }
 
 impl RepeaterSites<'_> {
-    /// The repeaters the signal of `net` passes through on its way to `sink`, in the order it
-    /// meets them. Two sinks that share a stretch of the tree share its repeaters, because they
-    /// are read off one set.
-    ///
-    /// `None` when `sink` is not a terminal of `net`, which the caller turns into
-    /// [`Fed::is_not_a_terminal`].
+    /// The repeaters `net`'s signal passes through on its way to `sink`, in order; `None` when
+    /// `sink` is not a terminal of `net`.
     pub(crate) fn along(&self, net: NetRef, sink: CellCoord) -> Option<Vec<CellCoord>> {
         let (tree, sites) = self.per_net.get(&net)?;
         let route = tree.route_to(sink)?;
@@ -79,39 +60,8 @@ impl RepeaterSites<'_> {
     }
 }
 
-/// [`repeater_sites`] for every net of one scope, or the `E_ATTENUATION_LIMIT` that refuses the
-/// scope when a net has a run of dust past its allowance with no coord close enough for a
-/// repeater.
-///
-/// The attenuation limit runs from the last block that restored strength, not from the start of
-/// each net. A cell whose [`EditionCell::regenerates`] is `false` (a Bedrock OR, which is a dust
-/// merge, or a Java comparator AND, which never outputs more than its rear input carries) passes
-/// on the strength that reached it, so the dust before and after it count as one run. Two walks
-/// carry that across the cells:
-///
-/// - **Backwards**, cells last to first, each such cell gets a *budget*: the most dust its inputs
-///   may already have spent for the net it drives still to reach every one of its sinks. Its
-///   sinks come after it, so their budgets are known. The budget is the largest `spent` in
-///   `1..=15` that [`repeater_sites`] accepts; acceptance is downward-closed, since a smaller
-///   `spent` lowers every running total. Zero is not tried: every cell is at least one block of
-///   dust from its driver.
-/// - **Forwards**, nets in [`net_ref_key`] order, each net starts with the dust already spent at
-///   its source: none at a sensor pad or a cell that restores strength, otherwise the most any
-///   one of its inputs arrives with. For a dust merge that is the worst case, since any one input
-///   may be the only one on; for a comparator it is conservative, since the pass does not track
-///   which input is the rear. Its repeaters go where the running total would pass the limit or a
-///   sink's budget, which can be on the segment into a cell.
-///
-/// The backward walk refuses on the highest-index cell whose own wire cannot be fed at any budget;
-/// otherwise the forward walk refuses on the first net in its order with nowhere left for a
-/// repeater. Either way the net named does not depend on map iteration.
-///
-/// `trees` must be the ones [`lay_nets`] returned, whose [`NetTree::unreachable`] is always
-/// empty: an unreachable sink is parented straight to the source at any distance, and
-/// [`repeater_sites`] counts every step as one block.
-///
-/// [`EditionCell::regenerates`]: crate::edition_netlist_ir::EditionCell::regenerates
-/// [`lay_nets`]: crate::pass::lay_nets
+/// [`repeater_sites`] for every net of one scope, or the `E_ATTENUATION_LIMIT` refusing it. The
+/// dust either side of a cell that does not regenerate strength counts as one run.
 pub(crate) fn repeater_sites_of_scope<'t>(
     ir: &PlacementIr,
     entry: &ScopedPlacementIrEntry,
@@ -133,16 +83,11 @@ pub(crate) fn repeater_sites_of_scope<'t>(
         if cell.cell.regenerates() {
             continue;
         }
-        // A cell that drives nothing spares the whole limit. A budget counts the cell's own coord
-        // as dust, which keeps a dust merge lit; with no entry it would get a sink's allowance,
-        // one block more. Only a hand-built IR reaches this: a `logic` binding nothing consumes
-        // draws `W_LOGIC_UNUSED_SIGNAL` and its cell is dropped.
         let Some(tree) = trees.get(&cell_net(index)) else {
             budgets.insert(cell.coord, DUST_ATTENUATION_LIMIT);
             continue;
         };
-        // One block spent is tried last, so when no budget fits, the refusal is the walk that
-        // spends the least: the wire out of the cell is what has no room.
+        // Tried from the full limit down, so a refusal comes from the walk spending least.
         let mut refusal = None;
         let budget = (1..=DUST_ATTENUATION_LIMIT).rev().find(|spent| {
             match repeater_sites(tree, *spent, &budgets) {
@@ -200,8 +145,7 @@ pub(crate) fn repeater_sites_of_scope<'t>(
     Ok(RepeaterSites { per_net })
 }
 
-/// The dust a net's signal has spent on reaching `sink`: the steps since the last repeater on its
-/// route, or, with none, the whole route on top of what was `spent` at the source.
+/// The dust a net's signal has spent on reaching `sink`.
 fn spent_on_arrival(
     tree: &NetTree,
     sites: &HashSet<CellCoord>,
@@ -218,30 +162,20 @@ fn spent_on_arrival(
     }
 }
 
-/// A run of one net's dust the signal cannot cross, with no coord close
-/// enough for a repeater.
+/// A run of one net's dust with no coord close enough for a repeater.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct NoRepeaterSite {
-    /// The block the signal last left with its strength restored: a repeater placed before this
-    /// run, or the net's source, which is short of full strength by [`Self::spent`] when its
-    /// driver passes strength on.
+    /// The block the signal last left with its strength restored.
     from: CellCoord,
-    /// Blocks of dust already spent on leaving `from`: zero at a repeater or at a source that
-    /// restores strength.
+    /// Dust already spent on leaving `from`.
     spent: u32,
-    /// The coord nearest the source that is past its allowance (a block of dust past the limit,
-    /// or a sink reached over more dust than it allows), the first in [`NetTree::wire_path`] on a
-    /// tie.
+    /// The coord nearest the source that is past its allowance.
     unpowered: CellCoord,
     /// What `unpowered` may be reached over.
     allowance: Allowance,
-    /// How many steps before `unpowered` a repeater may stand and still bring it within its
-    /// allowance, which bounds the walk for a site: [`DUST_ATTENUATION_LIMIT`] for a block of
-    /// dust, one more for a sink with no budget, and the budget for a sink with one.
+    /// How many steps before `unpowered` a repeater may stand and still bring it within allowance.
     reach: u32,
     /// Whether the walk started on `unpowered` itself, a block of dust a repeater could replace.
-    /// It starts one coord back when `unpowered` is a sink, or when even the block before it is
-    /// past the limit.
     starts_on_unpowered: bool,
     /// How far back the walk went before it gave up.
     blocked: Blocked,
@@ -252,34 +186,27 @@ struct NoRepeaterSite {
 /// The most dust a coord may be reached over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Allowance {
-    /// [`DUST_ATTENUATION_LIMIT`]: a block of dust may be at most the limit's last; a sink or a
-    /// repeater may be reached over all of it.
+    /// The [`DUST_ATTENUATION_LIMIT`].
     Limit,
-    /// A cell that passes on the strength it reads: the wire out of it needs the rest of the
-    /// limit.
+    /// The budget of a cell that passes on the strength it reads.
     Budget(u32),
 }
 
-/// How far back a [`NoRepeaterSite`]'s walk went. With
-/// [`NoRepeaterSite::starts_on_unpowered`], that is which coords [`NoRepeaterSite::refused`]
-/// describes.
+/// How far back a [`NoRepeaterSite`]'s walk went.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Blocked {
     /// It walked back to `from` without finding a site.
     NoneBetween,
-    /// It walked the whole allowance before `unpowered` without finding a site; a repeater
-    /// further back would leave the signal too weak to reach it.
+    /// It walked the whole allowance before `unpowered` without finding a site.
     NoneCloseEnough,
 }
 
-/// Which [`Misfit`]s kept the coords a [`NoRepeaterSite`]'s walk passed over from holding a
-/// repeater. Both empty when the first coord it asked about was already `from`.
+/// Which [`Misfit`]s kept the coords a walk passed over from holding a repeater.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct Refused {
     /// Some coord turns, climbs or branches.
     bends: bool,
-    /// The coord nearest `unpowered` that runs straight at one height but touches another block
-    /// of its own net.
+    /// The coord nearest `unpowered` refused for touching another block of its net.
     touching: Option<Touching>,
 }
 
@@ -288,14 +215,12 @@ struct Refused {
 struct Touching {
     /// The coord a repeater was refused on.
     at: CellCoord,
-    /// The first of its faces, in [`faces`] order, that holds a coord of the same net other than
-    /// the ones before and after it on the path.
+    /// The first of its faces, in [`faces`] order, holding another coord of the net.
     touching: CellCoord,
 }
 
 impl Refused {
-    /// Records a coord refused for `misfit`. The first coord refused for touching is kept: the
-    /// walk runs back from `unpowered`, so it is the nearest.
+    /// Records a coord refused for `misfit`, keeping the first touching one, the nearest.
     fn add(&mut self, misfit: Misfit) {
         match misfit {
             Misfit::Bends => self.bends = true,
@@ -306,34 +231,8 @@ impl Refused {
     }
 }
 
-/// Where one net's implicit buffer repeaters stand, in [`NetTree::wire_path`] order, which is not
-/// any one sink's route order ([`RepeaterSites::along`] gives that).
-///
-/// A repeater reads the block behind it and drives the block in front, at its own height, so it
-/// can only stand where the wire runs straight through at one height with nothing branching off:
-/// on a fork it would starve one branch, and on a turn or climb it drives into nothing.
-///
-/// Placed on the net's tree rather than per sink, so every sink past a repeater is fed by that one
-/// block. The signal leaves the source with `spent` blocks of dust behind it. A coord the wire
-/// runs on past is dust, and may be at most the [`DUST_ATTENUATION_LIMIT`]th block since the
-/// last full-strength one; a sink or a repeater only reads the dust before it, so it may be
-/// reached over all of it, or over its entry in `budgets`. The walk finds the coord nearest the
-/// source that is past its allowance and puts a repeater on the last coord back from it that can
-/// hold one and is close enough (on that coord itself when it is dust and the block before it is
-/// within the limit), then walks again.
-///
-/// On a straight run from a fresh source that is every `DUST_ATTENUATION_LIMIT + 1`th coord, the
-/// count [`buffer_count_for_segment`] gives. Where a coord cannot hold one the repeater moves
-/// earlier, so the run past it can need one more than its length implies; on a fork it moves onto
-/// the trunk, where one block serves every branch.
-///
-/// `Err` when a coord past its allowance has no coord close enough behind it, since the last
-/// full-strength block, that can hold a repeater.
-///
-/// Every step of `tree` must move one block, which holds for the trees [`crate::pass::lay_nets`]
-/// hands on, whose [`NetTree::unreachable`] is empty.
-///
-/// [`buffer_count_for_segment`]: crate::delay::buffer_count_for_segment
+/// Where one net's repeaters stand, in [`NetTree::wire_path`] order, or the run with no coord for
+/// one. Every step of `tree` must move one block, so its [`NetTree::unreachable`] must be empty.
 fn repeater_sites(
     tree: &NetTree,
     spent: u32,
@@ -348,8 +247,7 @@ fn repeater_sites(
             .expect("every coord but the source was attached to one");
         children.entry(parent).or_default().push(*coord);
     }
-    // Dust counts its own block against the limit. A leaf (a sink) and a site (a repeater) only
-    // read the dust before them, so they may be reached one block further.
+    // A sink or a repeater only reads the dust before it, so it may be reached one block further.
     let allowance = |coord: CellCoord, sites: &HashSet<CellCoord>| {
         budgets.get(&coord).copied().unwrap_or(
             if children.contains_key(&coord) && !sites.contains(&coord) {
@@ -361,14 +259,8 @@ fn repeater_sites(
     };
     let mut sites: HashSet<CellCoord> = HashSet::new();
     loop {
-        // Dust spent since the last full-strength block, and depth from the source; `order` lists
-        // a parent before its children, so one pass fills both.
-        //
-        // Of the coords past their allowance, the one fixed first has the least depth, then the
-        // least `order` index, so the answer depends only on the tree. The walk back from it
-        // either refuses or stops within its allowance, so every round adds one site or returns
-        // `Err`. `first` holds the depth, the `order` index, the coord and the dust it is reached
-        // over.
+        // The coord fixed first has the least depth, then `order` index, so the answer depends only
+        // on the tree.
         let mut walked: HashMap<CellCoord, (u32, u32)> = HashMap::with_capacity(order.len());
         walked.insert(source, (spent, 0));
         let mut first: Option<(u32, usize, CellCoord, u32)> = None;
@@ -392,8 +284,7 @@ fn repeater_sites(
             break;
         };
         let reach = allowance(unpowered, &sites);
-        // A repeater can replace dust past the limit if the dust before it is within the limit. A
-        // sink cannot be replaced: the repeater has to stand before it.
+        // A repeater can replace dust past the limit, but not a sink.
         let starts_on_unpowered =
             children.contains_key(&unpowered) && reached <= DUST_ATTENUATION_LIMIT + 1;
         let mut candidate = if starts_on_unpowered {
@@ -452,8 +343,7 @@ fn repeater_sites(
         .collect())
 }
 
-/// The block the signal on `coord` last left at full strength: `coord` itself when it is the
-/// source or a repeater, otherwise the nearest of those behind it.
+/// The source or repeater the signal on `coord` last left at full strength.
 fn last_full_strength(tree: &NetTree, sites: &HashSet<CellCoord>, coord: CellCoord) -> CellCoord {
     let mut at = coord;
     while !sites.contains(&at) {
@@ -468,22 +358,14 @@ fn last_full_strength(tree: &NetTree, sites: &HashSet<CellCoord>, coord: CellCoo
 /// Why a repeater on a coord would not carry the signal on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Misfit {
-    /// The coord turns, climbs or branches. The source, with no coord before it, lands here too,
-    /// though [`repeater_sites`] stops before asking about it.
+    /// The coord turns, climbs or branches, or is the source.
     Bends,
-    /// The wire runs straight through it at one height, but another
-    /// block of the same net is on one of its faces.
+    /// The wire runs straight through, but another block of the net is on one of its faces.
     Touches(Touching),
 }
 
-/// `Ok` when a repeater on `coord` would carry the signal on: one coord before it and exactly one
-/// after, all three at the same height and on one line, and no other coord of the net touching
-/// it. A coord that fails both is a [`Misfit::Bends`].
-///
-/// Touching is asked of the grid, not the parent links: dust joins the dust beside it whether or
-/// not the tree runs between them, and a repeater joins only the blocks at its back and front, so
-/// any other block of the net beside it would be cut off. The check takes all six faces, as
-/// `spec/redstone` "Place-and-route" does.
+/// `Ok` when a repeater on `coord` carries the signal on: in line with one coord before and one
+/// after at one height, with no other block of the net on any face, linked in the tree or not.
 fn holds_repeater(
     tree: &NetTree,
     children: &HashMap<CellCoord, Vec<CellCoord>>,
@@ -517,9 +399,7 @@ fn holds_repeater(
     }
 }
 
-/// The refusal for a [`NoRepeaterSite`]. It names the node left without the signal: past the
-/// limit, the first cell, then the first actuator pad, whose route runs through `unpowered`;
-/// within a budget, the cell on `unpowered`, which the signal reaches too weak to pass on.
+/// The refusal for a [`NoRepeaterSite`], naming the node the signal does not reach.
 fn no_repeater_site_diagnostic(
     ir: &PlacementIr,
     entry: &ScopedPlacementIrEntry,
@@ -585,8 +465,7 @@ fn no_repeater_site_diagnostic(
         net = net_label(net, ir),
     );
     let footer = match allowance {
-        // A repeater stands on the block past the limit at the latest, reading the 15 before it,
-        // so the wire needs a straight coord in every 16 blocks.
+        // A repeater reads the 15 blocks before it, so the wire needs a straight coord every 16.
         Allowance::Limit => format!(
             "Fix: leave the wire room to run straight at least once in every {} — a larger `region=` is one way, moving what walls it in is another — or split the logic across several scopes, each with its own `circuit` line",
             blocks(DUST_ATTENUATION_LIMIT + 1),
@@ -615,8 +494,7 @@ fn blocks(n: u32) -> String {
     format!("{n} {}", if n == 1 { "block" } else { "blocks" })
 }
 
-/// Why a [`NoRepeaterSite`] had nowhere for a repeater: the clause of its refusal after the colon,
-/// naming exactly the coords the walk asked about.
+/// The clause of a [`NoRepeaterSite`]'s refusal after the colon.
 fn why_no_site(stretch: &NoRepeaterSite) -> String {
     const STRAIGHT: &str = "a buffer repeater carries a signal only where the wire runs straight through it at one height";
     const JOINS: &str = "joins only the blocks at its back and front";

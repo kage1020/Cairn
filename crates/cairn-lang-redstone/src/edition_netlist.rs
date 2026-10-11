@@ -1,10 +1,5 @@
-//! Netlist IR → Edition Netlist IR lowering.
-//!
-//! Maps every [`crate::netlist_ir::CellNode`] to one [`EditionCellNode`] whose [`EditionCell`]
-//! names the target edition's realisation of its [`crate::netlist_ir::LogicalCell`], the middle
-//! tier of the cell library (`spec/redstone` "Edition differences"). Drivers, ports and
-//! `signal_defs` are copied, so the topological order carries over. A pure lookup, with no
-//! diagnostics.
+//! Netlist IR → Edition Netlist IR lowering: each logical cell's realisation for the target
+//! edition, the middle tier of `spec/redstone` "Edition differences".
 
 use cairn_lang_core::Edition;
 
@@ -13,8 +8,7 @@ use crate::edition_netlist_ir::{
 };
 use crate::netlist_ir::{LogicalCell, NetlistIr, ScopedNetlistIr};
 
-/// Lowers a [`ScopedNetlistIr`] to a [`ScopedEditionNetlistIr`] for `edition`, one
-/// [`EditionNetlistIr`] per scope.
+/// Lowers a [`ScopedNetlistIr`] to a [`ScopedEditionNetlistIr`] for `edition`.
 #[must_use]
 pub fn compile_edition_netlist(
     scoped: &ScopedNetlistIr,
@@ -49,10 +43,6 @@ fn compile_scope(source: &NetlistIr, edition: Edition) -> EditionNetlistIr {
     out
 }
 
-/// The realisation of `logical` for `edition`.
-///
-/// No wildcard arm, so a new `Edition` or `LogicalCell` variant is a compile error here rather
-/// than a silent fallback to another edition's cell.
 fn select_edition_cell(logical: LogicalCell, edition: Edition) -> EditionCell {
     match (edition, logical) {
         (Edition::Java, LogicalCell::And) => EditionCell::JavaComparatorAnd,

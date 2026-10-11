@@ -1,6 +1,3 @@
-//! Delay-pass behaviours `tests/redstone/delay.rs` cannot reach through synth
-//! fixtures: shapes only a hand-built `PlacementIr` produces.
-
 use std::collections::HashSet;
 
 use cairn_lang_core::Edition;
@@ -18,13 +15,6 @@ use crate::placement_ir::{CellCoord, PlacementIr, PlacementPhase, ScopedPlacemen
 use crate::routing::compile_routing;
 use crate::test_fixtures::{ROUTED, placed_cell, reservation, routed_output, scoped, staircase};
 
-/// The sanity cap counts the dust, not the distance, on the segment into an actuator pad too.
-///
-/// [`trunk_detour`] with the far sink a pad routes `2 * width - 2` against a straight line of 2:
-/// exactly the cap at `width = MAX_ATTENUATION_SEGMENT / 2 + 1` and two over one wider, so the
-/// boundary is pinned from both sides. The fixture builds only even lengths; the odd side is
-/// pinned by [`a_detour_from_the_source_is_refused_at_the_cap_by_stage_two`]. The wording is
-/// asserted too, since the straight-line gate and the router's bound raise the same code.
 #[test]
 fn attenuation_cap_measures_the_routed_output_segment() {
     let at_cap = MAX_ATTENUATION_SEGMENT / 2 + 1;
@@ -55,13 +45,6 @@ fn attenuation_cap_measures_the_routed_output_segment() {
     }
 }
 
-/// A detour laid from the source in one piece is refused by stage 2, at the cap and not a block
-/// past it, before this pass measures it.
-///
-/// A sensor pad at `(0,0,0)` drives an actuator pad at the far edge with a cell on the straight
-/// line between, so the route is `width + 1`, over the top or beside. At
-/// `width = MAX_ATTENUATION_SEGMENT - 1` that is the cap; one wider, the router's bound refuses
-/// it through [`crate::pass::lay_nets`], so the refusal is stage 2's wording under this code.
 #[test]
 fn a_detour_from_the_source_is_refused_at_the_cap_by_stage_two() {
     let cap = MAX_ATTENUATION_SEGMENT;
@@ -110,12 +93,6 @@ fn a_detour_from_the_source_is_refused_at_the_cap_by_stage_two() {
     }
 }
 
-/// A cell is charged once per net that drives it, not once per port: two ports on one net are fed
-/// by one strand and the repeaters on it.
-///
-/// The second row, two ports on two nets, is the control: two segments, both charged, so a fold
-/// that dropped a net or charged a cell once reports a different number. (The segments are 16
-/// and 17 blocks, one buffer each; the rows differ in the number of nets, not the lengths.)
 #[test]
 fn a_cell_is_charged_once_per_net_that_drives_it() {
     for (label, port_b_net, expected) in [
@@ -167,20 +144,8 @@ fn a_cell_is_charged_once_per_net_that_drives_it() {
     }
 }
 
-/// `local_delay_ticks` is the wire cost of every net feeding a cell, summed, not the tick the
-/// cell's output settles on.
-///
-/// With one buffer on the `a` segment and two on `b`, three blocks stand on the wires that feed
-/// the cell, and stage 4 lays all three
-/// (`two_distinct_nets_charge_a_cell_for_every_buffer_under_it`). The output settles at
-/// `base + 2`, when the last input arrives. Both figures come from the same two lengths, so a
-/// fold that became a max would make them equal and trip the assert.
-///
-/// Calls the fold with a stand-in `buffers_on`, since what is pinned is how per-net charges
-/// combine; `a_cell_is_charged_once_per_net_that_drives_it` measures real routed segments.
 #[test]
 fn local_delay_is_the_wire_cost_not_the_arrival_time() {
-    // One buffer on the short segment, two on the long one.
     const SHORT: u32 = DUST_ATTENUATION_LIMIT + 2;
     const LONG: u32 = 2 * (DUST_ATTENUATION_LIMIT + 1) + 1;
     assert_eq!(buffer_count_for_segment(SHORT), 1);
@@ -229,8 +194,7 @@ fn local_delay_is_the_wire_cost_not_the_arrival_time() {
         "the wire cost is every buffer on every net feeding the cell",
     );
 
-    // What the output actually settles on: the longer segment, through the `max` an arrival walk
-    // would take.
+    // The arrival time takes the max over the nets.
     let arrival = base + ticks(SHORT).max(ticks(LONG));
     assert_eq!(
         recorded - arrival,
@@ -239,12 +203,7 @@ fn local_delay_is_the_wire_cost_not_the_arrival_time() {
     );
 }
 
-/// Every cell, and whether its output is at full strength whatever reached it: only the merge and
-/// the comparator pass strength on, and every `*Unpinned` placeholder, having no realisation,
-/// answers `false`.
-///
-/// `listed` fails to compile when a variant is added and the length check fails when one is left
-/// out, because `strand_invariant` reads this same method and a wrong entry would fool it too.
+// `listed` stops compiling when a variant is added; the count catches one left out.
 #[test]
 fn only_the_merge_and_the_comparator_pass_strength_on() {
     const fn listed(cell: EditionCell) {
@@ -289,13 +248,6 @@ fn only_the_merge_and_the_comparator_pass_strength_on() {
     }
 }
 
-/// A net with a stretch past the limit on which every coord turns
-/// is refused, rather than charged for a repeater stage 4 could
-/// only put on a turn.
-///
-/// Through stage 2 first: the router lays the staircase itself, and
-/// raises nothing, so this is a tree stage 2 hands on and stage 3
-/// has to answer.
 #[test]
 fn a_stretch_with_nowhere_for_a_repeater_is_refused() {
     let routed = compile_routing(&staircase(&PlacementPhase::Unrouted));
@@ -335,14 +287,8 @@ enum FarSink {
     Pad,
 }
 
-/// A segment over the cap that only the routed-length check can see.
-///
-/// Cell #0 drives cell #1 at the far end of a row `width - 1` long, and `far` two blocks away
-/// across a wall of cells ending two columns short of the row's end. The tree reaches `far` round
-/// the wall off the trunk laid for cell #1, so its route is `2 * width - 2` against a straight
-/// line of 2. The straight-line gate and the router's bound, which sees only the branch, both pass
-/// it; a detour laid from the source in one piece would be refused by the bound first. Hand-built,
-/// since placement puts every cell on one row.
+/// A segment over the cap only the routed-length check sees: `far` hangs off the trunk, round a
+/// wall, `2 * width - 2` routed against 2 in a straight line.
 fn trunk_detour(width: u32, far: FarSink) -> PlacementIr {
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(width, 3, 1));
@@ -385,9 +331,7 @@ fn trunk_detour(width: u32, far: FarSink) -> PlacementIr {
     ir
 }
 
-/// The width [`trunk_detour`] is built at for the over-cap side: its branch, `width` blocks, is 55
-/// under the cap, so the router lays it, and its total, `2 * width - 2`, is 144 over, so only this
-/// pass refuses it.
+/// A width whose branch the router lays within the cap but whose routed total is over it.
 const OVER_CAP_TRUNK: u32 = 201;
 const _: () = assert!(OVER_CAP_TRUNK <= MAX_ATTENUATION_SEGMENT);
 const _: () = assert!(2 * OVER_CAP_TRUNK - 2 > MAX_ATTENUATION_SEGMENT);
@@ -424,16 +368,10 @@ fn cell_driver_attenuation_primary_names_cell_and_port() {
     );
 }
 
-/// The delay pass's own attenuation refusal, for a route over the cap because it goes round
-/// something, drops its scope without disturbing a sibling. No `.crn` can write this shape (see
-/// [`trunk_detour`]), so the integration fixture covers the routing pass instead.
 #[test]
 fn a_detour_refusal_leaves_its_sibling_alone() {
-    // Scope one: the detour fixture, which clears the straight-line
-    // gate and the router's bound and fails the routed length.
     let detour = trunk_detour(OVER_CAP_TRUNK, FarSink::Cell);
 
-    // Scope two: roomy, and nothing in it is near the cap.
     let mut roomy = PlacementIr::new(Edition::Java);
     roomy.region = Some(reservation(16, 3, 3));
     roomy.cells.push(placed_cell(
@@ -474,9 +412,6 @@ fn a_detour_refusal_leaves_its_sibling_alone() {
         "the refusal must name the scope it belongs to, got {:?}",
         refusal.primary,
     );
-    // Which check answered: both say "routed netlist" under one code, so only the wording of the
-    // measurement tells them apart. The gate's phrase is asserted absent so a fixture that drifted
-    // into tripping the straight-line gate fails.
     assert!(
         refusal.primary.contains("has a driver segment of")
             && !refusal.primary.contains("in a straight line"),
@@ -527,10 +462,6 @@ fn missing_region_with_cells_fires_no_circuit_region() {
     );
 }
 
-/// Boundary values of `buffer_count_for_segment`, in steps from a fresh source to its sink: 16
-/// steps is 15 blocks of dust and needs no repeater, 17 needs one, and each repeater carries the
-/// signal 16 steps further. Row by row, so counting the sink as dust (`(s - 1) / 15`) or dropping
-/// the `- 1` (`s / 16`) trips the rows it moves.
 #[test]
 fn buffer_count_boundary_table() {
     for (steps, expected_buffers) in [
@@ -576,8 +507,7 @@ fn out_of_range_net_ref_cell_panics_loudly() {
     expected = "for cell #1 at (4,0,1) in struct `mixed` — delay insertion must run exactly once per routed IR"
 )]
 fn delay_panic_names_the_offending_cell_not_the_first_one() {
-    // Re-running the whole pass trips on `cells[0]`, which cannot tell a hard-coded index from the
-    // real one; a `Routed` first cell and a `Delayed` second one put the panic on `cells[1]`.
+    // A `Delayed` second cell, so the panic cannot name `cells[0]` by accident.
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(8, 3, 2));
     ir.cells.push(placed_cell(

@@ -7,12 +7,7 @@ use crate::grid::PadColumn;
 use crate::routing_geometry::{BlockKind, BlockSite, block_sites};
 use crate::{compile_edition_netlist, compile_netlist, synthesize};
 
-/// Every block the placement pass puts in the one scope `source`
-/// declares: cells, sensor pads and actuator pads.
-///
-/// Java only. A pad's coordinate is a function of the region and
-/// the cell count, and a cell's of its index, so the Bedrock layout
-/// is the same one.
+/// Every block the placement pass puts in `source`'s one scope, laid out for Java.
 fn placed_sites(source: &str) -> Vec<BlockSite> {
     let intent = lower(&parse(source).expect("the fixture parses"));
     let netlist = compile_netlist(&synthesize(&intent).scoped);
@@ -75,10 +70,8 @@ fn shared_coords(sites: &[BlockSite]) -> Vec<(BlockSite, BlockSite)> {
     shared
 }
 
-/// A chain of `cells` cells over `sensors` plates, the last cell on
-/// the first door and each other door on a sensor of its own, so
-/// the pads beside the row belong to nets the end cells have nothing
-/// to do with.
+/// A chain of `cells` cells over `sensors` plates, so the pads beside the row carry nets the end
+/// cells do not read.
 fn chain(cells: usize, sensors: usize, doors: usize, width: usize, depth: u32) -> String {
     let mut source =
         String::from("theme t:\n  slot wall -> @oak_planks\n  slot door -> @oak_door\n\n");
@@ -119,19 +112,8 @@ fn chain(cells: usize, sensors: usize, doors: usize, width: usize, depth: u32) -
     source
 }
 
-/// No pad stands face to face with a cell or on another block, at any width the row check
-/// accepts, and at the narrowest the end cells stand exactly one diagonal step from the pads.
-///
-/// The router keeps one net's dust off another's, not a pad off a cell, so a pad against a cell
-/// of another net would take one of that cell's faces where no pass looks; the pads skip the cell
-/// row to stay clear. Distance exactly 2 at the narrowest width, and a coord per block, keep the
-/// check from passing pads moved far away or stacked. The sweep starts at zero cells, where the
-/// region is exactly as deep as the pads; a cell-less scope starts at two columns, since one is
-/// refused (see [`super::pad_column_diagnostic`]).
 #[test]
 fn no_pad_stands_against_a_cell() {
-    // The narrowest row, where a pad on the cell row would stand against the inverter, which
-    // reads only `sig.a`, while carrying `sig.b`.
     let reported = "\
 theme t:
   slot wall -> @oak_planks

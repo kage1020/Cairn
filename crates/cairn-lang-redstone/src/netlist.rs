@@ -1,10 +1,4 @@
-//! Logic IR → Netlist IR lowering.
-//!
-//! Maps every [`crate::logic_ir::GateNode`] to a [`CellNode`] tagged with a [`LogicalCell`], the
-//! "Logical Cell selection" of `spec/redstone` "Connection to the IR and phases". The Logic IR is
-//! already topologically ordered and checked by [`crate::synth::synthesize`], so this is one
-//! forward walk with no diagnostics. The edition is chosen one step down, by
-//! [`crate::edition_netlist::compile_edition_netlist`].
+//! Logic IR → Netlist IR lowering: one [`LogicalCell`] per gate, in the Logic IR's order.
 
 use crate::logic_ir::{GateKind, LogicIr, ScopedLogicIr, SignalRef};
 use crate::netlist_ir::{
@@ -63,9 +57,8 @@ fn compile_scope(ir: &LogicIr) -> NetlistIr {
     netlist
 }
 
-/// Rewrites a Logic IR [`SignalRef`] as a [`NetRef`], debug-checking the arena bounds synth
-/// guarantees. `max_gate` is one past the largest legal `Gate` index: the cell count for an output
-/// or `signal_defs` entry, and the node's own index for an operand, which must point earlier.
+/// `max_gate` is one past the largest legal `Gate` index: the cell count, or for an operand the
+/// node's own index, since operands point earlier.
 fn net_ref_from(sig: SignalRef, max_gate: u32, inputs_len: u32) -> NetRef {
     match sig {
         SignalRef::Input(i) => {

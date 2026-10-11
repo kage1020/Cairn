@@ -2,9 +2,6 @@ use strum::IntoEnumIterator;
 
 use super::{DiagnosticCode, Severity};
 
-/// The prefix is the contract tooling filters on: a CI annotator treats `E_` as failing and `W_`
-/// as advisory by the string, not by `severity()`. The walk covers every variant, so the newest
-/// one cannot be left out.
 #[test]
 fn the_code_prefix_agrees_with_the_severity() {
     for code in DiagnosticCode::iter() {
@@ -21,8 +18,6 @@ fn the_code_prefix_agrees_with_the_severity() {
     }
 }
 
-/// Two codes sharing a string would make them indistinguishable to
-/// every consumer that matches on it.
 #[test]
 fn every_code_has_its_own_string() {
     let mut seen: Vec<&str> = DiagnosticCode::iter().map(DiagnosticCode::as_str).collect();
