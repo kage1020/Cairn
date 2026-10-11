@@ -82,12 +82,10 @@ pub struct AliasIndex {
 }
 
 impl AliasIndex {
-    /// Index with no groups. Used when a pack omits the `aliases`
-    /// component, and the reason [`Self::spellings_of`] answers with an
-    /// empty slice rather than an `Option`: a pack that cannot name a
-    /// rename is in exactly the position every pack was in before this
-    /// component existed, and the caller's fallback — the distance search
-    /// — is the same either way.
+    /// Index with no groups, used when a pack omits the `aliases`
+    /// component. [`Self::spellings_of`] answers with an empty slice rather
+    /// than `None` because the caller's fallback, the distance search, is
+    /// the same either way.
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -123,11 +121,8 @@ impl AliasIndex {
             let mut spellings: Vec<String> = Vec::with_capacity(group.spellings.len());
             for spelling in group.spellings {
                 let id = namespaced(namespace, &spelling);
-                // A spelling already claimed by *this* group is a repeat
-                // the author can delete; one claimed by another group is a
-                // pack that has two answers for one question and no rule
-                // for picking. The two need different edits, so they are
-                // reported apart.
+                // A repeat within this group and a spelling another group
+                // claims need different edits, so they are reported apart.
                 match by_spelling.get(&id) {
                     Some(&owner) if owner == at => {
                         return Err(AliasError::DuplicateSpelling { id });
@@ -154,11 +149,9 @@ impl AliasIndex {
     /// Every spelling of the block `id` names, `id` included, in declared
     /// order — empty when no group claims it.
     ///
-    /// `id` itself is returned rather than filtered out because the caller
-    /// that matters is already asking about an id its target does not
-    /// declare, and it filters the group by that table anyway. Dropping
-    /// `id` here would make this function's answer depend on which of two
-    /// callers asked.
+    /// `id` itself is kept: callers filter the group by their target's
+    /// table anyway, and dropping it would make the answer depend on which
+    /// caller asked.
     #[must_use]
     pub fn spellings_of(&self, id: &str) -> &[String] {
         self.by_spelling

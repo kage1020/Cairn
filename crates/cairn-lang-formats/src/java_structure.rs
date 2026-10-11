@@ -10,11 +10,8 @@
 //! DataVersion: Int
 //! ```
 //!
-//! `block_entities` and `entities` from the IR are intentionally not wired
-//! through — the lowering passes never populate them today, and the Java
-//! vanilla structure format expects them either absent or empty. Keeping
-//! that decision local to this module (rather than failing if the lists
-//! aren't empty) leaves the door open for future fixture / entity lowering.
+//! The IR's `block_entities` and `entities` are not written: lowering never
+//! populates them, and the format accepts them absent or empty.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState};
 pub use cairn_lang_nbt::Compound;
@@ -51,10 +48,9 @@ pub enum JavaStructureError {
     ///
     /// Unreachable through the compiler, where interning
     /// ([`Palette::intern`], [`Palette::try_intern`]) is the only source of
-    /// a [`PaletteIndex`] — but [`BlockArray`]'s fields are public and so is
-    /// this builder, so a consumer of the crate can hand over a grid and a
-    /// palette that disagree. Writing the index anyway produces a file that
-    /// names a slot the reader has to invent.
+    /// a [`PaletteIndex`], but [`BlockArray`]'s fields and this builder are
+    /// public, so a consumer can hand over a grid and a palette that
+    /// disagree.
     ///
     /// [`Palette::intern`]: cairn_lang_core::block_array::Palette::intern
     /// [`Palette::try_intern`]: cairn_lang_core::block_array::Palette::try_intern
@@ -67,10 +63,6 @@ pub enum JavaStructureError {
         len: usize,
     },
     /// A voxel dimension overflowed the `i32` wire width Java NBT uses.
-    /// In practice this can only fire on a structure bigger than `i32::MAX`
-    /// blocks along one axis — far beyond what `cairn lower` or any sane
-    /// build descriptor produces — but failing loud beats writing a
-    /// truncated header.
     #[error("dimension {axis} = {value} exceeds Java NBT i32 wire limit")]
     DimensionOverflow {
         /// Which axis overflowed (`"x"` / `"y"` / `"z"`).
@@ -156,10 +148,8 @@ impl From<VolumeError> for JavaStructureError {
 /// raise on this structure: each palette string is encodable, the voxel
 /// count fits a list's length prefix and is the grid's length, and the
 /// palette fits one too. [`Self::write_gzip`] can therefore fail only on
-/// I/O, and has no panic of its own to reach. That is what lets a caller validate every
-/// structure of a build before writing any of them without building any
-/// tree: the per-voxel `blocks` list is encoded straight from the grid as
-/// it is written, one entry at a time.
+/// I/O and has no panic of its own to reach, so a caller can validate
+/// every structure of a build before writing any, without building a tree.
 #[derive(Clone, Copy)]
 pub struct JavaStructure<'a> {
     block_array: &'a BlockArray,
@@ -193,10 +183,8 @@ impl std::fmt::Debug for JavaStructure<'_> {
 /// # Errors
 ///
 /// Returns [`JavaStructureError::AbstractPaletteEntry`] when a palette
-/// entry's id has no `:` separator — the registry pack normally resolves
-/// abstract tokens before they reach this point, but a `cairn lower` run
-/// without a pack can leak them in and we refuse to write a malformed
-/// structure rather than emit one Minecraft will silently treat as air.
+/// entry's id is not a concrete `namespace:identifier`, which Minecraft
+/// would silently load as air.
 /// Returns [`JavaStructureError::UnencodablePaletteString`] when an entry's
 /// id, a property name or a property value cannot be written as an NBT
 /// string, [`JavaStructureError::DimensionOverflow`] when a dimension does
@@ -287,9 +275,8 @@ impl JavaStructure<'_> {
         )?;
         root.list("blocks", 10, self.volume, |blocks| {
             // Same (y, z, x) order as `blocks_list`. `prepare_structure`
-            // checked every dimension fits `i32`, and each coordinate is
-            // below its dimension. It also checked `voxels` holds
-            // `self.volume` entries, and `Dims::index` is below that.
+            // checked every dimension fits `i32` and `voxels` holds
+            // `self.volume` entries, which bounds `Dims::index`.
             for y in 0..block_array.dims.y {
                 let yi = i32::try_from(y).expect("dims checked to fit i32");
                 for z in 0..block_array.dims.z {
@@ -434,15 +421,12 @@ fn palette_entry(state: &BlockState) -> Compound {
 }
 
 fn blocks_list(block_array: &BlockArray) -> Result<List, JavaStructureError> {
-    // The IR stores voxels in (y, z, x) order; emit blocks in the same
-    // order so successive compiles produce byte-identical output. AIR cells
-    // are included — vanilla mojang structure block output keeps them, and
-    // site placement needs them to distinguish "void" from "explicit air"
-    // cells.
+    // The IR's (y, z, x) order, so successive compiles produce
+    // byte-identical output. Air cells are included, as vanilla structure
+    // blocks write them, so placement can tell void from explicit air.
     //
-    // The caller already checked `dims` fits, so these per-voxel
-    // conversions cannot fail; they stay fallible rather than `expect` so
-    // a direct caller of `blocks_list` cannot panic.
+    // The caller has checked `dims` fits, but the conversions stay fallible
+    // rather than `expect` so this function cannot panic on its own.
     let mut entries: Vec<Compound> = Vec::with_capacity(block_array.dims.volume());
     for y in 0..block_array.dims.y {
         let yi = dim_to_i32(y, "y")?;

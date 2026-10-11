@@ -1,9 +1,8 @@
 //! Load a [`RegistryPack`] from the bundled built-in or from a directory.
 //!
 //! The built-in pack is embedded at compile time via `include_str!` so the
-//! Cairn binary never has to find a data file at runtime. The on-disk
-//! loader exists for tests in this module and for a future
-//! `--registry-pack <dir>` CLI flag.
+//! Cairn binary never has to find a data file at runtime. [`load_from_dir`]
+//! reads a pack directory through the same validation.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -58,15 +57,13 @@ const BUILTIN_BEDROCK: BuiltinFiles = builtin_files!("bedrock");
 pub const SUPPORTED_MANIFEST_SCHEMA: u32 = 1;
 /// Highest `data_versions.schema_version` this Cairn build understands.
 ///
-/// Bumped to 2 by the `targetable` column. A `schema_version: 1` table
-/// still loads and still means what it meant — every row of one was a
-/// buildable target and the column defaults to `true` — but a v1 *reader*
-/// handed a v2 table would offer its ordering rows as `--target` values,
-/// so the version had to move.
+/// Version 2 adds the `targetable` column. A `schema_version: 1` table
+/// still loads, every row targetable; a v1 *reader* must refuse a v2 table,
+/// or it would offer the ordering rows as `--target` values.
 pub const SUPPORTED_DATA_VERSIONS_SCHEMA: u32 = 2;
 
-/// Where a [`RegistryPack`] came from. Surfaced in diagnostics so a
-/// `--registry-pack` user can tell at a glance which directory was read.
+/// Where a [`RegistryPack`] came from. Surfaced in diagnostics so a user
+/// can tell which directory was read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PackSource {
@@ -78,12 +75,10 @@ pub enum PackSource {
 
 /// A loaded and validated registry pack.
 ///
-/// `#[non_exhaustive]` so the "cannot be constructed without going through
-/// validation" guarantee the target lookup relies on holds outside this
-/// crate too: the fields stay readable, but a caller cannot assemble one
-/// from parts that skipped the loader's validators — the `data_versions`
-/// table, the per-version block tables, and the material overrides are each
-/// checked there, and each lookup below assumes it.
+/// `#[non_exhaustive]` so no caller outside this crate can assemble one
+/// that skipped the loader's validators (the `data_versions` table, the
+/// per-version block tables, the material overrides), which every lookup
+/// below assumes. The fields stay readable.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RegistryPack {
@@ -92,8 +87,7 @@ pub struct RegistryPack {
     /// `(mc_version, data_version)` table.
     pub data_versions: DataVersionTable,
     /// Abstract material catalog. Empty when the pack's manifest declares
-    /// no `materials` component, which an older pack or a hand-written
-    /// `--registry-pack` directory may not.
+    /// no `materials` component.
     pub materials: MaterialsIndex,
     /// Per-version block-id tables. Empty when the pack omits the
     /// component, which turns id validation off rather than making every
@@ -154,12 +148,9 @@ impl TargetRegistry for PackView<'_> {
     }
 
     fn aliases_for(&self, id: &str) -> Vec<String> {
-        // No pinned version means no table to filter the group by, and an
-        // unfiltered group is a list of spellings from other versions and
-        // the other edition — the silent-substitution hazard read out as a
-        // suggestion. The commands in that position (`lower`, `info`) do
-        // not raise `E_UNKNOWN_ID` at all, so the answer costs them
-        // nothing.
+        // Unpinned, there is no table to filter the group by, and an
+        // unfiltered group would suggest spellings from other versions and
+        // the other edition. Unpinned commands raise no `E_UNKNOWN_ID`.
         let Some(ids) = self.ids else {
             return Vec::new();
         };
@@ -205,9 +196,8 @@ pub enum RegistryError {
         source: std::io::Error,
     },
     /// Manifest or component file declared a schema version this build
-    /// does not understand. Returning a structured error lets the CLI
-    /// tell the user which upgrade lane they need rather than failing
-    /// with an opaque "missing field" message.
+    /// does not understand, reported as such rather than as an opaque
+    /// "missing field".
     #[error(
         "unsupported registry pack {kind} schema_version {got}; this Cairn supports up to {supported}"
     )]
@@ -250,8 +240,7 @@ pub enum RegistryError {
     },
     /// The manifest declared an edition that does not match the slot the
     /// pack was loaded into (e.g. a Bedrock pack handed to the Java
-    /// loader). Catches a misfiled `--registry-pack` directory before any
-    /// downstream code looks at the data.
+    /// loader), before any downstream code looks at the data.
     #[error("registry pack edition `{got:?}` does not match expected `{expected:?}`")]
     EditionMismatch {
         /// Expected edition.
@@ -294,10 +283,8 @@ pub enum RegistryError {
     /// tables declares.
     ///
     /// Such a group can never answer: a lookup keeps the members the
-    /// pinned target declares, and this one has none to keep in any
-    /// target. It is what a misspelt spelling looks like from the loader's
-    /// side, and the symptom without this check is a rename that goes on
-    /// being reported as having no candidate.
+    /// pinned target declares, and this one has none in any target. It is
+    /// what a misspelt spelling looks like from the loader's side.
     #[error(
         "registry pack aliases group [{spellings}] names no id any version of `blocks` declares"
     )]
@@ -358,15 +345,12 @@ impl From<AliasError> for RegistryError {
 ///
 /// A row is named by any label equal to its own under the comparison
 /// [`VersionOrder::key_of`](cairn_lang_core::resolve::VersionOrder::key_of)
-/// uses. That doc states the rule in full, and the two lookups have to
-/// keep agreeing, so a change to either belongs in both. `1.21.0` names
-/// Java's `1.21`, `1.21` names Bedrock's `1.21.0` and `1.021` names Java's
-/// `1.21`, while `1.21.4` is not Bedrock's `1.21.40`, and neither
-/// `1.21.0-rc1` nor `1.21.` is Java's `1.21`. [`compare_versions`] warns
-/// that it is not the ordering key, and `.is_eq()` asks it no ordering
-/// question, so this stays a lookup. `spec/versioning-editions`
-/// "The target is a compile-time parameter" defines the same version this
-/// way for `--target`, `@requires` and `@intended_targets` alike.
+/// uses, which states the rule in full; the two lookups must agree. `1.21.0`
+/// names Java's `1.21`, while `1.21.4` is not Bedrock's `1.21.40`.
+/// [`compare_versions`] is not the ordering key, but `.is_eq()` asks it no
+/// ordering question. `spec/versioning-editions` "The target is a
+/// compile-time parameter" defines the same version this way for
+/// `--target`, `@requires` and `@intended_targets` alike.
 ///
 /// The pair carries the row's own label, so the target and the lockfile
 /// name the version the way the table does. `validate_version_order`
@@ -400,18 +384,13 @@ impl RegistryPack {
     ///
     /// Panics when the pack is not of `edition`. Both editions share the
     /// `data_version` column with different meanings, so resolving against
-    /// the wrong pack would return a plausible-but-wrong integer — a
-    /// silent-substitution hazard of the kind
-    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
-    /// rules out. A full `assert!` rather than a `debug_assert!`: resolution
-    /// runs once per compile, and the guard must survive release builds once
-    /// `--registry-pack` can supply a pack.
+    /// the wrong pack would return a plausible-but-wrong integer, the
+    /// silent substitution `spec/versioning-editions` "Fail-loud and
+    /// minimum-version inference" rules out. A full `assert!` rather than a
+    /// `debug_assert!`, since resolution runs once per compile.
     ///
-    /// Also panics if the pack passed [`validate_data_versions`] but its
-    /// `latest` field nonetheless names no row in `versions`. That branch is
-    /// dead by construction: validation rejects exactly this case at load
-    /// time, and `RegistryPack` cannot be constructed without going through
-    /// validation.
+    /// Also panics if `latest` names no targetable row, which
+    /// [`validate_data_versions`] rules out at load time.
     fn resolve_target_row(
         &self,
         edition: PackEdition,
@@ -545,14 +524,8 @@ impl RegistryPack {
     /// The view of this pack that block-array lowering consults.
     ///
     /// `mc_version` is the target the run pinned, or `None` for a run that
-    /// pinned none: `cairn info` and `cairn lower`, which take no target;
-    /// a `cairn compile` or `cairn check --target` whose target did not
-    /// resolve; and a `cairn compile --target` whose `@requires` floors
-    /// refuse the target. The two `cairn compile` runs are the only `None`
-    /// callers in a command that writes artifacts and a lock, and neither
-    /// writes: the unresolved target and the floor each refuse the build
-    /// before any artifact is prepared. A `cairn check` without `--target`
-    /// does not lower at all. Passing `None` leaves
+    /// pinned none, whose target did not resolve, or whose `@requires`
+    /// floors refuse it; none of those writes an artifact. `None` leaves
     /// [`TargetRegistry::block_ids`] empty, so id validation is skipped
     /// rather than run against a version the caller never chose or one the
     /// source disowns.
@@ -561,37 +534,27 @@ impl RegistryPack {
     ///
     /// Panics when the pack has block tables but none for `mc_version`, or
     /// when the one it has is not sorted. Both are impossible for a pack
-    /// that came through the loader — `validate_blocks_cover_versions`
-    /// refuses the first and `BlocksIndex` builds sorted — so a panic here
-    /// means a `RegistryPack` was assembled some other way. The alternative
-    /// is a compile that checks no ids while looking clean, which is the
-    /// failure this component exists to remove.
+    /// that came through the loader (`validate_blocks_cover_versions`
+    /// refuses the first and `BlocksIndex` builds sorted), and the
+    /// alternative is a compile that checks no ids while looking clean.
     #[must_use]
     pub fn view<'a>(&'a self, mc_version: Option<&'a str>) -> PackView<'a> {
         let ids = mc_version.and_then(|version| {
             let ids = self.blocks.ids_for(version);
             // INVARIANT(blocks-cover-versions): `validate_blocks_cover_versions`
-            // refuses at load time any pack whose `blocks` component and
-            // `data_versions` table name different versions, and every
-            // caller resolves `mc_version` through `data_versions` first.
-            // A miss here therefore means one of those two rules was
-            // bypassed, and the resulting compile would check no ids at
-            // all while looking like a clean build.
-            //
-            // A full `assert!` rather than a `debug_assert!`, matching
-            // `resolve_java_target`'s: the failure is a silent
-            // no-substitution, the kind release builds must not be allowed
-            // to reach, and the cost is one map lookup per compile.
+            // refuses a pack whose `blocks` and `data_versions` name
+            // different versions, and every caller resolves `mc_version`
+            // through `data_versions`. A full `assert!`: a silently skipped
+            // id check must not reach a release build, and this costs one
+            // lookup per compile.
             assert!(
                 ids.is_some() || self.blocks.is_empty(),
                 "pack `{}` has block tables but none for `{version}`",
                 self.manifest.name,
             );
-            // Sortedness is the other half of the same guarantee —
             // `BlockIdSet::contains` binary-searches, so an unsorted table
-            // reports real ids as missing. `BlocksIndex` builds sorted by
-            // construction, so this holds unless a table arrived some other
-            // way; checked once here rather than per lookup.
+            // would report real ids as missing; checked once here rather
+            // than per lookup.
             assert!(
                 ids.is_none_or(<[String]>::is_sorted),
                 "pack `{}` block table for `{version}` is not sorted",
@@ -626,17 +589,12 @@ impl RegistryPack {
     }
 }
 
-/// Built-in Java pack, parsed once per process. Lookups against
-/// [`crate::data_version`] go through this, so the static JSON is loaded
-/// at most once even when many `cairn compile` runs happen inside a single
-/// `cargo test` invocation.
+/// Built-in Java pack, parsed once per process.
 ///
 /// # Panics
 ///
-/// Panics if the embedded JSON fails to parse or validate. That is a
-/// release-process invariant — the bundled files are part of the binary
-/// — so a failure here means the build artefact itself is broken; the
-/// `expect` surfaces that rather than papering it over.
+/// Panics if the embedded JSON fails to parse or validate, which means the
+/// build artefact itself is broken.
 pub fn builtin_java() -> &'static RegistryPack {
     builtin(PackEdition::Java)
 }
@@ -646,8 +604,8 @@ pub fn builtin_java() -> &'static RegistryPack {
 ///
 /// # Panics
 ///
-/// Panics if the embedded JSON fails to parse or validate, for the same
-/// build-invariant reason as [`builtin_java`].
+/// Panics if the embedded JSON fails to parse or validate, as
+/// [`builtin_java`] does.
 pub fn builtin_bedrock() -> &'static RegistryPack {
     builtin(PackEdition::Bedrock)
 }
@@ -975,17 +933,12 @@ fn validate_material_overrides(
 /// describe the same versions.
 ///
 /// A pack with no `blocks` component at all is exempt: that is the
-/// documented "this pack cannot check ids" mode, not a disagreement. Once
-/// the component is there, though, a supported target with no id table
-/// compiles with nothing checked and looks exactly like a clean build,
-/// and an id table for a version `--target` cannot name is dead data
-/// nobody will notice going stale.
+/// documented "this pack cannot check ids" mode, not a disagreement.
 ///
-/// The versions compared are the **targetable** ones. An ordering row is
-/// there to place an `@requires` floor against and is never pinned, so it
-/// has no id table to be missing — which is the whole reason the column
-/// exists. The `extra` half stays every row, because an id table for a
-/// version the table does not name at all is still dead data.
+/// The `missing` half compares the **targetable** versions only: an
+/// ordering row is never pinned, so it has no id table to be missing. The
+/// `extra` half compares every row, because an id table for a version the
+/// table does not name at all is still dead data.
 fn validate_blocks_cover_versions(
     blocks: &BlocksIndex,
     data_versions: &DataVersionTable,
@@ -1073,10 +1026,9 @@ fn validate_data_versions(table: &DataVersionTable) -> Result<(), RegistryError>
 /// is the property that makes placing a floor *outside* the table's span
 /// sound: that answer is reached by comparing the floor's label against
 /// the first and last rows' labels, so the text has to agree with the keys
-/// about which rows those are. It is not implied by "one numbering
-/// scheme" — two dotted decimals whose keys run the other way would break
-/// it — and every table Cairn ships satisfies it, so it is checked here
-/// rather than assumed in a doc comment.
+/// about which rows those are. One numbering scheme does not imply it (two
+/// dotted decimals whose keys run the other way break it), so it is
+/// checked rather than assumed.
 ///
 /// Labels are compared with `cairn_lang_core`'s label comparison, so two
 /// spellings of one version (`1.21` and `1.21.0`) count as a duplicate:

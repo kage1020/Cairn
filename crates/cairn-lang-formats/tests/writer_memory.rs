@@ -1,17 +1,10 @@
 //! The structure writers hold a bounded amount of memory whatever the
-//! structure's volume.
-//!
-//! `MAX_STRUCTURE_VOLUME` is sized against the block-array IR, at two bytes
-//! a voxel; a writer that builds a tag per voxel before writing needs
-//! hundreds of times that, so a structure inside the bound could still
-//! exhaust memory during `compile`. This binary counts the heap the check
-//! and the write allocate at two volumes and asserts the peak does not grow
-//! with the volume. The tree builders, measured the same way, are the
-//! control: they show the harness sees a per-voxel allocation when there is
-//! one.
-//!
-//! One test in its own binary: the counter is process-wide, and a second
-//! test on another thread would allocate into the measurement.
+//! structure's volume: `MAX_STRUCTURE_VOLUME` is sized at two bytes a voxel,
+//! and a tag per voxel costs hundreds of times that. The peak heap of the
+//! check and the write must not grow between two volumes; the tree
+//! builders, measured the same way, show the harness sees per-voxel
+//! allocation. One test in its own binary, because the counter is
+//! process-wide.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_formats::bedrock_structure::{build_mcstructure_tag, prepare_mcstructure};

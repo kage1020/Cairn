@@ -119,11 +119,6 @@ fn redstone_door_inside_plate_paints_one_voxel_inside_the_front_wall() {
 
 #[test]
 fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
-    // Two plates → zero `W_DEFERRED_MEMBER` diagnostics whose primary
-    // message names the `pressure_plate` role. The remaining deferred
-    // warning (the selector-form actuator patch on `door[id=front]`) is
-    // still expected and will be covered by its own test once the
-    // actuator wiring pass lands.
     let out = lower_redstone_door();
     let plate_deferred = out
         .diagnostics
@@ -143,19 +138,12 @@ fn redstone_door_pressure_plate_lines_emit_no_deferred_warnings() {
 
 #[test]
 fn redstone_door_lowers_without_deferred_warnings() {
-    // `circuit region=floor void=2` is a routing marker for the future
-    // logic passes; `door[id=front] opened_by=sig.open` is an actuator
-    // patch that binds the physical `door id=front` declared earlier
-    // in the struct to a logic-graph signal. Block-array lowering
-    // recognises both shapes as surface-guards for the future redstone
-    // pipeline — neither emits voxels, neither fires a
-    // `W_DEFERRED_MEMBER`. Combined with the plate paint tested above,
-    // this pins the whole example at "zero deferred members" so a
-    // regression on any of the three recognisers fails loud. Instead
-    // of filtering primaries by a per-role substring (which would
-    // silently pass a regression where the recogniser routes into
-    // `nonneg_int_or_defer`'s primary — that primary does not name
-    // the enclosing role), pin the total count.
+    // `circuit region=floor void=2` is a routing marker and
+    // `door[id=front] opened_by=sig.open` an actuator patch binding the
+    // struct's `door id=front` to a logic signal; block-array lowering
+    // recognises both and emits neither voxels nor `W_DEFERRED_MEMBER`.
+    // The total is pinned rather than primaries filtered by role, because
+    // `nonneg_int_or_defer`'s primary does not name the enclosing role.
     let out = lower_redstone_door();
     let deferred = out
         .diagnostics
@@ -175,17 +163,10 @@ fn redstone_door_lowers_without_deferred_warnings() {
 
 #[test]
 fn redstone_door_actuator_patch_bad_id_emits_actuator_shaped_primary() {
-    // Canary that guards against the recogniser silently degrading to
-    // "always accept": if the "zero deferred" invariant above ever
-    // starts holding because `recognize_actuator_patch` was accidentally
-    // turned into a no-op, this test still catches the regression by
-    // appending a known-bad patch to a copy of the fixture. A
-    // `door[id=nonexistent] opened_by=sig.open` line must produce
-    // exactly one deferred entry whose primary carries the recogniser's
-    // fingerprint (both the offending id rendered verbatim and the
-    // fixture's real door id `front`). Filtering on the "actuator patch"
-    // substring keeps the assertion targeted at this recogniser rather
-    // than any other deferral upstream.
+    // Keeps the test above from passing on a `recognize_actuator_patch`
+    // that accepts everything: a patch naming no door must defer once,
+    // with a primary naming the offending id and the fixture's real door
+    // id `front`.
     let mut source = example_source("redstone-door.crn");
     source.push_str("  door[id=nonexistent] opened_by=sig.open\n");
     let out = lower_source(&source, Edition::Java, Some(latest(Edition::Java)));

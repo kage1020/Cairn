@@ -1,26 +1,9 @@
-//! `cairn info`'s portability figures against what a build actually emits.
-//!
-//! The two sides lower the same source differently on purpose: `info`
-//! reports across a pack's whole version range and so lowers with no target
-//! pinned, while a build pins one and gets that version's spelling of every
-//! material. The figures still have to agree, because a portability count
-//! that does not describe the build it is about is worse than no count —
-//! `unsupported: 0` on a source no version of the edition can load is the
-//! shape these tests refuse.
-//!
-//! What is checked per example, per edition:
-//!
-//! - every entry the range-wide lowering interns is a block the edition
-//!   declares somewhere, so nothing shipped reports as unsupported;
-//! - the entry count matches the count a pinned build emits, on every
-//!   supported version — the two lowerings may disagree about *which*
-//!   spelling, never about how many intents there are;
-//! - and so does the extent, because the volume counts the members whose
-//!   material resolves and "resolves" is asked against the pinned target.
-//!   A count comparison alone cannot see an array that shortened.
-//!
-//! Whether each pinned build's ids exist in that pinned version is the
-//! neighbouring question, held by `tests/packs/ids_exist.rs`.
+//! `cairn info`'s portability figures against what a build emits, per
+//! shipped example and edition. `info` lowers with no target pinned and a
+//! build pins one, so the two may disagree about *which* spelling an entry
+//! takes, but every range-wide entry must be a block the edition declares,
+//! and the entry count and each structure's extent must match a pinned
+//! build on every supported version.
 
 use std::collections::BTreeMap;
 
@@ -36,12 +19,9 @@ use crate::common::{examples, lower_source, supported_versions};
 /// Every structure's extent, keyed by scope so a comparison cannot pass
 /// by two scopes swapping sizes.
 ///
-/// The volume counts the members whose material resolves, and "resolves"
-/// is asked against the pinned target — so an id only some versions
-/// declare moves `Dims` as well as the palette. The entry count alone
-/// cannot see that: a wall that stops painting drops one entry *and*
-/// shortens the array, and a comparison of counts is satisfied by the
-/// first half.
+/// The volume counts the members whose material resolves against the
+/// pinned target, so an id only some versions declare moves `Dims` as well
+/// as the palette, which an entry count alone cannot see.
 fn extents(ir: &BlockArrayIr) -> BTreeMap<&str, (u32, u32, u32)> {
     ir.structures
         .iter()
@@ -67,10 +47,9 @@ fn editions() -> [(Edition, &'static RegistryPack); 2] {
 /// The edition's report, refusing the whole test if the palette carries a
 /// blockstate the registry pack was expected to reject.
 ///
-/// A shipped example that leaked one would be the strongest possible case
-/// of the bug the refusal exists for, so it is asserted here rather than
-/// unwrapped silently: the corpus is the only place a leak could ever be
-/// found against real pack data.
+/// A leak in a shipped example would be the strongest case of the bug the
+/// refusal exists for, so it fails here rather than being unwrapped
+/// silently.
 fn report_for(
     edition: Edition,
     pack: &RegistryPack,

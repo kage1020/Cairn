@@ -133,8 +133,7 @@ fn pack_dir() -> tempfile::TempDir {
 
 #[test]
 fn a_pack_without_a_blocks_component_loads_and_refutes_no_id() {
-    // The `materials`-only shape is what every pack written before this
-    // component looks like, and refusing it would strand them.
+    // `blocks` is optional, so a `materials`-only pack must load.
     let pack = load_from_dir_or_die("no-blocks", |dir| {
         write_pack_with_materials(
             dir,
@@ -267,9 +266,6 @@ fn a_malformed_blocks_table_is_refused_with_its_own_error() {
 
 #[test]
 fn a_material_override_for_an_unsupported_version_is_refused() {
-    // The override would never fire, so the token would keep resolving
-    // to its default id everywhere — the silent wrong-id outcome the
-    // overrides exist to prevent.
     let err = load_from_dir_err("bad-override", |dir| {
         write_full_pack(
             dir,
@@ -315,9 +311,6 @@ fn a_material_override_changes_the_id_for_that_version_only() {
 
 #[test]
 fn a_pack_without_an_aliases_component_loads_and_names_no_rename() {
-    // Every pack written before this component looks like this, and it
-    // has to keep answering exactly as it did: no rename, and the typo
-    // search behind it untouched.
     let pack = load_from_dir_or_die("no-aliases", |dir| {
         write_full_pack(
             dir,
@@ -359,9 +352,6 @@ fn an_alias_answers_with_the_spellings_the_pinned_version_declares() {
 
 #[test]
 fn a_view_with_no_version_pinned_names_no_rename() {
-    // Nothing narrows the group without a pinned table, and an
-    // unfiltered group is a list of spellings from other versions and
-    // the other edition offered as if this build could use them.
     let pack = load_from_dir_or_die("aliases-unpinned", |dir| {
         write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
     });
@@ -374,9 +364,6 @@ fn a_view_with_no_version_pinned_names_no_rename() {
 
 #[test]
 fn an_alias_group_no_version_declares_is_refused() {
-    // Such a group can never answer, whatever the target — the shape a
-    // misspelt spelling takes, and one whose only symptom otherwise is
-    // a rename that goes on saying it has no candidate.
     let err = load_from_dir_err("aliases-dead", |dir| {
         write_pack_with_aliases(
             dir,
@@ -422,11 +409,8 @@ fn a_malformed_alias_catalog_is_refused_with_its_own_error() {
 
 #[test]
 fn the_aliases_bytes_reach_the_pack_hash() {
-    // Same reasoning as the blocks half: the digest lands in the
-    // lockfile, and two builds resolved against different rename
-    // tables are two different sets of inputs. The manifest is shared
-    // between the two packs so nothing but the component bytes can
-    // separate them.
+    // The manifest is shared, so only the `aliases` bytes can separate
+    // the digests.
     let one = load_from_dir_or_die("alias-hash-one", |dir| {
         write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
     });
@@ -447,15 +431,9 @@ fn the_aliases_bytes_reach_the_pack_hash() {
 
 #[test]
 fn the_blocks_bytes_reach_the_pack_hash() {
-    // The hash lands in the lockfile as `inputs.registry_pack_hash`, so
-    // two builds resolved against different id tables must not record
-    // the same inputs.
-    //
-    // Both packs use the same manifest, so the manifest bytes — which
-    // `pack_hash` concatenates first — cannot be what separates them.
-    // Varying the manifest instead would leave the test green even with
-    // the `components.push` for `blocks` deleted entirely, which is the
-    // line it exists to hold.
+    // The manifest is shared, so only the `blocks` bytes can separate
+    // the digests; varying the manifest would pass even with `blocks`
+    // left out of the hash.
     let materials = one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#);
     let one = load_from_dir_or_die("hash-one", |dir| {
         write_full_pack(
@@ -542,8 +520,7 @@ fn builtin_pack_includes_materials_catalog() {
 fn pack_without_materials_component_loads_with_empty_index() {
     let dir = pack_dir();
     let tmp = dir.path();
-    // `good_manifest()` already omits the `materials` key, so this
-    // exercises the backwards-compatible path that older packs ride on.
+    // `good_manifest()` omits the `materials` key.
     write_pack(tmp, good_manifest(), good_data_versions());
     let pack = load_from_dir(tmp).expect("load");
     assert!(pack.materials.is_empty());
@@ -684,15 +661,13 @@ fn builtin_pack_rejects_unknown_target() {
     assert_eq!(err.requested, "0.0.0");
     assert!(err.supported.contains("1.20.4"));
     assert!(err.supported.contains("latest"));
-    // `0.0.0` is far from every supported version; the suggestion
-    // field must stay None so the error reads as a plain "no match".
+    // `0.0.0` is far from every supported version.
     assert!(err.suggestion.is_none());
 }
 
 #[test]
 fn builtin_pack_suggests_near_target() {
-    // `1.21.5` is one substitution away from `1.21.4` — exactly the
-    // kind of typo the suggest pass is here to catch.
+    // `1.21.5` is one substitution away from `1.21.4`.
     let pack = load_builtin_java().expect("builtin pack");
     let err = pack
         .resolve_java_target("1.21.5")
@@ -728,9 +703,7 @@ fn either_spelling_of_a_version_names_its_row() {
 }
 
 /// A leading zero in a numeric component is padding, as the comparison
-/// reads it, so `1.021` names Java's `1.21`. Pinned so that tightening
-/// `compare_versions` later shows up here as a change to the
-/// `--target` contract rather than as an unrelated regression.
+/// reads it, so `1.021` names Java's `1.21`.
 #[test]
 fn a_leading_zero_in_a_target_is_padding() {
     let java = load_builtin_java().expect("java pack");
@@ -838,13 +811,10 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
     // Each targetable row is the block-state version that release
     // writes into a palette (PocketMine-MP's
     // `BlockStateData::CURRENT_VERSION` in the release supporting it),
-    // whose revision need not be the client build's: those builds are
-    // 1.21.0.3, 1.21.40.3 and 1.21.60.10, so only 1.21.0's two
-    // coincide. The targetable set is pinned along with the integers,
-    // so a targetable row added, or a table regenerated with revision
-    // 0, fails here rather than in a user's lock; a regeneration from
-    // the build number fails for 1.21.40 and 1.21.60 but not for
-    // 1.21.0.
+    // whose revision need not be the client build's (1.21.0.3, 1.21.40.3,
+    // 1.21.60.10). The targetable set is pinned with the integers, so a
+    // row added or a table regenerated with revision 0 or from build
+    // numbers fails here rather than in a user's lock.
     let expected = [
         ("1.21.0", version(1, 21, 0, 3)),
         ("1.21.40", version(1, 21, 40, 1)),

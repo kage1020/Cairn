@@ -38,9 +38,7 @@ fn cottage_compiles_to_mcstructure_without_degradation() {
 
 #[test]
 fn cottage_roof_stairs_carry_bedrock_states() {
-    // The roof stair palette entry must reach the Bedrock backend with its
-    // Java properties and come out with a non-empty typed `states` compound —
-    // proof the mapping fired rather than the old stateless empty compound.
+    // A non-empty typed `states` compound shows the mapping fired.
     use cairn_lang_nbt::tag::Tag;
 
     let out = lower_bedrock("cottage.crn");
@@ -93,8 +91,8 @@ fn cottage_roof_stairs_carry_bedrock_states() {
 fn themed_tower_compiles_to_mcstructure_with_shape_degradation() {
     // themed-tower's eave stair binds `shape=outer_left`, which Bedrock has
     // no state for. The build succeeds; palette dedup means one warning per
-    // distinct dropped `(id, shape)`, and today's source has exactly one
-    // such palette entry (`dark_oak_stairs` with `outer_left`).
+    // distinct dropped `(id, shape)`, and the source has exactly one such
+    // palette entry (`dark_oak_stairs` with `outer_left`).
     let out = lower_bedrock("themed-tower.crn");
     let target = resolve_bedrock_target("latest").expect("known target");
     let mut total_notes = 0;

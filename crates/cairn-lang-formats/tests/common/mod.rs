@@ -4,9 +4,8 @@
 //! built-in registry packs, so the plumbing for both lives once.
 
 // Every test binary compiles this module on its own and calls a subset of
-// it, so the unused-item lint would fire per binary. The workspace has no
-// other `#![allow]`; the fix that removes this one is a dev-dependency
-// helper crate, worth doing if the set keeps growing.
+// it, so the unused-item lint would fire per binary. A dev-dependency
+// helper crate would remove the need.
 #![allow(dead_code)]
 
 use std::path::PathBuf;

@@ -1,10 +1,8 @@
 //! Readers and writers around the Cairn block-array IR for existing schematic formats.
 //!
-//! Supported: vanilla Java `.nbt` structures and Bedrock `.mcstructure`
-//! (writers only; the Bedrock writer maps the stair family's blockstate
-//! properties to Bedrock `states` and drops unrepresentable intent with a
-//! degradation note).
-//! Planned: Litematica `.litematic` and the `WorldEdit` `.schem` format.
+//! Supported: vanilla Java `.nbt` structures and Bedrock `.mcstructure`,
+//! writers only. Planned: Litematica `.litematic` and the `WorldEdit`
+//! `.schem` format.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;

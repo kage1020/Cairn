@@ -17,11 +17,7 @@ use std::fmt;
 
 pub use crate::registry::{resolve_bedrock_target, resolve_java_target};
 
-/// Resolved Minecraft target. `mc_version` is owned (cloned from the
-/// registry pack) so a future `--registry-pack <dir>` flow can drop
-/// runtime-loaded strings in here. `Clone` instead of `Copy` because the
-/// owned `mc_version` cannot be byte-copied; callers that previously
-/// relied on `Copy` now pass `&JavaTarget` instead.
+/// Resolved Minecraft Java target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JavaTarget {
     /// Human-facing version string, e.g. `"1.21.4"`.
@@ -56,11 +52,10 @@ pub struct UnsupportedTarget {
     pub edition: &'static str,
     /// Verbatim value passed via `--target`.
     pub requested: String,
-    /// Closest supported version when one sits within the suggestion pass's
-    /// length-scaled Damerau-Levenshtein cap (see `cairn-lang-core::suggest`),
-    /// or `None` when the input is too far from any candidate. Holds the
-    /// bare candidate name; the surrounding `did you mean ...?` phrasing is
-    /// the [`fmt::Display`] impl's responsibility.
+    /// Closest supported version within the suggestion pass's
+    /// length-scaled Damerau-Levenshtein cap (`cairn-lang-core::suggest`),
+    /// or `None` when the input is too far from any candidate. The bare
+    /// name; [`fmt::Display`] adds the `did you mean ...?` phrasing.
     pub suggestion: Option<String>,
     /// Pre-formatted list of supported versions, ready to print.
     pub supported: String,
@@ -96,10 +91,8 @@ mod tests {
     #[test]
     fn resolves_latest_alias() {
         let latest = resolve_java_target("latest").expect("latest");
-        // `latest` must resolve to a real row that itself resolves to the
-        // same target. Comparing against a recomputed lookup avoids
-        // hardcoding the answer here so a registry-pack update doesn't
-        // need a parallel edit in this test.
+        // Compared with a second lookup rather than a literal, so a
+        // registry-pack update needs no edit here.
         let echoed = resolve_java_target(&latest.mc_version).expect("echo");
         assert_eq!(latest, echoed);
     }
@@ -114,12 +107,9 @@ mod tests {
 
     #[test]
     fn unknown_version_near_known_one_suggests_it() {
-        // `1.21.5` is one substitution away from `1.21.4`; the suggestion
-        // field must point at the real version so a user re-running
-        // `cairn compile --target 1.21.5` sees the typo immediately.
+        // `1.21.5` is one substitution away from `1.21.4`.
         let err = resolve_java_target("1.21.5").expect_err("unknown");
         assert_eq!(err.suggestion.as_deref(), Some("1.21.4"));
-        // The Display impl wraps the bare suggestion into the wider error.
         let rendered = err.to_string();
         assert!(
             rendered.contains("did you mean `1.21.4`?"),

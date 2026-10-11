@@ -1,22 +1,11 @@
-//! The streaming structure writers write the file the tree builders
-//! describe.
-//!
-//! `JavaStructure::write_gzip` and `McStructure::write` encode the
-//! per-voxel lists from the grid instead of from `build_structure_tag` /
-//! `build_mcstructure_tag`'s tree, so the two paths are two encodings of one
-//! layout. These tests hold them to the same bytes over every structure the
-//! shipped examples lower to, on both editions, and over the shapes the
-//! examples do not reach: an array with a different extent on each axis, and
-//! empty ones, whose lists must declare `TAG_End`. Each Bedrock structure's
-//! `block_palette` is held to listing no block twice, the set
-//! `spec/compilation` "Within-phase conflicts and the palette" says it
-//! stays.
-//!
-//! The write path indexes the grid and declares list lengths without
-//! re-checking them, so the last tests hold `prepare_*` to refusing every
-//! grid it could not stream: one whose voxel count is past a list's length
-//! limit, one shorter than its dims, and a palette string the encoder
-//! refuses.
+//! The streaming structure writers against the tree builders: the same
+//! bytes over every structure the shipped examples lower to, on both
+//! editions, and over shapes the examples do not reach (an array with a
+//! different extent on each axis, and empty ones, whose lists must declare
+//! `TAG_End`), with each Bedrock `block_palette` a set per
+//! `spec/compilation` "Within-phase conflicts and the palette". The write
+//! path does not re-check the grid, so `prepare_*` must refuse every grid
+//! it could not stream.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
@@ -77,10 +66,9 @@ fn assert_java_streams_the_tree(label: &str, array: &BlockArray) {
 /// parity notes `prepare_mcstructure` raised and how many palette entries
 /// translation merged into an earlier one.
 ///
-/// The tree builder takes its notes from `prepare_mcstructure`, so
-/// comparing the two would compare one function with itself; the sweep
-/// below checks the notes are raised at all instead, and that some
-/// palette has a merge for the set check to hold.
+/// The tree builder takes its notes from `prepare_mcstructure`, so the
+/// sweep checks that notes are raised at all, and that some palette has a
+/// merge for the set check to hold, rather than comparing the two.
 fn assert_bedrock_streams_the_tree(label: &str, array: &BlockArray) -> (Vec<ParityNote>, usize) {
     let target = resolve_bedrock_target("latest").expect("latest");
     let (root, _) = build_mcstructure_tag(array, &target).expect("build");
@@ -122,12 +110,9 @@ fn every_shipped_structure_streams_the_bytes_its_tree_writes() {
             }
         }
         assert!(compared > 0, "{edition:?}: the examples lowered to nothing");
-        // A stair with a corner `shape` degrades on Bedrock (`themed-tower`
-        // has one), so the sweep passes notes through `prepare_mcstructure`
-        // rather than only structures that raise none. Dropping that
-        // `shape` folds two stairs into one Bedrock block (`roof-hip`'s
-        // corners do), so the set check above holds a merge too, rather
-        // than only palettes with nothing to merge.
+        // `themed-tower`'s corner stair raises a note, and `roof-hip`'s
+        // corners fold two stairs into one Bedrock block once `shape` is
+        // dropped.
         if matches!(edition, Edition::Bedrock) {
             assert!(
                 notes > 0,
@@ -213,8 +198,6 @@ fn grid(dims: Dims, voxels: usize) -> BlockArray {
 fn a_voxel_count_past_the_list_limit_is_refused_before_a_byte_is_written() {
     // 2000 fits an `i32` on every axis, but 2000^3 does not, so the `blocks`
     // list and each `block_indices` layer could not declare their length.
-    // Without the check the Java write failed with `LengthOverflow` after
-    // the palette had already gone to the writer.
     let array = grid(
         Dims {
             x: 2000,
@@ -280,9 +263,7 @@ fn a_voxel_count_past_usize_is_refused() {
 
 #[test]
 fn a_grid_shorter_than_its_dims_is_refused_before_a_byte_is_written() {
-    // 2x2x2 holds 8 voxels and this grid has 3. Without the check the write
-    // indexed past the end of `voxels` and panicked part-way through the
-    // per-voxel list, with the file's head already written.
+    // 2x2x2 holds 8 voxels and this grid has 3.
     let array = grid(Dims { x: 2, y: 2, z: 2 }, 3);
     let java = resolve_java_target("latest").expect("latest");
     let err = prepare_structure(&array, &java).expect_err("java prepare");
@@ -316,9 +297,6 @@ fn a_grid_shorter_than_its_dims_is_refused_before_a_byte_is_written() {
 
 #[test]
 fn a_palette_string_the_encoder_refuses_is_named_with_its_entry() {
-    // `.mcstructure` writes its palette after both per-voxel layers, so the
-    // writer would meet this string only once the whole volume was encoded,
-    // and its error named the byte alone.
     let mut array = grid(Dims { x: 1, y: 1, z: 1 }, 1);
     array.voxels[0] = array
         .palette

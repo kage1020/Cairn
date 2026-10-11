@@ -40,9 +40,7 @@ fn themed_tower_palette_carries_every_resolved_theme_slot() {
     //   @wall.stone.cobble    → cobblestone
     //   @wood.dark            → dark_oak_planks   (used by trim window)
     //   @roof.dark_wood       → dark_oak_stairs   (roof + eave stair)
-    // Level-scoped members must reach the palette for this to hold, so a
-    // regression in flattening or in the mat_slot-honouring stair/roof
-    // change will drop one of these ids and fail the test.
+    // Level-scoped members must reach the palette for this to hold.
     let out = lower_themed_tower();
     let ba = out.structures.get("struct::keep").unwrap();
     let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();

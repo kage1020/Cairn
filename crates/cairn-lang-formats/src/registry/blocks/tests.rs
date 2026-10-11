@@ -79,10 +79,8 @@ fn the_empty_index_describes_no_version() {
 
 #[test]
 fn an_id_only_one_version_declares_is_still_declared_by_the_edition() {
-    // The question the range-wide lookup answers is "does this edition
-    // have the block at all", not "does every version have it". A
-    // rename inside the range leaves both spellings true for exactly
-    // one version each, and neither is absent from the edition.
+    // A rename inside the range leaves each spelling declared by one
+    // version, and neither is absent from the edition.
     let index = parse(TWO_VERSIONS).expect("catalog");
     assert_eq!(
         index.declared_by_some_version("minecraft:stonebrick"),
@@ -112,11 +110,9 @@ fn an_id_no_version_declares_is_absent_from_the_edition() {
 
 #[test]
 fn a_prefix_of_a_declared_id_is_not_itself_declared() {
-    // `minecraft:stone` is a prefix of two ids this table has and a
-    // block none of its versions declare. Answering by prefix rather
-    // than by equality would call a whole family of near-miss ids
-    // present, which is the failure mode with no visible symptom: the
-    // id is wrong, the lookup says fine, and the game loads air.
+    // `minecraft:stone` is a prefix of two declared ids and declared by
+    // no version. A prefix match would pass a wrong id the game loads as
+    // air.
     let index = parse(TWO_VERSIONS).expect("catalog");
     assert_eq!(
         index.declared_by_some_version("minecraft:stone"),

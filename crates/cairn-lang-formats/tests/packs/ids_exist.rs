@@ -102,13 +102,9 @@ fn both_packs_declare_the_token_that_redirects_the_plate() {
     }
 }
 
-/// The three ids the audit named, pinned by spelling rather than by "the
-/// mapping resolves to something".
-///
-/// The test above would keep passing if a future edit pointed `sign.oak` at
-/// some other block that happens to exist. These are the specific
-/// substitutions that were wrong, and naming them is what keeps the fix
-/// from being undone by a plausible-looking edit.
+/// Three ids pinned by spelling rather than by "the mapping resolves to
+/// something", which an edit pointing `sign.oak` at another existing block
+/// would still pass.
 #[test]
 fn the_bedrock_pack_uses_bedrock_spellings_for_the_blocks_that_differ() {
     let bedrock = builtin_bedrock();
@@ -169,13 +165,9 @@ fn the_bedrock_pack_respells_stone_bricks_for_the_version_that_predates_it() {
 /// Every id the shipped examples actually put in a palette exists in the
 /// target they were lowered for.
 ///
-/// The tests above walk the two *lists* — the pack's mappings and
-/// `BUILTIN_BLOCK_IDS` — and a list can only be held to what is written in
-/// it. This one reads the palettes instead, so an id hardcoded somewhere in
-/// lowering and added to no list is caught by the same assertion as
-/// everything else. That is the failure mode the whole component exists
-/// for: an id nobody registered, written into a structure file the game
-/// loads as air.
+/// The tests above walk the pack's mappings and `BUILTIN_BLOCK_IDS`; this
+/// one reads the palettes, so an id hardcoded in lowering and added to no
+/// list, which the game would load as air, is caught too.
 #[test]
 fn every_id_the_examples_intern_exists_in_its_target() {
     let examples = examples();

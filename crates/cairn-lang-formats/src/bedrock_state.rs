@@ -8,21 +8,19 @@
 //! for some intents (stair `shape`) it has **no** key at all.
 //!
 //! Per `spec/versioning-editions` "Folding the `(edition, version)` matrix"
-//! and "Java / Bedrock portability" — Java is the base and Bedrock the
-//! overriding diffs; `intent_state` is neutral and `resolved_state`
-//! per-edition — this module holds the hand-written Bedrock diff. It currently covers the **stair family**;
-//! further block families extend the same match dispatch additively as their
-//! lowering paths land. Any block with properties outside a covered family is
-//! a hard error rather than a silent pass-through.
+//! and "Java / Bedrock portability", Java is the base and Bedrock the
+//! overriding diff; `intent_state` is neutral and `resolved_state`
+//! per-edition. This module holds the hand-written Bedrock diff for the
+//! **stair family**. A block with properties outside a covered family is a
+//! hard error rather than a silent pass-through.
 //!
-//! `shape` has no Bedrock equivalent — the portability section lists "stairs
-//! `shape` (no such state on Bedrock)" among the differences the canonical
-//! vocabulary does not absorb. A non-`straight` shape is **dropped with a
-//! degradation note** (`dropped_states: [shape]` in the matrix section,
-//! `W_INTENT_DEGRADED` in the portability one), never silently:
+//! `shape` has no Bedrock equivalent (the portability section lists "stairs
+//! `shape` (no such state on Bedrock)"). A non-`straight` shape is **dropped
+//! with a degradation note** (`dropped_states: [shape]` in the matrix
+//! section, `W_INTENT_DEGRADED` in the portability one), never silently, as
 //! `spec/versioning-editions` "Fail-loud and minimum-version inference"
-//! forbids implicit dropping. `shape=straight` is the Bedrock default, so it
-//! drops without a note.
+//! requires. `shape=straight` is the Bedrock default, so it drops without a
+//! note.
 //!
 //! Numeric domains here are pinned against the Bedrock stair block-state
 //! listing on `minecraft.wiki` / `wiki.bedrock.dev` (`Stairs/BS`,
@@ -47,11 +45,8 @@ pub struct StateTranslation {
     /// One entry per intent Bedrock cannot express (e.g. a dropped
     /// non-`straight` stair `shape`). Empty on a lossless translation.
     ///
-    /// The pieces rather than the sentence, so a caller that wants to act
-    /// on the dropped property does not have to parse it back out of
-    /// English. [`degradation_detail`] writes the sentence, and both
-    /// `W_INTENT_DEGRADED` and `cairn info`'s portability note come off
-    /// that one function.
+    /// Structured rather than a sentence, so a caller can act on the dropped
+    /// property; [`degradation_detail`] words it.
     pub degraded: Vec<DroppedIntent>,
 }
 
@@ -63,8 +58,7 @@ pub struct StateTranslation {
 pub enum BedrockStateError {
     /// A block carries blockstate properties but is not a family this backend
     /// knows how to translate. Java writes the properties verbatim; Bedrock
-    /// needs an explicit per-edition mapping, which does not exist for this
-    /// block yet.
+    /// needs an explicit per-edition mapping, which this block lacks.
     #[error(
         "block `{id}[{properties}]` carries blockstate properties the Bedrock backend cannot map \
          (only {mapped} is mapped so far). Valid: a bare block id (e.g. \
@@ -119,19 +113,13 @@ const FACING_VALID: &str = "east, west, south, north";
 
 /// Block families [`translate_states`] has a state mapping for.
 ///
-/// Carried on the error for the same reason [`STAIR_KEYS_HANDLED`] is: the
-/// day a second family is mapped, every message naming the set has to
-/// follow, and a set spelled at each of those places goes stale one at a
-/// time.
+/// Carried on the error rather than spelled in each message, so every
+/// message naming the set follows it.
 const MAPPED_FAMILIES: &str = "the stair family";
 
 /// Stair property keys [`translate_stair`] reads, in the order its match
-/// arms take them.
-///
-/// Carried on the error rather than restated wherever one is rendered, the
-/// way [`FACING_VALID`] already is: a fourth key handled here has to reach
-/// every message that lists them, and a list spelled at each of those
-/// places goes stale one at a time.
+/// arms take them. Carried on the error for the same reason as
+/// [`MAPPED_FAMILIES`].
 const STAIR_KEYS_HANDLED: &str = "facing, half, shape";
 
 /// Translate a Java palette entry's `(id, properties)` into its Bedrock
@@ -139,12 +127,11 @@ const STAIR_KEYS_HANDLED: &str = "facing, half, shape";
 ///
 /// The `id` must already be a concrete `namespace:identifier` (the backend
 /// rejects abstract tokens separately). The whole stair family shares one
-/// Bedrock state vocabulary, so the mapping is keyed off the family rather
-/// than each material id — and off `cairn-lang-core`'s [`is_stair`], because
-/// core asks the same question when it decides whether a roof or eave may
-/// attach stair states to a material. A second copy here could disagree
-/// about an id core paints and this module then has to write, which is a
-/// disagreement with no symptom until a structure file reaches the game.
+/// Bedrock state vocabulary, so the mapping is keyed off the family through
+/// `cairn-lang-core`'s [`is_stair`], the predicate core uses to decide
+/// whether a roof or eave may attach stair states. A second copy here could
+/// disagree with core, with no symptom until a structure file reaches the
+/// game.
 ///
 /// # Errors
 ///
@@ -176,27 +163,16 @@ pub fn translate_states(state: &BlockState) -> Result<StateTranslation, BedrockS
 
 /// What one dropped intent cost, without naming what carried it.
 ///
-/// The single place this wording lives. `W_INTENT_DEGRADED` from the
-/// `.mcstructure` writer and the `degraded:` note `cairn info` prints are
-/// the same fact told to the same reader at two moments, and a second
-/// wording would be a thing to keep in step. [`DroppedIntent`] carries the
-/// pieces so this is the only place they are put into words.
-///
-/// Without the id because the two callers introduce the entry
-/// differently. [`degradation_message`] makes the entry the sentence's
-/// subject, because a [`ParityNote`](crate::bedrock_structure::ParityNote)
-/// has to read on its own — the CLI happens to prefix the id again when
-/// it renders one, which is that renderer's wart and not a reason for
-/// this split. `cairn info`'s note has already printed `id[states]` as
-/// its line's subject and wants the clause alone. Composing the one form
-/// from the other is what keeps that a matter of framing rather than of
-/// wording.
+/// The one wording shared by `W_INTENT_DEGRADED` and the `degraded:` note
+/// `cairn info` prints. It leaves the entry out because `cairn info` has
+/// already printed `id[states]` as its line's subject;
+/// [`degradation_message`] adds it for a
+/// [`ParityNote`](crate::bedrock_structure::ParityNote), which has to read
+/// on its own.
 ///
 /// A `match` rather than a format over the pieces, because this sentence
-/// is about stairs. [`DroppedIntent`] is a closed set so that the day a
-/// second family drops an intent, this stops compiling until someone
-/// writes what *that* loss looks like — the alternative is a slab told to
-/// check its corners.
+/// is about stairs: a new [`DroppedIntent`] variant fails to compile here
+/// until its own loss is put into words.
 #[must_use]
 pub fn degradation_detail(dropped: &DroppedIntent) -> String {
     match dropped {
@@ -210,17 +186,15 @@ pub fn degradation_detail(dropped: &DroppedIntent) -> String {
 /// [`degradation_detail`] with the entry that carried the intent, as
 /// `W_INTENT_DEGRADED` reports it.
 ///
-/// `state` is how the entry is named, quoted as given. The `.mcstructure`
-/// writer passes the Java state the entry came from,
+/// `state` names the entry, quoted as given. The `.mcstructure` writer
+/// passes the full Java state,
 /// `minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]`,
-/// as `cairn info`'s note names it. Degradation is a fact about the state
-/// combination, and one id reaches the palette once per combination. Two
-/// of those combinations can drop the same value — `roof-hip`'s north and
-/// south corners both drop `shape=outer_left` — and then a warning naming
-/// the id alone repeats itself word for word.
+/// because two states of one id can drop the same value (`roof-hip`'s north
+/// and south corners both drop `shape=outer_left`), and a warning naming
+/// the id alone would repeat itself word for word.
 ///
-/// The family word comes out of the same `match` for the same reason the
-/// sentence does: `stair` is true of this variant, not of the type.
+/// The family word comes from a `match` for the same reason the sentence
+/// does: `stair` is true of this variant, not of the type.
 #[must_use]
 pub fn degradation_message(state: &str, dropped: &DroppedIntent) -> String {
     let family = match dropped {
@@ -245,11 +219,7 @@ fn translate_stair(
                 states.insert("upside_down_bit", Tag::Byte(upside_down_bit(id, value)?));
             }
             "shape" => {
-                // Bedrock stairs have no `shape` state
-                // (`spec/versioning-editions` "Java / Bedrock portability").
-                // `straight` is Bedrock's default so it drops losslessly; any
-                // corner shape drops with a degradation note ("Backend = data
-                // tables" and "Fail-loud and minimum-version inference").
+                // No Bedrock `shape` state; `straight` is its default.
                 if value != "straight" {
                     degraded.push(DroppedIntent::Shape {
                         value: value.clone(),
@@ -269,9 +239,8 @@ fn translate_stair(
     Ok(StateTranslation { states, degraded })
 }
 
-/// Java `facing` → Bedrock `weirdo_direction`. Verified against the Bedrock
-/// stair block-state listing (wiki.bedrock.dev / minecraft.wiki `Stairs/BS`):
-/// `0 = east, 1 = west, 2 = south, 3 = north`.
+/// Java `facing` → Bedrock `weirdo_direction`, per the `Stairs/BS` listing
+/// the module doc cites.
 fn weirdo_direction(id: &str, facing: &str) -> Result<i32, BedrockStateError> {
     match facing {
         "east" => Ok(0),
@@ -287,8 +256,7 @@ fn weirdo_direction(id: &str, facing: &str) -> Result<i32, BedrockStateError> {
     }
 }
 
-/// Java `half` → Bedrock `upside_down_bit`. `top` flips the stair
-/// (`upside_down_bit = 1`); `bottom` is the default (`0`).
+/// Java `half` → Bedrock `upside_down_bit`.
 fn upside_down_bit(id: &str, half: &str) -> Result<i8, BedrockStateError> {
     match half {
         "top" => Ok(1),

@@ -40,8 +40,6 @@ fn the_group_answers_from_either_end() {
 
 #[test]
 fn members_keep_the_order_the_file_wrote_them_in() {
-    // A split answers with several ids at once, and the file's order is
-    // the order the author reads them in.
     let index = parse(RENAME_AND_SPLIT).expect("catalog");
     assert_eq!(
         index.spellings_of("minecraft:light"),
@@ -150,10 +148,8 @@ fn a_repeated_spelling_inside_one_group_is_refused() {
 
 #[test]
 fn a_spelling_two_groups_claim_is_refused() {
-    // `snow` is the real shape of this mistake: Bedrock's `snow` is
-    // Java's `snow_block` and Java's `snow` is Bedrock's `snow_layer`,
-    // so a pack tempted to write both pairs has one spelling with two
-    // answers and no rule for picking.
+    // Bedrock's `snow` is Java's `snow_block` and Java's `snow` is
+    // Bedrock's `snow_layer`: the real shape of this mistake.
     let err = parse(
         r#"{
         "schema_version": 1,

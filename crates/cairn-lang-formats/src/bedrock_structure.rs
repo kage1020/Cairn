@@ -20,17 +20,13 @@
 //! `block_indices` layer is a flat array in `(x, y, z)` nesting with **z
 //! fastest** — `index = (x * size_y + y) * size_z + z` — which differs
 //! from the `(y, z, x)` order the Java `blocks` list uses. The second
-//! layer carries co-located blocks (waterlogging); Cairn's lowering never
-//! authors those today, so it is `-1`-filled ("no block here").
+//! layer carries co-located blocks (waterlogging); Cairn's lowering authors
+//! none, so it is `-1`-filled ("no block here").
 //!
 //! Blockstate properties are translated per edition by
-//! [`crate::bedrock_state`]: the stair family's `facing` / `half` become
-//! Bedrock's `weirdo_direction` / `upside_down_bit`, and intent Bedrock
-//! cannot express (stair `shape`) is dropped with a degradation note rather
-//! than silently, per `spec/versioning-editions` "Backend = data tables",
-//! "Fail-loud and minimum-version inference" and "Java / Bedrock
-//! portability". A block with properties outside a mapped family is still a
-//! hard error.
+//! [`crate::bedrock_state`], which drops intent Bedrock cannot express with
+//! a degradation note and refuses a block with properties outside a mapped
+//! family.
 
 use cairn_lang_core::block_array::{BlockArray, PaletteIndex};
 pub use cairn_lang_nbt::Compound;
@@ -102,8 +98,7 @@ pub enum BedrockStructureError {
         /// Offending dimension value.
         value: u32,
     },
-    /// The dims' voxel count `x * y * z` overflows `usize`. Same check as
-    /// the Java backend's.
+    /// The dims' voxel count `x * y * z` overflows `usize`.
     #[error("dimensions {x}x{y}x{z} hold more voxels than this platform can count")]
     VolumeOverflow {
         /// Extent along x.
@@ -256,10 +251,6 @@ pub fn prepare_mcstructure<'a>(
     block_array: &'a BlockArray,
     target: &BedrockTarget,
 ) -> Result<(McStructure<'a>, Vec<ParityNote>), BedrockStructureError> {
-    // Translate every palette entry up front: a mapping failure (abstract
-    // token, unmapped stateful block, unencodable string) aborts before any
-    // `McStructure` is handed back, so no caller can reach the write path
-    // with a half-translated palette.
     let entries = &block_array.palette.entries;
     let mut block_palette: Vec<Compound> = Vec::with_capacity(entries.len());
     let mut slots: Vec<u16> = Vec::with_capacity(entries.len());
@@ -272,11 +263,8 @@ pub fn prepare_mcstructure<'a>(
         }
         let translated = translate_states(entry)?;
         check_palette_strings(&entry.id, &translated.states)?;
-        // Only an entry with properties degrades, so `state` is never a
-        // bare block's. It is named by the Java state it came from, as
-        // `cairn info` names it: the Bedrock state is what remains once
-        // the intent is dropped, so two entries that differ only in what
-        // was dropped would read the same by it.
+        // Named by its Java state, as `cairn info` names it: two entries
+        // that differ only in the dropped intent share a Bedrock state.
         if !translated.degraded.is_empty() {
             let state = java_state(entry);
             for dropped in &translated.degraded {
@@ -300,10 +288,6 @@ pub fn prepare_mcstructure<'a>(
                 block_palette.push(compound);
                 block_palette.len() - 1
             });
-        // A slot is never past its entry's palette index, so it fits a
-        // `u16` for every palette `Palette::intern` builds. Only a longer
-        // one, assembled by hand, can fail the `expect`, which panics as
-        // `intern` does rather than write a slot no voxel could name.
         slots.push(
             u16::try_from(slot)
                 .expect("block_palette grew past u16::MAX slots; widen PaletteIndex first"),
@@ -425,9 +409,7 @@ impl McStructure<'_> {
 
     /// The two `block_indices` layers. Layer 0 is the `block_palette` slot
     /// per voxel, which is not its palette index once translation has
-    /// merged entries; layer 1 is the co-located (waterlog) layer,
-    /// `-1`-filled because Cairn's lowering never authors co-located blocks
-    /// today.
+    /// merged entries; layer 1 is the `-1`-filled co-located layer.
     fn block_indices(&self) -> List {
         let block_array = self.block_array;
         let volume = self.volume;

@@ -26,9 +26,8 @@ fn no_aliases() -> AliasIndex {
 /// The Bedrock report for a palette every test but the leak ones
 /// expects to be valid.
 ///
-/// Named rather than `.expect(..)` at thirty call sites: a leak is not
-/// a variation on a count, so a test asking about counts should not be
-/// able to be read as also asking about that.
+/// Named rather than `.expect(..)` at thirty call sites, so a test about
+/// counts does not read as also asking about leaks.
 fn bedrock_report(
     ir: &BlockArrayIr,
     blocks: &BlocksIndex,
@@ -174,10 +173,8 @@ fn air_slot_is_skipped_by_both_editions() {
 
 #[test]
 fn an_id_the_edition_never_declares_is_unsupported_on_both_sides() {
-    // A stateless id reaches `translate_states` as an empty property
-    // map and comes back clean, so before the tables were consulted
-    // this counted as portable — on either edition, since the Java
-    // side asked nothing at all.
+    // A stateless id comes back clean from `translate_states`, so only
+    // the block tables can find it absent.
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),
         BlockState::bare("minecraft:totally_not_a_block"),
@@ -318,11 +315,8 @@ fn a_pack_with_no_id_tables_refutes_nothing() {
 
 #[test]
 fn a_walkway_strip_is_counted_like_any_other_entry() {
-    // Walkway strips are lowered into their own `BlockArray` under the
-    // same `structures` map, keyed `walkway::SITE::FROM__TO`. Counting
-    // only member structures would leave `connect ... path=@ID`
-    // unreported, and a walkway of a block the edition lacks is exactly
-    // the kind of gap that reads as a routing decision in-game.
+    // A walkway of a block the edition lacks reads in-game as a routing
+    // decision rather than a gap.
     let mut structures = IndexMap::new();
     structures.insert(
         "site::duo::home1".to_owned(),
@@ -368,9 +362,7 @@ fn a_walkway_strip_is_counted_like_any_other_entry() {
 
 #[test]
 fn empty_ir_produces_zero_counts() {
-    // A file with no structures (`ir.structures.is_empty()`) is not
-    // reachable from `cairn lower` today, but the counters must survive
-    // it without panicking so future entry points can call them freely.
+    // Not reachable from `cairn lower`, but the counters are public.
     let ir = BlockArrayIr {
         structures: IndexMap::new(),
         placements: IndexMap::new(),
@@ -516,7 +508,7 @@ fn an_alias_any_version_declares_counts_for_the_edition() {
 }
 
 /// A group whose other spellings this edition does not have either is
-/// no answer, and the row falls back to what it said before.
+/// no answer.
 #[test]
 fn an_alias_this_edition_lacks_is_not_offered() {
     let ir = one_state_ir(vec![BlockState::bare("minecraft:standing_sign")]);
@@ -636,10 +628,7 @@ fn a_suggestion_is_never_drawn_from_the_other_namespace() {
 #[test]
 fn a_block_the_backend_maps_no_states_for_is_named_by_the_states_it_carries() {
     // The block exists on the edition, so the repair is not to the
-    // material — a different answer from the absent case, and the
-    // states are what says so. `mapped` comes off the error rather
-    // than being restated here, so the day a second family is mapped
-    // this row follows without an edit.
+    // material, and the states are what says so.
     let mut properties = IndexMap::new();
     properties.insert("facing".to_owned(), "north".to_owned());
     let ir = one_state_ir(vec![BlockState {
@@ -660,11 +649,6 @@ fn a_block_the_backend_maps_no_states_for_is_named_by_the_states_it_carries() {
 
 #[test]
 fn a_state_value_outside_the_java_domain_refuses_the_report() {
-    // A value the pack was expected to reject is not a fact about
-    // Bedrock. Counting it would put a validation gap in the same
-    // figure as a stair whose corner shape Bedrock has no state for,
-    // where the two have nothing in common but the number they land
-    // in — so the palette is refused and no figure is offered for it.
     let ir = one_state_ir(vec![BlockState {
         id: "minecraft:oak_stairs".to_owned(),
         properties: stair_props("up", "bottom", "straight"),
@@ -709,16 +693,8 @@ fn a_state_key_the_backend_does_not_read_refuses_the_report() {
 
 #[test]
 fn a_leak_refuses_the_whole_palette_and_names_every_one_of_them() {
-    // Two things at once, because they are the same decision. The
-    // palette's other entries classify perfectly well — a portable
-    // block, a degraded stair, and an entry that really is
-    // unsupported — and none of those counts is reported, because a
-    // figure over a palette this one entry proves invalid is not an
-    // answer to "how much of this ports".
-    //
-    // And the walk does not stop at the first leak. They are one
-    // bug's symptoms, and a reader repairing the pack wants the whole
-    // list rather than one per run.
+    // The other entries are portable, degraded and unsupported, and
+    // none of those counts is reported.
     let ir = one_state_ir(vec![
         BlockState::bare("minecraft:oak_planks"),
         BlockState {
@@ -774,11 +750,8 @@ fn a_leak_refuses_the_whole_palette_and_names_every_one_of_them() {
 
 #[test]
 fn a_block_the_backend_maps_no_states_for_is_not_a_leak() {
-    // The third refusal is the one that stays a count. The block is
-    // on the edition and the states have no Bedrock form *yet* — a
-    // fact about this backend that a build would hit and that no pack
-    // validation could have prevented, which is what separates it
-    // from the two above.
+    // A fact about this backend that a build would hit and no pack
+    // validation could prevent, unlike the two leaks above.
     let mut properties = IndexMap::new();
     properties.insert("facing".to_owned(), "north".to_owned());
     let ir = one_state_ir(vec![BlockState {

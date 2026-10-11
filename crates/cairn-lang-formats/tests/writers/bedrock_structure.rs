@@ -1,10 +1,7 @@
-//! The Bedrock `.mcstructure` tag tree: its root keys, both `block_indices`
-//! layers, palette entries with their translated `states` and block version,
-//! and the uncompressed little-endian bytes.
-//!
-//! Format reference: wiki.bedrock.dev's "mcstructure" page — little-endian
-//! uncompressed NBT, `block_indices` in two layers ordered with Z as the
-//! fastest axis, palette entries of `{ name, states, version }`.
+//! The Bedrock `.mcstructure` tag tree against wiki.bedrock.dev's
+//! "mcstructure" page: its root keys, both `block_indices` layers (z
+//! fastest), palette entries of `{ name, states, version }` with their
+//! translated `states`, and the uncompressed little-endian bytes.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::resolve::DroppedIntent;
@@ -24,9 +21,8 @@ fn target_1_21_60() -> BedrockTarget {
 
 /// The `.mcstructure` block-palette `version` integer packs
 /// `(major, minor, patch, revision)` one byte each, major in the high
-/// byte. Deriving the expected value from the parts — rather than
-/// restating the packed integer — pins that the JSON table and this
-/// documented formula agree.
+/// byte. Deriving the expected value from the parts pins the JSON table
+/// against this documented formula.
 fn block_version(major: i32, minor: i32, patch: i32, revision: i32) -> i32 {
     (major << 24) | (minor << 16) | (patch << 8) | revision
 }
@@ -186,11 +182,9 @@ fn last_palette_states(root: &Compound) -> &Compound {
 
 #[test]
 fn unmappable_stateful_entry_fails_loud() {
-    // A stateful entry outside a mapped family is a hard error
-    // (`spec/versioning-editions` "Fail-loud and minimum-version inference"
-    // — no silent substitution/dropping) whose message carries the
-    // self-correction triple. Stairs are now mapped, so fail-loud is pinned
-    // on a non-stair stateful block.
+    // A stateful entry outside a mapped family is a hard error carrying the
+    // self-correction triple (`spec/versioning-editions` "Fail-loud and
+    // minimum-version inference"). Stairs are mapped, so a door pins it.
     let mut door = BlockState::bare("minecraft:oak_door");
     door.properties
         .insert("facing".to_owned(), "north".to_owned());
@@ -251,10 +245,8 @@ fn non_straight_stair_shape_degrades() {
     let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
     assert_eq!(notes.len(), 1);
     assert_eq!(notes[0].id, "minecraft:oak_stairs");
-    // Against the writer rather than a literal: `cairn info`'s degraded
-    // note renders the same clause from the same function, and a literal
-    // here would let the build's wording drift away from the report's
-    // without a test noticing.
+    // Against the writer rather than a literal, so the build's wording
+    // cannot drift from the `cairn info` note's.
     assert_eq!(
         notes[0].message,
         degradation_message(
@@ -314,9 +306,7 @@ fn write_mcstructure_is_uncompressed_little_endian() {
 
 #[test]
 fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
-    // Same hole as the Java backend's, reached the same way: public struct
-    // fields plus a public builder. The index was written into `block_indices`
-    // as an `i32` with nothing to point at.
+    // Unreachable from the CLI, as on the Java side.
     let (mut ba, _) = asymmetric_array();
     assert_eq!(ba.palette.entries.len(), 2, "fixture palette");
     ba.voxels[0] = PaletteIndex(7);

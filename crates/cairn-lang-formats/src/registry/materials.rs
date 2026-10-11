@@ -2,11 +2,9 @@
 //!
 //! Maps the abstract material tokens of `spec/materials-themes` "Canonical
 //! vocabulary" (`@floor.wood.broadleaf`) onto the canonical Minecraft block
-//! ids the block-array IR stores. The catalog itself is a flat list of
-//! `(token, block)` pairs; the surrounding tree structure suggested by the
-//! token names is *not* enforced by this layer because resolution is
-//! exact-match — the JSON shape stays cheap to validate and the surrounding
-//! tree can grow into the manifest later without churning every consumer now.
+//! ids the block-array IR stores. The catalog is a flat list of
+//! `(token, block)` pairs; the tree the token names suggest is *not*
+//! enforced, because resolution is exact-match.
 //!
 //! The block-array lowering pass reaches this catalog through
 //! [`crate::registry::PackView`], which pairs it with the block-id table
@@ -23,16 +21,13 @@ use super::namespaced;
 pub const SUPPORTED_MATERIALS_SCHEMA: u32 = 1;
 
 /// On-disk `materials.json` body.
-///
-/// Field order matters only for the `parses_minimal_catalog` test; serde
-/// reads by name so the on-disk JSON can use any key order.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MaterialsCatalog {
     /// Schema version of the catalog itself.
     pub schema_version: u32,
     /// Default Minecraft id namespace for entries whose `block` value does
-    /// not carry one. A future modded pack can override per-entry by writing
-    /// `"create:cogwheel"` instead of `"oak_planks"`.
+    /// not carry one. An entry overrides it by writing `"create:cogwheel"`
+    /// instead of `"oak_planks"`.
     pub namespace: String,
     /// Token → block mappings in declared order.
     pub entries: Vec<MaterialEntry>,
@@ -73,10 +68,8 @@ pub struct MaterialOverride {
 /// Validated, lookup-ready abstract-material catalog.
 #[derive(Debug, Clone)]
 pub struct MaterialsIndex {
-    /// `token → mapping`, in insertion order. `IndexMap` is here so the
-    /// suggestion-pool order matches the declared order — the
-    /// `nearest_match` tie-break is "first-seen wins", and the on-disk order
-    /// is the most readable bias for that.
+    /// `token → mapping`, in insertion order, which `nearest_match`'s
+    /// first-seen tie-break then follows.
     by_token: IndexMap<String, MaterialMapping>,
 }
 
@@ -90,9 +83,8 @@ struct MaterialMapping {
 }
 
 impl MaterialsIndex {
-    /// Catalog with no entries. Used when a registry pack's manifest
-    /// declares no `materials` component, which an older pack or a
-    /// hand-written `--registry-pack` may not. Lookups always miss.
+    /// Catalog with no entries, used when a registry pack's manifest
+    /// declares no `materials` component. Lookups always miss.
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -105,8 +97,8 @@ impl MaterialsIndex {
     /// # Errors
     ///
     /// Returns [`MaterialsError`] when the catalog declares an unsupported
-    /// `schema_version` or contains a duplicate `token`. Both are pack-author
-    /// bugs that can silently corrupt lookups, so they fail at load time.
+    /// `schema_version`, a duplicate `token`, or two overrides of one token
+    /// for the same version.
     pub fn from_catalog(catalog: MaterialsCatalog) -> Result<Self, MaterialsError> {
         if catalog.schema_version > SUPPORTED_MATERIALS_SCHEMA {
             return Err(MaterialsError::UnsupportedSchemaVersion {
@@ -118,10 +110,6 @@ impl MaterialsIndex {
         let mut by_token: IndexMap<String, MaterialMapping> =
             IndexMap::with_capacity(catalog.entries.len());
         for entry in catalog.entries {
-            // Reject the duplicate *before* mutating the map so a rejected
-            // pack never observes an inconsistent intermediate state; the
-            // resulting error reads as "the second declaration of token X
-            // was refused", which is what the pack author needs to fix.
             if by_token.contains_key(&entry.token) {
                 return Err(MaterialsError::DuplicateMaterialEntry { token: entry.token });
             }

@@ -312,11 +312,8 @@ fn output_filename_strips_site_and_name_prefixes_to_place_id() {
 
 #[test]
 fn output_filename_preserves_inner_colons_and_unicode() {
-    // Scope keys that the IR could legitimately produce (a nested-namespace
-    // notation once nested scopes land) should not be silently rewritten.
-    // We strip only the exact `struct::` prefix and leave the rest
-    // verbatim, including any subsequent `::`; downstream filename
-    // sanitisation is the OS layer's responsibility on Windows.
+    // Only the exact `struct::` prefix is stripped; filename sanitisation
+    // is the OS layer's responsibility.
     assert_eq!(output_filename_nbt("struct::deep::room"), "deep::room.nbt");
     // No prefix, no transformation: the scope key carries through verbatim.
     assert_eq!(output_filename_nbt("塔"), "塔.nbt");
@@ -369,8 +366,7 @@ fn gzip_output_begins_with_magic_bytes() {
 
 #[test]
 fn unit_air_debug_snapshot_is_stable() {
-    // Stable debug snapshot of the tag tree so a future refactor
-    // that accidentally changes Tag construction order is caught.
+    // Pins the tag tree's construction order.
     let root = build_structure_tag(&unit_air(), &target_1_21_4()).expect("build");
     insta::assert_debug_snapshot!(root);
 }
@@ -447,12 +443,8 @@ fn cottage_end_to_end_size_matches_overhang_inflated_dims() {
 
 #[test]
 fn a_voxel_naming_a_slot_the_palette_does_not_have_is_refused() {
-    // `Palette::intern` is the only source of a `PaletteIndex` inside the
-    // compiler, so this is unreachable from the CLI — but `BlockArray`'s
-    // fields are public and `build_structure_tag` is public, so a consumer
-    // of this crate can hand over a grid that points past the palette. Left
-    // unchecked the index went out as an `i32` and the file named a palette
-    // slot the reader would have to invent.
+    // Unreachable from the CLI, but `BlockArray`'s fields and
+    // `build_structure_tag` are public.
     let mut ba = unit_air();
     ba.voxels[0] = PaletteIndex(7);
     let err = build_structure_tag(&ba, &target_1_21_4()).expect_err("out-of-range index");

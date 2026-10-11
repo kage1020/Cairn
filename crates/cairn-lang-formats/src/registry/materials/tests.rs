@@ -85,8 +85,6 @@ fn duplicate_token_rejected_at_load_time() {
 
 #[test]
 fn duplicate_override_for_one_version_rejected_at_load_time() {
-    // Same reason as a duplicate token: the silent outcome is "the last
-    // row wins", which the pack author cannot see from the file.
     let src = r#"{
         "schema_version": 1,
         "namespace": "minecraft",

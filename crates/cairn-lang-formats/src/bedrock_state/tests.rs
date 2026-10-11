@@ -83,17 +83,13 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
     assert_eq!(t.states.entries.get("weirdo_direction"), Some(&Tag::Int(2)));
     assert_eq!(t.states.entries.get("upside_down_bit"), Some(&Tag::Byte(1)));
     assert_eq!(t.states.entries.len(), 2);
-    // One dropped intent, as the pieces: a consumer of
-    // `degraded_entries` reads which property was lost without
-    // parsing it back out of a sentence.
     assert_eq!(
         t.degraded,
         [DroppedIntent::Shape {
             value: "outer_left".to_owned(),
         }],
     );
-    // The sentence is written once, from those pieces, and the
-    // warning's form is the note's with the entry's Java state named.
+    // The warning is the note's sentence with the entry's Java state named.
     let detail = degradation_detail(&t.degraded[0]);
     assert!(
         detail.starts_with("shape=outer_left has no Bedrock state"),
@@ -119,16 +115,10 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
 
 #[test]
 fn the_family_test_agrees_with_the_one_that_decided_to_paint_it() {
-    // `minecraft:mystairs` is the id the two plausible spellings of the
-    // stair rule disagree about: its path ends in `stairs` but not in
-    // `_stairs`. `cairn-lang-core` refuses to attach stair states to it,
-    // and this module has to refuse to translate them — a second copy of
-    // the rule that answered "stair" here would translate a blockstate
-    // core never intended to exist, with nothing between it and the
-    // written file.
-    //
-    // Pinned on behaviour rather than by calling the predicate, so the
-    // test still means something if the two ever stop sharing one.
+    // `minecraft:mystairs` ends in `stairs` but not in `_stairs`, the id the
+    // two plausible spellings of the stair rule disagree about; core does
+    // not treat it as a stair. Pinned on behaviour rather than through the
+    // predicate, so the test holds if the two stop sharing one.
     let err = translate(
         "minecraft:mystairs",
         &stair_props("south", "top", "straight"),
@@ -148,10 +138,8 @@ fn non_stair_with_properties_fails_loud() {
         err,
         BedrockStateError::UnmappableBlock { ref id, .. } if id == "minecraft:oak_door"
     ));
-    // Self-correction triple per `spec/versioning-editions` "Fail-loud
-    // and minimum-version inference": what is wrong / what is valid /
-    // suggested fix. Each fragment is pinned so a message reword that
-    // breaks the lint loop's expectation fails here first.
+    // The self-correction triple, `spec/versioning-editions` "Fail-loud
+    // and minimum-version inference".
     let msg = err.to_string();
     assert!(msg.contains("minecraft:oak_door"), "wrong: {msg}");
     assert!(msg.contains("facing=north"), "wrong: {msg}");
@@ -173,8 +161,6 @@ fn unknown_stair_facing_value_fails_loud() {
     ));
     let msg = err.to_string();
     assert!(msg.contains("facing=up"), "wrong: {msg}");
-    // Valid values (FACING_VALID) surface in the message so the lint
-    // loop can steer back to the closed domain instead of guessing.
     assert!(msg.contains("east, west, south, north"), "valid: {msg}");
     // The value is no more valid on Java, where it would be written
     // unchanged, so the fix does not send the author there.
@@ -188,10 +174,6 @@ fn unknown_stair_facing_value_fails_loud() {
 
 #[test]
 fn unknown_stair_half_value_fails_loud() {
-    // Mirrors the facing test to guard against a future
-    // `upside_down_bit()` refactor that silently maps unknown values to
-    // `0` — a silent drop that `spec/versioning-editions` "Fail-loud and
-    // minimum-version inference" forbids.
     let err = translate(
         "minecraft:oak_stairs",
         &stair_props("north", "middle", "straight"),
@@ -204,8 +186,6 @@ fn unknown_stair_half_value_fails_loud() {
     let msg = err.to_string();
     assert!(msg.contains("half=middle"), "wrong: {msg}");
     assert!(msg.contains("top, bottom"), "valid: {msg}");
-    // The value is no more valid on Java, where it would be written
-    // unchanged, so the fix does not send the author there.
     assert!(
         msg.contains("correct the source blockstate")
             && msg.contains("Java has no such")

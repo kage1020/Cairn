@@ -1,16 +1,9 @@
-//! What the built-in packs' alias groups promise about the ids in them.
-//!
-//! The `blocks` tables say which ids a version has; the `aliases` groups
-//! say which of them are the same block under another name. Nothing inside
-//! the loader can check the second half against reality — a group is
-//! refused only when *no* member is an id its own edition declares, which
-//! leaves a mistyped foreign spelling riding along silently, doing nothing
-//! and looking like data.
-//!
-//! So the properties are held here, against both packs at once: every
-//! spelling has to be an id some supported version of some edition
-//! declares, and the renames the component exists for have to come out of
-//! it.
+//! What the built-in packs' alias groups promise about their ids, checked
+//! against both packs at once: every spelling is an id some supported
+//! version of some edition declares, and the renames the component exists
+//! for come out of it. The loader refuses a group only when *no* member is
+//! an id its own edition declares, so it cannot catch a mistyped foreign
+//! spelling.
 
 use cairn_lang_core::block_array::TargetRegistry;
 use cairn_lang_formats::registry::{RegistryPack, builtin_bedrock, builtin_java};
@@ -55,14 +48,10 @@ fn every_spelling_is_an_id_some_supported_version_declares() {
 /// Every group answers a question some version of this pack can actually
 /// be asked.
 ///
-/// The asking id is one the target *refused*, so the spelling has to be
-/// absent from that version for the row to be reachable — and a lookup
-/// returns the queried id itself when the target declares it, which makes
-/// "the answer is non-empty" true of every loaded group and a test of
-/// nothing. The loader's own rule is weaker still (some version declares
-/// some member), so this is the property it cannot state: a group whose
-/// members are all declared by every version loads fine and can never be
-/// reached.
+/// The asking id is one the target *refused*, so some spelling has to be
+/// absent from that version for the row to be reachable; "the answer is
+/// non-empty" would hold of every loaded group. A group whose members every
+/// version declares passes the loader and can never be reached.
 #[test]
 fn every_group_answers_somewhere_in_its_own_range() {
     for pack in [builtin_java(), builtin_bedrock()] {
@@ -84,12 +73,8 @@ fn every_group_answers_somewhere_in_its_own_range() {
     }
 }
 
-/// The renames from the report this component was written for, each asked
-/// of the target that refuses the id.
-///
-/// These are the cases a distance search cannot reach — seven and eight
-/// edits — and the reason a table exists at all rather than a wider
-/// threshold.
+/// Renames a distance search cannot reach (seven and eight edits), each
+/// asked of the target that refuses the id.
 #[test]
 fn the_java_spellings_a_bedrock_build_refuses_are_answered() {
     let bedrock = builtin_bedrock();

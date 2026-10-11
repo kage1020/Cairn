@@ -3,9 +3,6 @@
 use serde::Deserialize;
 
 /// `pack.json` body.
-///
-/// Field order matters for the `manifest_roundtrip` test only; on disk the
-/// JSON keys can appear in any order because `serde_json` reads by name.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PackManifest {
     /// Schema version of the manifest itself. Bumped only when an
@@ -13,8 +10,7 @@ pub struct PackManifest {
     pub schema_version: u32,
     /// Edition the pack targets.
     pub edition: PackEdition,
-    /// Stable identifier for the pack. Surfaced in error messages so a
-    /// `--registry-pack` mismatch points the user at the actual pack.
+    /// Stable identifier for the pack, surfaced in error messages.
     pub name: String,
     /// Free-form description. Informational; not consumed by the compiler.
     pub description: String,
@@ -49,35 +45,26 @@ impl PackEdition {
 
 /// Component file references inside a registry pack.
 ///
-/// `data_versions` is the only required component in the initial cut.
-/// Later additions slot in `Option`-typed entries for blocks, items,
-/// tags, and the semantic-sensitivity catalog so older packs stay
-/// loadable.
+/// `data_versions` is the only required component. Every other one is an
+/// `Option`, so a pack predating it stays loadable.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PackFiles {
     /// Relative filename of the `DataVersionTable` JSON.
     pub data_versions: String,
-    /// Relative filename of the abstract `materials` catalog JSON. Optional
-    /// for backwards compatibility: a pack predating the component lacks it,
-    /// and the loader fills [`crate::registry::MaterialsIndex::empty`]
+    /// Relative filename of the abstract `materials` catalog JSON. When
+    /// absent, the loader fills [`crate::registry::MaterialsIndex::empty`]
     /// in its place.
     #[serde(default)]
     pub materials: Option<String>,
-    /// Relative filename of the per-version `blocks` id table JSON.
-    /// Optional on the same terms as `materials`: a pack without it loads,
-    /// and the loader fills [`crate::registry::BlocksIndex::empty`] in its
-    /// place. A compile against such a pack cannot decide whether an id
-    /// exists, so it does not try — every id passes, exactly as it did
-    /// before this component existed. Nothing announces that; the pack is
-    /// what has to grow the table.
+    /// Relative filename of the per-version `blocks` id table JSON. When
+    /// absent, the loader fills [`crate::registry::BlocksIndex::empty`] in
+    /// its place, and a compile against the pack cannot decide whether an
+    /// id exists, so every id passes, silently.
     #[serde(default)]
     pub blocks: Option<String>,
-    /// Relative filename of the `aliases` group catalog JSON. Optional on
-    /// the same terms as `blocks`: a pack without it loads, and the loader
-    /// fills [`crate::registry::AliasIndex::empty`] in its place. An
-    /// `E_UNKNOWN_ID` against such a pack falls back to the typo search
-    /// alone, which is where every pack stood before this component
-    /// existed.
+    /// Relative filename of the `aliases` group catalog JSON. When absent,
+    /// the loader fills [`crate::registry::AliasIndex::empty`] in its place,
+    /// and an `E_UNKNOWN_ID` against the pack offers the typo search alone.
     #[serde(default)]
     pub aliases: Option<String>,
 }

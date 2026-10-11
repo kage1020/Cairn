@@ -2,9 +2,8 @@
 //!
 //! Answers one question: *does this block id exist in the target the compile
 //! is pinned to?* `spec/versioning-editions` "Fail-loud and minimum-version
-//! inference" makes an unknown id a hard error, and until this component
-//! landed the check was structural only ("the id has exactly one `:`"), so
-//! `@totally_not_a_block` rode all the way into a written `.mcstructure`.
+//! inference" makes an unknown id a hard error, and the structural
+//! `namespace:path` check passes any well-formed id.
 //!
 //! The on-disk shape follows the folding rule of
 //! `spec/versioning-editions` "Backend = data tables" — "fold versions with
@@ -227,11 +226,9 @@ impl BlocksIndex {
     /// reports across the range rather than building for one version — the
     /// same position [`Self::declared_by_some_version`] answers from.
     ///
-    /// An id several versions share is yielded once per version. These are
-    /// candidates for a distance scorer, which reads each one on its own
-    /// and keeps the nearest, so a repeat is always at an equal distance to
-    /// a candidate already seen and always discarded — deduplicating would
-    /// cost an allocation to change nothing.
+    /// An id several versions share is yielded once per version: a
+    /// distance scorer keeps the first of equal candidates, so
+    /// deduplicating would cost an allocation to change nothing.
     pub fn declared_ids(&self) -> impl Iterator<Item = &str> {
         self.by_version
             .values()
