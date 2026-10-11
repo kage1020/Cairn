@@ -1,8 +1,5 @@
-//! Every subcommand that writes to stdout, plus clap's `--version` and
-//! `--help`, run with a stdout whose reader has already gone (`cairn lower
-//! f.crn | head -1` once `head` exits). The exit code is a Stable surface
-//! (the CLI README's "Exit codes"), so the run ends with the code and the
-//! stderr it gives with stdout open, rather than panicking.
+//! Every stdout-writing subcommand, plus `--version` and `--help`, run with stdout already
+//! closed: it keeps the exit code and the stderr it has with stdout open.
 
 use std::process::{Command, Output, Stdio};
 
@@ -10,10 +7,7 @@ use crate::common::{
     Fixture, assert_stream, cairn_argv, cargo_bin, examples_dir, stderr_of, write_source,
 };
 
-/// Run `cairn argv` with stdout the write end of a pipe whose read end is
-/// closed before the child starts, so its first write to stdout fails
-/// with a broken pipe on every platform — no race with a reader that
-/// exits after the child has written.
+/// Run `cairn argv` with stdout a pipe already closed at the far end, so the first write fails.
 fn with_closed_stdout(argv: &[&str]) -> Output {
     let (reader, writer) = std::io::pipe().expect("create pipe");
     drop(reader);
@@ -29,15 +23,10 @@ fn example(name: &str) -> String {
     examples_dir().join(name).to_str().unwrap().to_owned()
 }
 
-/// Run `open_argv` with stdout open and `closed_argv` with it closed, and
-/// return the open run.
+/// Run `open_argv` with stdout open and `closed_argv` with it closed, and return the open run.
 ///
-/// The open run must exit with `code`, so a case cannot drift onto
-/// another path that still exits the same way both times, and it must
-/// write to stdout, or the closed run never reaches a failing write and
-/// passes by default. The two argv may differ only in paths (two copies
-/// of one source); stderr is compared with each open path replaced by its
-/// closed counterpart.
+/// The open run must exit `code` and write to stdout, or the closed run proves nothing; the two
+/// argv may differ only in paths.
 fn assert_closed_stdout_keeps_the_verdict(
     open_argv: &[&str],
     closed_argv: &[&str],
@@ -99,9 +88,7 @@ fn parse_keeps_its_exit_code() {
 fn lower_keeps_its_exit_code() {
     let village = example("village.crn");
     let ascii = same_argv(&["lower", &village, "--format", "ascii"], 0);
-    // `village.crn`'s stairs are what reach the palette line that prints
-    // block-state properties (`[  4] c  minecraft:spruce_stairs[…]`);
-    // without one, that line leaves the matrix.
+    // `village.crn`'s stairs reach the palette line that prints block-state properties.
     assert!(
         String::from_utf8_lossy(&ascii.stdout).lines().any(|line| {
             line.trim_start().starts_with('[')
@@ -120,8 +107,7 @@ fn lower_keeps_its_exit_code() {
 
 #[test]
 fn a_run_that_warns_says_so_with_stdout_closed() {
-    // Every other case here writes nothing to stderr, so their stderr
-    // comparison holds trivially. This one warns while it writes stdout.
+    // The one case that writes stderr as well as stdout.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let source = write_source(
         tmp.path(),
@@ -152,8 +138,6 @@ fn info_keeps_its_exit_code() {
 
 #[test]
 fn check_keeps_both_verdicts() {
-    // A refused source as well as an accepted one: the refusal's 1 is the
-    // verdict a consumer that stops reading early still has to see.
     same_argv(&["check", &example("village.crn"), "--format", "json"], 0);
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let duplicate = write_source(
@@ -184,16 +168,13 @@ fn synth_keeps_its_exit_code() {
 
 #[test]
 fn clap_keeps_its_exit_code() {
-    // clap writes these itself, bypassing `outln!`, and discards its own
-    // write error; a clap bump that stops discarding it fails here.
+    // clap writes these itself, bypassing `outln!`, and discards its own write error.
     same_argv(&["--version"], 0);
     same_argv(&["--help"], 0);
 }
 
 #[test]
 fn compile_reports_the_build_it_committed() {
-    // The `wrote …` lines come after the build has committed, so the
-    // closed run has to leave the same artifacts and lock as the open one.
     // Two copies, so neither run reads the other's lock.
     let village = std::fs::read_to_string(examples_dir().join("village.crn")).expect("read");
     let open_fixture = Fixture::new(&village);

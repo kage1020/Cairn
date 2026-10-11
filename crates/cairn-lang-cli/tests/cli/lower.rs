@@ -1,6 +1,4 @@
-//! `cairn lower <file>` end to end: the IR it prints in each format, the
-//! findings it reports on stderr with their positions, and every shipped
-//! example lowering at exit 0.
+//! `cairn lower <file>` end to end: the IR in each format, and the findings on stderr.
 
 use std::fs;
 use tempfile::TempDir;
@@ -21,9 +19,6 @@ fn cottage_exits_zero_and_names_the_struct() {
         stdout.contains("struct::cottage"),
         "expected scope key in stdout, got: {stdout}",
     );
-    // overhang=1 inflates the bounding box to 11×?×9; the y axis grows by
-    // the gable extra height (ceil(min(11,9)/2) = 5) above the floor +
-    // walls, so dims=11x10x9.
     assert!(
         stdout.contains("dims=11x10x9"),
         "expected dims line, got: {stdout}",
@@ -55,8 +50,7 @@ fn json_format_round_trips_as_block_array_ir() {
 
 #[test]
 fn deferred_member_warnings_print_to_stderr() {
-    // Stair lowering takes only `shape=straight` / `outer_left` /
-    // `outer_right`, so `inner_left` defers.
+    // Stair lowering has no `inner_left`, so it defers.
     let source = concat!(
         "theme t:\n",
         "  slot floor -> spruce_planks\n",
@@ -71,7 +65,6 @@ fn deferred_member_warnings_print_to_stderr() {
     fs::write(&src_path, source).expect("write source");
     let out = cairn("lower", &[src_path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    // Deferred on the `stair shape=inner_left` line.
     assert_stream(
         &stderr,
         &[
@@ -100,7 +93,6 @@ fn all_examples_exit_zero() {
 
 #[test]
 fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
-    // `W_PHASE_CONFLICT`'s note points at the overwritten member.
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("conflict.crn");
     fs::write(
@@ -133,7 +125,6 @@ fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
         stderr.contains(":7:3:   note: overwritten member declared here"),
         "the note must carry the `door` line's position, got: {stderr}",
     );
-    // A span-less footer stays indented and unprefixed.
     assert!(
         stderr.contains(
             "

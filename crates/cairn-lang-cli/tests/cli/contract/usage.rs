@@ -1,21 +1,14 @@
-//! A mistyped flag, subcommand or value gets what is wrong, what would be
-//! valid and the nearest candidate. clap's default `error-context` and
-//! `suggestions` features write these, so `default-features = false` would
-//! drop them without a source change. The assertions match clap's wording
-//! verbatim; after a clap bump, update the strings.
+//! A mistyped flag, subcommand or value gets what is wrong, what is valid and the nearest
+//! candidate. The strings are clap's own; update them after a clap bump.
 
 use std::process::Command;
 
 use crate::common::{cargo_bin, example_in_tempdir};
 
-/// Run `argv` with the placeholder `SOURCE` swapped for a real file,
-/// assert clap refused it as a usage error, and return stderr.
+/// Run `argv` with `SOURCE` swapped for a real file, since a missing one also exits 2, and
+/// return stderr once the exit says usage error.
 ///
-/// The file is real because `cairn` also exits 2 for a missing path; a
-/// clap that accepted the typo would check the file and exit 0.
-///
-/// `NO_COLOR`, which wins over `CLICOLOR_FORCE`, because clap styles the
-/// refused token and the escape codes would split the strings looked for.
+/// `NO_COLOR`: clap's escape codes would split the strings looked for.
 fn usage_error(argv: &[&str]) -> String {
     let (_dir, source) = example_in_tempdir("cottage.crn");
     let source = source.to_str().expect("temp path is utf-8");
@@ -71,8 +64,6 @@ fn a_mistyped_value_lists_the_valid_ones_and_suggests_the_nearest() {
         stderr.contains("invalid value 'jav' for '--edition <EDITION>'"),
         "the refusal should name the value and the flag it was given to: {stderr}",
     );
-    // Written out: editions are a fixed two-way axis, not a list that
-    // grows a member with each new pass.
     assert!(
         stderr.contains("[possible values: java, bedrock]"),
         "the refusal should list the values the flag accepts: {stderr}",

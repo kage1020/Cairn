@@ -1,9 +1,5 @@
-//! Sources whose numbers are hostile are refused with a finding, rather
-//! than ending in a panic (exit 101), an allocation failure that aborts the
-//! process, or minutes of work for a one-line source. `cairn check` accepts
-//! every input here, so the lowering pass is what stands between a typo and
-//! the failure. Each run is a subprocess with a deadline, so a crash or a
-//! hang fails the suite instead of taking it down.
+//! Sources whose numbers are hostile are refused with a finding, not a panic, an abort or a hang.
+//! Each run is a subprocess with a deadline, so a crash or a hang fails the suite.
 
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
@@ -14,32 +10,24 @@ use tempfile::TempDir;
 
 use crate::common::{assert_stream, cargo_bin};
 
-/// Generous next to the sub-second every legitimate source takes, tight
-/// next to the minutes an unbounded shape takes.
+/// Generous next to a legitimate source's sub-second, tight next to an unbounded shape's minutes.
 const DEADLINE: Duration = Duration::from_secs(30);
 
-/// The bound for a row that must be refused by arithmetic rather than by a
-/// search. Far above the few milliseconds it costs, far below [`DEADLINE`].
+/// The bound for a row that must be refused by arithmetic rather than by a search.
 const ANSWERED_WITHOUT_SEARCHING: Duration = Duration::from_secs(5);
 
-/// What a run did. `TimedOut` is a distinct outcome rather than an error so
-/// the assertion can name it: "hung" and "crashed" call for different fixes.
+/// What a run did; "hung" and "crashed" call for different fixes.
 #[derive(Debug, PartialEq, Eq)]
 enum Outcome {
     Exited(i32),
-    /// Killed at the deadline, or died from a signal (which is how a Unix
-    /// abort or stack overflow surfaces through `ExitStatus`).
+    /// Killed at the deadline, or died from a signal, as a Unix abort or stack overflow does.
     NoExitCode,
     TimedOut,
 }
 
-/// Run `cairn` with a deadline, returning the outcome, stderr and elapsed
-/// time. The time is returned because a row that must be *fast* and one
-/// that must merely *finish* want different bounds.
+/// Run `cairn` with a deadline, returning the outcome, stderr and elapsed time.
 ///
-/// stderr goes to a file: a full pipe nobody reads deadlocks the child,
-/// which looks exactly like a hang. stdout is discarded;
-/// [`run_bounded_with_stdout`] keeps it.
+/// stderr goes to a file, since a full pipe nobody reads deadlocks the child like a hang.
 fn run_bounded(dir: &Path, args: &[&str]) -> (Outcome, String, Duration) {
     run_bounded_to(dir, args, Stdio::null())
 }
@@ -112,10 +100,6 @@ fn connected(gap: &str) -> String {
 }
 
 /// Two huts with a door on their `+x` wall, `b` placed `east_of=a`.
-///
-/// `HUT`'s front door sits inside its body's `x` span, and a body may not
-/// reach past `i32`, so only a door on the `+x` wall can put a port one
-/// step past the range on that axis.
 fn connected_east_doors(gap: &str) -> String {
     source(&format!(
         "def east_door_hut size=3x3:\n\
@@ -129,9 +113,6 @@ fn connected_east_doors(gap: &str) -> String {
 }
 
 /// Two huts whose doors face each other's backs along `z`, via `north_of=`.
-///
-/// `HUT`'s only door is on its front, so [`connected`] cannot put a port on
-/// the `-z` side; this pair needs a door of its own on the back.
 fn connected_back_to_back(gap: &str) -> String {
     source(&format!(
         "def back_door_hut size=3x3:\n\
@@ -144,8 +125,7 @@ fn connected_back_to_back(gap: &str) -> String {
     ))
 }
 
-/// Two ports offset on *both* axes, via an `east_of=` / `north_of=` chain,
-/// which tells a length bound apart from an area one.
+/// Two ports offset on both axes, which tells a length bound apart from an area one.
 fn connected_diagonally(gap: &str) -> String {
     source(&format!(
         "{HUT}site duo:\n\
@@ -159,12 +139,7 @@ fn connected_diagonally(gap: &str) -> String {
 /// The findings `lower` gives up on a hostile row with, in emission order.
 type Findings = &'static [(u64, u64, &'static str, &'static str)];
 
-/// Every shape that, unbounded, crashes, aborts or hangs, each with the
-/// findings `lower` reports for it.
-///
-/// The four groups are separate faults that share a symptom: an `expect`
-/// on source text, a saturating read, an unbounded derived volume, and
-/// unchecked coordinate arithmetic.
+/// Every shape that, unbounded, crashes, aborts or hangs, with the findings `lower` reports.
 fn hostile_sources() -> Vec<(&'static str, String, Findings)> {
     const PLACE_ID: Findings = &[(15, 3, "error", "E_INVALID_PLACE_ID")];
     const TOO_LARGE: Findings = &[(9, 1, "warning", "W_STRUCTURE_TOO_LARGE")];
@@ -179,8 +154,7 @@ fn hostile_sources() -> Vec<(&'static str, String, Findings)> {
         ("place-id-space", place("\"home 1\""), PLACE_ID),
         ("place-id-colon", place("\"home:1\""), PLACE_ID),
         ("place-id-empty", place("\"\""), PLACE_ID),
-        // Numbers past `u32`, which a saturating read would clamp to
-        // `u32::MAX` instead of deferring.
+        // Numbers past `u32`, which a saturating read would clamp instead of deferring.
         (
             "height-past-u32",
             source("struct tower size=3x3\n  walls mat_slot=wall height=5000000000\n"),
@@ -191,8 +165,7 @@ fn hostile_sources() -> Vec<(&'static str, String, Findings)> {
             source("struct big size=3x3\n  roof kind=flat mat_slot=roof overhang=4294967295\n"),
             TOO_LARGE,
         ),
-        // In-range numbers whose product is not: unbounded, the derived
-        // volume asks the allocator for more memory than the machine has.
+        // In-range numbers whose product is not.
         (
             "height-in-range",
             source("struct tower size=3x3\n  walls mat_slot=wall height=2147483647\n"),
@@ -225,30 +198,21 @@ fn hostile_sources() -> Vec<(&'static str, String, Findings)> {
             ),
             TOO_LARGE,
         ),
-        // Walkway port resolution adds `i32`s, and an unmeasured strip is
-        // materialised whole. `east_door_hut` is 3 wide, so this puts `b`'s
-        // last column at exactly `i32::MAX` and only the step out of its
-        // `+x` door to the port leaves the range.
-        // `the_port_case_reaches_port_resolution` holds it there.
+        // `b` ends at `i32::MAX`, so only the step out of its `+x` door leaves the range.
         (
             "gap-port-past-i32",
             connected_east_doors("2147483642"),
             PORT_DEFERRED,
         ),
-        // The same on the `-z` side: `b`'s origin lands at `z = 0 - 3 -
-        // 2147483645 = i32::MIN` exactly, and only the step out to its back
-        // door's port leaves the range.
+        // `b`'s origin lands at `i32::MIN`, so only the step out to its back door's port leaves it.
         (
             "gap-port-past-i32-north",
             connected_back_to_back("2147483645"),
             PORT_DEFERRED,
         ),
-        // `b`'s origin lands at 2147483646 and its last column one past
-        // `i32::MAX`, so the row is refused before any port is resolved
-        // against it, and the build it is part of fails.
+        // `b`'s last column lands one past `i32::MAX`, so the row is refused before any port.
         ("gap-body-past-i32", connected("2147483643"), PLACE_DEFERRED),
-        // Here the origin itself leaves the range, and the row is refused
-        // before any port is resolved against it.
+        // The origin itself leaves the range.
         (
             "gap-origin-past-i32",
             connected("2147483647"),
@@ -259,9 +223,7 @@ fn hostile_sources() -> Vec<(&'static str, String, Findings)> {
             connected("100000000"),
             &[(17, 3, "warning", "W_WALKWAY_BLOCKED")],
         ),
-        // Area, not length: `gap=30000` on both axes is a 60001-cell path
-        // but a 900-million-cell bounding box, which an unbounded router
-        // allocates (32 seconds, roughly 1.8 GB).
+        // Area, not length: a 60001-cell path in a 900-million-cell bounding box.
         (
             "gap-diagonal",
             connected_diagonally("30000"),
@@ -275,12 +237,7 @@ fn hostile_sources() -> Vec<(&'static str, String, Findings)> {
     ]
 }
 
-/// A `circuit region=` inside a struct whose `size=` is hostile.
-///
-/// The reservation takes the floor's extent, so `region=` is as wide as
-/// `size=` and the actuator pad lands at `x = width - 1`: the driver
-/// segment out to it is the author's `size=`. The rest is the smallest
-/// circuit that reaches the place-and-route passes.
+/// A `circuit region=` inside a struct whose `size=` is hostile, so the driver segment is too.
 fn circuit(size: &str) -> String {
     let body = [
         format!("struct big size={size}"),
@@ -295,10 +252,7 @@ fn circuit(size: &str) -> String {
     source(&format!("{body}\n"))
 }
 
-/// The same shapes put to the place-and-route passes, which none of the
-/// commands `hostile_sources` runs reach. Unmeasured, routing lays millions
-/// of coords of wire to the actuator pad and exits 0 with a netlist the
-/// next stage refuses, so `--stage route` has to answer, by arithmetic.
+/// The same shapes put to place-and-route, which `--stage route` has to refuse by arithmetic.
 fn hostile_circuits() -> Vec<(&'static str, String)> {
     vec![
         ("circuit-size-in-range", circuit("4000000x4000000")),
@@ -315,9 +269,7 @@ fn routing_a_giant_reservation_answers_within_the_deadline() {
         fs::create_dir_all(&dir).expect("case dir");
         let path = write(&dir, name, &body);
         let file = path.to_str().unwrap();
-        // Only `route`: the CLI stops at the first stage with an error, so
-        // `delay` and `crossing` would spell the same refusal.
-        // `pass::tests::stages()` puts the shape to every pass.
+        // Only `route`: the CLI stops at the first stage with an error.
         let (outcome, stderr, elapsed) = run_bounded(
             &dir,
             &[
@@ -330,8 +282,7 @@ fn routing_a_giant_reservation_answers_within_the_deadline() {
                 "--experimental-logic-synth",
             ],
         );
-        // Not `Exited(0 | 1)`: a refusal demoted to a warning would put the
-        // same code on stderr.
+        // Not `Exited(0 | 1)`: a refusal demoted to a warning would put the same code on stderr.
         assert!(
             matches!(outcome, Outcome::Exited(1)),
             "{name}: `synth --stage route` ended as {outcome:?}; a reservation the attenuation \
@@ -344,9 +295,6 @@ fn routing_a_giant_reservation_answers_within_the_deadline() {
                 (15, 3, "error", "E_ATTENUATION_LIMIT"),
             ],
         );
-        // Arithmetic answers in milliseconds, a search in minutes.
-        // `DEADLINE` is shared with rows that only have to finish and cannot
-        // tell 4 ms from 29 s.
         assert!(
             elapsed < ANSWERED_WITHOUT_SEARCHING,
             "{name}: `synth --stage route` took {elapsed:?}; refusing on the straight line is \
@@ -415,9 +363,7 @@ fn lowering_says_which_member_it_gave_up_on() {
 
 #[test]
 fn the_port_case_reaches_port_resolution() {
-    // A row refused for its origin, its far edge or a port defers the same
-    // member at the same position, so only the message holds each case to
-    // the stage it is named for.
+    // Each case defers the same member at the same position, so only the message tells them apart.
     let tmp = TempDir::new().expect("tempdir");
     let sources = hostile_sources();
     for (name, reached, not_reached) in [
@@ -502,9 +448,6 @@ fn compile_refuses_rather_than_certifying_the_wreckage() {
     }
 }
 
-/// A row refused for its far edge produces no voxels, so the build it is
-/// part of is partial, and `check --target` and `compile` refuse it rather
-/// than exit 0 without the row.
 #[test]
 fn a_body_past_i32_fails_the_build_it_is_part_of() {
     let sources = hostile_sources();
@@ -542,23 +485,11 @@ fn a_body_past_i32_fails_the_build_it_is_part_of() {
     }
 }
 
-/// A walkway whose router search reaches the `i32::MAX` column.
-///
-/// The straight L from `b.east` to `c.west` crosses a floor, so the
-/// router runs. With `gap=2147483640`, `b.east` sits at `x = i32::MAX - 1`
-/// and the search rectangle's east margin is the `i32::MAX` column. One
-/// block further east the margin would leave `i32`, so the router refuses
-/// the rectangle and the lowering falls back to the straight L, skipping
-/// the cells it overlaps.
-///
-/// The second row holds the first on the edge, and its warning shows the
-/// straight L overlaps a floor, so the first row's silence means a detour.
-/// Not [`hostile_sources`] rows: the first lowers with no finding.
+/// With `gap=2147483640` the search rectangle's east margin is the `i32::MAX` column. The second
+/// row's warning shows the straight L overlaps a floor, so the first row's silence means a detour.
 #[test]
 fn a_detour_searched_along_the_edge_of_i32_answers_rather_than_panics() {
-    // `a` must have no floor: with one, its cells stretch the search
-    // rectangle 2.1e9 blocks west, past the router's area cap, and both
-    // rows fall back to the straight L.
+    // `a` must have no floor, or its cells stretch the search past the router's area cap.
     let detour = |gap: &str| {
         source(&format!(
             "def shell size=3x3:\n\
@@ -625,11 +556,7 @@ fn a_detour_searched_along_the_edge_of_i32_answers_rather_than_panics() {
     }
 }
 
-/// A body placed so its last column is `i32::MAX`, whose port is blocked.
-///
-/// A body past the range is refused before its floor is laid, so this one
-/// ends on the edge cell itself and the router's box runs out to it. The
-/// note naming what buries the port has to find that cell's owner.
+/// A body past the range is refused before its floor is laid, so this one ends on the edge cell.
 #[test]
 fn a_blocked_port_on_a_body_at_the_i32_edge_answers_rather_than_panics() {
     let src = source(
@@ -674,25 +601,15 @@ fn a_blocked_port_on_a_body_at_the_i32_edge_answers_rather_than_panics() {
     }
 }
 
-/// A hut with a door on its front and on its back, so a `north_of=` pair
-/// faces door to door along one column and the straight L between them
-/// is a z leg alone, crossing no floor.
+/// A hut with a door front and back, so a `north_of=` pair's straight L crosses no floor.
 const THROUGH_HUT: &str = "def hut size=3x3:\n\
 \x20\x20floor id=floor mat_slot=floor\n\
 \x20\x20walls id=walls mat_slot=wall height=3\n\
 \x20\x20door  id=front side=front at=center\n\
 \x20\x20door  id=back  side=back  at=center\n\n";
 
-/// A north–south walkway long enough that laying it in time quadratic
-/// in its length would not finish.
-///
-/// Every walkway row in [`hostile_sources`] is refused before a strip is
-/// laid, at the `i32` edge or by the router's 4,000,000-cell cap on the
-/// straight L's bounding box (`l_path_area`). A million-cell z strip is
-/// one cell wide, so its box sits under the cap and the strip is laid with
-/// no finding, which is why it stands alone. Linear, it lowers far inside
-/// [`DEADLINE`]; a lookup over the laid cells per step would be half a
-/// trillion comparisons.
+/// A million-cell z strip is one cell wide, under the router's area cap, so it is laid with no
+/// finding and only its time shows a quadratic lowering.
 #[test]
 fn a_long_north_south_walkway_lowers_within_the_deadline() {
     let body = source(&format!(
@@ -717,8 +634,7 @@ fn a_long_north_south_walkway_lowers_within_the_deadline() {
         !stderr.contains("W_") && !stderr.contains("E_"),
         "the walkway must be laid, not refused; got {stderr}",
     );
-    // A row dropped without a finding is silent too, so read the strip
-    // back.
+    // A row dropped without a finding is silent too, so read the strip back.
     let ir: serde_json::Value = serde_json::from_str(&stdout).expect("`lower` prints JSON");
     let key = "walkway::duo::a.back__b.front";
     let walkways = ir["walkways"].as_object().expect("a `walkways` map");
@@ -744,14 +660,8 @@ fn a_long_north_south_walkway_lowers_within_the_deadline() {
     );
 }
 
-/// A sink walled in two blocks from its driver, in a reservation as large
-/// as the `size=` and `void=` make it.
-///
-/// Every face of the sink is taken by a block, another net's dust, or the
-/// coords beside that dust. An unbounded search visits every free coord
-/// the net can reach, seconds and hundreds of megabytes per million coords
-/// set by `width × depth × void`, and raising `void`, as the refusal's fix
-/// line suggests, only makes it slower.
+/// A sink walled in two blocks from its driver, in a reservation as large as `size=` and `void=`
+/// make it.
 fn walled_in_near_sink() -> String {
     let body = [
         "theme t:",
@@ -792,8 +702,7 @@ fn a_walled_in_sink_is_refused_without_searching_the_reservation() {
         matches!(outcome, Outcome::Exited(1)),
         "`synth --stage route` ended as {outcome:?}\nstderr={stderr}",
     );
-    // Congestion, not distance: the sink is walled in whatever the cap
-    // allows.
+    // Congestion, not distance: the sink is walled in whatever the cap allows.
     assert_stream(
         &stderr,
         &[
@@ -803,9 +712,7 @@ fn a_walled_in_sink_is_refused_without_searching_the_reservation() {
         ],
     );
     assert!(stderr.contains("cannot reach (5,0,1)"), "got {stderr:?}");
-    // 12.4 million coords of reservation. Searched, it runs past
-    // `DEADLINE`; answered from the sink's faces, or from a search the
-    // cap bounds, it is far inside this.
+    // 12.4 million coords of reservation: searched, it runs past `DEADLINE`.
     assert!(
         elapsed < ANSWERED_WITHOUT_SEARCHING,
         "`synth --stage route` took {elapsed:?} to refuse a sink two blocks from its driver",

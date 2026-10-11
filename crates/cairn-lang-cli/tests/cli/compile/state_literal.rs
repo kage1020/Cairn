@@ -1,8 +1,5 @@
-//! A canonical token's block-state literal, `@oak_log[axis=x]`, end to
-//! end, as each command treats it: `check` and `compile --edition java`
-//! accept it and announce that nothing checked it against the target,
-//! `info` counts what Bedrock cannot map, and `compile --edition bedrock`
-//! refuses the same entry.
+//! A canonical token's block-state literal, `@oak_log[axis=x]`, end to end: Java writes it,
+//! `info` counts what Bedrock cannot map, and Bedrock refuses it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,8 +19,7 @@ fn floored(dir: &Path, target: &str) -> PathBuf {
     )
 }
 
-/// The NBT bytes of a `String` tag named `key` holding `value`: tag id 8,
-/// then each of the two as a big-endian `u16` length and its bytes.
+/// The NBT bytes of a `String` tag named `key` holding `value`.
 fn string_tag(key: &str, value: &str) -> Vec<u8> {
     let mut tag = vec![8];
     for part in [key, value] {
@@ -33,9 +29,6 @@ fn string_tag(key: &str, value: &str) -> Vec<u8> {
     tag
 }
 
-/// `info` counts the entry the backend cannot map and exits 0; the backend
-/// itself refuses it. A backend that dropped the properties instead would
-/// fail here while `info`'s answer stood.
 #[test]
 fn bedrock_refuses_to_compile_the_entry_info_counts_unsupported() {
     let tmp = TempDir::new().expect("tempdir");
@@ -67,9 +60,6 @@ fn bedrock_refuses_to_compile_the_entry_info_counts_unsupported() {
     );
 }
 
-/// Java writes a literal as given, even a value no `oak_log` has, as
-/// `spec/syntax` says it does until `E_STATE_DOMAIN` exists, and warns on
-/// the literal.
 #[test]
 fn java_writes_an_unchecked_literal_as_given_and_says_so() {
     let tmp = TempDir::new().expect("tempdir");
@@ -90,8 +80,6 @@ fn java_writes_an_unchecked_literal_as_given_and_says_so() {
     );
 }
 
-/// The `.nbt` is a function of the set of states a build holds, so the
-/// order a literal spells its properties in cannot reach its bytes.
 #[test]
 fn two_spellings_of_one_state_write_the_same_bytes() {
     let mut bodies = Vec::new();
@@ -117,9 +105,6 @@ fn two_spellings_of_one_state_write_the_same_bytes() {
     );
 }
 
-/// `check` reads the literal the way the build does: no error with or
-/// without a target, and with one, the lowering's announcement that the
-/// literal went unchecked is the only finding.
 #[test]
 fn a_well_formed_literal_passes_check() {
     let tmp = TempDir::new().expect("tempdir");

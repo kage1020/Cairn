@@ -1,5 +1,4 @@
-//! A `--target` resolved against its edition's data table, and the
-//! backend it selects.
+//! A `--target` resolved against its edition's data table, and the backend it selects.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArray;
@@ -12,21 +11,13 @@ use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
 use crate::artifacts::PreparedStructure;
 
-/// A `--target` resolved for one edition, which also selects the backend
-/// that serialises it.
-///
-/// Every edition-varying step of a compile matches on this type or on the
-/// [`PreparedStructure`] it produces, so adding an edition means adding a
-/// variant to both and the compiler flags every arm left to write.
+/// A `--target` resolved for one edition, which also selects the backend that writes it.
 pub(crate) enum ResolvedTarget {
-    /// Java vanilla structure target (`.nbt`, gzip).
     Java(JavaTarget),
-    /// Bedrock structure target (`.mcstructure`, uncompressed).
     Bedrock(BedrockTarget),
 }
 
 impl ResolvedTarget {
-    /// On-disk extension the backend writes.
     pub(crate) fn output_ext(&self) -> OutputExt {
         match self {
             ResolvedTarget::Java(_) => OutputExt::Nbt,
@@ -34,17 +25,7 @@ impl ResolvedTarget {
         }
     }
 
-    /// Check a structure against this edition's backend, with the
-    /// `W_INTENT_DEGRADED` parity notes lowering intent to the edition
-    /// raised (none on Java, which is lossless). Both backends' errors are
-    /// rendered to a string so the caller has one shape to report. Nothing
-    /// per voxel is built: [`PreparedStructure::write`] encodes the grid as
-    /// it writes.
-    ///
-    /// The notes stay [`ParityNote`]s so the warning line can print the
-    /// degraded block id as a field of its own. One id has a note per state
-    /// combination that degrades, and only the message, which names the
-    /// entry as `id[states]`, tells them apart.
+    /// Check `array` against this edition's backend, with the parity notes it raises.
     pub(crate) fn prepare<'a>(
         &self,
         array: &'a BlockArray,
@@ -59,7 +40,6 @@ impl ResolvedTarget {
         }
     }
 
-    /// Human-facing Minecraft version string for the lockfile.
     pub(crate) fn mc_version(&self) -> &str {
         match self {
             ResolvedTarget::Java(t) => &t.mc_version,
@@ -67,8 +47,7 @@ impl ResolvedTarget {
         }
     }
 
-    /// Edition-specific version integer for the lockfile (`DataVersion`
-    /// for Java, block-palette `version` for Bedrock).
+    /// `DataVersion` on Java, the block-palette `version` on Bedrock.
     pub(crate) fn version_int(&self) -> i32 {
         match self {
             ResolvedTarget::Java(t) => t.data_version,
@@ -76,8 +55,6 @@ impl ResolvedTarget {
         }
     }
 
-    /// Registry pack whose bytes the compile resolved against, hashed into
-    /// the lockfile.
     pub(crate) fn registry_pack(&self) -> &'static RegistryPack {
         match self {
             ResolvedTarget::Java(_) => builtin_pack(Edition::Java),
@@ -86,12 +63,6 @@ impl ResolvedTarget {
     }
 }
 
-/// Resolve `--target` against the pack for `--edition`.
-///
-/// Returns the failure instead of printing it: `run_compile` resolves the
-/// target before lowering, which checks block ids against it, but reports
-/// a bad target after the parse and lowering diagnostics, so a syntax
-/// error is still the first problem a user is told about.
 pub(crate) fn resolve_target(
     edition: Edition,
     target: &str,

@@ -1,5 +1,4 @@
-//! Argument-surface invariants the end-to-end tests could only assert by
-//! hard-coding both sides of a pairing.
+//! Argument-surface pairings that end-to-end tests could only hard-code on both sides.
 
 use clap::CommandFactory;
 
@@ -7,9 +6,6 @@ use crate::cli::Cli;
 
 use super::*;
 
-/// clap kebab-cases the variant identifier, which no type ties to the
-/// dump's `"stage"` key: renaming `SynthStage::Route` to `Routing` would
-/// accept `--stage routing` while the dump kept saying `route`.
 #[test]
 fn placement_stage_names_match_clap() {
     for (stage, placement) in [
@@ -26,8 +22,6 @@ fn placement_stage_names_match_clap() {
     }
 }
 
-/// Without a Placement IR counterpart, these spellings are literals in
-/// `stage_cli_name`.
 #[test]
 fn edition_neutral_stage_names_match_clap() {
     for stage in [SynthStage::Logic, SynthStage::Netlist, SynthStage::Edition] {
@@ -38,9 +32,6 @@ fn edition_neutral_stage_names_match_clap() {
     }
 }
 
-/// Walks `ValueEnum`'s full variant list, so a stage added without a
-/// decision on its edition-dependence fails here instead of joining the
-/// edition-neutral side.
 #[test]
 fn edition_required_stages_match_the_documented_set() {
     for stage in SynthStage::value_variants() {
@@ -61,7 +52,6 @@ fn edition_required_stages_match_the_documented_set() {
     }
 }
 
-/// The lists are derived; this pins the English between their items.
 #[test]
 fn stray_edition_message_lists_read_as_english() {
     assert_eq!(
@@ -72,10 +62,6 @@ fn stray_edition_message_lists_read_as_english() {
     assert_eq!(edition_neutral_stage_list(), "`logic` and `netlist`");
 }
 
-/// The `--help` prose naming the partition is hand-written, so the lists
-/// rendered from `stage_requires_edition` are looked for in clap's help
-/// text. `synth`'s description calls the neutral side "the earlier
-/// stages", so the stage order is pinned too.
 #[test]
 fn synth_help_names_the_edition_partition() {
     let command = Cli::command();

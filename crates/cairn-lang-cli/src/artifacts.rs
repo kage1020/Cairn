@@ -1,5 +1,4 @@
-//! Where each structure artifact is written, and writing the artifacts
-//! and the lockfile as one set.
+//! Where each structure artifact goes, and writing the artifacts and the lockfile as one set.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -15,16 +14,11 @@ use crate::target::ResolvedTarget;
 
 /// A structure its edition's backend has checked, waiting to be written.
 pub(crate) enum PreparedStructure<'a> {
-    /// Java vanilla structure (`.nbt`, gzip).
     Java(JavaStructure<'a>),
-    /// Bedrock structure (`.mcstructure`, uncompressed).
     Bedrock(McStructure<'a>),
 }
 
 impl PreparedStructure<'_> {
-    /// Write the structure in its edition's on-disk form: Java `.nbt` is
-    /// gzip-wrapped big-endian, Bedrock `.mcstructure` is raw
-    /// little-endian.
     fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         let encoded = match self {
             PreparedStructure::Java(structure) => structure.write_gzip(writer),
@@ -57,8 +51,7 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
         return Some(p.to_path_buf());
     }
     let parent = source.parent()?;
-    // `Path::parent` is `Some("")` for a bare `foo.crn`: the current
-    // directory.
+    // `Path::parent` is `Some("")` for a bare `foo.crn`.
     Some(if parent.as_os_str().is_empty() {
         PathBuf::from(".")
     } else {
@@ -66,12 +59,7 @@ fn resolve_out_dir(source: &Path, requested: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
-/// Check every structure against the backend before any I/O, so a backend
-/// error (abstract palette entry, stateful Bedrock entry, dimension
-/// overflow, a grid that disagrees with its dims) leaves no half-written
-/// artifacts: once every structure is prepared, only I/O can fail a write.
-/// No per-voxel tag tree is built; a structure is encoded as it is
-/// written.
+/// Check every structure against the backend before any I/O, so only I/O can fail a write.
 pub(crate) fn prepare_artifacts<'a>(
     block_ir: &'a BlockArrayIr,
     target: &ResolvedTarget,
@@ -88,8 +76,7 @@ pub(crate) fn prepare_artifacts<'a>(
             ExitCode::from(1)
         })?;
         for note in degraded {
-            // The id field repeats the message's `id[states]` so a tool can
-            // group the warnings by block.
+            // The id repeats the message's `id[states]` so a tool can group warnings by block.
             eprintln!(
                 "warning[W_INTENT_DEGRADED]: {scope}: {id}: {message}",
                 id = note.id,
@@ -97,11 +84,8 @@ pub(crate) fn prepare_artifacts<'a>(
             );
         }
         let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
-        // Distinct scope keys can name one file: `cairn_lang_core::artifact_stem`
-        // drops a placement's site, and a walkway joins place and port with
-        // a `_` an id may carry. The resolver's `E_OUTPUT_NAME_COLLISION`
-        // counts resolved scopes, but these keys come from lowering, so this
-        // is the last check before the commit overwrites the first file.
+        // Distinct scope keys can name one file, and the resolver's `E_OUTPUT_NAME_COLLISION`
+        // sees only resolved scopes.
         let location = entry_location(&path).map_err(|err| {
             eprintln!(
                 "error: cannot resolve where artifact `{}` would be written: {err}",
@@ -129,15 +113,13 @@ pub(crate) fn prepare_artifacts<'a>(
 /// Why [`prepare_artifacts`] refused.
 #[derive(Debug)]
 pub(crate) enum PrepareRefusal {
-    /// Two scopes name one directory entry. The caller prints it with
-    /// [`ArtifactCollision::report`].
+    /// Two scopes name one directory entry; the caller prints it.
     Collision(ArtifactCollision),
     /// Any other refusal, already printed, with its exit code.
     Other(ExitCode),
 }
 
-/// Two scopes whose artifacts are one directory entry: the scope that
-/// claimed it first and its path, then the one that met it and its path.
+/// Two scopes whose artifacts are one directory entry, the one that claimed it first leading.
 #[derive(Debug)]
 pub(crate) struct ArtifactCollision {
     first: String,
@@ -147,8 +129,7 @@ pub(crate) struct ArtifactCollision {
 }
 
 impl ArtifactCollision {
-    /// Print the refusal. The note is for paths spelled differently, which
-    /// only a case-folding file system makes one entry.
+    /// Print the refusal; the note covers spellings only a case-folding file system makes one.
     pub(crate) fn report(&self) {
         let Self {
             first,
@@ -180,20 +161,13 @@ impl From<ExitCode> for PrepareRefusal {
 /// Why an artifact file name cannot be joined onto `--out`.
 #[derive(Debug, PartialEq, Eq)]
 enum ArtifactNameRefusal {
-    /// The name carries `/`, `\` or `:`, the characters that make a name a
-    /// path on some host: a directory separator, or a Windows drive prefix
-    /// (`C:hut`) or alternate data stream (`hut.nbt:ads`).
+    /// `/`, `\` or `:`: a directory separator, a drive prefix or an alternate data stream.
     Separator(char),
-    /// The name is empty, `.` or `..`: it names `--out` itself or its
-    /// parent rather than a file inside it.
+    /// Empty, `.` or `..`, naming `--out` itself or its parent.
     NotAFile,
 }
 
-/// Decide whether `file_name` is a single plain file name.
-///
-/// The separator check is textual, so the same names are refused on every
-/// host: on Unix, `Path::components` reads `C:hut` and `a\b` as one
-/// `Normal` component each.
+/// Why `file_name` is not a single plain file name, checked textually so every host agrees.
 fn artifact_name_refusal(file_name: &str) -> Option<ArtifactNameRefusal> {
     if let Some(ch) = file_name.chars().find(|c| matches!(c, '/' | '\\' | ':')) {
         return Some(ArtifactNameRefusal::Separator(ch));
@@ -206,18 +180,8 @@ fn artifact_name_refusal(file_name: &str) -> Option<ArtifactNameRefusal> {
     (!plain).then_some(ArtifactNameRefusal::NotAFile)
 }
 
-/// Join an artifact's file name onto `--out`, refusing any name that is not
-/// a single plain file name.
-///
-/// A second line behind `check`'s `E_INVALID_PLACE_ID`, so that no source
-/// of file names skipping the identifier newtypes can choose the directory
-/// the compiler writes to. The name is checked rather than the joined
-/// path, because `Path::join` with an absolute argument discards `out_dir`.
-///
-/// Narrower than the identifier rule on purpose: that rule also refuses
-/// `.`, which every artifact name carries, and characters Windows cannot
-/// store, which make the write fail and be reported rather than land
-/// elsewhere. This line is only about where the file goes.
+/// Join an artifact's file name onto `--out`, refusing any name that is not a single plain
+/// file name.
 fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf, ExitCode> {
     match artifact_name_refusal(file_name) {
         None => Ok(out_dir.join(file_name)),
@@ -250,18 +214,7 @@ fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf
     }
 }
 
-/// Refuse a `--lock` that would land on a path the artifacts already own,
-/// scratch names included.
-///
-/// Two staged entries with one destination overwrite each other's bytes,
-/// and during the commit the second deletes the backup the first took,
-/// destroying the previous build's artifact. Paths are compared by the
-/// directory entry they name, not by spelling ([`entry_location`]).
-///
-/// A location that cannot be resolved is not treated as free, since an
-/// uncomputed key cannot match. For an artifact that is an error, as
-/// `--out` was just created; for the lockfile it is a warning that the
-/// check could not be made, and the build goes on.
+/// Refuse a `--lock` that would land on a path the artifacts already own, scratch names included.
 pub(crate) fn check_lock_path_is_free(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
     lock_path: &Path,
@@ -309,24 +262,10 @@ pub(crate) fn check_lock_path_is_free(
     Ok(())
 }
 
-/// The directory entry `path` names, as a key two spellings of one file
-/// compare equal on: the canonical parent directory and the file name.
+/// The directory entry `path` names, as a key two spellings of one file compare equal on: the
+/// canonical parent and the file name, lowercased where the platform folds case.
 ///
-/// Only the parent is canonicalised: the file usually does not exist yet,
-/// and the commit renames a symlink rather than writing through it, so the
-/// entry is what two staged files fight over. Only `NotFound` falls back,
-/// to the parent's absolute spelling, since `--out` exists by now and a
-/// lockfile whose directory is missing fails while staging. Any other
-/// failure is returned: a key computed another way would not match the
-/// canonical one and would read as "no collision".
-///
-/// On macOS and Windows, case-insensitive by default, the file name is
-/// compared lowercased; `canonicalize` already returns the directory in its
-/// recorded case. `to_lowercase` is not the file system's own fold, but
-/// artifact names come from ASCII identifiers, where the two agree. The
-/// choice is by platform, not volume: a case-sensitive volume there costs
-/// at most a spurious refusal, and a case-insensitive one elsewhere
-/// (casefold ext4, exFAT or CIFS on Linux) goes unfolded.
+/// Only `NotFound` falls back; a key computed another way would read as "no collision".
 fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)> {
     let resolve = |dir: &Path| {
         let dir = if dir.as_os_str().is_empty() {
@@ -339,8 +278,7 @@ fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)>
             resolved => resolved,
         }
     };
-    // No file name means the path ends in `..` or is a root; there is no
-    // entry to split off, so the whole path is the location.
+    // A path ending in `..`, or a root, has no entry to split off.
     let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
         return Ok((resolve(path)?, std::ffi::OsString::new()));
     };
@@ -352,14 +290,8 @@ fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)>
     Ok((resolve(parent)?, name))
 }
 
-/// Write the prepared structure files and the lockfile as one set: either
-/// every artifact plus the lock, or the directory exactly as it was.
-///
-/// Staging writes each file beside where it belongs, so every encode or
-/// write failure happens while the previous build is untouched; writing
-/// each file in place on its own would leave earlier destinations
-/// overwritten when a later one failed. Committing is renames only;
-/// [`staging::StagedSet::commit`] describes what makes it recoverable.
+/// Write the prepared structures and the lockfile as one set: all of them, or the directory as
+/// it was.
 pub(crate) fn write_artifacts_and_lock(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
     source: &str,
@@ -378,8 +310,6 @@ pub(crate) fn write_artifacts_and_lock(
         }
     }
 
-    // Encoded before the commit, so a hash or YAML failure leaves the
-    // directory as it was.
     let lock_body = match build_lockfile(source, block_ir, edition, target)
         .map_err(|err| err.to_string())
         .and_then(|lockfile| lockfile.to_yaml().map_err(|err| err.to_string()))

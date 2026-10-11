@@ -1,5 +1,4 @@
-//! The lockfile a compile writes, and what it says about the one it
-//! replaces.
+//! The lockfile a compile writes, and what it says about the one it replaces.
 
 use std::path::{Path, PathBuf};
 
@@ -12,25 +11,12 @@ use cairn_lang_core::{CAIRN_VERSION, Edition};
 
 use crate::target::ResolvedTarget;
 
-/// Compare the lockfile at `lock_path` with the target being built, and
-/// report the divergence the way `spec/versioning-editions`
-/// "Provenance and lock" does.
-///
-/// Both lines are warnings: nothing here changes the build or the exit
-/// code, and a first compile or an unchanged target says nothing.
-///
-/// A lockfile whose only fault is an identifier this build refuses, as an
-/// earlier Cairn's looser rule could write, is still compared:
-/// [`Lockfile::refused_identifier`] reads it with the strict rules but for
-/// its identifiers. Any other unreadable lockfile says so; only an absent
-/// one is silent.
+/// Warn where the lockfile at `lock_path` records another target, as `spec/versioning-editions`
+/// "Provenance and lock" does, or cannot be read; an absent one is silent.
 pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target: &ResolvedTarget) {
-    // Read once rather than through `Lockfile::read_from_path`, so the
-    // second parse below sees the same bytes as the first.
+    // Read once, so the lenient parse below sees the bytes the strict one did.
     let body = match std::fs::read_to_string(lock_path) {
         Ok(body) => body,
-        // Testing `exists()` first would fold a permission error into the
-        // silent case and race the read.
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
         Err(err) => {
             warn_unreadable_lock(lock_path, &LockError::from(err));
@@ -39,8 +25,6 @@ pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target:
     };
     let previous = match Lockfile::from_yaml(&body) {
         Ok(previous) => previous,
-        // A newer Cairn's document is not corrupt, and replacing it loses
-        // something, so it gets its own warning.
         Err(LockError::UnsupportedSchemaVersion { found, supported }) => {
             eprintln!(
                 "warning: {}: the existing lockfile is schema version {found} and this build \
@@ -66,11 +50,9 @@ pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target:
                         target,
                     );
                 }
-                // The second parse names the fault besides any identifier;
-                // the strict read's error may be an identifier it met first.
+                // `cause`, not `err`: the strict read may have stopped at an identifier first.
                 Err(cause) => warn_unreadable_lock(lock_path, &cause),
-                // Unreachable while the probe mirrors the strict schema; if
-                // they drift, the strict read's error is the one to report.
+                // Unreachable while the probe mirrors the strict schema.
                 Ok(None) => warn_unreadable_lock(lock_path, &err),
             }
             return;
@@ -84,14 +66,6 @@ pub(crate) fn report_previous_target(lock_path: &Path, edition: Edition, target:
     );
 }
 
-/// Say that the lockfile at `lock_path` is being replaced unread, because
-/// reading it failed with `err`: an I/O error (no permission, a directory
-/// at the path, bytes that are not UTF-8) or a document that is not a
-/// lockfile this build reads.
-///
-/// A warning, because an unreadable file is no reason to refuse a valid
-/// compile, but replacing it in silence would hide a tampered or stale
-/// lockfile.
 fn warn_unreadable_lock(lock_path: &Path, err: &LockError) {
     eprintln!(
         "warning: {}: the existing lockfile could not be read ({err}); replacing it",
@@ -99,9 +73,7 @@ fn warn_unreadable_lock(lock_path: &Path, err: &LockError) {
     );
 }
 
-/// The `W_PREVIOUSLY_VERIFIED_TARGET` / `W_SEMANTIC_SENSITIVITY` half of
-/// [`report_previous_target`]: `verified` and `sensitive` are what the
-/// previous lockfile recorded.
+/// Warn where `verified`, the previous lockfile's target, differs from this build's.
 fn report_target_change(
     verified: &LockTarget,
     sensitive: &[MemberSensitivity],
@@ -116,8 +88,6 @@ fn report_target_change(
     if *verified == now {
         return;
     }
-    // The edition shows only when it changed: editions number releases
-    // differently, so `1.21.4` against `1.21.60` is noise without it.
     let show_edition = verified.edition != now.edition;
     eprintln!(
         "W_PREVIOUSLY_VERIFIED_TARGET: verified for {}, now {}.",
@@ -137,11 +107,6 @@ fn report_target_change(
 }
 
 /// The left half of the warning: `1.20.4/DataVersion 3700`.
-///
-/// The integer is named here and bare on the right, as
-/// `spec/versioning-editions` "Provenance and lock" prints it. Bedrock's is
-/// the block palette's `version`, not a `DataVersion`, so it is not called
-/// one.
 fn describe_verified(target: &LockTarget, show_edition: bool) -> String {
     let field = match target.edition {
         Edition::Java => "DataVersion",
@@ -174,8 +139,7 @@ fn edition_prefix(target: &LockTarget, show_edition: bool) -> String {
     }
 }
 
-/// `<source>.lock`, keeping `.crn`: `Path::with_extension` would fuse
-/// `cottage.crn`'s lock with any other `cottage.*` source's.
+/// `<source>.lock`, keeping `.crn` so no two sources share a lock.
 pub(crate) fn default_lock_path(source: &Path) -> PathBuf {
     let mut p = source.as_os_str().to_owned();
     p.push(".lock");
@@ -198,9 +162,7 @@ pub(crate) fn build_lockfile(
             data_version: target.version_int(),
         },
         inputs: LockInputs {
-            // The pack's hash pins the (mc_version, version integer)
-            // resolution a re-compile must match. No constraint catalog
-            // ships, so its hash is zero (`LockInputs::zero`).
+            // No constraint catalog ships, so its hash is zero.
             registry_pack_hash: target.registry_pack().bytes_hash.clone(),
             constraint_catalog_hash: HashHex::zero(),
         },

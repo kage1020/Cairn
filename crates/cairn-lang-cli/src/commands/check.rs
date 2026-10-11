@@ -1,5 +1,4 @@
-//! `cairn check`: the validation passes, and with `--target` the
-//! lowering-stage findings a compile at that pin would refuse on.
+//! `cairn check`: the validation passes, and with `--target` the lowering-stage findings too.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -24,13 +23,9 @@ pub(crate) fn run_check(
         Ok(source) => source,
         Err(code) => return code,
     };
-    // A parse failure exits 1 like a check error, so a CI gate on
-    // `cairn check` cannot pass a file the parser rejects.
     let module = match parse(&source) {
         Ok(m) => m,
         Err(err) => {
-            // Under JSON a parse failure is the diagnostics array with one
-            // element, not an empty stream.
             match format {
                 CheckFormat::Text => report_parse_failure(file, &source, &err),
                 CheckFormat::Json => {
@@ -48,9 +43,7 @@ pub(crate) fn run_check(
         }
     };
     let ir = lower(&module);
-    // Through `build_diagnostics` rather than `check`, which cannot produce
-    // the `@intended_targets` findings. The lowering list is empty unless
-    // `--target` pinned a version.
+    // Not `check`, which cannot produce the `@intended_targets` findings.
     let pin = edition;
     let CheckLowering {
         diagnostics: lowering,
@@ -63,9 +56,6 @@ pub(crate) fn run_check(
     let lines = LineStarts::new(&source);
 
     match format {
-        // Text diagnostics go to stderr, as every subcommand's do, so
-        // `cairn check f.crn > out` still shows why it exited 1. JSON stays
-        // on stdout: there the findings are the product.
         CheckFormat::Text => {
             for d in &diagnostics {
                 report_diagnostic(file, &source, &lines, d);
@@ -81,15 +71,7 @@ pub(crate) fn run_check(
         }
     }
 
-    // Both refusals come after the file's own findings, which are what the
-    // author edits. Neither joins the `--format json` array (see the
-    // `Check` doc), so both are stderr in both formats, as in `compile`. A
-    // lost scope comes first, in `run_compile`'s order: it is about the
-    // file, the target about the command line.
-    //
-    // The verdict is `compile`'s but not the reason: this run is not held
-    // to the floors, and a `compile` whose floors refuse the target checks
-    // no id, so it may refuse on the floor instead.
+    // Run-level refusals: stderr in both formats, after the file's own findings, as in `compile`.
     if !dropped_scopes.is_empty() {
         report_partial_build(
             file,

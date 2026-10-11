@@ -1,11 +1,7 @@
-//! `cairn --version` prints `cairn-lang-core`'s `CAIRN_VERSION`, compared
-//! against the version cargo derived for this crate, a second route out of
-//! `[workspace.package] version`. It cannot see that version drift from the
-//! released tag, nor the constant reset to a literal of the current number.
+//! `cairn --version` prints `CAIRN_VERSION`, checked against the version cargo built with.
 
 use crate::common::cairn_argv;
 
-/// The version cargo derived for this crate from `[workspace.package]`.
 const WORKSPACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[test]

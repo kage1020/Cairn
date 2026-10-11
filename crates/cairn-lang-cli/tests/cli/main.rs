@@ -1,6 +1,4 @@
-//! The `cairn` binary, run as a subprocess against sources on disk: exit
-//! codes, the streams each subcommand writes, and the files `compile`
-//! leaves behind. One test binary, so [`common`] is compiled once.
+//! The `cairn` binary, run as a subprocess against sources on disk.
 
 mod common;
 

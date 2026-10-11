@@ -1,15 +1,11 @@
-//! `@intended_targets` against the floors the same file declares, as the
-//! commands that report it see it: which commands weigh the header, in
-//! which edition's table, and that a file whose two version headers
-//! contradict each other exits 1. What each header earns is pinned in
-//! `cairn-lang-core/tests/resolve/intended_targets.rs`.
+//! `@intended_targets` against the file's own floors, as the commands that report it see it;
+//! core's tests pin what each header earns.
 
 use std::process::Command;
 
 use crate::common::{Fixture, assert_stream, cargo_bin};
 
-/// One structure with something to paint, so nothing here is reported
-/// against an empty build.
+/// One structure with something to paint, so nothing is reported against an empty build.
 const BUILD: &str = "\
 theme t:
   slot wall -> @oak_planks
@@ -58,8 +54,6 @@ fn the_contradiction_needs_no_edition_pin() {
     assert_eq!(bare, Some(1), "got: {bare_err}");
 }
 
-/// The header is a hint, and one stated too widely does not make the file
-/// unbuildable.
 #[test]
 fn part_of_the_list_below_the_floor_is_a_warning_and_exits_zero() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n");
@@ -105,8 +99,7 @@ fn the_pinned_edition_decides_which_table_weighs_the_list() {
     );
 }
 
-/// `--target 1.21` satisfies the floor; the contradiction is between two
-/// lines of the file, which no target resolves.
+/// `--target 1.21` satisfies the floor; the contradiction is between two lines of the file.
 #[test]
 fn compile_refuses_the_source_check_refuses() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
@@ -187,9 +180,7 @@ fn the_finding_carries_a_structured_payload() {
     );
 }
 
-/// `1.21` is a target both editions build (Bedrock's `1.21.0`; trailing
-/// zeros are not a different version), and the floor is above every
-/// release of either, so both judge the header alike.
+/// `1.21` is a target both editions build, and the floor is above every release of either.
 #[test]
 fn a_header_both_editions_judge_alike_is_reported_once() {
     let fixture = fixture("@requires version>=99.0\n@intended_targets [\"1.21\"]\n");
@@ -204,8 +195,7 @@ fn a_header_both_editions_judge_alike_is_reported_once() {
     );
 }
 
-/// Java keeps a buildable version above its floor and earns the warning;
-/// Bedrock has nothing left and earns the error.
+/// Java keeps a buildable version above its floor; Bedrock has none.
 #[test]
 fn two_editions_disagreeing_about_reach_report_the_error() {
     let fixture = fixture(

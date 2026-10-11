@@ -1,5 +1,4 @@
-//! `cairn compile`: the structure artifacts and the lockfile for one
-//! `(edition, version)` pin.
+//! `cairn compile`: the structure artifacts and the lockfile for one `(edition, version)` pin.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -25,10 +24,8 @@ pub(crate) fn run_compile(
     out: Option<&Path>,
     lock: Option<&Path>,
 ) -> ExitCode {
-    // Resolved before lowering, which checks ids against the pinned
-    // version, but reported below; `resolve_target` says why, and
-    // `load_and_lower` why an unresolved or floor-refused target lowers
-    // unpinned.
+    // Resolved before lowering, which checks ids against it, but reported after the source's
+    // own findings.
     let resolved_target = resolve_target(edition, target);
     let Lowered {
         source,
@@ -47,11 +44,7 @@ pub(crate) fn run_compile(
     ) {
         return ExitCode::from(1);
     }
-    // A lockfile must not certify a build missing part of what the source
-    // asked for, and every code that drops a scope (`W_STRUCT_NO_SIZE`,
-    // `W_DEF_NO_SIZE`, ...) is a warning, so this is what refuses it. A
-    // source of only templates and themes requests no scopes and still
-    // compiles.
+    // Every code that drops a scope is a warning, so this is what refuses a partial build.
     if !dropped_scopes.is_empty() {
         report_partial_build(
             file,
@@ -85,10 +78,6 @@ pub(crate) fn run_compile(
 }
 
 /// Check every structure, then write them all and the lockfile.
-///
-/// [`prepare_artifacts`] refuses a structure the backend cannot write
-/// before [`write_artifacts_and_lock`] stages a byte, so a refusal leaves
-/// `out_dir` and the lockfile as they were.
 fn check_and_write(
     block_ir: &BlockArrayIr,
     source: &str,
@@ -108,8 +97,7 @@ fn check_and_write(
     if let Err(code) = check_lock_path_is_free(&prepared, lock_path) {
         return code;
     }
-    // Before the file is replaced, not after: the lockfile about to be
-    // overwritten is the only record of what was previously verified.
+    // Before the lockfile is replaced: it is the only record of what was verified before.
     report_previous_target(lock_path, edition, target);
     write_artifacts_and_lock(&prepared, source, block_ir, edition, target, lock_path)
 }
@@ -121,9 +109,6 @@ mod tests {
     use super::*;
     use crate::pipeline::lowered_probe;
 
-    /// The passing structure comes first, so a check folded into the write
-    /// loop would stage it before reaching the refused one, whose grid is
-    /// shorter than its dims.
     #[test]
     fn a_structure_the_backend_refuses_leaves_out_dir_and_lockfile_untouched() {
         let mut block_ir = lowered_probe(Edition::Java);

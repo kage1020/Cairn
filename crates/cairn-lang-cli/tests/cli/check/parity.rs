@@ -1,9 +1,5 @@
-//! Parity between `cairn check` and the commands that build on it. A
-//! source `check` rejects with an `Error`-severity finding does not lower,
-//! report portability figures or compile, and the build commands report
-//! `check`'s findings verbatim and in order before their own lowering
-//! findings: the unpinned check's stream is a prefix of theirs, and a check
-//! pinned to the compile's target reports exactly what the compile does.
+//! Parity between `cairn check` and the commands that build on it: a source `check` rejects
+//! builds nothing, and the build commands report `check`'s findings first and verbatim.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,8 +8,7 @@ use tempfile::TempDir;
 
 use crate::common::{Reported, cairn_argv, crn_examples, json_stream, stderr_stream};
 
-/// Shared prologue so each fixture differs only in the construct that trips
-/// its diagnostic.
+/// Shared prologue, so each fixture differs only in the construct that trips its diagnostic.
 const PROLOGUE: &str = "@cairn 2026.06\n\
 @requires version>=1.20\n\
 \n\
@@ -22,14 +17,7 @@ theme t:\n\
 \x20\x20slot wall  -> @cobblestone\n\
 \n";
 
-/// A fixture's source.
-///
-/// Most fixtures differ only in the construct that trips their diagnostic,
-/// so they are written as a body appended to [`PROLOGUE`]. Two cannot be.
-/// A header diagnostic repeats a directive that is legal only before the
-/// first item; and a selector fixture has to add rows to the file's *only*
-/// theme, because a second `theme` block leaves no theme auto-bound and the
-/// rows then reach no member. Both own their whole source.
+/// A fixture's source: a body after [`PROLOGUE`], or a whole file where a prologue cannot fit.
 pub(crate) enum Source {
     WithPrologue(&'static str),
     Whole(&'static str),
@@ -44,8 +32,7 @@ impl Source {
     }
 }
 
-/// One fixture per `Error`-severity code the syntactic passes inside
-/// `check` emit.
+/// One fixture per `Error`-severity code the syntactic passes inside `check` emit.
 const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
     (
         "E_DUPLICATE_SIZE",
@@ -60,9 +47,7 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
-        // Two rows with one keyword and attribute set select the same
-        // members, so only the later `frame=` survives. Whole, so the rows
-        // join the theme the struct binds.
+        // Whole, so the rows join the theme the struct binds; only the later `frame=` survives.
         "E_DUPLICATE_SELECTOR",
         Source::Whole(
             "@cairn 2026.06\n@requires version>=1.20\n\n\
@@ -92,8 +77,7 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
-        // The prologue already binds `theme t`, so the repeat is the only
-        // construct this body adds.
+        // The prologue already declares `theme t`.
         "E_DUPLICATE_ITEM",
         Source::WithPrologue(
             "theme t:\n  slot floor -> @stone\n\
@@ -109,8 +93,6 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
-        // `version<1.20` is the ceiling an author might reach for; only
-        // `>=` is defined, so the line declares nothing.
         "E_INVALID_REQUIRES",
         Source::Whole(
             "@requires version<1.20\n\
@@ -119,24 +101,16 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
-        // A member with no material paints nothing, an artifact empty
-        // rather than wrong, so it has to be refused before anything is
-        // emitted. (`run_lower` lowers first; what is ordered is the
-        // output, not the passes.)
         "E_MISSING_MATERIAL",
         Source::WithPrologue("struct s size=5x5\n  walls class=outer height=3\n"),
     ),
     (
-        // The tail belongs to a sensor; `walls` is not one, and the
-        // signal it names is emitted by nothing.
         "E_MISPLACED_BINDING",
         Source::WithPrologue(
             "struct s size=5x5\n  walls class=outer mat_slot=wall height=3 -> sig.w\n",
         ),
     ),
     (
-        // The site half of this code: a geometry row among a site's
-        // placements lowers to no voxels, so this code is its only report.
         "E_MISPLACED_MEMBER",
         Source::WithPrologue(
             "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
@@ -149,8 +123,6 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  torch mat_slot=wall\n"),
     ),
     (
-        // One letter, and the wall is built without the height it
-        // asked for.
         "E_UNKNOWN_ARGUMENT",
         Source::WithPrologue("struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n"),
     ),
@@ -160,8 +132,7 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),
     ),
     (
-        // The site half of this code's message; core's suite covers the
-        // geometry half.
+        // The site half; core's suite covers the geometry half.
         "E_UNSUPPORTED_NESTING",
         Source::WithPrologue(
             "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
@@ -202,9 +173,7 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
-        // Every combination assigned, so the repeat is the only finding:
-        // a table short of a row would add a warning, and the parity
-        // assertions are written per error.
+        // Every combination assigned, so the repeat is the only finding.
         "E_TRUTH_TABLE_CONFLICT",
         Source::WithPrologue(
             "struct s size=5x5\n  floor mat_slot=floor\n\
@@ -213,22 +182,17 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
     ),
 ];
 
-/// Resolver-origin fixtures. `check` merges the resolver's findings, so a
-/// build command that also appended `Resolution::diagnostics` would report
-/// these twice.
+/// Resolver-origin fixtures, which `check` already merges.
 const RESOLVER_FIXTURES: &[(&str, Source)] = &[
     (
         "E_UNRESOLVED_PLACE_REF",
-        // Also emits `W_UNUSED_DEF`, which puts a warning *before* the error
-        // in span order — so a stream that is re-sorted or re-ordered shows up.
+        // Also emits `W_UNUSED_DEF`, a warning ahead of the error in span order.
         Source::WithPrologue(
             "def hut size=4x4:\n  floor mat_slot=floor\n\
              \nsite s:\n  place id=a use=nosuchdef theme=t at=origin\n",
         ),
     ),
     (
-        // The site half of the place-row family: three keys, one code, and
-        // the row is dropped from the build for each of them.
         "E_INCOMPLETE_PLACE",
         Source::WithPrologue(
             "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
@@ -241,9 +205,6 @@ const RESOLVER_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  floor mat_slot=nosuchslot\n"),
     ),
     (
-        // `id=` takes a string literal, whose contents would otherwise
-        // reach the scope-key builder unexamined — and `.` is one of the
-        // separators that key is joined on.
         "E_INVALID_PLACE_ID",
         Source::WithPrologue(
             "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
@@ -266,11 +227,7 @@ pub(crate) fn all_fixtures() -> impl Iterator<Item = &'static (&'static str, Sou
     SYNTACTIC_FIXTURES.iter().chain(RESOLVER_FIXTURES)
 }
 
-/// Write one fixture into its own directory.
-///
-/// Numbered rather than named after the code: every diagnostic line begins
-/// with the path, so a directory named `E_DUPLICATE_SIZE` would satisfy any
-/// search for that code.
+/// Write one fixture into its own directory, numbered so no path contains a code.
 fn write_fixture(root: &Path, index: usize, source: &Source) -> PathBuf {
     let dir = root.join(format!("fixture_{index:02}"));
     fs::create_dir_all(&dir).expect("create fixture dir");
@@ -328,8 +285,7 @@ fn check_reports_each_fixture_code_exactly_once() {
 
 #[test]
 fn build_commands_replay_the_check_stream_verbatim() {
-    // A second copy of the resolver's findings appended after `check`'s
-    // keeps the prefix intact; the occurrence count catches it.
+    // A second copy of the resolver's findings keeps the prefix intact; the count catches it.
     let tmp = TempDir::new().expect("tempdir");
     for (index, (code, body)) in all_fixtures().enumerate() {
         let path = write_fixture(tmp.path(), index, body);
@@ -388,8 +344,6 @@ fn build_commands_refuse_every_check_error() {
 
 #[test]
 fn a_template_only_library_compiles_to_nothing_without_complaint() {
-    // A `def` no site instantiates is a template and lowers to no voxels:
-    // declaring nothing, not losing something.
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("library.crn");
     fs::write(
@@ -414,7 +368,6 @@ fn a_template_only_library_compiles_to_nothing_without_complaint() {
         !stderr.contains("E_PARTIAL_BUILD"),
         "a template library requests no scopes, so nothing was dropped; stderr={stderr}",
     );
-    // `W_UNUSED_DEF` reaches the stream through `check`, exactly once.
     let reported = stderr_stream(&stderr);
     let unused: Vec<&Reported> = reported.iter().filter(|d| d.3 == "W_UNUSED_DEF").collect();
     assert_eq!(
@@ -430,8 +383,6 @@ fn a_template_only_library_compiles_to_nothing_without_complaint() {
 
 #[test]
 fn a_partially_lowered_source_is_not_certified() {
-    // Every code that drops a scope is a warning, so only the refusal keeps
-    // a `verified: true` lockfile from certifying half the source.
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("partial.crn");
     fs::write(
@@ -464,8 +415,7 @@ fn every_example_still_passes_all_four_commands() {
     let tmp = TempDir::new().expect("tempdir");
     for src in crn_examples() {
         let name = src.file_name().expect("file name").to_owned();
-        // Copy into the tempdir: `compile` writes its lockfile next to the
-        // source, and `examples/` is not ours to dirty.
+        // `compile` writes its lockfile next to the source, which must not be `examples/`.
         let work = tmp.path().join(&name);
         fs::copy(&src, &work).expect("copy example");
         let path = work.to_str().unwrap();
@@ -489,8 +439,6 @@ fn every_example_still_passes_all_four_commands() {
                 0,
                 "{name:?}: `{cmd}` regressed; stderr={stderr}",
             );
-            // The corpus is clean, so this also catches a build command
-            // inventing diagnostics.
             assert!(
                 stderr_stream(&stderr).starts_with(&expected),
                 "{name:?}: `{cmd}` diverged from the check stream\n  \
@@ -502,12 +450,7 @@ fn every_example_still_passes_all_four_commands() {
 
 #[test]
 fn a_pinned_check_reports_exactly_what_the_compile_reports() {
-    // Equality both ways: the two run the same passes against the same
-    // table. `--target latest` because that is `compile`'s default.
-    //
-    // A target the floors refuse is outside the equality, since `compile`
-    // then pins no version and `check` does, but the only floor here is
-    // `PROLOGUE`'s `version>=1.20`, which `latest` clears.
+    // `--target latest` is `compile`'s default, and clears `PROLOGUE`'s only floor.
     let tmp = TempDir::new().expect("tempdir");
     for (index, (code, body)) in all_fixtures().enumerate() {
         let path = write_fixture(tmp.path(), index, body);

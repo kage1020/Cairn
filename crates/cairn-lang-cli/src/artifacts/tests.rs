@@ -5,8 +5,6 @@ use crate::target::resolve_target;
 
 use super::*;
 
-/// Each row pins the reason, which every host shares: on Unix the `\` and
-/// `:` rows are single `Normal` components only the textual check refuses.
 #[test]
 fn an_artifact_file_name_that_is_not_plain_is_refused() {
     let out_dir = Path::new("out");
@@ -34,11 +32,7 @@ fn an_artifact_file_name_that_is_not_plain_is_refused() {
     );
 }
 
-/// No source reaches this, since the resolver refuses such an id with
-/// `E_INVALID_PLACE_ID`, so a real lowering is rekeyed. The plain key
-/// passes `prepare_artifacts`' other refusals (tag build, directory-entry
-/// lookup, which falls back to `std::path::absolute` for a missing `out`,
-/// and collision check), so the file name is the only thing left to refuse.
+/// The resolver refuses such ids with `E_INVALID_PLACE_ID`, so a real lowering is rekeyed.
 #[test]
 fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
     let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
@@ -73,18 +67,14 @@ fn rekeyed_probe(keys: &[&str]) -> BlockArrayIr {
     block_ir
 }
 
-/// The paths `prepare_artifacts` would write, or its refusal, without
-/// the tag trees that make a failure message unreadable.
+/// `result` without the structures, which would bury a failure message.
 fn prepared_paths(
     result: Result<Vec<(PathBuf, PreparedStructure<'_>)>, PrepareRefusal>,
 ) -> Result<Vec<PathBuf>, PrepareRefusal> {
     result.map(|prepared| prepared.into_iter().map(|(path, _)| path).collect())
 }
 
-/// No source reaches this: the resolver refuses the pair with
-/// `E_OUTPUT_NAME_COLLISION`. The control pair shows the same structure
-/// prepares under two names that do not meet, so the refusal is the
-/// collision's.
+/// The resolver refuses such a pair with `E_OUTPUT_NAME_COLLISION`, so a real lowering is rekeyed.
 #[test]
 fn two_scopes_that_name_one_file_are_refused_before_any_io() {
     let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");

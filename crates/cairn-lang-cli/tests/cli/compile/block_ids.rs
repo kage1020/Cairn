@@ -1,16 +1,11 @@
-//! `cairn compile` against block ids the target does not have. An unknown
-//! id is a hard error naming the id, the registry checked and the spelling
-//! the target does have, as `spec/versioning-editions` "Fail-loud and
-//! minimum-version inference" requires, and the commands that pin no
-//! target say nothing about ids.
+//! `cairn compile` against block ids the target does not have, per `spec/versioning-editions`
+//! "Fail-loud and minimum-version inference".
 
 use std::process::Command;
 
 use crate::common::{Fixture, assert_stream, cairn_argv, cargo_bin, compile_as, stderr_of};
 
-/// A struct with one painted floor whose material comes from `slot floor`.
-/// `{id}` is what the theme binds, so each test names exactly the id it is
-/// about.
+/// A struct with one painted floor whose `slot floor` binds `{id}`.
 fn source_binding(id: &str) -> String {
     format!("theme t:\n  slot floor -> @{id}\nstruct s size=2x2\n  floor mat_slot=floor\n")
 }
@@ -30,9 +25,7 @@ fn an_id_no_edition_has_is_refused_rather_than_written() {
 
 #[test]
 fn a_java_only_block_is_refused_on_bedrock_and_compiles_on_java() {
-    // `minecraft:light` is Java's light block. Bedrock 1.21.60 has no id of
-    // that name at all — it spells the same thing `light_block_0` …
-    // `light_block_15` — so the same source must part ways at the edition.
+    // Bedrock spells Java's `light` `light_block_0` … `light_block_15`.
     let bedrock = Fixture::new(&source_binding("light"));
     let out = compile_as(&bedrock, "bedrock", "1.21.60");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
@@ -65,9 +58,6 @@ fn a_typo_is_answered_with_the_id_the_target_does_spell() {
     );
 }
 
-/// Bedrock spells Java's `light` `light_block_0` … `light_block_15`, eight
-/// edits away, beyond any distance threshold that keeps `oak_plank` →
-/// `oak_planks` honest, so only the pack's alias table can answer.
 #[test]
 fn a_rename_is_answered_with_the_name_the_target_uses() {
     let fixture = Fixture::new(&source_binding("light"));
@@ -84,9 +74,6 @@ fn a_rename_is_answered_with_the_name_the_target_uses() {
     );
 }
 
-/// The table is symmetric because a group carries no direction: which
-/// spelling is the local one is a question about the target, and the
-/// target's own id table answers it.
 #[test]
 fn the_same_group_answers_from_either_edition() {
     let on_bedrock = Fixture::new(&source_binding("oak_sign"));
@@ -108,8 +95,6 @@ fn the_same_group_answers_from_either_edition() {
     );
 }
 
-/// The alias table answers only where the pack knows the block under
-/// another name.
 #[test]
 fn an_id_no_group_names_still_says_it_has_no_candidate() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
@@ -121,9 +106,7 @@ fn an_id_no_group_names_still_says_it_has_no_candidate() {
     );
 }
 
-/// Bedrock 1.21.0 predates the flattening wave that turned `stonebrick`
-/// into `stone_bricks`, so an id table folded flat across the edition would
-/// accept both spellings everywhere and catch neither mistake.
+/// Bedrock 1.21.0 spells `stone_bricks` `stonebrick`.
 #[test]
 fn an_id_is_checked_against_the_version_and_not_the_edition() {
     let old = Fixture::new(&source_binding("stone_bricks"));
@@ -145,9 +128,7 @@ fn an_id_is_checked_against_the_version_and_not_the_edition() {
     );
 }
 
-/// The same rename, reached through the pack rather than through the
-/// author: `@floor.stone.smooth` is a valid token on both versions, and the
-/// pack respells it per version so both compile.
+/// `@floor.stone.smooth` is valid on both versions, and the pack respells it per version.
 #[test]
 fn a_material_token_follows_the_rename_across_its_editions_range() {
     for target in ["1.21.0", "1.21.40", "1.21.60"] {
@@ -164,9 +145,6 @@ fn a_material_token_follows_the_rename_across_its_editions_range() {
     }
 }
 
-/// An unpinned `check` runs no block-array lowering, so a source `compile`
-/// refuses for an unknown id passes it; `check --edition E --target V`
-/// closes that gap.
 #[test]
 fn check_stays_silent_about_ids_because_it_does_not_lower() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
@@ -180,8 +158,6 @@ fn check_stays_silent_about_ids_because_it_does_not_lower() {
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
 }
 
-/// `lower_connects` resolves `path=@ID` outside `resolve_member_state`, so
-/// the member tests say nothing about it.
 #[test]
 fn a_walkway_path_id_is_checked_too() {
     let fixture = Fixture::new(&two_huts_joined_by("totally_not_a_block"));
@@ -194,8 +170,7 @@ fn a_walkway_path_id_is_checked_too() {
         "expected the path material to be refused, got: {stderr}",
     );
 
-    // The same shape with a real block has to still build, or the test
-    // above would pass on any source that happens to fail.
+    // The control: the same shape with a real block still builds.
     let ok = Fixture::new(&two_huts_joined_by("gravel"));
     let out = compile_as(&ok, "java", "1.21.4");
     assert_eq!(
@@ -206,9 +181,7 @@ fn a_walkway_path_id_is_checked_too() {
     );
 }
 
-/// Selector bindings are reserved and no lowering reads one, so their value
-/// names no block. The slot tests above are the control: the same id on a
-/// `slot` is `E_UNKNOWN_ID`.
+/// The slot tests above are the control: the same id on a `slot` is `E_UNKNOWN_ID`.
 #[test]
 fn a_theme_selector_binding_id_does_not_refuse_the_build() {
     let fixture = Fixture::new(&window_bound_to("totally_not_a_block"));
@@ -228,9 +201,6 @@ fn a_theme_selector_binding_id_does_not_refuse_the_build() {
     );
 }
 
-/// The slot beside the binding is silent because the def is never placed;
-/// the binding decides no block in any case, so it may not be the louder
-/// of the two.
 #[test]
 fn a_binding_in_a_def_nothing_places_is_not_an_error() {
     let fixture = Fixture::new(
@@ -264,7 +234,7 @@ fn a_binding_in_a_def_nothing_places_is_not_an_error() {
     );
 }
 
-/// The `buildable targets:` row `cairn info` prints for `source`.
+/// The `buildable targets:` row `cairn info` prints for the fixture's source.
 fn buildable_row(fixture: &Fixture) -> String {
     let source = fixture.source();
     let out = cairn_argv(&["info", source.to_str().expect("utf-8 path")]);
@@ -282,8 +252,6 @@ fn buildable_row(fixture: &Fixture) -> String {
         .to_owned()
 }
 
-/// `info` lowers against every version, so a refused binding id would
-/// empty `buildable targets`.
 #[test]
 fn a_bad_binding_id_leaves_every_target_buildable() {
     let with = Fixture::new(&window_bound_to("totally_not_a_block"));
@@ -299,8 +267,6 @@ fn a_bad_binding_id_leaves_every_target_buildable() {
     assert_eq!(with, without);
 }
 
-/// So a CI gate on the unpinned command cannot pass a file a later command
-/// refuses.
 #[test]
 fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
     let fixture = Fixture::new(
@@ -323,9 +289,7 @@ fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
     }
 }
 
-/// The README's cottage window with a theme selector row binding
-/// `frame=@{id}`, cut into walls that paint: a struct of air is a lost
-/// scope, which would refuse the build whatever the binding said.
+/// The README's cottage window, its theme selector row binding `frame=@{id}`, in walls that paint.
 fn window_bound_to(id: &str) -> String {
     format!(
         "theme t:\n  slot glass -> @glass_pane\n  slot wall -> @cobblestone\n  \
@@ -336,8 +300,7 @@ fn window_bound_to(id: &str) -> String {
     )
 }
 
-/// Two placed huts and a walkway between them, with `{path}` as the strip's
-/// material.
+/// Two placed huts and a walkway between them paved with `{path}`.
 fn two_huts_joined_by(path: &str) -> String {
     format!(
         "theme t:\n  slot floor -> @oak_planks\n  slot wall -> @cobblestone\n\n\
@@ -364,9 +327,6 @@ fn lower_stays_silent_about_ids_because_it_takes_no_target() {
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
 }
 
-/// The range-wide pass gets no id table; the `buildable targets` row pins
-/// each version in turn, so an `E_UNKNOWN_ID` may appear only under the
-/// version that raised it, as `compile --target` would print it.
 #[test]
 fn info_blames_a_named_target_or_says_nothing_about_ids() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
@@ -381,8 +341,6 @@ fn info_blames_a_named_target_or_says_nothing_about_ids() {
         !stdout.contains("E_UNKNOWN_ID"),
         "the rows are about the source and carry no id verdict, got: {stdout}",
     );
-    // Every id finding is introduced by the version it belongs to, and
-    // there are as many introductions as findings.
     let findings = stderr.matches("E_UNKNOWN_ID").count();
     let attributions = stderr.matches("refuses this source").count();
     assert!(findings > 0, "the fixture's id is in no version: {stderr}");
@@ -397,8 +355,6 @@ fn info_blames_a_named_target_or_says_nothing_about_ids() {
     );
 }
 
-/// The target is resolved before lowering but reported after it, and with
-/// no version there is no id to find.
 #[test]
 fn an_unresolvable_target_is_still_reported_as_a_target_problem() {
     let fixture = Fixture::new(&source_binding("oak_planks"));
@@ -412,10 +368,7 @@ fn an_unresolvable_target_is_still_reported_as_a_target_problem() {
     assert_stream(&stderr, &[]);
 }
 
-/// The worked example in `spec/versioning-editions` "Fail-loud and
-/// minimum-version inference" is `E_UNKNOWN_ID line 12: ...`, a line the
-/// author can edit. The slot sits on line 2 of `source_binding`, its `@id`
-/// at column 17.
+/// The slot sits on line 2 of `source_binding`, its `@id` at column 17.
 #[test]
 fn the_refusal_points_at_the_line_that_names_the_material() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));

@@ -1,8 +1,5 @@
-//! Staging a set of output files and committing them together.
-//!
-//! A module of its own so that privacy, not convention, enforces what
-//! makes a commit recoverable: a staged file is only reachable through
-//! the scratch path chosen here.
+//! Staging a set of output files and committing them together; privacy keeps a staged file
+//! reachable only through the scratch path chosen here.
 
 use std::fmt;
 use std::fs;
@@ -25,11 +22,7 @@ impl fmt::Display for Kind {
     }
 }
 
-/// Which half of the commit failed.
-///
-/// The two call for different fixes at different paths: a stale `X.bak`
-/// directory blocks the displace step, and a message naming `X` would
-/// send the operator after the wrong file.
+/// Which half of the commit failed; the two need different fixes at different paths.
 #[derive(Debug, Clone, Copy)]
 enum Step {
     /// Moving what is already at the destination out of the way.
@@ -43,8 +36,7 @@ enum Step {
 pub struct CommitFailure {
     kind: Kind,
     step: Step,
-    /// The path the failing rename touched — the backup for a displace,
-    /// the destination for a place.
+    /// The backup for a displace, the destination for a place.
     path: PathBuf,
     source: io::Error,
 }
@@ -71,14 +63,11 @@ impl fmt::Display for CommitFailure {
 /// A file written beside its destination, waiting to be renamed there.
 struct Staged {
     kind: Kind,
-    /// Where it belongs once every file in the set has been written.
     final_path: PathBuf,
-    /// Where it is now.
     tmp_path: PathBuf,
 }
 
-/// A destination that already held something, moved aside for the
-/// duration of the commit so a failure part-way can put it back.
+/// A destination's previous file, moved aside so a failed commit can put it back.
 struct Displaced {
     final_path: PathBuf,
     backup_path: PathBuf,
@@ -90,22 +79,14 @@ pub struct StagedSet {
     entries: Vec<Staged>,
 }
 
-/// `path` with `suffix` appended to the whole file name.
-///
-/// Not `Path::with_extension`, which replaces the extension: a lockfile at
-/// `village.crn.lock` would stage to `village.crn.tmp`, colliding with any
-/// other `village.crn.*` scratch.
+/// `path` with `suffix` appended to the whole file name, extension included.
 fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut raw = path.as_os_str().to_owned();
     raw.push(suffix);
     PathBuf::from(raw)
 }
 
-/// Every path this set will create or rename, staging scratch included.
-///
-/// Callers check these against each other before staging starts: two
-/// entries sharing a destination would stage over each other's bytes and
-/// then fight over the same backup during the commit.
+/// Every path the set will create or rename for `final_path`, staging scratch included.
 pub fn reserved_paths(final_path: &Path) -> [PathBuf; 3] {
     [
         final_path.to_path_buf(),
@@ -116,19 +97,14 @@ pub fn reserved_paths(final_path: &Path) -> [PathBuf; 3] {
 
 /// What is sitting at a destination right now.
 enum Occupant {
-    /// Nothing — the commit will create the file.
     Vacant,
     /// A file or symlink, which `rename` can move aside and put back.
     Movable,
-    /// A directory, which `rename` cannot replace with a file. It is not
-    /// backed up, so the place step fails naming it.
+    /// A directory: not backed up, so the place step fails naming it.
     Directory,
 }
 
-/// `symlink_metadata` rather than `Path::is_file`, which folds every error
-/// into `false`, meaning "no backup needed": a transient stat failure
-/// would let the commit overwrite a file it could not restore. An
-/// unreadable destination is a hard error instead.
+/// An unreadable destination is an error, never a vacancy the commit could overwrite.
 fn occupant(path: &Path) -> io::Result<Occupant> {
     match fs::symlink_metadata(path) {
         Ok(meta) if meta.is_dir() => Ok(Occupant::Directory),
@@ -143,9 +119,7 @@ impl StagedSet {
     ///
     /// # Errors
     ///
-    /// Propagates the I/O failure. The partial scratch file is removed
-    /// before returning: a failed entry is never added to the set, so
-    /// [`Self::discard`] has no way to reach it afterwards.
+    /// The I/O failure, after removing the partial scratch file.
     pub fn stage(
         &mut self,
         final_path: &Path,
@@ -156,17 +130,10 @@ impl StagedSet {
 
         let tmp_path = with_suffix(final_path, ".tmp");
         let result = (|| {
-            // Buffered, because an uncompressed `.mcstructure` is two
-            // 4-byte writes per voxel and each would otherwise be its
-            // own system call.
             let mut file = io::BufWriter::new(fs::File::create(&tmp_path)?);
             write(&mut file)?;
-            // Flushed first, so the buffer's tail is in the file that
-            // `sync_all` then makes durable.
             file.flush()?;
-            // The commit's rename is atomic only for the directory entry;
-            // unsynced, a crash can leave a correctly named, half-written
-            // file.
+            // Unsynced, a crash after the rename can leave a correctly named, half-written file.
             file.get_ref().sync_all()
         })();
         if let Err(err) = result {
@@ -186,21 +153,12 @@ impl StagedSet {
         self.discard_scratch();
     }
 
-    /// Move every staged file into place, or leave the directory as it
-    /// was, and return the paths written.
-    ///
-    /// A rename consumes whatever is at the destination, so each one moves
-    /// that file aside first, and the backups are deleted only once the
-    /// whole set has landed: deleting eagerly would let a failure on the
-    /// last file take the previous build with it.
-    ///
-    /// Consuming `self` so the set cannot be committed twice, nor
-    /// discarded after its scratch files have been renamed away.
+    /// Move every staged file into place, or leave the directory as it was, and return the
+    /// paths written.
     ///
     /// # Errors
     ///
-    /// Returns the first rename that failed, after undoing the ones
-    /// before it.
+    /// The first rename that failed, after undoing the ones before it.
     pub fn commit(self) -> Result<Vec<PathBuf>, CommitFailure> {
         let mut displaced: Vec<Displaced> = Vec::new();
         let mut committed: Vec<PathBuf> = Vec::new();
@@ -251,8 +209,6 @@ impl StagedSet {
 
         for entry in &displaced {
             if let Err(err) = fs::remove_file(&entry.backup_path) {
-                // Not a failure, but nothing will come back for a copy of
-                // the previous build under a scratch-looking name.
                 eprintln!(
                     "warning: `{}` was left behind after replacing `{}`: {err}",
                     entry.backup_path.display(),
@@ -263,8 +219,6 @@ impl StagedSet {
         Ok(committed)
     }
 
-    /// `discard` by reference, for the undo paths that still need the
-    /// entry list afterwards.
     fn discard_scratch(&self) {
         for entry in &self.entries {
             remove_scratch(&entry.tmp_path);
@@ -272,8 +226,6 @@ impl StagedSet {
     }
 }
 
-/// Delete a scratch file the build is abandoning, warning when one is
-/// left behind. A file that was never created is not a leftover.
 fn remove_scratch(tmp_path: &Path) {
     match fs::remove_file(tmp_path) {
         Ok(()) => {}
@@ -285,13 +237,7 @@ fn remove_scratch(tmp_path: &Path) {
     }
 }
 
-/// Put the directory back the way the commit found it.
-///
-/// Every failed step is reported rather than swallowed. The delete loop
-/// has no later step to surface its failure: a created rather than
-/// replaced entry is in `committed` but never in `displaced`, so nothing
-/// touches its path again. On Windows deleting a file another process
-/// holds open fails, while renaming onto a vacant name succeeds.
+/// Put the directory back the way the commit found it, reporting every step that fails.
 fn undo(displaced: &[Displaced], committed: &[PathBuf]) {
     for path in committed {
         if let Err(err) = fs::remove_file(path) {

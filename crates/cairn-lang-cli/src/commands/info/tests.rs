@@ -3,8 +3,6 @@ use cairn_lang_core::resolve::DroppedIntent;
 use super::*;
 use crate::pipeline::lowered_probe;
 
-/// The end-to-end tests only look for an id and a clause in these lines,
-/// so this pins the header, the empty guard, the order and the indent.
 #[test]
 fn the_notes_answer_the_figure_they_sit_under() {
     let entries = vec![
@@ -76,11 +74,6 @@ fn the_degraded_notes_answer_the_figure_they_sit_under() {
     assert!(degraded_notes(Edition::Java, &[]).is_empty());
 }
 
-/// Built through `portability_for_bedrock` rather than a hand-made error,
-/// so the test also holds its premise: a leaked blockstate refuses the
-/// report instead of landing in `unsupported`. The leak is interned into
-/// a real lowering, as a pack or compiler bug would make it; the CLI tests
-/// drive the one source path, a state literal on a stair.
 #[test]
 fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
     use cairn_lang_core::block_array::BlockState;
@@ -132,9 +125,6 @@ fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
     );
 }
 
-/// A source reaches the states branch only through a state literal on a
-/// block outside the stair family (`@oak_log[axis=x]`); one on a stair
-/// refuses the edition's row instead.
 #[test]
 fn every_unsupported_reason_renders_the_repair_it_names() {
     let bare = unsupported_reason(&UnsupportedReason::AbsentFromEdition {

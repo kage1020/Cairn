@@ -1,5 +1,4 @@
-//! `cairn check`, unpinned and pinned to a target, and the gate it is for
-//! the commands that build on it.
+//! `cairn check`, unpinned and pinned to a target.
 
 mod findings;
 pub(crate) mod parity;

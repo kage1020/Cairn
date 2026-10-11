@@ -1,8 +1,5 @@
-//! `--format json` writes one JSON document to stdout for every source it
-//! can read, a failing one included: its findings are the document, so a
-//! consumer parsing stdout never has to guess from the exit code, while a
-//! run that builds writes its product there and its warnings to stderr as
-//! prose.
+//! `--format json` writes one JSON document to stdout for every readable source, failing ones
+//! included.
 
 use std::fs;
 use std::path::PathBuf;
@@ -52,8 +49,6 @@ fn check_json_renders_a_parse_failure_as_a_diagnostic() {
 
 #[test]
 fn check_text_renders_a_parse_failure_like_every_other_finding() {
-    // Without a code, the finding could not be looked up, nor matched by a
-    // grep for `error[E_`.
     let tmp = TempDir::new().expect("tempdir");
     let path = unparsable(&tmp);
     let out = cairn("check", &[path.to_str().unwrap()]);
@@ -80,8 +75,6 @@ fn info_json_renders_a_parse_failure_as_a_document_of_its_own() {
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
     let parsed: serde_json::Value = serde_json::from_str(&stdout)
         .unwrap_or_else(|err| panic!("stdout should be JSON, got {stdout:?}: {err}"));
-    // Distinguishable from the report by its keys: a report has axes and no
-    // `diagnostics`, this has `diagnostics` and no axes.
     assert!(
         parsed.get("registry_compat").is_none(),
         "a failure document is not a report: {stdout}",
@@ -95,8 +88,6 @@ fn info_json_renders_a_parse_failure_as_a_document_of_its_own() {
 
 #[test]
 fn info_json_renders_a_check_failure_the_same_way() {
-    // Not only the parse path: every error-severity finding writes the
-    // document.
     let tmp = TempDir::new().expect("tempdir");
     let path = unresolved(&tmp);
     let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
@@ -114,11 +105,6 @@ fn info_json_renders_a_check_failure_the_same_way() {
 }
 
 /// A source whose only finding is one the strict per-edition pass sees.
-///
-/// The edition-neutral gate unions slot names across a theme's per-edition
-/// variants, so a slot only one variant declares fails only inside the
-/// parity dry-run, and which pass raised it must not decide whether a
-/// document is written.
 fn edition_specific(dir: &TempDir) -> PathBuf {
     let path = dir.path().join("split.crn");
     fs::write(
@@ -139,8 +125,6 @@ fn edition_specific(dir: &TempDir) -> PathBuf {
 
 #[test]
 fn info_json_renders_an_edition_specific_failure_the_same_way() {
-    // The divergence `info` exists to show surfaces in the parity dry-run,
-    // and reaches the document like any other finding.
     let tmp = TempDir::new().expect("tempdir");
     let path = edition_specific(&tmp);
     let out = cairn(
@@ -167,8 +151,6 @@ fn info_json_renders_an_edition_specific_failure_the_same_way() {
                 .is_some_and(|p| p.contains("theme `shop_bedrock`"))),
         "the finding only the bedrock pass sees should be in it: {stdout}",
     );
-    // Empty, not merely free of the error: an edition header printed over a
-    // walk that held everything back would pass the weaker check.
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
         stderr.is_empty(),
@@ -178,15 +160,6 @@ fn info_json_renders_an_edition_specific_failure_the_same_way() {
 
 #[test]
 fn info_json_leaves_a_per_edition_warning_on_stderr() {
-    // A warning belongs to a row the caller is about to discard, so it
-    // stays prose under its edition's note while the error goes to the
-    // document, and only an edition with something left to head gets the
-    // note.
-    //
-    // `W_THEME_VARIANT_REBOUND` is raised only under a pinned edition, so
-    // `theme=shop_bedrock` on the site warns in the java pass alone; the
-    // slot only `shop_java` declares is the bedrock pass's error. The
-    // edition-neutral gate raises neither.
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("rebound.crn");
     fs::write(
@@ -245,9 +218,6 @@ fn info_json_leaves_a_per_edition_warning_on_stderr() {
 
 #[test]
 fn info_json_carries_every_edition_the_walk_refused() {
-    // The walk visits every requested edition before returning, so the
-    // document written after it carries every edition's errors, not only
-    // the first one's.
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("diverged.crn");
     fs::write(
@@ -297,8 +267,6 @@ fn info_json_carries_every_edition_the_walk_refused() {
 
 #[test]
 fn info_text_still_reports_an_edition_specific_failure_as_prose() {
-    // `--format text` does not hold errors back: each prints as the walk
-    // reaches it, under its edition's note.
     let tmp = TempDir::new().expect("tempdir");
     let path = edition_specific(&tmp);
     let out = cairn(
@@ -324,13 +292,7 @@ fn info_text_still_reports_an_edition_specific_failure_as_prose() {
     );
 }
 
-/// The four refusals a `.crn` can reach, asked for a parseable document
-/// together. The array is four hand-written fixtures, not an enumeration
-/// of `run_info`'s exits, so a fifth path would stay green here.
-///
-/// The fourth is a palette the pack refuses, reached through a stair state
-/// literal outside the Java domain; its document has no elements, since
-/// the refusal is the run's rather than a finding.
+/// Hand-written fixtures, one per refusal; a refused palette's document has no elements.
 #[test]
 fn every_refusal_a_source_can_reach_still_writes_a_document() {
     let tmp = TempDir::new().expect("tempdir");
@@ -366,10 +328,7 @@ fn every_refusal_a_source_can_reach_still_writes_a_document() {
     }
 }
 
-/// A source binding a stair to a `facing` no stair has. Nothing checks a
-/// state literal against the target yet, so this parses, passes `check`
-/// and lowers, and the Bedrock portability walk is the first thing that
-/// refuses it.
+/// A stair bound to a `facing` no stair has; the Bedrock portability walk is first to refuse it.
 fn refused_state(dir: &TempDir) -> PathBuf {
     let path = dir.path().join("refused_state.crn");
     fs::write(
@@ -380,8 +339,6 @@ fn refused_state(dir: &TempDir) -> PathBuf {
     path
 }
 
-/// The refusal says the literal is one place the blockstate can come from,
-/// because here it is the only one.
 #[test]
 fn an_authored_state_the_target_lacks_is_named_as_the_sources() {
     let tmp = TempDir::new().expect("tempdir");
@@ -399,8 +356,6 @@ fn an_authored_state_the_target_lacks_is_named_as_the_sources() {
     );
 }
 
-/// A state the edition has the block for but this compiler cannot map yet
-/// is an `unsupported` entry, not a refusal: the run still reports.
 #[test]
 fn an_authored_state_bedrock_cannot_map_yet_is_counted_as_unsupported() {
     let tmp = TempDir::new().expect("tempdir");
@@ -426,8 +381,6 @@ fn an_authored_state_bedrock_cannot_map_yet_is_counted_as_unsupported() {
 
 #[test]
 fn info_json_on_a_clean_source_is_still_the_report() {
-    // The failure document is additive: a source that has a report still
-    // gets exactly the report, with no `diagnostics` key grafted on.
     let path = examples_dir().join("cottage.crn");
     let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(out.status.success());
@@ -439,9 +392,6 @@ fn info_json_on_a_clean_source_is_still_the_report() {
 
 #[test]
 fn an_unreadable_source_is_still_told_apart_from_an_unparsable_one() {
-    // A missing file is the caller's mistake and exits 2; a file that does
-    // not parse is the source's and exits 1. Each row carries the flags its
-    // subcommand insists on.
     let out_dir = TempDir::new().expect("out tempdir");
     let out_arg = out_dir.path().to_str().expect("utf-8 path");
     let subcommands: [(&str, &[&str]); 6] = [
@@ -478,11 +428,8 @@ fn an_unreadable_source_is_still_told_apart_from_an_unparsable_one() {
 
 #[test]
 fn a_check_of_a_source_that_cannot_be_read_writes_no_document() {
-    // `spec/lint` "Machine-readable payload" reserves exit 1 over an array
-    // with no error element for a run-level refusal. An unreadable file is
-    // the other exit-1 case with nothing parsed, so it writes no document
-    // rather than `[]`. Non-UTF-8 reproduces it on every platform, where a
-    // permission bit would not.
+    // Exit 1 over `[]` is a run-level refusal (`spec/lint` "Machine-readable payload"), so an
+    // unreadable file writes nothing. Non-UTF-8 is unreadable on every platform.
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("not-utf8.crn");
     fs::write(&path, b"@cairn 2026.06\n\xff\xfe binary\n").expect("write");
@@ -499,9 +446,6 @@ fn a_check_of_a_source_that_cannot_be_read_writes_no_document() {
 
 #[test]
 fn parse_json_renders_a_parse_failure_as_a_document_of_its_own() {
-    // `parse`'s product is the AST, so a failure is not that dump with a
-    // hole in it — it is the document `info` writes, told apart by its
-    // keys.
     let tmp = TempDir::new().expect("tempdir");
     let path = unparsable(&tmp);
     let out = cairn("parse", &[path.to_str().unwrap(), "--format", "json"]);
@@ -543,8 +487,6 @@ fn lower_json_renders_a_parse_failure_as_a_document_of_its_own() {
 
 #[test]
 fn lower_json_renders_a_later_pass_failure_the_same_way() {
-    // Not only the parse path: `lower` refuses to dump an IR built from a
-    // source `check` rejects, and that refusal is a document too.
     let tmp = TempDir::new().expect("tempdir");
     let path = unresolved(&tmp);
     let out = cairn("lower", &[path.to_str().unwrap(), "--format", "json"]);
@@ -563,8 +505,6 @@ fn lower_json_renders_a_later_pass_failure_the_same_way() {
 
 #[test]
 fn a_dump_in_any_other_format_still_reports_as_prose_on_stderr() {
-    // The document belongs to `--format json` alone: `parse --format
-    // debug` and `lower --format ascii` are read by a person.
     let tmp = TempDir::new().expect("tempdir");
     let path = unparsable(&tmp);
     let dumps: [(&str, &[&str]); 3] = [
@@ -586,8 +526,6 @@ fn a_dump_in_any_other_format_still_reports_as_prose_on_stderr() {
 
 #[test]
 fn a_dump_on_a_clean_source_is_still_the_dump() {
-    // The failure document is additive here too: a source that has a dump
-    // gets exactly the dump, with no `diagnostics` key grafted on.
     let path = examples_dir().join("cottage.crn");
     for sub in ["parse", "lower"] {
         let out = cairn(sub, &[path.to_str().unwrap(), "--format", "json"]);
@@ -602,14 +540,10 @@ fn a_dump_on_a_clean_source_is_still_the_dump() {
     }
 }
 
-/// A run with warnings and no error still writes the dump, not the
-/// document: `report_diagnostics` sits behind the error check, so the IR
-/// goes to stdout, the warnings to stderr, and the exit is 0.
 #[test]
 fn a_dump_with_warnings_and_no_error_is_still_the_dump() {
     let tmp = TempDir::new().expect("tempdir");
-    // `place use=` a `def` that declares no `size=`: `W_DEF_NO_SIZE` and
-    // nothing of error severity.
+    // A `def` with no `size=`: `W_DEF_NO_SIZE` and nothing of error severity.
     let path = tmp.path().join("warned.crn");
     fs::write(
         &path,
@@ -634,11 +568,6 @@ fn a_dump_with_warnings_and_no_error_is_still_the_dump() {
     assert_stream(&stderr, &[(4, 1, "warning", "W_DEF_NO_SIZE")]);
 }
 
-/// The failure document is the whole report: stderr carries no second
-/// copy of it.
-///
-/// A `report_diagnostics` call beside the document would write the
-/// findings twice and pass every other test here.
 #[test]
 fn the_failure_document_is_not_also_prose_on_stderr() {
     let tmp = TempDir::new().expect("tempdir");
@@ -656,11 +585,7 @@ fn the_failure_document_is_not_also_prose_on_stderr() {
     }
 }
 
-/// A note reaches the document, so a consumer reading one finds it.
-///
-/// The `@cairn` version note is the only note a parse failure carries, and
-/// the other fixtures here declare no header, so their notes are empty
-/// whatever the serialiser does.
+/// The `@cairn` version note is the only note a parse failure carries.
 #[test]
 fn a_notes_array_reaches_the_failure_document() {
     let tmp = TempDir::new().expect("tempdir");

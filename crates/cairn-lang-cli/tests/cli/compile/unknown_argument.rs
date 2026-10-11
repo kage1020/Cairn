@@ -1,7 +1,5 @@
-//! `E_UNKNOWN_ARGUMENT` end to end: a misspelled `key=` refuses `check`
-//! and `compile`, and `compile` prints the typo ahead of the warning it
-//! causes, which names the argument as absent (`W_DEFERRED_MEMBER`,
-//! `W_STRUCT_NO_SIZE`) and so reads right only after the typo.
+//! `E_UNKNOWN_ARGUMENT` end to end: a misspelled `key=` refuses `check` and `compile`, and
+//! `compile` prints it ahead of the warning it causes.
 
 use crate::common::{assert_stream, cairn, compile, write_source};
 
@@ -9,8 +7,7 @@ use crate::common::{assert_stream, cairn, compile, write_source};
 const TYPO: &str =
     "@cairn 2026.06\n\nstruct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n";
 
-/// The same misspelling one line up: `siz=` on the header, so the struct
-/// is also left with no size at all.
+/// The same misspelling on the header, so the struct has no size at all.
 const HEADER_TYPO: &str = "@cairn 2026.06\n\nstruct s siz=5x5\n  walls mat_slot=wall height=3\n";
 
 #[test]
@@ -48,8 +45,7 @@ fn compile_reports_the_misspelling_before_the_absence_it_causes() {
 
 #[test]
 fn check_without_a_target_reports_a_header_misspelling_alone() {
-    // A plain `check` lowers nothing, so the missing-size warning the typo
-    // causes is not raised: the error is the only line.
+    // A plain `check` lowers nothing, so the missing-size warning is not raised.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = write_source(tmp.path(), "typo.crn", HEADER_TYPO);
     let out = cairn("check", &[src.to_str().unwrap()]);

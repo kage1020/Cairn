@@ -1,5 +1,4 @@
-//! `cairn lower`: the block-array IR of a source, as an ASCII slice
-//! dump, JSON or debug output.
+//! `cairn lower`: the block-array IR of a source, as an ASCII slice dump, JSON or debug output.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -27,8 +26,7 @@ pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         &resolution,
         Some(&builtin_pack(Edition::Java).view(None)),
     );
-    // As in `load_and_lower`, the check pass gates the output, ahead of the
-    // lowering deferrals its findings cascade into.
+    // Check findings lead, ahead of the lowering deferrals they cascade into.
     block_ir.diagnostics = build_diagnostics(
         &module,
         &ir,
@@ -37,9 +35,7 @@ pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         std::mem::take(&mut block_ir.diagnostics),
     );
 
-    // Refuse before printing: `> ir.json` creates the file whatever the
-    // exit code, so it gets the failure document rather than IR built from
-    // a source `cairn check` rejects.
+    // Refuse before printing: `> ir.json` gets the failure document, not IR of a rejected source.
     let has_error = block_ir
         .diagnostics
         .iter()
@@ -53,9 +49,7 @@ pub(crate) fn run_lower(file: &Path, format: LowerFormat) -> ExitCode {
         );
     }
 
-    // Warnings go to stderr as text in every format: folded into the JSON
-    // they would change a document tools already read, and among the
-    // voxels a pipe would swallow them.
+    // Warnings go to stderr as text in every format.
     let lines = LineStarts::new(&source);
     report_diagnostics(file, &source, &lines, &block_ir.diagnostics);
 
@@ -109,9 +103,7 @@ fn print_block_ir_ascii(block_ir: &BlockArrayIr) {
 
 const ASCII_ALPHABET: &[u8] = b"#abcdefghijklmnopqrstuvwxyz0123456789";
 
-/// Glyph for a palette index in an ASCII slice: `.` for air at index 0,
-/// then `#`, letters and digits. Every entry past index 36 renders as `?`,
-/// so a `?`-heavy slice means a large palette, not broken lowering.
+/// `.` for air at index 0, then `#`, letters and digits; every entry past index 36 is `?`.
 fn ascii_glyph(palette_index: usize) -> char {
     if palette_index == 0 {
         return '.';

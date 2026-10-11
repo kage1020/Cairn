@@ -1,5 +1,4 @@
-//! What every subcommand promises a caller: `--version`, usage errors,
-//! `--format json` on stdout, and the exit code when stdout has closed.
+//! What every subcommand promises a caller: version, usage errors, JSON, a closed stdout.
 
 mod closed_stdout;
 mod json;

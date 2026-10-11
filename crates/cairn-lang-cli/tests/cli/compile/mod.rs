@@ -1,5 +1,4 @@
-//! `cairn compile`: the artifacts and the lockfile it writes, and the
-//! sources and targets it refuses before writing anything.
+//! `cairn compile`: what it writes, and what it refuses before writing anything.
 
 mod artifacts;
 mod atomicity;

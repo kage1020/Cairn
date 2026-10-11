@@ -1,9 +1,5 @@
-//! A sloped roof's material, end to end. `gable` / `shed` / `hip` lowering
-//! derives `facing` / `half` / `shape` for the block the member's
-//! `mat_slot=` names, and a whole block has nowhere to carry them, so
-//! binding one stops the build on both editions rather than writing a
-//! blockstate that does not exist or a fallback species nobody chose. Any
-//! *member of the stair family* is a free choice.
+//! A sloped roof's material, end to end: a whole block refuses the build on both editions, and
+//! any member of the stair family is a free choice.
 
 use tempfile::TempDir;
 
@@ -26,9 +22,7 @@ fn roofed_source(material: &str) -> String {
 
 #[test]
 fn a_non_stair_roof_material_stops_the_build_on_both_editions() {
-    // No version of either edition has a cobblestone with a stair's
-    // `shape`. Unchecked, Java would write the impossible state and exit 0,
-    // and Bedrock's state translator would refuse it at the wrong layer.
+    // No version of either edition has a cobblestone with a stair's `shape`.
     for (edition, target) in [("java", "1.21.4"), ("bedrock", "1.21.60")] {
         let tmp = TempDir::new().expect("tempdir");
         let src = write_source(tmp.path(), "hut.crn", &roofed_source("cobblestone"));
@@ -54,8 +48,7 @@ fn a_non_stair_roof_material_stops_the_build_on_both_editions() {
 
 #[test]
 fn the_refusal_points_at_the_theme_line_and_names_the_slot() {
-    // The binding is what needs editing, and every member reading the slot
-    // shares it, so the finding anchors on the theme line, once.
+    // Every member reading the slot shares the binding, so the finding anchors on the theme line.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(tmp.path(), "hut.crn", &roofed_source("cobblestone"));
     let out = TempDir::new().expect("out tempdir");
@@ -72,14 +65,12 @@ fn the_refusal_points_at_the_theme_line_and_names_the_slot() {
 
 #[test]
 fn a_stair_species_reaches_the_artifact_unremarked() {
-    // Any stair species is a free choice, not one hardcoded id.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(tmp.path(), "hut.crn", &roofed_source("dark_oak_stairs"));
     let out = TempDir::new().expect("out tempdir");
     let run = compile(&src, "java", "1.21.4", out.path(), None);
     let stderr = stderr_of(&run);
     assert_eq!(run.status.code(), Some(0), "stderr={stderr}");
-    // A stair species is not a deviation.
     assert_stream(&stderr, &[]);
     let nbt = nbt_body(&out.path().join("hut.nbt"));
     assert!(

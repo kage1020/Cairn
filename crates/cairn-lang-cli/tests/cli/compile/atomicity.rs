@@ -1,9 +1,5 @@
-//! A failed `cairn compile` leaves the previous build exactly as it was,
-//! and a refused one writes nothing. A rename consumes whatever is at its
-//! destination, so an undo that only deleted what the run wrote would take
-//! the previous build's artifacts with it. Each failure is forced portably,
-//! by a **directory** at the path a file has to be created or renamed onto;
-//! which path it sits on decides which step breaks.
+//! A failed `cairn compile` leaves the previous build exactly as it was, and a refused one writes
+//! nothing. Each failure is forced by a directory planted where a file has to go.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -17,8 +13,7 @@ use crate::common::{
     Fixture, assert_stream, cargo_bin, compile, compile_as, examples_dir, stderr_of,
 };
 
-/// Every regular file under `dir`, keyed by name, so a snapshot can be
-/// compared byte-for-byte before and after a failed run.
+/// Every regular file under `dir`, keyed by name.
 fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     let mut out = BTreeMap::new();
     let Ok(entries) = fs::read_dir(dir) else {
@@ -38,8 +33,7 @@ struct Build {
     _tmp: TempDir,
     source: PathBuf,
     out_dir: PathBuf,
-    /// The lockfile lives beside the *source*, not in `out_dir`, so scratch
-    /// left next to it is invisible to a snapshot of `out_dir` alone.
+    /// Beside the source, so a snapshot of `out_dir` alone misses scratch left next to it.
     lock: PathBuf,
 }
 
@@ -48,8 +42,7 @@ impl Build {
         self.lock.parent().expect("the lockfile has a parent")
     }
 
-    /// Files in either directory that a finished build has no business
-    /// leaving behind.
+    /// Files in either directory a finished build should not leave behind.
     fn scratch(&self) -> Vec<String> {
         let mut out: Vec<String> = snapshot(&self.out_dir)
             .into_keys()
@@ -77,8 +70,7 @@ impl Build {
         (field("source_hash:"), field("resolved_ir_hash:"))
     }
 
-    /// Compile the source again over this build, returning the exit code
-    /// and stderr.
+    /// Compile the source again over this build, returning the exit code and stderr.
     fn rebuild(&self) -> (Option<i32>, String) {
         self.rebuild_with_lock(&self.lock)
     }
@@ -90,8 +82,7 @@ impl Build {
     }
 }
 
-/// A directory holding one successfully compiled `village.crn`: five
-/// artifacts plus a lockfile, all of which a second run will replace.
+/// A directory holding one compiled `village.crn`: five artifacts plus a lockfile.
 fn first_successful_build() -> Build {
     let tmp = TempDir::new().expect("tempdir");
     let source = tmp.path().join("village.crn");
@@ -120,8 +111,7 @@ fn first_successful_build() -> Build {
     }
 }
 
-/// Edit the source so the second run genuinely produces different bytes —
-/// otherwise "unchanged" would hold whether the rollback worked or not.
+/// Edit the source so the second run writes different bytes, making "unchanged" a real check.
 fn change_the_source(source: &Path) {
     let body = fs::read_to_string(source).expect("read source");
     let edited = body.replace("height=4", "height=5");
@@ -135,19 +125,15 @@ const OBSTRUCTIONS: &[&str] = &[
     "lockfile",
     // Commit fails on one artifact, with others already committed.
     "artifact",
-    // Staging fails: the scratch file cannot even be created, so nothing
-    // should have been touched yet.
+    // Staging fails: the scratch file cannot be created.
     "artifact-staging",
-    // The first entry in the set, so the undo runs with nothing displaced
-    // and nothing committed — the branch every other case skips past.
+    // The first entry, so the undo runs with nothing displaced and nothing committed.
     "first-artifact",
-    // A leftover backup blocks the *displace* step rather than the place
-    // step.
+    // A leftover backup blocks the displace step.
     "artifact-backup",
 ];
 
-/// The suffixes staging appends while a build is in flight. Either one
-/// surviving the run means the set was not cleaned up.
+/// The suffixes staging appends while a build is in flight.
 fn is_scratch(name: &str) -> bool {
     Path::new(name)
         .extension()
@@ -155,8 +141,6 @@ fn is_scratch(name: &str) -> bool {
 }
 
 /// Java artifacts are the only files a finished build leaves in `--out`.
-/// Anything else is bookkeeping: a `.tmp` that never landed, or a `.bak`
-/// that was never cleared.
 fn is_artifact(name: &str) -> bool {
     Path::new(name).extension().is_some_and(|ext| ext == "nbt")
 }
@@ -180,8 +164,7 @@ fn obstruction_path(build: &Build, label: &str) -> PathBuf {
     }
 }
 
-/// Plant a directory where a file has to go, after making the source
-/// produce different bytes so "unchanged" is a real observation.
+/// Plant a directory where a file has to go, after changing the source.
 fn arrange_failure(build: &Build, label: &str) -> PathBuf {
     change_the_source(&build.source);
     let obstruction = obstruction_path(build, label);
@@ -201,8 +184,7 @@ fn a_failed_build_leaves_the_previous_one_untouched() {
         let (code, _) = build.rebuild();
         assert_eq!(code, Some(1), "{label}: the build must fail");
 
-        // The obstruction itself is a directory we planted, not an artifact
-        // to compare; everything around it is.
+        // The planted directory is not an artifact to compare.
         let planted = obstruction
             .file_name()
             .expect("obstruction name")
@@ -234,8 +216,6 @@ fn a_failed_build_leaves_the_previous_one_untouched() {
 
 #[test]
 fn a_failed_build_leaves_no_scratch_files_behind() {
-    // An orphaned `.tmp` or `.bak` accumulates across retries, and a `.bak`
-    // is a copy of the previous build under a name that reads as scratch.
     for label in OBSTRUCTIONS {
         let build = first_successful_build();
         arrange_failure(&build, label);
@@ -258,8 +238,6 @@ stderr={stderr}",
 
 #[test]
 fn a_failed_build_says_which_file_stopped_it() {
-    // A stale `home2.nbt.bak` blocking the displace step is not a failure
-    // writing `home2.nbt`, which is fine.
     let build = first_successful_build();
     arrange_failure(&build, "artifact-backup");
     let (code, stderr) = build.rebuild();
@@ -269,7 +247,6 @@ fn a_failed_build_says_which_file_stopped_it() {
         "the refusal must name the path that actually blocked it; got {stderr}",
     );
 
-    // The lockfile keeps its own noun through both phases.
     let build = first_successful_build();
     arrange_failure(&build, "lockfile");
     let (code, stderr) = build.rebuild();
@@ -282,8 +259,6 @@ fn a_failed_build_says_which_file_stopped_it() {
 
 #[test]
 fn a_failed_first_build_leaves_nothing_at_all() {
-    // Nothing existed beforehand, so "restore what was there" and "remove
-    // what we made" have the same answer, and neither may be skipped.
     let tmp = TempDir::new().expect("tempdir");
     let source = tmp.path().join("village.crn");
     fs::copy(examples_dir().join("village.crn"), &source).expect("copy example");
@@ -335,9 +310,6 @@ fn a_successful_rebuild_replaces_everything_and_cleans_up() {
 
 #[test]
 fn a_lock_path_that_collides_with_an_artifact_is_refused() {
-    // Two set entries sharing a destination stage over each other and fight
-    // over one backup during the commit, losing the previous artifact. The
-    // scratch names collide the same way, one phase earlier.
     for suffix in ["", ".tmp", ".bak"] {
         let build = first_successful_build();
         let before = snapshot(&build.out_dir);
@@ -362,9 +334,7 @@ fn a_lock_path_that_collides_with_an_artifact_is_refused() {
     }
 }
 
-/// `compile` run from `cwd`, with `--out` (when given) and `--lock` passed
-/// exactly as spelled — the spellings are the point, so nothing here joins
-/// them onto a directory first.
+/// `compile` run from `cwd`, with `--out` and `--lock` passed exactly as spelled.
 fn compile_in(cwd: &Path, out_dir: Option<&str>, lock: &str) -> (Option<i32>, String) {
     let mut cmd = Command::new(cargo_bin());
     cmd.current_dir(cwd)
@@ -379,10 +349,8 @@ fn compile_in(cwd: &Path, out_dir: Option<&str>, lock: &str) -> (Option<i32>, St
     )
 }
 
-/// Rebuild from `dir` with `out_dir` and `lock`, and assert the collision
-/// guard refuses it naming `artifact` — the artifact's final path as the
-/// build spells it, never a scratch name or the lock's own spelling — with
-/// `watched` left byte-identical and nothing staged in it.
+/// Rebuild from `dir` and assert the collision guard refuses it, naming `artifact` as the build
+/// spells it, with `watched` left byte-identical.
 fn assert_refused_by_the_guard(
     dir: &Path,
     out_dir: Option<&str>,
@@ -401,8 +369,7 @@ fn assert_refused_by_the_guard(
         Some(1),
         "{args} names an artifact and must be refused; stderr={stderr}",
     );
-    // Keyed on the guard's own wording: an unguarded run also exits 1, from
-    // the failed commit, after the artifact is gone.
+    // The guard's own wording: an unguarded run also exits 1, from the failed commit.
     let expected = format!(
         "collides with an artifact this build writes (`{}`)",
         artifact.display(),
@@ -419,9 +386,7 @@ fn assert_refused_by_the_guard(
     );
 }
 
-/// [`assert_refused_by_the_guard`] over a fresh [`first_successful_build`],
-/// with `--out` and `--lock` as `spell` returns them for the build's
-/// directory. The artifact is `home1.nbt` under that `--out`, as spelled.
+/// [`assert_refused_by_the_guard`] over a fresh build, with `--out` and `--lock` from `spell`.
 fn assert_lock_spelling_is_refused(spell: impl FnOnce(&Path) -> (String, String)) {
     let build = first_successful_build();
     let dir = build.source.parent().expect("source has a parent");
@@ -432,8 +397,7 @@ fn assert_lock_spelling_is_refused(spell: impl FnOnce(&Path) -> (String, String)
 
 #[test]
 fn a_lock_spelled_differently_from_its_artifact_is_still_refused() {
-    // Each spelling names the file `out/home1.nbt` does, so a guard that
-    // compared paths as spelled would let it reach the commit.
+    // Each spelling names the file `out/home1.nbt` does.
     for lock in ["./out/home1.nbt", "out/./home1.nbt", "out/../out/home1.nbt"] {
         assert_lock_spelling_is_refused(|_| ("out".into(), lock.into()));
     }
@@ -454,9 +418,7 @@ fn a_lock_spelled_differently_from_its_artifact_is_still_refused() {
 #[cfg(unix)]
 #[test]
 fn a_lock_reached_through_a_symlinked_out_is_refused() {
-    // `--out` through a symlink and `--lock` through the real directory
-    // name one file, and so do the reverse; neither spelling shares a
-    // single component with the other past the directory.
+    // `--out` through a symlink and `--lock` through the real directory, and the reverse.
     assert_lock_spelling_is_refused(|dir| {
         std::os::unix::fs::symlink(dir.join("out"), dir.join("link")).expect("symlink");
         ("link".into(), "out/home1.nbt".into())
@@ -470,16 +432,13 @@ fn a_lock_reached_through_a_symlinked_out_is_refused() {
 #[cfg(any(target_os = "macos", windows))]
 #[test]
 fn a_lock_differing_only_in_case_is_refused_where_case_is_folded() {
-    // Case-insensitive by default on both platforms, so `OUT/HOME1.NBT` is
-    // the artifact's own directory entry.
+    // Case-insensitive by default on both platforms.
     assert_lock_spelling_is_refused(|_| ("out".into(), "OUT/HOME1.NBT".into()));
 }
 
 #[test]
 fn a_bare_lock_name_collides_with_the_default_out() {
-    // With `--out` omitted the artifacts go beside the source, and a bare
-    // `--lock home1.nbt` has an empty parent. That empty parent is the
-    // current directory, the same entry as `./home1.nbt`.
+    // With `--out` omitted, a bare `--lock home1.nbt` has an empty parent: the current directory.
     let tmp = TempDir::new().expect("tempdir");
     let dir = tmp.path();
     fs::copy(examples_dir().join("village.crn"), dir.join("village.crn")).expect("copy example");
@@ -505,8 +464,7 @@ fn a_bare_lock_name_collides_with_the_default_out() {
 
 #[test]
 fn a_lock_sharing_only_the_artifacts_name_still_builds() {
-    // The control: the key is the parent *and* the name, so the artifact's
-    // name in another directory is a different file.
+    // The control: the artifact's name in another directory is a different file.
     let build = first_successful_build();
     let dir = build.source.parent().expect("source has a parent");
     fs::create_dir(dir.join("other")).expect("mkdir other");
@@ -524,9 +482,7 @@ fn a_lock_sharing_only_the_artifacts_name_still_builds() {
 #[cfg(windows)]
 #[test]
 fn a_lock_reached_through_a_junction_is_refused() {
-    // The Windows counterpart of the symlink case: a directory junction
-    // needs no elevation, and names `out` under a spelling that shares
-    // nothing with it but the file name.
+    // The Windows counterpart of the symlink case: a junction needs no elevation.
     let junction = |dir: &Path| {
         let status = Command::new("cmd")
             .current_dir(dir)
@@ -547,10 +503,7 @@ fn a_lock_reached_through_a_junction_is_refused() {
 
 #[test]
 fn two_artifacts_differing_only_in_case_are_refused_on_every_host() {
-    // `home1` and `HOME1` are distinct ids, but `home1.nbt` and `HOME1.nbt`
-    // are one directory entry on macOS and Windows, where staging both
-    // loses the previous build. Names are compared ignoring case before
-    // lowering, so every host refuses the source.
+    // `home1.nbt` and `HOME1.nbt` are one entry on macOS and Windows, so every host refuses.
     let build = first_successful_build();
     let before = snapshot(&build.out_dir);
     let body = fs::read_to_string(&build.source).expect("read source");
@@ -577,10 +530,7 @@ fn two_artifacts_differing_only_in_case_are_refused_on_every_host() {
 #[cfg(unix)]
 #[test]
 fn a_lock_whose_location_cannot_be_resolved_is_reported_not_passed() {
-    // Only a missing directory is an ordinary reason not to resolve a
-    // path. Anything else — here a parent that runs through a regular file —
-    // leaves the guard without a key to compare, and it says so rather than
-    // reading "no key" as "no collision".
+    // A parent that runs through a regular file leaves the guard no key; it must say so.
     let build = first_successful_build();
     let dir = build.source.parent().expect("source has a parent");
     change_the_source(&build.source);
@@ -603,9 +553,7 @@ fn a_lock_whose_location_cannot_be_resolved_is_reported_not_passed() {
     );
 }
 
-/// Sources a compile refuses before writing anything, each as a label, the
-/// source, the edition and target it is compiled for, and the code it is
-/// refused with.
+/// Sources a compile refuses before writing anything: label, source, edition, target, code.
 const REFUSED: &[(&str, &str, &str, &str, &str)] = &[
     (
         "an id no edition has",
@@ -677,14 +625,7 @@ theme t:\n  slot floor -> @oak_planks\n  slot wall  -> @cobblestone\n  slot roof
 struct hut size=5x3\n  floor mat_slot=floor\n  walls class=outer mat_slot=wall height=3\n  \
 roof  kind=gable mat_slot=roof overhang=0\n";
 
-/// A compile refused for its source or its target leaves nothing the next
-/// reader could take for a finished build: no structure, no lockfile, and
-/// no output directory. `--out` is created after every refusal is decided,
-/// so a check moved one step later leaves the directory behind, which a
-/// count of files alone cannot see.
-///
-/// Every source `check` refuses is a row too, compiled for Java at the
-/// default target.
+/// `--out` is created after every refusal is decided, so a check moved later leaves it behind.
 #[test]
 fn a_refused_compile_writes_nothing() {
     let rows = REFUSED

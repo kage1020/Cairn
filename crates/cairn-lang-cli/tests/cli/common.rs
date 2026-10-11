@@ -1,5 +1,4 @@
-//! Helpers shared by the test modules: where the binary and the examples
-//! are, how to run one, and the temp directories a run writes into.
+//! Helpers the test modules share: running the binary, the examples, and temp directories.
 
 use std::fs;
 use std::io::Read;
@@ -14,9 +13,7 @@ pub fn cargo_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
 }
 
-/// The number of `.crn` files `examples/` ships. Bump it with the next
-/// example; every sweep refuses a different count, and a loop over a
-/// filtered-down set passes silently.
+/// The number of `.crn` files `examples/` ships; bump it with the next example.
 pub const SHIPPED_EXAMPLES: usize = 12;
 
 /// The repository's `examples/` directory.
@@ -44,9 +41,7 @@ pub fn cairn(subcommand: &str, args: &[&str]) -> Output {
         .expect("failed to invoke cairn binary")
 }
 
-/// Copy `examples/<name>` into a fresh temp dir so a test can rely on the
-/// source's parent being writable without leaving lock artefacts in the
-/// repository.
+/// Copy `examples/<name>` into a fresh temp dir, so its lockfile stays out of the repository.
 pub fn example_in_tempdir(name: &str) -> (TempDir, PathBuf) {
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join(name);
@@ -61,8 +56,7 @@ pub fn write_source(dir: &Path, name: &str, source: &str) -> PathBuf {
     path
 }
 
-/// Every `.crn` under `examples/`, sorted. Refuses any count but
-/// [`SHIPPED_EXAMPLES`], since a sweep over nothing passes.
+/// Every `.crn` under `examples/`, sorted, refusing any count but [`SHIPPED_EXAMPLES`].
 pub fn crn_examples() -> Vec<PathBuf> {
     let dir = examples_dir();
     let entries =
@@ -87,10 +81,8 @@ pub fn crn_examples() -> Vec<PathBuf> {
     found
 }
 
-/// A source plus the directory its artifacts would land in, both removed
-/// when the test ends.
+/// A source plus the directory its artifacts would land in, removed when the test ends.
 pub struct Fixture {
-    /// Directory holding the source, the output, and the lock.
     dir: TempDir,
 }
 
@@ -114,10 +106,7 @@ impl Fixture {
         self.dir.path().join("out")
     }
 
-    /// Every file the compile could have produced.
-    ///
-    /// Every I/O failure panics rather than reading as "nothing there",
-    /// which is what some tests assert.
+    /// Every file the compile could have produced; an I/O error panics, never reads as none.
     pub fn artifacts(&self) -> Vec<String> {
         fn walk(dir: &Path, into: &mut Vec<String>) {
             let entries = fs::read_dir(dir)
@@ -142,9 +131,7 @@ impl Fixture {
     }
 }
 
-/// `cairn compile <src> --edition <edition> --target <target> --out <out>`,
-/// with `--lock <lock>` when one is given; without it the lockfile lands
-/// beside the source.
+/// `cairn compile <src> --edition <edition> --target <target> --out <out> [--lock <lock>]`.
 pub fn compile(src: &Path, edition: &str, target: &str, out: &Path, lock: Option<&Path>) -> Output {
     let mut command = Command::new(cargo_bin());
     command
@@ -159,8 +146,7 @@ pub fn compile(src: &Path, edition: &str, target: &str, out: &Path, lock: Option
     command.output().expect("failed to invoke cairn binary")
 }
 
-/// `cairn compile` of the fixture's source for `edition` / `target`, with
-/// the output directory and the lockfile inside the fixture's directory.
+/// `cairn compile` of the fixture's source, writing into the fixture's directory.
 pub fn compile_as(fixture: &Fixture, edition: &str, target: &str) -> Output {
     compile(
         &fixture.source(),
@@ -171,8 +157,7 @@ pub fn compile_as(fixture: &Fixture, edition: &str, target: &str) -> Output {
     )
 }
 
-/// What a run of the binary reported: its exit code and both streams as
-/// text.
+/// A run's exit code and both streams as text.
 pub struct Run {
     pub code: Option<i32>,
     pub stdout: String,
@@ -194,8 +179,7 @@ pub fn stderr_of(out: &Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
-/// The NBT inside a Java `.nbt` artifact. The writer gzips, so a search
-/// over the file as written finds nothing whatever it is asked for.
+/// The gunzipped NBT inside a Java `.nbt` artifact.
 pub fn nbt_body(path: &Path) -> Vec<u8> {
     let bytes = fs::read(path).expect("read artifact");
     let mut body = Vec::new();
@@ -205,21 +189,16 @@ pub fn nbt_body(path: &Path) -> Vec<u8> {
     body
 }
 
-/// Whether `needle` occurs in `hay`. Both writers store a block id as the
-/// bytes of a string tag, so a palette assertion is a byte search over the
-/// NBT body.
+/// Whether `needle` occurs in `hay`; both writers store a block id as a string tag's bytes.
 pub fn bytes_contain(hay: &[u8], needle: impl AsRef<[u8]>) -> bool {
     let needle = needle.as_ref();
     hay.windows(needle.len()).any(|w| w == needle)
 }
 
-/// A diagnostic reduced to what an assertion compares: where it points
-/// (line, column), how bad it is, and which code it carries. The prose is
-/// left out; the code, not the wording, is the contract.
+/// A diagnostic as an assertion compares it: line, column, severity and code, without the prose.
 pub type Reported = (u64, u64, String, String);
 
-/// `expected` in the shape [`stderr_stream`] and [`json_stream`] return,
-/// for an `assert_eq!` against either.
+/// `expected` in the shape [`stderr_stream`] and [`json_stream`] return.
 pub fn reported(expected: &[(u64, u64, &str, &str)]) -> Vec<Reported> {
     expected
         .iter()
@@ -246,15 +225,8 @@ pub fn json_stream(stdout: &str) -> Vec<Reported> {
         .collect()
 }
 
-/// Diagnostics parsed back out of a command's stderr, in emission order.
-///
-/// A finding reads `FILE:LINE:COL: SEVERITY[CODE]: ...`; a refusal of the
-/// requested target reads `SEVERITY[CODE]: FILE:LINE:COL: ...`. Lines that
-/// carry no position (notes, `wrote ...`, plain `error:` messages, a
-/// refusal naming only the file) are skipped.
-///
-/// Parsing rather than substring-matching pins which code was reported,
-/// where, and how often.
+/// Diagnostics parsed back out of a command's stderr, in emission order; lines with no position
+/// are skipped.
 pub fn stderr_stream(stderr: &str) -> Vec<Reported> {
     stderr
         .lines()
@@ -262,8 +234,7 @@ pub fn stderr_stream(stderr: &str) -> Vec<Reported> {
         .collect()
 }
 
-/// `assert_eq!` of [`stderr_stream`] against `expected`, printing the whole
-/// stderr when they differ.
+/// `assert_eq!` of [`stderr_stream`] against `expected`, printing the whole stderr on failure.
 #[track_caller]
 pub fn assert_stream(stderr: &str, expected: &[(u64, u64, &str, &str)]) {
     assert_eq!(
@@ -275,8 +246,7 @@ pub fn assert_stream(stderr: &str, expected: &[(u64, u64, &str, &str)]) {
 
 /// `FILE:LINE:COL: SEVERITY[CODE]: ...`.
 fn finding_line(line: &str) -> Option<Reported> {
-    // The file path may itself contain `:` (`C:\...`), so anchor on the
-    // severity marker and walk backwards from there.
+    // A path may contain `:` (`C:\...`), so anchor on the severity marker.
     let (head, tail) = ["error[", "warning["].iter().find_map(|marker| {
         let needle = format!(": {marker}");
         line.find(&needle)

@@ -1,6 +1,4 @@
-//! `cairn check <file>` end to end: findings go to stderr as one located
-//! `FILE:LINE:COL: SEVERITY[CODE]` line each, or to stdout as a
-//! `--format json` array, and the exit code follows the worst severity.
+//! `cairn check <file>` end to end: findings on stderr or in a JSON array, and the exit code.
 
 use crate::common::{Fixture, assert_stream, cairn, examples_dir, reported, stderr_stream};
 
@@ -13,9 +11,6 @@ const CLEAN: &str = "struct s size=2x2\n  floor mat_slot=wall\n  walls height=4 
 
 const UNKNOWN_KEYWORD: &str = "struct s size=1x1\n  mystery foo=1\n";
 
-/// On stderr, as every subcommand reports, so `cairn check f.crn > out`
-/// cannot swallow a finding; `--format json`, the machine payload, stays
-/// on stdout.
 #[test]
 fn text_findings_go_to_stderr_one_located_line_each() {
     let fixture = Fixture::new(DUPLICATE);
@@ -42,8 +37,6 @@ fn text_findings_go_to_stderr_one_located_line_each() {
 
 #[test]
 fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
-    // `@cairn` is provenance that reaches no pass, so an unreadable value
-    // costs the build nothing.
     let fixture = Fixture::new(CAIRN_VERSION);
     let path = fixture.source();
     let out = cairn("check", &[path.to_str().unwrap()]);
@@ -52,8 +45,6 @@ fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
     assert_stream(&stderr, &[(1, 1, "warning", "W_INVALID_CAIRN_VERSION")]);
 }
 
-/// A value holding a character no token starts with must reach the check
-/// pass rather than be refused by the lexer as an error.
 #[test]
 fn an_unlexable_cairn_value_is_a_warning_and_the_build_goes_on() {
     let fixture = Fixture::new("@cairn 2026.6+build\n\ntheme t:\n  slot wall -> @stone\n");
@@ -64,8 +55,6 @@ fn an_unlexable_cairn_value_is_a_warning_and_the_build_goes_on() {
     assert_stream(&stderr, &[(1, 1, "warning", "W_INVALID_CAIRN_VERSION")]);
 }
 
-/// `~=` is an operator Cairn does not define, which is `E_INVALID_REQUIRES`
-/// whether or not the lexer has a token for `~`.
 #[test]
 fn an_unlexable_requires_value_is_an_invalid_floor_rather_than_a_parse_error() {
     for (label, source, at) in [
@@ -139,9 +128,7 @@ fn parse_failure_exits_one_with_parse_style_message() {
     );
 }
 
-/// The CLI is handed the file an editor wrote, terminator and all: the
-/// whole of `def foo bar\n` is on line 1, so a `:2:1` prefix would point at
-/// a line holding none of it.
+/// The file ends in a newline, so a `:2:1` prefix would point at an empty line.
 #[test]
 fn end_of_line_parse_error_names_the_line_that_has_it() {
     for (label, source) in [
@@ -174,8 +161,6 @@ fn unknown_keyword_fixture_lists_known_keywords_in_a_note() {
         reported.contains("note:") && reported.contains("floor"),
         "expected a known-keywords note, got: {reported}",
     );
-    // The informational note carries no span of its own, so it must not
-    // re-print the primary diagnostic's `file:L:C:` prefix.
     let primary_prefix = reported
         .lines()
         .find(|l| l.contains("E_UNKNOWN_KEYWORD"))
@@ -219,10 +204,7 @@ fn json_output_carries_line_and_col_for_every_diagnostic() {
             "code should be the E_-prefixed string, got: {}",
             entry["code"],
         );
-        // A code without a payload omits `data`, keeping the contract
-        // additive. No `E_DUPLICATE_*` code carries one, so a `data` key
-        // here means `Diagnostic::data`'s `skip_serializing_if` broke, or
-        // one of them gained a payload without this fixture following.
+        // No `E_DUPLICATE_*` code carries a payload, so none may carry `data`.
         assert!(
             entry.get("data").is_none(),
             "diagnostic without a payload must omit the `data` key, got: {entry}",

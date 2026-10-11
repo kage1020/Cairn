@@ -1,5 +1,4 @@
-//! One module per subcommand, each holding its `run_*` entry point and
-//! what only that subcommand prints.
+//! One module per subcommand: its `run_*` entry point and what only it prints.
 
 pub(crate) mod check;
 pub(crate) mod compile;

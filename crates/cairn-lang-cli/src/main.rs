@@ -3,10 +3,7 @@
 // Stdout goes through `outln!`, because `println!` panics once the reader has gone.
 #![deny(clippy::print_stdout)]
 
-/// `println!` for command output, except that a closed pipe
-/// (`cairn lower f.crn | head -1`) is not a failure: the line is dropped
-/// and the process ends with the exit code the command decides rather
-/// than a panic (an abort in release builds).
+/// `println!` for command output, except that a closed pipe drops the line instead of panicking.
 macro_rules! outln {
     ($($arg:tt)*) => {
         $crate::write_stdout_line(format_args!($($arg)*))
@@ -41,8 +38,7 @@ fn write_stdout_line(line: std::fmt::Arguments<'_>) {
     write_line(&mut std::io::stdout().lock(), line);
 }
 
-/// Write `line` to `out` as [`outln!`] does: drop it if the reader has
-/// gone, panic on any other error.
+/// Write `line` to `out`, dropping it if the reader has gone and panicking on any other error.
 fn write_line(out: &mut impl std::io::Write, line: std::fmt::Arguments<'_>) {
     match writeln!(out, "{line}") {
         Ok(()) => {}

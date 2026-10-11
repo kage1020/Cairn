@@ -1,6 +1,5 @@
-//! `cairn compile` end to end: the artifacts each edition writes for the
-//! shipped examples and for small sources, the lockfile that certifies
-//! them, and the findings that stop a build or ride along with one.
+//! `cairn compile` end to end: the artifacts each edition writes, the lockfile that certifies
+//! them, and the findings that stop a build or ride along.
 
 use std::fs;
 use std::path::PathBuf;
@@ -14,11 +13,7 @@ use crate::common::{
     examples_dir, nbt_body, write_source,
 };
 
-/// The version cargo derived for this crate from `[workspace.package]`.
-///
-/// The lockfile records the compiler that produced it, so the number has to
-/// be the release's; `cairn-lang-core`'s `CAIRN_VERSION` would only restate
-/// whatever the binary wrote.
+/// From cargo, not `CAIRN_VERSION`, which would only restate what the binary wrote.
 const WORKSPACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[test]
@@ -156,12 +151,7 @@ fn lockfile_records_target_triple() {
     assert_eq!(lf.target.data_version, 4189);
 }
 
-/// `--target` accepts either spelling of a version, as `@requires` and
-/// `@intended_targets` read one: Java's `1.21` row is reached as `1.21.0`,
-/// and Bedrock's `1.21.0` row as `1.21`. Each lockfile target is compared
-/// against the one written by the build that spells the row as the table
-/// does; `LockTarget` compares whole, so the integer is covered along with
-/// the label.
+/// Java's `1.21` row reached as `1.21.0`, and Bedrock's `1.21.0` as `1.21`.
 #[test]
 fn either_spelling_of_a_target_builds_the_row_it_names() {
     let (_tmp_src, src) = example_in_tempdir("roof-flat.crn");
@@ -211,8 +201,7 @@ fn either_spelling_of_a_target_builds_the_row_it_names() {
 
 #[test]
 fn bedrock_compiles_stateless_example_to_mcstructure() {
-    // `roof-flat.crn` resolves entirely to stateless block ids, the
-    // smallest example the Bedrock backend round-trips.
+    // `roof-flat.crn` resolves entirely to stateless block ids.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("roof-flat.crn");
     fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
@@ -243,9 +232,7 @@ fn bedrock_compiles_stateless_example_to_mcstructure() {
 
 #[test]
 fn bedrock_mcstructure_is_uncompressed_little_endian() {
-    // The `.mcstructure` bytes must be raw NBT (unnamed root compound,
-    // 0x0a + u16 zero length), never a gzip stream (0x1f 0x8b) the way the
-    // Java `.nbt` is.
+    // Raw NBT (`0x0a`, then a zero `u16` name length), never gzip (`0x1f 0x8b`) as `.nbt` is.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("roof-flat.crn");
     fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
@@ -307,9 +294,7 @@ fn bedrock_lockfile_records_bedrock_target_and_pack_hash() {
 
 #[test]
 fn bedrock_cottage_maps_stair_states_without_degradation() {
-    // The gable roof's `*_stairs` carry `facing`/`half`/`shape=straight`.
-    // Bedrock maps `facing`/`half` and drops `shape=straight`, its default,
-    // without a note.
+    // Bedrock drops the gable stairs' `shape=straight`, its default, without a note.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("cottage.crn");
     fs::copy(examples_dir().join("cottage.crn"), &dst).expect("copy cottage");
@@ -341,9 +326,7 @@ fn bedrock_cottage_maps_stair_states_without_degradation() {
 
 #[test]
 fn bedrock_themed_tower_degrades_stair_shape_but_compiles() {
-    // The eave stairs' `outer_left`/`outer_right` shapes have no Bedrock
-    // state, so each is a `W_INTENT_DEGRADED` (`spec/versioning-editions`
-    // "Backend = data tables" and "Java / Bedrock portability").
+    // The eave stairs' `outer_left`/`outer_right` shapes have no Bedrock state.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("themed-tower.crn");
     fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
@@ -452,8 +435,7 @@ fn parse_error_surfaces_file_line_col() {
     assert_eq!(result.status.code(), Some(1));
     let stderr = String::from_utf8(result.stderr).expect("utf-8");
     let bad_display = bad.display().to_string();
-    // Look for the `file:line:col:` shape gcc / clang ship — at least one
-    // `<path>:N:M:` occurrence where N and M are positive integers.
+    // The `file:line:col:` shape gcc and clang print.
     let mut found_position = false;
     for line in stderr.lines() {
         if !line.contains(&bad_display) {
@@ -490,8 +472,6 @@ fn default_out_dir_is_source_parent() {
 
 #[test]
 fn the_lockfile_on_disk_ends_with_a_newline() {
-    // The encoder is pinned in `cairn-lang-core`; this is the byte that
-    // actually reaches the file, through the temp-file-and-rename writer.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("newline.lock");
@@ -519,9 +499,6 @@ fn the_lockfile_on_disk_ends_with_a_newline() {
 
 #[test]
 fn compile_is_byte_reproducible() {
-    // The whole lockfile, not two of its fields: an absolute path, an
-    // iteration order or a timestamp is what a hash-only comparison cannot
-    // see, and what would make a committed lockfile impossible to keep.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_a = TempDir::new().expect("out a");
     let out_b = TempDir::new().expect("out b");
@@ -550,8 +527,6 @@ fn compile_is_byte_reproducible() {
 
     let lock_bytes_a = fs::read(&lock_a).expect("read a");
     let lock_bytes_b = fs::read(&lock_b).expect("read b");
-    // Raw bytes, like the `.nbt` comparison above: two differently
-    // malformed sequences both collapsing to U+FFFD would pass a lossy one.
     assert_eq!(
         lock_bytes_a,
         lock_bytes_b,
@@ -560,8 +535,6 @@ fn compile_is_byte_reproducible() {
         String::from_utf8_lossy(&lock_bytes_b),
     );
 
-    // Read back through the decoder too, so the comparison above cannot
-    // pass on two files that are equally malformed.
     let lf_a = Lockfile::read_from_path(&lock_a).expect("read a");
     let lf_b = Lockfile::read_from_path(&lock_b).expect("read b");
     assert_eq!(lf_a, lf_b);
@@ -569,8 +542,7 @@ fn compile_is_byte_reproducible() {
 
 #[test]
 fn compile_rolls_back_on_lockfile_failure() {
-    // Every artifact and the lock, or none. `--lock` at an existing
-    // directory forces the lockfile write to fail.
+    // `--lock` at an existing directory forces the lockfile write to fail.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_as_dir = out_dir.path().join("lock-is-a-dir");
@@ -596,8 +568,6 @@ fn compile_rolls_back_on_lockfile_failure() {
 
 #[test]
 fn compile_does_not_print_wrote_before_lockfile_success() {
-    // `wrote …` is announced only after every artifact and the lockfile
-    // land, so a failed lockfile step prints none.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_as_dir = out_dir.path().join("lock-dir");
@@ -623,8 +593,6 @@ fn compile_does_not_print_wrote_before_lockfile_success() {
 
 #[test]
 fn compile_all_examples_exit_zero() {
-    // Abstract tokens and unsupported roles degrade to air with a warning
-    // at lowering, so the palette reaching the Java backend is concrete.
     for path in crn_examples() {
         let name = path.file_name().expect("named").to_string_lossy();
         let out_dir = TempDir::new().expect("out tempdir");
@@ -649,22 +617,7 @@ fn compile_all_examples_exit_zero() {
     }
 }
 
-/// `(example, the artifact its one struct writes)` for every example whose
-/// members the voxel lowering covers end to end, so its
-/// `W_DEFERRED_MEMBER` stream is empty.
-///
-/// - `cottage.crn`: floor, walls, door, window, gable roof with overhang.
-/// - `themed-tower.crn`: `level y=N` grouping, per-level walls, an eave
-///   `stair`, and a `repeat=/step=` window pattern — level flattening and
-///   stair voxelisation paint every `level` child.
-/// - `redstone-door.crn`: two `pressure_plate` fixtures with the compound
-///   `at=<side>.outside` / `at=inside.<side>` anchor, a `circuit
-///   region=floor void=2` routing marker, and a `door[id=front]
-///   opened_by=sig.open` actuator patch; the plate paints its voxels and
-///   the other two only guard the logic pipeline.
-/// - `roof-shed/hip/flat.crn`: the roof voxelisers of `spec/compilation`
-///   ("Shed roof voxel rules", "Hip roof voxel rules" and
-///   "Flat roof voxel rules").
+/// `(example, the artifact its one struct writes)` for every example with no `W_DEFERRED_MEMBER`.
 const DEFER_FREE_EXAMPLES: &[(&str, &str)] = &[
     ("cottage.crn", "cottage.nbt"),
     ("themed-tower.crn", "keep.nbt"),
@@ -709,7 +662,6 @@ fn covered_examples_compile_without_deferred_warnings() {
 
 #[test]
 fn lockfile_registry_pack_hash_is_populated() {
-    // The lockfile pins the registry pack the compile resolved against.
     // `constraint_catalog_hash` is zero while there is no catalog.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
@@ -742,7 +694,6 @@ fn lockfile_registry_pack_hash_is_populated() {
 
 #[test]
 fn unknown_abstract_token_compile_exits_nonzero() {
-    // A build that fell back to air on a typo would hide it downstream.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("typo.crn");
     fs::write(
@@ -813,9 +764,7 @@ fn compile_village_emits_three_nbt() {
 
 #[test]
 fn village_lockfile_records_placements() {
-    // From `examples/village.crn`: home1 sits at origin, home2 east of it
-    // past its inflated width (11) plus gap=4 = 15, home3 north of it minus
-    // its depth (9) minus gap=5 = -14.
+    // home2: home1's inflated width 11 plus gap=4; home3: minus its depth 9 minus gap=5.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("village.lock");
@@ -856,7 +805,6 @@ fn village_lockfile_records_placements() {
 
 #[test]
 fn village_lockfile_round_trips_through_yaml() {
-    // A reader of the file gets the `placements` record the compiler wrote.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("rt.lock");
@@ -881,8 +829,7 @@ fn village_lockfile_round_trips_through_yaml() {
 
 #[test]
 fn village_lowers_connect_rows_into_walkway_artifacts() {
-    // The home1↔home3 row detours around home1's floor, so village
-    // compiles with no `W_WALKWAY_BLOCKED`.
+    // The home1↔home3 row detours round home1's floor, so nothing is blocked.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -1027,8 +974,7 @@ fn east_of_unknown_ref_errors_with_suggestion() {
     );
 }
 
-/// The source every refused-id test below runs: one `def hut`, one theme
-/// and a site whose rows are `rows`, the first of them on line 10.
+/// One `def hut`, one theme and a site whose rows are `rows`, the first on line 10.
 fn site_with_rows(rows: &[&str]) -> String {
     let mut source = String::from(
         "@cairn 2026.06\n\ndef hut size=3x3:\n  floor mat_slot=floor\n\n\
@@ -1051,9 +997,7 @@ fn check_rows(rows: &[&str]) -> (Option<i32>, String) {
     (result.status.code(), reported)
 }
 
-/// Every finding in `reported` as `(line, code)`, in print order, and
-/// nothing else: comparing the whole list is what bounds the total, so a
-/// finding sprouting on a row a test means to keep quiet fails it.
+/// Every finding in `reported` as `(line, code)`, in print order.
 fn findings(reported: &str) -> Vec<(usize, String)> {
     reported
         .lines()
@@ -1088,14 +1032,7 @@ fn owned(pairs: &[(usize, &str)]) -> Vec<(usize, String)> {
         .collect()
 }
 
-/// A row refused with `E_INVALID_PLACE_ID` is still the row a later
-/// `east_of=` / `north_of=` naming it means, so the reference is not
-/// `E_UNRESOLVED_PLACE_REF`, whose "declare the target above this line"
-/// would send the author to look for a typo. It is the cascade
-/// `W_DEFERRED_PLACE`, on the referencing row, with a note pointing at the
-/// refused one. A reference to an id no row declares is still unresolved,
-/// which the last row pins: without it, suppressing every reference would
-/// pass too.
+/// The last row references an id no row declares, which stays unresolved.
 #[test]
 fn a_reference_to_a_place_refused_for_its_id_is_a_cascade_on_its_own_row() {
     let (code, reported) = check_rows(&[
@@ -1129,9 +1066,6 @@ fn a_reference_to_a_place_refused_for_its_id_is_a_cascade_on_its_own_row() {
     );
 }
 
-/// `refused_place_ids` fills in source order, like the ids it shadows, so a
-/// reference *above* the refused row names no prior place and is reported
-/// as any other forward reference is.
 #[test]
 fn a_reference_above_the_row_refused_for_its_id_names_no_prior_place() {
     let (code, reported) = check_rows(&[
@@ -1151,9 +1085,6 @@ fn a_reference_above_the_row_refused_for_its_id_names_no_prior_place() {
     );
 }
 
-/// The `IdError::Empty` side of the same rule: `id=""` is refused for its
-/// id, and `east_of=""` names that row, so it is the cascade rather than a
-/// reference to nothing.
 #[test]
 fn a_reference_to_an_empty_place_id_is_a_cascade_on_its_own_row() {
     let (code, reported) = check_rows(&[
@@ -1170,12 +1101,6 @@ fn a_reference_to_an_empty_place_id_is_a_cascade_on_its_own_row() {
     assert_eq!(note_rows(&reported), [11], "reported={reported}");
 }
 
-/// One refused id written twice: each row is refused on its own line, the
-/// second is `E_DUPLICATE_PLACE_ID` against the first, and a reference to
-/// the id is one cascade whose note points at the first of the two rows, as
-/// `E_DUPLICATE_PLACE_ID`'s "first row wins" does for a usable id. The
-/// resolver compares refused ids too, so renaming both rows to one usable id
-/// raises no finding the author had not already seen.
 #[test]
 fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
     let (code, reported) = check_rows(&[
@@ -1202,9 +1127,7 @@ fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
     );
 }
 
-/// `place id=ID` refused on `shown`, by `check` and by `compile`, which
-/// writes nothing. Run once per character, so one failing does not hide
-/// the rest.
+/// `place id=ID` refused on `shown` by `check`, and by `compile`, which writes nothing.
 fn assert_place_id_refused(id: &str, shown: &str) {
     let tmp = TempDir::new().expect("tempdir");
     let out = tmp.path().join("out");
@@ -1242,11 +1165,8 @@ fn assert_place_id_refused(id: &str, shown: &str) {
     );
 }
 
-// The characters a Windows file name cannot carry are refused like the
-// path separators, on every host: an id is the stem of the artifact's file
-// name. `"` is in the rule too, but a source string literal cannot carry
-// one, so the lockfile reader is where it is reached. U+0001 is one of the
-// controls Windows reserves, and is quoted as its escape.
+// Characters a Windows file name cannot carry are refused on every host. A source string literal
+// cannot carry `"`, so the lockfile reader is where that one is reached.
 
 #[test]
 fn a_place_id_carrying_a_star_is_refused_on_every_host() {
@@ -1278,10 +1198,7 @@ fn a_place_id_carrying_a_control_windows_reserves_is_refused_and_escaped() {
     assert_place_id_refused("a\u{1}b", "\\u{1}");
 }
 
-// The controls past U+001F are legal in a Windows file name and are refused
-// on their own ground: they print as nothing, so the id could not be shown.
-// Whitespace other than a plain space would print as one, so it is quoted
-// as its escape for the same reason.
+// Controls past U+001F and whitespace other than a space print wrongly, so they are refused too.
 
 #[test]
 fn a_place_id_carrying_a_control_windows_allows_is_refused_as_illegible() {
@@ -1300,8 +1217,6 @@ fn a_place_id_carrying_an_ideographic_space_is_refused_and_escaped() {
 
 #[test]
 fn bare_def_without_place_emits_w_unused_def_and_no_nbt() {
-    // A def no site references compiles to no voxels; `W_UNUSED_DEF` keeps
-    // a typo on the `place use=` side from silently building nothing.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("orphan_def.crn");
     fs::write(
@@ -1351,8 +1266,6 @@ fn bare_def_without_place_emits_w_unused_def_and_no_nbt() {
 
 #[test]
 fn unknown_def_in_place_compile_exits_nonzero() {
-    // Resolver errors reach the exit code through their merge into the
-    // lowering stream.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("typo_use_compile.crn");
     fs::write(
@@ -1433,7 +1346,6 @@ fn home2_nbt_uses_resolved_theme_palette() {
 
 #[test]
 fn compile_overwrites_existing_output() {
-    // An edit-and-rerun loop compiles into the same directory every time.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let nbt_path = out_dir.path().join("cottage.nbt");
@@ -1463,8 +1375,6 @@ fn compile_overwrites_existing_output() {
 
 #[test]
 fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
-    // `cairn compile` reaches the note through
-    // `report_lowering_diagnostics`, which `lower` and `info` do not use.
     let tmp = TempDir::new().expect("tempdir");
     let src = tmp.path().join("conflict.crn");
     fs::write(
@@ -1509,10 +1419,7 @@ fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
 
 #[test]
 fn a_walkway_port_named_underscore_is_refused_rather_than_panicking_the_namer() {
-    // A port called `_` would lower to `walkway::s::a.___b._`, which the
-    // artifact namer cannot split back. The row is dropped at lowering
-    // with a finding instead, and the build, having lost the walkway the
-    // row asked for, is refused as partial rather than certified.
+    // A port called `_` would lower to a scope key the artifact namer cannot split back.
     let fixture = Fixture::new(concat!(
         "def hut size=5x5:\n",
         "  walls id=w mat_slot=wall height=3\n",
@@ -1548,11 +1455,7 @@ fn a_walkway_port_named_underscore_is_refused_rather_than_panicking_the_namer() 
 
 #[test]
 fn walkway_ids_that_would_alias_across_the_separator_are_each_named() {
-    // `a.p_ → b.p` and `a.p → _b.p` would share the scope key
-    // `walkway::s::a.p___b.p`, one `.nbt` for two rows. Each is named on its
-    // own line and among the losses that refuse the build, under its own
-    // ports rather than the shared key. The sound third row lays its
-    // walkway.
+    // `a.p_ → b.p` and `a.p → _b.p` would share one scope key; the third row is sound.
     let fixture = Fixture::new(concat!(
         "def hut size=5x5:\n",
         "  walls id=w mat_slot=wall height=3\n",
@@ -1599,10 +1502,7 @@ fn walkway_ids_that_would_alias_across_the_separator_are_each_named() {
 
 #[test]
 fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
-    // A walkway is judged by the pair its `connect` row names, not by the
-    // row. A duplicate of a pair an earlier row laid loses nothing, in
-    // either order, so the build is certified. Two rows naming a pair
-    // that neither laid are one loss, so the refusal counts it once.
+    // A walkway is judged by the pair its row names, so a duplicate of a laid pair loses nothing.
     let hut = concat!(
         "def hut size=5x5:\n",
         "  walls id=w mat_slot=wall height=3\n",
@@ -1627,8 +1527,7 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
     let lf = Lockfile::read_from_path(&laid.lock()).expect("read lock");
     assert_eq!(lf.walkways.len(), 1);
 
-    // Neither row lays: the trailing `_` on `a_` is refused by the
-    // walkway ident rule, whichever end of the row it sits on.
+    // Neither row lays: the walkway ident rule refuses the trailing `_` on `a_`.
     let lost = Fixture::new(&format!(
         "{hut}site s:\n  \
              place id=a_ use=hut theme=t at=origin\n  \
@@ -1642,9 +1541,6 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
     let result = compile_as(&lost, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
-    // Each row earns its own ident finding. The first row laid nothing,
-    // so the second is not a duplicate of it: a pair is recorded as laid
-    // only once its strip is, not when a row reaches the duplicate guard.
     assert_stream(
         &stderr,
         &[
@@ -1684,12 +1580,7 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
 
 #[test]
 fn a_walkway_whose_every_cell_is_blocked_is_lost_rather_than_written_as_air() {
-    // Two huts touching, each door port buried under the other's floor.
-    // The router cannot detour from a buried port, so the row falls back
-    // to the straight L, and every cell of it overlaps a floor: the
-    // walkway's array is all air. Holding no block, it is a lost walkway
-    // like a row that was refused, not an `.nbt` of air certified as
-    // built.
+    // Two huts touching, each door port buried under the other's floor: the walkway is all air.
     let fixture = Fixture::new(concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -1753,9 +1644,7 @@ fn a_walkway_whose_every_cell_is_blocked_is_lost_rather_than_written_as_air() {
 
 #[test]
 fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
-    // `nada`'s one member cannot voxelise, so lowering keeps an array for
-    // `b` that holds only air. Holding no block, it is a lost scope, not a
-    // `b.nbt` of air certified beside `a`.
+    // `nada`'s one member cannot voxelise, so `b`'s array holds only air.
     let fixture = Fixture::new(concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -1791,12 +1680,7 @@ fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
 
 #[test]
 fn walkways_that_flatten_to_one_filename_are_refused_before_anything_is_written() {
-    // Every id here passes the walkway ident rule, so both rows would lay
-    // and their scope keys differ, but the filename joins a place and its
-    // port with the same `_` that sits inside `a_b` and `b_c`: both
-    // walkways flatten to `s_walkway_a_b_c__d_e_f.nbt`. The second would
-    // overwrite the first, so the resolver refuses the source with
-    // `E_OUTPUT_NAME_COLLISION` before it lowers, and nothing is staged.
+    // Both walkways flatten to `s_walkway_a_b_c__d_e_f.nbt`, though their scope keys differ.
     let fixture = Fixture::new(concat!(
         "def hut size=5x5:\n",
         "  walls id=w mat_slot=wall height=3\n",
@@ -1854,20 +1738,9 @@ fn files_under(root: &std::path::Path) -> Vec<String> {
     found
 }
 
-/// A `place id=` is an artifact's file name, so a path separator in it would
-/// let the source choose where the compiler writes. `check` refuses it and
-/// `compile` writes nothing — neither the artifact nor the lock.
-///
-/// Each row would build without the rule: the absolute id's directory
-/// exists outside `--out`, and `out/` holds both the `sub/` the relative id
-/// names and the `a/` that `a\b` names on Windows. `\` is refused on Unix
-/// too, so acceptance does not depend on the host.
-///
-/// Each row pins the character the diagnostic names. On Windows the
-/// absolute id begins with a drive and is refused on its `:`, so the
-/// relative and Windows-style rows exercise `/` and `\` there. Elsewhere
-/// the tempdir is named without the `.` `TempDir::new` puts in front, so
-/// the absolute id carries no other refused character, which is asserted.
+/// Without the rule each row would build: the absolute id's directory exists, and `out/` holds
+/// the `sub/` and `a/` the others name. The tempdir is named without a `.`, so the absolute id
+/// carries no other refused character.
 #[test]
 fn a_place_id_carrying_a_path_separator_writes_nothing() {
     let tmp = tempfile::Builder::new()

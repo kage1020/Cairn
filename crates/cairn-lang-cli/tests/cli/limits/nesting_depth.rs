@@ -1,9 +1,5 @@
-//! Deeply nested sources are refused with a finding rather than
-//! overflowing the native stack, which kills the process and so can only
-//! be observed from outside it: each run is a subprocess, and its exit
-//! code is asserted to be `Some(1)`, which an overflow never yields
-//! (`Some(-1073741571)`, `STATUS_STACK_OVERFLOW`, on Windows; `None`, a
-//! signal death, on Unix).
+//! Deeply nested sources are refused with a finding rather than overflowing the native stack.
+//! An overflow kills the process, so each run is a subprocess whose exit code must be `Some(1)`.
 
 use std::fmt::Write as _;
 
@@ -52,11 +48,7 @@ fn flat_or_chain(terms: usize) -> String {
     format!("struct a size=1x1\n  logic sig.out = {chain}\n")
 }
 
-/// Every shape, past the depth an unguarded debug build overflows at:
-/// roughly 287 levels of `[[[…`, 380 of parentheses, 785 of `not` and 400
-/// of indented blocks, and about 570 terms of a flat `or` chain, which
-/// parses but overflows `cairn parse`'s serialiser. Each entry sits past
-/// its own shape's figure.
+/// Every shape, past the depth an unguarded debug build overflows at.
 fn over_limit_sources() -> Vec<(&'static str, String)> {
     vec![
         ("list", nested_list(400)),
@@ -87,8 +79,7 @@ struct chain size=8x6\n\
 \x20\x20pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a\n\
 \x20\x20pressure_plate id=p2 at=inside.front  offset=1 y=0 -> sig.b\n";
 
-/// A `logic` chain of `stages` bindings under `prefix`, declared so that
-/// each binding references the next one to be written.
+/// A `logic` chain of `stages` bindings under `prefix`, each referencing the next one written.
 fn reverse_chain(prefix: &str, stages: usize) -> String {
     let mut body = String::new();
     for i in (1..=stages).rev() {
@@ -154,8 +145,7 @@ fn every_command_refuses_deep_nesting_instead_of_aborting() {
 
 #[test]
 fn the_refusal_says_what_the_limit_is() {
-    // Both renderings: `parse` defaults to `--format json`, where a refusal
-    // is the failure document on stdout.
+    // Both renderings: `parse` defaults to `--format json`.
     let tmp = TempDir::new().expect("tempdir");
     for (shape, source) in over_limit_sources() {
         let path = write_source(tmp.path(), &format!("{shape}.crn"), &source);
@@ -211,9 +201,7 @@ fn nesting_at_the_limit_still_parses() {
 
 #[test]
 fn a_reverse_declared_logic_chain_is_refused_not_aborted() {
-    // `synth` descends into whatever a binding references, so a chain
-    // declared against dependency order nests two frames per binding, while
-    // the same graph in dependency order stays shallow.
+    // A chain declared against dependency order nests two frames per binding in `synth`.
     let tmp = TempDir::new().expect("tempdir");
     let stages = 600;
     let mut source = String::from(CHAIN_HEADER);
@@ -281,12 +269,9 @@ fn a_forward_declared_chain_of_the_same_size_still_lowers() {
 
 #[test]
 fn each_independent_chain_reports_its_own_root_cause() {
-    // Repeats within one chain are suppressed, a second chain is not: every
-    // root cause on one pass, as `lower_binary` states.
+    // Repeats within one chain are suppressed; a second chain's are not.
     let tmp = TempDir::new().expect("tempdir");
-    // Just over the bound, so each chain holds one over-budget segment. A
-    // longer chain reports once per segment, since the walk resumes at the
-    // next binding it has not lowered.
+    // Just over the bound, so each chain holds one over-budget segment.
     let stages = 200;
     let mut source = String::from(CHAIN_HEADER);
     let _ = writeln!(source, "  door[id=front] opened_by=sig.p{stages}");
@@ -311,9 +296,7 @@ fn each_independent_chain_reports_its_own_root_cause() {
 
 #[test]
 fn a_chain_of_one_operator_bindings_reaches_the_limit_where_the_doc_says() {
-    // `MAX_LOWERING_DEPTH`'s doc says a one-operator binding costs two
-    // frames, so such a chain reaches the bound at half of it. Nothing else
-    // pins that factor.
+    // A one-operator binding costs two frames, so the chain reaches the bound at half of it.
     let quoted = MAX_LOWERING_DEPTH / 2;
     let tmp = TempDir::new().expect("tempdir");
 
@@ -329,8 +312,7 @@ fn a_chain_of_one_operator_bindings_reaches_the_limit_where_the_doc_says() {
             path.to_str().unwrap(),
             "--experimental-logic-synth",
         ]);
-        // An exact code on both legs, so an overflow's `None` or
-        // `Some(-1073741571)` cannot pass for a chain that lowered.
+        // An exact code on both legs, so an overflow's exit cannot pass for a lowered chain.
         let code = out.status.code();
         let want = if want_refusal { Some(1) } else { Some(0) };
         assert_eq!(

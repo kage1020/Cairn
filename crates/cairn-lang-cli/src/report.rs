@@ -1,5 +1,4 @@
-//! How findings reach the reader: gcc-style lines on stderr, or the
-//! JSON documents `--format json` writes on stdout.
+//! How findings reach the reader: gcc-style lines on stderr, or JSON documents on stdout.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -7,30 +6,16 @@ use std::process::ExitCode;
 use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts, RenderedDiagnostic};
 use cairn_lang_core::{Diagnostic, ParseError, Severity, diagnose_parse_failure};
 
-/// How a command reports the findings that stopped it from producing
-/// its product: as prose on stderr, or as the `{"diagnostics": [...]}`
-/// document on stdout.
-///
-/// One type rather than a branch per format enum, because every command
-/// routed here owes the same answer: `spec/lint` "Machine-readable
-/// payload" promises one JSON document on stdout for every input,
-/// failures included. `check` writes a bare array instead and has no
-/// `failure_report()`, and `synth` reads its module as [`Self::Text`]
-/// whatever it prints.
+/// Where a command reports the findings that stopped it: prose on stderr, or the one JSON
+/// document `spec/lint` "Machine-readable payload" promises on stdout.
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub(crate) enum FailureReport {
-    /// Findings as prose on stderr: every format but JSON, and every
-    /// command without `--format`.
     Text,
-    /// The failure document on stdout.
     Json,
 }
 
-/// The four values a pass reports a finding from: `file` and `lines` turn
-/// a byte offset into the `path:line:col` the finding prints with,
-/// `source` is what the offset is into, and `report` says whether an
-/// error-severity finding prints at all or is held for the failure
-/// document. A warning prints on stderr whatever `report` holds.
+/// What a pass reports findings with; under [`FailureReport::Json`] errors wait for the failure
+/// document, while warnings still print on stderr.
 #[derive(Copy, Clone)]
 pub(crate) struct Reporting<'a> {
     pub(crate) file: &'a Path,
@@ -39,8 +24,7 @@ pub(crate) struct Reporting<'a> {
     pub(crate) report: FailureReport,
 }
 
-/// What a finding renders from, so the core and redstone diagnostic
-/// types — which carry different code enums — report through one path.
+/// A core or redstone diagnostic, as the reporters read it.
 pub(crate) trait Finding {
     fn span_start(&self) -> usize;
     fn severity(&self) -> Severity;
@@ -85,8 +69,7 @@ impl Finding for cairn_lang_redstone::Diagnostic {
     }
 }
 
-/// Report one finding on stderr, in the gcc-style shape every subcommand
-/// uses, with its notes under it.
+/// Report one finding and its notes on stderr, gcc-style.
 pub(crate) fn report_diagnostic(file: &Path, source: &str, lines: &LineStarts, d: &impl Finding) {
     eprintln!(
         "{}:{}: {}[{}]: {}",
@@ -116,16 +99,13 @@ pub(crate) fn report_diagnostics<D: Finding>(
     has_error
 }
 
-/// Report a parse failure the way every other finding is reported.
 pub(crate) fn report_parse_failure(file: &Path, source: &str, err: &ParseError) {
     let lines = LineStarts::new(source);
     let diagnostic = diagnose_parse_failure(source, &lines, err);
     report_diagnostic(file, source, &lines, &diagnostic);
 }
 
-/// Render diagnostics into the wire form `--format json` ships, which
-/// carries the `line` / `col` / `end_line` / `end_col` a serialised
-/// [`Diagnostic`] lacks.
+/// The `--format json` wire form, with the line and column a serialised [`Diagnostic`] lacks.
 pub(crate) fn render_diagnostics(
     source: &str,
     lines: &LineStarts,
@@ -137,9 +117,7 @@ pub(crate) fn render_diagnostics(
         .collect()
 }
 
-/// Write one JSON document to stdout, or report why it could not be
-/// serialised and give the caller an exit code. Every `--format json`
-/// document goes through here so they all pretty-print the same way.
+/// Write one pretty-printed JSON document to stdout, or report why it could not be serialised.
 pub(crate) fn print_json<T: serde::Serialize>(what: &str, value: &T) -> Result<(), ExitCode> {
     match serde_json::to_string_pretty(value) {
         Ok(json) => {
@@ -159,15 +137,7 @@ struct DiagnosticsDocument {
     diagnostics: Vec<RenderedDiagnostic>,
 }
 
-/// Report the findings that stopped a command from producing its
-/// product, and give back its exit code.
-///
-/// The products of `info`, `parse` and `lower` are not diagnostics lists,
-/// so under `--format json` a failure is a `{"diagnostics": [ ... ]}`
-/// document of its own, told apart by its keys and the exit code; stdout
-/// still carries one JSON document for every input. `check` does not come
-/// through here: its product is the findings, so a failure is that array
-/// with one more element.
+/// Report the findings that stopped a command, and return its exit code.
 pub(crate) fn report_failure_document(
     file: &Path,
     source: &str,
@@ -193,11 +163,7 @@ pub(crate) fn report_failure_document(
     ExitCode::from(1)
 }
 
-/// Print one finding's `note:` lines under its primary.
-///
-/// A note with a span prints its position, since it names a second place
-/// to look. One without is indented and unprefixed, so a footer does not
-/// read as a second pointer at the primary span.
+/// A note without a span prints indented and unprefixed, so it does not read as a second pointer.
 fn report_notes(file: &Path, source: &str, lines: &LineStarts, notes: &[Note]) {
     for note in notes {
         match note.span.as_ref() {
