@@ -51,10 +51,7 @@
 use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
-use crate::pass::{
-    OpenScope, Skipped, attribute_nodes, lay_nets, lower_scopes, missing_region_diagnostic,
-    open_scope, source_of_net,
-};
+use crate::pass::{OpenScope, attribute_nodes, lower_scopes, open_scope};
 use crate::placement::{CONGESTION_FIX, area_ratio_tenths};
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
@@ -127,35 +124,15 @@ pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
 type ScopeRouting = Result<(PlacementIr, Vec<Diagnostic>), Diagnostic>;
 
 fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
-    let source = &entry.ir;
-    let OpenScope {
+    let Some(OpenScope {
         mut ir,
         region,
-        cell_coords,
-        inputs,
-        column,
         blocks,
-    } = match open_scope(entry) {
-        Err(Skipped::Empty) => return Ok((source.clone(), Vec::new())),
-        // Refused rather than passed through: this pass writes
-        // `wire_length`, and the producer↔variant table on
-        // `PlacementPhase` promises it after this stage. The same
-        // policy the delay and crossing passes already apply — one
-        // answer for one shape, whichever stage meets it first.
-        Err(Skipped::MissingRegion) => {
-            return Err(missing_region_diagnostic(entry, "placed", "routing"));
-        }
-        Ok(scope) => scope,
+        nets,
+    }) = open_scope(entry, "placed", "routing")?
+    else {
+        return Ok((entry.ir.clone(), Vec::new()));
     };
-
-    let nets = lay_nets(
-        &ir,
-        &blocks,
-        entry,
-        "placed",
-        &region,
-        source_of_net(&region, column, &cell_coords, inputs),
-    )?;
 
     // Occupancy for the congestion figure below: the blocks, then the
     // dust laid over them. The refusal a repeated coord earns is
@@ -185,7 +162,7 @@ fn route_scope(entry: &ScopedPlacementIrEntry) -> ScopeRouting {
     // placement pass's pessimistic per-cell budget, plus the wire-only
     // coords laid on top (cell coords excluded so they are not counted
     // twice).
-    let cell_coord_set: HashSet<CellCoord> = cell_coords.iter().copied().collect();
+    let cell_coord_set: HashSet<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
     let wire_only: u64 = occupancy
         .iter()
         .filter(|c| !cell_coord_set.contains(c))

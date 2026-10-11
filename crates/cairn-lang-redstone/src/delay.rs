@@ -69,10 +69,7 @@
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::netlist_ir::NetRef;
-use crate::pass::{
-    OpenScope, Skipped, attribute_nodes, lay_nets, lower_scopes, missing_region_diagnostic,
-    open_scope, source_of_net,
-};
+use crate::pass::{OpenScope, attribute_nodes, lower_scopes, open_scope};
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
@@ -172,37 +169,15 @@ pub fn compile_delay(routed: &ScopedPlacementIr) -> DelayOutput {
 type ScopeDelay = Result<PlacementIr, Diagnostic>;
 
 fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
-    let source = &entry.ir;
-    let OpenScope {
+    let Some(OpenScope {
         mut ir,
         region,
-        cell_coords,
-        inputs,
-        column,
-        blocks,
-    } = match open_scope(entry) {
-        Err(Skipped::Empty) => return Ok(source.clone()),
-        // Refused rather than passed through as routing does: this pass
-        // writes `local_delay_ticks`, and the producer↔variant table on
-        // `PlacementPhase` promises it after this stage.
-        Err(Skipped::MissingRegion) => {
-            return Err(missing_region_diagnostic(
-                entry,
-                "routed",
-                "delay insertion",
-            ));
-        }
-        Ok(scope) => scope,
+        nets,
+        ..
+    }) = open_scope(entry, "routed", "delay insertion")?
+    else {
+        return Ok(entry.ir.clone());
     };
-
-    let nets = lay_nets(
-        &ir,
-        &blocks,
-        entry,
-        "routed",
-        &region,
-        source_of_net(&region, column, &cell_coords, inputs),
-    )?;
 
     // Refuse before writing `local_delay_ticks`, so a failed scope leaves
     // no partial attribution behind.

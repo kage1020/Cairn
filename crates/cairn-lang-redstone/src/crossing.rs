@@ -46,10 +46,7 @@
 //! tag exists (see [`crate::placement_ir::PlacementStage`]).
 
 use crate::diagnostic::Diagnostic;
-use crate::pass::{
-    OpenScope, Skipped, lay_nets, lower_scopes, missing_region_diagnostic, open_scope,
-    source_of_net,
-};
+use crate::pass::{OpenScope, lower_scopes, open_scope};
 use crate::placement_ir::{
     BufferCoord, BufferSegment, CellIdentity, PlacementIr, ScopedPlacementIr,
     ScopedPlacementIrEntry,
@@ -141,36 +138,15 @@ pub fn compile_crossing(delayed: &ScopedPlacementIr) -> CrossingOutput {
 type ScopeLegalization = Result<PlacementIr, Diagnostic>;
 
 fn legalize_scope(entry: &ScopedPlacementIrEntry) -> ScopeLegalization {
-    let source = &entry.ir;
-    let OpenScope {
+    let Some(OpenScope {
         mut ir,
         region,
-        cell_coords,
-        inputs,
-        column,
-        blocks,
-    } = match open_scope(entry) {
-        Err(Skipped::Empty) => return Ok(source.clone()),
-        // Same policy as the delay pass: this pass writes `buffer_coords`,
-        // which the phase table promises after stage 4.
-        Err(Skipped::MissingRegion) => {
-            return Err(missing_region_diagnostic(
-                entry,
-                "delayed",
-                "crossing legalization",
-            ));
-        }
-        Ok(scope) => scope,
+        nets,
+        ..
+    }) = open_scope(entry, "delayed", "crossing legalization")?
+    else {
+        return Ok(entry.ir.clone());
     };
-
-    let nets = lay_nets(
-        &ir,
-        &blocks,
-        entry,
-        "delayed",
-        &region,
-        source_of_net(&region, column, &cell_coords, inputs),
-    )?;
 
     // Every coord a repeater can be asked to stand on is a coord of its
     // own net's route, and `net_trees` asserts as it builds that no

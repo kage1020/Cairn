@@ -21,25 +21,13 @@ use crate::routing_geometry::{
 };
 use crate::saturating_index;
 
-/// Why [`open_scope`] found nothing to lay out.
-pub(crate) enum Skipped {
-    /// Neither cells nor actuator pads, so the pass hands the scope back
-    /// verbatim. `ScopedPlacementIr::push` elides these on the input
-    /// side; this covers a hand-built IR.
-    Empty,
-    /// Cells or pads but no reservation. The placement pass fires
-    /// `E_NO_CIRCUIT_REGION` and elides such a scope before it can reach
-    /// a later pass, so this is a caller-side hand-built IR.
-    MissingRegion,
-}
-
 /// Refuse a scope that reached `stage` carrying cells or output drivers
 /// but no `circuit region=` reservation. Reuses `E_NO_CIRCUIT_REGION`
 /// because the failure mode is the one the placement pass catches, so a
 /// reader matching on the code sees one taxonomy across stages. The span
 /// anchors on the first cell, falling back to a default span when the
 /// scope carries only outputs.
-pub(crate) fn missing_region_diagnostic(
+fn missing_region_diagnostic(
     entry: &ScopedPlacementIrEntry,
     netlist: &str,
     stage: &str,
@@ -64,44 +52,63 @@ pub(crate) fn missing_region_diagnostic(
 }
 
 /// One scope a pass is working on: the IR it will write into, cloned
-/// from the entry, and the geometry every pass measures against.
+/// from the entry, the geometry every pass measures against, and the
+/// nets laid over it.
 pub(crate) struct OpenScope {
     pub(crate) ir: PlacementIr,
     pub(crate) region: CircuitRegionReservation,
-    /// Snapshot of every cell's coord, so `ir.cells` can be borrowed
-    /// mutably while a `NetRef → source coord` closure reads these.
-    pub(crate) cell_coords: Vec<CellCoord>,
-    /// `ir.inputs.len()`, for the same reason and read by the same
-    /// closure: the bound `NetRef::Input(i)` is checked against.
-    pub(crate) inputs: usize,
-    /// How the scope's pads are laid, for the same reason: the closure
-    /// derives each sensor's pad from it.
-    pub(crate) column: PadColumn,
     /// Every block standing in the reservation, per [`block_sites`].
     pub(crate) blocks: Vec<BlockSite>,
+    /// What [`lay_nets`] laid over the blocks.
+    pub(crate) nets: Nets,
 }
 
-pub(crate) fn open_scope(entry: &ScopedPlacementIrEntry) -> Result<OpenScope, Skipped> {
+/// Open `entry` for the pass that runs as `stage` over the `netlist`
+/// netlist, and lay its nets.
+///
+/// `Ok(None)` for a scope with neither cells nor actuator pads, which
+/// the pass hands back verbatim. `ScopedPlacementIr::push` elides these
+/// on the input side; this covers a hand-built IR.
+///
+/// A scope with cells or pads but no reservation is refused rather
+/// than passed through: each pass writes a phase field (`wire_length`,
+/// `local_delay_ticks`, `buffer_coords`) that the producer↔variant
+/// table on `PlacementPhase` promises after its stage, so all three
+/// give one answer for one shape, whichever stage meets it first. The
+/// placement pass fires `E_NO_CIRCUIT_REGION` and elides such a scope
+/// before it can reach a later pass, so this is a caller-side
+/// hand-built IR.
+///
+/// Every other refusal is [`lay_nets`]'.
+pub(crate) fn open_scope(
+    entry: &ScopedPlacementIrEntry,
+    netlist: &str,
+    stage: &str,
+) -> Result<Option<OpenScope>, Diagnostic> {
     let source = &entry.ir;
     if source.cells.is_empty() && source.outputs.is_empty() {
-        return Err(Skipped::Empty);
+        return Ok(None);
     }
     let Some(region) = source.region.clone() else {
-        return Err(Skipped::MissingRegion);
+        return Err(missing_region_diagnostic(entry, netlist, stage));
     };
     let ir = source.clone();
     let cell_coords: Vec<CellCoord> = ir.cells.iter().map(|c| c.coord).collect();
-    let inputs = ir.inputs.len();
-    let column = PadColumn::of(&ir);
     let blocks = block_sites(&ir, &region);
-    Ok(OpenScope {
+    let nets = lay_nets(
+        &ir,
+        &blocks,
+        entry,
+        netlist,
+        &region,
+        source_of_net(&region, PadColumn::of(&ir), &cell_coords, ir.inputs.len()),
+    )?;
+    Ok(Some(OpenScope {
         ir,
         region,
-        cell_coords,
-        inputs,
-        column,
         blocks,
-    })
+        nets,
+    }))
 }
 
 /// `NetRef → source coord`: the input pad for a sensor, the cell body
@@ -131,7 +138,7 @@ pub(crate) fn open_scope(entry: &ScopedPlacementIrEntry) -> Result<OpenScope, Sk
 /// an out-of-range `Input` answers with a pad coord that stands in no
 /// block [`block_sites`] emitted. Both are a layout, not a number, so
 /// they reach the author as a plausible circuit rather than as a bug.
-pub(crate) fn source_of_net<'a>(
+fn source_of_net<'a>(
     region: &'a CircuitRegionReservation,
     column: PadColumn,
     cell_coords: &'a [CellCoord],
