@@ -4,11 +4,7 @@ use super::*;
 
 /// Stable strings of every code the predicate accepts, sorted.
 ///
-/// The left side comes from `EnumIter`, so the assertions below are
-/// exhaustive: a new variant lands in one of the expected lists or
-/// fails the comparison. The `for code in [...]` loops this replaced
-/// tolerated an omission silently, which is the one mistake a
-/// contract-surface test exists to catch.
+/// Drawn from `EnumIter`, so a new variant must land in one of the expected lists below.
 fn codes_where(predicate: impl Fn(DiagnosticCode) -> bool) -> Vec<&'static str> {
     let mut names: Vec<&'static str> = DiagnosticCode::iter()
         .filter(|c| predicate(*c))
@@ -20,10 +16,8 @@ fn codes_where(predicate: impl Fn(DiagnosticCode) -> bool) -> Vec<&'static str> 
 
 #[test]
 fn every_code_renders_its_documented_string() {
-    // The string form is the contract surface downstream matchers pin
-    // on, so it is spelled out here rather than derived — a rename
-    // that breaks an LSP quick-fix should be visible in the diff as a
-    // changed literal, not as a passing test.
+    // Spelled out rather than derived, so a rename that downstream matchers would notice shows
+    // as a changed literal.
     assert_eq!(
         codes_where(|_| true),
         [
@@ -97,10 +91,8 @@ fn every_code_renders_its_documented_string() {
 
 #[test]
 fn every_code_is_classified_against_the_error_vs_warning_rule() {
-    // Errors block a build; warnings are advisory. `severity` carries
-    // the rule and the two borderline calls; this pins the resulting
-    // partition so a reclassification is a deliberate edit here rather
-    // than a silent change in exit codes.
+    // `severity` holds the rule; this pins the partition, so a reclassification changes exit
+    // codes only through an edit here.
     assert_eq!(
         codes_where(|c| c.severity() == Severity::Error),
         [
@@ -184,10 +176,6 @@ fn every_code_is_classified_against_the_error_vs_warning_rule() {
 
 #[test]
 fn diagnostic_data_walkway_blocked_serialises_with_kind_tag() {
-    // The structured payload must surface as
-    // `{"kind":"walkway_blocked","skipped":N}` so downstream tooling
-    // can match on a stable discriminator instead of re-parsing the
-    // human-readable `primary` string.
     let value = serde_json::to_value(DiagnosticData::WalkwayBlocked { skipped: 3 })
         .expect("serialise payload");
     assert_eq!(
@@ -198,12 +186,7 @@ fn diagnostic_data_walkway_blocked_serialises_with_kind_tag() {
 
 #[test]
 fn unknown_id_payload_omits_the_halves_it_does_not_have() {
-    // `spec/lint` "Machine-readable payload" documents both optional
-    // fields as absent rather than `null`, and the two absences mean
-    // distinct things: no `token` says the author wrote the id, no
-    // `suggestion` says the target has nothing near it. A `null` would
-    // read as "unknown" for both. `origin` is never optional — it is what
-    // separates the three cases, so a consumer always has it.
+    // `spec/lint` "Machine-readable payload": an optional field is absent, never `null`.
     let authored = serde_json::to_value(DiagnosticData::UnknownId {
         id: "minecraft:light".to_owned(),
         registry: "bedrock 1.21.60".to_owned(),
@@ -248,8 +231,6 @@ fn unknown_id_payload_omits_the_halves_it_does_not_have() {
 
 #[test]
 fn rendered_diagnostic_omits_data_key_when_payload_absent() {
-    // `data: None` must serialise to *no key at all* so existing
-    // JSON consumers that did not opt into the new field keep working.
     let lines = LineStarts::new("abc\n");
     let diag = Diagnostic {
         code: DiagnosticCode::DuplicateSize,
@@ -269,10 +250,6 @@ fn rendered_diagnostic_omits_data_key_when_payload_absent() {
 
 #[test]
 fn rendered_diagnostic_propagates_data_payload_when_present() {
-    // At the render layer: a `Diagnostic` carrying a
-    // payload must lift it into `RenderedDiagnostic` so the JSON
-    // formatter (and any other consumer of `render`) sees the same
-    // structured data the in-memory finding holds.
     let lines = LineStarts::new("abc\n");
     let diag = Diagnostic {
         code: DiagnosticCode::WalkwayBlocked,

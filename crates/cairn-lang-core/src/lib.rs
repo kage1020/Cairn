@@ -1,11 +1,11 @@
 //! Core of the Cairn language.
 //!
-//! Hosts the surface-syntax lexer, parser, and AST, the Intent IR — the
-//! first semantic layer above the surface, where struct/site/def bodies are
-//! reorganised into typed members with roles — and the diagnostic-collecting
-//! `check` pipeline that turns structural surprises in a lowered module into
-//! position-anchored [`check::Diagnostic`] values. Registry-backed lifting
-//! (materials, themes, per-edition blockstate) lives in downstream layers.
+//! Hosts the surface-syntax lexer, parser, and AST; the Intent IR, the first semantic layer above
+//! the surface, where struct/site/def bodies are reorganised into typed members with roles; the
+//! diagnostic-collecting `check` pipeline, which turns structural surprises in a lowered module
+//! into position-anchored [`check::Diagnostic`] values; and the passes that resolve intent into a
+//! block-array IR. Everything past that IR (the NBT codec, the format backends, redstone
+//! synthesis, the LSP) lives in sibling crates.
 
 pub mod ast;
 pub mod block_array;
@@ -47,9 +47,7 @@ pub use resolve::{Resolution, ThemeBinding, VersionAxes, compute_axes, resolve};
 
 /// The Cairn release version, in date-based versioning (`YYYY.M[.PATCH]`).
 ///
-/// Read from this crate's package version, which is `[workspace.package]`'s,
-/// which is the number the release tooling bumps. Everything that has to name
-/// the compiler that produced an artefact — `cairn --version`, a lockfile's
-/// `cairn_version` — reads it from here, so it is derived rather than
-/// maintained.
+/// Read from this crate's package version, which is `[workspace.package]`'s, the number the
+/// release tooling bumps. Everything that names the compiler that produced an artefact
+/// (`cairn --version`, a lockfile's `cairn_version`) reads it from here.
 pub const CAIRN_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -7,12 +7,8 @@ use crate::lines::{LineStarts, position_at};
 
 /// Severity of a single [`Diagnostic`].
 ///
-/// `Error` participates in the `cairn check` exit code (any error → exit 1);
-/// `Warning` does not. Stable per `spec/lint` "Error vs warning": errors are
-/// things that, left alone, cause unintended results; warnings are advisory
-/// drift.
-/// Both variants ship in the public enum so a new `Warning` code can land
-/// without changing the discriminant a downstream matcher already pinned.
+/// An error makes `cairn check` exit 1 and a warning does not. `spec/lint` "Error vs warning"
+/// draws the line: an error, left alone, causes an unintended result; a warning is advisory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -35,35 +31,23 @@ impl Severity {
 
 /// Stable identifier for a kind of [`Diagnostic`].
 ///
-/// The string form (`E_DUPLICATE_SIZE`, `E_UNKNOWN_KEYWORD`, ...) is the
-/// contract surface: downstream tooling matches on it without inspecting
-/// the prose `primary` message. Marked `#[non_exhaustive]` so adding new
-/// codes while the diagnostic surface is still **Evolving** does not break
-/// callers' exhaust matches.
+/// The string form (`E_DUPLICATE_SIZE`, `E_UNKNOWN_KEYWORD`, ...) is the contract downstream
+/// tooling matches on, rather than the prose `primary`. `#[non_exhaustive]`, so a new code is not
+/// a breaking change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-// `EnumIter` exists so the in-crate tests can walk every variant instead of
-// re-listing them by hand — a hand-written list silently omits whatever was
-// added last, which is exactly the case the tests are there to catch. It is
-// `cfg(test)` so no proc-macro dependency reaches a shipped build.
+// Lets the tests walk every variant; `cfg(test)` keeps the proc macro out of shipped builds.
 #[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum DiagnosticCode {
     /// The source did not parse.
     ///
-    /// One code for every shape a parse fails in — a stray character, an
-    /// odd indent, an integer past `i64`, a keyword where an item was
-    /// expected — with the message carrying which. The alternative, a code
-    /// per [`crate::error::ParseError`] and [`crate::error::LexError`]
-    /// variant, would make every future variant of two `#[non_exhaustive]`
-    /// enums a new line of public contract, for a distinction nothing has
-    /// asked to branch on. What it costs is that a consumer cannot tell a
-    /// stray character from an odd indent without reading the message,
-    /// where it can tell `E_UNKNOWN_ARGUMENT` from `E_UNKNOWN_KEYWORD`.
+    /// One code for every way a parse fails, with the message saying which. A code per
+    /// [`crate::error::ParseError`] and [`crate::error::LexError`] variant would make every new
+    /// variant of two `#[non_exhaustive]` enums public contract, for a distinction nothing
+    /// branches on.
     ///
-    /// It is the only code no check pass produces: parsing precedes them
-    /// all, and a file that does not parse reaches none of them. See
-    /// [`crate::parse::diagnose_parse_failure`], which is where it is
-    /// built.
+    /// No check pass produces it, since a file that does not parse reaches none of them; it is
+    /// built by [`crate::parse::diagnose_parse_failure`].
     Parse,
     /// More than one `size=` argument in a struct or def header.
     DuplicateSize,
@@ -72,82 +56,51 @@ pub enum DiagnosticCode {
     /// Two selector rows in one `theme` block select the same members and
     /// bind the same key.
     ///
-    /// A member's selector bindings are the merge of every row it matches,
-    /// taken in source order, so a key two rows bind keeps the later
-    /// value. When the rows carry the same keyword and the same attributes
-    /// they match member for member, which leaves no member anywhere whose
-    /// merged bindings keep the earlier value: that row is dead text
-    /// whatever a binding comes to mean. No pass reads a merged binding yet
-    /// either (`spec/materials-themes` "Slots as dependency injection"), so
-    /// today neither value reaches the build; this code is about the merge,
-    /// not about a block.
+    /// A member's selector bindings merge every row it matches in source order, so the later row
+    /// wins. When both rows carry the same keyword and attributes, the earlier binding survives on
+    /// no member and is dead text. The finding is about the merge, since no pass reads a merged
+    /// binding.
     ///
-    /// Two shapes are not covered. Rows binding *different* keys compose,
-    /// the way `@requires` floors do — every binding reaches the merged
-    /// bindings of every member both rows select. And rows whose attributes
-    /// merely overlap (`window[class=small]` against
-    /// `window[class=small,side=front]`) do not coincide: a member the
-    /// wider row selects alone keeps its binding. Which of two overlapping
-    /// rows wins is the cascade, and the cascade is source order by design.
+    /// Rows binding different keys compose. Rows whose attributes only overlap
+    /// (`window[class=small]` against `window[class=small,side=front]`) are the cascade, which is
+    /// source order by design.
     DuplicateSelector,
     /// Repeated `key=` in the same argument list (struct/def header,
     /// statement args, selector attrs / bindings).
     DuplicateArg,
     /// Two or more members in the same immediate body share an `id=`.
     ///
-    /// Two `place` rows of one `site` body are left to the resolver, which
-    /// compares refused ids as well as accepted ones and reports a repeat as
-    /// [`Self::DuplicatePlaceId`]. A `place` row indented under another row
-    /// is not in that body, so a repeat there is still this code, as is a
-    /// `place` row sharing its id with any other row of the body.
+    /// Two `place` rows of one `site` body are [`Self::DuplicatePlaceId`] instead, because the
+    /// resolver compares refused ids too. A `place` indented under another row, or sharing its id
+    /// with a row that is not a `place`, is still this code.
     DuplicateId,
     /// Two or more top-level items of the same kind share a name.
     ///
-    /// The four kinds occupy separate namespaces (the resolver keys
-    /// them `struct::NAME`, `def::NAME`, `site::NAME::PLACE_ID`, and a
-    /// themes map of its own), so `theme x` alongside `struct x` is not
-    /// a collision — only a repeat within one kind is. The message names
-    /// the keyword, and the note differs by kind: for the three whose
-    /// name is the binding key the second declaration binds nothing,
-    /// while two `site` blocks of one name merge into a shared place
-    /// namespace instead of shadowing.
+    /// Kinds are separate namespaces, so `theme x` beside `struct x` is no collision. For three
+    /// kinds the second declaration binds nothing; two `site` blocks of one name merge into one
+    /// place namespace instead, and the note says which.
     DuplicateItem,
     /// A single-valued `@directive` header appears more than once.
     ///
-    /// `@cairn` and `@intended_targets` each answer a question with one
-    /// answer — which language version the file was written against,
-    /// which targets it was designed for. Neither has a consumer in the
-    /// compiler yet, so nothing would decide between two of them.
-    /// `@requires` is not covered: its floors compose, folding to the
-    /// strictest across every line, so a second one adds a constraint
-    /// rather than displacing the first.
+    /// `@cairn` and `@intended_targets` each answer one question once, and nothing would decide
+    /// between two answers. `@requires` is not covered: its floors compose, folding to the
+    /// strictest.
     DuplicateHeader,
     /// A `struct` or `def` body holds more than one `circuit` line.
     ///
-    /// A scope has one reservation for its redstone: place-and-route
-    /// reads the first usable line and assigns no logic to any other, so
-    /// every other line would be dropped without a word. Refused rather
-    /// than resolved by keeping that line, because nothing in the source
-    /// says which line the author meant, and the first usable one is a
-    /// guess.
+    /// Place-and-route reads only the first usable line, so the others would be dropped silently.
+    /// Refused rather than keeping the first, because nothing says which line the author meant.
     DuplicateCircuit,
     /// A member carries an indented body that nothing reads.
     ///
-    /// The surface grammar hangs a body off every command, but only
-    /// `level y=N` inside a `struct` or `def` has a reader — the
-    /// block-array pass unwraps it so the children join the phase
-    /// buckets. Every other body is dropped before lowering, and a
-    /// `site` body has no grouping construct at all.
+    /// The grammar allows a body under every command, but only `level y=N` in a `struct` or `def`
+    /// has a reader; every other body would be dropped before lowering.
     UnsupportedNesting,
     /// A statement keyword that is in the known-keyword table but whose
     /// enclosing body has no reader for it.
     ///
-    /// The surface grammar accepts every keyword in every body, and the
-    /// role table is global, so `place` in a `struct` body and `floor` in
-    /// a `site` body both parse and classify. Neither reaches the build:
-    /// the geometry passes bucket by role and the site passes match only
-    /// `place` / `connect`, so the member is dropped between the IR and
-    /// the voxels.
+    /// Every keyword parses in every body, so `place` in a `struct` or `floor` in a `site`
+    /// classifies, but would be dropped between the IR and the voxels.
     MisplacedMember,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
@@ -155,102 +108,63 @@ pub enum DiagnosticCode {
     /// `key=value` argument or inside the member's own `[key=value]` — or a
     /// key other than `size=` / `class=` on a `struct` / `def` header line.
     ///
-    /// An error for the same reason [`Self::UnknownKeyword`] is, one level
-    /// down: the key names nothing, so no pass will ever read the value,
-    /// and the member is built without whatever the author was asking for.
-    /// A misspelling of an argument that has a default is the worst of
-    /// them — the build succeeds, silently, at the default.
-    ///
-    /// One code for every field because it is one defect: `clas=outer`,
-    /// `[clas=outer]` and a header's `siz=7x7` are each a word the author
-    /// expects something to read that nothing does. Only the sentence
-    /// differs, naming the field to edit.
+    /// An error because no pass will read the value, so the member is built without it; a
+    /// misspelt argument with a default builds silently at the default. One code for every field
+    /// (`clas=outer`, `[clas=outer]`, a header's `siz=7x7`), because it is one defect; the
+    /// sentence names the field to edit.
     UnknownArgument,
     /// A `-> value` tail on a member whose keyword cannot emit a signal,
     /// or on a sensor keyword written in the `[selector]` form.
     ///
-    /// `spec/redstone` "Signal binding" writes an emitted signal on the
-    /// component that emits it, and [`crate::intent::SENSOR_HOSTS`] is the
-    /// set of keywords the surface accepts one on. A tail anywhere else
-    /// describes no circuit: the member is built without it and the signal
-    /// it names is driven by nothing, which is [`Self::UnknownArgument`]'s
-    /// failure in the one field that had no vocabulary to answer to.
+    /// `spec/redstone` "Signal binding" writes an emitted signal on the component that emits it,
+    /// and [`crate::intent::SENSOR_HOSTS`] are the keywords that accept one; anywhere else the
+    /// signal is driven by nothing. The host is the fault rather than the value, because no value
+    /// makes a `walls` emit. A sensor tail naming no signal is the redstone pipeline's
+    /// `E_LOGIC_INVALID_SIGNAL` instead.
     ///
-    /// The host is the fault rather than the value, because no edit to the
-    /// value makes a `walls` emit. A tail on a *sensor* whose value names
-    /// no signal is the redstone pipeline's `E_LOGIC_INVALID_SIGNAL`, which
-    /// is a question about the `sig.` namespace and needs the Logic IR to
-    /// ask.
-    ///
-    /// `pressure_plate[id=p] -> sig.x` is the second shape. The door
-    /// actuator patch is the only binding a selector line carries, and no
-    /// sensor patch exists, so the tail is on no sensor line.
+    /// A selector line carries only the door actuator patch, so `pressure_plate[id=p] -> sig.x` is
+    /// on no sensor line.
     MisplacedBinding,
     /// A statement carrying bare positional values in a form that takes
     /// none.
     ///
-    /// `spec/syntax` "Lexical" requires `key=value` for everything after the
-    /// command keyword; `connect FROM.PORT to TO.PORT` is the single exception
-    /// and is checked by `E_CONNECT_ARITY` instead. The line-based parser
-    /// collects any bare token into `positional` and every reader but
-    /// `connect`'s ignores that list, so a dropped `=` (`height 3`) or a
-    /// spec-forbidden positional form (`window front G 2 2 2x2`) changes
-    /// the build without a word.
+    /// `spec/syntax` "Lexical" requires `key=value` after the command keyword, `connect` aside
+    /// (`E_CONNECT_ARITY`). Every other reader ignores positional values, so a dropped `=`
+    /// (`height 3`) would change the build silently.
     UnexpectedPositional,
     /// An `@requires` expression that is not a version floor.
     ///
-    /// The directive declares one constraint and nothing else, so an
-    /// expression the compiler cannot read declares nothing — and the
-    /// author cannot tell, because the line is still in the file. The
-    /// grammar is `version>=X` and only that: a floor composes with other
-    /// floors by taking the strictest, which no other operator does
-    /// (`spec/syntax` "Headers", `spec/versioning-editions` "Fail-loud and
-    /// minimum-version inference").
-    ///
-    /// Not to be confused with `E_REQUIRES_CONFLICT`, which the spec
-    /// reserves for a declared floor contradicting the registry-*inferred*
-    /// range. No such range is derived yet, so that code has nothing to
-    /// compare against and is not defined here.
+    /// An unreadable expression declares nothing while the line still looks like a constraint.
+    /// The grammar is `version>=X` alone, because only a floor composes by taking the strictest
+    /// (`spec/syntax` "Headers", `spec/versioning-editions` "Fail-loud and minimum-version
+    /// inference"). Not the spec's `E_REQUIRES_CONFLICT`, a floor contradicting the
+    /// registry-inferred range, which this compiler does not derive.
     InvalidRequires,
-    /// The `@cairn` header's value is not a `YYYY.M[.PATCH]` language
-    /// version. The directive is provenance rather than an input, so the
-    /// build is unaffected and this is a warning — but provenance whose
-    /// whole job is to be readable by a later compiler has to be
-    /// readable, and nothing else in the pipeline ever looks at the
-    /// string. `data` names which component failed and what it held.
+    /// The `@cairn` value is not a `YYYY.M[.PATCH]` language version.
+    ///
+    /// A warning, because the header is provenance and the build is unaffected; but provenance a
+    /// later compiler cannot read is useless, and nothing else looks at the string.
     InvalidCairnVersion,
-    /// The `@cairn` header names a language version later than the build
-    /// reading it. A warning for the reason [`Self::InvalidCairnVersion`]
-    /// is — the header is provenance, so the build is the same either
-    /// way — and the only finding that can say an unknown keyword or
-    /// argument elsewhere in the file may be about the version gap rather
-    /// than about the line it names. A whole new syntactic form is
-    /// [`Self::Parse`] instead, and no check pass runs then, so the gap
-    /// goes unsaid in exactly the case it explains best.
+    /// The `@cairn` header names a language version later than the build reading it.
+    ///
+    /// A warning for the reason [`Self::InvalidCairnVersion`] is. It tells the author that an
+    /// unknown keyword or argument elsewhere may be the version gap; for a file that does not
+    /// parse, a note on [`Self::Parse`] says so instead.
     FutureCairnVersion,
     /// A label-typed key whose value is not a label (identifier or
     /// string): `id=`, `class=`, `mat_slot=`, `use=`, or `theme=`.
     ///
-    /// The five are one code because every reader lifts them the same
-    /// way, through `Value::as_label_str`, and answers `None` the same
-    /// way. For `use=` / `theme=` that `None` is indistinguishable at the
-    /// resolver from the key being absent — and both are errors, reported
-    /// by different codes: an absent key is `E_INCOMPLETE_PLACE`, a key
-    /// that is on the line but not usable is this one. Telling them apart
-    /// is what keeps the message from asking the author to add a key they
-    /// already wrote.
+    /// One code because every reader lifts the five alike, through `Value::as_label_str`. A
+    /// `use=` or `theme=` that is present but not a label is this code rather than
+    /// `E_INCOMPLETE_PLACE`, so the message does not ask for a key the author already wrote.
     TypeMismatchLabel,
     /// `size=` whose value is not a `WxH` literal.
     TypeMismatchSize,
     /// A member whose only route to a block is `mat_slot=` was written
     /// without one, so it paints nothing.
     ///
-    /// The absent half of the split [`Self::UnresolvedSlot`] owns the other
-    /// end of: on a role that reads a `mat_slot=`, one naming a slot no
-    /// theme declares is that code's, and no member earns both. On a role
-    /// that reads none the split does not arise — this code never applies
-    /// there, and a `mat_slot=` written on one is [`Self::IgnoredArgument`]
-    /// whatever it names.
+    /// The absent half of [`Self::UnresolvedSlot`]; no member earns both. On a role that reads no
+    /// `mat_slot=` neither applies, and one written there is [`Self::IgnoredArgument`].
     MissingMaterial,
     /// `mat_slot=NAME` references a slot the applied theme does not
     /// declare, on a member whose role's
@@ -261,477 +175,288 @@ pub enum DiagnosticCode {
     /// abstract material token (see `spec/materials-themes` "Canonical
     /// vocabulary").
     ///
-    /// Error rather than advisory: the slot binds to nothing, so every
-    /// `mat_slot=NAME` pointing at it lowers to air. A theme whose slots
-    /// are all mistyped builds a hollow shell of the requested extent —
-    /// the "implicit dropping" `spec/lint` "Error vs warning" forbids, and not
-    /// something the author can see in an exit code that stayed 0.
+    /// An error because every `mat_slot=NAME` pointing at the slot lowers to air, the implicit
+    /// dropping `spec/lint` "Error vs warning" forbids.
     UnknownSlotTarget,
     /// `theme` selector rule that does not match any member in the file.
     ///
-    /// Warning, unlike its `E_`-prefixed neighbour above: a rule that
-    /// matches nothing overrides nothing, so every member keeps the
-    /// material it would have had with the rule deleted. Nothing is
-    /// dropped and the build is exactly what the rest of the source
-    /// asked for — the finding is about the author's intent, which is
-    /// the advisory half of `spec/lint` "Error vs warning".
+    /// A warning despite its `E_` prefix: a rule that matches nothing overrides nothing, so the
+    /// build is what the rest of the source asks for. The finding is about intent, the advisory
+    /// half of `spec/lint` "Error vs warning".
     ThemeSelectorUnmatched,
-    /// A member role the block-array lowering pass does not yet handle
-    /// (door/window/roof/...). Surfaces during `cairn lower` so a partial
-    /// build is still inspectable, rather than failing the whole module.
+    /// A member whose role the block-array pass does not lower. A warning, so a partial build
+    /// stays inspectable rather than failing the whole module.
     DeferredMember,
     /// A `key=` no pass read on the line it was written on.
     ///
-    /// Three shapes, one finding. **Unreadable value**: the lowering pass
-    /// could not read it, dropped it, and put the default in its place.
-    /// **Unread key**: nothing reads it where it is written, for one of two
-    /// reasons (`crate::intent::Unread`). An *unreached* key is one the
-    /// specification defines and no pass reads yet, so a lowering rule is
-    /// owed: on a member, an `Unreached` entry of
-    /// `crate::intent::MemberRole::unread_arguments`; on a `struct` / `def`
-    /// header, a key the specification writes there, listed in
-    /// `crate::check::arguments::UNREAD_HEADER_ARGUMENTS` — today `class=`;
-    /// on a `theme` selector row whose keyword names a role, every
-    /// `key=value` right of the arrow, defined anywhere or not (`fram=42`
-    /// included), since no pass lowers a selector's bindings. An
-    /// *inapplicable* key is a universal one on a role that puts down
-    /// nothing it would be read for — an `Inapplicable` entry of the same
-    /// table, `mat_slot=` on a `level` — where no rule is owed and the note
-    /// asks for the argument's removal. **Routed past**: a sibling argument
-    /// picked a lowering rule that does not consult it, which
-    /// `crate::intent::MemberRole::conditional_arguments` records and
-    /// `roof kind=gable slope_to=front` is the instance of — that one has no
-    /// default to substitute, and fires whether or not the member went on to
-    /// build. The build differs from the source in all
-    /// three, and the difference is announced rather than silent.
+    /// Three shapes, in each of which the build differs from the source and says so:
     ///
-    /// Distinct from [`Self::DeferredMember`], which says the member did
-    /// not lower. A roof whose `overhang=` is unusable is in the build,
-    /// flush with the wall line, and reporting that as a deferral tells
-    /// the author to look for a member that is not missing. The boundary
-    /// the routed-past shape draws is about the *selector* rather than the
-    /// member: where the selector names no rule — a `kind=` the dispatch
-    /// does not know, or, on an axis with no absent arm, none at all — the
-    /// deferral carries the whole repair and this code stays quiet rather
-    /// than billing the argument that rule would not have read. A member
-    /// that fails to lower for any other reason still gets both findings,
-    /// because they are then two repairs.
+    /// - Unreadable value: lowering could not read it and used the default.
+    /// - Unread key: nothing reads it where it is written (`crate::intent::Unread`). An unreached
+    ///   key is one the spec defines and no pass reads, so a lowering rule is owed: an
+    ///   `Unreached` entry of `crate::intent::MemberRole::unread_arguments`, a header key in
+    ///   `crate::check::arguments::UNREAD_HEADER_ARGUMENTS`, or any binding right of a `theme`
+    ///   selector row's arrow, since no pass lowers those. An inapplicable key is a universal one
+    ///   on a role that puts down nothing it would be read for (`mat_slot=` on a `level`); no rule
+    ///   is owed, and the note asks for its removal.
+    /// - Routed past: a sibling argument picked a lowering rule that does not consult it, as
+    ///   `crate::intent::MemberRole::conditional_arguments` records for
+    ///   `roof kind=gable slope_to=front`. It fires whether or not the member built.
     ///
-    /// Where it sits against `spec/lint` "Error vs warning", and why it is a
-    /// warning, is argued once on [`Self::severity`] rather than twice.
+    /// Distinct from [`Self::DeferredMember`], which says the member did not lower: a roof with an
+    /// unusable `overhang=` is in the build. Where the selector names no rule at all, the deferral
+    /// carries the whole repair and this code stays quiet; a member that fails to lower for any
+    /// other reason gets both, because they are two repairs. [`Self::severity`] argues why this is
+    /// a warning.
     IgnoredArgument,
-    /// A `struct` body, or a `place`'s instance of a `def`, has no theme
-    /// bound to it while a member in it reads a `mat_slot=`. No slot
-    /// resolves, so every reader degrades the way `spec/lint` "Materials and
-    /// targets" describes, a `floor` to air and a `roof` to its default block
-    /// among them.
+    /// A `struct` body, or a `place`'s instance of a `def`, has no theme while a member in it reads
+    /// a `mat_slot=`, so every reader degrades as `spec/lint` "Materials and targets" describes.
     ///
-    /// Pushed once per body, by `block_array`'s `lower_body_to_block_array`,
-    /// and only when a member `flatten_members` keeps reads a slot as
-    /// `crate::intent::Member::read_slot` defines it. A member under a
-    /// `level` counts; one the `level` drops paints nothing whatever the
-    /// theme, and does not. A body that reads none is not reported: an
-    /// empty one, one built only from fallback materials such as a bare
-    /// `roof kind=flat`, or one whose every `mat_slot=` sits on a keyword
-    /// that reads none, such as a `door` or a `circuit`, and is
-    /// [`Self::IgnoredArgument`].
+    /// Raised once per body, and only when a member that lowers reads a slot as
+    /// `crate::intent::Member::read_slot` defines it; a member under a `level` counts, one the
+    /// `level` drops does not. A body that reads no slot, such as one built from fallback
+    /// materials or with every `mat_slot=` on a keyword that reads none, is not reported.
     NoThemeBound,
-    /// A `mat_slot=` resolved to an abstract material token
-    /// (`@floor.wood.broadleaf`) and no registry pack materials catalog was
-    /// available to lift it. The block-array lowering needs a canonical id;
-    /// the cell degrades to air. Distinct from `UnknownAbstractToken`, which
-    /// fires when a catalog *is* present but does not declare the token —
-    /// this variant covers the older "no pack at all" path that survives for
-    /// library callers (LSP highlighting, `cairn check` without a pack).
+    /// A `mat_slot=` resolved to an abstract material token (`@floor.wood.broadleaf`) with no
+    /// registry pack catalog to lift it, so the cell degrades to air. A catalog that lacks the
+    /// token is [`Self::UnknownAbstractToken`] instead; this covers callers with no pack at all,
+    /// such as the LSP or `cairn check` without one.
     AbstractTokenDeferred,
-    /// A `mat_slot=` resolved to an abstract material token that the registry
-    /// pack's materials catalog does not declare. Fail-loud per
-    /// `spec/materials-themes` "Canonical vocabulary": the cell cannot lower
-    /// silently to air when a pack was offered, so the build stops with a
-    /// structured suggestion towards the closest known token.
+    /// A `mat_slot=` resolved to an abstract material token that the registry pack's materials
+    /// catalog does not declare. An error per `spec/materials-themes` "Canonical vocabulary": with
+    /// a pack offered, the cell must not silently lower to air.
     UnknownAbstractToken,
-    /// A canonical token's state literal (`@oak_log[axis=x]`) was taken as
-    /// written, because nothing checks its properties and values against
-    /// the target yet.
+    /// A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, unchecked
+    /// against the target.
     ///
-    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
-    /// makes an out-of-domain state a hard error, `E_STATE_DOMAIN`, which
-    /// needs a table of every block's states that this compiler does not
-    /// hold. Until it does, a literal naming a property the block lacks, or
-    /// a value outside its domain, would be written into the structure file
-    /// with nothing said. A warning rather than an error because most
-    /// literals are right, and refusing every one of them would leave the
-    /// literal unwritable; the finding is the announcement the "Error vs
-    /// warning" rule asks for in place of silence. Raised on every state
-    /// literal the lowering resolves, wherever it was bound — a theme slot
-    /// or a `connect … path=`.
+    /// `spec/versioning-editions` "Fail-loud and minimum-version inference" makes an out-of-domain
+    /// state the error `E_STATE_DOMAIN`, which needs a table of every block's states that this
+    /// compiler does not hold. A warning rather than an error, because most literals are right and
+    /// refusing all of them would make literals unwritable; it is the announcement `spec/lint`
+    /// "Error vs warning" asks for in place of silence. Raised on every state literal lowering
+    /// resolves, from a theme slot or a `connect … path=`.
     StateLiteralUnchecked,
-    /// A `mat_slot=` resolved to a block id the compile's target does not
-    /// declare. Fail-loud per `spec/versioning-editions` "Fail-loud and
-    /// minimum-version inference" ("unknown IDs ... are hard errors"): the id
-    /// would otherwise be written into a structure file the game loads as air,
-    /// with nothing to explain the hole. Distinct from `UnknownAbstractToken`,
-    /// which fires one step earlier when the abstract token itself is
-    /// undeclared — this variant fires on an id that resolved cleanly and
-    /// simply does not exist in that `(edition, version)`, whether the author
-    /// or the pack's catalog chose it.
+    /// A `mat_slot=` resolved to a block id the compile's target does not declare.
     ///
-    /// Only raised when the run pinned a target — `cairn compile --target`
-    /// and `cairn check --edition E --target V`. `cairn info`, `cairn
-    /// lower` and an unpinned `cairn check` have no version to check
-    /// against and skip the comparison rather than guess one.
+    /// An error per `spec/versioning-editions` "Fail-loud and minimum-version inference" ("unknown
+    /// IDs ... are hard errors"), because the game would load the id as air. Unlike
+    /// [`Self::UnknownAbstractToken`], one step earlier, the id resolved cleanly, whether the
+    /// author or the pack's catalog chose it, and does not exist in that `(edition, version)`.
+    ///
+    /// Raised only when the run pinned a target, as `cairn compile --target` and
+    /// `cairn check --edition E --target V` do; without one there is no version to check against.
     UnknownId,
     /// A member whose geometry attaches blockstates was bound to a material
     /// that cannot carry them — a sloped roof or an eave `stair` bound to
     /// something outside the stair family.
     ///
-    /// Error, and by the first clause of `spec/lint` "Error vs warning"
-    /// rather than the last. The pass is not the incomplete side: `gable` /
-    /// `shed` / `hip` lowering is finished, and what it is being asked for
-    /// does not exist. Adopting the id writes a blockstate no version of the
-    /// game has; substituting the fallback species builds a roof out of a
-    /// material nobody asked for. Both are the silent substitution
-    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
-    /// forbids, and a warning does not make either loud: the lockfile still
-    /// says `verified: true`, there is no `--deny-warnings`, and the one
-    /// machine-readable surface that carries a lowering finding at all is
-    /// `cairn check --target --format json`, which an unpinned check — the
-    /// invocation a CI job writes by default — is not.
+    /// An error by the first clause of `spec/lint` "Error vs warning": the lowering is complete,
+    /// and what it is asked for does not exist. Adopting the id writes a blockstate no game version
+    /// has; substituting a fallback builds from a material nobody asked for. Both are the silent
+    /// substitution `spec/versioning-editions` "Fail-loud and minimum-version inference" forbids,
+    /// and a warning would not make either loud: the lockfile still says `verified: true`, and an
+    /// unpinned `cairn check`, the invocation CI writes by default, carries no lowering finding.
     ///
-    /// Whose mistake it is rides in `data` (`slot` and `token`), the way
-    /// [`Self::UnknownId`] carries `origin` — a pack that maps a token onto
-    /// the wrong material is not the author's to fix, but it is not less of
-    /// an error for that.
+    /// `data` says whose mistake it is (`slot` or `token`), as [`Self::UnknownId`] carries
+    /// `origin`.
     IncompatibleMaterial,
     /// A `struct` has no `size=WxH` header, so block-array lowering cannot
     /// derive a voxel extent and skips it.
     StructNoSize,
-    /// A `def` (referenced by a `place use=NAME`) has no `size=WxH` header.
-    /// Without an interior footprint the place cannot lower into a voxel
-    /// volume, so the placement is skipped. Distinct from `StructNoSize`
-    /// so a CI / LSP filter that matches on `code` can tell whether the
-    /// missing size sits on a struct or on a template the user meant to
-    /// instantiate.
+    /// A `def` that a `place use=NAME` references has no `size=WxH` header, so the placement is
+    /// skipped. Apart from [`Self::StructNoSize`] so a filter on the code can tell a struct from a
+    /// template.
     DefNoSize,
-    /// A `place use=NAME` references an unknown def, an `east_of=ID` /
-    /// `north_of=ID` references an unknown prior place in the same site, or
-    /// a `connect a.port to b.port` refers to a missing place id. Carries a
-    /// nearest-match suggestion when one fits within the spell cap. The
-    /// referenced symbol cannot be substituted silently, so the build stops.
+    /// A `place use=NAME` references an unknown def, an `east_of=ID` / `north_of=ID` an unknown
+    /// prior place in the same site, or a `connect a.port to b.port` a missing place id. Carries a
+    /// nearest-match suggestion when one fits.
     UnresolvedPlaceRef,
-    /// A `place theme=NAME` references a theme the module does not declare.
-    /// Fail-loud because the per-place colour scheme would otherwise vanish
-    /// silently; carries a nearest-match suggestion when one fits.
+    /// A `place theme=NAME` references a theme the module does not declare. Carries a
+    /// nearest-match suggestion when one fits.
     UnresolvedThemeRef,
     /// The module declares a theme, but under the pinned edition none of its
     /// per-edition variants (`spec/versioning-editions` "Java / Bedrock
     /// portability") can bind.
     ///
-    /// Error, and for the reason the same chapter's "Fail-loud and
-    /// minimum-version inference" gives: the alternative to stopping
-    /// is binding the other edition's variant — which routes, say,
-    /// Bedrock-only slot values into a Java `.nbt` — or binding nothing,
-    /// which builds the requested extent out of air. Both are silent
-    /// substitution. The theme is the thing that cannot be honoured, so
-    /// this names the theme rather than reporting each `mat_slot=` that
-    /// found no value.
+    /// An error for the reason the same chapter's "Fail-loud and minimum-version inference"
+    /// gives: binding the other edition's variant would route its slot values into this edition's
+    /// file, and binding nothing would build the extent from air. The theme is what cannot be
+    /// honoured, so the finding names it rather than each `mat_slot=` left without a value.
     ThemeVariantMissing,
     /// A `place theme=NAME` named one edition's variant and the pinned
     /// edition bound a different one.
     ///
-    /// Warning, not an error: binding whichever variant the pin selects is
-    /// what the author almost certainly wants — that is the pinned edition's
-    /// variant when the module has one, and the unsuffixed theme when it does
-    /// not — and `spec/versioning-editions` "Java / Bedrock portability" asks
-    /// the semantic layer to stay edition-neutral anyway. But an explicit name
-    /// silently becoming a different name is worth one line, and the fix —
-    /// write the logical name — is the spelling that section prescribes.
+    /// A warning: the variant the pin selects is almost certainly what the author wants, and
+    /// `spec/versioning-editions` "Java / Bedrock portability" keeps the semantic layer
+    /// edition-neutral. An explicit name silently becoming another is still worth a line, and the
+    /// fix, writing the logical name, is what that section prescribes.
     ThemeVariantRebound,
     /// A scope's derived voxel extent exceeds
     /// [`crate::block_array::MAX_STRUCTURE_VOLUME`], so the pass skips it
     /// rather than allocating for it.
     ///
-    /// Every input that feeds the extent — `size=`, `walls height=`,
-    /// `roof overhang=`, `level y=` — is range-checked on its own, so this
-    /// only fires on a combination whose *product* is out of reach. Warning
-    /// severity, matching `StructNoSize`: the scope is skipped, and
-    /// `cairn compile` refuses separately rather than certifying a build
-    /// missing one of the scopes its source asked for.
+    /// Each input to the extent is range-checked alone, so only a product out of reach fires
+    /// this. A warning like [`Self::StructNoSize`]: the scope is skipped, and `cairn compile`
+    /// refuses the partial build separately.
     StructureTooLarge,
     /// A scope paints more distinct block states than one palette can
     /// index ([`crate::block_array::PALETTE_CAPACITY`] entries, air
     /// included), so the pass skips it rather than panicking.
     ///
-    /// Every paint counts, including one a later member covers. A vanilla
-    /// registry has far fewer states, so a source reaches this only
-    /// through block ids or state-literal properties no pinned target
-    /// checks: an id goes unchecked wherever lowering runs with no version
-    /// pinned, and a state literal's properties under every target
-    /// (`W_STATE_LITERAL_UNCHECKED`). Every command that lowers can reach
-    /// it, `cairn compile` with a target that resolves among them. Warning
-    /// severity, matching `StructureTooLarge`: the scope is skipped, and
-    /// `cairn compile` refuses the partial build separately.
+    /// Every paint counts, including one a later member covers. A vanilla registry has far fewer
+    /// states, so only unchecked block ids (no version pinned) or state-literal properties reach
+    /// this. A warning like [`Self::StructureTooLarge`]: the scope is skipped, and `cairn compile`
+    /// refuses the partial build separately.
     PaletteTooLarge,
     /// A `place` row omits a key it cannot become a placement without:
     /// `id=`, `use=`, or `theme=`.
     ///
-    /// The three are one code because the row fails the same way for each
-    /// — `resolve_site_placements` skips it, no `.nbt` is written, and the
-    /// build is missing a building the source asked for. The message names
-    /// every key the row is short of, so the author fixes one line once
-    /// rather than re-running the compiler per key.
-    ///
-    /// Only a key that is *absent* counts. A key that is present but not
-    /// label-shaped (`use=3`) reaches the same skip, but calling it missing
-    /// would be a lie and `E_TYPE_MISMATCH_LABEL` already names it.
+    /// One code because the row fails the same way for each: it is skipped and the building is
+    /// missing. The message names every missing key, so one edit fixes the line. A key that is
+    /// present but not a label (`use=3`) is `E_TYPE_MISMATCH_LABEL` instead.
     IncompletePlace,
-    /// A `place id=` breaks an invariant [`crate::ids::PlaceId`] relies on:
-    /// it is empty, or contains `.`, `:`, `/`, `\`, or whitespace.
-    ///
-    /// The rule has two reasons. `.` and `:` are the structural separators
-    /// the scope key `site::SITE::PLACE` and every walkway key parsed back
-    /// out of it are built from, so an id carrying one cannot round-trip.
-    /// `/` and `\` are path separators: the id is the stem of the artifact
-    /// file written into `--out`, so either one would put that file in
-    /// another directory, and an absolute id would replace `--out`
-    /// altogether. Both are refused on every platform, so whether an id is
-    /// accepted does not depend on the host that checks it. `id=` accepts a
-    /// string literal, which is what let the value through — nothing between
-    /// the lexer and the key constructor looked at its contents.
+    /// A `place id=` that [`crate::ids::PlaceId`] refuses; the [`crate::ids`] module docs say what
+    /// and why. `id=` takes a string literal, so nothing before the key constructor looks at its
+    /// contents.
     InvalidPlaceId,
-    /// Two `place` rows in the same site share an `id=`. The first definition
-    /// wins for downstream references; the duplicate is dropped and the
-    /// error names both spans.
+    /// Two `place` rows in the same site share an `id=`. The first wins for references; the
+    /// duplicate is dropped.
     DuplicatePlaceId,
     /// Two scopes a build would write would be written to one file.
     ///
-    /// An artifact is named by [`crate::ids::artifact_stem`]: a `struct`
-    /// by its name, a `place` by its `id=` alone, a walkway by its site
-    /// and endpoints with `.` flattened to `_`. So `struct hut` and a
-    /// `place id=hut`, or two sites that each `place id=home`, or the
-    /// walkways `a_b.c to d.e` and `a.b_c to d.e` in one site, name one
-    /// file, and if both are built, a build can keep only one of them.
-    /// The check runs before lowering. It leaves out a sizeless `struct`
-    /// and a `place` of a sizeless `def`, which lowering drops, but still
-    /// counts a struct or placement past the volume budget and a walkway
-    /// past the router's area cap, which lowering drops too. Names are compared ignoring case,
-    /// because `Hut` and `hut` are one file on the case-insensitive file
-    /// systems macOS and Windows default to, and the verdict should not
-    /// depend on the host. A scope key declared twice (`struct hut` twice,
-    /// or one site's `id=` twice) is not this code: that is
-    /// `E_DUPLICATE_ITEM` or `E_DUPLICATE_PLACE_ID`, and the second one
-    /// builds nothing.
+    /// Artifacts are named by [`crate::ids::artifact_stem`], so `struct hut` and `place id=hut`,
+    /// two sites that each `place id=home`, or the walkways `a_b.c to d.e` and `a.b_c to d.e` in
+    /// one site collide. Checked before lowering: a sizeless `struct` or a `place` of a sizeless
+    /// `def` is left out, since lowering drops it, but a scope past the volume budget or the
+    /// router's area cap still counts. Names compare ignoring case, as the default file systems of
+    /// macOS and Windows do, so the verdict does not depend on the host. A scope key declared twice
+    /// is `E_DUPLICATE_ITEM` or `E_DUPLICATE_PLACE_ID` instead.
     OutputNameCollision,
     /// A `place` line carries either an `at=` value other than `origin` or
     /// combines `at=` with `east_of=` / `north_of=`. Origin selectors are
     /// mutually exclusive per `spec/components-editing-sites` "Multi-building
     /// with `site`" so the placement coordinate is unambiguous.
     InvalidPlaceOrigin,
-    /// A `def NAME` is never referenced by any `place use=NAME`. Every
-    /// `place` row in a `site` body whose `use=` is a label (an identifier
-    /// or string) naming the def counts as a reference, whether or not the
-    /// row is refused; a `use=` that is not a label (`use=3`) names no def
-    /// and does not count. The def itself lowers to no voxels (defs are
-    /// templates), so this is advisory rather than fatal — but worth
-    /// surfacing because an unused def is usually a typo on the
-    /// `place use=` side.
-    UnusedDef,
-    /// A `connect A.PORT to B.PORT` row names a port id (`PORT`) that no
-    /// member of the referenced def's body carries. A port is looked up
-    /// among the body's own members only, not the ones indented under a
-    /// `level` or any other member. The place id sides are reported by
-    /// `E_UNRESOLVED_PLACE_REF` instead — this code is specifically for the
-    /// port half of the `place.port` shape.
+    /// A `def NAME` that no `place use=NAME` references.
     ///
-    /// The notes take one of two shapes. When a member under a `level`
-    /// carries the id, the primary says so, naming the `level` the member
-    /// sits directly under, and one note points at the member and says
-    /// what a port has to be. Otherwise the notes are a nearest-match
-    /// suggestion when one of the body's ids fits the standard spell cap,
+    /// Every `place` row whose `use=` is a label naming the def counts, refused or not; `use=3`
+    /// names no def. Advisory, since a def lowers to nothing on its own, but an unused def is
+    /// usually a typo on the `place use=` side.
+    UnusedDef,
+    /// A `connect A.PORT to B.PORT` row names a port no member of the referenced def's body
+    /// carries. Only the body's own members count, not those indented under another member; an
+    /// unknown place is `E_UNRESOLVED_PLACE_REF` instead.
+    ///
+    /// When a member under a `level` carries the id, the primary names that `level` and a note
+    /// points at the member. Otherwise the notes are a nearest-match suggestion, when one fits,
     /// then a note to add the `id=`.
     UnresolvedPort,
-    /// A `connect A.PORT to B.PORT` row whose port id matches more than one
-    /// member of the referenced def. The first match is taken for downstream
-    /// lowering; the duplicate is flagged so the author can disambiguate by
-    /// renaming the colliding member.
+    /// A `connect A.PORT to B.PORT` row whose port id matches more than one member of the
+    /// referenced def. Lowering takes the first match.
     AmbiguousPort,
-    /// A `connect` row carries no `path=` argument. Walkway lowering has no
-    /// material to lay the path with — silently degrading to air would leave
-    /// the buildings invisibly unconnected, so the build fails.
+    /// A `connect` row carries no `path=` argument, so the walkway has no material; laying air
+    /// would leave the buildings invisibly unconnected.
     MissingPathMaterial,
-    /// Walkway voxelisation hit an existing building cell along the L-shaped
-    /// path between two ports. The blocked cell is skipped and the rest of
-    /// the walkway lays, so the connection still reaches both ends visibly
-    /// when an obstacle steals one or two cells in between.
+    /// Walkway voxelisation hit a building cell along the L-shaped path between two ports. The
+    /// cell is skipped and the rest is laid, so the walkway still visibly reaches both ends.
     ///
-    /// When every cell is skipped, or the straight L alone is past the
-    /// router's area cap, nothing is laid. The code stays a warning, but
-    /// the walkway is lost, and `cairn compile` refuses the build with
-    /// `E_PARTIAL_BUILD`.
+    /// When every cell is skipped, or the L alone is past the router's area cap, nothing is laid;
+    /// the code stays a warning, and `cairn compile` refuses the build with `E_PARTIAL_BUILD`.
     WalkwayBlocked,
-    /// A `connect` row repeats a `(from, to)` port pair already laid by an
-    /// earlier row in the same site. The second walkway is dropped silently
-    /// at the voxel level — re-laying the same gravel strip is a no-op — and
-    /// the row is flagged so the author can tell the duplicate from a missed
-    /// new connection.
+    /// A `connect` row repeats a `(from, to)` port pair an earlier row in the same site laid.
+    /// Re-laying the strip changes nothing; the finding tells a duplicate from a mistyped new
+    /// connection.
     DuplicateWalkway,
-    /// A `connect` row targets a `place` that the resolver registered in
-    /// `seen_place_ids` but never finished lifting into `place_def` — the
-    /// `place` row was skipped by `resolve_site_placements` for an absent
-    /// `use=` / `theme=` (`E_INCOMPLETE_PLACE`), a mistyped one
-    /// (`E_TYPE_MISMATCH_LABEL`), a failed origin selector
-    /// (`E_INVALID_PLACE_ORIGIN`, whose row registers before it is
-    /// validated), an origin naming a row refused for its id
-    /// ([`Self::DeferredPlace`]), or a name that resolved to nothing
-    /// (`E_UNRESOLVED_PLACE_REF` / `E_UNRESOLVED_THEME_REF`).
+    /// A `connect` row targets a `place` whose row was registered but refused: an absent or
+    /// mistyped `use=` / `theme=` (`E_INCOMPLETE_PLACE`, `E_TYPE_MISMATCH_LABEL`), a failed origin
+    /// selector (`E_INVALID_PLACE_ORIGIN`), an origin naming a row refused for its id
+    /// ([`Self::DeferredPlace`]), or a name that resolved to nothing (`E_UNRESOLVED_PLACE_REF`,
+    /// `E_UNRESOLVED_THEME_REF`).
     ///
-    /// The root cause is therefore reported elsewhere, and this is not a
-    /// duplicate of it: the other finding says which row is broken, this
-    /// one says which walkway went with it. Without it the walkway would
-    /// vanish from the build with no signal that the `connect` did nothing.
-    /// Mirrors the `W_DEFERRED_MEMBER` pattern used by walkway endpoint
-    /// cascades in `block_array::lower`.
+    /// That finding says which row is broken; this one says which walkway went with it, which
+    /// would otherwise vanish without a signal.
     DeferredConnect,
     /// A `place` row's `east_of=` / `north_of=` names an earlier row in the
     /// same site refused for its id (`E_INVALID_PLACE_ID`). The row naming
     /// it is not placed, since what it is placed against has no position.
     ///
-    /// The same cascade shape as [`Self::DeferredConnect`], one layer up:
-    /// the reference does name a row, so calling it `E_UNRESOLVED_PLACE_REF`
-    /// would send the author to look for a typo that is not there, and
-    /// saying nothing would leave a row that is not placed looking clean —
-    /// and a `connect` naming it would then point, through
-    /// `W_DEFERRED_CONNECT`'s note, at a row that prints nothing. The
-    /// finding with the repair is the one on the refused row, which this
-    /// one's note points at, so this is a warning: the build already fails
-    /// on that error.
+    /// The same cascade as [`Self::DeferredConnect`], one layer up. `E_UNRESOLVED_PLACE_REF` would
+    /// send the author after a typo that is not there, and silence would leave an unplaced row
+    /// looking clean. A warning, because the refused row's error, which the note points at,
+    /// already fails the build.
     DeferredPlace,
-    /// A `connect` row whose site / place / port identifier contains the
-    /// `__` substring, or whose place / port identifier starts or ends
-    /// with `_`. The surface lexer permits `_` anywhere in identifiers,
-    /// but the canonical walkway scope key uses `__` as the `from`/`to`
-    /// separator — so `(home, b__c, home2, entry)` and
-    /// `(home, b, c__home2, entry)` would otherwise encode to the same
-    /// wire string, and so would `(a, p_, b, p)` and `(a, p, _b, p)`.
-    /// The edge rule covers both ends of every place and port, not only
-    /// the ones that can touch the separator; see
-    /// [`crate::ids::KeyConstructError::UnderscoreAtEdge`] for why.
-    /// Lowering drops the row and asks the user to rename the offending
-    /// segment so the encoding stays unambiguous. A release build also
-    /// raises it if a row's key replaces an earlier row's anyway, which
-    /// only a hole in that rule allows (a debug build asserts instead).
+    /// A `connect` row whose site, place or port id contains `__`, or whose place or port id
+    /// starts or ends with `_`, so its walkway scope key would be ambiguous (see
+    /// [`crate::ids::KeyConstructError::UnderscoreAtEdge`]). Lowering drops the row. A release
+    /// build also raises it if a row's key replaces an earlier row's anyway, which only a hole in
+    /// that rule allows; a debug build asserts instead.
     InvalidWalkwayIdent,
-    /// A `connect` row whose positional shape is not
-    /// `FROM.PORT to TO.PORT`. The line-based parser accepts any number
-    /// of positionals up to the next newline and `intent::lower` carries
-    /// them through verbatim, so `connect a.entry` / `connect a.entry to`
-    /// / `connect a.entry xxx b.entry` would otherwise reach the
-    /// resolver, which silently short-circuits the row. Fail-loud here
-    /// so the user gets a position-anchored signal at the offending span
-    /// instead of a vanished walkway.
+    /// A `connect` row whose positional shape is not `FROM.PORT to TO.PORT`. Any other shape would
+    /// reach the resolver, which skips the row silently.
     ConnectArity,
-    /// Two members evaluated in the same phase wrote one voxel to different
-    /// blocks, so the block the build keeps is the one whose line comes
-    /// last. `spec/compilation` "Phase evaluation" opens by promising that
-    /// "order accidents are eliminated" and then grants last-wins to "local
-    /// overrides within the same phase" — an author restating a member is
-    /// the case that grant is for, and two footprints that happen to
-    /// intersect is not, yet the grid cannot tell them apart. Warned rather
-    /// than refused for that reason: the resolution the spec mandates still
-    /// happens, it just stops being invisible.
+    /// Two members evaluated in the same phase wrote one voxel to different blocks, so the later
+    /// line wins.
+    ///
+    /// `spec/compilation` "Phase evaluation" grants last-wins to "local overrides within the same
+    /// phase". An author restating a member is what that grant is for and two footprints that
+    /// happen to intersect are not, but the grid cannot tell them apart, so this warns rather than
+    /// refuses: the mandated resolution still happens, visibly.
     PhaseConflict,
-    /// An `assert truth(...)` with no rows at all. The construct exists to
-    /// state something about the circuit, and a table with no rows states
-    /// nothing — no context around it and no pass written later makes it
-    /// verify anything. That is the argument `E_INVALID_REQUIRES` makes
-    /// for a `@requires` the compiler cannot read, and the reason this is
-    /// an error rather than a note: in a diff an empty table reads exactly
-    /// like one that passes. A table whose input list repeats a signal is
-    /// reported as [`Self::TruthTableDuplicateInput`] instead.
+    /// An `assert truth(...)` with no rows. It states nothing, yet in a diff reads like a table
+    /// that passes, so it is an error, as `E_INVALID_REQUIRES` is for an unreadable `@requires`.
+    /// A table whose input list repeats a signal is [`Self::TruthTableDuplicateInput`] instead.
     TruthTableEmpty,
     /// An `assert truth(...)` lists one signal as two or more of its
     /// inputs.
     ///
-    /// One signal is one input, so the table has more than one column for
-    /// it, and its rows describe combinations the circuit does not have.
-    /// The coverage finding would count combinations that give those
-    /// columns different values among the ones missing, and a row written
-    /// to answer it would state an output for a combination that cannot
-    /// occur. Refused rather than read as one input, which would give the
-    /// rows a meaning the author did not write — the shape
-    /// `E_DUPLICATE_ARG` refuses for a `key=`. No other truth-table
-    /// finding is raised beside it: every other one reads the rows against
-    /// an input list that is wrong, so the rest of the table is left until
-    /// the list names each signal once.
+    /// The rows then describe combinations the circuit does not have. Refused rather than read as
+    /// one input, which would give the rows a meaning the author did not write. No other
+    /// truth-table finding is raised beside it, since each would read the rows against a wrong
+    /// input list.
     TruthTableDuplicateInput,
-    /// Two rows of one `assert truth(...)` assign the same inputs
-    /// different outputs. No circuit satisfies both, so whatever the table
-    /// was written to verify, it cannot. Reported on the later row with a
-    /// note at the first row carrying that pattern — which of the two is
-    /// wrong is the author's to decide, and no reading of the pair is
-    /// worth less than the other.
+    /// Two rows of one `assert truth(...)` assign the same inputs different outputs, which no
+    /// circuit satisfies. Reported on the later row with a note at the first; which is wrong is
+    /// the author's call.
     TruthTableConflict,
-    /// Two rows of one `assert truth(...)` assign the same inputs the same
-    /// output. The table still says exactly what it says, so the repair is
-    /// to delete either row and nothing else changes. Kept apart from
-    /// [`Self::TruthTableConflict`] because the two ask for different
-    /// work — one line to drop against two readings to choose between —
-    /// and because severity is a property of the code.
+    /// Two rows of one `assert truth(...)` assign the same inputs the same output, so deleting
+    /// either changes nothing. Apart from [`Self::TruthTableConflict`] because the work differs,
+    /// and severity belongs to the code.
     TruthTableDuplicateRow,
-    /// An `assert truth(...)` whose rows leave input combinations
-    /// unassigned. Every row present is still a real constraint, so the
-    /// finding is about coverage rather than about the statement being
-    /// void: a four-input table is sixteen rows, and an author part way
-    /// through writing one is writing something true. `data` carries the
-    /// combinations to write.
+    /// An `assert truth(...)` whose rows leave input combinations unassigned. Every row present
+    /// is still a real constraint, so this is about coverage: an author part way through a
+    /// sixteen-row table is writing something true.
     TruthTablePartial,
     /// Every version `@intended_targets` names is below a version floor
     /// the same file declares, so the file can be built for nothing it
     /// says it is for.
     ///
-    /// The two headers are one statement of intent and one constraint on
-    /// it, and a file whose constraint refuses its whole intent is a file
-    /// whose author meant one of the two lines differently. An error
-    /// rather than the warning [`Self::IntendedTargetCapPartial`] carries,
-    /// because there is nothing left that the declaration and the floor
-    /// agree on: the first `cairn compile --target` naming any version the
-    /// header asks for is `E_VERSION_CAP`.
-    ///
-    /// A version the edition cannot build at all is
-    /// [`Self::IntendedTargetUnsupported`] instead and is not counted
-    /// here, which is what keeps this code on the one shape it names — a
-    /// list of buildable versions the file's own floor rules out.
+    /// An error rather than [`Self::IntendedTargetCapPartial`]'s warning, because the declaration
+    /// and the floor agree on nothing: `cairn compile --target` at any listed version is
+    /// `E_VERSION_CAP`. A version the edition cannot build at all is
+    /// [`Self::IntendedTargetUnsupported`] and is not counted here.
     IntendedTargetCap,
     /// Some, not all, of the versions `@intended_targets` names are below
     /// a version floor the same file declares.
     ///
-    /// A warning because the header is "a hint, not a verification record"
-    /// (`spec/syntax` "Headers") and the versions above the floor still
-    /// build: the list reaches past the floor at one end, which is a wish
-    /// stated too widely rather than a file that cannot be built. Shares
-    /// its name with [`Self::IntendedTargetCap`] because it is the same
-    /// contradiction — what differs is how much of the intent survives it.
+    /// A warning because the header is "a hint, not a verification record" (`spec/syntax`
+    /// "Headers") and the versions above the floor still build. The same contradiction as
+    /// [`Self::IntendedTargetCap`], with part of the intent surviving it.
     IntendedTargetCapPartial,
     /// `@intended_targets` names a version no `--target` of the edition
     /// can build.
     ///
-    /// Two shapes reach it: a release the registry pack ships no block
-    /// data for (`1.19` on Java), and a label the edition's table cannot
-    /// place at all — which is what a version written in the *other*
-    /// edition's numbering looks like (`1.21.40` on Java). One code
-    /// because the repair is the same edit to the same line, and the note
-    /// says which of the two it was.
+    /// A release the registry pack has no block data for (`1.19` on Java), or a label the
+    /// edition's table cannot place, as a version in the other edition's numbering is (`1.21.40` on
+    /// Java). One code because the repair is the same; the note says which.
     ///
-    /// A warning, and only under a pinned edition: without one, a version
-    /// this edition cannot build may be exactly the target the author
-    /// means on the other.
+    /// A warning, and only under a pinned edition: unpinned, the version may be meant for the other
+    /// edition.
     IntendedTargetUnsupported,
 }
 
 impl DiagnosticCode {
-    /// Stable string form for the gcc-style text format and JSON output.
-    /// The same string is used by external matchers (LSP quick-fix etc.) so
-    /// changes here are breaking for consumers.
+    /// Stable string form for text and JSON output. External matchers depend on it, so a change is
+    /// breaking.
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
@@ -802,63 +527,26 @@ impl DiagnosticCode {
         }
     }
 
-    /// Severity assigned to this code.
+    /// Severity assigned to this code, the one place it is decided.
     ///
-    /// **The** severity for the code: every emission site reads it from
-    /// here rather than writing a literal, so reclassifying a code is one
-    /// edit and cannot leave a pass disagreeing with the ledger. Pinned by
-    /// `every_code_is_classified_against_the_error_vs_warning_rule` below,
-    /// which partitions the whole enum rather than whatever a corpus happens
-    /// to reach — with [`Diagnostic::severity`] reading this function there is
-    /// no per-finding value left for a fixture to disagree with, which
-    /// `tests/check/diagnostic_text.rs` records from the other side.
+    /// `spec/lint` "Error vs warning" draws the line at the build: a finding is an error when
+    /// leaving it alone yields something other than what the source asked for (an absent concept,
+    /// an id that resolves to nothing, a value outside its domain), because silent substitution
+    /// and implicit dropping are forbidden. Everything else is a warning: version or edition
+    /// drift, redstone timing, and the partial-build degradations the block-array pass reports
+    /// (`W_DEFERRED_MEMBER`, `W_NO_THEME_BOUND`, `W_ABSTRACT_TOKEN_DEFERRED`, `W_STRUCT_NO_SIZE`),
+    /// where the compiler is the incomplete side and `cairn compile` refuses separately.
     ///
-    /// `spec/lint` "Error vs warning" draws the line at the *build*: a finding
-    /// is an error when leaving it alone yields something other than what the
-    /// source asked for — a concept that is absent, an id that resolves to
-    /// nothing, a value outside its domain — because silent substitution
-    /// and implicit dropping are forbidden. Everything else is a warning:
-    /// version / edition drift, the non-guarantee of redstone timing, and
-    /// the partial-build degradations the block-array pass reports
-    /// (`W_DEFERRED_MEMBER`, `W_NO_THEME_BOUND`, `W_ABSTRACT_TOKEN_DEFERRED`,
-    /// `W_STRUCT_NO_SIZE`), where the compiler — not the source — is the
-    /// incomplete side and `cairn compile` refuses separately rather than
-    /// certifying a partial build.
+    /// `W_IGNORED_ARGUMENT` sits on the line. A dropped value with a default substituted is the
+    /// build differing from the source, but the rule forbids silent substitution, and this code
+    /// is the announcement. Its routed-past shape has two repair sites, the rule the author meant
+    /// or the leftover key, and refusing would pick one. Its inapplicable-key shape changes
+    /// nothing in the build, and refusing it would make a universal key one some roles reject.
     ///
-    /// `W_IGNORED_ARGUMENT` sits on the line. That section's error clause
-    /// covers a value dropped and a default substituted, which is the build
-    /// differing from the source — but the clause forbids *silent*
-    /// substitution, and this code is the announcement, so the letter
-    /// cuts both ways. It is a warning because it replaces a
-    /// `W_DEFERRED_MEMBER` on the same shapes and moves what the finding
-    /// says without moving any exit code. Promoting it is the same call
-    /// an argument key the compiler does not recognise waits on — those
-    /// are unreported outside the actuator-patch keys, and every source
-    /// carrying one builds today — and the two want one decision rather
-    /// than two. That section records the same.
-    ///
-    /// Its routed-past shape lands on the warning side by a second argument
-    /// as well. A key outside the vocabulary names nothing and has one
-    /// repair site, which is what makes `E_UNKNOWN_ARGUMENT` a refusal; a
-    /// key a sibling routed past names something real, and the repair is
-    /// either argument — the rule the author meant, or the leftover key.
-    /// Refusing would pick one of them.
-    ///
-    /// Its inapplicable-key shape is not a gap in the compiler at all, so
-    /// it rests on its own argument: the key is one every role accepts, and
-    /// its value changes nothing in the build. Refusing it would make a
-    /// universal key one that some roles reject, over an argument that
-    /// does nothing; the warning asks for its removal instead.
-    ///
-    /// Two codes sit close to the line and are decided in their variant
-    /// docs: `E_UNKNOWN_SLOT_TARGET` is an error because the members
-    /// bound to the slot lower to air, and `E_THEME_SELECTOR_UNMATCHED`
-    /// is a warning because a rule matching nothing changes nothing.
-    /// `E_UNKNOWN_ABSTRACT_TOKEN` is the one lowering code that is an
-    /// error: when a registry pack *was* offered but does not declare the
-    /// bound token, falling back to air would hide a typo the pack author
-    /// needs to fix (the fail-loud rule of `spec/materials-themes` "Canonical
-    /// vocabulary").
+    /// `E_UNKNOWN_SLOT_TARGET` and `E_THEME_SELECTOR_UNMATCHED` sit close to the line and are
+    /// decided in their own docs. `E_UNKNOWN_ABSTRACT_TOKEN` is the one lowering error: with a
+    /// registry pack offered, falling back to air would hide a typo the pack author must fix
+    /// (`spec/materials-themes` "Canonical vocabulary").
     #[must_use]
     pub fn severity(self) -> Severity {
         match self {
@@ -932,66 +620,38 @@ impl DiagnosticCode {
 
 impl Serialize for DiagnosticCode {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        // JSON output uses the same `E_*` string as the text format so
-        // downstream tooling can match on a single contract surface
-        // regardless of which `--format` was selected.
+        // The same string as the text format, whichever `--format` was chosen.
         serializer.serialize_str(self.as_str())
     }
 }
 
 /// Machine-readable payload attached to a [`Diagnostic`].
 ///
-/// Lets downstream tooling (LSP quick-fix, CI annotator, test asserts)
-/// inspect structured numeric / categorical fields without re-parsing the
-/// human-readable `primary` string. `tag = "kind"` is used so the JSON
-/// form (`{"kind":"walkway_blocked","skipped":3}`) carries a stable
-/// discriminator that downstream matchers pin on.
+/// Gives a quick-fix the fields it needs without parsing the prose `primary`, which `spec/lint`
+/// "Machine-readable payload" tells consumers to avoid. Serializes with a stable `kind` tag:
+/// `{"kind":"walkway_blocked","skipped":3}`.
 ///
-/// `#[non_exhaustive]` on the enum protects consumer exhaust matches
-/// against **new variants** landing for additional codes as the
-/// diagnostic surface is still **Evolving**. Adding a new field to an
-/// existing variant is still breaking by itself; per-variant
-/// `#[non_exhaustive]` is added on a per-case basis when a follow-up
-/// expansion is anticipated.
+/// `#[non_exhaustive]` covers new variants only; a field added to an existing variant is still a
+/// breaking change.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DiagnosticData {
-    /// Companion payload for [`DiagnosticCode::WalkwayBlocked`]. `skipped`
-    /// is the number of cells along the L-shaped path that overlapped an
-    /// existing structure and were dropped from the walkway lay.
+    /// Companion payload for [`DiagnosticCode::WalkwayBlocked`].
     WalkwayBlocked {
-        /// Count of cells the walkway lowering had to skip. Invariant:
-        /// `>= 1` — `lower_connects` attaches this payload only when the
-        /// underlying `skipped > 0`. The area-cap refusal emits
-        /// `W_WALKWAY_BLOCKED` with no payload, since it skipped no cells
-        /// and laid none. Typed as `u64` so `usize` lifts
-        /// without lossy truncation on any platform Cairn supports.
+        /// Cells along the path that overlapped a structure and were skipped; at least 1. The
+        /// area-cap refusal carries no payload, having skipped and laid nothing. `u64` so a
+        /// `usize` converts without loss.
         skipped: u64,
     },
-    /// Companion payload for [`DiagnosticCode::IncompletePlace`]. The keys
-    /// the `place` row does not declare, without the trailing `=`, in the
-    /// order the message lists them.
-    ///
-    /// Carried because "insert the missing keys" is the obvious quick-fix
-    /// for this code, and recovering the set from the rendered sentence is
-    /// exactly the prose-parsing `spec/lint` "Machine-readable payload" tells
-    /// consumers to avoid. Invariant: non-empty — a row that declares all
-    /// three keys produces no finding at all.
+    /// Companion payload for [`DiagnosticCode::IncompletePlace`]: the keys the `place` row lacks,
+    /// without the `=`, in the order the message lists them. Never empty.
     IncompletePlace {
         /// Missing key names (`id`, `use`, `theme`).
         missing: Vec<String>,
     },
-    /// Companion payload for [`DiagnosticCode::InvalidRequires`]. Which
-    /// way the expression failed, and the text that failed.
-    ///
-    /// Carried for the reason [`Self::IncompletePlace`] is: the code
-    /// covers several distinct mistakes and the obvious quick-fix differs
-    /// between them — replacing `<` with `>=` is a one-character edit a
-    /// tool can offer, while a snapshot label is not repairable at all
-    /// today. Telling them apart from the rendered sentence is the
-    /// prose-parsing `spec/lint` "Machine-readable payload" tells consumers
-    /// to avoid.
+    /// Companion payload for [`DiagnosticCode::InvalidRequires`]: how the expression failed, and
+    /// the text that failed, since the repair differs by failure (`<` to `>=` is one character).
     InvalidRequires {
         /// Stable name of the failure, from
         /// [`crate::resolve::RequirementError::kind`]:
@@ -1004,15 +664,9 @@ pub enum DiagnosticData {
         /// when the failure names no fragment of its own.
         found: String,
     },
-    /// Companion payload for [`DiagnosticCode::InvalidCairnVersion`].
-    /// Which way the value failed, and the text that failed.
-    ///
-    /// Carried for the reason [`Self::InvalidRequires`] is, and shaped the
-    /// same way so a consumer handling both version headers handles them
-    /// alike: the repairs differ between a month of `13` and a
-    /// four-component string, and telling them apart from the rendered
-    /// sentence is the prose-parsing `spec/lint` "Machine-readable payload"
-    /// tells consumers to avoid.
+    /// Companion payload for [`DiagnosticCode::InvalidCairnVersion`]: how the value failed, and the
+    /// text that failed. Shaped like [`Self::InvalidRequires`], so a consumer handles both version
+    /// headers alike.
     InvalidCairnVersion {
         /// Stable name of the failure, from
         /// [`crate::calver::LanguageVersionError::kind`]:
@@ -1026,40 +680,24 @@ pub enum DiagnosticData {
         /// empty component when that is what the value has (`2026.`).
         found: String,
     },
-    /// Companion payload for [`DiagnosticCode::FutureCairnVersion`]. The
-    /// two versions, each as its own side spells it.
-    ///
-    /// Both are verbatim rather than normalised: `declared` is the string
-    /// the author has to edit, and `compiler` is the build a bug report
-    /// has to name. `2026.06` and `2026.6` are one version to the
-    /// comparison and two strings to whoever reads the finding.
+    /// Companion payload for [`DiagnosticCode::FutureCairnVersion`]: the two versions, each
+    /// verbatim, because `declared` is the string the author edits and `compiler` the build a bug
+    /// report names.
     FutureCairnVersion {
         /// The `@cairn` value, as written.
         declared: String,
         /// [`crate::CAIRN_VERSION`], the build that reported this.
         compiler: String,
     },
-    /// Companion payload for [`DiagnosticCode::DuplicateSelector`]. The
-    /// binding keys this selector row takes over from an earlier row,
-    /// without the trailing `=`, in the order the message lists them.
-    ///
-    /// Carried for the reason [`Self::IncompletePlace`] is: "merge these
-    /// rows" is the obvious quick-fix and it needs the key set, not a
-    /// sentence to take apart. Invariant: non-empty — a row sharing no
-    /// binding key with an earlier one produces no finding at all.
+    /// Companion payload for [`DiagnosticCode::DuplicateSelector`]: the binding keys this row takes
+    /// over from an earlier one, without the `=`, in the order the message lists them. Never empty.
     DuplicateSelector {
         /// Rebound key names (`frame`, `sill`, ...).
         rebound: Vec<String>,
     },
-    /// Companion payload for [`DiagnosticCode::UnknownId`]. The id that does
-    /// not exist, the target it was checked against, and the way back.
-    ///
-    /// Carried for the reason [`Self::IncompletePlace`] is: the obvious
-    /// quick-fix is "replace this id with that one", and a tool should not
-    /// have to recover either id from the sentence. `origin` additionally
-    /// tells a consumer *where* the edit belongs, which differs by case —
-    /// in the source, in the pack's mapping, or in a pack row that does
-    /// not exist yet.
+    /// Companion payload for [`DiagnosticCode::UnknownId`]: the id, the target it was checked
+    /// against, and the way back. `origin` says where the edit belongs: the source, the pack's
+    /// mapping, or a pack row still to be written.
     UnknownId {
         /// The fully namespaced id the target does not declare.
         id: String,
@@ -1078,33 +716,24 @@ pub enum DiagnosticData {
         /// suggestion cap. Absent from the JSON when there is none.
         #[serde(skip_serializing_if = "Option::is_none")]
         suggestion: Option<String>,
-        /// Every id the target declares for the same block, from the
-        /// registry pack's alias table — the closed set of candidates a
-        /// rename has and a typo search cannot find. Absent from the JSON
-        /// when the pack names none, which is also the whole of what an
-        /// older pack, carrying no alias table, can say.
+        /// Every id the target declares for the same block, from the registry pack's alias table:
+        /// the candidates a rename has and a typo search cannot find. Absent from the JSON when
+        /// the pack names none, as a pack without an alias table cannot.
         ///
-        /// Beside `suggestion` rather than merged with it because the two
-        /// are different claims: an alias is the pack stating that two
-        /// names are one block, a suggestion is a guess from a string
-        /// distance. A quick-fix can apply the first unasked and should
-        /// not the second.
+        /// Apart from `suggestion` because an alias is the pack stating two names are one block,
+        /// which a quick-fix may apply unasked, while a suggestion is a guess.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         aliases: Vec<String>,
     },
     /// Companion payload for [`DiagnosticCode::IncompatibleMaterial`].
     ///
-    /// Carries where the material came from, because that decides who fixes
-    /// it: a `slot` the source binds directly is the author's line to edit,
-    /// while a dotted `token` is the registry pack's mapping. Same reason
-    /// [`Self::UnknownId`] carries `origin` — the severity does not move,
-    /// only the address does.
+    /// Carries where the material came from, because that decides who fixes it: a `slot` the
+    /// source binds directly is the author's line, a dotted `token` the registry pack's mapping.
     IncompatibleMaterial {
         /// The fully namespaced id the member was bound to.
         id: String,
-        /// Family the member's geometry needs, as a bare noun (`stair`).
-        /// Named rather than implied so a second family added later is a
-        /// value here and not a second code.
+        /// Family the member's geometry needs, as a bare noun (`stair`). Named so another family
+        /// is a new value rather than a new code.
         required: String,
         /// `mat_slot=` name the member read, when it has one. Absent when
         /// the member carries no binding at all.
@@ -1116,38 +745,21 @@ pub enum DiagnosticData {
         #[serde(skip_serializing_if = "Option::is_none")]
         token: Option<String>,
     },
-    /// Companion payload for [`DiagnosticCode::TruthTablePartial`]. The
-    /// combinations the table leaves unassigned, and the two numbers the
-    /// rest of the count is derived from.
+    /// Companion payload for [`DiagnosticCode::TruthTablePartial`]: unassigned combinations, and
+    /// the two numbers the count derives from.
     ///
-    /// Carried for the reason [`Self::IncompletePlace`] is: "write the
-    /// missing rows" is the obvious quick-fix and it needs the patterns
-    /// themselves, not a sentence to take apart.
-    ///
-    /// `missing` is a **sample rather than the set**, which breaks the
-    /// habit the other payloads here establish and is why it is said
-    /// twice: a twenty-input table has a million combinations, and
-    /// building that list to describe a one-row table would cost more
-    /// than the finding is worth. A consumer that needs the count derives
-    /// it from the other two fields.
+    /// `missing` is a sample, not the set, unlike the other payloads: a twenty-input table has a
+    /// million combinations. A consumer that needs the count derives it from the other two fields.
     TruthTablePartial {
-        /// How many signals sit left of the `->`, so the table has
-        /// `2^inputs` combinations in all. Carried instead of that total
-        /// because no integer the compiler holds fits `2^130`, and the
-        /// grammar puts no ceiling on the input list. At least 1: a
-        /// zero-input table does not parse.
+        /// Signals left of the `->`; the table has `2^inputs` combinations. Not the total itself,
+        /// because the grammar sets no ceiling on the input list and `2^130` fits no integer the
+        /// compiler holds. At least 1.
         inputs: u32,
-        /// How many distinct combinations the rows do assign. A pattern
-        /// written twice counts once, which is why one table can be
-        /// reported as both repeating and partial. Invariant: `>= 1` and
-        /// fewer than `2^inputs` — a table with no rows is
-        /// `E_TRUTH_TABLE_EMPTY` instead, and a complete one raises
-        /// nothing.
+        /// Distinct combinations the rows assign; a repeated pattern counts once, so one table
+        /// can be both repeating and partial. At least 1 and below `2^inputs`.
         covered: u64,
-        /// The lowest few unassigned patterns, in ascending order, spelled
-        /// as a row spells them: one character per input, leading zeros
-        /// kept. Non-empty, and usually shorter than
-        /// `2^inputs - covered`.
+        /// The lowest few unassigned patterns, ascending, spelled as a row spells them. Never
+        /// empty, and usually shorter than `2^inputs - covered`.
         missing: Vec<String>,
     },
     /// Companion payload for the three `@intended_targets` codes
@@ -1155,38 +767,25 @@ pub enum DiagnosticData {
     /// [`DiagnosticCode::IntendedTargetCapPartial`],
     /// [`DiagnosticCode::IntendedTargetUnsupported`]).
     ///
-    /// Carried for the reason [`Self::IncompletePlace`] is: the obvious
-    /// quick-fix rewrites the list, and which of its entries the finding
-    /// is about should not have to be recovered from a sentence naming
-    /// several of them. The edition rides along because every one of these
-    /// findings is a per-edition answer — the same header earns different
-    /// ones from a Java and a Bedrock build — and nothing else in the
-    /// payload says which build asked.
+    /// `edition` is carried because the same header earns different findings from a Java and a
+    /// Bedrock build.
     IntendedTargets {
         /// Which edition weighed the header, as
         /// [`crate::edition::Edition::as_str`] spells it.
         edition: String,
-        /// The versions this finding is about, in the order the header
-        /// lists them. A subset of the header's list, and non-empty: a
-        /// header with nothing to report raises nothing.
+        /// The versions this finding is about, in the header's order. Never empty.
         targets: Vec<String>,
-        /// The floor that refuses the first of them, as the author wrote
-        /// it (scope included). Absent for
-        /// [`DiagnosticCode::IntendedTargetUnsupported`], which is not
-        /// about a floor at all.
+        /// The floor that refuses the first of them, as written. Absent for
+        /// [`DiagnosticCode::IntendedTargetUnsupported`], which is not about a floor.
         #[serde(skip_serializing_if = "Option::is_none")]
         floor: Option<String>,
     },
 }
 
-/// Secondary location for a [`Diagnostic`] (the "first declared here"
-/// pointer attached to a duplicate-key error, etc.).
+/// A note on a [`Diagnostic`], such as the "first declared here" of a duplicate.
 ///
-/// `span` is optional because some notes are *informational* rather than
-/// locational — the "expected one of: ..." footer on
-/// `E_UNKNOWN_KEYWORD`, for example, has no byte range distinct from the
-/// primary finding's span. Renderers should suppress the `file:L:C:`
-/// prefix for `span == None`.
+/// `span` is `None` for a note with no location of its own, such as an "expected one of" footer;
+/// a renderer prints no `file:L:C:` prefix for it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct DiagnosticNote {
     /// Byte range the note refers to, when the note points at a distinct
@@ -1199,23 +798,12 @@ pub struct DiagnosticNote {
 
 /// One finding emitted by a `check` pass.
 ///
-/// `#[non_exhaustive]` so external crates cannot construct a
-/// [`Diagnostic`] by struct literal — when a future field arrives
-/// (another structured payload slot, a `source` pointer, etc.) the
-/// addition is no longer a breaking change for downstream callers.
-/// In-crate sites still build the struct directly and update in step
-/// when new fields land; cross-crate consumers must route through a
-/// future builder rather than depending on the field set being frozen.
+/// `#[non_exhaustive]`, so a new field is not a breaking change.
 ///
-/// `Eq` and `Hash` let a pass ask whether it has already said this, and
-/// every field answers: two findings that agree on all of them are one
-/// finding reported twice, because nothing outside the struct distinguishes
-/// them. `block_array::lower_to_block_array` relies on that to drop the
-/// copies a def body's per-placement walk produces.
-///
-/// A field added here therefore has to be `Eq + Hash` — no `f64`, no
-/// `serde_json::Value` — or that call stops compiling, and a field left out
-/// of the identity is not an option while the derive reads all of them.
+/// `Eq` and `Hash` let a pass drop a finding it already reported: two findings equal in every
+/// field are one finding reported twice, which `block_array::lower_to_block_array` relies on for
+/// the copies a def body's per-placement walk produces. A new field must therefore be
+/// `Eq + Hash` (no `f64`, no `serde_json::Value`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[non_exhaustive]
 pub struct Diagnostic {
@@ -1231,10 +819,8 @@ pub struct Diagnostic {
     /// `note: ...` lines in the text format.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<DiagnosticNote>,
-    /// Optional structured payload for machine-readable consumers. `None`
-    /// for codes that have no companion data yet. Serialised as a `data`
-    /// key only when present, keeping the JSON contract additive for
-    /// existing downstream tooling.
+    /// Structured payload for machine-readable consumers; `None` for codes without one, and then
+    /// absent from the JSON.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<DiagnosticData>,
 }
@@ -1242,14 +828,8 @@ pub struct Diagnostic {
 impl Diagnostic {
     /// Severity of this finding, read from [`DiagnosticCode::severity`].
     ///
-    /// A method rather than a field so the two cannot disagree. Every pass
-    /// builds its findings as struct literals, and twenty-eight sites used
-    /// to write a `severity:` value of their own — which made
-    /// [`DiagnosticCode::severity`] documentation rather than the source of
-    /// truth, and made reclassifying a code an edit that compiled while
-    /// changing no exit code. A literal written back in now fails to
-    /// compile, which is a stronger guarantee than any corpus-driven test
-    /// could give: a test only covers the codes its fixtures reach.
+    /// A method rather than a field, so a pass cannot give a finding a severity its code does not
+    /// have.
     #[must_use]
     pub fn severity(&self) -> Severity {
         self.code.severity()
@@ -1258,24 +838,15 @@ impl Diagnostic {
     /// Convert this diagnostic's primary byte span into a 1-based
     /// `line:column` [`Position`] against the given source string.
     ///
-    /// Lines are split by [`crate::lines`], the same rule the lexer walks
-    /// by, so this and a parse error name the same row. Column counts
-    /// Unicode scalar values, mirroring the `Position` documentation.
-    ///
-    /// O(`source.len()`) per call. When converting many diagnostics from
-    /// the same source, build a [`LineStarts`] index once and call
-    /// [`LineStarts::position`] instead.
+    /// Lines split as [`crate::lines`] says, as the lexer's do. `O(source.len())` per call; for
+    /// many diagnostics, build one [`LineStarts`] and call [`LineStarts::position`].
     #[must_use]
     pub fn position(&self, source: &str) -> Position {
         position_at(source, self.span.start)
     }
 
-    /// Build a [`RenderedDiagnostic`] suitable for JSON/structured output
-    /// against the given source. Populates 1-based `line` / `col` /
-    /// `end_line` / `end_col` for both the primary span and each note that
-    /// carries a span — without these the JSON form would carry zero
-    /// position information, defeating the `--format json` contract for
-    /// downstream tooling.
+    /// Build a [`RenderedDiagnostic`] against the given source, with 1-based positions for the
+    /// primary span and every note that has one.
     #[must_use]
     pub fn render(&self, source: &str, lines: &LineStarts) -> RenderedDiagnostic {
         let start = lines.position(source, self.span.start);
@@ -1314,9 +885,7 @@ pub(crate) fn sort_by_position(diagnostics: &mut [Diagnostic]) {
 
 /// JSON-friendly rendering of a [`Diagnostic`] with line/col populated.
 ///
-/// Built via [`Diagnostic::render`]. The `code` field serialises to the same
-/// `E_*` string as the text format (see [`DiagnosticCode::as_str`]) so
-/// downstream tooling matches a single contract regardless of `--format`.
+/// Built by [`Diagnostic::render`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RenderedDiagnostic {
     /// Stable code identifying the kind of finding.
@@ -1338,9 +907,7 @@ pub struct RenderedDiagnostic {
     /// secondary location.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<RenderedNote>,
-    /// Mirror of [`Diagnostic::data`] — see that field for the full
-    /// contract. Carried separately so the rendered form can be
-    /// serialised without re-walking the source `Diagnostic`.
+    /// [`Diagnostic::data`], carried over.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<DiagnosticData>,
 }

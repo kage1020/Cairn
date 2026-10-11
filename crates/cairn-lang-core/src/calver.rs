@@ -1,32 +1,16 @@
 //! Reading the `@cairn` header's `CalVer` value.
 //!
-//! Cairn versions itself by date: `YYYY.M[.PATCH]`, the scheme
-//! `CHANGELOG.md` names and [`crate::CAIRN_VERSION`] carries. A `.crn` file
-//! MAY declare the language version it was written against
-//! (`spec/syntax` "Headers"), and that declaration is provenance — nothing
-//! branches on it, and the artifact is the same whatever it says.
+//! Cairn versions itself by date, `YYYY.M[.PATCH]`, the scheme [`crate::CAIRN_VERSION`] carries.
+//! A `.crn` file may declare the language version it was written against (`spec/syntax`
+//! "Headers"). The declaration is provenance and nothing branches on it, but it still has to be
+//! readable: a later compiler can do nothing with `@cairn banana`.
 //!
-//! Provenance still has to be readable. `spec/index` gives the header
-//! its job — "so a future compiler can parse and warn correctly" — and a
-//! compiler handed `@cairn banana` has nothing to branch on when that
-//! future arrives. This module is where the value stops being a string.
+//! Stricter than [`crate::resolve::parse_requirement`] on purpose. A Minecraft label such as
+//! `24w14a` or `1.21.4-rc1` only has to be ordered, but a `CalVer` is Cairn's own, so every
+//! component is digits, the year has four of them and the month is a calendar month.
 //!
-//! **Stricter than [`crate::resolve::parse_requirement`], deliberately.**
-//! That one reads a Minecraft version label, where the label space is
-//! Mojang's and Cairn only has to order it: a component need only begin
-//! with a digit, and a pre-release tag after a `-` is a label too, so
-//! `24w14a` and `1.21.4-rc1` are both versions there. Here the space is
-//! Cairn's own, so every component is digits, `2026.13` is a month that
-//! does not exist and `1.2` is not a year — refusing those is what makes
-//! this a `CalVer` rather than any dotted label, and each refusal names
-//! one component with an obvious repair.
-//!
-//! **Two spellings of the month, both accepted.** `spec/index` and
-//! every shipped `.crn` write `2026.06`, which is calver.org's `YYYY.0M`;
-//! [`crate::CAIRN_VERSION`] is `YYYY.M`, because Cargo's `version` field is
-//! semver and semver forbids a leading zero. Both are in this repository
-//! today, so both are read, and the comparison is numeric — `2026.06` and
-//! `2026.6` are one version, not two.
+//! The month is read as `2026.06` (`YYYY.0M`, what `spec/index` and `.crn` files write) and as
+//! `2026.6` (`YYYY.M`, since Cargo's semver forbids a leading zero). The two compare equal.
 
 use std::fmt;
 
@@ -39,48 +23,33 @@ use crate::lines::end_before;
 const FIRST_MONTH: u32 = 1;
 /// Highest month a `CalVer` names.
 const LAST_MONTH: u32 = 12;
-/// Digits in the year component. Fixed rather than a range because the
-/// point of the check is to separate a year from any other number: `1.2`
-/// is a semver, and reading it as the year 1 would make every dotted
-/// number a `CalVer`. The rule is about the shape and not about the era —
-/// `0001.1` is four digits, and is accepted.
+/// Digits in the year component. Exact, so that a semver such as `1.2` is not read as the year 1;
+/// the rule is about shape, not era, so `0001.1` passes.
 const YEAR_DIGITS: usize = 4;
 
 /// A Cairn language version, parsed from a `YYYY.M[.PATCH]` string.
 ///
-/// Field order is the comparison order, which is what the derived [`Ord`]
-/// rests on: a later year wins whatever the month says, and a later month
-/// wins whatever the patch says.
+/// Field order is the comparison order the derived [`Ord`] relies on.
 ///
-/// The calendar ranges below are [`parse_language_version`]'s guarantee
-/// about what it returns, not this type's about what it holds — nothing
-/// here refuses a month of `99`, and nothing needs to: the ordering is a
-/// sound total order over any three numbers, [`fmt::Display`] passes them
-/// through, and both operands of the one comparison in the tree come from
-/// the parser. `#[non_exhaustive]` keeps [`LanguageVersion::new`] the only
-/// way in from outside the crate, so a caller cannot write a literal past
-/// the ranges without saying so.
+/// The calendar ranges are [`parse_language_version`]'s guarantee, not this type's: the order is
+/// total over any three numbers. `#[non_exhaustive]` makes [`LanguageVersion::new`] the only way
+/// to build one outside the crate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub struct LanguageVersion {
-    /// Calendar year. Four digits as [`parse_language_version`] reads it.
+    /// Calendar year, four digits when parsed.
     pub year: u32,
-    /// Calendar month, `1..=12` as [`parse_language_version`] reads it.
-    /// Numeric, so `06` and `6` are one value.
+    /// Calendar month, `1..=12` when parsed. Numeric, so `06` and `6` are one value.
     pub month: u32,
-    /// Patch within the month. `0` when the source wrote none, which is
-    /// what makes `2026.9` the earliest release of that month rather than
-    /// a version that cannot be ordered against `2026.9.2`.
+    /// Patch within the month; `0` when the source wrote none, so `2026.9` orders before
+    /// `2026.9.2`.
     pub patch: u32,
 }
 
 impl LanguageVersion {
-    /// Build a version from its three components.
+    /// Build a version from its three components, without validation.
     ///
-    /// No validation: this is the constructor a caller uses when the
-    /// numbers came from somewhere other than a `@cairn` line — a test
-    /// pinning a comparison, or a future consumer holding a version it
-    /// derived. [`parse_language_version`] is the one that judges a string.
+    /// [`parse_language_version`] is the one that judges a string.
     #[must_use]
     pub const fn new(year: u32, month: u32, patch: u32) -> Self {
         Self { year, month, patch }
@@ -88,10 +57,8 @@ impl LanguageVersion {
 
     /// Whether this version is later than `other`.
     ///
-    /// Named rather than left to `>` at the call site because the question
-    /// the pass asks is directional — "is the file's language newer than
-    /// this compiler's" — and reading that off an operator means reading
-    /// the argument order right every time.
+    /// Named so the direction of the comparison reads at the call site, where a bare `>` would
+    /// have to be read for argument order.
     #[must_use]
     pub fn is_newer_than(&self, other: &Self) -> bool {
         self > other
@@ -99,13 +66,10 @@ impl LanguageVersion {
 }
 
 impl fmt::Display for LanguageVersion {
-    /// `2026.9` or `2026.9.2` — the patch is elided when it is zero.
+    /// `2026.9` or `2026.9.2`, eliding a zero patch.
     ///
-    /// Not a round trip, and nothing should use it as one: `2026.06`
-    /// renders as `2026.6`, `2026.1.0` loses the explicit patch, and
-    /// `0001.1` renders as `1.1`, which does not parse back at all.
-    /// `check::cairn_version` quotes the author's own string for exactly
-    /// that reason.
+    /// Not a round trip: `2026.06` renders as `2026.6`, `2026.1.0` as `2026.1`, and `0001.1` as
+    /// `1.1`, which does not parse. A message quotes the author's own string instead.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self { year, month, patch } = self;
         if *patch == 0 {
@@ -118,60 +82,48 @@ impl fmt::Display for LanguageVersion {
 
 /// Why a string is not a Cairn language version.
 ///
-/// Carried out of [`parse_language_version`] rather than collapsed into
-/// `None` for the reason [`crate::resolve::RequirementError`] is: the
-/// repairs differ. A month of `13` is one keystroke; a four-component
-/// string is a line to shorten; a year of `20261` is a typo in a place a
-/// reader's eye slides over.
+/// One variant per repair, which is why a failure is not collapsed into `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum LanguageVersionError {
-    /// The string is not two or three dot-separated components. Holds how
-    /// many there were.
+    /// Not two or three dot-separated components.
     ComponentCount {
         /// Number of dot-separated components found.
         found: usize,
     },
-    /// A component that is not a run of decimal digits: empty, or holding
-    /// something else. Holds the component as written.
+    /// A component that is empty or not all decimal digits.
     Component {
         /// The dot-separated component that could not be read.
         component: String,
     },
-    /// A year that is not exactly four digits. Holds it as written.
+    /// A year that is not exactly four digits.
     Year {
         /// The year component as written.
         component: String,
     },
-    /// A month outside `1..=12`. Holds it as written, so `013` reads back
-    /// the way the author typed it.
+    /// A month outside `1..=12`.
     Month {
-        /// The month component as written.
+        /// The month component as written, so `013` reads back as typed.
         component: String,
     },
-    /// A patch of digits that does not fit in `u32`, which is what the
-    /// comparison orders by. Holds it as written.
+    /// A patch that does not fit in `u32`.
     PatchTooLarge {
         /// The patch component as written.
         component: String,
     },
-    /// Text after the version. Holds it verbatim.
+    /// Text after the version, verbatim.
     ///
-    /// The header value is a whole line with its ends trimmed, so an
-    /// interior space is the one way a second word reaches here. Without
-    /// this arm it went into `split('.')` and came out as a "component"
-    /// of `06 draft`, which is not a component and not something a
-    /// quick-fix can replace.
+    /// Kept apart from [`Self::Component`] so `2026.06 draft` names `draft`, not a "component"
+    /// `06 draft` that no quick-fix can replace.
     TrailingTokens(String),
 }
 
 impl LanguageVersionError {
-    /// Stable machine-readable name for this failure, for a consumer
-    /// choosing a quick-fix without reading the prose.
+    /// Stable machine-readable name for this failure.
     ///
-    /// Kept beside the variants rather than derived from them, because
-    /// [`crate::check::DiagnosticData`] carries these strings onto the wire
-    /// and a rename there is a break for anything matching on them.
+    /// Spelled out rather than derived from the variant names, because
+    /// [`crate::check::DiagnosticData`] puts these strings on the wire, where a rename breaks
+    /// consumers.
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
@@ -184,14 +136,11 @@ impl LanguageVersionError {
         }
     }
 
-    /// The fragment of the value the failure is about, for a consumer
-    /// building a quick-fix over it.
+    /// The fragment of the value the failure is about.
     ///
-    /// Empty when the failure names no fragment of its own:
-    /// [`Self::ComponentCount`] is about the whole string, and
-    /// [`Self::Component`] holds an empty component when that is what the
-    /// value has (`2026.` and `.6`). Inventing a substring for either
-    /// would give a tool something to replace that the author never wrote.
+    /// Empty for [`Self::ComponentCount`], which is about the whole string, and for an empty
+    /// [`Self::Component`] (`2026.`, `.6`), so a tool is never handed text the author did not
+    /// write.
     #[must_use]
     pub fn offending_text(&self) -> &str {
         match self {
@@ -241,20 +190,15 @@ impl std::error::Error for LanguageVersionError {}
 
 /// Read a `YYYY.M[.PATCH]` string as a [`LanguageVersion`].
 ///
-/// The whole string has to be the version. Surrounding whitespace is not
-/// trimmed — the one caller reads a header value the parser has already
-/// trimmed — but an *interior* space ends the version and makes what
-/// follows [`LanguageVersionError::TrailingTokens`], because a header
-/// value is a whole line and `2026.6 draft` is two things on it.
+/// The whole string has to be the version. Surrounding whitespace is not trimmed, because the
+/// header value arrives trimmed; an interior space starts
+/// [`LanguageVersionError::TrailingTokens`].
 ///
 /// # Errors
 ///
 /// [`LanguageVersionError`], naming the component that could not be read.
 pub fn parse_language_version(text: &str) -> Result<LanguageVersion, LanguageVersionError> {
-    // The version runs to the first whitespace; anything past it is a
-    // second thing on a line that names one version. Read before the dots
-    // so `2026.06 draft` reports the word rather than a "component" of
-    // `06 draft`, which is not a fragment of the value a tool can replace.
+    // Before the split on dots, so a second word is reported whole.
     let (text, trailing) = match text.find(char::is_whitespace) {
         Some(at) => (&text[..at], text[at..].trim()),
         None => (text, ""),
@@ -266,9 +210,7 @@ pub fn parse_language_version(text: &str) -> Result<LanguageVersion, LanguageVer
     if !matches!(parts.len(), 2 | 3) {
         return Err(LanguageVersionError::ComponentCount { found: parts.len() });
     }
-    // Digits first, for every component, so the year and month rules below
-    // are about numbers rather than about text. `str::parse` would accept
-    // a leading `+` and a `-` sign, which are not spellings of a date.
+    // Digits first: `str::parse` accepts a leading `+`, which is no spelling of a date.
     for part in &parts {
         if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
             return Err(LanguageVersionError::Component {
@@ -282,18 +224,14 @@ pub fn parse_language_version(text: &str) -> Result<LanguageVersion, LanguageVer
             component: year_text.to_owned(),
         });
     }
-    // Four digits always fit in `u32`. Read fallibly anyway, so the
-    // function has no panic for a reader to rule out and the ceiling is a
-    // named failure rather than an `expect` message.
+    // Four digits always fit; reading fallibly keeps the function free of panics.
     let year = year_text
         .parse::<u32>()
         .map_err(|_| LanguageVersionError::Year {
             component: year_text.to_owned(),
         })?;
     let month_text = parts[1];
-    // `013` and any longer run of leading zeros parse to the same month,
-    // and a month that overflows `u32` is out of range for the same reason
-    // `13` is — one arm, because the repair is the same.
+    // A month that overflows `u32` is out of range like `13`: same repair, same variant.
     let month = month_text
         .parse::<u32>()
         .ok()
@@ -312,28 +250,16 @@ pub fn parse_language_version(text: &str) -> Result<LanguageVersion, LanguageVer
     Ok(LanguageVersion { year, month, patch })
 }
 
-/// The note a parse failure carries when the `@cairn` header has
-/// something to say about it.
+/// The note a parse failure carries when the `@cairn` header has something to say about it.
 ///
-/// The `@cairn` check pass cannot reach a file that does not parse, and a
-/// whole new syntactic form — the shape a later language most often adds — is
-/// exactly what does not parse. The header is still readable from the
-/// text, which is what [`declared_version`] reads it from. Without this
-/// note the author is told "I do not understand this line" where the
-/// answer is "you need a newer Cairn", which is the whole reason
-/// `@cairn` is in the file.
+/// No check pass runs on a file that does not parse, and a new syntactic form from a later
+/// language is exactly what does not parse, so this note is how the author learns they need a
+/// newer Cairn. It is a note rather than a second finding because `spec/lint` "Error vs warning"
+/// makes a source that does not parse report `E_PARSE` alone.
 ///
-/// A note rather than a second finding, because `spec/lint`
-/// "Error vs warning" makes a source that does not parse report `E_PARSE`
-/// alone. A note keeps that true.
-///
-/// Two things it says. A header naming a *later* language explains the
-/// error below it. A header naming no language version at all —
-/// `@cairn banana`, or a value the lexer could not have read — says that
-/// this build cannot tell whether the error below is a version gap, which
-/// is worth a sentence because this is the only moment the author hears
-/// it: `W_INVALID_CAIRN_VERSION` is raised by a check pass, and no check
-/// pass runs on a source that does not parse.
+/// A header naming a later language explains the error. A header naming no language version says
+/// this build cannot tell whether the error is a version gap; the author hears nothing else,
+/// because `W_INVALID_CAIRN_VERSION` comes from a check pass.
 pub(crate) fn future_version_note(source: &str, line_starts: &[usize]) -> Option<DiagnosticNote> {
     let (declared, span) = declared_version(source, line_starts)?;
     let Ok(version) = parse_language_version(&declared) else {
@@ -355,40 +281,23 @@ pub(crate) fn future_version_note(source: &str, line_starts: &[usize]) -> Option
     })
 }
 
-/// The `@cairn` value a source declares and the span of the line
-/// carrying it, read from the text.
+/// The `@cairn` value a source declares and the span of its line, read from the text.
 ///
-/// Text rather than the AST because the caller has none, and text rather
-/// than the lexer because a source that fails to *lex* has no tokens
-/// either — `floor a=%` is the shape this note most needs to reach. Both
-/// halves of that matter: `crate::parse` lexes the whole file before it
-/// reads a header, so on a lex failure it holds no header at all, and on
-/// an unknown directive above the `@cairn` it stops at that line while
-/// this scan walks past it.
+/// Read from text because a source that fails to lex has neither AST nor tokens (`floor a=%` is
+/// the case this note most needs), and because `crate::parse` stops at an unknown directive above
+/// the `@cairn` where this scan walks past it.
 ///
-/// Only the header block is read: the run of lines before the first that
-/// is neither blank, a comment, nor a top-level `@directive`, which is
-/// the only place [`crate::parse()`] takes a header from. A `@cairn` below
-/// that, or indented under a body, is not a header, and reading one
-/// would attribute a version to a file the parser never saw one in.
+/// Only the header block is read: the lines before the first one that is not blank, a comment or
+/// a top-level `@directive`, which is the only place [`crate::parse()`] takes a header from.
 ///
-/// Where this agrees with the lexer it has to agree exactly, because the
-/// note asserts what the file *declares*. Lines come from
-/// [`crate::lines`] rather than from a `split` of this function's own,
-/// so `\r\n` and a lone `\r` end a line here the way they do everywhere
-/// else. Horizontal space is a single `' '` and nothing else, because
-/// `Lexer::skip_spaces` takes that byte alone: a tab at indentation is
-/// `LexError::TabIndent`, so `@cairn\t2099.1` declares nothing, and a
-/// `str::trim` that stripped the tab would have this note claim a
-/// version the file never carried. What survives the trim is then
-/// required to hold no space at all, which is the same rule read from
-/// the other end: a header value is one token. A leading byte-order mark is skipped
-/// for the opposite reason — the lexer skips one, so the header behind
-/// it is real.
+/// It must agree with the lexer exactly, because the note claims what the file declares. Lines
+/// end where [`crate::lines`] says, so `\r\n` and a lone `\r` behave as everywhere else.
+/// Horizontal space is `' '` alone, as in the lexer: a tab at indentation is
+/// `LexError::TabIndent`, so `@cairn\t2099.1` declares nothing. A leading byte-order mark is
+/// skipped, because the lexer skips it too.
 ///
-/// The span matches the one [`Header::Cairn`](crate::ast::Header::Cairn) carries — the `@` to the
-/// last byte of the value — so the note points where the check pass's own
-/// finding would have.
+/// The span matches [`Header::Cairn`](crate::ast::Header::Cairn)'s, from the `@` to the value's
+/// last byte, so the note points where the check pass's finding would.
 fn declared_version(source: &str, line_starts: &[usize]) -> Option<(String, Span)> {
     for (index, &start) in line_starts.iter().enumerate() {
         let end = match line_starts.get(index + 1) {
@@ -407,9 +316,7 @@ fn declared_version(source: &str, line_starts: &[usize]) -> Option<(String, Span
         if probe.is_empty() || probe.starts_with('#') {
             continue;
         }
-        // Anything that is not a directive at column zero ends the
-        // header block, indentation included: an indented `@cairn` is a
-        // body row to the lexer, not a header.
+        // An indented `@cairn` is a body row to the lexer, not a header.
         let rest = text.strip_prefix('@')?;
         let name_len = rest
             .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
@@ -417,18 +324,12 @@ fn declared_version(source: &str, line_starts: &[usize]) -> Option<(String, Span
         if &rest[..name_len] != "cairn" {
             continue;
         }
-        // Up to the comment marker, the way the lexer reads the line: a
-        // `#` ends the value wherever it sits.
+        // A `#` ends the value wherever it sits, as in the lexer.
         let tail = &text[1 + name_len..];
         let tail = tail.split_once('#').map_or(tail, |(before, _)| before);
         let declared = tail.trim_matches(' ');
-        // A header value is one token, so any space left inside it after
-        // the spaces around it are gone is space the lexer would have
-        // stopped on — a tab at indentation is `LexError::TabIndent`, and
-        // `@cairn 2026.06 spare` is a second token the header grammar has
-        // no room for. Either way `parse` built no header, and a note
-        // about what the file "declares" would be about a declaration
-        // that does not exist.
+        // Whitespace left inside is a tab the lexer rejects or a second token; either way
+        // `parse` built no header, so the file declares nothing.
         if declared.is_empty() || declared.chars().any(char::is_whitespace) {
             return None;
         }
@@ -484,9 +385,7 @@ mod tests {
 
     #[test]
     fn the_count_is_judged_before_the_components() {
-        // A one-component string names no month to be out of range, and a
-        // four-component one has a valid year and month in front of the
-        // problem — so the count has to be the first thing read.
+        // `2026.06.1.2` has a valid year and month in front of the problem.
         assert_eq!(
             parse_language_version("banana"),
             Err(LanguageVersionError::ComponentCount { found: 1 }),
@@ -566,8 +465,7 @@ mod tests {
 
     #[test]
     fn every_failure_names_itself_and_the_text_it_is_about() {
-        // The payload a consumer reads. `kind` is on the wire, so it is
-        // pinned here rather than left to the one call site.
+        // `kind` is on the wire, so it is pinned here rather than left to the one call site.
         for (text, kind, found) in [
             ("banana", "component_count", ""),
             ("2026.6.x", "component_not_a_number", "x"),
@@ -579,9 +477,7 @@ mod tests {
                 "99999999999999999999",
             ),
             ("2026.06 draft", "trailing_tokens", "draft"),
-            // Empty when the failure names no fragment. `2026.` has a
-            // component and it is the empty string, which is why the
-            // payload contract cannot say "empty means the whole value".
+            // `2026.` has a component, the empty string, so empty does not mean the whole value.
             ("2026.", "component_not_a_number", ""),
         ] {
             let error = parse_language_version(text).expect_err("not a version");
@@ -598,9 +494,6 @@ mod tests {
 
     #[test]
     fn rendering_is_not_a_round_trip_and_the_doc_says_so() {
-        // Named here so the promise is pinned as *absent*: whoever first
-        // puts a `LanguageVersion` into a message has to reach for the
-        // author's own string, which is what `check::cairn_version` does.
         let padded = parse_language_version("2026.06").expect("a version");
         assert_eq!(padded.to_string(), "2026.6", "the zero does not survive");
         let explicit = parse_language_version("2026.1.0").expect("a version");
@@ -615,10 +508,6 @@ mod tests {
 
     #[test]
     fn a_second_word_after_the_version_is_named_as_one() {
-        // The header value is a whole line with its ends trimmed, so an
-        // interior space is the one way a second word arrives. Read
-        // before the dots: otherwise `06 draft` came out as a "component",
-        // which is not a fragment of the value a quick-fix can replace.
         for (text, rest) in [
             ("2026.06 draft", "draft"),
             ("2026.6  and more", "and more"),
@@ -634,8 +523,7 @@ mod tests {
 
     #[test]
     fn an_empty_component_is_described_rather_than_quoted() {
-        // `` `` `` in a sentence tells an author nothing. The sibling
-        // `@requires` parser has the same dedicated arm.
+        // A quoted empty component renders as ``, which tells the author nothing.
         for text in ["2026.", ".6", "2026..1"] {
             let error = parse_language_version(text).expect_err("not a version");
             let rendered = error.to_string();

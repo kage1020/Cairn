@@ -1,55 +1,27 @@
 //! Lexer for the Cairn surface syntax.
 //!
-//! Produces a stream of [`Token`]s with byte spans and 1-based line/column
-//! positions, plus synthetic `Indent` / `Dedent` / `Newline` tokens so the
-//! parser can treat the language as indent-structured without re-walking
-//! whitespace.
+//! Produces [`Token`]s with byte spans and 1-based positions, plus synthetic `Indent`, `Dedent`
+//! and `Newline` tokens so the parser can treat the language as indent-structured.
 //!
-//! Line endings: `\n`, `\r\n`, and lone `\r` are all accepted as a single
-//! logical newline so files written on Windows (`core.autocrlf=true`) lex the
-//! same as files written on Linux. The rule itself lives in
-//! [`crate::lines`], shared with every layer that resolves a byte offset
-//! into a `line:column` after the fact — a `Newline` here and a diagnostic
-//! there have to name the same row.
+//! Line breaks follow [`crate::lines`], so a `Newline` here and a position resolved from a span
+//! name the same row. One `Indent` opens one level (a deeper jump is an error), but one dedented
+//! line emits a `Dedent` per level it closes. A byte-order mark is skipped only at the very start
+//! of the file. Comments, blank lines and trailing spaces are dropped.
 //!
-//! Indent/Dedent asymmetry: only one `Indent` token may be emitted per indent
-//! step (the lexer rejects multi-level jumps as `IndentJump`), but a single
-//! dedented line emits *one `Dedent` per level closed*. Parsers can therefore
-//! rely on `Dedent` counts to know how many scopes ended on that line.
-//!
-//! A byte-order mark at the very start of the file is skipped, since that
-//! is what a default Windows editor writes and it is not part of the text.
-//! One anywhere else is an ordinary stray character.
-//!
-//! Comments (`#` to end-of-line), blank lines, and trailing whitespace are
-//! discarded silently; everything else either becomes a token or fails with a
-//! [`LexError`].
-//!
-//! Two kinds of failure, and [`lex`] reports both the same way. A failure in
-//! a line's *indentation* ends the scan, since every token after it would
-//! sit at a level nobody can name. A failure *inside* a line — a character
-//! no token starts with, an unterminated string, a malformed size or
-//! integer — does not end it in the parser's own pass: the stretch is kept
-//! as a [`TokenKind::Unlexed`] and the scan goes on, because the directives
-//! that take their value as raw text to end of line (`@cairn`, `@requires`,
-//! a part's `requires`) judge that text themselves and have a finding of
-//! their own for a value they cannot read. [`crate::parse()`] reports the
-//! deferred failure only when the stretch lands anywhere else.
+//! A failure in a line's indentation ends the scan, since every later token would sit at a level
+//! nobody can name. A failure inside a line does not, in the parser's own pass: the stretch
+//! becomes a [`TokenKind::Unlexed`], because the directives that take raw text to end of line
+//! (`@cairn`, `@requires`, a part's `requires`) judge that text themselves. [`lex`] reports both
+//! kinds alike, and [`crate::parse()`] reports a deferred one only where the stretch lands
+//! anywhere else.
 
 use crate::error::{IntContext, LexError, Position, Span};
 
-/// `indent_stack` is seeded with `0` in `Lexer::new` and we only pop while
-/// the top is strictly greater than the current level, so the bottom-of-stack
-/// zero sentinel is never popped. The `expect` calls below document that
-/// invariant rather than hiding it behind an `unwrap_or(&0)` default.
+/// The bottom `0` of `indent_stack` is never popped: a pop needs a top greater than the current
+/// level, which is at least 0.
 const INDENT_STACK_NONEMPTY: &str = "indent_stack invariant: bottom 0 sentinel is never popped";
 
 /// Leading spaces per indentation level.
-///
-/// Named because the number appears in three roles that a bare `2` does
-/// not distinguish: the divisor turning a space count into a level, the
-/// parity a width must satisfy, and the multiplier turning a level back
-/// into the width a diagnostic asks for.
 const SPACES_PER_LEVEL: u32 = 2;
 
 /// One lexical token.
@@ -71,26 +43,17 @@ pub enum TokenKind {
     Ident(String),
     /// A run of decimal digits, carried verbatim.
     ///
-    /// Not yet a number. The lexer cannot tell an integer literal from a
-    /// truth-table row's bit pattern — both are digits, and only the
-    /// grammar around them says which — so it does not decide: the token
-    /// holds the digits and whoever needs a value parses them into the
-    /// type that position actually takes (`i64` for a value, `u32` for a
-    /// `within` bound). Interpreting here would put an `i64` ceiling on
-    /// every digit run in the language, including the patterns that are
-    /// not numbers at all: a twenty-input truth table whose row reads
-    /// `11111111111111111111` is a legal table, not an overflow.
-    ///
-    /// The lexeme is the whole token for the same reason `01` and `1`
-    /// have to stay different rows: leading zeros are data here.
+    /// Not yet a number: only the grammar around it says whether it is an integer or a
+    /// truth-table row's bit pattern, whose leading zeros are data and whose twenty digits can
+    /// overflow an `i64`. The position that needs a value parses it into the type it takes.
     Int {
         /// Raw source lexeme (preserves leading zeros).
         lexeme: String,
     },
     /// Boolean literal `true` / `false`.
     Bool(bool),
-    /// Double-quoted string literal. Escape sequences are preserved verbatim
-    /// at this layer; interpretation is left to a later layer.
+    /// Double-quoted string literal, without the quotes. The content is verbatim: a string runs
+    /// to the next `"`.
     Str(String),
     /// Size literal `WxH`, e.g. `9x7`.
     Size(u32, u32),
@@ -100,16 +63,9 @@ pub enum TokenKind {
     Arrow,
     /// `-` on its own.
     ///
-    /// Two constructs read one, and neither is an operator. Both are in
-    /// a truth row: a `-` in the input pattern is a don't-care, which the
-    /// parser reassembles out of the run of `Int` and `Minus` tokens the
-    /// lexer split it into, and a `-` in the output position is the row
-    /// declining to constrain what it covers. Everywhere else the parser
-    /// reports it as an unexpected token, which names the `-` it found in
-    /// the position it found it.
-    ///
-    /// The lexer takes `->` greedily, so the last `-` of a run that ends
-    /// at a `>` is an [`TokenKind::Arrow`] and not one of these.
+    /// Not an operator: only a truth row reads one, as a don't-care bit in the input pattern
+    /// (reassembled from the run of `Int` and `Minus` tokens) or as an unconstrained output.
+    /// `->` is taken greedily, so a `-` right before `>` is part of an [`TokenKind::Arrow`].
     Minus,
     /// `=` (key/value or `logic =`).
     Eq,
@@ -151,11 +107,8 @@ pub enum TokenKind {
     /// with, an unterminated string, or a size or integer the lexer
     /// refused.
     ///
-    /// [`lex`] never returns one — it reports the failure as the
-    /// [`LexError`] it is. Only [`crate::parse()`]'s own pass sees these,
-    /// so that a directive whose value is raw text to end of line can take
-    /// the stretch into that text; anywhere else the parse reports the
-    /// same `LexError` `lex` would have.
+    /// [`lex`] never returns one. Only [`crate::parse()`]'s own pass sees it, so that a directive
+    /// whose value is raw text to end of line can take the stretch as text.
     Unlexed,
 }
 
@@ -188,10 +141,7 @@ impl std::fmt::Display for TokenKind {
             Self::Newline => f.write_str("end of line"),
             Self::Indent => f.write_str("indent"),
             Self::Dedent => f.write_str("dedent"),
-            // Not expected to surface: `parse()` reports the deferred
-            // `LexError` ahead of anything the parse found, and a raw value
-            // takes an `Unlexed` as text. Kept for totality, not as wording
-            // a user reads.
+            // Not expected to surface: `parse()` reports the deferred `LexError` first.
             Self::Unlexed => f.write_str("text that is no token"),
         }
     }
@@ -207,8 +157,7 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
         deferred,
         fatal,
     } = lex_deferring(source);
-    // Every deferred failure was met before the scan stopped, so the first
-    // of them, if any, is the first failure in the file.
+    // Every deferred failure precedes the fatal one, so the first is the first in the file.
     match (deferred.into_iter().next(), fatal) {
         (Some(first), _) => Err(first.error),
         (None, Some(fatal)) => Err(fatal),
@@ -261,20 +210,9 @@ const BOM: &str = "\u{feff}";
 
 impl<'src> Lexer<'src> {
     fn new(src: &'src str) -> Self {
-        // A leading BOM is metadata about the encoding, not text. Skipped
-        // by advancing `pos` rather than by trimming `src`, so every span
-        // stays an offset into the string the caller handed us — an
-        // editor highlighting a diagnostic indexes the same bytes.
-        //
-        // `col` counts it, though it occupies no column an author can
-        // see. Not counting it would be the friendlier number in
-        // isolation, but it is not the only one reported: every
-        // span-derived position — `LineStarts::position` here,
-        // `LineIndex` in the LSP — resolves a column by counting
-        // characters from the line's start, and both count the mark.
-        // A lexer that skipped it would put its own errors one column
-        // left of every other layer's, on the first line of exactly the
-        // files a Windows editor produces.
+        // A leading BOM is skipped by advancing `pos`, not by trimming `src`, so spans stay
+        // offsets into the caller's string. `col` still counts it, because every span-derived
+        // position (`LineStarts::position`, the language server's `LineIndex`) does.
         let has_bom = src.starts_with(BOM);
         Self {
             src,
@@ -299,7 +237,6 @@ impl<'src> Lexer<'src> {
             }
             self.scan_line_body();
         }
-        // Close any open indentation when the file ends.
         while self.indent_stack.len() > 1 {
             self.indent_stack.pop();
             self.push_synthetic(TokenKind::Dedent);
@@ -320,7 +257,6 @@ impl<'src> Lexer<'src> {
             let start_position = self.position();
             let spaces = self.count_leading_spaces()?;
 
-            // Skip blank or comment-only lines without changing indent state.
             if self.peek().is_none_or(is_line_break_or_comment) {
                 if self.peek() == Some(b'#') {
                     while let Some(b) = self.peek() {
@@ -333,7 +269,6 @@ impl<'src> Lexer<'src> {
                 if self.consume_line_break() {
                     continue;
                 }
-                // EOF after blanks/comments.
                 return Ok(());
             }
 
@@ -346,13 +281,6 @@ impl<'src> Lexer<'src> {
             let level = spaces / SPACES_PER_LEVEL;
             let current = *self.indent_stack.last().expect(INDENT_STACK_NONEMPTY);
             if level > current {
-                // Only allow one level of indent increase at a time.
-                //
-                // Its own variant rather than `OddIndent`: 4 spaces is a
-                // multiple of 2, so "indentation must be a multiple of 2"
-                // describes a rule the line already satisfies. `expected`
-                // carries the one width that opens exactly one level from
-                // here, which is what the author has to write.
                 if level != current + 1 {
                     return Err(LexError::IndentJump {
                         position: start_position,
@@ -412,13 +340,8 @@ impl<'src> Lexer<'src> {
                 return;
             };
             if b == b'\n' || b == b'\r' {
-                // Recorded before the break is consumed. A `Newline` is
-                // where a line *ends*, and the parser reports "expected X,
-                // got end of line" at the position of the token it stopped
-                // at — so a position taken after the break sends the reader
-                // to the first column of the next line, which holds none of
-                // the text that is wrong and, after the last break in a
-                // file, holds no text at all.
+                // Positioned before the break, so "expected X, got end of line" points at the
+                // line that is wrong rather than at the start of the next.
                 let start = self.pos;
                 let position = self.position();
                 self.consume_line_break();
@@ -529,9 +452,7 @@ impl<'src> Lexer<'src> {
             c if c.is_ascii_digit() => self.scan_number(start, position)?,
             c if is_ident_start(c) => self.scan_ident(start, position),
             _ => {
-                // Read the *character* (not the byte) so multi-byte non-ASCII
-                // codepoints are reported faithfully and `pos` advances past
-                // the whole codepoint (avoids landing mid-sequence).
+                // A whole character, so `pos` never lands inside a UTF-8 sequence.
                 let ch = self.peek_char().unwrap_or('\0');
                 self.advance_char();
                 return Err(LexError::UnexpectedChar { position, ch });
@@ -541,7 +462,6 @@ impl<'src> Lexer<'src> {
     }
 
     fn scan_string(&mut self, start: usize, position: Position) -> Result<(), LexError> {
-        // Consume opening quote.
         self.advance();
         let content_start = self.pos;
         loop {
@@ -571,9 +491,8 @@ impl<'src> Lexer<'src> {
             }
         }
         let lexeme_end = self.pos;
-        // Size literal: `<digits>x<digits>` produced as a single Size token.
         if self.peek() == Some(b'x') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
-            self.advance(); // 'x'
+            self.advance();
             let h_start = self.pos;
             while let Some(b) = self.peek() {
                 if b.is_ascii_digit() {
@@ -584,22 +503,6 @@ impl<'src> Lexer<'src> {
             }
             let w_str = &self.src[start..lexeme_end];
             let h_str = &self.src[h_start..self.pos];
-            // A `Size` holds two extents. If the run continues into a
-            // third (`2x2x9`) or into a word (`2x2y`), the author wrote
-            // something this token cannot carry, and splitting it into a
-            // `Size` plus an identifier reports the wrong thing in the
-            // wrong place: the identifier lands among the parser's
-            // positional values, where `check::positional` eventually
-            // reports it as a stray argument — a true statement about a
-            // token the author never wrote, pointing past the literal
-            // that produced it. In a declaration header there is no
-            // positional list at all, so the parser fails at the end of
-            // the line instead.
-            //
-            // Refusing here also reaches the consumers that never run
-            // `check`: the tree-sitter grammar, an editor's scan path, a
-            // formatter. `check::positional` is the only guard today, and
-            // it sits downstream of all of them.
             if let Some(found) = self.peek().filter(|b| is_ident_continue(*b)) {
                 return Err(LexError::TrailingSizeSegment {
                     position,
@@ -622,13 +525,9 @@ impl<'src> Lexer<'src> {
             self.push_at(TokenKind::Size(w, h), start..self.pos, position);
             return Ok(());
         }
-        // Digits only, no value: see `TokenKind::Int`. A `Size` above is
-        // the other way round because no production today reads
-        // digits-`x`-digits as anything but a size, so the lexer is
-        // entitled to build one. That is a fact about the current
-        // grammar rather than a guarantee — a truth-table don't-care bit
-        // spelled `x` would make `1x0 -> 1` a `Size(1, 0)`, and this is
-        // the branch that would have to learn about it.
+        // Digits only, no value: see `TokenKind::Int`. A `Size` gets a value because no
+        // production reads digits-`x`-digits as anything else; a don't-care bit spelled `x`
+        // would make `1x0 -> 1` a `Size(1, 0)`, and the branch above would have to learn it.
         let lexeme = self.src[start..lexeme_end].to_owned();
         self.push_at(TokenKind::Int { lexeme }, start..self.pos, position);
         Ok(())
@@ -669,15 +568,13 @@ impl<'src> Lexer<'src> {
         self.src[self.pos..].chars().next()
     }
 
-    /// Advance by one ASCII byte and one column. Caller asserts that the byte
-    /// at `pos` is ASCII (every existing call site reads via `peek()` first).
+    /// Advance by one byte and one column. The byte at `pos` must be ASCII.
     fn advance(&mut self) {
         self.pos += 1;
         self.col += 1;
     }
 
-    /// Advance by one full Unicode code point — used inside string literals and
-    /// the unexpected-character recovery path, where non-ASCII may appear.
+    /// Advance by one Unicode scalar value and one column.
     fn advance_char(&mut self) {
         if let Some(ch) = self.peek_char() {
             self.pos += ch.len_utf8();
@@ -685,12 +582,8 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Consume one line break (`\n`, `\r\n`, or lone `\r`) if present and bump
-    /// the line counter. Returns `true` if any input was consumed.
-    ///
-    /// Which byte sequences count is [`crate::lines::terminator_len`]'s to
-    /// say, so that this lexer and every layer that resolves a byte offset
-    /// into a `line:column` after the fact split the source the same way.
+    /// Consume one line break, as [`crate::lines::terminator_len`] defines it, and start the next
+    /// line. Returns whether one was consumed.
     fn consume_line_break(&mut self) -> bool {
         let Some(len) = crate::lines::terminator_len(self.src, self.pos) else {
             return false;
@@ -702,9 +595,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn position(&self) -> Position {
-        // `self.line` and `self.col` are seeded with 1 in `Lexer::new` and only
-        // ever advance (line via newline, col via byte/char). They never hit
-        // zero, so the `NonZeroU32::new` calls below are total.
+        // `line` and `col` start at 1 and only grow.
         Position {
             line: std::num::NonZeroU32::new(self.line).expect("lex line is 1-based"),
             col: std::num::NonZeroU32::new(self.col).expect("lex col is 1-based"),

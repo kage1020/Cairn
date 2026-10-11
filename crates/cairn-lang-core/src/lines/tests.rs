@@ -1,8 +1,6 @@
 use super::*;
 
-/// Sources whose lines Rust already agrees about. `split` has to match
-/// `str::lines` on all of them, or replacing one with the other changes
-/// behaviour nobody asked to change.
+/// Sources on which `split` must match `str::lines`.
 const AGREED: &[&str] = &[
     "",
     "a",
@@ -22,12 +20,10 @@ fn terminator_len_names_each_of_the_three_breaks() {
     assert_eq!(terminator_len("a\rb", 1), Some(1));
     assert_eq!(terminator_len("a\nb", 1), Some(1));
     assert_eq!(terminator_len("a\r\nb", 0), None);
-    // Past the end is not a terminator, so callers can ask about any
-    // offset without a bounds check of their own.
+    // Past the end is no terminator, so callers need no bounds check.
     assert_eq!(terminator_len("a", 1), None);
     assert_eq!(terminator_len("a", 99), None);
-    // The `\n` of a `\r\n` is the pair's second byte, not a break of
-    // its own — asking about it would double-count the line.
+    // At the `\n` of a pair it answers 1, so a caller must step over the whole pair.
     assert_eq!(terminator_len("a\r\nb", 2), Some(1));
 }
 
@@ -63,13 +59,10 @@ fn end_before_stops_at_the_terminator_it_follows() {
     assert_eq!(end_before("a\nb", 2), 1);
     assert_eq!(end_before("a\r\nb", 3), 1);
     assert_eq!(end_before("a\rb", 2), 1);
-    // A source opening with a break: the first line is empty and ends
-    // where it starts. Reading the byte before it would leave the
-    // source entirely.
+    // A source opening with a break: the first line is empty.
     assert_eq!(end_before("\nx", 1), 0);
     assert_eq!(end_before("\r\nx", 2), 0);
-    // An empty line between two breaks gives up its own terminator and
-    // not the one that opened it.
+    // An empty line between two breaks ends at its own terminator, not the one before it.
     assert_eq!(end_before("\r\r", 2), 1);
     assert_eq!(end_before("a\r\r\n", 4), 2);
 }
@@ -114,8 +107,7 @@ fn split_matches_str_lines_wherever_str_lines_is_right() {
 fn split_also_breaks_at_a_lone_carriage_return() {
     assert_eq!(split("a\rb\r").collect::<Vec<_>>(), vec!["a", "b"]);
     assert_eq!(split("a\r\rb").collect::<Vec<_>>(), vec!["a", "", "b"]);
-    // The case that motivates the module: `str::lines` yields one line
-    // here, so a scanner built on it sees `floor walls` as one command.
+    // `str::lines` yields one line here.
     assert_eq!(
         split("floor\rwalls").collect::<Vec<_>>(),
         vec!["floor", "walls"]
@@ -133,8 +125,7 @@ fn split_matches_str_lines_backwards_too() {
     }
 }
 
-/// The two ends have to meet exactly once, or a line is yielded twice
-/// or not at all. Alternating is the only way to catch that.
+/// Alternating ends is what catches a line yielded twice or not at all.
 #[test]
 fn split_yields_each_line_once_when_walked_from_both_ends() {
     for source in AGREED.iter().copied().chain(AWKWARD.iter().copied()) {
@@ -213,13 +204,8 @@ fn position(line: u32, col: u32) -> Position {
     }
 }
 
-/// Every byte offset survives the trip out to a position and back.
-///
-/// The two conversions are written separately — one walks the line
-/// starts forward, the other counts characters along a line — so
-/// nothing but this says they agree. Non-ASCII on both sides of a
-/// break, because the column counts Unicode scalar values and a
-/// byte-counting version passes an ASCII-only round trip.
+/// Non-ASCII on both sides of a break, because a byte-counting column would pass an ASCII-only
+/// round trip.
 #[test]
 fn a_byte_offset_survives_the_round_trip_through_a_position() {
     let source = "α\nfoo\nβar\n";
@@ -233,13 +219,8 @@ fn a_byte_offset_survives_the_round_trip_through_a_position() {
     }
 }
 
-/// A position from outside the source clamps instead of panicking.
-///
-/// Nothing in this crate can reach it — a `ParseError` reports a
-/// position into the source it failed on — so the guard exists for the
-/// caller holding a position from a *different* revision of a
-/// document, which an editor does between a keystroke and a re-parse.
-/// Asserted here because there is nowhere else it can be.
+/// Nothing in this crate produces such a position; an editor holding one from an older revision
+/// of the document does.
 #[test]
 fn a_position_from_outside_the_source_clamps() {
     let source = "ab\ncd";
@@ -259,8 +240,6 @@ fn a_position_from_outside_the_source_clamps() {
 
 #[test]
 fn position_at_handles_unicode_columns() {
-    // Two-byte UTF-8 character: the column count must advance by 1
-    // (one Unicode scalar value), not by the byte length.
     let source = "α\nβ\n";
     let pos_after_alpha = position_at(source, 2); // byte 2 = start of '\n'
     assert_eq!(pos_after_alpha.line.get(), 1);
@@ -281,12 +260,7 @@ fn position_at_for_offset_past_end_clamps_to_eof() {
 
 #[test]
 fn position_agrees_with_a_direct_walk_of_the_source() {
-    // The index exists so N diagnostics do not re-walk the source N
-    // times, and the walk is what it has to reproduce: step one
-    // character at a time, bumping the line at each break and the
-    // column otherwise. Comparing against `position_at` instead would
-    // now be comparing the index with itself — there is one
-    // implementation, which is the point of having one rule.
+    // `position_at` is the index itself, so the reference is an independent walk.
     for source in ["α\nfoo\nbar\nβaz\n", "a\r\nb\rc", "\r\r\n", "", "no break"] {
         let lines = LineStarts::new(source);
         let (mut line, mut col, mut offset) = (1_u32, 1_u32, 0_usize);
@@ -319,8 +293,6 @@ fn position_agrees_with_a_direct_walk_of_the_source() {
     }
 }
 
-/// `line_of` is the line `position` reports, counted from zero, at
-/// every offset under each break style and past the end of the source.
 #[test]
 fn line_of_is_the_zero_based_line_of_position() {
     for source in ["α\nfoo\nbar\nβaz\n", "a\r\nb\rc", "\r\r\n", "", "no break"] {

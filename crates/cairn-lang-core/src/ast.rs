@@ -1,29 +1,14 @@
 //! Abstract syntax tree for the Cairn surface language.
 //!
-//! Every node here preserves the surface form of a single `.crn` construct so
-//! that round-tripping, error reporting, and future semantic lifting can all
-//! reason about what the author actually wrote. Disambiguation that would
-//! collapse equivalent surface forms (canonicalising tokens, resolving names,
-//! type-checking) is the responsibility of downstream layers.
+//! Every node keeps the surface form of one `.crn` construct, so error reporting and later layers
+//! see what the author wrote. Anything that would merge equivalent spellings (canonicalising
+//! tokens, resolving names, type-checking) belongs to a later layer.
 //!
-//! Source-position propagation: [`Header`], [`Item`], [`Statement`],
-//! [`ThemeRule`], [`MemberRequires`], [`Arg`], [`Value`], and [`TruthRow`] each
-//! carry a `span` field
-//! pointing at the byte range of the originating source, and [`Item`] carries a
-//! second, narrower `name_span` for the name token alone — a block's `span`
-//! reaches to the end of its indented body, which is too much to underline for a
-//! finding about the name. Diagnostic-collecting passes in
-//! `crate::check` rely on those spans to point a user at a specific spot in
-//! their `.crn` file. Every span field is tagged `#[serde(skip)]`, including
-//! any added later, so the externally-visible wire shape is unchanged from
-//! before spans were threaded through. The rest of the boolean-expression
-//! family ([`Expr`] and [`DottedRef`]) is intentionally span-free for now;
-//! those nodes only appear inside `logic`/`assert` lines that the
-//! reference-resolution pass will revisit, and spending the bytes there today
-//! would not buy any diagnostic the current passes need. [`TruthRow`] left
-//! that group once `crate::check` began reporting one row against another:
-//! "this row disagrees with an earlier one" names two positions, and neither
-//! of them is the statement's.
+//! [`Header`], [`Item`], [`Statement`], [`ThemeRule`], [`MemberRequires`], [`Arg`], [`Value`]
+//! and [`TruthRow`] carry the byte `span` of their source, and [`Item`] also a narrower
+//! `name_span`. Every span field is `#[serde(skip)]`, and a new one must be too, so the
+//! serialized shape carries no positions. [`Expr`] and [`DottedRef`] carry none, because no
+//! finding points inside a `logic` or `assert` expression.
 
 use std::num::NonZeroU32;
 
@@ -33,19 +18,11 @@ use crate::error::Span;
 
 /// A `CalVer` language version string captured verbatim from `@cairn`.
 ///
-/// Wrapping the raw string in a newtype prevents callers from confusing it
-/// with arbitrary identifiers, requirement expressions, or other free-form
-/// labels. Validation of the `YYYY.M[.PATCH]` shape is not done here: this
-/// type fixes the source provenance and nothing else.
-///
-/// The parsed form is [`crate::calver::LanguageVersion`], produced by
-/// [`crate::calver::parse_language_version`] and consumed by
-/// `check::cairn_version`, which is the one pass that reads the value. It
-/// is deliberately not held here — the header is provenance, so the string
-/// as the author wrote it is what every consumer wants, and a parsed copy
-/// beside it would be a second answer to keep in step. `#[non_exhaustive]`
-/// forces external callers through [`RawVersion::new`] rather than letting
-/// them depend on the tuple-struct shape.
+/// A newtype so it is not confused with other strings; the `YYYY.M[.PATCH]` shape is not checked
+/// here. The parsed [`crate::calver::LanguageVersion`] is deliberately not held beside it: the
+/// header is provenance, so consumers want the author's string, and a parsed copy would be a
+/// second answer to keep in step. `#[non_exhaustive]` keeps external callers on
+/// [`RawVersion::new`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 #[non_exhaustive]
@@ -64,13 +41,9 @@ impl RawVersion {
     }
 }
 
-/// A Minecraft-side requirement expression captured verbatim from
-/// `@requires`. Same role as [`RawVersion`]: keep the raw form distinct from
-/// other strings so downstream layers know it is meant to be parsed as a
-/// constraint, not displayed as-is.
+/// A Minecraft requirement expression captured verbatim from `@requires`.
 ///
-/// `#[non_exhaustive]` plays the same role as on [`RawVersion`] — see that
-/// type's documentation for the rationale.
+/// A newtype and `#[non_exhaustive]` for the same reasons as [`RawVersion`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 #[non_exhaustive]
@@ -91,29 +64,18 @@ impl RawRequirement {
 
 /// One `requires version>=X` line inside a `def` or `theme` body.
 ///
-/// The member-level twin of [`Header::Requires`] (`spec/versioning-editions`
-/// "Fail-loud and minimum-version inference"). It carries the same verbatim
-/// expression, read by the same `parse_requirement`, and differs only in what it
-/// constrains: a module-level `@requires` is a floor on the file, while this one
-/// is a floor on the part that declares it and therefore on every build that
-/// instantiates that part.
+/// The member-level twin of [`Header::Requires`] (`spec/versioning-editions` "Fail-loud and
+/// minimum-version inference"): the same verbatim expression, read by the same
+/// `parse_requirement`, but a floor on the part that declares it, and so on every build that
+/// instantiates the part.
 ///
-/// Held on the item rather than in its body statements because the word is
-/// not a member keyword and must not become one. `crate::intent`'s role
-/// table has no arm for it, so a `requires` line left among the statements
-/// lowers to `MemberRole::Other("requires")` and `check::keyword_allowlist`
-/// reports every one of them as `E_UNKNOWN_KEYWORD`. Lifting it is what
-/// keeps the floor out of the member vocabulary; the alternative was not a
-/// line the geometry passes skip but a new role for four passes to learn.
+/// Held on the item rather than among its body statements because `requires` is not a member
+/// keyword: as a statement it would lower to `MemberRole::Other` and be reported as
+/// `E_UNKNOWN_KEYWORD`.
 ///
-/// What it holds is one line's expression, verbatim — the same slice
-/// `@requires` keeps, and shaped no further. `E_INVALID_REQUIRES` is what
-/// reads it, and it says which part of the expression is wrong and carries
-/// the fragment for a quick-fix; a shape gate here would replace that with
-/// `E_PARSE` and no fragment, and would hold the two spellings of one
-/// constraint to two different grammars. The one thing the parser does
-/// refuse is an empty expression, because there is nothing there for either
-/// to report on.
+/// The expression is kept unshaped, as `@requires` keeps it, so that `E_INVALID_REQUIRES` can say
+/// which part is wrong; a shape check here would turn that into a bare `E_PARSE`. The parser
+/// refuses only an empty expression.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct MemberRequires {
@@ -146,9 +108,7 @@ pub struct Module {
 
 /// A leading directive line introduced by `@`.
 ///
-/// Values inside each variant are captured verbatim from the source: parsing
-/// the version string, requirement expression, or target list into structured
-/// data happens in a later layer so this AST stays free of validation policy.
+/// Values are captured verbatim; parsing them is a later layer's job.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
@@ -198,13 +158,8 @@ impl Header {
 pub enum Item {
     /// `theme NAME[:]` block — slot/selector bindings.
     ///
-    /// `#[non_exhaustive]` on the variant, not only on the enum: the enum's
-    /// own attribute makes adding a *variant* non-breaking and does nothing
-    /// for a field added to an existing one, which is what the `requires`
-    /// field was. This variant and [`Self::Def`] carry it because this
-    /// change already broke their struct patterns, so the next field costs
-    /// nothing; [`Self::Site`] and [`Self::Struct`] do not, because giving
-    /// it to them would be a breakage this change does not need.
+    /// `#[non_exhaustive]` on the variant as well as the enum, because the enum's attribute does
+    /// not cover a field added to an existing variant.
     #[non_exhaustive]
     Theme {
         /// Theme name following the `theme` keyword.
@@ -278,12 +233,9 @@ pub enum Item {
 
 /// Which top-level construct an [`Item`] is.
 ///
-/// The kind is also the name's namespace. The resolver keys scopes
-/// `struct::NAME`, `def::NAME`, and `site::NAME::PLACE_ID`, and holds
-/// themes in a map of their own, so one name may be declared once per
-/// kind without colliding. `check::duplicate` and the resolver both
-/// depend on that fact; a `&'static str` in each would be two tables to
-/// keep in step, and nothing would catch a typo in either.
+/// The kind is also the name's namespace: one name may be declared once per kind, because the
+/// resolver keys scopes `struct::NAME`, `def::NAME` and `site::NAME::PLACE_ID` and holds themes in
+/// a map of their own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ItemKind {
     /// `theme NAME` block.
@@ -300,11 +252,8 @@ impl ItemKind {
     /// Every kind, in the order `keyword` lists them.
     pub const ALL: [Self; 4] = [Self::Theme, Self::Def, Self::Site, Self::Struct];
 
-    /// Keyword introducing this kind, as written in source.
-    ///
-    /// Doubles as the scope-key prefix for the three kinds that have
-    /// one (`struct::`, `def::`, `site::`); themes are held by name in
-    /// a map of their own and so have no key.
+    /// Keyword introducing this kind, as written in source, and the scope-key prefix of every
+    /// kind but `theme`.
     #[must_use]
     pub fn keyword(self) -> &'static str {
         match self {
@@ -350,11 +299,8 @@ impl Item {
         }
     }
 
-    /// Byte range of the name token alone.
-    ///
-    /// [`Self::span`] covers the whole block including its indented
-    /// body, which is the wrong thing to underline when the finding is
-    /// about the name.
+    /// Byte range of the name token alone, for a finding about the name; [`Self::span`] runs to
+    /// the end of the body.
     #[must_use]
     pub fn name_span(&self) -> &Span {
         match self {
@@ -367,13 +313,10 @@ impl Item {
 
     /// The `requires version>=X` lines this item declares.
     ///
-    /// Empty for `site` and `struct`, which refuse a line that reads as a
-    /// floor — `spec/versioning-editions` "Fail-loud and minimum-version
-    /// inference" gives it to `def` and `theme`, the two kinds a build
-    /// instantiates rather than *is*. An empty slice rather than an `Option`,
-    /// because a caller folding floors over every item asks the same question
-    /// of all four and the answer for the other two is "none", not "not
-    /// applicable".
+    /// Empty for `site` and `struct`: `spec/versioning-editions` "Fail-loud and minimum-version
+    /// inference" gives the line only to `def` and `theme`, the kinds a build instantiates rather
+    /// than is. A slice rather than an `Option`, so a caller folding floors over every item asks
+    /// one question.
     #[must_use]
     pub fn requires(&self) -> &[MemberRequires] {
         match self {
@@ -424,11 +367,8 @@ impl ThemeRule {
 
 /// One line of a struct / site / def body.
 ///
-/// Most lines are `Generic` and follow the standard
-/// `keyword[selector] positional... key=value... -> binding` grammar. The
-/// special forms `logic` and `assert` have their own surface grammar and
-/// therefore appear as dedicated variants — making the discriminant a type
-/// invariant rather than an `Option<Extra>` carried by every generic line.
+/// Most lines are `Generic`: `keyword[selector] positional... key=value... -> binding`. `logic`
+/// and `assert` have grammars of their own, and so variants of their own.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
@@ -443,14 +383,9 @@ pub enum Statement {
         selector: Option<Vec<Arg>>,
         /// Bare values on the line, in source order.
         ///
-        /// Not a prefix: the parse loop appends here whenever the next token
-        /// is not `key=`, `-> binding`, or a selector, so `size=2 x2` leaves
-        /// one entry *after* an argument. `check::positional` relies on that
-        /// — an interleaved bare value is usually a dropped `=`, which is the
-        /// shape worth catching.
-        ///
-        /// Empty for every well-formed command but `connect <ref> to <ref>`,
-        /// the one form with a reader for it (`spec/syntax` "Lexical").
+        /// Not only a prefix: a bare value after an argument lands here too (`size=2 x2`),
+        /// because it is usually a dropped `=` that `check::positional` reports. Empty for every
+        /// well-formed command but `connect <ref> to <ref>` (`spec/syntax` "Lexical").
         #[serde(skip_serializing_if = "Vec::is_empty")]
         positional: Vec<Value>,
         /// `key=value` arguments in source order.
@@ -462,9 +397,7 @@ pub enum Statement {
         /// Child statements indented under this one.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         children: Vec<Statement>,
-        /// Byte range of the keyword line itself (excluding children). Used by
-        /// the `keyword_allowlist` and `type_mismatch` passes to point at a
-        /// whole statement.
+        /// Byte range of the keyword line itself, without its children.
         #[serde(skip)]
         span: Span,
     },
@@ -528,19 +461,12 @@ pub struct Arg {
     pub key: String,
     /// Value on the RHS of `=`.
     pub value: Value,
-    /// Byte range covering the whole `key=value` pair. Used by the
-    /// `duplicate` pass to point at a repeated argument and by
-    /// `keyword_allowlist` notes that fold an argument span into the
-    /// surrounding diagnostic.
+    /// Byte range of the whole `key=value` pair.
     #[serde(skip)]
     pub span: Span,
 }
 
-/// Discriminant of a [`Value`].
-///
-/// Keeps the original surface-form variants. The wrapper [`Value`] then
-/// attaches a `span` next to the kind, so internally-tagged enum
-/// serialisation (`{kind, value}`) stays byte-identical to the pre-span form.
+/// Discriminant of a [`Value`], in its surface form.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value")]
 #[non_exhaustive]
@@ -551,9 +477,7 @@ pub enum ValueKind {
     Bool(bool),
     /// Integer literal (`4`, `0`, ...).
     Int(i64),
-    /// Size literal `WxH` (`9x7`). Both dimensions are blocks, and `0xN`
-    /// or `Nx0` is not meaningful as a building footprint — the type rules
-    /// it out without per-field validation downstream.
+    /// Size literal `WxH` (`9x7`), in blocks. Non-zero, since a zero extent is no footprint.
     Size {
         /// Width in blocks.
         w: NonZeroU32,
@@ -572,21 +496,14 @@ pub enum ValueKind {
     List(Vec<Value>),
 }
 
-/// A value occurring on the RHS of `key=`, inside a list, or as a positional
-/// argument.
-///
-/// Carries the underlying [`ValueKind`] together with the byte range of the
-/// originating literal in source. The wrapper is `#[serde(transparent)]` over
-/// the kind so the wire shape is identical to serialising the bare
-/// `ValueKind` — `span` does not appear in JSON/YAML output.
+/// A value on the right of `key=`, inside a list, or as a positional argument, with its byte
+/// range. Serializes as its [`ValueKind`] alone.
 #[derive(Debug, Clone, Serialize)]
 #[serde(transparent)]
 pub struct Value {
     /// What kind of value this is.
     pub kind: ValueKind,
-    /// Byte range covered by this value in the original source.
-    ///
-    /// Not part of equality — see the `PartialEq` impl below.
+    /// Byte range covered by this value in the original source. Not part of equality.
     #[serde(skip)]
     pub span: Span,
 }
@@ -594,29 +511,16 @@ pub struct Value {
 /// Two values are equal when they say the same thing, wherever they were
 /// written.
 ///
-/// Hand-written rather than derived. The derive compared `span` as well,
-/// and [`ValueKind::List`] holds `Value`s — so `ValueKind`'s own derived
-/// equality recursed back through this impl, and two lists spelled
-/// identically on two lines were never equal at any depth. The comparisons
-/// this exists for ask what the value *is*: a theme selector asking
-/// whether a member carries the attribute it names, and the
-/// duplicate-selector pass asking whether two rows select alike. The
-/// `#[serde(transparent)]` above already says the value is its kind, and a
-/// caller that needs the position has `span` in hand.
+/// Hand-written so `span` is ignored at every depth of a [`ValueKind::List`]: a theme selector and
+/// the duplicate-selector pass ask what a value is, not where it was written.
 ///
-/// Two traits are deliberately absent, and stay absent:
+/// Two traits stay absent:
 ///
-/// - `Hash` must not be derived here. This equality ignores `span`, so a
-///   derived hash would break `k1 == k2 ⇒ hash(k1) == hash(k2)`. Clippy's
-///   `derived_hash_with_manual_eq` catches the derive; a hand-written
-///   `impl Hash` would slip past it.
-/// - `Eq` would hold today — nothing in [`ValueKind`] is a float, so the
-///   relation is a true equivalence — but `ValueKind` is
-///   `#[non_exhaustive]` and the spec already shows a decimal literal
-///   (`scale=2.0`). A later `Float(f64)` would mean withdrawing `Eq`, and
-///   removing a trait impl is a major break where adding one is not.
-///   Nothing needs it: no map is keyed on a `Value`, and `assert_eq!`
-///   wants only `PartialEq`.
+/// - `Hash`: a derived hash would include `span` and break `a == b ⇒ hash(a) == hash(b)`.
+///   Clippy's `derived_hash_with_manual_eq` catches a derive but not a hand-written impl.
+/// - `Eq`: it would hold, but `ValueKind` is `#[non_exhaustive]` and the spec already shows a
+///   decimal literal (`scale=2.0`). A float variant would then mean withdrawing `Eq`, a major
+///   break, and nothing needs it.
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         self.kind == other.kind
@@ -636,14 +540,8 @@ impl Value {
         &self.span
     }
 
-    /// Borrow the inner string when this value lowers as a *label* — an
-    /// identifier or a string literal. Used by passes that consume
-    /// `key=label` arguments (`use=cottage`, `theme=medieval`,
-    /// `east_of=home1`, ...) so the same coercion does not have to be
-    /// re-implemented at every call site, and so a future relaxation of
-    /// what counts as a label (e.g. accepting bare tokens) lands in one
-    /// place. Returns `None` for non-label kinds; callers raise a
-    /// targeted diagnostic in that case.
+    /// The inner string when this value is a label: an identifier or a string literal, as in
+    /// `use=cottage` or `theme=medieval`. The one place that decides what counts as a label.
     #[must_use]
     pub fn as_label_str(&self) -> Option<&str> {
         match &self.kind {
@@ -652,17 +550,11 @@ impl Value {
         }
     }
 
-    /// Source text that would parse back to this value, or `None` when
-    /// the reconstruction is unbounded — a list nests, and a diagnostic
-    /// that grows with the input is not one an editor can render inline.
+    /// Source text that would parse back to this value, or `None` for a list, whose text is
+    /// unbounded and so cannot be rendered inline.
     ///
-    /// A string is quoted and otherwise left alone. Cairn string literals
-    /// have no escape mechanism — the lexer takes the raw slice between
-    /// the quotes, and a newline inside one is an unterminated-string
-    /// error — so `Debug`'s escaping would show the author text they did
-    /// not write and that would not parse back to the same value.
-    /// Private, because the round-trip claim is a contract and `describe`
-    /// is the one caller that has to keep it.
+    /// A string is quoted and otherwise left alone: string literals have no escapes, so `Debug`'s
+    /// escaping would show text the author did not write.
     fn surface_form(&self) -> Option<String> {
         match &self.kind {
             ValueKind::Ident(s) => Some(s.clone()),
@@ -676,19 +568,11 @@ impl Value {
         }
     }
 
-    /// Kind and surface form together, for a message that says what it
-    /// found: `` identifier `a` ``, `` reference `foo.bar` ``, `a list`.
+    /// Kind and surface form together, for a message that says what it found:
+    /// `` identifier `a` ``, `` reference `foo.bar` ``, `a list`.
     ///
-    /// The surface form matters most for the shapes that render
-    /// identically under a bare [`Self::kind_name`]: a message that
-    /// printed a string's contents unquoted read as rejecting the very
-    /// word it had asked for.
-    ///
-    /// A noun phrase, article included, so it drops into a sentence
-    /// without the caller knowing which arm it took: `names a list`
-    /// rather than `names list`. Only the unbounded kinds reach the
-    /// article — the rest carry their own text and read as a phrase
-    /// already.
+    /// A noun phrase, article included where there is no surface form, so it drops into a
+    /// sentence whichever arm it took.
     #[must_use]
     pub fn describe(&self) -> String {
         match self.surface_form() {
@@ -697,9 +581,7 @@ impl Value {
         }
     }
 
-    /// One-word rendering of the kind. Used in diagnostic messages such as
-    /// "expected a label (identifier or string), got `token`" so callers do
-    /// not have to match on the kind themselves.
+    /// One-word name of the kind, for diagnostic messages.
     #[must_use]
     pub fn kind_name(&self) -> &'static str {
         match &self.kind {
@@ -719,24 +601,15 @@ impl Value {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct TruthRow {
-    /// Input pattern, one character per input signal: `0`, `1`, or `-`
-    /// for a don't-care, which stands for both values of that input.
-    /// Leading zeros are preserved, since `01` and `1` are rows of
-    /// differently sized tables.
+    /// Input pattern, one character per input signal: `0`, `1`, or `-` for a don't-care, which
+    /// stands for both values. Leading zeros are kept, since `01` and `1` are rows of differently
+    /// sized tables.
     pub inputs: String,
-    /// Output bit, or `None` where the row's output is `-`.
-    ///
-    /// The grammar permits only `0`, `1`, and `-` here, so the value is a
-    /// `bool` rather than a `u8` that could also hold something illegal
-    /// like `7`. `None` is the row saying the combinations it covers are
-    /// deliberately unconstrained: they count as assigned, so the coverage
-    /// finding passes over them, and nothing is asserted about the
-    /// circuit's output there.
+    /// Output bit, or `None` where the row's output is `-`: the combinations it covers count as
+    /// assigned for coverage, but nothing is asserted about the output there.
     pub output: Option<bool>,
-    /// Byte range of `PATTERN -> BIT`, ending at the output bit: the
-    /// separator that follows is punctuation between rows rather than part
-    /// of one, and underlining it would put the caret past the text the
-    /// finding is about.
+    /// Byte range of `PATTERN -> BIT`, without the separator that follows, which is punctuation
+    /// between rows.
     #[serde(skip)]
     pub span: Span,
 }
@@ -756,23 +629,18 @@ pub enum Expr {
     Not(Box<Expr>),
 }
 
-/// Head segment marking a [`DottedRef`] as a redstone signal name rather
-/// than a member id or a place reference.
+/// Head segment marking a [`DottedRef`] as a redstone signal name rather than a member id or a
+/// place reference.
 ///
-/// Lives here, next to the type it classifies, because three layers ask the
-/// same question: `block_array` decides whether an actuator argument is
-/// wired, `check::member_scope` decides whether a misplaced member is
-/// carrying a signal worth mentioning, and `redstone::synth` collects the
-/// sensors and actuators themselves.
+/// Kept beside the type it classifies, because `block_array`, `check` and the redstone crate all
+/// ask the question.
 pub const SIGNAL_HEAD: &str = "sig";
 
 /// A non-empty dotted name path such as `home1.entry`, `sig.step`, or a bare
 /// `outer` (single segment).
 ///
-/// Non-emptiness is encoded in the [`DottedRef::new`] constructor signature
-/// — a head segment is mandatory, the tail may be empty — so downstream code
-/// never has to special-case an empty path. Serialises as the bare segment
-/// list so wire consumers see `["sig", "step"]`, not a wrapped object.
+/// Never empty: [`DottedRef::new`] takes the head segment apart from the tail. Serializes as the
+/// bare segment list, `["sig", "step"]`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct DottedRef {
@@ -780,10 +648,7 @@ pub struct DottedRef {
 }
 
 impl DottedRef {
-    /// Build a non-empty [`DottedRef`] from a mandatory `head` segment and a
-    /// (possibly empty) `tail` of additional segments. The two-arg signature
-    /// makes the non-empty invariant a structural property of the call rather
-    /// than something the caller has to remember to satisfy.
+    /// Build a [`DottedRef`] from a `head` segment and a possibly empty `tail`.
     #[must_use]
     pub fn new(head: String, tail: Vec<String>) -> Self {
         let mut segments = Vec::with_capacity(tail.len() + 1);
@@ -792,10 +657,7 @@ impl DottedRef {
         Self { segments }
     }
 
-    /// Try to build a [`DottedRef`] from an arbitrary segment vector,
-    /// returning `None` if the vector is empty. Use this when the caller
-    /// already has a `Vec<String>` and would prefer to push the emptiness
-    /// check to the type rather than the call site.
+    /// Build a [`DottedRef`] from a segment vector, or `None` when it is empty.
     #[must_use]
     pub fn try_from_segments(segments: Vec<String>) -> Option<Self> {
         if segments.is_empty() {
@@ -823,19 +685,16 @@ impl DottedRef {
         &self.segments[1..]
     }
 
-    /// Number of segments. Always ≥ 1, hence the `NonZeroUsize` return —
-    /// callers never need a separate "is empty" check.
+    /// Number of segments, never zero.
     ///
     /// # Panics
-    /// Never: the non-empty invariant is enforced by every constructor, so
-    /// the inner `NonZeroUsize::new` call always succeeds.
+    /// Never: every constructor keeps the path non-empty.
     #[must_use]
     pub fn len(&self) -> std::num::NonZeroUsize {
         std::num::NonZeroUsize::new(self.segments.len()).expect("DottedRef is non-empty")
     }
 
-    /// Iterate over the segments in source order. Equivalent to
-    /// `(&dr).into_iter()` but discoverable as a method.
+    /// Iterate over the segments in source order.
     pub fn iter(&self) -> std::slice::Iter<'_, String> {
         self.segments.iter()
     }
@@ -868,18 +727,14 @@ impl<'a> IntoIterator for &'a DottedRef {
 mod tests {
     use super::*;
 
-    /// A value of `kind` at `offset`, spanning one byte. The offset is
-    /// what varies between two otherwise identical values.
+    /// A value of `kind` spanning one byte at `offset`.
     fn at(offset: usize, kind: ValueKind) -> Value {
         Value::new(kind, offset..offset + 1)
     }
 
     #[test]
     fn a_value_is_equal_to_the_same_value_written_somewhere_else() {
-        // The guard against re-deriving `PartialEq`. The derive compared
-        // `span`, and a list holds `Value`s, so the recursion made two
-        // identically-spelled lists unequal at every depth — which is how
-        // a list-valued theme selector came to match no member at all.
+        // A derived `PartialEq` would compare spans at every depth of a list.
         let ident = |s: &str| ValueKind::Ident(s.to_owned());
         let flat =
             |offset| ValueKind::List(vec![at(offset, ident("a")), at(offset + 2, ident("b"))]);
@@ -889,8 +744,7 @@ mod tests {
         assert_eq!(at(0, flat(0)), at(90, flat(90)), "list");
         assert_eq!(at(0, nested(0)), at(90, nested(90)), "list of lists");
 
-        // And still discriminating on what the value says, to the same
-        // depth: a difference buried inside a nested list is a difference.
+        // Still unequal when the contents differ, at any depth.
         assert_ne!(at(0, ident("a")), at(0, ident("b")), "different idents");
         assert_ne!(
             at(0, ValueKind::List(vec![at(0, ident("a"))])),

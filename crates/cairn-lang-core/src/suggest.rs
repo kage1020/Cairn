@@ -1,20 +1,12 @@
 //! "Did you mean ...?" candidate lookup over a closed vocabulary.
 //!
-//! [`nearest_match`] is the single entry point. Diagnostics that report an
-//! unknown identifier against a known set (`E_UNKNOWN_KEYWORD`,
-//! `E_UNRESOLVED_SLOT`, the `--target` resolver in `cairn-lang-formats`) call
-//! it to attach a `did you mean X?` note. The function is fail-loud's
-//! second half — `spec/glossary` "Fail-loud" requires errors return the
-//! closed set of valid candidates *and* a suggested DSL fix; the existing
-//! `expected one of: ...` notes cover the former and this module covers the
-//! latter.
+//! `spec/glossary` "Fail-loud" asks an error for the valid candidates and a suggested fix; this
+//! module supplies the fix for a diagnostic that reports an unknown identifier against a known
+//! set.
 //!
-//! Distance metric is Damerau-Levenshtein (`strsim::damerau_levenshtein`),
-//! which scores a single adjacent-character swap as 1. Pure Levenshtein
-//! would charge 2 for the same swap and miss the common `walsl` ↔ `walls`
-//! typo. The threshold scales with input length so a 2-char identifier
-//! cannot suggest a 4-char candidate the user could not plausibly have
-//! meant.
+//! The distance is Damerau-Levenshtein, which scores an adjacent swap (`walsl` for `walls`) as one
+//! edit where Levenshtein charges two. The cap scales with input length, so a short identifier
+//! cannot suggest a candidate the author could not plausibly have meant.
 
 use strsim::damerau_levenshtein;
 
@@ -38,14 +30,10 @@ pub(crate) fn did_you_mean_note(suggested: &str) -> DiagnosticNote {
     }
 }
 
-/// Maximum Damerau-Levenshtein distance allowed for a suggestion, scaled by
-/// the user's input length. The cut-offs (3 / 6 chars) are picked so a
-/// 2-3 char identifier admits at most one edit, mid-length identifiers two,
-/// and longer ones three — past which the suggestion reads as a different
-/// word entirely.
+/// Maximum edit distance for a suggestion, by input length in characters. Past three edits a
+/// suggestion reads as a different word.
 fn max_distance(input_len: usize) -> usize {
-    // [`nearest_match_by`] returns early on an empty input, so 0 never
-    // reaches here; the lower bound is 1.
+    // `nearest_match_by` returns early on an empty input, so 0 never arrives.
     match input_len {
         1..=3 => 1,
         4..=6 => 2,
@@ -53,22 +41,13 @@ fn max_distance(input_len: usize) -> usize {
     }
 }
 
-/// Return the candidate closest to `input` under Damerau-Levenshtein
-/// distance, subject to the length-scaled threshold from `max_distance`.
+/// The candidate closest to `input` by Damerau-Levenshtein distance, within the length-scaled
+/// cap.
 ///
-/// Returns `None` when `input` is empty, no candidate sits within the
-/// threshold, or `input` exactly matches some candidate (an exact match is
-/// not a typo and the caller is already in a "this should not be reported
-/// at all" branch). On a distance tie the first candidate in iteration
-/// order wins, so call sites controlling the candidate order
-/// (`known_keywords()`, `theme.slots.keys()`) determine the tie-break.
-///
-/// Comparison goes through Damerau-Levenshtein character-by-character, so
-/// case differences cost one edit each. DSL identifiers are case-sensitive
-/// (`spec/syntax`) — `Walls` is a different keyword from `walls` — but
-/// a wrong case is exactly the typo this function is meant to catch, and
-/// the distance threshold prevents the suggestion from drifting beyond
-/// "one or two edits away."
+/// `None` when `input` is empty, when no candidate is within the cap, or when `input` is itself a
+/// candidate, because an exact match is not a typo. On a tie the first candidate wins, so the
+/// caller's candidate order is the tie-break. A case difference costs one edit: identifiers are
+/// case-sensitive, and a wrong case is a typo worth catching.
 #[must_use]
 pub fn nearest_match<'a, I>(input: &str, candidates: I) -> Option<&'a str>
 where
@@ -95,18 +74,10 @@ where
     let mut best: Option<(usize, &'a str)> = None;
     for cand in candidates {
         if cand == input {
-            // Exact match — the caller is on an error path because *something*
-            // about the input was wrong (wrong scope, etc.), not because of a
-            // typo. Returning the input unchanged would render as a useless
-            // `did you mean \`walls\`?` next to the user's literal `walls`.
             return None;
         }
-        // The distance is never smaller than the difference in length (each
-        // extra character costs at least one insertion or deletion), so a
-        // candidate further than `max_edits` away in length cannot pass the
-        // cap. Skipping it here changes no answer, and a skipped candidate
-        // costs the count of its characters rather than the
-        // O(len(input) × len(cand)) distance.
+        // The distance is at least the length difference, so this skip changes no answer and
+        // saves a quadratic distance computation.
         if cand.chars().count().abs_diff(input_len) > max_edits {
             continue;
         }
@@ -115,8 +86,7 @@ where
             continue;
         }
         match best {
-            // Strict `<` keeps the tie-break "first wins": the candidate
-            // iterator's order is the contract surface for ambiguous cases.
+            // Only a strictly nearer candidate replaces the first one found.
             Some((best_distance, _)) if distance >= best_distance => {}
             _ => best = Some((distance, cand)),
         }
@@ -127,26 +97,15 @@ where
 /// The candidate closest to `id`, compared on the path within `id`'s own
 /// namespace.
 ///
-/// `id` and every candidate are `namespace:path`. Two rules a bare
-/// [`nearest_match`] over the full strings does not express:
+/// `id` and every candidate are `namespace:path`.
 ///
-/// - **Score the path, not the id.** The cap scales with input length, and
-///   every vanilla id shares the ten-character `minecraft:` prefix — long
-///   enough to buy a third edit the meaningful part never earned. Over a
-///   table of a thousand ids that is the difference between suggesting
-///   `oak_planks` for `oak_plank` and suggesting `dirt` for `light`.
-/// - **Stay inside the namespace.** A `mod:` id is not repaired by a
-///   `minecraft:` one — the pack that would have to declare it is the
-///   mod's.
+/// - The path is scored, not the id: the cap scales with length, and the ten-character
+///   `minecraft:` prefix would buy a third edit the path never earned (`dirt` for `light`).
+/// - Only `id`'s own namespace is searched, because a `mod:` id is not repaired by a `minecraft:`
+///   one.
 ///
-/// `None` for an id carrying no `namespace:` prefix, and otherwise whatever
-/// [`nearest_match`] answers, re-prefixed.
-///
-/// One definition because both callers make the same suggestion about the
-/// same kind of name: the pinned `E_UNKNOWN_ID` in
-/// `block_array::material`, and the edition-wide one `cairn info`'s
-/// portability row prints. They differ only in where the candidates come
-/// from, which is this function's argument.
+/// `None` for an id with no `namespace:` prefix; otherwise [`nearest_match`]'s answer,
+/// re-prefixed.
 #[must_use]
 pub fn nearest_namespaced_id<'a, I>(id: &str, candidates: I) -> Option<String>
 where
@@ -164,23 +123,16 @@ where
 /// How many candidates [`candidate_list`] prints before counting the
 /// rest.
 ///
-/// A registry-pack alias group runs to sixteen ids where one spelling was
-/// split into a family (`light_block_0` … `_15`), and a note that prints
-/// all of them buries the line saying what went wrong.
+/// A registry-pack alias group can run to sixteen ids (`light_block_0` … `_15`), and printing
+/// them all buries what went wrong.
 pub const CANDIDATES_SHOWN: usize = 4;
 
 /// Render a closed candidate set as the fragment a diagnostic note reads,
 /// in the order given and truncated to [`CANDIDATES_SHOWN`].
 ///
-/// One definition because the truncation is a presentation rule about the
-/// same kind of list in two commands — the `E_UNKNOWN_ID` note and `cairn
-/// info`'s unsupported-entry rows — and a cap that differed between them
-/// would be a difference nobody chose.
-///
-/// Truncating at all is a claim only about the sentence. Where a consumer
-/// needs the closed set an error must return per `spec/versioning-editions`
-/// "Fail-loud and minimum-version inference", it reads the diagnostic's `data`
-/// payload, which carries every candidate.
+/// The truncation is only about the sentence: the closed set an error must return
+/// (`spec/versioning-editions` "Fail-loud and minimum-version inference") is in the diagnostic's
+/// `data`.
 #[must_use]
 pub fn candidate_list(candidates: &[String]) -> String {
     let listed = candidates
@@ -201,13 +153,7 @@ mod tests {
 
     const KEYWORDS: &[&str] = &["floor", "walls", "door", "window", "roof", "stair", "level"];
 
-    /// No distance is computed for a candidate whose length differs from
-    /// the input's by more than the cap, whether the input is the longer or
-    /// the shorter of the two: an unknown id far longer than every
-    /// candidate, and one far shorter than every candidate, each answer
-    /// `None` with no candidate scored. The short candidates stand in for a
-    /// pinned target's block table: a couple of thousand ids of block-id
-    /// length.
+    /// `block_ids` stands in for a pinned target's block table.
     #[test]
     fn a_candidate_too_far_away_in_length_is_never_scored() {
         fn answer_and_scored<'a>(input: &str, table: &'a [String]) -> (Option<&'a str>, usize) {
@@ -237,15 +183,11 @@ mod tests {
         );
     }
 
-    /// The length prune changes no answer: every input below gets what
-    /// scoring every candidate gives, including inputs at the edge of the
-    /// band (one, two and three characters longer or shorter than a
-    /// candidate) where an off-by-one in the prune would drop a match.
+    /// Inputs a few characters longer or shorter than a candidate sit on the prune's edge, where
+    /// an off-by-one would drop a match.
     #[test]
     fn the_length_prune_agrees_with_scoring_every_candidate() {
-        /// Scores every candidate, with the same tie-break contract as
-        /// [`nearest_match_by`]: strict `<`, so the first of equally near
-        /// candidates wins.
+        /// Scores every candidate; the first of equally near ones wins.
         fn unpruned<'a>(input: &str, candidates: &[&'a str]) -> Option<&'a str> {
             if input.is_empty() {
                 return None;
@@ -279,9 +221,7 @@ mod tests {
             "window",
             "oak_planks",
             "stone_bricks",
-            // Three chars in nine bytes: a prune that measured the
-            // candidate in bytes would drop it where it is the answer, as
-            // it is for `日本語z`.
+            // Three chars in nine bytes: a prune measuring bytes would drop it for `日本語z`.
             "日本語",
         ];
         let mut inputs: Vec<String> = Vec::new();
@@ -310,8 +250,6 @@ mod tests {
 
     #[test]
     fn adjacent_swap_suggests_match() {
-        // Damerau-Levenshtein scores `wlals` ↔ `walls` as 1 (one swap of
-        // positions 0-1). Pure Levenshtein would score it 2 and miss this.
         assert_eq!(
             nearest_match("wlals", KEYWORDS.iter().copied()),
             Some("walls"),
@@ -328,15 +266,12 @@ mod tests {
 
     #[test]
     fn distant_input_returns_none() {
-        // `xyzzy` is 5 chars from every keyword in `KEYWORDS` — well above
-        // the length-scaled cap of 2 for a 5-char input.
+        // Far beyond the cap of 2 for a five-character input.
         assert!(nearest_match("xyzzy", KEYWORDS.iter().copied()).is_none());
     }
 
     #[test]
     fn exact_match_returns_none() {
-        // The caller is already on an error path; echoing the input back as
-        // a "did you mean" suggestion would mask the real cause.
         assert!(nearest_match("walls", KEYWORDS.iter().copied()).is_none());
     }
 
@@ -352,25 +287,19 @@ mod tests {
 
     #[test]
     fn case_difference_is_a_one_edit_suggestion() {
-        // DSL identifiers are case-sensitive (`spec/syntax`) — `Walls` is
-        // a different keyword from `walls` — but wrong case is exactly the
-        // typo we want to catch, so the suggestion fires (distance 1, well
-        // inside the cap of 2 for a 5-char input).
         assert_eq!(nearest_match("Walls", ["walls"].into_iter()), Some("walls"),);
     }
 
     #[test]
     fn tie_break_prefers_first_in_iteration_order() {
-        // Both candidates sit at distance 1 from `aa`. The contract is
-        // "first candidate wins"; the call site controls suggestion order by
-        // choosing the candidate iterator's order.
+        // Both candidates are one edit from `aa`.
         let cands: &[&str] = &["ab", "ba"];
         assert_eq!(nearest_match("aa", cands.iter().copied()), Some("ab"));
     }
 
     #[test]
     fn short_input_has_tighter_cap() {
-        // A 3-char input gets cap 1; a 2-edit candidate must not be picked.
+        // A three-character input's cap is 1.
         let cands: &[&str] = &["abcdef"];
         assert!(nearest_match("abc", cands.iter().copied()).is_none());
     }
@@ -401,17 +330,14 @@ mod tests {
 
     #[test]
     fn an_empty_candidate_list_renders_empty() {
-        // Callers ask whether the set is empty before rendering it, so this
-        // is the shape of a bug rather than of a message — it must not come
-        // out as a stray "and 0 more".
+        // Callers check for an empty set first, but a bug must still not render "and 0 more".
         assert_eq!(candidate_list(&[]), "");
     }
 
     #[test]
     fn long_input_admits_three_edits() {
-        // A 7-char input gets cap 3; three single-char substitutions match.
+        // Three substitutions, within the cap of 3 for seven characters or more.
         let cands: &[&str] = &["minecraft"];
-        // Replace three characters out of nine — distance 3, within cap.
         assert_eq!(
             nearest_match("minexyzft", cands.iter().copied()),
             Some("minecraft"),

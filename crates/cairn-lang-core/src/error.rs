@@ -11,16 +11,8 @@ pub type Span = Range<usize>;
 
 /// 1-based line/column position used in human-readable diagnostics.
 ///
-/// Both components are `NonZeroU32` because every source location is at line
-/// 1, column 1 or later; the type rules out an accidental `(0, 0)` sentinel
-/// that downstream code would have to special-case. `col` counts Unicode
-/// scalar values (`char`), not bytes, so the value matches what editors and
-/// `gcc`/`clang`-style tools display for the same source.
-///
-/// `Serialize` writes the two as plain numbers, so a payload embedding a
-/// position reads the same as one that spelled it `u32` by hand — what it
-/// gains is that the 1-based invariant travels with the type rather than
-/// being re-established at each producer.
+/// `NonZeroU32` rules out a `(0, 0)` sentinel. `col` counts Unicode scalar values, not bytes, as
+/// editors and `gcc`-style tools do. Serializes as two plain numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Position {
     /// 1-based line number.
@@ -33,12 +25,8 @@ pub struct Position {
 impl Position {
     /// First byte of any source: line 1, column 1.
     ///
-    /// Used as the fallback anchor when an error refers to an empty source —
-    /// there is no last token to point at. This means an empty-source EOF
-    /// error and a genuine error at `1:1` are indistinguishable by position
-    /// alone; a future diagnostics layer (LSP) that needs to tell them apart
-    /// should carry the distinction in the error variant rather than in the
-    /// `Position`.
+    /// Also the anchor for an error in an empty source, which has no last token to point at, so
+    /// telling that apart from an error at `1:1` takes the error variant, not the position.
     pub const START: Position = Position {
         line: NonZeroU32::MIN,
         col: NonZeroU32::MIN,
@@ -47,15 +35,11 @@ impl Position {
     /// Translate a position measured inside a detached slice onto the source
     /// that slice was cut from.
     ///
-    /// `self` counts from the start of the slice; `base` is where the slice
-    /// begins in the whole file. Only the first line of the slice sits at a
-    /// column offset — every line after it starts at column 1 in both
-    /// coordinate systems, so only its line number shifts.
+    /// `self` counts from the start of the slice; `base` is where the slice begins in the file.
+    /// Only the slice's first line is offset by a column; later lines shift by line only.
     ///
-    /// `@intended_targets` is the one directive that re-lexes its value as a
-    /// detached string, and every diagnostic from that sub-parse has to come
-    /// back through here: without it the caret lands on line 1 of the file
-    /// rather than on the directive.
+    /// `@intended_targets` re-lexes its value as a detached string, so every diagnostic from that
+    /// sub-parse has to come back through here.
     #[must_use]
     pub(crate) fn rebased(self, base: Position) -> Self {
         let line = base.line.saturating_add(self.line.get() - 1);
@@ -74,10 +58,9 @@ impl std::fmt::Display for Position {
     }
 }
 
-/// Grammatical position in which an integer literal was being parsed when it
-/// failed. Surface-level diagnostics use this to phrase a message, and LSP
-/// quick-fix logic uses it to dispatch on the offending site without resorting
-/// to substring matches on the rendered text.
+/// Where in the grammar an integer literal that failed to parse sat.
+///
+/// Phrases the message, and lets a consumer dispatch on the site without matching the text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IntContext {
@@ -92,9 +75,7 @@ pub enum IntContext {
 }
 
 impl IntContext {
-    /// Phrasing used as the leading clause of a human-readable diagnostic.
-    /// Kept in sync with the legacy messages so substring matchers in
-    /// downstream tooling continue to work.
+    /// Leading clause of the rendered message. Downstream substring matchers depend on it.
     fn describe(self) -> &'static str {
         match self {
             Self::SizeWidth | Self::SizeHeight | Self::IntLiteral => "invalid integer literal",
@@ -103,14 +84,10 @@ impl IntContext {
     }
 }
 
-/// One-word rendering of [`IntErrorKind`] suitable for embedding in a
-/// diagnostic. `IntErrorKind` is `#[non_exhaustive]`, so the catch-all arm
-/// guards against future variants without misleading the reader.
+/// Short rendering of an [`IntErrorKind`] for a diagnostic.
 ///
-/// `IntErrorKind::Zero` is only produced by `NonZero*::from_str` and never
-/// by the `u32` / `i64` parses this crate currently performs. It is not
-/// listed explicitly and falls through to `"invalid integer"`; callers
-/// parsing `NonZero*` types should phrase Zero themselves.
+/// `IntErrorKind::Zero` falls through to `"invalid integer"`. Only a `NonZero*` parse produces
+/// it, and a caller doing one phrases it itself.
 #[must_use]
 pub fn describe_int_kind(kind: IntErrorKind) -> &'static str {
     match kind {
@@ -121,9 +98,7 @@ pub fn describe_int_kind(kind: IntErrorKind) -> &'static str {
     }
 }
 
-/// Names the limit rather than only reporting that one exists: the author
-/// (or the LLM editing loop the language is designed around) has to know how
-/// far to unwind to make the source legal again.
+/// Names the limit, because the author has to know how far to unwind.
 fn render_nesting_too_deep(limit: usize) -> String {
     format!(
         "nesting is limited to {limit} levels here; \
@@ -134,17 +109,10 @@ fn render_nesting_too_deep(limit: usize) -> String {
 
 /// Name a character the lexer could not place.
 ///
-/// Quoting it verbatim is right for a character the reader can see and
-/// useless otherwise: U+FEFF renders as nothing, so the message quoted an
-/// empty string, and U+00A0 renders as a space, so it read as though an
-/// ordinary space were the problem. Neither tells the author what to
-/// delete.
-///
-/// The test is whether the glyph carries the information, not whether it
-/// is ASCII. A full-width `＝` and a stray `あ` are both plainly visible
-/// and are the likeliest mistakes in a project with Japanese docs, so
-/// they keep their glyph; the codepoint rides along, because two
-/// characters that look alike are exactly when one is needed.
+/// A character with no visible glyph is named by codepoint alone, because quoting U+FEFF shows
+/// nothing and quoting U+00A0 shows what looks like an ordinary space. Any other character, ASCII
+/// or not (a full-width `＝`, a stray `あ`), keeps its glyph, plus the codepoint for characters
+/// that look alike.
 fn render_unexpected_char(ch: char) -> String {
     if ch.is_control() || ch.is_whitespace() || ch == '\u{feff}' {
         format!("unexpected character U+{:04X}", ch as u32)
@@ -182,11 +150,8 @@ pub enum LexError {
     },
     /// Indentation opens more than one level in a single step.
     ///
-    /// Separate from [`LexError::OddIndent`] because the repair is
-    /// different and the other message actively misleads: a 4-space
-    /// indent already *is* a multiple of 2, so being told to make it one
-    /// leaves an author — or a generator reading the message back — with
-    /// nothing to change.
+    /// Separate from [`LexError::OddIndent`], whose message would mislead: a 4-space jump already
+    /// is a multiple of 2.
     #[error(
         "{position}: indentation opens more than one level at once \
          (got {got} spaces, expected {expected} spaces)"
@@ -221,13 +186,9 @@ pub enum LexError {
     },
     /// A size literal is followed by text that would have continued it.
     ///
-    /// `2x2x9` holds a third extent the token has no room for, and `2x2y`
-    /// runs the literal into a word. Both used to lex as a `Size` plus a
-    /// stray identifier: in a member's arguments that reached
-    /// `check::positional`, which reported a bare value the author never
-    /// wrote, at a column past the literal that produced it; in a
-    /// declaration header, which has no positional list, the parser
-    /// failed at the end of the line instead.
+    /// `2x2x9` holds a third extent and `2x2y` runs into a word. Rejected at the literal, because
+    /// as a `Size` plus an identifier either would surface away from it: as a bare positional
+    /// value the author never wrote, or as a parse failure at the end of a declaration header.
     #[error(
         "{position}: size literal `{literal}` is followed by `{found}`; \
          a size is two extents, as in `9x7`"
@@ -240,9 +201,8 @@ pub enum LexError {
         /// The character that would have continued it.
         found: char,
     },
-    /// An integer literal could not be parsed. Carries the failure `kind` so
-    /// downstream tooling (e.g. LSP quick-fix) can dispatch without parsing
-    /// the rendered message.
+    /// An integer literal could not be parsed. Carries `kind` so a consumer can dispatch without
+    /// parsing the message.
     #[error("{position}: {}", render_invalid_int(*context, lexeme, *kind))]
     InvalidInt {
         /// Where the literal starts.
@@ -260,10 +220,8 @@ pub enum LexError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ParseError {
-    /// A lexer error surfaced from token production. Lexer integer-parse
-    /// failures are *not* wrapped here; they bubble up directly as
-    /// [`ParseError::InvalidInt`] so callers have a single match arm to
-    /// handle for any integer-parse failure regardless of layer.
+    /// A lexer error other than an integer-parse failure, which becomes
+    /// [`ParseError::InvalidInt`] so one arm handles integer failures from either layer.
     #[error(transparent)]
     Lex(LexError),
     /// A syntactic mismatch with a human-readable message.
@@ -276,18 +234,14 @@ pub enum ParseError {
     },
     /// Value or expression nesting ran past the parser's depth limit.
     ///
-    /// Raised instead of descending far enough to exhaust the native stack.
-    /// A Rust stack overflow aborts the process and cannot be caught, so it
-    /// would take down every embedder too — including the language server,
-    /// which re-parses on each keystroke.
+    /// Raised before recursion can exhaust the native stack: an overflow aborts the process and
+    /// would take every embedder down with it, the language server included.
     #[error("{position}: {}", render_nesting_too_deep(*limit))]
     NestingTooDeep {
-        /// First token of the level that went one too far.
-        ///
-        /// Not the bracket or keyword that opened it: the guard fires once
-        /// the level has been entered, so the position sits just inside.
+        /// First token inside the level that went one too far, not the bracket or keyword that
+        /// opened it.
         position: Position,
-        /// The limit that was exceeded, so the message can state it.
+        /// The limit that was exceeded.
         limit: usize,
     },
     /// An integer literal could not be parsed.

@@ -46,7 +46,7 @@ impl fmt::Display for Edition {
     "unknown edition `{input}`. Valid: java, bedrock. Fix: pass one of the supported edition names"
 )]
 pub struct UnknownEdition {
-    /// Verbatim input string the caller passed.
+    /// The string as the caller passed it.
     pub input: String,
 }
 
