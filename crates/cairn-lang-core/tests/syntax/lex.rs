@@ -96,29 +96,6 @@ fn tabs_are_rejected() {
 }
 
 #[test]
-fn odd_indent_is_rejected() {
-    let err = lex("theme medieval:\n   slot floor -> @x\n").unwrap_err();
-    assert!(matches!(err, LexError::OddIndent { got: 3, .. }));
-}
-
-#[test]
-fn double_indent_is_rejected() {
-    // 0 to 4 spaces in one step opens two levels.
-    let err = lex("struct keep\n    floor mat_slot=floor\n").unwrap_err();
-    assert!(
-        matches!(
-            err,
-            LexError::IndentJump {
-                got: 4,
-                expected: 2,
-                ..
-            }
-        ),
-        "{err:?}",
-    );
-}
-
-#[test]
 fn lexes_arrow_and_comparison() {
     let kinds = kinds("@requires version>=1.20\n");
     assert!(kinds.iter().any(|k| matches!(k, TokenKind::GreaterEq)));
@@ -435,7 +412,7 @@ mod refusals {
     }
 
     #[test]
-    fn odd_indentation_is_still_its_own_refusal() {
+    fn odd_indentation_is_its_own_refusal() {
         let err = lex("theme medieval:\n   slot floor -> @x\n").unwrap_err();
         assert!(matches!(err, LexError::OddIndent { got: 3, .. }), "{err:?}");
     }

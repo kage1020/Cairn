@@ -11,13 +11,8 @@ fn statement_generic_span_round_trips_to_surface_text() {
     let Item::Struct { body, span, .. } = &module.items[0] else {
         panic!("expected Struct, got {:?}", module.items[0]);
     };
-    // The item span starts at the keyword and ends after the last
-    // meaningful body token.
-    let item_slice = &src[span.clone()];
-    assert!(
-        item_slice.starts_with("struct s") && item_slice.ends_with("height=4"),
-        "item span should bracket the whole struct, got {item_slice:?}",
-    );
+    // The item ends at its last body token, before the trailing line break.
+    assert_eq!(&src[span.clone()], "struct s size=1x1\n  walls height=4");
 
     let walls = &body[0];
     let Statement::Generic { args, span, .. } = walls else {
@@ -61,11 +56,21 @@ fn value_variants_each_carry_their_token_span() {
     assert!(matches!(by_key("tag"), ValueKind::DotRef(_)));
     assert!(matches!(by_key("name"), ValueKind::Str(s) if s == "label"));
 
-    for arg in walls_args {
-        let span = arg.value.span.clone();
-        assert!(span.start < span.end, "value span empty for {arg:?}");
-        assert!(span.end <= src.len(), "value span runs past EOF: {arg:?}");
-    }
+    let written: Vec<(&str, &str)> = walls_args
+        .iter()
+        .map(|arg| (arg.key.as_str(), &src[arg.value.span.clone()]))
+        .collect();
+    assert_eq!(
+        written,
+        [
+            ("flag", "true"),
+            ("height", "4"),
+            ("mat_slot", "wall"),
+            ("token", "@oak"),
+            ("tag", "front.outside"),
+            ("name", "\"label\""),
+        ],
+    );
 }
 
 #[test]

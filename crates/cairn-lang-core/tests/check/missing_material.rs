@@ -30,7 +30,7 @@ fn walls_with_no_mat_slot_is_refused() {
     assert_eq!(
         found[0].code.severity(),
         Severity::Error,
-        "implicit dropping is what spec/lint 11.3 calls an error",
+        "implicit dropping is an error under spec/lint \"Error vs warning\"",
     );
     let at = src.find("walls").expect("the member is in the source");
     assert_eq!(

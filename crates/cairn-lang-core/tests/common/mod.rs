@@ -191,6 +191,26 @@ pub fn defers(ir: &BlockArrayIr) -> Vec<&str> {
         .collect()
 }
 
+/// Whether `source` lays its walkway rather than skipping it for a port that
+/// could not be placed.
+///
+/// # Panics
+///
+/// When `source` does not parse, or when a walkway that was not skipped was
+/// not laid either.
+pub fn walkway_was_laid(source: &str) -> bool {
+    let out = lowered(source);
+    let skipped = defers(&out)
+        .iter()
+        .any(|primary| primary.contains("was skipped because port"));
+    assert_eq!(
+        skipped,
+        out.walkways.is_empty(),
+        "a walkway that was not skipped has to have been laid",
+    );
+    !skipped
+}
+
 /// The cells of `array` that are not air.
 pub fn solid_cells(array: &BlockArray) -> usize {
     array.voxels.iter().filter(|c| c.0 != 0).count()

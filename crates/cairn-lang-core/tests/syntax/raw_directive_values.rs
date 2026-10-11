@@ -105,7 +105,7 @@ fn a_comment_inside_an_unterminated_quote_is_part_of_the_value() {
 }
 
 #[test]
-fn the_same_stretch_anywhere_else_is_refused_as_before() {
+fn the_same_stretch_anywhere_else_is_refused() {
     for source in [
         // Whitespace other than a space separates nothing to the lexer,
         // and is no part of a value either.

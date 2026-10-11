@@ -6,7 +6,7 @@
 
 use cairn_lang_core::block_array::BlockArray;
 
-use crate::common::{defers, lowered, only_structure, state_at};
+use crate::common::{defers, lowered, only_structure, state_at, walkway_was_laid};
 
 const THEME: &str = "theme t:\n  \
                      slot floor -> @oak_planks\n  \
@@ -240,20 +240,6 @@ fn site_with_window_port(y: u32, height: u32, wall_height: u32) -> String {
          place id=b use=hut theme=t east_of=a gap=4\n  \
          connect a.top to b.e path=@gravel\n",
     )
-}
-
-fn walkway_was_laid(source: &str) -> bool {
-    let out = lowered(source);
-    let dropped = out
-        .diagnostics
-        .iter()
-        .any(|d| d.primary.contains("was skipped because port"));
-    assert_eq!(
-        !dropped,
-        !out.walkways.is_empty(),
-        "a walkway that was not dropped has to have been laid",
-    );
-    !dropped
 }
 
 #[test]

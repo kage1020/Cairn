@@ -153,7 +153,7 @@ fn lockfile_walkways_yaml_snapshot() {
 }
 
 #[test]
-fn lockfile_yaml_rejects_legacy_string_walkway_endpoint() {
+fn lockfile_yaml_rejects_a_dotted_string_walkway_endpoint() {
     // An endpoint is a `place`/`port` mapping, never one `"PLACE.PORT"`
     // string: a joined string cannot say which dot splits it. The YAML is
     // written by hand so the test does not depend on what the encoder
