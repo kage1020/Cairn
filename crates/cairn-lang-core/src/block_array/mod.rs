@@ -1,17 +1,15 @@
 //! Block-array IR — the universal voxel pivot below the semantic layer.
 //!
-//! Every format frontend and backend meets at this layer: it holds a voxel
-//! grid, a palette of [`BlockState`]s, and (eventually) block entities and
-//! entities, all neutral to file format, edition, and version. Compile diffs,
-//! `IoU` comparisons, and serialisation hang off this single shape (see
-//! `spec/architecture` "The block-array IR is the universal pivot").
+//! Every format frontend and backend meets at this layer: a voxel grid, a
+//! palette of [`BlockState`]s, and slots for block entities and entities,
+//! all neutral to file format, edition, and version. Compile diffs, `IoU`
+//! comparisons, and serialisation hang off this one shape
+//! (`spec/architecture` "The block-array IR is the universal pivot").
 //!
-//! The [`lower::lower_to_block_array`] pass handles `floor`, `walls`,
-//! `door`, `window`, `stair`, `pressure_plate`, the `level y=N` grouping,
-//! and all four roof kinds. A role it does not yet voxelise degrades to
-//! air with a `W_DEFERRED_MEMBER` warning rather than failing, so a partial
-//! build is still inspectable; the same warning covers an abstract material
-//! token reached with no registry pack to lift it.
+//! A member [`lower::lower_to_block_array`] cannot voxelise becomes air with
+//! a `W_DEFERRED_MEMBER` warning rather than failing, so a partial build is
+//! still inspectable; the same warning covers an abstract material token
+//! reached with no registry pack to lift it.
 //!
 //! ## Overhang convention
 //!
@@ -38,103 +36,81 @@ pub use material::{
     BlockIdSet, IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state,
 };
 pub use roof::is_stair;
-// `port_world_position` is deliberately not re-exported: it can only be
-// asked correctly with the wall column the body was lowered against,
-// which nothing outside this module holds. Exporting it invited the
-// second derivation the port used to carry.
+// `port_world_position` is not re-exported: it answers correctly only with
+// the wall column the body was lowered against, which nothing outside this
+// module holds.
 
 use crate::diagnostic::Diagnostic;
 use crate::ids::{PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey};
 
 /// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
 ///
-/// Mirrors the total-plus-diagnostics shape of [`crate::resolve::Resolution`]
-/// so a caller can pipeline `parse → lower → resolve → lower_to_block_array`
-/// and surface every finding in one pass, even when some structures produced
-/// no voxels.
+/// Total plus diagnostics, like [`crate::resolve::Resolution`], so a caller
+/// surfaces every finding even when some structures produced no voxels.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BlockArrayIr {
     /// One entry per concretised structure, keyed by `kind::name`
-    /// (`struct::cottage`, `site::hamlet::home1`). The key shape matches
-    /// [`crate::resolve::Resolution::scopes`] so the two maps line up
-    /// without an extra translation step.
+    /// (`struct::cottage`, `site::hamlet::home1`), the keys of
+    /// [`crate::resolve::Resolution::scopes`].
     pub structures: IndexMap<String, BlockArray>,
-    /// Per-`place` site coordinates. Keyed identically to [`Self::structures`]
-    /// (`site::HAMLET::PLACE_ID`) so a consumer can join the two without an
-    /// extra index. Empty for any source with no `site` blocks, which keeps
-    /// the JSON shape stable for cottage/themed-tower fixtures pre-dating
-    /// site lowering.
+    /// Per-`place` site coordinates, under the same keys as
+    /// [`Self::structures`]. Omitted from the JSON when empty, so a source
+    /// with no `site` block keeps its shape.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub placements: IndexMap<String, Placement>,
-    /// Per-`connect` walkway metadata, keyed by [`WalkwayScopeKey`]. The
-    /// matching [`BlockArray`] sits under the same wire-format key in
-    /// [`Self::structures`], so a consumer can join the two against the same
-    /// key the way `placements` does. Empty for any source with no
-    /// `connect` rows, keeping the JSON shape stable for cottage /
-    /// themed-tower fixtures.
+    /// Per-`connect` walkway metadata. Each walkway's [`BlockArray`] sits in
+    /// [`Self::structures`] under the wire form of the same key. Omitted
+    /// from the JSON when empty, like [`Self::placements`].
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub walkways: IndexMap<WalkwayScopeKey, Walkway>,
-    /// Diagnostics emitted during lowering. Kept separate from
-    /// [`crate::resolve::Resolution::diagnostics`]: the resolver owns
-    /// theme-binding hygiene, this list owns voxel-lowering deferrals.
+    /// Lowering's findings, kept apart from the resolver's
+    /// [`crate::resolve::Resolution::diagnostics`].
     #[serde(skip)]
     pub diagnostics: Vec<Diagnostic>,
 }
 
 /// One resolved `connect` row laid as a walkway between two ports.
 ///
-/// Mirrors the shape of [`Placement`]: site / endpoint provenance plus
-/// the world origin and footprint of the [`BlockArray`] this walkway
-/// lowers to. The path material is recorded as the canonical Minecraft
-/// id so the lockfile can round-trip the walkway palette without
-/// rehydrating the per-walkway [`BlockArray`].
+/// The path material is kept as its canonical id so the lockfile can
+/// record the walkway without rehydrating its [`BlockArray`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Walkway {
     /// Bare site name (no `site::` IR-key prefix).
     pub site: SiteName,
-    /// `from` endpoint — `(place, port)` of the walkway's first end.
+    /// `(place, port)` of the walkway's first end.
     pub from: WalkwayEndpoint,
-    /// `to` endpoint — `(place, port)` of the walkway's second end.
+    /// `(place, port)` of the walkway's second end.
     pub to: WalkwayEndpoint,
-    /// Absolute world-space origin `(x, y, z)` of the walkway
-    /// [`BlockArray`]. `i32` because `north_of` placements grow the
-    /// walkway into negative `z` just like the buildings themselves.
+    /// World-space origin `(x, y, z)` of the walkway's [`BlockArray`];
+    /// signed because `north_of` placements reach negative `z`.
     pub origin: (i32, i32, i32),
-    /// Horizontal extents of the walkway [`BlockArray`]. Walkways are
-    /// always a single block thick, so the Y axis is fixed at `1` and
-    /// elided from this field; lowering into the full
-    /// [`BlockArray::dims`] re-attaches `y = 1` via
-    /// [`Footprint::to_dims_y1`].
+    /// Horizontal extents of the walkway's one-block-thick [`BlockArray`];
+    /// [`Footprint::to_dims_y1`] gives its [`BlockArray::dims`].
     pub footprint: Footprint,
-    /// Canonical Minecraft id of the path material laid into the
-    /// walkway (e.g. `minecraft:gravel`).
+    /// Canonical id of the path material, e.g. `minecraft:gravel`.
     pub path_material: String,
 }
 
-/// One resolved `place` line from a `site` block.
-///
-/// Carries the world-space origin the per-place [`BlockArray`] (stored under
-/// the same key in [`BlockArrayIr::structures`]) lives at, plus the
-/// def/theme provenance pair so the lockfile can record the inputs that
-/// produced the absolute coordinates without re-walking the AST. `origin` is
-/// `i32` because `north_of` placements grow into negative `z`.
+/// One resolved `place` line from a `site` block: where its [`BlockArray`]
+/// (under the same key in [`BlockArrayIr::structures`]) sits, and the def
+/// and theme that produced it, so the lockfile records them without
+/// re-walking the AST.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Placement {
     /// Site this placement belongs to (the bare `site` name, not the IR key).
     pub site: SiteName,
     /// `place id=` value.
     pub place_id: PlaceId,
-    /// `place use=` target — the `def` whose body lowered into the per-place
-    /// volume.
+    /// `place use=`: the `def` whose body this place lowers.
     pub source_def: String,
     /// `place theme=` value applied during cross-scope theme resolution.
     pub theme: String,
-    /// Absolute world-space origin `(x, y, z)` resolved from the topological
-    /// constraint chain (`at=origin`, `east_of=`, `north_of=`).
+    /// World-space origin `(x, y, z)` resolved from the constraint chain
+    /// (`at=origin`, `east_of=`, `north_of=`); signed because `north_of`
+    /// reaches negative `z`.
     pub origin: (i32, i32, i32),
-    /// Voxel extents of the lowered per-place [`BlockArray`]. Mirrored here
-    /// so the lockfile can pin the dims without rehydrating every
-    /// [`BlockArray`] to compare against.
+    /// Extents of the place's [`BlockArray`], copied here so the lockfile
+    /// pins them without rehydrating it.
     pub dims: Dims,
 }
 
@@ -146,31 +122,29 @@ pub struct BlockArray {
     /// becomes `(W, _, H)` here; the Y extent is derived from member
     /// contributions.
     pub dims: Dims,
-    /// Block states referenced by the [`Self::voxels`] grid. Index `0` is always
-    /// [`BlockState::air()`]; [`Palette::intern`] preserves that invariant.
+    /// Block states the [`Self::voxels`] index into; slot `0` is always
+    /// [`BlockState::air()`].
     ///
-    /// Every array the lowering and walkway passes produce carries this in
-    /// the canonical order [`Palette::canonicalize`] fixes — air at slot
-    /// `0`, the rest ascending by `(id, properties)`. The field is public,
-    /// so an array assembled by hand (the format backends' tests do) holds
-    /// whatever order its author put there; nothing here enforces it.
+    /// Lowering leaves it in [`Palette::canonicalize`]'s order. Nothing
+    /// enforces that on an array assembled by hand, as the format backends'
+    /// tests do.
     pub palette: Palette,
     /// Palette indices in `(y, z, x)` order: `voxels[((y * dims.z) + z) *
     /// dims.x + x]`. Y-major lets ASCII renderers walk one slice at a time
     /// without re-striding.
     pub voxels: Vec<PaletteIndex>,
-    /// Block entities (chests, signs, ...) that sit on the grid. Empty
-    /// for now — the IR shape is reserved for the fixtures phase.
+    /// Block entities (chests, signs, ...) on the grid. Always empty: no
+    /// member lowers to one.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
-    /// Free entities (frames, paintings, ...). Empty for the same reason
-    /// as [`Self::block_entities`].
+    /// Free entities (frames, paintings, ...). Always empty, like
+    /// [`Self::block_entities`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<Entity>,
-    /// Source scope this volume was lowered from, mirroring the
-    /// [`crate::resolve::Resolution`] key (`struct::cottage`). Carried in
-    /// the IR so a downstream serialiser can stamp it into the output
-    /// filename without re-threading the originating [`crate::intent::IntentModule`].
+    /// Scope this volume was lowered from, as its
+    /// [`crate::resolve::Resolution`] key (`struct::cottage`), so a
+    /// serialiser can name the output file without the
+    /// [`crate::intent::IntentModule`].
     pub source_scope: String,
 }
 
@@ -185,11 +159,8 @@ pub struct Dims {
     pub z: u32,
 }
 
-/// Horizontal extents of a 1-block-thick volume.
-///
-/// Used by [`Walkway`] because walkways are always laid at a single Y;
-/// having only `x` and `z` keeps the invariant in the type rather than
-/// in an implicit `y == 1` convention spread across the codebase.
+/// Horizontal extents of a one-block-thick volume, such as a [`Walkway`].
+/// Having no `y` keeps the thickness in the type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Footprint {
     /// East/west extent.
@@ -199,8 +170,7 @@ pub struct Footprint {
 }
 
 impl Footprint {
-    /// Inflate to a full [`Dims`] with `y = 1`. The single place that
-    /// re-hydrates `y` for the lockfile / NBT path.
+    /// The [`Dims`] of this footprint, one block high.
     #[must_use]
     pub fn to_dims_y1(self) -> Dims {
         Dims {
@@ -211,45 +181,36 @@ impl Footprint {
     }
 }
 
-/// Largest voxel volume the lowering pass will build for one scope.
+/// Largest voxel volume the lowering pass builds for one scope: a 256-cube.
 ///
-/// A 256-cube. It exists to turn an arithmetic accident into a diagnostic,
-/// not to constrain anything anyone writes: the largest shipped example is
-/// under 2500 voxels, while `size=100000x100000` asks for 10^10 and
-/// `walls height=2147483647` for more again. Every one of those numbers is
-/// a valid `u32` on its own, so no per-key range check catches them — only
-/// the product does.
+/// It turns an arithmetic accident into a diagnostic rather than
+/// constraining real builds: `size=100000x100000` or
+/// `walls height=2147483647` passes every per-key range check, and only the
+/// product is too large.
 ///
-/// A structure at the bound already costs 32 MB for the index vector alone
-/// (`PaletteIndex` is two bytes), so the ceiling is well past where the
-/// output stops being useful and well below where the allocator gives up.
-/// That holds for writing the artifact too: `cairn-lang-formats` encodes a
-/// structure's per-voxel lists from this vector as it writes them, so the
-/// writer adds a fixed amount on top of it rather than a multiple of it.
+/// At the bound the index vector alone is 32 MB (`PaletteIndex` is two
+/// bytes): far past a useful output, far below what the allocator refuses.
+/// `cairn-lang-formats` writes from this vector as it goes, adding a fixed
+/// amount rather than a multiple of it.
 ///
-/// Per scope, not per module: a source declaring a thousand structs can
-/// still ask for a thousand times this. Bounding the total would need a
-/// budget threaded through the whole pass, and nothing today streams
-/// scopes to disk as they finish, so the two would have to land together.
+/// Per scope, not per module: a thousand structs may ask for a thousand
+/// times this. Bounding the total needs a budget threaded through the whole
+/// pass, which only pays once scopes stream to disk as they finish.
 pub const MAX_STRUCTURE_VOLUME: usize = 256 * 256 * 256;
 
-// Walkways are the other thing the pass allocates, and they are bounded by
-// `walkway::ROUTE_AREA_CAP` instead — a cell count over a one-block-thick
-// plane, so it is directly comparable. Keeping it under the volume bound is
-// what makes `Dims::volume`'s claim below true of every array this pass
-// produces, walkways included.
+// Walkways are bounded by `walkway::ROUTE_AREA_CAP` instead, a cell count
+// over a one-block-thick plane. Keeping it under this bound keeps
+// `Dims::volume`'s promise for walkway arrays too.
 const _: () = assert!(
     crate::block_array::walkway::ROUTE_AREA_CAP <= MAX_STRUCTURE_VOLUME as u64,
     "a walkway inside the router's area cap must also be inside the structure volume bound",
 );
 
 impl Dims {
-    /// Total voxel count, or `None` when the product overflows `usize`.
-    ///
-    /// The only honest way to ask: `size=4294967295x4294967295` overflows
-    /// the multiplication itself, which panics in a debug build and — worse
-    /// — wraps in a release one, handing back a small number that then
-    /// disagrees with [`Self::index`] and turns into an out-of-bounds write.
+    /// Total voxel count, or `None` when the product overflows `usize`, as
+    /// `size=4294967295x4294967295` does. Unchecked, that product panics in
+    /// a debug build and wraps in a release one, to a count that disagrees
+    /// with [`Self::index`].
     #[must_use]
     pub fn checked_volume(self) -> Option<usize> {
         (self.x as usize)
@@ -268,12 +229,9 @@ impl Dims {
             .is_some_and(|volume| volume <= MAX_STRUCTURE_VOLUME)
     }
 
-    /// Total voxel count, saturating at `usize::MAX`.
-    ///
-    /// Safe to call on any [`Dims`], but only meaningful on one that has
-    /// already passed [`Self::fits_volume_budget`] — which every
-    /// [`BlockArray`] the lowering pass produces has, so readers of a built
-    /// array can use it directly.
+    /// Total voxel count, saturating at `usize::MAX`. Exact for any [`Dims`]
+    /// that passed [`Self::fits_volume_budget`], as every lowered
+    /// [`BlockArray`]'s has.
     #[must_use]
     pub fn volume(self) -> usize {
         (self.x as usize)
@@ -281,9 +239,8 @@ impl Dims {
             .saturating_mul(self.z as usize)
     }
 
-    /// Linear offset of `(x, y, z)` into a `(y, z, x)`-ordered flat array.
-    /// Returns `None` when the coordinate falls outside [`Self`] so callers
-    /// can fail loud instead of indexing into the wrong cell.
+    /// Linear offset of `(x, y, z)` into a `(y, z, x)`-ordered flat array,
+    /// or `None` outside [`Self`].
     #[must_use]
     pub fn index(self, x: u32, y: u32, z: u32) -> Option<usize> {
         if x >= self.x || y >= self.y || z >= self.z {
@@ -297,37 +254,24 @@ impl Dims {
 /// Index into a [`Palette`]. [`Self::AIR`] (`0`) is reserved for
 /// [`BlockState::air()`].
 ///
-/// A newtype rather than a bare `u16` so a future change of the underlying
-/// width (e.g. `u32` for very large palettes) does not ripple through every
-/// call site, and so `palette.entries[i.0]` reads as "the entry the index
-/// names" instead of an arbitrary number.
+/// A newtype rather than a bare `u16` so widening it does not ripple
+/// through every call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct PaletteIndex(pub u16);
 
 impl PaletteIndex {
-    /// Index reserved for air. Used by [`Palette::new_with_air`] and by the
-    /// lowering pass to leave a cell empty.
+    /// Index reserved for air.
     pub const AIR: Self = Self(0);
 }
 
 impl BlockArray {
-    /// Put the palette in canonical order and renumber the grid onto it.
+    /// Put the palette in [`Palette::canonicalize`]'s order and renumber
+    /// the grid onto it, once the grid is finished.
     ///
-    /// The pass that paints a body numbers its palette by first use, and
-    /// first use is a paint, so two members that share no voxel still
-    /// reach the palette in the order their lines happen to be written —
-    /// and the numbering rides into the `.nbt` bytes, `cairn info`'s
-    /// per-entry rows, and `resolved_ir_hash`. Calling this once the grid
-    /// is finished makes all three a function of the grid alone
-    /// (`spec/compilation` "Within-phase conflicts and the palette").
-    ///
-    /// A voxel naming a slot the palette does not have is left as it is
-    /// rather than remapped onto air: the fields here are public, so a
-    /// caller can assemble a disagreeing pair by hand, and quietly
-    /// rewriting one is how [`Self::first_index_outside_palette`] — which
-    /// both backends ask before they assemble anything — would stop
-    /// seeing it.
+    /// A voxel naming a slot the palette lacks is left as it is rather than
+    /// mapped to air, so [`Self::first_index_outside_palette`] still
+    /// reports it.
     pub fn canonicalize_palette(&mut self) {
         let remap = self.palette.canonicalize();
         for index in &mut self.voxels {
@@ -337,16 +281,12 @@ impl BlockArray {
         }
     }
 
-    /// The first voxel whose index is not a slot of [`Self::palette`], as
+    /// The first voxel index that is not a slot of [`Self::palette`], as
     /// `(index, palette length)`.
     ///
-    /// Interning ([`Palette::intern`], [`Palette::try_intern`]) is the only
-    /// source of a [`PaletteIndex`] inside the compiler, so a lowered array
-    /// always satisfies this — but the fields above are public, so a caller
-    /// assembling one by hand can have the grid and the palette disagree.
-    /// A serialiser that writes the index anyway produces a file naming a
-    /// slot the reader has to invent, which is why both backends ask this
-    /// before they assemble anything.
+    /// Always `None` for a lowered array, but a hand-assembled one can
+    /// disagree, and a serialiser that wrote it would name a slot the
+    /// reader has to invent; both backends ask this first.
     #[must_use]
     pub fn first_index_outside_palette(&self) -> Option<(u16, usize)> {
         let len = self.palette.entries.len();
@@ -365,18 +305,16 @@ pub const PALETTE_CAPACITY: usize = u16::MAX as usize + 1;
 /// A new block state was refused because the palette already held
 /// [`Self::capacity`] entries.
 ///
-/// [`Palette::try_intern`] refuses at [`PALETTE_CAPACITY`]. Lowering's own
-/// tests paint against a smaller capacity so the refusal is reachable,
-/// which is why the error carries the capacity that was in force rather
-/// than leaving a reader to assume it.
+/// It carries the capacity in force because lowering's tests paint against
+/// one smaller than [`PALETTE_CAPACITY`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error(
     "the palette already holds {capacity} entries, its capacity, and refuses a new block state"
 )]
 #[non_exhaustive]
 pub struct PaletteFull {
-    /// The most entries the palette could hold, air's slot among them:
-    /// [`PALETTE_CAPACITY`] from [`Palette::try_intern`], and never more.
+    /// The most entries the palette could hold, air included; never more
+    /// than [`PALETTE_CAPACITY`].
     pub capacity: usize,
 }
 
@@ -387,15 +325,13 @@ pub struct PaletteFull {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct Palette {
-    /// Block states, in insertion order while the body is painted and in
-    /// [`Palette::canonicalize`]'s order once it is finished.
+    /// The block states, air first.
     pub entries: Vec<BlockState>,
 }
 
 impl Palette {
-    /// Construct a palette pre-seeded with [`BlockState::air()`] at index `0`.
-    /// This is the only constructor lowering should use so the AIR invariant
-    /// holds for every [`BlockArray`].
+    /// A palette holding only [`BlockState::air()`], at index `0`. Lowering
+    /// builds every palette from this so [`PaletteIndex::AIR`] holds.
     #[must_use]
     pub fn new_with_air() -> Self {
         Self {
@@ -403,52 +339,45 @@ impl Palette {
         }
     }
 
-    /// Look up or append a block state and return its index. O(n) over the
-    /// current palette; the builds the compiler emits today are small enough
-    /// (cottage = 3 distinct states) that a hash side-table would cost more
-    /// than it saves.
+    /// Look up or append a block state and return its index. A linear
+    /// scan: palettes are small enough that a hash side-table would cost
+    /// more than it saves.
     ///
-    /// For a caller whose states are bounded by construction, such as a
-    /// walkway's. The body paint path is not one: a source reaches any
-    /// number of distinct states there through block ids or state-literal
-    /// properties no pinned target checks (`W_STATE_LITERAL_UNCHECKED`), so
-    /// that path interns through the fallible form instead.
+    /// Only for a caller whose states are bounded by construction, such as
+    /// a walkway. A body is not: block ids and state-literal properties no
+    /// pinned target checks (`W_STATE_LITERAL_UNCHECKED`) reach any number
+    /// of states, so it interns through [`Self::try_intern`].
     ///
     /// # Panics
     ///
-    /// Panics where [`Self::try_intern`] answers [`PaletteFull`], when
-    /// `state` is new and the palette already holds [`PALETTE_CAPACITY`]
-    /// entries, and wherever [`Self::try_intern`] panics.
+    /// Panics when `state` is new and the palette already holds
+    /// [`PALETTE_CAPACITY`] entries, and wherever [`Self::try_intern`]
+    /// panics.
     pub fn intern(&mut self, state: BlockState) -> PaletteIndex {
         self.try_intern(state)
             .expect("palette grew past PALETTE_CAPACITY entries; widen PaletteIndex first")
     }
 
-    /// [`Self::intern`], answering [`PaletteFull`] instead of panicking
-    /// when `state` is new and the palette already holds
-    /// [`PALETTE_CAPACITY`] entries. A state already present answers its
-    /// index, never [`PaletteFull`], however full the palette is.
+    /// [`Self::intern`], answering [`PaletteFull`] instead of panicking. A
+    /// state already present answers its index however full the palette
+    /// is.
     ///
     /// # Errors
     ///
-    /// [`PaletteFull`] when `state` is new and there is no index left to
-    /// give it. Nothing is appended.
+    /// [`PaletteFull`] when `state` is new and the palette already holds
+    /// [`PALETTE_CAPACITY`] entries. Nothing is appended.
     ///
     /// # Panics
     ///
     /// Panics if the first entry equal to `state` sits past index
-    /// `u16::MAX`, the last a [`PaletteIndex`] can name. Interning never
-    /// grows a palette that long, so only [`Self::entries`] assembled by
-    /// hand past [`PALETTE_CAPACITY`] entries can hold one there.
+    /// `u16::MAX`, which only [`Self::entries`] assembled by hand can hold.
     pub fn try_intern(&mut self, state: BlockState) -> Result<PaletteIndex, PaletteFull> {
         self.try_intern_within(state, PALETTE_CAPACITY)
     }
 
-    /// [`Self::try_intern`] against a capacity of `capacity` entries, never
-    /// more than [`PALETTE_CAPACITY`]. Lowering paints through this at the
-    /// capacity passed down to it: [`PALETTE_CAPACITY`] from
-    /// [`lower_to_block_array`], or a small one from lowering's tests, so
-    /// the refusal can be reached without painting 65,536 states.
+    /// [`Self::try_intern`] against `capacity` entries, clamped to
+    /// [`PALETTE_CAPACITY`]. Lowering's tests pass a small one so the
+    /// refusal is reachable without painting 65,536 states.
     pub(crate) fn try_intern_within(
         &mut self,
         state: BlockState,
@@ -469,45 +398,30 @@ impl Palette {
         Ok(PaletteIndex(idx))
     }
 
-    /// Reorder the entries into the canonical order and return the
-    /// old-slot → new-slot map, so the caller can renumber a voxel grid
-    /// that was painted against the old numbering.
+    /// Reorder the entries into canonical order and return the old-slot →
+    /// new-slot map, for renumbering a grid painted against the old order.
+    /// [`BlockArray::canonicalize_palette`] does both.
     ///
-    /// Air keeps slot `0` — it is the one entry a reader may assume the
-    /// position of, and `minecraft:acacia_log` sorts ahead of
-    /// `minecraft:air` — and every other entry is placed by
-    /// [`BlockState::canonical_key`]: the id, then the properties sorted
-    /// by name. The result is a function of the *set* of states the body
-    /// contains, which is what makes the palette a rendering of the
-    /// finished grid rather than a log of the order the paints happened
-    /// to run in. Two sources that differ only in the order they declare
-    /// two members that share no voxel then produce the same `.nbt` bytes
-    /// and the same `resolved_ir_hash` (`spec/compilation` "Within-phase
-    /// conflicts and the palette").
-    ///
-    /// Only the palette moves: this hands back the map rather than
-    /// touching a grid it does not own, because a [`Palette`] outside a
-    /// [`BlockArray`] has no grid. [`BlockArray::canonicalize_palette`]
-    /// is the pairing that does both.
+    /// Air keeps slot `0`, the one position a reader may assume (and
+    /// `minecraft:acacia_log` sorts ahead of it); every other entry is
+    /// placed by [`BlockState::canonical_key`]. Painting numbers a palette
+    /// by first use, so without this, two members sharing no voxel would
+    /// number it by the order their lines are written, and that numbering
+    /// reaches the `.nbt` bytes, `cairn info`'s rows and `resolved_ir_hash`.
+    /// Sorted, it is a function of the set of states alone
+    /// (`spec/compilation` "Within-phase conflicts and the palette").
     ///
     /// # Panics
     ///
-    /// Panics on a palette longer than [`PALETTE_CAPACITY`] entries.
-    /// [`Self::try_intern`] cannot build one — it refuses the 65537th — so
-    /// this is reachable only from a palette assembled by hand past the
-    /// width [`PaletteIndex`] can name.
+    /// Panics on a palette longer than [`PALETTE_CAPACITY`] entries, which
+    /// only hand assembly can build.
     #[must_use]
     pub fn canonicalize(&mut self) -> Vec<PaletteIndex> {
-        // Slot 0 is reserved rather than guaranteed: `new_with_air` seeds
-        // it, but the field is public and a hand-assembled palette may be
-        // empty, which `drain(1..)` would panic on. Nothing to reorder
-        // and nothing to renumber, so answer with the empty map.
+        // A hand-assembled palette may be empty, and `drain(1..)` would
+        // panic on it.
         if self.entries.is_empty() {
             return Vec::new();
         }
-        // Each entry travels with the slot it came from, so the map back
-        // to the old numbering falls out of the sort instead of having to
-        // be reconstructed from a separately sorted permutation.
         let mut tagged: Vec<(usize, BlockState)> = self
             .entries
             .drain(1..)
@@ -537,17 +451,14 @@ impl Default for Palette {
 /// A resolved Minecraft block state: canonical id plus stringly-typed
 /// properties.
 ///
-/// The properties map is `String -> String` rather than a typed sum because
-/// the block-array IR sits below the materials/registry layer and treats
-/// state values as opaque payload — typing happens against the registry
-/// pack one layer up.
+/// Property values are strings because typing them is the registry pack's
+/// job, a layer above this IR.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BlockState {
     /// Canonical id, e.g. `minecraft:cobblestone`.
     pub id: String,
     /// State properties. A state literal's arrive sorted by name, so the
-    /// order a source spelled them in reaches neither the palette nor
-    /// anything written from it.
+    /// order a source spelled them in reaches no output.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub properties: IndexMap<String, String>,
 }
@@ -556,16 +467,13 @@ impl BlockState {
     /// Canonical Minecraft id for the air block.
     pub const AIR_ID: &'static str = "minecraft:air";
 
-    /// Construct the [`Self::AIR_ID`] state with no properties. Stays a
-    /// function rather than an `AIR: BlockState` const so callers do not
-    /// share an [`IndexMap`] allocation across palettes.
+    /// The [`Self::AIR_ID`] state, with no properties.
     #[must_use]
     pub fn air() -> Self {
         Self::bare(Self::AIR_ID)
     }
 
-    /// Construct a property-free state. Shorthand for the common case where
-    /// a slot binds to a bare `@cobblestone` with no state literal.
+    /// A state with no properties, such as a bare `@cobblestone`'s.
     #[must_use]
     pub fn bare(id: impl Into<String>) -> Self {
         Self {
@@ -574,21 +482,13 @@ impl BlockState {
         }
     }
 
-    /// Total order over block states, used by [`Palette::canonicalize`] to
-    /// place every non-air slot.
+    /// The key [`Palette::canonicalize`] orders non-air slots by: the id,
+    /// then the properties sorted by name.
     ///
-    /// The properties are sorted by name here rather than read in the
-    /// order they were inserted. [`IndexMap`] compares as a map, so two
-    /// states carrying the same pairs in different orders are already
-    /// [`PartialEq`]-equal and [`Palette::intern`] folds them onto one
-    /// slot — but their iteration orders differ, and a key that read them
-    /// in place would order the palette by which of the two was interned
-    /// first, which is the source-order dependence this ordering exists to
-    /// remove.
-    ///
-    /// Borrows rather than owning: it is called `O(n log n)` times inside
-    /// one sort, and every id and value it names is already in the
-    /// palette.
+    /// Sorted rather than in insertion order: two states with the same
+    /// pairs in different orders are equal and intern to one slot, and
+    /// reading the pairs in place would order the palette by whichever of
+    /// them was interned first.
     #[must_use]
     pub fn canonical_key(&self) -> (&str, Vec<(&str, &str)>) {
         let mut properties: Vec<(&str, &str)> = self
@@ -613,12 +513,8 @@ impl BlockState {
     }
 }
 
-/// Placeholder for an inhabited block entity slot.
-///
-/// The NBT payload is intentionally off this struct: no member role
-/// currently lowers to a block entity, so committing to a concrete payload
-/// shape now would lock in a representation before the format backends and
-/// the `cairn-lang-nbt` crate exist to inform that choice.
+/// A block entity on the grid, without its NBT payload: no member lowers to
+/// a block entity, so there is no use yet to choose the payload's shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BlockEntity {
     /// Voxel coordinate the block entity sits at.
@@ -627,10 +523,8 @@ pub struct BlockEntity {
     pub id: String,
 }
 
-/// Placeholder for an entity (frames, paintings, item displays, ...).
-///
-/// Same deferral story as [`BlockEntity`]: the entity payload shape is the
-/// format backend's choice and is intentionally absent for now.
+/// An entity (frames, paintings, item displays, ...), without its payload
+/// for the same reason as [`BlockEntity`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Entity {
     /// World-space coordinate the entity sits at.

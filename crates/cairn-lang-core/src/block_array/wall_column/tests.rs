@@ -14,8 +14,7 @@ fn a_single_walls_member_occupies_the_rows_above_the_floor_slab() {
 #[test]
 fn two_courses_that_touch_merge_into_one() {
     // `walls height=5` plus `level y=5 walls height=4`: rows 1..=5 and
-    // 6..=9 abut, so a window crossing the seam is cut into masonry
-    // the whole way.
+    // 6..=9 abut.
     let column = WallColumn::from_walls([(0, 5), (5, 4)]);
     assert_eq!(column.to_string(), "y=1..=9");
     assert!(column.contains_rows(4, 3), "4..=6 crosses the seam");
@@ -37,8 +36,6 @@ fn two_courses_with_air_between_them_stay_apart() {
 
 #[test]
 fn overlapping_courses_collapse_to_their_union() {
-    // Two walls members on the same level, one taller: the shorter is
-    // wholly inside the taller and contributes no second span.
     let column = WallColumn::from_walls([(0, 4), (0, 2)]);
     assert_eq!(column.to_string(), "y=1..=4");
     assert!(column.contains_rows(1, 4));
@@ -46,8 +43,7 @@ fn overlapping_courses_collapse_to_their_union() {
 
 #[test]
 fn the_spans_come_out_ascending_however_the_members_were_written() {
-    // Source order is the level order only by convention; the merge
-    // depends on the spans being sorted, so it sorts them.
+    // Source order is level order only by convention.
     let column = WallColumn::from_walls([(6, 2), (0, 2), (3, 1)]);
     assert_eq!(column.to_string(), "y=1..=2, y=4..=4, y=7..=8");
 }
@@ -70,10 +66,8 @@ fn a_struct_with_no_walls_has_an_empty_column() {
 
 #[test]
 fn a_height_that_would_overflow_the_column_does_not_wrap() {
-    // `walls height=4294967295` inside `level y=2`. The saturating add
-    // keeps the span at the top of the range rather than wrapping to a
-    // span that starts above where it ends — which would answer
-    // `false` for every row and hide the wall entirely.
+    // `walls height=4294967295` inside `level y=2`. A wrapped end would
+    // fall below the start and hide the wall.
     let column = WallColumn::from_walls([(2, u32::MAX)]);
     assert_eq!(column.to_string(), format!("y=3..={}", u32::MAX));
     assert!(column.contains_rows(3, 1));
@@ -82,9 +76,8 @@ fn a_height_that_would_overflow_the_column_does_not_wrap() {
 
 #[test]
 fn the_course_a_row_sits_in_is_the_one_that_caps_what_opens_there() {
-    // `walls height=2` plus `level y=6 walls height=2`: a door
-    // opening at row 1 is capped by row 2, not by row 8 — the second
-    // course is a different wall, with four rows of air below it.
+    // `walls height=2` plus `level y=6 walls height=2`, four rows of air
+    // apart.
     let column = WallColumn::from_walls([(0, 2), (6, 2)]);
     assert_eq!(column.course_top_at(1), Some(2));
     assert_eq!(column.course_top_at(2), Some(2));
@@ -97,9 +90,7 @@ fn the_course_a_row_sits_in_is_the_one_that_caps_what_opens_there() {
 #[test]
 fn a_row_in_merged_courses_is_capped_by_the_merge_and_not_by_its_member() {
     // `walls height=1` plus `level y=1 walls height=3`: rows 1..=1 and
-    // 2..=4 abut, so row 1 is capped at 4 and a doorway there opens
-    // the two rows it wants although the member it stands on paints
-    // one of them.
+    // 2..=4 abut.
     let column = WallColumn::from_walls([(0, 1), (1, 3)]);
     assert_eq!(column.to_string(), "y=1..=4");
     assert_eq!(column.course_top_at(1), Some(4));
@@ -113,9 +104,7 @@ fn a_row_in_no_course_at_all_has_no_top() {
 
 #[test]
 fn a_rectangle_whose_rows_overflow_is_not_inside_any_column() {
-    // `y=4294967295 size=1x2` would end at `u32::MAX + 1`. Nothing can
-    // contain it, and the answer has to come from the check rather
-    // than from a wrapped sum that lands back at row 0.
+    // `y=4294967295 size=1x2` would end at `u32::MAX + 1`.
     let column = WallColumn::from_walls([(0, u32::MAX)]);
     assert!(!column.contains_rows(u32::MAX, 2));
 }

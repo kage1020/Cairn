@@ -34,9 +34,8 @@ fn front_wall_maps_u_to_x_and_z_to_far_edge() {
 
 #[test]
 fn back_wall_mirrors_u_along_x() {
-    // size=9x7, overhang=1. Back wall at z=overhang=1, and u=0 should
-    // land at the *opposite* x corner from front u=0 so a `sym=true`
-    // opening looks the same from both sides of the building.
+    // size=9x7, overhang=1. Back wall at z=overhang=1, and u=0 at the
+    // opposite x corner from the front's.
     let dims = dims_for(9, 7, 1, 9);
     assert_eq!(
         wall_local_to_grid(WallSide::Back, 0, 1, 1, 9, 7, dims),
@@ -88,14 +87,9 @@ fn out_of_range_returns_none() {
 
 #[test]
 fn the_gate_is_exactly_the_wall_on_every_side() {
-    // The lowering callers assert rather than report a `None`, so the
-    // assertions can only catch a gate that *tightens*, and only where
-    // a test paints the cell it no longer admits. A gate that loosens
-    // never returns `None` at all, and on the back and right walls
-    // the `saturating_sub` mirror would answer a valid-looking corner
-    // cell instead. Pin both edges on all four sides: the last cell of
-    // the wall (`u = len - 1`, `v = dims.y - 1`) maps, and one past it
-    // on either axis does not.
+    // The callers' assertions only catch a gate that tightens. One that
+    // loosens returns no `None` at all, and on the back and right walls
+    // the `saturating_sub` mirror answers a valid-looking corner cell.
     let dims = dims_for(9, 7, 1, 9);
     for (side, len, last_cell) in [
         (WallSide::Front, 9, (9, 8, 7)),

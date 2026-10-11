@@ -1,19 +1,12 @@
-//! Translate a resolved theme-slot value into a [`BlockState`].
+//! Translate a resolved theme-slot value into a [`BlockState`]: the
+//! canonical id and properties the voxel grid stores.
 //!
-//! The semantic resolver hands lowering a `ValueWithSpan` for every member's
-//! `mat_slot=` (when both ends bound). This module turns that surface value
-//! into the canonical Minecraft id + property bag the voxel grid stores. The
-//! split is here, not inside the resolver, because the canonical/abstract
-//! decision is what the block-array lowering pivots on: abstract tokens are
-//! lifted through a registry-pack-backed [`TargetRegistry`]; when no
-//! registry is available, or the catalog does not declare the token, the
-//! caller is told which mode the failure took so the resulting diagnostic
-//! can be precise.
-//!
-//! The last step is the same either way: whatever id the value resolved to
-//! is checked against the target's block-id table. That is the only place
-//! that catches a *canonical* token nobody declared — `@totally_not_a_block`
-//! has no dot, so it never reaches the materials catalog at all.
+//! Abstract tokens are lifted through a [`TargetRegistry`]; when there is
+//! none, or its catalog lacks the token, the caller learns which, so its
+//! diagnostic can be precise. Either way the resolved id is then checked
+//! against the target's block-id table, the only check that catches an
+//! undeclared *canonical* token: `@totally_not_a_block` has no dot, so it
+//! never reaches the materials catalog.
 
 use indexmap::IndexMap;
 
@@ -26,64 +19,46 @@ use super::BlockState;
 
 /// What the registry pack tells lowering, for one compile.
 ///
-/// The block-array lowering pass keeps no direct dependency on
-/// `cairn-lang-formats` (where the on-disk registry pack lives). Instead the
-/// pack side implements this trait, and lowering takes it as
-/// `Option<&dyn TargetRegistry>`: `None` means "no pack was offered for this
-/// run" (LSP highlight, `cairn check` without a pack), `Some` means "lift
-/// abstract tokens through this catalog, fail-loud on misses".
+/// Lowering does not depend on `cairn-lang-formats`, where the registry
+/// pack lives; the pack implements this trait instead. Lowering takes an
+/// `Option`, `None` when no pack was offered (LSP highlight, `cairn check`
+/// without a pack).
 ///
-/// Implementations must be cheap to call: lowering invokes [`Self::lookup`]
-/// once per `mat_slot=` value, and [`Self::known_tokens`] only on the miss
-/// path to feed `nearest_match`. Returning an unordered iterator is fine —
-/// the suggestion pass is order-insensitive past the tie-break rule.
+/// [`Self::lookup`] runs once per `mat_slot=` value, so it must be cheap;
+/// [`Self::known_tokens`] runs only on a miss, and its order matters only
+/// to `nearest_match`'s tie-break.
 pub trait TargetRegistry {
-    /// Lift `token` into a canonical [`BlockState`]. The token text is the
-    /// inner body of the `@TOKEN` literal (no leading `@`). Implementations
-    /// resolve the namespace and any state literal themselves so the trait
-    /// shape stays format-agnostic.
+    /// Lift `token`, the `@TOKEN` literal without its `@`, into a canonical
+    /// [`BlockState`]. The implementation resolves the namespace and any
+    /// state literal itself.
     fn lookup(&self, token: &str) -> Option<BlockState>;
 
-    /// Every token this registry knows about. Used only when [`Self::lookup`]
-    /// returns `None`, to feed the `nearest_match` suggestion. Allocating a
-    /// fresh `Vec` per miss is intentional — misses are rare on a well-formed
-    /// pack and `nearest_match` needs to consume the candidates anyway.
+    /// Every token this registry knows, for the suggestion after a
+    /// [`Self::lookup`] miss. A fresh `Vec` per call is fine: misses are
+    /// rare.
     fn known_tokens(&self) -> Vec<String>;
 
     /// The block ids valid in the target this compile is pinned to.
     ///
-    /// `None` means no id table applies — either the pack ships no `blocks`
-    /// component, or the run has no `--target` to pin one (`cairn check`,
-    /// `cairn info`, `cairn lower`). Id validation is then skipped, because
-    /// the honest answer to "does this id exist" is "in which version?" and
-    /// picking one on the caller's behalf would refuse ids that are fine on
-    /// the version they actually compile against.
+    /// `None` when no id table applies: the pack ships no `blocks`
+    /// component, or the run pins no `--target` (`cairn check`,
+    /// `cairn info`, `cairn lower`). Validation is then skipped rather than
+    /// guessing a version, which would refuse ids that are fine on the one
+    /// actually compiled against.
     fn block_ids(&self) -> Option<BlockIdSet<'_>>;
 
     /// The ids **the pinned target declares** that name the same block as
-    /// `id`, in the registry's own order.
+    /// `id`, in the registry's own order, which is the one an author reads.
+    /// One old spelling often splits into several.
     ///
-    /// This is the rename half of a refused id, and the one a distance
-    /// search cannot reach: `minecraft:light` and
-    /// `minecraft:light_block_0` are eight edits apart and the same block,
-    /// so no threshold that keeps `oak_plank` → `oak_planks` honest will
-    /// ever connect them. A registry answers from a table that says so
-    /// outright.
+    /// A distance search cannot find a rename: `minecraft:light` and
+    /// `minecraft:light_block_0` are eight edits apart, and no threshold
+    /// that keeps `oak_plank` → `oak_planks` honest connects them. Called
+    /// only on a miss, like [`Self::known_tokens`].
     ///
-    /// Returning several is normal rather than exceptional — one old
-    /// spelling routinely splits into a family — and the order is the
-    /// registry's, since it is the one an author reads.
-    ///
-    /// Called only on the miss path, beside [`Self::known_tokens`] and on
-    /// the same terms: allocating per miss is intentional, because misses
-    /// are rare and the caller needs owned candidates anyway.
-    ///
-    /// The default is "this registry has no alias table", which is what a
-    /// pack shipping no `aliases` component amounts to and what every
-    /// registry did before the component existed. An implementation that
-    /// has one overrides it; one that does not is not obliged to say so.
+    /// The default answers no aliases, as for a pack without an `aliases`
+    /// component.
     fn aliases_for(&self, id: &str) -> Vec<String> {
-        // A registry with no alias table has the same answer for every id.
         let _ = id;
         Vec::new()
     }
@@ -91,9 +66,8 @@ pub trait TargetRegistry {
 
 /// The block ids valid in one pinned `(edition, version)` target.
 ///
-/// A borrowed, sorted slice rather than a set type so the pack can hand out
-/// the table it already folded at load time without rebuilding an index per
-/// lookup, and so `cairn-lang-core` needs no hashing dependency for it.
+/// A borrowed sorted slice rather than a set, so the pack lends the table
+/// it built at load time and `cairn-lang-core` needs no hashing dependency.
 #[derive(Debug, Clone, Copy)]
 pub struct BlockIdSet<'a> {
     /// How the target reads in a diagnostic — `"bedrock 1.21.60"`.
@@ -107,9 +81,8 @@ impl<'a> BlockIdSet<'a> {
     ///
     /// # Panics
     ///
-    /// Panics in debug builds when `ids` is not sorted ascending — the
-    /// binary search below would otherwise miss real ids for reasons no
-    /// caller could see from the outside.
+    /// Panics in a debug build when `ids` is not ascending, which would
+    /// make [`Self::contains`] miss real ids.
     #[must_use]
     pub fn new(label: &'a str, ids: &'a [String]) -> Self {
         debug_assert!(
@@ -151,42 +124,35 @@ impl<'a> BlockIdSet<'a> {
     }
 }
 
-/// Default Minecraft id namespace for bare `@name` tokens. A future mod-aware
-/// registry pack will let theme slots opt into other namespaces; this module
-/// hardcodes vanilla so the cottage example lowers without registry data.
+/// Namespace of a bare `@name` token, fixed so canonical tokens lower
+/// without registry data.
 const VANILLA_NAMESPACE: &str = "minecraft";
 
-/// Reason a slot value could not be lowered to a [`BlockState`].
+/// Why a slot value could not be lowered to a [`BlockState`].
 ///
-/// The lowering pass turns each variant into a distinct diagnostic instead
-/// of one catch-all so a downstream consumer (LSP quick-fix, future
-/// registry-pack tooling) can tell "we know we need to upgrade this later"
-/// (`Abstract`), "the pack rejected this token" (`UnknownAbstract`), or
-/// "the resolver already complained about this" (`AlreadyDiagnosed`).
+/// Each variant becomes its own diagnostic, or none, so a consumer such as
+/// an LSP quick-fix can tell them apart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MaterialDeferred {
     /// The slot bound to an abstract token (`@floor.wood.broadleaf`) and no
-    /// [`TargetRegistry`] was offered. Carries the inner token
-    /// text so the caller can name it in the emitted warning.
+    /// [`TargetRegistry`] was offered. Carries the token without its `@`.
     Abstract(String),
-    /// The slot bound to an abstract token that the offered resolver does
-    /// not declare. Carries the token plus the closest declared candidate
-    /// (when one exists within `nearest_match`'s edit cap) so the diagnostic
-    /// can suggest a fix instead of just listing valid options.
+    /// The slot bound to an abstract token the offered registry does not
+    /// declare.
     UnknownAbstract {
         /// Inner token text (no leading `@`).
         token: String,
         /// Closest declared token, when one is within the suggestion cap.
         suggestion: Option<String>,
     },
-    /// The slot value was not a `@TOKEN` shape at all. The resolver already
-    /// emitted `E_UNKNOWN_SLOT_TARGET` for this case during `resolve()`, so
-    /// lowering stays silent to avoid double-diagnosing the same span.
+    /// The slot value was not a `@TOKEN` at all. The resolver has reported
+    /// `E_UNKNOWN_SLOT_TARGET` for it, so lowering stays silent rather than
+    /// report the span twice.
     AlreadyDiagnosed,
     /// The value resolved to a block id the pinned target does not declare.
-    /// `spec/versioning-editions` "Fail-loud and minimum-version inference"
-    /// makes this a hard error: writing the id anyway produces a structure
-    /// file the game loads as air, with no diagnostic to explain the hole.
+    /// An error (`spec/versioning-editions` "Fail-loud and minimum-version
+    /// inference"), because the game loads the id as air with nothing to
+    /// explain the hole.
     UnknownId(UnknownId),
 }
 
@@ -207,21 +173,17 @@ pub struct UnknownId {
     /// the refused id, or the group's other spellings are all absent from
     /// this target too.
     ///
-    /// Kept apart from [`Self::suggestion`] rather than folded into it
-    /// because the two are different claims about the same span. A
-    /// suggestion is a guess from a string distance and can be wrong about
-    /// which block was meant; an alias is a statement out of the pack's
-    /// table that these names are one block. A consumer that offered them
-    /// as one list would be offering a quick-fix it cannot stand behind.
+    /// Kept apart from [`Self::suggestion`]: a suggestion is a guess from
+    /// string distance, an alias is the pack's statement that the names
+    /// are one block, and a quick-fix offering both as one list would vouch
+    /// for the guess.
     pub aliases: Vec<String>,
 }
 
 /// Who chose the id that turned out not to exist.
 ///
-/// The two cases need different prose and different fixes: an author can
-/// correct what they typed, but a pack mapping is not theirs to edit, and a
-/// message that blames their token for it sends them looking in the wrong
-/// file.
+/// Each needs its own fix, and a message blaming the author's token for a
+/// pack mapping sends them to the wrong file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdOrigin {
     /// The author wrote the id, as a canonical `@minecraft:foo` /`@foo`
@@ -236,10 +198,8 @@ pub enum IdOrigin {
     /// declares no catalog token for its default, and lowering fell back
     /// to an id compiled into `cairn-lang-core`.
     ///
-    /// Distinct from [`Self::Catalog`] because the fix is the opposite
-    /// one. A catalog mapping exists and is wrong for this target; a
-    /// built-in fallback fires precisely because the pack has nothing to
-    /// say, and the pack is what has to grow the row.
+    /// Unlike [`Self::Catalog`], the fix is for the pack to add the missing
+    /// row, not to correct an existing one.
     Builtin {
         /// The catalog token that would have redirected it, so the
         /// message can name the row the pack is missing.
@@ -248,12 +208,9 @@ pub enum IdOrigin {
 }
 
 impl IdOrigin {
-    /// Stable wire name for the diagnostic payload.
-    ///
-    /// `token` alone cannot separate [`Self::Catalog`] from
-    /// [`Self::Builtin`] — both carry one — and the two need opposite
-    /// fixes, so a consumer that can only see `token` would offer the
-    /// wrong one half the time.
+    /// Stable wire name for the diagnostic payload, which needs it because
+    /// [`Self::token`] alone cannot tell [`Self::Catalog`] from
+    /// [`Self::Builtin`].
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
@@ -276,36 +233,22 @@ impl IdOrigin {
 
 /// Convert a resolved slot value into a canonical [`BlockState`].
 ///
-/// `registry` is the offered registry view — usually backed by the built-in
-/// registry pack. When `Some`, abstract tokens (`@floor.wood.broadleaf`) are
-/// lifted through its catalog and every resolved id is checked against the
-/// pinned target's id table; misses become
-/// [`MaterialDeferred::UnknownAbstract`] / [`MaterialDeferred::UnknownId`]
-/// with a suggestion. When `None`, abstract tokens stay deferred
-/// ([`MaterialDeferred::Abstract`]) so library callers that never load a
-/// pack still see the shape they did before the pack carried a catalog.
-///
-/// Returns:
-/// - `Ok(state)` for a canonical token (`@oak_planks`, `@oak_log[axis=x]`)
-///   or an abstract token the registry knew about, whose id the target
-///   declares. A bracketed state literal on canonical tokens expands into
-///   [`BlockState::properties`].
-/// - `Err(MaterialDeferred::Abstract)` for `@a.b.c` shapes when `registry`
-///   is `None`.
-/// - `Err(MaterialDeferred::UnknownAbstract)` when `registry` is `Some` but
-///   the catalog does not declare the token. The `suggestion` field carries
-///   the nearest declared token when one exists.
-/// - `Err(MaterialDeferred::UnknownId)` when the value resolved to an id the
-///   pinned target does not declare — including one the catalog itself
-///   produced, which is a pack bug rather than an authoring one.
-/// - `Err(MaterialDeferred::AlreadyDiagnosed)` for non-token values; the
-///   `E_UNKNOWN_SLOT_TARGET` error has already fired during resolve.
+/// A canonical token (`@oak_planks`, `@oak_log[axis=x]`) maps directly, its
+/// state literal into [`BlockState::properties`]. With `registry`, an
+/// abstract token (`@floor.wood.broadleaf`) is lifted through its catalog
+/// and every resolved id is checked against the pinned target.
 ///
 /// # Errors
 ///
-/// Returns [`MaterialDeferred`] when the value cannot be lowered as
-/// described above. The lowering pass converts each variant into a
-/// `W_*` or `E_*` diagnostic.
+/// - [`MaterialDeferred::Abstract`] for an abstract token when `registry`
+///   is `None`.
+/// - [`MaterialDeferred::UnknownAbstract`] when the catalog does not
+///   declare the token.
+/// - [`MaterialDeferred::UnknownId`] when the target does not declare the
+///   resolved id, including one the catalog produced, which is a pack bug
+///   rather than an authoring one.
+/// - [`MaterialDeferred::AlreadyDiagnosed`] for a value that is not a
+///   token.
 pub fn resolve_block_state(
     slot: &ValueWithSpan,
     registry: Option<&dyn TargetRegistry>,
@@ -346,16 +289,12 @@ pub fn resolve_block_state(
     }
 }
 
-/// Refuse `state` when the pinned target does not declare its id.
+/// Refuse `state` when the pinned target does not declare its id; with no
+/// target pinned, pass it through.
 ///
-/// Passes the state through untouched when no target is pinned — that is
-/// the documented "cannot refute" mode of [`TargetRegistry::block_ids`],
-/// not an acceptance.
-///
-/// Visible to the lowering pass because `mat_slot=` is not the only way an
-/// id reaches a palette: a member whose default material comes from the
-/// pack (`pressure_plate`) resolves outside [`resolve_block_state`] and
-/// would otherwise be the one id in the build that nothing checks.
+/// Crate-visible because a pack-supplied default material
+/// (`pressure_plate`'s) reaches the palette outside
+/// [`resolve_block_state`] and needs the same check.
 pub(crate) fn validated_id(
     state: BlockState,
     registry: Option<&dyn TargetRegistry>,
@@ -367,14 +306,10 @@ pub(crate) fn validated_id(
     if ids.contains(&state.id) {
         return Ok(state);
     }
-    // Both answers are collected, and neither stands in for the other: the
-    // alias table says what this target calls the block, the distance
-    // search guesses which block was meant. A rename has the first and a
-    // typo the second — `aliases_for` is group membership and nothing
-    // else, so a misspelling no group names can never carry an alias. Both
-    // are filled when a renamed id also happens to sit inside the edit cap
-    // of a spelling this target declares: `stone_bricks` on Bedrock 1.21.0
-    // is a group member *and* two edits from `stonebrick`.
+    // Neither answer stands in for the other: a rename has aliases and a
+    // typo a suggestion. Both are filled when a renamed id is also within
+    // the edit cap of a declared spelling, as `stone_bricks` is of Bedrock
+    // 1.21.0's `stonebrick`.
     let aliases = registry.map_or_else(Vec::new, |registry| registry.aliases_for(&state.id));
     Err(MaterialDeferred::UnknownId(UnknownId {
         suggestion: nearest_namespaced_id(&state.id, ids.iter()),
@@ -389,17 +324,14 @@ pub(crate) fn validated_id(
 /// `minecraft:cobblestone`) into a [`BlockState`].
 ///
 /// Recognises an optional `namespace:` prefix and a trailing `[k=v,...]`
-/// state literal, whose properties come back sorted by name: the palette
-/// is a set with a canonical rendering (`spec/compilation`), so the order
-/// a source spelled them in must reach neither the `Properties` a backend
-/// writes nor the lockfile's hash. Every other producer of a state —
-/// `roof::stair_state` — already inserts its keys in that order.
+/// state literal, whose properties come back sorted by name so the order a
+/// source spelled them reaches neither a backend's `Properties` nor the
+/// lockfile's hash (`spec/compilation`). `roof::stair_state` builds its
+/// states in that order too.
 ///
-/// The parser refuses a malformed literal, so a token from source reaches
-/// here well formed, and a debug build asserts as much. A release build
-/// still reads the tail leniently, because [`resolve_block_state`] and
-/// [`ValueKind::Token`] are both public and a library caller can hand
-/// over any text at all.
+/// The parser refuses a malformed literal, and a debug build asserts none
+/// arrives. A release build still reads the tail leniently, because a
+/// library caller can hand [`resolve_block_state`] any text.
 fn canonical_to_block_state(inner: &str) -> BlockState {
     let (head, properties_src) = match inner.find('[') {
         Some(i) => {
@@ -413,8 +345,7 @@ fn canonical_to_block_state(inner: &str) -> BlockState {
                 "a state literal reaches the material layer as the parser folds it, \
                  `[key=value,...]`, got `{inner}`"
             );
-            // Trim the matching `]`; an unterminated literal falls
-            // through with whatever the tail contained.
+            // An unterminated literal keeps its whole tail.
             let trimmed = tail.strip_suffix(']').unwrap_or(tail);
             (head, trimmed)
         }
@@ -430,15 +361,11 @@ fn canonical_to_block_state(inner: &str) -> BlockState {
     BlockState { id, properties }
 }
 
-/// Parse a comma-separated `k=v,k=v` body into an ordered property map.
+/// Parse a `k=v,k=v` body into a property map, in written order.
 ///
-/// Whitespace around keys and values is trimmed; empty segments (from a
-/// trailing comma or a stray `,,`) are skipped silently. The block-array IR
-/// is below the lint layer, so noisy parsing here would surface as
-/// diagnostics in the wrong place; the parser, which refuses every one of
-/// those shapes in source, is the gate for them, and
-/// [`canonical_to_block_state`] asserts in a debug build that nothing
-/// else reached here.
+/// Lenient: whitespace is trimmed, and empty segments and pairs without
+/// `=` are skipped. The parser refuses those shapes in source; a
+/// diagnostic from here would land in the wrong place.
 fn parse_state_literal(body: &str) -> IndexMap<String, String> {
     let mut out = IndexMap::new();
     if body.is_empty() {

@@ -11,18 +11,15 @@ fn ident(name: &str) -> ValueWithSpan {
     ValueWithSpan::from_value(Value::new(ValueKind::Ident(name.to_owned()), span))
 }
 
-/// In-memory registry used by the material tests. Real callers go
-/// through `cairn-lang-formats::registry::RegistryPack::view`; the
-/// inline fake here keeps this test file free of a circular crate
-/// dependency.
+/// An in-memory [`TargetRegistry`]; the real one is in
+/// `cairn-lang-formats`, which depends on this crate.
 struct FakeResolver {
     entries: Vec<(&'static str, &'static str)>,
     /// Sorted, fully namespaced ids the pinned target declares. Empty
     /// means "no target pinned", matching a `blocks`-less pack.
     ids: Vec<String>,
-    /// One alias group: every spelling of one block, as a pack's
-    /// `aliases` component declares it. Empty means "no alias table",
-    /// which is what a pack without the component amounts to.
+    /// One alias group: every spelling of one block. Empty means no alias
+    /// table.
     group: Vec<String>,
 }
 
@@ -175,12 +172,8 @@ fn an_authored_id_the_target_lacks_is_refused_with_its_registry_named() {
 
 #[test]
 fn a_rename_is_answered_from_the_alias_table_and_not_by_distance() {
-    // Bedrock 1.21.0 spells the Java `light` block `light_block`, six
-    // edits away — past `nearest_match`'s cap. (From 1.21.40 it is
-    // `light_block_0` … `_15`, which is further still.) No threshold
-    // that keeps `oak_plank` → `oak_planks` honest reaches it, so the
-    // answer has to come from a table that states the two are one
-    // block.
+    // Bedrock 1.21.0 spells Java's `light` as `light_block`, six edits
+    // away and past `nearest_match`'s cap.
     let registry = FakeResolver::new(vec![])
         .pinned(&["minecraft:light_block"])
         .aliasing(&["minecraft:light", "minecraft:light_block"]);
@@ -198,13 +191,8 @@ fn a_rename_is_answered_from_the_alias_table_and_not_by_distance() {
     }
 }
 
-/// A group answers with every spelling the target declares, not with
-/// one of them.
-///
-/// Bedrock 1.21.40 split the single `light_block` into sixteen ids by
-/// light level. Picking one on the author's behalf would be a silent
-/// substitution of a light level they never chose; the closed set is
-/// the honest answer, and choosing from it is theirs.
+/// Bedrock 1.21.40 has a `light_block_N` per light level; offering one
+/// would choose the light level for the author.
 #[test]
 fn a_split_answers_with_every_spelling_the_target_has() {
     let registry = FakeResolver::new(vec![])
@@ -233,12 +221,8 @@ fn a_split_answers_with_every_spelling_the_target_has() {
     }
 }
 
-/// An alias the target does not declare either is not an answer.
-///
-/// The group is edition-wide and version-free by construction, so it
-/// holds spellings from versions this compile is not building for.
-/// Offering one of those would refuse an id and then suggest another
-/// the same target also refuses.
+/// An alias group spans versions, so it holds spellings this target
+/// refuses too.
 #[test]
 fn an_alias_the_target_lacks_is_not_offered() {
     let registry = FakeResolver::new(vec![])
@@ -254,15 +238,8 @@ fn an_alias_the_target_lacks_is_not_offered() {
     }
 }
 
-/// A renamed id near its replacement carries both answers, and they
-/// are different claims about it.
-///
-/// The two agree here by coincidence: `stone_bricks` is a group member,
-/// which is what fills `aliases`, and it is also two edits from
-/// `stonebrick`, which is what fills `suggestion`. What matters is that
-/// each field is filled by its own rule rather than one being derived
-/// from the other. A misspelling *of* a renamed id — `stone_brick`,
-/// which no group names — carries the second and never the first.
+/// `stone_bricks` is in the group and also two edits from `stonebrick`,
+/// so each field is filled, by its own rule.
 #[test]
 fn a_renamed_id_near_its_replacement_carries_both_answers() {
     let registry = FakeResolver::new(vec![])
@@ -278,12 +255,8 @@ fn a_renamed_id_near_its_replacement_carries_both_answers() {
     }
 }
 
-/// A misspelling no group names carries the distance guess alone.
-///
-/// The other half of the test above: `aliases_for` is group membership
-/// and nothing else, so a typo is never an alias however near a group
-/// member it lands. `stone_brick` is one edit from the `stone_bricks`
-/// the group does carry, and still gets nothing from it.
+/// `stone_brick` is one edit from the group's `stone_bricks`, but an
+/// alias is group membership, not distance.
 #[test]
 fn a_misspelling_no_group_names_carries_no_alias() {
     let registry = FakeResolver::new(vec![])
@@ -299,8 +272,6 @@ fn a_misspelling_no_group_names_carries_no_alias() {
     }
 }
 
-/// A registry with no alias table answers exactly as every registry
-/// did before the component existed.
 #[test]
 fn a_registry_with_no_alias_table_answers_no_alias() {
     let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light_block"]);
@@ -311,14 +282,9 @@ fn a_registry_with_no_alias_table_answers_no_alias() {
     }
 }
 
-/// A suggestion is only useful if it is an id the target actually
-/// declares, and an id is namespace plus path.
-///
-/// Searching paths across namespaces finds `cogwheels` one edit from
-/// `cogwheel` and hands back `minecraft:cogwheels` — a string that
-/// exists in no registry anywhere, offered as the fix for an id that
-/// does not exist either. Both built-in packs are entirely
-/// `minecraft:`, so only a modded-shaped table reaches this.
+/// A path search across namespaces would find `cogwheels` and offer
+/// `minecraft:cogwheels`, an id no registry has. Only a modded table
+/// reaches this: both built-in packs are all `minecraft:`.
 #[test]
 fn a_suggestion_never_borrows_a_path_from_another_namespace() {
     let registry = FakeResolver::new(vec![]).pinned(&["create:cogwheels"]);
@@ -336,8 +302,8 @@ fn a_suggestion_never_borrows_a_path_from_another_namespace() {
     }
 }
 
-/// The same table does suggest within its own namespace, so the test
-/// above is not passing because the search found nothing to look at.
+/// The control for the test above: the same table does suggest within
+/// its own namespace.
 #[test]
 fn a_suggestion_is_still_found_inside_the_namespace_that_has_one() {
     let registry = FakeResolver::new(vec![]).pinned(&["create:cogwheels"]);
@@ -359,8 +325,6 @@ fn an_authored_id_the_target_declares_passes() {
 
 #[test]
 fn a_state_literal_is_checked_on_the_id_alone() {
-    // `oak_log[axis=x]` is one id plus a property bag; the id table
-    // keys on the id, so the brackets must not defeat the lookup.
     let registry = FakeResolver::new(vec![]).pinned(&["minecraft:oak_log"]);
     let bs = resolve_block_state(&token("oak_log[axis=x]"), Some(&registry)).unwrap();
     assert_eq!(bs.properties.get("axis").map(String::as_str), Some("x"));
@@ -387,8 +351,6 @@ fn a_catalog_mapping_onto_a_missing_id_names_the_token_that_reached_it() {
 
 #[test]
 fn an_unpinned_registry_refutes_nothing() {
-    // No target means no id table; the value passes untouched rather
-    // than being checked against a version nobody asked for.
     let registry = FakeResolver::new(vec![("floor.stone.smooth", "stone_bricks")]);
     assert!(registry.block_ids().is_none());
     let bs = resolve_block_state(&token("totally_not_a_block"), Some(&registry)).unwrap();
@@ -405,9 +367,6 @@ fn an_unknown_id_with_no_close_candidate_carries_no_suggestion() {
     }
 }
 
-/// `origin` and `token` are two fields with one job between them, so
-/// the pairs a consumer may rely on are pinned here rather than left
-/// to the two call sites to agree on by hand.
 #[test]
 fn every_id_origin_has_a_wire_name_and_the_token_that_goes_with_it() {
     let cases = [

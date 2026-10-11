@@ -1,28 +1,22 @@
-//! The world rows a struct's `walls` members actually paint.
+//! The world rows a struct's `walls` members paint.
 //!
-//! A `walls height=H` member under `level y=N` fills the rows
-//! `N + 1 ..= N + H` — one voxel above the level's base plane, because the
-//! floor slab owns the base plane itself. A struct with several `walls`
-//! members therefore occupies a *set* of rows, and the set can have gaps:
-//! `walls height=2` plus a `level y=6 walls height=2` leaves `y = 3..=6`
-//! as open air between the two courses.
+//! A `walls height=H` member under `level y=N` fills rows `N + 1 ..= N + H`,
+//! one above the level's base plane, which the floor slab owns. Several
+//! `walls` members occupy a *set* of rows, which can have gaps:
+//! `walls height=2` plus `level y=6 walls height=2` leaves `y = 3..=6` open
+//! air between the two courses.
 //!
-//! The lowering used to carry that set as one number, the highest row any
-//! wall reached. A number cannot answer the question an opening has to
-//! ask — a `window`'s "is every row I cut into a wall?", a `door`'s "is
-//! the row I open at one?" — in either direction: it says nothing about
-//! the rows below the first course (so a `window y=0` carved a hole
-//! through the floor slab) and nothing about the gap between two courses
-//! (so a `window` between them hung glass in open air, and a `door` under
-//! walls that start a storey up carved air over air). All of them cut
-//! silently, because a check that cannot see the fault cannot report it.
+//! An opening asks about that set, not about the highest row: a `window`
+//! whether every row it cuts is wall, a `door` whether the row it opens at
+//! is. A single height cannot see the rows below the first course or the
+//! gap between two, so a `window y=0` would cut the floor slab, a window
+//! between courses would hang glass in air, and a door under walls that
+//! start a storey up would carve air over air, all silently.
 //!
-//! [`WallColumn`] is that set, kept as sorted inclusive spans with
-//! overlapping *and adjacent* runs merged. Merging adjacency is what makes
-//! a level-on-level tower read as one wall: `walls height=5` plus
-//! `level y=5 walls height=4` is `1..=9`, a window spanning the seam is
-//! cut into masonry the whole way up, and a doorway at the foot of it
-//! opens its two rows across the two members that paint them.
+//! [`WallColumn`] keeps the set as sorted inclusive spans with overlapping
+//! *and adjacent* runs merged, so a level-on-level tower reads as one wall:
+//! `walls height=5` plus `level y=5 walls height=4` is `1..=9`, and a window
+//! or doorway across the seam cuts masonry the whole way.
 
 use std::fmt;
 
@@ -59,9 +53,6 @@ impl WallColumn {
         let mut merged: Vec<(u32, u32)> = Vec::with_capacity(spans.len());
         for (start, end) in spans {
             match merged.last_mut() {
-                // `start <= last.1 + 1` merges touching spans as well as
-                // overlapping ones, so two courses stacked without a gap
-                // read as the single wall they build.
                 Some(last) if start <= last.1.saturating_add(1) => last.1 = last.1.max(end),
                 _ => merged.push((start, end)),
             }
@@ -75,20 +66,12 @@ impl WallColumn {
     }
 
     /// Whether the `height` rows starting at `y_start` all lie inside one
-    /// course.
+    /// course, not merely inside the union: a rectangle crossing a gap is
+    /// two cuts with a hole between them.
     ///
-    /// One course rather than the union: a rectangle that leaves masonry
-    /// and re-enters it above the gap is not cut into a wall, it is two
-    /// cuts with a hole between them. The spans are already merged, so
-    /// "one course" and "the union, with no gap crossed" are the same
-    /// test.
-    ///
-    /// `height = 0` cannot occur from source (`size=WxH` parses as
-    /// `NonZeroU32`) and an empty rectangle vacuously fits, so it answers
-    /// `true`. A rectangle whose last row does not fit in a `u32` answers
-    /// `false`: no column can hold it, and a wrapped sum would land the
-    /// question back at row 0 and answer `true` for a window nowhere near
-    /// a wall.
+    /// `height = 0`, which source cannot write (`size=` is `NonZeroU32`),
+    /// vacuously fits. Rows past `u32::MAX` never fit, rather than
+    /// wrapping back to row 0.
     pub(super) fn contains_rows(&self, y_start: u32, height: u32) -> bool {
         let Some(last_offset) = height.checked_sub(1) else {
             return true;
@@ -103,13 +86,9 @@ impl WallColumn {
     /// The last row of the course that holds `y`, or `None` when no
     /// course does.
     ///
-    /// The question a `door` asks: it opens at one row and takes what
-    /// the course above that row will give it, so the answer has to be
-    /// the top of *that* course rather than the top of the tallest one.
-    /// A `window` asks the same column [`Self::contains_rows`], which is
-    /// this answer plus "and the rectangle ends at or below it" — one
-    /// implementation, so the two members cannot come to disagree about
-    /// where the masonry is.
+    /// A door opening at `y` is capped by this, not by the tallest course.
+    /// [`Self::contains_rows`] is built on it, so doors and windows agree
+    /// on where the masonry is.
     pub(super) fn course_top_at(&self, y: u32) -> Option<u32> {
         self.spans
             .iter()
@@ -119,14 +98,9 @@ impl WallColumn {
 }
 
 impl fmt::Display for WallColumn {
-    /// `y=1..=3`, or `y=1..=2, y=7..=8` when the column has a gap — the
-    /// form the deferral message quotes, so an author reading it can see
-    /// which rows were available without counting `height=` by hand.
-    ///
-    /// An empty column renders as `none`, which no caller prints: every
-    /// site that formats a column asks `is_empty()` first — or holds one a
-    /// non-empty check produced — and says "no walls" in its own words, so
-    /// only this file's tests reach the fallback.
+    /// `y=1..=3`, or `y=1..=2, y=7..=8` across a gap, as deferral messages
+    /// quote it. An empty column renders as `none`, which no caller prints:
+    /// each checks `is_empty()` and says "no walls" itself.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.spans.is_empty() {
             return f.write_str("none");

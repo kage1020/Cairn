@@ -9,9 +9,6 @@ fn filled(len: usize) -> Palette {
     palette
 }
 
-/// The last index a palette can name is still given out, the one past
-/// it is refused rather than panicking, and a state already present is
-/// still found once every index is taken.
 #[test]
 fn try_intern_refuses_only_a_new_state_once_every_index_is_taken() {
     let mut palette = filled(PALETTE_CAPACITY - 1);
@@ -38,12 +35,8 @@ fn try_intern_refuses_only_a_new_state_once_every_index_is_taken() {
     assert_eq!(palette.try_intern(BlockState::air()), Ok(PaletteIndex::AIR));
 }
 
-/// A capacity past [`PALETTE_CAPACITY`] is clamped to it: a full
-/// palette refuses a new state rather than reaching for an index a
-/// [`PaletteIndex`] cannot name, and the refusal carries the capacity
-/// that was in force, not the one asked for. Caught rather than left to
-/// fail the test, so the clamp's absence is reported as this assertion
-/// and not as the panic it would cause.
+/// Without the clamp this panics, so it is caught to fail as the assertion
+/// instead.
 #[test]
 fn try_intern_within_clamps_a_capacity_past_what_an_index_can_name() {
     let mut palette = filled(PALETTE_CAPACITY);
@@ -133,8 +126,6 @@ fn canonicalize_sorts_by_id_and_pins_air_at_slot_zero() {
             "minecraft:oak_planks",
         ],
     );
-    // The map has to name where each old slot went, or a grid painted
-    // against the old numbering cannot follow.
     assert_eq!(
         remap,
         vec![
@@ -161,17 +152,10 @@ fn canonicalize_breaks_an_id_tie_on_the_properties() {
 
 #[test]
 fn canonicalize_reads_properties_in_name_order_not_insertion_order() {
-    // Same id on both, so the property bag is the whole decision.
-    // `half` is written first in one bag and second in the other, so a
-    // key that read the pairs in place would compare `half=top`
-    // against `facing=south` and order the two by which property the
-    // author happened to write first.
-    //
-    // Reachable from source, not only by hand: `parse_state_literal`
-    // fills the `IndexMap` in the order the literal spells its
-    // properties, so `@oak_stairs[half=top,facing=north]` beside
-    // `@oak_stairs[facing=south,half=bottom]` is a pair of theme slots
-    // someone can write.
+    // Same id on both, and `half` first in one bag but second in the
+    // other, so a key that read the pairs in place would compare
+    // `half=top` against `facing=south`. A source state literal arrives
+    // sorted, but a registry's `lookup` or a hand-built state need not.
     let mut p = Palette::new_with_air();
     p.intern(state(
         "minecraft:oak_stairs",
@@ -203,8 +187,6 @@ fn canonicalizing_a_block_array_renumbers_the_grid_onto_the_new_slots() {
         source_scope: "struct::t".to_owned(),
     };
     array.canonicalize_palette();
-    // Same two blocks in the same two cells, read back through the
-    // palette the reordering left behind.
     let read: Vec<&str> = array
         .voxels
         .iter()
@@ -223,9 +205,6 @@ fn canonicalizing_a_block_array_renumbers_the_grid_onto_the_new_slots() {
 
 #[test]
 fn canonicalizing_leaves_an_index_the_palette_does_not_have_alone() {
-    // A hand-assembled disagreement stays visible to
-    // `first_index_outside_palette`, which is what both backends ask
-    // before they write anything.
     let mut array = BlockArray {
         dims: Dims { x: 1, y: 1, z: 1 },
         palette: Palette::new_with_air(),
