@@ -1,4 +1,6 @@
-//! End-to-end tests for `cairn lower <file>`.
+//! `cairn lower <file>` end to end: the IR it prints in each format, the
+//! findings it reports on stderr with their positions, and every shipped
+//! example lowering at exit 0.
 
 use std::fs;
 use tempfile::TempDir;
@@ -6,7 +8,7 @@ use tempfile::TempDir;
 use crate::common::{assert_stream, cairn, crn_examples, examples_dir};
 
 #[test]
-fn lower_1_cottage_exits_zero_and_names_the_struct() {
+fn cottage_exits_zero_and_names_the_struct() {
     let path = examples_dir().join("cottage.crn");
     let out = cairn("lower", &[path.to_str().unwrap()]);
     assert!(
@@ -29,7 +31,7 @@ fn lower_1_cottage_exits_zero_and_names_the_struct() {
 }
 
 #[test]
-fn lower_2_json_format_round_trips_as_block_array_ir() {
+fn json_format_round_trips_as_block_array_ir() {
     let path = examples_dir().join("cottage.crn");
     let out = cairn("lower", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(out.status.success());
@@ -52,14 +54,13 @@ fn lower_2_json_format_round_trips_as_block_array_ir() {
 }
 
 #[test]
-fn lower_3_deferred_member_warnings_print_to_stderr() {
-    // The current carrier is a `stair kind=stairs shape=inner_left`.
+fn deferred_member_warnings_print_to_stderr() {
+    // The carrier is a `stair kind=stairs shape=inner_left`.
     // `fill_stair` accepts only `shape=straight` / `outer_left` /
     // `outer_right`, so an `inner_*` shape still emits a targeted
     // `W_DEFERRED_MEMBER` — that is what this test pins. Kept in-line
     // rather than as an example so we do not commit an example the
-    // docs would then need to describe. CHANGELOG owns the history of
-    // which construct held the carrier before this one.
+    // docs would then need to describe.
     let source = concat!(
         "theme t:\n",
         "  slot floor -> spruce_planks\n",
@@ -89,7 +90,7 @@ fn lower_3_deferred_member_warnings_print_to_stderr() {
 }
 
 #[test]
-fn lower_6_all_examples_exit_zero() {
+fn all_examples_exit_zero() {
     for path in crn_examples() {
         let out = cairn("lower", &[path.to_str().unwrap()]);
         assert!(
@@ -102,13 +103,12 @@ fn lower_6_all_examples_exit_zero() {
 }
 
 #[test]
-fn lower_8_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
+fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
     // `W_PHASE_CONFLICT` names the member that was overwritten in a note,
     // and a note saying "declared here" without a *here* sends the reader
-    // nowhere. Five copies of the note loop lived in this binary and three
-    // of them dropped `note.span`; they now share one renderer, so the
-    // location travels with every command's notes and not only with
-    // `check`'s.
+    // nowhere. Every command renders its notes through one renderer, and
+    // this pins that the location travels with `lower`'s notes as it does
+    // with `check`'s.
     let dir = TempDir::new().expect("tempdir");
     let path = dir.path().join("conflict.crn");
     fs::write(

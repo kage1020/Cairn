@@ -25,7 +25,7 @@ const TAGGED_STAGE: &str = "placement";
 const NEUTRAL_STAGE: &str = "netlist";
 
 #[test]
-fn cli_synth_requires_experimental_flag() {
+fn requires_experimental_flag() {
     // The subcommand is internal-tier; a caller invoking it without the
     // opt-in flag must exit 2 with a usage hint on stderr so the gate
     // cannot be missed silently.
@@ -502,7 +502,7 @@ fn every_stage_prints_the_ir_the_redstone_passes_build() {
 }
 
 #[test]
-fn cli_synth_stage_placement_missing_region_exits_one() {
+fn stage_placement_missing_region_exits_one() {
     // A scope with cells but no `circuit region=` line surfaces
     // `E_NO_CIRCUIT_REGION` on stderr and exits 1 — the symmetric E2E
     // gate to the congestion case below, so both fail-loud paths are
@@ -541,7 +541,7 @@ fn cli_synth_stage_placement_missing_region_exits_one() {
 }
 
 #[test]
-fn cli_synth_stage_placement_congestion_exits_one() {
+fn stage_placement_congestion_exits_one() {
     // A scope whose synthesised netlist overflows its `circuit
     // region=... void=N` reservation should fail loud with
     // `E_ROUTE_CONGESTION` on stderr and exit 1 — the same convention
@@ -583,7 +583,7 @@ fn cli_synth_stage_placement_congestion_exits_one() {
 }
 
 #[test]
-fn cli_synth_stage_route_congestion_exits_one() {
+fn stage_route_congestion_exits_one() {
     // A scope that passes placement at the cell-only budget boundary
     // but overflows once routing lays wires must fail loud with
     // `E_ROUTE_CONGESTION` on stderr and exit 1 — the same convention
@@ -632,7 +632,7 @@ fn cli_synth_stage_route_congestion_exits_one() {
 }
 
 #[test]
-fn cli_synth_stage_delay_inherits_upstream_congestion_failure() {
+fn stage_delay_inherits_upstream_congestion_failure() {
     // A scope that fails at the routing stage (E_ROUTE_CONGESTION) is
     // elided from routing's output. The delay stage runs on the elided
     // set, so its own diagnostics list is empty; but the routing
@@ -681,14 +681,14 @@ fn cli_synth_stage_delay_inherits_upstream_congestion_failure() {
 }
 
 #[test]
-fn cli_synth_stage_delay_attenuation_limit_exits_one() {
+fn stage_delay_attenuation_limit_exits_one() {
     // A scope whose output-pad segment exceeds the v1 attenuation cap
     // must fail loud with `E_ATTENUATION_LIMIT` on stderr and exit 1.
     // Uses a 300-block-wide region so the `sig.out` output driver spans
     // the full x-axis to the right-edge output pad — that segment
     // (~300 blocks) sits well past the 256-block cap.
     //
-    // `--stage delay` is asked for, but the refusal now comes from the
+    // `--stage delay` is asked for, but the refusal comes from the
     // routing pass: the straight line alone is already over the cap, so
     // stage 2's gate answers first and the CLI stops there. Hence the
     // `placed` noun below — the cells are still `Unrouted` when it
@@ -734,7 +734,7 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
 }
 
 #[test]
-fn cli_synth_stage_route_refuses_a_detour_past_the_attenuation_cap() {
+fn stage_route_refuses_a_detour_past_the_attenuation_cap() {
     // `sig.s1` feeds the gate from its pad at `(0,0,2)` through `(1,0,2)`,
     // so `sig.s2`'s wire, from its pad at `(0,0,3)`, cannot start along
     // its own row: `(1,0,3)` is one step from that dust. It steps out a
@@ -808,7 +808,7 @@ fn cli_synth_stage_route_refuses_a_detour_past_the_attenuation_cap() {
 }
 
 #[test]
-fn cli_synth_unparseable_source_exits_one() {
+fn unparseable_source_exits_one() {
     // Parse-level failure follows the same exit-code convention as
     // `cairn parse` / `check`: exit 1 (build problem), position-anchored
     // error on stderr. Using a scratch file rather than a fixture so the
@@ -826,7 +826,7 @@ fn cli_synth_unparseable_source_exits_one() {
 }
 
 #[test]
-fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
+fn stage_crossing_inherits_upstream_attenuation_failure() {
     // `--stage crossing` runs stages 1-4 in sequence, so an
     // Error-severity diagnostic from any prior stage (here, the
     // routing pass's `E_ATTENUATION_LIMIT` on a 300-block-wide region)
@@ -834,11 +834,10 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
     // still names the origin stage so a downstream reader can tell
     // which pass tripped.
     //
-    // The origin used to be the delay pass; stage 2 now answers first
-    // for a segment whose straight line alone is over the cap, and
-    // every `.crn` that reaches this code does so by that route. A
-    // scope that passes the straight-line gate and fails only the
-    // routed-length one can no longer be written in `.crn` at all, so
+    // Stage 2 answers first for a segment whose straight line alone is
+    // over the cap, and every `.crn` that reaches this code does so by
+    // that route. A scope that passes the straight-line gate and fails
+    // only the routed-length one cannot be written in `.crn` at all, so
     // "crossing inherits a *delay* failure" is exercised by a
     // hand-built two-scope fixture in `cairn-lang-redstone`'s
     // `tests/delay.rs` rather than here.
@@ -878,7 +877,7 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
 }
 
 #[test]
-fn cli_synth_stage_crossing_two_nets_over_one_coord_exits_one() {
+fn stage_crossing_two_nets_over_one_coord_exits_one() {
     // Two nets that want one coord, with no layer above the plane to
     // escape onto. The compiler refuses the scope rather than emitting
     // a layout in which those two signals are one strand of dust, and

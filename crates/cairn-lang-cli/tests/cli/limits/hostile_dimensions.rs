@@ -326,7 +326,7 @@ fn hostile_circuits() -> Vec<(&'static str, String)> {
 }
 
 #[test]
-fn hostile_4_routing_a_giant_reservation_answers_within_the_deadline() {
+fn routing_a_giant_reservation_answers_within_the_deadline() {
     let tmp = TempDir::new().expect("tempdir");
     for (name, body) in hostile_circuits() {
         let dir = tmp.path().join(name);
@@ -394,7 +394,7 @@ fn write(dir: &Path, name: &str, source: &str) -> PathBuf {
 }
 
 #[test]
-fn hostile_1_no_command_crashes_or_hangs() {
+fn no_command_crashes_or_hangs() {
     let tmp = TempDir::new().expect("tempdir");
     for (name, body, _) in hostile_sources() {
         let dir = tmp.path().join(name);
@@ -429,7 +429,7 @@ fn hostile_1_no_command_crashes_or_hangs() {
 }
 
 #[test]
-fn hostile_2_lowering_says_which_member_it_gave_up_on() {
+fn lowering_says_which_member_it_gave_up_on() {
     // Exiting cleanly is not enough on its own: a source that silently
     // produced an empty build would satisfy the test above while leaving the
     // author with no idea why their walls are missing. Each row names the
@@ -507,7 +507,7 @@ fn the_port_case_reaches_port_resolution() {
 }
 
 #[test]
-fn hostile_3_compile_refuses_rather_than_certifying_the_wreckage() {
+fn compile_refuses_rather_than_certifying_the_wreckage() {
     // Whatever the lowering decides to drop, the lockfile must not end up
     // claiming the build succeeded. Sources that lose their only structure
     // are refused outright; the rest still have to exit cleanly.
@@ -599,8 +599,9 @@ fn a_body_past_i32_fails_the_build_it_is_part_of() {
 /// overlaps a floor, so the first row's lack of a warning means the router
 /// laid a detour.
 ///
-/// Standalone rather than `hostile_sources()` rows: the first row lowers
-/// with no diagnostic at all, which `hostile_2` would reject.
+/// Standalone rather than [`hostile_sources`] rows: the first row lowers
+/// with no finding at all, where every row of that table is one `lower`
+/// gives up on.
 #[test]
 fn a_detour_searched_along_the_edge_of_i32_answers_rather_than_panics() {
     // `a` must have no floor: with one, its cells stretch the search
@@ -743,9 +744,8 @@ const THROUGH_HUT: &str = "def hut size=3x3:\n\
 /// leg of the straight L. This one does: a million-cell z strip is one
 /// cell wide, so its bounding box sits under the cap, and that margin is
 /// the premise of the test. It is laid rather than refused, which is why
-/// it stands alone:
-/// `hostile_2` requires every row to name a diagnostic, and this row earns
-/// none.
+/// it stands alone: every row of [`hostile_sources`] is one `lower` gives
+/// up on, and this row earns no finding.
 ///
 /// `gap=1000000` is a million-cell strip. Laid in linear time it lowers
 /// far inside [`DEADLINE`]; a lookup over the laid cells per step would
@@ -834,7 +834,7 @@ fn walled_in_near_sink() -> String {
 }
 
 #[test]
-fn hostile_5_a_walled_in_sink_is_refused_without_searching_the_reservation() {
+fn a_walled_in_sink_is_refused_without_searching_the_reservation() {
     let tmp = TempDir::new().expect("tempdir");
     let path = write(tmp.path(), "walled", &walled_in_near_sink());
     let (outcome, stderr, elapsed) = run_bounded(

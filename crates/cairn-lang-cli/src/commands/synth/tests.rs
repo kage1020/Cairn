@@ -145,6 +145,6 @@ fn synth_help_names_the_edition_partition() {
             .iter()
             .all(|stage| stage_requires_edition(*stage)),
         "an edition-neutral --stage follows an edition-tagged one, so `synth`'s \
-         \"earlier stages\" no longer describes the edition-neutral set",
+         \"earlier stages\" does not describe the edition-neutral set",
     );
 }

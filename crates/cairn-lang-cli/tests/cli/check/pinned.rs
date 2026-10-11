@@ -69,8 +69,8 @@ const NOTHING_TO_REPORT: &str = concat!(
 );
 
 /// The same unknown id, reached through a `def` three `place` rows
-/// instantiate. Lowering voxelises a def body once per placement, so this
-/// is the source that used to print the refusal three times.
+/// instantiate. Lowering voxelises a def body once per placement, so a
+/// refusal reported per placement would print three times here.
 const UNKNOWN_ID_PLACED_THREE_TIMES: &str = concat!(
     "@cairn 2026.06\n\n",
     "theme t:\n",

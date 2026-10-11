@@ -1,9 +1,11 @@
-//! End-to-end tests for `cairn info <file>`.
+//! `cairn info <file>` end to end: the version axes it reports as text
+//! and as JSON, the range and the buildable targets a source's floors
+//! leave, and the `--editions` list it weighs them for.
 
 use crate::common::{Fixture, assert_stream, cairn, crn_examples, examples_dir, stderr_of};
 
 #[test]
-fn info_1_clean_example_exits_zero_with_three_section_headers() {
+fn clean_example_exits_zero_with_three_section_headers() {
     let path = examples_dir().join("cottage.crn");
     let out = cairn("info", &[path.to_str().unwrap()]);
     assert!(
@@ -25,7 +27,7 @@ fn info_1_clean_example_exits_zero_with_three_section_headers() {
 }
 
 #[test]
-fn info_2_json_format_is_valid_version_axes() {
+fn json_format_is_valid_version_axes() {
     let path = examples_dir().join("cottage.crn");
     let out = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(
@@ -72,7 +74,7 @@ fn info_2_json_format_is_valid_version_axes() {
 }
 
 #[test]
-fn info_4_editions_flag_controls_portability_entries() {
+fn editions_flag_controls_portability_entries() {
     let path = examples_dir().join("cottage.crn");
     let out = cairn(
         "info",
@@ -95,7 +97,7 @@ fn info_4_editions_flag_controls_portability_entries() {
 }
 
 #[test]
-fn info_5_all_examples_exit_zero() {
+fn all_examples_exit_zero() {
     for path in crn_examples() {
         let out = cairn("info", &[path.to_str().unwrap()]);
         assert!(
@@ -108,7 +110,7 @@ fn info_5_all_examples_exit_zero() {
 }
 
 #[test]
-fn info_6_registry_compatibility_renders_as_single_range_line() {
+fn registry_compatibility_renders_as_single_range_line() {
     // The declared range is edition-agnostic — it reads only the floors
     // that name no edition, so a single `min/max` pair is the answer and
     // not a placeholder. The text output must not duplicate it per
@@ -171,7 +173,7 @@ fn a_malformed_editions_list_is_a_usage_error() {
 }
 
 #[test]
-fn info_8_file_without_requires_defaults_min_to_zero_zero() {
+fn file_without_requires_defaults_min_to_zero_zero() {
     let fixture = Fixture::new(
         "theme t:\n  slot m -> @oak_planks\n\nstruct s size=4x4\n  walls height=3 mat_slot=m\n",
     );
@@ -186,12 +188,11 @@ fn info_8_file_without_requires_defaults_min_to_zero_zero() {
 /// The floor reaches `registry_compat.min` however the author spaced the
 /// operator.
 ///
-/// `version >= 1.21` used to leave `min` at `0.0` — the constraint was
-/// dropped between the directive and the axis, and this is the command
-/// where that was visible. Pinned at the CLI surface because that is where
-/// it was seen; the library half is `cairn-lang-core`'s `check_requires`.
+/// A floor dropped between the directive and the axis leaves `min` at
+/// `0.0`, and this is the command where that shows. The library half is
+/// `cairn-lang-core`'s `check_requires`.
 #[test]
-fn info_9_requires_floor_reaches_the_registry_range_however_it_is_spaced() {
+fn requires_floor_reaches_the_registry_range_however_it_is_spaced() {
     for (label, header) in [
         ("tight", "@requires version>=1.21\n"),
         ("spaced", "@requires version >= 1.21\n"),
@@ -222,7 +223,7 @@ fn info_9_requires_floor_reaches_the_registry_range_however_it_is_spaced() {
 /// `DataVersion` has no answer here and reports none, with the reason on
 /// stderr rather than an empty row nobody can read.
 #[test]
-fn info_9b_a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() {
+fn a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() {
     let fixture = Fixture::new(&format!("@requires version>=1.21.4\n{PAINTED_STRUCT}"));
     let path = fixture.source();
     let out = cairn(
@@ -252,7 +253,7 @@ fn info_9b_a_floor_naming_no_release_of_an_edition_makes_none_of_it_buildable() 
 
 /// And a floor scoped to one edition leaves the other alone.
 #[test]
-fn info_9c_a_scoped_floor_is_weighed_only_against_its_own_edition() {
+fn a_scoped_floor_is_weighed_only_against_its_own_edition() {
     let fixture = Fixture::new(&format!("@requires java version>=1.21.4\n{PAINTED_STRUCT}"));
     let path = fixture.source();
     let out = cairn(
@@ -290,7 +291,7 @@ fn info_9c_a_scoped_floor_is_weighed_only_against_its_own_edition() {
 /// to work out which line they have to edit, which is the half of the
 /// report they can act on.
 #[test]
-fn info_9d_the_floor_note_names_the_line_that_refused() {
+fn the_floor_note_names_the_line_that_refused() {
     let fixture = Fixture::new(
         "@requires version>=1.20.4\n@requires java version>=1.21.4\nstruct s size=4x4\n",
     );
@@ -319,7 +320,7 @@ fn info_9d_the_floor_note_names_the_line_that_refused() {
 /// therefore has two causes — no `@requires` line, and only scoped ones.
 /// The reader is told which, rather than left to work it out.
 #[test]
-fn info_9e_a_scoped_only_file_says_why_the_neutral_row_is_empty() {
+fn a_scoped_only_file_says_why_the_neutral_row_is_empty() {
     let fixture = Fixture::new("@requires java version>=1.21.4\nstruct s size=4x4\n");
     let path = fixture.source();
     let out = cairn("info", &[path.to_str().unwrap(), "--editions", "java"]);
@@ -352,7 +353,7 @@ fn info_9e_a_scoped_only_file_says_why_the_neutral_row_is_empty() {
 /// declaration is itself a mistake is the confident-wrong answer the code
 /// exists to stop.
 #[test]
-fn info_10_a_rejected_requirement_stops_info_in_both_formats() {
+fn a_rejected_requirement_stops_info_in_both_formats() {
     let fixture = Fixture::new("@requires version<1.20\nstruct s size=4x4\n");
     let path = fixture.source();
     let text = cairn("info", &[path.to_str().unwrap()]);
@@ -378,11 +379,10 @@ const PAINTED_STRUCT: &str =
     "theme t:\n  slot m -> @oak_planks\n\nstruct s size=4x4\n  floor mat_slot=m\n";
 
 #[test]
-fn info_9_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
-    // `cairn info` was one of the three commands whose note loop dropped
-    // `note.span`; all six copies now share one renderer, and each of the
-    // three needs its own end-to-end line or a fold that missed one of
-    // them still passes.
+fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
+    // Every command renders its notes through one renderer, and each
+    // still needs its own end-to-end line, or a fold that missed one of
+    // them would pass.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let path = tmp.path().join("conflict.crn");
     std::fs::write(
@@ -426,7 +426,7 @@ fn info_9_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
 /// `buildable targets` row that refuses versions — two true lines that
 /// disagree on their face.
 #[test]
-fn info_9f_the_neutral_row_reads_a_floor_a_placed_def_declares() {
+fn the_neutral_row_reads_a_floor_a_placed_def_declares() {
     let fixture = Fixture::new(
         "theme t:\n  slot floor -> @oak_planks\n\
          \ndef cottage size=4x4:\n  requires version>=1.21.4\n  floor mat_slot=floor\n\
@@ -466,7 +466,7 @@ fn info_9f_the_neutral_row_reads_a_floor_a_placed_def_declares() {
 /// `0.0` on a file a Java build *is* held to, which `--format json`
 /// carries as `registry_compat.min` with nothing on the row to correct it.
 #[test]
-fn info_9g_a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
+fn a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
     let fixture = Fixture::new(
         "theme shop:\n  requires version>=1.21.4\n  slot floor -> @oak_planks\n\
          \ntheme shop_bedrock:\n  slot floor -> @oak_planks\n\
@@ -501,19 +501,18 @@ fn info_9g_a_theme_bound_per_edition_is_left_out_of_the_neutral_row() {
 ///
 /// The claim `spec/versioning-editions` "The `registry compatibility` row"
 /// makes, held against the shipped packs rather than asserted in prose.
-/// The spec used to describe this row as an intersection of `since` /
-/// `until` over the blocks the source uses — a derivation nothing
-/// performs, and one either source here would contradict:
+/// An intersection of `since` / `until` over the blocks the source uses is
+/// a derivation nothing performs, and one either source here would
+/// contradict:
 /// `pale_moss_block` arrives in Java 1.21.4 and Bedrock 1.21.60.
 ///
-/// No test read the row on such a source.
-/// `info_8_file_without_requires_defaults_min_to_zero_zero` runs
+/// `file_without_requires_defaults_min_to_zero_zero` runs
 /// `--format json` with no `--editions`, so it never sees the `buildable
 /// targets` row at all; `a_source_no_supported_version_can_build_says_so`
-/// in `cli_info_parity.rs` uses a narrow palette but asserts only the
+/// in `info/parity.rs` uses a narrow palette but asserts only the
 /// portability and buildable rows.
 #[test]
-fn info_8b_the_declared_range_is_not_an_answer_about_which_versions_build() {
+fn the_declared_range_is_not_an_answer_about_which_versions_build() {
     // The sharper of the two: a floor every supported version clears,
     // beside a palette only the newest one has. `1.20.4 .. latest` reads
     // as an authoritative answer, and the row two below disproves it —
@@ -616,7 +615,7 @@ fn declared_edge_and_refusals(stdout: &str) -> (String, Vec<&str>) {
 /// once per run, and, for each Java walk, one naming the versions it
 /// refuses, which a `java` walked twice would print twice.
 #[test]
-fn info_4b_an_edition_named_twice_is_reported_once() {
+fn an_edition_named_twice_is_reported_once() {
     let fixture = Fixture::new(&format!("@requires java version>=1.21.4\n{PAINTED_STRUCT}"));
     let path = fixture.source();
     let path = path.to_str().unwrap();

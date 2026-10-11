@@ -1,11 +1,9 @@
 //! Every subcommand that writes to stdout, plus clap's `--version` and
-//! `--help`, run with a stdout whose reader has already gone
-//! (`cairn lower f.crn | head -1` once `head` exits).
-//!
-//! The exit code is the Stable surface here (the CLI README's "Exit
-//! codes"), so a reader that stops early must not change it: the run
-//! ends with the code it decides with stdout open, and says the same
-//! thing on stderr, rather than panicking on the failed write.
+//! `--help`, run with a stdout whose reader has already gone (`cairn lower
+//! f.crn | head -1` once `head` exits). The exit code is a Stable surface
+//! (the CLI README's "Exit codes"), so the run ends with the code it
+//! decides with stdout open and says the same on stderr, rather than
+//! panicking on the failed write.
 
 use std::process::{Command, Output, Stdio};
 

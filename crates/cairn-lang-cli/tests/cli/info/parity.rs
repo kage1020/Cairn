@@ -1,10 +1,8 @@
-//! Parity table AC pins for `cairn info --editions ...`.
-//!
-//! The `edition_portability` axis grew from a hard-coded
-//! `degraded: 0, unsupported: 0` fill to a real per-edition classification
-//! driven by `cairn-lang-formats::portability`. These tests hold the
-//! contract from the CLI side end-to-end so a future refactor of the
-//! dry-run wiring can't silently re-introduce the zero-fill.
+//! `cairn info --editions`: each edition's portability figures and
+//! buildable targets are what `cairn compile` does with the same source
+//! for that edition. An entry it degrades or refuses is counted and named,
+//! a target it accepts is listed, and a refused version carries the reason
+//! the compile would give.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -142,8 +140,8 @@ fn as_u64(value: &Value, key: &str) -> u64 {
 }
 
 #[test]
-fn ac1_themed_tower_bedrock_reports_at_least_one_degraded_palette_entry() {
-    // AC1: themed-tower interns non-`straight` stair `shape` at least
+fn themed_tower_bedrock_reports_at_least_one_degraded_palette_entry() {
+    // themed-tower interns non-`straight` stair `shape` at least
     // once (the eave with `shape=outer_left`); Bedrock has no `shape`
     // state so that palette entry counts as degraded.
     let axes = info_json("themed-tower.crn", "bedrock");
@@ -161,8 +159,8 @@ fn ac1_themed_tower_bedrock_reports_at_least_one_degraded_palette_entry() {
 }
 
 #[test]
-fn ac2_cottage_bedrock_has_no_unsupported_entries() {
-    // AC2: cottage carries only bare blocks + gable stairs whose
+fn cottage_bedrock_has_no_unsupported_entries() {
+    // cottage carries only bare blocks + gable stairs whose
     // `shape=straight` is Bedrock's default (lossless drop). No family
     // outside the mapped set should appear.
     let axes = info_json("cottage.crn", "bedrock");
@@ -183,8 +181,8 @@ fn ac2_cottage_bedrock_has_no_unsupported_entries() {
 }
 
 #[test]
-fn ac3_the_java_axis_is_pure_portable_for_a_source_java_can_build() {
-    // AC3: Java is the base edition (`spec/versioning-editions`
+fn the_java_axis_is_pure_portable_for_a_source_java_can_build() {
+    // Java is the base edition (`spec/versioning-editions`
     // "Backend = data tables"), so no state ever degrades there and a
     // palette of blocks Java declares classifies as portable throughout.
     // Pin it on the two files carrying the widest block variety.
@@ -262,9 +260,9 @@ fn info_degraded_count_matches_compile_intent_degraded_warnings() {
 
 #[test]
 fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
-    // `roof-hip`'s four degraded entries are four states of one id, and the
-    // build's warning named the id alone, so it printed two pairs of
-    // identical lines. Each warning now names the Java state, the way
+    // `roof-hip`'s four degraded entries are four states of one id, so a
+    // warning naming the id alone would print two pairs of identical
+    // lines. Each warning names the Java state, the way
     // `info`'s note does, so the lines are distinct and each can be
     // matched to the note about the same entry.
     let axes = info_json("roof-hip.crn", "bedrock");
@@ -300,7 +298,7 @@ fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
 }
 
 #[test]
-fn ac5_an_edition_specific_resolve_failure_is_reported_not_counted_away() {
+fn an_edition_specific_resolve_failure_is_reported_not_counted_away() {
     // `info` gates on the edition-neutral pass, which unions slot names
     // across per-edition theme variants. A slot only one variant declares
     // therefore resolves there and fails only in the strict per-edition
@@ -854,10 +852,10 @@ fn a_floor_above_every_release_names_the_line_under_each_version() {
     assert_eq!(inherited["declared_by"]["name"], "cottage", "{row}");
 }
 
-/// The same two floors as prose. `report_version_notes` used to list every
-/// version some floor refused under *each* floor, so the header line read
-/// "1.21.40 is below `version>=1.21.40`" — which is not true of the
-/// version, and sends the reader to a line that does not refuse it.
+/// The same two floors as prose. Listing every version some floor refused
+/// under *each* floor would have the header line read "1.21.40 is below
+/// `version>=1.21.40`" — which is not true of the version, and sends the
+/// reader to a line that does not refuse it.
 #[test]
 fn a_floor_is_credited_only_with_the_versions_it_refuses() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -923,10 +921,10 @@ fn a_scope_that_produced_no_voxels_names_the_scope() {
     );
 }
 
-/// A floor used to eat the dropped scope: both refuse every version, the
-/// payload had one slot per version, and the floor arm was reached first.
-/// So the author repaired the `@requires` line and only then learned about
-/// the member — the same one-cause-per-run loop as the unplaceable floor.
+/// A floor and a dropped scope both refuse every version. With one slot
+/// per version and the floor reported first, the author would repair the
+/// `@requires` line and only then learn about the member — the same
+/// one-cause-per-run loop as the unplaceable floor.
 #[test]
 fn a_floor_does_not_hide_a_scope_that_produced_no_voxels() {
     let (_tmp, row) = buildable_row(
@@ -1396,8 +1394,9 @@ fn the_json_row_names_exactly_what_its_count_counts() {
 #[test]
 fn the_degraded_figure_names_the_entry_and_what_it_lost() {
     // The other integer over entries the command can name. `roof-hip` is
-    // a shipped example reporting `degraded: 4`, and before this the only
-    // way to find the four was to compile and read `W_INTENT_DEGRADED` —
+    // a shipped example reporting `degraded: 4`, and without the names
+    // the only way to find the four is to compile and read
+    // `W_INTENT_DEGRADED` —
     // which is the run `info` exists to be read before.
     let axes = info_json("roof-hip.crn", "bedrock");
     let bedrock = portability_entry(&axes, "bedrock");

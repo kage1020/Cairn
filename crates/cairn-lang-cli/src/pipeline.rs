@@ -366,7 +366,7 @@ fn intended_target_findings(
     // Before either pack is touched: the packs are embedded JSON that is
     // parsed and validated on first use, and `cairn check` is the command
     // run most. A file with no such header asks none of the questions
-    // below, and used to pay for both tables to find that out.
+    // below, and should not pay for both tables to find that out.
     if !module
         .headers
         .iter()
@@ -544,9 +544,9 @@ pub(crate) fn load_and_lower(
     let registry = edition.registry_pack().view(mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     // The check pass is the gate `cairn check` exposes; running it here is
-    // what keeps `compile` from accepting a source that `check` rejects. It
-    // used to be skipped, so an `E_DUPLICATE_ID` would compile to artifacts
-    // plus a `verified: true` lockfile at exit 0. Resolver findings such as
+    // what keeps `compile` from accepting a source that `check` rejects.
+    // Skipped, an `E_DUPLICATE_ID` would compile to artifacts plus a
+    // `verified: true` lockfile at exit 0. Resolver findings such as
     // a `place use=cottag` typo (`E_UNRESOLVED_PLACE_REF`) reach the stream
     // through the same call — `check` merges them.
     block_ir.diagnostics = build_diagnostics(

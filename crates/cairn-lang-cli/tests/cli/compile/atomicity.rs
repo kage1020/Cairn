@@ -1,15 +1,9 @@
-//! A failed `cairn compile` must leave the previous build exactly as it was.
-//!
-//! The mechanism that made that hard: a rename consumes whatever is already
-//! at its destination, so a list of "files this run wrote" mixes files it
-//! created with files it replaced. An undo that only deletes therefore takes
-//! the previous build's artifacts with it — and the step most likely to fail
-//! is the last one, after every artifact has already landed.
-//!
-//! Forcing the failure portably: a **directory** at a path a file has to be
-//! created or renamed onto makes that step fail on every platform, with no
-//! permission bits or filesystem-specific behaviour involved. Which path the
-//! directory sits on decides which step breaks.
+//! A failed `cairn compile` leaves the previous build exactly as it was,
+//! and a refused one writes nothing. A rename consumes whatever is at its
+//! destination, so an undo that only deleted what the run wrote would take
+//! the previous build's artifacts with it. Each failure is forced portably,
+//! by a **directory** at the path a file has to be created or renamed onto;
+//! which path it sits on decides which step breaks.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -151,7 +145,7 @@ const OBSTRUCTIONS: &[&str] = &[
     // and nothing committed — the branch every other case skips past.
     "first-artifact",
     // A leftover backup blocks the *displace* step rather than the place
-    // step, which is the one whose failure used to be reported against the
+    // step, so a failure reported against the file being placed names the
     // wrong path entirely.
     "artifact-backup",
 ];
@@ -201,7 +195,7 @@ fn arrange_failure(build: &Build, label: &str) -> PathBuf {
 }
 
 #[test]
-fn atomic_1_a_failed_build_leaves_the_previous_one_untouched() {
+fn a_failed_build_leaves_the_previous_one_untouched() {
     for label in OBSTRUCTIONS {
         let build = first_successful_build();
         let before_artifacts = snapshot(&build.out_dir);
@@ -243,7 +237,7 @@ fn atomic_1_a_failed_build_leaves_the_previous_one_untouched() {
 }
 
 #[test]
-fn atomic_2_a_failed_build_leaves_no_scratch_files_behind() {
+fn a_failed_build_leaves_no_scratch_files_behind() {
     // A retry has to start from a clean slate: an orphaned `.tmp` or `.bak`
     // accumulates, and a `.bak` in particular is a copy of the previous
     // build under a name that reads as scratch to anything scanning the
@@ -273,11 +267,11 @@ stderr={stderr}",
 }
 
 #[test]
-fn atomic_2b_a_failed_build_says_which_file_stopped_it() {
+fn a_failed_build_says_which_file_stopped_it() {
     // The obstruction is the thing to fix, so it is the thing to name. A
-    // stale `home2.nbt.bak` blocking the displace step used to be reported
-    // as a failure writing `home2.nbt`, sending the operator to a file that
-    // was fine.
+    // stale `home2.nbt.bak` blocking the displace step is not a failure
+    // writing `home2.nbt`, which would send the operator to a file that is
+    // fine.
     let build = first_successful_build();
     arrange_failure(&build, "artifact-backup");
     let (code, stderr) = build.rebuild();
@@ -288,7 +282,7 @@ fn atomic_2b_a_failed_build_says_which_file_stopped_it() {
     );
 
     // And the lockfile keeps its own noun through both phases: a commit-time
-    // failure on it used to be indistinguishable from an artifact's.
+    // failure on it reads differently from an artifact's.
     let build = first_successful_build();
     arrange_failure(&build, "lockfile");
     let (code, stderr) = build.rebuild();
@@ -300,7 +294,7 @@ fn atomic_2b_a_failed_build_says_which_file_stopped_it() {
 }
 
 #[test]
-fn atomic_3_a_failed_first_build_leaves_nothing_at_all() {
+fn a_failed_first_build_leaves_nothing_at_all() {
     // Nothing existed beforehand, so "restore what was there" and "remove
     // what we made" have the same answer, and neither may be skipped.
     let tmp = TempDir::new().expect("tempdir");
@@ -321,7 +315,7 @@ fn atomic_3_a_failed_first_build_leaves_nothing_at_all() {
 }
 
 #[test]
-fn atomic_4_a_successful_rebuild_replaces_everything_and_cleans_up() {
+fn a_successful_rebuild_replaces_everything_and_cleans_up() {
     // The other side of the contract: with nothing obstructing it the commit
     // has to land in full and leave no bookkeeping behind.
     let build = first_successful_build();
@@ -357,7 +351,7 @@ fn atomic_4_a_successful_rebuild_replaces_everything_and_cleans_up() {
 }
 
 #[test]
-fn atomic_5_a_lock_path_that_collides_with_an_artifact_is_refused() {
+fn a_lock_path_that_collides_with_an_artifact_is_refused() {
     // Two set entries sharing a destination staged over each other and then
     // fought over one backup during the commit, which deleted the previous
     // artifact with no copy left anywhere — the same loss this suite exists
@@ -457,7 +451,7 @@ fn assert_lock_spelling_is_refused(spell: impl FnOnce(&Path) -> (String, String)
 }
 
 #[test]
-fn atomic_6_a_lock_spelled_differently_from_its_artifact_is_still_refused() {
+fn a_lock_spelled_differently_from_its_artifact_is_still_refused() {
     // The guard compared paths as spelled, so only the byte-identical
     // `out/home1.nbt` was refused. Every spelling below names that same
     // file, and each one reached the commit and destroyed the previous
@@ -481,7 +475,7 @@ fn atomic_6_a_lock_spelled_differently_from_its_artifact_is_still_refused() {
 
 #[cfg(unix)]
 #[test]
-fn atomic_7_a_lock_reached_through_a_symlinked_out_is_refused() {
+fn a_lock_reached_through_a_symlinked_out_is_refused() {
     // `--out` through a symlink and `--lock` through the real directory
     // name one file, and so do the reverse; neither spelling shares a
     // single component with the other past the directory.
@@ -497,14 +491,14 @@ fn atomic_7_a_lock_reached_through_a_symlinked_out_is_refused() {
 
 #[cfg(any(target_os = "macos", windows))]
 #[test]
-fn atomic_8_a_lock_differing_only_in_case_is_refused_where_case_is_folded() {
+fn a_lock_differing_only_in_case_is_refused_where_case_is_folded() {
     // Case-insensitive by default on both platforms, so `OUT/HOME1.NBT` is
     // the artifact's own directory entry.
     assert_lock_spelling_is_refused(|_| ("out".into(), "OUT/HOME1.NBT".into()));
 }
 
 #[test]
-fn atomic_9_a_bare_lock_name_collides_with_the_default_out() {
+fn a_bare_lock_name_collides_with_the_default_out() {
     // With `--out` omitted the artifacts go beside the source, and a bare
     // `--lock home1.nbt` has an empty parent. That empty parent is the
     // current directory, the same entry as `./home1.nbt`.
@@ -532,7 +526,7 @@ fn atomic_9_a_bare_lock_name_collides_with_the_default_out() {
 }
 
 #[test]
-fn atomic_10_a_lock_sharing_only_the_artifacts_name_still_builds() {
+fn a_lock_sharing_only_the_artifacts_name_still_builds() {
     // The control for the tests above: the key is the parent *and* the name,
     // so the artifact's name in another directory is a different file.
     let build = first_successful_build();
@@ -551,7 +545,7 @@ fn atomic_10_a_lock_sharing_only_the_artifacts_name_still_builds() {
 
 #[cfg(windows)]
 #[test]
-fn atomic_7_windows_a_lock_reached_through_a_junction_is_refused() {
+fn a_lock_reached_through_a_junction_is_refused() {
     // The Windows counterpart of the symlink case: a directory junction
     // needs no elevation, and names `out` under a spelling that shares
     // nothing with it but the file name.
@@ -574,7 +568,7 @@ fn atomic_7_windows_a_lock_reached_through_a_junction_is_refused() {
 }
 
 #[test]
-fn atomic_11_two_artifacts_differing_only_in_case_are_refused_on_every_host() {
+fn two_artifacts_differing_only_in_case_are_refused_on_every_host() {
     // `home1` and `HOME1` are distinct ids, but `home1.nbt` and `HOME1.nbt`
     // are one directory entry on macOS and Windows. Staged together there
     // they overwrote each other and the commit lost both, the previous one
@@ -607,7 +601,7 @@ fn atomic_11_two_artifacts_differing_only_in_case_are_refused_on_every_host() {
 
 #[cfg(unix)]
 #[test]
-fn atomic_12_a_lock_whose_location_cannot_be_resolved_is_reported_not_passed() {
+fn a_lock_whose_location_cannot_be_resolved_is_reported_not_passed() {
     // Only a missing directory is an ordinary reason not to resolve a
     // path. Anything else — here a parent that runs through a regular file —
     // leaves the guard without a key to compare, and it says so rather than

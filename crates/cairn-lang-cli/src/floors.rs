@@ -529,7 +529,7 @@ fn report_unplaceable_floor(
         eprintln!("{note}");
     }
     // The two releases it falls between, not the whole table. The table
-    // names every release of the edition now, so printing it is dozens of
+    // names every release of the edition, so printing it is dozens of
     // versions where two say the same thing: where the label would sit if
     // it were one of them, and that it is not.
     match order.neighbours(&floor.version) {

@@ -1,9 +1,7 @@
-//! End-to-end tests for `cairn parse <file>`.
-//!
-//! These tests invoke the freshly compiled binary against every example so the
-//! "source parses" contract is enforced from the CLI surface, not just from
-//! the library API. That a missing file exits 2 is pinned for every
-//! subcommand at once in `cli_json_contract`.
+//! `cairn parse <file>` end to end, against every shipped example, so
+//! "the source parses" holds at the CLI surface and not only through the
+//! library API. That a missing file exits 2 is pinned for every subcommand
+//! at once in `contract/json.rs`.
 
 use crate::common::{cairn, crn_examples, examples_dir};
 

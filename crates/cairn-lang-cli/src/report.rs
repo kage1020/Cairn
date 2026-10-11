@@ -38,8 +38,8 @@ pub(crate) enum FailureReport {
 /// document. A warning prints on stderr whatever `report` holds.
 ///
 /// A bundle rather than four parameters in a fixed order, and only where
-/// the list grew long enough that the order was the only thing holding it
-/// together: the free functions that report still take them one by one.
+/// the list is long enough that the order would be the only thing holding
+/// it together: the free functions that report still take them one by one.
 #[derive(Copy, Clone)]
 pub(crate) struct Reporting<'a> {
     pub(crate) file: &'a Path,

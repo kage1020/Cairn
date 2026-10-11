@@ -1,11 +1,8 @@
-//! A canonical token's block-state literal, `@oak_log[axis=x]`, end to end.
-//!
-//! The core tests pin what the parser folds and the palette holds; these
-//! pin what each command does with it. Nothing checks a literal against
-//! the target yet, so the commands are asked the questions that answer
-//! differently: `check` and `compile --edition java` accept and announce
-//! it, `info` counts what Bedrock cannot map, and `compile --edition
-//! bedrock` refuses the same entry.
+//! A canonical token's block-state literal, `@oak_log[axis=x]`, end to
+//! end, as each command treats it: `check` and `compile --edition java`
+//! accept it and announce that nothing checked it against the target,
+//! `info` counts what Bedrock cannot map, and `compile --edition bedrock`
+//! refuses the same entry.
 
 use std::fs;
 use std::path::{Path, PathBuf};

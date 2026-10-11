@@ -1,22 +1,11 @@
 //! A mistyped flag, subcommand or value gets the same three-part answer
 //! the compiler gives a mistyped `key=`: what is wrong, what would be
-//! valid, and the nearest candidate.
-//!
-//! None of it is Cairn code. clap writes these messages, and two of its
-//! cargo features write the parts that matter: `error-context` names the
-//! token that was refused and lists the values an argument accepts, and
-//! `suggestions` adds the "a similar ... exists" tip. Both are in clap's
-//! default feature set, which is the only thing turning them on, so a
-//! `default-features = false` in `cairn-lang-cli`'s manifest — the first
-//! thing a binary-size pass reaches for — takes them away without touching
-//! a line of source. Without `error-context` the first case below reads
-//! `error: unexpected argument found`, naming nothing.
-//!
-//! The assertions match clap's wording verbatim, so a reword inside 4.x
-//! turns them red with both features still on. That is the price of
-//! pinning what the reader sees rather than that some message appeared;
-//! a red build here after a clap bump wants the strings updated, not a
-//! feature hunted for.
+//! valid, and the nearest candidate. clap writes these messages, through
+//! its default `error-context` and `suggestions` features, so a
+//! `default-features = false` in the manifest would take the answer away
+//! without touching a line of source. The assertions match clap's wording
+//! verbatim: a red build after a clap bump wants the strings updated, not
+//! a feature hunted for.
 
 use std::process::Command;
 
@@ -88,8 +77,7 @@ fn a_mistyped_value_lists_the_valid_ones_and_suggests_the_nearest() {
         stderr.contains("invalid value 'jav' for '--edition <EDITION>'"),
         "the refusal should name the value and the flag it was given to: {stderr}",
     );
-    // Written out, where `cli_synth.rs` parses the `--stage` list back
-    // out of clap: editions are a fixed two-way axis, not a list that
+    // Written out: editions are a fixed two-way axis, not a list that
     // grows a member with each new pass.
     assert!(
         stderr.contains("[possible values: java, bedrock]"),

@@ -1,25 +1,9 @@
-//! Parity between `cairn check` and the commands that build on it.
-//!
-//! `check` is the gate the other subcommands sit behind: a source it rejects
-//! with an `Error`-severity diagnostic must not lower, must not report
-//! portability figures, and must not compile. Before this suite existed,
-//! `check` ran only from `cairn check` and `cairn synth`, so `cairn compile`
-//! wrote artifacts — and a `verified: true` lockfile — for a file `cairn
-//! check` had just rejected with exit 1.
-//!
-//! Parity here means the whole diagnostic stream, not just the exit code.
-//! The build commands report `check`'s findings verbatim and in order, then
-//! append their own lowering diagnostics; anything else (a dropped code, a
-//! duplicated one, a reordered one) is a regression these tests catch.
-//!
-//! Most of that is a *prefix* assertion, because the unpinned `cairn check`
-//! those tests invoke runs no lowering and so has nothing to compare the
-//! appended half against. `parity_8` is the one that closes it: `cairn
-//! check --edition java --target latest` runs the same two stages at the
-//! same pin `cairn compile` does, so its stream is compared **equal**
-//! rather than prefixed — which is what keeps `check_lowering` and
-//! `load_and_lower` from drifting as two hand-written copies of the same
-//! `resolve` + `view` + `lower_to_block_array` sequence.
+//! Parity between `cairn check` and the commands that build on it. A
+//! source `check` rejects with an `Error`-severity finding does not lower,
+//! report portability figures or compile, and the build commands report
+//! `check`'s findings verbatim and in order before their own lowering
+//! findings: the unpinned check's stream is a prefix of theirs, and a check
+//! pinned to the compile's target reports exactly what the compile does.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -133,7 +117,7 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
     (
         // Also a header, so also a whole source. `version<1.20` is the
         // shape an author reaches for when they want a ceiling; only `>=`
-        // is defined, and the line used to declare nothing at all.
+        // is defined, so the line declares nothing at all.
         "E_INVALID_REQUIRES",
         Source::Whole(
             "@requires version<1.20\n\
@@ -176,8 +160,8 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  torch mat_slot=wall\n"),
     ),
     (
-        // The issue's own repro: one letter, and the wall is built
-        // without the height it asked for.
+        // One letter, and the wall is built without the height it
+        // asked for.
         "E_UNKNOWN_ARGUMENT",
         Source::WithPrologue("struct s size=5x5\n  walls class=outer mat_slot=wall hieght=3\n"),
     ),
@@ -272,9 +256,9 @@ const RESOLVER_FIXTURES: &[(&str, Source)] = &[
         Source::WithPrologue("struct s size=5x5\n  floor mat_slot=nosuchslot\n"),
     ),
     (
-        // `id=` takes a string literal, so its contents used to reach the
-        // scope-key builder unexamined — and `.` is one of the separators
-        // that key is joined on.
+        // `id=` takes a string literal, whose contents would otherwise
+        // reach the scope-key builder unexamined — and `.` is one of the
+        // separators that key is joined on.
         "E_INVALID_PLACE_ID",
         Source::WithPrologue(
             "def hut size=3x3:\n  floor id=floor mat_slot=floor\n\
@@ -341,7 +325,7 @@ fn build_commands(path: &str, out_dir: &str) -> Vec<(&'static str, Vec<String>)>
 }
 
 #[test]
-fn parity_1_check_reports_each_fixture_code_exactly_once() {
+fn check_reports_each_fixture_code_exactly_once() {
     let tmp = TempDir::new().expect("tempdir");
     for (index, (code, body)) in all_fixtures().enumerate() {
         let path = write_fixture(tmp.path(), index, body);
@@ -359,7 +343,7 @@ fn parity_1_check_reports_each_fixture_code_exactly_once() {
 }
 
 #[test]
-fn parity_2_build_commands_replay_the_check_stream_verbatim() {
+fn build_commands_replay_the_check_stream_verbatim() {
     // The single assertion this suite exists for. Each build command must
     // report exactly what `check` reported, in the same order, before adding
     // any lowering diagnostics of its own.
@@ -400,7 +384,7 @@ fn parity_2_build_commands_replay_the_check_stream_verbatim() {
 }
 
 #[test]
-fn parity_3_build_commands_refuse_every_check_error() {
+fn build_commands_refuse_every_check_error() {
     let tmp = TempDir::new().expect("tempdir");
     for (index, (code, body)) in all_fixtures().enumerate() {
         let path = write_fixture(tmp.path(), index, body);
@@ -426,11 +410,12 @@ fn parity_3_build_commands_refuse_every_check_error() {
 }
 
 #[test]
-fn parity_5_a_template_only_library_compiles_to_nothing_without_complaint() {
-    // The case `c26_bare_def_without_place_emits_w_unused_def_and_no_nbt`
+fn a_template_only_library_compiles_to_nothing_without_complaint() {
+    // The case `bare_def_without_place_emits_w_unused_def_and_no_nbt`
     // pins: a `def` no site instantiates is a template, templates lower to
     // no voxels, and that is not a failure. Declaring nothing is different
-    // from losing something — which is what `parity_6` covers.
+    // from losing something, which is what
+    // `a_partially_lowered_source_is_not_certified` covers.
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("library.crn");
     fs::write(
@@ -470,7 +455,7 @@ fn parity_5_a_template_only_library_compiles_to_nothing_without_complaint() {
 }
 
 #[test]
-fn parity_6_a_partially_lowered_source_is_not_certified() {
+fn a_partially_lowered_source_is_not_certified() {
     // Every code that drops a scope is Warning severity, so without the
     // refusal the exit code would be 0 and the lockfile would say
     // `verified: true` for a build missing one of the two structures the
@@ -503,7 +488,7 @@ fn parity_6_a_partially_lowered_source_is_not_certified() {
 }
 
 #[test]
-fn parity_7_every_example_still_passes_all_four_commands() {
+fn every_example_still_passes_all_four_commands() {
     let tmp = TempDir::new().expect("tempdir");
     for src in crn_examples() {
         let name = src.file_name().expect("file name").to_owned();
@@ -545,7 +530,7 @@ fn parity_7_every_example_still_passes_all_four_commands() {
 }
 
 #[test]
-fn parity_8_a_pinned_check_reports_exactly_what_the_compile_reports() {
+fn a_pinned_check_reports_exactly_what_the_compile_reports() {
     // Equality in both directions. A dropped lowering finding fails it, and
     // so does a compile-only one — the two commands run the same passes
     // against the same table, so a code either of them reaches alone is a

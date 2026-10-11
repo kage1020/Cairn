@@ -22,7 +22,7 @@ use crate::common::{
 const WORKSPACE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[test]
-fn c1_compile_cottage_with_explicit_target_exits_zero() {
+fn compile_cottage_with_explicit_target_exits_zero() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -45,7 +45,7 @@ fn c1_compile_cottage_with_explicit_target_exits_zero() {
 }
 
 #[test]
-fn c2_compile_writes_named_nbt_into_out_dir() {
+fn compile_writes_named_nbt_into_out_dir() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -64,7 +64,7 @@ fn c2_compile_writes_named_nbt_into_out_dir() {
 }
 
 #[test]
-fn c4_default_lock_is_written_beside_source() {
+fn default_lock_is_written_beside_source() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -88,7 +88,7 @@ fn c4_default_lock_is_written_beside_source() {
 }
 
 #[test]
-fn c5_explicit_lock_path_is_honored() {
+fn explicit_lock_path_is_honored() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let lock_path = out_dir.path().join("explicit.lock");
@@ -109,10 +109,10 @@ fn c5_explicit_lock_path_is_honored() {
 }
 
 #[test]
-fn c6_lockfile_records_cairn_version() {
+fn lockfile_records_cairn_version() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let lock_path = out_dir.path().join("c6.lock");
+    let lock_path = out_dir.path().join("version.lock");
     let result = cairn(
         "compile",
         &[
@@ -131,10 +131,10 @@ fn c6_lockfile_records_cairn_version() {
 }
 
 #[test]
-fn c7_lockfile_records_target_triple() {
+fn lockfile_records_target_triple() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let lock_path = out_dir.path().join("c7.lock");
+    let lock_path = out_dir.path().join("target.lock");
     let result = cairn(
         "compile",
         &[
@@ -163,7 +163,7 @@ fn c7_lockfile_records_target_triple() {
 /// does; `LockTarget` compares whole, so the integer is covered along with
 /// the label.
 #[test]
-fn c7b_either_spelling_of_a_target_builds_the_row_it_names() {
+fn either_spelling_of_a_target_builds_the_row_it_names() {
     let (_tmp_src, src) = example_in_tempdir("roof-flat.crn");
     let lock_target = |edition: &str, target: &str| {
         let out_dir = TempDir::new().expect("out tempdir");
@@ -210,7 +210,7 @@ fn c7b_either_spelling_of_a_target_builds_the_row_it_names() {
 }
 
 #[test]
-fn c8_bedrock_compiles_stateless_example_to_mcstructure() {
+fn bedrock_compiles_stateless_example_to_mcstructure() {
     // roof-flat.crn resolves entirely to bare (stateless) block ids —
     // planks and cobblestone — so it is the smallest example the Bedrock
     // backend can round-trip end-to-end. The compile must exit 0, write a
@@ -244,7 +244,7 @@ fn c8_bedrock_compiles_stateless_example_to_mcstructure() {
 }
 
 #[test]
-fn c8b_bedrock_mcstructure_is_uncompressed_little_endian() {
+fn bedrock_mcstructure_is_uncompressed_little_endian() {
     // The `.mcstructure` bytes must be raw NBT (unnamed root compound,
     // 0x0a + u16 zero length), never a gzip stream (0x1f 0x8b) the way the
     // Java `.nbt` is.
@@ -270,12 +270,12 @@ fn c8b_bedrock_mcstructure_is_uncompressed_little_endian() {
 }
 
 #[test]
-fn c8c_bedrock_lockfile_records_bedrock_target_and_pack_hash() {
+fn bedrock_lockfile_records_bedrock_target_and_pack_hash() {
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("roof-flat.crn");
     fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
     let out_dir = TempDir::new().expect("out tempdir");
-    let lock_path = out_dir.path().join("c8c.lock");
+    let lock_path = out_dir.path().join("bedrock.lock");
     let result = cairn(
         "compile",
         &[
@@ -308,7 +308,7 @@ fn c8c_bedrock_lockfile_records_bedrock_target_and_pack_hash() {
 }
 
 #[test]
-fn c8d_bedrock_cottage_maps_stair_states_without_degradation() {
+fn bedrock_cottage_maps_stair_states_without_degradation() {
     // cottage.crn resolves a gable roof to `*_stairs` with `facing`/`half`/
     // `shape=straight` properties. The Bedrock backend maps facing/half to
     // Bedrock `states` and drops the (straight, i.e. default) shape without a
@@ -343,7 +343,7 @@ fn c8d_bedrock_cottage_maps_stair_states_without_degradation() {
 }
 
 #[test]
-fn c8f_bedrock_themed_tower_degrades_stair_shape_but_compiles() {
+fn bedrock_themed_tower_degrades_stair_shape_but_compiles() {
     // themed-tower.crn's eave stairs use non-straight shapes
     // (`outer_left`/`outer_right`), which Bedrock has no state for. The
     // compile still succeeds (exit 0) but surfaces a W_INTENT_DEGRADED
@@ -380,7 +380,7 @@ fn c8f_bedrock_themed_tower_degrades_stair_shape_but_compiles() {
 }
 
 #[test]
-fn c8e_bedrock_unknown_target_names_bedrock_versions() {
+fn bedrock_unknown_target_names_bedrock_versions() {
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("roof-flat.crn");
     fs::copy(examples_dir().join("roof-flat.crn"), &dst).expect("copy roof-flat");
@@ -407,7 +407,7 @@ fn c8e_bedrock_unknown_target_names_bedrock_versions() {
 }
 
 #[test]
-fn c9_missing_edition_flag_exits_two_with_usage() {
+fn missing_edition_flag_exits_two_with_usage() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let result = cairn("compile", &[src.to_str().unwrap()]);
     // clap reports missing required args as exit 2.
@@ -417,7 +417,7 @@ fn c9_missing_edition_flag_exits_two_with_usage() {
 }
 
 #[test]
-fn c10_unknown_target_exits_one_with_supported_list() {
+fn unknown_target_exits_one_with_supported_list() {
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -439,7 +439,7 @@ fn c10_unknown_target_exits_one_with_supported_list() {
 }
 
 #[test]
-fn c12_parse_error_surfaces_file_line_col() {
+fn parse_error_surfaces_file_line_col() {
     let tmp = TempDir::new().expect("tempdir");
     let bad = tmp.path().join("bad.crn");
     // `;;;` is not a valid Cairn token — guarantees a lex/parse failure.
@@ -483,7 +483,7 @@ fn c12_parse_error_surfaces_file_line_col() {
 }
 
 #[test]
-fn c13_default_out_dir_is_source_parent() {
+fn default_out_dir_is_source_parent() {
     let (tmp_src, src) = example_in_tempdir("cottage.crn");
     let result = cairn("compile", &[src.to_str().unwrap(), "--edition", "java"]);
     assert!(
@@ -698,7 +698,7 @@ const DEFER_FREE_EXAMPLES: &[(&str, &str)] = &[
 ];
 
 #[test]
-fn c14_covered_examples_compile_without_deferred_warnings() {
+fn covered_examples_compile_without_deferred_warnings() {
     for (name, artifact) in DEFER_FREE_EXAMPLES {
         let (_tmp_src, src) = example_in_tempdir(name);
         let out_dir = TempDir::new().expect("out tempdir");
@@ -731,13 +731,13 @@ fn c14_covered_examples_compile_without_deferred_warnings() {
 }
 
 #[test]
-fn c15_lockfile_registry_pack_hash_is_populated() {
+fn lockfile_registry_pack_hash_is_populated() {
     // The registry pack ingest replaces the hardcoded data_version table,
     // and the lockfile must pin the bytes the compile resolved against.
     // The `constraint_catalog_hash` stays zero until that catalog lands.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
-    let lock_path = out_dir.path().join("c15.lock");
+    let lock_path = out_dir.path().join("pack.lock");
     let result = cairn(
         "compile",
         &[
@@ -765,7 +765,7 @@ fn c15_lockfile_registry_pack_hash_is_populated() {
 }
 
 #[test]
-fn c17_unknown_abstract_token_compile_exits_nonzero() {
+fn unknown_abstract_token_compile_exits_nonzero() {
     // Compile must propagate the new E_UNKNOWN_ABSTRACT_TOKEN as a hard
     // failure — a build that silently fell back to air on a typo would
     // hide the bug downstream.
@@ -812,12 +812,9 @@ fn c17_unknown_abstract_token_compile_exits_nonzero() {
 /// tests can land in their own writable scratch space without polluting the
 /// repo with `.lock` artefacts.
 #[test]
-fn c18_compile_village_emits_three_nbt() {
-    // village.crn used to compile to zero `.nbt` files because the lowering
-    // pass skipped sites entirely. With per-`place` lowering wired through,
-    // the three placements each produce a sibling `.nbt` and the build still
-    // exits 0 despite the two `W_DEFERRED_MEMBER` warnings the deferred
-    // `connect` rows emit.
+fn compile_village_emits_three_nbt() {
+    // Each of village.crn's three placements lowers to a sibling `.nbt`,
+    // and the build exits 0.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -847,7 +844,7 @@ fn c18_compile_village_emits_three_nbt() {
 }
 
 #[test]
-fn c19_village_lockfile_records_placements() {
+fn village_lockfile_records_placements() {
     // The lockfile carries the resolved per-place origin so a downstream
     // consumer can rebuild the village layout without re-running the
     // coordinate solver. Origins are derived from the topological chain in
@@ -893,7 +890,7 @@ fn c19_village_lockfile_records_placements() {
 }
 
 #[test]
-fn c20_village_lockfile_round_trips_through_yaml() {
+fn village_lockfile_round_trips_through_yaml() {
     // Pin that the new `placements` section survives a YAML round-trip:
     // serde_norway must encode and decode every field the schema declares so a
     // CI annotator or LSP that reads the file gets the same record the
@@ -921,13 +918,12 @@ fn c20_village_lockfile_round_trips_through_yaml() {
 }
 
 #[test]
-fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
-    // Port model and walkway voxelisation are wired through end-to-end, so
-    // the two `connect` rows in village.crn must lower into per-walkway
-    // `.nbt` artifacts (one per row) instead of degrading to
-    // W_DEFERRED_MEMBER. The home1↔home3 row detours around home1's
-    // floor, so the whole example must also compile without a single
-    // W_WALKWAY_BLOCKED — village is a warning-free example now.
+fn village_lowers_connect_rows_into_walkway_artifacts() {
+    // The two `connect` rows in village.crn lower into per-walkway `.nbt`
+    // artifacts (one per row) rather than degrading to W_DEFERRED_MEMBER.
+    // The home1↔home3 row detours around home1's floor, so the whole
+    // example compiles without a single W_WALKWAY_BLOCKED: village is a
+    // warning-free example.
     let (_tmp_src, src) = example_in_tempdir("village.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = cairn(
@@ -975,7 +971,7 @@ fn c21_village_lowers_connect_rows_into_walkway_artifacts() {
 }
 
 #[test]
-fn c22_unknown_def_in_place_errors_with_suggestion() {
+fn unknown_def_in_place_errors_with_suggestion() {
     // `use=cottag` typo → resolver fail-loud with a `did you mean
     // `cottage`?` suggestion via the existing nearest_match helper.
     // `cairn check` reports its text diagnostics on stderr, like every
@@ -1018,7 +1014,7 @@ fn c22_unknown_def_in_place_errors_with_suggestion() {
 }
 
 #[test]
-fn c23_unknown_theme_in_place_errors_with_suggestion() {
+fn unknown_theme_in_place_errors_with_suggestion() {
     // `theme=medeival` typo → fail-loud + did-you-mean note for the only
     // declared theme.
     let tmp = TempDir::new().expect("tempdir");
@@ -1050,7 +1046,7 @@ fn c23_unknown_theme_in_place_errors_with_suggestion() {
 }
 
 #[test]
-fn c25_east_of_unknown_ref_errors_with_suggestion() {
+fn east_of_unknown_ref_errors_with_suggestion() {
     // `east_of=home9` does not name a prior place id in the same site →
     // fail-loud, with `home1` as the nearest-match suggestion.
     let tmp = TempDir::new().expect("tempdir");
@@ -1301,7 +1297,8 @@ fn assert_place_id_refused(id: &str, shown: &str) {
 
 // The characters a Windows file name cannot carry are refused like the path
 // separators, on every host: an id is the stem of the artifact's file name,
-// and an id Linux accepts used to fail on Windows with a bare OS error. `"`
+// and an id Linux accepts would otherwise fail on Windows with a bare OS
+// error. `"`
 // is in the rule too, but a source string literal cannot carry one; the
 // lockfile reader is where it is reached. U+0001 is one of the controls
 // Windows reserves, and is quoted as its escape.
@@ -1357,7 +1354,7 @@ fn a_place_id_carrying_an_ideographic_space_is_refused_and_escaped() {
 }
 
 #[test]
-fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
+fn bare_def_without_place_emits_w_unused_def_and_no_nbt() {
     // A def that no site references is a noop (templates compile to no
     // voxels). The resolver flags it as `W_UNUSED_DEF` so a typo on the
     // `place use=` side does not silently produce an empty build. The
@@ -1412,7 +1409,7 @@ fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
 }
 
 #[test]
-fn c26b_unknown_def_in_place_compile_exits_nonzero() {
+fn unknown_def_in_place_compile_exits_nonzero() {
     // `cairn compile` must propagate resolver Error-severity diagnostics
     // through to the exit code — without the resolver→lowering diagnostic
     // merge, this would silently succeed with zero `.nbt` files.
@@ -1464,7 +1461,7 @@ fn c26b_unknown_def_in_place_compile_exits_nonzero() {
 }
 
 #[test]
-fn c27_home2_nbt_uses_resolved_theme_palette() {
+fn home2_nbt_uses_resolved_theme_palette() {
     // Cross-scope theme resolution proof: home2's palette must contain
     // the canonical id `medieval` binds to (`@cobblestone` →
     // `minecraft:cobblestone`). Reading the gzip-decoded NBT and grepping
@@ -1535,7 +1532,7 @@ fn compile_overwrites_existing_output() {
 }
 
 #[test]
-fn c30_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
+fn a_note_that_points_at_a_second_line_is_printed_with_its_position() {
     // The third of the three commands whose note loop dropped
     // `note.span`. `cairn compile` reaches it through
     // `report_lowering_diagnostics`, which `lower` and `info` do not use.
@@ -1583,10 +1580,9 @@ fn c30_a_note_that_points_at_a_second_line_is_printed_with_its_position() {
 
 #[test]
 fn a_walkway_port_named_underscore_is_refused_rather_than_panicking_the_namer() {
-    // A port called `_` used to lower to `walkway::s::a.___b._`, which
-    // the artifact namer could not split back, so `compile` aborted on a
-    // debug assertion while `check` passed. The row is now dropped at
-    // lowering with a finding, and the build, having lost the walkway the
+    // A port called `_` would lower to `walkway::s::a.___b._`, which the
+    // artifact namer cannot split back. The row is dropped at lowering
+    // with a finding instead, and the build, having lost the walkway the
     // row asked for, is refused as partial rather than certified.
     let fixture = Fixture::new(concat!(
         "def hut size=5x5:\n",
@@ -1623,10 +1619,10 @@ fn a_walkway_port_named_underscore_is_refused_rather_than_panicking_the_namer() 
 
 #[test]
 fn walkway_ids_that_would_alias_across_the_separator_are_each_named() {
-    // `a.p_ → b.p` and `a.p → _b.p` used to share the scope key
-    // `walkway::s::a.p___b.p`, so the second row replaced the first and
-    // one `.nbt` was written for two rows with no finding. Each is now
-    // named on its own line, and again among the losses that refuse the
+    // `a.p_ → b.p` and `a.p → _b.p` would share the scope key
+    // `walkway::s::a.p___b.p`, the second row replacing the first and one
+    // `.nbt` written for two rows with no finding. Each is named on its
+    // own line, and again among the losses that refuse the
     // build: the name a loss is reported under is the row's own ports,
     // not the key the two rows would both have spelled. The sound third
     // row laid its walkway, so it is not among them.
@@ -1764,9 +1760,9 @@ fn a_walkway_whose_every_cell_is_blocked_is_lost_rather_than_written_as_air() {
     // Two huts touching, each door port buried under the other's floor.
     // The router cannot detour from a buried port, so the row falls back
     // to the straight L, and every cell of it overlaps a floor: the
-    // walkway's array is all air. It used to be written as an `.nbt` of
-    // two air blocks and certified; holding no block, it is now a lost
-    // walkway like a row that was refused.
+    // walkway's array is all air. Holding no block, it is a lost walkway
+    // like a row that was refused, not an `.nbt` of air certified as
+    // built.
     let fixture = Fixture::new(concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",
@@ -1831,8 +1827,8 @@ fn a_walkway_whose_every_cell_is_blocked_is_lost_rather_than_written_as_air() {
 #[test]
 fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
     // `nada`'s one member cannot voxelise, so lowering keeps an array for
-    // `b` that holds only air. It used to be written as `b.nbt` and
-    // certified beside `a`; holding no block, it is now a lost scope.
+    // `b` that holds only air. Holding no block, it is a lost scope, not a
+    // `b.nbt` of air certified beside `a`.
     let fixture = Fixture::new(concat!(
         "theme t:\n",
         "  slot wall -> @cobblestone\n",

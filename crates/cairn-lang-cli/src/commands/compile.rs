@@ -62,7 +62,7 @@ pub(crate) fn run_compile(
     // Declaring nothing is not the same as losing something: a source that
     // is only templates and themes requests no scopes, produces none, and
     // still compiles (see
-    // `c26_bare_def_without_place_emits_w_unused_def_and_no_nbt`).
+    // `bare_def_without_place_emits_w_unused_def_and_no_nbt`).
     if !dropped_scopes.is_empty() {
         report_partial_build(
             file,

@@ -1,10 +1,8 @@
-//! `--format json` writes one JSON document to stdout, for every input.
-//!
-//! The flag advertises a machine-readable product. It delivered one for
-//! every source except the ones that fail — where stdout was empty and the
-//! reason went to stderr as prose — so a consumer parsing stdout saw
-//! nothing and had to guess from the exit code. These tests hold the
-//! contract on the paths that used to fall through it.
+//! `--format json` writes one JSON document to stdout for every source it
+//! can read, a failing one included: its findings are the document, so a
+//! consumer parsing stdout never has to guess from the exit code, while a
+//! run that builds writes its product there and its warnings to stderr as
+//! prose.
 
 use std::fs;
 use std::path::PathBuf;
@@ -635,10 +633,9 @@ fn a_dump_on_a_clean_source_is_still_the_dump() {
 /// A run with warnings and no error still writes the dump, not the
 /// document.
 ///
-/// This is the branch the failure gate now guards, and no test stood on
-/// it: `report_diagnostics` moved behind the error check, so a source
-/// whose findings are all warnings has to come out the other side with
-/// the IR on stdout, the warnings on stderr, and exit 0. A regression
+/// `report_diagnostics` sits behind the error check, so a source whose
+/// findings are all warnings has to come out the other side with the IR
+/// on stdout, the warnings on stderr, and exit 0. A regression
 /// here writes `{"diagnostics": [...]}` for a build that succeeded.
 #[test]
 fn a_dump_with_warnings_and_no_error_is_still_the_dump() {

@@ -15,7 +15,7 @@ use crate::common::{
 };
 
 #[test]
-fn ac5_java_compile_writes_oak_sign_and_not_wall_sign() {
+fn java_compile_writes_oak_sign_and_not_wall_sign() {
     let (_tmp_src, src) = example_in_tempdir("edition-fallback.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = Command::new(cargo_bin())
@@ -53,7 +53,7 @@ fn ac5_java_compile_writes_oak_sign_and_not_wall_sign() {
 }
 
 #[test]
-fn ac6_bedrock_compile_writes_the_bedrock_wall_sign_and_not_the_java_one() {
+fn bedrock_compile_writes_the_bedrock_wall_sign_and_not_the_java_one() {
     let (_tmp_src, src) = example_in_tempdir("edition-fallback.crn");
     let out_dir = TempDir::new().expect("out tempdir");
     let result = Command::new(cargo_bin())
@@ -182,7 +182,7 @@ fn check_edition_flag_wires_strict_variant_pin_through_cli() {
 }
 
 #[test]
-fn ac7_check_exits_zero_across_all_three_edition_states() {
+fn check_exits_zero_across_all_three_edition_states() {
     // `cairn check` on the fallback example succeeds under Java,
     // Bedrock, and no `--edition` — the sibling-slot union handles the
     // no-pin case, and each explicit edition sees its variant declare
@@ -208,7 +208,7 @@ fn ac7_check_exits_zero_across_all_three_edition_states() {
 }
 
 #[test]
-fn ac8_cottage_still_compiles_under_both_editions() {
+fn cottage_still_compiles_under_both_editions() {
     // Sanity: the existing `theme medieval:` cottage (unsuffixed theme,
     // no per-edition variants) must keep working under both editions —
     // regression guard for the sibling-slot pathway inadvertently gating

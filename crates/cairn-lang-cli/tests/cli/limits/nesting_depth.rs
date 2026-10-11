@@ -1,20 +1,9 @@
-//! Deeply nested sources must be refused, not abort the process.
-//!
-//! Every recursive descent here costs native stack, and a Rust stack
-//! overflow cannot be caught: it kills the process. That is why these
-//! assertions run the binary as a subprocess and look at the exit status — a
-//! library-level test could not observe the failure it is guarding against
-//! without taking the test runner down with it.
-//!
-//! What an overflow looks like through `Output::status.code()`:
-//!
-//! | platform | value |
-//! | --- | --- |
-//! | Windows | `Some(-1073741571)` — `0xC00000FD`, `STATUS_STACK_OVERFLOW` |
-//! | Unix | `None` — the child died on `SIGSEGV`/`SIGABRT`, so there is no code |
-//!
-//! (`127` is what a POSIX *shell* synthesises for a signal death; it never
-//! reaches `std::process`. Asserting `Some(1)` rejects every one of these.)
+//! Deeply nested sources are refused with a finding rather than
+//! overflowing the native stack, which kills the process and so can only
+//! be observed from outside it: each run is a subprocess, and its exit
+//! code is asserted to be `Some(1)`, which an overflow never yields
+//! (`Some(-1073741571)`, `STATUS_STACK_OVERFLOW`, on Windows; `None`, a
+//! signal death, on Unix).
 
 use std::fmt::Write as _;
 
@@ -131,7 +120,7 @@ fn forward_chain(prefix: &str, stages: usize) -> String {
 }
 
 #[test]
-fn depth_1_every_command_refuses_deep_nesting_instead_of_aborting() {
+fn every_command_refuses_deep_nesting_instead_of_aborting() {
     let tmp = TempDir::new().expect("tempdir");
     for (shape, source) in over_limit_sources() {
         let path = write_source(tmp.path(), &format!("{shape}.crn"), &source);
@@ -168,7 +157,7 @@ fn depth_1_every_command_refuses_deep_nesting_instead_of_aborting() {
 }
 
 #[test]
-fn depth_2_the_refusal_says_what_the_limit_is() {
+fn the_refusal_says_what_the_limit_is() {
     // Both renderings, because `parse` defaults to `--format json` and a
     // refusal there is the failure document on stdout, not prose. The
     // author needs the bound and the position either way.
@@ -211,7 +200,7 @@ fn depth_2_the_refusal_says_what_the_limit_is() {
 }
 
 #[test]
-fn depth_3_nesting_at_the_limit_still_parses() {
+fn nesting_at_the_limit_still_parses() {
     // Each bound is a wall, not a cliff edge: a source sitting exactly on it
     // is legal, so both sides are pinned.
     let tmp = TempDir::new().expect("tempdir");
@@ -228,7 +217,7 @@ fn depth_3_nesting_at_the_limit_still_parses() {
 }
 
 #[test]
-fn depth_4_a_reverse_declared_logic_chain_is_refused_not_aborted() {
+fn a_reverse_declared_logic_chain_is_refused_not_aborted() {
     // `synth` lowers a binding by descending into whatever it references, so
     // a chain declared in the reverse of dependency order recursed twice per
     // binding. Around 410 lines took the process down with no diagnostic —
@@ -278,7 +267,7 @@ fn depth_4_a_reverse_declared_logic_chain_is_refused_not_aborted() {
 }
 
 #[test]
-fn depth_5_a_forward_declared_chain_of_the_same_size_still_lowers() {
+fn a_forward_declared_chain_of_the_same_size_still_lowers() {
     // The mirror of the case above: the limit must bite on nesting depth,
     // not on how many bindings a scope has.
     let tmp = TempDir::new().expect("tempdir");
@@ -303,7 +292,7 @@ fn depth_5_a_forward_declared_chain_of_the_same_size_still_lowers() {
 }
 
 #[test]
-fn depth_6_each_independent_chain_reports_its_own_root_cause() {
+fn each_independent_chain_reports_its_own_root_cause() {
     // Suppressing repeats within one chain is right; suppressing the second
     // chain is not. `lower_binary` states the policy this restores: keep
     // every root cause on one pass so the author does not fix, re-run, and
@@ -337,7 +326,7 @@ fn depth_6_each_independent_chain_reports_its_own_root_cause() {
 }
 
 #[test]
-fn depth_7_a_chain_of_one_operator_bindings_reaches_the_limit_where_the_doc_says() {
+fn a_chain_of_one_operator_bindings_reaches_the_limit_where_the_doc_says() {
     // `MAX_LOWERING_DEPTH`'s doc translates the internal frame budget into
     // bindings, the unit the author counts in: a binding of one operator
     // costs two frames — an operand descent plus the referenced binding's

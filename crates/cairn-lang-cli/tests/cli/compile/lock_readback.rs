@@ -342,7 +342,7 @@ fn with_line(written: &str, recorded: &str, refused: &str) -> String {
 const PREVIOUS_TARGET: &str =
     "W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189.";
 
-/// A lock whose only fault is an identifier `id` the rule now refuses on
+/// A lock whose only fault is an identifier `id` the rule refuses on
 /// `ch` is reported in its own words, its target is still compared, and it
 /// is replaced.
 fn assert_refused_but_read(run: &Run, replaced: &str, id: &str, ch: &str) {
@@ -379,7 +379,7 @@ fn assert_refused_but_read(run: &Run, replaced: &str, id: &str, ch: &str) {
 // reasons: a path separator, and a character Windows reserves.
 
 #[test]
-fn a_lock_recording_a_placement_id_the_rule_now_refuses_is_still_read() {
+fn a_lock_recording_a_placement_id_the_rule_refuses_is_still_read() {
     let id = "sub/home1";
     let (run, replaced) = recompile_village_over(|written| {
         with_line(written, "  id: home1\n", &format!("  id: {id}\n"))
@@ -388,7 +388,7 @@ fn a_lock_recording_a_placement_id_the_rule_now_refuses_is_still_read() {
 }
 
 #[test]
-fn a_lock_recording_a_walkway_port_the_rule_now_refuses_is_still_read() {
+fn a_lock_recording_a_walkway_port_the_rule_refuses_is_still_read() {
     let id = "a*b";
     let (run, replaced) = recompile_village_over(|written| {
         with_line(written, "    port: entry\n", &format!("    port: {id}\n"))

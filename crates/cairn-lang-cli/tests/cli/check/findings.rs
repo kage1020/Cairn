@@ -1,4 +1,6 @@
-//! End-to-end tests for `cairn check <file>`.
+//! `cairn check <file>` end to end: findings go to stderr as one located
+//! `FILE:LINE:COL: SEVERITY[CODE]` line each, or to stdout as a
+//! `--format json` array, and the exit code follows the worst severity.
 
 use std::path::PathBuf;
 
@@ -98,7 +100,7 @@ fn an_unlexable_requires_value_is_an_invalid_floor_rather_than_a_parse_error() {
 }
 
 #[test]
-fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
+fn clean_example_exits_zero_and_says_nothing_on_either_stream() {
     let path = examples_dir().join("cottage.crn");
     let out = cairn("check", &[path.to_str().unwrap()]);
     assert!(
@@ -111,7 +113,7 @@ fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
         stdout.trim().is_empty(),
         "clean example should produce no stdout, got: {stdout}",
     );
-    // The load-bearing half now that diagnostics live on stderr: a clean
+    // The load-bearing half, since diagnostics live on stderr: a clean
     // input has nothing to report anywhere.
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert!(
@@ -121,7 +123,7 @@ fn cli_1_clean_example_exits_zero_and_says_nothing_on_either_stream() {
 }
 
 #[test]
-fn cli_4_clean_fixture_json_output_is_empty_array() {
+fn clean_fixture_json_output_is_empty_array() {
     let path = fixtures_dir().join("clean.crn");
     let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);
     assert!(
@@ -136,7 +138,7 @@ fn cli_4_clean_fixture_json_output_is_empty_array() {
 }
 
 #[test]
-fn cli_5_parse_failure_exits_one_with_parse_style_message() {
+fn parse_failure_exits_one_with_parse_style_message() {
     // A file the parser rejects must still hand the user a gcc-style
     // location, just like `cairn parse` does today.
     let fixture = Fixture::new("@unknown_directive nope\n");
@@ -156,10 +158,10 @@ fn cli_5_parse_failure_exits_one_with_parse_style_message() {
 /// The layer below is covered by `cairn-lang-core`'s `line_positions`
 /// tests; this one exists because the file the CLI is handed is the one an
 /// editor wrote, terminator and all. The whole of `def foo bar\n` is on
-/// line 1, and the gcc-style prefix used to read `:2:1` — sending a reader,
-/// or a model repairing its own output, to a line holding none of it.
+/// line 1, and a gcc-style prefix reading `:2:1` would send a reader, or a
+/// model repairing its own output, to a line holding none of it.
 #[test]
-fn cli_end_of_line_parse_error_names_the_line_that_has_it() {
+fn end_of_line_parse_error_names_the_line_that_has_it() {
     for (label, source) in [
         ("lf", "def foo bar\n"),
         ("crlf", "def foo bar\r\n"),
@@ -179,7 +181,7 @@ fn cli_end_of_line_parse_error_names_the_line_that_has_it() {
 }
 
 #[test]
-fn cli_unknown_keyword_fixture_lists_known_keywords_in_a_note() {
+fn unknown_keyword_fixture_lists_known_keywords_in_a_note() {
     let path = fixtures_dir().join("unknown_keyword.crn");
     let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
@@ -208,7 +210,7 @@ fn cli_unknown_keyword_fixture_lists_known_keywords_in_a_note() {
 }
 
 #[test]
-fn cli_json_output_carries_line_and_col_for_every_diagnostic() {
+fn json_output_carries_line_and_col_for_every_diagnostic() {
     // The `--format json` contract is that downstream tooling (LSP, CI
     // gates) receives the same position information as the text format.
     // Without `line` / `col` the JSON form would be useless to anything

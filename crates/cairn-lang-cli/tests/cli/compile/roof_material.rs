@@ -1,15 +1,9 @@
-//! A sloped roof's material, end to end.
-//!
-//! `gable` / `shed` / `hip` lowering derives `facing` / `half` / `shape` and
-//! attaches them to the block the member's `mat_slot=` names. A whole block
-//! has nowhere to carry them, so binding one asks for a blockstate that does
-//! not exist — and neither answer available without the author is
-//! acceptable: attaching the states anyway writes that blockstate into the
-//! artifact, and substituting the fallback species builds the roof out of a
-//! material nobody chose. The build stops instead, on both editions.
-//!
-//! Any *member of the stair family* is a free choice, which is what the
-//! registry pack's four roof species are for.
+//! A sloped roof's material, end to end. `gable` / `shed` / `hip` lowering
+//! derives `facing` / `half` / `shape` for the block the member's
+//! `mat_slot=` names, and a whole block has nowhere to carry them, so
+//! binding one stops the build on both editions rather than writing a
+//! blockstate that does not exist or a fallback species nobody chose. Any
+//! *member of the stair family* is a free choice.
 
 use tempfile::TempDir;
 
