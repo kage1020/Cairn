@@ -129,11 +129,9 @@ struct sim size=5x5
     }
 }
 
-/// The reachable `LogicalCell` variants (`And`, `Or`, `Not`) each
-/// pick their Java realisation, and the parser-unreachable cells
-/// (`Xor` / `Nand` / `Nor` / `Mux`) fall through to their `Java*Unpinned`
-/// placeholders so a future parser expansion cannot silently emit a
-/// container-mismatched cell.
+/// The reachable `LogicalCell` variants (`And`, `Or`, `Not`) each pick their Java realisation,
+/// and the cells the parser cannot reach (`Xor` / `Nand` / `Nor` / `Mux`) fall through to their
+/// `Java*Unpinned` placeholders, so none of them can come out as a cell of the wrong edition.
 #[test]
 fn java_mapping_is_exhaustive_over_logical_cells() {
     let two_input =
@@ -317,13 +315,10 @@ struct beta size=5x5
     assert!(beta.ir.signal_defs.get(&sig("sig.b1")).is_some());
 }
 
-/// The Java and Bedrock runs of the same Netlist IR differ *only* in
-/// the container's `edition` field and each cell's `cell` tag — every
-/// other structural byte (inputs, outputs, driver arity + port order,
-/// span, `signal_defs`) is edition-independent by contract, and this
-/// test locks that so a future edition pass that accidentally reorders
-/// or drops non-cell state (or forgets to copy `signal_defs`) fails
-/// loud instead of silently drifting.
+/// The Java and Bedrock runs of the same Netlist IR differ *only* in the container's `edition`
+/// field and each cell's `cell` tag: every other structural byte (inputs, outputs, driver arity
+/// and port order, span, `signal_defs`) is edition-independent, so an edition pass that reorders
+/// or drops non-cell state, or forgets `signal_defs`, fails here.
 #[test]
 fn java_and_bedrock_edition_netlists_differ_only_in_edition_and_cell_tags() {
     let source = r"
@@ -369,11 +364,8 @@ struct sim size=5x5
     }
 }
 
-/// The Netlist IR's `outputs` list can carry more than one entry — a
-/// scope with two actuators. Locks that every entry, not just the first,
-/// is copied verbatim (the `.clone_from` on `out.outputs` in `compile_scope`
-/// is a single call today, so this test would fail loud if that were
-/// reduced to a `take(1)` mistake in a later refactor).
+/// The Netlist IR's `outputs` list can carry more than one entry, a scope with two actuators, and
+/// every entry is copied verbatim, not just the first.
 #[test]
 fn compile_edition_netlist_copies_all_outputs_verbatim() {
     let source = r"
@@ -405,9 +397,8 @@ struct sim size=5x5
     assert_eq!(src_outputs, dst_outputs);
 }
 
-/// The `*Unpinned` placeholders serialise as their `snake_case` name —
-/// no `serde` attribute drift can silently make a downstream consumer
-/// think a `JavaXor` cell landed when the pass emitted a placeholder.
+/// The `*Unpinned` placeholders serialise as their `snake_case` name, so a downstream consumer
+/// cannot read a placeholder as, say, a `JavaXor` cell.
 #[test]
 fn unpinned_variants_serialise_as_snake_case() {
     let mut logic = LogicIr::new();

@@ -1,22 +1,10 @@
-//! A signal binding sits on the component that carries it.
-//!
-//! `spec/redstone` "Signal binding" writes each binding on one component —
-//! a sensor emits, `door ... opened_by=`, `lamp ... lit_by=`,
-//! `piston ... powered_by=`, `dispenser ... fired_by=` — rather than
-//! offering `-> sig.X` and the four actuator keys as free-floating
-//! attributes. A pair is read as a binding from either side, so a
-//! misspelt key (`oepend_by=sig.x`) and a value that names no signal
-//! (`opened_by=a`, `-> foo.bar`) are both reported rather than dropped.
-//! The tests below cover the value axis: what a value has to be, which
-//! fault is reported when the host is wrong too, and the one place a
-//! well-formed binding is still in the wrong place — inside the
-//! `[selector]`.
-//!
-//! A `->` tail on a member that cannot emit is `check`'s
-//! `E_MISPLACED_BINDING` (`cairn-lang-core/tests/check_binding.rs`). What
-//! this pass owes such a line is taking the driver out of the scope, so
-//! nothing downstream reports the hole as a fault of its own; the
-//! fixtures assert that silence rather than a finding.
+//! A signal binding sits on the component that carries it (`spec/redstone` "Signal binding"): a
+//! sensor emits, `door ... opened_by=`, `lamp ... lit_by=`, `piston ... powered_by=`,
+//! `dispenser ... fired_by=`. A pair is read as a binding from either side, so a misspelt key
+//! (`oepend_by=sig.x`) and a value that names no signal (`opened_by=a`, `-> foo.bar`) are both
+//! reported rather than dropped. A `->` tail on a member that cannot emit is `check`'s
+//! `E_MISPLACED_BINDING` (`cairn-lang-core/tests/check/binding.rs`); this pass takes the driver
+//! out of the scope so nothing downstream reports the hole, and the fixtures assert that silence.
 
 use cairn_lang_redstone::DiagnosticCode;
 
@@ -26,16 +14,13 @@ use crate::common::{codes, gate_source, only, synth_source};
 
 /// Every shape `ValueKind` has, in the position a signal name belongs.
 ///
-/// The tail goes through `parse_value` unrestricted, so all eight land
-/// here — the five a signal name is plausibly mistyped as, and `true` /
-/// `2x2` / `[a,b]`, which are not near-misses but are reachable and so
-/// have to render. A check written as "a `DotRef` whose head is not
-/// `sig`" would answer for one of the eight and let the rest through,
-/// which is what the front end did.
+/// The tail goes through `parse_value` unrestricted, so all eight land here: the five a signal
+/// name is plausibly mistyped as, and `true` / `2x2` / `[a,b]`, which are not near-misses but are
+/// reachable and so have to render. A check written as "a `DotRef` whose head is not `sig`" would
+/// answer for one of the eight and let the rest through.
 ///
-/// `sig.a.b` is the ninth row and the one that is not about kinds: a
-/// two-segment name is what a signal is, and the block-array pass has
-/// always said so while this one did not.
+/// `sig.a.b` is the ninth row and not about kinds: a signal is a two-segment name, as the
+/// block-array pass holds too.
 #[test]
 fn a_sensor_tail_that_names_no_signal_is_refused_whatever_it_names() {
     for (tail, found) in [
@@ -44,11 +29,10 @@ fn a_sensor_tail_that_names_no_signal_is_refused_whatever_it_names() {
         ("a", "identifier `a`"),
         ("3", "integer `3`"),
         ("\"sig.a\"", "string `\"sig.a\"`"),
-        // A Cairn string literal has no escape mechanism — the lexer
-        // takes the raw slice between the quotes — so a backslash is a
-        // backslash and the message has to show the one the author
-        // typed. `Debug` formatting would render this `"a\\b"`, which is
-        // text they did not write and would not parse back the same.
+        // A Cairn string literal has no escape mechanism (the lexer takes the raw slice between
+        // the quotes), so a backslash is a backslash and the message shows the one the author
+        // typed. `Debug` formatting would render this `"a\\b"`, which they did not write and
+        // would not parse back the same.
         ("\"a\\b\"", "string `\"a\\b\"`"),
         ("@tok", "token `@tok`"),
         ("true", "boolean `true`"),
@@ -74,12 +58,10 @@ fn a_sensor_tail_that_names_no_signal_is_refused_whatever_it_names() {
 
 /// The repair is offered only where there is one to offer.
 ///
-/// `-> a` is a name with the namespace left off and has a single reading;
-/// `-> 3` names nothing that adding `sig.` would fix, so the message asks
-/// for the shape rather than inventing `sig.3`. `-> sig` is the
-/// identifier that is not a name — the author wrote the namespace and
-/// stopped — so it takes the shape-only advice with the numbers rather
-/// than being offered `sig.sig`.
+/// `-> a` is a name with the namespace left off and has a single reading; `-> 3` names nothing
+/// that adding `sig.` would fix, so the message asks for the shape rather than inventing `sig.3`.
+/// `-> sig` is the namespace with no name after it, so it takes the shape-only advice with the
+/// numbers rather than being offered `sig.sig`.
 #[test]
 fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
     let named = synth_source(&gate_source(
@@ -112,15 +94,11 @@ fn a_bare_name_is_offered_its_namespace_and_a_number_is_not() {
     }
 }
 
-/// A tail on a member that cannot carry one draws no value-side finding,
-/// whatever the value says.
+/// A tail on a member that cannot carry one draws no value-side finding, whatever the value says.
 ///
-/// No edit to the value makes `walls` emit a signal, so reporting the
-/// value would send the author round the loop to be told about the host
-/// on the next run. The host fault itself is `check`'s, and `cairn synth`
-/// gates on `check`, so the line the author sees is the same one; what
-/// matters here is that this pass does not add a second sentence about
-/// the value under it.
+/// No edit to the value makes `walls` emit a signal, so reporting the value would send the author
+/// round the loop to be told about the host on the next run. The host fault is `check`'s, and
+/// `cairn synth` gates on `check`; this pass must not add a second sentence about the value.
 #[test]
 fn a_tail_on_the_wrong_host_draws_no_value_side_finding() {
     let out = synth_source(&gate_source(
@@ -131,9 +109,8 @@ fn a_tail_on_the_wrong_host_draws_no_value_side_finding() {
 
 /// An actuator key on its own host, with a value that names no signal.
 ///
-/// The key is what claims the binding — the value used to have to be a
-/// `sig.` reference for the field to be looked at at all, which is how
-/// this row reached placement as a door wired to nothing.
+/// The key is what claims the binding: a field looked at only for a `sig.` value would let this
+/// row reach placement as a door wired to nothing.
 #[test]
 fn an_actuator_argument_that_names_no_signal_is_refused() {
     for (value, found) in [
@@ -172,14 +149,13 @@ fn an_actuator_argument_on_the_wrong_host_is_a_host_fault_even_when_it_names_no_
     assert_eq!(codes(&out), ["E_LOGIC_MISPLACED_BINDING"]);
 }
 
-/// A binding inside the `[selector]` is refused, and the signal it names
-/// is not also reported as unconsumed.
+/// A binding inside the `[selector]` is refused, and the signal it names is not also reported as
+/// unconsumed.
 ///
-/// The brackets pick a member that already exists; what the line does to
-/// it is written after them. `block_array`'s actuator-patch recogniser
-/// already refuses any selector attribute but `id=`, so this is the same
-/// answer in this pass's vocabulary and for every host rather than the
-/// door patch alone.
+/// The brackets pick a member that already exists; what the line does to it is written after
+/// them. `block_array`'s actuator-patch recogniser refuses any selector attribute but `id=` too,
+/// so this is the same answer in this pass's vocabulary, for every host rather than the door
+/// patch alone.
 #[test]
 fn a_binding_inside_the_selector_is_refused_and_counts_as_wired() {
     let out = synth_source(&gate_source(concat!(
@@ -201,16 +177,12 @@ fn a_binding_inside_the_selector_is_refused_and_counts_as_wired() {
     );
 }
 
-/// A bracketed pair whose fault survives being moved out is told about
-/// that fault instead.
+/// A bracketed pair whose fault survives being moved out is told about that fault instead.
 ///
-/// Moving `lit_by=sig.a` out of a door's brackets leaves a `lit_by=` on a
-/// door, and moving `oepend_by=sig.a` out leaves a key nothing reads —
-/// so "move it out of the brackets" would be advice that does not work,
-/// and the finding that owns the surviving fault is the one to raise.
-/// The `did you mean` on the second row is the whole reason: it is
-/// `diag_unknown_binding_key`'s, and a bracket-only answer would not have
-/// it.
+/// Moving `lit_by=sig.a` out of a door's brackets leaves a `lit_by=` on a door, and moving
+/// `oepend_by=sig.a` out leaves a key nothing reads, so "move it out of the brackets" would be
+/// advice that does not work; the finding that owns the surviving fault is raised. The second
+/// row's `did you mean` comes from `diag_unknown_binding_key`, which a bracket-only answer lacks.
 #[test]
 fn a_bracketed_pair_is_answered_by_the_fault_that_survives_unbracketing() {
     let wrong_host = synth_source(&gate_source(concat!(
@@ -285,13 +257,11 @@ fn a_selector_binding_with_no_name_leaves_the_signal_unconsumed() {
     );
 }
 
-/// A selector binding on a keyword the role table does not know is left
-/// to `E_UNKNOWN_KEYWORD`, the same way one in the argument list is.
+/// A selector binding on a keyword the role table does not know is left to `E_UNKNOWN_KEYWORD`,
+/// the same way one in the argument list is.
 ///
-/// The member does not exist as a component, so saying its binding is in
-/// the wrong brackets would be a second finding about a line whose first
-/// finding is that it names nothing. The argument-list side of this gate
-/// has its own test above; the selector walk is newer and had none.
+/// The member does not exist as a component, so saying its binding is in the wrong brackets
+/// would be a second finding about a line whose first finding is that it names nothing.
 #[test]
 fn a_selector_binding_on_an_unknown_keyword_is_left_to_the_keyword_finding() {
     let out = synth_source(&gate_source(concat!(
@@ -327,14 +297,13 @@ fn a_selector_that_binds_nothing_is_left_alone() {
     assert_eq!(scope.ir.outputs.len(), 1, "the door is wired");
 }
 
-/// A malformed value and the signal nothing then consumes are two
-/// findings, in the order the lines were written.
+/// A malformed value and the signal nothing then consumes are two findings, in the order the
+/// lines were written.
 ///
-/// Not one: `refused_consumers` is keyed by signal name, and a value that
-/// names no signal gives it no name to key by. The author who writes
-/// `opened_by=a` is told which line is wrong and, separately, that the
-/// sensor above it now drives nothing — both true, and the second stops
-/// being said the moment the first is fixed.
+/// Not one: `refused_consumers` is keyed by signal name, and a value that names no signal gives it
+/// no name to key by. The author who writes `opened_by=a` is told which line is wrong and,
+/// separately, that the sensor above it drives nothing; both are true, and the second goes away
+/// once the first is fixed.
 #[test]
 fn a_malformed_value_and_the_signal_it_leaves_unconsumed_are_both_reported() {
     let out = synth_source(&gate_source(concat!(
@@ -362,9 +331,8 @@ fn a_sensor_tail_on_a_wall_registers_no_input_and_no_cascade() {
         "  walls class=inner mat_slot=wall height=1 -> sig.w\n",
         "  logic sig.x = not sig.w\n",
     )));
-    // Root cause once, and it is `E_MISPLACED_BINDING` on the `walls`
-    // line: that `sig.w` is now defined by nothing is that finding's
-    // consequence, not a second one.
+    // Root cause once, and it is `E_MISPLACED_BINDING` on the `walls` line: that `sig.w` is
+    // defined by nothing is that finding's consequence, not a second one.
     assert_eq!(codes(&out), Vec::<&str>::new(), "{:#?}", out.diagnostics);
     let scope = out.scoped.scopes.first().expect("one scope");
     assert!(
@@ -412,10 +380,9 @@ fn opened_by_on_a_window_names_the_component_it_belongs_to() {
 
 #[test]
 fn the_three_keys_with_no_keyword_to_host_them_say_so() {
-    // `lamp`, `piston`, and `dispenser` are not keywords the surface
-    // accepts, so `lit_by=` / `powered_by=` / `fired_by=` have no legal
-    // member at all today. Telling the author to "move it onto the piston"
-    // would send them to write a line that is `E_UNKNOWN_KEYWORD`.
+    // `lamp`, `piston` and `dispenser` are not keywords the surface accepts, so `lit_by=` /
+    // `powered_by=` / `fired_by=` have no legal member. Telling the author to "move it onto the
+    // piston" would send them to write a line that is `E_UNKNOWN_KEYWORD`.
     for (key, host) in [
         ("powered_by", "piston"),
         ("lit_by", "lamp"),
@@ -531,10 +498,8 @@ fn a_key_from_no_vocabulary_at_all_gets_the_list_instead() {
 
 #[test]
 fn a_non_signal_value_under_an_unknown_key_is_not_this_pass_business() {
-    // The check is keyed on the value being a `sig.` reference. Every
-    // ordinary argument — `mat_slot=`, `height=`, an unknown one holding a
-    // number — is somebody else's to validate, and a schema for that does
-    // not exist yet.
+    // The check is keyed on the value being a `sig.` reference. Every ordinary argument
+    // (`mat_slot=`, `height=`, an unknown one holding a number) is somebody else's to validate.
     let out = synth_source(&gate_source(concat!(
         "  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a\n",
         "  logic sig.x = not sig.a\n",
@@ -659,10 +624,9 @@ fn a_logic_lhs_that_is_not_one_segment_after_sig_is_refused() {
     }
 }
 
-/// The actuator side refuses the same name the left-hand side now does,
-/// so a `logic sig.x.y` line and an actuator reading `sig.x.y` are two
-/// findings of one code: neither is reported as unbound, and the right-hand
-/// side's `sig.a` is not reported as unused.
+/// The actuator side refuses the same names the left-hand side does, so a `logic sig.x.y` line
+/// and an actuator reading `sig.x.y` are two findings of one code: neither is reported as
+/// unbound, and the right-hand side's `sig.a` is not reported as unused.
 #[test]
 fn an_actuator_reading_a_refused_lhs_is_refused_by_the_same_rule() {
     let out = synth_source(&gate_source(concat!(

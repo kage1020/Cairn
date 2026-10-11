@@ -1,20 +1,11 @@
-//! What each refusal takes away, and what it must not take away with it.
-//!
-//! The front end declines a binding in four ways — a sensor tail on a
-//! member that cannot emit, an actuator key on the wrong component, a
-//! signal-valued key nothing reads, and a `logic` left-hand side outside
-//! the `sig.` namespace — and a member whose keyword the role table does
-//! not know is skipped without a word, because `E_UNKNOWN_KEYWORD` is
-//! already its finding. The first of the four is declined without a word
-//! too: `check::binding` refuses the tail with `E_MISPLACED_BINDING`, and
-//! this pass only takes the driver away.
-//!
-//! Each of those takes a driver or a consumer out of the scope, and every
-//! pass downstream would then report the hole as a mistake of its own. The
-//! crate's rule is one finding per root cause, so each refusal records what
-//! it removed. This file is the ledger of that: every fixture asserts the
-//! *whole* finding list, because "the code I asked about is present" is
-//! exactly the assertion a leaked cascade slips past.
+//! What each refusal takes away, and what it must not take away with it. The front end declines
+//! a binding in four ways (a sensor tail on a member that cannot emit, which `check::binding`
+//! already refuses as `E_MISPLACED_BINDING`; an actuator key on the wrong component; a
+//! signal-valued key nothing reads; a `logic` left-hand side outside the `sig.` namespace) and
+//! skips a member whose keyword the role table does not know, which is `E_UNKNOWN_KEYWORD`'s.
+//! Each takes a driver or consumer out of the scope that a downstream pass would otherwise report
+//! as a hole of its own, so every fixture asserts the *whole* finding list: one finding per root
+//! cause.
 
 use cairn_lang_redstone::ScopeKind;
 
@@ -112,10 +103,8 @@ fn a_refused_logic_line_still_counts_as_reading_its_right_hand_side() {
 
 #[test]
 fn a_scope_whose_only_content_is_an_assert_is_still_checked() {
-    // The finish step used to return early on a scope with no sensor, no
-    // actuator, and no `logic` line — so the one shape where an `assert`
-    // is the *only* redstone content was the one shape nothing checked it
-    // in.
+    // A scope with no sensor, no actuator and no `logic` line still reaches the finish step:
+    // there an `assert` is the only redstone content, and it is still checked.
     let out = synth_source(&gate_source(
         "  assert always(sig.zzz -> eventually sig.qqq within 3)\n",
     ));
@@ -212,8 +201,6 @@ fn an_assert_counts_as_a_consumer() {
 
 #[test]
 fn an_assert_inside_a_level_is_collected_with_the_rest() {
-    // `collect_member` gained the nested-`assert` walk in this change; the
-    // old code discarded a `level` block's asserts outright.
     let out = synth_source(&gate_source(concat!(
         "  level y=0\n",
         "    assert always(sig.zzz -> eventually sig.qqq within 3)\n",

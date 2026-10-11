@@ -165,8 +165,7 @@ struct tower size=1x1
 
 #[test]
 fn a_struct_written_above_a_def_is_still_walked_first() {
-    // The mirror of the test above: the old walk emitted structs first, so
-    // that one alone would pass under "always structs last" just as badly.
+    // The mirror of the test above, which alone would pass under "always structs last".
     let source = "\
 @cairn 2026.06
 
@@ -224,10 +223,9 @@ struct tower size=1x1
     );
 }
 
-/// A module with all three scope kinds, written in an order none of the
-/// three vectors reproduces: `def`, then `site`, then `struct`. The old
-/// walk emitted struct, then def, then site, so this puts every pair the
-/// wrong way round at once.
+/// A module with all three scope kinds, written in an order none of the three vectors
+/// reproduces: `def`, then `site`, then `struct`. A walk over the vectors in turn emits struct,
+/// then def, then site, so this order puts every pair the wrong way round at once.
 ///
 /// Each scope carries exactly one finding, on a line of its own. The two
 /// body scopes leave a signal nothing consumes; the site names one nothing

@@ -317,9 +317,7 @@ struct s size=1x1
 
 #[test]
 fn and_gate_lowers_with_two_inputs() {
-    // happy-path coverage for `and`. Also asserts the operand shape
-    // — `And2 { a, b }` — so a future refactor that swaps to a
-    // vec-based encoding gets caught here.
+    // The operand shape `And2 { a, b }` is asserted too, so a vec-based encoding fails here.
     let source = "\
 @cairn 2026.06
 
@@ -347,8 +345,7 @@ struct s size=1x1
 
 #[test]
 fn not_gate_lowers_with_one_input() {
-    // happy-path coverage for `not`. Also asserts the arity-1
-    // encoding at the type layer.
+    // The arity-1 encoding is asserted at the type layer too.
     let source = "\
 @cairn 2026.06
 
@@ -444,8 +441,7 @@ struct s size=1x1
 
 #[test]
 fn actuator_side_unbound_signal_flags_the_driver_arg() {
-    // coverage for the actuator-only path — no `logic` line names the
-    // signal at all; `opened_by=sig.ghost` should fail loud.
+    // The actuator-only path: no `logic` line names the signal at all.
     let source = "\
 @cairn 2026.06
 

@@ -153,9 +153,9 @@ struct sim size=7x5
 /// a partially-placed layout.
 #[test]
 fn congestion_fires_route_congestion_and_elides_scope() {
-    // 3 cells × 4 blocks each = 12 required blocks vs 3 × 3 × 1 = 9
-    // reserved blocks — ~1.3× over budget, well under the ~3.2× the
-    // spec example shows so a future footprint tweak has headroom.
+    // 3 cells × 4 blocks each = 12 required blocks vs 3 × 3 × 1 = 9 reserved blocks: ~1.3× over
+    // budget, well under the ~3.2× the spec example shows, leaving headroom for a footprint
+    // change.
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -296,11 +296,9 @@ fn empty_edition_netlist_produces_no_placement_entry() {
     assert!(out.scoped.scopes.is_empty());
 }
 
-/// The JSON dump carries `edition`, a `region` object with the
-/// four reservation fields, a per-cell `coord` object, and the
-/// `stage` tag naming the pass that produced it. `wire_length` and
-/// `local_delay_ticks` are absent (the phase this stage stamps carries
-/// neither) so the wire form does not carry future-only fields today.
+/// The JSON dump carries `edition`, a `region` object with the four reservation fields, a
+/// per-cell `coord` object, and the `stage` tag naming the pass that produced it. `wire_length`
+/// and `local_delay_ticks` are absent, since the phase this stage stamps carries neither.
 #[test]
 fn json_dump_carries_stage_region_and_coord_and_omits_reserved_fields() {
     let source = load_example("redstone-door.crn");
@@ -437,12 +435,11 @@ struct simple size=5x5
     assert_eq!(fix_line(d), "Fix: set `void=` to an integer >= 1");
 }
 
-/// A scope whose Edition Netlist IR carries inputs and outputs but no
-/// cells — a `pressure_plate -> sig.a` bound straight to `door
-/// opened_by=sig.a`, which `spec/redstone` "Signal binding" permits —
-/// still has a layout: the wire from the sensor pad to the actuator pad.
-/// It used to be dropped here, and `--stage placement` onward printed `[]`
-/// at exit 0 for a scope the netlist stage had just described in full.
+/// A scope whose Edition Netlist IR carries inputs and outputs but no cells (a
+/// `pressure_plate -> sig.a` bound straight to `door opened_by=sig.a`, which `spec/redstone`
+/// "Signal binding" permits) still has a layout: the wire from the sensor pad to the actuator
+/// pad. Dropping it would print `[]` at exit 0 from `--stage placement` onward for a scope the
+/// netlist stage describes in full.
 #[test]
 fn identity_wire_scope_places_its_actuator_pad() {
     let source = r"
@@ -914,14 +911,12 @@ struct beta size=7x5
 
 // ---- the row has to hold the cells (`spec/redstone` "Place-and-route") ----
 //
-// The v1 layout stamps `x = 1 + 2i`, so the reservation's *width* is
-// the resource the cells consume — twice their count and one column
-// more — and the area budget cannot see it. A `size=2x8` scope
-// reserving `void=3` offers 48 cells' worth of volume and a row two
-// columns long, so a three-cell netlist passes the volume test and
-// overruns the row. Every later pass reads these coordinates, and
-// `output_pad` sits at `width - 1`, so a cell past the edge drives a
-// pad standing behind it.
+// The layout stamps `x = 1 + 2i`, so the reservation's *width* is the resource the cells
+// consume, twice their count and one column more, and the area budget cannot see it. A
+// `size=2x8` scope reserving `void=3` offers 48 cells' worth of volume and a row two columns
+// long, so a three-cell netlist passes the volume test and overruns the row. Every later pass
+// reads these coordinates, and `output_pad` sits at `width - 1`, so a cell past the edge drives
+// a pad standing behind it.
 
 use std::fmt::Write as _;
 
@@ -960,9 +955,8 @@ fn placement_of(source: &str) -> cairn_lang_redstone::PlacementOutput {
     compile_placement(&edition_netlist, &intent)
 }
 
-/// The reported repro: `size=2x8 void=3` with three cells. The volume
-/// test passes (12 <= 48) and the row, which wants six columns, is
-/// overrun by four.
+/// `size=2x8 void=3` with three cells: the volume test passes (12 <= 48) and the row, which wants
+/// six columns, is overrun by four.
 #[test]
 fn a_netlist_wider_than_the_reserved_row_is_refused() {
     let out = placement_of(&source_with_cells(3, 2, 8, 3));
@@ -1020,20 +1014,14 @@ fn a_row_wide_enough_for_the_cells_and_not_the_spacing_is_refused() {
 
 /// The exact-fit boundary, with its neighbour one column down.
 ///
-/// A row of `n` cells wants `2n + 1` columns: one for each cell, one
-/// beside each, and the last for the actuator pads. At `2n` the last
-/// cell would stand at `x = width - 1`, inside the actuator-pad column,
-/// face to face with the pads at `z = 0` and `z = 2`; the extra column
-/// is what keeps it out.
+/// A row of `n` cells wants `2n + 1` columns: one for each cell, one beside each, and the last
+/// for the actuator pads. At `2n` the last cell would stand at `x = width - 1`, inside the
+/// actuator-pad column, face to face with the pads at `z = 0` and `z = 2`.
 ///
-/// Both sides are here rather than only the accepting one, because the
-/// number the check compares against is only pinned by a pair that
-/// straddles it: a threshold one column out in either direction passes
-/// a test that names one side alone. That no pad touches a cell once
-/// the row fits is held by `placement::tests::no_pad_stands_against_a_cell`
-/// in the crate, and the depth guard that keeps the pads off each other
-/// by `more_actuators_than_rows_is_refused_before_their_pads_collide`
-/// below.
+/// Both sides, because only a pair that straddles the threshold pins it. That no pad touches a
+/// cell once the row fits is held by `placement::tests::no_pad_stands_against_a_cell` in the
+/// crate, and the depth guard that keeps the pads off each other by
+/// `more_actuators_than_rows_is_refused_before_their_pads_collide` below.
 #[test]
 fn a_row_of_twice_the_cell_count_plus_one_places_every_cell() {
     assert!(
@@ -1127,11 +1115,10 @@ fn a_netlist_short_of_volume_but_not_of_row_still_reports_the_area() {
     );
 }
 
-/// A sensor nothing reads is not a layout. `EditionNetlistIr::is_empty`
-/// wants all three of inputs / outputs / cells empty, so keying elision
-/// on it made a lone `pressure_plate -> sig.step` claim a reservation
-/// for nothing to place — and refuse at byte 0 when there was none. The
-/// predicate is the one routing, delay, and crossing already use.
+/// A sensor nothing reads is not a layout. Elision keys on the predicate routing, delay and
+/// crossing use, not on `EditionNetlistIr::is_empty`, which wants inputs, outputs and cells all
+/// empty and would have a lone `pressure_plate -> sig.step` claim a reservation for nothing to
+/// place, and refuse at byte 0 when there was none.
 #[test]
 fn a_sensor_nothing_reads_is_not_something_to_place() {
     let source = r"
@@ -1153,14 +1140,12 @@ struct sens size=8x5
     assert!(out.scoped.scopes.is_empty(), "and must not be emitted");
 }
 
-/// The cell row needs a clear row on either side of it, which neither
-/// the volume budget nor the row length can see.
+/// The cell row needs a clear row on either side of it, which neither the volume budget nor the
+/// row length can see.
 ///
-/// Both sides of the threshold in one test: a number is only pinned by
-/// a pair that straddles it, and two tests that could drift apart would
-/// leave the depth free to move by one in either direction. The region
-/// is wide and its `void` ample in both, so the only thing that changes
-/// between the refusal and the layout is the depth.
+/// Both sides of the threshold in one test, since only a straddling pair pins a number. The
+/// region is wide and its `void` ample in both, so only the depth changes between the refusal
+/// and the layout.
 #[test]
 fn a_region_too_shallow_for_a_lane_either_side_of_the_row_is_refused() {
     let refused = placement_of(&source_with_cells(1, 9, 2, 4));

@@ -1,18 +1,8 @@
-//! The actuator table in `synth`, held against `core`'s per-role argument
-//! vocabularies.
-//!
-//! `ACTUATOR_BINDINGS` pairs each argument key from `spec/redstone`
-//! "Signal binding" with the component that carries it, and
-//! `MemberRole::arguments` is the vocabulary `check` refuses against.
-//! Where both know the keyword they have to agree, or `check` refuses a
-//! source the redstone front end is built to read.
-//!
-//! Asked from this crate because this is where the pairing lives, and asked
-//! against the constant itself rather than a copy of it — a local
-//! restatement would go stale on a change to `synth.rs` without failing
-//! here, which is the failure this exists to catch. The sensor half of the
-//! pair is `core`'s table, and its own test sits beside it in
-//! `cairn-lang-core/tests/check_binding.rs`.
+//! The actuator table in `synth` agrees with `core`'s per-role argument vocabularies:
+//! `ACTUATOR_BINDINGS` pairs each key from `spec/redstone` "Signal binding" with its component,
+//! and where `MemberRole::arguments` knows the keyword too the two must agree, or `check` refuses
+//! a source this front end is built to read. Asked of the constant itself, since a copy would go
+//! stale without failing. The sensor half is tested in `cairn-lang-core/tests/check/binding.rs`.
 
 use cairn_lang_core::intent::{MemberRole, role_of};
 use cairn_lang_redstone::synth::ACTUATOR_BINDINGS;

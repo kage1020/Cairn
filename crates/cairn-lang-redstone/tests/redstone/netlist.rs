@@ -79,10 +79,9 @@ fn redstone_door_lowers_to_a_single_or_cell() {
     );
 }
 
-/// The Netlist IR keeps a strict 1-to-1 mapping with the source
-/// Logic IR (no CSE, no fusion in this pass). Both counts and per-index
-/// gate → cell correspondence are checked, so a future accidental
-/// re-CSE or reorder would flag on the specific position that moved.
+/// The Netlist IR maps 1-to-1 onto the source Logic IR (no CSE, no fusion in this pass). The
+/// counts and the per-index gate → cell correspondence are both checked, so a re-CSE or a
+/// reorder names the position that moved.
 #[test]
 fn netlist_preserves_node_count_and_index_mapping() {
     let source = r"
@@ -138,10 +137,8 @@ struct sim size=5x5
             GateKind::Nand2 { .. } => LogicalCell::Nand,
             GateKind::Nor2 { .. } => LogicalCell::Nor,
             GateKind::Mux { .. } => LogicalCell::Mux,
-            // GateKind is `#[non_exhaustive]`; a new variant should
-            // land alongside a corresponding LogicalCell mapping and a
-            // new arm here — reaching the wildcard signals that the
-            // per-index correspondence is no longer being verified.
+            // `GateKind` is `#[non_exhaustive]`: a new variant needs a `LogicalCell` mapping and
+            // an arm here, or its per-index correspondence goes unchecked.
             _ => panic!("unhandled GateKind variant in the mapping: {:?}", gate.kind),
         };
         assert_eq!(
@@ -248,9 +245,8 @@ struct sim size=5x5
     }
 }
 
-/// The parser-unreachable `GateKind::Mux` variant lowers with the
-/// canonical `[Sel, A, B]` port order when hand-built. Exercises the
-/// enum path that a future parser change will make reachable.
+/// The parser-unreachable `GateKind::Mux`, hand-built, lowers with the canonical `[Sel, A, B]`
+/// port order.
 #[test]
 fn mux_gate_lowers_with_sel_a_b_port_order() {
     let mut ir = LogicIr::new();
@@ -320,9 +316,8 @@ struct plain size=3x3
     );
 }
 
-/// `signal_defs` is rewritten in place, keyed by the dotted signal
-/// name and mapping to the corresponding [`NetRef`]. Locks the JSON
-/// shape that the CLI's `synth --stage netlist` will emit.
+/// `signal_defs` is rewritten in place, keyed by the dotted signal name and mapping to the
+/// corresponding [`NetRef`]: the JSON shape the CLI's `synth --stage netlist` emits.
 #[test]
 fn signal_defs_rewrites_signal_refs_to_net_refs() {
     let source = load_example("redstone-door.crn");
@@ -428,12 +423,11 @@ struct wired size=5x5
     assert_eq!(netlist.scopes[0].name, "wired");
 }
 
-/// Build a hand-crafted single-gate `LogicIr` around the given
-/// `GateKind` and verify `compile_netlist` selects `expected_cell` with
-/// the canonical two-input `[A, B]` driver order. Covers the reserved
-/// combinational primitives whose surface syntax the parser does not
-/// yet emit — a `two_input` helper cross-wired to the wrong variant
-/// (e.g. `Xor2 => LogicalCell::Xnor`) would only be caught here.
+/// Build a hand-crafted single-gate `LogicIr` around the given `GateKind` and verify
+/// `compile_netlist` selects `expected_cell` with the canonical two-input `[A, B]` driver order.
+/// Covers the reserved combinational primitives the parser has no surface syntax for: a
+/// `two_input` helper cross-wired to the wrong variant (e.g. `Xor2 => LogicalCell::Xnor`) is
+/// caught only here.
 fn assert_two_input_gate_lowers(kind: GateKind, expected: LogicalCell) {
     let mut ir = LogicIr::new();
     ir.inputs.push(InputPort {

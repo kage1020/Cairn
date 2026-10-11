@@ -1,15 +1,8 @@
-//! Helpers shared by the redstone integration tests.
-//!
-//! The fixture builders — `load_example`, `synth_source`, `gate_source`
-//! and the `*_from_source` ladder — pin one prefix of the pipeline each,
-//! and every rung is the previous one plus a stage and the assertion that
-//! the stage ran clean, so a change to a pass's signature or to what
-//! "clean" means for a fixture lands in one place rather than in each
-//! module downstream of it. `normalize_stage_tags` and `strip_int_field`
-//! are machinery whose *correctness* is shared: they have to agree with
-//! the JSON wire form across every stage, and would rot silently if each
-//! module kept its own copy. The rest read a result back the same way in
-//! every module that asks.
+//! Helpers shared by the redstone integration tests. The fixture builders (`load_example`,
+//! `synth_source`, `gate_source` and the `*_from_source` ladder) each pin one prefix of the
+//! pipeline, every rung the previous one plus a stage that must run clean, so a change to a
+//! pass's signature lands in one place. `normalize_stage_tags` and `strip_int_field` have to agree
+//! with the JSON wire form across every stage, so they exist once rather than per module.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -125,13 +118,11 @@ pub fn placement_from_source(source: &str, edition: Edition) -> ScopedPlacementI
 
 /// [`placement_from_source`] plus routing.
 ///
-/// One warning rides through, by code rather than by severity: a scope
-/// whose nets climbed past each other carries
-/// `W_ROUTE_CROSS_LAYER_CLEARANCE`, which names the pairs the physical
-/// tile layer has to separate and elides nothing. Anything else — a
-/// refusal, which would take the scope out of the IR the tests read, or a
-/// warning routing has yet to grow — is the fixture set saying something
-/// new, and worth failing on rather than passing unread.
+/// One warning rides through, by code rather than by severity: a scope whose nets climbed past
+/// each other carries `W_ROUTE_CROSS_LAYER_CLEARANCE`, which names the pairs the physical tile
+/// layer has to separate and elides nothing. Anything else, a refusal that would take the scope
+/// out of the IR the tests read or any other warning, is the fixture set saying something new and
+/// fails rather than passing unread.
 pub fn routed_from_source(source: &str, edition: Edition) -> ScopedPlacementIr {
     let routing = compile_routing(&placement_from_source(source, edition));
     assert!(
@@ -210,20 +201,13 @@ struct chain size=60x5
     source
 }
 
-/// Rewrite every `"stage": "<name>"` value to a fixed placeholder so
-/// two adjacent stages' dumps can be byte-compared on everything
-/// *except* the tag that distinguishes them.
+/// Rewrite every `"stage": "<name>"` value to a fixed placeholder so two adjacent stages' dumps
+/// can be byte-compared on everything *except* the tag that distinguishes them.
 ///
-/// The routing, delay, and crossing modules each assert that their
-/// pass perturbs nothing but the field it writes. Since every cell
-/// carries a `stage` tag whose value moves from stage to stage, that
-/// assertion has to neutralise the tag first — and it has to do so
-/// identically in all three, or a change to the key name would be
-/// caught in one module and papered over in another.
-///
-/// Handles both the compact and the pretty spelling: the separator
-/// between the key and the value is copied through verbatim rather
-/// than assumed.
+/// The routing, delay and crossing modules each assert that their pass perturbs nothing but the
+/// field it writes, and must neutralise the tag identically, or a change to the key name would be
+/// caught in one module and papered over in another. The separator between key and value is
+/// copied through verbatim, so both the compact and the pretty spelling are handled.
 pub fn normalize_stage_tags(json: &str) -> String {
     const KEY: &str = "\"stage\":";
     let mut out = String::with_capacity(json.len());

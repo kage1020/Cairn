@@ -65,10 +65,8 @@ fn a_second_sensor_on_one_signal_is_refused_rather_than_dropped() {
 
 #[test]
 fn the_refused_sensor_leaves_no_input_port_behind() {
-    // The scope is dropped on the error, so what this pins is that the
-    // *silent* path is gone: before, both plates lowered, one input port
-    // existed, and `--stage placement` laid a single pad for a build that
-    // contains two plates.
+    // The scope is dropped on the error, so what this pins is that the source is not accepted
+    // silently, with one input port and a single pad for a build that contains two plates.
     let out = synth_source(TWO_SENSORS);
     assert!(
         out.scoped.scopes.is_empty(),
@@ -93,10 +91,8 @@ fn the_refused_sensor_leaves_no_input_port_behind() {
 
 #[test]
 fn a_sensor_and_two_logic_lines_report_the_sensor_as_the_first_driver() {
-    // The masking case. Two `logic` lines make the `logic`-versus-`logic`
-    // pair fire first, and it used to claim the name in the shared set, so
-    // the sensor — the thing the author actually has to look at — was
-    // never mentioned.
+    // The masking case. Two `logic` lines make the `logic`-versus-`logic` pair fire first, and
+    // the sensor, the thing the author has to look at, must still be named.
     let source = concat!(
         "@cairn 2026.06\n",
         "\n",
@@ -126,9 +122,8 @@ fn a_sensor_and_two_logic_lines_report_the_sensor_as_the_first_driver() {
 
 #[test]
 fn a_logic_line_above_the_sensor_is_the_first_driver() {
-    // The mirror of the pair above, and the collection-order defect: the
-    // sensor used to win the name whatever the file said, so this line was
-    // the one accused.
+    // The mirror of the pair above: the file's order, not the kind of driver, decides which line
+    // is accused.
     let source = concat!(
         "@cairn 2026.06\n",
         "\n",
@@ -187,8 +182,7 @@ fn a_third_driver_adds_no_second_finding() {
 
 #[test]
 fn two_logic_lines_on_one_signal_keep_the_wording_they_had() {
-    // The one pairing that already worked. Its message is the one authors
-    // have seen, so the unified pass must not have moved it.
+    // The `logic`-versus-`logic` message is the one authors know, so it stays word for word.
     let source = concat!(
         "@cairn 2026.06\n",
         "\n",

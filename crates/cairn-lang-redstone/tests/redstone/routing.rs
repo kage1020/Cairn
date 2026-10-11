@@ -76,13 +76,11 @@ fn redstone_door_bedrock_matches_java_wire_length() {
     }
 }
 
-/// A scope whose logic produces three cascaded cells fills
-/// every cell's `wire_length` with a pinned routed sum, so a
-/// regression in the input-pad coordinate convention, the cell-row
-/// spacing, or the per-driver attribution walk trips this test. Cell
-/// placement lays cells at `x = 1 + 2i, y = 0, z = 1`, and input pad
-/// `i` lands at `(0, 0, i)` below the cell row and `(0, 0, i + 1)` from
-/// it on.
+/// A scope whose logic produces three cascaded cells fills every cell's `wire_length` with a
+/// pinned routed sum, so a change to the input-pad coordinate convention, the cell-row spacing or
+/// the per-driver attribution walk trips this test. Placement lays cells at
+/// `x = 1 + 2i, y = 0, z = 1`, and input pad `i` lands at `(0, 0, i)` below the cell row and
+/// `(0, 0, i + 1)` from it on.
 ///
 /// That it routes at all is the first thing this fixture pins. A cell
 /// body is a block, so a net reaches it through a free neighbouring
@@ -178,18 +176,15 @@ struct sim size=7x5
     }
 }
 
-/// A cell whose two ports read one signal is fed by one strand of
-/// dust, and `wire_length` reports that strand once.
+/// A cell whose two ports read one signal is fed by one strand of dust, and `wire_length` reports
+/// that strand once.
 ///
-/// `sig.a and sig.a` is how a `.crn` reaches the shape: logic synth
-/// keeps both operands, so the cell arrives at the routing pass with
-/// `a` and `b` both driven by `Input(0)`. The routed length from the
-/// pad at `(0,0,0)` to the cell at `(1,0,1)` is two blocks, and a
-/// per-port fold reported four — twice the dust the layout has.
-///
-/// The per-net rule is not "one segment per cell":
-/// `multi_cell_scope_pins_wire_length_including_detours` above
-/// drives its cells from two distinct pads and pins the sums.
+/// `sig.a and sig.a` is how a `.crn` reaches the shape: logic synth keeps both operands, so the
+/// cell arrives at the routing pass with `a` and `b` both driven by `Input(0)`. The routed length
+/// from the pad at `(0,0,0)` to the cell at `(1,0,1)` is two blocks; a per-port fold would report
+/// four, twice the dust the layout has. The per-net rule is not "one segment per cell":
+/// `multi_cell_scope_pins_wire_length_including_detours` drives its cells from two distinct pads
+/// and pins the sums.
 #[test]
 fn ports_sharing_a_net_are_measured_once() {
     let source = r"
@@ -241,17 +236,11 @@ struct dup size=20x5
     );
 }
 
-/// A scope whose synthesised netlist packs cells to the cell-only
-/// budget boundary (`cells.len() * CELL_FOOTPRINT == reserved_area`)
-/// passes placement but fires `E_ROUTE_CONGESTION` once the routing
-/// pass adds any wire on top. The reservation footprint fits the
-/// placement-pass pessimistic estimate exactly, so the routing pass's
-/// stricter post-routing accounting is what promotes this to a
-/// failure. The primary quotes the ratio, the scope name, and the
-/// reservation shape in the "routed netlist for struct `<name>`
-/// occupies ~N.Mx..." form, and the failed scope is elided from the
-/// output so a downstream pass cannot silently consume a partial
-/// layout.
+/// A netlist within placement's cell-only budget (`cells.len() * CELL_FOOTPRINT <=
+/// reserved_area`) passes placement but gets `E_ROUTE_CONGESTION` once routing adds its wire:
+/// the post-routing accounting is stricter than placement's estimate. The primary quotes the
+/// ratio, the scope name and the reservation shape in the "routed netlist for struct `<name>`
+/// occupies ~N.Mx..." form, and the failed scope is elided.
 #[test]
 fn post_routing_congestion_fires_route_congestion_and_elides_scope() {
     // 2 cells × 4 blocks = 8 required cell area vs 5 × 3 × 1 = 15
@@ -386,12 +375,9 @@ struct wire size=5x5
     );
 }
 
-/// The JSON dump of a routed Placement IR carries a
-/// `"wire_length": N` field on every cell object, while `local_delay_ticks`
-/// stays elided (`skip_serializing_if = "Option::is_none"`). Pins the
-/// wire-form contract that distinguishes `--stage placement` (no
-/// `wire_length`) from `--stage route` (`wire_length` present)
-/// output.
+/// The JSON dump of a routed Placement IR carries `"wire_length": N` on every cell object while
+/// `local_delay_ticks` stays elided: the wire-form difference between `--stage placement` and
+/// `--stage route` output.
 #[test]
 fn json_dump_carries_wire_length_and_omits_local_delay_ticks() {
     let source = load_example("redstone-door.crn");
@@ -423,17 +409,11 @@ fn json_dump_carries_wire_length_and_omits_local_delay_ticks() {
     );
 }
 
-/// Routing must not perturb any Placement IR field other than
-/// `wire_length` and the `stage` tag. Serialise the placement and
-/// routing outputs to compact JSON, strip the routing side's
-/// `,"wire_length":<int>` entries, normalise both sides' stage tags,
-/// and byte-compare the remainder. Pins the "field-write only"
-/// wire-form contract the pass docstring on `PlacedCellNode` declares:
-/// a downstream JSON consumer that inspects `--stage placement` output
-/// today should see byte-identical bytes from `--stage route` once
-/// `wire_length` and the tag are peeled off, so field reordering,
-/// added/removed fields, or key-name typos in unrelated structs trip
-/// here even when the JSON parses equivalently.
+/// Routing perturbs no Placement IR field but `wire_length` and the `stage` tag. The placement
+/// and routing outputs, as compact JSON with the routing side's `,"wire_length":<int>` entries
+/// stripped and both stage tags normalised, are byte-identical, so field reordering, added or
+/// removed fields, or key-name typos in unrelated structs trip here even when the JSON parses
+/// equivalently.
 #[test]
 fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_stage() {
     let source = load_example("redstone-door.crn");
@@ -448,11 +428,8 @@ fn routing_leaves_placement_fields_byte_identical_apart_from_wire_length_and_sta
     );
     let routed_json = serde_json::to_string(&routed.scoped).expect("serialise routed");
 
-    // `wire_length` sits after `coord` in `PlacedCellNode`'s emission
-    // order, so in compact JSON it always shows up as
-    // `,"wire_length":<int>`. Strip that pattern, normalise the stage
-    // tag each side carries, and the routed and placement bytes must
-    // match exactly.
+    // `wire_length` follows `coord` in `PlacedCellNode`'s emission order, so in compact JSON it
+    // always reads `,"wire_length":<int>`.
     let stripped_routed = normalize_stage_tags(&strip_int_field(&routed_json, "wire_length"));
     assert_eq!(
         stripped_routed,
@@ -522,13 +499,9 @@ struct beta size=8x3
     );
 }
 
-/// Placement IR guarantees Java and Bedrock produce the same
-/// per-cell coordinate given the same source. Routing therefore
-/// produces the same `wire_length` values on both editions; only the
-/// cell tag and edition field differ. Pins the "routing is
-/// edition-agnostic in its numeric output" invariant so a future
-/// change that accidentally couples `wire_length` to edition-specific
-/// cell footprints trips the regression here.
+/// Placement gives Java and Bedrock the same per-cell coordinates for the same source, so routing
+/// produces the same `wire_length` values on both editions; only the cell tag and edition field
+/// differ. Coupling `wire_length` to edition-specific cell footprints fails here.
 #[test]
 fn edition_parity_wire_length_matches_across_java_and_bedrock() {
     let source = load_example("redstone-door.crn");
@@ -543,13 +516,10 @@ fn edition_parity_wire_length_matches_across_java_and_bedrock() {
     }
 }
 
-/// Chaining `compile_routing(&routed.scoped)` is forbidden by
-/// the producer↔variant table on `PlacementPhase`, and the panic it
-/// raises names
-/// the cell that tripped it. `#[track_caller]` alone would put only
-/// the pass's `.rs:line` in the backtrace, leaving an operator to walk
-/// back into the IR to find out which cell was already routed; the
-/// expected substring pins the breadcrumb that spares them that walk.
+/// Chaining `compile_routing(&routed.scoped)` is forbidden by the producer↔variant table on
+/// `PlacementPhase`, and the panic names the cell that tripped it. `#[track_caller]` alone would
+/// put only the pass's `.rs:line` in the backtrace, leaving an operator to walk the IR for the
+/// cell already routed.
 #[test]
 #[should_panic(
     expected = "for cell #0 at (1,0,1) in struct `gatehouse` — routing must run exactly once per placement"

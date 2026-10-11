@@ -1,14 +1,9 @@
-//! An actuator binding drives one physical component, and the netlist
-//! carries a port only for a binding that does.
-//!
-//! `spec/redstone` "Signal binding": a binding written where no component
-//! reads it "would put a port in the netlist with no component behind
-//! it". Two shapes are refused here: a selector-form patch whose `[id=]`
-//! names no physical door, and a second binding on one door, which would
-//! be a second output port into it — a wired OR the logic layer never
-//! states. A `->` tail on a sensor keyword in the selector form is
-//! `check`'s `E_MISPLACED_BINDING` (`cairn-lang-core/tests/check_binding.rs`);
-//! what this pass owes such a line is the input it does not register.
+//! An actuator binding drives one physical component, and the netlist carries a port only for a
+//! binding that does (`spec/redstone` "Signal binding"). Refused here: a selector-form patch whose
+//! `[id=]` names no physical door, and a second binding on one door, which would be a wired OR
+//! the logic layer never states. A `->` tail on a sensor keyword in the selector form is
+//! `check`'s `E_MISPLACED_BINDING` (`cairn-lang-core/tests/check/binding.rs`); this pass owes
+//! such a line only the input it does not register.
 
 use cairn_lang_redstone::{Diagnostic, DiagnosticCode, SynthOutput};
 
@@ -52,8 +47,7 @@ fn inputs(out: &SynthOutput) -> Option<Vec<String>> {
 
 // --- a patch that picks no door ---------------------------------------
 
-/// The shape the gap was found with: a patch on a door id nobody
-/// declared. It was an output port with a placed pad.
+/// Unrefused, the patch would be an output port with a placed pad and no door behind it.
 #[test]
 fn a_patch_on_an_id_no_door_carries_is_refused_and_gets_no_port() {
     let src = source("  door[id=nope] opened_by=sig.a\n");
@@ -91,10 +85,9 @@ fn lowering_deferrals(src: &str) -> Vec<String> {
         .collect()
 }
 
-/// Each reason a patch picks no door is the sentence block-array lowering
-/// defers the same line with, read from the same lookup — so the two
-/// passes cannot give one line two different accounts. One row per
-/// reason, so an edit to any of them on one side alone fails here.
+/// Each reason a patch picks no door is the sentence block-array lowering defers the same line
+/// with, read from the same lookup, so the two passes cannot give one line two accounts. One row
+/// per reason, so an edit to any of them on one side alone fails here.
 #[test]
 fn every_reason_is_the_one_lowering_gives() {
     let cases = [
@@ -149,11 +142,10 @@ fn every_reason_is_the_one_lowering_gives() {
     }
 }
 
-/// The one line the two passes describe differently, on purpose: a
-/// selector key a `door` carries but a patch does not read. Lowering
-/// refuses the key before it looks for a door, while this pass, which
-/// leaves the selector's other keys to lowering, finds only that there is
-/// no `id=` to look up by.
+/// The one line the two passes describe differently, on purpose: a selector key a `door` carries
+/// but a patch does not read. Lowering refuses the key before it looks for a door, while this
+/// pass, which leaves the selector's other keys to lowering, finds only that there is no `id=` to
+/// look up by.
 #[test]
 fn a_selector_key_other_than_id_is_where_the_passes_diverge() {
     let src = source("  door[side=front] opened_by=sig.a\n");
@@ -280,8 +272,6 @@ fn a_refused_patch_still_counts_its_signal_as_consumed() {
 
 // --- one binding per door ---------------------------------------------
 
-/// The issue's third shape: two patches on one door were two output
-/// ports into it.
 #[test]
 fn a_second_patch_on_one_door_is_refused_with_a_note_at_the_first() {
     let src = source(concat!(
@@ -337,9 +327,8 @@ fn a_patch_on_a_door_bound_on_its_own_line_is_refused() {
     );
 }
 
-/// The door's own line is the first binding wherever the patch is
-/// written. A patch above it used to be filed first, so the finding
-/// underlined the declaring line and pointed its note at the patch.
+/// The door's own line is the first binding wherever the patch is written, so a patch above it is
+/// the one refused and the note points at the declaring line.
 #[test]
 fn a_patch_above_a_bound_door_is_the_binding_refused() {
     let src = concat!(

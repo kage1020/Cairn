@@ -1,21 +1,9 @@
-//! Reading a dumped Placement IR back: every placed cell the pipeline
-//! produces, at each of the four place-and-route stages
-//! `cairn synth --stage <s>` can stop at, serialises to the flat wire
-//! form and deserialises back to the same cell.
-//!
-//! Driven by real pipeline output rather than hand-built cells, because
-//! the claim is about what a dump of a `.crn` a user can write reads
-//! back as: both redstone examples, for both editions, at each of those
-//! four stages, plus a shared bus that makes the crossing pass
-//! materialise buffer coords — neither example has anything to
-//! legalize, which the example test checks rather than assumes, so
-//! without the bus the `buffer_coords` key would never be read back
-//! from real output.
-//!
-//! The span is the one field the wire form does not carry, so the
-//! comparison is against the pipeline's cells with their spans emptied,
-//! and the read-back cells must re-serialise to the same JSON text as
-//! the pipeline's own, byte for byte.
+//! Reading a dumped Placement IR back: every placed cell the pipeline produces, at each of the
+//! four stages `cairn synth --stage <s>` can stop at, serialises to the flat wire form,
+//! deserialises to the same cell with its span emptied (the one field the wire form does not
+//! carry), and re-serialises to the same JSON text. Driven by real output: both redstone examples
+//! for both editions, plus a shared bus, since neither example materialises buffer coords and
+//! without it the `buffer_coords` key would never be read back.
 
 use cairn_lang_core::Edition;
 use cairn_lang_redstone::{PlacedCellNode, PlacementStage, ScopedPlacementIr};
