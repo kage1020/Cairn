@@ -1,6 +1,6 @@
 //! End-to-end tests for `cairn info <file>`.
 
-use crate::common::{Fixture, cairn, crn_examples, examples_dir};
+use crate::common::{Fixture, assert_stream, cairn, crn_examples, examples_dir, stderr_of};
 
 #[test]
 fn info_1_clean_example_exits_zero_with_three_section_headers() {
@@ -347,24 +347,17 @@ fn info_9e_a_scoped_only_file_says_why_the_neutral_row_is_empty() {
 /// A requirement `cairn check` rejects stops `cairn info` too, in both
 /// output formats.
 ///
-/// This is a contract change: the same file used to exit 0 and report
-/// `min: "0.0"`. `info` runs the check passes, so a new `Error`-severity
-/// code reaches it — and reporting a version range derived from a file
-/// whose version declaration is itself a mistake is the confident-wrong
-/// answer the code exists to stop.
+/// `info` runs the check passes, so an `Error`-severity code reaches it,
+/// and reporting a version range derived from a file whose version
+/// declaration is itself a mistake is the confident-wrong answer the code
+/// exists to stop.
 #[test]
 fn info_10_a_rejected_requirement_stops_info_in_both_formats() {
     let fixture = Fixture::new("@requires version<1.20\nstruct s size=4x4\n");
     let path = fixture.source();
     let text = cairn("info", &[path.to_str().unwrap()]);
     assert_eq!(text.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&text.stdout).contains("E_INVALID_REQUIRES")
-            || String::from_utf8_lossy(&text.stderr).contains("E_INVALID_REQUIRES"),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&text.stdout),
-        String::from_utf8_lossy(&text.stderr),
-    );
+    assert_stream(&stderr_of(&text), &[(1, 1, "error", "E_INVALID_REQUIRES")]);
 
     let json = cairn("info", &[path.to_str().unwrap(), "--format", "json"]);
     assert_eq!(json.status.code(), Some(1));

@@ -1,15 +1,12 @@
-//! `@intended_targets` against the floors the same file declares, from the
-//! commands that report it.
-//!
-//! The core pass (`cairn-lang-core/tests/intended_targets.rs`) decides what
-//! each header earns. What this file pins is the half only the CLI can
-//! answer: which commands ask, which edition's table they ask with, and
-//! that a file whose two version headers contradict each other stops
-//! exiting 0.
+//! `@intended_targets` against the floors the same file declares, as the
+//! commands that report it see it: which commands weigh the header, in
+//! which edition's table, and that a file whose two version headers
+//! contradict each other exits 1. What each header earns is the core
+//! pass's, pinned in `cairn-lang-core/tests/intended_targets.rs`.
 
 use std::process::Command;
 
-use crate::common::{Fixture, cargo_bin};
+use crate::common::{Fixture, assert_stream, cargo_bin};
 
 /// One structure with something to paint, so nothing here is reported
 /// against an empty build.
@@ -40,18 +37,15 @@ fn run(command: &str, fixture: &Fixture, args: &[&str]) -> (Option<i32>, String,
     )
 }
 
-/// The issue in one test: the file declares a floor and an intent that
-/// cannot both hold, and `cairn check` used to exit 0 on it while
-/// `cairn compile --target 1.20.4` refused.
+/// The file declares a floor and an intent that cannot both hold, so
+/// `cairn check` exits 1 on it, as `cairn compile --target 1.20.4` refuses
+/// it.
 #[test]
 fn a_floor_above_every_intended_target_stops_check_exiting_zero() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\"]\n");
     let (code, _, stderr) = run("check", &fixture, &[]);
     assert_eq!(code, Some(1), "got: {stderr}");
-    assert!(
-        stderr.contains("E_INTENDED_TARGET_CAP"),
-        "expected the cap, got: {stderr}",
-    );
+    assert_stream(&stderr, &[(2, 1, "error", "E_INTENDED_TARGET_CAP")]);
     assert!(
         stderr.contains("1.20.4") && stderr.contains("version>=1.21"),
         "both halves of the contradiction have to be named: {stderr}",
@@ -79,10 +73,7 @@ fn part_of_the_list_below_the_floor_is_a_warning_and_exits_zero() {
     let fixture = fixture("@requires version>=1.21\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n");
     let (code, _, stderr) = run("check", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
-    assert!(
-        stderr.contains("W_INTENDED_TARGET_CAP"),
-        "expected the warning, got: {stderr}",
-    );
+    assert_stream(&stderr, &[(2, 1, "warning", "W_INTENDED_TARGET_CAP")]);
 }
 
 /// A version no `--target` names is a question about one edition's pack,
@@ -95,19 +86,17 @@ fn a_version_no_target_names_is_reported_only_with_one_edition_in_scope() {
     let fixture = fixture("@intended_targets [\"1.19\"]\n");
     let (bare_code, _, bare_err) = run("check", &fixture, &[]);
     assert_eq!(bare_code, Some(0), "got: {bare_err}");
-    assert!(
-        !bare_err.contains("W_INTENDED_TARGET_UNSUPPORTED"),
-        "unpinned, nobody has said which edition is being asked: {bare_err}",
-    );
+    // Unpinned, nobody has said which edition is being asked.
+    assert_stream(&bare_err, &[]);
     let (code, _, stderr) = run("check", &fixture, &["--edition", "java"]);
     assert_eq!(
         code,
         Some(0),
         "a hint about a version we cannot build is not an error: {stderr}"
     );
-    assert!(
-        stderr.contains("W_INTENDED_TARGET_UNSUPPORTED"),
-        "expected the unsupported warning, got: {stderr}",
+    assert_stream(
+        &stderr,
+        &[(1, 1, "warning", "W_INTENDED_TARGET_UNSUPPORTED")],
     );
     assert!(
         stderr.contains("java builds against 1.20.4, 1.21, 1.21.4"),
@@ -123,10 +112,8 @@ fn the_pinned_edition_decides_which_table_weighs_the_list() {
     let fixture = fixture("@intended_targets [\"1.21.4\"]\n");
     let (java, _, java_err) = run("check", &fixture, &["--edition", "java"]);
     assert_eq!(java, Some(0));
-    assert!(
-        !java_err.contains("W_INTENDED_TARGET_UNSUPPORTED"),
-        "1.21.4 is an ordinary Java target: {java_err}",
-    );
+    // 1.21.4 is an ordinary Java target.
+    assert_stream(&java_err, &[]);
     let (bedrock, _, bedrock_err) = run("check", &fixture, &["--edition", "bedrock"]);
     assert_eq!(bedrock, Some(0));
     assert!(
@@ -154,7 +141,7 @@ fn compile_refuses_the_source_check_refuses() {
         .expect("failed to invoke cairn binary");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "got: {stderr}");
-    assert!(stderr.contains("E_INTENDED_TARGET_CAP"), "got: {stderr}");
+    assert_stream(&stderr, &[(2, 1, "error", "E_INTENDED_TARGET_CAP")]);
     assert!(
         !fixture.lock().exists(),
         "a refused source must not leave a lock reading `verified: true`",
@@ -162,8 +149,8 @@ fn compile_refuses_the_source_check_refuses() {
 }
 
 /// `cairn info` reports what the file says it is for beside what it can be
-/// built for. The row used to be absent entirely, so the one declaration
-/// that names versions was the one the report never mentioned.
+/// built for. Without the row, the one declaration that names versions
+/// would be the one the report never mentions.
 #[test]
 fn info_prints_the_declared_targets_beside_the_buildable_ones() {
     let fixture = fixture("@requires version>=1.20\n@intended_targets [\"1.20.4\",\"1.21.4\"]\n");
@@ -274,8 +261,8 @@ fn two_editions_disagreeing_about_reach_report_the_error() {
 }
 
 /// A report scoped to one edition is weighed in that edition's table and
-/// no other. `--editions bedrock` used to be refused outright by a
-/// finding only Java's table reached — stdout empty, not one row
+/// no other. A finding only Java's table reaches does not refuse
+/// `--editions bedrock`, which would leave stdout empty, not one row
 /// computed, for a file Bedrock has nothing to say against.
 #[test]
 fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
@@ -286,18 +273,16 @@ fn info_scoped_to_one_edition_is_not_refused_by_the_other() {
         stdout.contains("buildable targets:"),
         "the report has to be produced: {stdout}",
     );
-    assert!(
-        stderr.contains("W_INTENDED_TARGET_UNSUPPORTED"),
-        "and one edition in scope is one edition asked, so the version \
-         Bedrock cannot build is named: {stderr}",
+    // One edition in scope is one edition asked, so the version Bedrock
+    // cannot build is named.
+    assert_stream(
+        &stderr,
+        &[(2, 1, "warning", "W_INTENDED_TARGET_UNSUPPORTED")],
     );
-    // The same file, with Java in scope, is the contradiction it always was.
+    // The same file, with Java in scope, is the contradiction.
     let (java, _, java_err) = run("info", &fixture, &["--editions", "java"]);
     assert_eq!(java, Some(1), "got: {java_err}");
-    assert!(
-        java_err.contains("E_INTENDED_TARGET_CAP"),
-        "got: {java_err}"
-    );
+    assert_stream(&java_err, &[(2, 1, "error", "E_INTENDED_TARGET_CAP")]);
 }
 
 /// The default `--editions java,bedrock` keeps both in scope, so the
@@ -308,10 +293,7 @@ fn info_across_both_editions_does_not_name_an_unbuildable_version() {
     let fixture = fixture("@intended_targets [\"1.20.4\"]\n");
     let (code, _, stderr) = run("info", &fixture, &[]);
     assert_eq!(code, Some(0), "got: {stderr}");
-    assert!(
-        !stderr.contains("W_INTENDED_TARGET_UNSUPPORTED"),
-        "got: {stderr}",
-    );
+    assert_stream(&stderr, &[]);
 }
 
 /// A name repeated in `--editions` is still one edition in scope, so
@@ -322,10 +304,11 @@ fn info_across_both_editions_does_not_name_an_unbuildable_version() {
 fn info_naming_one_edition_twice_still_names_an_unbuildable_version() {
     let fixture = fixture("@intended_targets [\"1.20.4\"]\n");
     let (code, stdout, stderr) = run("info", &fixture, &["--editions", "bedrock,bedrock"]);
-    assert!(
-        stderr.contains("W_INTENDED_TARGET_UNSUPPORTED"),
-        "one edition named twice is one edition asked, so the version \
-         Bedrock cannot build is named: {stderr}",
+    // One edition named twice is one edition asked, so the version
+    // Bedrock cannot build is named.
+    assert_stream(
+        &stderr,
+        &[(1, 1, "warning", "W_INTENDED_TARGET_UNSUPPORTED")],
     );
     assert_eq!(
         (code, stdout, stderr),

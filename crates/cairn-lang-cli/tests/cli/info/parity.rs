@@ -14,7 +14,7 @@ use cairn_lang_formats::bedrock_state::degradation_detail;
 use serde_json::Value;
 
 use crate::common::{
-    cargo_bin, compile, crn_examples, example_in_tempdir, examples_dir, stderr_of,
+    assert_stream, cargo_bin, compile, crn_examples, example_in_tempdir, examples_dir, stderr_of,
 };
 
 fn info_json(file: &str, editions: &str) -> Value {
@@ -354,9 +354,10 @@ fn ac5_an_edition_specific_resolve_failure_is_reported_not_counted_away() {
         Some(1),
         "info must not pass a source compile refuses; stderr={stderr}",
     );
+    assert_stream(&stderr, &[(12, 3, "error", "E_UNRESOLVED_SLOT")]);
     assert!(
-        stderr.contains("E_UNRESOLVED_SLOT") && stderr.contains("bedrock"),
-        "the report must name the code and the edition it belongs to; stderr={stderr}",
+        stderr.contains("bedrock"),
+        "the report must name the edition the finding belongs to; stderr={stderr}",
     );
     assert!(
         info.stdout.is_empty(),
@@ -438,8 +439,17 @@ fn a_source_no_supported_version_can_build_says_so() {
     );
     // The reason is printed too, since nothing else in the run would show
     // it and a bare `none` is not a report.
+    assert_stream(
+        &stderr,
+        &[
+            (3, 17, "error", "E_UNKNOWN_ID"),
+            (2, 17, "error", "E_UNKNOWN_ID"),
+            (3, 17, "error", "E_UNKNOWN_ID"),
+            (2, 17, "error", "E_UNKNOWN_ID"),
+        ],
+    );
     assert!(
-        stderr.contains("E_UNKNOWN_ID") && stderr.contains("pale_moss_block"),
+        stderr.contains("pale_moss_block"),
         "the refusing ids should reach the user: {stderr}",
     );
 }
@@ -1088,7 +1098,8 @@ fn one_slot_source(dir: &std::path::Path, name: &str, id: &str) -> PathBuf {
     path
 }
 
-/// Assert that a build of `path` refuses `id` as unknown to that target.
+/// Assert that a build of `path` refuses `id`, named at `at`, as unknown to
+/// that target.
 ///
 /// The premise these tests rest on is not "the build failed" — any
 /// diagnostic exits 1, including ones about something else entirely — but
@@ -1100,6 +1111,7 @@ fn assert_build_refuses_the_id(
     target: &str,
     out: &std::path::Path,
     id: &str,
+    at: (u64, u64),
 ) {
     let run = compile(path, edition, target, out, None);
     let stderr = stderr_of(&run);
@@ -1108,8 +1120,10 @@ fn assert_build_refuses_the_id(
         Some(1),
         "premise: the build must fail; stderr={stderr}"
     );
+    // Premise: it fails because the target has no such id.
+    assert_stream(&stderr, &[(at.0, at.1, "error", "E_UNKNOWN_ID")]);
     assert!(
-        stderr.contains("E_UNKNOWN_ID") && stderr.contains(id),
+        stderr.contains(id),
         "premise: it must fail because {edition} {target} has no `{id}`; stderr={stderr}",
     );
 }
@@ -1131,6 +1145,7 @@ fn a_java_only_block_is_not_reported_as_bedrock_portable() {
         "1.21.60",
         &tmp.path().join("out"),
         "minecraft:oak_sign",
+        (4, 17),
     );
 
     let axes = info_json_at(&src, "java,bedrock");
@@ -1166,6 +1181,7 @@ fn a_bedrock_only_block_is_not_reported_as_java_portable() {
         "1.21.4",
         &tmp.path().join("out"),
         "minecraft:standing_sign",
+        (4, 17),
     );
 
     let axes = info_json_at(&src, "java,bedrock");
@@ -1313,10 +1329,8 @@ fn an_entry_is_named_even_when_no_target_was_weighed() {
         stdout.contains("unsupported: 1"),
         "premise: the entry is unsupported, got: {stdout}",
     );
-    assert!(
-        !stderr.contains("E_UNKNOWN_ID"),
-        "premise: the floor skipped every version, so nothing else named it: {stderr}",
-    );
+    // Premise: the floor skipped every version, so nothing else named it.
+    assert_stream(&stderr, &[]);
     assert!(
         stderr.contains("minecraft:oak_sign"),
         "the count is the only report left, so it has to name the entry: {stderr}",
@@ -1543,10 +1557,8 @@ fn a_source_info_refuses_prints_no_rows_at_all() {
     let (code, stdout, stderr) = info_raw(&src, "java,bedrock");
     assert_eq!(code, Some(1), "stdout={stdout} stderr={stderr}");
     assert!(stdout.is_empty(), "got: {stdout}");
-    assert!(
-        stderr.contains("E_UNRESOLVED_SLOT"),
-        "premise: the run is refused for a finding, got: {stderr}",
-    );
+    // Premise: the run is refused for a finding.
+    assert_stream(&stderr, &[(8, 3, "error", "E_UNRESOLVED_SLOT")]);
 }
 
 #[test]
@@ -1617,6 +1629,7 @@ fn a_walkway_path_material_reaches_the_portability_row() {
         "1.21.60",
         &tmp.path().join("out"),
         "minecraft:oak_sign",
+        (15, 35),
     );
 
     let axes = info_json_at(&src, "java,bedrock");

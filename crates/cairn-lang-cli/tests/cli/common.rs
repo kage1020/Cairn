@@ -249,32 +249,69 @@ pub fn json_stream(stdout: &str) -> Vec<Reported> {
 }
 
 /// Diagnostics parsed back out of a command's stderr, in emission order.
-/// Lines that are not `FILE:LINE:COL: SEVERITY[CODE]: ...` (notes,
-/// `wrote ...`, plain `error:` messages) are skipped.
+///
+/// A finding reads `FILE:LINE:COL: SEVERITY[CODE]: ...`; a refusal of the
+/// requested target reads `SEVERITY[CODE]: FILE:LINE:COL: ...`. Lines that
+/// carry no position (notes, `wrote ...`, plain `error:` messages, a
+/// refusal naming only the file) are skipped.
 ///
 /// Parsing rather than substring-matching pins which code was reported,
 /// where, and how often.
 pub fn stderr_stream(stderr: &str) -> Vec<Reported> {
     stderr
         .lines()
-        .filter_map(|line| {
-            // The file path may itself contain `:` (`C:\...`), so anchor on
-            // the severity marker and walk backwards from there.
-            let (head, tail) = ["error[", "warning["].iter().find_map(|marker| {
-                let needle = format!(": {marker}");
-                line.find(&needle)
-                    .map(|i| (&line[..i], &line[i + ": ".len()..]))
-            })?;
-            let (severity, tail) = tail.split_once('[')?;
-            let (code, _) = tail.split_once(']')?;
-            let (head, col) = head.rsplit_once(':')?;
-            let (_, line_no) = head.rsplit_once(':')?;
-            Some((
-                line_no.parse().ok()?,
-                col.parse().ok()?,
-                severity.to_owned(),
-                code.to_owned(),
-            ))
-        })
+        .filter_map(|line| finding_line(line).or_else(|| refusal_line(line)))
         .collect()
+}
+
+/// `assert_eq!` of [`stderr_stream`] against `expected`, printing the whole
+/// stderr when they differ.
+#[track_caller]
+pub fn assert_stream(stderr: &str, expected: &[(u64, u64, &str, &str)]) {
+    assert_eq!(
+        stderr_stream(stderr),
+        reported(expected),
+        "stderr:\n{stderr}"
+    );
+}
+
+/// `FILE:LINE:COL: SEVERITY[CODE]: ...`.
+fn finding_line(line: &str) -> Option<Reported> {
+    // The file path may itself contain `:` (`C:\...`), so anchor on the
+    // severity marker and walk backwards from there.
+    let (head, tail) = ["error[", "warning["].iter().find_map(|marker| {
+        let needle = format!(": {marker}");
+        line.find(&needle)
+            .map(|i| (&line[..i], &line[i + ": ".len()..]))
+    })?;
+    let (severity, code) = severity_and_code(tail)?;
+    let (head, col) = head.rsplit_once(':')?;
+    let (_, line_no) = head.rsplit_once(':')?;
+    Some((line_no.parse().ok()?, col.parse().ok()?, severity, code))
+}
+
+/// `SEVERITY[CODE]: FILE:LINE:COL: ...`.
+fn refusal_line(line: &str) -> Option<Reported> {
+    if !(line.starts_with("error[") || line.starts_with("warning[")) {
+        return None;
+    }
+    let (severity, code) = severity_and_code(line)?;
+    let (_, rest) = line.split_once("]: ")?;
+    // The file path may contain `:` too: take the first `:LINE:COL: `.
+    rest.match_indices(':').find_map(|(i, _)| {
+        let mut parts = rest[i + 1..].splitn(3, ':');
+        let line_no = parts.next()?.parse().ok()?;
+        let col = parts.next()?.parse().ok()?;
+        parts
+            .next()?
+            .starts_with(' ')
+            .then(|| (line_no, col, severity.clone(), code.clone()))
+    })
+}
+
+/// `SEVERITY` and `CODE` out of text starting `SEVERITY[CODE]`.
+fn severity_and_code(text: &str) -> Option<(String, String)> {
+    let (severity, tail) = text.split_once('[')?;
+    let (code, _) = tail.split_once(']')?;
+    Some((severity.to_owned(), code.to_owned()))
 }

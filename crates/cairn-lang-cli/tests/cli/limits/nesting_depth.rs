@@ -22,7 +22,7 @@ use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH};
 use cairn_lang_redstone::synth::MAX_LOWERING_DEPTH;
 use tempfile::TempDir;
 
-use crate::common::{cairn_argv, write_source};
+use crate::common::{assert_stream, cairn_argv, write_source};
 
 fn nested_list(depth: usize) -> String {
     format!(
@@ -255,9 +255,16 @@ fn depth_4_a_reverse_declared_logic_chain_is_refused_not_aborted() {
         Some(1),
         "a chain past the limit must be refused, not abort; got {code:?}\nstderr={stderr}",
     );
-    assert!(
-        stderr.contains("E_LOGIC_NESTING_TOO_DEEP"),
-        "the refusal needs a code a tool can match on; got {stderr}",
+    // The refusal carries a code a tool can match on.
+    assert_stream(
+        &stderr,
+        &[
+            (10, 48, "warning", "W_IGNORED_ARGUMENT"),
+            (14, 3, "error", "E_LOGIC_NESTING_TOO_DEEP"),
+            (143, 3, "error", "E_LOGIC_NESTING_TOO_DEEP"),
+            (272, 3, "error", "E_LOGIC_NESTING_TOO_DEEP"),
+            (401, 3, "error", "E_LOGIC_NESTING_TOO_DEEP"),
+        ],
     );
     assert!(
         stderr.contains("chained bindings"),

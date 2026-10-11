@@ -1,4 +1,6 @@
-//! AC C1–C14 for `cairn compile`.
+//! `cairn compile` end to end: the artifacts each edition writes for the
+//! shipped examples and for small sources, the lockfile that certifies
+//! them, and the findings that stop a build or ride along with one.
 
 use std::fs;
 use std::path::PathBuf;
@@ -7,7 +9,8 @@ use cairn_lang_core::lock::{HashHex, LockEdition, Lockfile};
 use tempfile::TempDir;
 
 use crate::common::{
-    Fixture, cairn, compile_as, crn_examples, example_in_tempdir, examples_dir, write_source,
+    Fixture, assert_stream, cairn, compile_as, crn_examples, example_in_tempdir, examples_dir,
+    write_source,
 };
 
 /// The version cargo derived for this crate from `[workspace.package]`.
@@ -797,10 +800,7 @@ fn c17_unknown_abstract_token_compile_exits_nonzero() {
         !result.status.success(),
         "exit should be non-zero; stderr={stderr}",
     );
-    assert!(
-        stderr.contains("E_UNKNOWN_ABSTRACT_TOKEN"),
-        "stderr should carry the new diagnostic code; got: {stderr}",
-    );
+    assert_stream(&stderr, &[(4, 17, "error", "E_UNKNOWN_ABSTRACT_TOKEN")]);
     assert!(
         stderr.contains("floor.wood.broadleaf"),
         "stderr should surface the nearest declared token; got: {stderr}",
@@ -1004,9 +1004,12 @@ fn c22_unknown_def_in_place_errors_with_suggestion() {
         !result.status.success(),
         "exit should be non-zero; reported={reported}",
     );
-    assert!(
-        reported.contains("E_UNRESOLVED_PLACE_REF"),
-        "reported should carry E_UNRESOLVED_PLACE_REF; got: {reported}",
+    assert_stream(
+        &reported,
+        &[
+            (3, 1, "warning", "W_UNUSED_DEF"),
+            (10, 3, "error", "E_UNRESOLVED_PLACE_REF"),
+        ],
     );
     assert!(
         reported.contains("did you mean `cottage`?"),
@@ -1039,10 +1042,7 @@ fn c23_unknown_theme_in_place_errors_with_suggestion() {
     let result = cairn("check", &[src.to_str().unwrap()]);
     let reported = String::from_utf8(result.stderr).expect("utf-8");
     assert!(!result.status.success(), "reported={reported}");
-    assert!(
-        reported.contains("E_UNRESOLVED_THEME_REF"),
-        "reported should carry E_UNRESOLVED_THEME_REF; got: {reported}",
-    );
+    assert_stream(&reported, &[(10, 3, "error", "E_UNRESOLVED_THEME_REF")]);
     assert!(
         reported.contains("did you mean `medieval`?"),
         "reported should suggest the closest theme name; got: {reported}",
@@ -1075,10 +1075,7 @@ fn c25_east_of_unknown_ref_errors_with_suggestion() {
     let result = cairn("check", &[src.to_str().unwrap()]);
     let reported = String::from_utf8(result.stderr).expect("utf-8");
     assert!(!result.status.success(), "reported={reported}");
-    assert!(
-        reported.contains("E_UNRESOLVED_PLACE_REF"),
-        "reported should carry E_UNRESOLVED_PLACE_REF; got: {reported}",
-    );
+    assert_stream(&reported, &[(11, 46, "error", "E_UNRESOLVED_PLACE_REF")]);
     assert!(
         reported.contains("did you mean `home1`?"),
         "reported should suggest the closest prior place id; got: {reported}",
@@ -1278,8 +1275,9 @@ fn assert_place_id_refused(id: &str, shown: &str) {
     let checked = cairn("check", &[src.to_str().unwrap()]);
     let check_err = String::from_utf8_lossy(&checked.stderr);
     assert_eq!(checked.status.code(), Some(1), "stderr={check_err}");
+    assert_stream(&check_err, &[(10, 3, "error", "E_INVALID_PLACE_ID")]);
     assert!(
-        check_err.contains("error[E_INVALID_PLACE_ID]") && check_err.contains(&refusal),
+        check_err.contains(&refusal),
         "the id must be refused on `{shown}`, got: {check_err}",
     );
 
@@ -1397,10 +1395,7 @@ fn c26_bare_def_without_place_emits_w_unused_def_and_no_nbt() {
         result.status.success(),
         "W_UNUSED_DEF is a warning, not an error; stderr={stderr}",
     );
-    assert!(
-        stderr.contains("W_UNUSED_DEF"),
-        "`cairn compile` should surface W_UNUSED_DEF on stderr; got: {stderr}",
-    );
+    assert_stream(&stderr, &[(3, 1, "warning", "W_UNUSED_DEF")]);
     let entries: Vec<_> = fs::read_dir(out_dir.path())
         .expect("read out dir")
         .filter_map(Result::ok)
@@ -1455,9 +1450,12 @@ fn c26b_unknown_def_in_place_compile_exits_nonzero() {
         !result.status.success(),
         "compile should fail on E_UNRESOLVED_PLACE_REF; stderr={stderr}",
     );
-    assert!(
-        stderr.contains("E_UNRESOLVED_PLACE_REF"),
-        "stderr should carry E_UNRESOLVED_PLACE_REF; got: {stderr}",
+    assert_stream(
+        &stderr,
+        &[
+            (3, 1, "warning", "W_UNUSED_DEF"),
+            (10, 3, "error", "E_UNRESOLVED_PLACE_REF"),
+        ],
     );
     assert!(
         stderr.contains("did you mean `cottage`?"),
@@ -1701,10 +1699,7 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
     let result = compile_as(&laid, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(result.status.success(), "stderr={stderr}");
-    assert!(
-        stderr.contains("warning[W_DUPLICATE_WALKWAY]"),
-        "stderr={stderr}"
-    );
+    assert_stream(&stderr, &[(12, 3, "warning", "W_DUPLICATE_WALKWAY")]);
     assert!(!stderr.contains("E_PARTIAL_BUILD"), "stderr={stderr}");
     let lf = Lockfile::read_from_path(&laid.lock()).expect("read lock");
     assert_eq!(lf.walkways.len(), 1);
@@ -1727,12 +1722,13 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
     // Each row earns its own ident finding. The first row laid nothing,
     // so the second is not a duplicate of it: a pair is recorded as laid
     // only once its strip is, not when a row reaches the duplicate guard.
-    assert_eq!(
-        stderr.matches("W_INVALID_WALKWAY_IDENT").count(),
-        2,
-        "stderr={stderr}"
+    assert_stream(
+        &stderr,
+        &[
+            (11, 3, "warning", "W_INVALID_WALKWAY_IDENT"),
+            (12, 3, "warning", "W_INVALID_WALKWAY_IDENT"),
+        ],
     );
-    assert!(!stderr.contains("W_DUPLICATE_WALKWAY"), "stderr={stderr}");
     assert_eq!(stderr.matches(partial).count(), 1, "stderr={stderr}");
     assert!(stderr.contains(counted_once), "stderr={stderr}");
     assert_eq!(
@@ -1855,6 +1851,7 @@ fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
     let result = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
+    assert_stream(&stderr, &[(9, 3, "warning", "W_DEFERRED_MEMBER")]);
     assert!(
         stderr.contains("warning[W_DEFERRED_MEMBER]: walls without a positive `height=`"),
         "stderr={stderr}",

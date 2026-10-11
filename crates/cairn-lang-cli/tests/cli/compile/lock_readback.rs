@@ -1,11 +1,8 @@
-//! AC A1–A8: `cairn compile` reads the lockfile it is about to replace.
-//!
-//! `spec/versioning-editions` "Provenance and lock" says a recompile for a
-//! different target "shows the difference from the verified one as a loud
-//! warning", and prints the two lines this file pins. Before these tests,
-//! the compiler never read the previous lockfile at all: it was overwritten
-//! without being looked at, so neither warning could exist and a stale or
-//! tampered file was discarded in silence.
+//! `cairn compile` reads back the lockfile it is about to replace: a
+//! recompile for a different target prints the two warnings
+//! `spec/versioning-editions` "Provenance and lock" shows, and a lock that
+//! is stale, newer or tampered with is reported rather than discarded in
+//! silence.
 
 use std::fs;
 
@@ -40,15 +37,14 @@ fn a_recompile_for_another_version_prints_the_shape_the_spec_prints() {
 
     let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
     assert_eq!(second.code, Some(0), "stderr={}", second.stderr);
-    assert!(
-        second.stderr.contains(
-            "W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189."
-        ),
+    assert_eq!(
+        warning_lines(&second.stderr),
+        ["W_PREVIOUSLY_VERIFIED_TARGET: verified for 1.20.4/DataVersion 3700, now 1.21.4/4189."],
         "stderr does not carry the spec's line: {}",
         second.stderr,
     );
-    // Held to the same rule this PR imposes on `check`: a finding is a
-    // report, and stdout carries the artifact lines a pipeline consumes.
+    // A finding is a report, and stdout carries the artifact lines a
+    // pipeline consumes.
     assert!(
         !second.stdout.contains("W_PREVIOUSLY_VERIFIED_TARGET"),
         "the warning must not reach stdout: {}",
@@ -157,10 +153,12 @@ fn the_sensitivity_list_reported_is_the_one_the_lockfile_recorded() {
     fs::write(&lock, &doctored).expect("write lock");
 
     let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
-    assert!(
-        second.stderr.contains(
-            "W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence"
-        ),
+    assert_eq!(
+        warning_lines(&second.stderr),
+        [
+            PREVIOUS_TARGET,
+            "W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence",
+        ],
         "stderr does not carry the recorded members: {}",
         second.stderr,
     );
@@ -191,10 +189,12 @@ fn one_recorded_member_reads_as_one_member() {
     fs::write(&lock, &doctored).expect("write lock");
 
     let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
-    assert!(
-        second
-            .stderr
-            .contains("W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: yard_water"),
+    assert_eq!(
+        warning_lines(&second.stderr),
+        [
+            PREVIOUS_TARGET,
+            "W_SEMANTIC_SENSITIVITY: 1 member may resolve differently: yard_water",
+        ],
         "stderr: {}",
         second.stderr,
     );
@@ -210,14 +210,12 @@ fn nothing_is_said_about_sensitivity_when_the_lockfile_recorded_none() {
 
     compile(&src, "java", "1.20.4", out_dir.path(), Some(&lock));
     let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), Some(&lock)));
-    assert!(
-        second.stderr.contains("W_PREVIOUSLY_VERIFIED_TARGET:"),
-        "the target warning should still fire: {}",
-        second.stderr,
-    );
-    assert!(
-        !second.stderr.contains("W_SEMANTIC_SENSITIVITY"),
-        "no members were recorded, so there is nothing to report: {}",
+    // The target warning still fires, and no members were recorded, so
+    // there is nothing else to report.
+    assert_eq!(
+        warning_lines(&second.stderr),
+        [PREVIOUS_TARGET],
+        "stderr: {}",
         second.stderr,
     );
 }
@@ -308,8 +306,9 @@ fn the_default_lock_path_is_read_back_too() {
     );
 
     let second = Run::from(compile(&src, "java", "1.21.4", out_dir.path(), None));
-    assert!(
-        second.stderr.contains("W_PREVIOUSLY_VERIFIED_TARGET:"),
+    assert_eq!(
+        warning_lines(&second.stderr),
+        [PREVIOUS_TARGET],
         "the default path was not read back: {}",
         second.stderr,
     );
@@ -372,8 +371,8 @@ fn assert_refused_but_read(run: &Run, replaced: &str, id: &str, ch: &str) {
     );
 }
 
-// The identifier rule has tightened over releases, so a lock an earlier
-// Cairn wrote can record an id this build refuses. That lock is not
+// A lock an earlier Cairn wrote can record an id this build's identifier
+// rule refuses. That lock is not
 // corrupt, and the target it was verified for is still compared. A
 // placement id and a walkway port are both covered, since they are read
 // by different arms of the probe, and so is each half of the rule's

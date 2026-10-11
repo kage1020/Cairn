@@ -1,16 +1,12 @@
-//! `cairn compile` against block ids the target does not have.
-//!
-//! Palette validation used to ask only whether an id had exactly one `:`,
-//! because the registry packs carried no id table to ask anything else of.
-//! `slot wall -> @totally_not_a_block` therefore compiled at exit 0 into a
-//! structure file the game loads as air, and `spec/versioning-editions`
-//! "Fail-loud and minimum-version inference" says the opposite: "unknown IDs
-//! ... are hard errors. Silent substitution and implicit dropping are
-//! forbidden."
+//! `cairn compile` against block ids the target does not have. An unknown
+//! id is a hard error naming the id, the registry checked and the spelling
+//! the target does have, as `spec/versioning-editions` "Fail-loud and
+//! minimum-version inference" requires, and the commands that pin no
+//! target say nothing about ids.
 
 use std::process::Command;
 
-use crate::common::{Fixture, cairn_argv, cargo_bin, compile_as, stderr_of};
+use crate::common::{Fixture, assert_stream, cairn_argv, cargo_bin, compile_as, stderr_of};
 
 /// A struct with one painted floor whose material comes from `slot floor`.
 /// `{id}` is what the theme binds, so each test names exactly the id it is
@@ -25,10 +21,7 @@ fn an_id_no_edition_has_is_refused_rather_than_written() {
     let out = compile_as(&fixture, "java", "1.21.4");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
-    assert!(
-        stderr.contains("E_UNKNOWN_ID"),
-        "expected E_UNKNOWN_ID, got: {stderr}",
-    );
+    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
     assert!(
         stderr.contains("minecraft:totally_not_a_block"),
         "the message must name the id it refused, got: {stderr}",
@@ -44,8 +37,9 @@ fn a_java_only_block_is_refused_on_bedrock_and_compiles_on_java() {
     let out = compile_as(&bedrock, "bedrock", "1.21.60");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
+    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
     assert!(
-        stderr.contains("E_UNKNOWN_ID") && stderr.contains("bedrock 1.21.60"),
+        stderr.contains("bedrock 1.21.60"),
         "the message must name the registry it checked, got: {stderr}",
     );
 
@@ -91,7 +85,7 @@ fn a_rename_is_answered_with_the_name_the_target_uses() {
     );
     assert!(
         !stderr.contains("is near enough to suggest"),
-        "the no-candidate note is what this replaces, got: {stderr}",
+        "the alias answer stands in place of the no-candidate note, got: {stderr}",
     );
 }
 
@@ -186,10 +180,9 @@ fn a_material_token_follows_the_rename_across_its_editions_range() {
 /// `compile` refuses for an unknown id therefore still passes it.
 ///
 /// Worth pinning rather than leaving implicit: it is a real hole for
-/// anyone gating CI on the unpinned command, and it widened by one code
-/// here. `cairn check --edition E --target V` is the invocation that
-/// closes it — `cli_check_target.rs` pins that half — and this test is
-/// what says the default did not move with it.
+/// anyone gating CI on the unpinned command. `cairn check --edition E
+/// --target V` is the invocation that closes it, pinned in
+/// `check/pinned.rs`.
 #[test]
 fn check_stays_silent_about_ids_because_it_does_not_lower() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
@@ -199,10 +192,8 @@ fn check_stays_silent_about_ids_because_it_does_not_lower() {
         .output()
         .expect("failed to invoke cairn binary");
     let stderr = stderr_of(&out);
-    assert!(
-        !stderr.contains("E_UNKNOWN_ID"),
-        "check has no target to check against, got: {stderr}",
-    );
+    // Check has no target to check against.
+    assert_stream(&stderr, &[]);
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
 }
 
@@ -219,8 +210,9 @@ fn a_walkway_path_id_is_checked_too() {
     let out = compile_as(&fixture, "java", "1.21.4");
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
+    assert_stream(&stderr, &[(13, 35, "error", "E_UNKNOWN_ID")]);
     assert!(
-        stderr.contains("E_UNKNOWN_ID") && stderr.contains("minecraft:totally_not_a_block"),
+        stderr.contains("minecraft:totally_not_a_block"),
         "expected the path material to be refused, got: {stderr}",
     );
 
@@ -250,10 +242,8 @@ fn a_theme_selector_binding_id_does_not_refuse_the_build() {
     let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = stderr_of(&out);
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
-    assert!(
-        stderr.contains("W_IGNORED_ARGUMENT") && !stderr.contains("E_UNKNOWN_ID"),
-        "the row says it does nothing, and nothing judges its value: {stderr}",
-    );
+    // The row says it does nothing, and nothing judges its value.
+    assert_stream(&stderr, &[(4, 32, "warning", "W_IGNORED_ARGUMENT")]);
     assert!(
         fixture
             .artifacts()
@@ -293,9 +283,13 @@ fn a_binding_in_a_def_nothing_places_is_not_an_error() {
     ]);
     let stderr = stderr_of(&out);
     assert_eq!(out.status.code(), Some(0), "stderr: {stderr}");
-    assert!(
-        stderr.contains("W_IGNORED_ARGUMENT") && stderr.contains("W_UNUSED_DEF"),
-        "both warnings are still said: {stderr}",
+    // Both warnings are said.
+    assert_stream(
+        &stderr,
+        &[
+            (4, 32, "warning", "W_IGNORED_ARGUMENT"),
+            (6, 1, "warning", "W_UNUSED_DEF"),
+        ],
     );
     assert!(
         !stderr.contains("no_such_binding_block"),
@@ -322,7 +316,8 @@ fn buildable_row(fixture: &Fixture) -> String {
 }
 
 /// `cairn info` weighs every version by lowering against it, so a binding
-/// id the lowering refused took every version out of `buildable targets`.
+/// id the lowering refused would take every version out of `buildable
+/// targets`.
 /// A binding builds nothing, so the row is exactly what the same source
 /// without the binding row gets.
 #[test]
@@ -340,9 +335,8 @@ fn a_bad_binding_id_leaves_every_target_buildable() {
     assert_eq!(with, without);
 }
 
-/// A misspelled abstract token in a binding, which is the shape that was
-/// judged with no pin at all. Unpinned `check`, pinned `check` and `info`
-/// have to agree on it, so a CI gating on the unpinned command does not
+/// A misspelled abstract token in a binding. Unpinned `check`, pinned
+/// `check` and `info` have to agree on it, so a CI gating on the unpinned command does not
 /// pass a file a later command refuses.
 #[test]
 fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
@@ -362,10 +356,8 @@ fn check_pinned_check_and_info_agree_on_a_misspelled_binding_token() {
         let out = cairn_argv(argv);
         let stderr = stderr_of(&out);
         assert_eq!(out.status.code(), Some(0), "{argv:?}: {stderr}");
-        assert!(
-            !stderr.contains("E_UNKNOWN_ABSTRACT_TOKEN"),
-            "{argv:?} judged the binding's token: {stderr}",
-        );
+        // Nothing judges the binding's token.
+        assert_stream(&stderr, &[(3, 30, "warning", "W_IGNORED_ARGUMENT")]);
     }
 }
 
@@ -405,30 +397,23 @@ fn lower_stays_silent_about_ids_because_it_takes_no_target() {
         .arg(fixture.source())
         .output()
         .expect("failed to invoke cairn binary");
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        stderr_of(&out),
-    );
-    assert!(
-        !combined.contains("E_UNKNOWN_ID"),
-        "lower has no target to check against, got: {combined}",
-    );
+    // Lower has no target to check against.
+    let stderr = stderr_of(&out);
+    assert_stream(&stderr, &[]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!stdout.contains("E_UNKNOWN_ID"), "got: {stdout}");
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr_of(&out));
 }
 
 /// `cairn info` never says an id is unknown without naming the target that
 /// says so.
 ///
-/// It used to say nothing about ids at all, and the reason was that it had
-/// no target to be right about: the range-wide pass gets no id table, so
-/// an id valid for part of the range would have been refused against a
-/// version nobody chose. That premise is gone — the `buildable targets`
-/// row pins each supported version in turn — so the rule is now the
-/// narrower one it was always standing in for. What must not appear is a
-/// bare `E_UNKNOWN_ID` about the *source*; what may appear is one about a
-/// named version, which is exactly what `compile --target` would print for
-/// that version.
+/// The range-wide pass gets no id table, so an id valid for part of the
+/// range would be refused against a version nobody chose; the `buildable
+/// targets` row pins each supported version in turn instead. What must not
+/// appear is a bare `E_UNKNOWN_ID` about the *source*; what may appear is
+/// one about a named version, which is exactly what `compile --target`
+/// would print for that version.
 #[test]
 fn info_blames_a_named_target_or_says_nothing_about_ids() {
     let fixture = Fixture::new(&source_binding("totally_not_a_block"));
@@ -462,9 +447,9 @@ fn info_blames_a_named_target_or_says_nothing_about_ids() {
 /// An unresolvable `--target` leaves nothing to check ids against, and the
 /// message the user gets must still be the one about their `--target`.
 ///
-/// The target is resolved before lowering now, so a regression that
-/// reported the resolution failure at the point it happens would move this
-/// message ahead of every parse and lowering diagnostic.
+/// The target is resolved before lowering, so reporting the resolution
+/// failure at the point it happens would move this message ahead of every
+/// parse and lowering diagnostic.
 #[test]
 fn an_unresolvable_target_is_still_reported_as_a_target_problem() {
     let fixture = Fixture::new(&source_binding("oak_planks"));
@@ -472,9 +457,11 @@ fn an_unresolvable_target_is_still_reported_as_a_target_problem() {
     assert_eq!(out.status.code(), Some(1), "stderr: {}", stderr_of(&out));
     let stderr = stderr_of(&out);
     assert!(
-        stderr.contains("1.99") && !stderr.contains("E_UNKNOWN_ID"),
+        stderr.contains("1.99"),
         "expected the unsupported-target message, got: {stderr}",
     );
+    // And no id finding: there is no version to check ids against.
+    assert_stream(&stderr, &[]);
 }
 
 /// The refusal points at the `slot` line that names the material, not at

@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use crate::common::{bytes_contain, cairn, compile, nbt_body, stderr_of, write_source};
+use crate::common::{
+    assert_stream, bytes_contain, cairn, compile, nbt_body, stderr_of, write_source,
+};
 
 /// A one-theme, one-struct source binding `target` to a floor.
 fn floored(dir: &Path, target: &str) -> PathBuf {
@@ -81,9 +83,9 @@ fn java_writes_an_unchecked_literal_as_given_and_says_so() {
     let compiled = compile(&src, "java", "1.21.4", out.path(), None);
     let stderr = stderr_of(&compiled);
     assert_eq!(compiled.status.code(), Some(0), "{stderr}");
+    assert_stream(&stderr, &[(2, 13, "warning", "W_STATE_LITERAL_UNCHECKED")]);
     assert!(
-        stderr.contains("warning[W_STATE_LITERAL_UNCHECKED]")
-            && stderr.contains("`minecraft:oak_log` is written with `axis=q`"),
+        stderr.contains("`minecraft:oak_log` is written with `axis=q`"),
         "{stderr}",
     );
     let body = nbt_body(&out.path().join("s.nbt"));
@@ -131,7 +133,7 @@ fn a_well_formed_literal_passes_check() {
     let plain = cairn("check", &[src.to_str().unwrap()]);
     let stderr = stderr_of(&plain);
     assert_eq!(plain.status.code(), Some(0), "{stderr}");
-    assert!(!stderr.contains("error"), "{stderr}");
+    assert_stream(&stderr, &[]);
 
     let pinned = cairn(
         "check",
@@ -145,14 +147,6 @@ fn a_well_formed_literal_passes_check() {
     );
     let stderr = stderr_of(&pinned);
     assert_eq!(pinned.status.code(), Some(0), "{stderr}");
-    assert!(!stderr.contains("error"), "{stderr}");
-    assert_eq!(
-        stderr.matches("warning[").count(),
-        1,
-        "only the unchecked literal: {stderr}",
-    );
-    assert!(
-        stderr.contains("warning[W_STATE_LITERAL_UNCHECKED]"),
-        "{stderr}"
-    );
+    // Only the unchecked literal.
+    assert_stream(&stderr, &[(2, 13, "warning", "W_STATE_LITERAL_UNCHECKED")]);
 }

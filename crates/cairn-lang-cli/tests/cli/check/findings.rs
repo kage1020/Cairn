@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::common::{Fixture, cairn, examples_dir, reported, stderr_stream};
+use crate::common::{Fixture, assert_stream, cairn, examples_dir, reported, stderr_stream};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -54,16 +54,14 @@ fn a_header_that_names_no_version_is_reported_without_refusing_the_file() {
     let out = cairn("check", &[path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
-    assert!(
-        stderr.contains("W_INVALID_CAIRN_VERSION"),
-        "the warning still reaches the author: {stderr}",
-    );
+    // The warning still reaches the author.
+    assert_stream(&stderr, &[(1, 1, "warning", "W_INVALID_CAIRN_VERSION")]);
 }
 
 /// A `@cairn` value holding a character no token starts with is still a
 /// header that names no version, and so still a warning: the build goes
-/// on. Pinned end to end because the difference is the exit code — the
-/// file used to be refused by the lexer before the check pass saw it.
+/// on. Pinned end to end because the difference is the exit code: a lexer
+/// refusing the value ahead of the check pass would make it an error.
 #[test]
 fn an_unlexable_cairn_value_is_a_warning_and_the_build_goes_on() {
     let fixture = Fixture::new("@cairn 2026.6+build\n\ntheme t:\n  slot wall -> @stone\n");
@@ -71,22 +69,23 @@ fn an_unlexable_cairn_value_is_a_warning_and_the_build_goes_on() {
     let out = cairn("check", &[file.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
-    assert!(stderr.contains("W_INVALID_CAIRN_VERSION"), "{stderr}");
-    assert!(!stderr.contains("E_PARSE"), "{stderr}");
+    assert_stream(&stderr, &[(1, 1, "warning", "W_INVALID_CAIRN_VERSION")]);
 }
 
 /// The same for a floor: `~=` is an operator Cairn does not define, which
 /// is `E_INVALID_REQUIRES` whether or not the lexer has a token for `~`.
 #[test]
 fn an_unlexable_requires_value_is_an_invalid_floor_rather_than_a_parse_error() {
-    for (label, source) in [
+    for (label, source, at) in [
         (
             "requires-unlexable",
             "@requires version~=1.21\n\ntheme t:\n  slot wall -> @stone\n",
+            (1, 1),
         ),
         (
             "member-requires-unlexable",
             "theme t:\n  requires version~=1.21\n  slot wall -> @stone\n",
+            (2, 3),
         ),
     ] {
         let fixture = Fixture::new(source);
@@ -94,8 +93,7 @@ fn an_unlexable_requires_value_is_an_invalid_floor_rather_than_a_parse_error() {
         let out = cairn("check", &[file.to_str().unwrap()]);
         let stderr = String::from_utf8(out.stderr).expect("utf-8");
         assert_eq!(out.status.code(), Some(1), "{label}: stderr={stderr}");
-        assert!(stderr.contains("E_INVALID_REQUIRES"), "{label}: {stderr}");
-        assert!(!stderr.contains("E_PARSE"), "{label}: {stderr}");
+        assert_stream(&stderr, &[(at.0, at.1, "error", "E_INVALID_REQUIRES")]);
     }
 }
 
@@ -186,14 +184,13 @@ fn cli_unknown_keyword_fixture_lists_known_keywords_in_a_note() {
     let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let reported = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(reported.contains("E_UNKNOWN_KEYWORD"));
+    assert_stream(&reported, &[(2, 3, "error", "E_UNKNOWN_KEYWORD")]);
     assert!(
         reported.contains("note:") && reported.contains("floor"),
         "expected a known-keywords note, got: {reported}",
     );
-    // The informational note must not re-print the same `file:L:C:`
-    // prefix as the primary diagnostic — that was the bug fixed when
-    // `DiagnosticNote.span` became `Option<Span>`.
+    // The informational note carries no span of its own, so it must not
+    // re-print the primary diagnostic's `file:L:C:` prefix.
     let primary_prefix = reported
         .lines()
         .find(|l| l.contains("E_UNKNOWN_KEYWORD"))

@@ -3,7 +3,7 @@
 use std::fs;
 use tempfile::TempDir;
 
-use crate::common::{cairn, crn_examples, examples_dir};
+use crate::common::{assert_stream, cairn, crn_examples, examples_dir};
 
 #[test]
 fn lower_1_cottage_exits_zero_and_names_the_struct() {
@@ -74,9 +74,13 @@ fn lower_3_deferred_member_warnings_print_to_stderr() {
     fs::write(&src_path, source).expect("write source");
     let out = cairn("lower", &[src_path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("W_DEFERRED_MEMBER"),
-        "expected at least one W_DEFERRED_MEMBER on the `stair shape=inner_left` line, stderr={stderr}",
+    // Deferred on the `stair shape=inner_left` line.
+    assert_stream(
+        &stderr,
+        &[
+            (2, 17, "error", "E_UNKNOWN_SLOT_TARGET"),
+            (7, 3, "warning", "W_DEFERRED_MEMBER"),
+        ],
     );
     assert!(
         stderr.contains("shape=inner_left"),

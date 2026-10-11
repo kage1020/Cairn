@@ -1,10 +1,8 @@
-//! Per-edition theme fallback end-to-end (`spec/versioning-editions`
-//! "Java / Bedrock portability").
-//!
-//! Pins ACs on `examples/edition-fallback.crn`: the same source file
-//! resolves to `oak_sign` under `--edition java` and `oak_wall_sign` under
-//! `--edition bedrock`, both compiles are clean (no `W_INTENT_DEGRADED`),
-//! and `cairn check` accepts the file across all three edition states.
+//! Per-edition theme variants end to end (`spec/versioning-editions`
+//! "Java / Bedrock portability"): one source writes each edition's own
+//! variant without degrading, a variant the pinned edition lacks is
+//! refused or rebound out loud, and `cairn check` accepts the shipped
+//! example whichever edition is pinned.
 
 use std::fs;
 use std::process::Command;
@@ -12,7 +10,8 @@ use std::process::Command;
 use tempfile::TempDir;
 
 use crate::common::{
-    bytes_contain, cargo_bin, example_in_tempdir, examples_dir, nbt_body, write_source,
+    assert_stream, bytes_contain, cargo_bin, example_in_tempdir, examples_dir, nbt_body, stderr_of,
+    write_source,
 };
 
 #[test]
@@ -82,8 +81,8 @@ fn ac6_bedrock_compile_writes_the_bedrock_wall_sign_and_not_the_java_one() {
     let structure = out_dir.path().join("shop.mcstructure");
     let bytes = fs::read(&structure).expect("read artifact");
     // Bedrock has no `oak_wall_sign` at all — it spells the block
-    // `wall_sign`, and the pack used to hand the Java spelling to the
-    // `.mcstructure` writer, which produced a file the game loads as air.
+    // `wall_sign`, and the Java spelling handed to the `.mcstructure`
+    // writer produces a file the game loads as air.
     // `oak_wall_sign` contains `wall_sign` as a substring, so a plain
     // `wall_sign` hit does not by itself prove the Java id is gone;
     // counting `oak_` separately is what distinguishes them.
@@ -179,15 +178,12 @@ fn check_edition_flag_wires_strict_variant_pin_through_cli() {
         String::from_utf8_lossy(&out.stderr),
     );
     let reported = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        reported.contains("E_UNRESOLVED_SLOT"),
-        "expected E_UNRESOLVED_SLOT in diagnostics, got stderr={reported}",
-    );
+    assert_stream(&reported, &[(12, 3, "error", "E_UNRESOLVED_SLOT")]);
 }
 
 #[test]
 fn ac7_check_exits_zero_across_all_three_edition_states() {
-    // AC7: `cairn check` on the fallback example succeeds under Java,
+    // `cairn check` on the fallback example succeeds under Java,
     // Bedrock, and no `--edition` — the sibling-slot union handles the
     // no-pin case, and each explicit edition sees its variant declare
     // every referenced slot.
@@ -310,11 +306,9 @@ fn a_java_build_writes_the_java_variants_block_whatever_the_place_named() {
         !bytes_contain(&nbt, "minecraft:dark_oak_planks"),
         "the Bedrock variant's material must not reach a Java artifact",
     );
+    // Swapping the named variant is worth saying out loud.
     let stderr = String::from_utf8_lossy(&result.stderr);
-    assert!(
-        stderr.contains("W_THEME_VARIANT_REBOUND"),
-        "swapping the named variant is worth saying out loud; stderr={stderr}",
-    );
+    assert_stream(&stderr, &[(13, 3, "warning", "W_THEME_VARIANT_REBOUND")]);
 }
 
 #[test]
@@ -335,10 +329,7 @@ fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
     // the artifact report instead.
     let report = String::from_utf8_lossy(&pinned.stderr);
     assert_eq!(pinned.status.code(), Some(1), "report={report}");
-    assert!(
-        report.contains("E_THEME_VARIANT_MISSING"),
-        "report={report}",
-    );
+    assert_stream(&report, &[(3, 1, "error", "E_THEME_VARIANT_MISSING")]);
 
     let unpinned = Command::new(cargo_bin())
         .args(["check", src.to_str().unwrap()])
@@ -366,8 +357,8 @@ fn check_reports_the_missing_variant_only_when_an_edition_is_pinned() {
 #[test]
 fn a_place_naming_the_logical_theme_builds_under_both_editions() {
     // The spelling `spec/versioning-editions` "Java / Bedrock portability"
-    // prescribes was the one spelling the site path rejected, because no
-    // theme is declared under the bare logical name.
+    // prescribes, though no theme is declared under the bare logical name:
+    // the site path resolves it to the pinned edition's variant.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(
         tmp.path(),
@@ -400,10 +391,8 @@ fn a_place_naming_the_logical_theme_builds_under_both_editions() {
             .expect("run cairn");
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(result.status.success(), "--edition {edition}: {stderr}");
-        assert!(
-            !stderr.contains("W_THEME_VARIANT_REBOUND"),
-            "the neutral spelling names no variant, so none was swapped: {stderr}",
-        );
+        // The neutral spelling names no variant, so none was swapped.
+        assert_stream(&stderr, &[]);
         let artifact = out_dir.path().join(if edition == "java" {
             "home.nbt"
         } else {
@@ -423,10 +412,10 @@ fn a_place_naming_the_logical_theme_builds_under_both_editions() {
 fn a_misspelled_variant_is_a_diagnostic_and_not_a_crash() {
     // `theme=shop_java` against a module that declares only `shop_bedrock`,
     // with no `--edition`. Routing the reference through variant selection
-    // made this reach a rebind with no edition to name in the message, and
-    // the resolver panicked — turning a typo into exit 101 on `check`, on
-    // `lower` (which has no `--edition` at all), and inside the language
-    // server, whose diagnostics pass calls the resolver with `None`.
+    // reaches a rebind with no edition to name in the message; a panic
+    // there turns a typo into exit 101 on `check`, on `lower` (which has no
+    // `--edition` at all), and inside the language server, whose
+    // diagnostics pass calls the resolver with `None`.
     let tmp = TempDir::new().expect("tempdir");
     let src = write_source(
         tmp.path(),
@@ -452,15 +441,10 @@ fn a_misspelled_variant_is_a_diagnostic_and_not_a_crash() {
             args[0],
             String::from_utf8_lossy(&result.stderr),
         );
-        let combined = format!(
-            "{}{}",
-            String::from_utf8_lossy(&result.stdout),
-            String::from_utf8_lossy(&result.stderr),
-        );
-        assert!(
-            combined.contains("E_UNRESOLVED_THEME_REF"),
-            "`cairn {}` must name the undeclared theme; got: {combined}",
-            args[0],
+        // The undeclared theme is named.
+        assert_stream(
+            &stderr_of(&result),
+            &[(10, 3, "error", "E_UNRESOLVED_THEME_REF")],
         );
     }
 }

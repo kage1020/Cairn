@@ -1,15 +1,12 @@
-//! `cairn compile --target` against a floor the source declares.
-//!
-//! `@requires version>=1.21` is a claim about what the build needs. It was
-//! rendered by `cairn info` and enforced nowhere, so compiling against
-//! `--target 1.20.4` succeeded and wrote a lockfile saying `verified: true`
-//! for a version the source itself disowns. A lock is the record of what
-//! was checked; recording a target the source rules out is the one thing it
-//! must not do.
+//! `cairn compile --target` against the version floors a source declares:
+//! a target a floor rules out, or one the floor's numbering cannot place,
+//! is refused before anything is written, since a lock recording a target
+//! the source disowns certifies a build nobody checked. The refusal names
+//! the floor that refused and a repair that builds.
 
 use std::process::Command;
 
-use crate::common::{Fixture, cargo_bin, compile_as};
+use crate::common::{Fixture, assert_stream, cargo_bin, compile_as};
 
 /// A struct with one painted floor, so the compile has real work to do and
 /// a failure cannot be mistaken for an empty build.
@@ -22,10 +19,7 @@ fn a_target_below_the_declared_floor_is_refused() {
     let out = compile_as(&fixture, "java", "1.20.4");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_VERSION_CAP"),
-        "expected E_VERSION_CAP, got: {stderr}",
-    );
+    assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
 }
 
 /// `cairn check --target` names a target too and is deliberately not held
@@ -43,7 +37,7 @@ fn a_pinned_check_is_not_held_to_the_floor_the_compile_is_held_to() {
     let refused = compile_as(&fixture, "java", "1.20.4");
     let stderr = String::from_utf8(refused.stderr).expect("utf-8");
     assert_eq!(refused.status.code(), Some(1), "premise: {stderr}");
-    assert!(stderr.contains("E_VERSION_CAP"), "premise: {stderr}");
+    assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
 
     let checked = Command::new(cargo_bin())
         .args([
@@ -58,10 +52,8 @@ fn a_pinned_check_is_not_held_to_the_floor_the_compile_is_held_to() {
         .expect("run cairn");
     let stderr = String::from_utf8(checked.stderr).expect("utf-8");
     assert_eq!(checked.status.code(), Some(0), "stderr={stderr}");
-    assert!(
-        !stderr.contains("E_VERSION_CAP"),
-        "the cap belongs to the command that writes the lock, got: {stderr}",
-    );
+    // The cap belongs to the command that writes the lock.
+    assert_stream(&stderr, &[]);
 }
 
 /// The message has to carry all three of what is needed to act: the floor,
@@ -200,14 +192,9 @@ fn a_malformed_requirement_is_reported_as_itself_not_as_a_cap() {
     let out = compile_as(&fixture, "java", "1.20.4");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_INVALID_REQUIRES"),
-        "expected the requirement itself to be named: {stderr}",
-    );
-    assert!(
-        !stderr.contains("E_VERSION_CAP"),
-        "a requirement that declares no floor cannot cap a target: {stderr}",
-    );
+    // The requirement itself is named, and no cap: a requirement that
+    // declares no floor cannot cap a target.
+    assert_stream(&stderr, &[(1, 1, "error", "E_INVALID_REQUIRES")]);
 }
 
 /// The same, on a file that *does* declare a floor the target misses.
@@ -225,14 +212,9 @@ fn a_malformed_requirement_is_reported_before_a_cap_it_would_also_trigger() {
     let out = compile_as(&fixture, "java", "1.20.4");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_INVALID_REQUIRES"),
-        "the mistake in the file comes first: {stderr}",
-    );
-    assert!(
-        !stderr.contains("E_VERSION_CAP"),
-        "the target is a consequence, not the thing to fix: {stderr}",
-    );
+    // The mistake in the file, and no cap: the target is a consequence,
+    // not the thing to fix.
+    assert_stream(&stderr, &[(1, 1, "error", "E_INVALID_REQUIRES")]);
 }
 
 /// Two lines naming the same version leave the maximum undecided, and the
@@ -320,7 +302,7 @@ fn a_bedrock_target_is_held_to_the_floor_too() {
     let out = compile_as(&fixture, "bedrock", "1.21.60");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(stderr.contains("E_VERSION_CAP"), "{stderr}");
+    assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
     assert!(
         stderr.contains("no supported bedrock target satisfies it"),
         "the candidates have to be the target edition's: {stderr}",
@@ -355,11 +337,10 @@ fn a_bedrock_target_equal_to_the_floor_but_for_a_trailing_zero_compiles() {
 /// A floor written in Java's numbering is not evaluated against Bedrock's.
 ///
 /// Bedrock numbers its patch releases in tens — `1.21.0`, `1.21.20`,
-/// `1.21.40` — so Java's `1.21.4` names no Bedrock release at all. The
-/// dotted-decimal comparison this replaced saw `40 > 4` and let the build
-/// through, so a file declaring `version>=1.21.4` compiled to a Bedrock
-/// structure and a lock reading `verified: true` for a target the source
-/// rules out.
+/// `1.21.40` — so Java's `1.21.4` names no Bedrock release at all.
+/// Compared as dotted decimals, `40 > 4` would let the build through, and a
+/// file declaring `version>=1.21.4` would compile to a Bedrock structure
+/// and a lock reading `verified: true` for a target the source rules out.
 ///
 /// Ordering by `DataVersion` has no answer to give here, and says so: Java's
 /// newest release names no Bedrock row and sits between two that exist, so
@@ -370,14 +351,9 @@ fn a_java_shaped_floor_is_not_evaluated_against_bedrock_numbering() {
     let out = compile_as(&fixture, "bedrock", "1.21.40");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_REQUIRES_UNORDERABLE"),
-        "the floor is not a cap on this edition; it names no version of it: {stderr}",
-    );
-    assert!(
-        !stderr.contains("E_VERSION_CAP"),
-        "`--target` is not the thing to change: {stderr}",
-    );
+    // The floor is not a cap on this edition, it names no version of it:
+    // `--target` is not the thing to change.
+    assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     // And nothing was written, so no lock can say `verified: true` for it.
     assert_eq!(
         fixture.artifacts(),
@@ -407,8 +383,8 @@ fn the_unorderable_refusal_offers_a_scope_that_works() {
         "should point at the `@requires` line: {stderr}",
     );
     // The two releases it falls between, rather than the whole table: the
-    // pack names every Bedrock release now, and dozens of them say no more
-    // than these two do.
+    // pack names every Bedrock release, and dozens of them say no more than
+    // these two do.
     assert!(
         stderr.contains("1.21.0 and then 1.21.20"),
         "should name the releases it falls between: {stderr}",
@@ -434,7 +410,7 @@ fn a_label_no_edition_can_place_is_not_answered_with_a_scope() {
     let fixture = Fixture::new(&format!("@requires version>=24w14a\n{BUILD}"));
     let stderr =
         String::from_utf8(compile_as(&fixture, "bedrock", "1.21.60").stderr).expect("utf-8");
-    assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
+    assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     assert!(
         !stderr.contains("@requires java"),
         "no edition can place a snapshot label, so none may be recommended: {stderr}",
@@ -455,10 +431,8 @@ fn assert_no_bedrock_scope_is_offered(label: &str) {
     let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "`{label}`: {stderr}");
-    assert!(
-        stderr.contains("E_REQUIRES_UNORDERABLE"),
-        "`{label}` is inside Java's span and names no Java release: {stderr}",
-    );
+    // The label is inside Java's span and names no Java release.
+    assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     assert!(
         !stderr.contains("@requires bedrock") && !stderr.contains("is a bedrock release"),
         "`{label}` names no bedrock release, so no bedrock scope may be offered: {stderr}",
@@ -514,7 +488,7 @@ fn a_label_naming_a_row_of_the_other_edition_is_offered_its_scope() {
     let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "{stderr}");
-    assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
+    assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     assert!(
         stderr.contains("`1.21.20` is a bedrock release"),
         "should say whose release the label is: {stderr}",
@@ -546,7 +520,7 @@ fn a_pre_release_of_a_row_of_the_other_edition_is_offered_its_scope() {
     let out = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "{stderr}");
-    assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
+    assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     assert!(
         stderr.contains("fix: `@requires bedrock version>=1.19.30-rc1`, or name a java release"),
         "should offer the bedrock scope: {stderr}",
@@ -566,7 +540,7 @@ fn a_pre_release_of_a_row_of_the_other_edition_is_offered_its_scope() {
 ///
 /// `1.21.1` is a Java release the pack ships no block table for. Ordering
 /// it and building for it are different questions, and answering the first
-/// with the second is what made this refuse a build that `canary` accepted.
+/// with the second refuses a build the floor allows.
 #[test]
 fn a_floor_naming_a_release_the_pack_cannot_build_for_still_orders() {
     let fixture = Fixture::new(&format!("@requires version>=1.21.1\n{BUILD}"));
@@ -579,11 +553,8 @@ fn a_floor_naming_a_release_the_pack_cannot_build_for_still_orders() {
     // And below it is still below it.
     let below = compile_as(&fixture, "java", "1.21");
     assert_eq!(below.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&below.stderr).contains("E_VERSION_CAP"),
-        "{}",
-        String::from_utf8_lossy(&below.stderr),
-    );
+    let stderr = String::from_utf8(below.stderr).expect("utf-8");
+    assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
 }
 
 /// A floor above every release the pack can *build* for, but below ones it
@@ -603,7 +574,7 @@ fn an_orderable_but_unbuildable_release_is_not_offered_as_a_target() {
     );
 }
 
-/// And the scope is the repair, so it has to work/// And the scope is the repair, so it has to work: the same floor, scoped
+/// And the scope is the repair, so it has to work: the same floor, scoped
 /// to Java, builds Bedrock because it says nothing about Bedrock.
 #[test]
 fn a_java_scoped_floor_is_inert_on_a_bedrock_build() {
@@ -618,7 +589,7 @@ fn a_java_scoped_floor_is_inert_on_a_bedrock_build() {
     let java = compile_as(&fixture, "java", "1.21");
     assert_eq!(java.status.code(), Some(1));
     let stderr = String::from_utf8(java.stderr).expect("utf-8");
-    assert!(stderr.contains("E_VERSION_CAP"), "{stderr}");
+    assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
     assert!(
         stderr.contains("java version>=1.21.4"),
         "the refusal should echo the floor as the author scoped it: {stderr}",
@@ -633,7 +604,7 @@ fn a_scoped_floor_naming_no_release_of_its_own_edition_is_refused_without_the_sc
     let fixture = Fixture::new(&format!("@requires bedrock version>=1.21.5\n{BUILD}"));
     let stderr =
         String::from_utf8(compile_as(&fixture, "bedrock", "1.21.40").stderr).expect("utf-8");
-    assert!(stderr.contains("E_REQUIRES_UNORDERABLE"), "{stderr}");
+    assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     assert!(
         !stderr.contains("scope the floor"),
         "it is already scoped to the edition refusing it: {stderr}",
@@ -671,12 +642,10 @@ fn a_floor_per_edition_builds_both() {
 
 /// **The ordering key is the `DataVersion`, not the label.**
 ///
-/// A pre-release sorts below the release it names, where the
-/// dotted-decimal comparison this replaced read `4-rc1` as a component
-/// that is not a number and sorted it *above* every number — so
-/// `1.21.4-rc1` was above `1.21.4`, and the newest supported target
-/// missed a floor its own release candidate set. It was refused at the
-/// directive rather than mis-ordered; now it is a floor, and it is met.
+/// A pre-release sorts below the release it names. Compared as dotted
+/// decimals, `4-rc1` is a component that is not a number and sorts *above*
+/// every number, so `1.21.4-rc1` would sit above `1.21.4` and the newest
+/// supported target would miss a floor its own release candidate set.
 #[test]
 fn a_pre_release_floor_is_met_by_the_release_it_names() {
     let fixture = Fixture::new(&format!("@requires version>=1.21.4-rc1\n{BUILD}"));
@@ -689,11 +658,8 @@ fn a_pre_release_floor_is_met_by_the_release_it_names() {
     // And a target below the release it precedes still misses it.
     let below = compile_as(&fixture, "java", "1.21");
     assert_eq!(below.status.code(), Some(1));
-    assert!(
-        String::from_utf8_lossy(&below.stderr).contains("E_VERSION_CAP"),
-        "{}",
-        String::from_utf8_lossy(&below.stderr),
-    );
+    let stderr = String::from_utf8(below.stderr).expect("utf-8");
+    assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
 }
 
 /// A build placing a `def` that declares a floor is held to it, and the
@@ -714,7 +680,7 @@ fn a_floor_a_def_declares_refuses_the_target_and_names_the_def() {
     let out = compile_as(&fixture, "java", "1.21");
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(stderr.contains("E_VERSION_CAP"), "{stderr}");
+    assert_stream(&stderr, &[(5, 3, "error", "E_VERSION_CAP")]);
     // The primary says whose floor it is, not "this file": a floor the file
     // inherited from a part is the reading the composite rule corrects.
     assert!(
@@ -843,14 +809,9 @@ fn a_target_below_the_floor_is_capped_rather_than_refused_for_a_block_it_lacks()
     let out = compile_as(&fixture, "java", "1.20.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert!(
-        stderr.contains("E_VERSION_CAP"),
-        "the floor should refuse the target, got: {stderr}",
-    );
-    assert!(
-        !stderr.contains("E_UNKNOWN_ID"),
-        "a block the refused target lacks is moot, got: {stderr}",
-    );
+    // The floor refuses the target, and the block the refused target lacks
+    // is moot.
+    assert_stream(&stderr, &[(1, 1, "error", "E_VERSION_CAP")]);
     // Before the build below, which writes into this same fixture.
     assert_eq!(
         fixture.artifacts(),
@@ -883,20 +844,17 @@ fn a_target_that_clears_the_floor_still_checks_the_blocks_it_lacks() {
     let out = compile_as(&fixture, "java", "1.20.4");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert!(
-        stderr.contains("E_UNKNOWN_ID"),
-        "1.20.4 has no pale moss, got: {stderr}",
-    );
-    assert!(!stderr.contains("E_VERSION_CAP"), "got: {stderr}");
+    // 1.20.4 has no pale moss, and clears the floor.
+    assert_stream(&stderr, &[(3, 17, "error", "E_UNKNOWN_ID")]);
 }
 
 /// A floor the edition's table cannot place refuses every target, as
 /// `E_REQUIRES_UNORDERABLE`, so it suspends the id check as a cap does.
 ///
-/// Pinned instead, Bedrock 1.21.40 reported the pale moss as `E_UNKNOWN_ID`,
-/// and the advice to compile against a target that declares the block led
-/// to a build refused on the `@requires` line, which was the repair all
-/// along. The second half takes the refusal's own advice: scoped to the
+/// Were the id check to run, Bedrock 1.21.40 would report the pale moss as
+/// `E_UNKNOWN_ID`, and the advice to compile against a target that declares
+/// the block would lead to a build refused on the `@requires` line, which is
+/// the repair. The second half takes the refusal's own advice: scoped to the
 /// numbering it is written in, the floor is inert on Bedrock, the target is
 /// pinned, and the block 1.21.40 lacks is reported. That is also the
 /// premise the first half's missing `E_UNKNOWN_ID` rests on.
@@ -906,14 +864,9 @@ fn an_unplaceable_floor_suspends_the_block_id_check_too() {
     let out = compile_as(&fixture, "bedrock", "1.21.40");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert!(
-        stderr.contains("E_REQUIRES_UNORDERABLE"),
-        "the floor names no bedrock release, got: {stderr}",
-    );
-    assert!(
-        !stderr.contains("E_UNKNOWN_ID"),
-        "the repair is on the `@requires` line, not the block, got: {stderr}",
-    );
+    // The floor names no bedrock release; the repair is on the `@requires`
+    // line, not the block.
+    assert_stream(&stderr, &[(1, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     assert_eq!(
         fixture.artifacts(),
         Vec::<String>::new(),
@@ -923,43 +876,31 @@ fn an_unplaceable_floor_suspends_the_block_id_check_too() {
     let scoped = Fixture::new(&pale_moss_under("@requires java version>=1.21.4\n"));
     let out = compile_as(&scoped, "bedrock", "1.21.40");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_UNKNOWN_ID"),
-        "premise: bedrock 1.21.40 has no pale moss, got: {stderr}",
-    );
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert!(
-        !stderr.contains("E_REQUIRES_UNORDERABLE"),
-        "a java-scoped floor is inert on a bedrock build, got: {stderr}",
-    );
+    // Bedrock 1.21.40 has no pale moss, and a java-scoped floor is inert on
+    // a bedrock build.
+    assert_stream(&stderr, &[(3, 17, "error", "E_UNKNOWN_ID")]);
 }
 
 /// Compile `floors` — Java's `1.21.4`, which Bedrock's table cannot place,
 /// and Bedrock's `1.21.60`, above the target, in the order given — against
-/// Bedrock 1.21.40, and require the unplaceable one to be what is reported.
+/// Bedrock 1.21.40, and require the unplaceable one, on `line`, to be what
+/// is reported.
 ///
 /// The report puts any unplaceable floor ahead of a below-target one,
 /// wherever each sits, and the id-check gate asks the same question. Both
 /// orders are run because the order is what a helper answering "the first
 /// floor in source order that refuses" gets wrong: it names the cap when
 /// the cap comes first.
-fn assert_the_unplaceable_floor_is_reported_beside_a_cap(floors: &str) {
+fn assert_the_unplaceable_floor_is_reported_beside_a_cap(floors: &str, line: u64) {
     let fixture = Fixture::new(&pale_moss_under(floors));
     let out = compile_as(&fixture, "bedrock", "1.21.40");
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert!(
-        stderr.contains("E_REQUIRES_UNORDERABLE"),
-        "the floor no target can satisfy is the line to fix, got: {stderr}",
-    );
-    assert!(
-        !stderr.contains("E_VERSION_CAP"),
-        "raising `--target` cannot clear the unplaceable floor, got: {stderr}",
-    );
-    assert!(
-        !stderr.contains("E_UNKNOWN_ID"),
-        "a block checked against a target the floors refuse is moot, got: {stderr}",
-    );
+    // The floor no target can satisfy is the line to fix: no cap, since
+    // raising `--target` cannot clear it, and no unknown id, since a block
+    // checked against a target the floors refuse is moot.
+    assert_stream(&stderr, &[(line, 1, "error", "E_REQUIRES_UNORDERABLE")]);
     assert_eq!(
         fixture.artifacts(),
         Vec::<String>::new(),
@@ -971,6 +912,7 @@ fn assert_the_unplaceable_floor_is_reported_beside_a_cap(floors: &str) {
 fn an_unplaceable_floor_before_a_cap_is_reported_as_unplaceable() {
     assert_the_unplaceable_floor_is_reported_beside_a_cap(
         "@requires version>=1.21.4\n@requires version>=1.21.60\n",
+        1,
     );
 }
 
@@ -978,5 +920,6 @@ fn an_unplaceable_floor_before_a_cap_is_reported_as_unplaceable() {
 fn an_unplaceable_floor_after_a_cap_is_reported_as_unplaceable() {
     assert_the_unplaceable_floor_is_reported_beside_a_cap(
         "@requires version>=1.21.60\n@requires version>=1.21.4\n",
+        2,
     );
 }

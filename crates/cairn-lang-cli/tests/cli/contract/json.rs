@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use tempfile::TempDir;
 
-use crate::common::{cairn, examples_dir};
+use crate::common::{assert_stream, cairn, examples_dir};
 
 /// A source no lexer pass will take: `%` is in no token.
 fn unparsable(dir: &TempDir) -> PathBuf {
@@ -54,9 +54,9 @@ fn check_json_renders_a_parse_failure_as_a_diagnostic() {
 
 #[test]
 fn check_text_renders_a_parse_failure_like_every_other_finding() {
-    // The text form used to be a bare `error: file:pos: message` with no
-    // code — the one finding a reader could not look up, and the one a
-    // grep for `error[E_` did not match.
+    // A bare `error: file:pos: message` with no code would be the one
+    // finding a reader could not look up, and the one a grep for
+    // `error[E_` does not match.
     let tmp = TempDir::new().expect("tempdir");
     let path = unparsable(&tmp);
     let out = cairn("check", &[path.to_str().unwrap()]);
@@ -67,10 +67,8 @@ fn check_text_renders_a_parse_failure_like_every_other_finding() {
         stdout.is_empty(),
         "text diagnostics stay off stdout: {stdout}"
     );
-    assert!(
-        stderr.contains("error[E_PARSE]:"),
-        "the failure should carry its code: {stderr}",
-    );
+    // The failure carries its code.
+    assert_stream(&stderr, &[(2, 11, "error", "E_PARSE")]);
     assert!(
         stderr.contains(&format!("{}:2:", path.display())),
         "and its position: {stderr}",
@@ -245,10 +243,9 @@ fn info_json_leaves_a_per_edition_warning_on_stderr() {
         "the error, and only the error: {stdout}",
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("W_THEME_VARIANT_REBOUND"),
-        "the warning still reads as prose: {stderr}",
-    );
+    // The warning still reads as prose, and the error is the document's
+    // alone.
+    assert_stream(&stderr, &[(18, 3, "warning", "W_THEME_VARIANT_REBOUND")]);
     assert!(
         stderr.contains("note: reported for --editions java"),
         "under the note naming the edition that raised it: {stderr}",
@@ -256,10 +253,6 @@ fn info_json_leaves_a_per_edition_warning_on_stderr() {
     assert!(
         !stderr.contains("--editions bedrock"),
         "and no note over an edition whose only finding went to the document: {stderr}",
-    );
-    assert!(
-        !stderr.contains("E_UNRESOLVED_SLOT"),
-        "the error is the document's alone: {stderr}",
     );
 }
 
@@ -617,10 +610,7 @@ fn a_dump_in_any_other_format_still_reports_as_prose_on_stderr() {
         let stdout = String::from_utf8(out.stdout).expect("utf-8");
         let stderr = String::from_utf8(out.stderr).expect("utf-8");
         assert!(stdout.is_empty(), "{sub} {flags:?} wrote {stdout}");
-        assert!(
-            stderr.contains("error[E_PARSE]:"),
-            "{sub} {flags:?} should carry the code: {stderr}",
-        );
+        assert_stream(&stderr, &[(2, 11, "error", "E_PARSE")]);
     }
 }
 
@@ -676,10 +666,8 @@ fn a_dump_with_warnings_and_no_error_is_still_the_dump() {
         parsed.get("structures").is_some(),
         "and the product is the IR: {stdout}",
     );
-    assert!(
-        stderr.contains("warning[W_DEF_NO_SIZE]:"),
-        "the warnings go to stderr as prose: {stderr}",
-    );
+    // The warnings go to stderr as prose.
+    assert_stream(&stderr, &[(4, 1, "warning", "W_DEF_NO_SIZE")]);
 }
 
 /// The failure document is the whole report: stderr carries no second

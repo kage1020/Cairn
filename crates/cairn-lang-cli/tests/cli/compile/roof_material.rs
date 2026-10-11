@@ -13,7 +13,7 @@
 
 use tempfile::TempDir;
 
-use crate::common::{bytes_contain, compile, nbt_body, stderr_of, write_source};
+use crate::common::{assert_stream, bytes_contain, compile, nbt_body, stderr_of, write_source};
 
 /// A hut whose roof reads `slot roof`, bound to `material`.
 fn roofed_source(material: &str) -> String {
@@ -34,8 +34,8 @@ fn roofed_source(material: &str) -> String {
 fn a_non_stair_roof_material_stops_the_build_on_both_editions() {
     // Both, because a source's materials are an edition-neutral question:
     // there is no version of either edition where a cobblestone carries a
-    // stair's `shape`. Java used to write the impossible state and exit 0;
-    // Bedrock used to fail in its state translator, which is true of the
+    // stair's `shape`. Java would write the impossible state and exit 0;
+    // Bedrock's state translator would refuse it, which is true of the
     // translator and the wrong layer to be reading about.
     for (edition, target) in [("java", "1.21.4"), ("bedrock", "1.21.60")] {
         let tmp = TempDir::new().expect("tempdir");
@@ -48,10 +48,9 @@ fn a_non_stair_roof_material_stops_the_build_on_both_editions() {
             Some(1),
             "--edition {edition}: stderr={stderr}"
         );
+        assert_stream(&stderr, &[(6, 17, "error", "E_INCOMPATIBLE_MATERIAL")]);
         assert!(
-            stderr.contains("E_INCOMPATIBLE_MATERIAL")
-                && stderr.contains("minecraft:cobblestone")
-                && stderr.contains("is not a stair"),
+            stderr.contains("minecraft:cobblestone") && stderr.contains("is not a stair"),
             "--edition {edition}: stderr={stderr}",
         );
         assert!(
@@ -93,10 +92,8 @@ fn a_stair_species_reaches_the_artifact_unremarked() {
     let run = compile(&src, "java", "1.21.4", out.path(), None);
     let stderr = stderr_of(&run);
     assert_eq!(run.status.code(), Some(0), "stderr={stderr}");
-    assert!(
-        !stderr.contains("E_INCOMPATIBLE_MATERIAL") && !stderr.contains("W_DEFERRED_MEMBER"),
-        "a stair species is not a deviation; stderr={stderr}",
-    );
+    // A stair species is not a deviation.
+    assert_stream(&stderr, &[]);
     let nbt = nbt_body(&out.path().join("hut.nbt"));
     assert!(
         bytes_contain(&nbt, "minecraft:dark_oak_stairs"),

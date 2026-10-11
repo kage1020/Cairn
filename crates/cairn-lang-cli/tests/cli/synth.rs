@@ -13,7 +13,7 @@ use cairn_lang_redstone::{
 };
 use serde_json::Value;
 
-use crate::common::{cairn, examples_dir, stderr_stream, write_source};
+use crate::common::{assert_stream, cairn, examples_dir, stderr_stream, write_source};
 
 /// The edition-tagged stage the usage tests run: which stages need
 /// `--edition` is pinned inside the binary, and the gate in front of
@@ -531,9 +531,12 @@ fn cli_synth_stage_placement_missing_region_exits_one() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_NO_CIRCUIT_REGION"),
-        "expected E_NO_CIRCUIT_REGION on stderr, got: {stderr}",
+    assert_stream(
+        &stderr,
+        &[
+            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
+            (11, 3, "error", "E_NO_CIRCUIT_REGION"),
+        ],
     );
 }
 
@@ -570,9 +573,12 @@ fn cli_synth_stage_placement_congestion_exits_one() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_ROUTE_CONGESTION"),
-        "expected E_ROUTE_CONGESTION on stderr, got: {stderr}",
+    assert_stream(
+        &stderr,
+        &[
+            (14, 43, "warning", "W_IGNORED_ARGUMENT"),
+            (15, 3, "error", "E_ROUTE_CONGESTION"),
+        ],
     );
 }
 
@@ -612,9 +618,12 @@ fn cli_synth_stage_route_congestion_exits_one() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_ROUTE_CONGESTION"),
-        "expected E_ROUTE_CONGESTION on stderr, got: {stderr}",
+    assert_stream(
+        &stderr,
+        &[
+            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
+            (13, 3, "error", "E_ROUTE_CONGESTION"),
+        ],
     );
     assert!(
         stderr.contains("routed netlist for struct `pack`"),
@@ -661,9 +670,13 @@ fn cli_synth_stage_delay_inherits_upstream_congestion_failure() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_ROUTE_CONGESTION"),
-        "expected E_ROUTE_CONGESTION inherited from routing on stderr, got: {stderr}",
+    // Inherited from routing.
+    assert_stream(
+        &stderr,
+        &[
+            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
+            (13, 3, "error", "E_ROUTE_CONGESTION"),
+        ],
     );
 }
 
@@ -707,9 +720,12 @@ fn cli_synth_stage_delay_attenuation_limit_exits_one() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_ATTENUATION_LIMIT"),
-        "expected E_ATTENUATION_LIMIT on stderr, got: {stderr}",
+    assert_stream(
+        &stderr,
+        &[
+            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
+            (13, 3, "error", "E_ATTENUATION_LIMIT"),
+        ],
     );
     assert!(
         stderr.contains("placed netlist for struct `wide_pack`"),
@@ -806,10 +822,7 @@ fn cli_synth_unparseable_source_exits_one() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("error"),
-        "expected an error line on stderr, got: {stderr}",
-    );
+    assert_stream(&stderr, &[(3, 8, "error", "E_PARSE")]);
 }
 
 #[test]
@@ -854,9 +867,13 @@ fn cli_synth_stage_crossing_inherits_upstream_attenuation_failure() {
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_ATTENUATION_LIMIT"),
-        "expected upstream E_ATTENUATION_LIMIT on stderr, got: {stderr}",
+    // Inherited from routing.
+    assert_stream(
+        &stderr,
+        &[
+            (12, 43, "warning", "W_IGNORED_ARGUMENT"),
+            (13, 3, "error", "E_ATTENUATION_LIMIT"),
+        ],
     );
 }
 
@@ -912,9 +929,16 @@ struct crossbar size=4x4
     );
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert!(
-        stderr.contains("E_ROUTE_CONGESTION"),
-        "expected E_ROUTE_CONGESTION on stderr, got: {stderr}",
+    // Congestion alone: an attenuation finding beside it would say the
+    // fixture drifted into an over-long segment rather than into the
+    // congestion this is about.
+    assert_stream(
+        &stderr,
+        &[
+            (7, 48, "warning", "W_IGNORED_ARGUMENT"),
+            (8, 48, "warning", "W_IGNORED_ARGUMENT"),
+            (18, 3, "error", "E_ROUTE_CONGESTION"),
+        ],
     );
     // `placed`, not `routed`: `--stage crossing` runs the whole pipeline
     // and the CLI stops at the first Error-severity stage, so this scope
@@ -929,13 +953,6 @@ struct crossbar size=4x4
         "the refusal names the scope, which of the three kinds of obstacle it \
          means and how far it reaches, and the net standing in the way, got: \
          {stderr}",
-    );
-    // Which other code leaked would say the fixture drifted into an
-    // over-long segment rather than into the congestion this is about.
-    assert!(
-        !stderr.contains("E_ATTENUATION_LIMIT"),
-        "the fixture must refuse for want of room, not for segment length, \
-         got: {stderr}",
     );
     assert!(
         out.stdout.is_empty(),

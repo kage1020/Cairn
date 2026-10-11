@@ -9,7 +9,9 @@
 
 use std::process::{Command, Output, Stdio};
 
-use crate::common::{Fixture, cairn_argv, cargo_bin, examples_dir, write_source};
+use crate::common::{
+    Fixture, assert_stream, cairn_argv, cargo_bin, examples_dir, stderr_of, write_source,
+};
 
 /// Run `cairn argv` with stdout the write end of a pipe whose read end is
 /// closed before the child starts, so its first write to stdout fails
@@ -140,11 +142,8 @@ fn a_run_that_warns_says_so_with_stdout_closed() {
         ["info", source, "--format", "text"],
     ] {
         let open = same_argv(&argv, 0);
-        assert!(
-            String::from_utf8_lossy(&open.stderr).contains("warning[W_DEFERRED_MEMBER]"),
-            "`cairn {}` no longer warns, so its stderr comparison holds trivially",
-            argv.join(" "),
-        );
+        // A run that does not warn holds the stderr comparison trivially.
+        assert_stream(&stderr_of(&open), &[(7, 3, "warning", "W_DEFERRED_MEMBER")]);
     }
 }
 

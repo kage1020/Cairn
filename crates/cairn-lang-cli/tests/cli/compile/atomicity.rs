@@ -19,7 +19,9 @@ use std::process::Command;
 use tempfile::TempDir;
 
 use crate::check::parity::all_fixtures;
-use crate::common::{Fixture, cargo_bin, compile, compile_as, examples_dir, stderr_of};
+use crate::common::{
+    Fixture, assert_stream, cargo_bin, compile, compile_as, examples_dir, stderr_of,
+};
 
 /// Every regular file under `dir`, keyed by name, so a snapshot can be
 /// compared byte-for-byte before and after a failed run.
@@ -593,10 +595,9 @@ fn atomic_11_two_artifacts_differing_only_in_case_are_refused_on_every_host() {
 
     let (code, stderr) = build.rebuild();
     assert_eq!(code, Some(1), "stderr={stderr}");
-    assert!(
-        stderr.contains("error[E_OUTPUT_NAME_COLLISION]") && stderr.contains("differ only in case"),
-        "the refusal must be the case-folded name collision; got {stderr}",
-    );
+    // The refusal is the case-folded name collision.
+    assert_stream(&stderr, &[(24, 3, "error", "E_OUTPUT_NAME_COLLISION")]);
+    assert!(stderr.contains("differ only in case"), "got {stderr}");
     assert_eq!(
         snapshot(&build.out_dir),
         before,

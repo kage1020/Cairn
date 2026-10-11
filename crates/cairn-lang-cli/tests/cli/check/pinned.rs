@@ -1,20 +1,15 @@
-//! `cairn check --edition E --target V`: the check gate with a version
-//! pinned.
-//!
-//! Without a target the gate cannot ask whether a block id exists, because
-//! the question has no answer at the edition level — `stone_bricks` is a
-//! block on Bedrock 1.21.40 and `stonebrick` is the same block on Bedrock
-//! 1.21.0. So `cairn check` skipped it, and a CI job gating on `check`
-//! went green on a source `cairn compile` refuses with `E_UNKNOWN_ID`.
-//! Pinning the pair the id belongs to closes that: the same lowering pass
-//! `compile` runs, against the same table, writing nothing.
+//! `cairn check --edition E --target V`: with a version pinned, the check
+//! gate runs the lowering pass `compile` runs, against the same id table,
+//! writing nothing, so a source the compile refuses for a block id or a
+//! lost scope fails the gate too. Unpinned, there is no table to ask:
+//! `stone_bricks` is a block on Bedrock 1.21.40 and `stonebrick` is the
+//! same block on Bedrock 1.21.0.
 
 use std::path::PathBuf;
 
-use crate::common::{cairn, crn_examples, examples_dir};
+use crate::common::{assert_stream, cairn, crn_examples, examples_dir};
 
-/// The repro this flag was added for: a theme slot bound to a block no
-/// version has.
+/// A theme slot bound to a block no version has.
 const UNKNOWN_ID: &str =
     "theme t:\n  slot floor -> @totally_not_a_block\nstruct s size=2x2\n  floor mat_slot=floor\n";
 
@@ -110,10 +105,8 @@ fn a_pinned_target_reports_an_id_that_target_does_not_declare() {
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert!(
-        stderr.contains("E_UNKNOWN_ID"),
-        "the pinned check must reach the lowering-stage finding, got: {stderr}",
-    );
+    // The pinned check reaches the lowering-stage finding.
+    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
     // The registry the answer is about is named, so the reader knows which
     // of the two pins decided it.
     assert!(
@@ -124,10 +117,9 @@ fn a_pinned_target_reports_an_id_that_target_does_not_declare() {
 
 #[test]
 fn without_a_target_the_same_source_still_passes() {
-    // The premise of the flag being opt-in: no source that passes today
-    // starts failing, because with no version pinned there is nothing to
-    // check the id against and guessing one would refuse ids that are fine
-    // on the target the author actually compiles for.
+    // The flag is opt-in: with no version pinned there is nothing to
+    // check the id against, and guessing one would refuse ids that are
+    // fine on the target the author actually compiles for.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), UNKNOWN_ID);
     let out = cairn("check", &[src.to_str().unwrap()]);
@@ -163,10 +155,8 @@ fn a_renamed_id_is_judged_per_version_not_per_edition() {
     );
     let stderr = String::from_utf8(refused.stderr).expect("utf-8");
     assert_eq!(refused.status.code(), Some(1), "stderr={stderr}");
-    assert!(
-        stderr.contains("E_UNKNOWN_ID"),
-        "1.21.0 does not declare it, got: {stderr}",
-    );
+    // 1.21.0 does not declare it.
+    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
     // A rename is answered from the pack's alias table rather than by a
     // distance search, so the older spelling is offered by name.
     assert!(
@@ -300,10 +290,7 @@ fn a_target_that_does_not_resolve_still_lowers_the_file() {
     // version was pinned. Reporting it here would be the guess
     // `spec/versioning-editions` "Fail-loud and minimum-version inference"
     // rules out, dressed as a check.
-    assert!(
-        !stderr.contains("E_UNKNOWN_ID"),
-        "no id table, so no id verdict, got: {stderr}",
-    );
+    assert_stream(&stderr, &[(4, 17, "error", "E_UNKNOWN_ABSTRACT_TOKEN")]);
 }
 
 #[test]
@@ -422,10 +409,8 @@ fn a_lowering_finding_that_is_not_an_id_verdict_reaches_a_pinned_check() {
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert!(
-        stderr.contains("E_UNKNOWN_ABSTRACT_TOKEN") && stderr.contains("floor.wood.broadleaf"),
-        "got: {stderr}",
-    );
+    assert_stream(&stderr, &[(4, 17, "error", "E_UNKNOWN_ABSTRACT_TOKEN")]);
+    assert!(stderr.contains("floor.wood.broadleaf"), "got: {stderr}");
 
     let roof = tmp.path().join("hut.crn");
     std::fs::write(&roof, ROOF_OUTSIDE_THE_STAIR_FAMILY).expect("write fixture");
@@ -441,15 +426,14 @@ fn a_lowering_finding_that_is_not_an_id_verdict_reaches_a_pinned_check() {
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert!(stderr.contains("E_INCOMPATIBLE_MATERIAL"), "got: {stderr}");
+    assert_stream(&stderr, &[(5, 16, "error", "E_INCOMPATIBLE_MATERIAL")]);
 }
 
 #[test]
 fn a_lost_scope_refuses_the_pinned_check_as_it_refuses_the_compile() {
-    // The gap this flag closes, in its other half: a scope that lowers to
-    // nothing is `E_PARTIAL_BUILD` at exit 1 from `cairn compile`, so a
-    // pinned check that passed it would be the same green-CI-on-a-refused
-    // source the flag was written against.
+    // A scope that lowers to nothing is `E_PARTIAL_BUILD` at exit 1 from
+    // `cairn compile`, so a pinned check that passed it would gate green
+    // on a source the compile refuses.
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = fixture(tmp.path(), ONE_SCOPE_WITHOUT_A_SIZE);
     let out = cairn(
@@ -505,7 +489,7 @@ fn latest_pins_a_version_like_any_other_target() {
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert!(stderr.contains("E_UNKNOWN_ID"), "got: {stderr}");
+    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
     // The alias is resolved before the report, so the reader is told which
     // version answered rather than being handed the word back.
     assert!(

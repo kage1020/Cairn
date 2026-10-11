@@ -471,9 +471,10 @@ fn parity_5_a_template_only_library_compiles_to_nothing_without_complaint() {
 
 #[test]
 fn parity_6_a_partially_lowered_source_is_not_certified() {
-    // Every code that drops a scope is Warning severity, so before this the
-    // exit code stayed 0 and the lockfile still said `verified: true` for a
-    // build missing one of the two structures the source asked for.
+    // Every code that drops a scope is Warning severity, so without the
+    // refusal the exit code would be 0 and the lockfile would say
+    // `verified: true` for a build missing one of the two structures the
+    // source asked for.
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("partial.crn");
     fs::write(
