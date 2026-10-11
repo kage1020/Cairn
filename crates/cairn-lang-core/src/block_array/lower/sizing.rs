@@ -136,7 +136,7 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
             // diagnostics here (the dim pass runs before envelope-phase
             // diagnostics), so an unrecognised or missing `slope_to=`
             // contributes `0`; the same member will surface a
-            // `W_DEFERRED_MEMBER` in `fill_roof_shed` and lower to no
+            // `W_DEFERRED_MEMBER` in `fill_roof` and lower to no
             // voxels, keeping the dim math conservative. The axis
             // choice goes through `shed_slope_span` — the same helper
             // `shed_voxels` uses — so the dim and the generator cannot
@@ -159,7 +159,7 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
 ///
 /// Not [`roof_kind_of`], which answers "does the kind table know this
 /// name". A `shed` with no usable `slope_to=` is a name the table knows
-/// and a member [`fill_roof_shed`] returns from without painting a voxel,
+/// and a member [`fill_roof`] returns from without painting a voxel,
 /// and [`roof_extra_height`]'s shed arm already gives it `0`. Both roof
 /// walks go through here so the footprint and the height cannot disagree
 /// about which roofs are real — the disagreement that let a roof widen an
@@ -168,7 +168,7 @@ fn roof_extra_height(kind: RoofKind, member: &Member, roof_w: u32, roof_h: u32) 
 /// Silent, unlike [`shed_slope_to`]: this is the question, and the answer
 /// is reported by the pass that tries to draw.
 ///
-/// [`fill_roof_shed`]: super::roof_fill::fill_roof_shed
+/// [`fill_roof`]: super::roof_fill::fill_roof
 /// [`shed_slope_to`]: super::roof_fill::shed_slope_to
 pub(super) fn roof_draws(member: &Member) -> Option<RoofKind> {
     let kind = roof_kind_of(member)?;
