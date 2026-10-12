@@ -1,7 +1,11 @@
-//! The `data_versions.json` table. It lists every release, targetable or not, because ordering an
-//! `@requires` floor needs them all (`spec/versioning-editions` "Fail-loud and minimum-version
-//! inference").
+//! The `data_versions.json` table, and a `--target` resolved against it. The table lists every
+//! release, targetable or not, because ordering an `@requires` floor needs them all
+//! (`spec/versioning-editions` "Fail-loud and minimum-version inference").
 
+use std::fmt;
+
+use cairn_lang_core::Edition;
+use cairn_lang_core::suggest::did_you_mean;
 use serde::Deserialize;
 
 /// The body of `data_versions.json`.
@@ -37,6 +41,53 @@ pub struct DataVersionEntry {
 fn targetable_by_default() -> bool {
     true
 }
+
+/// A resolved Java target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JavaTarget {
+    /// The version, such as `"1.21.4"`.
+    pub mc_version: String,
+    /// The `DataVersion` written into the structure root.
+    pub data_version: i32,
+}
+
+/// A resolved Bedrock target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BedrockTarget {
+    /// The version, such as `"1.21.60"`.
+    pub mc_version: String,
+    /// The palette entries' `version`, packed as `major << 24 | minor << 16 | patch << 8 | rev`.
+    pub block_version: i32,
+}
+
+/// A `--target` that is not `latest` and, compared as a version, no targetable version in the pack.
+#[derive(Debug)]
+pub struct UnsupportedTarget {
+    /// The edition whose version table was consulted.
+    pub edition: Edition,
+    /// The `--target` value, verbatim.
+    pub requested: String,
+    /// The closest supported version, bare; [`fmt::Display`] adds the `did you mean` phrasing.
+    pub suggestion: Option<String>,
+    /// The supported versions, formatted for printing.
+    pub supported: String,
+}
+
+impl fmt::Display for UnsupportedTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "unsupported {} target `{}`. ",
+            self.edition, self.requested
+        )?;
+        if let Some(s) = &self.suggestion {
+            write!(f, "{} ", did_you_mean(s))?;
+        }
+        write!(f, "supported targets: {}", self.supported)
+    }
+}
+
+impl std::error::Error for UnsupportedTarget {}
 
 #[cfg(test)]
 mod tests {

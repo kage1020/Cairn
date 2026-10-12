@@ -14,11 +14,12 @@ use thiserror::Error;
 
 use super::aliases::{AliasError, AliasIndex};
 use super::blocks::{BlocksError, BlocksIndex};
-use super::data_versions::{DataVersionEntry, DataVersionTable};
+use super::data_versions::{
+    BedrockTarget, DataVersionEntry, DataVersionTable, JavaTarget, UnsupportedTarget,
+};
 use super::hash::pack_hash;
 use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
-use crate::data_version::{BedrockTarget, JavaTarget, UnsupportedTarget};
 
 #[derive(Clone, Copy)]
 struct BuiltinFiles {
@@ -441,24 +442,6 @@ pub fn builtin_pack(edition: Edition) -> &'static RegistryPack {
         load_builtin_pack(edition)
             .expect("built-in registry pack failed to load — this is a build invariant")
     })
-}
-
-/// Resolves a `--target` value against the built-in Java pack.
-///
-/// # Errors
-///
-/// [`UnsupportedTarget`] when `requested` is neither `"latest"` nor a targetable version.
-pub fn resolve_java_target(requested: &str) -> Result<JavaTarget, UnsupportedTarget> {
-    builtin_pack(Edition::Java).resolve_java_target(requested)
-}
-
-/// Resolves a `--target` value against the built-in Bedrock pack.
-///
-/// # Errors
-///
-/// [`UnsupportedTarget`] when `requested` is neither `"latest"` nor a targetable version.
-pub fn resolve_bedrock_target(requested: &str) -> Result<BedrockTarget, UnsupportedTarget> {
-    builtin_pack(Edition::Bedrock).resolve_bedrock_target(requested)
 }
 
 /// Parses the built-in pack for `edition`, returning the error [`builtin_pack`] panics on.

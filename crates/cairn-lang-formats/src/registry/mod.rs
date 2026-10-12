@@ -18,7 +18,6 @@ pub use hash::pack_hash;
 pub use load::{
     PackSource, PackView, RegistryError, RegistryPack, SUPPORTED_DATA_VERSIONS_SCHEMA,
     SUPPORTED_MANIFEST_SCHEMA, builtin_pack, load_builtin_pack, load_from_dir,
-    resolve_bedrock_target, resolve_java_target,
 };
 pub use manifest::{PackFiles, PackManifest};
 
