@@ -11,7 +11,6 @@ mod spec_citations;
 mod unsafe_code;
 mod versions;
 
-use std::fmt;
 use std::path::PathBuf;
 
 use crate::repo::Repo;
@@ -37,30 +36,30 @@ pub const RULES: &[Rule] = &[
     comment_length::RULE,
 ];
 
+/// A fault a rule found, at a file and, when it has one, a line.
 pub struct Finding {
-    rule: &'static str,
     path: PathBuf,
     line: Option<usize>,
     message: String,
 }
 
 impl Finding {
-    pub fn new(
-        rule: &'static str,
-        path: impl Into<PathBuf>,
-        line: Option<usize>,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn new(path: impl Into<PathBuf>, line: Option<usize>, message: impl Into<String>) -> Self {
         Self {
-            rule,
             path: path.into(),
             line,
             message: message.into(),
         }
     }
 
+    /// The finding as `rule` reports it, as a line of text.
+    pub fn render(&self, rule: &str) -> String {
+        let line = self.line.map(|line| format!(":{line}")).unwrap_or_default();
+        format!("{}{line}: {rule}: {}", self.path.display(), self.message)
+    }
+
     /// The finding as a GitHub Actions workflow command, which annotates the file in the PR.
-    pub fn annotation(&self) -> String {
+    pub fn annotation(&self, rule: &str) -> String {
         let line = self
             .line
             .map(|line| format!(",line={line}"))
@@ -71,20 +70,9 @@ impl Finding {
             .replace('\r', "%0D")
             .replace('\n', "%0A");
         format!(
-            "::error file={}{line},title={}::{message}",
+            "::error file={}{line},title={rule}::{message}",
             self.path.display(),
-            self.rule
         )
-    }
-}
-
-impl fmt::Display for Finding {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.path.display())?;
-        if let Some(line) = self.line {
-            write!(f, ":{line}")?;
-        }
-        write!(f, ": {}: {}", self.rule, self.message)
     }
 }
 
@@ -102,11 +90,11 @@ mod tests {
 
     #[test]
     fn an_annotation_keeps_a_multi_line_message_on_one_line() {
-        let finding = Finding::new("rule", "a/b.rs", Some(3), "one\ntwo 100%");
+        let finding = Finding::new("a/b.rs", Some(3), "one\ntwo 100%");
         assert_eq!(
-            finding.annotation(),
+            finding.annotation("rule"),
             "::error file=a/b.rs,line=3,title=rule::one%0Atwo 100%25"
         );
-        assert_eq!(finding.to_string(), "a/b.rs:3: rule: one\ntwo 100%");
+        assert_eq!(finding.render("rule"), "a/b.rs:3: rule: one\ntwo 100%");
     }
 }

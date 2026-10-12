@@ -81,7 +81,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
         match syn::parse_file(&source) {
             Ok(file) => codes.visit_file(&file),
             Err(error) => findings.push(Finding::new(
-                RULE.name,
                 path,
                 Some(error.span().start().line),
                 error.to_string(),
@@ -90,7 +89,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
     }
     if codes.found.is_empty() {
         findings.push(Finding::new(
-            RULE.name,
             CORE_SRC,
             None,
             "found no `impl DiagnosticCode { fn as_str }` returning code strings",
@@ -104,13 +102,12 @@ fn check(repo: &Repo) -> Vec<Finding> {
         let rows = match repo.read(path) {
             Ok(text) => catalog_rows(&text, title),
             Err(error) => {
-                findings.push(Finding::new(RULE.name, path, None, error));
+                findings.push(Finding::new(path, None, error));
                 continue;
             }
         };
         let Some(rows) = rows.filter(|rows| !rows.is_empty()) else {
             findings.push(Finding::new(
-                RULE.name,
                 path,
                 None,
                 format!("no code rows under a `## … {title}` heading"),
@@ -119,7 +116,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
         };
         for code in codes.found.difference(&rows) {
             findings.push(Finding::new(
-                RULE.name,
                 path,
                 None,
                 format!("`{code}` has no row of its own in the catalog"),

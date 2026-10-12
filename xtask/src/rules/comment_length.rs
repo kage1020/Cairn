@@ -90,13 +90,12 @@ fn check(repo: &Repo) -> Vec<Finding> {
         let source = match repo.read(path) {
             Ok(source) => source,
             Err(error) => {
-                findings.push(Finding::new(RULE.name, path, None, error));
+                findings.push(Finding::new(path, None, error));
                 continue;
             }
         };
         for (line, kind, prose) in over_budget(&source) {
             findings.push(Finding::new(
-                RULE.name,
                 path,
                 Some(line),
                 format!(

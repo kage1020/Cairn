@@ -109,7 +109,7 @@ fn check(repo: &Repo) -> Vec<Finding> {
     let grammar_path = Path::new(GRAMMAR);
     let grammar = match repo.read(grammar_path) {
         Ok(grammar) => grammar,
-        Err(error) => return vec![Finding::new(RULE.name, grammar_path, None, error)],
+        Err(error) => return vec![Finding::new(grammar_path, None, error)],
     };
     let mut findings = Vec::new();
     for (name, core_path, kind) in PAIRS {
@@ -121,7 +121,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
             Ok(core) if !core.is_empty() => core,
             Ok(_) => {
                 findings.push(Finding::new(
-                    RULE.name,
                     core_path,
                     None,
                     format!("found no keywords for the grammar's `{name}` pattern"),
@@ -129,20 +128,19 @@ fn check(repo: &Repo) -> Vec<Finding> {
                 continue;
             }
             Err(error) => {
-                findings.push(Finding::new(RULE.name, core_path, None, error));
+                findings.push(Finding::new(core_path, None, error));
                 continue;
             }
         };
         let highlighted = match grammar_keywords(&grammar, name) {
             Ok(highlighted) => highlighted,
             Err(error) => {
-                findings.push(Finding::new(RULE.name, grammar_path, None, error));
+                findings.push(Finding::new(grammar_path, None, error));
                 continue;
             }
         };
         for keyword in core.difference(&highlighted) {
             findings.push(Finding::new(
-                RULE.name,
                 grammar_path,
                 None,
                 format!(
@@ -153,7 +151,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
         }
         for keyword in highlighted.difference(&core) {
             findings.push(Finding::new(
-                RULE.name,
                 grammar_path,
                 None,
                 format!(

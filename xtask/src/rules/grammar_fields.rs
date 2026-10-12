@@ -168,14 +168,9 @@ fn check(repo: &Repo) -> Vec<Finding> {
     {
         Ok(declared) if !declared.is_empty() => declared,
         Ok(_) => {
-            return vec![Finding::new(
-                RULE.name,
-                &node_types,
-                None,
-                "declares no fields",
-            )];
+            return vec![Finding::new(&node_types, None, "declares no fields")];
         }
-        Err(error) => return vec![Finding::new(RULE.name, &node_types, None, error)],
+        Err(error) => return vec![Finding::new(&node_types, None, error)],
     };
 
     let mut findings = Vec::new();
@@ -185,7 +180,7 @@ fn check(repo: &Repo) -> Vec<Finding> {
         let cases = match repo.read(path).and_then(|text| parse_cases(&text)) {
             Ok(cases) => cases,
             Err(error) => {
-                findings.push(Finding::new(RULE.name, path, None, error));
+                findings.push(Finding::new(path, None, error));
                 continue;
             }
         };
@@ -193,7 +188,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
         for case in cases.iter().filter(|case| case.markers.is_empty()) {
             if let Err(error) = collect_labels(&case.tree, &mut labelled) {
                 findings.push(Finding::new(
-                    RULE.name,
                     path,
                     None,
                     format!("case `{}`: {error}", case.title),
@@ -204,7 +198,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
 
     for (node, field) in declared.difference(&labelled) {
         findings.push(Finding::new(
-            RULE.name,
             &corpus,
             None,
             format!(
@@ -215,7 +208,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
     }
     for (node, field) in labelled.difference(&declared) {
         findings.push(Finding::new(
-            RULE.name,
             &node_types,
             None,
             format!(

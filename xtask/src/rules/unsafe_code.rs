@@ -84,11 +84,10 @@ impl<'ast> Visit<'ast> for Lifts {
 fn check(repo: &Repo) -> Vec<Finding> {
     let members = match repo.members() {
         Ok(members) => members,
-        Err(error) => return vec![Finding::new(RULE.name, "Cargo.toml", None, error)],
+        Err(error) => return vec![Finding::new("Cargo.toml", None, error)],
     };
     let Some(exempt) = members.iter().find(|member| member.name == UNSAFE_EXEMPT) else {
         return vec![Finding::new(
-            RULE.name,
             "Cargo.toml",
             None,
             format!("{UNSAFE_EXEMPT} is not a workspace member; update `UNSAFE_EXEMPT`"),
@@ -102,7 +101,7 @@ fn check(repo: &Repo) -> Vec<Finding> {
         let source = match repo.read(path) {
             Ok(source) => source,
             Err(error) => {
-                findings.push(Finding::new(RULE.name, path, None, error));
+                findings.push(Finding::new(path, None, error));
                 continue;
             }
         };
@@ -110,7 +109,7 @@ fn check(repo: &Repo) -> Vec<Finding> {
             Ok(file) => file,
             Err(error) => {
                 let line = error.span().start().line;
-                findings.push(Finding::new(RULE.name, path, Some(line), error.to_string()));
+                findings.push(Finding::new(path, Some(line), error.to_string()));
                 continue;
             }
         };
@@ -124,7 +123,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
             match allowed {
                 Some(index) => used[index] = true,
                 None => findings.push(Finding::new(
-                    RULE.name,
                     path,
                     Some(line),
                     "lifts `unsafe_code` outside the modules listed in xtask's `ALLOWED`; keep \
@@ -136,7 +134,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
     for ((file, module), used) in ALLOWED.iter().zip(used) {
         if !used {
             findings.push(Finding::new(
-                RULE.name,
                 *file,
                 None,
                 format!("module `{module}` is listed in `ALLOWED` but lifts no `unsafe_code`"),

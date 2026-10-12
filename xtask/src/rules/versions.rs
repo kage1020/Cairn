@@ -30,7 +30,7 @@ fn check(repo: &Repo) -> Vec<Finding> {
     let root = Path::new("Cargo.toml");
     let manifest = match repo.manifest(root) {
         Ok(manifest) => manifest,
-        Err(error) => return vec![Finding::new(RULE.name, root, None, error)],
+        Err(error) => return vec![Finding::new(root, None, error)],
     };
     let Some(version) = manifest
         .get("workspace")
@@ -38,17 +38,11 @@ fn check(repo: &Repo) -> Vec<Finding> {
         .and_then(|package| package.get("version"))
         .and_then(Value::as_str)
     else {
-        return vec![Finding::new(
-            RULE.name,
-            root,
-            None,
-            "no `[workspace.package] version`",
-        )];
+        return vec![Finding::new(root, None, "no `[workspace.package] version`")];
     };
     let calver = Regex::new(r"^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$").expect("valid regex");
     if !calver.is_match(version) {
         return vec![Finding::new(
-            RULE.name,
             root,
             None,
             format!("`[workspace.package] version` is {version:?}, which is not YYYY.M[.PATCH]"),
@@ -59,7 +53,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
     let mut compare = |path: &Path, what: &str, found: Option<&str>| {
         if found != Some(version) {
             findings.push(Finding::new(
-                RULE.name,
                 path,
                 None,
                 format!("{what} is {found:?}, but the workspace version is {version:?}"),
@@ -123,7 +116,7 @@ fn check(repo: &Repo) -> Vec<Finding> {
                 }
             }
         }
-        Err(error) => findings.push(Finding::new(RULE.name, root, None, error)),
+        Err(error) => findings.push(Finding::new(root, None, error)),
     }
     findings
 }

@@ -33,7 +33,6 @@ const PUBLIC_API_CRATES: &[&str] = &["cairn-lang-formats", "cairn-lang-nbt"];
 
 /// The spans in the first column of a README section's table, with the line each is on.
 fn table_names(
-    rule: &'static str,
     readme: &Path,
     text: &str,
     title: &str,
@@ -41,7 +40,6 @@ fn table_names(
 ) -> Vec<(usize, String)> {
     let Some(lines) = section(text, 2, |heading| heading == title) else {
         findings.push(Finding::new(
-            rule,
             readme,
             None,
             format!("no `## {title}` section"),
@@ -57,12 +55,11 @@ fn table_names(
                     .flatten()
                     .map(|span| (line, span.to_owned())),
             ),
-            Err(error) => findings.push(Finding::new(rule, readme, Some(line), error)),
+            Err(error) => findings.push(Finding::new(readme, Some(line), error)),
         }
     }
     if names.is_empty() {
         findings.push(Finding::new(
-            rule,
             readme,
             None,
             format!(
@@ -76,7 +73,6 @@ fn table_names(
 
 /// Report what one side holds and the other does not.
 fn compare(
-    rule: &'static str,
     readme: &Path,
     shipped: &BTreeSet<String>,
     named: &[(usize, String)],
@@ -89,7 +85,6 @@ fn compare(
         .filter(|name| !named_set.contains(name.as_str()))
     {
         findings.push(Finding::new(
-            rule,
             readme,
             None,
             format!("{what} `{missing}` ships but has no row"),
@@ -97,7 +92,6 @@ fn compare(
     }
     for (line, phantom) in named.iter().filter(|(_, name)| !shipped.contains(name)) {
         findings.push(Finding::new(
-            rule,
             readme,
             Some(*line),
             format!("the row names `{phantom}`, which is not a shipped {what}"),
@@ -105,26 +99,19 @@ fn compare(
     }
 }
 
-fn parse_rust(rule: &'static str, repo: &Repo, path: &Path) -> Result<syn::File, Finding> {
+fn parse_rust(repo: &Repo, path: &Path) -> Result<syn::File, Finding> {
     let source = repo
         .read(path)
-        .map_err(|error| Finding::new(rule, path, None, error))?;
-    syn::parse_file(&source).map_err(|error| {
-        Finding::new(
-            rule,
-            path,
-            Some(error.span().start().line),
-            error.to_string(),
-        )
-    })
+        .map_err(|error| Finding::new(path, None, error))?;
+    syn::parse_file(&source)
+        .map_err(|error| Finding::new(path, Some(error.span().start().line), error.to_string()))
 }
 
 fn check_modules(repo: &Repo) -> Vec<Finding> {
-    let rule = MODULES.name;
     let lib = Path::new("crates/cairn-lang-core/src/lib.rs");
     let readme = Path::new("crates/cairn-lang-core/README.md");
     let mut findings = Vec::new();
-    let file = match parse_rust(rule, repo, lib) {
+    let file = match parse_rust(repo, lib) {
         Ok(file) => file,
         Err(finding) => return vec![finding],
     };
@@ -140,10 +127,10 @@ fn check_modules(repo: &Repo) -> Vec<Finding> {
         .collect();
     match repo.read(readme) {
         Ok(text) => {
-            let named = table_names(rule, readme, &text, "Modules", &mut findings);
-            compare(rule, readme, &modules, &named, "module", &mut findings);
+            let named = table_names(readme, &text, "Modules", &mut findings);
+            compare(readme, &modules, &named, "module", &mut findings);
         }
-        Err(error) => findings.push(Finding::new(rule, readme, None, error)),
+        Err(error) => findings.push(Finding::new(readme, None, error)),
     }
     findings
 }
@@ -188,7 +175,6 @@ fn expand_use(tree: &UseTree, prefix: &mut Vec<String>, out: &mut Vec<Result<Str
 }
 
 fn check_public_api(repo: &Repo) -> Vec<Finding> {
-    let rule = PUBLIC_API.name;
     let mut findings = Vec::new();
 
     let tabled: BTreeSet<PathBuf> = repo
@@ -209,7 +195,6 @@ fn check_public_api(repo: &Repo) -> Vec<Finding> {
         .collect();
     for unlisted in tabled.difference(&listed) {
         findings.push(Finding::new(
-            rule,
             unlisted,
             None,
             "has a `## Public API` table but its crate is not in xtask's PUBLIC_API_CRATES",
@@ -220,7 +205,7 @@ fn check_public_api(repo: &Repo) -> Vec<Finding> {
         let dir = Path::new("crates").join(name);
         let lib = dir.join("src/lib.rs");
         let readme = dir.join("README.md");
-        let file = match parse_rust(rule, repo, &lib) {
+        let file = match parse_rust(repo, &lib) {
             Ok(file) => file,
             Err(finding) => {
                 findings.push(finding);
@@ -244,17 +229,17 @@ fn check_public_api(repo: &Repo) -> Vec<Finding> {
                     }
                     Err(error) => {
                         let line = item.use_token.span.start().line;
-                        findings.push(Finding::new(rule, &lib, Some(line), error));
+                        findings.push(Finding::new(&lib, Some(line), error));
                     }
                 }
             }
         }
         match repo.read(&readme) {
             Ok(text) => {
-                let named = table_names(rule, &readme, &text, "Public API", &mut findings);
-                compare(rule, &readme, &exported, &named, "re-export", &mut findings);
+                let named = table_names(&readme, &text, "Public API", &mut findings);
+                compare(&readme, &exported, &named, "re-export", &mut findings);
             }
-            Err(error) => findings.push(Finding::new(rule, &readme, None, error)),
+            Err(error) => findings.push(Finding::new(&readme, None, error)),
         }
     }
     findings
@@ -274,8 +259,15 @@ fn listed_subcommands(help: &str) -> Option<BTreeSet<String>> {
     )
 }
 
+/// The subcommand a row's `cairn <name> …` span runs.
+fn subcommand_of(invocation: &str) -> Option<&str> {
+    let mut words = invocation.split_whitespace();
+    (words.next() == Some("cairn"))
+        .then(|| words.next())
+        .flatten()
+}
+
 fn check_subcommands(repo: &Repo) -> Vec<Finding> {
-    let rule = SUBCOMMANDS.name;
     let readme = Path::new("crates/cairn-lang-cli/README.md");
     let output = repo
         .cargo()
@@ -297,7 +289,6 @@ fn check_subcommands(repo: &Repo) -> Vec<Finding> {
         }
         Ok(output) => {
             return vec![Finding::new(
-                rule,
                 readme,
                 None,
                 format!(
@@ -308,7 +299,6 @@ fn check_subcommands(repo: &Repo) -> Vec<Finding> {
         }
         Err(error) => {
             return vec![Finding::new(
-                rule,
                 readme,
                 None,
                 format!("cannot run cargo: {error}"),
@@ -317,7 +307,6 @@ fn check_subcommands(repo: &Repo) -> Vec<Finding> {
     };
     let Some(offered) = listed_subcommands(&help) else {
         return vec![Finding::new(
-            rule,
             readme,
             None,
             "`cairn --help` printed no `Commands:` block",
@@ -327,20 +316,20 @@ fn check_subcommands(repo: &Repo) -> Vec<Finding> {
     let mut findings = Vec::new();
     let text = match repo.read(readme) {
         Ok(text) => text,
-        Err(error) => return vec![Finding::new(rule, readme, None, error)],
+        Err(error) => return vec![Finding::new(readme, None, error)],
     };
-    // A row's first span is an invocation, `cairn <name> …`; the name is its second word.
-    let named: Vec<(usize, String)> =
-        table_names(rule, readme, &text, "Subcommands", &mut findings)
-            .into_iter()
-            .filter_map(|(line, invocation)| {
-                let mut words = invocation.split_whitespace();
-                (words.next() == Some("cairn"))
-                    .then(|| words.next().map(|name| (line, name.to_owned())))
-                    .flatten()
-            })
-            .collect();
-    compare(rule, readme, &offered, &named, "subcommand", &mut findings);
+    let mut named = Vec::new();
+    for (line, invocation) in table_names(readme, &text, "Subcommands", &mut findings) {
+        match subcommand_of(&invocation) {
+            Some(name) => named.push((line, name.to_owned())),
+            None => findings.push(Finding::new(
+                readme,
+                Some(line),
+                format!("`{invocation}` is not an invocation; start the row with `cairn <name>`"),
+            )),
+        }
+    }
+    compare(readme, &offered, &named, "subcommand", &mut findings);
     findings
 }
 
@@ -403,5 +392,13 @@ use private::Item;
         let help = "Usage: cairn <COMMAND>\n\nCommands:\n  parse  Lex and parse\n  check  Run checks\n  help   Print this message\n\nOptions:\n  -h, --help\n";
         let names: Vec<_> = listed_subcommands(help).unwrap().into_iter().collect();
         assert_eq!(names, ["check", "parse"]);
+    }
+
+    #[test]
+    fn a_subcommand_row_names_a_cairn_invocation() {
+        assert_eq!(subcommand_of("cairn check <file.crn>"), Some("check"));
+        assert_eq!(subcommand_of("carn lint"), None);
+        assert_eq!(subcommand_of("frob <file.crn>"), None);
+        assert_eq!(subcommand_of("cairn"), None);
     }
 }

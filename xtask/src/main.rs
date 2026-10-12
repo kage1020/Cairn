@@ -7,7 +7,7 @@ mod rules;
 use std::process::ExitCode;
 
 use repo::Repo;
-use rules::{Finding, RULES};
+use rules::RULES;
 
 const USAGE: &str = "usage: cargo xtask lint [--list] [--tag vVERSION] [RULE...]";
 
@@ -48,6 +48,10 @@ fn main() -> ExitCode {
     if selected.is_empty() {
         selected.extend(RULES);
     }
+    if tag.is_some() && !selected.iter().any(|rule| rule.name == "versions") {
+        eprintln!("--tag is read only by the `versions` rule, which is not selected\n{USAGE}");
+        return ExitCode::from(2);
+    }
 
     let repo = match Repo::open(tag) {
         Ok(repo) => repo,
@@ -57,21 +61,21 @@ fn main() -> ExitCode {
         }
     };
 
-    let mut findings: Vec<Finding> = Vec::new();
-    for rule in selected {
-        findings.extend((rule.check)(&repo));
-    }
     let annotate = std::env::var_os("GITHUB_ACTIONS").is_some();
-    for finding in &findings {
-        println!("{finding}");
-        if annotate {
-            println!("{}", finding.annotation());
+    let mut count = 0;
+    for rule in selected {
+        for finding in (rule.check)(&repo) {
+            println!("{}", finding.render(rule.name));
+            if annotate {
+                println!("{}", finding.annotation(rule.name));
+            }
+            count += 1;
         }
     }
-    if findings.is_empty() {
+    if count == 0 {
         ExitCode::SUCCESS
     } else {
-        eprintln!("{} finding(s)", findings.len());
+        eprintln!("{count} finding(s)");
         ExitCode::FAILURE
     }
 }

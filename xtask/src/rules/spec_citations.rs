@@ -35,7 +35,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
     let chapters = spec_titles(repo);
     if chapters.is_empty() {
         return vec![Finding::new(
-            RULE.name,
             SPEC_DIR,
             None,
             "no spec chapters found; update SPEC_DIR in xtask if the spec moved",
@@ -70,7 +69,6 @@ fn scanned_files(repo: &Repo) -> Vec<PathBuf> {
 fn numbered_citations(path: &Path, text: &str, findings: &mut Vec<Finding>) {
     let finding = |offset: usize, what: String| {
         Finding::new(
-            RULE.name,
             path,
             Some(line_of(text, offset)),
             format!(
@@ -109,7 +107,6 @@ fn named_citations(
         let Some(titles) = chapters.get(stem) else {
             let known: Vec<_> = chapters.keys().map(String::as_str).collect();
             findings.push(Finding::new(
-                RULE.name,
                 path,
                 line,
                 format!(
@@ -122,7 +119,6 @@ fn named_citations(
         for title in quoted {
             if !titles.contains(&title) {
                 findings.push(Finding::new(
-                    RULE.name,
                     path,
                     line,
                     format!(

@@ -46,7 +46,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
         };
         for found in pattern.find_iter(&text) {
             findings.push(Finding::new(
-                RULE.name,
                 path,
                 Some(line_of(&text, found.start())),
                 format!(

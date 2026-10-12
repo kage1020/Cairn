@@ -33,15 +33,10 @@ fn check(repo: &Repo) -> Vec<Finding> {
             .get("workspace")
             .and_then(|workspace| workspace.get("lints"))
             .cloned(),
-        Err(error) => return vec![Finding::new(RULE.name, root, None, error)],
+        Err(error) => return vec![Finding::new(root, None, error)],
     };
     let Some(workspace_lints) = workspace_lints else {
-        return vec![Finding::new(
-            RULE.name,
-            root,
-            None,
-            "no `[workspace.lints]` table",
-        )];
+        return vec![Finding::new(root, None, "no `[workspace.lints]` table")];
     };
     let unsafe_level = level(
         workspace_lints
@@ -50,7 +45,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
     );
     if unsafe_level != Some("forbid") {
         findings.push(Finding::new(
-            RULE.name,
             root,
             None,
             format!(
@@ -71,14 +65,14 @@ fn check(repo: &Repo) -> Vec<Finding> {
 
     let members = match repo.members() {
         Ok(members) => members,
-        Err(error) => return vec![Finding::new(RULE.name, root, None, error)],
+        Err(error) => return vec![Finding::new(root, None, error)],
     };
     for member in members {
         let path = member.dir.join("Cargo.toml");
         let manifest = match repo.manifest(&path) {
             Ok(manifest) => manifest,
             Err(error) => {
-                findings.push(Finding::new(RULE.name, &path, None, error));
+                findings.push(Finding::new(&path, None, error));
                 continue;
             }
         };
@@ -86,7 +80,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
         if member.name == UNSAFE_EXEMPT {
             if lints != Some(&exempt_copy) {
                 findings.push(Finding::new(
-                    RULE.name,
                     &path,
                     None,
                     "`[lints]` must be a copy of `[workspace.lints]` with `unsafe_code = \"deny\"` \
@@ -95,7 +88,6 @@ fn check(repo: &Repo) -> Vec<Finding> {
             }
         } else if lints != Some(&inherited) {
             findings.push(Finding::new(
-                RULE.name,
                 &path,
                 None,
                 "must inherit the workspace lints with `[lints]` `workspace = true` and set none \
