@@ -661,7 +661,7 @@ fn covered_examples_compile_without_deferred_warnings() {
 }
 
 #[test]
-fn lockfile_registry_pack_hash_is_populated() {
+fn lockfile_hashes_are_populated() {
     // `constraint_catalog_hash` is zero while there is no catalog.
     let (_tmp_src, src) = example_in_tempdir("cottage.crn");
     let out_dir = TempDir::new().expect("out tempdir");
@@ -684,6 +684,11 @@ fn lockfile_registry_pack_hash_is_populated() {
         lf.inputs.registry_pack_hash.as_str(),
         HashHex::ZERO_STR,
         "registry_pack_hash must be filled in by the registry pack ingest",
+    );
+    assert_ne!(
+        lf.resolved_ir_hash,
+        HashHex::zero(),
+        "resolved_ir_hash must be the hash of the IR the compile lowered",
     );
     assert_eq!(
         lf.inputs.constraint_catalog_hash.as_str(),
