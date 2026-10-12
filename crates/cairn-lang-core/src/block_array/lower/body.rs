@@ -14,18 +14,11 @@ use crate::block_array::{BlockArray, Dims, MAX_STRUCTURE_VOLUME, PaletteFull};
 
 use super::canvas::{Canvas, ScopePalette, prune_unreferenced};
 use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circuit_region};
-use super::diag::{diag_deferred_member, diag_no_theme_bound_generic};
+use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
 use super::members::{
     MemberDisposition, Phase, StructCtx, flatten_members, member_disposition, paint_member,
 };
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
-
-/// Which lowering entry point produced this body: what is voxelised, not what was written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum VoxelSource {
-    Struct,
-    Place,
-}
 
 /// What every body of one run is lowered against.
 #[derive(Clone, Copy)]

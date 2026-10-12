@@ -36,9 +36,9 @@ use super::roof::{FLAT_BASE_ID, STAIR_BASE_ID};
 use super::{BlockArray, BlockArrayIr, BlockState, PALETTE_CAPACITY, Placement, Walkway};
 
 use anchor::{GapOutcome, report_unread_gap, resolve_place_anchor};
-use body::{BodyDescriptor, BodyInputs, LoweredBody, VoxelSource, lower_body_to_block_array};
+use body::{BodyDescriptor, BodyInputs, LoweredBody, lower_body_to_block_array};
 use connect::{ConnectInputs, lower_connects};
-use diag::{diag_def_no_size, diag_struct_no_size};
+use diag::{VoxelSource, diag_def_no_size, diag_struct_no_size};
 use site_floor::{PlacedBody, collect_floor_cells};
 
 /// Block ids lowering can put in a palette that no pack can redirect.

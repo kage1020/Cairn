@@ -7,7 +7,12 @@ use crate::intent::{DefIr, Member, MemberRole, StructIr};
 
 use crate::block_array::args::diag_deferred_member_reason;
 
-use super::body::VoxelSource;
+/// Which lowering entry point produced this body: what is voxelised, not what was written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum VoxelSource {
+    Struct,
+    Place,
+}
 
 pub(super) fn diag_struct_no_size(s: &StructIr) -> Diagnostic {
     Diagnostic {
