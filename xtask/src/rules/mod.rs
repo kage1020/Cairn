@@ -5,6 +5,7 @@ mod diagnostic_catalog;
 mod editor_keywords;
 mod grammar_fields;
 mod manifest;
+mod module_cycles;
 mod readme;
 mod session_refs;
 mod spec_citations;
@@ -34,6 +35,7 @@ pub const RULES: &[Rule] = &[
     grammar_fields::RULE,
     editor_keywords::RULE,
     comment_length::RULE,
+    module_cycles::RULE,
 ];
 
 /// A fault a rule found, at a file and, when it has one, a line.

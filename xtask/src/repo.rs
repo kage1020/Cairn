@@ -8,6 +8,8 @@ pub struct Member {
     pub name: String,
     /// The directory holding its `Cargo.toml`, relative to the repository root.
     pub dir: PathBuf,
+    /// Its library and binary crate roots, relative to the repository root.
+    pub roots: Vec<PathBuf>,
 }
 
 pub struct Repo {
@@ -111,13 +113,31 @@ impl Repo {
             else {
                 return Err("cargo metadata lists a package without a name or manifest".into());
             };
-            let dir = Path::new(manifest)
+            let relative = |path: &str| {
+                Path::new(path)
+                    .strip_prefix(&self.root)
+                    .map(Path::to_path_buf)
+                    .map_err(|_| format!("{path} is outside {}", self.root.display()))
+            };
+            let dir = relative(manifest)?
                 .parent()
-                .and_then(|dir| dir.strip_prefix(&self.root).ok())
-                .ok_or_else(|| format!("{manifest} is outside {}", self.root.display()))?;
+                .ok_or_else(|| format!("{manifest} has no parent directory"))?
+                .to_path_buf();
+            let mut roots = Vec::new();
+            for target in package["targets"].as_array().into_iter().flatten() {
+                let crate_root = target["kind"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|kind| kind == "lib" || kind == "bin");
+                if crate_root && let Some(src) = target["src_path"].as_str() {
+                    roots.push(relative(src)?);
+                }
+            }
             members.push(Member {
                 name: name.to_owned(),
-                dir: dir.to_path_buf(),
+                dir,
+                roots,
             });
         }
         members.sort_by(|a, b| a.name.cmp(&b.name));
