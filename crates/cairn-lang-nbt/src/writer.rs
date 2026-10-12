@@ -2,53 +2,8 @@
 
 use std::io::Write;
 
-use thiserror::Error;
-
-use crate::tag::{Compound, List, Tag};
-
-/// Errors raised while encoding an NBT tag tree.
-#[derive(Debug, Error)]
-#[non_exhaustive]
-pub enum NbtIoError {
-    /// A string held a NUL or non-ASCII byte, outside the range where Java's Modified UTF-8 and
-    /// Bedrock's UTF-8 agree.
-    #[error("nbt: string contains byte 0x{byte:02x} at index {index}, not encodable here")]
-    InvalidString {
-        /// The rejected byte.
-        byte: u8,
-        /// Its byte index in the string.
-        index: usize,
-    },
-    /// A [`List`] declared one element type but an item carried another.
-    #[error("nbt: list declared element type {declared} but item {index} has type {actual}")]
-    HeterogeneousList {
-        /// The declared element type id.
-        declared: u8,
-        /// The mismatching item's index.
-        index: usize,
-        /// The mismatching item's type id.
-        actual: u8,
-    },
-    /// An empty [`List`] declared an element type other than `TAG_End`.
-    #[error("nbt: empty list declared element type {declared}, expected 0 (TAG_End)")]
-    EmptyListWithElementType {
-        /// The declared element type id.
-        declared: u8,
-    },
-    /// A length overflowed its wire prefix.
-    #[error("nbt: {context} length {len} exceeds wire limit {limit}")]
-    LengthOverflow {
-        /// What the length measures, such as `"string"` or `"list"`.
-        context: &'static str,
-        /// The length.
-        len: usize,
-        /// The prefix's maximum.
-        limit: usize,
-    },
-    /// An I/O failure.
-    #[error("nbt I/O: {0}")]
-    Io(#[from] std::io::Error),
-}
+use crate::error::NbtIoError;
+use crate::tag::{Compound, List, Tag, string_len};
 
 /// The byte order of every multi-byte scalar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,29 +53,6 @@ pub(crate) fn write_named_root<W: Write>(
 pub(crate) fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError> {
     w.write_all(&[id])?;
     Ok(())
-}
-
-/// Checks that the writers would accept `s` as an NBT string, without writing it.
-///
-/// # Errors
-///
-/// [`NbtIoError::InvalidString`] for a NUL or non-ASCII byte, or [`NbtIoError::LengthOverflow`].
-pub fn check_string(s: &str) -> Result<(), NbtIoError> {
-    string_len(s).map(drop)
-}
-
-/// [`check_string`], returning the length prefix to write.
-fn string_len(s: &str) -> Result<u16, NbtIoError> {
-    for (index, &byte) in s.as_bytes().iter().enumerate() {
-        if byte == 0 || byte >= 0x80 {
-            return Err(NbtIoError::InvalidString { byte, index });
-        }
-    }
-    u16::try_from(s.len()).map_err(|_| NbtIoError::LengthOverflow {
-        context: "string",
-        len: s.len(),
-        limit: u16::MAX as usize,
-    })
 }
 
 pub(crate) fn write_string<W: Write>(w: &mut W, endian: Endian, s: &str) -> Result<(), NbtIoError> {

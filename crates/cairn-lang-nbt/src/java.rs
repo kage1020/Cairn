@@ -3,9 +3,9 @@
 
 use std::io::Write;
 
+pub use crate::error::NbtIoError;
 use crate::stream::{CompoundStream, stream_named_root};
 use crate::tag::Compound;
-pub use crate::writer::NbtIoError;
 use crate::writer::{Endian, write_named_root};
 
 /// Writes `root` as a named Java NBT root without gzip.

@@ -3,9 +3,10 @@
 
 use std::io::Write;
 
+use crate::error::NbtIoError;
 use crate::stream::{CompoundStream, stream_named_root};
 use crate::tag::Compound;
-use crate::writer::{Endian, NbtIoError, write_named_root};
+use crate::writer::{Endian, write_named_root};
 
 /// Writes `root` as a named Bedrock NBT root; `.mcstructure` files use an empty `root_name`.
 ///

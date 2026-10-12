@@ -2,6 +2,7 @@
 //! a streaming form for output too large to build as a tree first.
 
 pub mod bedrock;
+mod error;
 pub mod java;
 pub mod stream;
 pub mod tag;

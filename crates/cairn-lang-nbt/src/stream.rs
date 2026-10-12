@@ -4,10 +4,11 @@
 
 use std::io::Write;
 
+use crate::error::NbtIoError;
 use crate::tag::{Compound, Tag};
 use crate::writer::{
-    Endian, NbtIoError, check_item_type, write_compound_body, write_list_header, write_payload,
-    write_string, write_tag_id,
+    Endian, check_item_type, write_compound_body, write_list_header, write_payload, write_string,
+    write_tag_id,
 };
 
 const LIST_ID: u8 = 9;

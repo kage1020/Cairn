@@ -2,7 +2,7 @@
 
 use indexmap::IndexMap;
 
-pub use crate::writer::check_string;
+use crate::error::NbtIoError;
 
 /// An NBT tag; `TAG_End` exists only as a compound's terminator, so it has no variant.
 #[derive(Debug, Clone, PartialEq)]
@@ -117,6 +117,29 @@ impl List {
             items,
         }
     }
+}
+
+/// Checks that the writers would accept `s` as an NBT string, without writing it.
+///
+/// # Errors
+///
+/// [`NbtIoError::InvalidString`] for a NUL or non-ASCII byte, or [`NbtIoError::LengthOverflow`].
+pub fn check_string(s: &str) -> Result<(), NbtIoError> {
+    string_len(s).map(drop)
+}
+
+/// [`check_string`], returning the length prefix to write.
+pub(crate) fn string_len(s: &str) -> Result<u16, NbtIoError> {
+    for (index, &byte) in s.as_bytes().iter().enumerate() {
+        if byte == 0 || byte >= 0x80 {
+            return Err(NbtIoError::InvalidString { byte, index });
+        }
+    }
+    u16::try_from(s.len()).map_err(|_| NbtIoError::LengthOverflow {
+        context: "string",
+        len: s.len(),
+        limit: u16::MAX as usize,
+    })
 }
 
 #[cfg(test)]
