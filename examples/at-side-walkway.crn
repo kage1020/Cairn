@@ -8,7 +8,7 @@
 # `east.west_corner` (front `at=left`, u=0). A regression that
 # silently rounds `at=left|right` back to `at=center` would shift one
 # of the ports by one cell and break the bounding-box assertions in
-# `tests/at_side_walkway_lower.rs`.
+# `crates/cairn-lang-core/tests/lower/at_side_walkway.rs`.
 
 def cottage size=3x3:
   floor id=floor mat_slot=floor
