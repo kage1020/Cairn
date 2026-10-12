@@ -53,7 +53,7 @@ fn deferred_member_warnings_print_to_stderr() {
     // Stair lowering has no `inner_left`, so it defers.
     let source = concat!(
         "theme t:\n",
-        "  slot floor -> spruce_planks\n",
+        "  slot floor -> @spruce_planks\n",
         "\n",
         "struct s size=2x2\n",
         "  floor mat_slot=floor\n",
@@ -65,13 +65,8 @@ fn deferred_member_warnings_print_to_stderr() {
     fs::write(&src_path, source).expect("write source");
     let out = cairn("lower", &[src_path.to_str().unwrap()]);
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(
-        &stderr,
-        &[
-            (2, 17, "error", "E_UNKNOWN_SLOT_TARGET"),
-            (7, 3, "warning", "W_DEFERRED_MEMBER"),
-        ],
-    );
+    assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
+    assert_stream(&stderr, &[(7, 3, "warning", "W_DEFERRED_MEMBER")]);
     assert!(
         stderr.contains("shape=inner_left"),
         "the deferred primary should name the offending `shape=inner_left`, stderr={stderr}",
