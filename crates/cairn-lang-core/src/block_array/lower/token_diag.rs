@@ -4,13 +4,53 @@
 use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::error::Span;
-use crate::intent::ValueWithSpan;
+use crate::intent::{MemberRole, ValueWithSpan};
 use crate::suggest::{candidate_list, did_you_mean_note};
 
 use crate::block_array::BlockState;
 use crate::block_array::material::{IdOrigin, UnknownId};
 
-use super::members::MemberFallback;
+/// What becomes of a member whose `mat_slot=` resolves to no material.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MemberFallback {
+    /// A `floor`: [`fill_floor`] is not reached, so its cells stay air.
+    ///
+    /// [`fill_floor`]: super::paint::fill_floor
+    Air,
+    /// A `walls`: it paints no row and claims none in the volume, so a cut into it is refused.
+    Absent,
+    /// A `window`: [`fill_window`] refuses it, so the wall stays and a port on it is refused.
+    ///
+    /// [`fill_window`]: super::window::fill_window
+    WallStays,
+    /// A `roof`, an eave `stair` or a `pressure_plate`: built from its default block.
+    DefaultBlock,
+}
+
+impl MemberFallback {
+    /// The consequence for a member of this role, each spelled out as in [`paint_member`].
+    ///
+    /// [`paint_member`]: super::paint::paint_member
+    pub(super) fn for_role(role: &MemberRole) -> Self {
+        match role {
+            MemberRole::Floor => Self::Air,
+            MemberRole::Walls => Self::Absent,
+            MemberRole::Window => Self::WallStays,
+            MemberRole::Roof | MemberRole::Stair | MemberRole::PressurePlate => Self::DefaultBlock,
+            MemberRole::Door
+            | MemberRole::Level
+            | MemberRole::Circuit
+            | MemberRole::Place
+            | MemberRole::Connect
+            | MemberRole::Other(_) => {
+                unreachable!(
+                    "no painter resolves the `mat_slot=` of a `{}`",
+                    MemberRole::keyword(role)
+                )
+            }
+        }
+    }
+}
 
 /// Where an `@token` was read from, for the prose of the abstract-token diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

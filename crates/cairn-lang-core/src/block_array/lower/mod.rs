@@ -13,6 +13,8 @@ mod connect;
 mod diag;
 mod door;
 mod members;
+mod paint;
+mod phase;
 mod plate;
 mod roof_fill;
 mod site_floor;

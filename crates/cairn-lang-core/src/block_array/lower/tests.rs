@@ -1,7 +1,7 @@
 use super::anchor::{PlaceAnchor, PlacementCorner, PlacementOutOfRange};
 use super::canvas::{Canvas, ScopePalette, prune_unreferenced};
 use super::connect::edge_pushers;
-use super::members::Phase;
+use super::phase::Phase;
 use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
 use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
 use super::site_floor::FloorExtent;

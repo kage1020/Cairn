@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 
 use crate::block_array::{BlockState, Dims, Palette, PaletteFull, PaletteIndex};
 
-use super::members::Phase;
+use super::phase::Phase;
 
 /// Drop the palette slots a later phase covered, and remap the voxels onto the survivors.
 ///
