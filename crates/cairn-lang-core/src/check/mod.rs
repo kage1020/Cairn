@@ -166,6 +166,38 @@ mod tests {
     }
 
     #[test]
+    fn the_syntactic_error_codes_are_the_ones_the_cli_parity_table_lists() {
+        assert_eq!(
+            codes_where(|c| raised_by(c) == RaisedBy::Syntactic && c.severity() == Severity::Error),
+            [
+                "E_CONNECT_ARITY",
+                "E_DUPLICATE_ARG",
+                "E_DUPLICATE_CIRCUIT",
+                "E_DUPLICATE_HEADER",
+                "E_DUPLICATE_ID",
+                "E_DUPLICATE_ITEM",
+                "E_DUPLICATE_SELECTOR",
+                "E_DUPLICATE_SIZE",
+                "E_DUPLICATE_SLOT",
+                "E_INVALID_REQUIRES",
+                "E_MISPLACED_BINDING",
+                "E_MISPLACED_MEMBER",
+                "E_MISSING_MATERIAL",
+                "E_TRUTH_TABLE_CONFLICT",
+                "E_TRUTH_TABLE_DUPLICATE_INPUT",
+                "E_TRUTH_TABLE_EMPTY",
+                "E_TYPE_MISMATCH_LABEL",
+                "E_TYPE_MISMATCH_SIZE",
+                "E_UNEXPECTED_POSITIONAL",
+                "E_UNKNOWN_ARGUMENT",
+                "E_UNKNOWN_KEYWORD",
+                "E_UNSUPPORTED_NESTING",
+            ],
+            "change `SYNTACTIC_FIXTURES` in cairn-lang-cli's tests/cli/check/parity.rs to match",
+        );
+    }
+
+    #[test]
     fn exactly_one_code_belongs_to_the_parser() {
         assert_eq!(
             codes_where(|c| raised_by(c) == RaisedBy::Parser),
