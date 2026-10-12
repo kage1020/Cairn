@@ -155,9 +155,6 @@ jobs:
           pnpm run generate
           cd ../..
 
-          # Fold changelog.d/ into the section release-plz just wrote, and
-          # delete the fragments, so the merged release PR carries the whole
-          # entry and the release body is read from it.
           # `release-patch` refuses to publish if this never ran.
           python3 .github/scripts/changelog.py assemble --version "$version" --delete
 
@@ -183,55 +180,6 @@ jobs:
           fetch-tags: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Assert every copy of the version agrees before publishing
-        shell: bash
-        run: |
-          set -euo pipefail
-          version=$(awk '
-            /^\[workspace\.package\]/   { in_section = 1; next }
-            /^\[/                       { in_section = 0 }
-            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
-          ' Cargo.toml)
-          if [[ ! "$version" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
-            echo "Read '$version' from [workspace.package]; that is not a CalVer number" >&2
-            exit 1
-          fi
-          echo "Cargo [workspace.package]: $version"
-          drifted=0
-          compare() {
-            printf '  %-48s %s\n' "$1" "$2"
-            if [ "$2" != "$version" ]; then
-              drifted=1
-            fi
-          }
-          compare "crates/cairn-lang-tree-sitter/package.json" "$(jq -er '.version' crates/cairn-lang-tree-sitter/package.json)"
-          compare "crates/cairn-lang-tree-sitter/tree-sitter.json" "$(jq -er '.metadata.version' crates/cairn-lang-tree-sitter/tree-sitter.json)"
-          compare "editors/vscode/package.json" "$(jq -er '.version' editors/vscode/package.json)"
-          while read -r name declared; do
-            compare "[workspace.dependencies] $name" "$declared"
-          done < <(awk '
-            /^\[workspace\.dependencies\]/ { in_section = 1; next }
-            /^\[/                           { in_section = 0 }
-            in_section && /^cairn-[a-z-]+ = \{ version = "/ {
-              declared = $0
-              sub(/^.*version = "/, "", declared)
-              sub(/".*$/, "", declared)
-              print $1, declared
-            }
-          ' Cargo.toml)
-          if [ "$drifted" -ne 0 ]; then
-            echo 'A copy of the version disagrees with [workspace.package].' >&2
-            echo 'Refusing to publish: the artefacts would carry different numbers.' >&2
-            exit 1
-          fi
-
-      # The fold happens in the release PR, and that PR's own checks do not run
-      # on commits this workflow pushes with GITHUB_TOKEN. For a version not yet
-      # tagged, this is the last point at which a missed fold can stop the
-      # release instead of shipping a month without its entries.
-      - name: Assert the changelog fragments were folded into this version
-        run: python3 .github/scripts/changelog.py verify-release
-
       - name: Install Rust toolchain
         run: rustup show
 
@@ -240,6 +188,13 @@ jobs:
         with:
           shared-key: release-patch
           save-if: ${{ github.ref == 'refs/heads/canary' }}
+
+      - name: Assert every copy of the version agrees before publishing
+        run: cargo xtask lint versions
+
+      # The release PR's checks do not run on the fold, which was pushed with GITHUB_TOKEN.
+      - name: Assert the changelog fragments were folded into this version
+        run: python3 .github/scripts/changelog.py verify-release
 
       - name: Authenticate to crates.io via OIDC
         id: cratesio-auth

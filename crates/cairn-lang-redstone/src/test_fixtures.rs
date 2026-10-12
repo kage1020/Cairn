@@ -1,18 +1,17 @@
-//! Hand-built Placement IR fixtures shared by the in-crate tests of the
-//! routing, delay, and crossing passes.
+//! Hand-built Placement IR fixtures for the routing, delay and crossing tests.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 
 use crate::edition_netlist_ir::EditionCell;
+use crate::grid::{PadColumn, output_pad};
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 use crate::placement_ir::{
     CellCoord, CircuitRegionReservation, PlacedCellNode, PlacedOutputNode, PlacementIr,
     PlacementPhase, ScopedPlacementIr, ScopedPlacementIrEntry,
 };
-use crate::routing_geometry::PadColumn;
 
 pub(crate) fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionReservation {
     CircuitRegionReservation {
@@ -34,29 +33,44 @@ pub(crate) fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlac
     scoped
 }
 
-/// One scope whose reservation is too shallow to hold its pad column,
-/// so the actuator pad lands on the only cell.
-///
-/// `depth = 1` leaves the pad column a single row and
-/// [`crate::routing_geometry::output_pad`] saturates into it: `z = 0`,
-/// `x = width - 1 = 1`, which is where the cell stands. Two blocks,
-/// one coord.
-///
-/// Hand-built because the placement pass refuses a region this small
-/// before any later stage sees it, and the CLI always runs that pass.
-/// A caller assembling the IR itself is the only shape the refusal
-/// exists for — an in-crate test, or a library consumer calling
-/// [`crate::compile_delay`] or [`crate::compile_crossing`] — so the
-/// fixture has to build it directly.
-///
-/// `phase` is what the stage under test expects to be handed:
-/// `Unrouted` for routing, `Routed` for delay, `Delayed` for crossing.
-/// The geometry does not vary with it, which is the point — one
-/// collapsed pad row, put to three stages.
-///
-/// A second, sound scope rides along so a caller can tell "elides the
-/// scope that earned the refusal" from "elides everything". On a
-/// one-scope fixture those two are the same assertion.
+/// A cell's phase as stage 2 hands it on, with nothing measured.
+pub(crate) const ROUTED: PlacementPhase = PlacementPhase::Routed { wire_length: 0 };
+
+/// A cell's phase as stage 3 hands it on, with nothing measured.
+pub(crate) const DELAYED: PlacementPhase = PlacementPhase::Delayed {
+    wire_length: 0,
+    local_delay_ticks: 0,
+};
+
+pub(crate) fn placed_cell(
+    cell: EditionCell,
+    coord: CellCoord,
+    drivers: Vec<CellPortDriver>,
+    phase: PlacementPhase,
+) -> PlacedCellNode {
+    PlacedCellNode {
+        cell,
+        drivers,
+        coord,
+        phase,
+        span: Span::default(),
+    }
+}
+
+/// An actuator pad already through routing.
+pub(crate) fn routed_output(driver: NetRef, pad: CellCoord) -> PlacedOutputNode {
+    let mut output = PlacedOutputNode::new(
+        DottedRef::new("sig".into(), vec!["out".into()]),
+        driver,
+        pad,
+        Span::default(),
+    );
+    output.phase = ROUTED;
+    output
+}
+
+/// A scope too shallow for its pad column, which the placement pass would refuse, beside a sound
+/// one.
 pub(crate) fn collapsed_pad_row(phase: &PlacementPhase, row: CollapsedRow) -> ScopedPlacementIr {
     let mut scoped = ScopedPlacementIr::new();
     scoped.scopes.push(ScopedPlacementIrEntry {
@@ -72,11 +86,10 @@ pub(crate) fn collapsed_pad_row(phase: &PlacementPhase, row: CollapsedRow) -> Sc
     scoped
 }
 
-/// The sound half of [`collapsed_pad_row`]: pad column, cell row and
-/// actuator edge all on coords of their own.
+/// The sound scope that rides beside each refused fixture.
 fn roomy_ir(phase: &PlacementPhase) -> PlacementIr {
     let region = reservation(6, 3, 1);
-    let pad = crate::routing_geometry::output_pad(0, PadColumn::for_cell_count(1), &region);
+    let pad = output_pad(0, PadColumn::for_cell_count(1), &region);
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(region);
     ir.inputs.push(NetlistInput {
@@ -105,23 +118,16 @@ fn roomy_ir(phase: &PlacementPhase) -> PlacementIr {
 }
 
 /// Which end of the pad column runs out of rows.
-///
-/// Both ends saturate through the same `edge_pad`, but they land on
-/// different things — the actuator column onto a cell, the sensor
-/// column onto its own previous pad — and the refusal names which.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum CollapsedRow {
-    /// `depth = 1` leaves the actuator column no row of its own, so
-    /// output pad #0 lands on the cell at the right-hand edge.
+    /// `depth = 1`: output pad #0 lands on the cell at the right-hand edge.
     OutputOntoCell,
-    /// `depth = 2` leaves the sensor column two rows for three inputs,
-    /// so input pad #2 saturates onto input pad #1.
+    /// `depth = 2` for three inputs: input pad #2 saturates onto #1.
     InputOntoInput,
 }
 
 impl CollapsedRow {
-    /// `(reservation, inputs)`: the region too small for the row, and
-    /// how many sensors it is asked to hold.
+    /// The region too small for the row, and how many sensors it holds.
     fn shape(self) -> (CircuitRegionReservation, usize) {
         match self {
             Self::OutputOntoCell => (reservation(2, 1, 1), 1),
@@ -145,7 +151,7 @@ impl CollapsedRow {
 
 fn shallow_ir(phase: &PlacementPhase, row: CollapsedRow) -> PlacementIr {
     let (region, inputs) = row.shape();
-    let pad = crate::routing_geometry::output_pad(0, PadColumn::for_cell_count(1), &region);
+    let pad = output_pad(0, PadColumn::for_cell_count(1), &region);
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(region);
     for i in 0..inputs {
@@ -175,15 +181,7 @@ fn shallow_ir(phase: &PlacementPhase, row: CollapsedRow) -> PlacementIr {
     ir
 }
 
-/// A scope carrying cells but no `circuit region=` reservation, beside
-/// the sound scope [`collapsed_pad_row`] uses.
-///
-/// Hand-built for the same reason: the placement pass fires
-/// `E_NO_CIRCUIT_REGION` and elides such a scope before any later
-/// stage sees it, so a caller assembling the IR itself is the only way
-/// to produce one. `phase` is what the stage under test expects to be
-/// handed, and the second scope is what distinguishes "elides the
-/// scope that earned the refusal" from "elides everything".
+/// A scope with cells but no reservation, beside the sound one.
 pub(crate) fn regionless_scope(phase: &PlacementPhase) -> ScopedPlacementIr {
     let mut ir = PlacementIr::new(Edition::Java);
     ir.cells.push(PlacedCellNode {
@@ -207,26 +205,17 @@ pub(crate) fn regionless_scope(phase: &PlacementPhase) -> ScopedPlacementIr {
     scoped
 }
 
-/// Which `NetRef` variant the fixture below points past the end of the
-/// list that answers it.
+/// Which `NetRef` variant [`dangling_net`] points one past the end of its list.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum DanglingNet {
-    /// A driver naming a cell the IR does not have. Breaks the
-    /// topological invariant (`j < i` inside `cells[i]`) as well as the
-    /// bound, since the only cell is the one carrying the driver, and
-    /// `cells[0]` can satisfy `j < 0` for no `j` at all.
+    /// A driver naming a cell the IR does not have.
     Cell,
     /// A driver naming a sensor the netlist does not have.
     Input,
 }
 
 impl DanglingNet {
-    /// Exactly one index past the end of the list that answers it,
-    /// rather than comfortably past.
-    ///
-    /// An index far past the end is answered by any bound that is
-    /// roughly right, so it cannot tell `< len` from `<= len`. The
-    /// first index the list does not have is the one that can.
+    /// One past the end, the index that tells `< len` from `<= len`.
     fn net(self) -> NetRef {
         match self {
             Self::Cell => NetRef::Cell(1),
@@ -234,12 +223,7 @@ impl DanglingNet {
         }
     }
 
-    /// The whole panic message, not a prefix of it.
-    ///
-    /// The routing pass used to carry a `debug_assert!` whose wording
-    /// was the first half of this one, so a test keyed on the index
-    /// alone would have passed against the shape being replaced — in
-    /// debug builds, and only there.
+    /// The whole panic message.
     pub(crate) fn expected(self) -> &'static str {
         match self {
             Self::Cell => {
@@ -254,11 +238,7 @@ impl DanglingNet {
     }
 }
 
-/// One scope whose only cell is driven by a net no list can answer.
-///
-/// The reservation is roomy and the geometry sound, so nothing but the
-/// dangling index is wrong: a stage that answers this fixture at all
-/// answered it with a coord it invented.
+/// One scope whose only cell is driven by a net no list can answer, in otherwise sound geometry.
 pub(crate) fn dangling_net(phase: &PlacementPhase, which: DanglingNet) -> ScopedPlacementIr {
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(6, 3, 1));
@@ -283,24 +263,17 @@ fn scoped_entry(ir: PlacementIr) -> ScopedPlacementIr {
     scoped(ScopeKind::Struct, "dangling", ir)
 }
 
-/// Which kind of sink [`far_sink`] puts at the far edge of the
-/// reservation.
-///
-/// Both arms of the attenuation walk, because they are two loops and a
-/// gate that grew only one of them would still answer the case a
-/// `.crn` produces.
+/// Which kind of sink [`far_sink`] puts at the far edge of the reservation.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FarSink {
-    /// A gate body driven by the sensor pad at the near edge.
+    /// A gate body.
     Cell,
-    /// An actuator pad driven by the same, which is the shape a
-    /// `region=` as wide as its `size=` makes on its own.
+    /// An actuator pad.
     OutputPad,
 }
 
 impl FarSink {
-    /// How a refusal names it, in the wording [`crate::delay`] uses for
-    /// the same sink one stage later.
+    /// How a refusal names it, in [`crate::delay`]'s wording.
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Cell => "cell #0 port #0",
@@ -309,14 +282,8 @@ impl FarSink {
     }
 }
 
-/// One scope whose only net runs the width of the reservation: a sink
-/// at `x = width - 1` driven by the sensor pad at `x = 0`.
-///
-/// Nothing stands between them, so the route is the straight line and
-/// `width - 1` is both the distance and the segment the cap is measured
-/// against. That is what lets a caller put the two sides of the cap —
-/// the straight-line floor and the routed length — on one axis by
-/// moving one number.
+/// One scope whose only net runs straight across the reservation, so `width - 1` is both its
+/// straight-line and its routed length.
 pub(crate) fn far_sink(phase: &PlacementPhase, width: u32, which: FarSink) -> ScopedPlacementIr {
     let region = reservation(width, 3, 2);
     let far = CellCoord::new(width - 1, 0, 0);
@@ -351,25 +318,8 @@ pub(crate) fn far_sink(phase: &PlacementPhase, width: u32, which: FarSink) -> Sc
     scoped(ScopeKind::Struct, "wide", ir)
 }
 
-/// One scope whose only net has nowhere for a buffer repeater, beside
-/// a sound one.
-///
-/// The sensor pad at `(0,0,0)` drives a gate at `(9,0,9)` across a
-/// `16x16`, `void=1` reservation. Seventeen gate bodies that drive
-/// nothing stand on two diagonal lines, `(x, x+1)` for `x` in `0..9`
-/// and `(x, x-2)` for `x` in `2..10`, and a path that moves one block
-/// at a time cannot cross a diagonal line without stepping onto it. So
-/// the one shortest way through — the one the router lays — is the
-/// staircase between them, east, south, east, south: 18 blocks, so the
-/// signal needs a repeater, and every coord between the two ends turns,
-/// which no repeater can carry a signal through.
-///
-/// Every node carries `phase`: handed to stage 2 unrouted, the
-/// staircase is the router's own, not one built by hand.
-///
-/// The second scope is [`collapsed_pad_row`]'s sound one, so a caller
-/// can tell "elides the scope that earned the refusal" from "elides
-/// everything".
+/// One scope whose only route is an 18-block staircase between two diagonal walls, where no coord
+/// runs straight for the repeater it needs, beside a sound one.
 pub(crate) fn staircase(phase: &PlacementPhase) -> ScopedPlacementIr {
     const SIDE: u32 = 10;
     let walls = (0..SIDE - 1)

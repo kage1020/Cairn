@@ -1,8 +1,4 @@
-"""Tests for changelog.py, run as `python3 -m unittest discover -s .github/scripts`.
-
-Each test copies the script into a scratch git repository and runs it there as
-a subprocess, so `ROOT` is that repository and nothing touches this one.
-"""
+"""Tests for changelog.py, run as `python3 -m unittest discover -s .github/scripts`."""
 
 from __future__ import annotations
 
@@ -100,7 +96,6 @@ class Case(unittest.TestCase):
         self.fresh()
 
     def fresh(self) -> None:
-        """Start over in a new scratch repository."""
         self.repo = Repo()
         self.addCleanup(self.repo.cleanup)
 

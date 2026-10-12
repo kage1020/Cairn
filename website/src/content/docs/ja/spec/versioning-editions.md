@@ -684,7 +684,7 @@ W_SEMANTIC_SENSITIVITY: 2 members may resolve differently: yard_water, fence
 intent_state: { primitive: stairs, corner: inner_left, facing: east }   # エディション中立
 resolved_state:
   java:    { facing: east, half: bottom, shape: inner_left }
-  bedrock: { weirdo_direction: 1, upside_down_bit: false }              # shape が無く角がつながらない
+  bedrock: { weirdo_direction: 0, upside_down_bit: false }              # shape が無く角がつながらない
 ```
 
 解決結果の差が見た目や機能の差になるとき、ビルドが知らせます。`themed-tower` の軒の階段は

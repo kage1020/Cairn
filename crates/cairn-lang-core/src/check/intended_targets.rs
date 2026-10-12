@@ -1,91 +1,18 @@
-//! `intended_targets` pass — weighs `@intended_targets` against the floors
-//! the same file declares, and against the versions the edition can build.
-//!
-//! The two headers used to be two inert statements: neither reached
-//! anything, so a file could say `@requires version>=1.21` on one line and
-//! `@intended_targets ["1.20.4"]` on the next and be told nothing. Once
-//! the floor became enforceable against `cairn compile --target`, the
-//! arrangement got worse rather than better — one of the two declarations
-//! decides a build and the other is ignored, and the ignored one is the
-//! header that reads like an instruction. This pass is the comparison
-//! between them.
-//!
-//! # Why it is not one of [`super::check`]'s passes
-//!
-//! Every question here is answered by the target edition's `DataVersion`
-//! table (`spec/versioning-editions` "The target is a compile-time
-//! parameter"), which lives in the registry pack and reaches this crate only
-//! as a [`VersionOrder`] the caller builds. `check` takes no pack and no
-//! order, so it cannot run
-//! this pass; the CLI does, once per edition the command is about. That is
-//! the same shape `E_THEME_VARIANT_MISSING` has — a finding only a pinned
-//! edition can reach — and the alternative is worse: comparing two version
-//! labels as text is the defect `VersionOrder` exists to remove, and a
-//! comparison this file made by text would reach "1.21.40 satisfies
-//! version>=1.21.4" exactly as the enforcement once did.
-//!
-//! # The three findings
-//!
-//! A target is weighed only when the edition can build it, because
-//! "`--target 1.19` is not a version this compiler builds" answers before
-//! any floor does and is the more actionable news. So each version the
-//! header names is one of:
-//!
-//! - not a version the edition builds — `W_INTENDED_TARGET_UNSUPPORTED`,
-//!   whether the table places it as a release the pack ships no block data
-//!   for (`1.19` on Java) or cannot place it at all (`1.21.40` on Java,
-//!   which is Bedrock's numbering);
-//! - below a floor the file declares — the file states an intention the
-//!   compiler refuses the moment anyone acts on it;
-//! - buildable, at or above every floor, which is the ordinary case and
-//!   raises nothing.
-//!
-//! The second splits by reach rather than by kind, counted over the
-//! versions the edition can build rather than over everything the header
-//! names. Every one of them below a floor is `E_INTENDED_TARGET_CAP`: the
-//! file can be built for nothing it says it is for, which is the
-//! strongest reading a contradiction between two declarations gets and
-//! the one an author cannot have meant. *Some* of them is
-//! `W_INTENDED_TARGET_CAP`, because `spec/syntax` "Headers" calls this
-//! header "a hint, not a verification record" — a list that reaches past
-//! the floor at one end is a wish stated too widely, and the versions it
-//! names above the floor still build.
-//!
-//! Counting the unbuildable names in that denominator would demote the
-//! first case with a name that was never buildable: `["1.20.4", "1.19"]`
-//! under `version>=1.21` builds on no Java version at all, and `1.19`
-//! answering for half the list made it read as half a problem.
+//! The `intended_targets` pass: `@intended_targets` weighed against the file's version floors and
+//! the versions the edition builds. It runs outside [`super::check`] because it needs the
+//! edition's [`VersionOrder`]
+//! (`spec/versioning-editions` "The target is a compile-time parameter").
 
 use crate::ast::{Header, Module};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
-use crate::resolve::{
-    FloorVerdict, VersionFloor, VersionOrder, compare_versions, declared_version_floors,
-    versions_satisfying,
-};
+use crate::resolve::{VersionFloor, declared_version_floors, versions_satisfying};
+use crate::version::{FloorVerdict, VersionOrder, compare_versions};
 
-use super::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
-
-/// Weigh every `@intended_targets` version a module declares against the
-/// floors a build of `edition` is held to.
+/// The findings for each `@intended_targets` version weighed against `edition`'s floors.
 ///
-/// `order` is that edition's release table and `targetable` the versions
-/// its registry pack can build for — the same two lists `cairn compile`
-/// weighs `--target` against, so a version this pass calls buildable is
-/// one the build accepts.
-///
-/// The findings are returned rather than pushed into a
-/// [`super::DiagnosticSink`]: this pass runs outside [`super::check`] (see
-/// the module doc), so the caller merges them into whatever stream it is
-/// already reporting.
-///
-/// A `targetable` entry `order` cannot place is dropped rather than
-/// panicked on. The two come from one registry pack, where the buildable
-/// versions are a subset of the release table by construction, so nothing
-/// in this repository can produce one — but this is a public entry point,
-/// and a pack assembled elsewhere should get an answer rather than an
-/// abort. Dropping errs the safe way: such a version is one no `--target`
-/// could be ordered against either.
+/// `targetable` lists the versions the registry pack builds; one `order` cannot place is dropped.
 #[must_use]
 pub fn weigh_intended_targets(
     module: &Module,
@@ -99,9 +26,6 @@ pub fn weigh_intended_targets(
         let Header::IntendedTargets { targets, span } = header else {
             continue;
         };
-        // `@intended_targets []` states no intention, so there is nothing
-        // for a floor to contradict. Reporting the empty list as "names no
-        // buildable version" would be true and useless.
         if targets.is_empty() {
             continue;
         }
@@ -121,49 +45,29 @@ pub fn weigh_intended_targets(
 
 /// What one intended version is, weighed against one edition.
 enum Verdict<'a> {
-    /// A version the edition builds, at or above every floor that applies.
+    /// Built by the edition, at or above every floor.
     Buildable,
-    /// A version the edition builds, below a floor the file declares —
-    /// the first one in source order that refuses it, for the reason
-    /// `E_VERSION_CAP` reports the first: an equivalent line appended
-    /// below an existing one must not move the finding.
+    /// Built by the edition, below this floor: the first in source order to refuse it.
     BelowFloor(&'a VersionFloor),
-    /// A release of this edition the registry pack ships no block data
-    /// for, so `--target` cannot name it.
+    /// A release of this edition the registry pack ships no block data for.
     NotShipped,
-    /// Not a release of this edition at all: either a label its table
-    /// cannot place — which is what a version written in the other
-    /// edition's numbering looks like — or one outside the table's span.
+    /// Not a release of this edition, such as the other edition's numbering.
     NoSuchRelease,
 }
 
-/// Place one intended version, then weigh it if the edition can build it.
-///
-/// The order is what keeps the two findings apart. A version the pack
-/// cannot build is reported as that and not as a cap, however its label
-/// sits against the floors: "`--target 1.19` does not exist here" is the
-/// answer the author acts on first, and a cap reported beside it would
-/// send them to raise a floor that is not what stops the build.
+/// Only a buildable version meets the floors: a floor is not what stops an unbuildable one.
 fn weigh<'a>(
     label: &str,
     floors: &'a [VersionFloor],
     order: &VersionOrder,
     targetable: &[String],
 ) -> Verdict<'a> {
-    // The key rather than the label, once a row is found: a version is
-    // weighed against a floor by its `DataVersion` and never by its text.
-    // A row the table cannot place falls through to the arm below rather
-    // than aborting — see the entry point's note on a pack assembled
-    // outside this repository.
+    // Weighed by its `DataVersion` key, never by the label's text.
     let buildable = targetable
         .iter()
         .find(|row| compare_versions(row, label).is_eq())
         .and_then(|row| order.key_of(row));
     let Some(key) = buildable else {
-        // Placed rather than merely absent from the buildable list: a
-        // release the pack can order and one it has never heard of are
-        // different news to the author, and only the first has a version
-        // of this edition behind it.
         return if order.place(label).names_release() {
             Verdict::NotShipped
         } else {
@@ -177,11 +81,6 @@ fn weigh<'a>(
 }
 
 /// The cap finding, when any intended version is below a floor.
-///
-/// One finding for the header rather than one per version: the header is
-/// one declaration and the repair is one edit to it, and a list of five
-/// versions below one floor is not five things to fix. Which versions, and
-/// which floor put each of them out, is what the notes carry.
 fn capped(
     weighed: &[(&str, Verdict<'_>)],
     span: &Span,
@@ -197,20 +96,8 @@ fn capped(
             Verdict::Buildable | Verdict::NotShipped | Verdict::NoSuchRelease => None,
         })
         .collect();
-    // The first refusing floor in source order, which is the one the fix
-    // line and the payload speak about — the same choice `E_VERSION_CAP`
-    // makes, so an equivalent line appended below an existing one does not
-    // move what the message names.
     let (_, first_floor) = *below.first()?;
-    // Against the versions this edition can build, not against everything
-    // the header names. A version no `--target` names is reported by
-    // `unsupported` and is not a version a floor has anything to say
-    // about, so counting it here demoted the file that can be built for
-    // nothing it says it is for — `@intended_targets ["1.20.4", "1.19"]`
-    // under `version>=1.21` — to a warning, on the strength of a name
-    // that was never buildable. `below` is non-empty by the line above,
-    // so the denominator is at least one and "every" cannot mean "of
-    // nothing".
+    // Buildable versions only: an unbuildable name must not soften the error to a warning.
     let buildable = weighed
         .iter()
         .filter(|(_, verdict)| matches!(verdict, Verdict::Buildable | Verdict::BelowFloor(_)))
@@ -285,11 +172,6 @@ fn unsupported(
     let outside: Vec<(&str, String)> = weighed
         .iter()
         .filter_map(|(target, verdict)| match verdict {
-            // Two reasons because they are two different repairs. A
-            // release the pack does not ship is a version of *this*
-            // edition and the answer is another target; a label it cannot
-            // place is usually the other edition's numbering, and the
-            // answer may be another edition.
             Verdict::NotShipped => Some((
                 *target,
                 format!("is a {edition} release this compiler ships no block data for"),
@@ -317,11 +199,6 @@ fn unsupported(
         span: None,
         message: format!("{edition} builds against {}", targetable.join(", ")),
     });
-    // Both halves of the repair, because the header is a statement of
-    // intent and the wrong half of it may be the edition: a version this
-    // edition cannot place is usually the other edition's numbering, and
-    // telling its author to pick from the list above would be telling them
-    // to give up the target they meant.
     notes.push(DiagnosticNote {
         span: None,
         message: "fix: name a version this edition builds, or build for the edition that has \
@@ -344,12 +221,7 @@ fn unsupported(
     })
 }
 
-/// The closed set of versions that would satisfy every floor at once.
-///
-/// Every floor, not the one being reported: a version that clears this
-/// floor and trips the next one is a second error in a different spelling,
-/// and `spec/lint` "Diagnostic codes" makes the valid candidates part of the
-/// message rather than an extra.
+/// The versions that satisfy every floor at once (`spec/lint` "Diagnostic codes").
 fn candidates_note(
     edition: Edition,
     order: &VersionOrder,
@@ -372,11 +244,6 @@ fn candidates_note(
     }
 }
 
-/// How to name the line a floor was written on, as a repair points at it.
-///
-/// The two spellings are `@requires` on a module header and `requires`
-/// inside a `def` or a `theme` body; a fix line naming the wrong one sends
-/// its reader looking for a line the file does not contain.
 fn keyword(floor: &VersionFloor) -> &'static str {
     if floor.origin.part().is_some() {
         "`requires`"

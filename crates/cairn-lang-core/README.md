@@ -25,7 +25,7 @@ Everything past the block-array IR — the NBT codec, the format backends, redst
 
 ## Not yet here
 
-Entity placement, the editing and patch DSL ([components-editing-sites "Editing model"](https://cairn.kage1020.com/spec/components-editing-sites/)), and the reverse direction — lifting an imported structure back into idiomatic Cairn — are specified but unimplemented. Roles outside the set `block_array` voxelises today (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
+Entity placement, the editing and patch DSL ([components-editing-sites "Editing model"](https://cairn.kage1020.com/spec/components-editing-sites/)), and the reverse direction — lifting an imported structure back into idiomatic Cairn — are specified but unimplemented. Roles outside the set `block_array` voxelises (floor, walls, door, window, roof, stair, pressure plate, `level` grouping, and `circuit region` reservations) lower to a `W_DEFERRED_MEMBER` warning rather than to blocks.
 
 ## Versioning
 

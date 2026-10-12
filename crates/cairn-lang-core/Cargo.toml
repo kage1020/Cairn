@@ -13,22 +13,18 @@ authors.workspace = true
 workspace = true
 
 [dependencies]
-indexmap = { version = "2.14.0", features = ["serde"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
+indexmap = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 serde_norway = "0.9.42"
 sha2 = "0.11.0"
-strsim = "0.11.1"
-thiserror = "2.0.18"
+strsim.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-# Default features off: that drops `rayon` (parallel analysis after a
-# run), `plotters` (plot rendering) and `cargo_bench_support`, which 0.8.2
-# declares but never reads, so `cargo bench` and saved baselines work
-# unchanged.
-criterion = { version = "0.8.2", default-features = false }
-insta = { version = "1.48.0", features = ["yaml"] }
-strum = { version = "0.28.0", features = ["derive"] }
+criterion.workspace = true
+insta = { workspace = true, features = ["yaml"] }
+strum = { workspace = true, features = ["derive"] }
 
 [[bench]]
 name = "lowering"

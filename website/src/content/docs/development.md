@@ -55,7 +55,7 @@ leaf integrations that nothing depends on. `cairn-lang-formats` is the only crat
 | Rust | `rust-toolchain.toml` | An exact version, not a channel. With `rustfmt` and `clippy`. |
 | Edition 2024, MSRV | `Cargo.toml` | Workspace package metadata, inherited by every crate. |
 | Formatting | `rustfmt.toml` | `max_width = 100`, Unix line endings. |
-| Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = deny`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
+| Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = forbid`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
 
 The Rust version is exact because CI treats every clippy finding as fatal. On a channel, a Rust
 release turns every open branch red on its own — the finding lands on a file the branch never
@@ -66,20 +66,21 @@ consumer needs, and raising the pin does not raise it. The number itself lives o
 that compiler, so a change reaching for a newly stabilised API goes red there rather than at a
 consumer's.
 
-Every crate inherits these with `[lints] workspace = true` and writes no `[lints.*]` table of its
-own. Inheritance is opt-in per crate and all-or-nothing: a crate without that line receives none of
-the workspace lints, so a lint added to the workspace later would silently skip it.
+Every crate but the tree-sitter one inherits these with `[lints] workspace = true` and writes no
+`[lints.*]` table of its own; the next paragraph says why that one carries a copy. Inheritance is
+opt-in per crate and all-or-nothing: a crate without that line receives none of the workspace
+lints, so a lint added to the workspace later would silently skip it.
 
-`unsafe_code` is denied workspace-wide and lifted inside one module: `ffi` in the tree-sitter
-crate's Rust binding, which is the only way to reach the generated C parser. The level is `deny`
-rather than `forbid` because `forbid` refuses that module's `#![expect(unsafe_code)]` too. The
-`unsafe_code_is_confined` test in `cairn-lang-core` makes up the difference, over every crate
-`cargo metadata` reports as a workspace member: it fails if the workspace level is anything but
-`deny`, if a crate does not inherit the workspace lints, or if an `allow`, `expect`, `warn` or
-`cfg_attr` attribute names `unsafe_code` outside that module. Its module doc is the full statement
-of the policy and of what the test cannot see. If another use case ever needs `unsafe`, it goes
-through a focused PR that lifts the lint on a single module with documented invariants and adds
-that file and module to the test's `ALLOWED` list, never `#[allow]` at a call site.
+`unsafe_code` is forbidden everywhere but one module: `ffi` in the tree-sitter crate's Rust
+binding, which is the only way to reach the generated C parser. `forbid` cannot be lifted, so that
+crate alone carries a copy of the workspace lints with `unsafe_code` at `deny`, and `ffi` lifts it
+with `#![expect(unsafe_code)]`. `cargo xtask lint` holds the exception that narrow: its `manifest`
+rule fails if the workspace level is anything but `forbid`, if a crate does not inherit the
+workspace lints, or if the tree-sitter copy differs from them in anything else, and its
+`unsafe-code` rule fails if an `allow`, `expect`, `warn` or `cfg_attr` attribute names
+`unsafe_code` outside that module. If another use case ever needs `unsafe`, it lifts the lint on a
+single module with documented invariants and adds that file and module to the rule's `ALLOWED`
+list, never `#[allow]` at a call site.
 
 ## Build, test, lint
 
@@ -97,6 +98,11 @@ cargo test -p cairn-lang-redstone --bench place_and_route
 
 The last two run each bench once as a test, untimed; `--workspace` does not select bench
 targets.
+
+CI's `Lint` job also runs `cargo xtask lint`, the checks that compare files with each other rather
+than test behaviour: README inventories, spec citations, the diagnostic catalog, the copies of the
+version, the lint configuration. `cargo xtask lint --list` names them, and each rule's module in
+`xtask/src/rules/` says why it holds.
 
 CI sets `RUSTFLAGS=-D warnings`, so any new warning fails the build. To match it locally:
 

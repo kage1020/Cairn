@@ -1,11 +1,5 @@
-//! Named member of an Intent IR.
-//!
-//! Mirrors the spec's "rich member with invariants" (see `spec/architecture`
-//! "The Intent IR is rich and carries invariants"): every member knows its
-//! [`MemberRole`], may carry an `id` / `class` / `mat_slot`, holds an
-//! [`IntentState`] of raw `key=value` attributes, and reserves a
-//! [`ResolvedState`] slot that the lift pass fills in once materials and themes
-//! resolve.
+//! Named member of an Intent IR, the rich member of `spec/architecture`
+//! "The Intent IR is rich and carries invariants".
 
 use std::ops::{Deref, DerefMut};
 
@@ -15,141 +9,47 @@ use serde::Serialize;
 use crate::ast::{Value, ValueKind};
 use crate::error::Span;
 
-use super::{AssertIr, LogicBinding};
+use super::{AssertIr, LogicBinding, MemberRole};
 
 /// One named member produced by lowering a body statement.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Member {
-    /// Explicit `id=` value, if any. The lowering pass does not auto-assign
-    /// addresses; an unset `id` stays unset all the way through.
+    /// Explicit `id=` value, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
     /// Explicit `class=` grouping, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub class: Option<String>,
-    /// What kind of member this is. Classified from the surface command
-    /// keyword via [`super::keyword_table::role_of`]; unknown keywords land
-    /// in [`MemberRole::Other`].
+    /// What kind of member this is; unknown keywords are [`MemberRole::Other`].
     pub role: MemberRole,
-    /// Explicit `mat_slot=` slot name, if any, with where its value was
-    /// written.
-    ///
-    /// On a role that reads one, the name the resolver looks up in the
-    /// bound theme's slot table. On a role whose
-    /// [`MemberRole::unread_arguments`] lists `mat_slot` it refers to
-    /// nothing: the resolver does not look it up, and `check::arguments`
-    /// reports it as ignored, at the position this carries. Which of the two
-    /// a member is, [`Self::read_slot`] answers.
+    /// Explicit `mat_slot=` slot name, if any; [`Self::read_slot`] says whether it is read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mat_slot: Option<Label>,
-    /// `[attr=value]` selector immediately after the keyword
-    /// (`door[id=front] ...`). Carried through verbatim; later passes decide
-    /// whether the selector is binding a fresh id or referencing an existing
-    /// member.
+    /// `[attr=value]` selector immediately after the keyword, verbatim.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selector: Option<IndexMap<String, ValueWithSpan>>,
-    /// Bare values on the line, in source order.
-    ///
-    /// Not a prefix — see [`crate::ast::Statement::Generic`]'s field of the
-    /// same name for why. `check::positional` reads *this* copy and spans
-    /// the run first-to-last, so the distinction is load-bearing here
-    /// rather than merely accurate.
-    /// Empty for almost every command; non-empty only for special forms
-    /// such as `connect <ref> to <ref>` whose surface grammar mandates them.
+    /// Bare values on the line in source order, wherever they sit.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub positional: Vec<Value>,
-    /// `-> VALUE` tail at the end of a line, e.g.
-    /// `pressure_plate ... -> sig.step`. Always carried separately from
-    /// [`Self::intent_state`] so the resolver's reference pass can match
-    /// it without round-tripping through a string key.
+    /// `-> VALUE` tail at the end of the line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<Value>,
-    /// `key=value` attributes that were not consumed by the dedicated fields
-    /// above. These remain untyped today; a per-keyword schema pass is
-    /// reserved for a future extension.
+    /// `key=value` attributes the fields above did not consume.
     pub intent_state: IntentState,
-    /// Per-edition resolved blockstate. Always `None` at semantic level
-    /// `Grouped`; populated when the lift pass advances the member to
-    /// `Lifted`.
+    /// Per-edition resolved blockstate; `None` until the member is `Lifted`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_state: Option<ResolvedState>,
     /// Nested body indented under this member.
-    ///
-    /// A `level y=...` (or any other grouping keyword) may declare further
-    /// members, `logic` bindings, and `assert` properties beneath it. Holding
-    /// the children as a [`MemberBody`] — the same triple the top-level IR
-    /// uses — keeps each of those three statement flavours addressable
-    /// instead of forcing the caller to either reject or silently drop the
-    /// non-member ones. The current `lower` is total, so the only
-    /// structural invariant maintained here is "children sit in their
-    /// declaration order, grouped by kind".
     #[serde(default, skip_serializing_if = "MemberBody::is_empty")]
     pub children: MemberBody,
-    /// Byte range of the originating `Statement::Generic` line in the source
-    /// (children excluded). Diagnostic passes anchor `E_UNKNOWN_KEYWORD` and
-    /// similar messages here.
+    /// Byte range of the member's own line, children excluded.
     #[serde(skip)]
     pub span: Span,
 }
 
-/// Coarse classification of a member, derived from its source keyword.
-///
-/// Not marked `#[non_exhaustive]` on purpose: the [`MemberRole::Other`]
-/// variant already forces every external `match` to handle the "any keyword
-/// we don't know" case, so a non-exhaustive marker would only suppress the
-/// internal exhaustiveness check we rely on to catch missed updates when a
-/// new keyword is added to the roster.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "kind", content = "value")]
-pub enum MemberRole {
-    /// `floor` command.
-    Floor,
-    /// `walls` command.
-    Walls,
-    /// `door` command.
-    Door,
-    /// `window` command.
-    Window,
-    /// `roof` command.
-    Roof,
-    /// `stair` command.
-    Stair,
-    /// `level` grouping block.
-    Level,
-    /// `pressure_plate` fixture.
-    PressurePlate,
-    /// `circuit` redstone region marker.
-    Circuit,
-    /// `place` site placement.
-    Place,
-    /// `connect` site topology edge.
-    Connect,
-    /// Any keyword the role table does not know about. The keyword-allowlist
-    /// validation pass reports these via `E_UNKNOWN_KEYWORD`; lower itself
-    /// never fails.
-    Other(String),
-}
-
 impl Member {
-    /// The slot name this member reads from a theme: its hoisted
-    /// [`Self::mat_slot`], unless its role's
-    /// [`MemberRole::unread_arguments`] lists `mat_slot`, where the name
-    /// changes nothing in the build.
-    ///
-    /// This is the one definition of reading a `mat_slot=`, and every
-    /// question of that shape asks it rather than [`Self::mat_slot`]. The
-    /// resolver looks up exactly the names it returns, and reports
-    /// `E_THEME_VARIANT_MISSING` for the module's theme only when a `struct`
-    /// or `def` member reads one. `block_array` reports `W_NO_THEME_BOUND` on
-    /// a body only when a member that survives its `level` flattening reads
-    /// one. A hoisted `mat_slot=` this answers `None` for is the
-    /// `W_IGNORED_ARGUMENT` that `check::arguments` reports from the same
-    /// table.
-    ///
-    /// The predicate is that table and nothing wider. An unknown keyword
-    /// ([`MemberRole::Other`]) lists nothing there, so its slot reads: the
-    /// line is refused with `E_UNKNOWN_KEYWORD` either way, and a misspelt
-    /// slot on it is one the author will need once the keyword is repaired.
+    /// The slot name this member reads from a theme: its [`Self::mat_slot`], unless its role's
+    /// [`MemberRole::unread_arguments`] lists `mat_slot`. Ask this, not the field.
     #[must_use]
     pub fn read_slot(&self) -> Option<&str> {
         self.mat_slot
@@ -158,15 +58,7 @@ impl Member {
             .map(|slot| slot.name.as_str())
     }
 
-    /// Read `key=` as a non-negative `u32`, or `None` when the argument
-    /// is absent, is not an integer, is negative, or would not fit.
-    ///
-    /// Shared rather than re-read per pass: `block_array` places a
-    /// `level`'s children at this offset and `check::nesting` reports a
-    /// `level` that has none, so the two have to agree on what counts
-    /// as a usable value. `u32::try_from` failing on overflow is the
-    /// point — no member should land at `u32::MAX` because the author
-    /// asked for `2^33`.
+    /// Read `key=` as a non-negative `u32`, or `None`.
     #[must_use]
     pub fn nonneg_u32(&self, key: &str) -> Option<u32> {
         match &self.intent_state.get(key)?.value.kind {
@@ -175,15 +67,7 @@ impl Member {
         }
     }
 
-    /// Read `key=` as a bare identifier, or `None` when the argument is
-    /// absent or its value is of any other shape.
-    ///
-    /// Shared for the same reason [`Self::nonneg_u32`] is. A `kind=` picks
-    /// which lowering rule runs, and `check::arguments` decides from the
-    /// same value which of that rule's arguments it will read — so "what
-    /// counts as naming a rule" has to be one answer. A quoted `kind="shed"`
-    /// is not that identifier in either place: the member does not lower,
-    /// and the check pass leaves the whole line to the deferral.
+    /// Read `key=` as a bare identifier, or `None`.
     #[must_use]
     pub fn ident_value(&self, key: &str) -> Option<&str> {
         match &self.intent_state.get(key)?.value.kind {
@@ -193,17 +77,7 @@ impl Member {
     }
 }
 
-/// Which top-level body a member sits in, and so which roles the later
-/// passes have a reader for.
-///
-/// The two bodies are read by different code and share no keyword. A
-/// `struct` / `def` body is voxelised by `block_array`'s phase buckets; a
-/// `site` body is walked by the resolver's placement loop, which matches
-/// only [`MemberRole::Place`] and [`MemberRole::Connect`] and drops
-/// everything else without a word. Naming the split once keeps
-/// `check::member_scope` (which reports a member the enclosing body has no
-/// reader for) and `check::nesting` (which reports an indented body nothing
-/// unwraps) from encoding it twice.
+/// Which top-level body a member sits in, and so which roles the later passes have a reader for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyKind {
     /// A `struct` or `def` body — one building's geometry.
@@ -213,8 +87,7 @@ pub enum BodyKind {
 }
 
 impl BodyKind {
-    /// Surface keyword(s) naming this body, for prose that has to say
-    /// where the author is.
+    /// Surface keyword(s) naming this body, for prose.
     #[must_use]
     pub fn describe(self) -> &'static str {
         match self {
@@ -223,11 +96,7 @@ impl BodyKind {
         }
     }
 
-    /// Keywords this body has a reader for, in the order
-    /// [`super::known_keywords`] declares them.
-    ///
-    /// Rendered as the "expected one of" note, so it is the closed set the
-    /// author picks a replacement from.
+    /// Keywords this body has a reader for, in [`super::known_keywords`] order.
     #[must_use]
     pub fn allowed_keywords(self) -> Vec<&'static str> {
         super::known_keywords()
@@ -239,28 +108,8 @@ impl BodyKind {
 }
 
 impl MemberRole {
-    /// Whether a body of this kind has anything that reads this role.
-    ///
-    /// Derived from the readers, not from the grammar: the surface parser
-    /// accepts every keyword in every body, so this is the only place the
-    /// distinction is written down.
-    ///
-    /// * Geometry — `block_array`'s `member_disposition` buckets `floor`,
-    ///   `walls`, `roof`, `stair`, `door`, `window`, and `pressure_plate`;
-    ///   `recognize_circuit_region` reads `circuit`; `flatten_members`
-    ///   unwraps `level`.
-    /// * Site — `resolve::resolve_site_placements` and
-    ///   `block_array::lower_site` match `place` and `connect`.
-    ///
-    /// [`MemberRole::Other`] answers `false` for both, but no pass should
-    /// report it on that basis: the keyword is not in the table at all, so
-    /// `check::keyword_allowlist` owns it and the repair is the word rather
-    /// than the body it sits in.
-    ///
-    /// Matched on the pair with no wildcard so both axes are checked: a
-    /// third [`BodyKind`] has to be answered for every role here rather
-    /// than silently reading as "no reader", which would empty
-    /// [`BodyKind::allowed_keywords`] and report every member of that body.
+    /// Whether a body of this kind has anything that reads this role; `false` for
+    /// [`MemberRole::Other`], which `check::keyword_allowlist` reports instead.
     #[must_use]
     pub fn is_read_in(&self, body: BodyKind) -> bool {
         match (body, self) {
@@ -294,12 +143,7 @@ impl MemberRole {
         }
     }
 
-    /// Surface keyword this role was classified from.
-    ///
-    /// The inverse of [`super::role_of`], so a diagnostic can quote the
-    /// word the author typed without carrying it separately on every
-    /// [`Member`]. `keyword_table`'s round-trip test keeps the two
-    /// sides from drifting.
+    /// Surface keyword this role was classified from, the inverse of [`super::role_of`].
     #[must_use]
     pub fn keyword(&self) -> &str {
         match self {
@@ -319,17 +163,7 @@ impl MemberRole {
     }
 }
 
-/// Which end of a `connect FROM.PORT to TO.PORT` row a positional
-/// value occupies.
-///
-/// Both `check::connect_arity` and the resolver check the two ends
-/// identically and differ only in how they name the one at fault, so
-/// both reach for the same discriminant. Sharing the type instead of
-/// passing `"from"` / `"to"` around is what keeps the naming honest:
-/// the resolver's stringly-typed predecessor rendered the end as
-/// ``` `from=a.entry` ```, copying the `use=` / `east_of=` argument-key
-/// style onto a slot that has no argument key — advice that does not
-/// parse if the author follows it.
+/// Which end of a `connect FROM.PORT to TO.PORT` row a positional value occupies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConnectEnd {
     /// The `FROM.PORT` slot, before the `to` keyword.
@@ -339,8 +173,7 @@ pub(crate) enum ConnectEnd {
 }
 
 impl ConnectEnd {
-    /// Bare name of the end, for prose that supplies its own framing
-    /// (`the {} endpoint`).
+    /// Bare name of the end, for prose that supplies its own framing (`the {} endpoint`).
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::From => "from",
@@ -349,13 +182,7 @@ impl ConnectEnd {
     }
 }
 
-/// Sub-body indented under a [`Member`] (typically a `level y=...` block).
-///
-/// Mirrors the three statement flavours [`super::StructIr`] groups at the
-/// top level: ordinary member commands, `logic` bindings, and `assert`
-/// properties. Defined as a struct rather than a `Vec` of one big sum so a
-/// `level` block whose body mixes all three flavours lowers without losing
-/// any of them (`spec/lint` "Error vs warning" forbids silent dropping).
+/// Sub-body indented under a [`Member`], keeping members, `logic` and `assert` lines apart.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct MemberBody {
     /// Nested members in declaration order.
@@ -370,24 +197,14 @@ pub struct MemberBody {
 }
 
 impl MemberBody {
-    /// `true` when no members, logic bindings, or asserts have been added.
-    /// Used to elide empty bodies from snapshot output.
+    /// `true` when it holds no members, logic bindings or asserts.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.members.is_empty() && self.logic.is_empty() && self.asserts.is_empty()
     }
 }
 
-/// Raw `key=value` attributes attached to a [`Member`].
-///
-/// Stored as an [`IndexMap`] so source order is preserved — diagnostic
-/// messages need stable positions, and any snapshot-based test would
-/// otherwise flake. Each entry is wrapped in
-/// [`ValueWithSpan`] so the diagnostic-collecting `check` passes can point at
-/// the offending byte range without re-walking the AST to recover positions.
-/// `Deref` / `DerefMut` against the underlying map let callers write
-/// `state.insert(...)` / `state.contains_key(...)` without threading through
-/// a `.fields` accessor.
+/// Raw `key=value` attributes attached to a [`Member`], in source order.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct IntentState {
@@ -396,8 +213,7 @@ pub struct IntentState {
 }
 
 impl IntentState {
-    /// Construct an empty intent state. Equivalent to
-    /// `IntentState::default()` but spells out the intent at call sites.
+    /// Construct an empty intent state.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -418,37 +234,19 @@ impl DerefMut for IntentState {
     }
 }
 
-/// A [`Value`] together with its source byte range.
-///
-/// The `Value` itself already owns a `span` field (`#[serde(skip)]`); this
-/// wrapper exists so [`IntentState`] and the IR's per-keyword `args` maps can
-/// stay `IndexMap<String, ValueWithSpan>` even after the lowering step copies
-/// the value out of the AST. Keeping the span next to the value at the IR
-/// level means `check` passes can point at the exact byte range without
-/// re-correlating with the AST.
-///
-/// Equality here *does* include the wrapper's `span`, unlike
-/// [`crate::ast::Value`]'s, whose equality is its kind's. The two agree
-/// for anything `lower` builds, because the wrapper copies the value's own
-/// span — see [`Self::span`] — but they are different questions, and the
-/// field doc below records when they could come apart.
+/// A [`Value`] with its source byte range; unlike [`Value`]'s, this equality includes the span.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct ValueWithSpan {
     /// Underlying value.
     pub value: Value,
-    /// Byte range of the value in the original source. Equal to
-    /// `self.value.span()` for every value produced by `lower`; carried as a
-    /// separate field so future code paths can mint a `ValueWithSpan` that
-    /// extends the surrounding `key=value` range without rebuilding the
-    /// `Value` tree.
+    /// Byte range of the value in the original source.
     #[serde(skip)]
     pub span: Span,
 }
 
 impl ValueWithSpan {
-    /// Build a [`ValueWithSpan`] using the value's own span as the wrapper
-    /// span. The common case at the IR boundary.
+    /// Wrap `value` with its own span.
     #[must_use]
     pub fn from_value(value: Value) -> Self {
         let span = value.span().clone();
@@ -456,18 +254,7 @@ impl ValueWithSpan {
     }
 }
 
-/// A label-shaped value — an identifier or a string — hoisted out of a
-/// member's arguments into a dedicated field, with where it was written.
-///
-/// Hoisting takes the key out of [`IntentState`], whose entries carry their
-/// own spans, so the position travels with the name rather than in a field
-/// beside it that has to be kept in step. `#[serde(transparent)]` over the
-/// name, with the span skipped as [`ValueWithSpan`]'s is, so the IR
-/// serialises to the bare string it did before the span was carried.
-/// [`ValueWithSpan`] itself does not fit: it serialises the value's kind,
-/// and a hoisted label has already been reduced to its text.
-///
-/// Equality includes the span, as [`Member`]'s own does.
+/// An identifier or string hoisted out of a member's arguments, with where it was written.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct Label {
@@ -478,11 +265,7 @@ pub struct Label {
     pub span: Span,
 }
 
-/// Resolved, per-edition blockstate for a [`Member`].
-///
-/// Empty for now — only the shape is fixed so the future `Lifted` pass
-/// can populate concrete state without a breaking change. Uses the same
-/// `Deref` / `DerefMut` ergonomics as [`IntentState`].
+/// Resolved, per-edition blockstate for a [`Member`]; always empty for now.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct ResolvedState {

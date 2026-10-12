@@ -1,51 +1,16 @@
-//! The world rows a struct's `walls` members actually paint.
-//!
-//! A `walls height=H` member under `level y=N` fills the rows
-//! `N + 1 ..= N + H` — one voxel above the level's base plane, because the
-//! floor slab owns the base plane itself. A struct with several `walls`
-//! members therefore occupies a *set* of rows, and the set can have gaps:
-//! `walls height=2` plus a `level y=6 walls height=2` leaves `y = 3..=6`
-//! as open air between the two courses.
-//!
-//! The lowering used to carry that set as one number, the highest row any
-//! wall reached. A number cannot answer the question an opening has to
-//! ask — a `window`'s "is every row I cut into a wall?", a `door`'s "is
-//! the row I open at one?" — in either direction: it says nothing about
-//! the rows below the first course (so a `window y=0` carved a hole
-//! through the floor slab) and nothing about the gap between two courses
-//! (so a `window` between them hung glass in open air, and a `door` under
-//! walls that start a storey up carved air over air). All of them cut
-//! silently, because a check that cannot see the fault cannot report it.
-//!
-//! [`WallColumn`] is that set, kept as sorted inclusive spans with
-//! overlapping *and adjacent* runs merged. Merging adjacency is what makes
-//! a level-on-level tower read as one wall: `walls height=5` plus
-//! `level y=5 walls height=4` is `1..=9`, a window spanning the seam is
-//! cut into masonry the whole way up, and a doorway at the foot of it
-//! opens its two rows across the two members that paint them.
+//! The rows a struct's `walls` members paint: `walls height=H` under `level y=N` fills
+//! `N + 1 ..= N + H`, and courses that touch merge into one.
 
 use std::fmt;
 
-/// The rows a struct's walls occupy, as sorted inclusive `[start, end]`
-/// spans with no two of them touching.
-///
-/// Built once per struct and consulted by every member that has to sit
-/// inside a wall rather than merely below the roof.
+/// The rows a struct's walls occupy, as sorted inclusive spans with no two touching.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct WallColumn {
-    /// Disjoint, non-adjacent, ascending. Empty when no `walls` member
-    /// will paint a row — no positive `height=`, or a `mat_slot=` that
-    /// does not resolve.
     spans: Vec<(u32, u32)>,
 }
 
 impl WallColumn {
-    /// Build the column from `(y_offset, height)` pairs — one per `walls`
-    /// member the pass will paint, `y_offset` being the enclosing
-    /// `level y=N` (`0` in the struct body).
-    ///
-    /// A member with `height = 0` contributes nothing: it paints no row,
-    /// and its own `W_DEFERRED_MEMBER` fires in the massing phase.
+    /// Build the column from `(level y, height)` pairs, one per `walls` member the pass paints.
     pub(super) fn from_walls(walls: impl IntoIterator<Item = (u32, u32)>) -> Self {
         let mut spans: Vec<(u32, u32)> = walls
             .into_iter()
@@ -59,9 +24,6 @@ impl WallColumn {
         let mut merged: Vec<(u32, u32)> = Vec::with_capacity(spans.len());
         for (start, end) in spans {
             match merged.last_mut() {
-                // `start <= last.1 + 1` merges touching spans as well as
-                // overlapping ones, so two courses stacked without a gap
-                // read as the single wall they build.
                 Some(last) if start <= last.1.saturating_add(1) => last.1 = last.1.max(end),
                 _ => merged.push((start, end)),
             }
@@ -74,21 +36,7 @@ impl WallColumn {
         self.spans.is_empty()
     }
 
-    /// Whether the `height` rows starting at `y_start` all lie inside one
-    /// course.
-    ///
-    /// One course rather than the union: a rectangle that leaves masonry
-    /// and re-enters it above the gap is not cut into a wall, it is two
-    /// cuts with a hole between them. The spans are already merged, so
-    /// "one course" and "the union, with no gap crossed" are the same
-    /// test.
-    ///
-    /// `height = 0` cannot occur from source (`size=WxH` parses as
-    /// `NonZeroU32`) and an empty rectangle vacuously fits, so it answers
-    /// `true`. A rectangle whose last row does not fit in a `u32` answers
-    /// `false`: no column can hold it, and a wrapped sum would land the
-    /// question back at row 0 and answer `true` for a window nowhere near
-    /// a wall.
+    /// Whether the `height` rows from `y_start` all lie inside one course, not merely the union.
     pub(super) fn contains_rows(&self, y_start: u32, height: u32) -> bool {
         let Some(last_offset) = height.checked_sub(1) else {
             return true;
@@ -100,16 +48,7 @@ impl WallColumn {
             .is_some_and(|course_top| y_end <= course_top)
     }
 
-    /// The last row of the course that holds `y`, or `None` when no
-    /// course does.
-    ///
-    /// The question a `door` asks: it opens at one row and takes what
-    /// the course above that row will give it, so the answer has to be
-    /// the top of *that* course rather than the top of the tallest one.
-    /// A `window` asks the same column [`Self::contains_rows`], which is
-    /// this answer plus "and the rectangle ends at or below it" — one
-    /// implementation, so the two members cannot come to disagree about
-    /// where the masonry is.
+    /// The last row of the course that holds `y`, or `None` when no course does.
     pub(super) fn course_top_at(&self, y: u32) -> Option<u32> {
         self.spans
             .iter()
@@ -119,14 +58,7 @@ impl WallColumn {
 }
 
 impl fmt::Display for WallColumn {
-    /// `y=1..=3`, or `y=1..=2, y=7..=8` when the column has a gap — the
-    /// form the deferral message quotes, so an author reading it can see
-    /// which rows were available without counting `height=` by hand.
-    ///
-    /// An empty column renders as `none`, which no caller prints: every
-    /// site that formats a column asks `is_empty()` first — or holds one a
-    /// non-empty check produced — and says "no walls" in its own words, so
-    /// only this file's tests reach the fallback.
+    /// `y=1..=3`, or `y=1..=2, y=7..=8` across a gap, as deferral messages quote it.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.spans.is_empty() {
             return f.write_str("none");
@@ -142,126 +74,4 @@ impl fmt::Display for WallColumn {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::WallColumn;
-
-    #[test]
-    fn a_single_walls_member_occupies_the_rows_above_the_floor_slab() {
-        let column = WallColumn::from_walls([(0, 3)]);
-        assert_eq!(column.to_string(), "y=1..=3");
-        assert!(!column.contains_rows(0, 1), "the floor plane is not a wall");
-        assert!(column.contains_rows(1, 3));
-        assert!(column.contains_rows(3, 1));
-        assert!(!column.contains_rows(3, 2), "one row past the top course");
-        assert!(!column.contains_rows(4, 1));
-    }
-
-    #[test]
-    fn two_courses_that_touch_merge_into_one() {
-        // `walls height=5` plus `level y=5 walls height=4`: rows 1..=5 and
-        // 6..=9 abut, so a window crossing the seam is cut into masonry
-        // the whole way.
-        let column = WallColumn::from_walls([(0, 5), (5, 4)]);
-        assert_eq!(column.to_string(), "y=1..=9");
-        assert!(column.contains_rows(4, 3), "4..=6 crosses the seam");
-        assert!(column.contains_rows(1, 9));
-        assert!(!column.contains_rows(1, 10));
-    }
-
-    #[test]
-    fn two_courses_with_air_between_them_stay_apart() {
-        // `walls height=2` plus `level y=6 walls height=2`: rows 1..=2 and
-        // 7..=8, with 3..=6 open air.
-        let column = WallColumn::from_walls([(0, 2), (6, 2)]);
-        assert_eq!(column.to_string(), "y=1..=2, y=7..=8");
-        assert!(column.contains_rows(1, 2));
-        assert!(column.contains_rows(7, 2));
-        assert!(!column.contains_rows(3, 3), "hangs in the gap");
-        assert!(!column.contains_rows(2, 6), "spans the gap");
-    }
-
-    #[test]
-    fn overlapping_courses_collapse_to_their_union() {
-        // Two walls members on the same level, one taller: the shorter is
-        // wholly inside the taller and contributes no second span.
-        let column = WallColumn::from_walls([(0, 4), (0, 2)]);
-        assert_eq!(column.to_string(), "y=1..=4");
-        assert!(column.contains_rows(1, 4));
-    }
-
-    #[test]
-    fn the_spans_come_out_ascending_however_the_members_were_written() {
-        // Source order is the level order only by convention; the merge
-        // depends on the spans being sorted, so it sorts them.
-        let column = WallColumn::from_walls([(6, 2), (0, 2), (3, 1)]);
-        assert_eq!(column.to_string(), "y=1..=2, y=4..=4, y=7..=8");
-    }
-
-    #[test]
-    fn a_walls_member_with_no_height_contributes_nothing() {
-        let column = WallColumn::from_walls([(0, 0)]);
-        assert!(column.is_empty());
-        assert_eq!(column.to_string(), "none");
-        assert!(!column.contains_rows(1, 1));
-    }
-
-    #[test]
-    fn a_struct_with_no_walls_has_an_empty_column() {
-        let column = WallColumn::from_walls([]);
-        assert!(column.is_empty());
-        assert!(!column.contains_rows(0, 1));
-        assert!(!column.contains_rows(1, 1));
-    }
-
-    #[test]
-    fn a_height_that_would_overflow_the_column_does_not_wrap() {
-        // `walls height=4294967295` inside `level y=2`. The saturating add
-        // keeps the span at the top of the range rather than wrapping to a
-        // span that starts above where it ends — which would answer
-        // `false` for every row and hide the wall entirely.
-        let column = WallColumn::from_walls([(2, u32::MAX)]);
-        assert_eq!(column.to_string(), format!("y=3..={}", u32::MAX));
-        assert!(column.contains_rows(3, 1));
-        assert!(column.contains_rows(u32::MAX, 1));
-    }
-
-    #[test]
-    fn the_course_a_row_sits_in_is_the_one_that_caps_what_opens_there() {
-        // `walls height=2` plus `level y=6 walls height=2`: a door
-        // opening at row 1 is capped by row 2, not by row 8 — the second
-        // course is a different wall, with four rows of air below it.
-        let column = WallColumn::from_walls([(0, 2), (6, 2)]);
-        assert_eq!(column.course_top_at(1), Some(2));
-        assert_eq!(column.course_top_at(2), Some(2));
-        assert_eq!(column.course_top_at(7), Some(8));
-        assert_eq!(column.course_top_at(3), None, "the gap holds no course");
-        assert_eq!(column.course_top_at(0), None, "the floor slab owns row 0");
-        assert_eq!(column.course_top_at(9), None);
-    }
-
-    #[test]
-    fn a_row_in_merged_courses_is_capped_by_the_merge_and_not_by_its_member() {
-        // `walls height=1` plus `level y=1 walls height=3`: rows 1..=1 and
-        // 2..=4 abut, so row 1 is capped at 4 and a doorway there opens
-        // the two rows it wants although the member it stands on paints
-        // one of them.
-        let column = WallColumn::from_walls([(0, 1), (1, 3)]);
-        assert_eq!(column.to_string(), "y=1..=4");
-        assert_eq!(column.course_top_at(1), Some(4));
-    }
-
-    #[test]
-    fn a_row_in_no_course_at_all_has_no_top() {
-        let column = WallColumn::from_walls([]);
-        assert_eq!(column.course_top_at(1), None);
-    }
-
-    #[test]
-    fn a_rectangle_whose_rows_overflow_is_not_inside_any_column() {
-        // `y=4294967295 size=1x2` would end at `u32::MAX + 1`. Nothing can
-        // contain it, and the answer has to come from the check rather
-        // than from a wrapped sum that lands back at row 0.
-        let column = WallColumn::from_walls([(0, u32::MAX)]);
-        assert!(!column.contains_rows(u32::MAX, 2));
-    }
-}
+mod tests;

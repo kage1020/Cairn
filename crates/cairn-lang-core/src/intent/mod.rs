@@ -1,21 +1,5 @@
-//! Intent IR — the first semantic layer above the surface AST.
-//!
-//! The Intent IR keeps the surface form's structure (a module owns themes,
-//! defs, sites, and structs) but reorganises each body into typed groups:
-//! [`Member`]s carry roles and an [`IntentState`] of `key=value` attributes,
-//! `logic` and `assert` lines are split out of the generic statement stream,
-//! and the size header on a struct is hoisted into a dedicated field.
-//!
-//! This is what the spec calls the "rich member with invariants" layer
-//! (`spec/architecture` "The Intent IR is rich and carries invariants"). The
-//! current lowering produces it at semantic level [`SemanticLevel::Grouped`];
-//! registry-backed resolution (materials, themes, per-edition blockstate)
-//! belongs to the later [`SemanticLevel::Lifted`] tier.
-//!
-//! Each IR node carries a `span: Span` pointing at the originating byte range
-//! in the source. The `check` module relies on those spans to emit gcc-style
-//! diagnostics; spans are tagged `#[serde(skip)]` so the on-the-wire form is
-//! unchanged from the pre-span IR.
+//! Intent IR, the first semantic layer above the surface AST: each body sorted into typed
+//! [`Member`]s with roles, and `logic` and `assert` lines split out.
 
 mod keyword_table;
 mod lower;
@@ -33,13 +17,13 @@ use crate::ast::{DottedRef, Expr, Header, TruthRow, ValueKind};
 use crate::error::Span;
 
 pub use self::keyword_table::{
-    SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue, UNIVERSAL_ARGUMENTS, Unread,
-    UnreadArgument, known_keywords, role_of,
+    MemberRole, SENSOR_HOSTS, SelectorArm, SelectorAxis, SelectorValue, UNIVERSAL_ARGUMENTS,
+    Unread, UnreadArgument, known_keywords, role_of,
 };
 pub use self::lower::lower;
 pub(crate) use self::member::ConnectEnd;
 pub use self::member::{
-    BodyKind, IntentState, Label, Member, MemberBody, MemberRole, ResolvedState, ValueWithSpan,
+    BodyKind, IntentState, Label, Member, MemberBody, ResolvedState, ValueWithSpan,
 };
 pub use self::patch::{PatchTargetError, actuator_patch_target};
 pub use self::semantic_level::SemanticLevel;
@@ -47,8 +31,7 @@ pub use self::semantic_level::SemanticLevel;
 /// Intent IR for a whole `.crn` module.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct IntentModule {
-    /// Maturity of this IR. The current [`lower()`] always returns
-    /// [`SemanticLevel::Grouped`].
+    /// Maturity of this IR; [`lower()`] always produces [`SemanticLevel::Grouped`].
     pub semantic_level: SemanticLevel,
     /// Headers carried through verbatim from the AST.
     pub headers: Vec<Header>,
@@ -62,15 +45,45 @@ pub struct IntentModule {
     pub structs: Vec<StructIr>,
 }
 
-/// `theme NAME:` block, normalised so slot bindings live in a map and
-/// selector bindings keep their full surface shape.
+impl IntentModule {
+    /// Every `struct`, `def` and `site` body, in that order, each in source order.
+    pub(crate) fn bodies(&self) -> impl Iterator<Item = ItemBody<'_>> {
+        let structs = self.structs.iter().map(|s| ItemBody {
+            kind: BodyKind::Geometry,
+            members: &s.members,
+            asserts: &s.asserts,
+        });
+        let defs = self.defs.iter().map(|d| ItemBody {
+            kind: BodyKind::Geometry,
+            members: &d.members,
+            asserts: &d.asserts,
+        });
+        let sites = self.sites.iter().map(|s| ItemBody {
+            kind: BodyKind::Site,
+            members: &s.placements,
+            asserts: &s.asserts,
+        });
+        structs.chain(defs).chain(sites)
+    }
+}
+
+/// One `struct`, `def` or `site` body, as [`IntentModule::bodies`] yields it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ItemBody<'a> {
+    /// Which roles the body has a reader for.
+    pub(crate) kind: BodyKind,
+    /// The body's top-level members: a `site`'s are its placements.
+    pub(crate) members: &'a [Member],
+    /// The body's top-level `assert` properties.
+    pub(crate) asserts: &'a [AssertIr],
+}
+
+/// `theme NAME:` block, with its slot bindings in a map.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ThemeIr {
     /// Theme name.
     pub name: String,
-    /// `slot NAME -> VALUE` bindings. Source order is preserved; if a slot is
-    /// declared twice the last wins here and the duplicate is flagged by the
-    /// `duplicate` pass in `crate::check`.
+    /// `slot NAME -> VALUE` bindings in source order; a repeated slot keeps its last value.
     pub slots: IndexMap<String, ValueWithSpan>,
     /// `KEYWORD[...] -> ...` selector bindings, in source order.
     pub selectors: Vec<SelectorRule>,
@@ -101,9 +114,7 @@ pub struct DefIr {
     /// Hoisted `size=WxH` header argument, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    /// Remaining header `key=value` arguments: every one but a `size=`
-    /// whose value is a `WxH` literal. A `size=` of any other shape stays
-    /// here, and `check::type_mismatch` reports it.
+    /// Header `key=value` arguments other than a `size=WxH` hoisted into `size`.
     pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the def body.
     pub members: Vec<Member>,
@@ -118,9 +129,7 @@ pub struct DefIr {
     pub span: Span,
 }
 
-/// Lifted form of `struct NAME[ ARGS]` (single-building structural
-/// composition). Structurally identical to [`DefIr`] but kept as a distinct
-/// type so downstream passes can match on intent.
+/// Lifted form of `struct NAME[ ARGS]` (single-building structural composition).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StructIr {
     /// Struct name.
@@ -128,9 +137,7 @@ pub struct StructIr {
     /// Hoisted `size=WxH` header argument, if present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<Size>,
-    /// Remaining header `key=value` arguments: every one but a `size=`
-    /// whose value is a `WxH` literal. A `size=` of any other shape stays
-    /// here, and `check::type_mismatch` reports it.
+    /// Header `key=value` arguments other than a `size=WxH` hoisted into `size`.
     pub args: IndexMap<String, ValueWithSpan>,
     /// Member lines from the struct body.
     pub members: Vec<Member>,
@@ -150,12 +157,9 @@ pub struct StructIr {
 pub struct SiteIr {
     /// Site name.
     pub name: String,
-    /// `place` / `connect` lines from the site body, kept as
-    /// [`Member`]s so role-based passes treat them uniformly with struct
-    /// members.
+    /// `place` / `connect` lines from the site body, as [`Member`]s.
     pub placements: Vec<Member>,
-    /// `logic` bindings from the site body. Rare, but legal at the site
-    /// scope so we don't drop them.
+    /// `logic` bindings from the site body.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub logic: Vec<LogicBinding>,
     /// `assert` properties from the site body.
@@ -231,13 +235,6 @@ impl AssertIr {
     }
 
     /// Every signal this property names, in declaration order.
-    ///
-    /// Lives here rather than at the consumer because the enum is
-    /// `#[non_exhaustive]`: a match written in another crate needs a
-    /// wildcard, and a wildcard is where a variant added later would go to
-    /// have its references silently unchecked. Written here the match is
-    /// exhaustive, so the next variant stops the compile until it says
-    /// which of its fields are signals.
     #[must_use]
     pub fn signal_refs(&self) -> Vec<&DottedRef> {
         match self {
@@ -254,12 +251,6 @@ impl AssertIr {
 }
 
 /// Which family of Intent IR scope a downstream pass is describing.
-///
-/// Introduced so passes that hand data off across crates (redstone
-/// placement, future routing) can key on scope identity without
-/// depending on the surface AST or on a downstream crate's local
-/// discriminator. The three variants intentionally mirror the shape of
-/// [`IntentModule::structs`] / [`IntentModule::defs`] / [`IntentModule::sites`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScopeKind {
@@ -271,18 +262,7 @@ pub enum ScopeKind {
     Site,
 }
 
-/// One recognised `circuit region=<label> void=<N>` fixture together
-/// with the footprint of its enclosing scope.
-///
-/// Produced by [`circuit_regions`] out of a lowered [`IntentModule`] so
-/// the redstone placement pass (`spec/redstone` "Place-and-route") has one
-/// entry point for looking up the reserved area of each scope instead of
-/// walking [`Member`]s and re-decoding `intent_state` at every caller.
-/// The block-array pass's [`crate::block_array`] recogniser owns the
-/// shape validation and per-shape diagnostics; [`circuit_regions`]
-/// leaves out every `circuit` line that reserves nothing, and
-/// [`circuit_lines`] hands each of those back with the reason, for a
-/// caller that needs to say why a scope has no reservation.
+/// One usable `circuit region=<label> void=<N>` reservation, with its scope's footprint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct CircuitRegion {
@@ -292,7 +272,7 @@ pub struct CircuitRegion {
     pub scope_name: String,
     /// `region=<label>` value the circuit member declared.
     pub label: String,
-    /// `void=<N>` service-layer height (`>= 1`).
+    /// `void=<N>` service-layer height, at least 1.
     pub void: u32,
     /// Width of the enclosing scope's footprint, copied from `size=WxH`.
     pub width: u32,
@@ -303,18 +283,7 @@ pub struct CircuitRegion {
     pub span: Span,
 }
 
-/// Lift every well-formed `circuit region=<label> void=<N>` fixture out
-/// of `module`, tagged with the enclosing scope's footprint.
-///
-/// The reservations among [`circuit_lines`], in the same order: a
-/// `circuit` line at the top level of a `struct` or `def` body whose
-/// scope has a `size=WxH` header and whose `region=` and `void=` are
-/// usable. Every other line that walk finds, a line under a `level`
-/// among them, is left out here. (`cairn check --edition E --target V`
-/// reports each malformed shape individually via the block-array pass's
-/// `recognize_circuit_region`; `cairn check` lowers only when given
-/// both flags, and this function is called from paths that skip the
-/// block-array lower, so it cannot rely on that pass firing.)
+/// The usable reservations among [`circuit_lines`], in the same order.
 #[must_use]
 pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
     circuit_lines(module)
@@ -323,29 +292,9 @@ pub fn circuit_regions(module: &IntentModule) -> Vec<CircuitRegion> {
         .collect()
 }
 
-/// Every `circuit` line at the top level of a `struct` or `def` body or
-/// under a `level` in one, in source order within each scope, read into
-/// the reservation it makes or the [`CircuitRegionDefect`] that keeps it
-/// from making one.
-///
-/// One walk, so [`circuit_regions`] and a caller that also needs the
-/// rejected lines cannot disagree about which lines are usable: each
-/// line lands on exactly one side.
-///
-/// Reads the top-level members of each body, and descends into every
-/// `level` among them and into any `level` nested in one. A `circuit`
-/// line found under a `level` comes back as
-/// [`CircuitRegionDefect::NestedUnderLevel`] whatever else it says: v1
-/// reserves nothing from one, and naming that lets a pass point at the
-/// line rather than tell the author the scope has none. An indented
-/// body under any other member is not descended into; `cairn check`
-/// reports that body as never reaching the build.
-///
-/// Sites are not walked: [`SiteIr`] has no `size` and no `members` (its
-/// rows are `placements`), and this function reads `module.structs` and
-/// `module.defs` only, so a `circuit` line in a `site` body comes back on
-/// neither side. A `struct` or `def` with no `size=` is walked, and its
-/// lines come back as [`CircuitRegionDefect::NoSize`].
+/// Every `circuit` line in a `struct` or `def` body, top level or under a `level`, read into the
+/// reservation it makes or the [`CircuitRegionDefect`] that keeps it from making one. `site`
+/// bodies are not walked.
 #[must_use]
 pub fn circuit_lines(module: &IntentModule) -> Vec<Result<CircuitRegion, RejectedCircuitRegion>> {
     let mut out = Vec::new();
@@ -384,28 +333,12 @@ pub struct RejectedCircuitRegion {
     pub span: Span,
 }
 
-/// Why a `circuit` line is not a usable reservation. The first that
-/// applies, in the order listed.
-///
-/// The [`fmt::Display`] form is the reason clause a pass prints after
-/// naming the line, so no two passes can describe the same line
-/// differently. It states what is wrong and stops there: the repair
-/// depends on what the caller can offer the author, so each caller
-/// writes its own.
-///
-/// `#[non_exhaustive]` on the enum and on every variant, as on
-/// [`PatchTargetError`]. That costs no exhaustiveness checking: the match
-/// that has to name every variant is the `Display` below, in this crate,
-/// where the attribute does not apply, so a new variant does not compile
-/// until it has a sentence. A caller in another crate matches only to
-/// choose its repair, and keeps a `_` arm for a variant it has none for.
+/// Why a `circuit` line is not a usable reservation: the first that applies, in the order listed.
+/// Its `Display` is the reason clause, without a repair.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CircuitRegionDefect {
-    /// The line sits under a `level` (at any depth). v1 reads a
-    /// reservation only from a `circuit` line at the top level of a
-    /// `struct` or `def` body, so this one reserves nothing whatever its
-    /// `region=` and `void=` say.
+    /// The line sits under a `level`, at any depth.
     #[non_exhaustive]
     NestedUnderLevel,
     /// The enclosing scope has no `size=WxH` header to reserve within.
@@ -414,8 +347,7 @@ pub enum CircuitRegionDefect {
     /// No `region=` key.
     #[non_exhaustive]
     RegionMissing,
-    /// `region=` holds a value that is not an identifier or a string;
-    /// `found` is the kind of value it is.
+    /// `region=` holds a value that is not an identifier or a string.
     #[non_exhaustive]
     RegionNotLabel {
         /// The value kind, as [`crate::ast::Value::kind_name`] names it.
@@ -427,8 +359,7 @@ pub enum CircuitRegionDefect {
     /// No `void=` key.
     #[non_exhaustive]
     VoidMissing,
-    /// `void=` holds a value that is not an integer; `found` is the
-    /// kind of value it is.
+    /// `void=` holds a value that is not an integer.
     #[non_exhaustive]
     VoidNotInteger {
         /// The value kind, as [`crate::ast::Value::kind_name`] names it.
@@ -440,8 +371,7 @@ pub enum CircuitRegionDefect {
         /// The integer written.
         value: i64,
     },
-    /// `void=` is an integer above [`u32::MAX`], the largest height a
-    /// [`CircuitRegion`] holds.
+    /// `void=` is an integer above [`u32::MAX`].
     #[non_exhaustive]
     VoidTooLarge {
         /// The integer written.
@@ -481,9 +411,7 @@ impl fmt::Display for CircuitRegionDefect {
     }
 }
 
-/// Push each `circuit` line among `members` onto `out`, and every
-/// `circuit` line under a `level` among them as
-/// [`CircuitRegionDefect::NestedUnderLevel`].
+/// Push each `circuit` line among `members`, and each under a `level` among them, onto `out`.
 fn collect_circuit_lines(
     scope_kind: ScopeKind,
     scope_name: &str,
@@ -523,9 +451,6 @@ fn collect_circuit_lines(
     }
 }
 
-/// Push every `circuit` line among a `level`'s `members`, and under any
-/// `level` nested among them, as
-/// [`CircuitRegionDefect::NestedUnderLevel`].
 fn collect_nested_circuit_lines(
     scope_kind: ScopeKind,
     scope_name: &str,
@@ -548,10 +473,7 @@ fn collect_nested_circuit_lines(
     }
 }
 
-/// Parse the `region=<label>` / `void=<N>` payload of a `circuit`
-/// [`Member`] into `(label, void)` when both sides are well-formed, or
-/// the first defect when not, so callers cannot silently accept a
-/// partial fixture.
+/// The `(label, void)` a `circuit` member declares, or its first defect.
 fn parse_circuit_region_fixture(member: &Member) -> Result<(String, u32), CircuitRegionDefect> {
     let raw_region = member
         .intent_state

@@ -1,81 +1,6 @@
-//! Intent IR → Logic IR lowering.
-//!
-//! Walks each scope of an [`IntentModule`], collects sensor bindings as
-//! [`InputPort`]s, actuator bindings as [`OutputPort`]s, and lowers every
-//! `logic sig.X = <expr>` line into a topologically ordered DAG of
-//! [`GateNode`]s. Diagnostics fire fail-loud per `spec/lint`
-//! "Error vs warning": an unbound signal, a duplicate driver, or a cycle
-//! stops the scope from reaching the returned [`ScopedLogicIr`]; only
-//! warnings survive alongside a well-formed IR.
-//!
-//! Common subexpression elimination is done inline while lowering — two
-//! `logic` lines whose RHS builds the same gate over the same operands
-//! collapse to one node. Symmetric gates (`and`/`or`/`xor`/`nand`/`nor`)
-//! canonicalise operand order before the CSE lookup so
-//! `sig.a or sig.b` and `sig.b or sig.a` share a node too.
-//!
-//! Detection contract. `spec/redstone` "Signal binding" writes each
-//! binding on one component, and a binding elsewhere describes no
-//! circuit, so what a line is *for* is read from the line and then held
-//! to that:
-//! - **Sensor**: a `-> value` tail on a member whose keyword is in
-//!   [`SENSOR_HOSTS`], which `cairn-lang-core` owns because the host
-//!   question needs no Logic IR to ask. A follow-up recognizer for
-//!   `lever` / `button` / `daylight` / `observer` costs one entry in that
-//!   table.
-//! - **Actuator**: one of the argument keys in [`ACTUATOR_BINDINGS`]
-//!   (`opened_by` / `powered_by` / `lit_by` / `fired_by`) on the
-//!   component that table pairs the key with. Written in the selector
-//!   form (`door[id=front] opened_by=sig.x`), it drives the physical door
-//!   `cairn_lang_core::intent::actuator_patch_target` picks — the
-//!   lookup block-array lowering reads too — and one that picks no single
-//!   door is `E_LOGIC_UNRESOLVED_PATCH`. A component takes one binding per
-//!   key, however the lines carrying them are written; a second is
-//!   `E_LOGIC_DUPLICATE_BINDING`.
-//!
-//! The *claim* comes from either side of a pair and the value is then
-//! checked against it. A tail claims a sensor whatever the value is; an
-//! actuator key claims a wire whatever the value is; and a `sig.X` value
-//! still claims one under a key nothing reads, which is
-//! `E_LOGIC_UNKNOWN_BINDING_KEY`. Reading the claim off the value alone
-//! is what let a well-spelled key with a malformed value fall through
-//! every branch and vanish.
-//!
-//! Three faults, and each is reported by the one finding the other
-//! repairs would not answer:
-//! - the **host** cannot carry this binding — `E_LOGIC_MISPLACED_BINDING`,
-//!   asked first, because no edit to the value makes `walls` carry a tail.
-//!   For a `-> value` tail that fault is `check`'s
-//!   `E_MISPLACED_BINDING`, which every command reports; this pass reads
-//!   the same table to know the tail is not a sensor's, records what it
-//!   would have driven so nothing downstream bills the hole a second
-//!   time, and says nothing;
-//! - the **key** is one nothing reads — `E_LOGIC_UNKNOWN_BINDING_KEY`,
-//!   with the nearest key it might be a typo for;
-//! - the **value** names no signal — `E_LOGIC_INVALID_SIGNAL`, the code
-//!   the `logic` left-hand side has always taken, because all three
-//!   positions are the same rule about the same namespace.
-//!
-//! A pair that claims nothing on either side is an argument like any
-//! other. What its *key* means is the per-keyword schema question, which
-//! no pass answers yet, so `hieght=3` is nobody's finding here.
-//!
-//! The `[selector]` carries the same pairs and is never a binding site:
-//! the brackets pick a member that already exists and the binding is
-//! written after them. It is walked, and answered by the same three
-//! faults — a bracketed pair whose only fault *is* the brackets earns
-//! `E_LOGIC_MISPLACED_BINDING` saying so, and one that would still be
-//! wrong outside them is told that instead.
-//!
-//! Cascade suppression: any signal name that has already produced an
-//! `E_LOGIC_UNBOUND_SIGNAL` (either because a `logic` binding for it
-//! failed to lower or because a raw reference to it was unresolved) is
-//! recorded in `failed_lhs`; a name a refused binding would have driven
-//! or consumed is recorded in `ScopeCollected`'s two `refused_*` sets.
-//! Every downstream reference — RHS lookups, actuator resolution, the
-//! `assert` walk, the unused-signal audit — checks those before emitting
-//! another diagnostic, so a single root cause produces exactly one
-//! finding.
+//! Intent IR → Logic IR lowering: sensor and actuator bindings become ports and each `logic` line a
+//! DAG of gates, one gate shared by every line that builds it. A scope with an error is left out,
+//! and each root cause is reported once.
 
 use std::collections::{HashMap, HashSet};
 
@@ -92,25 +17,10 @@ use cairn_lang_core::intent::{
     AssertIr, DefIr, IntentModule, LogicBinding, Member, MemberBody, MemberRole, PatchTargetError,
     SiteIr, StructIr, ValueWithSpan, actuator_patch_target, known_keywords,
 };
-use cairn_lang_core::suggest::nearest_match;
+use cairn_lang_core::suggest::{did_you_mean, nearest_match};
 
-/// Each actuator argument key from `spec/redstone` "Signal binding",
-/// paired with the component keyword that carries it.
-///
-/// That section does not offer these keys as free-floating attributes: it
-/// writes each one on one component (`lamp ... lit_by=`,
-/// `piston ... powered_by=`, `door ... opened_by=`,
-/// `dispenser ... fired_by=`). Reading only the
-/// value made every member an actuator, so `walls ... powered_by=sig.x`
-/// became a live output port on a member with no component behind it.
-///
-/// Of the four hosts, only `door` is a keyword the surface accepts today —
-/// `lamp`, `piston`, and `dispenser` are not in the role table, so the
-/// other three keys have no legal host yet and are refused wherever they
-/// are written. The table is what changes when those keywords land; the
-/// check does not.
-/// Public so `tests/actuator_schema.rs` can compare this array against
-/// `MemberRole::arguments` outright rather than against a copy of it.
+/// Each actuator argument key of `spec/redstone` "Signal binding", paired with the component
+/// keyword that carries it.
 pub const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
     ("opened_by", "door"),
     ("powered_by", "piston"),
@@ -119,49 +29,20 @@ pub const ACTUATOR_BINDINGS: &[(&str, &str)] = &[
 ];
 
 /// The component keywords that may carry a `->` sensor tail.
-///
-/// Re-exported from `cairn-lang-core`, which owns the table: the host
-/// question is about the member line rather than about the Logic IR, so
-/// `check::binding` asks it and every command reports the answer. This
-/// pass reads the same rows to know which tails are a sensor's.
 pub use cairn_lang_core::intent::SENSOR_HOSTS;
 
-/// Successful synth output: the per-scope Logic IR plus every diagnostic
-/// collected across the module. Errors abort the containing scope's IR
-/// construction; the scope simply does not appear in [`Self::scoped`].
+/// The per-scope Logic IR and every diagnostic of the module.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SynthOutput {
-    /// Per-scope Logic IR produced by the walk. Scopes that hit an error
-    /// during construction are absent; their diagnostics still land in
-    /// [`Self::diagnostics`].
+    /// Per-scope Logic IR, without the scopes that hit an error.
     pub scoped: ScopedLogicIr,
-    /// All findings collected across every scope, in source order. Both
-    /// errors and warnings — the caller filters by severity when deciding
-    /// exit status.
+    /// Every finding, errors and warnings, in source order.
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Lower an [`IntentModule`] to a [`SynthOutput`].
-///
-/// One [`LogicIr`] entry per struct / def / site whose body carries any
-/// redstone content — a sensor, an actuator, a `logic` binding, or an
-/// `assert`. Scopes with none of those are omitted so the JSON dump stays
-/// proportional to redstone content.
-///
-/// Expects the caller to have run `cairn_lang_core::check` and stopped on
-/// its Errors, which `cairn synth` does. This pass reads a member's role
-/// to decide which bindings it may carry, so a member whose keyword the
-/// role table does not know is skipped rather than reported: the finding
-/// that matters there is `E_UNKNOWN_KEYWORD`, and it is not this pass's
-/// to raise.
+/// Lowers an [`IntentModule`] to a [`SynthOutput`], one [`LogicIr`] per scope with redstone in it.
+/// Expects `cairn_lang_core::check` to have passed.
 pub fn synthesize(module: &IntentModule) -> SynthOutput {
-    // `IntentModule` files the three scope kinds into three vectors, each
-    // one internally in source order, so walking them one after another
-    // dumps every `struct` before every `def` however the module was
-    // written. Both readers of this walk are documented as source-ordered
-    // — the IR dump reads top-to-bottom the way the file does, and the
-    // findings come out in the order a reader meets the lines — so the
-    // three are merged back by span here instead.
     let mut scopes: Vec<ModuleScope<'_>> =
         Vec::with_capacity(module.structs.len() + module.defs.len() + module.sites.len());
     scopes.extend(module.structs.iter().map(ModuleScope::Struct));
@@ -176,10 +57,7 @@ pub fn synthesize(module: &IntentModule) -> SynthOutput {
     out
 }
 
-/// One top-level scope of a module, whichever of the three kinds it is.
-///
-/// Exists so [`synthesize`] can hold all three in one list long enough to
-/// order them; every other pass reads the kind-specific vectors directly.
+/// One top-level scope of a module, of any kind.
 enum ModuleScope<'a> {
     Struct(&'a StructIr),
     Def(&'a DefIr),
@@ -187,11 +65,7 @@ enum ModuleScope<'a> {
 }
 
 impl ModuleScope<'_> {
-    /// Byte range of the `struct` / `def` / `site` block, as the sort
-    /// key. Two scopes cannot begin at the same byte, so the start alone
-    /// would order them — the end is carried anyway so this key matches
-    /// the one the diagnostic sort uses, and so a tie can never fall back
-    /// on the by-kind order this function exists to undo.
+    /// Byte range of the scope's block, the sort key.
     fn span(&self) -> (usize, usize) {
         match self {
             Self::Struct(struct_ir) => (struct_ir.span.start, struct_ir.span.end),
@@ -200,12 +74,7 @@ impl ModuleScope<'_> {
         }
     }
 
-    /// Collect the scope's body and finish it into `out`.
-    ///
-    /// A site's `place` / `connect` rows never emit sensor bindings, so
-    /// only its `logic` contributes; the walk still descends because
-    /// `check::member_scope` is what refuses a fixture written among a
-    /// site's rows, not this pass.
+    /// Collects the scope's body and finishes it into `out`.
     fn lower(&self, out: &mut SynthOutput) {
         let (kind, name, members, logic, asserts) = match self {
             Self::Struct(struct_ir) => (
@@ -238,19 +107,8 @@ impl ModuleScope<'_> {
     }
 }
 
-/// Per-scope working set built during the collection pass. Kept separate
-/// from [`LogicIr`] because a mid-collection error must never surface a
-/// half-built IR to the caller — the finish step decides whether the
-/// working set becomes an IR or an error report.
 impl ScopeCollected<'_> {
-    /// Whether this scope has anything for the finish step to do.
-    ///
-    /// Destructured rather than written as a list of `is_empty()` calls:
-    /// the list form is a hand-written predicate over a subset of the
-    /// fields, and a field added later lands in the gap silently. That is
-    /// what happened to `asserts` — a scope whose only redstone content
-    /// was an `assert` returned here before anything checked the signals
-    /// it names. Written this way the next field is a compile error.
+    /// Whether the finish step has anything to do; destructured, so a new field must be added here.
     fn has_work(&self) -> bool {
         let Self {
             sensors,
@@ -271,37 +129,20 @@ impl ScopeCollected<'_> {
     }
 }
 
+/// One scope's bindings as collected, before [`finish_scope`] decides whether they become an IR.
 #[derive(Debug, Default)]
 struct ScopeCollected<'a> {
-    /// Findings raised while walking the body. Collection is where a
-    /// binding's *host* is known — the finish step sees a flat list of
-    /// pending sensors and actuators and no longer knows which member each
-    /// came from — so these are raised here and carried along.
+    /// Findings raised while walking the body, where a binding's host is still known.
     diagnostics: Vec<Diagnostic>,
-    /// `assert` properties, in source order. Their evaluation waits on the
-    /// simulator, but the signals they name are checked as soon as the
-    /// scope's `signal_defs` is complete.
+    /// `assert` properties, in source order.
     asserts: Vec<&'a AssertIr>,
-    /// Signals a refused binding would have driven — a `-> sig.X` tail on
-    /// a member that is not a sensor, or a `logic` LHS that is not a
-    /// signal name ([`is_signal_name`]). A later line referencing one of
-    /// these is not a second mistake, so the unbound-signal report skips
-    /// it: the crate reports the root cause once.
+    /// Signals a refused binding would have driven, so a reference to one is not reported unbound.
     refused_drivers: HashSet<DottedRef>,
-    /// Signals a refused binding would have consumed — an actuator key on
-    /// the wrong member, or a signal-valued key nothing reads. The author
-    /// did wire the actuator, so the unused-signal audit counts these as
-    /// consumed rather than adding a warning about the wire they meant to
-    /// draw.
+    /// Signals a refused binding would have consumed, which the unused-signal audit counts as read.
     refused_consumers: HashSet<DottedRef>,
     /// Sensors, in source order.
     sensors: Vec<PendingSensor>,
-    /// Accepted actuator bindings, in walk order, each filed under the
-    /// physical component it drives. A patch is filed under the door its
-    /// selector picks, so a second binding on one door is found whichever
-    /// line — the door's own or a patch — carries it. Resolved to
-    /// [`OutputPort`]s in the finish step so an undefined driver can be
-    /// reported without pretending the actuator was wired.
+    /// Accepted actuator bindings, each filed under the component it drives.
     actuators: Vec<BoundActuator<'a>>,
     /// `logic sig.X = <expr>` lines, in source order.
     bindings: Vec<PendingBinding<'a>>,
@@ -316,8 +157,7 @@ struct PendingSensor {
 /// One accepted actuator binding, filed under the component it drives.
 #[derive(Debug)]
 struct BoundActuator<'a> {
-    /// The physical member the binding drives: the member itself, or the
-    /// door a selector-form patch picks.
+    /// The member the binding drives: itself, or the door a patch picks.
     host: &'a Member,
     key: &'a str,
     driver_name: &'a DottedRef,
@@ -345,33 +185,9 @@ fn collect_body<'a>(
     for b in logic {
         collect_binding(b, scope, out);
     }
-    // The walk above reaches every `logic` line nested under a member
-    // before it reaches the scope's own, so a binding written later inside
-    // a `level` would otherwise be numbered — and reported — ahead of one
-    // written earlier at the top level. Source order is what both readers
-    // want: the node numbering is documented as reading top-to-bottom the
-    // way the file does, and `E_LOGIC_MULTIPLE_DRIVERS` names the *first*
-    // declaration in its note, which is only true if "first" means first
-    // in the file. `MemberBody` splits a body into a members vector and a
-    // logic vector, so the interleaving the author wrote survives nowhere
-    // but in the spans — sorting by them is the reconstruction, not a
-    // convenience.
-    //
-    // `resolve_drivers` sorts a list of its own for the same reason, and
-    // does not replace this one: that list decides which driver keeps a
-    // signal, while this one is the order the surviving bindings lower in,
-    // which is the order the IR's nodes are numbered in.
+    // Nested `logic` lines are reached before the scope's own; sorting restores source order.
     out.bindings.sort_by_key(|b| (b.span.start, b.span.end));
-    // The same walk collects a member's nested `assert`s before the
-    // scope's own, and `check_assert_refs` reports each unbound name once,
-    // at the first assert in this list that uses it — which is only the
-    // first in the file once the list is in source order.
-    //
-    // That moves which `assert` the finding stands on and nothing else:
-    // `finish_scope` already sorts the scope's diagnostics by span, so the
-    // order they are printed in does not change. `check_assert_refs` is the
-    // one reader of this list that depends on its order;
-    // `audit_unused_signals` folds the same asserts into a set.
+    // Sorted so an unbound name is reported at its first `assert` in the file.
     out.asserts.extend(asserts);
     out.asserts.sort_by_key(|a| (a.span().start, a.span().end));
 }
@@ -382,34 +198,14 @@ fn collect_member<'a>(
     scope: ScopeRef<'_>,
     out: &mut ScopeCollected<'a>,
 ) {
-    // A member whose keyword is not in the role table is already
-    // `E_UNKNOWN_KEYWORD` from the `check` pass. Reading its bindings
-    // could only add a second finding about a component that does not
-    // exist, so the whole member is left to that one — but what it would
-    // have driven or consumed is still recorded, or the author of
-    // `lamp id=l1 lit_by=sig.x` is told that `sig.x` is unconsumed on top
-    // of being told that `lamp` is not a keyword.
+    // An unknown keyword is `check`'s to report; its bindings are only recorded as refused.
     let unknown_keyword = matches!(m.role, MemberRole::Other(_));
 
-    // Sensor: a `-> value` tail claims to emit a signal, whatever the
-    // value turns out to be. Reading the claim off the *tail* and not off
-    // the value is what makes `-> a` a mistake rather than a line nobody
-    // looks at: the author who writes one has written a sensor.
-    //
-    // The host is asked first. No edit to the value makes `walls` carry a
-    // tail, so telling that author about the `sig.` namespace would send
-    // them round the loop to be told about the host next time.
+    // The host is asked before the value: no edit to the value makes `walls` carry a tail.
     if let Some(binding) = &m.binding {
         let named = signal_named_by(binding);
         if unknown_keyword || !SENSOR_HOSTS.contains(&m.role.keyword()) || m.selector.is_some() {
-            // `check::binding` refuses the tail — on a keyword that is not
-            // a sensor, and on a sensor keyword in the selector form, which
-            // no sensor binding is defined for — and `cairn synth`
-            // gates on `check`, so a second finding here would be the same
-            // sentence twice on one line. What this arm still owes the rest
-            // of the pass is the driver it takes away: a `logic` line
-            // reading the signal must not be told separately that nothing
-            // defines it.
+            // `check` reports this tail; only its driver is recorded here.
             if let Some(dr) = named {
                 out.refused_drivers.insert(dr.clone());
             }
@@ -424,24 +220,13 @@ fn collect_member<'a>(
         }
     }
 
-    // Actuator: an `opened_by=` / `powered_by=` / ... argument on the
-    // component `spec/redstone` "Signal binding" pairs that key with. The
-    // key claims the binding on its own — the value used to have to be a
-    // `sig.X` dotted ref for this loop to look at the field at all, which
-    // is how a well-spelled key with a malformed value went straight past
-    // it.
     for (key, vspan) in &m.intent_state.fields {
         let named = signal_named_by(&vspan.value);
         let Some(claim) = binding_claim(key, named) else {
-            // Neither side says a binding was meant. What the key *does*
-            // mean is the argument-schema question, which no pass answers
-            // yet.
             continue;
         };
         match claim {
             BindingClaim::UnreadKey => {
-                // The value is a signal, so the author meant to wire
-                // something; the key is not a binding anyone reads.
                 if !unknown_keyword {
                     out.diagnostics
                         .push(diag_unknown_binding_key(m, key, vspan, scope));
@@ -468,28 +253,14 @@ fn collect_member<'a>(
         }
     }
 
-    // The `[selector]` carries the same `key=value` pairs and is not a
-    // binding site: `spec/redstone` "Signal binding" writes the actuator
-    // patch as `door[id=front] opened_by=sig.x`, with the binding after the
-    // brackets, and `block_array`'s patch recogniser already refuses any
-    // selector attribute but `id=`. Walked here for the same answer in
-    // this pass's vocabulary, and for every host rather than the door
-    // patch alone.
+    // The `[selector]` is never a binding site (`spec/redstone` "Signal binding").
     for (key, vspan) in m.selector.iter().flatten() {
         let named = signal_named_by(&vspan.value);
         let Some(claim) = binding_claim(key, named) else {
             continue;
         };
         if !unknown_keyword {
-            // Report whichever fault moving the pair out of the brackets
-            // would not fix, which is the same rule the argument list
-            // follows one level in. `door[id=front,lit_by=sig.a]` moved
-            // out is still a `lit_by=` on a door, and
-            // `door[id=front,oepend_by=sig.a]` moved out is still a key
-            // nothing reads — so telling either author about the
-            // brackets first would be advice that does not work. Only a
-            // key this member does host has the brackets as its one
-            // fault.
+            // Report the fault that moving the pair out of the brackets would not fix.
             out.diagnostics.push(match claim {
                 BindingClaim::Actuator(host) if host == m.role.keyword() => {
                     diag_binding_inside_selector(m, key, vspan, scope)
@@ -503,8 +274,6 @@ fn collect_member<'a>(
         }
     }
 
-    // Nested body (e.g. `level y=0` block) — same triple of members /
-    // logic / asserts as the top-level, so recurse.
     let MemberBody {
         members: children,
         logic,
@@ -519,21 +288,8 @@ fn collect_member<'a>(
     out.asserts.extend(asserts);
 }
 
-/// Register a well-formed actuator binding on the component it drives, or
-/// refuse it. `false` when this binding is refused, so the caller can
-/// still count the signal as consumed.
-///
-/// The component is `m`, or the door a selector-form patch picks. A patch
-/// that picks none is `E_LOGIC_UNRESOLVED_PATCH`, and a second binding
-/// under one key on one component is `E_LOGIC_DUPLICATE_BINDING`: either
-/// way the port would have no component of its own behind it.
-///
-/// Of two bindings on one component, the one on the component's own line
-/// is the first, whichever the walk reaches first. A patch may be written
-/// above the door it binds, and blaming the door's own line for coming
-/// second would underline the binding that declares the wire and point the
-/// note at the patch. So when the declaration arrives after a patch, it
-/// takes the patch's place and the patch is the binding refused.
+/// Registers a well-formed actuator binding on the component it drives, or refuses it with `false`.
+/// Of two bindings on one component, the one on its own line is kept.
 fn accept_actuator<'a>(
     m: &'a Member,
     key: &'a str,
@@ -565,8 +321,7 @@ fn accept_actuator<'a>(
         out.actuators.push(incoming);
         return true;
     };
-    // One line cannot carry a key twice, so a duplicate always involves a
-    // patch, and the line that is not one is the component's own.
+    // A duplicate always involves a patch; the other line is the component's own.
     let declares = std::ptr::eq(m, host);
     let refused = if declares {
         std::mem::replace(slot, incoming)
@@ -581,19 +336,7 @@ fn accept_actuator<'a>(
     declares
 }
 
-/// The members a selector-form patch in this scope may pick: every member
-/// this pass walks, at any depth.
-///
-/// Block-array lowering resolves a patch against its flattened view,
-/// which unwraps a `level` sitting directly in the body and nothing else.
-/// Every body it does not unwrap is a `check` error — `nesting`'s
-/// `E_UNSUPPORTED_NESTING`, or the `E_UNKNOWN_KEYWORD` /
-/// `E_MISPLACED_MEMBER` on the row the body hangs off — and `cairn synth`
-/// gates on `check`, so on a source that reaches this pass the two views
-/// hold the same doors. The
-/// wider one is kept because [`collect_member`] reads bindings at any
-/// depth too: a patch and its door nested under the same parent pick
-/// each other here the way they would once that nesting has a reader.
+/// The members a selector-form patch in this scope may pick: every member, at any depth.
 fn patch_candidates(members: &[Member]) -> Vec<&Member> {
     fn walk<'a>(members: &'a [Member], out: &mut Vec<&'a Member>) {
         for m in members {
@@ -606,8 +349,7 @@ fn patch_candidates(members: &[Member]) -> Vec<&Member> {
     out
 }
 
-/// The physical member an actuator binding on `m` drives: `m` itself, or,
-/// for the selector form, the door its brackets pick.
+/// The member an actuator binding on `m` drives: `m`, or the door its brackets pick.
 fn actuator_host<'a>(
     m: &'a Member,
     candidates: &[&'a Member],
@@ -618,26 +360,13 @@ fn actuator_host<'a>(
     actuator_patch_target(m, candidates.iter().copied())
 }
 
-/// Whether a dotted name is a signal name: `sig.` and exactly one segment
-/// after it (`spec/redstone` "Signal binding").
-///
-/// The positions that define or wire a signal ask it here: a `logic`
-/// line's left-hand side, and through [`signal_named_by`] the sensor tail,
-/// an argument value, and a selector attribute. A reference on a `logic`
-/// right-hand side or in an `assert` is not checked here; it is looked up
-/// in the scope's defined signals, which only a sensor tail or a `logic`
-/// left-hand side adds to, and both of those are checked here.
-///
-/// Two segments, not just a `sig.` head, because the reading side takes
-/// exactly one segment after `sig.`: an actuator value is a signal only by
-/// this test, and the block-array lowering refuses any other shape with
-/// `must be a two-segment signal reference`.
+/// Whether a dotted name is a signal name: `sig.` and exactly one segment after it
+/// (`spec/redstone` "Signal binding").
 fn is_signal_name(dr: &DottedRef) -> bool {
     dr.head() == SIGNAL_HEAD && dr.tail().len() == 1
 }
 
-/// The signal reference a value names, or `None` for a value that names
-/// no signal at all. See [`is_signal_name`].
+/// The signal a value names, if any.
 fn signal_named_by(value: &Value) -> Option<&DottedRef> {
     match &value.kind {
         ValueKind::DotRef(dr) if is_signal_name(dr) => Some(dr),
@@ -648,28 +377,13 @@ fn signal_named_by(value: &Value) -> Option<&DottedRef> {
 /// Why a `key=value` pair is read as a binding the author meant to write.
 #[derive(Debug, Clone, Copy)]
 enum BindingClaim {
-    /// The key is one of [`ACTUATOR_BINDINGS`], which is a binding whatever
-    /// the value says. Carries the component `spec/redstone`
-    /// "Signal binding" pairs the key with — `'static` because it comes
-    /// from that table and from nowhere else, which is what the borrow says
-    /// and a lifetime parameter would not.
+    /// The key is one of [`ACTUATOR_BINDINGS`]; carries the component it pairs with.
     Actuator(&'static str),
-    /// The key is not a binding anyone reads, and the value is a signal —
-    /// so the author meant to wire something and put it under a key that
-    /// nothing consumes. Only built when a signal *was* named, which is
-    /// what every caller reads back off `named` rather than off here.
+    /// A signal value under a key nothing reads.
     UnreadKey,
 }
 
-/// Whether a pair claims to be a binding, from either side.
-///
-/// Either side is the point. Keying only on the value is what let a
-/// well-spelled key with a malformed value fall through; keying only on
-/// the key would lose [`DiagnosticCode::LogicUnknownBindingKey`], which
-/// exists because a `sig.` value says a binding was meant even where the
-/// key does not. A pair that says nothing on either side is an argument
-/// like any other, and what its key means is a question no pass answers
-/// yet.
+/// Whether a pair claims to be a binding, by its key or by its signal value.
 fn binding_claim(key: &str, named: Option<&DottedRef>) -> Option<BindingClaim> {
     if let Some((_, host)) = ACTUATOR_BINDINGS.iter().find(|(k, _)| *k == key) {
         return Some(BindingClaim::Actuator(host));
@@ -677,14 +391,7 @@ fn binding_claim(key: &str, named: Option<&DottedRef>) -> Option<BindingClaim> {
     named.map(|_| BindingClaim::UnreadKey)
 }
 
-/// Take one `logic` line, or refuse its left-hand side.
-///
-/// A binding whose name is not a signal name ([`is_signal_name`]) can never
-/// be read by an actuator: a name outside the `sig.` namespace because
-/// actuators read from it, and `sig` or `sig.x.y` because they read exactly
-/// one segment after `sig.`. Refusing at collection is what keeps the gate
-/// out of the DAG; lowered, it would take a cell and a placement coordinate
-/// for a signal no actuator can consume.
+/// Collects one `logic` line, or refuses a left-hand side that is not a signal name.
 fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut ScopeCollected<'a>) {
     if !is_signal_name(&b.lhs) {
         let LhsRefusal { why, fix } = lhs_refusal(&b.lhs);
@@ -703,16 +410,11 @@ fn collect_binding<'a>(b: &'a LogicBinding, scope: ScopeRef<'_>, out: &mut Scope
             )),
         );
         out.refused_drivers.insert(b.lhs.clone());
-        // The left-hand side is what was refused; the right-hand side is
-        // still a list of signals this line reads, and warning that they
-        // are unconsumed would be the same mistake reported twice.
+        // Its operands still count as read, or this mistake would be reported twice.
         let mut refs = HashSet::new();
         collect_refs(&b.rhs, &mut refs);
         out.refused_consumers.extend(refs);
-        // The line is not collected as a binding, so its right-hand side is
-        // never resolved: one finding per line, the left-hand side's, and
-        // an undefined name on the right is reported once the left is
-        // fixed.
+        // Not collected, so an undefined name on the right is reported once the left is fixed.
         return;
     }
     out.bindings.push(PendingBinding {
@@ -730,11 +432,7 @@ struct LhsRefusal {
     fix: String,
 }
 
-/// The refusal for a `logic` left-hand side that fails [`is_signal_name`],
-/// for the three ways it can miss: outside the namespace, the namespace
-/// with no name after it, and more than one segment after it. Only called
-/// on such a name; on a signal name the third branch would describe a
-/// single segment as too many.
+/// The refusal for a `logic` left-hand side that fails [`is_signal_name`].
 fn lhs_refusal(lhs: &DottedRef) -> LhsRefusal {
     debug_assert!(!is_signal_name(lhs), "`{lhs}` is a signal name");
     if lhs.head() != SIGNAL_HEAD {
@@ -770,17 +468,7 @@ fn lhs_refusal(lhs: &DottedRef) -> LhsRefusal {
     }
 }
 
-/// The repair for a value that names no signal, when there is one.
-///
-/// A bare identifier is a name with the namespace left off, so
-/// `opened_by=a` has exactly one reading and the message can offer it.
-/// Every other kind is a value of some other sort standing where a name
-/// belongs — `opened_by=3` names nothing that adding `sig.` would fix —
-/// so the message asks for the shape instead of guessing at a name.
-///
-/// `sig` is the identifier that is not a name: the author wrote the
-/// namespace and stopped, and `sig.sig` is not what they meant. It takes
-/// the shape-only advice with every other kind.
+/// The repair for a value naming no signal: `sig.<ident>` for a bare identifier other than `sig`.
 fn signal_spelling_for(value: &Value) -> Option<String> {
     match &value.kind {
         ValueKind::Ident(name) if name != SIGNAL_HEAD => Some(format!("{SIGNAL_HEAD}.{name}")),
@@ -788,9 +476,7 @@ fn signal_spelling_for(value: &Value) -> Option<String> {
     }
 }
 
-/// The `Fix:` line the two value-side refusals share, so the sensor tail
-/// and the actuator argument cannot start offering different repairs for
-/// the same mistake.
+/// The `Fix:` line both value-side refusals share.
 fn signal_value_fix(value: &Value, drop_advice: &str) -> String {
     match signal_spelling_for(value) {
         Some(spelling) => format!("Fix: write `{spelling}`, or {drop_advice}"),
@@ -798,10 +484,7 @@ fn signal_value_fix(value: &Value, drop_advice: &str) -> String {
     }
 }
 
-/// A `-> value` tail on a sensor whose value names no signal.
-///
-/// The tail is what says a signal was meant; the value is what fails to
-/// name one. Reported at the value, because that is the text to change.
+/// A sensor's `-> value` tail that names no signal, reported at the value.
 fn diag_tail_names_no_signal(member: &Member, binding: &Value, scope: ScopeRef<'_>) -> Diagnostic {
     diag_names_no_signal(
         member,
@@ -842,10 +525,7 @@ fn diag_argument_names_no_signal(
     )
 }
 
-/// The two value-side refusals: reported at `span`, noted at the member,
-/// and repaired by [`signal_value_fix`]. `span` is passed beside `value`
-/// rather than read off it because a [`ValueWithSpan`] may one day cover
-/// more than its value's own range.
+/// The two value-side refusals, reported at `span`, which may cover more than `value` itself.
 fn diag_names_no_signal(
     member: &Member,
     value: &Value,
@@ -858,14 +538,7 @@ fn diag_names_no_signal(
         .with_footer(signal_value_fix(value, drop_advice))
 }
 
-/// A binding written inside the `[selector]` rather than after it.
-///
-/// The brackets select a member that already exists; what the line does
-/// to it is written after them. Only reached for a key this member does
-/// host, so the brackets are the one thing wrong with the line and the
-/// `Fix:` can rebuild it verbatim — a key the member cannot host, or one
-/// nothing reads, goes to the finding that owns *that* fault, because
-/// moving it out of the brackets would not answer it.
+/// A binding written inside the `[selector]`, its one fault, so the `Fix:` can rebuild the line.
 fn diag_binding_inside_selector(
     member: &Member,
     key: &str,
@@ -898,8 +571,7 @@ fn diag_binding_inside_selector(
     ))
 }
 
-/// An actuator key on a member that is not the component
-/// `spec/redstone` "Signal binding" pairs it with.
+/// An actuator key on a member that is not the component it pairs with.
 fn diag_misplaced_actuator(
     member: &Member,
     key: &str,
@@ -930,13 +602,7 @@ fn diag_misplaced_actuator(
     })
 }
 
-/// An actuator patch whose selector picks no single physical door.
-///
-/// Anchored on the selector's `id=` when it has one, because the id is
-/// what the author corrects; the binding itself is well formed. The
-/// primary carries [`PatchTargetError`]'s reason clause, the one
-/// block-array lowering defers the line with, and the footer the repair,
-/// which depends on the reason.
+/// An actuator patch whose selector picks no single door, anchored on its `id=` when it has one.
 fn diag_unresolved_patch(
     member: &Member,
     key: &str,
@@ -989,19 +655,13 @@ fn diag_unresolved_patch(
     .with_footer(fix)
 }
 
-/// A second binding under one actuator key on one physical component.
-///
-/// `kept` is the binding the component keeps — its own line's, when it has
-/// one — and `refused` the one this finding is anchored on.
+/// A second binding under one actuator key on one component, anchored on `refused`.
 fn diag_duplicate_binding(
     kept: &BoundActuator<'_>,
     refused: &BoundActuator<'_>,
     scope: ScopeRef<'_>,
 ) -> Diagnostic {
     let keyword = kept.host.role.keyword();
-    // One line cannot carry a key twice, so one of the two is a patch, and
-    // a patch resolves only by an `id=` its door carries: `host.id` is set
-    // here. The keyword alone keeps the sentence total without a panic.
     let named = kept.host.id.as_deref().map_or_else(
         || format!("this `{keyword}`"),
         |id| format!("`{keyword}` `{id}`"),
@@ -1059,7 +719,7 @@ fn diag_unknown_binding_key(
     )
     .with_note(member.span.clone(), "declared here");
     match nearest_match(key, keys.iter().copied()) {
-        Some(near) => diag.with_footer(format!("did you mean `{near}=`?")),
+        Some(near) => diag.with_footer(did_you_mean(&format!("{near}="))),
         None => diag.with_footer(format!(
             "Fix: use one of `{}=`, or drop the argument if this member is not an actuator.",
             keys.join("=`, `"),
@@ -1067,11 +727,7 @@ fn diag_unknown_binding_key(
     }
 }
 
-/// Finalise one scope's collected state. Success writes a
-/// [`ScopedLogicIrEntry`] onto `out.scoped`; every finding — including
-/// warnings that survive alongside a well-formed IR — appends to
-/// `out.diagnostics`. Each step below owns one specific transformation of
-/// the working set so the top-level flow reads as a linear pipeline.
+/// Finishes one scope: its entry goes to `out.scoped` unless a finding is an error.
 fn finish_scope(scope: ScopeRef<'_>, mut collected: ScopeCollected<'_>, out: &mut SynthOutput) {
     if !collected.has_work() {
         return;
@@ -1130,12 +786,7 @@ fn finish_scope(scope: ScopeRef<'_>, mut collected: ScopeCollected<'_>, out: &mu
         &mut diagnostics,
     );
 
-    // Collection raises its findings before the phases run, and each
-    // phase raises in its own order, so which finding comes first has
-    // never tracked which line comes first. `SynthOutput::diagnostics`
-    // promises source order and `cairn synth` prints them in the order it
-    // is handed, so the sort belongs here. Stable, so two findings on one
-    // span keep the order the passes raised them in.
+    // Into source order; stable, so findings on one span keep the order they were raised in.
     diagnostics.sort_by_key(|d| (d.span.start, d.span.end));
 
     let scope_has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
@@ -1149,18 +800,12 @@ fn finish_scope(scope: ScopeRef<'_>, mut collected: ScopeCollected<'_>, out: &mu
     }
 }
 
-/// Which source drives a signal, and where in its list it sits.
-///
-/// The kind and the index travel together because they are one fact: the
-/// index means nothing without knowing which list it points into. Carried
-/// as two fields they read as independent, and the correlation lives in
-/// whoever remembers to check the tag first.
+/// Which source drives a signal, as an index into the scope's sensors or its bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DriverSource {
     /// Index into the scope's collected sensors — a `-> sig.X` tail.
     Sensor(usize),
-    /// Index into the scope's collected bindings — a `logic sig.X = ...`
-    /// left-hand side.
+    /// Index into the scope's collected bindings — a `logic sig.X = ...` left-hand side.
     Binding(usize),
 }
 
@@ -1173,11 +818,6 @@ struct Driver<'a> {
 }
 
 /// The single driver each signal keeps, once the collisions are reported.
-///
-/// One map keyed by the signal, rather than a sensor set beside a binding
-/// map: this PR's whole claim is that a signal carries one driver, and two
-/// containers can hold a name in both at once. Here that state cannot be
-/// written down.
 #[derive(Debug, Default)]
 struct Winners(HashMap<DottedRef, DriverSource>);
 
@@ -1189,9 +829,7 @@ impl Winners {
             .any(|source| *source == DriverSource::Sensor(index))
     }
 
-    /// LHS name to the index of the binding that owns it — the shape the
-    /// lowering passes take, since they test ownership by comparing an
-    /// index against the one the name maps to.
+    /// Left-hand side → index of the binding that owns it.
     fn bindings(&self) -> HashMap<DottedRef, usize> {
         self.0
             .iter()
@@ -1203,25 +841,7 @@ impl Winners {
     }
 }
 
-/// Reduce every source that drives a signal to one, reporting the rest.
-///
-/// A signal is driven by a sensor's `-> sig.X` tail or by a `logic` line's
-/// left-hand side, and the two used to be checked by different passes in a
-/// fixed order — sensors registered first, `logic` duplicates second,
-/// sensor-versus-`logic` third, with a shared "already reported" set. That
-/// arrangement had three consequences, all of them here:
-///
-/// - two sensors on one signal were the pairing nobody checked, so the
-///   second was dropped in silence and its plate wired to nothing;
-/// - a signal driven by a sensor *and* two `logic` lines reported only the
-///   `logic` pair, because the earlier pass had already claimed the name in
-///   the shared set, so the root cause was the one thing not mentioned;
-/// - "first" meant "sensor", not "first in the file", so a `logic` line
-///   written above the sensor it collides with was the line accused.
-///
-/// One list of drivers ordered by span answers all three: the first is the
-/// definition, the second is reported against it, and the rest are
-/// suppressed so the finding still lands once per signal.
+/// Reduces every source driving a signal to the first in the file, reporting the second.
 fn resolve_drivers(
     sensors: &[PendingSensor],
     bindings: &[PendingBinding<'_>],
@@ -1239,10 +859,7 @@ fn resolve_drivers(
         source: DriverSource::Binding(index),
         span: &b.span,
     }));
-    // Ordered by where the author wrote them, which is what makes "first
-    // declared here" true. `sort_by_key` is stable, so a sensor tail and a
-    // `logic` line that somehow shared a start byte would keep the order
-    // they were collected in rather than swapping between runs.
+    // By where the author wrote them, which makes "first declared here" true.
     drivers.sort_by_key(|d| (d.span.start, d.span.end));
 
     let mut winners = Winners::default();
@@ -1254,8 +871,7 @@ fn resolve_drivers(
             winners.0.insert(driver.name.clone(), driver.source);
             continue;
         };
-        // One finding per signal. A third driver adds nothing an author
-        // has not already been told to go and look at.
+        // One finding per signal.
         if reported.insert(driver.name) {
             diagnostics.push(diag_multiple_drivers(driver, incumbent, scope));
         }
@@ -1263,11 +879,7 @@ fn resolve_drivers(
     winners
 }
 
-/// Two sources drive one signal.
-///
-/// Anchored at the later of the two, with a note at the one that keeps the
-/// signal — the shape `E_LOGIC_MULTIPLE_DRIVERS` has always had, now with
-/// both sides named whichever kind they are.
+/// Two sources drive one signal: anchored at the later, with a note at the one that keeps it.
 fn diag_multiple_drivers(
     later: &Driver<'_>,
     first: &Driver<'_>,
@@ -1314,13 +926,7 @@ fn diag_multiple_drivers(
     .with_footer(fix)
 }
 
-/// Check every signal an `assert` names against the scope's definitions.
-///
-/// The tick simulator that would evaluate these is unbuilt, but a
-/// property over a name nothing emits and
-/// nothing defines is not waiting on the simulator to be wrong. It is the
-/// same finding a `logic` line naming that signal earns, so it is the
-/// same code.
+/// Reports every signal an `assert` names that nothing in the scope defines.
 fn check_assert_refs(
     asserts: &[&AssertIr],
     ir: &LogicIr,
@@ -1334,13 +940,6 @@ fn check_assert_refs(
     for assertion in asserts {
         let span = assertion.span();
         for name in assertion.signal_refs() {
-            // `failed_lhs` joins the two sets the rest of the pass
-            // consults: a `logic` line that failed to lower has already
-            // been reported, and its LHS *is* defined by a `logic` line —
-            // saying otherwise here would be false as well as second.
-            // A property may also name one signal twice
-            // (`always(sig.x -> eventually sig.x ...)`), and one name is
-            // one finding.
             if ir.signal_defs.contains_key(name)
                 || refused_drivers.contains(name)
                 || failed_lhs.contains(name)
@@ -1361,18 +960,7 @@ fn check_assert_refs(
     }
 }
 
-/// Register each sensor that won its signal as an [`InputPort`] and its
-/// `signal_defs` entry, in source order.
-///
-/// A sensor that lost is skipped rather than overwriting the winner's
-/// entry. Nothing observable rests on that today — a losing sensor means
-/// [`resolve_drivers`] raised an error, and `finish_scope` drops the whole
-/// scope on one, so the IR reaches nobody and every finding the later
-/// passes raise names the same signals either way. It is here for the
-/// reason the `failed_lhs` comment in [`lower_all_bindings`] gives: a
-/// change that lets a scope survive an Error would otherwise inherit an
-/// IR where one signal has two input ports and `signal_defs` points at the
-/// one the author was told to remove.
+/// Registers each sensor that kept its signal as an [`InputPort`] with its `signal_defs` entry.
 fn register_sensors(sensors: &[PendingSensor], winners: &Winners, ir: &mut LogicIr) {
     for (index, sensor) in sensors.iter().enumerate() {
         if !winners.owns_sensor(index) {
@@ -1388,17 +976,7 @@ fn register_sensors(sensors: &[PendingSensor], winners: &Winners, ir: &mut Logic
     }
 }
 
-/// Lower the RHS of each binding that owns its LHS into the DAG.
-///
-/// Ownership is [`resolve_drivers`]' answer, so a binding that lost its
-/// name — to a sensor or to another `logic` line, whichever came first in
-/// the file — is not in `bindings_by_lhs` and never reaches here. "First"
-/// means first by span rather than first collected, which differ whenever
-/// a `level` block is involved.
-///
-/// Returns the set of LHS names whose lowering failed — the actuator
-/// resolution, the `assert` walk, and the unused audit consult it to
-/// suppress cascaded diagnostics.
+/// Lowers each binding that owns its left-hand side into the DAG, returning the names that failed.
 fn lower_all_bindings<'a>(
     bindings: &'a [PendingBinding<'a>],
     bindings_by_lhs: &HashMap<DottedRef, usize>,
@@ -1421,10 +999,6 @@ fn lower_all_bindings<'a>(
     };
 
     for (idx, b) in bindings.iter().enumerate() {
-        // Only the binding that owns its LHS is lowered; a binding that
-        // lost the name to a sensor or to an earlier line is not in
-        // `bindings_by_lhs` at all, and `resolve_drivers` has already said
-        // so.
         if bindings_by_lhs.get(b.lhs).copied() != Some(idx) {
             continue;
         }
@@ -1432,13 +1006,7 @@ fn lower_all_bindings<'a>(
             continue;
         }
         if lower_binding(b.lhs, ir, &mut ctx, diagnostics).is_err() {
-            // Records every failure kind, including a depth refusal, which is
-            // a property of the path walked rather than of this binding. That
-            // is only harmless because `finish_scope` drops the whole scope on
-            // any Error, so the cascade suppression `failed_lhs` also drives
-            // (`resolve_actuators`, `audit_unused_signals`) never reports on an
-            // IR anyone sees. A future change that lets a scope survive an
-            // Error has to split the two uses apart first.
+            // A depth refusal lands here too: harmless only while any error drops the scope.
             ctx.failed_lhs.insert(b.lhs.clone());
         }
     }
@@ -1446,10 +1014,7 @@ fn lower_all_bindings<'a>(
     ctx.failed_lhs
 }
 
-/// Register actuator drivers against the resolved signal table. An
-/// unresolved driver whose LHS is in `failed_lhs` was already reported
-/// upstream; skip the cascade. Every other missing driver produces a
-/// standalone `E_LOGIC_UNBOUND_SIGNAL`.
+/// Resolves each actuator's driver to an [`OutputPort`], reporting a missing one once.
 fn resolve_actuators(
     actuators: &[BoundActuator<'_>],
     bindings_by_lhs: &HashMap<DottedRef, usize>,
@@ -1481,10 +1046,7 @@ fn resolve_actuators(
     }
 }
 
-/// Walk every `logic sig.X = ...` first-declared binding and warn if
-/// nothing consumes its LHS. Purely syntactic so it also catches bare-ref
-/// bindings (`logic sig.a = sig.b`) that never produced a gate node and
-/// would be invisible to a gate-only reachability walk.
+/// Warns about every sensor and owning `logic` binding whose signal nothing consumes.
 fn audit_unused_signals(
     collected: &ScopeCollected<'_>,
     ir: &LogicIr,
@@ -1507,23 +1069,13 @@ fn audit_unused_signals(
     for act in actuators {
         consumed.insert(act.driver_name.clone());
     }
-    // A property observes wires — that is what `spec/redstone`
-    // "Verification" is for — so a signal an `assert` names is read even
-    // when no actuator reads it. Checking an assert's references and then
-    // not counting them would warn that a signal is unused in the one place
-    // the author wrote down what it is for.
+    // An `assert` observes wires (`spec/redstone` "Verification"), so its names are consumed.
     for assertion in asserts {
         consumed.extend(assertion.signal_refs().into_iter().cloned());
     }
-    // An actuator the front end refused still says what the author meant
-    // to wire. Warning that the signal is unconsumed on top of the finding
-    // that took the actuator away is the same mistake reported twice.
+    // A refused actuator still says what the author meant to wire.
     consumed.extend(refused_consumers.iter().cloned());
 
-    // Sensors are audited from the result side rather than by shape: a
-    // scope whose only content is `pressure_plate ... -> sig.a` lowers to
-    // an IR with one input and no output, which is a build with a plate
-    // wired to nothing — the same silence this pass exists to break.
     for input in &ir.inputs {
         if !consumed.contains(&input.name) {
             diagnostics.push(
@@ -1568,96 +1120,37 @@ fn audit_unused_signals(
     }
 }
 
-/// DFS lowering context for one scope. Held on a separate struct so the
-/// recursive helpers can pass a single `&mut` instead of threading five
-/// arguments.
+/// Depth-first lowering state for one scope.
 struct LoweringCtx<'a> {
     scope: ScopeRef<'a>,
     bindings: &'a [PendingBinding<'a>],
     bindings_by_lhs: &'a HashMap<DottedRef, usize>,
-    /// Signals a refused binding would have driven. A reference to one is
-    /// a consequence of that refusal rather than a second mistake, so it
-    /// is suppressed the way [`Self::failed_lhs`] suppresses the rest.
+    /// Signals a refused binding would have driven, suppressed like [`Self::failed_lhs`].
     refused_drivers: &'a HashSet<DottedRef>,
-    /// `sig.X` currently being lowered — presence during a lookup indicates
-    /// a dependency cycle. Value = span of the outermost `logic` line in
-    /// the chain, so the diagnostic can point at the culprit.
+    /// Signals being lowered, each with its `logic` line's span; meeting one again is a cycle.
     in_progress: HashMap<DottedRef, Span>,
-    /// The bindings being lowered, as indices into [`Self::bindings`],
-    /// outermost first: each one is being lowered from inside the
-    /// expression of the one before it. What `E_LOGIC_NESTING_TOO_DEEP`
-    /// counts, stands on and notes; its last entry is the binding
-    /// [`Self::depth_reported`] keys on.
+    /// The bindings being lowered, outermost first, as indices into [`Self::bindings`].
     chain: Vec<usize>,
-    /// Signal names whose resolution already failed. Every downstream
-    /// reference (RHS or actuator) checks this set before emitting a fresh
-    /// `E_LOGIC_UNBOUND_SIGNAL` so the user sees the root cause once, not
-    /// once per consumer. Populated both by `logic` binding failures and
-    /// by raw-ref lookups that name a signal no source defines.
+    /// Signals whose resolution already failed, so the root cause is reported once.
     failed_lhs: HashSet<DottedRef>,
-    /// Common-subexpression cache keyed by the fully-populated
-    /// [`GateKind`]. Symmetric variants are canonicalised at construction,
-    /// so `a and b` and `b and a` share a cache slot.
+    /// Common-subexpression cache; symmetric gates are canonicalised first.
     cse: HashMap<GateKind, u32>,
-    /// How many nested [`lower_expr`] frames are open, bounded by
-    /// [`MAX_LOWERING_DEPTH`]. [`lower_binding`] does not touch it directly;
-    /// it costs depth only through the [`lower_expr`] it calls.
+    /// Open [`lower_expr`] frames, bounded by [`MAX_LOWERING_DEPTH`].
     depth: usize,
-    /// Bindings that already reported the limit, keyed by the span of the
-    /// one the lowering was in when it stopped: the deepest of its chain,
-    /// not the outermost the finding stands on. The several branches of
-    /// one binding that all hit the wall share one finding, while two
-    /// chains that stop in different bindings each get their own, even when
-    /// both start from the same one — `logic sig.top = sig.p1 or sig.q1`
-    /// over two reverse chains reports twice, and keying on `sig.top` would
-    /// leave the second chain unreported. `lower_binary` deliberately keeps
-    /// every root cause on a single pass, and a bare flag broke that for
-    /// the second chain.
+    /// Spans of the deepest binding of each chain that already reported the depth limit.
     depth_reported: HashSet<(usize, usize)>,
 }
 
-/// Deepest `logic` lowering recursion before the pass refuses.
-///
-/// Depth is counted in `lower_expr` frames, which is not the unit an
-/// author writes in:
-///
-/// - one expression node on the path costs **one** level
-/// - one binding a reference chains through costs **two** — the operand
-///   descent plus the referenced binding's own expression
-///
-/// so a chain of one-operator bindings reaches this bound at about
-/// `MAX_LOWERING_DEPTH / 2` of them, and a chain of longer expressions at
-/// fewer. The diagnostic counts the bindings it was inside when it
-/// stopped and points at the outermost, because "nested past 256 levels"
-/// is not something an author can act on.
-///
-/// The depth comes from declaration order, not graph size: `lower_binding`
-/// resolves a reference by lowering the binding it names, so a chain
-/// declared in reverse recurses once per binding while the same graph in
-/// dependency order stays shallow at several thousand. Measured on a debug
-/// build, roughly 410 reverse-declared bindings overflowed the native stack
-/// — an uncatchable abort, with no diagnostic.
-///
-/// Sits above `cairn_lang_core`'s expression-tree bound so a single
-/// well-formed expression can never reach it; what remains is the chained
-/// case, which is what the diagnostic's footer addresses.
+/// Deepest `logic` lowering recursion, in `lower_expr` frames, before the pass refuses with
+/// `E_LOGIC_NESTING_TOO_DEEP`.
 pub const MAX_LOWERING_DEPTH: usize = 256;
 
-// A single well-formed expression must never be able to reach the bound: it
-// would earn the footer below, which tells the author to reorder bindings —
-// useless advice for a scope holding one. `cairn_lang_core` caps the tree it
-// hands over, and one node costs one level here, so keeping this above that
-// cap is what makes the chained case the only reachable one. Asserted rather
-// than assumed, because the two constants live in different crates.
 const _: () = assert!(
     cairn_lang_core::MAX_EXPR_DEPTH < MAX_LOWERING_DEPTH,
     "an expression the parser accepts must not be able to exhaust the lowering budget on its own",
 );
 
-/// Sentinel returned by [`lower_binding`] / [`lower_expr`] when a
-/// diagnostic has already been queued and the caller should abandon the
-/// current branch without pushing a placeholder. The specific error text
-/// lives on `diagnostics`; this type just controls control flow.
+/// Returned once a diagnostic has been queued, so the caller abandons the branch.
 struct LoweringFailed;
 
 fn lower_binding<'a>(
@@ -1667,13 +1160,6 @@ fn lower_binding<'a>(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<SignalRef, LoweringFailed> {
     let Some(&binding_idx) = ctx.bindings_by_lhs.get(lhs) else {
-        // `LoweringFailed` is defined as "a diagnostic has been queued",
-        // and there is none to queue here — the caller is asking to lower
-        // a name no binding owns. Both callers check first, so this is
-        // unreachable; returning the error silently instead would put the
-        // name into `failed_lhs` and suppress the report a third caller
-        // owes the user, which is the class this whole pass exists to
-        // close.
         unreachable!(
             "lower_binding called for `{lhs}`, which owns no binding — the caller must test \
              `bindings_by_lhs` first"
@@ -1697,12 +1183,7 @@ fn lower_binding<'a>(
     }
 }
 
-/// Lower one boolean expression, one level deeper than the caller.
-///
-/// Every recursive step in the pass — nested operands, and the descent into
-/// a referenced binding via [`resolve_ref`] — funnels through here, so this
-/// is the single place [`MAX_LOWERING_DEPTH`] is enforced. A new recursive
-/// site cannot reopen the hole by forgetting to count.
+/// Lowers a boolean expression one level deeper, the one place [`MAX_LOWERING_DEPTH`] is enforced.
 fn lower_expr<'a>(
     expr: &'a Expr,
     binding_span: &Span,
@@ -1722,32 +1203,11 @@ fn lower_expr<'a>(
     result
 }
 
-/// How many bindings `E_LOGIC_NESTING_TOO_DEEP` notes by line after the
-/// first, the one it stands on. A chain long enough to reach the limit
-/// with one-operator bindings is over a hundred lines, and the first few
-/// show the shape. The primary counts the whole chain, and a footer says
-/// how many more there are past the noted ones.
+/// How many bindings after the first `E_LOGIC_NESTING_TOO_DEEP` notes by line.
 const CHAIN_NOTES: usize = 3;
 
-/// `E_LOGIC_NESTING_TOO_DEEP` for the chain `ctx` is inside, or `None`
-/// when the binding the lowering stopped in has already reported it.
-///
-/// Anchored on the outermost binding of the chain, the one the pass set
-/// out to lower: bindings are lowered in declaration order, so every
-/// binding it reaches through a reference is declared after it, and that
-/// is where the reordering has to start. The next `CHAIN_NOTES` are noted
-/// in the order they were entered, and the remainder is a count in the
-/// footer.
-///
-/// Entry order is a choice. It is the order the bindings reference one
-/// another in, so each note names the binding the one before it refers
-/// to; a chain entered 13 -> 15 -> 14 notes line 15 before line 14. That
-/// makes the notes the one place `finish_scope`'s sort by span does not
-/// reach, since it orders the findings and not the notes inside one.
-///
-/// Deduplicated on the deepest binding rather than on the anchor, so two
-/// chains that start from one binding get a finding each;
-/// [`LoweringCtx::depth_reported`] says why.
+/// `E_LOGIC_NESTING_TOO_DEEP` for `ctx`'s chain, anchored on its outermost binding, or `None` when
+/// already reported.
 fn nesting_too_deep(ctx: &mut LoweringCtx<'_>) -> Option<Diagnostic> {
     let (Some(&outermost), Some(&deepest)) = (ctx.chain.first(), ctx.chain.last()) else {
         unreachable!("an expression is lowered only inside `lower_binding`, which opens the chain")
@@ -1757,9 +1217,6 @@ fn nesting_too_deep(ctx: &mut LoweringCtx<'_>) -> Option<Diagnostic> {
         return None;
     }
     let count = ctx.chain.len();
-    // The `const _` assertion under `MAX_LOWERING_DEPTH` keeps a single
-    // expression from reaching the bound on its own, so no chain of one
-    // binding gets here and the primary needs no singular.
     debug_assert!(
         count >= 2,
         "one expression cannot exhaust the lowering budget, so a chain that does holds two \
@@ -1799,10 +1256,7 @@ fn nesting_too_deep(ctx: &mut LoweringCtx<'_>) -> Option<Diagnostic> {
     ))
 }
 
-/// Lower one boolean expression. Every operand is lowered independently
-/// before the enclosing gate is built, and every recursive failure is
-/// collected — a `logic sig.x = sig.undef1 or sig.undef2` reports both
-/// unbound refs rather than shortcircuiting at the first.
+/// Lowers one boolean expression, lowering every operand even after one fails.
 fn lower_expr_inner<'a>(
     expr: &'a Expr,
     binding_span: &Span,
@@ -1841,12 +1295,6 @@ fn lower_expr_inner<'a>(
                 binding_span.clone(),
             ))
         }
-        // `Expr` is `#[non_exhaustive]`; the current parser produces only
-        // the four variants above. A future extension (`xor(a, b)`,
-        // `mux(sel=..., a=..., b=...)`, ...) will land as new variants —
-        // reject them fail-loud with a dedicated code so the missing
-        // lowering site is signalled at the offending line rather than
-        // hidden inside a wrong DAG.
         _ => {
             let label = ctx.scope.label();
             diagnostics.push(
@@ -1854,11 +1302,11 @@ fn lower_expr_inner<'a>(
                     DiagnosticCode::LogicUnsupportedPrimitive,
                     binding_span.clone(),
                     format!(
-                        "{label} logic expression uses a boolean primitive this synth pass does not yet lower",
+                        "{label} logic expression uses a boolean primitive the combinational lowering has no gate for",
                     ),
                 )
                 .with_footer(
-                    "Fix: rewrite using `and` / `or` / `not`, or wait for a follow-up change that lands the missing primitive.",
+                    "Fix: rewrite the expression with `and`, `or` and `not`",
                 ),
             );
             Err(LoweringFailed)
@@ -1866,10 +1314,7 @@ fn lower_expr_inner<'a>(
     }
 }
 
-/// Lower the two operands of a binary gate, collecting *both* independent
-/// diagnostics before deciding whether to fail. Keeps every root cause on
-/// one pass so the author does not have to fix and re-run to see the
-/// second issue.
+/// Lowers both operands of a binary gate before failing, so one run reports every root cause.
 fn lower_binary<'a>(
     a: &'a Expr,
     b: &'a Expr,
@@ -1893,12 +1338,11 @@ fn resolve_ref<'a>(
     ctx: &mut LoweringCtx<'a>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<SignalRef, LoweringFailed> {
-    // Already defined (sensor input or previously lowered binding).
     if let Some(sig) = ir.signal_defs.get(dr).copied() {
         return Ok(sig);
     }
 
-    // Cycle: this ref is currently mid-lowering.
+    // Still being lowered: a cycle.
     if let Some(seed_span) = ctx.in_progress.get(dr).cloned() {
         let label = ctx.scope.label();
         diagnostics.push(
@@ -1917,16 +1361,11 @@ fn resolve_ref<'a>(
         return Err(LoweringFailed);
     }
 
-    // Root cause already reported once — silent skip. `refused_drivers`
-    // joins it: a `-> sig.X` tail on a member that cannot emit, or a
-    // `logic` LHS that is not a signal name, was already refused where it
-    // was written, and the signal it would have defined going missing
-    // is that finding's consequence rather than a second one.
+    // Already reported, here or where a refused binding was written.
     if ctx.failed_lhs.contains(dr) || ctx.refused_drivers.contains(dr) {
         return Err(LoweringFailed);
     }
 
-    // Defined by a downstream `logic` line: recurse.
     if ctx.bindings_by_lhs.contains_key(dr) {
         return match lower_binding(dr, ir, ctx, diagnostics) {
             Ok(sig) => Ok(sig),
@@ -1937,8 +1376,7 @@ fn resolve_ref<'a>(
         };
     }
 
-    // Unbound: no sensor, no `logic` line defines it. Record so a later
-    // actuator or sibling RHS reference does not repeat the same finding.
+    // Unbound. Recorded so a later reference does not repeat the finding.
     diagnostics.push(unbound_signal_diagnostic(
         ctx.scope,
         dr,
@@ -1952,9 +1390,7 @@ fn resolve_ref<'a>(
     Err(LoweringFailed)
 }
 
-/// Reuse a gate node whose fully-populated [`GateKind`] was already
-/// interned, or push a fresh one. Returns the [`SignalRef::Gate`] handle
-/// either way so the caller does not have to branch on the CSE cache.
+/// Reuses the node of an already interned [`GateKind`], or pushes a new one.
 fn intern_gate(
     ir: &mut LogicIr,
     ctx: &mut LoweringCtx<'_>,
@@ -1970,10 +1406,7 @@ fn intern_gate(
     SignalRef::Gate(idx)
 }
 
-/// Canonicalise the operand pair for a symmetric gate so
-/// `and(a, b)` and `and(b, a)` share the same CSE cache slot. Uses a
-/// deterministic total order over `SignalRef` — input ports sort before
-/// gates, and inside each family the smaller index wins.
+/// Orders a symmetric gate's operands so `and(a, b)` and `and(b, a)` share a CSE slot.
 fn canonicalize_pair(a: SignalRef, b: SignalRef) -> (SignalRef, SignalRef) {
     if signal_rank(a) <= signal_rank(b) {
         (a, b)
@@ -1998,10 +1431,7 @@ fn unbound_signal_diagnostic(
     failed_lhs: &HashSet<DottedRef>,
     source_label: &str,
 ) -> Diagnostic {
-    // A name whose `logic` line failed to lower is a key in
-    // `bindings_by_lhs` and is not a signal anyone can rename to. Offering
-    // it made the finding contradict itself: "no `logic` line defines
-    // `sig.x`" followed by "valid signals in scope: sig.x".
+    // A name whose `logic` line failed to lower is no valid rename target.
     let mut candidates: Vec<String> = ir
         .inputs
         .iter()
@@ -2033,9 +1463,7 @@ fn unbound_signal_diagnostic(
             "Valid signals in scope: {joined}. Fix: rename to a defined signal, or drive `{dr}` from a sensor / `logic` line.",
         ));
     } else {
-        // Neither a sensor tail nor a `logic` left-hand side accepts a name
-        // that is not a signal name, so offering to drive it from one would
-        // send the author to a refusal.
+        // A non-signal name cannot be driven, so only a rename is offered.
         let joined = candidates.join(", ");
         diag = diag.with_footer(format!(
             "Valid signals in scope: {joined}. Fix: rename to a defined signal.",
@@ -2044,9 +1472,7 @@ fn unbound_signal_diagnostic(
     diag
 }
 
-/// Walk an `Expr` tree and add every `sig.X` reference it names into
-/// `out`. Used by the unused-signal detection so a bare-ref binding
-/// (`logic sig.a = sig.b`) still marks `sig.b` as consumed.
+/// Adds every signal an expression references to `out`.
 fn collect_refs(expr: &Expr, out: &mut HashSet<DottedRef>) {
     match expr {
         Expr::Ref(dr) => {
@@ -2061,11 +1487,7 @@ fn collect_refs(expr: &Expr, out: &mut HashSet<DottedRef>) {
     }
 }
 
-/// Which scope a pass is working on, as the diagnostics need it.
-///
-/// Carried as one value rather than the `(kind, name)` pair every function
-/// used to take, because the pair is threaded through the whole file and
-/// every finding renders it the same way.
+/// Which scope the pass is working on, as the diagnostics name it.
 #[derive(Debug, Clone, Copy)]
 struct ScopeRef<'a> {
     kind: ScopeKind,
@@ -2073,20 +1495,8 @@ struct ScopeRef<'a> {
 }
 
 impl ScopeRef<'_> {
-    /// `struct=gatehouse:` — the prefix every finding in this pass opens
-    /// with.
+    /// `struct=gatehouse:`, the prefix of every finding's primary message.
     fn label(self) -> String {
-        scope_label(self.kind, self.name)
+        format!("{}={}:", self.kind.label(), self.name)
     }
-}
-
-/// Prefix every diagnostic's primary message with the scope kind + name so
-/// a multi-scope module's findings read unambiguously in the CLI dump.
-fn scope_label(kind: ScopeKind, name: &str) -> String {
-    let label = match kind {
-        ScopeKind::Struct => "struct",
-        ScopeKind::Def => "def",
-        ScopeKind::Site => "site",
-    };
-    format!("{label}={name}:")
 }

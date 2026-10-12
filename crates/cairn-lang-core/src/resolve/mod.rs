@@ -1,51 +1,31 @@
-//! Semantic layer for the Intent IR.
-//!
-//! Given a lowered [`crate::intent::IntentModule`], `resolve` walks every
-//! `theme`, `def`, `struct`, and `site` and produces a [`Resolution`] that
-//! records:
-//!
-//! 1. **slot bindings** — each `mat_slot=NAME` on a member is paired with
-//!    `theme.slots[NAME]` from the applied theme;
-//! 2. **selector matches** — each `KEYWORD[attrs] -> bindings` row in a theme
-//!    is paired with the member(s) it actually matches in the file;
-//! 3. **diagnostics** — `E_UNRESOLVED_SLOT` (Error) for `mat_slot=NAME` that
-//!    no theme provides, `E_UNKNOWN_SLOT_TARGET` (Error) for theme slot
-//!    targets that look like neither a canonical nor an abstract material
-//!    token, and `E_THEME_SELECTOR_UNMATCHED` (Warning) for selectors that
-//!    don't bind to anything.
-//!
-//! The resolved data here is consumed by:
-//!
-//! - `crate::check` — merges `Resolution.diagnostics` into the full `cairn
-//!   check` output so a single CLI run reports both syntactic and
-//!   theme-binding problems together;
-//! - `cairn info` — re-uses the same [`Resolution`] when computing the three
-//!   version axes (`compute_axes`).
-//!
-//! Per-edition resolved blockstate (the `Lifted` semantic level) is the
-//! next maturity tier's responsibility — `Member.resolved_state` is left
-//! untouched here.
-//!
-//! See `spec/materials-themes` (slots, selectors, canonical vs. abstract
-//! tokens) and `spec/versioning-editions` (the three info axes) for the rules
-//! this module enforces.
+//! Semantic layer for the Intent IR: [`resolve`] pairs each `mat_slot=` with its theme slot, each
+//! theme selector with the members it matches, and each `place` and `connect` across scopes;
+//! [`compute_axes`] computes the version axes `cairn info` reports.
 
 mod binding;
-mod requires_parse;
+mod connect;
+mod output_names;
+mod resolution;
 mod resolver;
+mod scope;
+mod selector;
+mod site;
+mod slots;
+mod theme_reference;
 mod theme_variant;
+mod unresolved_ref;
 mod version_axes;
-mod version_order;
 
+pub use crate::version::{
+    FloorPlacement, FloorVerdict, Requirement, RequirementError, VersionOrder, compare_versions,
+    parse_min_version, parse_requirement,
+};
 pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
-pub use requires_parse::{
-    Requirement, RequirementError, compare_versions, parse_min_version, parse_requirement,
-};
-pub(crate) use resolver::select_the_same_members;
-pub use resolver::{
+pub use resolution::{
     PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,
-    resolve,
 };
+pub use resolver::resolve;
+pub(crate) use selector::select_the_same_members;
 pub use version_axes::{
     BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, DroppedIntent,
     EditionPortability, EditionReport, FloorDeclarer, FloorOrigin, FloorPart, RefusedTarget,
@@ -53,4 +33,3 @@ pub use version_axes::{
     VersionAxes, VersionFloor, compute_axes, declared_version_floors, unscoped_version_floors,
     versions_satisfying,
 };
-pub use version_order::{FloorPlacement, FloorVerdict, VersionOrder};

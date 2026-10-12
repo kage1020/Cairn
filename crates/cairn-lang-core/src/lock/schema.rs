@@ -1,44 +1,21 @@
-//! `build.cairn.lock` YAML schema.
-//!
-//! Field order in [`Lockfile`] is deliberate: `serde_norway` writes structs in
-//! declaration order, so this matches the sample in
-//! `spec/versioning-editions` "Provenance and lock" byte-for-byte. Changing the
-//! order breaks downstream tools that grep the lockfile, so it is also
-//! exercised by an AC.
+//! `build.cairn.lock` YAML schema. Fields are written in declaration order, which matches the
+//! sample in `spec/versioning-editions` "Provenance and lock".
 
 use serde::{Deserialize, Serialize};
 
 use super::hash::HashHex;
+use crate::edition::Edition;
 use crate::ids::{IdError, PlaceId, PortId, SiteName, WalkwayEndpoint};
 
-/// The lockfile schema this build reads and writes.
-///
-/// Version 1 is the shape that shipped before the number was recorded, so a
-/// document without the field is that version rather than an unknown one —
-/// refusing those would mean refusing files this compiler wrote. A document
-/// declaring anything higher is refused rather than read as if the field
-/// names still meant the same thing.
+/// The lockfile schema this build reads and writes; a document without the field is version 1.
 pub const LOCK_SCHEMA_VERSION: u32 = 1;
 
-/// Default for a document written before the version was recorded.
-///
-/// The literal `1`, not [`LOCK_SCHEMA_VERSION`]: the meaning being pinned
-/// is "the shape that shipped before the field existed", which stays
-/// version 1 forever. Tracking the constant would silently re-read every
-/// v1 document as v2 the day the constant moves.
+/// The literal `1`, not [`LOCK_SCHEMA_VERSION`]: an unversioned document stays version 1 forever.
 fn assume_unversioned_schema() -> u32 {
     1
 }
 
-/// Just the leading field, read without the strict field check.
-///
-/// `deny_unknown_fields` fails *during* deserialisation, so a realistic
-/// later format — one that adds a key — would be rejected as malformed
-/// YAML before its version was ever compared, and its author told the
-/// document was broken when the truth is that this build is too old.
-/// Reading the version on its own is what makes [`Lockfile`]'s first
-/// field mean what its doc says: a reader decides whether it understands
-/// the rest before parsing the rest.
+/// The version alone, read before `deny_unknown_fields` can call a newer format malformed.
 #[derive(Deserialize)]
 struct SchemaVersionProbe {
     #[serde(default = "assume_unversioned_schema")]
@@ -51,23 +28,10 @@ pub(super) fn declared_schema_version(body: &str) -> Result<u32, serde_norway::E
     Ok(probe.lock_schema_version)
 }
 
-/// What a lockfile still says about its build when it records an identifier
-/// this build refuses.
-///
-/// Returned by [`super::Lockfile::refused_identifier`]. The identifier rule
-/// has tightened over releases, so a lock an earlier Cairn wrote can name a
-/// place, port or site the current rule refuses. It is returned only for a
-/// document that is a valid lockfile in every other respect — every field
-/// present, every value in its domain, no key the schema does not declare,
-/// a schema version this build reads — so the strict read failed on the
-/// identifier rule and on nothing else. The target it was verified for is
-/// still worth comparing against, which is why this carries it.
+/// What a lockfile valid but for an identifier the current rule refuses says about its build.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefusedIdentifierLock {
-    /// The first recorded identifier the current rule refuses, in the order
-    /// [`super::Lockfile::refused_identifier`] states, and why. Not
-    /// necessarily the one the strict read reported, which is the first in
-    /// document order.
+    /// The first refused identifier in field order, which need not be document order.
     pub error: IdError,
     /// The target the lock was verified for.
     pub target: LockTarget,
@@ -75,18 +39,8 @@ pub struct RefusedIdentifierLock {
     pub member_version_sensitivity: Vec<MemberSensitivity>,
 }
 
-/// [`Lockfile`] with its seven identifier fields read as plain strings, so
-/// the identifier rule does not stop the read, and nothing else loosened.
-///
-/// Every other field has the type, the default and the unknown-key refusal
-/// [`Lockfile`] gives it, nested types included, so a document this reads
-/// is one the strict read would take but for its identifiers. That is what
-/// lets [`RefusedIdentifierLock`] call the rest of the document valid: a
-/// missing field, a malformed hash or a stray key fails here exactly as it
-/// fails there. The schema version is gated before this is read, as
-/// [`super::Lockfile::from_yaml`] gates it. `mirrors_the_strict_schema`
-/// below destructures each strict struct field by field, so a field added
-/// there fails to compile until it is added here.
+/// [`Lockfile`] with its seven identifier fields read as plain strings and nothing else loosened.
+/// The tests' `mirror` stops compiling until a field added to a strict struct is added here.
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LockfileProbe {
@@ -137,14 +91,7 @@ struct EndpointProbe {
     port: String,
 }
 
-/// Read `body` through [`LockfileProbe`] and report the first identifier
-/// the rule refuses, in the order [`super::Lockfile::refused_identifier`]
-/// states.
-///
-/// `Ok(None)` when the document is valid and every identifier passes;
-/// `Err` when the document is invalid for a reason other than its
-/// identifiers, carrying that reason. The schema version is the caller's to
-/// gate, before this runs.
+/// The first identifier the rule refuses, in field order; the caller gates the schema version.
 pub(super) fn refused_identifier(
     body: &str,
 ) -> Result<Option<RefusedIdentifierLock>, serde_norway::Error> {
@@ -176,113 +123,64 @@ pub(super) fn refused_identifier(
 
 /// The whole lockfile, as written to `build.cairn.lock`.
 ///
-/// `verified: true` is the default after a successful compile; a future
-/// `--no-verify` workflow will flip it to `false` and the same struct
-/// shape will roundtrip without changes.
-///
-/// This struct, every type it nests, and the probe that mirrors them for
-/// [`super::Lockfile::refused_identifier`] deny unknown fields. The one
-/// reader in this file that does not is `SchemaVersionProbe`, which reads
-/// the version alone to decide whether to read the rest. A lockfile is a
-/// claim about what was built, and one carrying keys the reader silently
-/// ignores is a document whose meaning depends on who is reading it — a
-/// tampered file used to deserialise as `Ok` with `verified: true` alongside
-/// whatever else it liked. Tampering is not confined to the top level, so
-/// neither is the check.
+/// It and every type it nests deny unknown fields, so a tampered document cannot read as verified.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Lockfile {
-    /// Which revision of this schema the document is written in. First
-    /// field so a reader can decide whether it understands the rest without
-    /// parsing it. See [`LOCK_SCHEMA_VERSION`].
+    /// Schema revision, first so a reader can check it before the rest.
     #[serde(default = "assume_unversioned_schema")]
     pub lock_schema_version: u32,
     /// sha256 over the raw `.crn` bytes.
     pub source_hash: HashHex,
     /// The Cairn release `CalVer` that produced the lockfile.
     pub cairn_version: String,
-    /// Target edition + Minecraft version + `DataVersion`.
+    /// Target edition, Minecraft version and data version.
     pub target: LockTarget,
-    /// Registry / catalog input hashes. Zero until those inputs are wired.
+    /// Registry and catalog input hashes, zero while those inputs are not hashed.
     pub inputs: LockInputs,
-    /// sha256 over the lowered block-array IR. The core of reproducibility.
+    /// sha256 over the lowered block-array IR.
     pub resolved_ir_hash: HashHex,
-    /// `true` for a successful build; reserved for a later opt-out flow.
+    /// `true` for a successful build.
     pub verified: bool,
     /// Members whose meaning may drift across a Minecraft version bump.
-    /// Empty until the constraint catalog ingest lands.
     pub member_version_sensitivity: Vec<MemberSensitivity>,
-    /// Per-`place` site coordinates resolved from the `at=` / `east_of=` /
-    /// `north_of=` constraint chain. Empty for sources that declare no
-    /// `site` block, which keeps the lockfile shape byte-identical to
-    /// cottage / themed-tower builds that pre-date the site surface.
+    /// Resolved coordinates per `place` row; omitted when the source has no `site` block.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub placements: Vec<LockPlacement>,
-    /// Per-`connect` walkway records. Each entry pins both ports, the
-    /// world-space origin / dims of the walkway block array, and the
-    /// canonical path material so the lockfile alone is enough to
-    /// reproduce the strip without re-running the resolver. Empty for
-    /// sources that declare no `connect` lines, preserving lockfile
-    /// shape parity with cottage / themed-tower builds.
+    /// Resolved walkway per `connect` row; omitted when the source has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub walkways: Vec<LockWalkway>,
 }
 
-/// One `place` line resolved into absolute world-space coordinates.
-///
-/// Carries enough provenance (site / def / theme) to reproduce the
-/// coordinate chain without re-walking the source: a downstream consumer can
-/// rebuild the village layout straight from the lockfile.
+/// One `place` row resolved into absolute world-space coordinates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LockPlacement {
-    /// `site` name the placement belongs to (bare, without the `site::`
-    /// IR-key prefix).
+    /// The `site` name, without the `site::` key prefix.
     pub site: SiteName,
     /// `place id=` value.
     pub id: PlaceId,
     /// `place use=` target.
     pub def: String,
-    /// The theme that governed this placement's materials.
-    ///
-    /// Usually the `place theme=` target verbatim, but not always: under a
-    /// `--edition` pin the resolver binds that edition's variant of the
-    /// named theme, which can be a different name (`W_THEME_VARIANT_REBOUND`
-    /// reports it). What the artifact was built from is what is recorded.
+    /// The theme bound, which under an `--edition` pin can be a variant of the `theme=` name.
     pub theme: String,
-    /// Absolute `(x, y, z)` origin in world voxels. Stored as `[i32; 3]` so
-    /// `north_of` placements (negative `z`) round-trip without saturation.
+    /// Absolute `(x, y, z)` origin in world voxels.
     pub origin: [i32; 3],
-    /// Voxel extents of the per-place [`super::super::block_array::BlockArray`]
-    /// at the time of the build, roof `overhang=` included. An `east_of`
-    /// row's origin can be computed from the lockfile alone, since it
-    /// reads only the prior placement's `dims.x`; a `north_of` row's
-    /// cannot, since it steps back by the new placement's own `dims.z`,
-    /// which is known only once that body is lowered.
+    /// Voxel extents of the placement's block array, roof `overhang=` included.
     pub dims: [u32; 3],
 }
 
-/// One `connect from.port to to.port` row resolved into a walkway
-/// strip's world-space origin, dims, and path material.
-///
-/// Mirrors [`LockPlacement`]'s shape so `(site, id, def, theme,
-/// origin, dims)` becomes `(site, from, to, path_material, origin,
-/// dims)` — same five disk axes, just oriented around the two ports
-/// the row connects.
+/// One `connect` row resolved into a walkway strip's world-space origin, dims and path material.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LockWalkway {
-    /// `site` name the walkway belongs to (bare, no `site::` prefix).
+    /// The `site` name, without the `site::` key prefix.
     pub site: SiteName,
-    /// `from` endpoint as a `{ place, port }` pair. Stored as a
-    /// structured object rather than a `"PLACE.PORT"` string so a port
-    /// id is never re-parsed from a `.`-separated token — the type
-    /// boundary catches the silent disaster the string form risked.
+    /// `from` endpoint.
     pub from: WalkwayEndpoint,
-    /// `to` endpoint, same shape as [`Self::from`].
+    /// `to` endpoint.
     pub to: WalkwayEndpoint,
-    /// Canonical Minecraft id of the path material laid into the
-    /// walkway (e.g. `minecraft:gravel`).
+    /// Canonical id of the path material, e.g. `minecraft:gravel`.
     pub path_material: String,
     /// Absolute `(x, y, z)` origin in world voxels.
     pub origin: [i32; 3],
@@ -290,43 +188,15 @@ pub struct LockWalkway {
     pub dims: [u32; 3],
 }
 
-/// Backend edition the lockfile pins to.
-///
-/// A closed enum (rather than `String`) so a typo (`"jav"`,
-/// `"BEDROCK"`) cannot ride along as a valid lockfile. The serde
-/// representation is the lowercase identifier (`"java"` / `"bedrock"`),
-/// matching the human-facing CLI flag values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LockEdition {
-    /// Java Edition.
-    Java,
-    /// Bedrock Edition.
-    Bedrock,
-}
-
-impl LockEdition {
-    /// Lowercase identifier (`"java"` / `"bedrock"`). Same string used in
-    /// the YAML output.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            LockEdition::Java => "java",
-            LockEdition::Bedrock => "bedrock",
-        }
-    }
-}
-
 /// `(edition, mc_version, data_version)` triple.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LockTarget {
     /// Backend edition.
-    pub edition: LockEdition,
+    pub edition: Edition,
     /// Human-facing Minecraft version, e.g. `"1.21.4"`.
     pub mc_version: String,
-    /// Java `DataVersion` integer or Bedrock `block_version` once that
-    /// backend lands.
+    /// Java `DataVersion`, or Bedrock block-palette `version`.
     pub data_version: i32,
 }
 
@@ -334,15 +204,14 @@ pub struct LockTarget {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LockInputs {
-    /// sha256 of the registry pack that resolved the ids. Zero until the
-    /// registry pack ingest is wired.
+    /// sha256 of the registry pack that resolved the ids.
     pub registry_pack_hash: HashHex,
-    /// sha256 of the constraint catalog. Zero until that catalog lands.
+    /// sha256 of the constraint catalog.
     pub constraint_catalog_hash: HashHex,
 }
 
 impl LockInputs {
-    /// All-zero inputs (no registry / catalog yet).
+    /// All-zero inputs.
     #[must_use]
     pub fn zero() -> Self {
         Self {
@@ -369,14 +238,7 @@ mod tests {
     use super::super::{LockError, Lockfile};
     use super::*;
 
-    /// What a strict document reads as through [`LockfileProbe`]: every
-    /// field carried over, the identifiers as their strings.
-    ///
-    /// Each strict struct is destructured field by field, with no `..`, and
-    /// each probe is built the same way. A field added to `Lockfile`,
-    /// `LockPlacement`, `LockWalkway` or `WalkwayEndpoint` is a compile
-    /// error here until the probe has it too, which is what keeps an added
-    /// identifier field from being missed by the probe in silence.
+    /// Destructured without `..`, so a field added to a strict struct fails to compile here.
     fn mirror(lock: Lockfile) -> LockfileProbe {
         let Lockfile {
             lock_schema_version,
@@ -457,16 +319,13 @@ mod tests {
         }
     }
 
-    /// A valid lock with one of everything the probe reads, every
-    /// identifier distinct, and a version-sensitive member so an empty
-    /// list recovered by mistake shows.
     fn sample() -> Lockfile {
         Lockfile {
             lock_schema_version: LOCK_SCHEMA_VERSION,
             source_hash: HashHex::zero(),
             cairn_version: "2026.10.0".to_owned(),
             target: LockTarget {
-                edition: LockEdition::Java,
+                edition: Edition::Java,
                 mc_version: "1.20.4".to_owned(),
                 data_version: 3700,
             },
@@ -541,8 +400,6 @@ mod tests {
 
     #[test]
     fn mirrors_the_strict_schema() {
-        // What a valid document reads as through the probe is what the
-        // strict read gives, field for field.
         let body = sample().to_yaml().expect("encode");
         let probe: LockfileProbe = serde_norway::from_str(&body).expect("the probe reads it");
         assert_eq!(probe, mirror(sample()));
@@ -561,7 +418,7 @@ mod tests {
             let body = doctored(&[(path, "a/b")]);
             assert!(
                 Lockfile::from_yaml(&body).is_err(),
-                "{path}: the strict read refuses the id, which is why the probe exists",
+                "{path}: the strict read refuses the id",
             );
             let found = Lockfile::refused_identifier(&body)
                 .unwrap_or_else(|err| panic!("{path}: the rest is valid, got {err}"))
@@ -571,7 +428,7 @@ mod tests {
             assert_eq!(
                 found.member_version_sensitivity,
                 sample().member_version_sensitivity,
-                "{path}: what the lock recorded, not a default",
+                "{path}",
             );
         }
     }
@@ -597,9 +454,6 @@ mod tests {
 
     #[test]
     fn field_order_is_not_document_order() {
-        // A document that writes `walkways:` first: the strict read stops at
-        // the walkway's id, and the probe still reports the placement's,
-        // which is what the public doc says.
         let mut doc = sample_doc();
         *at(&mut doc, "placements.0.id") = Value::String("p/1".to_owned());
         *at(&mut doc, "walkways.0.site") = Value::String("w*1".to_owned());
@@ -628,9 +482,6 @@ mod tests {
 
     #[test]
     fn an_unreadable_target_is_the_reason_given_not_the_identifier() {
-        // The strict read meets the refused id first and reports it; the
-        // reason this document cannot be read is the missing target, and
-        // that is what comes back.
         let mut doc = sample_doc();
         *at(&mut doc, "placements.0.id") = Value::String("sub/home1".to_owned());
         doc.as_mapping_mut()
@@ -663,14 +514,10 @@ mod tests {
         );
     }
 
-    /// One way to break a lock that has nothing to do with its identifiers.
     type Corruption = fn(&mut Value);
 
     #[test]
     fn a_lock_broken_besides_its_identifiers_is_not_reported_as_refused() {
-        // Each corruption on its own fails the strict read. With a refused id
-        // beside it, the probe has to fail too: one refused id must not be
-        // enough to call a broken document valid.
         fn unknown(node: &mut Value) {
             node.as_mapping_mut()
                 .expect("a mapping")

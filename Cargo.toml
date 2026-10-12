@@ -9,6 +9,7 @@ members = [
     "crates/cairn-lang-lsp",
     "crates/cairn-lang-wasm",
     "crates/cairn-lang-tree-sitter",
+    "xtask",
 ]
 
 [workspace.package]
@@ -25,13 +26,22 @@ publish = true
 cairn-lang-core = { version = "2026.10.0", path = "crates/cairn-lang-core" }
 cairn-lang-nbt = { version = "2026.10.0", path = "crates/cairn-lang-nbt" }
 cairn-lang-formats = { version = "2026.10.0", path = "crates/cairn-lang-formats" }
+cairn-lang-redstone = { version = "2026.10.0", path = "crates/cairn-lang-redstone" }
+# Default features off drops `rayon` and `plotters`; `cargo bench` and saved baselines still work.
+criterion = { version = "0.8.2", default-features = false }
+flate2 = "1.1.9"
+indexmap = "2.14.0"
+insta = "1.48.0"
+serde = "1.0.229"
+serde_json = "1.0.150"
+strsim = "0.11.1"
+strum = "0.28.0"
+tempfile = "3.27.0"
+thiserror = "2.0.18"
 
 [workspace.lints.rust]
-# `deny` rather than `forbid` only so the tree-sitter binding's `ffi` module
-# can lift it: `forbid` refuses every inner `allow`/`expect`, including that
-# one. `cairn-lang-core`'s `unsafe_code_is_confined` test checks this line and
-# states the rest of the policy it enforces.
-unsafe_code = "deny"
+# The tree-sitter binding lowers this to `deny` so its `ffi` module can lift it.
+unsafe_code = "forbid"
 missing_docs = "warn"
 
 [workspace.lints.clippy]
@@ -41,17 +51,11 @@ module_name_repetitions = "allow"
 must_use_candidate = "allow"
 
 [profile.release]
-# Sized for the release archives rather than build time; CI only builds this
-# profile on the publish matrix.
+# Sized for the release archives.
 lto = "fat"
 codegen-units = 1
 strip = "symbols"
-# A panic aborts the shipped binaries instead of exiting 101. Tests are
-# unaffected: Cargo builds test targets with unwinding regardless.
 panic = "abort"
-# `opt-level` is written out at the default 3 on purpose, because it is
-# the one setting here that trades throughput: "s" and "z" shrink the
-# gzipped binaries and slow the compiler passes, place-and-route most.
-# The `lowering` and `place_and_route` benches measure that side, and
-# CONTRIBUTING.md says how to rerun them before changing this.
+# Not "s" or "z": they slow place-and-route. CONTRIBUTING.md "Changing the release profile" says
+# how to measure a change.
 opt-level = 3

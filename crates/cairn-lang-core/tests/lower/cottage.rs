@@ -1,0 +1,158 @@
+//! `cottage.crn` lowers to the expected volume: the inflated dims, the door,
+//! window and roof voxels, the whole palette, and no deferred member.
+
+use cairn_lang_core::check::DiagnosticCode;
+
+use crate::common::{lowered, read_example};
+
+#[test]
+fn cottage_lowers_to_overhang_inflated_volume() {
+    // dims.x = 9 + 2, dims.z = 7 + 2, and dims.y = 1 + 4 + ceil(9/2).
+    let out = lowered(&read_example("cottage.crn"));
+    let ba = out
+        .structures
+        .get("struct::cottage")
+        .expect("cottage struct present");
+    assert_eq!(ba.dims.x, 11);
+    assert_eq!(ba.dims.y, 10);
+    assert_eq!(ba.dims.z, 9);
+}
+
+#[test]
+fn cottage_palette_contains_all_five_materials() {
+    let out = lowered(&read_example("cottage.crn"));
+    let ba = out.structures.get("struct::cottage").unwrap();
+    let ids: Vec<&str> = ba.palette.entries.iter().map(|s| s.id.as_str()).collect();
+    assert!(ids.contains(&"minecraft:air"));
+    assert!(ids.contains(&"minecraft:oak_planks"));
+    assert!(ids.contains(&"minecraft:cobblestone"));
+    assert!(ids.contains(&"minecraft:spruce_stairs"));
+    assert!(ids.contains(&"minecraft:glass_pane"));
+    // Each (facing, half) pair is its own palette entry.
+    let stair_entries = ba
+        .palette
+        .entries
+        .iter()
+        .filter(|s| s.id == "minecraft:spruce_stairs")
+        .count();
+    assert!(
+        stair_entries >= 3,
+        "expected at least 3 spruce_stairs blockstates (north slope, south slope, apex), got {stair_entries}",
+    );
+}
+
+#[test]
+fn cottage_floor_plane_fills_interior_only() {
+    let out = lowered(&read_example("cottage.crn"));
+    let ba = out.structures.get("struct::cottage").unwrap();
+    // Interior x∈[1, 9], z∈[1, 7] (overhang=1). 9 * 7 = 63 oak_planks cells.
+    let mut interior_non_air = 0;
+    let mut overhang_non_air = 0;
+    for z in 0..ba.dims.z {
+        for x in 0..ba.dims.x {
+            let i = ba.dims.index(x, 0, z).expect("in-range coord");
+            if ba.voxels[i].0 == 0 {
+                continue;
+            }
+            let in_interior = (1..=9).contains(&x) && (1..=7).contains(&z);
+            if in_interior {
+                interior_non_air += 1;
+            } else {
+                overhang_non_air += 1;
+            }
+        }
+    }
+    assert_eq!(interior_non_air, 9 * 7);
+    assert_eq!(
+        overhang_non_air, 0,
+        "overhang ring of the floor plane must stay air",
+    );
+}
+
+#[test]
+fn cottage_wall_ring_at_y1_has_perimeter_minus_door() {
+    let out = lowered(&read_example("cottage.crn"));
+    let ba = out.structures.get("struct::cottage").unwrap();
+    // A 9x7 outline is 28 cells, less the door's one at y=1.
+    let mut wall_cells = 0;
+    for z in 0..ba.dims.z {
+        for x in 0..ba.dims.x {
+            let i = ba.dims.index(x, 1, z).expect("in-range coord");
+            let pi = ba.voxels[i];
+            if ba.palette.entries[usize::from(pi.0)].id == "minecraft:cobblestone" {
+                wall_cells += 1;
+            }
+        }
+    }
+    assert_eq!(wall_cells, 28 - 1);
+}
+
+#[test]
+fn cottage_door_carves_front_opening() {
+    let out = lowered(&read_example("cottage.crn"));
+    let ba = out.structures.get("struct::cottage").unwrap();
+    // Front wall at z = overhang + size.h - 1 = 7. Center x = 1 + 4 = 5.
+    let i1 = ba.dims.index(5, 1, 7).unwrap();
+    let i2 = ba.dims.index(5, 2, 7).unwrap();
+    assert_eq!(ba.voxels[i1].0, 0, "door y=1 should be air");
+    assert_eq!(ba.voxels[i2].0, 0, "door y=2 should be air");
+}
+
+#[test]
+fn cottage_window_pair_lowered_to_glass_panes() {
+    let out = lowered(&read_example("cottage.crn"));
+    let ba = out.structures.get("struct::cottage").unwrap();
+    // The primary at x∈[3,5), y∈[2,4), and its mirror at x∈[6,8).
+    for x in [3, 4, 6, 7] {
+        for y in [2, 3] {
+            let i = ba.dims.index(x, y, 7).unwrap();
+            let pi = ba.voxels[i];
+            assert_eq!(
+                ba.palette.entries[usize::from(pi.0)].id,
+                "minecraft:glass_pane",
+                "expected glass at ({x},{y},7)",
+            );
+        }
+    }
+}
+
+#[test]
+fn cottage_roof_palette_includes_stairs_with_facing() {
+    let out = lowered(&read_example("cottage.crn"));
+    let ba = out.structures.get("struct::cottage").unwrap();
+    // The north and south slopes, and the `half=top` apex cap.
+    let mut north_slope = false;
+    let mut south_slope = false;
+    let mut apex = false;
+    for entry in &ba.palette.entries {
+        if entry.id != "minecraft:spruce_stairs" {
+            continue;
+        }
+        let facing = entry.properties.get("facing").map(String::as_str);
+        let half = entry.properties.get("half").map(String::as_str);
+        match (facing, half) {
+            (Some("south"), Some("bottom")) => north_slope = true,
+            (Some("north"), Some("bottom")) => south_slope = true,
+            (_, Some("top")) => apex = true,
+            _ => {}
+        }
+    }
+    assert!(north_slope, "missing north-slope stair entry");
+    assert!(south_slope, "missing south-slope stair entry");
+    assert!(apex, "missing apex stair entry");
+}
+
+#[test]
+fn cottage_emits_zero_deferred_warnings() {
+    let out = lowered(&read_example("cottage.crn"));
+    let deferred = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::DeferredMember)
+        .count();
+    assert_eq!(
+        deferred, 0,
+        "cottage.crn should voxelise without W_DEFERRED_MEMBER warnings, diagnostics: {:?}",
+        out.diagnostics,
+    );
+}

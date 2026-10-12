@@ -1,0 +1,1291 @@
+//! Truth tables checked as a whole table: repeated inputs, empty tables, conflicts, repeats and
+//! coverage.
+
+use cairn_lang_core::check::{DiagnosticData, Severity};
+use cairn_lang_core::{Diagnostic, DiagnosticCode};
+
+use crate::common::{codes, diagnose};
+
+/// How many missing combinations a coverage finding names at most.
+const SAMPLE_CAP: usize = 4;
+
+fn table(inputs: &str, rows: &str) -> String {
+    format!("struct s size=3x3\n  assert truth({inputs} -> sig.o) {{ {rows} }}\n")
+}
+
+/// Every combination of two inputs after `extra`, so a repeat is not also partial.
+fn complete_plus(extra: &str) -> String {
+    table("sig.a, sig.b", &format!("{extra}; 01->0; 10->0; 11->0"))
+}
+
+/// The one finding `source` raises.
+fn only(source: &str) -> Diagnostic {
+    let found = diagnose(source);
+    assert_eq!(
+        found.len(),
+        1,
+        "{source:?} should raise exactly one finding, got {:?}",
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+    );
+    found[0].clone()
+}
+
+/// Everything a finding renders, its notes included.
+fn rendered(found: &Diagnostic) -> String {
+    let mut text = found.primary.clone();
+    for note in &found.notes {
+        text.push(' ');
+        text.push_str(&note.message);
+    }
+    text
+}
+
+fn underlined(source: &str, span: &std::ops::Range<usize>) -> String {
+    source[span.clone()].to_owned()
+}
+
+/// The coverage clause of a `W_TRUTH_TABLE_PARTIAL` finding.
+fn found_covers(found: &Diagnostic) -> String {
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_PARTIAL");
+    let text = found.primary.clone();
+    let start = text
+        .find("assigns")
+        .expect("the coverage sentence says `assigns`");
+    let end = text
+        .find(" combinations")
+        .expect("and `combinations` after the counts");
+    text[start..end].to_owned()
+}
+
+// -- a table that says something -----------------------------------------
+
+#[test]
+fn a_complete_table_is_quiet() {
+    assert!(codes(&table("sig.a, sig.b", "00->0; 01->0; 10->0; 11->0")).is_empty());
+    assert!(codes(&table("sig.a", "0->1; 1->0")).is_empty());
+}
+
+#[test]
+fn two_patterns_that_differ_only_in_order_are_different_rows() {
+    assert!(codes(&table("sig.a, sig.b", "00->0; 01->1; 10->0; 11->1")).is_empty());
+}
+
+// -- no rows --------------------------------------------------------------
+
+#[test]
+fn a_table_with_no_rows_is_refused() {
+    let found = only(&table("sig.a, sig.b", ""));
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_EMPTY");
+    assert_eq!(found.severity(), Severity::Error);
+}
+
+#[test]
+fn an_empty_table_says_how_many_rows_its_inputs_need() {
+    let found = only(&table("sig.a, sig.b", ""));
+    let text = rendered(&found);
+    assert!(
+        text.contains('4'),
+        "the message should name the four combinations two inputs have: {text:?}",
+    );
+}
+
+#[test]
+fn an_empty_table_is_not_also_reported_as_partial() {
+    assert_eq!(codes(&table("sig.a, sig.b", "")), ["E_TRUTH_TABLE_EMPTY"]);
+}
+
+#[test]
+fn a_table_with_one_input_reads_as_a_sentence() {
+    for source in [table("sig.a", ""), table("sig.a", "0->1")] {
+        let text = rendered(&only(&source));
+        assert!(
+            text.contains("1 input can take") && !text.contains("inputs"),
+            "a one-input table should not be described in the plural: {text:?}",
+        );
+    }
+}
+
+// -- a pattern assigned twice ---------------------------------------------
+
+#[test]
+fn a_pattern_assigned_two_different_outputs_is_refused() {
+    let source = complete_plus("00->0; 00->1");
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_CONFLICT");
+    assert_eq!(found.severity(), Severity::Error);
+    assert_eq!(
+        underlined(&source, &found.span),
+        "00->1",
+        "the finding belongs to the row that repeats, not to the first one",
+    );
+    let note = found
+        .notes
+        .first()
+        .expect("the conflict should point at the row it disagrees with");
+    assert_eq!(
+        underlined(
+            &source,
+            note.span.as_ref().expect("the note carries a span")
+        ),
+        "00->0",
+    );
+}
+
+#[test]
+fn the_conflict_does_not_say_which_row_would_win() {
+    let text = rendered(&only(&complete_plus("00->0; 00->1")));
+    for claim in ["wins", "takes precedence", "overrides", "the last"] {
+        assert!(
+            !text.contains(claim),
+            "the message claims an outcome no implementation decides: {text:?}",
+        );
+    }
+}
+
+#[test]
+fn a_pattern_assigned_the_same_output_twice_is_a_warning() {
+    let source = complete_plus("00->0; 00->0");
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    assert_eq!(found.severity(), Severity::Warning);
+    assert_eq!(underlined(&source, &found.span), "00->0");
+    assert!(
+        found.span.start > source.find("00->0").expect("the first row"),
+        "the finding belongs to the repeat, and the two rows read alike",
+    );
+}
+
+#[test]
+fn a_repeat_is_judged_against_the_first_row_with_its_pattern() {
+    let source = complete_plus("00->0; 00->0; 00->0");
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_DUPLICATE_ROW", "W_TRUTH_TABLE_DUPLICATE_ROW"],
+    );
+    let first = source.find("00->0").expect("the first row");
+    for d in &found {
+        assert_eq!(
+            d.notes[0].span.as_ref().expect("a note span").start,
+            first,
+            "every repeat should send the author to the row that set the pattern",
+        );
+    }
+}
+
+#[test]
+fn a_row_that_flips_back_contradicts_the_row_it_flips_back_from() {
+    let source = complete_plus("00->0; 00->1; 00->0");
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["E_TRUTH_TABLE_CONFLICT", "E_TRUTH_TABLE_CONFLICT"],
+    );
+    let first = source.find("00->0").expect("the first row");
+    assert_eq!(
+        found[0].notes[0].span.as_ref().expect("a note span").start,
+        first,
+        "the flip contradicts the first row",
+    );
+    let flipped = source.find("00->1").expect("the second row");
+    assert_eq!(
+        found[1].notes[0].span.as_ref().expect("a note span").start,
+        flipped,
+        "the flip back contradicts the second row, not the first",
+    );
+}
+
+#[test]
+fn two_repeats_that_agree_with_each_other_still_answer_to_the_first_row() {
+    let found = codes(&complete_plus("00->0; 00->1; 00->1"));
+    assert_eq!(found, ["E_TRUTH_TABLE_CONFLICT", "E_TRUTH_TABLE_CONFLICT"]);
+}
+
+// -- combinations left out ------------------------------------------------
+
+#[test]
+fn a_table_short_of_a_combination_is_a_warning() {
+    let found = only(&table("sig.a, sig.b", "00->0"));
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_PARTIAL");
+    assert_eq!(found.severity(), Severity::Warning);
+    let text = rendered(&found);
+    for missing in ["01", "10", "11"] {
+        assert!(
+            text.contains(missing),
+            "the message should name the rows to write, missing {missing}: {text:?}",
+        );
+    }
+    assert!(
+        text.contains('4'),
+        "and the number of combinations two inputs have: {text:?}",
+    );
+    assert!(
+        !text.contains("more"),
+        "three missing rows are the whole set, not a sample of it: {text:?}",
+    );
+}
+
+/// Three inputs leave exactly the cap missing when four rows are covered, one past it at three.
+#[test]
+fn the_sample_says_it_is_a_sample_only_when_it_is_one() {
+    let whole = rendered(&only(&table(
+        "sig.a, sig.b, sig.c",
+        "000->0; 001->0; 010->0; 011->0",
+    )));
+    assert!(
+        !whole.contains("more"),
+        "four missing rows are exactly what the sentence lists: {whole:?}",
+    );
+    let sampled = rendered(&only(&table(
+        "sig.a, sig.b, sig.c",
+        "000->0; 001->0; 010->0",
+    )));
+    assert!(
+        sampled.contains("and 1 more"),
+        "five missing rows are one past what the sentence lists: {sampled:?}",
+    );
+}
+
+#[test]
+fn a_repeated_row_leaves_the_combination_it_repeats_uncovered() {
+    let found = diagnose(&table("sig.a, sig.b", "00->0; 00->0"));
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_PARTIAL", "W_TRUTH_TABLE_DUPLICATE_ROW"],
+    );
+    assert!(
+        rendered(&found[0]).contains("11"),
+        "the partial finding counts distinct patterns, not rows: {:?}",
+        found[0],
+    );
+}
+
+#[test]
+fn a_wide_table_is_counted_rather_than_enumerated() {
+    let names: Vec<String> = (0..20).map(|i| format!("sig.a{i}")).collect();
+    let found = only(&table(&names.join(", "), &format!("{}->1", "0".repeat(20))));
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_PARTIAL");
+    let text = rendered(&found);
+    assert!(
+        text.contains("1048576"),
+        "the total is exact whether or not the rows are listed: {text:?}",
+    );
+    assert!(
+        text.contains("more"),
+        "and the sample says it is a sample: {text:?}",
+    );
+}
+
+#[test]
+fn a_table_too_wide_to_count_says_so_symbolically() {
+    let names: Vec<String> = (0..130).map(|i| format!("sig.a{i}")).collect();
+    let found = only(&table(
+        &names.join(", "),
+        &format!("{}->1", "0".repeat(130)),
+    ));
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_PARTIAL");
+    let text = rendered(&found);
+    assert!(
+        text.contains("2^130"),
+        "a total no integer holds is written as a power: {text:?}",
+    );
+}
+
+#[test]
+fn the_total_becomes_a_power_before_it_stops_fitting_an_integer() {
+    for (arity, expected, absent) in [(32usize, "4294967296", "2^32"), (33, "2^33", "8589934592")] {
+        let names: Vec<String> = (0..arity).map(|i| format!("sig.a{i}")).collect();
+        let source = table(&names.join(", "), &format!("{}->1", "0".repeat(arity)));
+        let text = rendered(&only(&source));
+        assert!(
+            text.contains(expected) && !text.contains(absent),
+            "{arity} inputs should have their total written as {expected}: {text:?}",
+        );
+    }
+}
+
+// -- the input list -------------------------------------------------------
+
+#[test]
+fn a_signal_listed_twice_is_refused_and_not_asked_for_impossible_rows() {
+    let found = only(&table("sig.a, sig.a", "00 -> 0; 11 -> 1"));
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_DUPLICATE_INPUT");
+    assert_eq!(found.severity(), Severity::Error);
+    assert_eq!(
+        found.primary,
+        "this `assert truth` lists `sig.a` as inputs 1 and 2, and one signal is one input, so \
+         the table has 2 columns for it and its rows describe combinations the circuit does not \
+         have",
+    );
+    assert_eq!(
+        found.notes[0].message,
+        "Fix: list `sig.a` once and drop its other columns from every row, or name the signal \
+         you meant in its place",
+    );
+}
+
+#[test]
+fn a_repeated_input_is_refused_where_its_rows_raise_nothing() {
+    let source = table("sig.a, sig.a", "-0 -> 0; -1 -> 1");
+    assert!(
+        codes(&table("sig.a, sig.b", "-0 -> 0; -1 -> 1")).is_empty(),
+        "read as two inputs, these rows are complete and agree",
+    );
+    assert_eq!(only(&source).code.as_str(), "E_TRUTH_TABLE_DUPLICATE_INPUT");
+}
+
+#[test]
+fn each_repeated_signal_is_reported_once_in_list_order() {
+    let found = diagnose(&table("sig.b, sig.a, sig.b, sig.a, sig.a", ""));
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        [
+            "E_TRUTH_TABLE_DUPLICATE_INPUT",
+            "E_TRUTH_TABLE_DUPLICATE_INPUT"
+        ],
+    );
+    assert!(
+        found[0].primary.contains("`sig.b` as inputs 1 and 3"),
+        "{:?}",
+        found[0]
+    );
+    assert!(
+        found[1].primary.contains("`sig.a` as inputs 2, 4, and 5"),
+        "{:?}",
+        found[1]
+    );
+}
+
+#[test]
+fn a_repeated_input_stands_on_the_whole_statement() {
+    let source = table("sig.a, sig.a", "00 -> 0; 11 -> 1");
+    let found = only(&source);
+    assert_eq!(
+        underlined(&source, &found.span),
+        "assert truth(sig.a, sig.a -> sig.o) { 00 -> 0; 11 -> 1 }",
+        "the finding stands on the whole statement, since the input list has no span",
+    );
+}
+
+#[test]
+fn a_repeated_input_is_the_only_finding_its_table_gets() {
+    for (inputs, rows, repaired_inputs, repaired_rows, deferred) in [
+        (
+            "sig.a, sig.a",
+            "00 -> 0; 00 -> 1",
+            "sig.a",
+            "0 -> 0; 0 -> 1",
+            "E_TRUTH_TABLE_CONFLICT",
+        ),
+        ("sig.a, sig.a", "", "sig.a", "", "E_TRUTH_TABLE_EMPTY"),
+        (
+            "sig.a, sig.a, sig.b",
+            "000 -> 0",
+            "sig.a, sig.b",
+            "00 -> 0",
+            "W_TRUTH_TABLE_PARTIAL",
+        ),
+    ] {
+        let found = only(&table(inputs, rows));
+        assert_eq!(
+            found.code.as_str(),
+            "E_TRUTH_TABLE_DUPLICATE_INPUT",
+            "`{inputs}` over `{{ {rows} }}`",
+        );
+        assert!(
+            codes(&table(repaired_inputs, repaired_rows)).contains(&deferred),
+            "`{repaired_inputs}` over `{{ {repaired_rows} }}` should raise {deferred}",
+        );
+    }
+}
+
+#[test]
+fn a_repeated_input_names_four_positions_and_counts_the_rest() {
+    for (times, listed) in [
+        (4, "inputs 1, 2, 3, and 4,"),
+        (5, "inputs 1, 2, 3, 4, and 1 more,"),
+        (2000, "inputs 1, 2, 3, 4, and 1996 more,"),
+    ] {
+        let found = only(&table(&vec!["sig.a"; times].join(", "), ""));
+        assert!(
+            found.primary.contains(listed),
+            "{times} positions: {:?}",
+            found.primary,
+        );
+        assert!(
+            found
+                .primary
+                .contains(&format!("the table has {times} columns for it")),
+            "{times} positions: {:?}",
+            found.primary,
+        );
+        assert!(
+            found.primary.len() < 300,
+            "{times} positions: the sentence should not grow with the list, got {} bytes",
+            found.primary.len(),
+        );
+    }
+}
+
+// -- where the table sits -------------------------------------------------
+
+#[test]
+fn a_table_nested_under_a_level_is_checked() {
+    let source = "struct s size=3x3\n  level y=1\n    assert truth(sig.a -> sig.o) { }\n";
+    assert_eq!(codes(source), ["E_TRUTH_TABLE_EMPTY"]);
+}
+
+#[test]
+fn a_table_in_a_site_body_is_checked() {
+    let source = "site s:\n  assert truth(sig.a -> sig.o) { }\n";
+    assert_eq!(codes(source), ["E_TRUTH_TABLE_EMPTY"]);
+}
+
+#[test]
+fn a_table_in_a_def_body_is_checked() {
+    let source = "def d size=3x3:\n  assert truth(sig.a -> sig.o) { }\n";
+    let truth: Vec<&str> = codes(source)
+        .into_iter()
+        .filter(|c| c.contains("TRUTH"))
+        .collect();
+    assert_eq!(truth, ["E_TRUTH_TABLE_EMPTY"]);
+}
+
+// -- the payload ----------------------------------------------------------
+
+/// `spec/lint` "Machine-readable payload": the rows to write are in the payload, not just prose.
+#[test]
+fn the_partial_finding_carries_the_rows_to_write() {
+    let found = only(&table("sig.a, sig.b", "00->0"));
+    let Some(DiagnosticData::TruthTablePartial {
+        inputs,
+        covered,
+        missing,
+    }) = found.data.clone()
+    else {
+        panic!("the partial finding should carry its payload, got {found:?}");
+    };
+    assert_eq!(inputs, 2);
+    assert_eq!(covered, 1);
+    assert_eq!(missing, ["01", "10", "11"]);
+}
+
+#[test]
+fn the_payload_sample_is_capped_and_says_nothing_about_the_total() {
+    let names: Vec<String> = (0..20).map(|i| format!("sig.a{i}")).collect();
+    let found = only(&table(&names.join(", "), &format!("{}->1", "0".repeat(20))));
+    let Some(DiagnosticData::TruthTablePartial {
+        inputs,
+        covered,
+        missing,
+    }) = found.data.clone()
+    else {
+        panic!("the partial finding should carry its payload, got {found:?}");
+    };
+    assert_eq!((inputs, covered), (20, 1));
+    assert!(
+        missing.len() < 20,
+        "a million missing rows must not be materialised, got {}",
+        missing.len(),
+    );
+    assert!(missing.iter().all(|p| p.chars().count() == 20));
+}
+
+// -- don't-care rows ------------------------------------------------------
+
+#[test]
+fn a_dont_care_row_stands_for_the_rows_it_replaces() {
+    assert!(codes(&table("sig.a, sig.b", "0- -> 0; 1- -> 1")).is_empty());
+    assert!(codes(&table("sig.a, sig.b, sig.c", "--0 -> 0; --1 -> 1")).is_empty());
+}
+
+#[test]
+fn a_row_of_only_dont_cares_completes_the_table() {
+    assert!(codes(&table("sig.a, sig.b, sig.c", "--- -> 1")).is_empty());
+}
+
+#[test]
+fn a_dont_care_row_is_counted_as_the_combinations_it_assigns() {
+    let found = only(&table("sig.a, sig.b, sig.c", "0-- -> 0"));
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_PARTIAL");
+    assert!(
+        rendered(&found).contains("assigns 4 of the 8"),
+        "one row with two don't-cares assigns four combinations: {}",
+        rendered(&found),
+    );
+}
+
+#[test]
+fn two_rows_that_cross_and_disagree_are_a_conflict() {
+    let found = only(&table("sig.a, sig.b", "0- -> 0; -1 -> 1"));
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_CONFLICT");
+    assert_eq!(found.severity(), Severity::Error);
+    let text = rendered(&found);
+    assert!(
+        text.contains("`01`"),
+        "the conflict should name the combination both rows assign: {text}",
+    );
+}
+
+#[test]
+fn a_row_inside_an_earlier_one_asserts_nothing_new() {
+    let found = only(&table("sig.a, sig.b", "0- -> 0; 01 -> 0; 10 -> 0; 11 -> 0"));
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    let text = rendered(&found);
+    assert!(
+        text.contains("asserts nothing new") && text.contains("`0-`"),
+        "the finding should name the row that already covers it: {text}",
+    );
+}
+
+#[test]
+fn an_exact_repeat_still_reads_as_a_repeat() {
+    let found = only(&complete_plus("00->0; 00->0"));
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    assert!(
+        rendered(&found).contains("repeats an earlier one"),
+        "an exact repeat should not be reworded: {}",
+        rendered(&found),
+    );
+}
+
+#[test]
+fn two_rows_that_cross_are_reported_even_when_they_agree() {
+    let found = only(&table("sig.a, sig.b", "0- -> 0; -1 -> 0"));
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    let text = rendered(&found);
+    assert!(
+        text.contains("`01`") && text.contains("narrow one of the two"),
+        "a crossing pair should be told to narrow rather than to delete: {text}",
+    );
+}
+
+#[test]
+fn a_crossing_pair_does_not_also_earn_a_coverage_count() {
+    let found = only(&table("sig.a, sig.b", "0- -> 0; -1 -> 0"));
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+}
+
+#[test]
+fn a_row_inside_another_still_leaves_the_coverage_finding() {
+    let found = codes(&table("sig.a, sig.b", "0- -> 0; 01 -> 0"));
+    // Ordered by span: the coverage finding underlines the whole statement.
+    assert_eq!(
+        found,
+        vec!["W_TRUTH_TABLE_PARTIAL", "W_TRUTH_TABLE_DUPLICATE_ROW"],
+    );
+}
+
+#[test]
+fn the_payload_above_a_row_of_half_a_million_combinations_is_exact() {
+    let names: Vec<String> = (0..20).map(|i| format!("sig.a{i}")).collect();
+    let pattern = format!("0{}", "-".repeat(19));
+    let found = only(&table(&names.join(", "), &format!("{pattern} -> 1")));
+    let Some(DiagnosticData::TruthTablePartial {
+        inputs,
+        covered,
+        missing,
+    }) = found.data.clone()
+    else {
+        panic!("the partial finding should carry its payload, got {found:?}");
+    };
+    assert_eq!((inputs, covered), (20, 1 << 19));
+    assert_eq!(
+        missing,
+        vec![
+            format!("1{}", "0".repeat(19)),
+            format!("1{}1", "0".repeat(18)),
+            format!("1{}10", "0".repeat(17)),
+            format!("1{}11", "0".repeat(17)),
+        ],
+    );
+}
+
+/// At forty inputs a search visiting every combination before the gap hangs instead of failing.
+#[test]
+fn a_two_row_table_reports_its_gap_however_many_combinations_precede_it() {
+    for arity in [15usize, 40] {
+        let names: Vec<String> = (0..arity).map(|i| format!("sig.i{i}")).collect();
+        let rows = format!(
+            "{}0 -> 0; 0{}1 -> 1",
+            "-".repeat(arity - 1),
+            "-".repeat(arity - 2),
+        );
+        let found = only(&table(&names.join(", "), &rows));
+        let Some(DiagnosticData::TruthTablePartial {
+            inputs,
+            covered,
+            missing,
+        }) = found.data.clone()
+        else {
+            panic!("{arity} inputs should carry the partial payload, got {found:?}");
+        };
+        let half = 1u64 << (arity - 1);
+        assert_eq!(
+            (inputs, covered),
+            (u32::try_from(arity).expect("small"), half + half / 2),
+            "{arity} inputs",
+        );
+        assert_eq!(
+            missing,
+            vec![
+                format!("1{}1", "0".repeat(arity - 2)),
+                format!("1{}11", "0".repeat(arity - 3)),
+                format!("1{}101", "0".repeat(arity - 4)),
+                format!("1{}111", "0".repeat(arity - 4)),
+            ],
+            "{arity} inputs: the four lowest combinations neither row assigns",
+        );
+    }
+}
+
+#[test]
+fn a_sample_smaller_than_the_cap_names_every_missing_combination() {
+    let found = only(&table(
+        "sig.a, sig.b, sig.c",
+        "000 -> 0; 01- -> 0; 101 -> 1; 110 -> 1",
+    ));
+    let Some(DiagnosticData::TruthTablePartial {
+        covered, missing, ..
+    }) = found.data.clone()
+    else {
+        panic!("the partial finding should carry its payload, got {found:?}");
+    };
+    assert_eq!(covered, 5);
+    assert_eq!(missing, ["001", "100", "111"]);
+}
+
+/// A search recursing once per input overflows the stack well short of this, aborting the binary.
+#[test]
+fn a_table_thirty_two_thousand_inputs_wide_is_searched_without_recursing() {
+    const WIDTH: usize = 32_000;
+    let names: Vec<String> = (0..WIDTH).map(|i| format!("sig.i{i}")).collect();
+    let source = table(&names.join(", "), &format!("{} -> 1", "0".repeat(WIDTH)));
+    let found = diagnose(&source);
+    // Not `only`, whose message quotes the source: 400 KB of it here.
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_PARTIAL"],
+    );
+    let Some(DiagnosticData::TruthTablePartial {
+        inputs,
+        covered,
+        missing,
+    }) = &found[0].data
+    else {
+        panic!("the partial finding should carry its payload");
+    };
+    assert_eq!((*inputs, *covered), (32_000, 1));
+    assert_eq!(missing, &[1, 2, 3, 4].map(|k: u8| format!("{k:0WIDTH$b}")));
+}
+
+// -- don't-care outputs ---------------------------------------------------
+
+#[test]
+fn a_dash_output_answers_the_coverage_finding() {
+    let enabled = "001 -> 0; 011 -> 1; 101 -> 1; 111 -> 1";
+    assert_eq!(
+        codes(&table("sig.a, sig.b, sig.enable", enabled)),
+        vec!["W_TRUTH_TABLE_PARTIAL"],
+    );
+    assert!(
+        codes(&table(
+            "sig.a, sig.b, sig.enable",
+            &format!("{enabled}; --0 -> -"),
+        ))
+        .is_empty(),
+    );
+}
+
+#[test]
+fn a_dash_output_counts_toward_coverage_like_any_other_row() {
+    let without = only(&table("sig.a, sig.b, sig.c", "00- -> 0"));
+    let with = only(&table("sig.a, sig.b, sig.c", "00- -> 0; 01- -> -"));
+    assert_eq!(found_covers(&without), "assigns 2 of the 8");
+    assert_eq!(found_covers(&with), "assigns 4 of the 8");
+    for (found, expected) in [
+        (&without, ["010", "011", "100", "101"]),
+        (&with, ["100", "101", "110", "111"]),
+    ] {
+        let Some(DiagnosticData::TruthTablePartial { missing, .. }) = &found.data else {
+            panic!("the partial finding should carry its payload, got {found:?}");
+        };
+        assert_eq!(missing, &expected);
+    }
+}
+
+#[test]
+fn a_table_of_only_dash_outputs_verifies_nothing() {
+    let found = only(&table("sig.a, sig.b", "0- -> -; 1- -> -"));
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_EMPTY");
+    assert!(
+        rendered(&found).contains("every row")
+            && rendered(&found).contains("give at least one row a `0` or `1` output"),
+        "the sentence has to send the author to the rows, not ask for more of them: {}",
+        rendered(&found),
+    );
+}
+
+#[test]
+fn a_complete_table_of_dash_outputs_is_still_refused() {
+    assert_eq!(
+        codes(&table("sig.a, sig.b", "-- -> -")),
+        vec!["E_TRUTH_TABLE_EMPTY"],
+    );
+}
+
+#[test]
+fn a_dash_output_contradicts_nothing_and_agrees_with_nothing() {
+    let source = complete_plus("00 -> 0; 00 -> -");
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    assert!(
+        rendered(&found).contains("this row leaves `00` unconstrained")
+            && rendered(&found).contains("assigns it the output `0`"),
+        "the sentence has to say which row does which: {}",
+        rendered(&found),
+    );
+    assert_eq!(underlined(&source, &found.span), "00 -> -");
+}
+
+#[test]
+fn a_row_under_an_earlier_dash_output_names_the_earlier_row_as_the_lenient_one() {
+    let source = table("sig.a, sig.b", "0- -> -; 01 -> 1; 10 -> 0; 11 -> 0");
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    assert!(
+        rendered(&found).contains("this row assigns `01` the output `1`")
+            && rendered(&found).contains("the earlier row `0-` leaves it unconstrained"),
+        "the earlier row's `-` output is what the author has to see: {}",
+        rendered(&found),
+    );
+    assert!(
+        rendered(&found).contains("delete whichever of the two you did not mean")
+            && !rendered(&found).contains("delete either row"),
+        "deleting either row changes the table, so the fix may not offer both: {}",
+        rendered(&found),
+    );
+    assert_eq!(underlined(&source, &found.span), "01 -> 1");
+}
+
+#[test]
+fn two_dash_outputs_over_one_combination_are_an_ordinary_repeat() {
+    let source = table("sig.a, sig.b", "0- -> -; 01 -> -; 10 -> 0; 11 -> 0");
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_DUPLICATE_ROW");
+    assert!(
+        rendered(&found).contains("already assigns `01` no output, by its `-`")
+            && rendered(&found).contains("delete this row"),
+        "two rows that both decline are a line to delete: {}",
+        rendered(&found),
+    );
+}
+
+#[test]
+fn a_broad_dash_row_written_first_does_not_empty_the_table() {
+    assert_eq!(
+        codes(&table("sig.a, sig.b", "-- -> -; 01 -> 1")),
+        vec!["W_TRUTH_TABLE_DUPLICATE_ROW"],
+        "the overlap is the finding; the table plainly has a `1` in it",
+    );
+}
+
+#[test]
+fn a_broad_dash_row_written_first_still_earns_its_coverage_finding() {
+    let found = diagnose(&table("sig.a, sig.b", "0- -> -; 01 -> 1"));
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        vec!["W_TRUTH_TABLE_PARTIAL", "W_TRUTH_TABLE_DUPLICATE_ROW"],
+    );
+    assert!(
+        rendered(&found[0]).contains("assigns 2 of the 4")
+            && rendered(&found[0]).contains("`10`")
+            && rendered(&found[0]).contains("`11`"),
+        "the two the `0-` row does not cover: {}",
+        rendered(&found[0]),
+    );
+}
+
+#[test]
+fn a_dash_output_elsewhere_leaves_a_conflict_a_conflict() {
+    assert_eq!(
+        codes(&table("sig.a, sig.b", "0- -> -; 10 -> 0; 10 -> 1; 11 -> 0")),
+        vec!["E_TRUTH_TABLE_CONFLICT"],
+    );
+}
+
+// -- row order ------------------------------------------------------------
+
+fn permutations<'a>(rows: &[&'a str]) -> Vec<Vec<&'a str>> {
+    fn heap<'a>(k: usize, rows: &mut Vec<&'a str>, out: &mut Vec<Vec<&'a str>>) {
+        if k <= 1 {
+            out.push(rows.clone());
+            return;
+        }
+        for i in 0..k {
+            heap(k - 1, rows, out);
+            let j = if k.is_multiple_of(2) { i } else { 0 };
+            rows.swap(j, k - 1);
+        }
+    }
+    let mut rows = rows.to_vec();
+    let mut out = Vec::new();
+    heap(rows.len(), &mut rows, &mut out);
+    out
+}
+
+/// A row's pattern and output digit.
+fn parsed(row: &str) -> (String, char) {
+    let (pattern, output) = row.split_once(" -> ").expect("rows are written `p -> o`");
+    (
+        pattern.to_owned(),
+        output.chars().next().expect("an output digit"),
+    )
+}
+
+/// The codes reported on each of the `written` rows, found by where each row's text starts.
+fn per_row_codes(source: &str, written: &[String], found: &[Diagnostic]) -> Vec<Vec<&'static str>> {
+    let mut offset = source.find('{').expect("the table opens");
+    written
+        .iter()
+        .map(|text| {
+            let start = offset
+                + source[offset..]
+                    .find(text.as_str())
+                    .expect("each row is written");
+            offset = start + text.len();
+            found
+                .iter()
+                .filter(|d| d.span.start == start)
+                .map(|d| d.code.as_str())
+                .collect()
+        })
+        .collect()
+}
+
+fn assert_every_order_matches_the_enumeration(rows: &[&str], orders_expected: usize) {
+    let orders = permutations(rows);
+    assert_eq!(
+        orders
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        orders_expected,
+        "every order of the rows, each once",
+    );
+    for order in orders {
+        let written: Vec<String> = order.iter().map(|r| (*r).to_owned()).collect();
+        let source = table("sig.a, sig.b", &written.join("; "));
+        let found = diagnose(&source);
+        let expected: Vec<Vec<&str>> =
+            expected_verdicts(&order.iter().map(|r| parsed(r)).collect::<Vec<_>>())
+                .into_iter()
+                .map(|verdict| verdict.into_iter().collect())
+                .collect();
+        assert_eq!(
+            per_row_codes(&source, &written, &found),
+            expected,
+            "{source}"
+        );
+        assert!(
+            found
+                .iter()
+                .any(|d| d.code == DiagnosticCode::TruthTableConflict),
+            "the table is refused in every order: {source}",
+        );
+    }
+}
+
+#[test]
+fn a_row_overlapping_several_earlier_rows_is_compared_with_each() {
+    assert_every_order_matches_the_enumeration(
+        &["00 -> 1", "01 -> 0", "0- -> 1", "10 -> 0", "11 -> 0"],
+        120,
+    );
+}
+
+#[test]
+fn a_row_contradicting_a_dropped_row_is_a_conflict() {
+    assert_every_order_matches_the_enumeration(&["0- -> 1", "-0 -> 1", "10 -> 0", "11 -> 0"], 24);
+}
+
+#[test]
+fn a_conflict_with_a_dropped_row_is_noted_at_the_dropped_row() {
+    let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 10 -> 0; 11 -> 0");
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_DUPLICATE_ROW", "E_TRUTH_TABLE_CONFLICT"],
+    );
+    assert_eq!(underlined(&source, &found[1].span), "10 -> 0");
+    let note = &found[1].notes[0];
+    assert_eq!(
+        underlined(
+            &source,
+            note.span.as_ref().expect("the note carries a span")
+        ),
+        "-0 -> 1",
+    );
+    assert_eq!(note.message, "first row assigning `10` the output `1` here");
+}
+
+#[test]
+fn a_conflict_is_noted_at_the_row_it_contradicts() {
+    let source = table(
+        "sig.a, sig.b",
+        "00 -> 1; 01 -> 0; 0- -> 1; 10 -> 0; 11 -> 0",
+    );
+    let found = only(&source);
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_CONFLICT");
+    assert_eq!(underlined(&source, &found.span), "0- -> 1");
+    let note = &found.notes[0];
+    assert_eq!(
+        underlined(
+            &source,
+            note.span.as_ref().expect("the note carries a span")
+        ),
+        "01 -> 0",
+    );
+    assert_eq!(note.message, "first row assigning `01` the output `0` here");
+    assert!(
+        found.primary.contains("assigns `01` the output `1`"),
+        "the sentence names the combination the two disagree on: {}",
+        found.primary,
+    );
+}
+
+#[test]
+fn a_conflict_with_several_rows_is_noted_at_the_first() {
+    let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 00 -> 0; 11 -> 0");
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_DUPLICATE_ROW", "E_TRUTH_TABLE_CONFLICT"],
+    );
+    assert_eq!(underlined(&source, &found[1].span), "00 -> 0");
+    assert_eq!(
+        underlined(
+            &source,
+            found[1].notes[0].span.as_ref().expect("a note span")
+        ),
+        "0- -> 1",
+    );
+}
+
+#[test]
+fn a_dash_output_row_written_first_does_not_hide_a_conflict_under_it() {
+    let source = table("sig.a, sig.b", "0- -> -; 00 -> 0; 00 -> 1; 1- -> 0");
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_DUPLICATE_ROW", "E_TRUTH_TABLE_CONFLICT"],
+    );
+    let noted = |d: &Diagnostic| {
+        underlined(
+            &source,
+            d.notes[0].span.as_ref().expect("the note carries a span"),
+        )
+    };
+    assert_eq!(underlined(&source, &found[0].span), "00 -> 0");
+    assert_eq!(noted(&found[0]), "0- -> -");
+    assert_eq!(underlined(&source, &found[1].span), "00 -> 1");
+    assert_eq!(noted(&found[1]), "00 -> 0");
+}
+
+#[test]
+fn every_finding_about_a_combination_is_noted_at_the_first_row_assigning_it() {
+    let source = table(
+        "sig.a, sig.b",
+        "00 -> 1; 0- -> 1; 01 -> 1; 01 -> 1; 1- -> 0",
+    );
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        [
+            "W_TRUTH_TABLE_DUPLICATE_ROW",
+            "W_TRUTH_TABLE_DUPLICATE_ROW",
+            "W_TRUTH_TABLE_DUPLICATE_ROW"
+        ],
+    );
+    let dash = source.find("0- -> 1").expect("the `0-` row");
+    for d in &found[1..] {
+        assert_eq!(
+            d.notes[0].span.as_ref().expect("a note span").start,
+            dash,
+            "`0-` is the first row assigning `01`: {}",
+            rendered(d),
+        );
+        assert_eq!(d.notes[0].message, "first row assigning `01` here");
+    }
+}
+
+#[test]
+fn a_row_inside_a_reported_row_is_told_to_settle_that_row_first() {
+    let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 10 -> 1; 11 -> 0");
+    let found = diagnose(&source);
+    assert_eq!(
+        found.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["W_TRUTH_TABLE_DUPLICATE_ROW", "W_TRUTH_TABLE_DUPLICATE_ROW"],
+    );
+    assert_eq!(underlined(&source, &found[1].span), "10 -> 1");
+    assert_eq!(
+        underlined(
+            &source,
+            found[1].notes[0].span.as_ref().expect("a note span")
+        ),
+        "-0 -> 1",
+    );
+    let text = rendered(&found[1]);
+    assert!(
+        text.contains("settle the earlier row `-0` first") && !text.contains("delete"),
+        "the fix may not tell the author to delete a row the noted one is not keeping: {text}",
+    );
+}
+
+#[test]
+fn a_dash_output_inside_a_reported_row_is_told_to_settle_that_row_first() {
+    let source = table("sig.a, sig.b", "0- -> 1; -0 -> 1; 10 -> -");
+    let found: Vec<Diagnostic> = diagnose(&source)
+        .into_iter()
+        .filter(|d| d.code == DiagnosticCode::TruthTableDuplicateRow)
+        .collect();
+    assert_eq!(found.len(), 2, "one finding each for `-0` and `10`");
+    assert_eq!(underlined(&source, &found[1].span), "10 -> -");
+    let text = rendered(&found[1]);
+    assert!(
+        text.contains("this row leaves `10` unconstrained")
+            && text.contains("settle the earlier row `-0` first")
+            && !text.contains("delete"),
+        "the unconstrained pair under a reported row settles that row first: {text}",
+    );
+}
+
+#[test]
+fn a_row_accepted_with_a_finding_does_not_earn_a_coverage_count() {
+    assert_eq!(
+        codes(&table(
+            "sig.a, sig.b, sig.c",
+            "00- -> 1; 0-0 -> 1; 010 -> 1"
+        )),
+        ["W_TRUTH_TABLE_DUPLICATE_ROW", "W_TRUTH_TABLE_DUPLICATE_ROW"],
+    );
+}
+
+fn combinations_of(pattern: &str) -> Vec<String> {
+    pattern
+        .chars()
+        .fold(vec![String::new()], |prefixes, digit| {
+            let choices: &[char] = match digit {
+                '-' => &['0', '1'],
+                '0' => &['0'],
+                _ => &['1'],
+            };
+            prefixes
+                .iter()
+                .flat_map(|prefix| {
+                    choices.iter().map(move |c| {
+                        let mut next = prefix.clone();
+                        next.push(*c);
+                        next
+                    })
+                })
+                .collect()
+        })
+}
+
+fn share_a_combination(a: &str, b: &str) -> bool {
+    let theirs = combinations_of(b);
+    combinations_of(a).iter().any(|c| theirs.contains(c))
+}
+
+fn outputs_contradict(a: char, b: char) -> bool {
+    a != '-' && b != '-' && a != b
+}
+
+/// The code each row should earn, worked out combination by combination.
+fn expected_verdicts(rows: &[(String, char)]) -> Vec<Option<&'static str>> {
+    rows.iter()
+        .enumerate()
+        .map(|(index, (pattern, output))| {
+            let mut verdict = None;
+            for (earlier, earlier_output) in &rows[..index] {
+                if !share_a_combination(pattern, earlier) {
+                    continue;
+                }
+                if outputs_contradict(*output, *earlier_output) {
+                    return Some("E_TRUTH_TABLE_CONFLICT");
+                }
+                verdict = Some("W_TRUTH_TABLE_DUPLICATE_ROW");
+            }
+            verdict
+        })
+        .collect()
+}
+
+/// How many rows contradict a row past their first overlap, and how many are noted at a row
+/// that overlaps an earlier one.
+fn interesting_shapes(rows: &[(String, char)]) -> (usize, usize) {
+    let mut contradicts_past_its_first_overlap = 0;
+    let mut noted_at_an_overlapping_row = 0;
+    for (index, (pattern, output)) in rows.iter().enumerate() {
+        let overlapping: Vec<usize> = (0..index)
+            .filter(|at| share_a_combination(pattern, &rows[*at].0))
+            .collect();
+        let contradicting = overlapping
+            .iter()
+            .find(|at| outputs_contradict(*output, rows[**at].1));
+        if let (Some(first), Some(_)) = (overlapping.first(), contradicting)
+            && !outputs_contradict(*output, rows[*first].1)
+        {
+            contradicts_past_its_first_overlap += 1;
+        }
+        if let Some(noted) = contradicting.or(overlapping.first())
+            && (0..*noted).any(|at| share_a_combination(&rows[*noted].0, &rows[at].0))
+        {
+            noted_at_an_overlapping_row += 1;
+        }
+    }
+    (
+        contradicts_past_its_first_overlap,
+        noted_at_an_overlapping_row,
+    )
+}
+
+/// Checks the table-level findings against the enumeration; returns the coverage findings' count.
+fn assert_table_findings_are_sound(
+    source: &str,
+    rows: &[(String, char)],
+    arity: usize,
+    found: &[Diagnostic],
+    row_findings: usize,
+) -> usize {
+    let mut partial_findings = 0;
+    let table_findings: Vec<&Diagnostic> = found
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.code.as_str(),
+                "E_TRUTH_TABLE_EMPTY" | "W_TRUTH_TABLE_PARTIAL"
+            )
+        })
+        .collect();
+    assert_eq!(
+        row_findings + table_findings.len(),
+        found.len(),
+        "every finding is either on a row or about the table: {source}",
+    );
+    let assigned: std::collections::BTreeSet<String> = rows
+        .iter()
+        .flat_map(|(pattern, _)| combinations_of(pattern))
+        .collect();
+    let total = 1usize << arity;
+    let all_dash = rows.iter().all(|(_, output)| *output == '-');
+    let lowest_missing: Vec<String> = (0..total)
+        .map(|n| format!("{n:0arity$b}"))
+        .filter(|combination| !assigned.contains(combination))
+        .take(SAMPLE_CAP)
+        .collect();
+    for finding in table_findings {
+        match &finding.data {
+            None => {
+                assert_eq!(finding.code.as_str(), "E_TRUTH_TABLE_EMPTY");
+                assert!(all_dash, "empty only when no row asserts: {source}");
+            }
+            Some(DiagnosticData::TruthTablePartial {
+                covered, missing, ..
+            }) => {
+                partial_findings += 1;
+                assert!(!all_dash, "{source}");
+                assert!(
+                    assigned.len() < total,
+                    "a complete table is not partial: {source}"
+                );
+                assert_eq!(
+                    usize::try_from(*covered).expect("small"),
+                    assigned.len(),
+                    "the coverage count is the true count: {source}",
+                );
+                assert_eq!(
+                    missing, &lowest_missing,
+                    "the sample is the lowest combinations no row assigns, up to \
+                     {SAMPLE_CAP}, in ascending order: {source}",
+                );
+            }
+            Some(other) => panic!("unexpected payload {other:?}: {source}"),
+        }
+    }
+    // No row finding means no dropped rows, so the count is exact.
+    if !all_dash && row_findings == 0 && assigned.len() < total {
+        assert_eq!(
+            partial_findings, 1,
+            "an incomplete table whose rows do not overlap is partial, once: {source}",
+        );
+    }
+    if all_dash {
+        assert!(
+            found
+                .iter()
+                .any(|d| d.code == DiagnosticCode::TruthTableEmpty),
+            "a table of `-` outputs verifies nothing: {source}",
+        );
+    }
+    partial_findings
+}
+
+#[test]
+fn every_row_verdict_matches_an_enumeration_of_its_combinations() {
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut next = move |bound: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state % bound
+    };
+    let digit = |n: u64| ['0', '1', '-'][usize::try_from(n).expect("below three")];
+    // Floors at about half what the seed reaches, so the generator cannot drift off these shapes.
+    let mut contradicts_past_its_first_overlap = 0;
+    let mut noted_at_an_overlapping_row = 0;
+    let mut partial_findings = 0;
+    for _ in 0..4000 {
+        let arity = usize::try_from(next(4) + 1).expect("small");
+        let count = next(6) + 1;
+        let rows: Vec<(String, char)> = (0..count)
+            .map(|_| {
+                let pattern: String = (0..arity).map(|_| digit(next(3))).collect();
+                (pattern, digit(next(3)))
+            })
+            .collect();
+        let written: Vec<String> = rows.iter().map(|(p, o)| format!("{p} -> {o}")).collect();
+        let inputs: Vec<String> = (0..arity).map(|i| format!("sig.i{i}")).collect();
+        let source = table(&inputs.join(", "), &written.join("; "));
+        let found = diagnose(&source);
+
+        let expected = expected_verdicts(&rows);
+        let actual = per_row_codes(&source, &written, &found);
+        for ((verdict, codes), row) in expected.iter().zip(&actual).zip(&rows) {
+            assert_eq!(
+                codes,
+                &verdict.iter().copied().collect::<Vec<_>>(),
+                "row `{}` of {source}",
+                row.0,
+            );
+        }
+
+        let (past_first, at_overlapping) = interesting_shapes(&rows);
+        contradicts_past_its_first_overlap += past_first;
+        noted_at_an_overlapping_row += at_overlapping;
+        let row_findings: usize = actual.iter().map(Vec::len).sum();
+        partial_findings +=
+            assert_table_findings_are_sound(&source, &rows, arity, &found, row_findings);
+    }
+    assert!(
+        contradicts_past_its_first_overlap > 350 && noted_at_an_overlapping_row > 650,
+        "the generator should reach the shapes this check is about: {contradicts_past_its_first_overlap} \
+         rows contradicting past their first overlap, {noted_at_an_overlapping_row} noted at a row \
+         that itself overlaps",
+    );
+    assert!(
+        partial_findings > 500,
+        "and the coverage finding often enough to check it: {partial_findings}",
+    );
+}

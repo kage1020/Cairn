@@ -1,24 +1,12 @@
-//! Wall-local coordinate mapping for openings (doors and windows).
-//!
-//! Door/window members are written in the source as `side=front offset=N y=N
-//! size=WxH`. That coordinate system is anchored to the wall the opening is
-//! cut into, not to the struct's voxel grid: `offset` runs along the wall,
-//! `y` rises from the floor, and the wall index itself (`x` or `z`) is fixed
-//! by the side. This module converts a `(side, u, v)` wall-local
-//! coordinate into a `(x, y, z)` struct-grid coordinate, accounting for the
-//! `overhang` shift that pushes floor/walls inward by a constant on every
-//! axis (see `block_array/mod.rs` for the overhang convention).
-//!
-//! Kept in its own module so doors and windows share one mapping instead of
-//! re-deriving it twice with subtle sign errors.
+//! Wall-local coordinates for doors and windows, and the arguments that place them on a wall.
+
+use crate::ast::ValueKind;
+use crate::intent::Member;
 
 use super::Dims;
+use super::args::size_value;
 
-/// Which wall of a struct an opening cuts through.
-///
-/// Sides follow `spec/syntax` "Selectors": `front` = `+z`, `back` = `-z`,
-/// `left` = `-x`, `right` = `+x`. The names are world-facing (a viewer
-/// outside the structure sees the front wall as the +z face).
+/// A struct wall, named as seen from outside (`spec/syntax` "Selectors").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WallSide {
     /// `+z` face of the struct.
@@ -32,9 +20,7 @@ pub enum WallSide {
 }
 
 impl WallSide {
-    /// Parse a `side=` identifier value into a [`WallSide`], if it names one
-    /// of the four cardinal walls. Returns `None` for any other identifier;
-    /// the caller turns that into a `W_DEFERRED_MEMBER` warning.
+    /// The [`WallSide`] a `side=` identifier names, or `None`.
     #[must_use]
     pub fn from_ident(name: &str) -> Option<Self> {
         match name {
@@ -58,12 +44,7 @@ impl WallSide {
     }
 }
 
-/// Length of the wall along its `offset` axis, in voxels.
-///
-/// `interior_w` is the struct's authored `size.w` and `interior_h` the
-/// authored `size.h` (i.e. the footprint *before* overhang inflation). The
-/// front and back walls run along `x`, so their length is `interior_w`; the
-/// left and right walls run along `z`, so their length is `interior_h`.
+/// Length of the wall along its `offset` axis, given the authored `size=WxH`.
 #[must_use]
 pub fn wall_length(side: WallSide, interior_w: u32, interior_h: u32) -> u32 {
     match side {
@@ -72,38 +53,9 @@ pub fn wall_length(side: WallSide, interior_w: u32, interior_h: u32) -> u32 {
     }
 }
 
-/// Convert a wall-local `(u, v)` coordinate into a struct-grid `(x, y, z)`.
+/// Convert a wall-local `(u, v)` into a struct-grid `(x, y, z)`, or `None` outside the wall.
 ///
-/// - `u` is the offset along the wall, starting at 0 at the wall's *left
-///   end* in the view of someone standing outside that wall (front: low x,
-///   back: low x mirrored to high x, left: low z, right: low z mirrored to
-///   high z; the per-side mirroring keeps `sym=true` symmetric about the
-///   wall's midpoint regardless of which side is named).
-/// - `v` is the height from the floor (`y` directly).
-/// - `overhang` shifts the wall inward on its own axis.
-/// - `interior` carries the authored `size` extents (before overhang
-///   inflation). Pass the struct's `size.w` / `size.h` so the helper can
-///   compute the back-wall and right-wall mirroring without re-deriving the
-///   full inflated dimensions.
-///
-/// Returns `None` if `(u, v)` falls outside the wall's range.
-///
-/// No caller can reach that `None` today; each asks only after checking
-/// the same bounds itself. There are five callers and two dispositions:
-///
-/// - The four lowering callers in `block_array::lower` — the single-cell
-///   `plate_voxel_position` and the walks over a rectangle or a band,
-///   `carve_door`, `fill_stair` and `paint_window_rect` — validate `u` and
-///   `v` against the wall first and report any author error there, once per
-///   member. A `None` reaching them means one of those checks stopped
-///   agreeing with this function, which is a compiler bug rather than
-///   something the author can fix, so each one `debug_assert!`s with a
-///   message naming the check it relied on, then drops the cell (or the
-///   plate) in release builds rather than panicking over one voxel. The
-///   sites are tagged `INVARIANT(wall-grid-validated)`.
-/// - `walkway::window_world_xz` propagates the `None` with `?`. Its `u`
-///   comes from `window_center_offset`, already bounded by the wall, and its
-///   `v` is the ground row `0`, so that `None` is unreachable too.
+/// `u` runs from the wall's left end as seen from outside, so `sym=true` mirrors about its middle.
 #[must_use]
 pub fn wall_local_to_grid(
     side: WallSide,
@@ -125,9 +77,6 @@ pub fn wall_local_to_grid(
             Some((x, v, z))
         }
         WallSide::Back => {
-            // Back wall mirrors `u` so symmetry around the wall midpoint is
-            // preserved between sides — a `sym=true` window on the back
-            // looks like the front-wall pair viewed from the other side.
             let mirrored = interior_w.saturating_sub(1).saturating_sub(u);
             let x = overhang.saturating_add(mirrored);
             let z = overhang;
@@ -139,8 +88,6 @@ pub fn wall_local_to_grid(
             Some((x, v, z))
         }
         WallSide::Right => {
-            // Right wall mirrors `u` along z for the same reason the back
-            // wall mirrors along x.
             let mirrored = interior_h.saturating_sub(1).saturating_sub(u);
             let x = overhang.saturating_add(interior_w).saturating_sub(1);
             let z = overhang.saturating_add(mirrored);
@@ -149,137 +96,142 @@ pub fn wall_local_to_grid(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// How an argument a port cannot use was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Written {
+    /// The key is not on the line.
+    Absent,
+    /// The key carries an identifier the port does not accept.
+    Ident(String),
+    /// The key carries a value of some other shape (a number, a string, …).
+    OtherShape,
+}
 
-    fn dims_for(interior_w: u32, interior_h: u32, overhang: u32, y: u32) -> Dims {
-        Dims {
-            x: interior_w + 2 * overhang,
-            y,
-            z: interior_h + 2 * overhang,
+impl Written {
+    pub(super) fn of_ident(member: &Member, key: &str) -> Self {
+        match member.intent_state.get(key).map(|v| &v.value.kind) {
+            None => Self::Absent,
+            Some(ValueKind::Ident(s)) => Self::Ident(s.clone()),
+            Some(_) => Self::OtherShape,
         }
-    }
-
-    #[test]
-    fn from_ident_parses_four_cardinals() {
-        assert_eq!(WallSide::from_ident("front"), Some(WallSide::Front));
-        assert_eq!(WallSide::from_ident("back"), Some(WallSide::Back));
-        assert_eq!(WallSide::from_ident("left"), Some(WallSide::Left));
-        assert_eq!(WallSide::from_ident("right"), Some(WallSide::Right));
-        assert_eq!(WallSide::from_ident("up"), None);
-    }
-
-    #[test]
-    fn front_wall_maps_u_to_x_and_z_to_far_edge() {
-        // size=9x7, overhang=1 → interior x ∈ [1, 9], z ∈ [1, 7].
-        // Front wall is the +z face: z = overhang + size.h - 1 = 7.
-        let dims = dims_for(9, 7, 1, 9);
-        assert_eq!(
-            wall_local_to_grid(WallSide::Front, 0, 1, 1, 9, 7, dims),
-            Some((1, 1, 7)),
-        );
-        assert_eq!(
-            wall_local_to_grid(WallSide::Front, 8, 4, 1, 9, 7, dims),
-            Some((9, 4, 7)),
-        );
-    }
-
-    #[test]
-    fn back_wall_mirrors_u_along_x() {
-        // size=9x7, overhang=1. Back wall at z=overhang=1, and u=0 should
-        // land at the *opposite* x corner from front u=0 so a `sym=true`
-        // opening looks the same from both sides of the building.
-        let dims = dims_for(9, 7, 1, 9);
-        assert_eq!(
-            wall_local_to_grid(WallSide::Back, 0, 1, 1, 9, 7, dims),
-            Some((9, 1, 1)),
-        );
-        assert_eq!(
-            wall_local_to_grid(WallSide::Back, 8, 1, 1, 9, 7, dims),
-            Some((1, 1, 1)),
-        );
-    }
-
-    #[test]
-    fn left_and_right_walls_run_along_z() {
-        let dims = dims_for(9, 7, 1, 9);
-        // Left wall: x=overhang, u runs along z starting at z=overhang.
-        assert_eq!(
-            wall_local_to_grid(WallSide::Left, 0, 2, 1, 9, 7, dims),
-            Some((1, 2, 1)),
-        );
-        assert_eq!(
-            wall_local_to_grid(WallSide::Left, 6, 2, 1, 9, 7, dims),
-            Some((1, 2, 7)),
-        );
-        // Right wall: x=overhang+size.w-1=9, u runs along z mirrored.
-        assert_eq!(
-            wall_local_to_grid(WallSide::Right, 0, 2, 1, 9, 7, dims),
-            Some((9, 2, 7)),
-        );
-        assert_eq!(
-            wall_local_to_grid(WallSide::Right, 6, 2, 1, 9, 7, dims),
-            Some((9, 2, 1)),
-        );
-    }
-
-    #[test]
-    fn out_of_range_returns_none() {
-        let dims = dims_for(9, 7, 1, 9);
-        // u past the wall length.
-        assert_eq!(
-            wall_local_to_grid(WallSide::Front, 9, 1, 1, 9, 7, dims),
-            None,
-        );
-        // v past dims.y.
-        assert_eq!(
-            wall_local_to_grid(WallSide::Front, 0, 9, 1, 9, 7, dims),
-            None,
-        );
-    }
-
-    #[test]
-    fn the_gate_is_exactly_the_wall_on_every_side() {
-        // The lowering callers assert rather than report a `None`, so the
-        // assertions can only catch a gate that *tightens*, and only where
-        // a test paints the cell it no longer admits. A gate that loosens
-        // never returns `None` at all, and on the back and right walls
-        // the `saturating_sub` mirror would answer a valid-looking corner
-        // cell instead. Pin both edges on all four sides: the last cell of
-        // the wall (`u = len - 1`, `v = dims.y - 1`) maps, and one past it
-        // on either axis does not.
-        let dims = dims_for(9, 7, 1, 9);
-        for (side, len, last_cell) in [
-            (WallSide::Front, 9, (9, 8, 7)),
-            (WallSide::Back, 9, (1, 8, 1)),
-            (WallSide::Left, 7, (1, 8, 7)),
-            (WallSide::Right, 7, (9, 8, 1)),
-        ] {
-            assert_eq!(wall_length(side, 9, 7), len, "{side:?}");
-            assert_eq!(
-                wall_local_to_grid(side, len - 1, dims.y - 1, 1, 9, 7, dims),
-                Some(last_cell),
-                "{side:?}: the last cell of the wall maps",
-            );
-            assert_eq!(
-                wall_local_to_grid(side, len, 0, 1, 9, 7, dims),
-                None,
-                "{side:?}: `u = len` is past the wall",
-            );
-            assert_eq!(
-                wall_local_to_grid(side, 0, dims.y, 1, 9, 7, dims),
-                None,
-                "{side:?}: `v = dims.y` is past the wall",
-            );
-        }
-    }
-
-    #[test]
-    fn wall_length_picks_axis_by_side() {
-        assert_eq!(wall_length(WallSide::Front, 9, 7), 9);
-        assert_eq!(wall_length(WallSide::Back, 9, 7), 9);
-        assert_eq!(wall_length(WallSide::Left, 9, 7), 7);
-        assert_eq!(wall_length(WallSide::Right, 9, 7), 7);
     }
 }
+
+/// What is wrong with a door's `at=`, as the rest of a sentence whose subject is the door.
+pub(super) fn door_at_clause(written: &Written) -> String {
+    match written {
+        Written::Absent => "has no `at=`".to_owned(),
+        Written::Ident(s) => format!("has `at={s}`, which is not one of center, left, right"),
+        Written::OtherShape => "has an `at=` that is not one of center, left, right (numeric \
+                                offsets are reserved)"
+            .to_owned(),
+    }
+}
+
+/// The reason a door is deferred when [`door_anchor_offset`] refused its `at=`.
+pub(super) fn door_at_deferral(written: &Written) -> String {
+    format!(
+        "door {} — use `at=center | left | right`",
+        door_at_clause(written)
+    )
+}
+
+/// The first window argument [`read_window_args`] could not use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WindowArgFault {
+    /// `offset=` is present and not a non-negative integer.
+    OffsetMalformed,
+    /// No `y=`.
+    YAbsent,
+    /// `y=` is present and not a non-negative integer.
+    YMalformed,
+    /// No `size=`.
+    SizeAbsent,
+    /// `size=` is present and not a `WxH`.
+    SizeMalformed,
+}
+
+impl WindowArgFault {
+    /// What is wrong, as the rest of a sentence whose subject is the window.
+    pub(super) fn clause(self) -> &'static str {
+        match self {
+            Self::OffsetMalformed => {
+                "has an `offset=` that is not a non-negative integer that fits in u32"
+            }
+            Self::YAbsent => "has no `y=`",
+            Self::YMalformed => "has a `y=` that is not a non-negative integer that fits in u32",
+            Self::SizeAbsent => "has no `size=WxH`",
+            Self::SizeMalformed => "has a `size=` that is not a `WxH` of two positive integers",
+        }
+    }
+
+    /// The reason `super::lower::window::cut_window` defers the window.
+    pub(super) fn deferral(self) -> String {
+        format!("window {}", self.clause())
+    }
+}
+
+/// The window arguments a port and a cut both need, read once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct WindowArgs {
+    /// `offset=`, `0` when absent.
+    pub(super) offset: u32,
+    /// `y=`, relative to the member's own level.
+    pub(super) y: u32,
+    /// `size=`'s `W`.
+    pub(super) width: u32,
+    /// `size=`'s `H`.
+    pub(super) height: u32,
+}
+
+/// Read a window's `offset=`, `y=` and `size=`, in that order.
+///
+/// # Errors
+///
+/// The [`WindowArgFault`] for the first argument that cannot be used.
+pub(super) fn read_window_args(member: &Member) -> Result<WindowArgs, WindowArgFault> {
+    let offset = if member.intent_state.contains_key("offset") {
+        member
+            .nonneg_u32("offset")
+            .ok_or(WindowArgFault::OffsetMalformed)?
+    } else {
+        0
+    };
+    let y = match (
+        member.intent_state.contains_key("y"),
+        member.nonneg_u32("y"),
+    ) {
+        (_, Some(y)) => y,
+        (false, None) => return Err(WindowArgFault::YAbsent),
+        (true, None) => return Err(WindowArgFault::YMalformed),
+    };
+    let (width, height) = match (
+        member.intent_state.contains_key("size"),
+        size_value(member, "size"),
+    ) {
+        (_, Some(size)) => size,
+        (false, None) => return Err(WindowArgFault::SizeAbsent),
+        (true, None) => return Err(WindowArgFault::SizeMalformed),
+    };
+    Ok(WindowArgs {
+        offset,
+        y,
+        width,
+        height,
+    })
+}
+
+/// Wall-local `u` of a door's `at=` on a wall `len` long, or how an unusable `at=` was written.
+///
+/// `center` is `len / 2`, rounding half up on an even wall (`spec/syntax` "Selectors").
+pub(super) fn door_anchor_offset(member: &Member, len: u32) -> Result<u32, Written> {
+    match member.ident_value("at") {
+        Some("center") => Ok(len / 2),
+        Some("left") => Ok(0),
+        Some("right") => Ok(len.saturating_sub(1)),
+        _ => Err(Written::of_ident(member, "at")),
+    }
+}
+
+#[cfg(test)]
+mod tests;

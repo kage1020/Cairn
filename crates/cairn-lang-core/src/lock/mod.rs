@@ -1,14 +1,4 @@
-//! `build.cairn.lock` reader/writer.
-//!
-//! The lockfile pins three pieces of state at the moment of a successful
-//! compile: the source bytes, the target (edition + Minecraft version +
-//! `DataVersion`), and the resolved IR. Re-running `cairn compile` against
-//! a different target prints the divergence by comparing fields.
-//!
-//! Note that the canonical filename for a single-source build is
-//! `build.cairn.lock` (per `spec/versioning-editions` "Provenance and lock"),
-//! but the CLI defaults to `<source>.lock` so multi-source workspaces stay
-//! unambiguous; the lockfile schema does not care which path it lives at.
+//! Lockfile reader and writer (`spec/versioning-editions` "Provenance and lock").
 
 mod hash;
 mod schema;
@@ -19,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 pub use hash::{HashError, HashHex, HashParseError, hash_resolved_ir, hash_source};
 pub use schema::{
-    LOCK_SCHEMA_VERSION, LockEdition, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
+    LOCK_SCHEMA_VERSION, LockInputs, LockPlacement, LockTarget, LockWalkway, Lockfile,
     MemberSensitivity, RefusedIdentifierLock,
 };
 
@@ -34,11 +24,7 @@ pub enum LockError {
     /// YAML encoder/decoder rejected the contents.
     #[error("lockfile YAML: {0}")]
     Yaml(#[from] serde_norway::Error),
-    /// The document declares a schema revision this build does not know.
-    ///
-    /// Refused rather than read: the field names would be the same, so a
-    /// later format would deserialise into this struct and mean something
-    /// else.
+    /// The document declares a schema revision newer than this build reads.
     #[error("lockfile declares schema version {found}; this build reads {supported}")]
     UnsupportedSchemaVersion {
         /// Version the document declared.
@@ -49,17 +35,11 @@ pub enum LockError {
 }
 
 impl Lockfile {
-    /// Write the lockfile to `path` as YAML, overwriting any existing file.
+    /// Write the lockfile to `path` as YAML, replacing any existing file atomically.
     ///
     /// # Errors
     ///
-    /// Propagates I/O failure from creating or writing `path`, or YAML
-    /// encoder failure from the schema.
-    /// Writes through a sibling temporary file and a rename, so a failure
-    /// part-way cannot leave a truncated lockfile where a valid one was.
-    /// `fs::write` truncates in place, which turns a full disk or a lost
-    /// handle into a file that no longer parses — worse than the old
-    /// contents and worse than no file at all.
+    /// I/O failure writing `path`, or YAML encoder failure.
     pub fn write_to_path(&self, path: &Path) -> Result<(), LockError> {
         let body = self.to_yaml()?;
         let mut tmp = path.as_os_str().to_owned();
@@ -70,9 +50,7 @@ impl Lockfile {
             let mut file = fs::File::create(&tmp)?;
             file.write_all(body.as_bytes())?;
             file.flush()?;
-            // The rename below publishes the name, not the bytes; without
-            // this a crash can leave the new name pointing at a partial
-            // file.
+            // The rename publishes the name, not the bytes.
             file.sync_all()
         })();
         if let Err(err) = staged {
@@ -86,23 +64,11 @@ impl Lockfile {
         Ok(())
     }
 
-    /// Serialise to the YAML body [`Self::write_to_path`] would write.
-    ///
-    /// Separating the encoding from the I/O lets a caller that has to place
-    /// several files together fail out of the encode without having touched
-    /// the filesystem at all.
-    ///
-    /// The body always ends with exactly one newline.
-    ///
-    /// A body that stops mid-line makes `git diff` report `\ No newline at
-    /// end of file` on every change and an appended byte corrupt the
-    /// document. The guard is unconditional so the contract holds whatever
-    /// the encoder does with the last field — the one at risk being
-    /// `member_version_sensitivity`, written last and often empty.
+    /// Serialise to the YAML body [`Self::write_to_path`] writes, ending in exactly one newline.
     ///
     /// # Errors
     ///
-    /// Propagates YAML encode failure.
+    /// YAML encoder failure.
     pub fn to_yaml(&self) -> Result<String, LockError> {
         let mut body = serde_norway::to_string(self)?;
         if !body.ends_with('\n') {
@@ -115,78 +81,36 @@ impl Lockfile {
     ///
     /// # Errors
     ///
-    /// Propagates I/O failure from reading `path`, and everything
-    /// [`Self::from_yaml`] can return.
+    /// I/O failure reading `path`, or anything [`Self::from_yaml`] returns.
     pub fn read_from_path(path: &Path) -> Result<Self, LockError> {
         Self::from_yaml(&fs::read_to_string(path)?)
     }
 
-    /// Decode the YAML body [`Self::to_yaml`] would have written.
-    ///
-    /// The mirror of [`Self::to_yaml`], and where the schema version is
-    /// enforced — so a caller that already holds the bytes has the same
-    /// gate available as one reading a file. It is not a chokepoint:
-    /// `Lockfile` is public and derives `Deserialize`, so
-    /// `serde_norway::from_str` reaches one without the version check. This is
-    /// the entry point the compiler uses.
+    /// Decode a lockfile body, checking its schema version first so a newer format reads as newer,
+    /// not malformed.
     ///
     /// # Errors
     ///
-    /// Returns [`LockError::UnsupportedSchemaVersion`] when the document
-    /// declares a revision above [`LOCK_SCHEMA_VERSION`], and
-    /// [`LockError::Yaml`] when its shape does not match [`Lockfile`] —
-    /// which includes a key the schema does not declare, at any depth.
-    ///
-    /// The version is read first and on its own. Deciding it after the
-    /// full parse would put it behind `deny_unknown_fields`, so any later
-    /// format that adds a key would be reported as malformed rather than
-    /// as newer — and the leading field would not mean what its doc says.
+    /// [`LockError::UnsupportedSchemaVersion`] for a revision above [`LOCK_SCHEMA_VERSION`], or
+    /// [`LockError::Yaml`] when the shape does not match [`Lockfile`].
     pub fn from_yaml(body: &str) -> Result<Self, LockError> {
         gate_schema_version(body)?;
         Ok(serde_norway::from_str(body)?)
     }
 
-    /// The first identifier in `body` the current id rule refuses, when that
-    /// is all that is wrong with `body`, with the target and
-    /// version-sensitive members the document records.
-    ///
-    /// For a caller whose [`Self::from_yaml`] failed: it tells a lock that
-    /// is valid under an earlier, looser identifier rule apart from one that
-    /// is broken, and recovers the target it was verified for. `body` is
-    /// read exactly as strictly as [`Self::from_yaml`] reads it — the same
-    /// schema-version gate, every field required where it is required
-    /// there, no undeclared key at any depth — except that the seven
-    /// identifier fields (`site` and `id` of each placement; `site`, and
-    /// the `place` and `port` of `from` and `to`, of each walkway) are read
-    /// as plain strings.
-    ///
-    /// Identifiers are checked in field order: every placement, each by
-    /// `site` then `id`, then every walkway, each by `site`, `from.place`,
-    /// `from.port`, `to.place`, `to.port`. The first one refused is
-    /// reported. That is the order this compiler writes them in, but not
-    /// necessarily the order of a document written by hand, so it need not
-    /// be the identifier the strict read stopped at.
-    ///
-    /// `Ok(None)` means `body` is valid and records no refused identifier,
-    /// which is a document [`Self::from_yaml`] reads.
+    /// The first identifier the current id rule refuses, with the target and members `body`
+    /// records, when that is all that is wrong with it; `Ok(None)` when `body` is valid.
     ///
     /// # Errors
     ///
-    /// Returns [`LockError::UnsupportedSchemaVersion`] when `body` declares
-    /// a revision above [`LOCK_SCHEMA_VERSION`], and [`LockError::Yaml`]
-    /// when `body` is not a valid lockfile even with its identifiers read
-    /// as plain strings. That error names what is wrong besides the
-    /// identifiers, which is the reason to report: the strict read's own
-    /// error can be an identifier it happened to meet first.
+    /// [`LockError::UnsupportedSchemaVersion`] for a newer revision, or [`LockError::Yaml`] when
+    /// `body` is invalid even with its identifiers read as plain strings.
     pub fn refused_identifier(body: &str) -> Result<Option<RefusedIdentifierLock>, LockError> {
         gate_schema_version(body)?;
         Ok(schema::refused_identifier(body)?)
     }
 }
 
-/// Refuse a document that declares a schema revision this build does not
-/// read, before anything else in it is read. Shared by every reader of a
-/// whole document, so none of them can parse a later format as this one.
 fn gate_schema_version(body: &str) -> Result<(), LockError> {
     let found = schema::declared_schema_version(body)?;
     if found > LOCK_SCHEMA_VERSION {

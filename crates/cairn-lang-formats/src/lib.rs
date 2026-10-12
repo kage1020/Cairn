@@ -1,13 +1,9 @@
-//! Readers and writers around the Cairn block-array IR for existing schematic formats.
-//!
-//! Supported: vanilla Java `.nbt` structures and Bedrock `.mcstructure`
-//! (writers only; the Bedrock writer maps the stair family's blockstate
-//! properties to Bedrock `states` and drops unrepresentable intent with a
-//! degradation note).
-//! Planned: Litematica `.litematic` and the `WorldEdit` `.schem` format.
+//! Java `.nbt` and Bedrock `.mcstructure` writers for the block-array IR, with the registry packs
+//! and portability reports they rely on.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
+mod block_id;
 pub mod data_version;
 mod dims;
 pub mod java_structure;
@@ -21,7 +17,6 @@ pub use bedrock_structure::{
 };
 pub use data_version::{
     BedrockTarget, JavaTarget, UnsupportedTarget, resolve_bedrock_target, resolve_java_target,
-    supported_list,
 };
 pub use java_structure::{
     Compound, JavaStructure, JavaStructureError, OutputExt, build_structure_tag, output_filename,
@@ -32,6 +27,6 @@ pub use portability::{
     portability_for_java,
 };
 pub use registry::{
-    PackEdition, PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_bedrock,
-    builtin_java, load_builtin_bedrock, load_builtin_java, load_from_dir,
+    PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_pack,
+    load_builtin_pack, load_from_dir,
 };

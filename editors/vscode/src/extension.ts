@@ -31,11 +31,8 @@ export async function activate(context: ExtensionContext): Promise<void> {
 
   await logServerVersion(serverPath, output);
 
-  // No `transport`: vscode-languageclient still spawns an `Executable` over
-  // stdio when it is unset, but setting it to `TransportKind.stdio` also
-  // appends `--stdio` to the command line. `cairn-lsp` accepts that flag,
-  // yet one released before it did exits 2 on it, and the bare command is
-  // the one every `cairn-lsp` release has started a session on.
+  // No `transport`: `TransportKind.stdio` appends `--stdio`, which older
+  // `cairn-lsp` releases exit 2 on.
   const serverOptions: ServerOptions = {
     run: { command: serverPath },
     debug: { command: serverPath },
@@ -77,8 +74,7 @@ export async function deactivate(): Promise<void> {
   try {
     await current.stop();
   } catch (err) {
-    // Nothing user-facing left; VS Code is tearing the extension host down.
-    // Route the error to the developer console rather than swallow it silent.
+    // VS Code is tearing the extension host down; nothing user-facing is left.
     console.error("cairn-lsp: stop() failed during deactivate:", err);
   }
 }
@@ -179,7 +175,7 @@ function classifyProbeFailure(err: unknown): ProbeResult {
     return { ok: false, category: "permission", detail };
   }
   if (record?.killed === true) {
-    // `execFile` sets `killed = true` when it kills the child on the timeout.
+    // `execFile` sets `killed` when the timeout kills the child.
     return { ok: false, category: "timeout", detail };
   }
   return { ok: false, category: "runtime", detail };

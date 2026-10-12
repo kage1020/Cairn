@@ -1,31 +1,10 @@
-//! Theme names, their per-edition variants, and which of them a build binds.
-//!
-//! `spec/versioning-editions` "Java / Bedrock portability" lets one logical
-//! theme be written as two per-edition variants — `shop_java` and
-//! `shop_bedrock` — and lets a reference name the logical theme rather than
-//! either variant. Which variant a build actually binds is therefore a
-//! question about a *set of names* and the pinned edition, and nothing else.
-//!
-//! It lives here rather than inside [`super::resolver`] because two callers
-//! now ask it. The resolver asks in order to walk a body under the right slot
-//! map; [`super::version_axes`] asks in order to decide whose version floors
-//! a build inherits, and it works from the surface AST, where no
-//! `ThemeBinding` exists yet. One copy of the rule, so the same names and the
-//! same pin cannot bind differently in two places — which is what makes
-//! `E_VERSION_CAP` and `buildable targets` weigh the floor of the variant the
-//! build actually binds.
-//!
-//! The guarantee is about the rule, not about every question asked of it.
-//! `cairn info`'s edition-neutral row asks with *no* pin, and reads a theme
-//! only when both editions bind the same one — see
-//! [`super::unscoped_version_floors`], which owns that caveat.
+//! Theme names, their per-edition variants, and which of them a build binds
+//! (`spec/versioning-editions` "Java / Bedrock portability"). Shared by the resolver and
+//! [`super::version_axes`], so both weigh the variant the build actually binds.
 
 use crate::edition::Edition;
 
-/// Split a theme name into its logical part and the edition it names.
-///
-/// The suffix set is closed to the two editions, so `javanese` is an
-/// unsuffixed name and not a Java variant of `javan`.
+/// A theme name's logical part, and the edition its `_java` or `_bedrock` suffix names.
 pub(crate) fn strip_edition_suffix(name: &str) -> (&str, Option<Edition>) {
     if let Some(base) = name.strip_suffix("_java") {
         (base, Some(Edition::Java))
@@ -36,15 +15,7 @@ pub(crate) fn strip_edition_suffix(name: &str) -> (&str, Option<Edition>) {
     }
 }
 
-/// Return the sole *logical* theme name among `names`, ignoring per-edition
-/// variant suffixes.
-///
-/// A file with `theme shop_java` + `theme shop_bedrock` reports
-/// `Some("shop")` because both are variants of one logical theme — this
-/// keeps the auto-pick rule intact when the author uses the variants of
-/// `spec/versioning-editions` "Java / Bedrock portability". A file with
-/// `theme cottage` + `theme keep` reports `None` because the two names are
-/// genuinely distinct logical themes.
+/// The sole logical theme name among `names`, ignoring per-edition variant suffixes.
 pub(crate) fn single_logical_theme<'a>(
     names: impl IntoIterator<Item = &'a str>,
 ) -> Option<&'a str> {
@@ -60,27 +31,10 @@ pub(crate) fn single_logical_theme<'a>(
     logical
 }
 
-/// Pick the theme name to bind for `logical` under `edition`.
+/// The theme name to bind for `logical` under `edition`, or `None`.
 ///
-/// Order of preference:
-///
-/// - `Some(Java)`    → `<logical>_java` → unsuffixed `<logical>` → **unbound**
-/// - `Some(Bedrock)` → `<logical>_bedrock` → unsuffixed `<logical>` → **unbound**
-/// - `None`          → unsuffixed `<logical>` → `<logical>_java` → `<logical>_bedrock`
-///
-/// Under a `Some(edition)` compile the fallback deliberately **stops at
-/// the unsuffixed variant** rather than cross over to the opposite
-/// edition's variant. Binding, say, a `_bedrock` theme under
-/// `--edition java` would silently route Bedrock-only slot values into a
-/// Java `.nbt`. Returning `None` instead is reported as
-/// `E_THEME_VARIANT_MISSING` by both callers — not as `E_UNRESOLVED_SLOT`,
-/// which needs a bound theme to say the slot is missing from and would
-/// blame a slot that is declared and spelled correctly.
-///
-/// The `None` case still tolerates a partial file (only one variant
-/// declared): it prefers the unsuffixed theme, then Java, then Bedrock —
-/// a deterministic order that avoids leaking source-order into
-/// diagnostics.
+/// A pin falls back to the unsuffixed variant but never to the other edition's, whose slot values
+/// would leak into this edition's output.
 pub(crate) fn pick_variant<'a>(
     names: impl IntoIterator<Item = &'a str>,
     logical: &str,
@@ -109,17 +63,7 @@ pub(crate) fn pick_variant<'a>(
 
 /// Which declared theme a `theme=NAME` reference binds, or `None`.
 ///
-/// The name half of the resolver's `resolve_theme_reference`, which adds to
-/// it the two things only a diagnostic needs: whether `None` means "nothing
-/// of that name is declared" or "no variant of it fits the pin", and how the
-/// reference was spelled.
-///
-/// A reference is read as naming the *logical* theme, which is the spelling
-/// `spec/versioning-editions` "Java / Bedrock portability" asks the semantic
-/// layer to use, so `theme=shop` binds in a module declaring only `shop_java`
-/// and `shop_bedrock`. With no pin, nothing re-picks a variant the author
-/// named: a declared name binds verbatim, and a *suffixed* name nothing
-/// declares binds nothing rather than being swapped for a sibling.
+/// Unpinned, a declared name binds verbatim and an undeclared suffixed name binds nothing.
 pub(crate) fn bound_theme_name<'a, I>(
     names: I,
     written: &str,
@@ -163,8 +107,6 @@ mod tests {
             ("shop", Some(Edition::Bedrock)),
         );
         assert_eq!(strip_edition_suffix("medieval"), ("medieval", None));
-        // Names that happen to end with a similar substring but are not
-        // suffixed with the closed edition set remain unsuffixed.
         assert_eq!(strip_edition_suffix("javanese"), ("javanese", None));
     }
 

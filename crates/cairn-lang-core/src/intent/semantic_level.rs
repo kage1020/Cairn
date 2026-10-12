@@ -1,11 +1,5 @@
-//! Maturity tag for an [`IntentModule`](super::IntentModule).
-//!
-//! Cairn distinguishes three IR maturity states (see `spec/architecture` "The
-//! Intent IR is rich and carries invariants"). The current `lower()` produces
-//! [`SemanticLevel::Grouped`] — the surface AST has been mechanically lifted
-//! into named members, but materials/themes have not been resolved yet.
-//! [`SemanticLevel::Lifted`] is the next maturity tier; [`SemanticLevel::Raw`]
-//! is reserved for schematic-import paths once that surface lands.
+//! Maturity tag for an [`IntentModule`](super::IntentModule) (`spec/architecture` "The Intent IR
+//! is rich and carries invariants").
 
 use serde::Serialize;
 
@@ -14,14 +8,10 @@ use serde::Serialize;
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum SemanticLevel {
-    /// Schematic import that has not yet been clustered into member candidates.
+    /// Schematic import not yet clustered into members.
     Raw,
-    /// AST has been lowered into named members, but materials/themes have
-    /// not been resolved against any registry. This is what the current
-    /// `lower()` returns.
+    /// Named members with materials and themes unresolved; what `lower()` returns.
     Grouped,
-    /// Materials, themes, and per-edition resolution have completed; every
-    /// member carries an `intent_state` and a `resolved_state`. Future
-    /// maturity tier.
+    /// Every member carries an `intent_state` and a `resolved_state`.
     Lifted,
 }

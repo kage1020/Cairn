@@ -17,7 +17,7 @@ The streaming reader is still to land. It is what the reverse direction needs �
 
 ## Public API
 
-Every item the crate root re-exports, and nothing else — the same rule [`cairn-lang-formats`](../cairn-lang-formats/README.md) states, held by the same test in both directions.
+Every item the crate root re-exports, and nothing else — the same rule [`cairn-lang-formats`](../cairn-lang-formats/README.md) states, held by the same check in both directions.
 
 | Item | Role |
 |---|---|
