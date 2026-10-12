@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::ast::{Value, ValueKind};
 use crate::error::Span;
 
-use super::{AssertIr, LogicBinding};
+use super::{AssertIr, LogicBinding, MemberRole};
 
 /// One named member produced by lowering a body statement.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -45,36 +45,6 @@ pub struct Member {
     /// Byte range of the member's own line, children excluded.
     #[serde(skip)]
     pub span: Span,
-}
-
-/// Coarse classification of a member, derived from its source keyword.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "kind", content = "value")]
-pub enum MemberRole {
-    /// `floor` command.
-    Floor,
-    /// `walls` command.
-    Walls,
-    /// `door` command.
-    Door,
-    /// `window` command.
-    Window,
-    /// `roof` command.
-    Roof,
-    /// `stair` command.
-    Stair,
-    /// `level` grouping block.
-    Level,
-    /// `pressure_plate` fixture.
-    PressurePlate,
-    /// `circuit` redstone region marker.
-    Circuit,
-    /// `place` site placement.
-    Place,
-    /// `connect` site topology edge.
-    Connect,
-    /// Any keyword the role table does not know.
-    Other(String),
 }
 
 impl Member {

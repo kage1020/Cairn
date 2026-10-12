@@ -1,6 +1,6 @@
 //! Surface command keywords, the [`MemberRole`] each classifies to, and each role's arguments.
 
-use super::member::MemberRole;
+use serde::Serialize;
 
 /// All keywords known to the role table; the order breaks ties between equally near suggestions.
 pub const KNOWN_KEYWORDS: &[&str] = &[
@@ -22,6 +22,36 @@ pub const UNIVERSAL_ARGUMENTS: &[&str] = &["id", "class", "mat_slot"];
 
 /// Keywords that may carry a `-> value` sensor tail (`spec/redstone` "Signal binding").
 pub const SENSOR_HOSTS: &[&str] = &["pressure_plate"];
+
+/// Coarse classification of a member, derived from its source keyword.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "value")]
+pub enum MemberRole {
+    /// `floor` command.
+    Floor,
+    /// `walls` command.
+    Walls,
+    /// `door` command.
+    Door,
+    /// `window` command.
+    Window,
+    /// `roof` command.
+    Roof,
+    /// `stair` command.
+    Stair,
+    /// `level` grouping block.
+    Level,
+    /// `pressure_plate` fixture.
+    PressurePlate,
+    /// `circuit` redstone region marker.
+    Circuit,
+    /// `place` site placement.
+    Place,
+    /// `connect` site topology edge.
+    Connect,
+    /// Any keyword the role table does not know.
+    Other(String),
+}
 
 /// An argument whose value picks a lowering rule, and which conditional keys each rule reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
