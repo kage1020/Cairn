@@ -246,6 +246,16 @@ mod tests {
     }
 
     #[test]
+    fn a_stray_rule_is_an_error_not_a_dropped_case() {
+        let corpus =
+            "===\nOne\n===\n\nin\n\n---\n\n(a)\n===\n\n===\nTwo\n===\n\nin\n\n---\n\n(b)\n";
+        assert_eq!(
+            parse_cases(corpus).err().as_deref(),
+            Some("case `` has no `---` divider")
+        );
+    }
+
+    #[test]
     fn labels_are_read_per_node_outside_error_recovery() {
         let mut found = BTreeSet::new();
         collect_labels(

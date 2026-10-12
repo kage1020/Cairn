@@ -86,7 +86,9 @@ fn over_budget(source: &str) -> Vec<(usize, Kind, usize)> {
 
 fn check(repo: &Repo) -> Vec<Finding> {
     let mut findings = Vec::new();
+    let mut scanned = 0;
     for path in repo.files_in(Path::new(""), &["rs"]) {
+        scanned += 1;
         let source = match repo.read(path) {
             Ok(source) => source,
             Err(error) => {
@@ -106,6 +108,9 @@ fn check(repo: &Repo) -> Vec<Finding> {
                 ),
             ));
         }
+    }
+    if scanned == 0 {
+        findings.push(Finding::new(".", None, "scanned no Rust files"));
     }
     findings
 }

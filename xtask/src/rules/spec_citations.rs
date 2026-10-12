@@ -41,10 +41,22 @@ fn check(repo: &Repo) -> Vec<Finding> {
         )];
     }
 
+    let scanned = scanned_files(repo);
+    if scanned.is_empty() {
+        return vec![Finding::new(
+            ".",
+            None,
+            "scanned no files; update SCANNED in xtask if the trees moved",
+        )];
+    }
     let mut findings = Vec::new();
-    for path in scanned_files(repo) {
-        let Ok(text) = repo.read(&path) else {
-            continue;
+    for path in scanned {
+        let text = match repo.read(&path) {
+            Ok(text) => text,
+            Err(error) => {
+                findings.push(Finding::new(&path, None, error));
+                continue;
+            }
         };
         numbered_citations(&path, &text, &mut findings);
         named_citations(&path, &text, &chapters, &mut findings);

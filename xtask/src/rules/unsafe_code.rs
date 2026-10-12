@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use proc_macro2::{TokenStream, TokenTree};
+use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use syn::visit::Visit;
 
 use super::manifest::UNSAFE_EXEMPT;
@@ -48,6 +48,43 @@ fn names_unsafe_code(tokens: TokenStream) -> bool {
     })
 }
 
+/// Whether the attribute `name(tokens)` lifts `unsafe_code`.
+fn attribute_lifts(name: &str, tokens: TokenStream) -> bool {
+    match name {
+        "allow" | "expect" | "warn" => names_unsafe_code(tokens),
+        "cfg_attr" => lowers_unsafe_code(tokens),
+        _ => false,
+    }
+}
+
+/// The line of each `#[…]` or `#![…]` in a macro's tokens that lifts `unsafe_code`.
+fn lifts_in_tokens(tokens: TokenStream, found: &mut Vec<usize>) {
+    let mut pound = None;
+    for token in tokens {
+        match token {
+            TokenTree::Punct(punct) if punct.as_char() == '#' => {
+                pound = Some(punct.span().start().line);
+                continue;
+            }
+            TokenTree::Punct(punct) if punct.as_char() == '!' && pound.is_some() => continue,
+            TokenTree::Group(group) => match pound {
+                Some(line) if group.delimiter() == Delimiter::Bracket => {
+                    let mut inner = group.stream().into_iter();
+                    if let (Some(TokenTree::Ident(name)), Some(TokenTree::Group(args))) =
+                        (inner.next(), inner.next())
+                        && attribute_lifts(&name.to_string(), args.stream())
+                    {
+                        found.push(line);
+                    }
+                }
+                _ => lifts_in_tokens(group.stream(), found),
+            },
+            TokenTree::Punct(_) | TokenTree::Ident(_) | TokenTree::Literal(_) => {}
+        }
+        pound = None;
+    }
+}
+
 /// Attributes that lift `unsafe_code`, each with its line and the module path it sits in.
 #[derive(Default)]
 struct Lifts {
@@ -62,19 +99,23 @@ impl<'ast> Visit<'ast> for Lifts {
         self.modules.pop();
     }
 
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        let mut lines = Vec::new();
+        lifts_in_tokens(mac.tokens.clone(), &mut lines);
+        for line in lines {
+            self.found.push((line, self.modules.clone()));
+        }
+        syn::visit::visit_macro(self, mac);
+    }
+
     fn visit_attribute(&mut self, attribute: &'ast syn::Attribute) {
         let syn::Meta::List(list) = &attribute.meta else {
             return;
         };
-        let lifts = if ["allow", "expect", "warn"]
-            .iter()
-            .any(|level| list.path.is_ident(level))
-        {
-            names_unsafe_code(list.tokens.clone())
-        } else {
-            list.path.is_ident("cfg_attr") && lowers_unsafe_code(list.tokens.clone())
+        let Some(name) = list.path.get_ident() else {
+            return;
         };
-        if lifts {
+        if attribute_lifts(&name.to_string(), list.tokens.clone()) {
             let line = attribute.pound_token.span.start().line;
             self.found.push((line, self.modules.clone()));
         }
@@ -186,5 +227,21 @@ fn g() {}
 fn f() { let _ = \"#[allow(unsafe_code)]\"; }
 ";
         assert!(lifts(source).is_empty());
+    }
+
+    #[test]
+    fn an_attribute_inside_a_macro_is_found() {
+        let source = "\
+macro_rules! m {
+    () => { #[allow(unsafe_code)] fn f() {} };
+}
+m! {
+    #![cfg_attr(test, expect(unsafe_code))]
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    struct S;
+}
+";
+        assert_eq!(lifts(source), [(2, vec![]), (5, vec![])]);
     }
 }

@@ -75,8 +75,12 @@ fn check(repo: &Repo) -> Vec<Finding> {
     let mut findings = Vec::new();
     let mut codes = Codes::default();
     for path in repo.files_in(Path::new(CORE_SRC), &["rs"]) {
-        let Ok(source) = repo.read(path) else {
-            continue;
+        let source = match repo.read(path) {
+            Ok(source) => source,
+            Err(error) => {
+                findings.push(Finding::new(path, None, error));
+                continue;
+            }
         };
         match syn::parse_file(&source) {
             Ok(file) => codes.visit_file(&file),
