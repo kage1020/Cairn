@@ -66,9 +66,10 @@ consumer needs, and raising the pin does not raise it. The number itself lives o
 that compiler, so a change reaching for a newly stabilised API goes red there rather than at a
 consumer's.
 
-Every crate inherits these with `[lints] workspace = true` and writes no `[lints.*]` table of its
-own. Inheritance is opt-in per crate and all-or-nothing: a crate without that line receives none of
-the workspace lints, so a lint added to the workspace later would silently skip it.
+Every crate but the tree-sitter one inherits these with `[lints] workspace = true` and writes no
+`[lints.*]` table of its own; the next paragraph says why that one carries a copy. Inheritance is
+opt-in per crate and all-or-nothing: a crate without that line receives none of the workspace
+lints, so a lint added to the workspace later would silently skip it.
 
 `unsafe_code` is forbidden everywhere but one module: `ffi` in the tree-sitter crate's Rust
 binding, which is the only way to reach the generated C parser. `forbid` cannot be lifted, so that

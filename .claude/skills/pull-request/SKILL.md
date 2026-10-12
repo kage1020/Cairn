@@ -13,7 +13,7 @@ is the sequence.
 2. Title the PR with a Conventional Commits line. The squash merge makes it the commit on
    `canary`, and release-plz reads it.
    - Scope is the crate without its prefix or the spec area: `core`, `nbt`, `formats`,
-     `redstone`, `cli`, `lsp`, `tree-sitter`, `spec`, `deps`.
+     `redstone`, `cli`, `lsp`, `wasm`, `tree-sitter`, `xtask`, `spec`, `deps`.
    - `feat`, `fix`, `perf`, `refactor` and `build` cut a patch release; `docs`, `test`, `ci`,
      `chore` and `style` do not.
    - A breaking change puts `!` before the colon and adds a `breaking` fragment. The two always

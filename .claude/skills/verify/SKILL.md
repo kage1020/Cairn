@@ -19,6 +19,7 @@ cargo xtask lint
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
 python3 .github/scripts/changelog.py check
+python3 -m unittest discover -s .github/scripts
 ```
 
 While iterating on one crate, `-p <crate>` on clippy and test is enough. Run the whole list once
@@ -29,7 +30,8 @@ Add these when the change reaches them:
 - `crates/cairn-lang-tree-sitter/grammar.js` or its corpus: `pnpm install`, `pnpm run generate`
   (the generated files must come out unchanged after you commit them) and `pnpm test`, in that
   crate's directory.
-- `website/`: `pnpm install && pnpm build` in `website/`.
+- `website/`: `pnpm install`, `pnpm run check` and `pnpm run build` in `website/`.
+- `editors/vscode/`: `pnpm install` and `pnpm run package` in `editors/vscode/`.
 - A new dependency or a recently stabilised API: CI's `MSRV` job runs
   `cargo +<rust-version> check --workspace --locked --all-features` at the `rust-version` in
   `Cargo.toml`.

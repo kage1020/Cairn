@@ -93,7 +93,7 @@ Rust source, spec body, examples, and docs have to read on their own years from 
 
 When the deferred thing lands, update the comment in the same PR.
 
-Three surfaces are exempt, because milestone vocabulary is what they are *for*: [CHANGELOG.md](CHANGELOG.md) with its fragments in [changelog.d/](changelog.d/README.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the milestone columns of the [compatibility](https://cairn.kage1020.com/spec/compatibility/) table. `cargo xtask lint session-refs` holds every other tracked file to this.
+Three surfaces are exempt, because milestone vocabulary is what they are *for*: [CHANGELOG.md](CHANGELOG.md) with its fragments in [changelog.d/](changelog.d/README.md), the [roadmap](https://cairn.kage1020.com/roadmap/), and the milestone columns of the [compatibility](https://cairn.kage1020.com/spec/compatibility/) table. `cargo xtask lint session-refs` holds every other tracked file to this, except the pull request template, which asks for the issue a PR closes, and the changelog script's tests.
 
 ### Cite the spec by name, not by number
 

@@ -24,7 +24,8 @@ to keep in mind while editing.
 
 Dependencies point one way. A library never depends on `cli` or `lsp`, so code both front ends
 need lives in the library they call. Modules inside a crate form a DAG too: when two modules need
-the same item, it moves down into a module both can import.
+the same item, it moves down into a module both can import. `cargo xtask lint module-cycles` holds
+the modules under each parent to that.
 
 ## Commands
 
