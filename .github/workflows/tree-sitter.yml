@@ -69,14 +69,47 @@ jobs:
           ref: ${{ needs.resolve-ref.outputs.ref }}
 
       - name: Install Rust toolchain
+        if: hashFiles('xtask/Cargo.toml') != ''
         working-directory: .
         run: rustup show
 
       - name: Compare every version declaration with the workspace version
+        if: hashFiles('xtask/Cargo.toml') != ''
         working-directory: .
         env:
           TAG: ${{ needs.resolve-ref.outputs.tag }}
         run: cargo xtask lint versions ${TAG:+--tag "$TAG"}
+
+      # A tag cut before `cargo xtask` existed is checked the way it was when it was released.
+      - name: Compare the three version declarations (a tag without xtask)
+        if: hashFiles('xtask/Cargo.toml') == ''
+        shell: bash
+        env:
+          TAG: ${{ needs.resolve-ref.outputs.tag }}
+        run: |
+          set -euo pipefail
+          workspace=$(awk '
+            /^\[workspace\.package\]/   { in_section = 1; next }
+            /^\[/                       { in_section = 0 }
+            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' ../../Cargo.toml)
+          if [[ ! "$workspace" =~ ^[0-9]{4}\.(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
+            echo "Read '$workspace' from [workspace.package]; that is not a CalVer number" >&2
+            exit 1
+          fi
+          package=$(jq -er '.version' package.json)
+          manifest=$(jq -er '.metadata.version' tree-sitter.json)
+          echo "Cargo [workspace.package]: $workspace"
+          echo "package.json:              $package"
+          echo "tree-sitter.json:          $manifest"
+          if [ "$workspace" != "$package" ] || [ "$workspace" != "$manifest" ]; then
+            echo "Version declarations disagree. All three move together." >&2
+            exit 1
+          fi
+          if [ -n "$TAG" ] && [ "$workspace" != "${TAG#v}" ]; then
+            echo "Tag $TAG does not match the declared version $workspace" >&2
+            exit 1
+          fi
 
   generate-check:
     name: Generate drift check
