@@ -11,12 +11,12 @@ use crate::error::Span;
 use crate::ids::{FORBIDDEN_IDENT_PUNCTUATION, IdError, PlaceId, shown_char};
 use crate::intent::{DefIr, Member, MemberRole, SiteIr};
 use crate::prose::and_list;
-use crate::suggest::{did_you_mean_note, nearest_match};
 
 use super::connect::resolve_connect_row;
-use super::resolution::{ScopeResolution, ValidatedConnect};
-use super::resolver::{ResolveCtx, place_scope_key, resolve_struct_or_def};
+use super::resolution::{ScopeResolution, ValidatedConnect, place_scope_key};
+use super::scope::{ResolveCtx, resolve_struct_or_def};
 use super::theme_reference::bind_place_theme;
+use super::unresolved_ref::unresolved_ref_diag;
 
 pub(super) fn resolve_site_placements(
     site: &SiteIr,
@@ -244,25 +244,6 @@ pub(super) fn check_unused_defs(
             }],
             data: None,
         });
-    }
-}
-
-/// An unresolved reference, with a nearest-match suggestion from `candidates`.
-pub(super) fn unresolved_ref_diag<'a>(
-    code: DiagnosticCode,
-    primary: &str,
-    span: Span,
-    typo: &str,
-    candidates: impl IntoIterator<Item = &'a str>,
-) -> Diagnostic {
-    let mut notes = Vec::new();
-    notes.extend(nearest_match(typo, candidates).map(did_you_mean_note));
-    Diagnostic {
-        code,
-        span,
-        primary: primary.to_owned(),
-        notes,
-        data: None,
     }
 }
 

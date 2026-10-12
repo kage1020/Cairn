@@ -11,10 +11,10 @@ use crate::error::Span;
 use crate::intent::{IntentModule, Member};
 
 use super::binding::ThemeBinding;
-use super::site::unresolved_ref_diag;
 use super::theme_variant::{
     bound_theme_name, pick_variant as pick_variant_by_name, strip_edition_suffix,
 };
+use super::unresolved_ref::unresolved_ref_diag;
 
 /// [`super::theme_variant::pick_variant`] over the module's binding map.
 pub(super) fn pick_variant<'a>(

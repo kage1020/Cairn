@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::diagnostic::Diagnostic;
 use crate::error::Span;
 use crate::ids::{PlaceId, PortId, SiteName};
-use crate::intent::ValueWithSpan;
+use crate::intent::{StructIr, ValueWithSpan};
 
 use super::binding::ThemeBinding;
 
@@ -93,4 +93,14 @@ pub struct ResolvedMemberBinding {
     /// Bindings from matching theme selectors, the later row winning on a shared key.
     #[serde(skip_serializing_if = "IndexMap::is_empty")]
     pub selector_extras: IndexMap<String, ValueWithSpan>,
+}
+
+pub(super) fn struct_key(s: &StructIr) -> String {
+    format!("struct::{}", s.name)
+}
+
+/// IR-side key for a single `place` inside a `site`, `site::SITE::ID`.
+#[must_use]
+pub fn place_scope_key(site_name: &str, place_id: &str) -> String {
+    format!("site::{site_name}::{place_id}")
 }

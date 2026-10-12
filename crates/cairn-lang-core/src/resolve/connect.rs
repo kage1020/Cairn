@@ -11,7 +11,7 @@ use crate::intent::{ConnectEnd, DefIr, Member, MemberRole};
 use crate::suggest::{did_you_mean_note, nearest_match};
 
 use super::resolution::{PortRef, ValidatedConnect};
-use super::site::unresolved_ref_diag;
+use super::unresolved_ref::unresolved_ref_diag;
 
 /// Records a [`ValidatedConnect`] for `member` when both ends and its `path=` material resolve.
 pub(super) fn resolve_connect_row(

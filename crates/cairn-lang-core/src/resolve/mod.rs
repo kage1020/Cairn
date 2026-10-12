@@ -7,11 +7,13 @@ mod connect;
 mod output_names;
 mod resolution;
 mod resolver;
+mod scope;
 mod selector;
 mod site;
 mod slots;
 mod theme_reference;
 mod theme_variant;
+mod unresolved_ref;
 mod version_axes;
 
 pub use crate::version::{
@@ -20,9 +22,9 @@ pub use crate::version::{
 };
 pub use binding::{SelectorMatch, ThemeBinding, TokenKind, classify_token};
 pub use resolution::{
-    PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect,
+    PortRef, Resolution, ResolvedMemberBinding, ScopeResolution, ValidatedConnect, place_scope_key,
 };
-pub use resolver::{place_scope_key, resolve};
+pub use resolver::resolve;
 pub(crate) use selector::select_the_same_members;
 pub use version_axes::{
     BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, DroppedIntent,

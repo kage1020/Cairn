@@ -9,8 +9,7 @@ use crate::error::Span;
 use crate::ids::{WalkwayEndpoint, WalkwayScopeKey, artifact_stem};
 use crate::intent::{IntentModule, MemberRole};
 
-use super::resolution::{PortRef, ScopeResolution, ValidatedConnect};
-use super::resolver::{place_scope_key, struct_key};
+use super::resolution::{PortRef, ScopeResolution, ValidatedConnect, place_scope_key, struct_key};
 
 /// Two scopes a build would write to one file, compared by [`artifact_stem`] folded to lower case
 /// so `Hut` and `hut` collide on every host. A scope key seen twice is another code's finding.
