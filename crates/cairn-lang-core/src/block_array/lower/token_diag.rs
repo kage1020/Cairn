@@ -13,9 +13,7 @@ use crate::block_array::material::{IdOrigin, UnknownId};
 /// What becomes of a member whose `mat_slot=` resolves to no material.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum MemberFallback {
-    /// A `floor`: [`fill_floor`] is not reached, so its cells stay air.
-    ///
-    /// [`fill_floor`]: super::paint::fill_floor
+    /// A `floor`: `fill_floor` is not reached, so its cells stay air.
     Air,
     /// A `walls`: it paints no row and claims none in the volume, so a cut into it is refused.
     Absent,

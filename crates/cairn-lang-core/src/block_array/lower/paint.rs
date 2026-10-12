@@ -72,7 +72,7 @@ pub(super) fn paint_member(
     }
 }
 
-pub(super) fn fill_floor(ctx: &StructCtx<'_>, idx: PaletteIndex, canvas: &mut MemberCanvas<'_>) {
+fn fill_floor(ctx: &StructCtx<'_>, idx: PaletteIndex, canvas: &mut MemberCanvas<'_>) {
     let y = 0;
     for z_local in 0..ctx.interior_h {
         for x_local in 0..ctx.interior_w {
