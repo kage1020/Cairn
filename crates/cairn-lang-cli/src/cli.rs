@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use cairn_lang_core::CAIRN_VERSION;
 use cairn_lang_core::Edition;
+use clap::builder::{PossibleValue, PossibleValuesParser, TypedValueParser};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::report::FailureReport;
@@ -65,7 +66,7 @@ pub(crate) enum Command {
         /// Edition to check against; omitted, slots resolve across both editions' theme variants.
         #[arg(
             long,
-            value_enum,
+            value_parser = edition_parser(),
             long_help = "Optional edition pin. When set, per-edition theme variants \
                 (`spec/versioning-editions` \"Java / Bedrock portability\") are resolved for the \
                 picked edition specifically — a `mat_slot=X` reference to a slot only the *other* \
@@ -78,7 +79,7 @@ pub(crate) enum Command {
                 finding that waits until a single edition is in scope, because a version Java \
                 cannot build is routinely the Bedrock target the author means."
         )]
-        edition: Option<EditionArg>,
+        edition: Option<Edition>,
         /// Minecraft version to check block ids against, resolved as `compile --target` is.
         // No `latest` default: it would refuse ids on a version nobody chose, the guess
         // `spec/versioning-editions` "Fail-loud and minimum-version inference" rules out.
@@ -172,11 +173,11 @@ pub(crate) enum Command {
         /// Target edition.
         #[arg(
             long,
-            value_enum,
+            value_parser = edition_parser(),
             long_help = "Target edition. Required by `spec/compilation` \"Target axes\" \
                 (`--target` alone is forbidden)"
         )]
-        edition: EditionArg,
+        edition: Edition,
         /// Minecraft version to compile for, resolved against the edition's data table.
         #[arg(
             long,
@@ -264,15 +265,32 @@ pub(crate) enum Command {
         /// Target edition, for the stages after `netlist`.
         #[arg(
             long,
-            value_enum,
+            value_parser = edition_parser(),
             long_help = "Target edition for the Edition Netlist IR / Placement IR / routed \
                 Placement IR / delayed Placement IR / legalized Placement IR. Required when \
                 `--stage edition`, `--stage placement`, `--stage route`, `--stage delay`, or \
                 `--stage crossing` is set; refused for `logic` and `netlist`, which are \
                 edition-neutral by contract"
         )]
-        edition: Option<EditionArg>,
+        edition: Option<Edition>,
     },
+}
+
+/// The parser for `--edition`: core's edition names, each with the line `--help` gives it.
+fn edition_parser() -> impl TypedValueParser<Value = Edition> {
+    PossibleValuesParser::new([Edition::Java, Edition::Bedrock].map(|edition| {
+        // Exhaustive, so an edition core adds stops the build here until it is listed.
+        let help = match edition {
+            Edition::Java => "Java Edition. Emits a gzip-compressed vanilla `.nbt` structure",
+            Edition::Bedrock => {
+                "Bedrock Edition. Emits an uncompressed little-endian `.mcstructure`; the stair \
+                 family's blockstate is mapped to Bedrock `states` and unrepresentable intent \
+                 (stair `shape`) degrades with a `W_INTENT_DEGRADED` warning"
+            }
+        };
+        PossibleValue::new(edition.as_str()).help(help)
+    }))
+    .try_map(|name| name.parse::<Edition>())
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -360,25 +378,6 @@ pub(crate) enum InfoFormat {
     Text,
     /// Pretty JSON serialisation of `VersionAxes`, for tools.
     Json,
-}
-
-#[derive(Copy, Clone, ValueEnum)]
-pub(crate) enum EditionArg {
-    /// Java Edition. Emits a gzip-compressed vanilla `.nbt` structure.
-    Java,
-    /// Bedrock Edition. Emits an uncompressed little-endian `.mcstructure`; the stair family's
-    /// blockstate is mapped to Bedrock `states` and unrepresentable intent (stair `shape`)
-    /// degrades with a `W_INTENT_DEGRADED` warning.
-    Bedrock,
-}
-
-impl From<EditionArg> for Edition {
-    fn from(arg: EditionArg) -> Self {
-        match arg {
-            EditionArg::Java => Edition::Java,
-            EditionArg::Bedrock => Edition::Bedrock,
-        }
-    }
 }
 
 #[derive(Copy, Clone, ValueEnum)]
