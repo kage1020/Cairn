@@ -196,6 +196,8 @@ pub fn bytes_contain(hay: &[u8], needle: impl AsRef<[u8]>) -> bool {
 }
 
 /// A diagnostic as an assertion compares it: line, column, severity and code, without the prose.
+///
+/// A finding printed without a position, such as `E_PARTIAL_BUILD`, has line 0 and column 0.
 pub type Reported = (u64, u64, String, String);
 
 /// `expected` in the shape [`stderr_stream`] and [`json_stream`] return.
@@ -225,12 +227,21 @@ pub fn json_stream(stdout: &str) -> Vec<Reported> {
         .collect()
 }
 
-/// Diagnostics parsed back out of a command's stderr, in emission order; lines with no position
-/// are skipped.
+/// Diagnostics parsed back out of a command's stderr, in emission order.
+///
+/// # Panics
+///
+/// On an `error[` or `warning[` line that is not a finding.
 pub fn stderr_stream(stderr: &str) -> Vec<Reported> {
     stderr
         .lines()
-        .filter_map(|line| finding_line(line).or_else(|| refusal_line(line)))
+        .filter(|line| line.contains("error[") || line.contains("warning["))
+        .map(|line| {
+            finding_line(line)
+                .or_else(|| refusal_line(line))
+                .or_else(|| unpositioned_line(line))
+                .unwrap_or_else(|| panic!("cannot parse the finding {line:?}; stderr:\n{stderr}"))
+        })
         .collect()
 }
 
@@ -275,6 +286,15 @@ fn refusal_line(line: &str) -> Option<Reported> {
             .starts_with(' ')
             .then(|| (line_no, col, severity.clone(), code.clone()))
     })
+}
+
+/// `SEVERITY[CODE]: ...` with no position, such as `E_PARTIAL_BUILD` naming only the file.
+fn unpositioned_line(line: &str) -> Option<Reported> {
+    if !(line.starts_with("error[") || line.starts_with("warning[")) {
+        return None;
+    }
+    let (severity, code) = severity_and_code(line)?;
+    Some((0, 0, severity, code))
 }
 
 /// `SEVERITY` and `CODE` out of text starting `SEVERITY[CODE]`.

@@ -91,7 +91,13 @@ fn a_pinned_target_reports_an_id_that_target_does_not_declare() {
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
+    assert_stream(
+        &stderr,
+        &[
+            (2, 17, "error", "E_UNKNOWN_ID"),
+            (0, 0, "error", "E_PARTIAL_BUILD"),
+        ],
+    );
     assert!(
         stderr.contains("java 1.21.4"),
         "the refusal names the pinned target, got: {stderr}",
@@ -128,7 +134,13 @@ fn a_renamed_id_is_judged_per_version_not_per_edition() {
     );
     let stderr = String::from_utf8(refused.stderr).expect("utf-8");
     assert_eq!(refused.status.code(), Some(1), "stderr={stderr}");
-    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
+    assert_stream(
+        &stderr,
+        &[
+            (2, 17, "error", "E_UNKNOWN_ID"),
+            (0, 0, "error", "E_PARTIAL_BUILD"),
+        ],
+    );
     // From the pack's alias table, not a distance search.
     assert!(
         stderr.contains("stonebrick"),
@@ -414,7 +426,13 @@ fn latest_pins_a_version_like_any_other_target() {
     );
     let stderr = String::from_utf8(out.stderr).expect("utf-8");
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert_stream(&stderr, &[(2, 17, "error", "E_UNKNOWN_ID")]);
+    assert_stream(
+        &stderr,
+        &[
+            (2, 17, "error", "E_UNKNOWN_ID"),
+            (0, 0, "error", "E_PARTIAL_BUILD"),
+        ],
+    );
     assert!(
         !stderr.contains("java latest"),
         "the refusal names the resolved version, got: {stderr}",

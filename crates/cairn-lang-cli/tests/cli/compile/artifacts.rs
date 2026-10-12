@@ -1535,7 +1535,6 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
              connect a_.p to b.p path=@gravel\n  \
              connect b.p to a_.p path=@gravel\n",
     ));
-    let partial = "error[E_PARTIAL_BUILD]";
     let counted_once = "1 of 3 requested scopes did not lower";
     let named = "  note: `site::s::a_.p ↔ b.p` produced no voxels\n";
     let result = compile_as(&lost, "java", "1.21.4");
@@ -1546,9 +1545,9 @@ fn a_connect_pair_is_lost_once_and_only_when_no_row_laid_it() {
         &[
             (11, 3, "warning", "W_INVALID_WALKWAY_IDENT"),
             (12, 3, "warning", "W_INVALID_WALKWAY_IDENT"),
+            (0, 0, "error", "E_PARTIAL_BUILD"),
         ],
     );
-    assert_eq!(stderr.matches(partial).count(), 1, "stderr={stderr}");
     assert!(stderr.contains(counted_once), "stderr={stderr}");
     assert_eq!(
         stderr.matches("produced no voxels").count(),
@@ -1663,7 +1662,13 @@ fn a_place_whose_every_member_deferred_is_lost_rather_than_written_as_air() {
     let result = compile_as(&fixture, "java", "1.21.4");
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert_eq!(result.status.code(), Some(1), "stderr={stderr}");
-    assert_stream(&stderr, &[(9, 3, "warning", "W_DEFERRED_MEMBER")]);
+    assert_stream(
+        &stderr,
+        &[
+            (9, 3, "warning", "W_DEFERRED_MEMBER"),
+            (0, 0, "error", "E_PARTIAL_BUILD"),
+        ],
+    );
     assert!(
         stderr.contains("warning[W_DEFERRED_MEMBER]: walls without a positive `height=`"),
         "stderr={stderr}",
