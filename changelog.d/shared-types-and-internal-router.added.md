@@ -5,5 +5,5 @@
 - *(core)* `ast::ItemKind::ALL`, every top-level item kind.
 - *(formats)* `RegistryPack::targetable`, the rows `--target` may name, and
   `RegistryPack::version_order`, the order `@requires` floors are placed in.
-- *(redstone)* `PlacementStage` and `RouteLayer` derive `Serialize`, and the four `Scoped*` IR
-  lists are aliases of one `Scoped<T>` / `ScopedEntry<T>` pair with the same fields and JSON.
+- *(redstone)* `Scoped<T>` / `ScopedEntry<T>`, of which the four `Scoped*` IR lists are now
+  aliases, with the same fields and JSON.
