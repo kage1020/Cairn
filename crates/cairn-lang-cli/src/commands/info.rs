@@ -25,12 +25,12 @@ use crate::floors::{
 };
 use crate::pipeline::{
     RequestedEditions, build_diagnostics, dropped_scopes, load_module, requested_editions,
-    supported_versions,
 };
 use crate::report::{
     FailureReport, Reporting, print_json, report_diagnostic, report_diagnostics,
     report_failure_document,
 };
+use crate::target::supported_versions;
 
 pub(crate) fn run_info(file: &Path, editions: &[String], format: InfoFormat) -> ExitCode {
     let asked = match requested_editions(editions) {

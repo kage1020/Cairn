@@ -11,11 +11,11 @@ use cairn_lang_core::resolve::{declared_version_floors, resolve};
 use cairn_lang_core::{
     Diagnostic, DiagnosticCode, Edition, check, diagnose_parse_failure, lower, parse,
 };
-use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
+use cairn_lang_formats::registry::builtin_pack;
 
 use crate::floors::{DeclaredFloors, floor_refusing_target};
 use crate::report::{FailureReport, report_failure_document};
-use crate::target::{ResolvedTarget, resolve_target};
+use crate::target::{ResolvedTarget, resolve_target, supported_versions};
 
 pub(crate) use requested::{RequestedEditions, requested_editions};
 
@@ -151,14 +151,6 @@ pub(crate) fn report_partial_build(file: &Path, dropped: &[String], built: usize
     for scope in dropped {
         eprintln!("  note: `{scope}` produced no voxels");
     }
-}
-
-/// Every version a pack can build for, in ascending release order.
-pub(crate) fn supported_versions(pack: &RegistryPack) -> Vec<String> {
-    pack.targetable()
-        .into_iter()
-        .map(|entry| entry.mc_version.clone())
-        .collect()
 }
 
 /// Every diagnostic a command must report, in the order the passes ran: [`check()`]'s, which

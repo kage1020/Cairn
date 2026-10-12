@@ -15,9 +15,8 @@ use cairn_lang_core::resolve::{
 use cairn_lang_core::{Edition, Module, Severity};
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
-use crate::pipeline::supported_versions;
 use crate::report::render_diagnostics;
-use crate::target::ResolvedTarget;
+use crate::target::{ResolvedTarget, supported_versions};
 
 fn floor_keyword(floor: &VersionFloor) -> &'static str {
     match floor.origin {

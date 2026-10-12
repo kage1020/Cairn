@@ -5,28 +5,11 @@ use std::process::ExitCode;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
-use cairn_lang_formats::bedrock_structure::McStructure;
-use cairn_lang_formats::java_structure::{JavaStructure, output_filename};
+use cairn_lang_formats::java_structure::output_filename;
 
 use crate::lockfile::build_lockfile;
 use crate::staging;
-use crate::target::ResolvedTarget;
-
-/// A structure its edition's backend has checked, waiting to be written.
-pub(crate) enum PreparedStructure<'a> {
-    Java(JavaStructure<'a>),
-    Bedrock(McStructure<'a>),
-}
-
-impl PreparedStructure<'_> {
-    fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        let encoded = match self {
-            PreparedStructure::Java(structure) => structure.write_gzip(writer),
-            PreparedStructure::Bedrock(structure) => structure.write(writer),
-        };
-        encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
-    }
-}
+use crate::target::{PreparedStructure, ResolvedTarget};
 
 pub(crate) fn prepare_out_dir(file: &Path, requested: Option<&Path>) -> Result<PathBuf, ExitCode> {
     let Some(out_dir) = resolve_out_dir(file, requested) else {

@@ -2,14 +2,12 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArray;
-use cairn_lang_formats::bedrock_structure::{ParityNote, prepare_mcstructure};
+use cairn_lang_formats::bedrock_structure::{McStructure, ParityNote, prepare_mcstructure};
 use cairn_lang_formats::data_version::{
     BedrockTarget, JavaTarget, resolve_bedrock_target, resolve_java_target,
 };
-use cairn_lang_formats::java_structure::{OutputExt, prepare_structure};
+use cairn_lang_formats::java_structure::{JavaStructure, OutputExt, prepare_structure};
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
-
-use crate::artifacts::PreparedStructure;
 
 /// A `--target` resolved for one edition, which also selects the backend that writes it.
 pub(crate) enum ResolvedTarget {
@@ -70,5 +68,29 @@ pub(crate) fn resolve_target(
     match edition {
         Edition::Java => resolve_java_target(target).map(ResolvedTarget::Java),
         Edition::Bedrock => resolve_bedrock_target(target).map(ResolvedTarget::Bedrock),
+    }
+}
+
+/// Every version a pack can build for, in ascending release order.
+pub(crate) fn supported_versions(pack: &RegistryPack) -> Vec<String> {
+    pack.targetable()
+        .into_iter()
+        .map(|entry| entry.mc_version.clone())
+        .collect()
+}
+
+/// A structure its edition's backend has checked, waiting to be written.
+pub(crate) enum PreparedStructure<'a> {
+    Java(JavaStructure<'a>),
+    Bedrock(McStructure<'a>),
+}
+
+impl PreparedStructure<'_> {
+    pub(crate) fn write<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+        let encoded = match self {
+            PreparedStructure::Java(structure) => structure.write_gzip(writer),
+            PreparedStructure::Bedrock(structure) => structure.write(writer),
+        };
+        encoded.map_err(|e| std::io::Error::other(format!("nbt encode: {e}")))
     }
 }
