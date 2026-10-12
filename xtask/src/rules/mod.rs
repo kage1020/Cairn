@@ -1,5 +1,6 @@
 //! The rules `cargo xtask lint` runs, and the finding each one reports.
 
+mod circuit_advice;
 mod comment_length;
 mod diagnostic_catalog;
 mod editor_keywords;
@@ -36,6 +37,7 @@ pub const RULES: &[Rule] = &[
     editor_keywords::RULE,
     comment_length::RULE,
     module_cycles::RULE,
+    circuit_advice::RULE,
 ];
 
 /// A fault a rule found, at a file and, when it has one, a line.
