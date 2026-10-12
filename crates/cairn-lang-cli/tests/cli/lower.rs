@@ -3,7 +3,7 @@
 use std::fs;
 use tempfile::TempDir;
 
-use crate::common::{assert_stream, cairn, crn_examples, examples_dir};
+use crate::common::{Run, assert_stream, cairn, crn_examples, examples_dir, write_source};
 
 #[test]
 fn cottage_exits_zero_and_names_the_struct() {
@@ -71,6 +71,24 @@ fn deferred_member_warnings_print_to_stderr() {
         stderr.contains("shape=inner_left"),
         "the deferred primary should name the offending `shape=inner_left`, stderr={stderr}",
     );
+}
+
+#[test]
+fn a_lowering_stage_error_exits_one() {
+    // `check` passes this source: only lowering looks the token up.
+    let source = concat!(
+        "theme t:\n",
+        "  slot floor -> @floor.wood.broadlef\n",
+        "\n",
+        "struct s size=2x2\n",
+        "  floor mat_slot=floor\n",
+    );
+    let tmp = TempDir::new().expect("tempdir");
+    let src_path = write_source(tmp.path(), "token-typo.crn", source);
+    let run = Run::from(cairn("lower", &[src_path.to_str().unwrap()]));
+    assert_eq!(run.code, Some(1), "stderr={}", run.stderr);
+    assert_stream(&run.stderr, &[(2, 17, "error", "E_UNKNOWN_ABSTRACT_TOKEN")]);
+    assert_eq!(run.stdout, "");
 }
 
 #[test]
