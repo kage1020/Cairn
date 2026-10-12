@@ -145,7 +145,8 @@ where
 }
 
 /// Refuses a sink further than the cap from its driver in a straight line, before laying a route;
-/// walked in [`crate::delay`]'s order, so both name a sink the same way.
+/// walked in [`crate::delay`]'s order, so the two refuse in the same order; they can still name
+/// different sinks.
 fn beyond_attenuation<F>(
     ir: &PlacementIr,
     entry: &ScopedPlacementIrEntry,

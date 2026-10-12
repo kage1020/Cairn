@@ -208,8 +208,8 @@ impl ScopeKind {
     }
 }
 
-/// One IR per scope of a `.crn` module that produced a non-empty one, in source order. `(kind,
-/// name)` is not unique: duplicate scope names are core's to report.
+/// Per-scope IRs of a `.crn` module, in source order. `(kind, name)` is not unique: duplicate
+/// scope names are core's to report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct Scoped<T> {
@@ -231,7 +231,7 @@ impl<T> Scoped<T> {
         Self::default()
     }
 
-    /// `true` when no scope produced a non-empty IR.
+    /// `true` when the list holds no scope.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.scopes.is_empty()

@@ -79,6 +79,7 @@ pub(crate) fn repeater_sites_of_scope<'t>(
     };
 
     let mut budgets: HashMap<CellCoord, u32> = HashMap::new();
+    // Last to first: a cell's sinks follow it, so their budgets are already known.
     for (index, cell) in ir.cells.iter().enumerate().rev() {
         if cell.cell.regenerates() {
             continue;
@@ -87,7 +88,8 @@ pub(crate) fn repeater_sites_of_scope<'t>(
             budgets.insert(cell.coord, DUST_ATTENUATION_LIMIT);
             continue;
         };
-        // Tried from the full limit down, so a refusal comes from the walk spending least.
+        // Acceptance is downward-closed in `spent`, so the first accepted from the top is the
+        // budget, and the refusal kept is the one from the walk spending least.
         let mut refusal = None;
         let budget = (1..=DUST_ATTENUATION_LIMIT).rev().find(|spent| {
             match repeater_sites(tree, *spent, &budgets) {

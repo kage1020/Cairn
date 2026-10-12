@@ -524,7 +524,7 @@ impl VersionFloor {
 
 /// The versions in `considered` that satisfy every floor (`spec/lint` "Diagnostic codes").
 ///
-/// A floor this edition's table cannot place refuses nothing here: it is `E_REQUIRES_UNORDERABLE`.
+/// A floor this edition's table cannot place admits none of them.
 #[must_use]
 pub fn versions_satisfying<'a>(
     order: &VersionOrder,

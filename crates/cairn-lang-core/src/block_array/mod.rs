@@ -68,7 +68,8 @@ pub struct Placement {
     pub place_id: PlaceId,
     /// `place use=`: the `def` whose body this place lowers.
     pub source_def: String,
-    /// `place theme=` value.
+    /// The theme that governed the build: the `place theme=` variant an `--edition` pin bound,
+    /// else the one written.
     pub theme: String,
     /// World position of the place's array's `(0, 0, 0)` cell.
     pub origin: (i32, i32, i32),
