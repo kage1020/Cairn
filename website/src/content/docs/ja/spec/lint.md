@@ -148,7 +148,7 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `E_UNKNOWN_ABSTRACT_TOKEN` | `mat_slot=` が、渡されたパックのカタログが宣言していない抽象マテリアルトークンに解決される ([マテリアルとテーマ](/ja/spec/materials-themes))。 |
 | `W_ABSTRACT_TOKEN_DEFERRED` | 同じトークンだが、そもそもカタログが渡されておらず、照合する相手がいない。 |
 | `W_STATE_LITERAL_UNCHECKED` | 正準トークンのステートリテラル (`@oak_log[axis=x]`) が書かれたまま使われた。`E_STATE_DOMAIN` が実装されるまで、そのプロパティと値をターゲットに照らして検査するものがない ([バージョンとエディション](/ja/spec/versioning-editions))。 |
-| `W_NO_THEME_BOUND` | `mat_slot=` を読むスコープにテーマが束縛されていないので、そこで読む `mat_slot=` はすべて空気になる。 |
+| `W_NO_THEME_BOUND` | `mat_slot=` を読むスコープにテーマが束縛されていないので、そこで読む `mat_slot=` はどれもブロックに解決しない。`floor` はセルを空気のまま残し、`walls` は 1 つも建たないので `door` と `window` はすべて壁が無いために拒否され、`roof`、軒の `stair`、`pressure_plate` は既定ブロックで作られる。 |
 | `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定されたエディションは別のものを束縛した ([バージョンとエディション](/ja/spec/versioning-editions))。 |
 
 `E_UNKNOWN_ID` と `E_INCOMPATIBLE_MATERIAL` は block-array lowering 段で発生するので、報告するのは
@@ -201,9 +201,12 @@ lowering パスを走らせるので、スコープを失えば同じ `E_PARTIAL
 ([互換性ティア](/ja/spec/compatibility))、書かれたまま据え置きます。深刻度は先頭の 1 文字ではなく
 `severity` フィールドから読んでください。
 
-`E_UNKNOWN_SLOT_TARGET` は逆の判定でエラーです。何にも束縛されないスロットは、そこを指すすべての
-`mat_slot=` を空気に落とすので、スロットが全部打ち間違っているテーマは、要求された大きさの空洞を
-終了コード 0 で建ててしまいます。
+`E_UNKNOWN_SLOT_TARGET` は逆の判定でエラーです。マテリアルトークン以外に束縛されたスロットは、そこを
+指す `mat_slot=` をどれも解決しません。それを名指す `floor` はセルを空気のまま残し、`walls` は建てら
+れず行も占めないので、そこに切り抜く `door` や `window` は拒否されます。`window` は切り抜かれず、
+`roof`、軒の `stair`、`pressure_plate` は既定ブロックで作られます。これが警告なら、スロットが全部打
+ち間違っているテーマは、要求より低く、床も壁も無く、その既定ブロックだけでできた構造物を終了コード 0
+で建ててしまいます。
 
 `E_MISSING_MATERIAL` と `E_UNRESOLVED_SLOT` は 1 つの切り分けの両側で、両方を受け取るメンバはありま
 せん。前者はキーが無い場合、後者はキーがあって使えない場合です。修正の仕方が違うのでコードも分かれて
@@ -629,7 +632,8 @@ stderr にしか書かれません。ほかの失敗がこう見えることは�
 名前ではなく上のルールで判定されています。
 
 - `E_UNKNOWN_SLOT_TARGET` は **エラー** です。マテリアルでない値に束縛されたスロットは、参照する
-  メンバをすべて空気に落とすからです。
+  メンバからマテリアルを奪うからです。`floor` はセルを空気のまま残し、`walls` は建たず `window` は
+  切り抜かれず、`roof`、軒の `stair`、`pressure_plate` は既定ブロックになります。
 - `E_THEME_SELECTOR_UNMATCHED` は **警告** です。何にもマッチしないルールは何も上書きしません。
 
 `E_PARSE` は、パースが失敗するあらゆる形 — 未知の文字、奇数インデント、`i64` を超える整数、item を
