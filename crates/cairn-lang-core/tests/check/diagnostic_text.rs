@@ -216,12 +216,6 @@ fn noisy_sources() -> Vec<String> {
         format!("{THEME}{HUT}site s:\n  place id=\"home.1\" use=hut theme=t at=origin\n"),
         format!("{THEME}{HUT}site s:\n  place id=a use=nosuchdef theme=t at=origin\n"),
         format!("{THEME}{HUT}"),
-        // Names Windows reserves for a device, and the rows that name a place refused for one.
-        format!(
-            "{THEME}{HUT}struct con size=3x3\n  floor mat_slot=floor\n\nsite s:\n  \
-             place id=a use=hut theme=t at=origin\n  place id=nul use=hut theme=t east_of=a gap=4\n  \
-             place id=b use=hut theme=t north_of=nul gap=4\n  connect a.entry to nul.entry path=@path\n"
-        ),
         // Walkway refusals.
         format!(
             "{THEME}{HUT}site duo:\n  place id=a use=hut theme=t at=origin\n\
@@ -308,6 +302,7 @@ fn noisy_sources() -> Vec<String> {
          \x20\x20floor mat_slot=floor\n"
             .to_owned(),
     ];
+    sources.extend(device_name_sources());
     sources.extend(unreadable_value_sources());
     sources.extend(header_sources());
     sources.extend(truth_table_sources());
@@ -365,6 +360,15 @@ fn unreadable_value_sources() -> Vec<String> {
          window side=left offset=0 y=1 size=1x1 repeat=2 step=2 sym=yes mat_slot=wall\n"
             .to_owned(),
     ]
+}
+
+/// The source for names Windows reserves for a device, and rows naming a place refused for one.
+fn device_name_sources() -> Vec<String> {
+    vec![format!(
+        "{THEME}{HUT}struct con size=3x3\n  floor mat_slot=floor\n\nsite s:\n  \
+         place id=a use=hut theme=t at=origin\n  place id=nul use=hut theme=t east_of=a gap=4\n  \
+         place id=b use=hut theme=t north_of=nul gap=4\n  connect a.entry to nul.entry path=@path\n"
+    )]
 }
 
 /// Every finding `check` and the block-array pass raise over `source`.
