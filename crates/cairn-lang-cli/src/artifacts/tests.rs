@@ -1,5 +1,6 @@
 use cairn_lang_core::Edition;
 
+use crate::name_case::NameCase;
 use crate::pipeline::lowered_probe;
 use crate::target::resolve_target;
 
@@ -40,12 +41,18 @@ fn a_scope_whose_file_name_leaves_out_dir_writes_nothing() {
 
     for key in ["site::s::/abs/hut", "site::s::sub/hut", "site::s::a\\b"] {
         assert!(
-            prepare_artifacts(&rekeyed_probe(&[key]), &target, out_dir).is_err(),
+            prepare_artifacts(
+                &rekeyed_probe(&[key]),
+                &target,
+                out_dir,
+                NameCase::Sensitive
+            )
+            .is_err(),
             "scope `{key}` must be refused rather than written outside `out`",
         );
     }
     let plain = rekeyed_probe(&["site::s::hut"]);
-    let prepared = prepare_artifacts(&plain, &target, out_dir)
+    let prepared = prepare_artifacts(&plain, &target, out_dir, NameCase::Sensitive)
         .unwrap_or_else(|_| panic!("a plain id prepares"));
     let paths: Vec<&Path> = prepared.iter().map(|(path, _)| path.as_path()).collect();
     assert_eq!(paths, [out_dir.join("hut.nbt").as_path()]);
@@ -79,52 +86,121 @@ fn prepared_paths(
 fn two_scopes_that_name_one_file_are_refused_before_any_io() {
     let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
     let out_dir = Path::new("out");
-    assert!(
-        prepare_artifacts(
-            &rekeyed_probe(&["struct::hut", "site::s::barn"]),
+    for case in [NameCase::Sensitive, NameCase::Insensitive] {
+        assert!(
+            prepare_artifacts(
+                &rekeyed_probe(&["struct::hut", "site::s::barn"]),
+                &target,
+                out_dir,
+                case,
+            )
+            .is_ok(),
+            "the control pair names two files where `--out` is {case:?}",
+        );
+        match prepare_artifacts(
+            &rekeyed_probe(&["struct::hut", "site::s::hut"]),
             &target,
-            out_dir
-        )
-        .is_ok(),
-        "the control pair names two files",
-    );
+            out_dir,
+            case,
+        ) {
+            Err(PrepareRefusal::Collision(collision)) => {
+                assert_eq!(
+                    (collision.first.as_str(), collision.scope.as_str()),
+                    ("struct::hut", "site::s::hut")
+                );
+            }
+            other => panic!(
+                "`struct::hut` and `site::s::hut` both write `hut.nbt`, so the collision check \
+                 must refuse them where `--out` is {case:?}, got {:?}",
+                prepared_paths(other),
+            ),
+        }
+    }
+}
+
+#[test]
+fn two_scopes_whose_names_differ_only_in_case_collide_where_out_folds_case() {
+    let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
+    let out_dir = Path::new("out");
     match prepare_artifacts(
-        &rekeyed_probe(&["struct::hut", "site::s::hut"]),
+        &rekeyed_probe(&["struct::hut", "struct::HUT"]),
         &target,
         out_dir,
+        NameCase::Insensitive,
     ) {
-        Err(PrepareRefusal::Collision(collision)) => {
-            assert_eq!(
-                (collision.first.as_str(), collision.scope.as_str()),
-                ("struct::hut", "site::s::hut")
-            );
-        }
+        Err(PrepareRefusal::Collision(collision)) => assert_eq!(
+            (
+                collision.first.as_str(),
+                collision.first_path.as_path(),
+                collision.scope.as_str(),
+                collision.path.as_path(),
+            ),
+            (
+                "struct::hut",
+                out_dir.join("hut.nbt").as_path(),
+                "struct::HUT",
+                out_dir.join("HUT.nbt").as_path(),
+            ),
+        ),
         other => panic!(
-            "`struct::hut` and `site::s::hut` both write `hut.nbt`, so the collision check \
-             must refuse them, got {:?}",
+            "`hut.nbt` and `HUT.nbt` are one file where `--out` folds case, got {:?}",
             prepared_paths(other),
         ),
     }
 }
 
-#[cfg(any(target_os = "macos", windows))]
 #[test]
-fn two_scopes_whose_names_differ_only_in_case_are_refused_where_case_is_folded() {
+fn two_scopes_whose_names_differ_only_in_case_are_two_files_where_out_keeps_case() {
     let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
-    match prepare_artifacts(
+    let out_dir = Path::new("out");
+    let paths = prepared_paths(prepare_artifacts(
         &rekeyed_probe(&["struct::hut", "struct::HUT"]),
         &target,
-        Path::new("out"),
-    ) {
-        Err(PrepareRefusal::Collision(collision)) => {
-            assert_eq!(
-                (collision.first.as_str(), collision.scope.as_str()),
-                ("struct::hut", "struct::HUT")
-            );
-        }
-        other => panic!(
-            "`hut.nbt` and `HUT.nbt` are one file here, got {:?}",
-            prepared_paths(other),
-        ),
+        out_dir,
+        NameCase::Sensitive,
+    ))
+    .unwrap_or_else(|refusal| {
+        panic!("`hut.nbt` and `HUT.nbt` are two files where `--out` keeps case, got {refusal:?}")
+    });
+    assert_eq!(paths, [out_dir.join("hut.nbt"), out_dir.join("HUT.nbt")]);
+}
+
+/// The lock spellings that are `hut.nbt`, or one of its scratch names, only once case is folded.
+const LOCKS_DIFFERING_ONLY_IN_CASE: [&str; 3] = ["HUT.nbt", "Hut.NBT.tmp", "hut.nbt.BAK"];
+
+#[test]
+fn a_lock_differing_from_an_artifact_only_in_case_is_refused_where_out_folds_case() {
+    let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
+    let out_dir = Path::new("out");
+    let block_ir = rekeyed_probe(&["struct::hut"]);
+    let prepared = prepare_artifacts(&block_ir, &target, out_dir, NameCase::Insensitive)
+        .unwrap_or_else(|_| panic!("one struct prepares"));
+    for lock in LOCKS_DIFFERING_ONLY_IN_CASE {
+        assert_eq!(
+            check_lock_path_is_free(&prepared, &out_dir.join(lock), NameCase::Insensitive),
+            Err(ExitCode::from(1)),
+            "`--lock out/{lock}` is a path `hut.nbt` owns where `--out` folds case",
+        );
     }
+}
+
+#[test]
+fn a_lock_differing_from_an_artifact_only_in_case_is_free_where_out_keeps_case() {
+    let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
+    let out_dir = Path::new("out");
+    let block_ir = rekeyed_probe(&["struct::hut"]);
+    let prepared = prepare_artifacts(&block_ir, &target, out_dir, NameCase::Sensitive)
+        .unwrap_or_else(|_| panic!("one struct prepares"));
+    for lock in LOCKS_DIFFERING_ONLY_IN_CASE {
+        assert_eq!(
+            check_lock_path_is_free(&prepared, &out_dir.join(lock), NameCase::Sensitive),
+            Ok(()),
+            "`--lock out/{lock}` is a file of its own where `--out` keeps case",
+        );
+    }
+    assert_eq!(
+        check_lock_path_is_free(&prepared, &out_dir.join("hut.nbt"), NameCase::Sensitive),
+        Err(ExitCode::from(1)),
+        "the artifact's own spelling is refused whatever the volume",
+    );
 }

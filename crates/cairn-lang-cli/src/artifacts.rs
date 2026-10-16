@@ -8,6 +8,7 @@ use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::java_structure::output_filename;
 
 use crate::lockfile::build_lockfile;
+use crate::name_case::NameCase;
 use crate::staging;
 use crate::target::{PreparedStructure, ResolvedTarget};
 
@@ -47,6 +48,7 @@ pub(crate) fn prepare_artifacts<'a>(
     block_ir: &'a BlockArrayIr,
     target: &ResolvedTarget,
     out_dir: &Path,
+    case: NameCase,
 ) -> Result<Vec<(PathBuf, PreparedStructure<'a>)>, PrepareRefusal> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
     let mut seen_paths: std::collections::HashMap<
@@ -69,7 +71,7 @@ pub(crate) fn prepare_artifacts<'a>(
         let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
         // Distinct scope keys can name one file, and the resolver's `E_OUTPUT_NAME_COLLISION`
         // sees only resolved scopes.
-        let location = entry_location(&path).map_err(|err| {
+        let location = entry_location(&path, case).map_err(|err| {
             eprintln!(
                 "error: cannot resolve where artifact `{}` would be written: {err}",
                 path.display(),
@@ -201,12 +203,13 @@ fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf
 pub(crate) fn check_lock_path_is_free(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
     lock_path: &Path,
+    case: NameCase,
 ) -> Result<(), ExitCode> {
     let mut reserved_paths: std::collections::HashMap<(PathBuf, std::ffi::OsString), &Path> =
         std::collections::HashMap::with_capacity(prepared.len() * 3);
     for (artifact, _) in prepared {
         for reserved in staging::reserved_paths(artifact) {
-            let location = entry_location(&reserved).map_err(|err| {
+            let location = entry_location(&reserved, case).map_err(|err| {
                 eprintln!(
                     "error: cannot resolve where artifact `{}` would be written: {err}",
                     reserved.display(),
@@ -218,7 +221,7 @@ pub(crate) fn check_lock_path_is_free(
         }
     }
     for reserved in staging::reserved_paths(lock_path) {
-        let location = match entry_location(&reserved) {
+        let location = match entry_location(&reserved, case) {
             Ok(location) => location,
             Err(err) => {
                 eprintln!(
@@ -246,10 +249,10 @@ pub(crate) fn check_lock_path_is_free(
 }
 
 /// The directory entry `path` names, as a key two spellings of one file compare equal on: the
-/// canonical parent and the file name, lowercased where the platform folds case.
+/// canonical parent and the file name, folded as `case` says `--out` folds it.
 ///
 /// Only `NotFound` falls back; a key computed another way would read as "no collision".
-fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)> {
+fn entry_location(path: &Path, case: NameCase) -> std::io::Result<(PathBuf, std::ffi::OsString)> {
     let resolve = |dir: &Path| {
         let dir = if dir.as_os_str().is_empty() {
             Path::new(".")
@@ -265,12 +268,7 @@ fn entry_location(path: &Path) -> std::io::Result<(PathBuf, std::ffi::OsString)>
     let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
         return Ok((resolve(path)?, std::ffi::OsString::new()));
     };
-    let name = if cfg!(any(target_os = "macos", windows)) {
-        name.to_string_lossy().to_lowercase().into()
-    } else {
-        name.to_os_string()
-    };
-    Ok((resolve(parent)?, name))
+    Ok((resolve(parent)?, case.key(name)))
 }
 
 /// Write the prepared structures and the lockfile as one set: all of them, or the directory as
