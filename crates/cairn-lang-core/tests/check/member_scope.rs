@@ -314,6 +314,179 @@ fn the_row_tables_cover_every_known_keyword() {
     );
 }
 
+mod circuit_under_a_level {
+    //! A `circuit` line under a `level`, at any depth, is an error on that line: place-and-route
+    //! reads a reservation only from a line among the scope's own members.
+
+    use std::ops::Range;
+
+    use cairn_lang_core::{Diagnostic, Severity};
+
+    use crate::common::{diagnose, notes, nth};
+
+    const PRIMARY: &str = "this `circuit` line reserves nothing: it is written under a `level`, \
+                           and only a `circuit` line at the scope's top level is read as a \
+                           reservation";
+
+    const BELONGS: &str = "a `circuit` line belongs among the `struct`'s or `def`'s own members: \
+                           its reservation spans the scope's `size=WxH`, and no pass reads a \
+                           `level`'s `y=` for it";
+
+    const MOVE: &str =
+        "move it out of the `level` to the scope's top level; nothing else about it changes";
+
+    const KEEP_ONE: &str = "a scope reserves one region for its redstone: delete this line, or \
+                            move it to the scope's top level in place of that one";
+
+    /// A door two plates open in `keyword gatehouse`, then `lines` at the body's top level.
+    fn gatehouse(keyword: &str, lines: &str) -> String {
+        format!(
+            "@cairn 2026.06\n\ntheme entry:\n  slot wall -> @oak_planks\n  slot door -> @oak_door\n\n\
+             {keyword} gatehouse size=7x5\n  floor mat_slot=wall\n  \
+             walls class=outer mat_slot=wall height=3\n  door  id=front side=front at=center\n  \
+             pressure_plate id=plate at=front.outside offset=0 y=0 -> sig.step\n  \
+             pressure_plate id=inner at=inside.front  offset=1 y=0 -> sig.exit\n  \
+             logic sig.open = sig.step or sig.exit\n  door[id=front] opened_by=sig.open\n{lines}"
+        )
+    }
+
+    /// The byte range of the `n`th (0-based) occurrence of `text` in `source`.
+    fn span_of(source: &str, text: &str, n: usize) -> Range<usize> {
+        let start = nth(source, text, n);
+        start..start + text.len()
+    }
+
+    fn found(diags: &[Diagnostic]) -> Vec<(&'static str, Range<usize>)> {
+        diags
+            .iter()
+            .map(|d| (d.code.as_str(), d.span.clone()))
+            .collect()
+    }
+
+    fn note_spans(diag: &Diagnostic) -> Vec<Option<Range<usize>>> {
+        diag.notes.iter().map(|n| n.span.clone()).collect()
+    }
+
+    #[test]
+    fn a_line_under_a_level_beside_the_scopes_own_is_refused_and_pointed_at_it() {
+        let src = gatehouse(
+            "struct",
+            "  circuit region=floor void=2\n  level y=1\n    circuit region=basement void=3\n",
+        );
+        let diags = diagnose(&src);
+        assert_eq!(
+            found(&diags),
+            [(
+                "E_MISPLACED_MEMBER",
+                span_of(&src, "circuit region=basement void=3", 0),
+            )],
+            "{diags:#?}",
+        );
+        let d = &diags[0];
+        assert_eq!(d.severity(), Severity::Error);
+        assert_eq!(d.primary, PRIMARY);
+        assert_eq!(
+            notes(d),
+            [BELONGS, "the scope's own `circuit` line is here", KEEP_ONE],
+        );
+        assert_eq!(
+            note_spans(d),
+            [
+                None,
+                Some(span_of(&src, "circuit region=floor void=2", 0)),
+                None,
+            ],
+        );
+    }
+
+    #[test]
+    fn a_line_only_under_a_level_is_refused_with_the_move_that_repairs_it() {
+        let src = gatehouse(
+            "struct",
+            "  level y=1\n    circuit region=basement void=3\n",
+        );
+        let diags = diagnose(&src);
+        assert_eq!(
+            found(&diags),
+            [(
+                "E_MISPLACED_MEMBER",
+                span_of(&src, "circuit region=basement void=3", 0),
+            )],
+            "{diags:#?}",
+        );
+        let d = &diags[0];
+        assert_eq!(d.severity(), Severity::Error);
+        assert_eq!(d.primary, PRIMARY);
+        assert_eq!(notes(d), [BELONGS, MOVE]);
+        assert_eq!(note_spans(d), [None, None]);
+    }
+
+    /// The `def` loop is walked as well; nothing places the `def`, hence `W_UNUSED_DEF`.
+    #[test]
+    fn a_line_under_a_level_in_a_def_is_refused() {
+        let src = gatehouse("def", "  level y=1\n    circuit region=basement void=3\n");
+        let line = span_of(&src, "circuit region=basement void=3", 0);
+        let diags = diagnose(&src);
+        assert_eq!(
+            found(&diags),
+            [
+                ("W_UNUSED_DEF", nth(&src, "def gatehouse", 0)..line.end),
+                ("E_MISPLACED_MEMBER", line),
+            ],
+            "{diags:#?}",
+        );
+        assert_eq!(diags[1].primary, PRIMARY);
+        assert_eq!(notes(&diags[1]), [BELONGS, MOVE]);
+    }
+
+    /// A `level` that groups nothing is `E_UNSUPPORTED_NESTING` as well, about the blocks its
+    /// members lose; a `circuit` line writes none, and what it loses is reported on the line.
+    #[test]
+    fn a_line_under_a_level_at_any_depth_is_refused_on_that_line() {
+        let circuit = "circuit region=attic void=1";
+        let level_in_level = format!("  level y=1\n    level y=2\n      {circuit}\n");
+        let level_without_offset = format!("  level\n    {circuit}\n");
+        let three_deep = format!(
+            "  level y=1\n    level y=2\n      walls mat_slot=m height=2\n      level y=3\n        \
+             {circuit}\n"
+        );
+        for (levels, lost_from) in [
+            (level_in_level, circuit),
+            (level_without_offset, circuit),
+            (three_deep, "walls mat_slot=m height=2"),
+        ] {
+            let src = format!("struct s size=5x5\n  floor mat_slot=m\n{levels}");
+            let line = span_of(&src, circuit, 0);
+            let lost = nth(&src, lost_from, 0)..line.end;
+            let misplaced = ("E_MISPLACED_MEMBER", line.clone());
+            let nesting = ("E_UNSUPPORTED_NESTING", lost.clone());
+            let expected = if lost == line {
+                [misplaced, nesting]
+            } else {
+                [nesting, misplaced]
+            };
+            let diags = diagnose(&src);
+            assert_eq!(found(&diags), expected, "{src}");
+            let d = diags
+                .iter()
+                .find(|d| d.code.as_str() == "E_MISPLACED_MEMBER")
+                .expect("found above");
+            assert_eq!(d.primary, PRIMARY, "{src}");
+            assert_eq!(notes(d), [BELONGS, MOVE], "{src}");
+        }
+    }
+
+    #[test]
+    fn a_line_among_the_scopes_own_members_beside_a_level_is_not_reported() {
+        let src = gatehouse(
+            "struct",
+            "  circuit region=floor void=2\n  level y=1\n    walls mat_slot=wall height=2\n",
+        );
+        let diags = diagnose(&src);
+        assert!(diags.is_empty(), "{diags:#?}");
+    }
+}
+
 mod lowering {
     //! What a misplaced member costs, measured by lowering each source beside the same source
     //! without the row.

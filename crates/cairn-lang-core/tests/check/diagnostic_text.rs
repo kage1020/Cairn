@@ -266,6 +266,12 @@ fn noisy_sources() -> Vec<String> {
         format!(
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n  walls mat_slot=wall height=3\n    floor mat_slot=floor\n    door id=d side=front at=center\n"
         ),
+        format!(
+            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  level y=1\n    circuit region=a void=1\n"
+        ),
+        format!(
+            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  circuit region=a void=1\n  level y=1\n    circuit region=b void=1\n"
+        ),
         // A misplaced row carrying a signal, whose message softens its claim.
         format!(
             "{THEME}{HUT}site s:

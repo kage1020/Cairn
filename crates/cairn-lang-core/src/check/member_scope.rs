@@ -1,15 +1,21 @@
 //! The `member_scope` pass: a known keyword the enclosing body has no reader for, which would
-//! otherwise fall out of the build without a word. One finding per misplaced subtree.
+//! otherwise fall out of the build without a word. One finding per misplaced subtree, and one per
+//! `circuit` line under a `level`, whose body has no reader for it.
 
 use crate::ast::{SIGNAL_HEAD, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
-use crate::intent::{BodyKind, IntentModule, Member, MemberRole};
+use crate::intent::{
+    BodyKind, CircuitRegionDefect, IntentModule, Member, MemberRole, circuit_lines_under_level,
+};
 
 use super::DiagnosticSink;
 
 pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     for body in ir.bodies() {
         walk(body.members, body.kind, false, sink);
+        if body.kind == BodyKind::Geometry {
+            report_circuit_lines_under_levels(body.members, sink);
+        }
     }
 }
 
@@ -60,6 +66,59 @@ fn report(member: &Member, body: BodyKind, sink: &mut DiagnosticSink) {
         primary: format!(
             "nothing in a {body} body lowers `{keyword}`: this member produces no blocks, no placement, and no walkway",
             body = body.describe(),
+        ),
+        notes,
+        data: None,
+    });
+}
+
+/// Walks each `level` as [`crate::intent::circuit_lines`] does, since place-and-route reads a
+/// reservation only from a `circuit` line among the body's own members.
+fn report_circuit_lines_under_levels(members: &[Member], sink: &mut DiagnosticSink) {
+    let own_line = members
+        .iter()
+        .find(|m| matches!(m.role, MemberRole::Circuit));
+    for level in members
+        .iter()
+        .filter(|m| matches!(m.role, MemberRole::Level))
+    {
+        for line in circuit_lines_under_level(level) {
+            report_circuit_line_under_level(line, own_line, sink);
+        }
+    }
+}
+
+fn report_circuit_line_under_level(
+    line: &Member,
+    own_line: Option<&Member>,
+    sink: &mut DiagnosticSink,
+) {
+    let mut notes = vec![DiagnosticNote {
+        span: None,
+        message: "a `circuit` line belongs among the `struct`'s or `def`'s own members: its reservation spans the scope's `size=WxH`, and no pass reads a `level`'s `y=` for it".to_owned(),
+    }];
+    match own_line {
+        Some(own_line) => notes.extend([
+            DiagnosticNote {
+                span: Some(own_line.span.clone()),
+                message: "the scope's own `circuit` line is here".to_owned(),
+            },
+            DiagnosticNote {
+                span: None,
+                message: "a scope reserves one region for its redstone: delete this line, or move it to the scope's top level in place of that one".to_owned(),
+            },
+        ]),
+        None => notes.push(DiagnosticNote {
+            span: None,
+            message: "move it out of the `level` to the scope's top level; nothing else about it changes".to_owned(),
+        }),
+    }
+    sink.push(Diagnostic {
+        code: DiagnosticCode::MisplacedMember,
+        span: line.span.clone(),
+        primary: format!(
+            "this `circuit` line reserves nothing: {}",
+            CircuitRegionDefect::NestedUnderLevel,
         ),
         notes,
         data: None,

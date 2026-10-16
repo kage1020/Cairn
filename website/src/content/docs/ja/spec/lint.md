@@ -77,6 +77,13 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 ジオメトリキーワードで発火します。該当行で 1 回だけ報告され、その下にインデントされたものも一緒に
 落ちます。
 
+`level` の下にある `circuit` 行でも、深さを問わず発火します。確保はスコープ全体にわたるので、
+place-and-route が `circuit` 行を読むのは `struct` / `def` 自身のメンバの中だけで
+([§14.5](/ja/spec/redstone/#145-place-and-route))、`level` の下の行は何も確保しません。
+`E_DUPLICATE_CIRCUIT` は本体自身のメンバを数えるので、その行を重ねて数えることはありません。別の
+`level` の中の `level` のように何もグループ化しない `level` は `E_UNSUPPORTED_NESTING` にもなります。
+こちらはメンバが失うブロックについての指摘で、`circuit` 行はブロックを書きません。
+
 `E_UNSUPPORTED_NESTING`: メンバをグループ化するのは `struct` / `def` 内の `level y=N` だけです。
 `site` のボディはフラットなリストです。落ちたサブツリーごとに、その根で 1 回報告されます。
 

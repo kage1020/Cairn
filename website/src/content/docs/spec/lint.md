@@ -76,6 +76,13 @@ compose to the strictest across every line, so a second one adds a constraint ([
 keyword among a `site`'s rows. It is reported once at the offending row, and anything indented
 under it goes with it.
 
+It also fires on a `circuit` line under a `level`, at any depth. A reservation spans the whole
+scope, so place-and-route reads a `circuit` line only among the `struct`'s or `def`'s own members
+([§14.5](/spec/redstone/#145-place-and-route)), and one under a `level` reserves nothing.
+`E_DUPLICATE_CIRCUIT` counts the body's own members, so it does not count that line a second time.
+A `level` that groups nothing, such as one inside another, is `E_UNSUPPORTED_NESTING` as well: that
+finding is about the blocks its members lose, and a `circuit` line writes none.
+
 `E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, and a `site`
 body is a flat list. Reported once per dropped subtree, at its root.
 
