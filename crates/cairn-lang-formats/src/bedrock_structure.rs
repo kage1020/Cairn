@@ -3,6 +3,7 @@
 //! `-1`, since lowering authors none.
 
 use cairn_lang_core::block_array::{BlockArray, PaletteIndex};
+use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{
@@ -11,18 +12,23 @@ use cairn_lang_nbt::{
 };
 use thiserror::Error;
 
-use crate::bedrock_state::{BedrockStateError, degradation_message, java_state, translate_states};
+use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
 
-/// A palette entry whose intent degraded to fit Bedrock, reported as `W_INTENT_DEGRADED`.
+/// One intent a palette entry dropped to fit Bedrock, reported as `W_INTENT_DEGRADED`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ParityNote {
-    /// The entry's id.
+    /// The entry's block id.
     pub id: String,
-    /// The message, which already names the entry by its Java state.
-    pub message: String,
+    /// The entry's `key=value` pairs, comma-joined, the spelling of
+    /// [`DegradedEntry::states`](cairn_lang_core::resolve::DegradedEntry::states).
+    pub states: String,
+    /// The intent dropped, which [`degradation_detail`](crate::bedrock_state::degradation_detail)
+    /// words.
+    pub dropped: DroppedIntent,
 }
 
 /// Why a [`BlockArray`] cannot be written as a `.mcstructure`.
@@ -172,13 +178,12 @@ pub fn prepare_mcstructure<'a>(
         check_palette_strings(&entry.id, &translated.states)?;
         // By Java state: entries differing only in the dropped intent share a Bedrock state.
         if !translated.degraded.is_empty() {
-            let state = java_state(entry);
-            for dropped in &translated.degraded {
-                notes.push(ParityNote {
-                    id: entry.id.clone(),
-                    message: degradation_message(&state, dropped),
-                });
-            }
+            let states = entry.properties_text();
+            notes.extend(translated.degraded.into_iter().map(|dropped| ParityNote {
+                id: entry.id.clone(),
+                states: states.clone(),
+                dropped,
+            }));
         }
         let compound = palette_entry(&entry.id, translated.states, target.block_version);
         // The palette is a set (`spec/compilation` "Within-phase conflicts and the palette"):

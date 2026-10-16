@@ -217,30 +217,31 @@ fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
         .expect("degraded_entries is a JSON array");
     assert!(entries.len() > 1, "premise: several entries degrade");
 
+    let from_info: Vec<String> = entries
+        .iter()
+        .flat_map(|entry| {
+            let id = entry["id"].as_str().expect("an id");
+            let states = entry["states"].as_str().expect("states");
+            let dropped = entry["dropped"].as_array().expect("what it lost");
+            dropped.iter().map(move |one| {
+                assert_eq!(one["key"], "shape", "got: {entry}");
+                let value = one["value"].as_str().expect("the value that was asked for");
+                let detail = degradation_detail(&DroppedIntent::Shape {
+                    value: value.to_owned(),
+                });
+                format!("warning[W_INTENT_DEGRADED]: struct::roof_hip: {id}[{states}]: {detail}")
+            })
+        })
+        .collect();
+
     let warnings = degraded_warnings("roof-hip.crn");
-    let distinct: std::collections::BTreeSet<&String> = warnings.iter().collect();
+    assert_eq!(warnings, from_info);
     assert_eq!(
-        distinct.len(),
-        warnings.len(),
-        "a warning repeats: {warnings:?}"
+        warnings[0],
+        "warning[W_INTENT_DEGRADED]: struct::roof_hip: \
+         minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]: shape=outer_left \
+         has no Bedrock state; Bedrock stairs render straight, so corners show visual gaps",
     );
-    assert_eq!(
-        warnings.len(),
-        entries.len(),
-        "one warning per entry: {warnings:?}"
-    );
-    for entry in entries {
-        let named = format!(
-            "`{}[{}]`",
-            entry["id"].as_str().expect("an id"),
-            entry["states"].as_str().expect("states"),
-        );
-        assert_eq!(
-            warnings.iter().filter(|line| line.contains(&named)).count(),
-            1,
-            "exactly one warning names {named}: {warnings:?}",
-        );
-    }
 }
 
 #[test]

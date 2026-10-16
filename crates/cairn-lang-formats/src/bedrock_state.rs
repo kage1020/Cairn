@@ -110,16 +110,6 @@ pub fn degradation_detail(dropped: &DroppedIntent) -> String {
     }
 }
 
-/// [`degradation_detail`] after the entry `state` that carried the intent, as
-/// `W_INTENT_DEGRADED` reports it.
-#[must_use]
-pub fn degradation_message(state: &str, dropped: &DroppedIntent) -> String {
-    let family = match dropped {
-        DroppedIntent::Shape { .. } => "stair",
-    };
-    format!("{family} `{state}` {}", degradation_detail(dropped))
-}
-
 fn translate_stair(
     id: &str,
     properties: &IndexMap<String, String>,
@@ -183,11 +173,6 @@ fn upside_down_bit(id: &str, half: &str) -> Result<i8, BedrockStateError> {
             valid: "top, bottom",
         }),
     }
-}
-
-/// A palette entry as `cairn info` spells it, `id[key=value,...]`, or `id[]` for a bare block.
-pub(crate) fn java_state(state: &BlockState) -> String {
-    format!("{}[{}]", state.id, state.properties_text())
 }
 
 #[cfg(test)]

@@ -2,9 +2,10 @@
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::resolve::DroppedIntent;
-use cairn_lang_formats::bedrock_state::{BedrockStateError, degradation_message};
+use cairn_lang_formats::bedrock_state::BedrockStateError;
 use cairn_lang_formats::bedrock_structure::{
-    BedrockStructureError, build_mcstructure_tag, prepare_mcstructure, write_mcstructure,
+    BedrockStructureError, ParityNote, build_mcstructure_tag, prepare_mcstructure,
+    write_mcstructure,
 };
 use cairn_lang_formats::data_version::{BedrockTarget, resolve_bedrock_target};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
@@ -19,6 +20,20 @@ fn target_1_21_60() -> BedrockTarget {
 /// The packed palette `version`: a byte each of major, minor, patch and revision.
 fn block_version(major: i32, minor: i32, patch: i32, revision: i32) -> i32 {
     (major << 24) | (minor << 16) | (patch << 8) | revision
+}
+
+/// Each note's `(id, states, dropped)`.
+fn note_fields(notes: &[ParityNote]) -> Vec<(&str, &str, &DroppedIntent)> {
+    notes
+        .iter()
+        .map(|note| (note.id.as_str(), note.states.as_str(), &note.dropped))
+        .collect()
+}
+
+fn shape(value: &str) -> DroppedIntent {
+    DroppedIntent::Shape {
+        value: value.to_owned(),
+    }
 }
 
 /// A 2×3×4 array with two marked voxels, so an axis-order mistake moves a flat index.
@@ -218,16 +233,13 @@ fn non_straight_stair_shape_degrades() {
         .insert("shape".to_owned(), "outer_left".to_owned());
     let ba = single_stateful_array(stairs);
     let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
-    assert_eq!(notes.len(), 1);
-    assert_eq!(notes[0].id, "minecraft:oak_stairs");
     assert_eq!(
-        notes[0].message,
-        degradation_message(
-            "minecraft:oak_stairs[facing=east,half=bottom,shape=outer_left]",
-            &DroppedIntent::Shape {
-                value: "outer_left".to_owned(),
-            },
-        ),
+        note_fields(&notes),
+        [(
+            "minecraft:oak_stairs",
+            "facing=east,half=bottom,shape=outer_left",
+            &shape("outer_left"),
+        )],
     );
     let states = last_palette_states(&root);
     assert_eq!(states.entries.get("weirdo_direction"), Some(&Tag::Int(0)));
@@ -411,24 +423,32 @@ fn stairs_that_differ_only_in_a_dropped_shape_share_one_palette_entry() {
     assert_eq!(layer[1], layer[4]);
     assert_eq!(layer[3], layer[5]);
 
-    // Four corner shapes degrade; `straight` drops losslessly.
-    let messages: Vec<&str> = notes.iter().map(|note| note.message.as_str()).collect();
-    assert_eq!(messages.len(), 4, "{messages:?}");
-    for (i, a) in messages.iter().enumerate() {
-        for b in &messages[i + 1..] {
-            assert_ne!(a, b, "two notes read the same: {messages:?}");
-        }
-    }
+    // Four corner shapes degrade, one note per Java state; `straight` drops losslessly.
     assert_eq!(
-        messages[0],
-        degradation_message(
-            "minecraft:oak_stairs[facing=north,half=bottom,shape=outer_left]",
-            &DroppedIntent::Shape {
-                value: "outer_left".to_owned(),
-            },
-        ),
+        note_fields(&notes),
+        [
+            (
+                oak,
+                "facing=north,half=bottom,shape=outer_left",
+                &shape("outer_left"),
+            ),
+            (
+                oak,
+                "facing=south,half=bottom,shape=outer_right",
+                &shape("outer_right"),
+            ),
+            (
+                oak,
+                "facing=north,half=bottom,shape=outer_right",
+                &shape("outer_right"),
+            ),
+            (
+                oak,
+                "facing=south,half=bottom,shape=outer_left",
+                &shape("outer_left"),
+            ),
+        ],
     );
-    assert!(notes.iter().all(|note| note.id == oak));
 
     let mut tree = Vec::new();
     write_mcstructure(&mut tree, &root).expect("write tree");

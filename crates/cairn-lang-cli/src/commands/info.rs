@@ -27,8 +27,8 @@ use crate::pipeline::{
     RequestedEditions, build_diagnostics, dropped_scopes, load_module, requested_editions,
 };
 use crate::report::{
-    FailureReport, Reporting, print_json, report_diagnostic, report_diagnostics,
-    report_failure_document,
+    FailureReport, Reporting, palette_entry_name, print_json, report_diagnostic,
+    report_diagnostics, report_failure_document,
 };
 use crate::target::supported_versions;
 
@@ -244,9 +244,8 @@ fn degraded_notes(edition: Edition, entries: &[DegradedEntry]) -> Vec<String> {
     notes.extend(entries.iter().map(|entry| {
         let detail: Vec<String> = entry.dropped.iter().map(degradation_detail).collect();
         format!(
-            "  note: `{}[{}]` — {}",
-            entry.id,
-            entry.states,
+            "  note: `{}` — {}",
+            palette_entry_name(&entry.id, &entry.states),
             detail.join("; "),
         )
     }));

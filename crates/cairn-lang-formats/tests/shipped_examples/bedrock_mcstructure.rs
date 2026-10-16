@@ -2,6 +2,7 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
+use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 
@@ -79,17 +80,26 @@ fn cottage_roof_stairs_carry_bedrock_states() {
 fn themed_tower_compiles_to_mcstructure_with_shape_degradation() {
     let out = lower_bedrock("themed-tower.crn");
     let target = resolve_bedrock_target("latest").expect("known target");
-    let mut total_notes = 0;
+    let mut degraded = Vec::new();
     for (scope, ba) in &out.structures {
         let (_root, notes) =
             build_mcstructure_tag(ba, &target).unwrap_or_else(|e| panic!("build `{scope}`: {e}"));
-        for note in &notes {
-            assert!(note.message.contains("shape"), "note: {}", note.message);
-        }
-        total_notes += notes.len();
+        degraded.extend(
+            notes
+                .into_iter()
+                .map(|note| (scope.clone(), note.id, note.states, note.dropped)),
+        );
     }
     assert_eq!(
-        total_notes, 1,
-        "themed-tower has exactly one non-straight stair palette entry today"
+        degraded,
+        [(
+            "struct::keep".to_owned(),
+            "minecraft:dark_oak_stairs".to_owned(),
+            "facing=south,half=top,shape=outer_left".to_owned(),
+            DroppedIntent::Shape {
+                value: "outer_left".to_owned(),
+            },
+        )],
+        "themed-tower's one non-straight stair palette entry",
     );
 }

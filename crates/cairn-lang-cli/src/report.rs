@@ -5,6 +5,8 @@ use std::process::ExitCode;
 
 use cairn_lang_core::check::{DiagnosticNote as Note, LineStarts, RenderedDiagnostic};
 use cairn_lang_core::{Diagnostic, ParseError, Severity, diagnose_parse_failure};
+use cairn_lang_formats::bedrock_state::degradation_detail;
+use cairn_lang_formats::bedrock_structure::ParityNote;
 
 /// Where a command reports the findings that stopped it: prose on stderr, or the one JSON
 /// document `spec/lint` "Machine-readable payload" promises on stdout.
@@ -161,6 +163,20 @@ pub(crate) fn report_failure_document(
         }
     }
     ExitCode::from(1)
+}
+
+/// A palette entry as `cairn info`'s notes and `W_INTENT_DEGRADED` name it, `id[key=value,...]`.
+pub(crate) fn palette_entry_name(id: &str, states: &str) -> String {
+    format!("{id}[{states}]")
+}
+
+/// The `W_INTENT_DEGRADED` line for one intent the structure `scope` dropped.
+pub(crate) fn degraded_warning(scope: &str, note: &ParityNote) -> String {
+    format!(
+        "warning[W_INTENT_DEGRADED]: {scope}: {}: {}",
+        palette_entry_name(&note.id, &note.states),
+        degradation_detail(&note.dropped),
+    )
 }
 
 /// A note without a span prints indented and unprefixed, so it does not read as a second pointer.
