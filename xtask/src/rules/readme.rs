@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use syn::{UseTree, Visibility};
 
@@ -267,10 +268,10 @@ fn subcommand_of(invocation: &str) -> Option<&str> {
         .flatten()
 }
 
-fn check_subcommands(repo: &Repo) -> Vec<Finding> {
-    let readme = Path::new("crates/cairn-lang-cli/README.md");
-    let output = repo
-        .cargo()
+/// `cairn --help`, run through cargo with colour off.
+fn help_command(repo: &Repo) -> Command {
+    let mut command = repo.cargo();
+    command
         .args([
             "run",
             "--quiet",
@@ -282,7 +283,14 @@ fn check_subcommands(repo: &Repo) -> Vec<Finding> {
             "--",
             "--help",
         ])
-        .output();
+        // clap styles its help even into a pipe when the environment sets `CLICOLOR_FORCE`.
+        .env("NO_COLOR", "1");
+    command
+}
+
+fn check_subcommands(repo: &Repo) -> Vec<Finding> {
+    let readme = Path::new("crates/cairn-lang-cli/README.md");
+    let output = help_command(repo).output();
     let help = match output {
         Ok(output) if output.status.success() => {
             String::from_utf8_lossy(&output.stdout).into_owned()
@@ -392,6 +400,17 @@ use private::Item;
         let help = "Usage: cairn <COMMAND>\n\nCommands:\n  parse  Lex and parse\n  check  Run checks\n  help   Print this message\n\nOptions:\n  -h, --help\n";
         let names: Vec<_> = listed_subcommands(help).unwrap().into_iter().collect();
         assert_eq!(names, ["check", "parse"]);
+    }
+
+    #[test]
+    fn the_help_is_read_with_colour_off() {
+        let repo = Repo::open(None).expect("open the checkout");
+        let command = help_command(&repo);
+        let no_color: Vec<_> = command
+            .get_envs()
+            .filter(|(key, _)| *key == "NO_COLOR")
+            .collect();
+        assert_eq!(no_color, [("NO_COLOR".as_ref(), Some("1".as_ref()))]);
     }
 
     #[test]
