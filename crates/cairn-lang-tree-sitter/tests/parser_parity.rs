@@ -1,8 +1,10 @@
 //! Accept/reject parity with the reference parser, which is by design the one that is right.
-//! The divergences that remain live in [`KNOWN_DIVERGENCES`], asserted rather than skipped.
+//! The divergences that remain live in [`KNOWN_DIVERGENCES`] and [`DEPTH_DIVERGENCES`], asserted
+//! rather than skipped.
 
 use std::fmt::Write as _;
 
+use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH};
 use tree_sitter::Parser;
 
 /// What both parsers should say about a fixture.
@@ -1076,6 +1078,106 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     ),
 ];
 
+/// `(name, shape, depth)` one step past a core depth bound, where the grammar accepts and core
+/// refuses. The grammar's recursive rules cannot count how deep they are, and core spends one
+/// counter on bodies, lists, parentheses and `not` alike. One step shallower, both accept.
+const DEPTH_DIVERGENCES: &[(&str, Shape, usize)] = &[
+    (
+        "blocks_past_the_nesting_bound",
+        nested_blocks,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "list_past_the_nesting_bound",
+        nested_list,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "parens_past_the_nesting_bound",
+        nested_parens,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "not_chain_past_the_nesting_bound",
+        chained_not,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "blocks_and_list_past_the_nesting_bound",
+        list_in_blocks,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "or_chain_past_the_expression_bound",
+        flat_or_chain,
+        MAX_EXPR_DEPTH + 1,
+    ),
+];
+
+/// A source of the given depth.
+type Shape = fn(usize) -> String;
+
+/// One indented `level` block per level.
+fn nested_blocks(depth: usize) -> String {
+    let mut source = String::from("struct a size=1x1\n");
+    for level in 1..=depth {
+        source.push_str(&"  ".repeat(level));
+        source.push_str("level y=0\n");
+    }
+    source
+}
+
+/// `mat=[[[ … x … ]]]`.
+fn nested_list(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  window mat={}x{}\n",
+        "[".repeat(depth),
+        "]".repeat(depth),
+    )
+}
+
+/// `logic sig.out = ((( … sig.a … )))`.
+fn nested_parens(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}sig.a{}\n",
+        "(".repeat(depth),
+        ")".repeat(depth),
+    )
+}
+
+/// `logic sig.out = not not … sig.a`.
+fn chained_not(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}sig.a\n",
+        "not ".repeat(depth),
+    )
+}
+
+/// Half of `depth` in `level` blocks, the rest in a list inside the deepest one.
+fn list_in_blocks(depth: usize) -> String {
+    let blocks = depth / 2;
+    let list = depth - blocks;
+    let mut source = nested_blocks(blocks);
+    let indent = "  ".repeat(blocks + 1);
+    writeln!(
+        source,
+        "{indent}window mat={}x{}",
+        "[".repeat(list),
+        "]".repeat(list),
+    )
+    .expect("a String never fails to take a write");
+    source
+}
+
+/// `sig.a0 or sig.a1 or …`, which deepens core's boolean tree without descent.
+fn flat_or_chain(terms: usize) -> String {
+    let chain = (0..terms)
+        .map(|i| format!("sig.a{i}"))
+        .collect::<Vec<_>>()
+        .join(" or ");
+    format!("struct a size=1x1\n  logic sig.out = {chain}\n")
+}
+
 fn grammar_accepts(parser: &mut Parser, source: &str) -> bool {
     let tree = parser.parse(source, None).expect("parse produced no tree");
     !tree.root_node().has_error()
@@ -1093,7 +1195,18 @@ fn new_parser() -> Parser {
 fn both_parsers_reach_the_written_verdict() {
     let mut parser = new_parser();
     let mut wrong = Vec::new();
-    for (name, source, expected) in FIXTURES {
+    let written = FIXTURES
+        .iter()
+        .map(|&(name, source, verdict)| (name.to_owned(), source.to_owned(), verdict));
+    let at_the_bounds = DEPTH_DIVERGENCES.iter().map(|&(name, shape, depth)| {
+        (
+            format!("{name}, one step shallower"),
+            shape(depth - 1),
+            Accept,
+        )
+    });
+    for (name, source, expected) in written.chain(at_the_bounds) {
+        let source = source.as_str();
         let core = if cairn_lang_core::parse::parse(source).is_ok() {
             Accept
         } else {
@@ -1104,7 +1217,7 @@ fn both_parsers_reach_the_written_verdict() {
         } else {
             Reject
         };
-        if (core, grammar) != (*expected, *expected) {
+        if (core, grammar) != (expected, expected) {
             wrong.push(format!(
                 "{name}: expected both to {expected:?}, core said {core:?} and the grammar said {grammar:?}\n  source: {source:?}"
             ));
@@ -1266,7 +1379,14 @@ fn count_member_statements(node: tree_sitter::Node<'_>, count: &mut usize) {
 fn listed_divergences_still_diverge() {
     let mut parser = new_parser();
     let mut wrong = Vec::new();
-    for (name, source, grammar_says) in KNOWN_DIVERGENCES {
+    let written = KNOWN_DIVERGENCES
+        .iter()
+        .map(|&(name, source, verdict)| (name, source.to_owned(), verdict));
+    let generated = DEPTH_DIVERGENCES
+        .iter()
+        .map(|&(name, shape, depth)| (name, shape(depth), Accept));
+    for (name, source, grammar_says) in written.chain(generated) {
+        let source = source.as_str();
         let core = if cairn_lang_core::parse::parse(source).is_ok() {
             Accept
         } else {
@@ -1277,7 +1397,7 @@ fn listed_divergences_still_diverge() {
         } else {
             Reject
         };
-        if grammar != *grammar_says || core == grammar {
+        if grammar != grammar_says || core == grammar {
             wrong.push(format!(
                 "{name}: listed as grammar={grammar_says:?} against the reference parser, but core said {core:?} and the grammar said {grammar:?}\n  source: {source:?}"
             ));
