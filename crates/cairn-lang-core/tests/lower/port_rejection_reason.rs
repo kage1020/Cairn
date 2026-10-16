@@ -1,10 +1,10 @@
 //! A `connect` row whose port cannot be placed names the one rule it broke and points at the
 //! member it is about.
 
-use cairn_lang_core::block_array::BlockArrayIr;
+use cairn_lang_core::block_array::{BlockArrayIr, Footprint};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, DiagnosticNote};
 
-use crate::common::lowered;
+use crate::common::{lowered, state_at};
 
 /// A theme, a `hut` whose front door `e` anchors any walkway, and a `probe` def holding `p`.
 fn site(probe_members: &str, gap: u32) -> String {
@@ -266,6 +266,36 @@ fn a_window_without_offset_anchors_a_walkway_as_it_is_cut() {
         out.diagnostics,
     );
     assert_eq!(out.walkways.len(), 1, "the strip is laid");
+}
+
+#[test]
+fn a_sym_window_whose_mirror_is_skipped_keeps_its_cut_and_its_port() {
+    let window = "window id=p side=front offset=2 y=1 size=1x1 sym=true mat_slot=glass";
+    let src = site(&format!("{WALLS}  {window}\n"), 6);
+    let out = lowered(&src);
+    let found: Vec<_> = out
+        .diagnostics
+        .iter()
+        .map(|d| (d.code, &src[d.span.clone()], d.primary.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        [(
+            DiagnosticCode::DeferredMember,
+            window,
+            "`sym=true` window at offset=2 size=1x1 on the `front` wall coincides with its mirror \
+             (wall length=5); the mirror was skipped",
+        )],
+    );
+    assert_eq!(
+        state_at(&out.structures["site::s::a"], 2, 1, 4).id,
+        "minecraft:glass_pane",
+    );
+    // From the window's port at (2, 0, 5) to the door's at (13, 0, 5).
+    let walkway = &out.walkways["walkway::s::a.p__b.e"];
+    assert_eq!(out.walkways.len(), 1);
+    assert_eq!(walkway.origin, (2, 0, 5));
+    assert_eq!(walkway.footprint, Footprint { x: 12, z: 1 });
 }
 
 #[test]

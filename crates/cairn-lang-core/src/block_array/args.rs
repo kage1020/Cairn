@@ -145,19 +145,26 @@ pub(super) fn size_value(member: &Member, key: &str) -> Option<(u32, u32)> {
 
 /// The `W_DEFERRED_MEMBER` for a member lowering does not draw, with `reason` as its primary.
 pub(super) fn diag_deferred_member_reason(member: &Member, reason: &str) -> Diagnostic {
+    diag_deferred_member_noted(
+        member,
+        reason,
+        "block-array lowering currently voxelises floor, walls, door, window, roof \
+         (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
+         (at=<side>.outside|inside.<side>), and level y=N grouping, and recognises circuit \
+         region=<label> void=<N> (u32, N>=1) plus door[id=<name>] opened_by=sig.<name> actuator \
+         patches; other roles will be added as their lowering rules are spec'd",
+    )
+}
+
+/// A `W_DEFERRED_MEMBER` on `member` with `reason` as its primary and `note` as its one note.
+pub(super) fn diag_deferred_member_noted(member: &Member, reason: &str, note: &str) -> Diagnostic {
     Diagnostic {
         code: DiagnosticCode::DeferredMember,
         span: member.span.clone(),
         primary: reason.to_owned(),
         notes: vec![DiagnosticNote {
             span: None,
-            message: "block-array lowering currently voxelises floor, walls, door, window, \
-                      roof (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
-                      (at=<side>.outside|inside.<side>), and level y=N grouping, and \
-                      recognises circuit region=<label> void=<N> (u32, N>=1) plus \
-                      door[id=<name>] opened_by=sig.<name> actuator patches; other roles \
-                      will be added as their lowering rules are spec'd"
-                .to_owned(),
+            message: note.to_owned(),
         }],
         data: None,
     }

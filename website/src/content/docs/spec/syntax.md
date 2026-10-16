@@ -216,7 +216,11 @@ low `z` and mirror the same way.
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle
 is rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. That includes the
 mirror of a window centred on the wall's midpoint (`2 * offset + size_w = wall_length`), which
-coincides with the primary. `sym=` takes a bare `true` or `false`, and a window without it
+coincides with the primary. A mirror that only touches the primary, beginning in the column after
+the primary's last (`2 * (offset + size_w) = wall_length`) or ending in the column before its
+first (`2 * offset = wall_length`), shares no cell with it, so it is neither rejected nor
+reported: both are painted, and read as one opening twice the window's width. `sym=` takes a
+bare `true` or `false`, and a window without it
 is not mirrored. Any other value (`sym=yes`, `sym="true"`, `sym=1`) is an unreadable value:
 the window is drawn without its mirror, and the value is reported as `W_IGNORED_ARGUMENT`
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)). A window whose `repeat=` is greater than 1 is the

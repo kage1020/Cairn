@@ -138,6 +138,26 @@ fn the_corpus_reaches_the_header_vocabulary_prose() {
     }
 }
 
+#[test]
+fn the_corpus_reaches_both_relations_of_the_mirror_prose() {
+    let rendered = rendered_strings();
+    for (origin, sentence) in [
+        ("W_DEFERRED_MEMBER primary", "coincides with its mirror"),
+        ("W_DEFERRED_MEMBER primary", "would overlap its mirror"),
+        (
+            "W_DEFERRED_MEMBER note 0",
+            "a `sym=true` window and its mirror are a pair only when the window lies in one half",
+        ),
+    ] {
+        assert!(
+            rendered
+                .iter()
+                .any(|(o, text)| o == origin && text.contains(sentence)),
+            "no fixture reaches the {origin} `{sentence}`",
+        );
+    }
+}
+
 /// A floor, not the full code set: some codes need a registry pack or a multi-theme file.
 #[test]
 fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
@@ -290,6 +310,12 @@ fn noisy_sources() -> Vec<String> {
         // Positional values, singular and plural.
         format!("{THEME}struct s size=5x5\n  roof flat mat_slot=wall\n"),
         format!("{THEME}struct s size=5x5\n  window front G 2 2 2x2 mat_slot=wall\n"),
+        // A `sym=true` window that coincides with its mirror, and one that would overlap it.
+        format!(
+            "{THEME}struct s size=6x5\n  walls mat_slot=wall height=3\n\
+             \x20\x20window side=front offset=2 y=1 size=2x1 sym=true\n\
+             \x20\x20window side=back offset=1 y=1 size=3x1 sym=true\n"
+        ),
         // A slot bound to a non-token, and a selector that matches nothing.
         "theme t:\n  slot floor -> 42\n\nstruct s size=3x3\n  floor mat_slot=floor\n".to_owned(),
         "theme t:\n\
