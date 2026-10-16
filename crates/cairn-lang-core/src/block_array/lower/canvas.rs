@@ -2,6 +2,7 @@
 
 use indexmap::IndexMap;
 
+use crate::block_array::material::is_stand_in;
 use crate::block_array::{BlockState, Dims, Palette, PaletteFull, PaletteIndex};
 
 use super::phase::Phase;
@@ -49,6 +50,8 @@ pub(super) struct ScopePalette {
     capacity: usize,
     /// The refusal that overflowed the palette, once one has.
     overflow: Option<PaletteFull>,
+    /// Whether a stand-in was interned since [`Self::take_stand_in`] last asked.
+    stand_in: bool,
 }
 
 impl ScopePalette {
@@ -58,10 +61,17 @@ impl ScopePalette {
             palette: Palette::new_with_air(),
             capacity,
             overflow: None,
+            stand_in: false,
         }
     }
 
+    /// Whether a stand-in was interned since the last call, which this one clears.
+    pub(super) fn take_stand_in(&mut self) -> bool {
+        std::mem::take(&mut self.stand_in)
+    }
+
     pub(super) fn intern(&mut self, state: BlockState) -> PaletteIndex {
+        self.stand_in |= is_stand_in(&state);
         // After an overflow the palette is never read, so skip the scan.
         if self.overflow.is_some() {
             return PaletteIndex::AIR;
@@ -96,6 +106,8 @@ pub(super) struct Canvas {
     painted: Vec<bool>,
     /// Indexed like [`Self::phases`]: `true` once that member has written a cell.
     pub(super) wrote: Vec<bool>,
+    /// Indexed like [`Self::phases`]: `true` once that member has painted a stand-in.
+    pub(super) stand_in: Vec<bool>,
     /// `(overridden, overriding)` member pairs to the voxels the second took, in discovery order.
     pub(super) conflicts: IndexMap<(u32, u32), u32>,
 }
@@ -107,6 +119,7 @@ impl Canvas {
             voxels: vec![PaletteIndex::AIR; dims.volume()],
             owners: vec![0; dims.volume()],
             wrote: vec![false; phases.len()],
+            stand_in: vec![false; phases.len()],
             phases,
             painted: vec![false; 1],
             conflicts: IndexMap::new(),

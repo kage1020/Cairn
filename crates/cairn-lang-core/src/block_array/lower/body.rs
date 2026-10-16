@@ -111,15 +111,23 @@ pub(super) fn lower_body_to_block_array<'a>(
     let buckets = bucket_members(&flattened, diagnostics);
     let canvas = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     // Before anything reads the grid: a voxel painted after the palette filled holds air.
+    // How many blocks the stand-ins come to, and whether one differs from another block, is the
+    // target's pack to say.
+    let stand_in = |member: u32| canvas.stand_in.get(member as usize) == Some(&true);
     let mut palette = match palette.into_palette() {
         Ok(palette) => palette,
         Err(full) => {
-            diagnostics.push(diag_palette_too_large(&body, full));
+            if !canvas.stand_in.contains(&true) {
+                diagnostics.push(diag_palette_too_large(&body, full));
+            }
             return None;
         }
     };
 
     for ((overridden, overriding), voxels) in &canvas.conflicts {
+        if stand_in(*overridden) || stand_in(*overriding) {
+            continue;
+        }
         diagnostics.push(diag_phase_conflict(
             flattened[*overridden as usize].1,
             flattened[*overriding as usize].1,
@@ -242,6 +250,11 @@ pub(super) fn run_phase(
             &mut member_canvas,
             diagnostics,
         );
+        if palette.take_stand_in()
+            && let Some(painted) = canvas.stand_in.get_mut(index as usize)
+        {
+            *painted = true;
+        }
     }
 }
 

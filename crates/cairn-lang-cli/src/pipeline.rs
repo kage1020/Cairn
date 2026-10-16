@@ -5,7 +5,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use cairn_lang_core::ast::Header;
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockArrayIr, BlockState, findings_without_target, lower_to_block_array,
+};
 use cairn_lang_core::check::{LineStarts, weigh_intended_targets};
 use cairn_lang_core::resolve::{declared_version_floors, resolve};
 use cairn_lang_core::{
@@ -46,7 +48,7 @@ pub(crate) fn load_module(
 
 /// What [`check_lowering`] found, and what the run owes a refusal for.
 pub(crate) struct CheckLowering {
-    /// The block-array pass's findings, empty when no target was given.
+    /// The block-array pass's findings; without a target, the ones every target raises.
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// Scopes that produced no voxels, empty when no target was given.
     pub(crate) dropped_scopes: Vec<String>,
@@ -56,8 +58,8 @@ pub(crate) struct CheckLowering {
     pub(crate) unsupported: Option<cairn_lang_formats::data_version::UnsupportedTarget>,
 }
 
-/// Lower for `cairn check --target`'s id check, or not at all without a target; an unresolved
-/// target lowers unpinned, so every finding that needs no version is still reported.
+/// Lower against `cairn check --target`'s id table, or with no target when none is given; an
+/// unresolved target lowers unpinned, so every finding that needs no version is still reported.
 pub(crate) fn check_lowering(
     ir: &cairn_lang_core::intent::IntentModule,
     edition: Option<Edition>,
@@ -66,7 +68,7 @@ pub(crate) fn check_lowering(
     // clap refuses `--target` without `--edition` (`spec/compilation` "Target axes").
     let (Some(edition), Some(target)) = (edition, target) else {
         return CheckLowering {
-            diagnostics: Vec::new(),
+            diagnostics: findings_without_target(ir, edition),
             dropped_scopes: Vec::new(),
             built_scopes: 0,
             unsupported: None,

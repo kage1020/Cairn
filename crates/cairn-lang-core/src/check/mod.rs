@@ -218,7 +218,7 @@ mod tests {
                 "E_UNKNOWN_ABSTRACT_TOKEN",
                 "E_UNKNOWN_ID",
             ],
-            "an Error raised only in lowering passes an unpinned `cairn check`",
+            "`check` cannot raise these, so a front end reports them only by lowering too",
         );
     }
 }

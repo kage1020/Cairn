@@ -7,7 +7,7 @@ const DUPLICATE: &str =
 
 const CAIRN_VERSION: &str = "@cairn banana\n\ntheme t:\n  slot floor -> @oak_planks\n\nstruct s size=2x2\n  floor mat_slot=floor\n";
 
-const CLEAN: &str = "struct s size=2x2\n  floor mat_slot=wall\n  walls height=4 mat_slot=wall\n";
+const CLEAN: &str = "theme t:\n  slot wall -> @stone\n\nstruct s size=2x2\n  floor mat_slot=wall\n  walls height=4 mat_slot=wall\n";
 
 const UNKNOWN_KEYWORD: &str = "struct s size=1x1\n  mystery foo=1\n";
 
@@ -30,6 +30,8 @@ fn text_findings_go_to_stderr_one_located_line_each() {
             (2, 3, "error", "E_MISSING_MATERIAL"),
             (2, 18, "error", "E_DUPLICATE_ARG"),
             (4, 8, "error", "E_DUPLICATE_ID"),
+            (3, 3, "warning", "W_DEFERRED_MEMBER"),
+            (4, 3, "warning", "W_DEFERRED_MEMBER"),
         ]),
         "{stderr}",
     );
@@ -156,7 +158,13 @@ fn unknown_keyword_fixture_lists_known_keywords_in_a_note() {
     let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let reported = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(&reported, &[(2, 3, "error", "E_UNKNOWN_KEYWORD")]);
+    assert_stream(
+        &reported,
+        &[
+            (2, 3, "error", "E_UNKNOWN_KEYWORD"),
+            (2, 3, "warning", "W_DEFERRED_MEMBER"),
+        ],
+    );
     assert!(
         reported.contains("note:") && reported.contains("floor"),
         "expected a known-keywords note, got: {reported}",
@@ -200,11 +208,13 @@ fn json_output_carries_line_and_col_for_every_diagnostic() {
         let col = entry["col"].as_u64().expect("col should be a number");
         assert!(line >= 1 && col >= 1, "1-based positions, got {line}:{col}");
         assert!(
-            entry["code"].as_str().is_some_and(|s| s.starts_with("E_")),
-            "code should be the E_-prefixed string, got: {}",
+            entry["code"]
+                .as_str()
+                .is_some_and(|s| s.starts_with("E_") || s.starts_with("W_")),
+            "code should be the E_- or W_-prefixed string, got: {}",
             entry["code"],
         );
-        // No `E_DUPLICATE_*` code carries a payload, so none may carry `data`.
+        // No finding this fixture raises carries a payload, so none may carry `data`.
         assert!(
             entry.get("data").is_none(),
             "diagnostic without a payload must omit the `data` key, got: {entry}",

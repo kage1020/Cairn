@@ -109,23 +109,16 @@ fn two_spellings_of_one_state_write_the_same_bytes() {
 fn a_well_formed_literal_passes_check() {
     let tmp = TempDir::new().expect("tempdir");
     let src = floored(tmp.path(), "@oak_stairs[half=top, facing=north]");
+    let src = src.to_str().unwrap();
 
-    let plain = cairn("check", &[src.to_str().unwrap()]);
-    let stderr = stderr_of(&plain);
-    assert_eq!(plain.status.code(), Some(0), "{stderr}");
-    assert_stream(&stderr, &[]);
-
-    let pinned = cairn(
-        "check",
-        &[
-            src.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--target",
-            "1.21.4",
-        ],
-    );
-    let stderr = stderr_of(&pinned);
-    assert_eq!(pinned.status.code(), Some(0), "{stderr}");
-    assert_stream(&stderr, &[(2, 13, "warning", "W_STATE_LITERAL_UNCHECKED")]);
+    // The warning needs no target, so a check with none reports it as a pinned one does.
+    for args in [
+        vec![src],
+        vec![src, "--edition", "java", "--target", "1.21.4"],
+    ] {
+        let out = cairn("check", &args);
+        let stderr = stderr_of(&out);
+        assert_eq!(out.status.code(), Some(0), "{args:?}: {stderr}");
+        assert_stream(&stderr, &[(2, 13, "warning", "W_STATE_LITERAL_UNCHECKED")]);
+    }
 }

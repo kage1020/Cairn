@@ -146,7 +146,7 @@ pub(super) fn resolve_place_anchor(
             ValueKind::Int(n) => Some(*n),
             _ => None,
         },
-        "an integer",
+        "a non-negative integer",
     ) {
         Ok(gap) => (gap.unwrap_or(0), None),
         Err(unread) => (0, Some(unread)),
@@ -176,10 +176,9 @@ pub(super) fn resolve_place_anchor(
 pub(super) enum GapOutcome {
     /// Placed at the `gap=0` the unreadable value falls back to.
     Placed,
-    /// Refused for a reason no `gap=` reaches.
+    /// Refused for a reason no `gap=` reaches, a placement past the `i32` range included: a
+    /// larger gap only moves the row further out.
     NotPlaced,
-    /// Refused because the placement at `gap=0` leaves the `i32` range.
-    OutOfRange,
 }
 
 /// Report a `place` row's unreadable `gap=`, if any, with the note for where the row ended up.
@@ -196,10 +195,6 @@ pub(super) fn report_unread_gap(
             }
             GapOutcome::NotPlaced => {
                 "this row is not placed either way — see the finding on the same line"
-            }
-            GapOutcome::OutOfRange => {
-                "this row is not placed at `gap=0`, the value its origin was worked out \
-                 with — see the finding on the same line"
             }
         })
     }));

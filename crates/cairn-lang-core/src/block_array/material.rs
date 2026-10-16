@@ -30,6 +30,30 @@ pub trait TargetRegistry {
     }
 }
 
+/// The registry a lowering with no target reads: no pack, no version, so every abstract token
+/// lifts to a stand-in for whichever block the target's pack names.
+pub(crate) struct NoTarget;
+
+impl TargetRegistry for NoTarget {
+    fn lookup(&self, token: &str) -> Option<BlockState> {
+        // A block id starts with its namespace, whether a canonical token or a catalog spelt it.
+        Some(BlockState::bare(format!("@{token}")))
+    }
+
+    fn known_tokens(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn block_ids(&self) -> Option<BlockIdSet<'_>> {
+        None
+    }
+}
+
+/// Whether `state` is a [`NoTarget`] stand-in, whose block only the target's pack can name.
+pub(crate) fn is_stand_in(state: &BlockState) -> bool {
+    state.id.starts_with('@')
+}
+
 /// The block ids valid in one pinned `(edition, version)` target.
 #[derive(Debug, Clone, Copy)]
 pub struct BlockIdSet<'a> {

@@ -153,20 +153,22 @@ version to compare.
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so every `mat_slot=` it reads lowers to air. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 
-`E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only the
-commands that lower report them: `cairn compile`, `cairn lower`, `cairn info`, and `cairn check
---edition E --target V`. `E_UNKNOWN_ID` further needs a pinned target, so the two commands that
-raise it are `cairn compile --target` and `cairn check --edition E --target V` — `info` and
-`lower` lower against no version, and so does a `compile` whose target the file's floors refuse
-([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A
-`cairn check` with no `--target` runs no lowering at all and reaches neither code.
+`E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, which
+`cairn compile`, `cairn lower`, `cairn info` and `cairn check` all run, as does the language
+server. `E_UNKNOWN_ID` further needs a pinned target, so the two commands that raise it are
+`cairn compile --target` and `cairn check --edition E --target V` — `info` and `lower` lower
+against no version, and so does a `compile` whose target the file's floors refuse
+([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
+check` with no `--target`, and the language server, lower with no target at all, so they raise
+`E_INCOMPATIBLE_MATERIAL` only on a canonical token and never `E_UNKNOWN_ID`
+([§11.3](#113-error-vs-warning)).
 
 `W_STATE_LITERAL_UNCHECKED` is raised by the same lowering, on every state literal it reads from a
-theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info` and `cairn check
---edition E --target V` report it under either edition. It stands in for `E_STATE_DOMAIN`: until
-the compiler holds a table of each block's states, a property the block lacks or a value outside
-its domain is written into the structure file unchanged, and the warning is what keeps that from
-being silent.
+theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info`, `cairn check`
+with or without `--target`, and the language server report it under either edition. It stands in
+for `E_STATE_DOMAIN`: until the compiler holds a table of each block's states, a property the block
+lacks or a value outside its domain is written into the structure file unchanged, and the warning
+is what keeps that from being silent.
 
 `cairn check --target` exists so a CI job can gate on the check command and still see the
 lowering-stage findings a compile would refuse on: an id the target does not declare passed
@@ -181,7 +183,8 @@ So at a target the floors refuse, the two commands name different causes: `check
 and reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing ids leave empty, while
 `compile` checks no id and reports the floor
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Leaving the
-flag off is unchanged behaviour, so no source that passes today starts failing. See
+flag off still lowers, with no target, and reports only the findings no target changes
+([§11.3](#113-error-vs-warning)). See
 [Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
@@ -249,9 +252,11 @@ declares more than one — or none at all — no theme binds to the def's own sc
 `E_UNKNOWN_ABSTRACT_TOKEN` and `W_ABSTRACT_TOKEN_DEFERRED` differ on whether anything could have
 answered. A pack was offered and does not declare the token, so the build stops with a suggestion
 towards the closest one it does declare; no pack was offered, so nothing was asked and the member
-degrades with a warning. The second is the path a library caller reaches — LSP highlighting, or a
-`cairn check` with no pack — and it is a warning for that reason: refusing there would refuse every
-source read without a pack.
+degrades with a warning. The second is the path only a library caller reaches, by lowering with no
+pack at all, and it is a warning for that reason: refusing there would refuse every source read
+without a pack. A front end with no target — the language server, or a `cairn check` with no
+`--target` — raises neither, and leaves the token to the pack of the target that builds it
+([§11.3](#113-error-vs-warning)).
 
 The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave `stair`
 or `pressure_plate` is built from its default block. A `walls` is not built and takes up no rows, so
@@ -419,9 +424,10 @@ build is unaffected.
 a member writes counts, including one a later member covers, so the limit is on the states written
 rather than the states the finished scope keeps. A vanilla registry has far fewer states, so a source
 reaches it only through block ids or state-literal properties no pinned target checks. Block ids go
-unchecked wherever lowering runs with no version pinned: in `cairn lower` and `cairn info`, in a
-`cairn compile` or `cairn check --edition E --target V` naming a version the edition does not ship,
-and in a `cairn compile` whose target the file's floors refuse
+unchecked wherever lowering runs with no version pinned: in `cairn lower`, `cairn info`, the
+language server and a `cairn check` with no `--target`, in a `cairn compile` or `cairn check
+--edition E --target V` naming a version the edition does not ship, and in a `cairn compile` whose
+target the file's floors refuse
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A state
 literal's properties go unchecked under every target, as `W_STATE_LITERAL_UNCHECKED` says
 ([Materials and targets](#materials-and-targets)), so every command that lowers can reach the limit,
@@ -649,6 +655,21 @@ that costs is that a consumer reads the message to tell them apart. It is also t
 check pass raises: parsing precedes them all, and a source that does not parse reaches none of
 them, so it is the one finding a build reports alone.
 
+A finding of block-array lowering is reported wherever a source is checked, whether a target is
+pinned or not. With no `--target` — a plain `cairn check`, and the language server, which pins
+nothing — lowering runs with no target and reports the findings no target changes, each with the
+code, span and text a pinned check gives it, weighed as if every id and token the source names were
+declared. The block an abstract token lifts to is the target's pack's to name, so the token is not
+deferred: it stands in for that block, and no verdict on the block is given — no
+`E_INCOMPATIBLE_MATERIAL` on it, no `W_PHASE_CONFLICT` with a member that paints it, no
+`W_PALETTE_TOO_LARGE` on a body whose palette holds it, and no `W_WALKWAY_BLOCKED` whose note would
+name it. A `pressure_plate` with no `mat_slot=` takes the pack's plate, so it is such a block too.
+`E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, and
+neither is `E_PARTIAL_BUILD`, which counts what a build at a target loses. `--edition` alone picks
+that edition's theme variants; with neither flag, a finding is reported only when lowering with each
+edition's variants raises it. A check with `--target` lowers once, against the target, so no
+finding is reported twice.
+
 `E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
 dropped from the build and nothing is put in its place, which is implicit dropping and not a
 partial-build degradation. The incomplete side is the source, which named no material, and not
@@ -692,10 +713,8 @@ Editing, and Multi-building](/spec/components-editing-sites/) states: `size=`, w
 reads, and `class=`, which no pass reads yet. No `theme` selector widens it, since a selector names
 a member keyword. A key outside the two is the same defect one line up from a member's, and is
 refused with the suggestion: `struct s siz=7x7` is offered `size`. The missing-size warning the
-same typo causes cannot name it, and is raised only where block-array lowering runs, which
-`cairn check` does only with both `--edition` and `--target`; without this check a plain
-`cairn check` would say nothing about the line. Where both are raised, the error is printed before
-the warning.
+same typo causes cannot name it, since it says only that the struct has no size. The error is
+printed before the warning.
 
 `W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=`
 in the vocabulary whose value the pass cannot read is dropped and a default put in its place, or,
@@ -731,9 +750,8 @@ built either way, and the refusal beside it is why; or that the member is refuse
 the default, and the refusal beside it is the one the value caused. A member dropped before its
 arguments are read — a `roof` under a raised `level` — is the exception today: its values are not
 read, so they are not reported beside the drop. Most values are read only during block-array
-lowering, so a `cairn check` with no `--edition` / `--target`, and the language server, report an
-unreadable value only for the keys the check passes read themselves
-([§11.1](#111-diagnostic-codes)).
+lowering, and an unreadable one needs no target, so a `cairn check` with no `--target` and the
+language server report it as a pinned check does.
 
 The routed-past shape is the vocabulary's second axis: closed per keyword *and* per the way the
 argument that selects the lowering rule is written. `roof slope_to=` is read by the `kind=shed`
@@ -757,9 +775,8 @@ silent drop ([§9.3.2](/spec/components-editing-sites/#932-origin-selectors)).
 Where the **selector** names no rule at all — a value the dispatch does not know, or, on an axis
 with no absent arm, nothing written — no finding is raised here: that member lowers to nothing and
 `W_DEFERRED_MEMBER` is the whole repair, so a second finding about the argument that rule would not
-have read bills one repair twice. That deferral is raised during block-array lowering, so a `cairn
-check` with no `--edition` / `--target` reports neither ([§11.1](#111-diagnostic-codes)); the case
-that is always reported is the one where the member builds. A key another key makes inert *without*
+have read bills one repair twice. That deferral needs no target either, so a `cairn check` with no
+`--target` reports it as a pinned check does. A key another key makes inert *without*
 selecting a rule is a different shape again and is not reported today: `window step=` at `repeat=1`
 is a condition on a count rather than on a rule.
 

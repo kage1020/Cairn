@@ -1,5 +1,6 @@
 //! Source text → LSP diagnostics, from the pipeline `cairn check` runs.
 
+use cairn_lang_core::block_array::findings_without_target;
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{
     Diagnostic as CoreDiagnostic, Severity, check, diagnose_parse_failure, lower, parse,
@@ -7,7 +8,8 @@ use cairn_lang_core::{
 
 use crate::line_index::LineIndex;
 
-/// The findings of `parse → lower → check` on `source`, as diagnostics in the document at `uri`.
+/// The findings of `parse → lower → check` on `source`, and of block-array lowering with no
+/// target, as diagnostics in the document at `uri`.
 #[must_use]
 pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types::Diagnostic> {
     let index = LineIndex::new(source);
@@ -21,7 +23,9 @@ pub fn compute_diagnostics(uri: &lsp_types::Uri, source: &str) -> Vec<lsp_types:
     };
     let ir = lower(&module);
     // No edition, as `cairn check` without `--edition`.
-    check(&module, &ir, None)
+    let mut findings = check(&module, &ir, None);
+    findings.extend(findings_without_target(&ir, None));
+    findings
         .iter()
         .map(|d| to_lsp_diagnostic(uri, source, &index, d))
         .collect()
@@ -80,6 +84,10 @@ fn to_lsp_diagnostic(
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+
+    use cairn_lang_core::block_array::lower_to_block_array;
+    use cairn_lang_core::{Edition, resolve};
+    use cairn_lang_formats::builtin_pack;
 
     use super::*;
     use crate::test_fixtures::{CLEAN, DUPLICATE};
@@ -191,6 +199,80 @@ mod tests {
             related[0].location.range.start.line, 3,
             "the related pointer names the struct",
         );
+    }
+
+    /// A shed roof outside the stair family, and a door whose side is a number.
+    const SHED_ON_COBBLESTONE: &str = "\
+@cairn 2026.06
+
+theme t:
+  slot wall -> @cobblestone
+  slot roof -> @cobblestone
+
+struct hut size=5x5
+  walls mat_slot=wall height=3
+  roof kind=shed slope_to=front mat_slot=roof
+  door side=3
+";
+
+    /// Each diagnostic as its code, severity and range.
+    fn located(
+        diagnostics: &[lsp_types::Diagnostic],
+    ) -> Vec<(&str, lsp_types::DiagnosticSeverity, lsp_types::Range)> {
+        diagnostics
+            .iter()
+            .map(|d| (code_of(d), d.severity.expect("severity present"), d.range))
+            .collect()
+    }
+
+    /// The range from `start` to `end`, each a `(line, character)` pair.
+    fn range(start: (u32, u32), end: (u32, u32)) -> lsp_types::Range {
+        lsp_types::Range::new(
+            lsp_types::Position::new(start.0, start.1),
+            lsp_types::Position::new(end.0, end.1),
+        )
+    }
+
+    #[test]
+    fn lowering_findings_no_target_changes_are_the_ones_a_pinned_check_reports() {
+        let source = SHED_ON_COBBLESTONE;
+        let diagnostics = compute_diagnostics(&uri(), source);
+        assert_eq!(
+            located(&diagnostics),
+            [
+                (
+                    "E_INCOMPATIBLE_MATERIAL",
+                    lsp_types::DiagnosticSeverity::ERROR,
+                    range((4, 15), (4, 27)),
+                ),
+                (
+                    "W_DEFERRED_MEMBER",
+                    lsp_types::DiagnosticSeverity::WARNING,
+                    range((9, 2), (9, 13)),
+                ),
+            ],
+        );
+
+        let module = parse(source).expect("parses");
+        let ir = lower(&module);
+        let registry = builtin_pack(Edition::Java).view(Some("1.21.4"));
+        let pinned = lower_to_block_array(&ir, &resolve(&ir, Some(Edition::Java)), Some(&registry));
+        let index = LineIndex::new(source);
+        let expected: Vec<lsp_types::Diagnostic> = check(&module, &ir, None)
+            .iter()
+            .chain(&pinned.diagnostics)
+            .map(|d| to_lsp_diagnostic(&uri(), source, &index, d))
+            .collect();
+        assert_eq!(diagnostics, expected);
+    }
+
+    #[test]
+    fn a_finding_whose_verdict_is_a_targets_pack_is_not_reported() {
+        let source = "theme t:\n  slot floor -> @totally_not_a_block\n  \
+                      slot roof -> @wall.stone.cobble\n\nstruct s size=5x5\n  \
+                      floor mat_slot=floor\n  walls mat_slot=floor height=3\n  \
+                      roof kind=gable mat_slot=roof\n";
+        assert_eq!(compute_diagnostics(&uri(), source), vec![]);
     }
 
     #[test]

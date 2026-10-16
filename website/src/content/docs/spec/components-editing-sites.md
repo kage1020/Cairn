@@ -87,17 +87,19 @@ no distance, so a `gap=` written beside it is read by nothing and reported as `W
 ([Lint §11.3](/spec/lint/#113-error-vs-warning)) — the argument is real, and which of the two the author
 meant is theirs to say.
 
-On a relative row, `gap=` takes an integer. Any other value (`gap=wide`, `gap="4"`) is an
-unreadable value: the row is placed as `gap=0` places it, and the value is reported as
-`W_IGNORED_ARGUMENT`. An origin is recorded as a 32-bit signed coordinate, so a row whose origin,
-or the far edge of whose body, works out past that range is not placed at all and is reported as
-`W_DEFERRED_MEMBER`, as is every row placed relative to it. It is refused rather than clamped to the
-edge: a clamped origin is not the one the source asks for, two rows clamped to one edge land on one
-coordinate, and a cell past the range has no coordinate at all. Every row refused for its origin or
-its far edge, including one refused because the row it is placed relative to was, still reports
-what its `def` body raises — an `E_INCOMPATIBLE_MATERIAL` or `W_NO_THEME_BOUND` is a defect in the
-`def` or the theme wherever the row lands — and an unreadable `gap=` on any row that is not placed
-is reported with a note saying so.
+On a relative row, `gap=` takes a non-negative integer, the number of cells left between the two
+bodies, so neither reaches into the other. A negative value does not parse: `gap=-3` is `E_PARSE`,
+as a `-` in any value position is. Any other value (`gap=wide`, `gap="4"`) is an unreadable value:
+the row is placed as `gap=0` places it, and the value is reported as `W_IGNORED_ARGUMENT`. An origin
+is recorded as a 32-bit signed coordinate, so a row whose origin, or the far edge of whose body,
+works out past that range is not placed at all and is reported as `W_DEFERRED_MEMBER`, as is every
+row placed relative to it. It is refused rather than clamped to the edge: a clamped origin is not
+the one the source asks for, two rows clamped to one edge land on one coordinate, and a cell past
+the range has no coordinate at all. Every row refused for its origin or its far edge, including one
+refused because the row it is placed relative to was, still reports what its `def` body raises — an
+`E_INCOMPATIBLE_MATERIAL` or `W_NO_THEME_BOUND` is a defect in the `def` or the theme wherever the
+row lands — and an unreadable `gap=` on any row that is not placed is reported with a note saying
+so.
 
 ### 9.3.3 Cross-scope references
 
@@ -226,7 +228,8 @@ cannot carry, a path material that does not resolve, a straight L that is itself
 search-area cap, or a straight L whose every cell overlaps a placement, which leaves the strip all
 air. `cairn compile` then refuses the build with `E_PARTIAL_BUILD`, as it does for a lost scope, and
 `cairn check --edition E --target V` refuses with it too ([Lint](/spec/lint/)). A `cairn check`
-without `--target` does not lower, so it never sees this loss. The loss is named
+without `--target` reports the findings behind the loss that need no target, and not the loss
+itself ([Lint §11.3](/spec/lint/#113-error-vs-warning)). The loss is named
 `site::SITE::FROM ↔ TO`, with the ports as the row wrote them. A `W_DUPLICATE_WALKWAY` row loses
 nothing, since the earlier row laid its pair, and two rows naming one pair that neither laid are one
 loss. One mistake can cost more than one loss: a `place` whose def has no `size=` is a lost scope,

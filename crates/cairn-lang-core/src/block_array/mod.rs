@@ -16,7 +16,7 @@ mod wall_column;
 use indexmap::IndexMap;
 use serde::Serialize;
 
-pub use lower::{BUILTIN_BLOCK_IDS, lower_to_block_array};
+pub use lower::{BUILTIN_BLOCK_IDS, findings_without_target, lower_to_block_array};
 pub use material::{
     BlockIdSet, IdOrigin, MaterialDeferred, TargetRegistry, UnknownId, resolve_block_state,
 };

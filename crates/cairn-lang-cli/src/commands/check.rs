@@ -1,4 +1,5 @@
-//! `cairn check`: the validation passes, and with `--target` the lowering-stage findings too.
+//! `cairn check`: the validation passes and the lowering-stage findings, the ones every target
+//! raises unless `--target` pins one.
 
 use std::path::Path;
 use std::process::ExitCode;
