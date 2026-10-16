@@ -609,6 +609,108 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a, b, c -> z) { 0- 1->1 }\n",
         Reject,
     ),
+    // A line break separates rows, and a line inside the braces carries no indentation.
+    (
+        "truth_row_per_line",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b, sig.enable -> sig.out) {\n    001 -> 0\n    011 -> 1\n    101 -> 1\n    111 -> 1\n  }\n",
+        Accept,
+    ),
+    (
+        "truth_row_per_line_crlf",
+        "struct s size=3x3\r\n  assert truth(a -> z) {\r\n    0 -> 1\r\n    1 -> 0\r\n  }\r\n  floor mat_slot=f\r\n",
+        Accept,
+    ),
+    (
+        "truth_row_per_line_lone_cr",
+        "struct s size=3x3\r  assert truth(a -> z) {\r    0 -> 1\r    1 -> 0\r  }\r  floor mat_slot=f\r",
+        Accept,
+    ),
+    (
+        "truth_rows_at_any_depth",
+        "struct s size=3x3\n  level y=1\n    assert truth(a -> z) {\n0 -> 1\n   1 -> 0\n          }\n  floor mat_slot=f\nstruct t size=3x3\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "truth_closing_brace_at_column_zero",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n}\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "truth_blank_and_comment_lines_between_rows",
+        "struct s size=3x3\n  assert truth(a -> z) {  # rows\n\n    0 -> 1  # low\n   \n# between\n    1 -> 0\n\n  }\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "truth_semicolon_ending_a_line",
+        "struct s size=3x3\n  assert truth(a -> z) { 0 -> 1;\n    1 -> 0; }\n",
+        Accept,
+    ),
+    (
+        "truth_rows_on_the_brace_lines",
+        "struct s size=3x3\n  assert truth(a -> z) { 0 -> 1\n    1 -> 0 }\n",
+        Accept,
+    ),
+    (
+        "truth_empty_across_lines",
+        "struct s size=3x3\n  assert truth(a -> z) {\n\n  }\n",
+        Accept,
+    ),
+    (
+        "truth_table_ending_the_file",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n  }",
+        Accept,
+    ),
+    (
+        "truth_row_split_after_the_arrow",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 ->\n    1\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_row_split_before_the_arrow",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0\n    -> 1\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_semicolon_opening_a_line",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n    ; 1 -> 0\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_brace_on_a_line_of_its_own",
+        "struct s size=3x3\n  assert truth(a -> z)\n  {\n    0 -> 1\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_unclosed_before_a_member",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n  floor mat_slot=f\n",
+        Reject,
+    ),
+    (
+        "truth_unclosed_at_end_of_input",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n",
+        Reject,
+    ),
+    (
+        "truth_tab_opening_a_row_line",
+        "struct s size=3x3\n  assert truth(a -> z) {\n\t0 -> 1\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_member_after_the_closing_brace",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n  } floor mat_slot=f\n",
+        Reject,
+    ),
+    // Raw text: a `{` there opens no table, and the lines below it keep their layout.
+    (
+        "cairn_brace_in_value",
+        "@cairn 2026.06 {\nstruct s size=3x3\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "requires_brace_in_value",
+        "def d size=2x2:\n  requires version>={\n  floor mat_slot=f\n",
+        Accept,
+    ),
     (
         "always_within",
         "struct s size=3x3\n  assert always(a.b -> eventually c.d within 5)\n",

@@ -195,6 +195,90 @@ fn dedent_emits_per_level_closed() {
     assert_eq!(dedents, 2);
 }
 
+#[test]
+fn a_line_inside_a_truth_table_takes_no_indent_or_dedent() {
+    let source = "struct s\n  assert truth(a -> b) {\n      0 -> 1\n 1 -> 0\n    }\n  floor x=1\n";
+    let int = |lexeme: &str| TokenKind::Int {
+        lexeme: lexeme.into(),
+    };
+    assert_eq!(
+        kinds(source),
+        vec![
+            TokenKind::Ident("struct".into()),
+            TokenKind::Ident("s".into()),
+            TokenKind::Newline,
+            TokenKind::Indent,
+            TokenKind::Ident("assert".into()),
+            TokenKind::Ident("truth".into()),
+            TokenKind::LParen,
+            TokenKind::Ident("a".into()),
+            TokenKind::Arrow,
+            TokenKind::Ident("b".into()),
+            TokenKind::RParen,
+            TokenKind::LBrace,
+            TokenKind::Newline,
+            int("0"),
+            TokenKind::Arrow,
+            int("1"),
+            TokenKind::Newline,
+            int("1"),
+            TokenKind::Arrow,
+            int("0"),
+            TokenKind::Newline,
+            TokenKind::RBrace,
+            TokenKind::Newline,
+            TokenKind::Ident("floor".into()),
+            TokenKind::Ident("x".into()),
+            TokenKind::Eq,
+            int("1"),
+            TokenKind::Newline,
+            TokenKind::Dedent,
+        ],
+    );
+}
+
+#[test]
+fn a_tab_inside_a_truth_table_is_still_rejected() {
+    let err = lex("struct s\n  assert truth(a -> b) {\n  \t0 -> 1\n  }\n").unwrap_err();
+    assert_eq!(
+        err,
+        LexError::TabIndent {
+            position: pos(3, 3)
+        }
+    );
+}
+
+/// A directive's raw value is text, so its `{` opens no table.
+#[test]
+fn a_brace_off_an_assert_line_leaves_the_layout_below_it_alone() {
+    assert_eq!(
+        kinds("@cairn 2026.06 {\nstruct s\n  floor x=1\n"),
+        vec![
+            TokenKind::At,
+            TokenKind::Ident("cairn".into()),
+            TokenKind::Int {
+                lexeme: "2026".into()
+            },
+            TokenKind::Dot,
+            TokenKind::Int {
+                lexeme: "06".into()
+            },
+            TokenKind::LBrace,
+            TokenKind::Newline,
+            TokenKind::Ident("struct".into()),
+            TokenKind::Ident("s".into()),
+            TokenKind::Newline,
+            TokenKind::Indent,
+            TokenKind::Ident("floor".into()),
+            TokenKind::Ident("x".into()),
+            TokenKind::Eq,
+            TokenKind::Int { lexeme: "1".into() },
+            TokenKind::Newline,
+            TokenKind::Dedent,
+        ],
+    );
+}
+
 /// `spec/versioning-editions` "The target is a compile-time parameter" counts `-rc1` as a version.
 #[test]
 fn a_lone_dash_lexes_as_a_token_rather_than_failing() {

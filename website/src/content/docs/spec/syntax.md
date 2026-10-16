@@ -5,7 +5,8 @@ title: "5. Syntax"
 ## 5.1 Lexical
 
 One line is one command, and `#` begins a line comment. The line starts with a command keyword;
-**every remaining argument MUST be `key=value`.**
+**every remaining argument MUST be `key=value`.** The rows of a truth table are the one thing that
+may run onto the lines below its command ([Literals and separators](#511-literals-and-separators)).
 
 ```
 window side=front mat_slot=glass offset=2 y=2 size=2x2 sym=true   # OK
@@ -91,8 +92,28 @@ The table around those rows is read the same way:
 The last two are warnings because the rows that *are* present still assert what they say. A
 four-input table is sixteen rows, and an author part way through is not blocked.
 
+Between the braces a line break may come before or after any row, after a row's `;`, and before the
+`}`, so a table can sit on its `assert` line or give each row a line of its own:
+
+```
+assert truth(sig.a, sig.b, sig.enable -> sig.out) {
+  001 -> 0
+  011 -> 1
+  101 -> 1
+  111 -> 1
+}
+```
+
+Inside the braces a line carries no indentation: the rows and the closing `}` may sit at any depth,
+and blank and comment lines between them are skipped. A row is still one line, so a break between
+its pattern, its `->` and its output is refused. The `{` stays on the `assert` line, and a `;` ends
+the row in front of it on that row's line, so no line may open with one. A table whose `}` is
+missing is refused at whatever follows its last row, such as the next command, or at the end of
+that row's line when nothing does.
+
 Indentation is two spaces per level and opens one level at a time. A width that is not a multiple of
-two and a jump of more than one level are different mistakes and are reported as such.
+two and a jump of more than one level are different mistakes and are reported as such. Neither can
+be made inside a truth table's braces, whose lines carry no indentation.
 
 Spaces before a line break are not part of the line, so a row may end in them, and a line holding
 nothing but spaces is a blank line. A blank line's leading spaces are counted like any other line's
