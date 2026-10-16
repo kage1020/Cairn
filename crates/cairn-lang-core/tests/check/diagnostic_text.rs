@@ -266,12 +266,6 @@ fn noisy_sources() -> Vec<String> {
         format!(
             "{THEME}{HUT}site s:\n  place id=a use=hut theme=t at=origin\n  walls mat_slot=wall height=3\n    floor mat_slot=floor\n    door id=d side=front at=center\n"
         ),
-        format!(
-            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  level y=1\n    circuit region=a void=1\n"
-        ),
-        format!(
-            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  circuit region=a void=1\n  level y=1\n    circuit region=b void=1\n"
-        ),
         // A misplaced row carrying a signal, whose message softens its claim.
         format!(
             "{THEME}{HUT}site s:
@@ -306,6 +300,7 @@ fn noisy_sources() -> Vec<String> {
             .to_owned(),
     ];
     sources.extend(unreadable_value_sources());
+    sources.extend(circuit_under_level_sources());
     sources.extend(header_sources());
     sources.extend(truth_table_sources());
     sources
@@ -326,6 +321,18 @@ fn truth_table_sources() -> Vec<String> {
         // Two repeated signals: `sig.a` listed in full, `sig.b` past the cap with a count.
         format!(
             "{THEME}struct s size=3x3\n  assert truth(sig.a, sig.a, sig.b, sig.b, sig.b, sig.b, sig.b -> sig.o) {{ }}\n"
+        ),
+    ]
+}
+
+/// The sources for a `circuit` line under a `level`, alone and beside one that is read.
+fn circuit_under_level_sources() -> Vec<String> {
+    vec![
+        format!(
+            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  level y=1\n    circuit region=a void=1\n"
+        ),
+        format!(
+            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  circuit region=a void=1\n  level y=1\n    circuit region=b void=1\n"
         ),
     ]
 }
