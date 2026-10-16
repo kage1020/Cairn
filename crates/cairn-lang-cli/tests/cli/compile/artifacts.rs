@@ -1134,6 +1134,11 @@ fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
 
 /// `place id=ID` refused on `shown` by `check`, and by `compile`, which writes nothing.
 fn assert_place_id_refused(id: &str, shown: &str) {
+    assert_place_id_refused_because(id, &format!("it contains `{shown}`"));
+}
+
+/// `place id=ID` refused by `check` for `reason`, and by `compile`, which writes nothing.
+fn assert_place_id_refused_because(id: &str, reason: &str) {
     let tmp = TempDir::new().expect("tempdir");
     let out = tmp.path().join("out");
     let src = write_source(
@@ -1141,7 +1146,9 @@ fn assert_place_id_refused(id: &str, shown: &str) {
         "refused.crn",
         &site_with_rows(&[&format!("place id=\"{id}\" use=hut theme=t at=origin")]),
     );
-    let refusal = format!("is not a usable id: it contains `{shown}`");
+    let refusal = format!(
+        "error[E_INVALID_PLACE_ID]: `place id={id}` in site `s` is not a usable id: {reason}\n"
+    );
 
     let checked = cairn("check", &[src.to_str().unwrap()]);
     let check_err = String::from_utf8_lossy(&checked.stderr);
@@ -1149,7 +1156,7 @@ fn assert_place_id_refused(id: &str, shown: &str) {
     assert_stream(&check_err, &[(10, 3, "error", "E_INVALID_PLACE_ID")]);
     assert!(
         check_err.contains(&refusal),
-        "the id must be refused on `{shown}`, got: {check_err}",
+        "the id must be refused because {reason}, got: {check_err}",
     );
 
     let compiled = cairn(
@@ -1218,6 +1225,91 @@ fn a_place_id_carrying_a_no_break_space_is_refused_and_escaped() {
 #[test]
 fn a_place_id_carrying_an_ideographic_space_is_refused_and_escaped() {
     assert_place_id_refused("a\u{3000}b", "\\u{3000}");
+}
+
+// Device names Windows reserves in every directory, in any letter case, are refused on every host.
+
+const A_DEVICE_NAME: &str = "it is a device name Windows reserves";
+
+#[test]
+fn a_place_id_named_con_is_refused_on_every_host() {
+    assert_place_id_refused_because("con", A_DEVICE_NAME);
+}
+
+#[test]
+fn a_place_id_named_prn_is_refused_on_every_host() {
+    assert_place_id_refused_because("Prn", A_DEVICE_NAME);
+}
+
+#[test]
+fn a_place_id_named_aux_is_refused_on_every_host() {
+    assert_place_id_refused_because("AUX", A_DEVICE_NAME);
+}
+
+#[test]
+fn a_place_id_named_nul_is_refused_on_every_host() {
+    assert_place_id_refused_because("nUl", A_DEVICE_NAME);
+}
+
+#[test]
+fn a_place_id_named_com_and_a_digit_is_refused_on_every_host() {
+    assert_place_id_refused_because("com7", A_DEVICE_NAME);
+}
+
+#[test]
+fn a_place_id_named_lpt_and_a_digit_is_refused_on_every_host() {
+    assert_place_id_refused_because("LPT0", A_DEVICE_NAME);
+}
+
+#[test]
+fn a_place_id_named_com_and_a_superscript_digit_is_refused_on_every_host() {
+    assert_place_id_refused_because("COM²", A_DEVICE_NAME);
+}
+
+#[test]
+fn a_place_id_named_lpt_and_a_superscript_digit_is_refused_on_every_host() {
+    assert_place_id_refused_because("lpt³", A_DEVICE_NAME);
+}
+
+#[test]
+fn a_struct_named_after_a_windows_device_is_refused_on_every_host() {
+    let tmp = TempDir::new().expect("tempdir");
+    let out = tmp.path().join("out");
+    let src = write_source(
+        tmp.path(),
+        "device.crn",
+        "@cairn 2026.06\n\ntheme t:\n  slot floor -> @oak_planks\n\n\
+         struct Nul size=3x3\n  floor mat_slot=floor\n",
+    );
+
+    let checked = cairn("check", &[src.to_str().unwrap()]);
+    let check_err = String::from_utf8_lossy(&checked.stderr);
+    assert_eq!(checked.status.code(), Some(1), "stderr={check_err}");
+    assert_stream(&check_err, &[(6, 8, "error", "E_INVALID_STRUCT_NAME")]);
+    assert!(
+        check_err.contains(
+            "error[E_INVALID_STRUCT_NAME]: `struct Nul` is not a usable name: it is a device \
+             name Windows reserves\n"
+        ),
+        "stderr={check_err}",
+    );
+
+    let compiled = cairn(
+        "compile",
+        &[
+            src.to_str().unwrap(),
+            "--edition",
+            "java",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    let compile_err = String::from_utf8_lossy(&compiled.stderr);
+    assert_eq!(compiled.status.code(), Some(1), "stderr={compile_err}");
+    assert!(
+        !out.exists(),
+        "compile must write nothing, got: {compile_err}"
+    );
 }
 
 #[test]

@@ -155,6 +155,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_DUPLICATE_SIZE",
         "E_INCOMPLETE_PLACE",
         "E_INVALID_PLACE_ID",
+        "E_INVALID_STRUCT_NAME",
         "E_MISPLACED_MEMBER",
         "E_THEME_SELECTOR_UNMATCHED",
         "E_TRUTH_TABLE_CONFLICT",
@@ -167,7 +168,9 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_UNRESOLVED_PLACE_REF",
         "E_UNRESOLVED_SLOT",
         "E_UNSUPPORTED_NESTING",
+        "W_DEFERRED_CONNECT",
         "W_DEFERRED_MEMBER",
+        "W_DEFERRED_PLACE",
         "W_IGNORED_ARGUMENT",
         "W_STRUCTURE_TOO_LARGE",
         "W_STRUCT_NO_SIZE",
@@ -213,6 +216,12 @@ fn noisy_sources() -> Vec<String> {
         format!("{THEME}{HUT}site s:\n  place id=\"home.1\" use=hut theme=t at=origin\n"),
         format!("{THEME}{HUT}site s:\n  place id=a use=nosuchdef theme=t at=origin\n"),
         format!("{THEME}{HUT}"),
+        // Names Windows reserves for a device, and the rows that name a place refused for one.
+        format!(
+            "{THEME}{HUT}struct con size=3x3\n  floor mat_slot=floor\n\nsite s:\n  \
+             place id=a use=hut theme=t at=origin\n  place id=nul use=hut theme=t east_of=a gap=4\n  \
+             place id=b use=hut theme=t north_of=nul gap=4\n  connect a.entry to nul.entry path=@path\n"
+        ),
         // Walkway refusals.
         format!(
             "{THEME}{HUT}site duo:\n  place id=a use=hut theme=t at=origin\n\
