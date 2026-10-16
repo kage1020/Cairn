@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -76,10 +77,12 @@ class Repo:
         self.git("add", "-A")
         self.git("commit", "-q", "--allow-empty", "-m", message)
 
-    def run(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def run(self, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
+        # Windows needs `SYSTEMROOT` to start a process, and finds `git` on the host's own `PATH`.
+        host = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT") if key in os.environ}
         return subprocess.run([sys.executable, ".github/scripts/changelog.py", *args],
                               cwd=self.dir, capture_output=True, text=True, encoding="utf-8",
-                              env={"PATH": "/usr/bin:/bin", "GITHUB_ACTIONS": "false"})
+                              env={**host, "GITHUB_ACTIONS": "false", **env})
 
     def pr(self, title: str, head: str = "topic", base: str = "canary",
            author: str = "someone") -> subprocess.CompletedProcess[str]:
@@ -331,6 +334,28 @@ class AssembleTest(Case):
         self.repo.write("changelog.d/a.fixed.md", GOOD)
         self.assertPasses(self.repo.run("assemble", "--version", "2026.11.0"))
         self.assertNotIn(b"\r\n", (self.repo.dir / "CHANGELOG.md").read_bytes())
+
+
+class HostEncodingTest(Case):
+    """A host whose locale encoding is not UTF-8, as on Japanese Windows (CP932)."""
+
+    def test_a_heading_cp932_cannot_encode_is_printed_as_utf8(self) -> None:
+        self.repo.write("CHANGELOG.md", CHANGELOG.replace("## 2026.10.0", RELEASE_SECTION
+                                                          + "## 2026.10.0"))
+        self.repo.write("changelog.d/a.fixed.md", GOOD)
+        result = self.repo.run("assemble", "--version", "2026.11.0", PYTHONIOENCODING="cp932")
+        self.assertPasses(result)
+        self.assertEqual(result.stdout, "folded 1 fragment(s) into ## 2026.11.0 — 2026-11-01; "
+                                        "the fragment files are kept (pass --delete)\n")
+
+    def test_a_path_cp932_spells_differently_is_printed_as_utf8(self) -> None:
+        self.repo.write("changelog.d/説明.fixed.md", GOOD)
+        result = self.repo.run("check", PYTHONIOENCODING="cp932")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stderr, f"{Path('changelog.d/説明.fixed.md')}: a fragment is named "
+                         "`<slug>.<kind>.md`: the slug starts with a lowercase letter or digit and "
+                         "goes on in those and `-`, the kind is one of breaking, deprecations, "
+                         "added, changed, fixed, performance, build\n")
 
 
 class VerifyReleaseTest(Case):
