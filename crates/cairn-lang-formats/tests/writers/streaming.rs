@@ -241,37 +241,127 @@ fn a_voxel_count_past_usize_is_refused() {
     );
 }
 
-#[test]
-fn a_grid_shorter_than_its_dims_is_refused_before_a_byte_is_written() {
-    let array = grid(Dims { x: 2, y: 2, z: 2 }, 3);
-    let java = resolve_java_target("latest").expect("latest");
-    let err = prepare_structure(&array, &java).expect_err("java prepare");
-    assert!(
-        matches!(
-            err,
-            JavaStructureError::VoxelCountMismatch {
-                volume: 8,
-                voxels: 3,
-            }
-        ),
-        "java: got {err:?}",
-    );
-    let mut written = Vec::new();
-    write_structure_gzip(&mut written, &array, &java).expect_err("java one-step write");
-    assert!(written.is_empty(), "java wrote {} bytes", written.len());
+/// A refusal of a grid that disagrees with its dims, as both backends' errors carry it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GridRefusal {
+    Mismatch { volume: usize, voxels: usize },
+    Overflow { x: u32, y: u32, z: u32 },
+}
 
-    let bedrock = resolve_bedrock_target("latest").expect("latest");
-    let err = prepare_mcstructure(&array, &bedrock).expect_err("bedrock prepare");
-    assert!(
-        matches!(
-            err,
-            BedrockStructureError::VoxelCountMismatch {
+fn java_grid_refusal(err: &JavaStructureError) -> Option<GridRefusal> {
+    match *err {
+        JavaStructureError::VoxelCountMismatch { volume, voxels } => {
+            Some(GridRefusal::Mismatch { volume, voxels })
+        }
+        JavaStructureError::VolumeOverflow { x, y, z } => Some(GridRefusal::Overflow { x, y, z }),
+        _ => None,
+    }
+}
+
+fn bedrock_grid_refusal(err: &BedrockStructureError) -> Option<GridRefusal> {
+    match *err {
+        BedrockStructureError::VoxelCountMismatch { volume, voxels } => {
+            Some(GridRefusal::Mismatch { volume, voxels })
+        }
+        BedrockStructureError::VolumeOverflow { x, y, z } => {
+            Some(GridRefusal::Overflow { x, y, z })
+        }
+        _ => None,
+    }
+}
+
+#[test]
+fn a_grid_that_disagrees_with_its_dims_is_refused_by_every_builder_before_a_byte_is_written() {
+    let small = Dims { x: 2, y: 2, z: 2 };
+    // Each axis fits an `i32`, and the product overflows `usize`.
+    let side = 2_000_000_000;
+    let cases = [
+        (
+            "short",
+            grid(small, 3),
+            GridRefusal::Mismatch {
                 volume: 8,
                 voxels: 3,
-            }
+            },
         ),
-        "bedrock: got {err:?}",
-    );
+        (
+            "long",
+            grid(small, 100),
+            GridRefusal::Mismatch {
+                volume: 8,
+                voxels: 100,
+            },
+        ),
+        (
+            "overflowing",
+            grid(
+                Dims {
+                    x: side,
+                    y: side,
+                    z: side,
+                },
+                0,
+            ),
+            GridRefusal::Overflow {
+                x: side,
+                y: side,
+                z: side,
+            },
+        ),
+    ];
+    let java = resolve_java_target("latest").expect("latest");
+    let bedrock = resolve_bedrock_target("latest").expect("latest");
+    for (label, array, expected) in cases {
+        let java_refusals = [
+            (
+                "prepare_structure",
+                prepare_structure(&array, &java).map(drop),
+            ),
+            (
+                "build_structure_tag",
+                build_structure_tag(&array, &java).map(drop),
+            ),
+        ];
+        for (builder, result) in java_refusals {
+            let err = result.expect_err(builder);
+            assert_eq!(
+                java_grid_refusal(&err),
+                Some(expected),
+                "{label} grid, {builder}: got {err:?}",
+            );
+        }
+        let mut written = Vec::new();
+        let err = write_structure_gzip(&mut written, &array, &java).expect_err("one-step write");
+        assert_eq!(
+            java_grid_refusal(&err),
+            Some(expected),
+            "{label} grid, write_structure_gzip: got {err:?}",
+        );
+        assert!(
+            written.is_empty(),
+            "{label} grid: wrote {} bytes",
+            written.len()
+        );
+
+        let bedrock_refusals = [
+            (
+                "prepare_mcstructure",
+                prepare_mcstructure(&array, &bedrock).map(drop),
+            ),
+            (
+                "build_mcstructure_tag",
+                build_mcstructure_tag(&array, &bedrock).map(drop),
+            ),
+        ];
+        for (builder, result) in bedrock_refusals {
+            let err = result.expect_err(builder);
+            assert_eq!(
+                bedrock_grid_refusal(&err),
+                Some(expected),
+                "{label} grid, {builder}: got {err:?}",
+            );
+        }
+    }
 }
 
 #[test]
