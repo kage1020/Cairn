@@ -28,12 +28,13 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 
 use crate::diagnostic::{Diagnostic, sort_by_position};
+use crate::edition::Edition;
 use crate::ids::{PlaceId, SiteName, WalkwayScopeKey};
 use crate::intent::{DefIr, IntentModule, MemberRole, SiteIr, StructIr};
-use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
+use crate::resolve::{Resolution, ScopeResolution, place_scope_key, resolve};
 
 use super::args::diag_deferred_member_reason;
-use super::material::TargetRegistry;
+use super::material::{NoTarget, TargetRegistry};
 use super::roof::{FLAT_BASE_ID, STAIR_BASE_ID};
 use super::{BlockArray, BlockArrayIr, BlockState, PALETTE_CAPACITY, Placement, Walkway};
 
@@ -58,6 +59,33 @@ pub fn lower_to_block_array(
     registry: Option<&dyn TargetRegistry>,
 ) -> BlockArrayIr {
     lower_to_block_array_within(intent, resolution, registry, PALETTE_CAPACITY)
+}
+
+/// The findings lowering `intent` raises at every target of `edition`, or of both editions when
+/// it is `None` (`spec/lint` "Error vs warning").
+#[must_use]
+pub fn findings_without_target(intent: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
+    let editions = edition
+        .as_ref()
+        .map_or(&[Edition::Java, Edition::Bedrock][..], std::slice::from_ref);
+    let mut resolutions: Vec<Resolution> = Vec::with_capacity(editions.len());
+    for edition in editions {
+        let resolution = resolve(intent, Some(*edition));
+        if !resolutions.contains(&resolution) {
+            resolutions.push(resolution);
+        }
+    }
+    // Each edition binds its own theme variants, so a finding one of them changes is dropped.
+    let mut lowered = resolutions.iter().map(|resolution| {
+        lower_to_block_array_within(intent, resolution, Some(&NoTarget), PALETTE_CAPACITY)
+            .diagnostics
+    });
+    let first = lowered.next().unwrap_or_default();
+    let rest: Vec<HashSet<Diagnostic>> = lowered.map(|found| found.into_iter().collect()).collect();
+    first
+        .into_iter()
+        .filter(|finding| rest.iter().all(|found| found.contains(finding)))
+        .collect()
 }
 
 /// [`lower_to_block_array`] with each body's palette capped at `palette_capacity` entries.
@@ -251,7 +279,7 @@ fn lower_site<'a>(
             Ok(origin) => origin,
             Err(refusal) => {
                 diagnostics.push(diag_deferred_member_reason(member, &refusal.deferral()));
-                report_unread_gap(gap_unread, GapOutcome::OutOfRange, diagnostics);
+                report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
                 continue;
             }
         };

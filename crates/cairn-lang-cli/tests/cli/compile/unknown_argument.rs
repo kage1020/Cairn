@@ -17,7 +17,14 @@ fn check_refuses_a_source_carrying_a_key_nothing_reads() {
     let out = cairn("check", &[src.to_str().unwrap()]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
-    assert_stream(&stderr, &[(4, 42, "error", "E_UNKNOWN_ARGUMENT")]);
+    assert_stream(
+        &stderr,
+        &[
+            (4, 42, "error", "E_UNKNOWN_ARGUMENT"),
+            (3, 1, "warning", "W_NO_THEME_BOUND"),
+            (4, 3, "warning", "W_DEFERRED_MEMBER"),
+        ],
+    );
     assert!(stderr.contains("did you mean `height`?"), "got: {stderr}");
 }
 
@@ -44,15 +51,20 @@ fn compile_reports_the_misspelling_before_the_absence_it_causes() {
 }
 
 #[test]
-fn check_without_a_target_reports_a_header_misspelling_alone() {
-    // A plain `check` lowers nothing, so the missing-size warning is not raised.
+fn check_without_a_target_reports_a_header_misspelling_before_the_missing_size_it_causes() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src = write_source(tmp.path(), "typo.crn", HEADER_TYPO);
     let out = cairn("check", &[src.to_str().unwrap()]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "stderr={stderr}");
     assert!(stderr.contains("did you mean `size`?"), "got: {stderr}");
-    assert_stream(&stderr, &[(3, 14, "error", "E_UNKNOWN_ARGUMENT")]);
+    assert_stream(
+        &stderr,
+        &[
+            (3, 14, "error", "E_UNKNOWN_ARGUMENT"),
+            (3, 1, "warning", "W_STRUCT_NO_SIZE"),
+        ],
+    );
 }
 
 #[test]

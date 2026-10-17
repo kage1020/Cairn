@@ -376,6 +376,23 @@ fn a_place_whose_def_paints_more_states_than_its_palette_holds_is_refused() {
 }
 
 #[test]
+fn a_palette_holding_a_stand_in_is_not_refused_without_a_target() {
+    let without_target = |source: &str| {
+        let ir = lower(&parse(source).expect("parse"));
+        let out = lower_to_block_array_within(&ir, &resolve(&ir, None), Some(&NoTarget), 4);
+        out.diagnostics
+            .iter()
+            .map(|d| d.code.as_str())
+            .collect::<Vec<_>>()
+    };
+    let canonical = overwriting_walls(4);
+    assert_eq!(without_target(&canonical), ["W_PALETTE_TOO_LARGE"]);
+    // The pack may lift the token to one of the other three blocks.
+    let stand_in = canonical.replacen("@b0", "@wall.stone.cobble", 1);
+    assert_eq!(without_target(&stand_in), Vec::<&str>::new());
+}
+
+#[test]
 fn a_scope_palette_looks_nothing_up_once_it_has_overflowed() {
     let mut palette = ScopePalette::with_capacity(2);
     let kept = BlockState::bare("test:kept");

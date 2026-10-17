@@ -124,9 +124,9 @@ writing anything. A `compile` whose target the file's floors refuse pins none: i
 is refused on the floor instead ([§10.4](#the-declared-floor-is-enforced)), while `check --target`
 is not held to the floors and pins the target regardless. `cairn info` and `cairn lower` do lower,
 but pin no version, since `info` reports across the whole range by design. They skip the comparison
-rather than pick a version on the author's behalf. A `cairn check` with no `--target` does not run
-block-array lowering at all, so no lowering-stage code reaches it, `E_UNKNOWN_ABSTRACT_TOKEN`
-included.
+rather than pick a version on the author's behalf. A `cairn check` with no `--target` lowers with
+no target at all, which pins no version and offers no pack, so neither this check nor
+`E_UNKNOWN_ABSTRACT_TOKEN` reaches it ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 Checking against *every* version the edition ships and refusing only the ids valid in none of them
 would need no flag, and would answer a different question: `stone_bricks` is valid somewhere on

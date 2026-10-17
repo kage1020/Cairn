@@ -14,8 +14,11 @@ struct s size=4x4 size=5x5
   door id=front
   door id=front
 ";
-/// A document `check` has nothing to say about.
+/// A document neither `check` nor lowering has anything to say about.
 const CLEAN: &str = "\
+theme t:
+  slot wall -> @stone
+
 struct s size=2x2
   floor mat_slot=wall
   walls height=4 mat_slot=wall

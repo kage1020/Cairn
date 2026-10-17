@@ -4,7 +4,7 @@ Language Server Protocol implementation for Cairn editors. It puts the parser an
 
 ## Status
 
-The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — a subset of what `cairn check` reports: the same `parse → lower → check` passes, without the `@intended_targets` findings the CLI merges in — on every `didOpen`/`didChange`, clearing them on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Hover and code actions are not yet wired.
+The `cairn-lsp` binary speaks standard LSP over stdio: it negotiates full-content document sync at `initialize`, pushes `textDocument/publishDiagnostics` — what a `cairn check` with no `--edition` reports: the same `parse → lower → check` passes and the lowering-stage findings every target raises, without the `@intended_targets` findings the CLI merges in — on every `didOpen`/`didChange`, clearing them on `didClose`, and answers `textDocument/completion` from the closed vocabularies. Hover and code actions are not yet wired.
 
 ## Shipped capabilities
 

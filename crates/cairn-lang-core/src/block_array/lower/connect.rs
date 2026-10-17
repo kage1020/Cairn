@@ -11,7 +11,9 @@ use crate::intent::DefIr;
 use crate::prose::and_list;
 use crate::resolve::{Resolution, place_scope_key};
 
-use crate::block_array::material::{MaterialDeferred, TargetRegistry, resolve_block_state};
+use crate::block_array::material::{
+    MaterialDeferred, TargetRegistry, is_stand_in, resolve_block_state,
+};
 use crate::block_array::ports::port_world_position;
 use crate::block_array::walkway::{
     BlockedIndex, ROUTE_AREA_CAP, RoutePathError, SearchRect, WalkwayLayout, build_walkway_array,
@@ -105,8 +107,8 @@ pub(super) fn lower_connects(
                 "walkway `{scope_key}` laid a routed path with {skipped} collisions",
             );
         }
-        if skipped > 0 {
-            let note = walkway_blocked_note(
+        if skipped > 0
+            && let Some(note) = walkway_blocked_note(
                 connect,
                 route_failure,
                 &BlockedEndpoints {
@@ -118,7 +120,8 @@ pub(super) fn lower_connects(
                     placed,
                     floor,
                 },
-            );
+            )
+        {
             diagnostics.push(diag_walkway_blocked(connect, skipped, note));
         }
         let footprint = walkway_footprint(array.dims);
@@ -442,24 +445,25 @@ struct SiteFloor<'a> {
     floor: &'a FloorPlan,
 }
 
-/// Note text for a `W_WALKWAY_BLOCKED` row, matched to why the router could not detour.
+/// Note text for a `W_WALKWAY_BLOCKED` row, matched to why the router could not detour, or
+/// `None` when it would name a stand-in, a block only the target's pack can name.
 fn walkway_blocked_note(
     connect: &crate::resolve::ValidatedConnect,
     route_failure: Option<RoutePathError>,
     ends: &BlockedEndpoints<'_>,
     site: &SiteFloor<'_>,
-) -> String {
-    match route_failure {
+) -> Option<String> {
+    let note = match route_failure {
         Some(RoutePathError::EndpointBlocked {
             from_blocked,
             to_blocked,
         }) => {
             let mut clauses = Vec::new();
             if from_blocked {
-                clauses.push(buried_port_clause(&connect.from, ends.from, connect, site));
+                clauses.push(buried_port_clause(&connect.from, ends.from, connect, site)?);
             }
             if to_blocked {
-                clauses.push(buried_port_clause(&connect.to, ends.to, connect, site));
+                clauses.push(buried_port_clause(&connect.to, ends.to, connect, site)?);
             }
             clauses.join("; ")
         }
@@ -477,7 +481,8 @@ fn walkway_blocked_note(
              the walkway can round the obstacle"
                 .to_owned()
         }
-    }
+    };
+    Some(note)
 }
 
 /// The note for a router whose [`SearchRect`] passed the area cap, naming what stretched it.
@@ -565,13 +570,14 @@ fn placement_label(placement: &Placement, connect: &crate::resolve::ValidatedCon
     }
 }
 
-/// One clause of a buried-endpoint note: what covers the port cell, and the remedy for each.
+/// One clause of a buried-endpoint note: what covers the port cell, and the remedy for each; `None`
+/// when the block on the cell is a stand-in.
 fn buried_port_clause(
     port: &crate::resolve::PortRef,
     (cell, own_key): ((i32, i32, i32), &str),
     connect: &crate::resolve::ValidatedConnect,
     site: &SiteFloor<'_>,
-) -> String {
+) -> Option<String> {
     let mut own_block: Option<Option<&str>> = None;
     let mut own_label = None;
     let mut others: Vec<String> = Vec::new();
@@ -592,6 +598,9 @@ fn buried_port_clause(
                     false,
                     "voxel {owner:?} of `{key}` names no entry of its palette",
                 );
+            }
+            if block.is_some_and(is_stand_in) {
+                return None;
             }
             own_block = Some(block.map(|state| state.id.as_str()));
             own_label = Some(placement_label(&body.placement, connect));
@@ -614,7 +623,7 @@ fn buried_port_clause(
             and_list(&others).unwrap_or_default()
         )
     });
-    match (own, others) {
+    let clause = match (own, others) {
         (Some(own), None) => {
             format!("port `{port}` sits on {own}; move that block or the door/window")
         }
@@ -637,7 +646,8 @@ fn buried_port_clause(
                  door/window to an unobstructed wall or pull the placements apart"
             )
         }
-    }
+    };
+    Some(clause)
 }
 
 fn diag_walkway_invalid_ident(
