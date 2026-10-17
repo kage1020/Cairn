@@ -206,6 +206,92 @@ fn a_floor_this_table_cannot_place_refuses_no_intended_target() {
     assert!(codes("@requires version>=1.21.40\n@intended_targets [\"1.21\"]\n").is_empty());
 }
 
+/// Bedrock's release table, cut to the rows these fixtures name, with the built-in pack's keys.
+fn bedrock_order() -> VersionOrder {
+    VersionOrder::new([
+        ("1.21.0".to_owned(), 18_153_475),
+        ("1.21.40".to_owned(), 18_163_713),
+        ("1.21.50".to_owned(), 18_166_272),
+        ("1.21.60".to_owned(), 18_168_865),
+    ])
+}
+
+/// The three versions the built-in Bedrock pack ships block data for.
+fn bedrock_targetable() -> Vec<String> {
+    ["1.21.0", "1.21.40", "1.21.60"]
+        .iter()
+        .map(|v| (*v).to_owned())
+        .collect()
+}
+
+/// `version>=1.21.4` falls between two Bedrock rows, so its repair is on its own line.
+#[test]
+fn a_floor_this_table_cannot_place_takes_no_version_off_the_offered_list() {
+    for (intended, code, primary) in [
+        (
+            "[\"1.21.40\"]",
+            "E_INTENDED_TARGET_CAP",
+            "`@intended_targets` names no bedrock version this file can be built for: 1.21.40 is \
+             below a version floor the file declares",
+        ),
+        (
+            "[\"1.21.40\",\"1.21.60\"]",
+            "W_INTENDED_TARGET_CAP",
+            "`@intended_targets` names 1.21.40, below a version floor the file declares, so no \
+             bedrock build can be made for it",
+        ),
+    ] {
+        let source = format!(
+            "@requires version>=1.21.4\n@requires version>=1.21.50\n\
+             @intended_targets {intended}\n{BUILD}"
+        );
+        let module = parse(&source).expect("parse");
+        let found = weigh_intended_targets(
+            &module,
+            Edition::Bedrock,
+            &bedrock_order(),
+            &bedrock_targetable(),
+        );
+        let rendered: Vec<_> = found
+            .iter()
+            .map(|d| {
+                let notes: Vec<_> = d
+                    .notes
+                    .iter()
+                    .map(|n| (n.span.clone().map(|s| &source[s]), n.message.as_str()))
+                    .collect();
+                (
+                    d.code.as_str(),
+                    &source[d.span.clone()],
+                    d.primary.as_str(),
+                    notes,
+                )
+            })
+            .collect();
+        let header = format!("@intended_targets {intended}");
+        assert_eq!(
+            rendered,
+            [(
+                code,
+                header.as_str(),
+                primary,
+                vec![
+                    (
+                        Some("@requires version>=1.21.50"),
+                        "1.21.40 is below `version>=1.21.50`, which this file declares",
+                    ),
+                    (None, "valid bedrock targets: 1.21.60"),
+                    (
+                        None,
+                        "fix: name a version at or above the floor in `@intended_targets`, or \
+                         lower the `@requires` floor",
+                    ),
+                ],
+            )],
+        );
+    }
+}
+
 #[test]
 fn a_floor_scoped_to_the_other_edition_is_inert() {
     assert!(
