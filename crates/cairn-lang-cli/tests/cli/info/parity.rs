@@ -209,7 +209,7 @@ fn info_degraded_count_matches_compile_intent_degraded_warnings() {
 }
 
 #[test]
-fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
+fn each_dropped_intent_gets_a_warning_naming_the_entry_info_names() {
     // `roof-hip`'s four degraded entries are four states of one id.
     let axes = info_json("roof-hip.crn", "bedrock");
     let entries = portability_entry(&axes, "bedrock")["degraded_entries"]
@@ -239,8 +239,8 @@ fn each_degraded_entry_gets_its_own_warning_naming_the_entry_info_names() {
     assert_eq!(
         warnings[0],
         "warning[W_INTENT_DEGRADED]: struct::roof_hip: \
-         minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]: shape=outer_left \
-         has no Bedrock state; Bedrock stairs render straight, so corners show visual gaps",
+         minecraft:spruce_stairs[facing=north,half=bottom,shape=outer_left]: Bedrock has no \
+         `shape` state; its stairs render straight, so corners show visual gaps",
     );
 }
 
@@ -1266,6 +1266,27 @@ fn the_degraded_notes_and_the_build_share_one_wording() {
             }),
         ),
         "got: {stderr}",
+    );
+    let warnings = degraded_warnings("roof-hip.crn");
+    let mut from_build: Vec<(&str, Vec<&str>)> = Vec::new();
+    for warning in &warnings {
+        let (entry, detail) = warning
+            .strip_prefix("warning[W_INTENT_DEGRADED]: struct::roof_hip: ")
+            .and_then(|rest| rest.split_once(": "))
+            .unwrap_or_else(|| panic!("a warning names its entry after the scope: {warning}"));
+        // A warning per dropped intent, so an entry that drops several is named on a run of lines.
+        match from_build.last_mut() {
+            Some((named, details)) if *named == entry => details.push(detail),
+            _ => from_build.push((entry, vec![detail])),
+        }
+    }
+    let from_build: Vec<String> = from_build
+        .iter()
+        .map(|(entry, details)| format!("  note: `{entry}` — {}", details.join("; ")))
+        .collect();
+    assert_eq!(
+        named, from_build,
+        "info's notes against the build's warnings"
     );
     assert!(
         !stdout.contains("spruce_stairs"),

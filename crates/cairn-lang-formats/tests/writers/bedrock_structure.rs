@@ -1,17 +1,17 @@
 //! The Bedrock `.mcstructure` tag tree and bytes, against wiki.bedrock.dev's "mcstructure" page.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
-use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_formats::bedrock_state::BedrockStateError;
 use cairn_lang_formats::bedrock_structure::{
-    BedrockStructureError, ParityNote, build_mcstructure_tag, prepare_mcstructure,
-    write_mcstructure,
+    BedrockStructureError, build_mcstructure_tag, prepare_mcstructure, write_mcstructure,
 };
 use cairn_lang_formats::data_version::{BedrockTarget, resolve_bedrock_target};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_nbt::tag::{Compound, Tag};
 
-use crate::common::{block_palette, default_palette, structure_compound};
+use crate::common::{
+    block_palette, default_palette, dropped_shape, note_fields, structure_compound,
+};
 
 fn target_1_21_60() -> BedrockTarget {
     resolve_bedrock_target("1.21.60").expect("known target")
@@ -20,20 +20,6 @@ fn target_1_21_60() -> BedrockTarget {
 /// The packed palette `version`: a byte each of major, minor, patch and revision.
 fn block_version(major: i32, minor: i32, patch: i32, revision: i32) -> i32 {
     (major << 24) | (minor << 16) | (patch << 8) | revision
-}
-
-/// Each note's `(id, states, dropped)`.
-fn note_fields(notes: &[ParityNote]) -> Vec<(&str, &str, &DroppedIntent)> {
-    notes
-        .iter()
-        .map(|note| (note.id.as_str(), note.states.as_str(), &note.dropped))
-        .collect()
-}
-
-fn shape(value: &str) -> DroppedIntent {
-    DroppedIntent::Shape {
-        value: value.to_owned(),
-    }
 }
 
 /// A 2×3×4 array with two marked voxels, so an axis-order mistake moves a flat index.
@@ -238,7 +224,7 @@ fn non_straight_stair_shape_degrades() {
         [(
             "minecraft:oak_stairs",
             "facing=east,half=bottom,shape=outer_left",
-            &shape("outer_left"),
+            &dropped_shape("outer_left"),
         )],
     );
     let states = last_palette_states(&root);
@@ -430,22 +416,22 @@ fn stairs_that_differ_only_in_a_dropped_shape_share_one_palette_entry() {
             (
                 oak,
                 "facing=north,half=bottom,shape=outer_left",
-                &shape("outer_left"),
+                &dropped_shape("outer_left"),
             ),
             (
                 oak,
                 "facing=south,half=bottom,shape=outer_right",
-                &shape("outer_right"),
+                &dropped_shape("outer_right"),
             ),
             (
                 oak,
                 "facing=north,half=bottom,shape=outer_right",
-                &shape("outer_right"),
+                &dropped_shape("outer_right"),
             ),
             (
                 oak,
                 "facing=south,half=bottom,shape=outer_left",
-                &shape("outer_left"),
+                &dropped_shape("outer_left"),
             ),
         ],
     );

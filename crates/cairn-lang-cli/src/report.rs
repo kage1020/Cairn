@@ -165,7 +165,7 @@ pub(crate) fn report_failure_document(
     ExitCode::from(1)
 }
 
-/// A palette entry as `cairn info`'s notes and `W_INTENT_DEGRADED` name it, `id[key=value,...]`.
+/// A palette entry's name, `id[key=value,...]`.
 pub(crate) fn palette_entry_name(id: &str, states: &str) -> String {
     format!("{id}[{states}]")
 }

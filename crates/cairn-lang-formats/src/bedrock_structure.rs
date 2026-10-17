@@ -151,7 +151,7 @@ impl std::fmt::Debug for McStructure<'_> {
 }
 
 /// Checks that `block_array` writes as a `.mcstructure` for `target`, translating its palette,
-/// with the [`ParityNote`]s the translation raised.
+/// with the [`ParityNote`]s the translation raised, in palette order.
 ///
 /// # Errors
 ///
@@ -176,7 +176,7 @@ pub fn prepare_mcstructure<'a>(
         }
         let translated = translate_states(entry)?;
         check_palette_strings(&entry.id, &translated.states)?;
-        // By Java state: entries differing only in the dropped intent share a Bedrock state.
+        // Named by the Java entry: several can share one Bedrock state once the intent drops.
         if !translated.degraded.is_empty() {
             let states = entry.properties_text();
             notes.extend(translated.degraded.into_iter().map(|dropped| ParityNote {
@@ -187,7 +187,7 @@ pub fn prepare_mcstructure<'a>(
         }
         let compound = palette_entry(&entry.id, translated.states, target.block_version);
         // The palette is a set (`spec/compilation` "Within-phase conflicts and the palette"):
-        // an entry translation folds into an earlier one takes that slot, so air stays at 0.
+        // an entry whose translation folds into an earlier one takes that slot, so air stays at 0.
         let slot = block_palette
             .iter()
             .position(|written| *written == compound)

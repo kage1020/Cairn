@@ -87,8 +87,7 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
     );
     assert_eq!(
         degradation_detail(&t.degraded[0]),
-        "shape=outer_left has no Bedrock state; Bedrock stairs render straight, so corners show \
-         visual gaps",
+        "Bedrock has no `shape` state; its stairs render straight, so corners show visual gaps",
     );
 
     let straight = translate(
