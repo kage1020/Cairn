@@ -4,6 +4,8 @@ use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
 use cairn_lang_core::resolve::{Resolution, ScopeResolution, resolve};
 use cairn_lang_core::{Edition, IntentModule, Span, lower, parse};
 
+use crate::common::span_of;
+
 fn ir(source: &str) -> IntentModule {
     let module = parse(source).expect("parse");
     lower(&module)
@@ -239,14 +241,6 @@ fn unresolved_ports(r: &Resolution) -> Vec<&Diagnostic> {
         .collect()
 }
 
-/// The byte range of the first occurrence of `needle` in `src`.
-fn span_of(src: &str, needle: &str) -> Span {
-    let start = src
-        .find(needle)
-        .unwrap_or_else(|| panic!("`{needle}` is not in the source"));
-    start..start + needle.len()
-}
-
 #[test]
 fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
     let src = concat!(
@@ -273,7 +267,7 @@ fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
         "port `entry` of `def cottage` (used by `place a`) is declared under a `level`, \
              and a member under a `level` cannot be a port yet",
     );
-    assert_eq!(refusal.span, span_of(src, "a.entry"));
+    assert_eq!(refusal.span, span_of(src, "a.entry", 0));
     let notes: Vec<(Option<Span>, &str)> = refusal
         .notes
         .iter()
@@ -282,7 +276,7 @@ fn a_port_under_a_level_without_an_id_is_refused_for_the_nesting() {
     assert_eq!(
         notes,
         [(
-            Some(span_of(src, "door id=entry side=back at=center")),
+            Some(span_of(src, "door id=entry side=back at=center", 0)),
             "a port has to be a door or window declared directly in the body of \
                  `def cottage`: use one of those as the endpoint; level-scoped ports are a \
                  future extension",
@@ -324,7 +318,11 @@ fn a_port_under_a_level_inside_a_level_names_the_inner_level() {
     let note_spans: Vec<Option<Span>> = refusal.notes.iter().map(|n| n.span.clone()).collect();
     assert_eq!(
         note_spans,
-        [Some(span_of(src, "door id=up_entry side=back at=center"))],
+        [Some(span_of(
+            src,
+            "door id=up_entry side=back at=center",
+            0
+        ))],
     );
     assert!(
         r.connects.is_empty(),
@@ -384,7 +382,7 @@ fn a_typo_in_a_def_with_a_level_is_still_not_declared() {
         refusal.primary,
         "port `frnt` is not declared by `def tower` (used by `place a`)",
     );
-    assert_eq!(refusal.span, span_of(src, "a.frnt"));
+    assert_eq!(refusal.span, span_of(src, "a.frnt", 0));
     let notes: Vec<&str> = refusal.notes.iter().map(|n| n.message.as_str()).collect();
     assert_eq!(
         notes,

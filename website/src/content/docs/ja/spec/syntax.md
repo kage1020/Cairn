@@ -128,7 +128,9 @@ Monaco と同じ規則なので、診断の行番号とカーソル位置の行�
 `pressure_plate` / `circuit`)。`site` のボディはレイアウトを記述します (`place` / `connect`)。キーワー
 ド表はグローバルなので、片方をもう片方のボディに書くとパースも分類も通り、そのうえで誰にも届きません。
 これが `E_MISPLACED_MEMBER` で、該当行で 1 回だけ報告され、その下にインデントされたものも一緒に落ち
-ます。
+ます。`level` は `struct` / `def` のボディのほかのメンバをまとめますが、確保がスコープ全体にわたる
+`circuit` 行はまとめません。`level` の下の `circuit` 行もどこにも届かず、その行で
+`E_MISPLACED_MEMBER` です ([レッドストーン §14.5](/ja/spec/redstone/#145-place-and-route))。
 
 `logic` と `assert` の行はメンバではないので、この規則は届きません。`logic` 行はどちらのボディからも
 レッドストーン合成が読み、`assert` はまだ誰も読みません。

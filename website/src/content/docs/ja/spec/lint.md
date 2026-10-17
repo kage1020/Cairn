@@ -63,7 +63,7 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 | `E_UNKNOWN_ARGUMENT` | そのメンバのキーワードの語彙に無い `key=`。引数として書かれたものと、メンバ自身の `[key=value]` の中のものの両方。または `struct` / `def` のヘッダが取る `size=` / `class=` 以外の `key=`。 |
 | `W_IGNORED_ARGUMENT` | その語彙、または `struct` / `def` のヘッダの語彙の中にはあるが、書かれた行でどのパスにも読まれなかった `key=`。または `theme` のセレクタ行が束ねる `key=` で、まだどのパスも読まないもの。 |
 | `E_MISPLACED_BINDING` | 信号を発せないキーワードのメンバに付いた `-> value` の末尾 ([§14.2](/ja/spec/redstone/#142-信号バインディング))。 |
-| `E_MISPLACED_MEMBER` | キーワードは既知だが、囲んでいるボディに読み手がいない。 |
+| `E_MISPLACED_MEMBER` | キーワードは既知だが、囲んでいるボディに読み手がいない。または `level` の下にある `circuit` 行。 |
 | `E_UNEXPECTED_POSITIONAL` | 位置引数を読まない行に裸の値がある ([§5.1](/ja/spec/syntax#51-字句))。 |
 | `E_UNSUPPORTED_NESTING` | メンバが、誰も読まないインデントされたボディを持っている。 |
 | `E_TYPE_MISMATCH_LABEL` | ラベル型キーの値が識別子でも文字列でもない。 |
@@ -76,6 +76,13 @@ redstone パイプラインの `E_LOGIC_*` / `W_LOGIC_*` はこの約束の外�
 `E_MISPLACED_MEMBER` は `struct` / `def` 内の `place` / `connect`、あるいは `site` の行に混ざった
 ジオメトリキーワードで発火します。該当行で 1 回だけ報告され、その下にインデントされたものも一緒に
 落ちます。
+
+`level` の直下、またはその中に入れ子になった `level` の下にある `circuit` 行でも発火します。確保はス
+コープ全体にわたるので、place-and-route が `circuit` 行を読むのは `struct` / `def` 自身のメンバの中
+だけで ([§14.5](/ja/spec/redstone/#145-place-and-route))、`level` の下の行は何も確保しません。
+`E_DUPLICATE_CIRCUIT` が数えるのは本体自身のメンバだけなので、その行を重ねて報告することはありませ
+ん。別の `level` の中の `level` のように何もグループ化しない `level` は `E_UNSUPPORTED_NESTING` にも
+なります。こちらはメンバが失うブロックについての指摘で、`circuit` 行はブロックを書きません。
 
 `E_UNSUPPORTED_NESTING`: メンバをグループ化するのは `struct` / `def` 内の `level y=N` だけです。
 `site` のボディはフラットなリストです。落ちたサブツリーごとに、その根で 1 回報告されます。

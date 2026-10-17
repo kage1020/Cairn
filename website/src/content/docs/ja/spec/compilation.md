@@ -166,7 +166,9 @@ overhang 膨張後の `min(dims.x, dims.z)` です。
 
 `level y=N` はメンバをグループ化し、struct の基準面から `N` ボクセル上に置きます。`level` の行自体は
 ブロックを生みません。配下の各メンバは、自身の垂直座標に `N` を足したうえで、本体に直接書かれたのと
-同じように立体化されます。
+同じように立体化されます。`level` は、確保がスコープ全体にわたる `circuit` 行をまとめません。`level`
+の下の `circuit` 行は `E_MISPLACED_MEMBER` です
+([レッドストーン §14.5](/ja/spec/redstone/#145-place-and-route))。
 
 struct が立体化される体積は書くものではなく、導出されるものです。
 

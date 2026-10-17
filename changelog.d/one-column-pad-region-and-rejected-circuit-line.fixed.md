@@ -7,6 +7,6 @@
 - *(core,redstone)* A scope whose `circuit` line reserved nothing got an `E_NO_CIRCUIT_REGION` on
   its first `logic` line (or its first actuator binding, with no `logic` line) that listed every
   possible cause. It now stands on that `circuit` line, names the one cause, and gives a fix for
-  it; with several such lines, the first. A `circuit` line under a `level`, which reserves nothing,
-  is named as such on the line. A scope with no `circuit` line keeps the old anchor, and its
-  message now asks only for the line.
+  it; with several such lines, the first. For a library caller of `compile_placement` that skips
+  `check`, a `circuit` line under a `level`, which reserves nothing, is named as such on the line.
+  A scope with no `circuit` line keeps the old anchor, and its message now asks only for the line.
