@@ -1,6 +1,6 @@
 //! The `member_scope` pass: a known keyword the enclosing body has no reader for, which would
 //! otherwise fall out of the build without a word. One finding per misplaced subtree, and one per
-//! `circuit` line under a `level`, whose body has no reader for it.
+//! `circuit` line under a `level`, which place-and-route never reads.
 
 use crate::ast::{SIGNAL_HEAD, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
@@ -72,45 +72,75 @@ fn report(member: &Member, body: BodyKind, sink: &mut DiagnosticSink) {
     });
 }
 
-/// Walks each `level` as [`crate::intent::circuit_lines`] does, since place-and-route reads a
-/// reservation only from a `circuit` line among the body's own members.
+/// The line a scope's reservation comes from, which a `circuit` line under a `level` defers to.
+#[derive(Clone, Copy)]
+enum Kept<'a> {
+    /// The first `circuit` line among the scope's own members.
+    Own(&'a Member),
+    /// The first `circuit` line under a `level`, in a scope with none of its own.
+    FirstNested(&'a Member),
+}
+
+impl Kept<'_> {
+    /// The note pointing at the kept line, then the repair for a second line.
+    fn notes(self) -> [DiagnosticNote; 2] {
+        let (line, here, repair) = match self {
+            Kept::Own(line) => (
+                line,
+                "the scope's own `circuit` line is here",
+                "a scope reserves one region for its redstone: delete this line or move it to the scope's top level in place of that one, or split the logic across several scopes, each with its own `circuit` line",
+            ),
+            Kept::FirstNested(line) => (
+                line,
+                "the first `circuit` line under a `level` is here",
+                "a scope reserves one region for its redstone: move one of the two lines to the scope's top level and delete the other, or split the logic across several scopes, each with its own `circuit` line",
+            ),
+        };
+        [
+            DiagnosticNote {
+                span: Some(line.span.clone()),
+                message: here.to_owned(),
+            },
+            DiagnosticNote {
+                span: None,
+                message: repair.to_owned(),
+            },
+        ]
+    }
+}
+
+/// Reports each `circuit` line under a `level` among `members`.
 fn report_circuit_lines_under_levels(members: &[Member], sink: &mut DiagnosticSink) {
-    let own_line = members
+    let mut kept = members
         .iter()
-        .find(|m| matches!(m.role, MemberRole::Circuit));
-    for level in members
+        .find(|m| matches!(m.role, MemberRole::Circuit))
+        .map(Kept::Own);
+    for line in members
         .iter()
         .filter(|m| matches!(m.role, MemberRole::Level))
+        .flat_map(circuit_lines_under_level)
     {
-        for line in circuit_lines_under_level(level) {
-            report_circuit_line_under_level(line, own_line, sink);
-        }
+        report_circuit_line_under_level(line, kept, sink);
+        kept.get_or_insert(Kept::FirstNested(line));
     }
 }
 
 fn report_circuit_line_under_level(
     line: &Member,
-    own_line: Option<&Member>,
+    kept: Option<Kept<'_>>,
     sink: &mut DiagnosticSink,
 ) {
     let mut notes = vec![DiagnosticNote {
         span: None,
         message: "a `circuit` line belongs among the `struct`'s or `def`'s own members: its reservation spans the scope's `size=WxH`, and no pass reads a `level`'s `y=` for it".to_owned(),
     }];
-    match own_line {
-        Some(own_line) => notes.extend([
-            DiagnosticNote {
-                span: Some(own_line.span.clone()),
-                message: "the scope's own `circuit` line is here".to_owned(),
-            },
-            DiagnosticNote {
-                span: None,
-                message: "a scope reserves one region for its redstone: delete this line, or move it to the scope's top level in place of that one".to_owned(),
-            },
-        ]),
+    match kept {
+        Some(kept) => notes.extend(kept.notes()),
         None => notes.push(DiagnosticNote {
             span: None,
-            message: "move it out of the `level` to the scope's top level; nothing else about it changes".to_owned(),
+            message:
+                "move it out of the `level` to the scope's top level; nothing else about it changes"
+                    .to_owned(),
         }),
     }
     sink.push(Diagnostic {

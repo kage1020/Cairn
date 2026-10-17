@@ -52,7 +52,8 @@ pub enum DiagnosticCode {
     DuplicateCircuit,
     /// A member carries an indented body that nothing reads.
     UnsupportedNesting,
-    /// A known statement keyword whose enclosing body has no reader for it.
+    /// A known statement keyword whose enclosing body has no reader for it, or a `circuit` line
+    /// under a `level`.
     MisplacedMember,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,

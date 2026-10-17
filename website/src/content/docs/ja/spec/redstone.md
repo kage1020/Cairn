@@ -145,9 +145,9 @@ circuit region=basement void=3       # 高さ 3 のサービス層を確保し�
 ([Lint §11.1](/ja/spec/lint/#111-診断コード))。2 つ以上の確保が要るロジックは、2 つ以上の
 スコープに分けます。
 
-この行は本体自身のメンバの中に置きます。確保はスコープの `size=WxH` 全体にわたり、`circuit` 行に
-ついて `level` の `y=` を読むパスはないので、`level` の下の行は何も確保しません。それはスコープの
-2 つ目の行ではなく、その行での `E_MISPLACED_MEMBER` です。
+この行は本体自身のメンバの中に置きます。確保はスコープの `size=WxH` 全体にわたり、どの `level` の
+`y=` も取らないので、place-and-route は `level` の下の `circuit` 行を読みません。そうした行は
+`E_DUPLICATE_CIRCUIT` ではなく、その行での `E_MISPLACED_MEMBER` です。
 
 内部アルゴリズムは 5 段階です。
 

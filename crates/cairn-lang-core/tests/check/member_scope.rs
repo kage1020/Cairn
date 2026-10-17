@@ -315,14 +315,15 @@ fn the_row_tables_cover_every_known_keyword() {
 }
 
 mod circuit_under_a_level {
-    //! A `circuit` line under a `level`, at any depth, is an error on that line: place-and-route
-    //! reads a reservation only from a line among the scope's own members.
+    //! A `circuit` line under a `level`, directly or through `level`s nested in it, is an error on
+    //! that line: place-and-route reads a reservation only from a line among the scope's own
+    //! members.
 
     use std::ops::Range;
 
     use cairn_lang_core::{Diagnostic, Severity};
 
-    use crate::common::{diagnose, notes, nth};
+    use crate::common::{code_spans, diagnose, notes, nth, span_of};
 
     const PRIMARY: &str = "this `circuit` line reserves nothing: it is written under a `level`, \
                            and only a `circuit` line at the scope's top level is read as a \
@@ -335,10 +336,19 @@ mod circuit_under_a_level {
     const MOVE: &str =
         "move it out of the `level` to the scope's top level; nothing else about it changes";
 
-    const KEEP_ONE: &str = "a scope reserves one region for its redstone: delete this line, or \
-                            move it to the scope's top level in place of that one";
+    const OWN_HERE: &str = "the scope's own `circuit` line is here";
 
-    /// A door two plates open in `keyword gatehouse`, then `lines` at the body's top level.
+    const KEEP_OWN: &str = "a scope reserves one region for its redstone: delete this line or move \
+                            it to the scope's top level in place of that one, or split the logic \
+                            across several scopes, each with its own `circuit` line";
+
+    const FIRST_HERE: &str = "the first `circuit` line under a `level` is here";
+
+    const KEEP_FIRST: &str = "a scope reserves one region for its redstone: move one of the two \
+                              lines to the scope's top level and delete the other, or split the \
+                              logic across several scopes, each with its own `circuit` line";
+
+    /// `{keyword} gatehouse`, whose door two pressure plates open, followed by `lines` as written.
     fn gatehouse(keyword: &str, lines: &str) -> String {
         format!(
             "@cairn 2026.06\n\ntheme entry:\n  slot wall -> @oak_planks\n  slot door -> @oak_door\n\n\
@@ -348,19 +358,6 @@ mod circuit_under_a_level {
              pressure_plate id=inner at=inside.front  offset=1 y=0 -> sig.exit\n  \
              logic sig.open = sig.step or sig.exit\n  door[id=front] opened_by=sig.open\n{lines}"
         )
-    }
-
-    /// The byte range of the `n`th (0-based) occurrence of `text` in `source`.
-    fn span_of(source: &str, text: &str, n: usize) -> Range<usize> {
-        let start = nth(source, text, n);
-        start..start + text.len()
-    }
-
-    fn found(diags: &[Diagnostic]) -> Vec<(&'static str, Range<usize>)> {
-        diags
-            .iter()
-            .map(|d| (d.code.as_str(), d.span.clone()))
-            .collect()
     }
 
     fn note_spans(diag: &Diagnostic) -> Vec<Option<Range<usize>>> {
@@ -375,7 +372,7 @@ mod circuit_under_a_level {
         );
         let diags = diagnose(&src);
         assert_eq!(
-            found(&diags),
+            code_spans(&diags),
             [(
                 "E_MISPLACED_MEMBER",
                 span_of(&src, "circuit region=basement void=3", 0),
@@ -385,10 +382,7 @@ mod circuit_under_a_level {
         let d = &diags[0];
         assert_eq!(d.severity(), Severity::Error);
         assert_eq!(d.primary, PRIMARY);
-        assert_eq!(
-            notes(d),
-            [BELONGS, "the scope's own `circuit` line is here", KEEP_ONE],
-        );
+        assert_eq!(notes(d), [BELONGS, OWN_HERE, KEEP_OWN]);
         assert_eq!(
             note_spans(d),
             [
@@ -400,6 +394,28 @@ mod circuit_under_a_level {
     }
 
     #[test]
+    fn lines_under_sibling_levels_each_point_at_the_scopes_own_wherever_it_stands() {
+        let src = "struct s size=5x5\n  floor mat_slot=m\n  level y=1\n    circuit region=b void=1\n  \
+                   circuit region=a void=1\n  level y=2\n    circuit region=c void=1\n";
+        let [own, b, c] = [
+            "circuit region=a void=1",
+            "circuit region=b void=1",
+            "circuit region=c void=1",
+        ]
+        .map(|line| span_of(src, line, 0));
+        let diags = diagnose(src);
+        assert_eq!(
+            code_spans(&diags),
+            [("E_MISPLACED_MEMBER", b), ("E_MISPLACED_MEMBER", c)],
+            "{diags:#?}",
+        );
+        for d in &diags {
+            assert_eq!(notes(d), [BELONGS, OWN_HERE, KEEP_OWN]);
+            assert_eq!(note_spans(d), [None, Some(own.clone()), None]);
+        }
+    }
+
+    #[test]
     fn a_line_only_under_a_level_is_refused_with_the_move_that_repairs_it() {
         let src = gatehouse(
             "struct",
@@ -407,7 +423,7 @@ mod circuit_under_a_level {
         );
         let diags = diagnose(&src);
         assert_eq!(
-            found(&diags),
+            code_spans(&diags),
             [(
                 "E_MISPLACED_MEMBER",
                 span_of(&src, "circuit region=basement void=3", 0),
@@ -421,14 +437,49 @@ mod circuit_under_a_level {
         assert_eq!(note_spans(d), [None, None]);
     }
 
-    /// The `def` loop is walked as well; nothing places the `def`, hence `W_UNUSED_DEF`.
+    /// Moving every line out as each finding asks would make the later ones `E_DUPLICATE_CIRCUIT`.
+    #[test]
+    fn without_an_own_line_only_the_first_line_under_a_level_is_asked_to_move() {
+        let sibling_levels = "struct s size=5x5\n  floor mat_slot=m\n  level y=1\n    \
+                              circuit region=a void=1\n  level y=2\n    circuit region=b void=1\n  \
+                              level y=3\n    circuit region=c void=1\n";
+        let one_level = "struct s size=5x5\n  floor mat_slot=m\n  level y=1\n    \
+                         circuit region=a void=1\n    circuit region=b void=1\n    \
+                         circuit region=c void=1\n";
+        for src in [sibling_levels, one_level] {
+            let [first, b, c] = [
+                "circuit region=a void=1",
+                "circuit region=b void=1",
+                "circuit region=c void=1",
+            ]
+            .map(|line| span_of(src, line, 0));
+            let diags = diagnose(src);
+            assert_eq!(
+                code_spans(&diags),
+                [
+                    ("E_MISPLACED_MEMBER", first.clone()),
+                    ("E_MISPLACED_MEMBER", b),
+                    ("E_MISPLACED_MEMBER", c),
+                ],
+                "{diags:#?}",
+            );
+            assert_eq!(notes(&diags[0]), [BELONGS, MOVE], "{src}");
+            assert_eq!(note_spans(&diags[0]), [None, None], "{src}");
+            for d in &diags[1..] {
+                assert_eq!(notes(d), [BELONGS, FIRST_HERE, KEEP_FIRST], "{src}");
+                assert_eq!(note_spans(d), [None, Some(first.clone()), None], "{src}");
+            }
+        }
+    }
+
+    /// Nothing places the `def`, hence the `W_UNUSED_DEF` beside the finding.
     #[test]
     fn a_line_under_a_level_in_a_def_is_refused() {
         let src = gatehouse("def", "  level y=1\n    circuit region=basement void=3\n");
         let line = span_of(&src, "circuit region=basement void=3", 0);
         let diags = diagnose(&src);
         assert_eq!(
-            found(&diags),
+            code_spans(&diags),
             [
                 ("W_UNUSED_DEF", nth(&src, "def gatehouse", 0)..line.end),
                 ("E_MISPLACED_MEMBER", line),
@@ -442,31 +493,44 @@ mod circuit_under_a_level {
     /// A `level` that groups nothing is `E_UNSUPPORTED_NESTING` as well, about the blocks its
     /// members lose; a `circuit` line writes none, and what it loses is reported on the line.
     #[test]
-    fn a_line_under_a_level_at_any_depth_is_refused_on_that_line() {
-        let circuit = "circuit region=attic void=1";
-        let level_in_level = format!("  level y=1\n    level y=2\n      {circuit}\n");
-        let level_without_offset = format!("  level\n    {circuit}\n");
-        let three_deep = format!(
-            "  level y=1\n    level y=2\n      walls mat_slot=m height=2\n      level y=3\n        \
-             {circuit}\n"
-        );
-        for (levels, lost_from) in [
-            (level_in_level, circuit),
-            (level_without_offset, circuit),
-            (three_deep, "walls mat_slot=m height=2"),
+    fn a_line_under_a_level_nested_in_one_is_refused_on_that_line() {
+        let level_in_level = "struct s size=5x5\n  floor mat_slot=m\n  level y=1\n    level y=2\n      \
+                              circuit region=attic void=1\n";
+        let level_without_offset = "struct s size=5x5\n  floor mat_slot=m\n  level\n    \
+                                    circuit region=attic void=1\n";
+        let three_deep = "struct s size=5x5\n  floor mat_slot=m\n  level y=1\n    level y=2\n      \
+                          walls mat_slot=m height=2\n      level y=3\n        \
+                          circuit region=attic void=1\n";
+        let line = |src| span_of(src, "circuit region=attic void=1", 0);
+        // On one span, `E_MISPLACED_MEMBER` comes first: its pass runs before the nesting pass.
+        for (src, expected) in [
+            (
+                level_in_level,
+                [
+                    ("E_MISPLACED_MEMBER", line(level_in_level)),
+                    ("E_UNSUPPORTED_NESTING", line(level_in_level)),
+                ],
+            ),
+            (
+                level_without_offset,
+                [
+                    ("E_MISPLACED_MEMBER", line(level_without_offset)),
+                    ("E_UNSUPPORTED_NESTING", line(level_without_offset)),
+                ],
+            ),
+            (
+                three_deep,
+                [
+                    (
+                        "E_UNSUPPORTED_NESTING",
+                        nth(three_deep, "walls mat_slot=m height=2", 0)..line(three_deep).end,
+                    ),
+                    ("E_MISPLACED_MEMBER", line(three_deep)),
+                ],
+            ),
         ] {
-            let src = format!("struct s size=5x5\n  floor mat_slot=m\n{levels}");
-            let line = span_of(&src, circuit, 0);
-            let lost = nth(&src, lost_from, 0)..line.end;
-            let misplaced = ("E_MISPLACED_MEMBER", line.clone());
-            let nesting = ("E_UNSUPPORTED_NESTING", lost.clone());
-            let expected = if lost == line {
-                [misplaced, nesting]
-            } else {
-                [nesting, misplaced]
-            };
-            let diags = diagnose(&src);
-            assert_eq!(found(&diags), expected, "{src}");
+            let diags = diagnose(src);
+            assert_eq!(code_spans(&diags), expected, "{src}");
             let d = diags
                 .iter()
                 .find(|d| d.code.as_str() == "E_MISPLACED_MEMBER")
@@ -474,6 +538,32 @@ mod circuit_under_a_level {
             assert_eq!(d.primary, PRIMARY, "{src}");
             assert_eq!(notes(d), [BELONGS, MOVE], "{src}");
         }
+    }
+
+    #[test]
+    fn a_line_under_a_member_under_a_level_is_left_to_the_nesting_finding() {
+        let src = "struct s size=5x5\n  floor mat_slot=m\n  level y=1\n    walls mat_slot=m height=2\n      \
+                   circuit region=attic void=1\n";
+        let diags = diagnose(src);
+        assert_eq!(
+            code_spans(&diags),
+            [(
+                "E_UNSUPPORTED_NESTING",
+                span_of(src, "circuit region=attic void=1", 0),
+            )],
+            "{diags:#?}",
+        );
+    }
+
+    #[test]
+    fn a_line_under_a_level_in_a_site_is_part_of_the_misplaced_level() {
+        let src = super::site_with("level y=0\n    circuit region=a void=1");
+        let diags = diagnose(&src);
+        assert_eq!(
+            code_spans(&diags),
+            [("E_MISPLACED_MEMBER", span_of(&src, "level y=0", 0))],
+            "{diags:#?}",
+        );
     }
 
     #[test]

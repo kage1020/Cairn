@@ -62,7 +62,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` / `class=` a `struct` / `def` header takes. |
 | `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
-| `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
+| `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
@@ -76,12 +76,13 @@ compose to the strictest across every line, so a second one adds a constraint ([
 keyword among a `site`'s rows. It is reported once at the offending row, and anything indented
 under it goes with it.
 
-It also fires on a `circuit` line under a `level`, at any depth. A reservation spans the whole
-scope, so place-and-route reads a `circuit` line only among the `struct`'s or `def`'s own members
-([§14.5](/spec/redstone/#145-place-and-route)), and one under a `level` reserves nothing.
-`E_DUPLICATE_CIRCUIT` counts the body's own members, so it does not count that line a second time.
-A `level` that groups nothing, such as one inside another, is `E_UNSUPPORTED_NESTING` as well: that
-finding is about the blocks its members lose, and a `circuit` line writes none.
+It also fires on a `circuit` line under a `level`, directly or through `level`s nested in it. A
+reservation spans the whole scope, so place-and-route reads a `circuit` line only among the
+`struct`'s or `def`'s own members ([§14.5](/spec/redstone/#145-place-and-route)), and one under a
+`level` reserves nothing. `E_DUPLICATE_CIRCUIT` counts only the body's own members, so it does not
+report that line as well. A `level` that groups nothing, such as one inside another, is
+`E_UNSUPPORTED_NESTING` as well: that finding is about the blocks its members lose, and a `circuit`
+line writes none.
 
 `E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, and a `site`
 body is a flat list. Reported once per dropped subtree, at its root.

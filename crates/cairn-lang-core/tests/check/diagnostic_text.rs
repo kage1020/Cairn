@@ -325,11 +325,11 @@ fn truth_table_sources() -> Vec<String> {
     ]
 }
 
-/// The sources for a `circuit` line under a `level`, alone and beside one that is read.
+/// The sources for `circuit` lines under a `level`, in a scope without its own and beside it.
 fn circuit_under_level_sources() -> Vec<String> {
     vec![
         format!(
-            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  level y=1\n    circuit region=a void=1\n"
+            "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  level y=1\n    circuit region=a void=1\n    circuit region=b void=1\n"
         ),
         format!(
             "{THEME}struct s size=5x5\n  floor mat_slot=floor\n  circuit region=a void=1\n  level y=1\n    circuit region=b void=1\n"
