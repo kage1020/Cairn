@@ -42,6 +42,9 @@ RELEASE_SECTION = """\
 """
 
 GOOD = "- *(core)* A thing was wrong. It is right now.\n"
+NAMING = ("a fragment is named `<slug>.<kind>.md`: the slug starts with a lowercase letter or "
+          "digit and goes on in those and `-`, the kind is one of breaking, deprecations, added, "
+          "changed, fixed, performance, build")
 
 
 class Repo:
@@ -78,7 +81,8 @@ class Repo:
         self.git("commit", "-q", "--allow-empty", "-m", message)
 
     def run(self, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
-        # Windows needs `SYSTEMROOT` to start a process, and finds `git` on the host's own `PATH`.
+        # The child finds `git` on the host's `PATH`, and a side-by-side assembly on Windows needs
+        # `SYSTEMROOT`.
         host = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT") if key in os.environ}
         return subprocess.run([sys.executable, ".github/scripts/changelog.py", *args],
                               cwd=self.dir, capture_output=True, text=True, encoding="utf-8",
@@ -160,6 +164,19 @@ class CheckTest(Case):
 
     def test_a_ci_only_entry_is_refused(self) -> None:
         self.assertRefused(self.check_one("x.fixed.md", "- *(ci)* a workflow\n"), "`ci` change")
+
+    def test_a_name_utf8_cannot_encode_is_one_line_not_a_traceback(self) -> None:
+        try:
+            self.repo.write("changelog.d/caf\udce9.fixed.md", GOOD)
+        except OSError:
+            self.skipTest("this filesystem refuses a name that is not UTF-8")
+        shown = f"changelog.d{os.sep}caf\\udce9.fixed.md"
+        for actions, stdout, stderr in (("false", "", f"{shown}: {NAMING}\n"),
+                                        ("true", f"::error file={shown}::{NAMING}\n", "")):
+            with self.subTest(GITHUB_ACTIONS=actions):
+                result = self.repo.run("check", GITHUB_ACTIONS=actions)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertEqual((result.stdout, result.stderr), (stdout, stderr))
 
     def test_a_missing_directory_is_refused(self) -> None:
         shutil.rmtree(self.repo.dir / "changelog.d")
@@ -337,7 +354,7 @@ class AssembleTest(Case):
 
 
 class HostEncodingTest(Case):
-    """A host whose locale encoding is not UTF-8, as on Japanese Windows (CP932)."""
+    """Redirected stdio in an encoding other than UTF-8, such as CP932 on Japanese Windows."""
 
     def test_a_heading_cp932_cannot_encode_is_printed_as_utf8(self) -> None:
         self.repo.write("CHANGELOG.md", CHANGELOG.replace("## 2026.10.0", RELEASE_SECTION
@@ -348,14 +365,11 @@ class HostEncodingTest(Case):
         self.assertEqual(result.stdout, "folded 1 fragment(s) into ## 2026.11.0 — 2026-11-01; "
                                         "the fragment files are kept (pass --delete)\n")
 
-    def test_a_path_cp932_spells_differently_is_printed_as_utf8(self) -> None:
+    def test_a_path_cp932_can_encode_is_still_printed_as_utf8(self) -> None:
         self.repo.write("changelog.d/説明.fixed.md", GOOD)
         result = self.repo.run("check", PYTHONIOENCODING="cp932")
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(result.stderr, f"{Path('changelog.d/説明.fixed.md')}: a fragment is named "
-                         "`<slug>.<kind>.md`: the slug starts with a lowercase letter or digit and "
-                         "goes on in those and `-`, the kind is one of breaking, deprecations, "
-                         "added, changed, fixed, performance, build\n")
+        self.assertEqual(result.stderr, f"{Path('changelog.d/説明.fixed.md')}: {NAMING}\n")
 
 
 class VerifyReleaseTest(Case):

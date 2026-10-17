@@ -264,9 +264,10 @@ def verify_release(_: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    # A pipe opens in the locale's encoding, and CP932 cannot carry the `—` in a CHANGELOG heading.
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    # Redirected stdio can take the locale's encoding (CP932 cannot write a heading's `—`), and
+    # `backslashreplace` reports a name that is not UTF-8 instead of raising on it.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check", help="check every fragment").set_defaults(run=check)
