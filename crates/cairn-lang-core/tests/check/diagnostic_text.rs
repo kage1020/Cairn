@@ -138,6 +138,26 @@ fn the_corpus_reaches_the_header_vocabulary_prose() {
     }
 }
 
+#[test]
+fn the_corpus_reaches_the_mirror_prose() {
+    let rendered = rendered_strings();
+    for (origin, sentence) in [
+        ("W_DEFERRED_MEMBER primary", "coincides with its mirror"),
+        ("W_DEFERRED_MEMBER primary", "would overlap its mirror"),
+        (
+            "W_DEFERRED_MEMBER note 0",
+            "a `sym=true` window and its mirror are a pair only when the window lies in one half",
+        ),
+    ] {
+        assert!(
+            rendered
+                .iter()
+                .any(|(o, text)| o == origin && text.contains(sentence)),
+            "no fixture reaches the {origin} `{sentence}`",
+        );
+    }
+}
+
 /// A floor, not the full code set: some codes need a registry pack or a multi-theme file.
 #[test]
 fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
@@ -302,6 +322,7 @@ fn noisy_sources() -> Vec<String> {
     sources.extend(unreadable_value_sources());
     sources.extend(header_sources());
     sources.extend(truth_table_sources());
+    sources.extend(mirror_sources());
     sources
 }
 
@@ -330,6 +351,15 @@ fn header_sources() -> Vec<String> {
         format!("{THEME}struct s siz=7x7\n  floor mat_slot=floor\n"),
         format!("{THEME}def cottage class=house size=5x5:\n  floor mat_slot=floor\n"),
     ]
+}
+
+/// The source for a `sym=true` window that coincides with its mirror, and one that overlaps it.
+fn mirror_sources() -> Vec<String> {
+    vec![format!(
+        "{THEME}struct s size=6x5\n  walls mat_slot=wall height=3\n\
+         \x20\x20window side=front offset=2 y=1 size=2x1 sym=true\n\
+         \x20\x20window side=back offset=1 y=1 size=3x1 sym=true\n"
+    )]
 }
 
 /// The sources for an unreadable value's findings.
