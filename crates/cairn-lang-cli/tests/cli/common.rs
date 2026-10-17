@@ -13,6 +13,12 @@ pub fn cargo_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cairn"))
 }
 
+fn cairn_command() -> Command {
+    let mut command = Command::new(cargo_bin());
+    command.env("NO_COLOR", "1");
+    command
+}
+
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
 pub const SHIPPED_EXAMPLES: usize = 12;
 
@@ -26,7 +32,7 @@ pub fn examples_dir() -> PathBuf {
 
 /// Run the binary with `argv` and wait for it to exit.
 pub fn cairn_argv(argv: &[&str]) -> Output {
-    Command::new(cargo_bin())
+    cairn_command()
         .args(argv)
         .output()
         .expect("failed to invoke cairn binary")
@@ -34,7 +40,7 @@ pub fn cairn_argv(argv: &[&str]) -> Output {
 
 /// Run one subcommand of the binary and wait for it to exit.
 pub fn cairn(subcommand: &str, args: &[&str]) -> Output {
-    Command::new(cargo_bin())
+    cairn_command()
         .arg(subcommand)
         .args(args)
         .output()
@@ -133,7 +139,7 @@ impl Fixture {
 
 /// `cairn compile <src> --edition <edition> --target <target> --out <out> [--lock <lock>]`.
 pub fn compile(src: &Path, edition: &str, target: &str, out: &Path, lock: Option<&Path>) -> Output {
-    let mut command = Command::new(cargo_bin());
+    let mut command = cairn_command();
     command
         .arg("compile")
         .arg(src)
