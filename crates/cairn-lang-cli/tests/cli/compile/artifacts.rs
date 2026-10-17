@@ -326,7 +326,7 @@ fn bedrock_cottage_maps_stair_states_without_degradation() {
 
 #[test]
 fn bedrock_themed_tower_degrades_stair_shape_but_compiles() {
-    // The eave stairs' `outer_left`/`outer_right` shapes have no Bedrock state.
+    // The eave's one `shape=outer_left` stair has no Bedrock state.
     let tmp = TempDir::new().expect("tempdir");
     let dst = tmp.path().join("themed-tower.crn");
     fs::copy(examples_dir().join("themed-tower.crn"), &dst).expect("copy themed-tower");
@@ -346,9 +346,17 @@ fn bedrock_themed_tower_degrades_stair_shape_but_compiles() {
         result.status.success(),
         "themed-tower should still compile on bedrock, stderr={stderr}",
     );
-    assert!(
-        stderr.contains("W_INTENT_DEGRADED") && stderr.contains("shape"),
-        "expected a shape-drop degradation warning, got: {stderr}",
+    let degraded: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.starts_with("warning[W_INTENT_DEGRADED]"))
+        .collect();
+    let quoted = "warning[W_INTENT_DEGRADED]: struct::keep: \
+        minecraft:dark_oak_stairs[facing=south,half=top,shape=outer_left]: Bedrock has no `shape` \
+        state; its stairs render straight, so corners show visual gaps";
+    assert_eq!(
+        degraded,
+        [quoted],
+        "the line `spec/versioning-editions` \"Java / Bedrock portability\" quotes: {stderr}",
     );
     assert!(
         out_dir.path().join("keep.mcstructure").exists(),

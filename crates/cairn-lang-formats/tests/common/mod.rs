@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
+use cairn_lang_core::resolve::DroppedIntent;
 use cairn_lang_core::{Edition, lower, parse, resolve};
+use cairn_lang_formats::bedrock_structure::ParityNote;
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
@@ -153,4 +155,19 @@ pub fn props<const N: usize>(pairs: [(&str, &str); N]) -> IndexMap<String, Strin
 /// Stair properties in the order lowering inserts them.
 pub fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String> {
     props([("facing", facing), ("half", half), ("shape", shape)])
+}
+
+/// Each note's `(id, states, dropped)`: a `#[non_exhaustive]` note cannot be built to compare.
+pub fn note_fields(notes: &[ParityNote]) -> Vec<(&str, &str, &DroppedIntent)> {
+    notes
+        .iter()
+        .map(|note| (note.id.as_str(), note.states.as_str(), &note.dropped))
+        .collect()
+}
+
+/// The intent a stair drops when Bedrock has no form for its `shape=value`.
+pub fn dropped_shape(value: &str) -> DroppedIntent {
+    DroppedIntent::Shape {
+        value: value.to_owned(),
+    }
 }

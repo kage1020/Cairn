@@ -85,18 +85,9 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
             value: "outer_left".to_owned(),
         }],
     );
-    let detail = degradation_detail(&t.degraded[0]);
-    assert!(
-        detail.starts_with("shape=outer_left has no Bedrock state"),
-        "got: {detail}"
-    );
-    let state = java_state(&BlockState {
-        id: "minecraft:oak_stairs".to_owned(),
-        properties: stair_props("south", "top", "outer_left"),
-    });
     assert_eq!(
-        degradation_message(&state, &t.degraded[0]),
-        format!("stair `minecraft:oak_stairs[facing=south,half=top,shape=outer_left]` {detail}"),
+        degradation_detail(&t.degraded[0]),
+        "Bedrock has no `shape` state; its stairs render straight, so corners show visual gaps",
     );
 
     let straight = translate(

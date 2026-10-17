@@ -5,7 +5,7 @@ use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::bedrock_structure::build_mcstructure_tag;
 use cairn_lang_formats::data_version::resolve_bedrock_target;
 
-use crate::common::{block_palette, latest, lower_example};
+use crate::common::{block_palette, dropped_shape, latest, lower_example, note_fields};
 
 /// An example lowered as `cairn compile --edition bedrock` lowers it.
 fn lower_bedrock(example: &str) -> BlockArrayIr {
@@ -79,17 +79,27 @@ fn cottage_roof_stairs_carry_bedrock_states() {
 fn themed_tower_compiles_to_mcstructure_with_shape_degradation() {
     let out = lower_bedrock("themed-tower.crn");
     let target = resolve_bedrock_target("latest").expect("known target");
-    let mut total_notes = 0;
+    let mut built = Vec::new();
     for (scope, ba) in &out.structures {
         let (_root, notes) =
             build_mcstructure_tag(ba, &target).unwrap_or_else(|e| panic!("build `{scope}`: {e}"));
-        for note in &notes {
-            assert!(note.message.contains("shape"), "note: {}", note.message);
-        }
-        total_notes += notes.len();
+        built.push((scope.as_str(), notes));
     }
+    let degraded: Vec<_> = built
+        .iter()
+        .filter(|(_, notes)| !notes.is_empty())
+        .map(|(scope, notes)| (*scope, note_fields(notes)))
+        .collect();
     assert_eq!(
-        total_notes, 1,
-        "themed-tower has exactly one non-straight stair palette entry today"
+        degraded,
+        [(
+            "struct::keep",
+            vec![(
+                "minecraft:dark_oak_stairs",
+                "facing=south,half=top,shape=outer_left",
+                &dropped_shape("outer_left"),
+            )],
+        )],
+        "themed-tower's one non-straight stair palette entry",
     );
 }
