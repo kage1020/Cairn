@@ -38,6 +38,64 @@ fn a_misspelled_assert_form_is_reported_at_the_form() {
     );
 }
 
+#[test]
+fn a_truth_row_is_still_one_line() {
+    for (rows, expected) in [
+        (
+            "    0 ->\n    1\n",
+            "3:9: truth-table output must be `0`, `1`, or `-`, got end of line",
+        ),
+        ("    0\n    -> 1\n", "3:6: expected `->`, got end of line"),
+    ] {
+        let source = format!("struct s size=3x3\n  assert truth(a -> b) {{\n{rows}  }}\n");
+        assert_eq!(refusal(&source), expected, "{source:?}");
+    }
+}
+
+#[test]
+fn a_semicolon_may_not_open_a_line_of_a_truth_table() {
+    assert_eq!(
+        refusal("struct s size=3x3\n  assert truth(a -> b) {\n    0 -> 1\n    ; 1 -> 0\n  }\n"),
+        "4:5: expected a truth-table row or the `}` that closes the table, got `;`",
+    );
+}
+
+#[test]
+fn a_truth_table_brace_stays_on_the_assert_line() {
+    assert_eq!(
+        refusal("struct s size=3x3\n  assert truth(a -> b)\n  {\n    0 -> 1\n  }\n"),
+        "2:23: expected `{`, got end of line",
+    );
+}
+
+#[test]
+fn a_truth_table_without_its_brace_is_refused_at_what_follows_its_rows() {
+    assert_eq!(
+        refusal("struct s size=3x3\n  assert truth(a -> b) {\n    0 -> 1\n  floor mat_slot=f\n"),
+        "4:3: expected a truth-table row or the `}` that closes the table, got identifier `floor`",
+    );
+}
+
+/// The end of input is no text to point at, so the refusal stays on the last line there is.
+#[test]
+fn a_truth_table_without_its_brace_at_the_end_of_input_is_refused_at_its_last_line() {
+    for source in [
+        "struct s size=3x3\n  assert truth(a -> b) {\n    0 -> 1\n",
+        "struct s size=3x3\n  assert truth(a -> b) {\n    0 -> 1",
+        "struct s size=3x3\n  assert truth(a -> b) {\n    0 -> 1\n\n# done\n",
+    ] {
+        assert_eq!(
+            refusal(source),
+            "3:11: expected a truth-table row or the `}` that closes the table, got end of input",
+            "{source:?}",
+        );
+    }
+    assert_eq!(
+        refusal("struct s size=3x3\n  assert truth(a -> b) { 0 -> 1\n"),
+        "2:32: expected a truth-table row or the `}` that closes the table, got end of input",
+    );
+}
+
 // -- directives -----------------------------------------------------------
 
 #[test]

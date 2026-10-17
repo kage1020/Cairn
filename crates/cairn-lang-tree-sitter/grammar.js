@@ -85,6 +85,7 @@ module.exports = grammar({
 
     assert_stmt: $ => seq('assert', choice($.truth_form, $.temporal_form)),
 
+    // A line break may stand between rows; the scanner measures no indent inside the braces.
     truth_form: $ => seq(
       'truth', '(',
       field('inputs', $.signal_list),
@@ -92,7 +93,7 @@ module.exports = grammar({
       field('output', $._dotted_ref),
       ')',
       '{',
-      repeat(seq($.truth_row, optional(';'))),
+      repeat(choice($._newline, seq($.truth_row, optional(';')))),
       '}',
     ),
 

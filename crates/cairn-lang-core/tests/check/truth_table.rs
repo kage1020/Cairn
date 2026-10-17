@@ -436,6 +436,37 @@ fn a_table_nested_under_a_level_is_checked() {
 }
 
 #[test]
+fn a_table_with_a_row_per_line_is_checked_as_written() {
+    let partial = "struct s size=3x3\n  assert truth(sig.a, sig.b, sig.enable -> sig.out) {\n    \
+                   001 -> 0\n    011 -> 1\n    101 -> 1\n    111 -> 1\n  }\n";
+    let found = only(partial);
+    assert_eq!(found.code.as_str(), "W_TRUTH_TABLE_PARTIAL");
+    assert_eq!(
+        found.primary,
+        "this `assert truth` assigns 4 of the 8 combinations its 3 inputs can take",
+    );
+    assert_eq!(
+        underlined(partial, &found.span),
+        "assert truth(sig.a, sig.b, sig.enable -> sig.out) {\n    001 -> 0\n    011 -> 1\n    \
+         101 -> 1\n    111 -> 1\n  }",
+    );
+
+    let conflict = "struct s size=3x3\n  assert truth(sig.a -> sig.o) {\n    0 -> 0\n    \
+                    1 -> 1\n    0 -> 1\n  }\n";
+    let found = only(conflict);
+    assert_eq!(found.code.as_str(), "E_TRUTH_TABLE_CONFLICT");
+    assert_eq!(underlined(conflict, &found.span), "0 -> 1");
+    let note = found.notes.first().expect("a note at the row contradicted");
+    assert_eq!(
+        underlined(
+            conflict,
+            note.span.as_ref().expect("the note carries a span")
+        ),
+        "0 -> 0",
+    );
+}
+
+#[test]
 fn a_table_in_a_site_body_is_checked() {
     let source = "site s:\n  assert truth(sig.a -> sig.o) { }\n";
     assert_eq!(codes(source), ["E_TRUTH_TABLE_EMPTY"]);

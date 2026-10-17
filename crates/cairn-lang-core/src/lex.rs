@@ -1,5 +1,8 @@
 //! Lexer for the Cairn surface syntax, with synthetic `Indent`, `Dedent` and `Newline` tokens.
 //!
+//! The lines inside a truth table's braces carry no indentation, so they take no `Indent` or
+//! `Dedent`; each still ends in a `Newline`, which separates the rows.
+//!
 //! A bad indentation ends the scan. A failure inside a line becomes a [`TokenKind::Unlexed`] in
 //! the parser's own pass, since a directive that takes raw text to end of line judges it itself.
 
@@ -167,6 +170,10 @@ struct Lexer<'src> {
     indent_stack: Vec<u32>,
     out: Vec<Token>,
     deferred: Vec<Deferred>,
+    /// Index in `out` of the current line's first token.
+    line_first_token: usize,
+    /// Whether a truth table's `{` is open, from an `assert` line's `{` to the next `}`.
+    in_truth_table: bool,
 }
 
 /// U+FEFF, the byte-order mark, as it appears in UTF-8.
@@ -186,6 +193,8 @@ impl<'src> Lexer<'src> {
             indent_stack: vec![0],
             out: Vec::new(),
             deferred: Vec::new(),
+            line_first_token: 0,
+            in_truth_table: false,
         }
     }
 
@@ -211,7 +220,8 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Emit `Indent` / `Dedent` for the next line that is not blank or a comment.
+    /// Emit `Indent` / `Dedent` for the next line that is not blank or a comment, unless it is
+    /// inside a truth table.
     fn scan_line_start(&mut self) -> Result<(), LexError> {
         loop {
             let line_start = self.pos;
@@ -230,6 +240,9 @@ impl<'src> Lexer<'src> {
                 if self.consume_line_break() {
                     continue;
                 }
+                return Ok(());
+            }
+            if self.in_truth_table {
                 return Ok(());
             }
 
@@ -287,6 +300,7 @@ impl<'src> Lexer<'src> {
 
     /// Scan the rest of a logical line through its `Newline`, deferring a token that fails.
     fn scan_line_body(&mut self) {
+        self.line_first_token = self.out.len();
         loop {
             self.skip_spaces();
             let Some(b) = self.peek() else {
@@ -397,10 +411,16 @@ impl<'src> Lexer<'src> {
             }
             b'{' => {
                 self.advance();
+                // Only `assert truth` takes a `{`: one in a directive's raw value is text, and
+                // must not suspend the layout of the lines below it.
+                if self.line_opens_with("assert") {
+                    self.in_truth_table = true;
+                }
                 self.push_at(TokenKind::LBrace, start..self.pos, position);
             }
             b'}' => {
                 self.advance();
+                self.in_truth_table = false;
                 self.push_at(TokenKind::RBrace, start..self.pos, position);
             }
             b'"' => self.scan_string(start, position)?,
@@ -567,6 +587,14 @@ impl<'src> Lexer<'src> {
             span,
             position,
         });
+    }
+
+    /// Whether the current line's first token is the identifier `word`.
+    fn line_opens_with(&self, word: &str) -> bool {
+        matches!(
+            self.out.get(self.line_first_token).map(|t| &t.kind),
+            Some(TokenKind::Ident(first)) if first == word
+        )
     }
 
     fn last_is_newline(&self) -> bool {

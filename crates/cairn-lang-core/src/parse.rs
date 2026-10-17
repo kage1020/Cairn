@@ -621,7 +621,8 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::RParen)?;
         self.expect(&TokenKind::LBrace)?;
         let mut rows = Vec::new();
-        while !self.peek_is(&TokenKind::RBrace) && !self.at_eof() {
+        self.skip_newlines();
+        while !self.peek_is(&TokenKind::RBrace) {
             let pattern_position = self.position();
             let row_start_byte = self.current_byte();
             let pattern = self.expect_truth_pattern()?;
@@ -664,21 +665,25 @@ impl<'a> Parser<'a> {
                 self.advance();
                 None
             } else {
-                // Before the output is consumed, so a refusal points at it.
-                let output_position = self.position();
-                let out_lex = self.expect_int_lexeme()?;
-                match out_lex.as_str() {
-                    "0" => Some(false),
-                    "1" => Some(true),
-                    other => {
+                let output = match self.peek().map(|t| &t.kind) {
+                    Some(TokenKind::Int { lexeme }) if lexeme == "0" => Some(false),
+                    Some(TokenKind::Int { lexeme }) if lexeme == "1" => Some(true),
+                    found => {
+                        let found = match found {
+                            Some(TokenKind::Int { lexeme }) => format!("`{lexeme}`"),
+                            Some(kind) => kind.to_string(),
+                            None => "end of input".to_owned(),
+                        };
                         return Err(ParseError::Syntax {
-                            position: output_position,
+                            position: self.position(),
                             message: format!(
-                                "truth-table output must be `0`, `1`, or `-`, got `{other}`"
+                                "truth-table output must be `0`, `1`, or `-`, got {found}"
                             ),
                         });
                     }
-                }
+                };
+                self.advance();
+                output
             };
             rows.push(TruthRow {
                 inputs: inputs_lex,
@@ -688,6 +693,7 @@ impl<'a> Parser<'a> {
             if self.peek_is(&TokenKind::Semi) {
                 self.advance();
             }
+            self.skip_newlines();
         }
         self.expect(&TokenKind::RBrace)?;
         let span = start_byte..self.last_byte();
@@ -1206,13 +1212,20 @@ impl<'a> Parser<'a> {
             self.advance();
         }
         if text.is_empty() {
-            return Err(ParseError::Syntax {
-                position,
-                message: match self.peek() {
-                    Some(token) => {
-                        format!("expected a truth-table input pattern, got {}", token.kind)
-                    }
-                    None => "expected a truth-table input pattern, got end of input".to_owned(),
+            const EXPECTED: &str = "expected a truth-table row or the `}` that closes the table";
+            // Inside a table only the end of input dedents, and the refusal belongs at the end of
+            // the table's last line rather than past it.
+            return Err(match self.peek() {
+                Some(token) if token.kind != TokenKind::Dedent => ParseError::Syntax {
+                    position,
+                    message: format!("{EXPECTED}, got {}", token.kind),
+                },
+                _ => ParseError::Syntax {
+                    position: self
+                        .tokens
+                        .get(self.pos.wrapping_sub(1))
+                        .map_or(position, |t| t.position),
+                    message: format!("{EXPECTED}, got end of input"),
                 },
             });
         }

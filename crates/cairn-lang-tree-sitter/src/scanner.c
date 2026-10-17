@@ -168,6 +168,19 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // are skipped and tabs are not, as core refuses a tab.
   if (valid_symbols[BIT_PATTERN]) {
     while (lexer->lookahead == ' ') skip(lexer);
+    // Between rows a break separates them, and leaves no indentation behind: the next line's
+    // spaces are skipped here like any others, so no INDENT or DEDENT is measured inside a table.
+    if (valid_symbols[NEWLINE] && (lexer->lookahead == '\n' || lexer->lookahead == '\r')) {
+      if (lexer->lookahead == '\r') {
+        advance(lexer);
+        if (lexer->lookahead == '\n') advance(lexer);
+      } else {
+        advance(lexer);
+      }
+      s->line_start_column = lexer->get_column(lexer);
+      lexer->result_symbol = NEWLINE;
+      return true;
+    }
     bool scanned = false;
     for (;;) {
       if (lexer->lookahead == '0' || lexer->lookahead == '1') {
