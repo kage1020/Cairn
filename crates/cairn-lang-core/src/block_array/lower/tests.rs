@@ -987,7 +987,8 @@ fn missing_theme_warns_and_air_fills() {
 }
 
 /// The `W_NO_THEME_BOUND` a themeless `struct s` that reads a slot earns.
-const S_HAS_NO_THEME: &str = "struct `s` has no theme bound; every `mat_slot=` will lower to air";
+const S_HAS_NO_THEME: &str =
+    "struct `s` has no theme bound, so no `mat_slot=` in it resolves to a block";
 
 /// `src`'s `cairn check` findings and its lowering.
 fn checked_and_lowered(src: &str) -> (Vec<Diagnostic>, BlockArrayIr) {
@@ -1017,7 +1018,7 @@ fn painted_ids(ba: &BlockArray) -> std::collections::BTreeSet<&str> {
 }
 
 #[test]
-fn a_scope_that_reads_no_slot_is_not_told_its_slots_lower_to_air() {
+fn a_scope_that_reads_no_slot_is_not_told_it_has_no_theme() {
     // `spec/lint` "Materials and targets": a scope that reads no `mat_slot=` is not reported.
     let src = "struct s size=3x3\n";
     let out = lowered(src);
@@ -1052,7 +1053,7 @@ fn a_scope_that_reads_no_slot_is_not_told_its_slots_lower_to_air() {
     );
     assert_eq!(
         primaries_of(&out, DiagnosticCode::NoThemeBound),
-        ["struct `b` has no theme bound; every `mat_slot=` will lower to air"],
+        ["struct `b` has no theme bound, so no `mat_slot=` in it resolves to a block"],
         "{src}",
     );
 }

@@ -43,16 +43,25 @@ pub(super) fn diag_no_theme_bound_generic(
         code: DiagnosticCode::NoThemeBound,
         span: header_span.clone(),
         primary: format!(
-            "{host} `{label}` has no theme bound; every `mat_slot=` will lower to air",
+            "{host} `{label}` has no theme bound, so no `mat_slot=` in it resolves to a block",
         ),
-        notes: vec![DiagnosticNote {
-            span: None,
-            // Names what makes a theme bind, since this pass cannot tell which cause applies.
-            message: "a scope binds a theme when the module declares exactly one logical theme, \
-                      or the `place` names one with `theme=`; under a `--edition` pin that theme \
-                      must also have a variant for that edition"
-                .to_owned(),
-        }],
+        notes: vec![
+            DiagnosticNote {
+                span: None,
+                message: "a `floor` is left air; no `walls` is built, so every `door` and \
+                          `window` is refused for want of a wall; a `roof`, eave `stair` or \
+                          `pressure_plate` is built from its default block"
+                    .to_owned(),
+            },
+            DiagnosticNote {
+                span: None,
+                // Names what makes a theme bind, since this pass cannot tell which cause applies.
+                message: "a scope binds a theme when the module declares exactly one logical \
+                          theme, or the `place` names one with `theme=`; under a `--edition` pin \
+                          that theme must also have a variant for that edition"
+                    .to_owned(),
+            },
+        ],
         data: None,
     }
 }
