@@ -13,12 +13,21 @@ use crate::suggest::{did_you_mean_note, nearest_match};
 use super::resolution::{PortRef, ValidatedConnect};
 use super::unresolved_ref::unresolved_ref_diag;
 
+/// The place ids of a site's rows above a `connect`, each with its first row.
+#[derive(Clone, Copy)]
+pub(super) struct PlaceIds<'a> {
+    /// Ids that passed the id rule.
+    pub(super) seen: &'a IndexMap<String, Span>,
+    /// Ids refused with `E_INVALID_PLACE_ID`.
+    pub(super) refused: &'a IndexMap<String, Span>,
+}
+
 /// Records a [`ValidatedConnect`] for `member` when both ends and its `path=` material resolve.
 pub(super) fn resolve_connect_row(
     member: &Member,
     site_name: &str,
     defs: &[DefIr],
-    seen_place_ids: &IndexMap<String, Span>,
+    place_ids: PlaceIds<'_>,
     place_def: &IndexMap<String, String>,
     connects: &mut Vec<ValidatedConnect>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -31,8 +40,8 @@ pub(super) fn resolve_connect_row(
         return;
     }
     // Both ends before short-circuiting, so two broken halves earn two findings.
-    let from = port_ref_from_value(from_value, ConnectEnd::From, seen_place_ids, diagnostics);
-    let to = port_ref_from_value(to_value, ConnectEnd::To, seen_place_ids, diagnostics);
+    let from = port_ref_from_value(from_value, ConnectEnd::From, place_ids, diagnostics);
+    let to = port_ref_from_value(to_value, ConnectEnd::To, place_ids, diagnostics);
     let (Some(from), Some(to)) = (from, to) else {
         return;
     };
@@ -92,11 +101,12 @@ pub(super) fn resolve_connect_row(
     });
 }
 
-/// The [`PortRef`] a `<place>.<port>` value names; `None` for any other shape or an unknown place.
+/// The [`PortRef`] a `<place>.<port>` value names; `None` for any other shape, an unknown place
+/// or one refused for its id.
 fn port_ref_from_value(
     raw: &Value,
     end: ConnectEnd,
-    seen_place_ids: &IndexMap<String, Span>,
+    place_ids: PlaceIds<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<PortRef> {
     // INVARIANT(upstream-diagnosed): `check::connect_arity` reports every non-`<place>.<port>` end.
@@ -108,8 +118,16 @@ fn port_ref_from_value(
     };
     let place_str = dot.head();
     let port_str = port.as_str();
-    if !seen_place_ids.contains_key(place_str) {
-        let prior: Vec<&str> = seen_place_ids.keys().map(String::as_str).collect();
+    if let Some(refused) = place_ids.refused.get(place_str) {
+        diagnostics.push(deferred_connect_to_refused_id_diag(
+            &format!("{place_str}.{port_str}"),
+            raw.span.clone(),
+            refused,
+        ));
+        return None;
+    }
+    if !place_ids.seen.contains_key(place_str) {
+        let prior: Vec<&str> = place_ids.seen.keys().map(String::as_str).collect();
         diagnostics.push(unresolved_ref_diag(
             DiagnosticCode::UnresolvedPlaceRef,
             &format!(
@@ -122,14 +140,33 @@ fn port_ref_from_value(
         ));
         return None;
     }
-    // INVARIANT(upstream-diagnosed): every lexer `Ident` is a valid place and port id.
-    let place = PlaceId::new(place_str).expect("surface lexer enforces PlaceId invariants");
+    // INVARIANT(structural): `seen` holds only ids `PlaceId::new` accepted.
+    let place = PlaceId::new(place_str).expect("a seen place id is a valid PlaceId");
+    // INVARIANT(upstream-diagnosed): every lexer `Ident` is a valid port id.
     let port = PortId::new(port_str).expect("surface lexer enforces PortId invariants");
     Some(PortRef {
         place,
         port,
         span: raw.span.clone(),
     })
+}
+
+/// `W_DEFERRED_CONNECT`: an endpoint names a row refused for its id, which `refused` spans.
+fn deferred_connect_to_refused_id_diag(endpoint: &str, span: Span, refused: &Span) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::DeferredConnect,
+        span,
+        primary: format!(
+            "`connect` target `{endpoint}` names a `place` row refused for its id; no walkway laid"
+        ),
+        notes: vec![DiagnosticNote {
+            span: Some(refused.clone()),
+            message: "that row carries its own diagnostic saying what is wrong with its id; \
+                      renaming it, and this endpoint with it, lays this walkway"
+                .to_owned(),
+        }],
+        data: None,
+    }
 }
 
 /// Whether exactly one of the def body's own members carries `port.port`; if not, pushes why.

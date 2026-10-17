@@ -175,6 +175,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_DUPLICATE_SIZE",
         "E_INCOMPLETE_PLACE",
         "E_INVALID_PLACE_ID",
+        "E_INVALID_STRUCT_NAME",
         "E_MISPLACED_MEMBER",
         "E_THEME_SELECTOR_UNMATCHED",
         "E_TRUTH_TABLE_CONFLICT",
@@ -187,7 +188,9 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_UNRESOLVED_PLACE_REF",
         "E_UNRESOLVED_SLOT",
         "E_UNSUPPORTED_NESTING",
+        "W_DEFERRED_CONNECT",
         "W_DEFERRED_MEMBER",
+        "W_DEFERRED_PLACE",
         "W_IGNORED_ARGUMENT",
         "W_STRUCTURE_TOO_LARGE",
         "W_STRUCT_NO_SIZE",
@@ -319,6 +322,7 @@ fn noisy_sources() -> Vec<String> {
          \x20\x20floor mat_slot=floor\n"
             .to_owned(),
     ];
+    sources.extend(device_name_sources());
     sources.extend(unreadable_value_sources());
     sources.extend(circuit_under_level_sources());
     sources.extend(header_sources());
@@ -399,6 +403,15 @@ fn unreadable_value_sources() -> Vec<String> {
          window side=left offset=0 y=1 size=1x1 repeat=2 step=2 sym=yes mat_slot=wall\n"
             .to_owned(),
     ]
+}
+
+/// The source for names Windows reserves for a device, and rows naming a place refused for one.
+fn device_name_sources() -> Vec<String> {
+    vec![format!(
+        "{THEME}{HUT}struct con size=3x3\n  floor mat_slot=floor\n\nsite s:\n  \
+         place id=a use=hut theme=t at=origin\n  place id=nul use=hut theme=t east_of=a gap=4\n  \
+         place id=b use=hut theme=t north_of=nul gap=4\n  connect a.entry to nul.entry path=@path\n"
+    )]
 }
 
 /// Every finding `check` and the block-array pass raise over `source`.

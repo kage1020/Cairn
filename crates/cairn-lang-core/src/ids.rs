@@ -1,7 +1,8 @@
 //! Identifier newtypes and the walkway scope key built from them.
 //!
 //! An identifier is non-empty and carries no `.`, `:`, `/`, `\`, `*`, `|`, `?`, `<`, `>`, `"`,
-//! whitespace or control character (`spec/lint` "Sites and placements").
+//! whitespace or control character. A [`PlaceId`] is also the stem of an artifact's file name, so
+//! it is not a device name Windows reserves either (`spec/lint` "Sites and placements").
 
 use std::borrow::Borrow;
 use std::fmt;
@@ -26,6 +27,12 @@ pub enum IdError {
         /// The first character that triggered the rejection.
         ch: char,
     },
+    /// A [`PlaceId`] that is a device name Windows reserves, which no file can be named.
+    #[error("identifier `{ident}` is a device name Windows reserves")]
+    ReservedDeviceName {
+        /// The full offending string.
+        ident: String,
+    },
 }
 
 /// The punctuation no identifier may carry, in the order a message lists it.
@@ -46,6 +53,46 @@ pub(crate) fn shown_char(c: char) -> String {
     }
 }
 
+/// The device names Windows reserves in every directory, whatever the case or extension.
+const WINDOWS_DEVICE_NAMES: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+
+/// The device names Windows reserves with one digit after them, `¹`, `²` and `³` among the digits.
+const WINDOWS_NUMBERED_DEVICE_NAMES: [&str; 2] = ["COM", "LPT"];
+
+/// Whether Windows reads `name`, as a file name's stem, as a device rather than a file.
+#[must_use]
+pub(crate) fn is_windows_device_name(name: &str) -> bool {
+    if WINDOWS_DEVICE_NAMES
+        .iter()
+        .any(|device| name.eq_ignore_ascii_case(device))
+    {
+        return true;
+    }
+    WINDOWS_NUMBERED_DEVICE_NAMES.iter().any(|device| {
+        let Some((head, tail)) = name.split_at_checked(device.len()) else {
+            return false;
+        };
+        let mut digits = tail.chars();
+        head.eq_ignore_ascii_case(device)
+            && matches!(
+                (digits.next(), digits.next()),
+                (Some('0'..='9' | '¹' | '²' | '³'), None)
+            )
+    })
+}
+
+/// What [`is_windows_device_name`] refuses, as a message words it.
+#[must_use]
+pub(crate) fn windows_device_names_listed() -> String {
+    let quoted =
+        |names: &[&str]| -> Vec<String> { names.iter().map(|name| format!("`{name}`")).collect() };
+    format!(
+        "{}, and {} followed by one digit",
+        quoted(&WINDOWS_DEVICE_NAMES).join(", "),
+        quoted(&WINDOWS_NUMBERED_DEVICE_NAMES).join(" or "),
+    )
+}
+
 fn validate_ident(s: &str) -> Result<(), IdError> {
     if s.is_empty() {
         return Err(IdError::Empty);
@@ -57,6 +104,16 @@ fn validate_ident(s: &str) -> Result<(), IdError> {
                 ch: c,
             });
         }
+    }
+    Ok(())
+}
+
+fn validate_place_id(s: &str) -> Result<(), IdError> {
+    validate_ident(s)?;
+    if is_windows_device_name(s) {
+        return Err(IdError::ReservedDeviceName {
+            ident: s.to_owned(),
+        });
     }
     Ok(())
 }
@@ -148,7 +205,7 @@ impl fmt::Display for EndpointSegmentRole {
 }
 
 macro_rules! ident_newtype {
-    ($(#[$meta:meta])* $Name:ident) => {
+    ($(#[$meta:meta])* $Name:ident, $validate:ident) => {
         $(#[$meta])*
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
         #[serde(transparent)]
@@ -159,10 +216,10 @@ macro_rules! ident_newtype {
             ///
             /// # Errors
             ///
-            /// [`IdError::Empty`] for the empty string, or [`IdError::ForbiddenChar`].
+            /// The [`IdError`] naming the first of those rules `s` breaks.
             pub fn new<S: Into<String>>(s: S) -> Result<Self, IdError> {
                 let s = s.into();
-                validate_ident(&s)?;
+                $validate(&s)?;
                 Ok(Self(s))
             }
 
@@ -232,15 +289,18 @@ macro_rules! ident_newtype {
 
 ident_newtype!(
     /// `place id=` value, e.g. `home1`.
-    PlaceId
+    PlaceId,
+    validate_place_id
 );
 ident_newtype!(
     /// Member `id=` exposed by a place's def, e.g. `entry`.
-    PortId
+    PortId,
+    validate_ident
 );
 ident_newtype!(
     /// Bare `site` name (no `site::` IR-key prefix), e.g. `hamlet`.
-    SiteName
+    SiteName,
+    validate_ident
 );
 
 /// Failure modes for [`WalkwayScopeKey::parse`].
