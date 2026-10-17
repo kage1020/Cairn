@@ -139,7 +139,7 @@ fn the_corpus_reaches_the_header_vocabulary_prose() {
 }
 
 #[test]
-fn the_corpus_reaches_both_relations_of_the_mirror_prose() {
+fn the_corpus_reaches_the_mirror_prose() {
     let rendered = rendered_strings();
     for (origin, sentence) in [
         ("W_DEFERRED_MEMBER primary", "coincides with its mirror"),

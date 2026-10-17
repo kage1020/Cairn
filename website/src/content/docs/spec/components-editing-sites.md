@@ -172,8 +172,8 @@ Those are the rules a port reads for itself. It also anchors only on an opening 
 actually cut: a `window` deferred by an argument only the cut reads — `repeat=` or `step=`,
 including a `repeat=` above 1 written beside `sym=true` or an unreadable `sym=` — or whose own
 `mat_slot=` resolves to no block leaves its wall standing, and its port is refused with it. A
-`sym=true` window whose mirror is skipped is not deferred this way: its own rectangle is cut, so
-its port anchors.
+`sym=true` window whose mirror is skipped is reported with `W_DEFERRED_MEMBER` for the mirror, but
+its own rectangle is cut, so its port anchors.
 
 A `walls height=H` member under `level y=N` paints world rows `N + 1 … N + H` — one above the
 level's base row, which is where that level's floor slab would go, though a level-scoped `floor` is

@@ -270,7 +270,7 @@ fn a_window_without_offset_anchors_a_walkway_as_it_is_cut() {
 
 #[test]
 fn a_sym_window_whose_mirror_is_skipped_keeps_its_cut_and_its_port() {
-    let window = "window id=p side=front offset=2 y=1 size=1x1 sym=true mat_slot=glass";
+    let window = "window id=p side=front offset=1 y=1 size=2x1 sym=true mat_slot=glass";
     let src = site(&format!("{WALLS}  {window}\n"), 6);
     let out = lowered(&src);
     let found: Vec<_> = out
@@ -283,13 +283,20 @@ fn a_sym_window_whose_mirror_is_skipped_keeps_its_cut_and_its_port() {
         [(
             DiagnosticCode::DeferredMember,
             window,
-            "`sym=true` window at offset=2 size=1x1 on the `front` wall coincides with its mirror \
+            "`sym=true` window at offset=1 size=2x1 on the `front` wall would overlap its mirror \
              (wall length=5); the mirror was skipped",
         )],
     );
+    // The window is u=1..=2; its mirror would add u=3.
+    let a = &out.structures["site::s::a"];
+    let row: Vec<_> = (1..4).map(|x| state_at(a, x, 1, 4).id.as_str()).collect();
     assert_eq!(
-        state_at(&out.structures["site::s::a"], 2, 1, 4).id,
-        "minecraft:glass_pane",
+        row,
+        [
+            "minecraft:glass_pane",
+            "minecraft:glass_pane",
+            "minecraft:cobblestone"
+        ]
     );
     // From the window's port at (2, 0, 5) to the door's at (13, 0, 5).
     let walkway = &out.walkways["walkway::s::a.p__b.e"];
@@ -335,7 +342,8 @@ fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
 
 #[test]
 fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
-    // The port reads `offset=`, `y=`, `size=`; the cut also defers on `repeat=`, `step=` or `sym=`.
+    // The port reads `offset=`, `y=`, `size=`; the cut also defers on `repeat=` or `step=`,
+    // including a `repeat=` above 1 beside `sym=`.
     for (args, own_line) in [
         (
             "offset=0 y=1 size=1x1 repeat=0 mat_slot=glass",
@@ -352,6 +360,12 @@ fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
         (
             "offset=1 y=1 size=1x1 repeat=2 step=2 sym=true",
             "window with both `repeat=` and `sym=true` is not yet supported",
+        ),
+        (
+            "offset=1 y=1 size=1x1 repeat=2 step=2 sym=yes",
+            "window with `repeat=` greater than 1 is not cut while its `sym=` is unreadable: \
+             `sym=true` with such a `repeat=` is not yet supported, and `sym=false` is not what \
+             was written",
         ),
         (
             "offset=0 y=1 size=1x1 repeat=2 mat_slot=glass",

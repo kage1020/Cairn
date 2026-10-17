@@ -4,7 +4,7 @@
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
 use cairn_lang_core::check::DiagnosticCode;
 
-use crate::common::{lowered, only_structure, state_at};
+use crate::common::{lowered, notes, only_structure, slice, state_at};
 
 /// A struct `width`x`depth` with one course of cobblestone walls and `window` in it.
 fn struct_with_window(width: u32, depth: u32, window: &str) -> String {
@@ -25,14 +25,7 @@ fn findings<'a>(
 ) -> Vec<(DiagnosticCode, &'a str, &'a str, Vec<&'a str>)> {
     out.diagnostics
         .iter()
-        .map(|d| {
-            (
-                d.code,
-                &src[d.span.clone()],
-                d.primary.as_str(),
-                d.notes.iter().map(|n| n.message.as_str()).collect(),
-            )
-        })
+        .map(|d| (d.code, slice(src, d), d.primary.as_str(), notes(d)))
         .collect()
 }
 
@@ -84,7 +77,7 @@ fn a_mirror_ending_where_its_window_begins_is_cut_as_a_pair() {
 
 #[test]
 fn a_mirror_sharing_cells_with_its_window_is_skipped_with_a_note_on_the_halves() {
-    let window = "window side=front offset=2 y=1 size=3x1 sym=true mat_slot=glass";
+    let window = "window side=front offset=1 y=1 size=3x1 sym=true mat_slot=glass";
     let src = struct_with_window(6, 5, window);
     let out = lowered(&src);
     assert_eq!(
@@ -92,7 +85,7 @@ fn a_mirror_sharing_cells_with_its_window_is_skipped_with_a_note_on_the_halves()
         [(
             DiagnosticCode::DeferredMember,
             window,
-            "`sym=true` window at offset=2 size=3x1 on the `front` wall would overlap its mirror \
+            "`sym=true` window at offset=1 size=3x1 on the `front` wall would overlap its mirror \
              (wall length=6); the mirror was skipped",
             vec![
                 "a `sym=true` window and its mirror are a pair only when the window lies in one \
@@ -101,12 +94,13 @@ fn a_mirror_sharing_cells_with_its_window_is_skipped_with_a_note_on_the_halves()
             ],
         )],
     );
-    assert_eq!(front_row(only_structure(&out), 1), "##ggg#");
+    assert_eq!(front_row(only_structure(&out), 1), "#ggg##");
 }
 
 #[test]
 fn a_mirror_on_a_side_wall_is_measured_along_that_wall() {
     // A `9x7` struct's `left` wall is 7 long; read along `x` it would be 9 and mirror to u=5.
+    // It is also the only note in this file whose two bounds differ, which takes an odd wall.
     let window = "window side=left offset=3 y=1 size=1x1 sym=true mat_slot=glass";
     let src = struct_with_window(9, 7, window);
     let out = lowered(&src);
@@ -125,4 +119,38 @@ fn a_mirror_on_a_side_wall_is_measured_along_that_wall() {
         )],
     );
     assert_eq!(left_row(only_structure(&out), 1), "###g###");
+}
+
+#[test]
+fn a_wall_one_long_offers_only_dropping_sym() {
+    let window = "window side=front offset=0 y=1 size=1x1 sym=true mat_slot=glass";
+    let src = struct_with_window(1, 5, window);
+    let out = lowered(&src);
+    let all: Vec<_> = out.diagnostics.iter().flat_map(notes).collect();
+    assert_eq!(
+        all,
+        [
+            "a wall 1 long holds no `sym=true` pair; drop `sym=true` to keep the one opening that \
+             was cut"
+        ],
+    );
+    assert_eq!(front_row(only_structure(&out), 1), "g");
+}
+
+#[test]
+fn a_window_refused_outright_carries_the_generic_deferral_note() {
+    let window = "window side=front offset=0 y=1 size=1x1 repeat=0 mat_slot=glass";
+    let src = struct_with_window(6, 5, window);
+    let out = lowered(&src);
+    let all: Vec<_> = out.diagnostics.iter().flat_map(notes).collect();
+    assert_eq!(
+        all,
+        [
+            "block-array lowering currently voxelises floor, walls, door, window, roof \
+             (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate \
+             (at=<side>.outside|inside.<side>), and level y=N grouping, and recognises circuit \
+             region=<label> void=<N> (u32, N>=1) plus door[id=<name>] opened_by=sig.<name> \
+             actuator patches; other roles will be added as their lowering rules are spec'd"
+        ],
+    );
 }

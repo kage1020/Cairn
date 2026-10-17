@@ -277,20 +277,27 @@ fn cut_window_mirror(
         } else {
             "would overlap"
         };
-        // On an odd wall the middle column is in neither half, so the two bounds differ.
-        let (left_half_end, right_half_start) = (len / 2, len - len / 2);
+        let note = if len < 2 {
+            "a wall 1 long holds no `sym=true` pair; drop `sym=true` to keep the one opening \
+             that was cut"
+                .to_owned()
+        } else {
+            // On an odd wall the middle column is in neither half, so the two bounds differ.
+            let (left_half_end, right_half_start) = (len / 2, len.div_ceil(2));
+            format!(
+                "a `sym=true` window and its mirror are a pair only when the window lies in one \
+                 half of the wall (here `offset + size.w <= {left_half_end}` or \
+                 `offset >= {right_half_start}`); move or narrow the window to cut a pair, or \
+                 drop `sym=true` to keep the one opening that was cut",
+            )
+        };
         diagnostics.push(diag_deferred_member_noted(
             member,
             &format!(
                 "`sym=true` window at offset={offset} size={sw}x{sh} on the `{}` wall {relation} its mirror (wall length={len}); the mirror was skipped",
                 side_name(side),
             ),
-            &format!(
-                "a `sym=true` window and its mirror are a pair only when the window lies in one \
-                 half of the wall (here `offset + size.w <= {left_half_end}` or \
-                 `offset >= {right_half_start}`); move or narrow the window to cut a pair, or \
-                 drop `sym=true` to keep the one opening that was cut",
-            ),
+            &note,
         ));
         return;
     }
