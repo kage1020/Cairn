@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use syn::{UseTree, Visibility};
 
@@ -267,10 +268,10 @@ fn subcommand_of(invocation: &str) -> Option<&str> {
         .flatten()
 }
 
-fn check_subcommands(repo: &Repo) -> Vec<Finding> {
-    let readme = Path::new("crates/cairn-lang-cli/README.md");
-    let output = repo
-        .cargo()
+/// `cairn --help`, run through cargo with colour off.
+fn help_command(repo: &Repo) -> Command {
+    let mut command = repo.cargo();
+    command
         .args([
             "run",
             "--quiet",
@@ -282,7 +283,14 @@ fn check_subcommands(repo: &Repo) -> Vec<Finding> {
             "--",
             "--help",
         ])
-        .output();
+        // `CLICOLOR_FORCE` styles clap's help even into a pipe; `NO_COLOR` outranks it.
+        .env("NO_COLOR", "1");
+    command
+}
+
+fn check_subcommands(repo: &Repo) -> Vec<Finding> {
+    let readme = Path::new("crates/cairn-lang-cli/README.md");
+    let output = help_command(repo).output();
     let help = match output {
         Ok(output) if output.status.success() => {
             String::from_utf8_lossy(&output.stdout).into_owned()
@@ -392,6 +400,22 @@ use private::Item;
         let help = "Usage: cairn <COMMAND>\n\nCommands:\n  parse  Lex and parse\n  check  Run checks\n  help   Print this message\n\nOptions:\n  -h, --help\n";
         let names: Vec<_> = listed_subcommands(help).unwrap().into_iter().collect();
         assert_eq!(names, ["check", "parse"]);
+    }
+
+    #[test]
+    fn the_help_comes_back_plain_when_the_environment_forces_colour() {
+        let repo = Repo::open(None).expect("open the checkout");
+        let output = help_command(&repo)
+            .env("CLICOLOR_FORCE", "1")
+            .output()
+            .expect("run cargo");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let help = String::from_utf8(output.stdout).expect("help is utf-8");
+        assert_eq!(help.find('\x1b'), None, "{help:?}");
     }
 
     #[test]

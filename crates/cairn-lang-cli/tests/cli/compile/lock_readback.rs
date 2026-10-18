@@ -302,11 +302,21 @@ const PREVIOUS_TARGET: &str =
 
 /// Assert a lock refused only for `id`'s `ch` was reported, still compared and replaced.
 fn assert_refused_but_read(run: &Run, replaced: &str, id: &str, ch: &str) {
+    assert_read_despite(
+        run,
+        replaced,
+        id,
+        &format!("identifier `{id}` contains forbidden character `{ch}`"),
+    );
+}
+
+/// Assert a lock refused only for `id`, as `refusal` words it, was reported, compared and replaced.
+fn assert_read_despite(run: &Run, replaced: &str, id: &str, refusal: &str) {
     assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
     assert!(
         run.stderr.contains(&format!(
-            "the existing lockfile records an identifier this build refuses \
-             (identifier `{id}` contains forbidden character `{ch}`) but is otherwise valid"
+            "the existing lockfile records an identifier this build refuses ({refusal}) but is \
+             otherwise valid"
         )),
         "stderr should name the refused id in its own words: {}",
         run.stderr,
@@ -355,6 +365,34 @@ fn a_lock_recording_a_no_break_space_quotes_it_as_its_escape() {
         with_line(written, "    port: entry\n", &format!("    port: {id}\n"))
     });
     assert_refused_but_read(&run, &replaced, id, "\\u{a0}");
+}
+
+#[test]
+fn a_lock_recording_a_placement_id_windows_reserves_is_still_read() {
+    let id = "CON";
+    let (run, replaced) = recompile_village_over(|written| {
+        with_line(written, "  id: home1\n", &format!("  id: {id}\n"))
+    });
+    assert_read_despite(
+        &run,
+        &replaced,
+        id,
+        "identifier `CON` is a device name Windows reserves",
+    );
+}
+
+#[test]
+fn a_lock_recording_a_walkway_place_windows_reserves_is_still_read() {
+    let id = "lpt¹";
+    let (run, replaced) = recompile_village_over(|written| {
+        with_line(written, "    place: home1\n", &format!("    place: {id}\n"))
+    });
+    assert_read_despite(
+        &run,
+        &replaced,
+        id,
+        "identifier `lpt¹` is a device name Windows reserves",
+    );
 }
 
 #[test]

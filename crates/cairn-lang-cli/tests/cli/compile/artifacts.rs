@@ -1142,6 +1142,11 @@ fn a_reference_to_a_refused_id_declared_twice_points_at_the_first_row() {
 
 /// `place id=ID` refused on `shown` by `check`, and by `compile`, which writes nothing.
 fn assert_place_id_refused(id: &str, shown: &str) {
+    assert_place_id_refused_because(id, &format!("it contains `{shown}`"));
+}
+
+/// `place id=ID` refused by `check` for `reason`, and by `compile`, which writes nothing.
+fn assert_place_id_refused_because(id: &str, reason: &str) {
     let tmp = TempDir::new().expect("tempdir");
     let out = tmp.path().join("out");
     let src = write_source(
@@ -1149,7 +1154,9 @@ fn assert_place_id_refused(id: &str, shown: &str) {
         "refused.crn",
         &site_with_rows(&[&format!("place id=\"{id}\" use=hut theme=t at=origin")]),
     );
-    let refusal = format!("is not a usable id: it contains `{shown}`");
+    let refusal = format!(
+        "error[E_INVALID_PLACE_ID]: `place id={id}` in site `s` is not a usable id: {reason}\n"
+    );
 
     let checked = cairn("check", &[src.to_str().unwrap()]);
     let check_err = String::from_utf8_lossy(&checked.stderr);
@@ -1157,7 +1164,7 @@ fn assert_place_id_refused(id: &str, shown: &str) {
     assert_stream(&check_err, &[(10, 3, "error", "E_INVALID_PLACE_ID")]);
     assert!(
         check_err.contains(&refusal),
-        "the id must be refused on `{shown}`, got: {check_err}",
+        "the id must be refused because {reason}, got: {check_err}",
     );
 
     let compiled = cairn(
@@ -1226,6 +1233,11 @@ fn a_place_id_carrying_a_no_break_space_is_refused_and_escaped() {
 #[test]
 fn a_place_id_carrying_an_ideographic_space_is_refused_and_escaped() {
     assert_place_id_refused("a\u{3000}b", "\\u{3000}");
+}
+
+#[test]
+fn a_place_id_named_after_a_windows_device_is_refused_on_every_host() {
+    assert_place_id_refused_because("COM²", "it is a device name Windows reserves");
 }
 
 #[test]

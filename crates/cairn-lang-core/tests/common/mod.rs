@@ -1,5 +1,6 @@
 //! Helpers shared by the core integration test binaries.
 
+use std::ops::Range;
 use std::path::PathBuf;
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState, lower_to_block_array};
@@ -116,6 +117,24 @@ pub fn nth(source: &str, needle: &str, n: usize) -> usize {
         .nth(n)
         .unwrap_or_else(|| panic!("occurrence {n} of `{needle}` not found in:\n{source}"))
         .0
+}
+
+/// The byte range of the `n`th (0-based) occurrence of `needle`.
+///
+/// # Panics
+///
+/// When `source` holds fewer than `n + 1` occurrences.
+pub fn span_of(source: &str, needle: &str, n: usize) -> Range<usize> {
+    let start = nth(source, needle, n);
+    start..start + needle.len()
+}
+
+/// Each finding's code and span, in report order.
+pub fn code_spans(found: &[Diagnostic]) -> Vec<(&'static str, Range<usize>)> {
+    found
+        .iter()
+        .map(|d| (d.code.as_str(), d.span.clone()))
+        .collect()
 }
 
 /// The primaries of `found`.

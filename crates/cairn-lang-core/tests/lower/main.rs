@@ -21,5 +21,6 @@ mod the_volume_is_what_gets_painted;
 mod unread_mat_slot;
 mod unreadable_argument_values;
 mod village;
+mod window_mirror;
 mod window_walkway;
 mod window_wall_fit;

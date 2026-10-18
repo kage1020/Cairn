@@ -249,3 +249,152 @@ struct s size=3x3
   assert truth(sig.a, sig.b -> sig.c) { 00->101->0 }
 
 ---
+
+==================
+Truth table with one row per line
+==================
+
+struct s size=3x3
+  assert truth(sig.a, sig.b, sig.enable -> sig.out) {
+    001 -> 0
+    011 -> 1
+    101 -> 1
+    111 -> 1
+  }
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (assert_stmt
+        (truth_form
+          (signal_list
+            (signal_ref
+              (identifier)
+              (identifier))
+            (signal_ref
+              (identifier)
+              (identifier))
+            (signal_ref
+              (identifier)
+              (identifier)))
+          (signal_ref
+            (identifier)
+            (identifier))
+          (truth_row
+            (bit_pattern)
+            (bit))
+          (truth_row
+            (bit_pattern)
+            (bit))
+          (truth_row
+            (bit_pattern)
+            (bit))
+          (truth_row
+            (bit_pattern)
+            (bit)))))))
+
+==================
+Truth table rows at any depth, between blank and comment lines
+==================
+
+struct s size=3x3
+  level y=1
+    assert truth(sig.a -> sig.out) {  # rows
+0->1
+
+      # between
+   1->0;
+          }
+  floor mat_slot=f
+
+---
+
+(source_file
+  (struct_decl
+    (identifier)
+    (attribute_list
+      (attribute
+        (identifier)
+        (size_literal
+          (integer)
+          (integer))))
+    (struct_body
+      (member_stmt_with_body
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (integer))))
+        (struct_body
+          (assert_stmt
+            (truth_form
+              (signal_list
+                (signal_ref
+                  (identifier)
+                  (identifier)))
+              (signal_ref
+                (identifier)
+                (identifier))
+              (comment)
+              (truth_row
+                (bit_pattern)
+                (bit))
+              (comment)
+              (truth_row
+                (bit_pattern)
+                (bit))))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier))))))))
+
+==================
+Truth row split across lines is rejected
+:error
+==================
+
+struct s size=3x3
+  assert truth(sig.a -> sig.out) {
+    0 ->
+    1
+  }
+
+---
+
+==================
+Truth table missing its closing brace is rejected
+:error
+==================
+
+struct s size=3x3
+  assert truth(sig.a -> sig.out) {
+    0 -> 1
+  floor mat_slot=f
+
+---
+
+==================
+Truth table line opened by a semicolon is rejected
+:error
+==================
+
+struct s size=3x3
+  assert truth(sig.a -> sig.out) {
+    0 -> 1
+    ; 1 -> 0
+  }
+
+---

@@ -2,7 +2,7 @@
 
 use cairn_lang_core::{Diagnostic, DiagnosticCode};
 
-use crate::common::{diagnose, exactly_one, notes, nth, slice};
+use crate::common::{code_spans, diagnose, exactly_one, notes, nth, slice, span_of};
 
 #[test]
 fn duplicate_size_flags_second_occurrence_only() {
@@ -360,14 +360,41 @@ fn a_circuit_line_after_an_unusable_one_is_still_a_second_line() {
     assert_eq!(note_text(src, found[0]), "circuit region=floor void=0");
 }
 
-/// A `circuit` line under a `level` is that level's, not the scope's.
 #[test]
 fn one_circuit_line_per_scope_is_not_a_duplicate() {
     let src = "struct a size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n\n\
-               struct b size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
-               level y=1\n    circuit region=floor void=1\n";
+               struct b size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n";
     let diags = diagnose(src);
     assert!(diags.is_empty(), "{diags:#?}");
+}
+
+/// The line under the `level` is `E_MISPLACED_MEMBER` instead, so the duplicate skips it and
+/// points at the first line.
+#[test]
+fn a_circuit_line_under_a_level_is_not_counted_toward_the_scope() {
+    let src = "struct s size=7x5\n  floor mat_slot=m\n  circuit region=floor void=1\n  \
+               level y=1\n    circuit region=basement void=2\n  \
+               circuit region=attic void=3\n";
+    let diags = diagnose(src);
+    assert_eq!(
+        code_spans(&diags),
+        [
+            (
+                "E_MISPLACED_MEMBER",
+                span_of(src, "circuit region=basement void=2", 0),
+            ),
+            (
+                "E_DUPLICATE_CIRCUIT",
+                span_of(src, "circuit region=attic void=3", 0),
+            ),
+        ],
+        "{diags:#?}"
+    );
+    assert_eq!(
+        diags[0].notes[1].span,
+        Some(span_of(src, "circuit region=floor void=1", 0)),
+    );
+    assert_eq!(note_text(src, &diags[1]), "circuit region=floor void=1");
 }
 
 #[test]
