@@ -197,6 +197,64 @@ fn an_output_must_be_zero_one_or_a_dash() {
 
 #[test]
 fn an_output_is_still_required() {
-    assert!(!refusal(&body("00->", "sig.a, sig.b")).is_empty());
-    assert!(!refusal(&body("00", "sig.a, sig.b")).is_empty());
+    assert_eq!(
+        refusal(&body("00->", "sig.a, sig.b")),
+        "truth-table output must be `0`, `1`, or `-`, got `}`",
+    );
+    assert_eq!(
+        refusal(&body("00", "sig.a, sig.b")),
+        "expected `->`, got `}`"
+    );
+}
+
+// -- one row per line -----------------------------------------------------
+
+/// The module as data, spans aside, which is what two spellings of one table must agree on.
+fn ast(source: &str) -> serde_json::Value {
+    let module = parse(source)
+        .unwrap_or_else(|err| panic!("{source:?} should parse, got: {}", err.user_message()));
+    serde_json::to_value(module).expect("a module serialises")
+}
+
+#[test]
+fn a_table_may_give_each_row_a_line_of_its_own() {
+    let per_line = "struct s size=3x3\n  assert truth(sig.a, sig.b, sig.enable -> sig.out) {\n    \
+                    001 -> 0\n    011 -> 1\n    101 -> 1\n    111 -> 1\n  }\n";
+    let one_line = "struct s size=3x3\n  assert truth(sig.a, sig.b, sig.enable -> sig.out) \
+                    { 001 -> 0; 011 -> 1; 101 -> 1; 111 -> 1 }\n";
+    assert_eq!(rows_of(per_line), ["001 0", "011 1", "101 1", "111 1"]);
+    assert_eq!(ast(per_line), ast(one_line));
+}
+
+/// The members after the table, and the dedents out of the `level`, show the lines below it laid
+/// out as though it had sat on one line.
+#[test]
+fn every_layout_of_a_table_reads_as_the_one_line_table() {
+    let around = |table: &str| {
+        format!(
+            "struct s size=3x3\n  level y=1\n    assert truth(sig.a -> sig.o) {table}\n  \
+             floor mat_slot=f\nstruct t size=3x3\n  floor mat_slot=f\n"
+        )
+    };
+    let one_line = ast(&around("{ 0 -> 1; 1 -> 0 }"));
+    for table in [
+        "{\n      0 -> 1\n      1 -> 0\n    }",
+        "{\n0 -> 1\n   1 -> 0\n          }",
+        "{  # rows\n\n      0 -> 1  # low\n   \n# between\n      1 -> 0\n\n    }",
+        "{ 0 -> 1;\n      1 -> 0; }",
+        "{ 0 -> 1\n      1 -> 0 }",
+    ] {
+        for ending in ["\n", "\r\n", "\r"] {
+            let source = around(table).replace('\n', ending);
+            assert_eq!(ast(&source), one_line, "{source:?}");
+        }
+    }
+}
+
+#[test]
+fn an_empty_table_may_close_on_a_line_of_its_own() {
+    assert_eq!(
+        ast("struct s size=3x3\n  assert truth(sig.o -> sig.o) {\n\n  }\n"),
+        ast("struct s size=3x3\n  assert truth(sig.o -> sig.o) { }\n"),
+    );
 }

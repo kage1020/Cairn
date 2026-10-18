@@ -621,7 +621,8 @@ impl<'a> Parser<'a> {
         self.expect(&TokenKind::RParen)?;
         self.expect(&TokenKind::LBrace)?;
         let mut rows = Vec::new();
-        while !self.peek_is(&TokenKind::RBrace) && !self.at_eof() {
+        self.skip_newlines();
+        while !self.peek_is(&TokenKind::RBrace) {
             let pattern_position = self.position();
             let row_start_byte = self.current_byte();
             let pattern = self.expect_truth_pattern()?;
@@ -659,27 +660,22 @@ impl<'a> Parser<'a> {
                 });
             }
             self.expect(&TokenKind::Arrow)?;
-            let output = if self.peek_is(&TokenKind::Minus) {
+            let output = match self.peek().map(|t| &t.kind) {
                 // The arrow is already taken, so this `-` is the output, not the arrow's dash.
-                self.advance();
-                None
-            } else {
-                // Before the output is consumed, so a refusal points at it.
-                let output_position = self.position();
-                let out_lex = self.expect_int_lexeme()?;
-                match out_lex.as_str() {
-                    "0" => Some(false),
-                    "1" => Some(true),
-                    other => {
-                        return Err(ParseError::Syntax {
-                            position: output_position,
-                            message: format!(
-                                "truth-table output must be `0`, `1`, or `-`, got `{other}`"
-                            ),
-                        });
-                    }
+                Some(TokenKind::Minus) => None,
+                Some(TokenKind::Int { lexeme }) if lexeme == "0" => Some(false),
+                Some(TokenKind::Int { lexeme }) if lexeme == "1" => Some(true),
+                found => {
+                    let found = match found {
+                        Some(TokenKind::Int { lexeme }) => format!("`{lexeme}`"),
+                        _ => self.next_token_text(),
+                    };
+                    return Err(self.syntax_here(&format!(
+                        "truth-table output must be `0`, `1`, or `-`, got {found}"
+                    )));
                 }
             };
+            self.advance();
             rows.push(TruthRow {
                 inputs: inputs_lex,
                 output,
@@ -688,6 +684,7 @@ impl<'a> Parser<'a> {
             if self.peek_is(&TokenKind::Semi) {
                 self.advance();
             }
+            self.skip_newlines();
         }
         self.expect(&TokenKind::RBrace)?;
         let span = start_byte..self.last_byte();
@@ -1206,14 +1203,27 @@ impl<'a> Parser<'a> {
             self.advance();
         }
         if text.is_empty() {
+            // A line no row can open is laid out as usual, so its indent or dedents come first.
+            let next = self
+                .tokens
+                .iter()
+                .skip(self.pos)
+                .find(|t| !matches!(t.kind, TokenKind::Indent | TokenKind::Dedent));
+            let (position, got) = match next {
+                Some(token) => (token.position, token.kind.to_string()),
+                // End of input is no text to point at, so the refusal ends the table's last line.
+                None => (
+                    self.tokens
+                        .get(self.pos.wrapping_sub(1))
+                        .map_or(position, |t| t.position),
+                    "end of input".to_owned(),
+                ),
+            };
             return Err(ParseError::Syntax {
                 position,
-                message: match self.peek() {
-                    Some(token) => {
-                        format!("expected a truth-table input pattern, got {}", token.kind)
-                    }
-                    None => "expected a truth-table input pattern, got end of input".to_owned(),
-                },
+                message: format!(
+                    "expected a truth-table row or the `}}` that closes the table, got {got}"
+                ),
             });
         }
         Ok(TruthPattern {

@@ -1,5 +1,9 @@
 //! Lexer for the Cairn surface syntax, with synthetic `Indent`, `Dedent` and `Newline` tokens.
 //!
+//! A line inside a truth table's braces carries no indentation, so it takes no `Indent` or
+//! `Dedent`. The table holds every line from an `assert truth` line's `{` up to the next `}`, or
+//! up to the next line no row or `}` can open, which is measured as usual.
+//!
 //! A bad indentation ends the scan. A failure inside a line becomes a [`TokenKind::Unlexed`] in
 //! the parser's own pass, since a directive that takes raw text to end of line judges it itself.
 
@@ -167,6 +171,10 @@ struct Lexer<'src> {
     indent_stack: Vec<u32>,
     out: Vec<Token>,
     deferred: Vec<Deferred>,
+    /// Index in `out` of the current line's first token.
+    line_first_token: usize,
+    /// Whether a truth table's braces are open, so the next line takes no `Indent` or `Dedent`.
+    in_truth_table: bool,
 }
 
 /// U+FEFF, the byte-order mark, as it appears in UTF-8.
@@ -186,6 +194,8 @@ impl<'src> Lexer<'src> {
             indent_stack: vec![0],
             out: Vec::new(),
             deferred: Vec::new(),
+            line_first_token: 0,
+            in_truth_table: false,
         }
     }
 
@@ -211,7 +221,8 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Emit `Indent` / `Dedent` for the next line that is not blank or a comment.
+    /// Emit `Indent` / `Dedent` for the next line that is not blank or a comment, unless it is
+    /// inside a truth table.
     fn scan_line_start(&mut self) -> Result<(), LexError> {
         loop {
             let line_start = self.pos;
@@ -231,6 +242,12 @@ impl<'src> Lexer<'src> {
                     continue;
                 }
                 return Ok(());
+            }
+            if self.in_truth_table {
+                if self.peek().is_some_and(continues_a_truth_table) {
+                    return Ok(());
+                }
+                self.in_truth_table = false;
             }
 
             if spaces % SPACES_PER_LEVEL != 0 {
@@ -287,6 +304,7 @@ impl<'src> Lexer<'src> {
 
     /// Scan the rest of a logical line through its `Newline`, deferring a token that fails.
     fn scan_line_body(&mut self) {
+        self.line_first_token = self.out.len();
         loop {
             self.skip_spaces();
             let Some(b) = self.peek() else {
@@ -397,10 +415,16 @@ impl<'src> Lexer<'src> {
             }
             b'{' => {
                 self.advance();
+                // A `{` in a directive's raw value is text, and must not suspend the layout of
+                // the lines below it.
+                if self.line_opens_with(&["assert", "truth"]) {
+                    self.in_truth_table = true;
+                }
                 self.push_at(TokenKind::LBrace, start..self.pos, position);
             }
             b'}' => {
                 self.advance();
+                self.in_truth_table = false;
                 self.push_at(TokenKind::RBrace, start..self.pos, position);
             }
             b'"' => self.scan_string(start, position)?,
@@ -569,6 +593,16 @@ impl<'src> Lexer<'src> {
         });
     }
 
+    /// Whether the current line's first tokens are the identifiers `words`, in order.
+    fn line_opens_with(&self, words: &[&str]) -> bool {
+        words.iter().enumerate().all(|(i, word)| {
+            matches!(
+                self.out.get(self.line_first_token + i).map(|t| &t.kind),
+                Some(TokenKind::Ident(ident)) if ident == word
+            )
+        })
+    }
+
     fn last_is_newline(&self) -> bool {
         matches!(self.out.last().map(|t| &t.kind), Some(TokenKind::Newline))
     }
@@ -584,4 +618,9 @@ fn is_ident_continue(b: u8) -> bool {
 
 fn is_line_break_or_comment(b: u8) -> bool {
     b == b'\n' || b == b'\r' || b == b'#'
+}
+
+/// Whether a line opening with `b` stays inside a truth table: a row, the `}`, or a misplaced `;`.
+fn continues_a_truth_table(b: u8) -> bool {
+    matches!(b, b'0' | b'1' | b'-' | b';' | b'}')
 }
