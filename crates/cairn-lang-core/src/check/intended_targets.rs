@@ -221,7 +221,7 @@ fn unsupported(
     })
 }
 
-/// The versions that satisfy every floor at once (`spec/lint` "Diagnostic codes").
+/// The note naming the targetable versions below no floor, or why there are none.
 fn candidates_note(
     edition: Edition,
     order: &VersionOrder,
