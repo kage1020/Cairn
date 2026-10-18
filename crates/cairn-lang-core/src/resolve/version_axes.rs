@@ -522,10 +522,10 @@ impl VersionFloor {
     }
 }
 
-/// The versions in `considered` that satisfy every floor (`spec/lint` "Diagnostic codes").
+/// The versions in `considered` that are below no floor
+/// (`spec/versioning-editions` "The hint is weighed against the floor").
 ///
-/// A floor this edition's table cannot place refuses none of them: folding it in would answer "no
-/// target works" for a file whose repair is on that floor's line (`E_REQUIRES_UNORDERABLE`).
+/// A floor this edition's table cannot place keeps every one: its repair is on its own line.
 #[must_use]
 pub fn versions_satisfying<'a>(
     order: &VersionOrder,

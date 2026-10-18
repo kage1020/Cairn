@@ -3,7 +3,9 @@
 
 use cairn_lang_core::check::weigh_intended_targets;
 use cairn_lang_core::resolve::VersionOrder;
-use cairn_lang_core::{Edition, parse};
+use cairn_lang_core::{Diagnostic, Edition, parse};
+
+use crate::common::slice;
 
 /// Java's release table, cut to the rows these fixtures name. The top row is past `1.21.4` so
 /// that Bedrock's `1.21.40` lands inside the table's span.
@@ -22,6 +24,25 @@ fn java_order() -> VersionOrder {
 /// The three versions the built-in Java pack ships block data for.
 fn java_targetable() -> Vec<String> {
     ["1.20.4", "1.21", "1.21.4"]
+        .iter()
+        .map(|v| (*v).to_owned())
+        .collect()
+}
+
+/// Bedrock's release table, cut to the targetable rows and the `1.21.50` floor's. The bottom row
+/// is below `1.21.4` so that the floor lands inside the table's span, where it names no row.
+fn bedrock_order() -> VersionOrder {
+    VersionOrder::new([
+        ("1.21.0".to_owned(), 18_153_475),
+        ("1.21.40".to_owned(), 18_163_713),
+        ("1.21.50".to_owned(), 18_166_272),
+        ("1.21.60".to_owned(), 18_168_865),
+    ])
+}
+
+/// The three versions the built-in Bedrock pack ships block data for.
+fn bedrock_targetable() -> Vec<String> {
+    ["1.21.0", "1.21.40", "1.21.60"]
         .iter()
         .map(|v| (*v).to_owned())
         .collect()
@@ -48,6 +69,38 @@ fn codes(headers: &str) -> Vec<&'static str> {
     findings(headers)
         .into_iter()
         .map(|(code, _)| code)
+        .collect()
+}
+
+fn weighed_for_bedrock(source: &str) -> Vec<Diagnostic> {
+    let module = parse(source).expect("parse");
+    weigh_intended_targets(
+        &module,
+        Edition::Bedrock,
+        &bedrock_order(),
+        &bedrock_targetable(),
+    )
+}
+
+type Rendered<'a> = (
+    &'static str,
+    &'a str,
+    &'a str,
+    Vec<(Option<&'a str>, &'a str)>,
+);
+
+/// Each finding as its code, the text it points at, its primary, and its notes with theirs.
+fn rendered<'a>(source: &'a str, found: &'a [Diagnostic]) -> Vec<Rendered<'a>> {
+    found
+        .iter()
+        .map(|d| {
+            let notes = d
+                .notes
+                .iter()
+                .map(|n| (n.span.clone().map(|s| &source[s]), n.message.as_str()))
+                .collect();
+            (d.code.as_str(), slice(source, d), d.primary.as_str(), notes)
+        })
         .collect()
 }
 
@@ -206,24 +259,6 @@ fn a_floor_this_table_cannot_place_refuses_no_intended_target() {
     assert!(codes("@requires version>=1.21.40\n@intended_targets [\"1.21\"]\n").is_empty());
 }
 
-/// Bedrock's release table, cut to the rows these fixtures name, with the built-in pack's keys.
-fn bedrock_order() -> VersionOrder {
-    VersionOrder::new([
-        ("1.21.0".to_owned(), 18_153_475),
-        ("1.21.40".to_owned(), 18_163_713),
-        ("1.21.50".to_owned(), 18_166_272),
-        ("1.21.60".to_owned(), 18_168_865),
-    ])
-}
-
-/// The three versions the built-in Bedrock pack ships block data for.
-fn bedrock_targetable() -> Vec<String> {
-    ["1.21.0", "1.21.40", "1.21.60"]
-        .iter()
-        .map(|v| (*v).to_owned())
-        .collect()
-}
-
 /// `version>=1.21.4` falls between two Bedrock rows, so its repair is on its own line.
 #[test]
 fn a_floor_this_table_cannot_place_takes_no_version_off_the_offered_list() {
@@ -245,32 +280,10 @@ fn a_floor_this_table_cannot_place_takes_no_version_off_the_offered_list() {
             "@requires version>=1.21.4\n@requires version>=1.21.50\n\
              @intended_targets {intended}\n{BUILD}"
         );
-        let module = parse(&source).expect("parse");
-        let found = weigh_intended_targets(
-            &module,
-            Edition::Bedrock,
-            &bedrock_order(),
-            &bedrock_targetable(),
-        );
-        let rendered: Vec<_> = found
-            .iter()
-            .map(|d| {
-                let notes: Vec<_> = d
-                    .notes
-                    .iter()
-                    .map(|n| (n.span.clone().map(|s| &source[s]), n.message.as_str()))
-                    .collect();
-                (
-                    d.code.as_str(),
-                    &source[d.span.clone()],
-                    d.primary.as_str(),
-                    notes,
-                )
-            })
-            .collect();
+        let found = weighed_for_bedrock(&source);
         let header = format!("@intended_targets {intended}");
         assert_eq!(
-            rendered,
+            rendered(&source, &found),
             [(
                 code,
                 header.as_str(),
@@ -293,6 +306,40 @@ fn a_floor_this_table_cannot_place_takes_no_version_off_the_offered_list() {
 }
 
 #[test]
+fn a_floor_this_table_cannot_place_leaves_the_others_to_refuse_every_target() {
+    let source = format!(
+        "@requires version>=1.21.4\n@requires version>=1.21.70\n\
+         @intended_targets [\"1.21.40\"]\n{BUILD}"
+    );
+    let found = weighed_for_bedrock(&source);
+    assert_eq!(
+        rendered(&source, &found),
+        [(
+            "E_INTENDED_TARGET_CAP",
+            "@intended_targets [\"1.21.40\"]",
+            "`@intended_targets` names no bedrock version this file can be built for: 1.21.40 is \
+             below a version floor the file declares",
+            vec![
+                (
+                    Some("@requires version>=1.21.70"),
+                    "1.21.40 is below `version>=1.21.70`, which this file declares",
+                ),
+                (
+                    None,
+                    "no bedrock target satisfies the floors this file declares: bedrock builds \
+                     against 1.21.0, 1.21.40, 1.21.60",
+                ),
+                (
+                    None,
+                    "fix: name a version at or above the floor in `@intended_targets`, or lower \
+                     the `@requires` floor",
+                ),
+            ],
+        )],
+    );
+}
+
+#[test]
 fn a_floor_scoped_to_the_other_edition_is_inert() {
     assert!(
         codes("@requires bedrock version>=1.21.60\n@intended_targets [\"1.20.4\"]\n").is_empty()
@@ -307,25 +354,21 @@ fn a_label_spelled_with_trailing_zeros_finds_its_row() {
 #[test]
 fn each_edition_answers_for_itself() {
     let module = parse(&format!("@intended_targets [\"1.20.4\"]\n{BUILD}")).expect("parse");
-    let bedrock = VersionOrder::new([
-        ("1.21.0".to_owned(), 649),
-        ("1.21.40".to_owned(), 686),
-        ("1.21.60".to_owned(), 729),
-    ]);
-    let targetable: Vec<String> = ["1.21.0", "1.21.40", "1.21.60"]
-        .iter()
-        .map(|v| (*v).to_owned())
-        .collect();
     assert!(
         weigh_intended_targets(&module, Edition::Java, &java_order(), &java_targetable())
             .is_empty(),
         "1.20.4 is an ordinary Java target",
     );
     assert_eq!(
-        weigh_intended_targets(&module, Edition::Bedrock, &bedrock, &targetable)
-            .iter()
-            .map(|d| d.code.as_str())
-            .collect::<Vec<_>>(),
+        weigh_intended_targets(
+            &module,
+            Edition::Bedrock,
+            &bedrock_order(),
+            &bedrock_targetable()
+        )
+        .iter()
+        .map(|d| d.code.as_str())
+        .collect::<Vec<_>>(),
         ["W_INTENDED_TARGET_UNSUPPORTED"],
     );
 }
