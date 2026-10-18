@@ -1,7 +1,8 @@
 //! Lexer for the Cairn surface syntax, with synthetic `Indent`, `Dedent` and `Newline` tokens.
 //!
-//! The lines inside a truth table's braces carry no indentation, so they take no `Indent` or
-//! `Dedent`; each still ends in a `Newline`, which separates the rows.
+//! A line inside a truth table's braces carries no indentation, so it takes no `Indent` or
+//! `Dedent`. The table holds every line from an `assert truth` line's `{` up to the next `}`, or
+//! up to the next line no row or `}` can open, which is measured as usual.
 //!
 //! A bad indentation ends the scan. A failure inside a line becomes a [`TokenKind::Unlexed`] in
 //! the parser's own pass, since a directive that takes raw text to end of line judges it itself.
@@ -172,7 +173,7 @@ struct Lexer<'src> {
     deferred: Vec<Deferred>,
     /// Index in `out` of the current line's first token.
     line_first_token: usize,
-    /// Whether a truth table's `{` is open, from an `assert` line's `{` to the next `}`.
+    /// Whether a truth table's braces are open, so the next line takes no `Indent` or `Dedent`.
     in_truth_table: bool,
 }
 
@@ -243,7 +244,10 @@ impl<'src> Lexer<'src> {
                 return Ok(());
             }
             if self.in_truth_table {
-                return Ok(());
+                if self.peek().is_some_and(continues_a_truth_table) {
+                    return Ok(());
+                }
+                self.in_truth_table = false;
             }
 
             if spaces % SPACES_PER_LEVEL != 0 {
@@ -411,9 +415,9 @@ impl<'src> Lexer<'src> {
             }
             b'{' => {
                 self.advance();
-                // Only `assert truth` takes a `{`: one in a directive's raw value is text, and
-                // must not suspend the layout of the lines below it.
-                if self.line_opens_with("assert") {
+                // A `{` in a directive's raw value is text, and must not suspend the layout of
+                // the lines below it.
+                if self.line_opens_with(&["assert", "truth"]) {
                     self.in_truth_table = true;
                 }
                 self.push_at(TokenKind::LBrace, start..self.pos, position);
@@ -589,12 +593,14 @@ impl<'src> Lexer<'src> {
         });
     }
 
-    /// Whether the current line's first token is the identifier `word`.
-    fn line_opens_with(&self, word: &str) -> bool {
-        matches!(
-            self.out.get(self.line_first_token).map(|t| &t.kind),
-            Some(TokenKind::Ident(first)) if first == word
-        )
+    /// Whether the current line's first tokens are the identifiers `words`, in order.
+    fn line_opens_with(&self, words: &[&str]) -> bool {
+        words.iter().enumerate().all(|(i, word)| {
+            matches!(
+                self.out.get(self.line_first_token + i).map(|t| &t.kind),
+                Some(TokenKind::Ident(ident)) if ident == word
+            )
+        })
     }
 
     fn last_is_newline(&self) -> bool {
@@ -612,4 +618,9 @@ fn is_ident_continue(b: u8) -> bool {
 
 fn is_line_break_or_comment(b: u8) -> bool {
     b == b'\n' || b == b'\r' || b == b'#'
+}
+
+/// Whether a line opening with `b` stays inside a truth table: a row, the `}`, or a misplaced `;`.
+fn continues_a_truth_table(b: u8) -> bool {
+    matches!(b, b'0' | b'1' | b'-' | b';' | b'}')
 }

@@ -631,6 +631,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Accept,
     ),
     (
+        "truth_rows_at_column_zero_in_a_struct_body",
+        "struct s size=3x3\n  assert truth(a -> z) {\n0 -> 1\n1 -> 0\n}\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
         "truth_closing_brace_at_column_zero",
         "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n}\n  floor mat_slot=f\n",
         Accept,
@@ -686,6 +691,11 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         Reject,
     ),
     (
+        "truth_unclosed_before_a_later_table",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n  level y=1\n    floor mat_slot=f\n      assert truth(b -> z) { 0 -> 1 }\n      floor mat_slot=f\n",
+        Reject,
+    ),
+    (
         "truth_unclosed_at_end_of_input",
         "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n",
         Reject,
@@ -708,7 +718,7 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
     ),
     (
         "requires_brace_in_value",
-        "def d size=2x2:\n  requires version>={\n  floor mat_slot=f\n",
+        "def d size=2x2:\n  requires version>={\nstruct s size=3x3\n  floor mat_slot=f\n",
         Accept,
     ),
     (

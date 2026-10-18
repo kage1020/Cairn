@@ -248,31 +248,77 @@ fn a_tab_inside_a_truth_table_is_still_rejected() {
     );
 }
 
-/// A directive's raw value is text, so its `{` opens no table.
+/// A directive's raw value is text and `assert always` takes no table, so neither `{` opens one.
 #[test]
-fn a_brace_off_an_assert_line_leaves_the_layout_below_it_alone() {
+fn a_brace_off_an_assert_truth_line_opens_no_table() {
     assert_eq!(
-        kinds("@cairn 2026.06 {\nstruct s\n  floor x=1\n"),
+        lex("@cairn 2026.06 {\n      1 -> 0\n").unwrap_err(),
+        LexError::IndentJump {
+            position: pos(2, 1),
+            got: 6,
+            expected: 2,
+        },
+    );
+    assert_eq!(
+        lex("struct s\n  assert always(a -> eventually b within 5) {\n      1 -> 0\n").unwrap_err(),
+        LexError::IndentJump {
+            position: pos(3, 1),
+            got: 6,
+            expected: 4,
+        },
+    );
+}
+
+#[test]
+fn a_line_after_a_closed_truth_table_is_measured_again() {
+    assert_eq!(
+        lex("struct s\n  assert truth(a -> b) {\n    0 -> 1\n  }\n      1 -> 0\n").unwrap_err(),
+        LexError::IndentJump {
+            position: pos(5, 1),
+            got: 6,
+            expected: 4,
+        },
+    );
+}
+
+/// The member's dedent out of the `level` comes before it, as though the table had been closed.
+#[test]
+fn a_line_no_row_can_open_ends_the_truth_table() {
+    let source = "struct s\n  level y=1\n    assert truth(a -> b) {\n      0 -> 1\n  floor x=1\n";
+    let int = |lexeme: &str| TokenKind::Int {
+        lexeme: lexeme.into(),
+    };
+    assert_eq!(
+        kinds(source),
         vec![
-            TokenKind::At,
-            TokenKind::Ident("cairn".into()),
-            TokenKind::Int {
-                lexeme: "2026".into()
-            },
-            TokenKind::Dot,
-            TokenKind::Int {
-                lexeme: "06".into()
-            },
-            TokenKind::LBrace,
-            TokenKind::Newline,
             TokenKind::Ident("struct".into()),
             TokenKind::Ident("s".into()),
             TokenKind::Newline,
             TokenKind::Indent,
+            TokenKind::Ident("level".into()),
+            TokenKind::Ident("y".into()),
+            TokenKind::Eq,
+            int("1"),
+            TokenKind::Newline,
+            TokenKind::Indent,
+            TokenKind::Ident("assert".into()),
+            TokenKind::Ident("truth".into()),
+            TokenKind::LParen,
+            TokenKind::Ident("a".into()),
+            TokenKind::Arrow,
+            TokenKind::Ident("b".into()),
+            TokenKind::RParen,
+            TokenKind::LBrace,
+            TokenKind::Newline,
+            int("0"),
+            TokenKind::Arrow,
+            int("1"),
+            TokenKind::Newline,
+            TokenKind::Dedent,
             TokenKind::Ident("floor".into()),
             TokenKind::Ident("x".into()),
             TokenKind::Eq,
-            TokenKind::Int { lexeme: "1".into() },
+            int("1"),
             TokenKind::Newline,
             TokenKind::Dedent,
         ],

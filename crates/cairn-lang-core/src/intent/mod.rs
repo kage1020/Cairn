@@ -194,7 +194,7 @@ pub struct LogicBinding {
     pub span: Span,
 }
 
-/// `assert ...` line lifted out of a body.
+/// `assert ...` command lifted out of a body.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
@@ -226,7 +226,7 @@ pub enum AssertIr {
 }
 
 impl AssertIr {
-    /// Byte range of the originating `assert ...` line in source.
+    /// Byte range of the originating `assert ...` command in source, through a table's `}`.
     #[must_use]
     pub fn span(&self) -> &Span {
         match self {

@@ -197,8 +197,14 @@ fn an_output_must_be_zero_one_or_a_dash() {
 
 #[test]
 fn an_output_is_still_required() {
-    assert!(!refusal(&body("00->", "sig.a, sig.b")).is_empty());
-    assert!(!refusal(&body("00", "sig.a, sig.b")).is_empty());
+    assert_eq!(
+        refusal(&body("00->", "sig.a, sig.b")),
+        "truth-table output must be `0`, `1`, or `-`, got `}`",
+    );
+    assert_eq!(
+        refusal(&body("00", "sig.a, sig.b")),
+        "expected `->`, got `}`"
+    );
 }
 
 // -- one row per line -----------------------------------------------------

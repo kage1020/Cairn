@@ -5,8 +5,8 @@ title: "5. Syntax"
 ## 5.1 Lexical
 
 One line is one command, and `#` begins a line comment. The line starts with a command keyword;
-**every remaining argument MUST be `key=value`.** The rows of a truth table are the one thing that
-may run onto the lines below its command ([Literals and separators](#511-literals-and-separators)).
+**every remaining argument MUST be `key=value`.** A truth table's braces are the one place a command
+may run onto the lines below it ([Literals and separators](#511-literals-and-separators)).
 
 ```
 window side=front mat_slot=glass offset=2 y=2 size=2x2 sym=true   # OK
@@ -105,11 +105,12 @@ assert truth(sig.a, sig.b, sig.enable -> sig.out) {
 ```
 
 Inside the braces a line carries no indentation: the rows and the closing `}` may sit at any depth,
-and blank and comment lines between them are skipped. A row is still one line, so a break between
-its pattern, its `->` and its output is refused. The `{` stays on the `assert` line, and a `;` ends
-the row in front of it on that row's line, so no line may open with one. A table whose `}` is
-missing is refused at whatever follows its last row, such as the next command, or at the end of
-that row's line when nothing does.
+and blank and comment lines between them are skipped. A tab in front of a row or the `}` is still
+refused, as it is in front of a command. A row is still one line, so a break between its pattern,
+its `->` and its output is refused. The `{` stays on the `assert` line, and a `;` ends the row in
+front of it on that row's line, so no line may open with one. A table whose `}` is missing is
+refused at whatever follows its last row, such as the next command, or at the end of that row's line
+when nothing does.
 
 Indentation is two spaces per level and opens one level at a time. A width that is not a multiple of
 two and a jump of more than one level are different mistakes and are reported as such. Neither can

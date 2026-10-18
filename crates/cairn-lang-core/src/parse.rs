@@ -660,31 +660,22 @@ impl<'a> Parser<'a> {
                 });
             }
             self.expect(&TokenKind::Arrow)?;
-            let output = if self.peek_is(&TokenKind::Minus) {
+            let output = match self.peek().map(|t| &t.kind) {
                 // The arrow is already taken, so this `-` is the output, not the arrow's dash.
-                self.advance();
-                None
-            } else {
-                let output = match self.peek().map(|t| &t.kind) {
-                    Some(TokenKind::Int { lexeme }) if lexeme == "0" => Some(false),
-                    Some(TokenKind::Int { lexeme }) if lexeme == "1" => Some(true),
-                    found => {
-                        let found = match found {
-                            Some(TokenKind::Int { lexeme }) => format!("`{lexeme}`"),
-                            Some(kind) => kind.to_string(),
-                            None => "end of input".to_owned(),
-                        };
-                        return Err(ParseError::Syntax {
-                            position: self.position(),
-                            message: format!(
-                                "truth-table output must be `0`, `1`, or `-`, got {found}"
-                            ),
-                        });
-                    }
-                };
-                self.advance();
-                output
+                Some(TokenKind::Minus) => None,
+                Some(TokenKind::Int { lexeme }) if lexeme == "0" => Some(false),
+                Some(TokenKind::Int { lexeme }) if lexeme == "1" => Some(true),
+                found => {
+                    let found = match found {
+                        Some(TokenKind::Int { lexeme }) => format!("`{lexeme}`"),
+                        _ => self.next_token_text(),
+                    };
+                    return Err(self.syntax_here(&format!(
+                        "truth-table output must be `0`, `1`, or `-`, got {found}"
+                    )));
+                }
             };
+            self.advance();
             rows.push(TruthRow {
                 inputs: inputs_lex,
                 output,
@@ -1212,21 +1203,27 @@ impl<'a> Parser<'a> {
             self.advance();
         }
         if text.is_empty() {
-            const EXPECTED: &str = "expected a truth-table row or the `}` that closes the table";
-            // Inside a table only the end of input dedents, and the refusal belongs at the end of
-            // the table's last line rather than past it.
-            return Err(match self.peek() {
-                Some(token) if token.kind != TokenKind::Dedent => ParseError::Syntax {
-                    position,
-                    message: format!("{EXPECTED}, got {}", token.kind),
-                },
-                _ => ParseError::Syntax {
-                    position: self
-                        .tokens
+            // A line no row can open is laid out as usual, so its indent or dedents come first.
+            let next = self
+                .tokens
+                .iter()
+                .skip(self.pos)
+                .find(|t| !matches!(t.kind, TokenKind::Indent | TokenKind::Dedent));
+            let (position, got) = match next {
+                Some(token) => (token.position, token.kind.to_string()),
+                // End of input is no text to point at, so the refusal ends the table's last line.
+                None => (
+                    self.tokens
                         .get(self.pos.wrapping_sub(1))
                         .map_or(position, |t| t.position),
-                    message: format!("{EXPECTED}, got end of input"),
-                },
+                    "end of input".to_owned(),
+                ),
+            };
+            return Err(ParseError::Syntax {
+                position,
+                message: format!(
+                    "expected a truth-table row or the `}}` that closes the table, got {got}"
+                ),
             });
         }
         Ok(TruthPattern {
