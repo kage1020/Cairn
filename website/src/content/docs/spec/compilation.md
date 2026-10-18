@@ -173,7 +173,9 @@ slope inward toward a centre ridge.
 
 `level y=N` groups members and places each of them `N` voxels above the struct's base plane. The
 `level` line itself lowers to no blocks; every member under it lowers as if written in the body with
-`N` added to its vertical coordinate.
+`N` added to its vertical coordinate. A `level` does not group a `circuit` line, whose reservation
+spans the whole scope: one under a `level` is `E_MISPLACED_MEMBER`
+([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 
 The volume a struct lowers into is derived, never written:
 
@@ -206,9 +208,9 @@ a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=` doe
 footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
 
 The material half applies to `walls` and not to `roof`, because a roof whose `mat_slot=` does not
-resolve falls back to a material of its own and still draws. A themeless struct shows the
-asymmetry: its walls lower to air and reserve nothing, while a `roof kind=gable` over them still
-draws and still seats its ridge above them.
+resolve falls back to a material of its own and still draws. A themeless struct shows the asymmetry:
+its walls are not built and take up no rows, while a `roof kind=gable` over them still draws, seated
+where it would sit with no walls at all.
 
 "Does the material resolve" is asked against the pinned target, so a block only some versions
 declare can change `Dims.y` between two `--target` values. An id the pinned target does not declare

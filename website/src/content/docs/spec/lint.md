@@ -62,7 +62,7 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` / `class=` a `struct` / `def` header takes. |
 | `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
-| `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it. |
+| `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
 | `E_UNSUPPORTED_NESTING` | A member carries an indented body that nothing reads. |
 | `E_TYPE_MISMATCH_LABEL` | A label-typed key's value is not an identifier or string. |
@@ -75,6 +75,14 @@ compose to the strictest across every line, so a second one adds a constraint ([
 `E_MISPLACED_MEMBER` fires on a `place` / `connect` inside a `struct` or `def`, or a geometry
 keyword among a `site`'s rows. It is reported once at the offending row, and anything indented
 under it goes with it.
+
+It also fires on a `circuit` line under a `level`, directly or through `level`s nested in it. A
+reservation spans the whole scope, so place-and-route reads a `circuit` line only among the
+`struct`'s or `def`'s own members ([§14.5](/spec/redstone/#145-place-and-route)), and one under a
+`level` reserves nothing. `E_DUPLICATE_CIRCUIT` counts only the body's own members, so it does not
+report that line as well. A `level` that groups nothing, such as one inside another, is
+`E_UNSUPPORTED_NESTING` as well: that finding is about the blocks its members lose, and a `circuit`
+line writes none.
 
 `E_UNSUPPORTED_NESTING`: only `level y=N` inside a `struct` or `def` groups members, and a `site`
 body is a flat list. Reported once per dropped subtree, at its root.
@@ -150,7 +158,7 @@ version to compare.
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since nothing checks its properties and values against the target until `E_STATE_DOMAIN` is implemented ([Versioning and Editions](/spec/versioning-editions/)). |
-| `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so every `mat_slot=` it reads lowers to air. |
+| `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, which
@@ -206,9 +214,14 @@ about the author's intent rather than about what was built. The prefix is part o
 which is Stable ([Compatibility Tiers](/spec/compatibility/)), so it stays as written — read severity from
 the `severity` field rather than from the first letter.
 
-`E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: a slot bound to nothing lowers every
-`mat_slot=` pointing at it to air, so a theme whose slots are all mistyped builds a hollow shell of
-the requested extent at exit 0.
+`E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: no `mat_slot=` pointing at a slot bound to
+something other than a material token resolves. A `floor` that names it is left air; a `walls` that
+names it is not built and takes up no rows, so a `door` or `window` cut into it is refused; a
+`window` that names it is not cut, so its wall stays; and a `roof`, eave `stair` or `pressure_plate`
+that names it is built from its default block. Were it a warning, a theme whose slots are all
+mistyped would still build at exit 0 every scope that keeps something to draw, such as a `roof`:
+shorter than asked, with no floor and no walls, and only default blocks, less any eave `stair` or
+`pressure_plate` set higher than the shorter structure reaches.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member
 earns both: the key is absent for the first and present-but-unusable for the second. They have
@@ -264,15 +277,16 @@ a `door` or `window` cut into it is refused. A `window` is not cut, so its wall 
 it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
-all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built,
-so every `door` and `window` is refused for want of a wall; a `floor` leaves its cells air, and a
-`roof`, eave `stair` or `pressure_plate` is still built from its default block. It is judged per
-scope: a scope with no theme bound that reads no `mat_slot=` is not reported, whatever the rest of
-the module reads. A `mat_slot=` on a keyword that reads none, such as a `door`'s, is not a read.
-Nor, for this warning, is one on a member a `level` drops
-([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which
-paints nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level`
-whose body is `E_UNSUPPORTED_NESTING`.
+all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
+or takes up rows, so no `door` or `window` is cut and the structure is shorter than asked. A `floor`
+leaves its cells air, and a `roof` is still built from its default block, as is an eave `stair` or
+`pressure_plate` that still fits the shorter structure; one set higher than it reaches is refused.
+It is judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported,
+whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none, such as a
+`door`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
+([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints
+nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body
+is `E_UNSUPPORTED_NESTING`.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A version
@@ -301,7 +315,8 @@ author means, so with both in scope the question has not been asked.
 
 | Code | Meaning |
 |---|---|
-| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:`, `/`, `\`, `*`, `\|`, `?`, `<`, `>`, `"`, whitespace or a control character. |
+| `E_INVALID_PLACE_ID` | A `place id=` is empty, carries `.`, `:`, `/`, `\`, `*`, `\|`, `?`, `<`, `>`, `"`, whitespace or a control character, or is a device name Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
+| `E_INVALID_STRUCT_NAME` | A `struct` is named after a device Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
@@ -317,11 +332,21 @@ placement is written to in the output directory, and a `/` or `\` would make tha
 relative id with one lands in a subdirectory, and an absolute id replaces the output directory
 altogether. `*`, `|`, `?`, `<`, `>`, `"` and the control characters U+0000 to U+001F cannot appear
 in a Windows file name, so an id carrying one would build on Linux and fail to be written on
-Windows. They are refused on every platform, so whether an id is refused for a character Windows
-reserves in a file name does not depend on the host that checks it. The other control characters,
-U+007F to U+009F, are legal in a Windows file name and are refused on their own ground: they print
-as nothing or move the terminal cursor, so a finding that quotes the id could not show it. `id=`
-accepts a string literal, which is what let the value through.
+Windows. Microsoft's naming rules also reserve a set of device names, whatever extension follows:
+`CON`, `PRN`, `AUX`, `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, and `COM¹`, `COM²`, `COM³`, `LPT¹`,
+`LPT²` and `LPT³`, whose superscripts count as digits, each in any letter case. A Windows release
+that applies those rules opens `CON.nbt` as the console rather than as a file. Both are refused on
+every platform, so whether an id is accepted does not depend on the host that checks it. The other
+control characters, U+007F to U+009F, are legal in a Windows file name and are refused on their own
+ground: they print as nothing or move the terminal cursor, so a finding that quotes the id could
+not show it. `id=` accepts a string literal, which is what let the value through.
+
+A `struct` is written under its own name ([§9.3.4](/spec/components-editing-sites/#934-output-naming)),
+so one named after a device is `E_INVALID_STRUCT_NAME`, for the same reason and in any letter
+case. A struct name is a bare identifier, so none of the characters above can reach it. Neither a
+site name nor a port id is refused for spelling a device name: each is only ever one part of a
+walkway's file name, such as `hamlet_walkway_home1_entry__home2_entry`, and Windows reads a file as
+a device only when the part of its name before the extension is the device's whole name.
 
 A later `east_of=` / `north_of=` naming the id of a row refused with `E_INVALID_PLACE_ID` still
 means that row, so it is not `E_UNRESOLVED_PLACE_REF`, which would send the author looking for a
@@ -329,8 +354,9 @@ typo. It is `W_DEFERRED_PLACE`: the row naming the refused one is not placed eit
 is placed against has no position, and the note points at the refused row, where the repair is.
 Renaming that row's id means renaming the reference with it. It is a warning for the reason
 `W_DEFERRED_CONNECT` is: the build already fails on the refused row, and a second error would send
-the author to a line that names the row it means. A reference above the refused row names no prior
-place, as it would for any other id, and is `E_UNRESOLVED_PLACE_REF`.
+the author to a line that names the row it means. A `connect` endpoint naming the refused row is
+`W_DEFERRED_CONNECT`, whose note likewise points at the refused row. A reference above the refused
+row names no prior place, as it would for any other id, and is `E_UNRESOLVED_PLACE_REF`.
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
@@ -394,11 +420,12 @@ from the edge rule, since `::` separates it from both neighbours. The row is dro
 names the segment to rename. The walkway it asked for is lost, so `cairn compile` refuses the build
 with `E_PARTIAL_BUILD`, as it does for every row that lays nothing.
 
-`W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
-failed origin selector, an origin naming a row refused for its id (`W_DEFERRED_PLACE`, whose note
-leads on to that row), an unresolved `use=` or `theme=`. It is a warning because the finding that
-has the repair is the one on the `place`, or the one its note points at, and reporting the
-`connect` as a second error would send the author to a line that is correct.
+`W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, an
+id refused with `E_INVALID_PLACE_ID` (the note then points at that row), a failed origin selector,
+an origin naming a row refused for its id (`W_DEFERRED_PLACE`, whose note leads on to that row), an
+unresolved `use=` or `theme=`. It is a warning because the finding that has the repair is the one
+on the `place`, or the one its note points at, and reporting the `connect` as a second error would
+send the author to a line that is correct.
 
 ### Lowering
 
@@ -643,8 +670,9 @@ partial-build degradation, but `W_UNUSED_DEF`, `W_TRUTH_TABLE_PARTIAL` and the t
 are warnings without being one; and two `E_`-prefixed codes are decided by the rule above rather
 than by their name:
 
-- `E_UNKNOWN_SLOT_TARGET` is an **error**, because a slot bound to a non-material value lowers
-  every member referencing it to air.
+- `E_UNKNOWN_SLOT_TARGET` is an **error**, because the fault is in the source: the slot is written
+  with a value that is not a material token. Its members degrade as they would with no theme bound,
+  so what is built does not set it apart from `W_NO_THEME_BOUND`.
 - `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule that matches nothing overrides
   nothing.
 

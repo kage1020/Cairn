@@ -5,7 +5,8 @@ title: "5. Syntax"
 ## 5.1 Lexical
 
 One line is one command, and `#` begins a line comment. The line starts with a command keyword;
-**every remaining argument MUST be `key=value`.**
+**every remaining argument MUST be `key=value`.** A truth table's braces are the one place a command
+may run onto the lines below it ([Literals and separators](#511-literals-and-separators)).
 
 ```
 window side=front mat_slot=glass offset=2 y=2 size=2x2 sym=true   # OK
@@ -91,8 +92,29 @@ The table around those rows is read the same way:
 The last two are warnings because the rows that *are* present still assert what they say. A
 four-input table is sixteen rows, and an author part way through is not blocked.
 
+Between the braces a line break may come before or after any row, after a row's `;`, and before the
+`}`, so a table can sit on its `assert` line or give each row a line of its own:
+
+```
+assert truth(sig.a, sig.b, sig.enable -> sig.out) {
+  001 -> 0
+  011 -> 1
+  101 -> 1
+  111 -> 1
+}
+```
+
+Inside the braces a line carries no indentation: the rows and the closing `}` may sit at any depth,
+and blank and comment lines between them are skipped. A tab in front of a row or the `}` is still
+refused, as it is in front of a command. A row is still one line, so a break between its pattern,
+its `->` and its output is refused. The `{` stays on the `assert` line, and a `;` ends the row in
+front of it on that row's line, so no line may open with one. A table whose `}` is missing is
+refused at whatever follows its last row, such as the next command, or at the end of that row's line
+when nothing does.
+
 Indentation is two spaces per level and opens one level at a time. A width that is not a multiple of
-two and a jump of more than one level are different mistakes and are reported as such.
+two and a jump of more than one level are different mistakes and are reported as such. Neither can
+be made inside a truth table's braces, whose lines carry no indentation.
 
 Spaces before a line break are not part of the line, so a row may end in them, and a line holding
 nothing but spaces is a blank line. A blank line's leading spaces are counted like any other line's
@@ -133,6 +155,9 @@ building's geometry: `floor`, `walls`, `door`, `window`, `roof`, `stair`, `level
 `pressure_plate`, `circuit`. A `site` body describes a layout: `place`, `connect`. The keyword table
 is global, so writing one in the other body parses and classifies and then reaches nothing. That is
 `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
+A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
+reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
+`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body, and an `assert` is read by nothing yet.
@@ -216,12 +241,16 @@ low `z` and mirror the same way.
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle
 is rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. That includes the
 mirror of a window centred on the wall's midpoint (`2 * offset + size_w = wall_length`), which
-coincides with the primary. `sym=` takes a bare `true` or `false`, and a window without it
-is not mirrored. Any other value (`sym=yes`, `sym="true"`, `sym=1`) is an unreadable value:
-the window is drawn without its mirror, and the value is reported as `W_IGNORED_ARGUMENT`
-([Lint §11.3](/spec/lint/#113-error-vs-warning)). A window whose `repeat=` is greater than 1 is the
-exception: `sym=true` refuses it, so an unreadable `sym=` is not read as `false` there. The window
-is not cut, and is reported as `W_DEFERRED_MEMBER` beside the `W_IGNORED_ARGUMENT`.
+coincides with the primary. A mirror that only touches the primary, beginning in the column after
+the primary's last (`2 * (offset + size_w) = wall_length`) or ending in the column before its first
+(`2 * offset = wall_length`), shares no cell with it, so it is neither rejected nor reported: both
+are painted, and read as one opening twice the window's width. `sym=` takes a bare `true` or
+`false`, and a window without it is not mirrored. Any other value (`sym=yes`, `sym="true"`, `sym=1`)
+is an unreadable value: the window is drawn without its mirror, and the value is reported as
+`W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)). A window whose `repeat=` is
+greater than 1 is the exception: `sym=true` refuses it, so an unreadable `sym=` is not read as
+`false` there. The window is not cut, and is reported as `W_DEFERRED_MEMBER` beside the
+`W_IGNORED_ARGUMENT`.
 
 **`at=` door anchors.** A door's wall-local column comes from one of three named anchors:
 

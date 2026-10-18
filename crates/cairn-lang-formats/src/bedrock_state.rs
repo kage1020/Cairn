@@ -99,25 +99,15 @@ pub fn translate_states(state: &BlockState) -> Result<StateTranslation, BedrockS
     }
 }
 
-/// What one dropped intent cost, worded without the entry that carried it.
+/// What dropping one intent costs, worded per `key`: the value shows in the entry's `states`.
 #[must_use]
 pub fn degradation_detail(dropped: &DroppedIntent) -> String {
     match dropped {
-        DroppedIntent::Shape { value } => format!(
-            "shape={value} has no Bedrock state; Bedrock stairs render straight, so corners show \
-             visual gaps"
-        ),
+        DroppedIntent::Shape { .. } => {
+            "Bedrock has no `shape` state; its stairs render straight, so corners show visual gaps"
+                .to_owned()
+        }
     }
-}
-
-/// [`degradation_detail`] after the entry `state` that carried the intent, as
-/// `W_INTENT_DEGRADED` reports it.
-#[must_use]
-pub fn degradation_message(state: &str, dropped: &DroppedIntent) -> String {
-    let family = match dropped {
-        DroppedIntent::Shape { .. } => "stair",
-    };
-    format!("{family} `{state}` {}", degradation_detail(dropped))
 }
 
 fn translate_stair(
@@ -183,11 +173,6 @@ fn upside_down_bit(id: &str, half: &str) -> Result<i8, BedrockStateError> {
             valid: "top, bottom",
         }),
     }
-}
-
-/// A palette entry as `cairn info` spells it, `id[key=value,...]`, or `id[]` for a bare block.
-pub(crate) fn java_state(state: &BlockState) -> String {
-    format!("{}[{}]", state.id, state.properties_text())
 }
 
 #[cfg(test)]

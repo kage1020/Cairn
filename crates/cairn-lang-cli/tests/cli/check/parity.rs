@@ -101,6 +101,10 @@ const SYNTACTIC_FIXTURES: &[(&str, Source)] = &[
         ),
     ),
     (
+        "E_INVALID_STRUCT_NAME",
+        Source::WithPrologue("struct nul size=3x3\n  floor mat_slot=floor\n"),
+    ),
+    (
         "E_MISSING_MATERIAL",
         Source::WithPrologue("struct s size=5x5\n  walls class=outer height=3\n"),
     ),

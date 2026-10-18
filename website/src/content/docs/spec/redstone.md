@@ -150,6 +150,10 @@ A `struct` or `def` has one such line: a second one in the same body is `E_DUPLI
 ([Lint §11.1](/spec/lint/#111-diagnostic-codes)). Logic that needs more than one reservation goes
 in more than one scope.
 
+The line stands among the body's own members: a reservation spans the scope's `size=WxH` and takes
+no `level`'s `y=`, so place-and-route reads no `circuit` line under a `level`. Such a line is
+`E_MISPLACED_MEMBER` on that line, not `E_DUPLICATE_CIRCUIT`.
+
 The internal algorithm runs five stages:
 
 1. **Placement.** Topological order, left to right, one clear column between each pair of cells.

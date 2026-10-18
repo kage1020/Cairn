@@ -1,8 +1,10 @@
 //! Accept/reject parity with the reference parser, which is by design the one that is right.
-//! The divergences that remain live in [`KNOWN_DIVERGENCES`], asserted rather than skipped.
+//! The divergences that remain live in [`KNOWN_DIVERGENCES`] and [`DEPTH_DIVERGENCES`], asserted
+//! rather than skipped.
 
 use std::fmt::Write as _;
 
+use cairn_lang_core::{MAX_EXPR_DEPTH, MAX_NESTING_DEPTH};
 use tree_sitter::Parser;
 
 /// What both parsers should say about a fixture.
@@ -609,6 +611,118 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  assert truth(a, b, c -> z) { 0- 1->1 }\n",
         Reject,
     ),
+    // A line break separates rows, and a line inside the braces carries no indentation.
+    (
+        "truth_row_per_line",
+        "struct s size=3x3\n  assert truth(sig.a, sig.b, sig.enable -> sig.out) {\n    001 -> 0\n    011 -> 1\n    101 -> 1\n    111 -> 1\n  }\n",
+        Accept,
+    ),
+    (
+        "truth_row_per_line_crlf",
+        "struct s size=3x3\r\n  assert truth(a -> z) {\r\n    0 -> 1\r\n    1 -> 0\r\n  }\r\n  floor mat_slot=f\r\n",
+        Accept,
+    ),
+    (
+        "truth_row_per_line_lone_cr",
+        "struct s size=3x3\r  assert truth(a -> z) {\r    0 -> 1\r    1 -> 0\r  }\r  floor mat_slot=f\r",
+        Accept,
+    ),
+    (
+        "truth_rows_at_any_depth",
+        "struct s size=3x3\n  level y=1\n    assert truth(a -> z) {\n0 -> 1\n   1 -> 0\n          }\n  floor mat_slot=f\nstruct t size=3x3\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "truth_rows_at_column_zero_in_a_struct_body",
+        "struct s size=3x3\n  assert truth(a -> z) {\n0 -> 1\n1 -> 0\n}\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "truth_closing_brace_at_column_zero",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n}\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "truth_blank_and_comment_lines_between_rows",
+        "struct s size=3x3\n  assert truth(a -> z) {  # rows\n\n    0 -> 1  # low\n   \n# between\n    1 -> 0\n\n  }\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "truth_semicolon_ending_a_line",
+        "struct s size=3x3\n  assert truth(a -> z) { 0 -> 1;\n    1 -> 0; }\n",
+        Accept,
+    ),
+    (
+        "truth_rows_on_the_brace_lines",
+        "struct s size=3x3\n  assert truth(a -> z) { 0 -> 1\n    1 -> 0 }\n",
+        Accept,
+    ),
+    (
+        "truth_empty_across_lines",
+        "struct s size=3x3\n  assert truth(a -> z) {\n\n  }\n",
+        Accept,
+    ),
+    (
+        "truth_table_ending_the_file",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n  }",
+        Accept,
+    ),
+    (
+        "truth_row_split_after_the_arrow",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 ->\n    1\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_row_split_before_the_arrow",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0\n    -> 1\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_semicolon_opening_a_line",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n    ; 1 -> 0\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_brace_on_a_line_of_its_own",
+        "struct s size=3x3\n  assert truth(a -> z)\n  {\n    0 -> 1\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_unclosed_before_a_member",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n  floor mat_slot=f\n",
+        Reject,
+    ),
+    (
+        "truth_unclosed_before_a_later_table",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n  level y=1\n    floor mat_slot=f\n      assert truth(b -> z) { 0 -> 1 }\n      floor mat_slot=f\n",
+        Reject,
+    ),
+    (
+        "truth_unclosed_at_end_of_input",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n",
+        Reject,
+    ),
+    (
+        "truth_tab_opening_a_row_line",
+        "struct s size=3x3\n  assert truth(a -> z) {\n\t0 -> 1\n  }\n",
+        Reject,
+    ),
+    (
+        "truth_member_after_the_closing_brace",
+        "struct s size=3x3\n  assert truth(a -> z) {\n    0 -> 1\n  } floor mat_slot=f\n",
+        Reject,
+    ),
+    // Raw text: a `{` there opens no table, and the lines below it keep their layout.
+    (
+        "cairn_brace_in_value",
+        "@cairn 2026.06 {\nstruct s size=3x3\n  floor mat_slot=f\n",
+        Accept,
+    ),
+    (
+        "requires_brace_in_value",
+        "def d size=2x2:\n  requires version>={\nstruct s size=3x3\n  floor mat_slot=f\n",
+        Accept,
+    ),
     (
         "always_within",
         "struct s size=3x3\n  assert always(a.b -> eventually c.d within 5)\n",
@@ -1076,6 +1190,160 @@ const KNOWN_DIVERGENCES: &[(&str, &str, Verdict)] = &[
     ),
 ];
 
+/// A source of the given depth.
+type Shape = fn(usize) -> String;
+
+/// `(name, shape, depth)` one step past a core depth bound, where the grammar accepts and core
+/// refuses. Core spends one descent counter on bodies, lists, parentheses and `not` alike, which
+/// the grammar cannot share: its rules keep no count, and the scanner bounds indentation alone,
+/// at `MAX_INDENT_DEPTH`. One step shallower, both accept.
+const DEPTH_DIVERGENCES: &[(&str, Shape, usize)] = &[
+    (
+        "blocks_past_the_nesting_bound",
+        nested_blocks,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "list_past_the_nesting_bound",
+        nested_list,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "parens_past_the_nesting_bound",
+        nested_parens,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "not_chain_past_the_nesting_bound",
+        chained_not,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "blocks_and_list_past_the_nesting_bound",
+        list_in_blocks,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "blocks_and_parens_past_the_nesting_bound",
+        parens_in_blocks,
+        MAX_NESTING_DEPTH + 1,
+    ),
+    (
+        "or_chain_past_the_expression_bound",
+        flat_or_chain,
+        MAX_EXPR_DEPTH + 1,
+    ),
+    (
+        "and_chain_past_the_expression_bound",
+        flat_and_chain,
+        MAX_EXPR_DEPTH + 1,
+    ),
+    (
+        "nots_around_an_or_chain_past_the_expression_bound",
+        nots_around_an_or_chain,
+        MAX_EXPR_DEPTH + 1,
+    ),
+];
+
+/// One indented `level` block per level.
+fn nested_blocks(depth: usize) -> String {
+    let mut source = String::from("struct a size=1x1\n");
+    for level in 1..=depth {
+        source.push_str(&"  ".repeat(level));
+        source.push_str("level y=0\n");
+    }
+    source
+}
+
+/// `mat=[[[ … x … ]]]`.
+fn nested_list(depth: usize) -> String {
+    format!("struct a size=1x1\n  {}\n", list_line(depth))
+}
+
+/// `window mat=[[[ … x … ]]]`, the list `depth` deep.
+fn list_line(depth: usize) -> String {
+    format!("window mat={}x{}", "[".repeat(depth), "]".repeat(depth))
+}
+
+/// `logic sig.out = ((( … sig.a … )))`.
+fn nested_parens(depth: usize) -> String {
+    format!("struct a size=1x1\n  {}\n", parens_line(depth))
+}
+
+/// `logic sig.out = ((( … sig.a … )))`, the parentheses `depth` deep.
+fn parens_line(depth: usize) -> String {
+    format!(
+        "logic sig.out = {}sig.a{}",
+        "(".repeat(depth),
+        ")".repeat(depth),
+    )
+}
+
+/// `logic sig.out = not not … sig.a`.
+fn chained_not(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}sig.a\n",
+        "not ".repeat(depth),
+    )
+}
+
+/// Half of `depth` in `level` blocks, the rest in a list inside the deepest one.
+fn list_in_blocks(depth: usize) -> String {
+    in_blocks(depth, list_line)
+}
+
+/// Half of `depth` in `level` blocks, the rest in parentheses inside the deepest one.
+fn parens_in_blocks(depth: usize) -> String {
+    in_blocks(depth, parens_line)
+}
+
+/// Half of `depth` in `level` blocks, and the line `inner` makes of the rest inside the deepest.
+fn in_blocks(depth: usize, inner: fn(usize) -> String) -> String {
+    let blocks = depth / 2;
+    let mut source = nested_blocks(blocks);
+    let indent = "  ".repeat(blocks + 1);
+    writeln!(source, "{indent}{}", inner(depth - blocks))
+        .expect("a String never fails to take a write");
+    source
+}
+
+/// `sig.a0 or sig.a1 or …`, which deepens core's boolean tree without descent.
+fn flat_or_chain(terms: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}\n",
+        chain("or", terms)
+    )
+}
+
+/// `sig.a0 and sig.a1 and …`, which deepens core's boolean tree without descent.
+fn flat_and_chain(terms: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}\n",
+        chain("and", terms)
+    )
+}
+
+/// The `not`s around the chain in [`nots_around_an_or_chain`], short of the descent bound.
+const NOTS: usize = 60;
+
+/// `not not … (sig.a0 or sig.a1 or …)`: `NOTS` levels of `not` over an `or` chain, `depth` deep
+/// in all.
+fn nots_around_an_or_chain(depth: usize) -> String {
+    format!(
+        "struct a size=1x1\n  logic sig.out = {}({})\n",
+        "not ".repeat(NOTS),
+        chain("or", depth - NOTS),
+    )
+}
+
+/// `terms` distinct signals joined by `op`.
+fn chain(op: &str, terms: usize) -> String {
+    (0..terms)
+        .map(|i| format!("sig.a{i}"))
+        .collect::<Vec<_>>()
+        .join(&format!(" {op} "))
+}
+
 fn grammar_accepts(parser: &mut Parser, source: &str) -> bool {
     let tree = parser.parse(source, None).expect("parse produced no tree");
     !tree.root_node().has_error()
@@ -1089,11 +1357,23 @@ fn new_parser() -> Parser {
     parser
 }
 
+/// Each [`DEPTH_DIVERGENCES`] shape at its bound, where both parsers accept it.
+fn generated_at_the_bounds() -> impl Iterator<Item = (String, String)> {
+    DEPTH_DIVERGENCES
+        .iter()
+        .map(|&(name, shape, depth)| (format!("{name}, one step shallower"), shape(depth - 1)))
+}
+
 #[test]
-fn both_parsers_reach_the_written_verdict() {
+fn both_parsers_reach_the_expected_verdict() {
     let mut parser = new_parser();
     let mut wrong = Vec::new();
-    for (name, source, expected) in FIXTURES {
+    let written = FIXTURES
+        .iter()
+        .map(|&(name, source, verdict)| (name.to_owned(), source.to_owned(), verdict));
+    let generated = generated_at_the_bounds().map(|(name, source)| (name, source, Accept));
+    for (name, source, expected) in written.chain(generated) {
+        let source = source.as_str();
         let core = if cairn_lang_core::parse::parse(source).is_ok() {
             Accept
         } else {
@@ -1104,7 +1384,7 @@ fn both_parsers_reach_the_written_verdict() {
         } else {
             Reject
         };
-        if (core, grammar) != (*expected, *expected) {
+        if (core, grammar) != (expected, expected) {
             wrong.push(format!(
                 "{name}: expected both to {expected:?}, core said {core:?} and the grammar said {grammar:?}\n  source: {source:?}"
             ));
@@ -1266,7 +1546,14 @@ fn count_member_statements(node: tree_sitter::Node<'_>, count: &mut usize) {
 fn listed_divergences_still_diverge() {
     let mut parser = new_parser();
     let mut wrong = Vec::new();
-    for (name, source, grammar_says) in KNOWN_DIVERGENCES {
+    let written = KNOWN_DIVERGENCES
+        .iter()
+        .map(|&(name, source, verdict)| (name, source.to_owned(), verdict));
+    let generated = DEPTH_DIVERGENCES
+        .iter()
+        .map(|&(name, shape, depth)| (name, shape(depth), Accept));
+    for (name, source, grammar_says) in written.chain(generated) {
+        let source = source.as_str();
         let core = if cairn_lang_core::parse::parse(source).is_ok() {
             Accept
         } else {
@@ -1277,7 +1564,7 @@ fn listed_divergences_still_diverge() {
         } else {
             Reject
         };
-        if grammar != *grammar_says || core == grammar {
+        if grammar != grammar_says || core == grammar {
             wrong.push(format!(
                 "{name}: listed as grammar={grammar_says:?} against the reference parser, but core said {core:?} and the grammar said {grammar:?}\n  source: {source:?}"
             ));
@@ -1285,7 +1572,9 @@ fn listed_divergences_still_diverge() {
     }
     assert!(
         wrong.is_empty(),
-        "a listed divergence changed. If you fixed one, delete its entry and add the source to FIXTURES:\n{}",
+        "a listed divergence changed. If you fixed one, delete its entry: a written source moves to \
+         FIXTURES, and a generated shape needs both verdicts asserted at its bound and one step \
+         past it:\n{}",
         wrong.join("\n"),
     );
 }
@@ -1295,10 +1584,12 @@ fn listed_divergences_still_diverge() {
 fn accepted_sources_place_every_member_at_the_same_depth() {
     let mut parser = new_parser();
     let mut wrong = Vec::new();
-    for (name, source, expected) in FIXTURES {
-        if *expected != Accept {
-            continue;
-        }
+    let written = FIXTURES
+        .iter()
+        .filter(|&&(_, _, verdict)| verdict == Accept)
+        .map(|&(name, source, _)| (name.to_owned(), source.to_owned()));
+    for (name, source) in written.chain(generated_at_the_bounds()) {
+        let source = source.as_str();
         let Ok(module) = cairn_lang_core::parse::parse(source) else {
             continue;
         };

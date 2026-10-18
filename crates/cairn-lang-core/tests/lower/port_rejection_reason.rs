@@ -1,10 +1,10 @@
 //! A `connect` row whose port cannot be placed names the one rule it broke and points at the
 //! member it is about.
 
-use cairn_lang_core::block_array::BlockArrayIr;
+use cairn_lang_core::block_array::{BlockArrayIr, Footprint};
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, DiagnosticNote};
 
-use crate::common::lowered;
+use crate::common::{lowered, state_at};
 
 /// A theme, a `hut` whose front door `e` anchors any walkway, and a `probe` def holding `p`.
 fn site(probe_members: &str, gap: u32) -> String {
@@ -269,6 +269,43 @@ fn a_window_without_offset_anchors_a_walkway_as_it_is_cut() {
 }
 
 #[test]
+fn a_sym_window_whose_mirror_is_skipped_keeps_its_cut_and_its_port() {
+    let window = "window id=p side=front offset=1 y=1 size=2x1 sym=true mat_slot=glass";
+    let src = site(&format!("{WALLS}  {window}\n"), 6);
+    let out = lowered(&src);
+    let found: Vec<_> = out
+        .diagnostics
+        .iter()
+        .map(|d| (d.code, &src[d.span.clone()], d.primary.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        [(
+            DiagnosticCode::DeferredMember,
+            window,
+            "`sym=true` window at offset=1 size=2x1 on the `front` wall would overlap its mirror \
+             (wall length=5); the mirror was skipped",
+        )],
+    );
+    // The window is u=1..=2; its mirror would add u=3.
+    let a = &out.structures["site::s::a"];
+    let row: Vec<_> = (1..4).map(|x| state_at(a, x, 1, 4).id.as_str()).collect();
+    assert_eq!(
+        row,
+        [
+            "minecraft:glass_pane",
+            "minecraft:glass_pane",
+            "minecraft:cobblestone"
+        ]
+    );
+    // From the window's port at (2, 0, 5) to the door's at (13, 0, 5).
+    let walkway = &out.walkways["walkway::s::a.p__b.e"];
+    assert_eq!(out.walkways.len(), 1);
+    assert_eq!(walkway.origin, (2, 0, 5));
+    assert_eq!(walkway.footprint, Footprint { x: 12, z: 1 });
+}
+
+#[test]
 fn one_refused_port_is_named_in_the_singular() {
     let src = site(&format!("{WALLS}  door id=p side=frnt at=center\n"), 6);
     let out = lowered(&src);
@@ -305,7 +342,8 @@ fn a_numeric_door_at_reads_the_same_on_the_row_and_on_the_door() {
 
 #[test]
 fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
-    // The port reads `offset=`, `y=`, `size=`; the cut also defers on `repeat=`, `step=` or `sym=`.
+    // The port reads `offset=`, `y=`, `size=`; the cut also defers on `repeat=` or `step=`,
+    // including a `repeat=` above 1 beside `sym=`.
     for (args, own_line) in [
         (
             "offset=0 y=1 size=1x1 repeat=0 mat_slot=glass",
@@ -322,6 +360,12 @@ fn a_window_the_cut_defers_for_its_repeat_anchors_no_walkway() {
         (
             "offset=1 y=1 size=1x1 repeat=2 step=2 sym=true",
             "window with both `repeat=` and `sym=true` is not yet supported",
+        ),
+        (
+            "offset=1 y=1 size=1x1 repeat=2 step=2 sym=yes",
+            "window with `repeat=` greater than 1 is not cut while its `sym=` is unreadable: \
+             `sym=true` with such a `repeat=` is not yet supported, and `sym=false` is not what \
+             was written",
         ),
         (
             "offset=0 y=1 size=1x1 repeat=2 mat_slot=glass",

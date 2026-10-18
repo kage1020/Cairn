@@ -194,7 +194,7 @@ pub struct LogicBinding {
     pub span: Span,
 }
 
-/// `assert ...` line lifted out of a body.
+/// `assert ...` command lifted out of a body.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 #[non_exhaustive]
@@ -226,7 +226,7 @@ pub enum AssertIr {
 }
 
 impl AssertIr {
-    /// Byte range of the originating `assert ...` line in source.
+    /// Byte range of the originating `assert ...` command in source, through a table's `}`.
     #[must_use]
     pub fn span(&self) -> &Span {
         match self {
@@ -444,30 +444,33 @@ fn collect_circuit_lines(
                 });
             }
             MemberRole::Level => {
-                collect_nested_circuit_lines(scope_kind, scope_name, &m.children.members, out);
+                out.extend(circuit_lines_under_level(m).into_iter().map(|line| {
+                    Err(RejectedCircuitRegion {
+                        scope_kind,
+                        scope_name: scope_name.to_owned(),
+                        defect: CircuitRegionDefect::NestedUnderLevel,
+                        span: line.span.clone(),
+                    })
+                }));
             }
             _ => {}
         }
     }
 }
 
-fn collect_nested_circuit_lines(
-    scope_kind: ScopeKind,
-    scope_name: &str,
-    members: &[Member],
-    out: &mut Vec<Result<CircuitRegion, RejectedCircuitRegion>>,
-) {
-    for m in members {
+/// Each `circuit` line indented under `level`, at any depth through the `level`s in its body, in
+/// source order.
+pub(crate) fn circuit_lines_under_level(level: &Member) -> Vec<&Member> {
+    let mut out = Vec::new();
+    push_circuit_lines_under_level(level, &mut out);
+    out
+}
+
+fn push_circuit_lines_under_level<'a>(level: &'a Member, out: &mut Vec<&'a Member>) {
+    for m in &level.children.members {
         match m.role {
-            MemberRole::Circuit => out.push(Err(RejectedCircuitRegion {
-                scope_kind,
-                scope_name: scope_name.to_owned(),
-                defect: CircuitRegionDefect::NestedUnderLevel,
-                span: m.span.clone(),
-            })),
-            MemberRole::Level => {
-                collect_nested_circuit_lines(scope_kind, scope_name, &m.children.members, out);
-            }
+            MemberRole::Circuit => out.push(m),
+            MemberRole::Level => push_circuit_lines_under_level(m, out),
             _ => {}
         }
     }

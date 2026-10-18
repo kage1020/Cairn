@@ -128,6 +128,11 @@ fn comment_start(line: &str) -> Option<usize> {
 /// Classify the cursor's byte offset into a completion [`Context`].
 fn context_at(source: &str, offset: usize) -> Option<Context> {
     let line_start = cairn_lang_core::lines::start_of(source, offset);
+    let (outside, in_table) = lines_outside_truth_tables(&source[..line_start]);
+    // A truth table's rows are bits, which no vocabulary completes.
+    if in_table {
+        return None;
+    }
     let prefix = &source[line_start..offset];
     // Comments and strings take free-form text.
     let scan = scan_line(prefix);
@@ -168,7 +173,7 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     if indent == 0 {
         return Some(Context::TopLevelKeyword { replace });
     }
-    match enclosing_item_keyword(source, line_start) {
+    match enclosing_item_keyword(&outside) {
         Some("theme") => Some(Context::ThemeBodyKeyword { replace }),
         Some("site") => Some(Context::MemberKeyword {
             replace,
@@ -191,9 +196,46 @@ fn line_keyword(line: &str) -> &str {
     &trimmed[..end]
 }
 
-/// First word of the nearest non-blank, non-comment indent-0 line above `line_start`.
-fn enclosing_item_keyword(source: &str, line_start: usize) -> Option<&str> {
-    cairn_lang_core::lines::split(&source[..line_start])
+/// The lines of `text` outside every truth table's braces, and whether a table is still open
+/// where `text` ends (`spec/syntax` "Literals and separators").
+fn lines_outside_truth_tables(text: &str) -> (Vec<&str>, bool) {
+    let mut outside = Vec::new();
+    let mut open = false;
+    for line in cairn_lang_core::lines::split(text) {
+        let code = comment_start(line).map_or(line, |i| &line[..i]);
+        // Core's lexer ends a table at a line no row or `}` can open.
+        let continues =
+            code.trim_start().starts_with(['0', '1', '-', ';', '}']) || code.trim().is_empty();
+        if !(open && continues) {
+            open = false;
+            outside.push(line);
+        }
+        open = truth_table_open_after(code, open);
+    }
+    (outside, open)
+}
+
+/// Whether a truth table is open after `code`, a line without its comment, given whether one was
+/// open before it.
+fn truth_table_open_after(code: &str, mut open: bool) -> bool {
+    let keyword = line_keyword(code);
+    let opens = keyword == "assert" && line_keyword(&code.trim_start()[keyword.len()..]) == "truth";
+    let mut in_string = false;
+    for c in code.chars() {
+        match c {
+            '"' => in_string = !in_string,
+            '{' if opens && !in_string => open = true,
+            '}' if !in_string => open = false,
+            _ => {}
+        }
+    }
+    open
+}
+
+/// First word of the last non-blank, non-comment indent-0 line in `lines`.
+fn enclosing_item_keyword<'a>(lines: &[&'a str]) -> Option<&'a str> {
+    lines
+        .iter()
         .rev()
         .filter_map(|line| {
             let trimmed = line.trim_start();
@@ -500,6 +542,38 @@ mod tests {
         let source = "site s:\n  p";
         let items = complete(source, "\n  p");
         assert_eq!(labels(&items), BodyKind::Site.allowed_keywords());
+    }
+
+    #[test]
+    fn a_truth_table_at_column_zero_is_no_item_header() {
+        for source in [
+            "struct s size=3x3\n  assert truth(a -> b) {\n0 -> 1\n  }\n  flo",
+            "struct s size=3x3\n  assert truth(a -> b) {\n    0 -> 1\n}\n  flo",
+        ] {
+            let items = complete(source, "  flo");
+            assert_eq!(
+                labels(&items),
+                BodyKind::Geometry.allowed_keywords(),
+                "for {source:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn a_line_inside_a_truth_table_offers_nothing() {
+        for (source, needle) in [
+            ("struct s size=3x3\n  assert truth(a -> b) {\n0", "{\n0"),
+            (
+                "struct s size=3x3\n  assert truth(a -> b) {\n    0 -> 1\n    \n  }\n",
+                "0 -> 1\n    ",
+            ),
+        ] {
+            assert_eq!(
+                labels(&complete(source, needle)),
+                Vec::<&str>::new(),
+                "for {source:?}"
+            );
+        }
     }
 
     #[test]
