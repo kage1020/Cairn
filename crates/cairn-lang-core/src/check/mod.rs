@@ -15,6 +15,7 @@ mod nesting;
 mod positional;
 mod requires;
 mod sink;
+mod struct_name;
 mod truth;
 mod type_mismatch;
 
@@ -48,6 +49,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     nesting::run(ir, &mut sink);
     positional::run(ir, &mut sink);
     requires::run(module, &mut sink);
+    struct_name::run(module, &mut sink);
     truth::run(ir, &mut sink);
     type_mismatch::run(module, &mut sink);
     for d in crate::resolve::resolve(ir, edition).diagnostics {
@@ -97,6 +99,7 @@ mod tests {
             | C::TypeMismatchLabel
             | C::TypeMismatchSize
             | C::ConnectArity
+            | C::InvalidStructName
             | C::TruthTableEmpty
             | C::TruthTableDuplicateInput
             | C::TruthTableConflict
@@ -180,6 +183,7 @@ mod tests {
                 "E_DUPLICATE_SIZE",
                 "E_DUPLICATE_SLOT",
                 "E_INVALID_REQUIRES",
+                "E_INVALID_STRUCT_NAME",
                 "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",

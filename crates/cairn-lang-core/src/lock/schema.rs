@@ -434,6 +434,50 @@ mod tests {
     }
 
     #[test]
+    fn a_place_spelling_a_windows_device_is_refused_where_the_lock_records_a_place() {
+        for path in [
+            "placements.0.id",
+            "walkways.0.from.place",
+            "walkways.0.to.place",
+        ] {
+            let body = doctored(&[(path, "Con")]);
+            assert!(
+                Lockfile::from_yaml(&body).is_err(),
+                "{path}: the strict read refuses the id",
+            );
+            let found = Lockfile::refused_identifier(&body)
+                .unwrap_or_else(|err| panic!("{path}: the rest is valid, got {err}"))
+                .unwrap_or_else(|| panic!("{path}: the refused id was not seen"));
+            assert_eq!(
+                found.error,
+                IdError::ReservedDeviceName {
+                    ident: "Con".to_owned()
+                },
+                "{path}",
+            );
+            assert_eq!(found.target, sample().target, "{path}");
+        }
+    }
+
+    #[test]
+    fn a_site_or_port_spelling_a_windows_device_reads_as_valid() {
+        for path in [
+            "placements.0.site",
+            "walkways.0.site",
+            "walkways.0.from.port",
+            "walkways.0.to.port",
+        ] {
+            let body = doctored(&[(path, "Con")]);
+            assert!(Lockfile::from_yaml(&body).is_ok(), "{path}");
+            assert_eq!(
+                Lockfile::refused_identifier(&body).expect("valid"),
+                None,
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
     fn the_first_refused_identifier_in_field_order_is_the_one_reported() {
         for (earlier, first) in POSITIONS.iter().enumerate() {
             for (later, second) in POSITIONS.iter().enumerate().skip(earlier + 1) {

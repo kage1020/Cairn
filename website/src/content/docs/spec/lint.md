@@ -304,7 +304,8 @@ author means, so with both in scope the question has not been asked.
 
 | Code | Meaning |
 |---|---|
-| `E_INVALID_PLACE_ID` | A `place id=` is empty or carries `.`, `:`, `/`, `\`, `*`, `\|`, `?`, `<`, `>`, `"`, whitespace or a control character. |
+| `E_INVALID_PLACE_ID` | A `place id=` is empty, carries `.`, `:`, `/`, `\`, `*`, `\|`, `?`, `<`, `>`, `"`, whitespace or a control character, or is a device name Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
+| `E_INVALID_STRUCT_NAME` | A `struct` is named after a device Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
 | `E_INVALID_PLACE_ORIGIN` | A `place` carries an `at=` other than `origin`, or combines `at=` with `east_of=` / `north_of=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
@@ -320,11 +321,21 @@ placement is written to in the output directory, and a `/` or `\` would make tha
 relative id with one lands in a subdirectory, and an absolute id replaces the output directory
 altogether. `*`, `|`, `?`, `<`, `>`, `"` and the control characters U+0000 to U+001F cannot appear
 in a Windows file name, so an id carrying one would build on Linux and fail to be written on
-Windows. They are refused on every platform, so whether an id is refused for a character Windows
-reserves in a file name does not depend on the host that checks it. The other control characters,
-U+007F to U+009F, are legal in a Windows file name and are refused on their own ground: they print
-as nothing or move the terminal cursor, so a finding that quotes the id could not show it. `id=`
-accepts a string literal, which is what let the value through.
+Windows. Microsoft's naming rules also reserve a set of device names, whatever extension follows:
+`CON`, `PRN`, `AUX`, `NUL`, `COM0` to `COM9`, `LPT0` to `LPT9`, and `COM¹`, `COM²`, `COM³`, `LPT¹`,
+`LPT²` and `LPT³`, whose superscripts count as digits, each in any letter case. A Windows release
+that applies those rules opens `CON.nbt` as the console rather than as a file. Both are refused on
+every platform, so whether an id is accepted does not depend on the host that checks it. The other
+control characters, U+007F to U+009F, are legal in a Windows file name and are refused on their own
+ground: they print as nothing or move the terminal cursor, so a finding that quotes the id could
+not show it. `id=` accepts a string literal, which is what let the value through.
+
+A `struct` is written under its own name ([§9.3.4](/spec/components-editing-sites/#934-output-naming)),
+so one named after a device is `E_INVALID_STRUCT_NAME`, for the same reason and in any letter
+case. A struct name is a bare identifier, so none of the characters above can reach it. Neither a
+site name nor a port id is refused for spelling a device name: each is only ever one part of a
+walkway's file name, such as `hamlet_walkway_home1_entry__home2_entry`, and Windows reads a file as
+a device only when the part of its name before the extension is the device's whole name.
 
 A later `east_of=` / `north_of=` naming the id of a row refused with `E_INVALID_PLACE_ID` still
 means that row, so it is not `E_UNRESOLVED_PLACE_REF`, which would send the author looking for a
@@ -332,8 +343,9 @@ typo. It is `W_DEFERRED_PLACE`: the row naming the refused one is not placed eit
 is placed against has no position, and the note points at the refused row, where the repair is.
 Renaming that row's id means renaming the reference with it. It is a warning for the reason
 `W_DEFERRED_CONNECT` is: the build already fails on the refused row, and a second error would send
-the author to a line that names the row it means. A reference above the refused row names no prior
-place, as it would for any other id, and is `E_UNRESOLVED_PLACE_REF`.
+the author to a line that names the row it means. A `connect` endpoint naming the refused row is
+`W_DEFERRED_CONNECT`, whose note likewise points at the refused row. A reference above the refused
+row names no prior place, as it would for any other id, and is `E_UNRESOLVED_PLACE_REF`.
 
 `E_DUPLICATE_PLACE_ID` names both spans. The first row wins for everything that references the id
 and the duplicate is dropped, so a reference resolving to "the other one" is not a second finding.
@@ -397,11 +409,12 @@ from the edge rule, since `::` separates it from both neighbours. The row is dro
 names the segment to rename. The walkway it asked for is lost, so `cairn compile` refuses the build
 with `E_PARTIAL_BUILD`, as it does for every row that lays nothing.
 
-`W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, a
-failed origin selector, an origin naming a row refused for its id (`W_DEFERRED_PLACE`, whose note
-leads on to that row), an unresolved `use=` or `theme=`. It is a warning because the finding that
-has the repair is the one on the `place`, or the one its note points at, and reporting the
-`connect` as a second error would send the author to a line that is correct.
+`W_DEFERRED_CONNECT` follows whatever refused the `place` — an incomplete row, a mistyped key, an
+id refused with `E_INVALID_PLACE_ID` (the note then points at that row), a failed origin selector,
+an origin naming a row refused for its id (`W_DEFERRED_PLACE`, whose note leads on to that row), an
+unresolved `use=` or `theme=`. It is a warning because the finding that has the repair is the one
+on the `place`, or the one its note points at, and reporting the `connect` as a second error would
+send the author to a line that is correct.
 
 ### Lowering
 

@@ -19,3 +19,4 @@ mod positional;
 mod requires;
 mod truth_table;
 mod type_mismatch;
+mod windows_device_name;

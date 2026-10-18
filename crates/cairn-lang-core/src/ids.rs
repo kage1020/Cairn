@@ -1,7 +1,8 @@
 //! Identifier newtypes and the walkway scope key built from them.
 //!
 //! An identifier is non-empty and carries no `.`, `:`, `/`, `\`, `*`, `|`, `?`, `<`, `>`, `"`,
-//! whitespace or control character (`spec/lint` "Sites and placements").
+//! whitespace or control character. A [`PlaceId`] is also the stem of an artifact's file name, so
+//! it is not a device name Windows reserves either (`spec/lint` "Sites and placements").
 
 use std::borrow::Borrow;
 use std::fmt;
@@ -11,6 +12,7 @@ use thiserror::Error;
 
 /// Failure modes for [`PlaceId`] / [`PortId`] / [`SiteName`] construction.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum IdError {
     /// Construction was attempted with an empty string.
     #[error("identifier is empty")]
@@ -25,6 +27,12 @@ pub enum IdError {
         ident: String,
         /// The first character that triggered the rejection.
         ch: char,
+    },
+    /// A [`PlaceId`] that is a device name Windows reserves.
+    #[error("identifier `{ident}` is a device name Windows reserves")]
+    ReservedDeviceName {
+        /// The full offending string.
+        ident: String,
     },
 }
 
@@ -46,6 +54,46 @@ pub(crate) fn shown_char(c: char) -> String {
     }
 }
 
+/// The device names Windows reserves in every directory, whatever the case or extension.
+const WINDOWS_DEVICE_NAMES: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
+
+/// The device names Windows reserves with one digit after them, `¹`, `²` and `³` among the digits.
+const WINDOWS_NUMBERED_DEVICE_NAMES: [&str; 2] = ["COM", "LPT"];
+
+/// Whether `name`, as a file name's stem, is a device name Windows reserves.
+#[must_use]
+pub(crate) fn is_windows_device_name(name: &str) -> bool {
+    if WINDOWS_DEVICE_NAMES
+        .iter()
+        .any(|device| name.eq_ignore_ascii_case(device))
+    {
+        return true;
+    }
+    WINDOWS_NUMBERED_DEVICE_NAMES.iter().any(|device| {
+        let Some((head, tail)) = name.split_at_checked(device.len()) else {
+            return false;
+        };
+        let mut digits = tail.chars();
+        head.eq_ignore_ascii_case(device)
+            && matches!(
+                (digits.next(), digits.next()),
+                (Some('0'..='9' | '¹' | '²' | '³'), None)
+            )
+    })
+}
+
+/// The names [`is_windows_device_name`] matches, as a message lists them.
+#[must_use]
+pub(crate) fn windows_device_names_listed() -> String {
+    let quoted =
+        |names: &[&str]| -> Vec<String> { names.iter().map(|name| format!("`{name}`")).collect() };
+    format!(
+        "{}, and {} followed by one of `0` to `9`, `¹`, `²` or `³`",
+        quoted(&WINDOWS_DEVICE_NAMES).join(", "),
+        quoted(&WINDOWS_NUMBERED_DEVICE_NAMES).join(" or "),
+    )
+}
+
 fn validate_ident(s: &str) -> Result<(), IdError> {
     if s.is_empty() {
         return Err(IdError::Empty);
@@ -57,6 +105,16 @@ fn validate_ident(s: &str) -> Result<(), IdError> {
                 ch: c,
             });
         }
+    }
+    Ok(())
+}
+
+fn validate_place_id(s: &str) -> Result<(), IdError> {
+    validate_ident(s)?;
+    if is_windows_device_name(s) {
+        return Err(IdError::ReservedDeviceName {
+            ident: s.to_owned(),
+        });
     }
     Ok(())
 }
@@ -148,7 +206,7 @@ impl fmt::Display for EndpointSegmentRole {
 }
 
 macro_rules! ident_newtype {
-    ($(#[$meta:meta])* $Name:ident) => {
+    ($(#[$meta:meta])* $Name:ident, $validate:ident) => {
         $(#[$meta])*
         #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize)]
         #[serde(transparent)]
@@ -159,10 +217,10 @@ macro_rules! ident_newtype {
             ///
             /// # Errors
             ///
-            /// [`IdError::Empty`] for the empty string, or [`IdError::ForbiddenChar`].
+            /// The [`IdError`] naming the first of those rules `s` breaks.
             pub fn new<S: Into<String>>(s: S) -> Result<Self, IdError> {
                 let s = s.into();
-                validate_ident(&s)?;
+                $validate(&s)?;
                 Ok(Self(s))
             }
 
@@ -232,15 +290,18 @@ macro_rules! ident_newtype {
 
 ident_newtype!(
     /// `place id=` value, e.g. `home1`.
-    PlaceId
+    PlaceId,
+    validate_place_id
 );
 ident_newtype!(
     /// Member `id=` exposed by a place's def, e.g. `entry`.
-    PortId
+    PortId,
+    validate_ident
 );
 ident_newtype!(
     /// Bare `site` name (no `site::` IR-key prefix), e.g. `hamlet`.
-    SiteName
+    SiteName,
+    validate_ident
 );
 
 /// Failure modes for [`WalkwayScopeKey::parse`].
