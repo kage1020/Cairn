@@ -238,7 +238,8 @@ fn walls_whose_abstract_token_cannot_be_resolved_do_not_raise_the_array() {
     );
 }
 
-/// A roof falls back to a material of its own where walls fall back to air.
+/// A roof falls back to a material of its own, while walls whose material does not resolve are
+/// not built.
 #[test]
 fn a_roof_still_draws_over_walls_that_paint_nothing() {
     let source = "struct s size=5x5\n  walls mat_slot=wall height=6\n  roof kind=gable mat_slot=roof overhang=1\n";
