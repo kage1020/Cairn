@@ -283,7 +283,7 @@ fn help_command(repo: &Repo) -> Command {
             "--",
             "--help",
         ])
-        // clap styles its help even into a pipe when the environment sets `CLICOLOR_FORCE`.
+        // `CLICOLOR_FORCE` styles clap's help even into a pipe; `NO_COLOR` outranks it.
         .env("NO_COLOR", "1");
     command
 }
@@ -403,14 +403,19 @@ use private::Item;
     }
 
     #[test]
-    fn the_help_is_read_with_colour_off() {
+    fn the_help_comes_back_plain_when_the_environment_forces_colour() {
         let repo = Repo::open(None).expect("open the checkout");
-        let command = help_command(&repo);
-        let no_color: Vec<_> = command
-            .get_envs()
-            .filter(|(key, _)| *key == "NO_COLOR")
-            .collect();
-        assert_eq!(no_color, [("NO_COLOR".as_ref(), Some("1".as_ref()))]);
+        let output = help_command(&repo)
+            .env("CLICOLOR_FORCE", "1")
+            .output()
+            .expect("run cargo");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let help = String::from_utf8(output.stdout).expect("help is utf-8");
+        assert_eq!(help.find('\x1b'), None, "{help:?}");
     }
 
     #[test]
