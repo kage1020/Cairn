@@ -69,7 +69,7 @@ cargo xtask lint versions   # 1 つのルールだけ
 | `crates/cairn-lang-tree-sitter` | tree-sitter 文法。npm 向けには `tree-sitter-cairn` として梱包 |
 | `crates/cairn-lang-wasm` | 将来のプレイグラウンド向けブラウザバインディング。現状はプレースホルダ |
 | `editors/vscode` | VS Code 拡張 — `cairn-lsp` の薄いクライアント |
-| `website` | Astro + Starlight のドキュメントサイト。仕様・チュートリアル・開発者ガイドを英語と日本語で |
+| `website` | Astro + Starlight のドキュメントサイト。仕様・チュートリアル・開発者ガイドを英語と日本語で。サイトの Markdown ページを `cairn docs` 用に埋め込む `cairn-lang-docs` クレートもここにあります |
 | `examples` | `.crn` ソース (ロックファイルは生成物で、追跡していません) |
 
 クレート間の依存ルールは[開発者ガイド](https://cairn.kage1020.com/development/) (英語のみ) が詳しく扱っています。
@@ -105,7 +105,7 @@ Rust のソース、仕様本文、サンプル、ドキュメントは、何年
 
 章は拡張子なしのファイル名（`spec/redstone`、`spec/versioning-editions`）で書き、節の見出しはそのまま写します。章全体を指すときは章だけを挙げます。一度その形で引いたあとは、同じコメントの後続の文では「that pipeline」「the phase order」のように散文で受けてください。同じ引用を繰り返す必要はありません。
 
-これは `cargo xtask lint spec-citations` が `crates/`、`examples/`、`xtask/`、`.github/`、`.claude/`、`CLAUDE.md` に対して守ります。その中に `§` や "section 11.3" が残っていないこと、`spec/<章>` が実在する章を指していること、引用符で囲まれた見出しがその章に実在することの 3 点です。仕様を採番し直しても Rust 側は 1 行も動きません。節の見出しを変えた場合はルールが引用箇所をファイルと行番号で名指して落ちますが、それが狙いです。見出しの変更は意味の変更であり、それに寄りかかっていたコメントは読み直す価値があります。
+これは `cargo xtask lint spec-citations` が `crates/`、`examples/`、`xtask/`、`.github/`、`.claude/`、`CLAUDE.md` に対して守ります。その中に `§` や "section 11.3" が残っていないこと、`spec/<章>` が実在する章を指していること、引用符で囲まれた見出しが `cairn docs` でその章から表示できるもの (見出し、章が太字で定義する用語、章自身のタイトル) であることの 3 点です。したがって引用はそのまま `cairn docs spec/lint "Error vs warning"` として実行できます。仕様を採番し直しても Rust 側は 1 行も動きません。節の見出しを変えた場合はルールが引用箇所をファイルと行番号で名指して落ちますが、それが狙いです。見出しの変更は意味の変更であり、それに寄りかかっていたコメントは読み直す価値があります。
 
 残りは人の目で見るしかありません。`website/` を読まないのは、そこが番号を定義している側だからです。仕様の隣に並ぶガイドページは今も番号を埋め込んだアンカーで節を参照しており、それをほどくのは見出しそのものを変える変更と一緒にやる仕事です。`editors/`、このファイル、`CHANGELOG.md` と `changelog.d/` は単に走査範囲の外です。
 

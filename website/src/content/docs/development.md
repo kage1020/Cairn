@@ -19,7 +19,7 @@ language spec rather than the compiler, start at the [Specification](/spec/) and
 | `crates/` | The Rust workspace (below). |
 | `editors/vscode/` | VS Code extension. |
 | `examples/` | Worked `.crn` examples. |
-| `website/` | This site: Astro + Starlight, including the specification. |
+| `website/` | This site: Astro + Starlight, including the specification, and the `cairn-lang-docs` crate that embeds its pages. |
 
 Each crate maps back to the spec chapter it implements:
 
@@ -33,12 +33,14 @@ Each crate maps back to the spec chapter it implements:
 | [`cairn-lang-lsp`](https://github.com/kage1020/Cairn/blob/main/crates/cairn-lang-lsp/README.md) | Language Server Protocol | lib + bin |
 | `cairn-lang-wasm` | WebAssembly bindings | cdylib + rlib |
 | `cairn-lang-tree-sitter` | Grammar for editor highlighting | grammar |
+| [`cairn-lang-docs`](https://github.com/kage1020/Cairn/blob/main/website/rust/README.md) | This site's Markdown pages, embedded for `cairn docs` | lib |
 
 ## Dependency rules
 
 `cairn-lang-core` sits at the root. `cairn-lang-cli`, `cairn-lang-lsp`, and `cairn-lang-wasm` are
 leaf integrations that nothing depends on. `cairn-lang-formats` is the only crate that pulls in
-`cairn-lang-nbt`.
+`cairn-lang-nbt`. `cairn-lang-docs` depends on nothing: its manifest is `website/Cargo.toml`, so the
+pages it embeds are the site's own sources and no copy of them can drift.
 
 - **`cairn-lang-core` knows nothing about NBT, file formats, redstone simulation, or editor
   protocols.** The block-array IR is the universal pivot ([Architecture](/spec/architecture/));

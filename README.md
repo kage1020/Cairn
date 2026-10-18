@@ -110,6 +110,11 @@ semantic-sensitive:      (none)
 
 Site source lives in [`website/src/content/docs/`](website/README.md) and is reviewed like code.
 
+The same pages travel with the compiler and are served in the shape a language model reads best:
+
+- `cairn docs` lists every page the installed `cairn` was built with, `cairn docs spec/syntax` prints one as Markdown, and `cairn docs spec/lint "Error vs warning"` prints the section a citation names. No network is needed, and the pages are always the ones that release implements.
+- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) indexes the site for language models, every page is also served as Markdown at its URL followed by `index.md` ([`/spec/syntax/index.md`](https://cairn.kage1020.com/spec/syntax/index.md)), and [`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) is every English page in one file.
+
 ## Versioning
 
 Releases use date-based versioning, `YYYY.M[.PATCH]`, covering the language, the compiler, and the registry packs as one bundle. That is a different axis from the Minecraft version you pass to `--target`; the two are always told apart by flag or keyword, never by format.

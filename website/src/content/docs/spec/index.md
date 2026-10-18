@@ -35,6 +35,10 @@ and aligns architectural knowledge (walls, roofs, symmetry) with the voxel world
 - Requirement words **MUST / SHOULD / MUST NOT / OPTIONAL** are used in the RFC 2119 sense.
 - The language is **Cairn**, the CLI is `cairn`, and source files use `.crn`.
 - Design principles are referenced as `P1`–`P5` (see [Design Principles](/spec/principles/)).
+- Outside this specification, a chapter is cited by its file name and a section by its title
+  without the number, as `spec/lint` "Error vs warning". `cairn docs` takes such a citation as
+  written and prints that section from the specification the installed compiler implements:
+  `cairn docs spec/lint "Error vs warning"`.
 
 ## Two version axes
 

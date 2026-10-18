@@ -27,6 +27,7 @@ use clap::Parser;
 use cli::{Cli, Command};
 use commands::check::run_check;
 use commands::compile::run_compile;
+use commands::docs::run_docs;
 use commands::info::run_info;
 use commands::lower::run_lower;
 use commands::parse::run_parse;
@@ -75,6 +76,9 @@ fn main() -> ExitCode {
             out,
             lock,
         }) => run_compile(&file, edition, &target, out.as_deref(), lock.as_deref()),
+        Some(Command::Docs { page, title, toc }) => {
+            run_docs(page.as_deref(), title.as_deref(), toc)
+        }
         None => {
             eprintln!("error: a subcommand is required (try `cairn --help`)");
             ExitCode::from(2)

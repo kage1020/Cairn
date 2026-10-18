@@ -34,6 +34,10 @@ description: AI が Minecraft の建築物を読み書きするための中間�
 - 要求水準語 **MUST / SHOULD / MUST NOT / OPTIONAL** は RFC 2119 の意味で使います。
 - 言語名は **Cairn**、CLI は `cairn`、ソースファイルは `.crn` です。
 - 設計原則は `P1`–`P5` で参照します ([設計原則](/ja/spec/principles/))。
+- この仕様の外では、章をファイル名で、節を番号を除いた英語の見出しで引用します (`spec/lint` "Error vs
+  warning")。`cairn docs` はこの引用をそのまま受け取り、インストール済みのコンパイラが実装している仕様
+  からその節を表示します: `cairn docs spec/lint "Error vs warning"`。日本語版は
+  `cairn docs ja/spec/lint "エラーと警告の区分"` のように `ja/` の下にあります。
 
 ## 2 つのバージョン軸
 

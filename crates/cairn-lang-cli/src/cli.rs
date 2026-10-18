@@ -274,6 +274,33 @@ pub(crate) enum Command {
         )]
         edition: Option<Edition>,
     },
+    /// Print a page of the documentation this binary carries, the specification among them.
+    #[command(
+        long_about = "Print a page of the Cairn documentation site as Markdown, from the copy \
+            embedded in this binary, so the page describes the compiler printing it and needs no \
+            network. Without PAGE, list every page with its title.\n\n\
+            PAGE is the path the site serves the page at: `spec/syntax` is \
+            https://cairn.kage1020.com/spec/syntax/, and each Japanese page sits under `ja/`. A \
+            link inside a page can be passed as written, its slashes and `#fragment` included, as \
+            can a URL of the site: `cairn docs /spec/lint/#113-error-vs-warning` prints the \
+            section that fragment opens.\n\n\
+            TITLE names a part of the page the way `--help` cites the spec: a heading without its \
+            number, a term the page defines in bold, or the page's own title. The citation \
+            `spec/lint` \"Error vs warning\" reads as `cairn docs spec/lint \"Error vs warning\"`.\
+            \n\n\
+            Exits 0 when the list, the page or its part is printed, and 2 when PAGE or TITLE \
+            names nothing this binary carries."
+    )]
+    Docs {
+        /// The page's path on the site, such as `spec/syntax`, optionally with a `#fragment`.
+        page: Option<String>,
+        /// A heading, defined term or page title of PAGE, to print instead of the whole page.
+        #[arg(requires = "page")]
+        title: Option<String>,
+        /// List PAGE's headings, each as a link this command takes, instead of printing PAGE.
+        #[arg(long, requires = "page", conflicts_with = "title")]
+        toc: bool,
+    },
 }
 
 /// The parser for `--edition`: core's edition names, each with the line `--help` gives it.

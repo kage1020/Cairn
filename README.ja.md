@@ -110,6 +110,11 @@ semantic-sensitive:      (none)
 
 サイトのソースは [`website/src/content/docs/`](website/README.md) にあり、コードと同じレビューを通ります。
 
+同じページはコンパイラにも同梱され、言語モデルが読みやすい形でも配信されています。
+
+- `cairn docs` はインストール済みの `cairn` がビルドされたときのページを一覧し、`cairn docs ja/spec/syntax` は 1 ページを Markdown で表示し、`cairn docs spec/lint "Error vs warning"` は引用が指す節だけを表示します。ネットワークは要らず、表示されるのは常にそのリリースが実装している版です。
+- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) は言語モデル向けのサイト索引です。各ページは URL の末尾に `index.md` を付けた場所でも Markdown として配信され ([`/ja/spec/syntax/index.md`](https://cairn.kage1020.com/ja/spec/syntax/index.md))、[`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) には英語の全ページがひとつにまとまっています。
+
 ## バージョニング
 
 リリースは日付ベースのバージョニング `YYYY.M[.PATCH]` を使い、言語・コンパイラ・レジストリパックをひとつの束として扱います。これは `--target` に渡す Minecraft のバージョンとは別の軸で、両者はフラグやキーワードで区別され、書式で区別されることはありません。

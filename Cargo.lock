@@ -135,6 +135,7 @@ name = "cairn-lang-cli"
 version = "2026.10.0"
 dependencies = [
  "cairn-lang-core",
+ "cairn-lang-docs",
  "cairn-lang-formats",
  "cairn-lang-redstone",
  "clap",
@@ -159,6 +160,10 @@ dependencies = [
  "strum",
  "thiserror",
 ]
+
+[[package]]
+name = "cairn-lang-docs"
+version = "2026.10.0"
 
 [[package]]
 name = "cairn-lang-formats"
@@ -1436,6 +1441,7 @@ dependencies = [
 name = "xtask"
 version = "2026.10.0"
 dependencies = [
+ "cairn-lang-docs",
  "proc-macro2",
  "regex",
  "serde_json",
