@@ -22,19 +22,19 @@ mod sizing;
 mod stair;
 mod token_diag;
 mod window;
+mod without_target;
 
 use std::collections::HashSet;
 
 use indexmap::IndexMap;
 
 use crate::diagnostic::{Diagnostic, sort_by_position};
-use crate::edition::Edition;
 use crate::ids::{PlaceId, SiteName, WalkwayScopeKey};
 use crate::intent::{DefIr, IntentModule, MemberRole, SiteIr, StructIr};
-use crate::resolve::{Resolution, ScopeResolution, place_scope_key, resolve};
+use crate::resolve::{Resolution, ScopeResolution, place_scope_key};
 
 use super::args::diag_deferred_member_reason;
-use super::material::{NoTarget, TargetRegistry};
+use super::material::TargetRegistry;
 use super::roof::{FLAT_BASE_ID, STAIR_BASE_ID};
 use super::{BlockArray, BlockArrayIr, BlockState, PALETTE_CAPACITY, Placement, Walkway};
 
@@ -43,6 +43,8 @@ use body::{BodyDescriptor, BodyInputs, LoweredBody, lower_body_to_block_array};
 use connect::{ConnectInputs, lower_connects};
 use diag::{VoxelSource, diag_def_no_size, diag_struct_no_size};
 use site_floor::{PlacedBody, collect_floor_cells};
+
+pub use without_target::findings_without_target;
 
 /// Block ids lowering can put in a palette that no pack can redirect.
 ///
@@ -59,33 +61,6 @@ pub fn lower_to_block_array(
     registry: Option<&dyn TargetRegistry>,
 ) -> BlockArrayIr {
     lower_to_block_array_within(intent, resolution, registry, PALETTE_CAPACITY)
-}
-
-/// The findings lowering `intent` raises at every target of `edition`, or of both editions when
-/// it is `None` (`spec/lint` "Error vs warning").
-#[must_use]
-pub fn findings_without_target(intent: &IntentModule, edition: Option<Edition>) -> Vec<Diagnostic> {
-    let editions = edition
-        .as_ref()
-        .map_or(&[Edition::Java, Edition::Bedrock][..], std::slice::from_ref);
-    let mut resolutions: Vec<Resolution> = Vec::with_capacity(editions.len());
-    for edition in editions {
-        let resolution = resolve(intent, Some(*edition));
-        if !resolutions.contains(&resolution) {
-            resolutions.push(resolution);
-        }
-    }
-    // Each edition binds its own theme variants, so a finding one of them changes is dropped.
-    let mut lowered = resolutions.iter().map(|resolution| {
-        lower_to_block_array_within(intent, resolution, Some(&NoTarget), PALETTE_CAPACITY)
-            .diagnostics
-    });
-    let first = lowered.next().unwrap_or_default();
-    let rest: Vec<HashSet<Diagnostic>> = lowered.map(|found| found.into_iter().collect()).collect();
-    first
-        .into_iter()
-        .filter(|finding| rest.iter().all(|found| found.contains(finding)))
-        .collect()
 }
 
 /// [`lower_to_block_array`] with each body's palette capped at `palette_capacity` entries.
@@ -105,7 +80,7 @@ fn lower_to_block_array_within(
     for s in &intent.structs {
         let key = format!("struct::{}", s.name);
         let scope = resolution.scopes.get(&key);
-        // `lower_struct` has already diagnosed a `None`.
+        // A `None` is diagnosed, unless its palette is one only a target's pack can size.
         if let Some(ba) = lower_struct(s, scope, bodies, &mut diagnostics) {
             // First write wins on a duplicate name, as `resolution.scopes` bound the first body.
             structures.entry(key).or_insert(ba);
@@ -269,7 +244,7 @@ fn lower_site<'a>(
             continue;
         };
         let Some(LoweredBody { array, walls, cut }) = body else {
-            // Refused for its extent or palette, already diagnosed.
+            // Refused for its extent or palette: diagnosed unless only a pack can size the palette.
             report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };

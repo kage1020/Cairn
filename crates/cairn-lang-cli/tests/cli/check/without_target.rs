@@ -1,5 +1,6 @@
-//! `cairn check` without `--target`: the lowering findings every target raises, worded as a pinned
-//! check words them, and none whose verdict is a target's pack's to give.
+//! `cairn check` without `--target`: the lowering findings every target that reads their line
+//! raises, weighed as if every id some shipped version declares were declared, and none whose
+//! verdict is a target's pack's to give.
 
 use std::path::Path;
 
@@ -146,4 +147,87 @@ fn a_bare_check_names_no_lost_scope() {
     let bare = check(&src, &[]);
     assert_eq!(bare.code, Some(0), "{}", bare.stderr);
     assert_stream(&bare.stderr, &[(7, 1, "warning", "W_STRUCT_NO_SIZE")]);
+}
+
+#[test]
+fn an_id_no_shipped_version_declares_is_left_to_a_pinned_check() {
+    let source = concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "  slot roof -> @oak_stair\n\n",
+        "struct hut size=5x5\n",
+        "  walls mat_slot=wall height=3\n",
+        "  roof kind=gable mat_slot=roof\n",
+    );
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = write_source(tmp.path(), "hut.crn", source);
+    for flags in [&[][..], &["--edition", "java"], &["--edition", "bedrock"]] {
+        let run = check(&src, flags);
+        assert_eq!(run.code, Some(0), "{flags:?}: {}", run.stderr);
+        assert_eq!(run.stderr, "", "{flags:?}");
+    }
+    for flags in [
+        &["--edition", "java", "--target", "1.21.4"][..],
+        &["--edition", "bedrock", "--target", "1.21.60"],
+    ] {
+        let run = check(&src, flags);
+        assert_eq!(run.code, Some(1), "{flags:?}: {}", run.stderr);
+        assert_stream(
+            &run.stderr,
+            &[
+                (3, 16, "error", "E_UNKNOWN_ID"),
+                (7, 3, "warning", "W_DEFERRED_MEMBER"),
+            ],
+        );
+    }
+}
+
+/// `t_java` and `t_bedrock` binding the roof slot of a gable roof to `java` and `bedrock`.
+fn variant_roofs(java: &str, bedrock: &str) -> String {
+    format!(
+        "@cairn 2026.06\n\ntheme t_java:\n  slot wall -> @stone\n  slot roof -> {java}\n\n\
+         theme t_bedrock:\n  slot wall -> @stone\n  slot roof -> {bedrock}\n\n\
+         struct s size=5x5\n  walls mat_slot=wall height=3\n  roof kind=gable mat_slot=roof\n"
+    )
+}
+
+#[test]
+fn a_finding_each_edition_raises_on_its_own_variant_is_reported_for_each() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = write_source(
+        tmp.path(),
+        "s.crn",
+        &variant_roofs("@cobblestone", "@cobblestone"),
+    );
+    let java = (5, 16, "error", "E_INCOMPATIBLE_MATERIAL");
+    let bedrock = (9, 16, "error", "E_INCOMPATIBLE_MATERIAL");
+    let bare = check(&src, &[]);
+    assert_eq!(bare.code, Some(1), "{}", bare.stderr);
+    assert_stream(&bare.stderr, &[java, bedrock]);
+    for (edition, target, found) in [("java", "1.21.4", java), ("bedrock", "1.21.60", bedrock)] {
+        let alone = check(&src, &["--edition", edition]);
+        assert_eq!(alone.code, Some(1), "{edition}: {}", alone.stderr);
+        assert_stream(&alone.stderr, &[found]);
+        let pinned = check(&src, &["--edition", edition, "--target", target]);
+        assert_eq!(pinned.stderr, alone.stderr, "{edition}");
+    }
+}
+
+#[test]
+fn a_finding_one_edition_variant_raises_fails_a_check_for_that_edition_only() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = write_source(
+        tmp.path(),
+        "s.crn",
+        &variant_roofs("@oak_stairs", "@cobblestone"),
+    );
+    let bedrock = [(9, 16, "error", "E_INCOMPATIBLE_MATERIAL")];
+    for flags in [&[][..], &["--edition", "bedrock"]] {
+        let run = check(&src, flags);
+        assert_eq!(run.code, Some(1), "{flags:?}: {}", run.stderr);
+        assert_stream(&run.stderr, &bedrock);
+    }
+    let java = check(&src, &["--edition", "java"]);
+    assert_eq!(java.code, Some(0), "{}", java.stderr);
+    assert_eq!(java.stderr, "");
 }

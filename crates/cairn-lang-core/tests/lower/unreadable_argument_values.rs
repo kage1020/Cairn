@@ -2,8 +2,7 @@
 //! warning"), and an origin past `i32` is refused rather than saturated.
 
 use cairn_lang_core::block_array::BlockArrayIr;
-use cairn_lang_core::check::LineStarts;
-use cairn_lang_core::{Diagnostic, DiagnosticCode, diagnose_parse_failure, parse};
+use cairn_lang_core::{Diagnostic, DiagnosticCode};
 
 use crate::common::{lowered, only_structure};
 
@@ -385,34 +384,6 @@ fn an_unreadable_gap_places_the_row_edge_to_edge_and_says_so() {
             );
             assert_eq!(underlined(&source, &ir, 0), written);
         }
-    }
-}
-
-#[test]
-fn a_negative_gap_does_not_parse() {
-    for selector in ["east_of", "north_of"] {
-        let source = site(&format!(
-            "  place id=b use=box theme=t {selector}=a gap=-3\n"
-        ));
-        let err = parse(&source).expect_err("a value cannot start with `-`");
-        let found = diagnose_parse_failure(&source, &LineStarts::new(&source), &err);
-        assert_eq!(
-            (
-                found.code,
-                &source[found.span.clone()],
-                found.primary.as_str(),
-                found.notes.len(),
-                found.data,
-            ),
-            (
-                DiagnosticCode::Parse,
-                "-3",
-                "unexpected `-` in value position",
-                0,
-                None,
-            ),
-            "{selector}",
-        );
     }
 }
 

@@ -122,8 +122,9 @@ ID はエディション全体ではなく、コンパイルが固定した 1 �
 その場合もターゲットを固定します。
 `cairn info` と `cairn lower` は lowering はしますがバージョンを固定しません (`info` は意図的に範囲
 全体を報告します)。作者に代わってバージョンを選ぶことはせず、比較を飛ばします。`--target` の無い
-`cairn check` はターゲットを一切持たずに lowering し、バージョンを固定せずパックも渡さないので、この
-検査も `E_UNKNOWN_ABSTRACT_TOKEN` も届きません ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
+`cairn check` はターゲットを一切持たずに lowering し、バージョンを固定せず、各抽象トークンをそれを
+ビルドするターゲットのパックに委ねるので、この検査も `E_UNKNOWN_ABSTRACT_TOKEN` も
+`W_ABSTRACT_TOKEN_DEFERRED` も届きません ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
 
 エディションが出荷する *すべて* のバージョンに照合し、どれにも存在しない ID だけを拒否する方式なら
 フラグは要りませんが、それは別の問いへの答えです。`stone_bricks` は Bedrock のどこかには存在するので、

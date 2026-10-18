@@ -11,6 +11,22 @@ fn refusal(source: &str) -> String {
     format!("{}: {}", error.position(), error.user_message())
 }
 
+// -- values ---------------------------------------------------------------
+
+#[test]
+fn a_negative_gap_is_refused_at_its_sign() {
+    for (selector, column) in [("east_of", 44), ("north_of", 45)] {
+        let source = format!(
+            "site s:\n  place id=a use=box theme=t at=origin\n  \
+             place id=b use=box theme=t {selector}=a gap=-3\n"
+        );
+        assert_eq!(
+            refusal(&source),
+            format!("3:{column}: unexpected `-` in value position"),
+        );
+    }
+}
+
 // -- truth tables ---------------------------------------------------------
 
 #[test]

@@ -168,8 +168,8 @@ server. `E_UNKNOWN_ID` further needs a pinned target, so the two commands that r
 against no version, and so does a `compile` whose target the file's floors refuse
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
 check` with no `--target`, and the language server, lower with no target at all, so they raise
-`E_INCOMPATIBLE_MATERIAL` only on a canonical token and never `E_UNKNOWN_ID`
-([§11.3](#113-error-vs-warning)).
+`E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares, and never
+`E_UNKNOWN_ID` ([§11.3](#113-error-vs-warning)).
 
 `W_STATE_LITERAL_UNCHECKED` is raised by the same lowering, on every state literal it reads from a
 theme slot or a `connect … path=`, so `cairn compile`, `cairn lower`, `cairn info`, `cairn check`
@@ -191,8 +191,8 @@ So at a target the floors refuse, the two commands name different causes: `check
 and reports the ids it lacks, with `E_PARTIAL_BUILD` for a scope the missing ids leave empty, while
 `compile` checks no id and reports the floor
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). Leaving the
-flag off still lowers, with no target, and reports only the findings no target changes
-([§11.3](#113-error-vs-warning)). See
+flag off still lowers, with no target, and reports only the findings every target that reads their
+line raises ([§11.3](#113-error-vs-warning)). See
 [Versioning and Editions §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
 `E_INCOMPATIBLE_MATERIAL` today means a sloped roof or an eave `stair` bound outside the stair
@@ -685,18 +685,22 @@ them, so it is the one finding a build reports alone.
 
 A finding of block-array lowering is reported wherever a source is checked, whether a target is
 pinned or not. With no `--target` — a plain `cairn check`, and the language server, which pins
-nothing — lowering runs with no target and reports the findings no target changes, each with the
-code, span and text a pinned check gives it, weighed as if every id and token the source names were
-declared. The block an abstract token lifts to is the target's pack's to name, so the token is not
-deferred: it stands in for that block, and no verdict on the block is given — no
-`E_INCOMPATIBLE_MATERIAL` on it, no `W_PHASE_CONFLICT` with a member that paints it, no
-`W_PALETTE_TOO_LARGE` on a body whose palette holds it, and no `W_WALKWAY_BLOCKED` whose note would
-name it. A `pressure_plate` with no `mat_slot=` takes the pack's plate, so it is such a block too.
-`E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, and
-neither is `E_PARTIAL_BUILD`, which counts what a build at a target loses. `--edition` alone picks
-that edition's theme variants; with neither flag, a finding is reported only when lowering with each
-edition's variants raises it. A check with `--target` lowers once, against the target, so no
-finding is reported twice.
+nothing — lowering runs with no target and reports the findings every target that reads their line
+raises, with the code, span and text a pinned check gives them. It weighs the source as if every
+block id some shipped version of the edition declares were declared. An abstract token, and an id no
+shipped version declares, are not deferred: each stands in for the block a target's pack names for
+it, and no verdict on that block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no
+`W_PHASE_CONFLICT` between it and another block, and no `W_PALETTE_TOO_LARGE` that only it could
+cause, since the palette is counted without it. A stand-in overwritten by air, or air by a stand-in,
+is still a `W_PHASE_CONFLICT`, since no pack names air. A `pressure_plate` built from its default
+block takes the pack's plate, so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a
+block" where a pinned check would name it. `E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN` are the
+pack's verdicts and are not raised. Neither is `E_PARTIAL_BUILD`, which counts what a build at a
+target loses. `--edition` alone picks that edition's theme variants. With neither flag, each
+edition's variants are lowered: a finding on a line only one edition's variant reads is that
+edition's verdict and is reported, and any other finding is reported when every edition raises it
+with the same code at the same span, once for each wording the editions give it. A check with
+`--target` lowers once, against the target, so no finding is reported twice.
 
 `E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
 dropped from the build and nothing is put in its place, which is implicit dropping and not a

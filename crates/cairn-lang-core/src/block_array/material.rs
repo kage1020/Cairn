@@ -28,16 +28,27 @@ pub trait TargetRegistry {
         let _ = id;
         Vec::new()
     }
+
+    /// Whether a version this registry covers may declare `id`, asked only when
+    /// [`Self::block_ids`] is `None`. Lowering paints an id this denies as a stand-in, which no
+    /// structure file can hold, so a registry whose lowering is written out denies none.
+    fn may_declare(&self, id: &str) -> bool {
+        let _ = id;
+        true
+    }
 }
 
-/// The registry a lowering with no target reads: no pack, no version, so every abstract token
-/// lifts to a stand-in for whichever block the target's pack names.
-pub(crate) struct NoTarget;
+/// The registry of a lowering with no target. It lifts every abstract token, and every id no
+/// version of the edition declares, to a stand-in rather than a canonical state; that is safe
+/// because nothing it lowers leaves [`findings_without_target`](super::findings_without_target).
+pub(crate) struct NoTarget<'a> {
+    /// Whether some version of the edition being lowered declares a block id.
+    pub(crate) declared: &'a dyn Fn(&str) -> bool,
+}
 
-impl TargetRegistry for NoTarget {
+impl TargetRegistry for NoTarget<'_> {
     fn lookup(&self, token: &str) -> Option<BlockState> {
-        // A block id starts with its namespace, whether a canonical token or a catalog spelt it.
-        Some(BlockState::bare(format!("@{token}")))
+        Some(stand_in(token))
     }
 
     fn known_tokens(&self) -> Vec<String> {
@@ -47,11 +58,23 @@ impl TargetRegistry for NoTarget {
     fn block_ids(&self) -> Option<BlockIdSet<'_>> {
         None
     }
+
+    fn may_declare(&self, id: &str) -> bool {
+        id.starts_with(STAND_IN_MARK) || (self.declared)(id)
+    }
 }
 
-/// Whether `state` is a [`NoTarget`] stand-in, whose block only the target's pack can name.
+/// What a stand-in's id starts with; no block id or abstract token can.
+const STAND_IN_MARK: char = '@';
+
+/// A stand-in for the block a target's pack names for `name`, an abstract token or a block id.
+pub(crate) fn stand_in(name: &str) -> BlockState {
+    BlockState::bare(format!("{STAND_IN_MARK}{name}"))
+}
+
+/// Whether `state` is a [`stand_in`], whose block only a target's pack can name.
 pub(crate) fn is_stand_in(state: &BlockState) -> bool {
-    state.id.starts_with('@')
+    state.id.starts_with(STAND_IN_MARK)
 }
 
 /// The block ids valid in one pinned `(edition, version)` target.
@@ -230,20 +253,28 @@ pub fn resolve_block_state(
     }
 }
 
-/// Refuse `state` when the pinned target does not declare its id; pass it when none is pinned.
+/// Refuse `state` when the pinned target does not declare its id; pass it when none is pinned,
+/// as a stand-in when no version the registry covers declares it.
 pub(crate) fn validated_id(
     state: BlockState,
     registry: Option<&dyn TargetRegistry>,
     origin: &IdOrigin,
 ) -> Result<BlockState, MaterialDeferred> {
-    let Some(ids) = registry.and_then(TargetRegistry::block_ids) else {
+    let Some(registry) = registry else {
         return Ok(state);
+    };
+    let Some(ids) = registry.block_ids() else {
+        if registry.may_declare(&state.id) {
+            return Ok(state);
+        }
+        // Every target refuses the id itself, so nothing may be said about its state literal.
+        return Ok(stand_in(&state.id));
     };
     if ids.contains(&state.id) {
         return Ok(state);
     }
     // Both can be filled: a rename has aliases, a typo a suggestion, and one id can be both.
-    let aliases = registry.map_or_else(Vec::new, |registry| registry.aliases_for(&state.id));
+    let aliases = registry.aliases_for(&state.id);
     Err(MaterialDeferred::UnknownId(UnknownId {
         suggestion: nearest_namespaced_id(&state.id, ids.iter()),
         aliases,

@@ -377,6 +377,13 @@ impl RegistryPack {
         )
     }
 
+    /// Whether some version this pack describes declares `id`; any id may be, without block
+    /// tables.
+    #[must_use]
+    pub fn may_declare(&self, id: &str) -> bool {
+        self.blocks.declared_by_some_version(id).unwrap_or(true)
+    }
+
     /// The view block-array lowering consults for `mc_version`; `None` skips the id check.
     ///
     /// # Panics

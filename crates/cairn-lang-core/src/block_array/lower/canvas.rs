@@ -3,7 +3,7 @@
 use indexmap::IndexMap;
 
 use crate::block_array::material::is_stand_in;
-use crate::block_array::{BlockState, Dims, Palette, PaletteFull, PaletteIndex};
+use crate::block_array::{BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteFull, PaletteIndex};
 
 use super::phase::Phase;
 
@@ -49,9 +49,18 @@ pub(super) struct ScopePalette {
     palette: Palette,
     capacity: usize,
     /// The refusal that overflowed the palette, once one has.
-    overflow: Option<PaletteFull>,
-    /// Whether a stand-in was interned since [`Self::take_stand_in`] last asked.
-    stand_in: bool,
+    overflow: Option<Overflow>,
+    /// The one slot every stand-in shares, once one is interned.
+    stand_in: Option<PaletteIndex>,
+}
+
+/// Why a [`ScopePalette`] refused a state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Overflow {
+    /// The states that are no stand-in passed the capacity, so every target refuses the body.
+    Full(PaletteFull),
+    /// The stand-in's slot took the last index, and only the pack can say whether it was needed.
+    StandIn,
 }
 
 impl ScopePalette {
@@ -61,34 +70,58 @@ impl ScopePalette {
             palette: Palette::new_with_air(),
             capacity,
             overflow: None,
-            stand_in: false,
+            stand_in: None,
         }
     }
 
-    /// Whether a stand-in was interned since the last call, which this one clears.
-    pub(super) fn take_stand_in(&mut self) -> bool {
-        std::mem::take(&mut self.stand_in)
-    }
-
     pub(super) fn intern(&mut self, state: BlockState) -> PaletteIndex {
-        self.stand_in |= is_stand_in(&state);
         // After an overflow the palette is never read, so skip the scan.
         if self.overflow.is_some() {
             return PaletteIndex::AIR;
         }
-        self.palette
-            .try_intern_within(state, self.capacity)
-            .unwrap_or_else(|full| {
-                self.overflow = Some(full);
-                PaletteIndex::AIR
-            })
+        let entries = &mut self.palette.entries;
+        if is_stand_in(&state) {
+            // How many blocks the stand-ins come to, and which the body already paints, is the
+            // pack's to say, so they share one slot; past the last index they share the newest.
+            return *self.stand_in.get_or_insert_with(|| {
+                let next = u16::try_from(entries.len()).unwrap_or(u16::MAX);
+                if usize::from(next) == entries.len() {
+                    entries.push(state);
+                }
+                PaletteIndex(next)
+            });
+        }
+        if let Some(i) = entries.iter().position(|s| s == &state) {
+            return PaletteIndex(
+                u16::try_from(i).expect("palette index fits in u16 by construction"),
+            );
+        }
+        let uncounted = self
+            .stand_in
+            .is_some_and(|slot| entries.get(usize::from(slot.0)).is_some_and(is_stand_in));
+        let capacity = self.capacity.min(PALETTE_CAPACITY);
+        if entries.len() - usize::from(uncounted) >= capacity {
+            self.overflow = Some(Overflow::Full(PaletteFull { capacity }));
+            return PaletteIndex::AIR;
+        }
+        let Ok(next) = u16::try_from(entries.len()) else {
+            self.overflow = Some(Overflow::StandIn);
+            return PaletteIndex::AIR;
+        };
+        entries.push(state);
+        PaletteIndex(next)
+    }
+
+    /// The slot every stand-in shares, once one is interned.
+    pub(super) fn stand_in(&self) -> Option<PaletteIndex> {
+        self.stand_in
     }
 
     /// The palette, or the refusal that overflowed it.
-    pub(super) fn into_palette(self) -> Result<Palette, PaletteFull> {
+    pub(super) fn into_palette(self) -> Result<Palette, Overflow> {
         match self.overflow {
             None => Ok(self.palette),
-            Some(full) => Err(full),
+            Some(overflow) => Err(overflow),
         }
     }
 }
@@ -106,10 +139,9 @@ pub(super) struct Canvas {
     painted: Vec<bool>,
     /// Indexed like [`Self::phases`]: `true` once that member has written a cell.
     pub(super) wrote: Vec<bool>,
-    /// Indexed like [`Self::phases`]: `true` once that member has painted a stand-in.
-    pub(super) stand_in: Vec<bool>,
-    /// `(overridden, overriding)` member pairs to the voxels the second took, in discovery order.
-    pub(super) conflicts: IndexMap<(u32, u32), u32>,
+    /// `(overridden, overriding)` member pairs, in discovery order, to how many voxels the second
+    /// took from each `(before, after)` pair of palette slots.
+    pub(super) conflicts: IndexMap<(u32, u32), IndexMap<(PaletteIndex, PaletteIndex), u32>>,
 }
 
 impl Canvas {
@@ -119,7 +151,6 @@ impl Canvas {
             voxels: vec![PaletteIndex::AIR; dims.volume()],
             owners: vec![0; dims.volume()],
             wrote: vec![false; phases.len()],
-            stand_in: vec![false; phases.len()],
             phases,
             painted: vec![false; 1],
             conflicts: IndexMap::new(),
@@ -198,7 +229,12 @@ impl MemberCanvas<'_> {
         // A same-member overwrite is a generator fault no author can move, so never a finding.
         let overridden = previous - 1;
         if overridden != member && canvas.same_phase(overridden, member) {
-            *canvas.conflicts.entry((overridden, member)).or_default() += 1;
+            *canvas
+                .conflicts
+                .entry((overridden, member))
+                .or_default()
+                .entry((before, after))
+                .or_default() += 1;
         }
         true
     }

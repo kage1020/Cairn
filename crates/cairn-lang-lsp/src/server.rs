@@ -1,5 +1,9 @@
 //! The stdio JSON-RPC loop: diagnostics pushed on each change, completion from the stored text.
 
+use std::collections::VecDeque;
+use std::sync::mpsc;
+use std::thread;
+
 use lsp_server::{Connection, ErrorCode, Message, Notification, Request, Response};
 use lsp_types::notification::{
     DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Notification as _,
@@ -69,9 +73,66 @@ enum Teardown {
     WithoutShutdown,
 }
 
+/// What the diagnostics thread publishes next for one document.
+enum Publication {
+    /// The findings on one revision of its text.
+    Findings { version: i32, text: String },
+    /// No findings, for a closed document.
+    Cleared,
+}
+
+/// A document and what to publish for it.
+type Queued = (lsp_types::Uri, Publication);
+
+/// Runs [`dispatch`] until it ends, while a second thread computes and publishes diagnostics, so
+/// a request is answered while a long document is still being diagnosed.
+fn main_loop(connection: &Connection) -> Result<Teardown, DynError> {
+    let (queue, queued) = mpsc::channel();
+    thread::scope(|scope| {
+        let diagnostics_thread = thread::Builder::new()
+            .name("cairn-lsp-diagnostics".to_owned())
+            .spawn_scoped(scope, move || publish_queued(connection, &queued))?;
+        let dispatched = dispatch(connection, &queue);
+        drop(queue);
+        let published = diagnostics_thread
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+        // The diagnostics thread's failure is why a dispatch could not queue.
+        published.and(dispatched)
+    })
+}
+
+/// Publishes what `queued` holds until the queue closes, skipping every revision of a document
+/// that a newer one queued after it replaces.
+fn publish_queued(
+    connection: &Connection,
+    queued: &mpsc::Receiver<Queued>,
+) -> Result<(), DynError> {
+    let mut pending: VecDeque<Queued> = VecDeque::new();
+    loop {
+        for (uri, publication) in queued.try_iter() {
+            match pending.iter_mut().find(|(seen, _)| *seen == uri) {
+                Some((_, replaced)) => *replaced = publication,
+                None => pending.push_back((uri, publication)),
+            }
+        }
+        let Some((uri, publication)) = pending.pop_front().or_else(|| queued.recv().ok()) else {
+            return Ok(());
+        };
+        match publication {
+            Publication::Findings { version, text } => {
+                let diagnostics = compute_diagnostics(&uri, &text);
+                publish(connection, uri, Some(version), diagnostics)?;
+            }
+            // An empty set clears the closed document's squiggles.
+            Publication::Cleared => publish(connection, uri, None, Vec::new())?,
+        }
+    }
+}
+
 /// Dispatches messages until `exit` or closed input. Not `Connection::handle_shutdown`: it fails
 /// on any message between `shutdown` and `exit`, and editors send `didClose` there.
-fn main_loop(connection: &Connection) -> Result<Teardown, DynError> {
+fn dispatch(connection: &Connection, queue: &mpsc::Sender<Queued>) -> Result<Teardown, DynError> {
     let mut store = DocumentStore::new();
     let mut shutdown_requested = false;
     for message in &connection.receiver {
@@ -104,7 +165,7 @@ fn main_loop(connection: &Connection) -> Result<Teardown, DynError> {
             }
             Message::Notification(_) if shutdown_requested => {}
             Message::Notification(notification) => {
-                handle_notification(connection, &mut store, notification)?;
+                handle_notification(queue, &mut store, notification)?;
             }
             Message::Response(_) => {
                 // The server sends no requests.
@@ -181,13 +242,13 @@ fn parse_params<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// Mirrors one notification's text into the store and republishes that document's diagnostics.
+/// Mirrors one notification's text into the store and queues that document's diagnostics.
 fn handle_notification(
-    connection: &Connection,
+    queue: &mpsc::Sender<Queued>,
     store: &mut DocumentStore,
     notification: Notification,
 ) -> Result<(), DynError> {
-    match notification.method.as_str() {
+    let queued = match notification.method.as_str() {
         DidOpenTextDocument::METHOD => {
             let Some(params) = parse_params::<lsp_types::DidOpenTextDocumentParams>(
                 DidOpenTextDocument::METHOD,
@@ -195,15 +256,13 @@ fn handle_notification(
             ) else {
                 return Ok(());
             };
-            let uri = params.text_document.uri;
-            let diagnostics = compute_diagnostics(&uri, &params.text_document.text);
-            store.open(uri.clone(), params.text_document.text);
-            publish(
-                connection,
-                uri,
-                Some(params.text_document.version),
-                diagnostics,
-            )?;
+            let document = params.text_document;
+            store.open(document.uri.clone(), document.text.clone());
+            let findings = Publication::Findings {
+                version: document.version,
+                text: document.text,
+            };
+            (document.uri, findings)
         }
         DidChangeTextDocument::METHOD => {
             let Some(params) = parse_params::<lsp_types::DidChangeTextDocumentParams>(
@@ -232,13 +291,11 @@ fn handle_notification(
                     return Ok(());
                 }
             };
-            let diagnostics = compute_diagnostics(&uri, source);
-            publish(
-                connection,
-                uri,
-                Some(params.text_document.version),
-                diagnostics,
-            )?;
+            let findings = Publication::Findings {
+                version: params.text_document.version,
+                text: source.to_owned(),
+            };
+            (uri, findings)
         }
         DidCloseTextDocument::METHOD => {
             let Some(params) = parse_params::<lsp_types::DidCloseTextDocumentParams>(
@@ -248,11 +305,13 @@ fn handle_notification(
                 return Ok(());
             };
             store.close(&params.text_document.uri);
-            // An empty set clears the closed document's squiggles.
-            publish(connection, params.text_document.uri, None, Vec::new())?;
+            (params.text_document.uri, Publication::Cleared)
         }
-        _ => {}
-    }
+        _ => return Ok(()),
+    };
+    queue
+        .send(queued)
+        .map_err(|_| "the diagnostics thread stopped")?;
     Ok(())
 }
 

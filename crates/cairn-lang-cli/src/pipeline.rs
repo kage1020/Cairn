@@ -48,11 +48,13 @@ pub(crate) fn load_module(
 
 /// What [`check_lowering`] found, and what the run owes a refusal for.
 pub(crate) struct CheckLowering {
-    /// The block-array pass's findings; without a target, the ones every target raises.
+    /// The block-array pass's findings; without a target, those every target reading their line
+    /// raises.
     pub(crate) diagnostics: Vec<Diagnostic>,
-    /// Scopes that produced no voxels, empty when no target was given.
+    /// Scopes that produced no voxels at the pinned target, empty without one.
     pub(crate) dropped_scopes: Vec<String>,
-    /// How many scopes did lower, so the refusal can say "1 of 2".
+    /// How many scopes lowered at the pinned target, so the refusal can say "1 of 2"; 0 without
+    /// one.
     pub(crate) built_scopes: usize,
     /// Why a `--target` did not resolve.
     pub(crate) unsupported: Option<cairn_lang_formats::data_version::UnsupportedTarget>,
@@ -68,7 +70,9 @@ pub(crate) fn check_lowering(
     // clap refuses `--target` without `--edition` (`spec/compilation` "Target axes").
     let (Some(edition), Some(target)) = (edition, target) else {
         return CheckLowering {
-            diagnostics: findings_without_target(ir, edition),
+            diagnostics: findings_without_target(ir, edition, &|edition, id| {
+                builtin_pack(edition).may_declare(id)
+            }),
             dropped_scopes: Vec::new(),
             built_scopes: 0,
             unsupported: None,

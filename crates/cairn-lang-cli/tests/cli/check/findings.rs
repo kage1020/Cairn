@@ -1,9 +1,21 @@
 //! `cairn check <file>` end to end: findings on stderr or in a JSON array, and the exit code.
 
-use crate::common::{Fixture, assert_stream, cairn, examples_dir, reported, stderr_stream};
+use crate::common::{
+    Fixture, assert_stream, cairn, examples_dir, json_stream, reported, stderr_stream,
+};
 
 const DUPLICATE: &str =
     "struct s size=4x4 size=5x5\n  walls height=4 height=5\n  door id=front\n  door id=front\n";
+
+/// What `cairn check` reports on [`DUPLICATE`], in emission order.
+const DUPLICATE_FINDINGS: &[(u64, u64, &str, &str)] = &[
+    (1, 19, "error", "E_DUPLICATE_SIZE"),
+    (2, 3, "error", "E_MISSING_MATERIAL"),
+    (2, 18, "error", "E_DUPLICATE_ARG"),
+    (4, 8, "error", "E_DUPLICATE_ID"),
+    (3, 3, "warning", "W_DEFERRED_MEMBER"),
+    (4, 3, "warning", "W_DEFERRED_MEMBER"),
+];
 
 const CAIRN_VERSION: &str = "@cairn banana\n\ntheme t:\n  slot floor -> @oak_planks\n\nstruct s size=2x2\n  floor mat_slot=floor\n";
 
@@ -25,15 +37,8 @@ fn text_findings_go_to_stderr_one_located_line_each() {
     );
     assert_eq!(
         stderr_stream(&stderr),
-        reported(&[
-            (1, 19, "error", "E_DUPLICATE_SIZE"),
-            (2, 3, "error", "E_MISSING_MATERIAL"),
-            (2, 18, "error", "E_DUPLICATE_ARG"),
-            (4, 8, "error", "E_DUPLICATE_ID"),
-            (3, 3, "warning", "W_DEFERRED_MEMBER"),
-            (4, 3, "warning", "W_DEFERRED_MEMBER"),
-        ]),
-        "{stderr}",
+        reported(DUPLICATE_FINDINGS),
+        "{stderr}"
     );
 }
 
@@ -192,28 +197,15 @@ fn json_output_carries_line_and_col_for_every_diagnostic() {
     let out = cairn("check", &[path.to_str().unwrap(), "--format", "json"]);
     assert_eq!(out.status.code(), Some(1));
     let stdout = String::from_utf8(out.stdout).expect("utf-8");
+    assert_eq!(json_stream(&stdout), reported(DUPLICATE_FINDINGS));
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("valid JSON");
-    let arr = parsed.as_array().expect("expected an array");
-    assert!(!arr.is_empty());
-    for entry in arr {
-        for field in [
-            "code", "severity", "line", "col", "end_line", "end_col", "primary",
-        ] {
+    for entry in parsed.as_array().expect("expected an array") {
+        for field in ["end_line", "end_col", "primary"] {
             assert!(
                 entry.get(field).is_some(),
                 "JSON diagnostic missing `{field}`: {entry}",
             );
         }
-        let line = entry["line"].as_u64().expect("line should be a number");
-        let col = entry["col"].as_u64().expect("col should be a number");
-        assert!(line >= 1 && col >= 1, "1-based positions, got {line}:{col}");
-        assert!(
-            entry["code"]
-                .as_str()
-                .is_some_and(|s| s.starts_with("E_") || s.starts_with("W_")),
-            "code should be the E_- or W_-prefixed string, got: {}",
-            entry["code"],
-        );
         // No finding this fixture raises carries a payload, so none may carry `data`.
         assert!(
             entry.get("data").is_none(),
