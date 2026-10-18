@@ -158,7 +158,7 @@ version to compare.
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since nothing checks its properties and values against the target until `E_STATE_DOMAIN` is implemented ([Versioning and Editions](/spec/versioning-editions/)). |
-| `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so every `mat_slot=` it reads lowers to air. |
+| `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
 | `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 
 `E_UNKNOWN_ID` and `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, so only the
@@ -211,9 +211,14 @@ about the author's intent rather than about what was built. The prefix is part o
 which is Stable ([Compatibility Tiers](/spec/compatibility/)), so it stays as written — read severity from
 the `severity` field rather than from the first letter.
 
-`E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: a slot bound to nothing lowers every
-`mat_slot=` pointing at it to air, so a theme whose slots are all mistyped builds a hollow shell of
-the requested extent at exit 0.
+`E_UNKNOWN_SLOT_TARGET` is an error on the opposite test: no `mat_slot=` pointing at a slot bound to
+something other than a material token resolves. A `floor` that names it is left air; a `walls` that
+names it is not built and takes up no rows, so a `door` or `window` cut into it is refused; a
+`window` that names it is not cut, so its wall stays; and a `roof`, eave `stair` or `pressure_plate`
+that names it is built from its default block. Were it a warning, a theme whose slots are all
+mistyped would still build at exit 0 every scope that keeps something to draw, such as a `roof`:
+shorter than asked, with no floor and no walls, and only default blocks, less any eave `stair` or
+`pressure_plate` set higher than the shorter structure reaches.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member
 earns both: the key is absent for the first and present-but-unusable for the second. They have
@@ -267,15 +272,16 @@ a `door` or `window` cut into it is refused. A `window` is not cut, so its wall 
 it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect)).
 
 `W_NO_THEME_BOUND` is the same shape one level up: a `mat_slot=` that resolves against no theme at
-all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built,
-so every `door` and `window` is refused for want of a wall; a `floor` leaves its cells air, and a
-`roof`, eave `stair` or `pressure_plate` is still built from its default block. It is judged per
-scope: a scope with no theme bound that reads no `mat_slot=` is not reported, whatever the rest of
-the module reads. A `mat_slot=` on a keyword that reads none, such as a `door`'s, is not a read.
-Nor, for this warning, is one on a member a `level` drops
-([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which
-paints nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level`
-whose body is `E_UNSUPPORTED_NESTING`.
+all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
+or takes up rows, so no `door` or `window` is cut and the structure is shorter than asked. A `floor`
+leaves its cells air, and a `roof` is still built from its default block, as is an eave `stair` or
+`pressure_plate` that still fits the shorter structure; one set higher than it reaches is refused.
+It is judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported,
+whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none, such as a
+`door`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
+([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints
+nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body
+is `E_UNSUPPORTED_NESTING`.
 
 The three `@intended_targets` codes weigh the file's stated intent against its own floor
 ([versioning-editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor)). A version
@@ -658,8 +664,9 @@ partial-build degradation, but `W_UNUSED_DEF`, `W_TRUTH_TABLE_PARTIAL` and the t
 are warnings without being one; and two `E_`-prefixed codes are decided by the rule above rather
 than by their name:
 
-- `E_UNKNOWN_SLOT_TARGET` is an **error**, because a slot bound to a non-material value lowers
-  every member referencing it to air.
+- `E_UNKNOWN_SLOT_TARGET` is an **error**, because the fault is in the source: the slot is written
+  with a value that is not a material token. Its members degrade as they would with no theme bound,
+  so what is built does not set it apart from `W_NO_THEME_BOUND`.
 - `E_THEME_SELECTOR_UNMATCHED` is a **warning**, because a rule that matches nothing overrides
   nothing.
 

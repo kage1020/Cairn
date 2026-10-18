@@ -208,9 +208,9 @@ a member drops out: a `roof` with no `kind=` or a `shed` with no `slope_to=` doe
 footprint, and `walls` whose material does not resolve do not raise `Dims.y`.
 
 The material half applies to `walls` and not to `roof`, because a roof whose `mat_slot=` does not
-resolve falls back to a material of its own and still draws. A themeless struct shows the
-asymmetry: its walls lower to air and reserve nothing, while a `roof kind=gable` over them still
-draws and still seats its ridge above them.
+resolve falls back to a material of its own and still draws. A themeless struct shows the asymmetry:
+its walls are not built and take up no rows, while a `roof kind=gable` over them still draws, seated
+where it would sit with no walls at all.
 
 "Does the material resolve" is asked against the pinned target, so a block only some versions
 declare can change `Dims.y` between two `--target` values. An id the pinned target does not declare

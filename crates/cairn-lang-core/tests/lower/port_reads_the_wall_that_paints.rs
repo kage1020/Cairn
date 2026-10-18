@@ -18,7 +18,7 @@ fn walkway_keys(out: &BlockArrayIr) -> Vec<String> {
 }
 
 /// `home1` from `solid` and `home2` from `other`, joined by one `connect` row. `hollow`'s `ghost`
-/// lifts to an abstract token, which defers to air without a registry pack.
+/// lifts to an abstract token, so with no registry pack its walls are not built.
 fn pair(other: &str, connect: &str) -> String {
     format!(
         "@cairn 2026.06

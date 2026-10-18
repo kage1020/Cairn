@@ -10,6 +10,7 @@ mod door_wall_fit;
 mod intent;
 mod l_walkway;
 mod level_scoped_members;
+mod no_theme_bound;
 mod palette_capacity;
 mod palette_is_referenced;
 mod phase_order;
