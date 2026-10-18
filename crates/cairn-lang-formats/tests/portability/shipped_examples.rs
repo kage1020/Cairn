@@ -5,12 +5,15 @@ use std::collections::BTreeMap;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArrayIr, BlockState};
+use cairn_lang_core::resolve::DroppedIntent;
+use cairn_lang_formats::bedrock_structure::prepare_mcstructure;
+use cairn_lang_formats::data_version::resolve_bedrock_target;
 use cairn_lang_formats::portability::{
     PortabilityReport, portability_for_bedrock, portability_for_java,
 };
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 
-use crate::common::{examples, lower_source, supported_versions};
+use crate::common::{examples, lower_source, note_fields, supported_versions};
 
 /// Every structure's extent, keyed by scope.
 fn extents(ir: &BlockArrayIr) -> BTreeMap<&str, (u32, u32, u32)> {
@@ -107,4 +110,54 @@ fn the_reported_entry_count_matches_what_a_pinned_build_emits() {
             }
         }
     }
+}
+
+#[test]
+fn the_build_notes_each_degraded_entry_by_the_fields_info_names_it_with() {
+    let pack = builtin_pack(Edition::Bedrock);
+    let mut roof_hip = None;
+    for (name, source) in &examples() {
+        let unpinned = lower_source(source, Edition::Bedrock, None);
+        let report = report_for(Edition::Bedrock, pack, &unpinned, name);
+        let from_info: Vec<(&str, &str, &DroppedIntent)> = report
+            .degraded()
+            .iter()
+            .flat_map(|entry| {
+                entry
+                    .dropped
+                    .iter()
+                    .map(|dropped| (entry.id.as_str(), entry.states.as_str(), dropped))
+            })
+            .collect();
+        if name == "roof-hip.crn" {
+            roof_hip = Some(from_info.len());
+        }
+
+        for version in supported_versions(pack) {
+            let target = resolve_bedrock_target(version).expect("a targetable version resolves");
+            let built = lower_source(source, Edition::Bedrock, Some(version));
+            assert!(
+                built.diagnostics.is_empty(),
+                "{name} does not build for bedrock {version}: {:?}",
+                built.diagnostics,
+            );
+            let mut notes = Vec::new();
+            for (scope, array) in &built.structures {
+                let (_, raised) = prepare_mcstructure(array, &target).unwrap_or_else(|err| {
+                    panic!("{name}: `{scope}` is refused for bedrock {version}: {err}")
+                });
+                notes.extend(raised);
+            }
+            assert_eq!(
+                note_fields(&notes),
+                from_info,
+                "{name} on bedrock {version}"
+            );
+        }
+    }
+    assert_eq!(
+        roof_hip,
+        Some(4),
+        "premise: `roof-hip` degrades several entries, so order and repeats are compared",
+    );
 }

@@ -52,7 +52,8 @@ pub enum DiagnosticCode {
     DuplicateCircuit,
     /// A member carries an indented body that nothing reads.
     UnsupportedNesting,
-    /// A known statement keyword whose enclosing body has no reader for it.
+    /// A known statement keyword whose enclosing body has no reader for it, or a `circuit` line
+    /// under a `level`.
     MisplacedMember,
     /// A statement keyword not in the known-keyword table.
     UnknownKeyword,
@@ -116,6 +117,8 @@ pub enum DiagnosticCode {
     IncompletePlace,
     /// A `place id=` that [`crate::ids::PlaceId`] refuses.
     InvalidPlaceId,
+    /// A `struct` named after a device Windows reserves.
+    InvalidStructName,
     /// Two `place` rows in the same site share an `id=`; the first wins.
     DuplicatePlaceId,
     /// Two scopes a build writes share a file name, ignoring case.
@@ -209,6 +212,7 @@ impl DiagnosticCode {
             Self::PaletteTooLarge => "W_PALETTE_TOO_LARGE",
             Self::IncompletePlace => "E_INCOMPLETE_PLACE",
             Self::InvalidPlaceId => "E_INVALID_PLACE_ID",
+            Self::InvalidStructName => "E_INVALID_STRUCT_NAME",
             Self::DuplicatePlaceId => "E_DUPLICATE_PLACE_ID",
             Self::OutputNameCollision => "E_OUTPUT_NAME_COLLISION",
             Self::InvalidPlaceOrigin => "E_INVALID_PLACE_ORIGIN",
@@ -266,6 +270,7 @@ impl DiagnosticCode {
             | Self::OutputNameCollision
             | Self::IncompletePlace
             | Self::InvalidPlaceId
+            | Self::InvalidStructName
             | Self::InvalidPlaceOrigin
             | Self::UnresolvedPort
             | Self::AmbiguousPort

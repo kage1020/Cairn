@@ -8,6 +8,7 @@ use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::java_structure::output_filename;
 
 use crate::lockfile::build_lockfile;
+use crate::report::degraded_warning;
 use crate::staging;
 use crate::target::{PreparedStructure, ResolvedTarget};
 
@@ -58,13 +59,8 @@ pub(crate) fn prepare_artifacts<'a>(
             eprintln!("error: checking `{scope}`: {err}");
             ExitCode::from(1)
         })?;
-        for note in degraded {
-            // The id repeats the message's `id[states]` so a tool can group warnings by block.
-            eprintln!(
-                "warning[W_INTENT_DEGRADED]: {scope}: {id}: {message}",
-                id = note.id,
-                message = note.message,
-            );
+        for note in &degraded {
+            eprintln!("{}", degraded_warning(scope, note));
         }
         let path = artifact_path(out_dir, scope, &output_filename(scope, target.output_ext()))?;
         // Distinct scope keys can name one file, and the resolver's `E_OUTPUT_NAME_COLLISION`

@@ -147,6 +147,19 @@ static bool emit_dedent(Scanner *s, TSLexer *lexer) {
   return true;
 }
 
+// Consumes the line break at the lookahead, `\r\n` as one, and starts the next line there.
+static bool emit_newline(Scanner *s, TSLexer *lexer) {
+  if (lexer->lookahead == '\r') {
+    advance(lexer);
+    if (lexer->lookahead == '\n') advance(lexer);
+  } else {
+    advance(lexer);
+  }
+  s->line_start_column = lexer->get_column(lexer);
+  lexer->result_symbol = NEWLINE;
+  return true;
+}
+
 bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
   Scanner *s = (Scanner *)payload;
 
@@ -168,6 +181,11 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // are skipped and tabs are not, as core refuses a tab.
   if (valid_symbols[BIT_PATTERN]) {
     while (lexer->lookahead == ' ') skip(lexer);
+    // Between rows a break separates them, and leaves no indentation behind: the next line's
+    // spaces are skipped here like any others, so no INDENT or DEDENT is measured inside a table.
+    if (valid_symbols[NEWLINE] && (lexer->lookahead == '\n' || lexer->lookahead == '\r')) {
+      return emit_newline(s, lexer);
+    }
     bool scanned = false;
     for (;;) {
       if (lexer->lookahead == '0' || lexer->lookahead == '1') {
@@ -269,15 +287,7 @@ bool tree_sitter_cairn_external_scanner_scan(void *payload, TSLexer *lexer, cons
   // Consumes the break and nothing else: the layout section below refuses a bad indent on the
   // next line, so the error lands on that row.
   if (valid_symbols[NEWLINE] && (lexer->lookahead == '\n' || lexer->lookahead == '\r')) {
-    if (lexer->lookahead == '\r') {
-      advance(lexer);
-      if (lexer->lookahead == '\n') advance(lexer);
-    } else {
-      advance(lexer);
-    }
-    s->line_start_column = lexer->get_column(lexer);
-    lexer->result_symbol = NEWLINE;
-    return true;
+    return emit_newline(s, lexer);
   }
 
   // Mid-line, a construct follows the INDENT or DEDENT that measured its line. Sound only while
