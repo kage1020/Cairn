@@ -1,5 +1,5 @@
 //! Whether a directory takes two file names that differ only in letter case for one entry, asked
-//! of the volume it is on.
+//! of the directory itself.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -19,25 +19,17 @@ pub(crate) enum NameCase {
 }
 
 impl NameCase {
-    /// How `dir` compares names, probed on its volume, or the platform's default when it cannot be.
+    /// How `dir` compares names, probed in `dir`, or `Insensitive` when the probe fails.
     pub(crate) fn of_dir(dir: &Path) -> Self {
-        Self::probe(dir).unwrap_or_else(|_| Self::platform_default())
-    }
-
-    /// The default of the file systems the host formats its volumes with.
-    fn platform_default() -> Self {
-        if cfg!(any(target_os = "macos", windows)) {
-            Self::Insensitive
-        } else {
-            Self::Sensitive
-        }
+        // A wrong `Insensitive` only refuses a build; a wrong `Sensitive` loses an artifact.
+        Self::probe(dir).unwrap_or(Self::Insensitive)
     }
 
     /// Write a scratch file into `dir`, read it back under its upper-case spelling, and remove it.
     ///
     /// # Errors
     ///
-    /// The I/O failure that kept the scratch file from being written or read back.
+    /// The I/O failure writing the scratch file, or reading it back other than as `NotFound`.
     fn probe(dir: &Path) -> io::Result<Self> {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -60,7 +52,7 @@ impl NameCase {
         answer
     }
 
-    /// `name` as a key that every spelling of one entry shares.
+    /// `name` as a key, lowercased where names fold, so `hut.nbt` and `HUT.nbt` share one.
     pub(crate) fn key(self, name: &OsStr) -> OsString {
         match self {
             Self::Sensitive => name.to_os_string(),

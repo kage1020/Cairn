@@ -49,6 +49,29 @@ pub fn example_in_tempdir(name: &str) -> (TempDir, PathBuf) {
     (tmp, dst)
 }
 
+/// Whether `dir` takes two names that differ only in letter case for one entry, found by a second
+/// `create_new` under the other spelling; neither file is left behind.
+pub fn folds_case(dir: &Path) -> bool {
+    let create_new = |name: &str| {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(dir.join(name))
+    };
+    drop(create_new("case-oracle").expect("create the lower-case spelling"));
+    let folds = match create_new("CASE-ORACLE") {
+        Ok(file) => {
+            drop(file);
+            fs::remove_file(dir.join("CASE-ORACLE")).expect("remove the upper-case spelling");
+            false
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => true,
+        Err(err) => panic!("create the upper-case spelling: {err}"),
+    };
+    fs::remove_file(dir.join("case-oracle")).expect("remove the lower-case spelling");
+    folds
+}
+
 /// Write `source` to `dir/name` and return the path.
 pub fn write_source(dir: &Path, name: &str, source: &str) -> PathBuf {
     let path = dir.join(name);

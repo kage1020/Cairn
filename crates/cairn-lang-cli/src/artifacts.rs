@@ -52,10 +52,8 @@ pub(crate) fn prepare_artifacts<'a>(
     case: NameCase,
 ) -> Result<Vec<(PathBuf, PreparedStructure<'a>)>, PrepareRefusal> {
     let mut prepared = Vec::with_capacity(block_ir.structures.len());
-    let mut seen_paths: std::collections::HashMap<
-        (PathBuf, std::ffi::OsString),
-        (PathBuf, String),
-    > = std::collections::HashMap::with_capacity(block_ir.structures.len());
+    let mut seen_paths: std::collections::HashMap<EntryLocation, (PathBuf, String)> =
+        std::collections::HashMap::with_capacity(block_ir.structures.len());
     for (scope, array) in &block_ir.structures {
         let (structure, degraded) = target.prepare(array).map_err(|err| {
             eprintln!("error: checking `{scope}`: {err}");
@@ -201,7 +199,7 @@ pub(crate) fn check_lock_path_is_free(
     lock_path: &Path,
     case: NameCase,
 ) -> Result<(), ExitCode> {
-    let mut reserved_paths: std::collections::HashMap<(PathBuf, std::ffi::OsString), &Path> =
+    let mut reserved_paths: std::collections::HashMap<EntryLocation, &Path> =
         std::collections::HashMap::with_capacity(prepared.len() * 3);
     for (artifact, _) in prepared {
         for reserved in staging::reserved_paths(artifact) {
@@ -244,27 +242,58 @@ pub(crate) fn check_lock_path_is_free(
     Ok(())
 }
 
-/// The directory entry `path` names, as a key two spellings of one file compare equal on: the
-/// canonical parent and the file name, folded as `case` says `--out` folds it.
-///
-/// Only `NotFound` falls back; a key computed another way would read as "no collision".
-fn entry_location(path: &Path, case: NameCase) -> std::io::Result<(PathBuf, std::ffi::OsString)> {
-    let resolve = |dir: &Path| {
-        let dir = if dir.as_os_str().is_empty() {
-            Path::new(".")
-        } else {
-            dir
-        };
-        match dir.canonicalize() {
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => std::path::absolute(dir),
-            resolved => resolved,
-        }
-    };
+/// Where a directory entry lives: its parent directory and its file name as a [`NameCase`] keys it.
+type EntryLocation = (DirIdentity, std::ffi::OsString);
+
+/// A directory as the file system tells it apart, so every spelling that reaches it is one key.
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum DirIdentity {
+    /// The device and inode of a directory that exists.
+    #[cfg(unix)]
+    Inode(u64, u64),
+    /// The canonical path of a directory that exists, or the absolute path of one that does not.
+    Path(PathBuf),
+}
+
+/// The directory entry `path` names, as its parent's identity and its file name keyed by `case`.
+fn entry_location(path: &Path, case: NameCase) -> std::io::Result<EntryLocation> {
     // A path ending in `..`, or a root, has no entry to split off.
     let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
-        return Ok((resolve(path)?, std::ffi::OsString::new()));
+        return Ok((dir_identity(path)?, std::ffi::OsString::new()));
     };
-    Ok((resolve(parent)?, case.key(name)))
+    Ok((dir_identity(parent)?, case.key(name)))
+}
+
+/// How `dir`, or the current directory when it is empty, is told apart from every other.
+///
+/// Only `NotFound` falls back; an identity computed another way would read as "no collision".
+fn dir_identity(dir: &Path) -> std::io::Result<DirIdentity> {
+    let dir = if dir.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        dir
+    };
+    match existing_dir_identity(dir) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            std::path::absolute(dir).map(DirIdentity::Path)
+        }
+        identity => identity,
+    }
+}
+
+/// `dir`'s device and inode, which `canonicalize` cannot stand in for: on Linux it keeps each
+/// component's spelling, so `out` and `OUT` in a case-folding directory would be two keys.
+#[cfg(unix)]
+fn existing_dir_identity(dir: &Path) -> std::io::Result<DirIdentity> {
+    use std::os::unix::fs::MetadataExt as _;
+    let metadata = std::fs::metadata(dir)?;
+    Ok(DirIdentity::Inode(metadata.dev(), metadata.ino()))
+}
+
+/// `dir`'s canonical path, which spells each component as the directory stores it.
+#[cfg(not(unix))]
+fn existing_dir_identity(dir: &Path) -> std::io::Result<DirIdentity> {
+    dir.canonicalize().map(DirIdentity::Path)
 }
 
 /// Write the prepared structures and the lockfile as one set: all of them, or the directory as

@@ -87,7 +87,7 @@ fn check_and_write(
     out_dir: &Path,
     lock_path: &Path,
 ) -> ExitCode {
-    // Every artifact lands in `--out`, so only how its volume folds case can make the lock collide.
+    // A lock can share an entry with an artifact only inside `--out`, so `--out` alone is probed.
     let case = NameCase::of_dir(out_dir);
     let prepared = match prepare_artifacts(block_ir, target, out_dir, case) {
         Ok(p) => p,

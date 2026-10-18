@@ -10,7 +10,8 @@ use tempfile::TempDir;
 
 use crate::check::parity::all_fixtures;
 use crate::common::{
-    Fixture, assert_stream, cargo_bin, compile, compile_as, examples_dir, stderr_of,
+    Fixture, assert_stream, cargo_bin, compile, compile_as, examples_dir, folds_case, nbt_body,
+    stderr_of,
 };
 
 /// Every regular file under `dir`, keyed by name.
@@ -429,11 +430,34 @@ fn a_lock_reached_through_a_symlinked_out_is_refused() {
     });
 }
 
-#[cfg(any(target_os = "macos", windows))]
 #[test]
-fn a_lock_differing_only_in_case_is_refused_where_case_is_folded() {
-    // Case-insensitive by default on both platforms.
-    assert_lock_spelling_is_refused(|_| ("out".into(), "OUT/HOME1.NBT".into()));
+fn a_lock_differing_only_in_case_is_refused_only_where_out_folds_case() {
+    let build = first_successful_build();
+    if folds_case(&build.out_dir) {
+        for lock in ["out/HOME1.NBT", "OUT/HOME1.NBT"] {
+            assert_lock_spelling_is_refused(|_| ("out".into(), lock.into()));
+        }
+        return;
+    }
+    let dir = build.source.parent().expect("source has a parent");
+    change_the_source(&build.source);
+
+    let (code, stderr) = compile_in(dir, Some("out"), "out/HOME1.NBT");
+
+    assert_eq!(
+        code,
+        Some(0),
+        "`--lock out/HOME1.NBT` is a file of its own where `--out` keeps case; stderr={stderr}",
+    );
+    let lock = fs::read_to_string(build.out_dir.join("HOME1.NBT")).expect("read the lockfile");
+    assert!(
+        lock.starts_with("lock_schema_version: "),
+        "`HOME1.NBT` holds the lockfile: {lock}"
+    );
+    assert!(
+        !nbt_body(&build.out_dir.join("home1.nbt")).is_empty(),
+        "`home1.nbt` still holds the artifact",
+    );
 }
 
 #[test]

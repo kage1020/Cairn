@@ -169,38 +169,48 @@ fn two_scopes_whose_names_differ_only_in_case_are_two_files_where_out_keeps_case
 const LOCKS_DIFFERING_ONLY_IN_CASE: [&str; 3] = ["HUT.nbt", "Hut.NBT.tmp", "hut.nbt.BAK"];
 
 #[test]
-fn a_lock_differing_from_an_artifact_only_in_case_is_refused_where_out_folds_case() {
+fn a_lock_differing_from_an_artifact_only_in_case_is_refused_only_where_out_folds_case() {
     let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
     let out_dir = Path::new("out");
     let block_ir = rekeyed_probe(&["struct::hut"]);
-    let prepared = prepare_artifacts(&block_ir, &target, out_dir, NameCase::Insensitive)
-        .unwrap_or_else(|_| panic!("one struct prepares"));
-    for lock in LOCKS_DIFFERING_ONLY_IN_CASE {
+    for (case, expected) in [
+        (NameCase::Insensitive, Err(ExitCode::from(1))),
+        (NameCase::Sensitive, Ok(())),
+    ] {
+        let prepared = prepare_artifacts(&block_ir, &target, out_dir, case)
+            .unwrap_or_else(|_| panic!("one struct prepares"));
+        for lock in LOCKS_DIFFERING_ONLY_IN_CASE {
+            assert_eq!(
+                check_lock_path_is_free(&prepared, &out_dir.join(lock), case),
+                expected,
+                "`--lock out/{lock}` where `--out` is {case:?}",
+            );
+        }
         assert_eq!(
-            check_lock_path_is_free(&prepared, &out_dir.join(lock), NameCase::Insensitive),
+            check_lock_path_is_free(&prepared, &out_dir.join("hut.nbt"), case),
             Err(ExitCode::from(1)),
-            "`--lock out/{lock}` is a path `hut.nbt` owns where `--out` folds case",
+            "the artifact's own spelling is refused where `--out` is {case:?}",
         );
     }
 }
 
 #[test]
-fn a_lock_differing_from_an_artifact_only_in_case_is_free_where_out_keeps_case() {
+fn a_lower_case_lock_beside_an_upper_case_artifact_is_refused_where_out_folds_case() {
     let target = resolve_target(Edition::Java, "latest").expect("the latest target resolves");
     let out_dir = Path::new("out");
-    let block_ir = rekeyed_probe(&["struct::hut"]);
-    let prepared = prepare_artifacts(&block_ir, &target, out_dir, NameCase::Sensitive)
-        .unwrap_or_else(|_| panic!("one struct prepares"));
-    for lock in LOCKS_DIFFERING_ONLY_IN_CASE {
-        assert_eq!(
-            check_lock_path_is_free(&prepared, &out_dir.join(lock), NameCase::Sensitive),
-            Ok(()),
-            "`--lock out/{lock}` is a file of its own where `--out` keeps case",
-        );
+    let block_ir = rekeyed_probe(&["struct::HUT"]);
+    for (case, expected) in [
+        (NameCase::Insensitive, Err(ExitCode::from(1))),
+        (NameCase::Sensitive, Ok(())),
+    ] {
+        let prepared = prepare_artifacts(&block_ir, &target, out_dir, case)
+            .unwrap_or_else(|_| panic!("one struct prepares"));
+        for lock in ["hut.nbt", "hut.nbt.tmp", "Hut.nbt.bak"] {
+            assert_eq!(
+                check_lock_path_is_free(&prepared, &out_dir.join(lock), case),
+                expected,
+                "`--lock out/{lock}` beside `HUT.nbt` where `--out` is {case:?}",
+            );
+        }
     }
-    assert_eq!(
-        check_lock_path_is_free(&prepared, &out_dir.join("hut.nbt"), NameCase::Sensitive),
-        Err(ExitCode::from(1)),
-        "the artifact's own spelling is refused whatever the volume",
-    );
 }

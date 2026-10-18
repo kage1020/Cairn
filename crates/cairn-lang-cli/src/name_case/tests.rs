@@ -1,7 +1,3 @@
-use std::fs;
-use std::io;
-use std::path::Path;
-
 use super::*;
 
 /// How `dir` compares names, found by a second `create_new` under the other spelling.
@@ -28,7 +24,7 @@ fn entries(dir: &Path) -> Vec<OsString> {
 }
 
 #[test]
-fn the_probe_answers_how_the_temp_volume_compares_names() {
+fn the_probe_answers_how_the_temp_dir_compares_names() {
     let dir = tempfile::tempdir().expect("temp dir");
 
     let probed = NameCase::probe(dir.path()).expect("a writable temp dir can be probed");
@@ -42,19 +38,14 @@ fn the_probe_answers_how_the_temp_volume_compares_names() {
 }
 
 #[test]
-fn a_directory_that_cannot_be_probed_takes_the_platform_default() {
+fn a_directory_that_cannot_be_probed_is_taken_to_fold_case() {
     let dir = tempfile::tempdir().expect("temp dir");
     let missing = dir.path().join("missing");
 
     let err = NameCase::probe(&missing).expect_err("a missing directory holds no scratch file");
 
     assert_eq!(err.kind(), io::ErrorKind::NotFound);
-    let platform_default = if cfg!(any(target_os = "macos", windows)) {
-        NameCase::Insensitive
-    } else {
-        NameCase::Sensitive
-    };
-    assert_eq!(NameCase::of_dir(&missing), platform_default);
+    assert_eq!(NameCase::of_dir(&missing), NameCase::Insensitive);
     assert!(
         !missing.exists(),
         "the probe created the directory it was asked about"
@@ -62,7 +53,7 @@ fn a_directory_that_cannot_be_probed_takes_the_platform_default() {
 }
 
 #[test]
-fn only_a_folding_volume_keys_two_spellings_alike() {
+fn only_a_folding_directory_keys_two_spellings_alike() {
     let keys = |case: NameCase| {
         (
             case.key(OsStr::new("Hut.NBT")),
