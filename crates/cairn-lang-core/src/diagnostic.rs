@@ -116,7 +116,7 @@ pub enum DiagnosticCode {
     IncompletePlace,
     /// A `place id=` that [`crate::ids::PlaceId`] refuses.
     InvalidPlaceId,
-    /// A `struct` named after a device Windows reserves, which no artifact file can be named.
+    /// A `struct` named after a device Windows reserves.
     InvalidStructName,
     /// Two `place` rows in the same site share an `id=`; the first wins.
     DuplicatePlaceId,

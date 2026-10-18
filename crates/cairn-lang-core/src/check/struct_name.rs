@@ -1,9 +1,10 @@
-//! The `struct_name` pass: a `struct` named after a device Windows reserves, which the artifact
-//! named after it could not be written under (`spec/lint` "Sites and placements").
+//! The `struct_name` pass: a `struct` named after a device Windows reserves, its artifact's file
+//! stem (`spec/lint` "Sites and placements").
 
 use crate::ast::{Item, Module};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
-use crate::ids::{is_windows_device_name, windows_device_names_listed};
+use crate::ids::is_windows_device_name;
+use crate::prose::windows_device_name_note;
 
 use super::DiagnosticSink;
 
@@ -26,13 +27,7 @@ pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
             ),
             notes: vec![DiagnosticNote {
                 span: None,
-                message: format!(
-                    "a struct's name is the stem of the artifact file written into `--out`, and \
-                     Windows reserves {devices}, in any letter case, as device names no file \
-                     can take, so the name is refused on every host, not only on Windows; \
-                     rename it, for example to `{name}_1`",
-                    devices = windows_device_names_listed(),
-                ),
+                message: windows_device_name_note("a struct's name", "name", name),
             }],
             data: None,
         });

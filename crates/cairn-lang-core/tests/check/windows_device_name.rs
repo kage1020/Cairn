@@ -1,6 +1,6 @@
-//! A `place id=` or `struct` name that Windows reserves for a device names an artifact no Windows
-//! host can write, so `check` refuses it on every host; a site name or port id never names a whole
-//! artifact, so it may spell one.
+//! A `place id=` or `struct` name is an artifact's file stem, so `check` refuses one that spells a
+//! device name Windows reserves, on every host; a site name or port id is only ever one part of a
+//! walkway's file name, so it may spell one.
 
 use cairn_lang_core::{Diagnostic, DiagnosticCode, Severity, artifact_stem};
 
@@ -63,9 +63,9 @@ fn the_place_id_refusal_says_why_and_how_to_fix_it() {
         notes(&found),
         [
             "a place id is the stem of the artifact file written into `--out`, and Windows \
-             reserves `CON`, `PRN`, `AUX`, `NUL`, and `COM` or `LPT` followed by one digit, in \
-             any letter case, as device names no file can take, so the id is refused on every \
-             host, not only on Windows; rename it, for example to `nul_1`"
+             reserves `CON`, `PRN`, `AUX`, `NUL`, and `COM` or `LPT` followed by one of `0` to \
+             `9`, `¹`, `²` or `³`, in any letter case, as device names, so the id is refused on \
+             every host, not only on Windows; rename it, for example to `nul_1`"
         ],
     );
     assert_eq!(found.notes[0].span, None);
@@ -75,6 +75,23 @@ fn the_place_id_refusal_says_why_and_how_to_fix_it() {
 fn the_place_id_the_refusal_recommends_is_usable() {
     let source = site_of(&["place id=nul_1 use=hut theme=plain at=origin"]);
     assert_eq!(codes(&source), Vec::<&str>::new());
+}
+
+#[test]
+fn the_rename_recommended_for_a_superscript_id_is_quoted_as_the_source_must_write_it() {
+    let source = site_of(&["place id=\"COM²\" use=hut theme=plain at=origin"]);
+    let found = one_of_code(&source, DiagnosticCode::InvalidPlaceId);
+    assert_eq!(
+        notes(&found),
+        [
+            "a place id is the stem of the artifact file written into `--out`, and Windows \
+             reserves `CON`, `PRN`, `AUX`, `NUL`, and `COM` or `LPT` followed by one of `0` to \
+             `9`, `¹`, `²` or `³`, in any letter case, as device names, so the id is refused on \
+             every host, not only on Windows; rename it, for example to `\"COM²_1\"`"
+        ],
+    );
+    let renamed = site_of(&["place id=\"COM²_1\" use=hut theme=plain at=origin"]);
+    assert_eq!(codes(&renamed), Vec::<&str>::new());
 }
 
 #[test]
@@ -142,8 +159,26 @@ fn a_connect_naming_a_place_refused_as_a_device_is_deferred_to_that_row() {
     assert_eq!(
         notes(&deferred),
         [
-            "that row carries its own diagnostic saying what is wrong with its id; renaming it, \
-             and this endpoint with it, lays this walkway"
+            "that row carries its own diagnostic saying what is wrong with its id; this walkway \
+             waits on that row, so rename this endpoint along with it"
+        ],
+    );
+}
+
+#[test]
+fn a_connect_naming_refused_places_at_both_ends_is_deferred_to_each_row() {
+    let source = site_of(&[
+        "place id=nul use=hut theme=plain at=origin",
+        "place id=aux use=hut theme=plain at=origin",
+        "connect nul.entry to aux.entry path=@oak_planks",
+    ]);
+    assert_eq!(
+        findings_with_note_lines(&source),
+        [
+            ("E_INVALID_PLACE_ID", FIRST_ROW, vec![]),
+            ("E_INVALID_PLACE_ID", FIRST_ROW + 1, vec![]),
+            ("W_DEFERRED_CONNECT", FIRST_ROW + 2, vec![FIRST_ROW]),
+            ("W_DEFERRED_CONNECT", FIRST_ROW + 2, vec![FIRST_ROW + 1]),
         ],
     );
 }
@@ -189,6 +224,20 @@ fn a_struct_named_com_or_lpt_and_a_digit_is_refused_in_any_case() {
     }
 }
 
+#[test]
+fn every_struct_named_after_a_device_is_refused() {
+    let source = "theme plain:\n  slot floor -> @oak_planks\n\n\
+         struct ok size=3x3\n  floor mat_slot=floor\n\n\
+         struct con size=3x3\n  floor mat_slot=floor\n\n\
+         struct Aux size=3x3\n  floor mat_slot=floor\n";
+    assert_eq!(
+        codes(source),
+        ["E_INVALID_STRUCT_NAME", "E_INVALID_STRUCT_NAME"]
+    );
+    let named: Vec<&str> = diagnose(source).iter().map(|d| slice(source, d)).collect();
+    assert_eq!(named, ["con", "Aux"]);
+}
+
 fn assert_struct_refused_as_a_device(name: &str) {
     let source = struct_named(name);
     assert_eq!(codes(&source), ["E_INVALID_STRUCT_NAME"], "{name}");
@@ -208,9 +257,9 @@ fn the_struct_name_refusal_says_why_and_how_to_fix_it() {
         notes(&found),
         [
             "a struct's name is the stem of the artifact file written into `--out`, and Windows \
-             reserves `CON`, `PRN`, `AUX`, `NUL`, and `COM` or `LPT` followed by one digit, in \
-             any letter case, as device names no file can take, so the name is refused on every \
-             host, not only on Windows; rename it, for example to `Aux_1`"
+             reserves `CON`, `PRN`, `AUX`, `NUL`, and `COM` or `LPT` followed by one of `0` to \
+             `9`, `¹`, `²` or `³`, in any letter case, as device names, so the name is refused \
+             on every host, not only on Windows; rename it, for example to `Aux_1`"
         ],
     );
     assert_eq!(found.notes[0].span, None);

@@ -8,11 +8,9 @@ use crate::ast::ValueKind;
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
-use crate::ids::{
-    FORBIDDEN_IDENT_PUNCTUATION, IdError, PlaceId, shown_char, windows_device_names_listed,
-};
+use crate::ids::{FORBIDDEN_IDENT_PUNCTUATION, IdError, PlaceId, shown_char};
 use crate::intent::{DefIr, Member, MemberRole, SiteIr};
-use crate::prose::and_list;
+use crate::prose::{and_list, windows_device_name_note};
 
 use super::connect::{PlaceIds, resolve_connect_row};
 use super::resolution::{ScopeResolution, ValidatedConnect, place_scope_key};
@@ -414,13 +412,7 @@ fn invalid_place_id_diag(place_id: &str, site_name: &str, span: Span, err: &IdEr
         ),
         IdError::ReservedDeviceName { .. } => (
             "it is a device name Windows reserves".to_owned(),
-            format!(
-                "a place id is the stem of the artifact file written into `--out`, and \
-                 Windows reserves {devices}, in any letter case, as device names no file can \
-                 take, so the id is refused on every host, not only on Windows; rename it, \
-                 for example to `{place_id}_1`",
-                devices = windows_device_names_listed(),
-            ),
+            windows_device_name_note("a place id", "id", place_id),
         ),
     };
     Diagnostic {

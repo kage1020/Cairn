@@ -150,7 +150,7 @@ fn a_place_id_spelling_com_or_lpt_and_a_superscript_digit_is_refused_in_any_case
 fn a_place_id_that_only_resembles_a_device_is_accepted() {
     for name in [
         "CONSOLE", "ACON", "CON1", "CON_1", "NULL", "AUX_1", "PRNT", "COM", "LPT", "COM10",
-        "LPT00", "COMx", "COM1a", "COM⁴", "LPT⁰", "COM¹¹",
+        "LPT00", "COMx", "COM1a", "COM⁴", "LPT⁰", "COM¹¹", "Größe", "CO¹",
     ] {
         assert_eq!(
             PlaceId::new(name).map(PlaceId::into_inner),
@@ -175,7 +175,7 @@ fn a_port_id_or_site_name_may_spell_a_device() {
 }
 
 #[test]
-fn a_device_name_is_checked_after_the_characters() {
+fn a_device_name_with_an_extension_is_refused_for_its_dot() {
     assert_eq!(
         PlaceId::new("CON.nbt"),
         Err(IdError::ForbiddenChar {
@@ -197,7 +197,8 @@ fn a_refused_device_name_reads_as_itself() {
 fn the_device_names_listed_are_the_ones_refused() {
     assert_eq!(
         windows_device_names_listed(),
-        "`CON`, `PRN`, `AUX`, `NUL`, and `COM` or `LPT` followed by one digit",
+        "`CON`, `PRN`, `AUX`, `NUL`, and `COM` or `LPT` followed by one of `0` to `9`, `¹`, `²` or \
+         `³`",
     );
 }
 

@@ -162,7 +162,7 @@ fn deferred_connect_to_refused_id_diag(endpoint: &str, span: Span, refused: &Spa
         notes: vec![DiagnosticNote {
             span: Some(refused.clone()),
             message: "that row carries its own diagnostic saying what is wrong with its id; \
-                      renaming it, and this endpoint with it, lays this walkway"
+                      this walkway waits on that row, so rename this endpoint along with it"
                 .to_owned(),
         }],
         data: None,

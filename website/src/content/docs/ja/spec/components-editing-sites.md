@@ -115,16 +115,16 @@ Y 軸はトポロジカルセレクタの影響を受けず、現状すべての
 ### 9.3.4 出力ファイル名
 
 コンパイラは `place` ごとに `.nbt` を 1 つ、`id=` の名前で出力ディレクトリの直下に書きます
-(`home1.nbt`、`home2.nbt`)。`/` や `\` を含む id はファイルではなくパスを指し、Windows のファイル名に
-使えない文字を含む id や、`CON` や `NUL` のように Windows が予約しているデバイス名の id はそこでは
-書き出せないので、いずれも `E_INVALID_PLACE_ID` です ([Lint](/ja/spec/lint/))。名前に site は含まれず、
-同じディレクトリにすべての `struct` (自身の名前で書かれ、その名前がそうしたデバイス名なら
-`E_INVALID_STRUCT_NAME`) とすべての walkway ([§9.3.5](#935-ポートと-connect)) も書かれます。
-大文字小文字を無視して比べて同じファイル名になる 2 つの成果物は `E_OUTPUT_NAME_COLLISION` です。
-`struct` と同じ名前の `place` や、2 つの site に置かれた同じ `id=` は、片方をもう片方で上書きする代わりに
-拒否されます。各
-placement のワールド原点と `(site, def, theme)` の provenance は `build.cairn.lock` の `placements`
-に記録されるので、下流の消費者は座標ソルバを再実行せずにレイアウトを再構築できます。
+(`home1.nbt`、`home2.nbt`)。`/` や `\` を含む id はファイルではなくパスを指し、Windows のファイル名
+に使えない文字を含む id はそこでは書き出せず、`CON` や `NUL` のように Windows が予約しているデバイス
+名の id はそこでデバイスとして開かれることがあるので、いずれも `E_INVALID_PLACE_ID` です
+([Lint](/ja/spec/lint/))。名前に site は含まれず、同じディレクトリにすべての `struct` (自身の名前で
+書かれ、その名前がそうしたデバイス名なら `E_INVALID_STRUCT_NAME`) とすべての walkway
+([§9.3.5](#935-ポートと-connect)) も書かれます。大文字小文字を無視して比べて同じファイル名になる 2
+つの成果物は `E_OUTPUT_NAME_COLLISION` です。`struct` と同じ名前の `place` や、2 つの site に置かれ
+た同じ `id=` は、片方をもう片方で上書きする代わりに拒否されます。各 placement のワールド原点と
+`(site, def, theme)` の provenance は `build.cairn.lock` の `placements` に記録されるので、下流の消
+費者は座標ソルバを再実行せずにレイアウトを再構築できます。
 
 ### 9.3.5 ポートと `connect`
 

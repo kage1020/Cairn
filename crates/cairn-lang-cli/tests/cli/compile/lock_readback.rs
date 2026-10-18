@@ -395,22 +395,6 @@ fn a_lock_recording_a_walkway_place_windows_reserves_is_still_read() {
     );
 }
 
-/// Neither is ever a whole artifact name, so the rule lets both spell a device.
-#[test]
-fn a_lock_recording_a_site_or_port_named_after_a_device_is_read_as_valid() {
-    let (run, _) = recompile_village_over(|written| {
-        let site = with_line(written, "- site: hamlet\n", "- site: Nul\n");
-        with_line(&site, "    port: entry\n", "    port: AUX\n")
-    });
-    assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
-    assert_eq!(
-        warning_lines(&run.stderr),
-        [PREVIOUS_TARGET],
-        "{}",
-        run.stderr
-    );
-}
-
 #[test]
 fn a_lock_with_a_refused_id_still_reports_the_sensitive_members_it_recorded() {
     let id = "sub/home1";

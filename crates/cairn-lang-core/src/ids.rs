@@ -12,6 +12,7 @@ use thiserror::Error;
 
 /// Failure modes for [`PlaceId`] / [`PortId`] / [`SiteName`] construction.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum IdError {
     /// Construction was attempted with an empty string.
     #[error("identifier is empty")]
@@ -27,7 +28,7 @@ pub enum IdError {
         /// The first character that triggered the rejection.
         ch: char,
     },
-    /// A [`PlaceId`] that is a device name Windows reserves, which no file can be named.
+    /// A [`PlaceId`] that is a device name Windows reserves.
     #[error("identifier `{ident}` is a device name Windows reserves")]
     ReservedDeviceName {
         /// The full offending string.
@@ -59,7 +60,7 @@ const WINDOWS_DEVICE_NAMES: [&str; 4] = ["CON", "PRN", "AUX", "NUL"];
 /// The device names Windows reserves with one digit after them, `¹`, `²` and `³` among the digits.
 const WINDOWS_NUMBERED_DEVICE_NAMES: [&str; 2] = ["COM", "LPT"];
 
-/// Whether Windows reads `name`, as a file name's stem, as a device rather than a file.
+/// Whether `name`, as a file name's stem, is a device name Windows reserves.
 #[must_use]
 pub(crate) fn is_windows_device_name(name: &str) -> bool {
     if WINDOWS_DEVICE_NAMES
@@ -81,13 +82,13 @@ pub(crate) fn is_windows_device_name(name: &str) -> bool {
     })
 }
 
-/// What [`is_windows_device_name`] refuses, as a message words it.
+/// The names [`is_windows_device_name`] matches, as a message lists them.
 #[must_use]
 pub(crate) fn windows_device_names_listed() -> String {
     let quoted =
         |names: &[&str]| -> Vec<String> { names.iter().map(|name| format!("`{name}`")).collect() };
     format!(
-        "{}, and {} followed by one digit",
+        "{}, and {} followed by one of `0` to `9`, `¹`, `²` or `³`",
         quoted(&WINDOWS_DEVICE_NAMES).join(", "),
         quoted(&WINDOWS_NUMBERED_DEVICE_NAMES).join(" or "),
     )

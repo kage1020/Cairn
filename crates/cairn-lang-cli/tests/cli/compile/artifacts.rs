@@ -1227,89 +1227,9 @@ fn a_place_id_carrying_an_ideographic_space_is_refused_and_escaped() {
     assert_place_id_refused("a\u{3000}b", "\\u{3000}");
 }
 
-// Device names Windows reserves in every directory, in any letter case, are refused on every host.
-
-const A_DEVICE_NAME: &str = "it is a device name Windows reserves";
-
 #[test]
-fn a_place_id_named_con_is_refused_on_every_host() {
-    assert_place_id_refused_because("con", A_DEVICE_NAME);
-}
-
-#[test]
-fn a_place_id_named_prn_is_refused_on_every_host() {
-    assert_place_id_refused_because("Prn", A_DEVICE_NAME);
-}
-
-#[test]
-fn a_place_id_named_aux_is_refused_on_every_host() {
-    assert_place_id_refused_because("AUX", A_DEVICE_NAME);
-}
-
-#[test]
-fn a_place_id_named_nul_is_refused_on_every_host() {
-    assert_place_id_refused_because("nUl", A_DEVICE_NAME);
-}
-
-#[test]
-fn a_place_id_named_com_and_a_digit_is_refused_on_every_host() {
-    assert_place_id_refused_because("com7", A_DEVICE_NAME);
-}
-
-#[test]
-fn a_place_id_named_lpt_and_a_digit_is_refused_on_every_host() {
-    assert_place_id_refused_because("LPT0", A_DEVICE_NAME);
-}
-
-#[test]
-fn a_place_id_named_com_and_a_superscript_digit_is_refused_on_every_host() {
-    assert_place_id_refused_because("COM²", A_DEVICE_NAME);
-}
-
-#[test]
-fn a_place_id_named_lpt_and_a_superscript_digit_is_refused_on_every_host() {
-    assert_place_id_refused_because("lpt³", A_DEVICE_NAME);
-}
-
-#[test]
-fn a_struct_named_after_a_windows_device_is_refused_on_every_host() {
-    let tmp = TempDir::new().expect("tempdir");
-    let out = tmp.path().join("out");
-    let src = write_source(
-        tmp.path(),
-        "device.crn",
-        "@cairn 2026.06\n\ntheme t:\n  slot floor -> @oak_planks\n\n\
-         struct Nul size=3x3\n  floor mat_slot=floor\n",
-    );
-
-    let checked = cairn("check", &[src.to_str().unwrap()]);
-    let check_err = String::from_utf8_lossy(&checked.stderr);
-    assert_eq!(checked.status.code(), Some(1), "stderr={check_err}");
-    assert_stream(&check_err, &[(6, 8, "error", "E_INVALID_STRUCT_NAME")]);
-    assert!(
-        check_err.contains(
-            "error[E_INVALID_STRUCT_NAME]: `struct Nul` is not a usable name: it is a device \
-             name Windows reserves\n"
-        ),
-        "stderr={check_err}",
-    );
-
-    let compiled = cairn(
-        "compile",
-        &[
-            src.to_str().unwrap(),
-            "--edition",
-            "java",
-            "--out",
-            out.to_str().unwrap(),
-        ],
-    );
-    let compile_err = String::from_utf8_lossy(&compiled.stderr);
-    assert_eq!(compiled.status.code(), Some(1), "stderr={compile_err}");
-    assert!(
-        !out.exists(),
-        "compile must write nothing, got: {compile_err}"
-    );
+fn a_place_id_named_after_a_windows_device_is_refused_on_every_host() {
+    assert_place_id_refused_because("COM²", "it is a device name Windows reserves");
 }
 
 #[test]

@@ -3,6 +3,7 @@
 use indexmap::IndexMap;
 
 use crate::ast::{Value, ValueKind};
+use crate::ids::windows_device_names_listed;
 use crate::intent::ValueWithSpan;
 
 /// Render `items` as an English list — `a`, `a and b`, `a, b, and c` — or `None` when empty.
@@ -21,6 +22,26 @@ fn join_list(items: &[String], conjunction: &str) -> Option<String> {
         (last, [only]) => format!("{only} {conjunction} {last}"),
         (last, head) => format!("{}, {conjunction} {last}", head.join(", ")),
     })
+}
+
+/// The note on `name`, the `subject` that is an artifact file's stem, refused as a Windows device.
+pub(crate) fn windows_device_name_note(subject: &str, noun: &str, name: &str) -> String {
+    let renamed = format!("{name}_1");
+    // Only a string literal can carry a superscript digit.
+    let renamed = if renamed
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        renamed
+    } else {
+        format!("\"{renamed}\"")
+    };
+    format!(
+        "{subject} is the stem of the artifact file written into `--out`, and Windows reserves \
+         {devices}, in any letter case, as device names, so the {noun} is refused on every host, \
+         not only on Windows; rename it, for example to `{renamed}`",
+        devices = windows_device_names_listed(),
+    )
 }
 
 /// Render a `KEYWORD[attrs]` selector as the source spells it, attributes in source order.
