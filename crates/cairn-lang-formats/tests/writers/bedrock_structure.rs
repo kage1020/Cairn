@@ -1,8 +1,7 @@
 //! The Bedrock `.mcstructure` tag tree and bytes, against wiki.bedrock.dev's "mcstructure" page.
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
-use cairn_lang_core::resolve::DroppedIntent;
-use cairn_lang_formats::bedrock_state::{BedrockStateError, degradation_message};
+use cairn_lang_formats::bedrock_state::BedrockStateError;
 use cairn_lang_formats::bedrock_structure::{
     BedrockStructureError, build_mcstructure_tag, prepare_mcstructure, write_mcstructure,
 };
@@ -10,7 +9,9 @@ use cairn_lang_formats::data_version::{BedrockTarget, resolve_bedrock_target};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_nbt::tag::{Compound, Tag};
 
-use crate::common::{block_palette, default_palette, structure_compound};
+use crate::common::{
+    block_palette, default_palette, dropped_shape, note_fields, structure_compound,
+};
 
 fn target_1_21_60() -> BedrockTarget {
     resolve_bedrock_target("1.21.60").expect("known target")
@@ -218,16 +219,13 @@ fn non_straight_stair_shape_degrades() {
         .insert("shape".to_owned(), "outer_left".to_owned());
     let ba = single_stateful_array(stairs);
     let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
-    assert_eq!(notes.len(), 1);
-    assert_eq!(notes[0].id, "minecraft:oak_stairs");
     assert_eq!(
-        notes[0].message,
-        degradation_message(
-            "minecraft:oak_stairs[facing=east,half=bottom,shape=outer_left]",
-            &DroppedIntent::Shape {
-                value: "outer_left".to_owned(),
-            },
-        ),
+        note_fields(&notes),
+        [(
+            "minecraft:oak_stairs",
+            "facing=east,half=bottom,shape=outer_left",
+            &dropped_shape("outer_left"),
+        )],
     );
     let states = last_palette_states(&root);
     assert_eq!(states.entries.get("weirdo_direction"), Some(&Tag::Int(0)));
@@ -411,24 +409,32 @@ fn stairs_that_differ_only_in_a_dropped_shape_share_one_palette_entry() {
     assert_eq!(layer[1], layer[4]);
     assert_eq!(layer[3], layer[5]);
 
-    // Four corner shapes degrade; `straight` drops losslessly.
-    let messages: Vec<&str> = notes.iter().map(|note| note.message.as_str()).collect();
-    assert_eq!(messages.len(), 4, "{messages:?}");
-    for (i, a) in messages.iter().enumerate() {
-        for b in &messages[i + 1..] {
-            assert_ne!(a, b, "two notes read the same: {messages:?}");
-        }
-    }
+    // Four corner shapes degrade, one note per Java state; `straight` drops losslessly.
     assert_eq!(
-        messages[0],
-        degradation_message(
-            "minecraft:oak_stairs[facing=north,half=bottom,shape=outer_left]",
-            &DroppedIntent::Shape {
-                value: "outer_left".to_owned(),
-            },
-        ),
+        note_fields(&notes),
+        [
+            (
+                oak,
+                "facing=north,half=bottom,shape=outer_left",
+                &dropped_shape("outer_left"),
+            ),
+            (
+                oak,
+                "facing=south,half=bottom,shape=outer_right",
+                &dropped_shape("outer_right"),
+            ),
+            (
+                oak,
+                "facing=north,half=bottom,shape=outer_right",
+                &dropped_shape("outer_right"),
+            ),
+            (
+                oak,
+                "facing=south,half=bottom,shape=outer_left",
+                &dropped_shape("outer_left"),
+            ),
+        ],
     );
-    assert!(notes.iter().all(|note| note.id == oak));
 
     let mut tree = Vec::new();
     write_mcstructure(&mut tree, &root).expect("write tree");

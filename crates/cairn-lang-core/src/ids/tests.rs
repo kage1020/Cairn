@@ -109,6 +109,99 @@ fn every_listed_punctuation_mark_is_refused() {
     }
 }
 
+fn assert_place_id_is_a_device(names: &[&str]) {
+    for name in names {
+        assert_eq!(
+            PlaceId::new(*name),
+            Err(IdError::ReservedDeviceName {
+                ident: (*name).to_owned(),
+            }),
+            "`{name}` is a Windows device name",
+        );
+    }
+}
+
+#[test]
+fn a_place_id_spelling_con_prn_aux_or_nul_is_refused_in_any_case() {
+    assert_place_id_is_a_device(&[
+        "CON", "con", "Con", "cON", "PRN", "prn", "pRn", "AUX", "aux", "Aux", "NUL", "nul", "nUL",
+    ]);
+}
+
+#[test]
+fn a_place_id_spelling_com_or_lpt_and_a_digit_is_refused_in_any_case() {
+    for prefix in ["COM", "com", "Com", "LPT", "lpt", "lPt"] {
+        let names: Vec<String> = ('0'..='9')
+            .map(|digit| format!("{prefix}{digit}"))
+            .collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        assert_place_id_is_a_device(&names);
+    }
+}
+
+#[test]
+fn a_place_id_spelling_com_or_lpt_and_a_superscript_digit_is_refused_in_any_case() {
+    assert_place_id_is_a_device(&[
+        "COM¹", "COM²", "COM³", "com¹", "cOm²", "LPT¹", "LPT²", "LPT³", "lpt³", "Lpt¹",
+    ]);
+}
+
+#[test]
+fn a_place_id_that_only_resembles_a_device_is_accepted() {
+    for name in [
+        "CONSOLE", "ACON", "CON1", "CON_1", "NULL", "AUX_1", "PRNT", "COM", "LPT", "COM10",
+        "LPT00", "COMx", "COM1a", "COM⁴", "LPT⁰", "COM¹¹", "Größe", "CO¹",
+    ] {
+        assert_eq!(
+            PlaceId::new(name).map(PlaceId::into_inner),
+            Ok(name.to_owned()),
+            "`{name}` is not a Windows device name",
+        );
+    }
+}
+
+#[test]
+fn a_port_id_or_site_name_may_spell_a_device() {
+    for name in ["CON", "nul", "com1", "LPT³"] {
+        assert_eq!(
+            PortId::new(name).map(PortId::into_inner),
+            Ok(name.to_owned())
+        );
+        assert_eq!(
+            SiteName::new(name).map(SiteName::into_inner),
+            Ok(name.to_owned())
+        );
+    }
+}
+
+#[test]
+fn a_device_name_with_an_extension_is_refused_for_its_dot() {
+    assert_eq!(
+        PlaceId::new("CON.nbt"),
+        Err(IdError::ForbiddenChar {
+            ident: "CON.nbt".to_owned(),
+            ch: '.',
+        }),
+    );
+}
+
+#[test]
+fn a_refused_device_name_reads_as_itself() {
+    assert_eq!(
+        PlaceId::new("com²").unwrap_err().to_string(),
+        "identifier `com²` is a device name Windows reserves",
+    );
+}
+
+#[test]
+fn the_device_names_listed_are_the_ones_refused() {
+    assert_eq!(
+        windows_device_names_listed(),
+        "`CON`, `PRN`, `AUX`, `NUL`, and `COM` or `LPT` followed by one of `0` to `9`, `¹`, `²` or \
+         `³`",
+    );
+}
+
 #[test]
 fn an_illegible_forbidden_character_is_quoted_as_its_escape() {
     for (ch, shown) in [

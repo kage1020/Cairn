@@ -522,9 +522,10 @@ impl VersionFloor {
     }
 }
 
-/// The versions in `considered` that satisfy every floor (`spec/lint` "Diagnostic codes").
+/// The versions in `considered` that are below no floor
+/// (`spec/versioning-editions` "The hint is weighed against the floor").
 ///
-/// A floor this edition's table cannot place admits none of them.
+/// A floor this edition's table cannot place keeps every one: its repair is on its own line.
 #[must_use]
 pub fn versions_satisfying<'a>(
     order: &VersionOrder,
@@ -537,7 +538,7 @@ pub fn versions_satisfying<'a>(
             order.key_of(label).is_some_and(|key| {
                 floors
                     .iter()
-                    .all(|floor| order.verdict(&floor.version, key) == FloorVerdict::Satisfied)
+                    .all(|floor| order.verdict(&floor.version, key) != FloorVerdict::Below)
             })
         })
         .map(String::as_str)

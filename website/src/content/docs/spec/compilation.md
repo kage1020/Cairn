@@ -173,7 +173,9 @@ slope inward toward a centre ridge.
 
 `level y=N` groups members and places each of them `N` voxels above the struct's base plane. The
 `level` line itself lowers to no blocks; every member under it lowers as if written in the body with
-`N` added to its vertical coordinate.
+`N` added to its vertical coordinate. A `level` does not group a `circuit` line, whose reservation
+spans the whole scope: one under a `level` is `E_MISPLACED_MEMBER`
+([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 
 The volume a struct lowers into is derived, never written:
 

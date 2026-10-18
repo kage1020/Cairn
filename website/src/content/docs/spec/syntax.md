@@ -155,6 +155,9 @@ building's geometry: `floor`, `walls`, `door`, `window`, `roof`, `stair`, `level
 `pressure_plate`, `circuit`. A `site` body describes a layout: `place`, `connect`. The keyword table
 is global, so writing one in the other body parses and classifies and then reaches nothing. That is
 `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along.
+A `level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
+reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
+`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body, and an `assert` is read by nothing yet.
@@ -238,12 +241,16 @@ low `z` and mirror the same way.
 (`mirror_offset = wall_length - offset - size_w`). A mirror overlapping the primary rectangle
 is rejected with `W_DEFERRED_MEMBER`, and only the primary is painted. That includes the
 mirror of a window centred on the wall's midpoint (`2 * offset + size_w = wall_length`), which
-coincides with the primary. `sym=` takes a bare `true` or `false`, and a window without it
-is not mirrored. Any other value (`sym=yes`, `sym="true"`, `sym=1`) is an unreadable value:
-the window is drawn without its mirror, and the value is reported as `W_IGNORED_ARGUMENT`
-([Lint §11.3](/spec/lint/#113-error-vs-warning)). A window whose `repeat=` is greater than 1 is the
-exception: `sym=true` refuses it, so an unreadable `sym=` is not read as `false` there. The window
-is not cut, and is reported as `W_DEFERRED_MEMBER` beside the `W_IGNORED_ARGUMENT`.
+coincides with the primary. A mirror that only touches the primary, beginning in the column after
+the primary's last (`2 * (offset + size_w) = wall_length`) or ending in the column before its first
+(`2 * offset = wall_length`), shares no cell with it, so it is neither rejected nor reported: both
+are painted, and read as one opening twice the window's width. `sym=` takes a bare `true` or
+`false`, and a window without it is not mirrored. Any other value (`sym=yes`, `sym="true"`, `sym=1`)
+is an unreadable value: the window is drawn without its mirror, and the value is reported as
+`W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)). A window whose `repeat=` is
+greater than 1 is the exception: `sym=true` refuses it, so an unreadable `sym=` is not read as
+`false` there. The window is not cut, and is reported as `W_DEFERRED_MEMBER` beside the
+`W_IGNORED_ARGUMENT`.
 
 **`at=` door anchors.** A door's wall-local column comes from one of three named anchors:
 
