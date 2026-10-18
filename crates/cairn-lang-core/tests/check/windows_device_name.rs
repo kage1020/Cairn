@@ -184,6 +184,25 @@ fn a_connect_naming_refused_places_at_both_ends_is_deferred_to_each_row() {
 }
 
 #[test]
+fn a_connect_naming_a_device_id_refused_twice_points_at_the_first_row() {
+    let source = site_of(&[
+        "place id=b use=hut theme=plain at=origin",
+        "place id=nul use=hut theme=plain east_of=b gap=4",
+        "place id=nul use=hut theme=plain east_of=b gap=8",
+        "connect b.entry to nul.entry path=@oak_planks",
+    ]);
+    assert_eq!(
+        findings_with_note_lines(&source),
+        [
+            ("E_INVALID_PLACE_ID", FIRST_ROW + 1, vec![]),
+            ("E_INVALID_PLACE_ID", FIRST_ROW + 2, vec![]),
+            ("E_DUPLICATE_PLACE_ID", FIRST_ROW + 2, vec![FIRST_ROW + 1]),
+            ("W_DEFERRED_CONNECT", FIRST_ROW + 3, vec![FIRST_ROW + 1]),
+        ],
+    );
+}
+
+#[test]
 fn a_connect_above_the_place_refused_as_a_device_names_no_prior_place() {
     let source = site_of(&[
         "place id=b use=hut theme=plain at=origin",
