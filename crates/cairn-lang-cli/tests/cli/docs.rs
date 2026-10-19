@@ -174,10 +174,13 @@ fn what_names_nothing_is_refused_with_the_nearest_candidate() {
         ),
         (
             &["/spec/syntax/", "Headers", "--toc"],
-            "error: the argument '[TITLE]' cannot be used with '--toc'\n\n\
-             Usage: cairn docs <PAGE> <TITLE>\n\n\
-             For more information, try '--help'.\n"
-                .to_owned(),
+            // clap names the binary by its file, `cairn.exe` on Windows.
+            format!(
+                "error: the argument '[TITLE]' cannot be used with '--toc'\n\n\
+                 Usage: cairn{} docs <PAGE> <TITLE>\n\n\
+                 For more information, try '--help'.\n",
+                std::env::consts::EXE_SUFFIX,
+            ),
         ),
     ] {
         let run = docs(args);
