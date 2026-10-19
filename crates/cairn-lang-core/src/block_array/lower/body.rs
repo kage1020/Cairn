@@ -10,9 +10,9 @@ use crate::resolve::ScopeResolution;
 
 use crate::block_array::material::TargetRegistry;
 use crate::block_array::wall_column::WallColumn;
-use crate::block_array::{BlockArray, Dims, MAX_STRUCTURE_VOLUME, PaletteFull};
+use crate::block_array::{BlockArray, Dims, MAX_STRUCTURE_VOLUME, PaletteFull, PaletteIndex};
 
-use super::canvas::{Canvas, ScopePalette, prune_unreferenced};
+use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::circuit::{is_actuator_patch, recognize_actuator_patch, recognize_circuit_region};
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
@@ -110,20 +110,30 @@ pub(super) fn lower_body_to_block_array<'a>(
 
     let buckets = bucket_members(&flattened, diagnostics);
     let canvas = paint_phases(buckets, &ctx, &mut palette, diagnostics);
+    let stand_in = palette.stand_in();
     // Before anything reads the grid: a voxel painted after the palette filled holds air.
     let mut palette = match palette.into_palette() {
         Ok(palette) => palette,
-        Err(full) => {
+        Err(Overflow::Full(full)) => {
             diagnostics.push(diag_palette_too_large(&body, full));
             return None;
         }
+        Err(Overflow::StandIn) => return None,
     };
 
-    for ((overridden, overriding), voxels) in &canvas.conflicts {
+    // A stand-in differs from air at every target, but from another block only as the pack says.
+    let pack_decides = |&(before, after): &(PaletteIndex, PaletteIndex)| {
+        (Some(before) == stand_in && after != PaletteIndex::AIR)
+            || (Some(after) == stand_in && before != PaletteIndex::AIR)
+    };
+    for ((overridden, overriding), contested) in &canvas.conflicts {
+        if contested.keys().any(pack_decides) {
+            continue;
+        }
         diagnostics.push(diag_phase_conflict(
             flattened[*overridden as usize].1,
             flattened[*overriding as usize].1,
-            *voxels,
+            contested.values().sum(),
         ));
     }
     let cut: HashSet<Span> = flattened

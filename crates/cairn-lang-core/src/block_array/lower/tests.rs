@@ -1,5 +1,5 @@
 use super::anchor::{PlaceAnchor, PlacementCorner, PlacementOutOfRange};
-use super::canvas::{Canvas, ScopePalette, prune_unreferenced};
+use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::connect::edge_pushers;
 use super::phase::Phase;
 use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
@@ -7,7 +7,7 @@ use super::roof_fill::{GeometryMemberDescription, geometry_material_id};
 use super::site_floor::FloorExtent;
 use super::*;
 use crate::ast::ValueKind;
-use crate::block_array::material::resolve_block_state;
+use crate::block_array::material::{NoTarget, resolve_block_state, stand_in};
 use crate::block_array::roof::is_stair;
 use crate::block_array::walkway::{ROUTE_AREA_CAP, SearchRect, l_path_area};
 use crate::block_array::wall_column::WallColumn;
@@ -376,6 +376,69 @@ fn a_place_whose_def_paints_more_states_than_its_palette_holds_is_refused() {
 }
 
 #[test]
+fn without_a_target_the_palette_counts_no_stand_in() {
+    /// Each finding as its code and the first line it covers.
+    fn without_target(source: &str) -> Vec<(&'static str, &str)> {
+        let ir = lower(&parse(source).expect("parse"));
+        let registry = NoTarget {
+            declared: &|_| true,
+        };
+        let out = lower_to_block_array_within(&ir, &resolve(&ir, None), Some(&registry), 4);
+        out.diagnostics
+            .iter()
+            .map(|d| {
+                let covered = source[d.span.clone()].lines().next().unwrap_or_default();
+                (d.code.as_str(), covered)
+            })
+            .collect()
+    }
+    let refused = [("W_PALETTE_TOO_LARGE", "struct s size=1x1")];
+    let canonical = overwriting_walls(4);
+    assert_eq!(without_target(&canonical), refused);
+    // The pack may lift the token to one of the other three blocks.
+    let one_stand_in = canonical.replacen("@b0", "@wall.stone.cobble", 1);
+    assert_eq!(
+        without_target(&one_stand_in),
+        [
+            ("W_PHASE_CONFLICT", "walls mat_slot=s2 height=1"),
+            ("W_PHASE_CONFLICT", "walls mat_slot=s3 height=1"),
+        ],
+    );
+    let four_others = overwriting_walls(5).replacen("@b0", "@wall.stone.cobble", 1);
+    assert_eq!(without_target(&four_others), refused);
+}
+
+#[test]
+fn a_scope_palette_gives_every_stand_in_one_uncounted_slot() {
+    let mut palette = ScopePalette::with_capacity(3);
+    assert_eq!(palette.intern(stand_in("x")), PaletteIndex(1));
+    assert_eq!(palette.intern(BlockState::bare("test:a")), PaletteIndex(2));
+    assert_eq!(palette.intern(stand_in("y")), PaletteIndex(1));
+    assert_eq!(palette.intern(BlockState::bare("test:b")), PaletteIndex(3));
+    assert_eq!(palette.stand_in(), Some(PaletteIndex(1)));
+    let entries = |palette: ScopePalette| palette.into_palette().map(|palette| palette.entries);
+    let mut full = ScopePalette::with_capacity(3);
+    for state in ["test:a", "test:b"] {
+        full.intern(BlockState::bare(state));
+    }
+    assert_eq!(full.intern(stand_in("x")), PaletteIndex(3));
+    assert_eq!(full.intern(BlockState::bare("test:c")), PaletteIndex::AIR);
+    assert_eq!(
+        entries(palette),
+        Ok(vec![
+            BlockState::air(),
+            stand_in("x"),
+            BlockState::bare("test:a"),
+            BlockState::bare("test:b"),
+        ]),
+    );
+    assert_eq!(
+        entries(full),
+        Err(Overflow::Full(PaletteFull { capacity: 3 })),
+    );
+}
+
+#[test]
 fn a_scope_palette_looks_nothing_up_once_it_has_overflowed() {
     let mut palette = ScopePalette::with_capacity(2);
     let kept = BlockState::bare("test:kept");
@@ -391,7 +454,7 @@ fn a_scope_palette_looks_nothing_up_once_it_has_overflowed() {
     );
     assert_eq!(
         palette.into_palette(),
-        Err(PaletteFull { capacity: 2 }),
+        Err(Overflow::Full(PaletteFull { capacity: 2 })),
         "the refusal kept is the one at the capacity in force",
     );
 }

@@ -11,7 +11,9 @@ use crate::intent::DefIr;
 use crate::prose::and_list;
 use crate::resolve::{Resolution, place_scope_key};
 
-use crate::block_array::material::{MaterialDeferred, TargetRegistry, resolve_block_state};
+use crate::block_array::material::{
+    MaterialDeferred, TargetRegistry, is_stand_in, resolve_block_state,
+};
 use crate::block_array::ports::port_world_position;
 use crate::block_array::walkway::{
     BlockedIndex, ROUTE_AREA_CAP, RoutePathError, SearchRect, WalkwayLayout, build_walkway_array,
@@ -593,7 +595,12 @@ fn buried_port_clause(
                     "voxel {owner:?} of `{key}` names no entry of its palette",
                 );
             }
-            own_block = Some(block.map(|state| state.id.as_str()));
+            // Only a target's pack names the block a stand-in becomes.
+            own_block = Some(
+                block
+                    .filter(|state| !is_stand_in(state))
+                    .map(|state| state.id.as_str()),
+            );
             own_label = Some(placement_label(&body.placement, connect));
         } else {
             others.push(placement_label(&body.placement, connect));

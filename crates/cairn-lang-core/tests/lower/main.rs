@@ -25,3 +25,4 @@ mod village;
 mod window_mirror;
 mod window_walkway;
 mod window_wall_fit;
+mod without_target;

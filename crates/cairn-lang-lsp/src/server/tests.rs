@@ -1,6 +1,7 @@
 //! The dispatch loop driven in-process over an in-memory connection.
 
 use std::str::FromStr;
+use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -350,6 +351,82 @@ fn a_deeply_nested_document_is_diagnosed_and_the_loop_keeps_serving() {
         );
         session.shutdown();
     }
+}
+
+#[test]
+fn a_document_queued_again_publishes_only_what_was_queued_last() {
+    let (server, client) = Connection::memory();
+    let (queue, queued) = mpsc::channel();
+    let uri = |path: &str| lsp_types::Uri::from_str(path).expect("valid uri");
+    let findings = |version, text: &str| Publication::Findings {
+        version,
+        text: text.to_owned(),
+    };
+    for entry in [
+        (uri("file:///a.crn"), findings(1, DUPLICATE)),
+        (uri("file:///b.crn"), findings(1, CLEAN)),
+        (uri("file:///a.crn"), findings(2, DUPLICATE)),
+        (uri("file:///a.crn"), Publication::Cleared),
+        (uri("file:///b.crn"), findings(2, DUPLICATE)),
+    ] {
+        queue.send(entry).expect("the queue is open");
+    }
+    drop(queue);
+    publish_queued(&server, &queued).expect("every publication is sent");
+
+    let published: Vec<serde_json::Value> = client
+        .receiver
+        .try_iter()
+        .map(|message| serde_json::to_value(message).expect("serialise message"))
+        .collect();
+    let expected = |path: &str, version, diagnostics| {
+        serde_json::json!({
+            "method": "textDocument/publishDiagnostics",
+            "params": lsp_types::PublishDiagnosticsParams {
+                uri: uri(path),
+                diagnostics,
+                version,
+            },
+        })
+    };
+    assert_eq!(
+        published,
+        [
+            expected("file:///a.crn", None, Vec::new()),
+            expected(
+                "file:///b.crn",
+                Some(2),
+                compute_diagnostics(&uri("file:///b.crn"), DUPLICATE),
+            ),
+        ],
+    );
+}
+
+#[test]
+fn rapid_changes_publish_in_revision_order_ending_with_the_newest() {
+    let session = Session::start();
+    session.did_open(DUPLICATE, 1);
+    for version in 2..=20 {
+        let text = if version % 2 == 0 { CLEAN } else { DUPLICATE };
+        session.did_change(TEST_URI, text, version);
+    }
+    let mut versions = Vec::new();
+    loop {
+        let published = session.read_until_method("textDocument/publishDiagnostics");
+        let version = published["params"]["version"]
+            .as_i64()
+            .expect("a revision's version");
+        versions.push(version);
+        if version == 20 {
+            assert!(diagnostics_of(&published).is_empty(), "version 20 is clean");
+            break;
+        }
+    }
+    assert!(
+        versions.is_sorted_by(|older, newer| older < newer),
+        "no revision may be published after a newer one: {versions:?}",
+    );
+    session.shutdown();
 }
 
 // ---------------------------------------------------------------- requests

@@ -7,6 +7,7 @@ use crate::intent::{Member, ValueWithSpan};
 use crate::resolve::ScopeResolution;
 
 use crate::block_array::args::{diag_deferred_member_reason, member_or_slot_span};
+use crate::block_array::material::is_stand_in;
 use crate::block_array::openings::WallSide;
 use crate::block_array::roof::{
     RoofKind, RoofVoxel, flat_block_state, flat_voxels, gable_ridge_axis, gable_stair_state,
@@ -165,7 +166,8 @@ pub(super) fn geometry_material_id<'a>(
     let slot_value = scope
         .and_then(|scope| scope.members.get(&member.span.start))
         .and_then(|binding| binding.slot_value.as_ref());
-    if shape.requires_stair && !is_stair(&state.id) {
+    // Whether a stand-in is a stair is the target's pack to say.
+    if shape.requires_stair && !is_stair(&state.id) && !is_stand_in(state) {
         diagnostics.push(diag_incompatible_material(member, state, shape, slot_value));
         return fallback;
     }

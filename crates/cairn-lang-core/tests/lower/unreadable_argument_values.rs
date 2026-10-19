@@ -349,10 +349,6 @@ fn origin(ir: &BlockArrayIr, id: &str) -> Option<(i32, i32, i32)> {
 /// The note on an unreadable `gap=` whose row is refused for a reason no `gap=` reaches.
 const NOT_PLACED: &str = "this row is not placed either way — see the finding on the same line";
 
-/// The note on an unreadable `gap=` whose row is refused for its origin.
-const NOT_PLACED_AT_ZERO: &str = "this row is not placed at `gap=0`, the value its origin was \
-     worked out with — see the finding on the same line";
-
 #[test]
 fn an_unreadable_gap_places_the_row_edge_to_edge_and_says_so() {
     let touching = lowered(&site("  place id=b use=box theme=t east_of=a\n"));
@@ -373,8 +369,11 @@ fn an_unreadable_gap_places_the_row_edge_to_edge_and_says_so() {
                 findings(&ir),
                 vec![(
                     "W_IGNORED_ARGUMENT",
-                    format!("`gap=` must be an integer, not {described}; the value was ignored")
-                        .as_str(),
+                    format!(
+                        "`gap=` must be a non-negative integer, not {described}; the value was \
+                         ignored"
+                    )
+                    .as_str(),
                 )],
                 "{selector} gap={written}",
             );
@@ -582,7 +581,7 @@ fn a_row_whose_anchor_did_not_lower_still_reports_its_body() {
 
 #[test]
 fn an_unreadable_gap_on_a_row_refused_for_its_origin_is_still_reported() {
-    // `b`'s last column sits on `i32::MAX`, so `c` leaves the range even at `gap=0`.
+    // `b`'s last column sits on `i32::MAX`, so `c` leaves the range at any gap.
     let ir = lowered(&site(
         "  place id=b use=box theme=t east_of=a gap=2147483642\n  \
          place id=c use=box theme=t east_of=b gap=wide\n",
@@ -596,5 +595,5 @@ fn an_unreadable_gap_on_a_row_refused_for_its_origin_is_still_reported() {
         "{:#?}",
         ir.diagnostics
     );
-    assert_eq!(ir.diagnostics[1].notes[0].message, NOT_PLACED_AT_ZERO);
+    assert_eq!(ir.diagnostics[1].notes[0].message, NOT_PLACED);
 }

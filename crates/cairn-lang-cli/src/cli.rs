@@ -33,20 +33,27 @@ pub(crate) enum Command {
     },
     /// Run the validation passes against a .crn source file and print its diagnostics.
     #[command(
-        long_about = "Run syntactic validation passes against a .crn source file. Exits 0 when \
+        long_about = "Run the validation passes and block-array lowering against a .crn source \
+            file, writing nothing. Exits 0 when \
             nothing `Error`-severity is reported, 1 when any `Error`-severity diagnostic is \
             emitted (or the file fails to parse, or cannot be read for a reason other than \
             absence, or `--target` names no version the pinned edition ships, or a pinned run \
             loses a scope), 2 when the file cannot be located or `--target` is given without \
             `--edition`.\n\n\
-            Without `--target` this command runs no block-array lowering, so no lowering-stage \
-            finding reaches it — `E_UNKNOWN_ID` and `E_UNKNOWN_ABSTRACT_TOKEN` among them. \
-            `--edition E --target V` pins the one `(edition, version)` those findings are answers \
-            about and runs the lowering pass too, which is what lets a CI job gate on `cairn \
-            check` and see the lowering-stage findings `cairn compile` would refuse on, plus the \
-            `E_PARTIAL_BUILD` a lost scope earns. Nothing is written either way — `compile` \
-            remains the command that produces artifacts and the lockfile, and the only one that \
-            holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`).\n\n\
+            Without `--target` this command still runs block-array lowering, with no target, and \
+            reports the lowering-stage findings every target that reads their line raises — a \
+            roof bound outside the stair family, a `door side=` it cannot read — weighed as if \
+            every block id some shipped version of the edition declares were declared. A finding \
+            only a target's registry pack can give is left out: `E_UNKNOWN_ID` and \
+            `E_UNKNOWN_ABSTRACT_TOKEN` among them, and any verdict on the block an abstract \
+            token, or an id no shipped version declares, stands for; a note that would name such \
+            a block says \"a block\" instead. `--edition E --target V` pins the one \
+            `(edition, version)` those findings \
+            are answers about and lowers against its id table, which is what lets a CI job gate \
+            on `cairn check` and see every lowering-stage finding `cairn compile` would refuse \
+            on, plus the `E_PARTIAL_BUILD` a lost scope earns. Nothing is written either way — \
+            `compile` remains the command that produces artifacts and the lockfile, and the only \
+            one that holds `--target` to the file's `@requires` floors (`E_VERSION_CAP`).\n\n\
             The two run-level refusals — an unshipped `--target` and a lost scope — are reported \
             on stderr and by the exit code in both formats, never as elements of the `--format \
             json` array: neither is a finding at a span in the file, and inventing one would put a \
@@ -72,7 +79,10 @@ pub(crate) enum Command {
                 picked edition specifically — a `mat_slot=X` reference to a slot only the *other* \
                 variant declares fires `E_UNRESOLVED_SLOT`. When omitted, the resolver unions slot \
                 names across both variants of one logical theme so the file passes `check` \
-                regardless of which edition it ends up compiling for.\n\n\
+                regardless of which edition it ends up compiling for. Without `--target`, \
+                lowering runs with no target for the pinned edition, or for both when none is \
+                pinned: a finding on a line only one edition's variant reads is that edition's, \
+                and any other is reported when each edition raises it at the same place.\n\n\
                 The pin also names the version table `@intended_targets` is weighed in. Without \
                 one both editions weigh it, since a floor refusing every version the same file \
                 says it is for is a mistake either way; `W_INTENDED_TARGET_UNSUPPORTED` is the one \
@@ -95,13 +105,15 @@ pub(crate) enum Command {
                 that `--target` alone is forbidden: \"1.21\" names different releases on Java and \
                 Bedrock, and an id table belongs to one `(edition, version)` pair rather than to a \
                 version string.\n\n\
-                Setting it runs block-array lowering, so the lowering stage's findings join the \
-                report — `E_UNKNOWN_ID` above all, which exists only where a target is pinned: \
-                `stone_bricks` is a block on Bedrock 1.21.40 and not on Bedrock 1.21.0, so with no \
-                version chosen there is no question to answer. A version the edition does not ship \
+                Setting it lowers against that version's id table, so the lowering stage's \
+                findings that need a target join the report — `E_UNKNOWN_ID` above all, which \
+                exists only where a target is pinned: `stone_bricks` is a block on Bedrock \
+                1.21.40 and not on Bedrock 1.21.0, so with no version chosen there is no question \
+                to answer. A version the edition does not ship \
                 still lowers, against the same unpinned view `cairn lower` uses, so every finding \
                 that needs no id table is reported before the target is refused. Leaving the flag \
-                off keeps the check a syntax-and-resolution gate."
+                off still lowers, with no target, and reports only the findings every target that \
+                reads their line raises."
         )]
         target: Option<String>,
         /// Output format for the diagnostics.

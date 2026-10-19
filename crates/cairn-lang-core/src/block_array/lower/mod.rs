@@ -22,6 +22,7 @@ mod sizing;
 mod stair;
 mod token_diag;
 mod window;
+mod without_target;
 
 use std::collections::HashSet;
 
@@ -42,6 +43,8 @@ use body::{BodyDescriptor, BodyInputs, LoweredBody, lower_body_to_block_array};
 use connect::{ConnectInputs, lower_connects};
 use diag::{VoxelSource, diag_def_no_size, diag_struct_no_size};
 use site_floor::{PlacedBody, collect_floor_cells};
+
+pub use without_target::findings_without_target;
 
 /// Block ids lowering can put in a palette that no pack can redirect.
 ///
@@ -77,7 +80,7 @@ fn lower_to_block_array_within(
     for s in &intent.structs {
         let key = format!("struct::{}", s.name);
         let scope = resolution.scopes.get(&key);
-        // `lower_struct` has already diagnosed a `None`.
+        // A `None` is diagnosed, unless its palette is one only a target's pack can size.
         if let Some(ba) = lower_struct(s, scope, bodies, &mut diagnostics) {
             // First write wins on a duplicate name, as `resolution.scopes` bound the first body.
             structures.entry(key).or_insert(ba);
@@ -241,7 +244,7 @@ fn lower_site<'a>(
             continue;
         };
         let Some(LoweredBody { array, walls, cut }) = body else {
-            // Refused for its extent or palette, already diagnosed.
+            // Refused for its extent or palette: diagnosed unless only a pack can size the palette.
             report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
             continue;
         };
@@ -251,7 +254,7 @@ fn lower_site<'a>(
             Ok(origin) => origin,
             Err(refusal) => {
                 diagnostics.push(diag_deferred_member_reason(member, &refusal.deferral()));
-                report_unread_gap(gap_unread, GapOutcome::OutOfRange, diagnostics);
+                report_unread_gap(gap_unread, GapOutcome::NotPlaced, diagnostics);
                 continue;
             }
         };
