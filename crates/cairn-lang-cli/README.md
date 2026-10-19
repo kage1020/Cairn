@@ -39,7 +39,7 @@ Per [compilation "Target axes"](https://cairn.kage1020.com/spec/compilation/):
 |---|---|
 | `0` | Success. Warnings do not change it. |
 | `1` | A parse failure, an `Error`-severity diagnostic, an I/O error, or a run-level refusal such as a `--target` the edition does not ship. |
-| `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`), or `cairn docs` was asked for a page or part the binary does not carry. |
+| `2` | The source file could not be located, or the flags are unusable (`--target` without `--edition`, an empty `--editions`), or `cairn docs` was asked for a page or part the binary does not carry, for a title more than one part has, or for a `#fragment` together with a title or `--toc`. |
 
 A reader of stdout that stops early (`cairn lower f.crn | head -1`) does not change the code: output written after stdout has been closed is dropped, and the command exits as it would have with stdout open. This holds for stdout only: diagnostics go to stderr, and a closed stderr still ends the run with a panic.
 
@@ -47,18 +47,20 @@ A run-level refusal is reported on stderr and by the exit code in both output fo
 
 ## `cairn docs`
 
-Every Markdown page of [the documentation site](https://cairn.kage1020.com/), the specification among them, is compiled into the binary by [`cairn-lang-docs`](../../website/rust/README.md), so `cairn docs` shows the pages of the release that is running, with no network. A page is named by the path the site serves it at, so a link inside one can be passed as written, fragment included:
+Every Markdown page of [the documentation site](https://cairn.kage1020.com/), the specification among them, is compiled into the binary by [`cairn-lang-docs`](../../website/rust/README.md), so `cairn docs` shows the pages of the release that is running, with no network. A page is named by the path the site serves it at or by its file (`spec/index`, `spec/lint.md`), so a link to any page it lists can be passed as written, `index.md` and fragment included:
 
 ```sh
 cairn docs                                     # every page, with its title
 cairn docs spec/syntax                         # one page, as Markdown
 cairn docs spec/syntax --toc                   # its headings, each a link `cairn docs` takes
-cairn docs /spec/lint/#113-error-vs-warning    # the section a link opens
+cairn docs /spec/#two-version-axes             # the section a link opens
 cairn docs spec/lint "Error vs warning"        # the section a citation names
 cairn docs ja/spec/syntax                      # the Japanese copy
 ```
 
-The title is quoted the way `--help` and the code cite the spec: a heading without its number, a term the page defines in bold, or the page's own title. `cargo xtask lint spec-citations` holds every citation in the repository to what `cairn docs` can print.
+The title is quoted the way `--help` and the code cite the spec: a heading without its number, a term the page defines in bold, or the page's own title. A heading or the page's title is also taken with its number. A title that more than one part of the page has is refused with each part listed, and the `#fragment` of the section you mean picks one. `cargo xtask lint spec-citations` holds every citation in the repository to what `cairn docs` can print.
+
+Git Bash on Windows rewrites an argument that starts with `/` into a Windows path before `cairn` sees it, so leave the leading slash off there: `cairn docs spec/#two-version-axes`.
 
 ## `cairn synth` (experimental)
 

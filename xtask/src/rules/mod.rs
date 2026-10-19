@@ -9,6 +9,7 @@ mod manifest;
 mod module_cycles;
 mod readme;
 mod session_refs;
+mod site_parity;
 mod spec_citations;
 mod unsafe_code;
 mod versions;
@@ -28,6 +29,7 @@ pub const RULES: &[Rule] = &[
     unsafe_code::RULE,
     versions::RULE,
     spec_citations::RULE,
+    site_parity::RULE,
     session_refs::RULE,
     readme::MODULES,
     readme::PUBLIC_API,

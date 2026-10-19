@@ -19,6 +19,7 @@ pub const RULE: Rule = Rule {
 const SCANNED: &[&str] = &[
     "crates",
     "examples",
+    "website/rust",
     ".github",
     ".claude",
     "xtask",
@@ -129,16 +130,18 @@ fn named_citations(
             return;
         };
         for title in quoted {
-            if chapter.cited(&title).is_none() {
-                findings.push(Finding::new(
-                    path,
-                    line,
-                    format!(
-                        "`spec/{stem}` has no section titled \"{title}\"; nearest: {}",
-                        nearest(&chapter.titles(), &title)
-                    ),
-                ));
-            }
+            let message = match chapter.cited(&title).len() {
+                1 => continue,
+                0 => format!(
+                    "`spec/{stem}` has no section titled \"{title}\"; nearest: {}",
+                    nearest(&chapter.titles(), &title)
+                ),
+                parts => format!(
+                    "`spec/{stem}` has {parts} parts titled \"{title}\"; cite a title only one \
+                     of them has, or retitle the others"
+                ),
+            };
+            findings.push(Finding::new(path, line, message));
         }
     };
 
@@ -294,6 +297,64 @@ mod tests {
         assert_eq!(
             markdown_link_citation("[lint \"X\"](https://x/other/)", 0),
             None
+        );
+    }
+
+    #[test]
+    fn a_citation_must_name_one_part_of_a_chapter_that_exists() {
+        let index = Page::new("spec", "Specification", "## Two version axes\n");
+        let lint = Page::new(
+            "spec/lint",
+            "11. Lint",
+            "## 11.3 Error vs warning\n\n- **Term.** Defined.\n\n## 11.4 Twice\n\n## 11.5 Twice\n",
+        );
+        let chapters = BTreeMap::from([("index", &index), ("lint", &lint)]);
+        // Written as `SPEC/` so that this lint does not read the citations as its own.
+        let text = "\
+`SPEC/lint` \"Error vs warning\"
+`SPEC/lint` \"Term\" and \"Lint\"
+`SPEC/index` \"Two version axes\"
+`SPEC/nowhere` \"Anything\"
+`SPEC/lint` \"Error vs warnings\"
+`SPEC/lint` \"Twice\"
+"
+        .replace("SPEC", "spec");
+        let mut findings = Vec::new();
+        named_citations(Path::new("x.rs"), &text, &chapters, &mut findings);
+        let findings: Vec<_> = findings
+            .iter()
+            .map(|finding| (finding.line, finding.message.replace("spec", "SPEC")))
+            .collect();
+        assert_eq!(
+            findings,
+            [
+                (
+                    Some(4),
+                    "`SPEC/nowhere` names no chapter; the chapters are: index, lint".to_owned()
+                ),
+                (
+                    Some(5),
+                    "`SPEC/lint` has no section titled \"Error vs warnings\"; nearest: \
+                     \"Error vs warning\", \"Lint\", \"Twice\""
+                        .to_owned()
+                ),
+                (
+                    Some(6),
+                    "`SPEC/lint` has 2 parts titled \"Twice\"; cite a title only one of them \
+                     has, or retitle the others"
+                        .to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_spec_index_is_cited_by_its_file_stem() {
+        let chapters = spec_chapters();
+        assert_eq!(chapters.get("index").map(|page| page.path()), Some("spec"));
+        assert_eq!(
+            chapters.get("lint").map(|page| page.path()),
+            Some("spec/lint")
         );
     }
 

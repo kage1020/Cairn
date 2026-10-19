@@ -63,8 +63,9 @@ Evolving な面:
 Internal な面:
 
 - ワークスペース全 crate の Rust API (`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、
-  `cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`、`cairn-lang-docs`)。これらは含まれる最初の月次 minor から
-  crates.io に publish するが、CLI の推移的公開依存ではない項目はすべて `#[doc(hidden)]` を付ける。
+  `cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`、`cairn-lang-docs`)。これらは含まれる
+  最初の月次 minor から crates.io に publish するが、CLI の推移的公開依存ではない項目はすべて
+  `#[doc(hidden)]` を付ける。
 - コンパイラの中間表現 (Intent IR、Semantic IR、block-array pivot のレイアウト)。
 - 増分ビルドキャッシュのオンディスク形状 (ワークスペース内の `target/` 相当)。
 - 言語サーバーの内部プロトコル (VS Code 等との LSP オンワイヤ仕様は Stable; `cairn-lang-lsp` の

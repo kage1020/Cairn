@@ -42,11 +42,11 @@ schematic は忠実な低レベルの写し取りとして保持し、LLM が慣
 | [開発者ガイド](/development/) | Rust ワークスペース、クレートの分割、変更の流し方 (英語)。 |
 | [プレイグラウンド](/ja/playground/) | ブラウザで動くコンパイラのプレースホルダー。`cairn-lang-wasm` を追跡中。 |
 
-このサイトの全ページは、インストールしたリリースの版のまま `cairn` にも同梱されています。`cairn docs`
-でページを一覧し、`cairn docs ja/spec/syntax` で 1 ページを Markdown として表示でき、ネットワークは要り
-ません。言語モデル向けには [`/llms.txt`](/llms.txt) がサイトの索引で、各ページは URL の末尾に `index.md`
-を付けた場所で Markdown として配信され、[`/llms-full.txt`](/llms-full.txt) は英語の全ページをひとつに
-まとめたものです。
+このサイトのページは、トップページとプレイグラウンドを除いてすべて、インストールしたリリースの版のまま
+`cairn` にも同梱されています。`cairn docs` でページを一覧し、`cairn docs ja/spec/syntax` で 1 ページを
+Markdown として表示でき、ネットワークは要りません。言語モデル向けには [`/llms.txt`](/llms.txt) がサイト
+の索引で、同じページは URL の末尾に `index.md` を付けた場所で Markdown として配信され、
+[`/llms-full.txt`](/llms-full.txt) はその英語版をすべてひとつにまとめたものです。
 
 ## ステータス
 

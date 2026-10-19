@@ -16,12 +16,14 @@ pub struct Repo {
     pub root: PathBuf,
     /// `--tag` from the command line, for the rules that compare against a release tag.
     pub tag: Option<String>,
+    /// `--site` from the command line, for the rule that compares against a built site.
+    pub site: Option<PathBuf>,
     /// Every file git tracks or would track, relative to `root`, sorted.
     files: Vec<PathBuf>,
 }
 
 impl Repo {
-    pub fn open(tag: Option<String>) -> Result<Self, String> {
+    pub fn open(tag: Option<String>, site: Option<PathBuf>) -> Result<Self, String> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .ok_or("xtask has no parent directory")?
@@ -53,7 +55,12 @@ impl Repo {
             .collect();
         files.sort();
         files.dedup();
-        Ok(Self { root, tag, files })
+        Ok(Self {
+            root,
+            tag,
+            site,
+            files,
+        })
     }
 
     pub fn files(&self) -> &[PathBuf] {

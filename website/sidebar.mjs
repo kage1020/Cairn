@@ -3,7 +3,7 @@
 /** @typedef {{ label: string, translations: Record<string, string>, slug: string }} Link */
 
 /**
- * The site's navigation, which `llms.txt` lists the pages in as well.
+ * The site's navigation: groups of pages, each group labelled in every locale.
  *
  * @type {{ label: string, translations: Record<string, string>, items: Link[] }[]}
  */

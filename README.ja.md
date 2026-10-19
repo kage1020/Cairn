@@ -112,8 +112,8 @@ semantic-sensitive:      (none)
 
 同じページはコンパイラにも同梱され、言語モデルが読みやすい形でも配信されています。
 
-- `cairn docs` はインストール済みの `cairn` がビルドされたときのページを一覧し、`cairn docs ja/spec/syntax` は 1 ページを Markdown で表示し、`cairn docs spec/lint "Error vs warning"` は引用が指す節だけを表示します。ネットワークは要らず、表示されるのは常にそのリリースが実装している版です。
-- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) は言語モデル向けのサイト索引です。各ページは URL の末尾に `index.md` を付けた場所でも Markdown として配信され ([`/ja/spec/syntax/index.md`](https://cairn.kage1020.com/ja/spec/syntax/index.md))、[`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) には英語の全ページがひとつにまとまっています。
+- `cairn docs` はトップページとプレイグラウンドを除くサイトのページを、インストール済みの `cairn` がビルドされたときの版で一覧し、`cairn docs ja/spec/syntax` は 1 ページを Markdown で表示し、`cairn docs spec/lint "Error vs warning"` は引用が指す節だけを表示します。ネットワークは要らず、表示されるのは常にそのリリースが実装している版です。
+- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) は言語モデル向けのサイト索引です。同じページは URL の末尾に `index.md` を付けた場所でも Markdown として配信され ([`/ja/spec/syntax/index.md`](https://cairn.kage1020.com/ja/spec/syntax/index.md))、[`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) にはその英語版がすべてひとつにまとまっています。
 
 ## バージョニング
 

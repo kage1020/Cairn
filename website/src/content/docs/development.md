@@ -39,8 +39,8 @@ Each crate maps back to the spec chapter it implements:
 
 `cairn-lang-core` sits at the root. `cairn-lang-cli`, `cairn-lang-lsp`, and `cairn-lang-wasm` are
 leaf integrations that nothing depends on. `cairn-lang-formats` is the only crate that pulls in
-`cairn-lang-nbt`. `cairn-lang-docs` depends on nothing: its manifest is `website/Cargo.toml`, so the
-pages it embeds are the site's own sources and no copy of them can drift.
+`cairn-lang-nbt`. `cairn-lang-docs` depends on nothing, and its manifest is `website/Cargo.toml`, so
+the pages it embeds are the site's own sources and no copy of them can drift.
 
 - **`cairn-lang-core` knows nothing about NBT, file formats, redstone simulation, or editor
   protocols.** The block-array IR is the universal pivot ([Architecture](/spec/architecture/));

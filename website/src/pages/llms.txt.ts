@@ -28,7 +28,7 @@ to read when one is at hand, since this site follows the latest release:
 
 - \`cairn docs\` lists the pages, and \`cairn docs spec/syntax\` prints one.
 - \`cairn docs spec/lint "Error vs warning"\` prints the part of a page a citation names, and
-  \`cairn docs /spec/lint/#113-error-vs-warning\` the part a link names.
+  \`cairn docs /spec/#two-version-axes\` the part a link names. Each link below works as written.
 - \`cairn check FILE --format json\` says what is wrong with a source, what would be valid, and how
   to fix it.
 

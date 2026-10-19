@@ -54,6 +54,7 @@ CI's `Lint` job runs the checks that hold files to each other rather than test b
 cargo xtask lint            # every rule
 cargo xtask lint --list     # the rules and what each holds
 cargo xtask lint versions   # one rule
+cargo xtask lint --site website/dist site-parity   # after `pnpm run build` in website/
 ```
 
 ### The repository
@@ -105,9 +106,9 @@ A section number is the same kind of coordinate. `§14.5` is true only while "Pl
 
 Write the chapter as its file stem without the extension (`spec/redstone`, `spec/versioning-editions`) and copy the section title verbatim. Cite the chapter alone when you mean the chapter, and once a comment has given the full citation, later sentences in it should refer back in prose — "that pipeline", "the phase order" — rather than repeat it.
 
-`cargo xtask lint spec-citations` holds this over `crates/`, `examples/`, `xtask/`, `.github/`, `.claude/` and `CLAUDE.md`: no `§` or "section 11.3" in any of them, every `spec/<chapter>` names a chapter that exists, and every quoted title is something `cairn docs` prints for that chapter: a heading, a term it defines in bold, or its own title. So a citation can be run as written, `cairn docs spec/lint "Error vs warning"`. Renumbering the spec now touches no Rust at all. Retitling a section fails the rule at each citation by file and line, which is the point — a title change is a change of meaning, and the comment that leaned on it deserves a re-read.
+`cargo xtask lint spec-citations` holds this over `crates/`, `examples/`, `website/rust/`, `xtask/`, `.github/`, `.claude/` and `CLAUDE.md`: no `§` or "section 11.3" in any of them, every `spec/<chapter>` names a chapter that exists, and every quoted title is something `cairn docs` prints for that chapter: a heading, a term it defines in bold, or its own title. So a citation can be run as written, `cairn docs spec/lint "Error vs warning"`, and a title that more than one part of the chapter has fails the rule, since it would not say which part it means. Renumbering the spec touches no Rust at all. Retitling a section fails the rule at each citation by file and line, which is the point — a title change is a change of meaning, and the comment that leaned on it deserves a re-read.
 
-The rest of the repository is on you. `website/` is unread because that is where the numbers are defined, and the guide pages beside the spec still link to sections by an anchor that bakes the number into the slug — untangling that belongs with a change to the headings themselves. `editors/`, this file, `CHANGELOG.md` and `changelog.d/` are simply outside the scan.
+The rest of the repository is on you. The pages under `website/` are unread because that is where the numbers are defined, and the guide pages beside the spec still link to sections by an anchor that bakes the number into the slug — untangling that belongs with a change to the headings themselves. `editors/`, this file, `CHANGELOG.md` and `changelog.d/` are simply outside the scan.
 
 ### Crate READMEs
 

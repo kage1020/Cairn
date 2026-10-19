@@ -4,9 +4,14 @@ import { sidebar } from "../sidebar.mjs";
 
 export type Page = CollectionEntry<"docs">;
 
-/** Every Markdown page of the site, in every locale; an MDX page is left out. */
+/** Every Markdown page the build renders, in every locale; an MDX page is left out. */
 export async function markdownPages(): Promise<Page[]> {
-  return getCollection("docs", (page) => page.filePath?.endsWith(".md") ?? false);
+  return getCollection(
+    "docs",
+    // Starlight leaves a draft out of a production build, and `cairn-lang-docs` does too.
+    (page) =>
+      (page.filePath?.endsWith(".md") ?? false) && !(import.meta.env.PROD && page.data.draft),
+  );
 }
 
 /** A page as Markdown: its title as a heading over its body, the text `cairn docs` prints. */
@@ -30,7 +35,7 @@ export async function sidebarGroups(): Promise<{ label: string; pages: Page[] }[
     .filter((group) => group.pages.length > 0);
 }
 
-/** The line `llms.txt` and `llms-full.txt` open with, under the project's name. */
+/** What Cairn is, in one sentence. */
 export const summary =
   "Cairn is a description language for Minecraft builds: a `.crn` file declares intent (walls, " +
   "roofs, windows, themes, redstone) and the `cairn` compiler resolves it into structure files " +

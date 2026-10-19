@@ -1,4 +1,5 @@
-//! Lists the site's Markdown pages for the crate to embed, each with its path, title and body.
+//! Lists the site's Markdown pages for the crate to embed, each with its path, title and body,
+//! leaving out what Starlight leaves out of a production build.
 
 use std::cmp::Ordering;
 use std::fmt::Write as _;
@@ -30,7 +31,7 @@ fn main() {
     for page in &found {
         writeln!(
             table,
-            "    Page {{ path: {:?}, title: {:?}, source: include_str!({:?}), body: {} }},",
+            "    Page::new({:?}, {:?}, include_str!({:?}).split_at({}).1),",
             page.path,
             page.title,
             page.file.display().to_string(),
@@ -55,17 +56,22 @@ fn walk(docs: &Path, dir: &Path, found: &mut Vec<Found>) {
             walk(docs, &file, found);
             continue;
         }
-        let Some(name) = file.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
+        let name = file
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_else(|| panic!("{} has a file name that is not UTF-8", file.display()));
         // Starlight leaves out a file whose name starts with `_`.
         if name.starts_with('_') || file.extension().and_then(|ext| ext.to_str()) != Some("md") {
             continue;
         }
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("cannot read {}: {error}", file.display()));
-        let (title, body) = front_matter(&source)
+        let front = front_matter(&source)
             .unwrap_or_else(|| panic!("{} has no front matter with a `title:`", file.display()));
+        if front.draft {
+            continue;
+        }
+        let (title, body) = (front.title, front.body);
         found.push(Found {
             path: site_path(docs, &file),
             file,
@@ -91,22 +97,35 @@ fn site_path(docs: &Path, file: &Path) -> String {
     parts.join("/")
 }
 
-/// The front matter's `title:` and the byte offset its closing `---` line ends at.
-fn front_matter(source: &str) -> Option<(String, usize)> {
+struct FrontMatter {
+    title: String,
+    draft: bool,
+    /// The byte offset its closing `---` line ends at.
+    body: usize,
+}
+
+fn front_matter(source: &str) -> Option<FrontMatter> {
     let mut lines = source.split_inclusive('\n');
     if lines.next()?.trim_end() != "---" {
         return None;
     }
     let mut offset = source.find('\n')? + 1;
     let mut title = None;
+    let mut draft = false;
     for line in lines {
         offset += line.len();
         let line = line.trim_end();
         if line == "---" {
-            return Some((title?, offset));
+            return Some(FrontMatter {
+                title: title?,
+                draft,
+                body: offset,
+            });
         }
         if let Some(value) = line.strip_prefix("title:") {
             title = Some(unquote(value.trim()));
+        } else if let Some(value) = line.strip_prefix("draft:") {
+            draft = value.trim() == "true";
         }
     }
     None

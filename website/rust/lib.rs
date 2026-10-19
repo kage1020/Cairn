@@ -7,11 +7,11 @@
 use std::collections::HashMap;
 
 /// One Markdown page of the documentation site.
+#[derive(Debug)]
 pub struct Page {
     path: &'static str,
     title: &'static str,
-    source: &'static str,
-    body: usize,
+    markdown: &'static str,
 }
 
 static PAGES: &[Page] = &include!(concat!(env!("OUT_DIR"), "/pages.rs"));
@@ -21,12 +21,26 @@ pub fn pages() -> &'static [Page] {
     PAGES
 }
 
-/// The page the site serves at `/<path>/`, such as `spec/syntax` or `ja/tutorial`.
+/// The page the site serves at `/<path>/`, `/<path>/index.md` or from the file `<path>.md`.
 pub fn page(path: &str) -> Option<&'static Page> {
+    let path = path.strip_suffix(".md").unwrap_or(path);
+    let path = match path.strip_suffix("index") {
+        Some(dir) if dir.is_empty() || dir.ends_with('/') => dir.trim_end_matches('/'),
+        _ => path,
+    };
     PAGES.iter().find(|page| page.path == path)
 }
 
 impl Page {
+    /// A page served at `path`, with `title` in its front matter and `markdown` below it.
+    pub const fn new(path: &'static str, title: &'static str, markdown: &'static str) -> Self {
+        Self {
+            path,
+            title,
+            markdown,
+        }
+    }
+
     /// The path the site serves the page at, without the slashes around it.
     pub fn path(&self) -> &'static str {
         self.path
@@ -39,12 +53,67 @@ impl Page {
 
     /// The Markdown below the front matter.
     pub fn markdown(&self) -> &'static str {
-        &self.source[self.body..]
+        self.markdown
+    }
+
+    /// The page as the site serves it at `index.md`: its title as a heading over its Markdown.
+    pub fn document(&self) -> String {
+        format!("# {}\n\n{}\n", self.title, self.markdown.trim())
     }
 
     /// The page's headings in order, leaving out lines inside fenced code.
     pub fn headings(&self) -> Vec<Heading> {
-        let markdown = self.markdown();
+        self.located_headings()
+            .into_iter()
+            .map(|(_, heading)| heading)
+            .collect()
+    }
+
+    /// Each title a citation of the page may quote, once: its own, its headings', its terms'.
+    pub fn titles(&self) -> Vec<&'static str> {
+        let mut titles: Vec<&'static str> = Vec::new();
+        for (title, _) in self.parts() {
+            if !titles.contains(&title) {
+                titles.push(title);
+            }
+        }
+        titles
+    }
+
+    /// Every part a citation of the page quoting `title` names, in order; two make it ambiguous.
+    pub fn cited(&self, title: &str) -> Vec<Part> {
+        self.parts()
+            .into_iter()
+            .filter(|(named, _)| *named == title)
+            .map(|(_, part)| part)
+            .collect()
+    }
+
+    /// The section a link to `#slug` on the page opens.
+    pub fn anchored(&self, slug: &str) -> Option<&'static str> {
+        self.headings()
+            .into_iter()
+            .find(|heading| heading.slug == slug)
+            .map(|heading| heading.markdown)
+    }
+
+    /// Each part of the page with the title a citation quotes it by.
+    fn parts(&self) -> Vec<(&'static str, Part)> {
+        let headings = self.located_headings();
+        let terms = self.terms(&headings);
+        let mut parts = vec![(strip_number(self.title), Part::Page)];
+        parts.extend(
+            headings
+                .into_iter()
+                .map(|(_, heading)| (heading.title(), Part::Section(heading))),
+        );
+        parts.extend(terms);
+        parts
+    }
+
+    /// The headings, each with the offset of its line.
+    fn located_headings(&self) -> Vec<(usize, Heading)> {
+        let markdown = self.markdown;
         let found: Vec<(usize, &'static str, usize)> = lines(markdown)
             .filter(|line| !line.fenced)
             .filter_map(|line| heading(line.text).map(|(level, text)| (level, text, line.start)))
@@ -58,19 +127,20 @@ impl Page {
                     .iter()
                     .find(|(next, _, _)| *next <= level)
                     .map_or(markdown.len(), |(_, _, next_start)| *next_start);
-                Heading {
+                let heading = Heading {
                     level,
                     text,
                     slug: slugger.slug(text),
                     markdown: &markdown[start..end],
-                }
+                };
+                (start, heading)
             })
             .collect()
     }
 
-    /// The terms the page's `- **Term.**` list items define, in order.
-    pub fn terms(&self) -> Vec<Term> {
-        let markdown = self.markdown();
+    /// The terms list items define as `- **Term.**` or `- **Term**.`, each named without the stop.
+    fn terms(&self, headings: &[(usize, Heading)]) -> Vec<(&'static str, Part)> {
+        let markdown = self.markdown;
         let all: Vec<Line> = lines(markdown).collect();
         let mut terms = Vec::new();
         for (index, line) in all.iter().enumerate() {
@@ -84,6 +154,11 @@ impl Page {
             let Some(close) = rest.find("**") else {
                 continue;
             };
+            let bold = &rest[..close];
+            let name = bold.trim_end_matches(FULL_STOPS);
+            if name.len() == bold.len() && !rest[close + 2..].starts_with(FULL_STOPS) {
+                continue;
+            }
             let indent = line.text.len() - item.len();
             let end = all[index + 1..]
                 .iter()
@@ -99,46 +174,27 @@ impl Page {
                     }
                 })
                 .map_or(markdown.len(), |(_, next)| next.start);
-            terms.push(Term {
-                name: rest[..close].trim_end_matches('.'),
-                markdown: &markdown[line.start..end],
-            });
+            let section = headings
+                .iter()
+                .rfind(|(start, _)| *start < line.start)
+                .map(|(_, heading)| heading.slug.clone());
+            terms.push((
+                name,
+                Part::Term {
+                    markdown: &markdown[line.start..end],
+                    section,
+                },
+            ));
         }
         terms
     }
-
-    /// Every title a citation of the page may quote: its own, its headings', its terms'.
-    pub fn titles(&self) -> Vec<&'static str> {
-        let mut titles = vec![strip_number(self.title)];
-        titles.extend(self.headings().iter().map(Heading::title));
-        titles.extend(self.terms().iter().map(|term| term.name));
-        titles
-    }
-
-    /// What a citation of the page quoting `title` names: the whole page, a section, or a term.
-    pub fn cited(&self, title: &str) -> Option<&'static str> {
-        if strip_number(self.title) == title {
-            return Some(self.markdown());
-        }
-        if let Some(heading) = self.headings().into_iter().find(|h| h.title() == title) {
-            return Some(heading.markdown);
-        }
-        self.terms()
-            .into_iter()
-            .find(|term| term.name == title)
-            .map(|term| term.markdown)
-    }
-
-    /// The section a link to `#slug` on the page opens at.
-    pub fn anchored(&self, slug: &str) -> Option<&'static str> {
-        self.headings()
-            .into_iter()
-            .find(|heading| heading.slug == slug)
-            .map(|heading| heading.markdown)
-    }
 }
 
+/// The full stops the English and Japanese pages end a term's name with.
+const FULL_STOPS: [char; 2] = ['.', '。'];
+
 /// A heading of a page, with the section it opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Heading {
     /// The number of `#` it is written with.
     pub level: usize,
@@ -152,17 +208,25 @@ pub struct Heading {
 
 impl Heading {
     /// The text without a leading section number such as `14.5` or `C.3`, as a citation quotes it.
-    pub fn title(&self) -> &'static str {
+    fn title(&self) -> &'static str {
         strip_number(self.text)
     }
 }
 
-/// A term a page defines with a `- **Term.**` list item.
-pub struct Term {
-    /// The bold text without its closing full stop.
-    pub name: &'static str,
-    /// The list item, its continuation lines included.
-    pub markdown: &'static str,
+/// A part of a page a citation names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Part {
+    /// The whole page, named by its title.
+    Page,
+    /// The section a heading opens.
+    Section(Heading),
+    /// The list item defining a term.
+    Term {
+        /// The item, its continuation lines included.
+        markdown: &'static str,
+        /// The `#fragment` of the innermost section holding it, absent above the first heading.
+        section: Option<String>,
+    },
 }
 
 struct Line {

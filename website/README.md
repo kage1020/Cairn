@@ -73,11 +73,11 @@ pnpm preview        # serves ./dist
 
 ## Reading the pages elsewhere
 
-Every `.md` page under `src/content/docs/` reaches readers by three more routes, and none of them is a copy to keep in step: each reads the page sources as they are.
+Every `.md` page under `src/content/docs/` that is not a draft reaches readers by three more routes, and none of them is a copy to keep in step: each reads the page sources as they are.
 
-- **As Markdown on the site.** `/<path>/index.md` serves a page's title and body, `/llms.txt` indexes those in sidebar order for language models, and `/llms-full.txt` is every English page in one file. The endpoints are in `src/pages/`; an `.mdx` page is left out, since its components do not read as Markdown.
+- **As Markdown on the site.** `/<path>/index.md` serves a page's title and body, `/llms.txt` indexes the English ones the sidebar lists, in its order, for language models, and `/llms-full.txt` is every English page in one file. The endpoints are in `src/pages/`; an `.mdx` page is left out, since its components do not read as Markdown.
 - **Inside `cairn`.** `Cargo.toml` here makes this directory the `cairn-lang-docs` crate, whose build script embeds every page, so `cairn docs spec/syntax` prints the page the installed release was built with. Its package carries the pages themselves, which is why the manifest sits next to them rather than under `crates/`.
-- **As citations.** A heading's title without its number, a term a page defines in bold, and a page's own title are what `spec/<chapter> "<title>"` citations quote. `cargo xtask lint spec-citations` resolves them through the same crate, so retitling a heading fails the lint at every citation of it, and `cargo test -p cairn-lang-docs` fails if the crate gives a heading an anchor the site does not.
+- **As citations.** A heading's title without its number, a term a page defines in bold, and a page's own title are what `spec/<chapter> "<title>"` citations quote. `cargo xtask lint spec-citations` resolves them through the same crate, so retitling a heading fails the lint at every citation of it, and `cargo test -p cairn-lang-docs` fails if a page links to a fragment the crate gives no heading. After `pnpm run build`, `cargo xtask lint --site website/dist site-parity`, run from the repository root, checks that the site serves each embedded page and no other, with the same Markdown and the same heading anchors; CI runs it after every build of the site.
 
 ## Deploying
 

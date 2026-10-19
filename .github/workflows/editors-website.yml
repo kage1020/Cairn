@@ -5,12 +5,14 @@ on:
     paths:
       - "editors/vscode/**"
       - "website/**"
+      - "xtask/**"
       - "Cargo.toml"
       - ".github/workflows/editors-website.yml"
   pull_request:
     paths:
       - "editors/vscode/**"
       - "website/**"
+      - "xtask/**"
       - "Cargo.toml"
       - ".github/workflows/editors-website.yml"
   workflow_dispatch:
@@ -63,3 +65,15 @@ jobs:
       # The build does not type-check, and `astro check` neither renders pages nor validates links.
       - run: pnpm run check
       - run: pnpm run build
+
+      - name: Install Rust toolchain
+        run: rustup show
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: website
+          save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
+      # `cairn docs` prints the pages cairn-lang-docs embeds, so they must be the ones just built.
+      - name: Embedded pages match the build
+        working-directory: .
+        run: cargo xtask lint --site website/dist site-parity
