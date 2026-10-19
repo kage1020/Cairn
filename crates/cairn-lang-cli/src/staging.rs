@@ -226,7 +226,8 @@ impl StagedSet {
     }
 }
 
-fn remove_scratch(tmp_path: &Path) {
+/// Remove a scratch file, warning when it is left behind.
+pub fn remove_scratch(tmp_path: &Path) {
     match fs::remove_file(tmp_path) {
         Ok(()) => {}
         Err(err) if err.kind() == io::ErrorKind::NotFound => {}

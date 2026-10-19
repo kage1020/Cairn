@@ -13,6 +13,7 @@ use crate::artifacts::{
 };
 use crate::floors::enforce_version_floor;
 use crate::lockfile::{default_lock_path, report_previous_target};
+use crate::name_case::NameCase;
 use crate::pipeline::{Lowered, built_scopes, load_and_lower, report_partial_build};
 use crate::report::report_diagnostics;
 use crate::target::{ResolvedTarget, resolve_target};
@@ -86,7 +87,9 @@ fn check_and_write(
     out_dir: &Path,
     lock_path: &Path,
 ) -> ExitCode {
-    let prepared = match prepare_artifacts(block_ir, target, out_dir) {
+    // A lock can share an entry with an artifact only inside `--out`, so `--out` alone is probed.
+    let case = NameCase::of_dir(out_dir);
+    let prepared = match prepare_artifacts(block_ir, target, out_dir, case) {
         Ok(p) => p,
         Err(PrepareRefusal::Collision(collision)) => {
             collision.report();
@@ -94,7 +97,7 @@ fn check_and_write(
         }
         Err(PrepareRefusal::Other(code)) => return code,
     };
-    if let Err(code) = check_lock_path_is_free(&prepared, lock_path) {
+    if let Err(code) = check_lock_path_is_free(&prepared, lock_path, case) {
         return code;
     }
     // Before the lockfile is replaced: it is the only record of what was verified before.
