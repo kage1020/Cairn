@@ -1,9 +1,11 @@
 //! The spec is cited by chapter and section title, never by number, which goes stale when a
-//! section moves. Every `spec/<chapter>` names a chapter, and every quoted title after one is a
-//! heading of that chapter or a glossary term.
+//! section moves. Every `spec/<chapter>` names a chapter, and every quoted title after one is
+//! something `cairn docs` prints for that chapter: a heading, a defined term, or its own title.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+use cairn_lang_docs::Page;
 
 use super::{Finding, Rule};
 use crate::repo::{Repo, line_of};
@@ -14,11 +16,10 @@ pub const RULE: Rule = Rule {
     check,
 };
 
-const SPEC_DIR: &str = "website/src/content/docs/spec";
-
 const SCANNED: &[&str] = &[
     "crates",
     "examples",
+    "website/rust",
     ".github",
     ".claude",
     "xtask",
@@ -32,12 +33,12 @@ const TITLE_WINDOW: usize = 400;
 const SECTION_SIGN: char = '\u{a7}';
 
 fn check(repo: &Repo) -> Vec<Finding> {
-    let chapters = spec_titles(repo);
+    let chapters = spec_chapters();
     if chapters.is_empty() {
         return vec![Finding::new(
-            SPEC_DIR,
+            "website",
             None,
-            "no spec chapters found; update SPEC_DIR in xtask if the spec moved",
+            "cairn-lang-docs embeds no `spec/` page; update `spec_chapters` if the spec moved",
         )];
     }
 
@@ -111,13 +112,13 @@ fn numbered_citations(path: &Path, text: &str, findings: &mut Vec<Finding>) {
 fn named_citations(
     path: &Path,
     text: &str,
-    chapters: &BTreeMap<String, Vec<String>>,
+    chapters: &BTreeMap<&str, &Page>,
     findings: &mut Vec<Finding>,
 ) {
     let mut cite = |offset: usize, stem: &str, quoted: Vec<String>| {
         let line = Some(line_of(text, offset));
-        let Some(titles) = chapters.get(stem) else {
-            let known: Vec<_> = chapters.keys().map(String::as_str).collect();
+        let Some(chapter) = chapters.get(stem) else {
+            let known: Vec<_> = chapters.keys().copied().collect();
             findings.push(Finding::new(
                 path,
                 line,
@@ -129,16 +130,18 @@ fn named_citations(
             return;
         };
         for title in quoted {
-            if !titles.contains(&title) {
-                findings.push(Finding::new(
-                    path,
-                    line,
-                    format!(
-                        "`spec/{stem}` has no section titled \"{title}\"; nearest: {}",
-                        nearest(titles, &title)
-                    ),
-                ));
-            }
+            let message = match chapter.cited(&title).len() {
+                1 => continue,
+                0 => format!(
+                    "`spec/{stem}` has no section titled \"{title}\"; nearest: {}",
+                    nearest(&chapter.titles(), &title)
+                ),
+                parts => format!(
+                    "`spec/{stem}` has {parts} parts titled \"{title}\"; cite a title only one \
+                     of them has, or retitle the others"
+                ),
+            };
+            findings.push(Finding::new(path, line, message));
         }
     };
 
@@ -163,65 +166,18 @@ fn chapter_stem(text: &str) -> &str {
     &text[..end]
 }
 
-/// Chapter file stem → its frontmatter title, its headings without numbers, and glossary terms.
-fn spec_titles(repo: &Repo) -> BTreeMap<String, Vec<String>> {
-    let mut chapters = BTreeMap::new();
-    for path in repo.files_in(Path::new(SPEC_DIR), &["md"]) {
-        if path.parent() != Some(Path::new(SPEC_DIR)) {
-            continue;
-        }
-        let (Some(stem), Ok(text)) = (
-            path.file_stem().and_then(|stem| stem.to_str()),
-            repo.read(path),
-        ) else {
-            continue;
-        };
-        let mut titles = Vec::new();
-        let mut fenced = false;
-        for line in text.lines() {
-            if line.trim_start().starts_with("```") {
-                fenced = !fenced;
-            } else if fenced {
-            } else if let Some(rest) = line.strip_prefix("title:") {
-                titles.push(strip_leading_number(rest.trim().trim_matches('"')));
-            } else if let Some(rest) = line.strip_prefix("##") {
-                titles.push(strip_leading_number(rest.trim_start_matches('#').trim()));
-            } else if stem == "glossary"
-                && let Some(term) = defined_term(line)
-            {
-                titles.push(term);
-            }
-        }
-        chapters.insert(stem.to_owned(), titles);
-    }
-    chapters
-}
-
-/// The term a glossary row defines: `- **Fail-loud.** …` defines `Fail-loud`.
-fn defined_term(line: &str) -> Option<String> {
-    let rest = line.trim_start().strip_prefix("- **")?;
-    let end = rest.find("**")?;
-    Some(rest[..end].trim_end_matches('.').to_owned())
-}
-
-/// A heading without its number, such as the `14.5` or `C.3` before it.
-fn strip_leading_number(heading: &str) -> String {
-    let digits = heading.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
-    let after = if digits.len() < heading.len() {
-        digits
-    } else {
-        let mut chars = heading.char_indices();
-        match (chars.next(), chars.next()) {
-            (Some((_, letter)), Some((dot, '.'))) if letter.is_ascii_uppercase() => {
-                heading[dot..].trim_start_matches(|c: char| c.is_ascii_digit() || c == '.')
-            }
-            _ => heading,
-        }
-    };
-    if after.len() == heading.len() || !after.starts_with(char::is_whitespace) {
-        return heading.to_owned();
-    }
-    after.trim_start().to_owned()
+/// Chapter stem → its page, the index under the stem its file has.
+fn spec_chapters() -> BTreeMap<&'static str, &'static Page> {
+    cairn_lang_docs::pages()
+        .iter()
+        .filter_map(|page| match page.path() {
+            "spec" => Some(("index", page)),
+            path => path
+                .strip_prefix("spec/")
+                .filter(|stem| !stem.contains('/'))
+                .map(|stem| (stem, page)),
+        })
+        .collect()
 }
 
 /// The chapter and titles of a Markdown link citing the spec, given the offset of its `[`.
@@ -248,6 +204,14 @@ fn quoted_titles_after(rest: &str) -> Vec<String> {
         Some((end, _)) => &rest[..end],
         None => rest,
     };
+    // A quote right after the chapter closes the string literal the chapter is written in.
+    if window
+        .strip_prefix(".md")
+        .unwrap_or(window)
+        .starts_with('"')
+    {
+        return Vec::new();
+    }
     // A citation inside a Rust string literal escapes its quotes.
     let joined = unwrapped(window).replace("\\\"", "\"");
 
@@ -290,8 +254,8 @@ fn unwrapped(text: &str) -> String {
         .join(" ")
 }
 
-fn nearest(titles: &[String], written: &str) -> String {
-    let mut ranked: Vec<&String> = titles.iter().collect();
+fn nearest(titles: &[&str], written: &str) -> String {
+    let mut ranked: Vec<&str> = titles.to_vec();
     ranked.sort_by(|a, b| {
         strsim::normalized_levenshtein(b, written)
             .total_cmp(&strsim::normalized_levenshtein(a, written))
@@ -309,20 +273,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn numbers_are_stripped_only_when_they_are_numbers() {
-        assert_eq!(
-            strip_leading_number("14.5 Place-and-route"),
-            "Place-and-route"
-        );
-        assert_eq!(
-            strip_leading_number("C.3 How a break is communicated"),
-            "How a break is communicated"
-        );
-        assert_eq!(strip_leading_number("3D coordinates"), "3D coordinates");
-        assert_eq!(strip_leading_number("Glossary"), "Glossary");
-    }
-
-    #[test]
     fn a_title_wrapped_across_comment_lines_reads_whole() {
         assert_eq!(
             quoted_titles_after("` \"Java / Bedrock\n    /// portability\": rest"),
@@ -333,6 +283,7 @@ mod tests {
             ["Time model", "Connection to the IR and phases"]
         );
         assert!(quoted_titles_after("` says \"not a title\"").is_empty());
+        assert!(quoted_titles_after("\".into(), \"not a title\"").is_empty());
         assert_eq!(quoted_titles_after(r#"` \"Escaped\""#), ["Escaped"]);
     }
 
@@ -346,6 +297,64 @@ mod tests {
         assert_eq!(
             markdown_link_citation("[lint \"X\"](https://x/other/)", 0),
             None
+        );
+    }
+
+    #[test]
+    fn a_citation_must_name_one_part_of_a_chapter_that_exists() {
+        let index = Page::new("spec", "Specification", "## Two version axes\n");
+        let lint = Page::new(
+            "spec/lint",
+            "11. Lint",
+            "## 11.3 Error vs warning\n\n- **Term.** Defined.\n\n## 11.4 Twice\n\n## 11.5 Twice\n",
+        );
+        let chapters = BTreeMap::from([("index", &index), ("lint", &lint)]);
+        // Written as `SPEC/` so that this lint does not read the citations as its own.
+        let text = "\
+`SPEC/lint` \"Error vs warning\"
+`SPEC/lint` \"Term\" and \"Lint\"
+`SPEC/index` \"Two version axes\"
+`SPEC/nowhere` \"Anything\"
+`SPEC/lint` \"Error vs warnings\"
+`SPEC/lint` \"Twice\"
+"
+        .replace("SPEC", "spec");
+        let mut findings = Vec::new();
+        named_citations(Path::new("x.rs"), &text, &chapters, &mut findings);
+        let findings: Vec<_> = findings
+            .iter()
+            .map(|finding| (finding.line, finding.message.replace("spec", "SPEC")))
+            .collect();
+        assert_eq!(
+            findings,
+            [
+                (
+                    Some(4),
+                    "`SPEC/nowhere` names no chapter; the chapters are: index, lint".to_owned()
+                ),
+                (
+                    Some(5),
+                    "`SPEC/lint` has no section titled \"Error vs warnings\"; nearest: \
+                     \"Error vs warning\", \"Lint\", \"Twice\""
+                        .to_owned()
+                ),
+                (
+                    Some(6),
+                    "`SPEC/lint` has 2 parts titled \"Twice\"; cite a title only one of them \
+                     has, or retitle the others"
+                        .to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_spec_index_is_cited_by_its_file_stem() {
+        let chapters = spec_chapters();
+        assert_eq!(chapters.get("index").map(|page| page.path()), Some("spec"));
+        assert_eq!(
+            chapters.get("lint").map(|page| page.path()),
+            Some("spec/lint")
         );
     }
 

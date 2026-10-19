@@ -16,11 +16,12 @@ to keep in mind while editing.
 | `cairn-lang-nbt` | NBT codec | — |
 | `cairn-lang-formats` | `.nbt` and `.mcstructure` writers, registry packs, portability | core, nbt |
 | `cairn-lang-redstone` | logic IR, netlist, place-and-route | core |
-| `cairn-lang-cli` | the `cairn` binary | core, formats, redstone |
+| `cairn-lang-cli` | the `cairn` binary | core, docs, formats, redstone |
 | `cairn-lang-lsp` | the `cairn-lsp` server | core, formats |
 | `cairn-lang-wasm` | browser bindings, a placeholder | core |
 | `cairn-lang-tree-sitter` | editor grammar, separate from core's parser | — |
-| `xtask` | `cargo xtask lint`, unpublished | — |
+| `cairn-lang-docs` | the site's Markdown pages, embedded; its manifest is `website/Cargo.toml` | — |
+| `xtask` | `cargo xtask lint`, unpublished | docs |
 
 Dependencies point one way. A library never depends on `cli` or `lsp`, so code both front ends
 need lives in the library they call. Modules inside a crate form a DAG too: when two modules need

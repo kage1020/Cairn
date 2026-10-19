@@ -66,9 +66,9 @@ surfaces are responsible for their own pinning.**
 Internal surfaces:
 
 - The Rust API of every workspace crate (`cairn-lang-core`, `cairn-lang-nbt`, `cairn-lang-formats`,
-  `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`). These crates are published to
-  crates.io from the first monthly minor that contains them, but every item that is not the CLI's
-  transitive public dependency is marked `#[doc(hidden)]`.
+  `cairn-lang-redstone`, `cairn-lang-lsp`, `cairn-lang-wasm`, `cairn-lang-docs`). These crates are
+  published to crates.io from the first monthly minor that contains them, but every item that is
+  not the CLI's transitive public dependency is marked `#[doc(hidden)]`.
 - The compiler's intermediate representation (Intent IR, Semantic IR, block-array pivot
   layouts).
 - The on-disk shape of incremental build caches (`target/`-equivalents inside the project

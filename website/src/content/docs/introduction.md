@@ -44,6 +44,12 @@ See [Purpose and Scope](/spec/overview/) for the normative wording.
 | [Developer Guide](/development/) | The Rust workspace, how the crates split, and how to land changes. |
 | [Playground](/playground/) | A placeholder for the browser-hosted compiler. Tracks `cairn-lang-wasm`. |
 
+Every page of this site but the home page and the playground also ships inside `cairn`, as the
+release you installed has it: `cairn docs` lists the pages and `cairn docs spec/syntax` prints one as
+Markdown, with no network. For a language model, [`/llms.txt`](/llms.txt) indexes the site, the same
+pages are served as Markdown at their URL followed by `index.md`, and
+[`/llms-full.txt`](/llms-full.txt) is every English one in one file.
+
 ## Status
 
 Cairn is at the design stage, draft `2026.06`. The language is being designed in the open and the

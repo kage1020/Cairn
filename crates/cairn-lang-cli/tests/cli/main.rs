@@ -5,6 +5,7 @@ mod common;
 mod check;
 mod compile;
 mod contract;
+mod docs;
 mod info;
 mod limits;
 mod lower;

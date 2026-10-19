@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 cairn-lang-core.workspace = true
+cairn-lang-docs.workspace = true
 cairn-lang-formats.workspace = true
 cairn-lang-redstone.workspace = true
 # Keep clap's default features: `error-context` and `suggestions` name a mistyped flag and the

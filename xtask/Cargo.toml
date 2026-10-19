@@ -12,6 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
+cairn-lang-docs.workspace = true
 proc-macro2 = { version = "1.0.106", features = ["span-locations"] }
 regex = "1.13.1"
 serde_json.workspace = true

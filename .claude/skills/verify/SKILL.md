@@ -30,7 +30,8 @@ Add these when the change reaches them:
 - `crates/cairn-lang-tree-sitter/grammar.js` or its corpus: `pnpm install`, `pnpm run generate`
   (the generated files must come out unchanged after you commit them) and `pnpm test`, in that
   crate's directory.
-- `website/`: `pnpm install`, `pnpm run check` and `pnpm run build` in `website/`.
+- `website/`: `pnpm install`, `pnpm run check` and `pnpm run build` in `website/`, then
+  `cargo xtask lint --site website/dist site-parity` from the root.
 - `editors/vscode/`: `pnpm install` and `pnpm run package` in `editors/vscode/`.
 - A new dependency or a recently stabilised API: CI's `MSRV` job runs
   `cargo +<rust-version> check --workspace --locked --all-features` at the `rust-version` in

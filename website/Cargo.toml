@@ -1,0 +1,21 @@
+[package]
+name = "cairn-lang-docs"
+description = "The Cairn documentation site's Markdown pages, the specification among them, embedded for offline reading"
+version.workspace = true
+publish.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+readme = "rust/README.md"
+build = "rust/build.rs"
+# The pages are the site's own sources, so the crate lives where Starlight reads them.
+include = ["rust/**", "src/content/docs/**/*.md"]
+
+[lib]
+path = "rust/lib.rs"
+
+[lints]
+workspace = true

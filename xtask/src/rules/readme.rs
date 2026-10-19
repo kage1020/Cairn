@@ -404,7 +404,7 @@ use private::Item;
 
     #[test]
     fn the_help_comes_back_plain_when_the_environment_forces_colour() {
-        let repo = Repo::open(None).expect("open the checkout");
+        let repo = Repo::open(None, None).expect("open the checkout");
         let output = help_command(&repo)
             .env("CLICOLOR_FORCE", "1")
             .output()

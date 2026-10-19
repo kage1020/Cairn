@@ -9,6 +9,7 @@ members = [
     "crates/cairn-lang-lsp",
     "crates/cairn-lang-wasm",
     "crates/cairn-lang-tree-sitter",
+    "website",
     "xtask",
 ]
 
@@ -24,6 +25,7 @@ publish = true
 
 [workspace.dependencies]
 cairn-lang-core = { version = "2026.10.0", path = "crates/cairn-lang-core" }
+cairn-lang-docs = { version = "2026.10.0", path = "website" }
 cairn-lang-nbt = { version = "2026.10.0", path = "crates/cairn-lang-nbt" }
 cairn-lang-formats = { version = "2026.10.0", path = "crates/cairn-lang-formats" }
 cairn-lang-redstone = { version = "2026.10.0", path = "crates/cairn-lang-redstone" }

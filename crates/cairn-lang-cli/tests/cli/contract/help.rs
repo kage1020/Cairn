@@ -16,6 +16,10 @@ fn long_help_states_each_subcommands_exit_codes() {
         ("lower", "and 2 when the file cannot be located"),
         ("compile", "and 2 when the source file cannot be located"),
         ("synth", "with exit 2, before the file is read"),
+        (
+            "docs",
+            "and 2 when PAGE or TITLE names nothing this binary carries",
+        ),
     ] {
         let run = Run::from(cairn(subcommand, &["--help"]));
         assert_eq!(run.code, Some(0), "stderr={}", run.stderr);
