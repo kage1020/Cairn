@@ -19,8 +19,8 @@ importers:
         specifier: ^13.0.1
         version: 13.1.0
       tree-sitter-cli:
-        specifier: ^0.26.11
-        version: 0.26.11
+        specifier: ^0.27.1
+        version: 0.27.1
 
 packages:
 
@@ -106,8 +106,8 @@ packages:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
 
-  tree-sitter-cli@0.26.11:
-    resolution: {integrity: sha512-/hRCA0Ehkgk6B5WTYSiENk1R2Zv3LJcfvL3wjofzx+EYaKySZDu0agGRQcccay9Lg7wxJWsDa9cTRS92wsM5gQ==}
+  tree-sitter-cli@0.27.1:
+    resolution: {integrity: sha512-WFPEjxwscCjZP9uYj0rxT2TyGBkDcXUkGTthrMpxZFGvzXEYsbC3J0633Ps8dd2mMsdsbU8oVwmQ148lLHI7Xw==}
     engines: {node: '>=12.0.0'}
     hasBin: true
 
@@ -192,7 +192,7 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.7)
       picomatch: 4.0.7
 
-  tree-sitter-cli@0.26.11: {}
+  tree-sitter-cli@0.27.1: {}
 
   undici@8.12.3: {}
 
