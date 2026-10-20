@@ -1,6 +1,8 @@
 //! The Bedrock `.mcstructure` tag tree and bytes, against wiki.bedrock.dev's "mcstructure" page.
 
-use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockState, Dims, PALETTE_CAPACITY, Palette, PaletteIndex,
+};
 use cairn_lang_formats::bedrock_state::BedrockStateError;
 use cairn_lang_formats::bedrock_structure::{
     BedrockStructureError, build_mcstructure_tag, prepare_mcstructure, write_mcstructure,
@@ -468,4 +470,94 @@ fn stairs_of_two_ids_with_equal_states_keep_an_entry_each() {
             voxel + 1
         );
     }
+}
+
+const OAK_STAIRS: &str = "minecraft:oak_stairs";
+
+/// Air, a north oak stair, the same stair `outer_left`, which shares its slot, bare blocks of
+/// distinct ids until every `block_palette` slot is taken, then `last` as entry
+/// `PALETTE_CAPACITY + 1`, over voxels naming entries `0`, `2` and `u16::MAX`.
+fn every_slot_taken_then(last: BlockState) -> BlockArray {
+    let mut entries = vec![
+        BlockState::air(),
+        stair(OAK_STAIRS, "north", "straight"),
+        stair(OAK_STAIRS, "north", "outer_left"),
+    ];
+    entries.extend((3..=PALETTE_CAPACITY).map(|i| BlockState::bare(format!("test:block_{i}"))));
+    entries.push(last);
+    BlockArray {
+        dims: Dims { x: 1, y: 1, z: 3 },
+        palette: Palette { entries },
+        voxels: vec![PaletteIndex::AIR, PaletteIndex(2), PaletteIndex(u16::MAX)],
+        block_entities: vec![],
+        entities: vec![],
+        source_scope: "struct::every_slot_taken".to_owned(),
+    }
+}
+
+#[test]
+fn an_entry_translating_to_a_new_block_past_the_last_slot_is_refused_by_both_builders() {
+    let ba = every_slot_taken_then(stair(OAK_STAIRS, "south", "straight"));
+    let target = target_1_21_60();
+    let refusals = [
+        (
+            "prepare_mcstructure",
+            prepare_mcstructure(&ba, &target).err(),
+        ),
+        (
+            "build_mcstructure_tag",
+            build_mcstructure_tag(&ba, &target).err(),
+        ),
+    ];
+    for (builder, err) in refusals {
+        let Some(err) = err else {
+            panic!("{builder}: accepted");
+        };
+        assert!(
+            matches!(
+                &err,
+                BedrockStructureError::BlockPaletteFull {
+                    index: 65_537,
+                    id,
+                } if id == OAK_STAIRS
+            ),
+            "{builder}: got {err:?}",
+        );
+        assert_eq!(
+            err.to_string(),
+            "palette entry 65537, `minecraft:oak_stairs`, translates to a new Bedrock block, but \
+             `block_palette` already holds the 65536 a palette index can name",
+            "{builder}",
+        );
+    }
+}
+
+#[test]
+fn an_entry_past_the_last_slot_is_written_when_it_merges_into_an_earlier_block() {
+    let ba = every_slot_taken_then(stair(OAK_STAIRS, "north", "outer_right"));
+    let (root, notes) = build_mcstructure_tag(&ba, &target_1_21_60()).expect("build");
+
+    let names: Vec<&str> = block_palette(&root).iter().map(name_of).collect();
+    let bare = ba.palette.entries[3..=PALETTE_CAPACITY].iter();
+    let expected: Vec<&str> = ["minecraft:air", OAK_STAIRS]
+        .into_iter()
+        .chain(bare.map(|entry| entry.id.as_str()))
+        .collect();
+    assert_eq!(names, expected);
+    assert_eq!(block_layer(&root), [0, 1, 65_534]);
+    assert_eq!(
+        note_fields(&notes),
+        [
+            (
+                OAK_STAIRS,
+                "facing=north,half=bottom,shape=outer_left",
+                &dropped_shape("outer_left"),
+            ),
+            (
+                OAK_STAIRS,
+                "facing=north,half=bottom,shape=outer_right",
+                &dropped_shape("outer_right"),
+            ),
+        ],
+    );
 }

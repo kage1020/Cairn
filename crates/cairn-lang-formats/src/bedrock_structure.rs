@@ -2,7 +2,9 @@
 //! `(x * size_y + y) * size_z + z`, unlike Java's `blocks`; the second, waterlogging layer is all
 //! `-1`, since lowering authors none.
 
-use cairn_lang_core::block_array::{BlockArray, PaletteIndex};
+use std::collections::HashMap;
+
+use cairn_lang_core::block_array::{BlockArray, PALETTE_CAPACITY, PaletteIndex};
 use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
@@ -15,7 +17,7 @@ use thiserror::Error;
 use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
-use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
+use crate::dims::{VolumeError, dims_to_i32, list_volume};
 
 /// One intent a palette entry dropped to fit Bedrock, reported as `W_INTENT_DEGRADED`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +78,7 @@ pub enum BedrockStructureError {
     /// A list longer than an NBT list's `i32` length prefix allows.
     #[error("the `{list}` list would hold {len} entries, past the NBT list limit of 2147483647")]
     ListTooLong {
-        /// `"block_indices"` or `"block_palette"`.
+        /// `"block_indices"`.
         list: &'static str,
         /// Its length.
         len: usize,
@@ -88,6 +90,19 @@ pub enum BedrockStructureError {
         volume: usize,
         /// `voxels.len()`.
         voxels: usize,
+    },
+    /// A palette entry translating to a new Bedrock block once `block_palette` holds
+    /// [`PALETTE_CAPACITY`] blocks, reachable only through the public fields.
+    #[error(
+        "palette entry {index}, `{id}`, translates to a new Bedrock block, but `block_palette` \
+         already holds the {capacity} a palette index can name",
+        capacity = PALETTE_CAPACITY
+    )]
+    BlockPaletteFull {
+        /// The entry's position in the palette.
+        index: usize,
+        /// The entry's id.
+        id: String,
     },
     /// A palette string the NBT encoder cannot write, checked first since the file writes it last.
     #[error("palette entry `{id}`: {field} cannot be written as NBT: {source}")]
@@ -156,19 +171,17 @@ impl std::fmt::Debug for McStructure<'_> {
 /// # Errors
 ///
 /// The first fault found, as any [`BedrockStructureError`] but [`BedrockStructureError::Nbt`].
-///
-/// # Panics
-///
-/// When `block_palette` needs a slot past `u16::MAX`, which only a hand-built palette can cause.
 pub fn prepare_mcstructure<'a>(
     block_array: &'a BlockArray,
     target: &BedrockTarget,
 ) -> Result<(McStructure<'a>, Vec<ParityNote>), BedrockStructureError> {
     let entries = &block_array.palette.entries;
     let mut block_palette: Vec<Compound> = Vec::with_capacity(entries.len());
+    // Keyed by name: blocks of two names never merge, and translation gives one name few states.
+    let mut slots_by_name: HashMap<&str, Vec<u16>> = HashMap::new();
     let mut slots: Vec<u16> = Vec::with_capacity(entries.len());
     let mut notes: Vec<ParityNote> = Vec::new();
-    for entry in entries {
+    for (index, entry) in entries.iter().enumerate() {
         if !is_concrete_id(&entry.id) {
             return Err(BedrockStructureError::AbstractPaletteEntry {
                 id: entry.id.clone(),
@@ -188,25 +201,27 @@ pub fn prepare_mcstructure<'a>(
         let compound = palette_entry(&entry.id, translated.states, target.block_version);
         // The palette is a set (`spec/compilation` "Within-phase conflicts and the palette"):
         // an entry whose translation folds into an earlier one takes that slot, so air stays at 0.
-        let slot = block_palette
+        let named = slots_by_name.entry(&entry.id).or_default();
+        let earlier = named
             .iter()
-            .position(|written| *written == compound)
-            .unwrap_or_else(|| {
-                block_palette.push(compound);
-                block_palette.len() - 1
-            });
-        slots.push(
-            u16::try_from(slot)
-                .expect("block_palette grew past u16::MAX slots; widen PaletteIndex first"),
-        );
+            .copied()
+            .find(|&slot| block_palette[usize::from(slot)] == compound);
+        let slot = if let Some(slot) = earlier {
+            slot
+        } else {
+            let slot = u16::try_from(block_palette.len()).map_err(|_| {
+                BedrockStructureError::BlockPaletteFull {
+                    index,
+                    id: entry.id.clone(),
+                }
+            })?;
+            block_palette.push(compound);
+            named.push(slot);
+            slot
+        };
+        slots.push(slot);
     }
     let block_palette_len = block_palette.len();
-    if !fits_list_limit(block_palette_len) {
-        return Err(BedrockStructureError::ListTooLong {
-            list: "block_palette",
-            len: block_palette_len,
-        });
-    }
     let size = dims_to_i32(&block_array.dims)?;
     let volume = list_volume(block_array)?;
     if let Some((index, len)) = block_array.first_index_outside_palette() {
