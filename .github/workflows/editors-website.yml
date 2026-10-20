@@ -35,7 +35,7 @@ jobs:
           package_json_file: editors/vscode/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
 
@@ -57,7 +57,7 @@ jobs:
           package_json_file: website/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: website/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
