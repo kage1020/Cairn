@@ -66,7 +66,7 @@ fn json_format_is_valid_version_axes() {
         .as_array()
         .expect("semantic_sensitive is an array");
     // Nothing populates the semantic-sensitivity catalog, so this is empty.
-    assert!(sensitive.is_empty());
+    assert_eq!(*sensitive, [] as [serde_json::Value; 0]);
 }
 
 #[test]

@@ -484,9 +484,9 @@ fn local_delay_ticks_accessor_covers_every_variant() {
 
 #[test]
 fn buffer_coords_accessor_covers_every_variant() {
-    assert!(PlacementPhase::Unrouted.buffer_coords().is_empty());
-    assert!(routed().buffer_coords().is_empty());
-    assert!(delayed().buffer_coords().is_empty());
+    assert_eq!(PlacementPhase::Unrouted.buffer_coords(), []);
+    assert_eq!(routed().buffer_coords(), []);
+    assert_eq!(delayed().buffer_coords(), []);
     assert_eq!(
         legalized().buffer_coords(),
         &[BufferCoord::new(

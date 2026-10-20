@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::compile_crossing;
 use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
-use crate::diagnostic::DiagnosticCode;
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition_netlist_ir::EditionCell;
 use crate::grid::{PadColumn, input_pad};
 use crate::logic_ir::ScopeKind;
@@ -13,6 +13,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
 use crate::placement_ir::{BufferSegment, PlacedOutputNode};
 use crate::placement_ir::{
     CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, RouteLayer, ScopedPlacementIr,
+    ScopedPlacementIrEntry,
 };
 use crate::routing::compile_routing;
 use crate::routing_geometry::{Router, block_sites, collect_nets, net_trees};
@@ -21,8 +22,8 @@ use crate::test_fixtures::{DELAYED, placed_cell, reservation, scoped, staircase}
 #[test]
 fn no_scopes_input_yields_no_scopes_output() {
     let legalized = compile_crossing(&ScopedPlacementIr::new());
-    assert!(legalized.diagnostics.is_empty());
-    assert!(legalized.scoped.scopes.is_empty());
+    assert_eq!(legalized.diagnostics, [] as [Diagnostic; 0]);
+    assert_eq!(legalized.scoped.scopes, [] as [ScopedPlacementIrEntry; 0]);
 }
 
 #[test]
@@ -30,9 +31,12 @@ fn empty_scope_passes_through_untouched() {
     // Dropping an empty scope is `ScopedPlacementIr::push`'s job, not this pass's.
     let ir = PlacementIr::new(Edition::Java);
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "empty", ir));
-    assert!(legalized.diagnostics.is_empty());
+    assert_eq!(legalized.diagnostics, [] as [Diagnostic; 0]);
     assert_eq!(legalized.scoped.scopes.len(), 1);
-    assert!(legalized.scoped.scopes[0].ir.cells.is_empty());
+    assert_eq!(
+        legalized.scoped.scopes[0].ir.cells,
+        [] as [PlacedCellNode; 0]
+    );
 }
 
 #[test]
@@ -832,7 +836,7 @@ fn missing_region_with_cells_fires_no_circuit_region() {
 fn missing_region_empty_scope_passes_through() {
     let ir = PlacementIr::new(Edition::Java);
     let legalized = compile_crossing(&scoped(ScopeKind::Struct, "harmless", ir));
-    assert!(legalized.diagnostics.is_empty());
+    assert_eq!(legalized.diagnostics, [] as [Diagnostic; 0]);
     assert_eq!(legalized.scoped.scopes.len(), 1);
     assert!(legalized.scoped.scopes[0].ir.region.is_none());
 }

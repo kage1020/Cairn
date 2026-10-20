@@ -5,7 +5,9 @@ use super::compile_routing;
 use crate::edition_netlist_ir::EditionCell;
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
-use crate::placement_ir::{CellCoord, PlacedCellNode, PlacementIr, PlacementPhase};
+use crate::placement_ir::{
+    CellCoord, PlacedCellNode, PlacementIr, PlacementPhase, ScopedPlacementIrEntry,
+};
 use crate::test_fixtures::{ROUTED, placed_cell, reservation, scoped};
 
 #[test]
@@ -264,7 +266,7 @@ fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
         .find(|d| d.code == crate::DiagnosticCode::RouteCongestion)
         .unwrap_or_else(|| panic!("stage 3 must refuse too: {:?}", delayed.diagnostics));
     assert_eq!(delay_refusal.primary, format!("routed netlist for {said}"));
-    assert!(delayed.scoped.scopes.is_empty());
+    assert_eq!(delayed.scoped.scopes, [] as [ScopedPlacementIrEntry; 0]);
 
     for cell in &mut ir.cells {
         cell.phase = PlacementPhase::Delayed {
@@ -282,7 +284,7 @@ fn an_unreachable_sink_is_refused_by_every_pass_that_measures_it() {
         crossing_refusal.primary,
         format!("delayed netlist for {said}")
     );
-    assert!(legalized.scoped.scopes.is_empty());
+    assert_eq!(legalized.scoped.scopes, [] as [ScopedPlacementIrEntry; 0]);
 }
 
 #[test]

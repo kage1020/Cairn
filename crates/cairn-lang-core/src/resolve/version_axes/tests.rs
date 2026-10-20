@@ -187,7 +187,7 @@ fn semantic_sensitive_is_empty_without_catalog() {
     let src = "struct s size=4x4\n  walls height=3\n";
     let m = parse(src).expect("parse");
     let axes = compute_axes(&m, synthetic_portability(&[(Edition::Java, 0)]));
-    assert!(axes.semantic_sensitive.is_empty());
+    assert_eq!(axes.semantic_sensitive, [] as [SemanticSensitiveFinding; 0]);
 }
 
 #[test]

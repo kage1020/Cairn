@@ -228,7 +228,7 @@ fn did_open_publishes_the_documents_diagnostics_with_its_version() {
 
     session.did_open(CLEAN, 2);
     let message = session.read_until_method("textDocument/publishDiagnostics");
-    assert!(diagnostics_of(&message).is_empty());
+    assert_eq!(diagnostics_of(&message).len(), 0);
     session.shutdown();
 }
 
@@ -264,7 +264,10 @@ fn documents_publish_under_their_own_uris() {
     let session = Session::start();
     session.did_open_uri(broken_uri, DUPLICATE, 1);
     let first = session.read_until_method("textDocument/publishDiagnostics");
-    assert!(!diagnostics_for(&first, broken_uri).is_empty());
+    assert!(
+        !diagnostics_for(&first, broken_uri).is_empty(),
+        "broken file diagnosed"
+    );
     session.did_open_uri(clean_uri, CLEAN, 1);
     let second = session.read_until_method("textDocument/publishDiagnostics");
     assert_eq!(diagnostics_for(&second, clean_uri).len(), 0);
@@ -306,7 +309,7 @@ fn an_unknown_notification_before_shutdown_is_ignored() {
     }));
     session.did_open(CLEAN, 1);
     let published = session.read_until_method("textDocument/publishDiagnostics");
-    assert!(diagnostics_of(&published).is_empty());
+    assert_eq!(diagnostics_of(&published).len(), 0);
     session.shutdown();
 }
 
@@ -510,7 +513,7 @@ fn completion_answers_in_an_empty_document() {
     let items = response["result"]
         .as_array()
         .unwrap_or_else(|| panic!("expected items in an empty document, got: {response}"));
-    assert!(!items.is_empty());
+    assert!(!items.is_empty(), "an empty document still has candidates");
     session.shutdown();
 }
 

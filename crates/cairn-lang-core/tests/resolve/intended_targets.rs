@@ -148,12 +148,15 @@ fn a_floor_above_part_of_the_list_is_a_warning() {
 
 #[test]
 fn a_list_at_or_above_the_floor_is_silent() {
-    assert!(codes("@requires version>=1.21\n@intended_targets [\"1.21\",\"1.21.4\"]\n").is_empty(),);
+    assert_eq!(
+        codes("@requires version>=1.21\n@intended_targets [\"1.21\",\"1.21.4\"]\n"),
+        [] as [&str; 0]
+    );
 }
 
 #[test]
 fn a_file_without_a_floor_raises_nothing() {
-    assert!(codes("@intended_targets [\"1.21.4\"]\n").is_empty());
+    assert_eq!(codes("@intended_targets [\"1.21.4\"]\n"), [] as [&str; 0]);
 }
 
 /// A `def`'s floor is a floor on every `place` naming it, per `spec/versioning-editions`
@@ -250,13 +253,19 @@ fn a_buildable_version_above_the_floor_keeps_the_finding_a_warning() {
 
 #[test]
 fn an_empty_list_is_not_a_contradiction() {
-    assert!(codes("@requires version>=1.21\n@intended_targets []\n").is_empty());
+    assert_eq!(
+        codes("@requires version>=1.21\n@intended_targets []\n"),
+        [] as [&str; 0]
+    );
 }
 
 /// Such a floor is its own `E_REQUIRES_UNORDERABLE`, raised where a target is pinned.
 #[test]
 fn a_floor_this_table_cannot_place_refuses_no_intended_target() {
-    assert!(codes("@requires version>=1.21.40\n@intended_targets [\"1.21\"]\n").is_empty());
+    assert_eq!(
+        codes("@requires version>=1.21.40\n@intended_targets [\"1.21\"]\n"),
+        [] as [&str; 0]
+    );
 }
 
 /// `version>=1.21.4` falls between two Bedrock rows, so its repair is on its own line.
@@ -341,14 +350,18 @@ fn a_floor_this_table_cannot_place_leaves_the_others_to_refuse_every_target() {
 
 #[test]
 fn a_floor_scoped_to_the_other_edition_is_inert() {
-    assert!(
-        codes("@requires bedrock version>=1.21.60\n@intended_targets [\"1.20.4\"]\n").is_empty()
+    assert_eq!(
+        codes("@requires bedrock version>=1.21.60\n@intended_targets [\"1.20.4\"]\n"),
+        [] as [&str; 0]
     );
 }
 
 #[test]
 fn a_label_spelled_with_trailing_zeros_finds_its_row() {
-    assert!(codes("@requires version>=1.21\n@intended_targets [\"1.21.0\"]\n").is_empty());
+    assert_eq!(
+        codes("@requires version>=1.21\n@intended_targets [\"1.21.0\"]\n"),
+        [] as [&str; 0]
+    );
 }
 
 #[test]

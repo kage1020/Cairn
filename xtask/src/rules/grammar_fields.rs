@@ -237,10 +237,9 @@ mod tests {
 
     #[test]
     fn only_error_cases_may_omit_the_divider() {
-        assert!(
-            parse_cases("===\nRejected\n:error\n===\n\nin\n").unwrap()[0]
-                .tree
-                .is_empty()
+        assert_eq!(
+            parse_cases("===\nRejected\n:error\n===\n\nin\n").unwrap()[0].tree,
+            ""
         );
         assert!(parse_cases("===\nNo divider\n===\n\nin\n").is_err());
     }

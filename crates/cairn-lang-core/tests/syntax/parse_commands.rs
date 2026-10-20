@@ -63,7 +63,7 @@ fn parses_empty_theme_block() {
         panic!("expected Theme item, got {:?}", module.items[0]);
     };
     assert_eq!(name, "medieval");
-    assert!(body.is_empty());
+    assert_eq!(body.as_slice(), []);
 }
 
 #[test]
@@ -562,7 +562,7 @@ fn invalid_int_user_message_is_string_compatible() {
 fn dotted_ref_constructor_pins_non_empty_shape() {
     let single = DottedRef::new("sig".into(), Vec::new());
     assert_eq!(single.head(), "sig");
-    assert!(single.tail().is_empty());
+    assert_eq!(single.tail(), [] as [String; 0]);
     assert_eq!(single.len().get(), 1);
 
     let multi = DottedRef::new("sig".into(), vec!["step".into(), "edge".into()]);

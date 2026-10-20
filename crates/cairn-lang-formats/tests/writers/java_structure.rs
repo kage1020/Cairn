@@ -101,7 +101,7 @@ fn unit_air_root_has_size_palette_blocks_entities_dataversion() {
         _ => panic!("blocks is not a List"),
     }
     match &root.entries["entities"] {
-        Tag::List(l) => assert!(l.items.is_empty()),
+        Tag::List(l) => assert_eq!(l.items, [] as [Tag; 0]),
         _ => panic!("entities is not a List"),
     }
     assert_eq!(

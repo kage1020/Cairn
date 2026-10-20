@@ -357,7 +357,7 @@ mod refusals {
     //! What the lexer refuses, with a message naming what would fix the file.
 
     use cairn_lang_core::error::LexError;
-    use cairn_lang_core::lex::{TokenKind, lex};
+    use cairn_lang_core::lex::{Token, TokenKind, lex};
 
     use crate::kinds;
 
@@ -601,7 +601,7 @@ mod refusals {
 
     #[test]
     fn a_byte_order_mark_alone_is_an_empty_file() {
-        assert!(lex("\u{feff}").expect("lex").is_empty());
+        assert_eq!(lex("\u{feff}").expect("lex"), [] as [Token; 0]);
         assert!(lex("\u{feff}  struct s\n").is_ok());
     }
 }

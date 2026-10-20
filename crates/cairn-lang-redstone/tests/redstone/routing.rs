@@ -3,7 +3,10 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
-use cairn_lang_redstone::{DiagnosticCode, PlacedCellNode, ScopedPlacementIr, compile_routing};
+use cairn_lang_redstone::{
+    Diagnostic, DiagnosticCode, PlacedCellNode, ScopedPlacementIr, ScopedPlacementIrEntry,
+    compile_routing,
+};
 
 use crate::common::{load_example, normalize_stage_tags, placement_from_source, strip_int_field};
 
@@ -256,8 +259,8 @@ struct pack size=5x3
 fn empty_placement_ir_produces_empty_routing_output() {
     let scoped = ScopedPlacementIr::new();
     let routed = compile_routing(&scoped);
-    assert!(routed.diagnostics.is_empty());
-    assert!(routed.scoped.scopes.is_empty());
+    assert_eq!(routed.diagnostics, [] as [Diagnostic; 0]);
+    assert_eq!(routed.scoped.scopes, [] as [ScopedPlacementIrEntry; 0]);
 }
 
 #[test]

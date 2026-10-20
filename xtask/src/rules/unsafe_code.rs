@@ -226,7 +226,7 @@ fn g() {}
 #[doc = \"allow(unsafe_code)\"]
 fn f() { let _ = \"#[allow(unsafe_code)]\"; }
 ";
-        assert!(lifts(source).is_empty());
+        assert_eq!(lifts(source), [] as [(usize, Vec<String>); 0]);
     }
 
     #[test]

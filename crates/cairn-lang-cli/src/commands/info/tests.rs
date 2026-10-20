@@ -35,7 +35,7 @@ fn the_notes_answer_the_figure_they_sit_under() {
             ),
         ],
     );
-    assert!(unsupported_notes(Edition::Java, &[]).is_empty());
+    assert_eq!(unsupported_notes(Edition::Java, &[]), [] as [String; 0]);
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn the_degraded_notes_answer_the_figure_they_sit_under() {
             ),
         ],
     );
-    assert!(degraded_notes(Edition::Java, &[]).is_empty());
+    assert_eq!(degraded_notes(Edition::Java, &[]), [] as [String; 0]);
 }
 
 #[test]

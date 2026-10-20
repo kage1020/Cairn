@@ -26,7 +26,7 @@ fn stair_props(facing: &str, half: &str, shape: &str) -> IndexMap<String, String
 fn bare_block_has_empty_states_and_no_degradation() {
     let t = translate("minecraft:oak_planks", &IndexMap::new()).expect("bare");
     assert!(t.states.entries.is_empty());
-    assert!(t.degraded.is_empty());
+    assert_eq!(t.degraded, [] as [DroppedIntent; 0]);
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn stair_maps_facing_and_half_straight_is_lossless() {
     assert_eq!(t.states.entries.get("weirdo_direction"), Some(&Tag::Int(3)));
     assert_eq!(t.states.entries.get("upside_down_bit"), Some(&Tag::Byte(0)));
     assert_eq!(t.states.entries.len(), 2);
-    assert!(t.degraded.is_empty());
+    assert_eq!(t.degraded, [] as [DroppedIntent; 0]);
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn non_straight_shape_drops_as_the_property_and_the_value() {
         &stair_props("south", "top", "straight"),
     )
     .expect("stair");
-    assert!(straight.degraded.is_empty());
+    assert_eq!(straight.degraded, [] as [DroppedIntent; 0]);
 }
 
 #[test]

@@ -217,7 +217,7 @@ mod tests {
     fn a_floor_above_every_row_is_met_by_no_target() {
         assert_eq!(java().place("99.0"), FloorPlacement::AboveEvery);
         assert_eq!(java().verdict("99.0", 4189), FloorVerdict::Below);
-        assert!(satisfying(&java(), "99.0").is_empty());
+        assert_eq!(satisfying(&java(), "99.0"), [] as [&str; 0]);
     }
 
     #[test]
@@ -296,6 +296,6 @@ mod tests {
     fn an_empty_table_places_nothing() {
         let empty = VersionOrder::new([]);
         assert_eq!(empty.place("1.21"), FloorPlacement::Unplaceable);
-        assert!(satisfying(&empty, "1.21").is_empty());
+        assert_eq!(satisfying(&empty, "1.21"), [] as [&str; 0]);
     }
 }

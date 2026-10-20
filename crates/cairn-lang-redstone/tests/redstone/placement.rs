@@ -4,7 +4,10 @@
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
-use cairn_lang_redstone::{DiagnosticCode, EditionCell, ScopedEditionNetlistIr, compile_placement};
+use cairn_lang_redstone::{
+    Diagnostic, DiagnosticCode, EditionCell, ScopedEditionNetlistIr, ScopedPlacementIrEntry,
+    compile_placement,
+};
 
 use crate::common::{edition_netlist_from_source, load_example};
 
@@ -249,9 +252,9 @@ fn empty_edition_netlist_produces_no_placement_entry() {
     let intent = lower(&module);
     let scoped = ScopedEditionNetlistIr::new();
     let out = compile_placement(&scoped, &intent);
-    assert!(out.diagnostics.is_empty());
+    assert_eq!(out.diagnostics, [] as [Diagnostic; 0]);
     assert!(out.scoped.is_empty());
-    assert!(out.scoped.scopes.is_empty());
+    assert_eq!(out.scoped.scopes, [] as [ScopedPlacementIrEntry; 0]);
 }
 
 #[test]
@@ -926,7 +929,7 @@ fn a_row_of_twice_the_cell_count_plus_one_places_every_cell() {
 fn one_cell_more_than_the_row_holds_is_refused() {
     let out = placement_of(&source_with_cells(5, 4, 8, 3));
 
-    assert!(out.scoped.scopes.is_empty());
+    assert_eq!(out.scoped.scopes, [] as [ScopedPlacementIrEntry; 0]);
     let diagnostic = out
         .diagnostics
         .iter()
@@ -943,7 +946,7 @@ fn one_cell_more_than_the_row_holds_is_refused() {
 fn a_scope_with_cells_in_one_column_is_refused_on_its_row() {
     let out = placement_of(&source_with_cells(1, 1, 5, 2));
 
-    assert!(out.scoped.scopes.is_empty());
+    assert_eq!(out.scoped.scopes, [] as [ScopedPlacementIrEntry; 0]);
     let [diagnostic] = out.diagnostics.as_slice() else {
         panic!("one finding: {:?}", out.diagnostics);
     };
@@ -1000,7 +1003,7 @@ struct sens size=8x5
 fn a_region_too_shallow_for_a_lane_either_side_of_the_row_is_refused() {
     let refused = placement_of(&source_with_cells(1, 9, 2, 4));
 
-    assert!(refused.scoped.scopes.is_empty());
+    assert_eq!(refused.scoped.scopes, [] as [ScopedPlacementIrEntry; 0]);
     let diagnostic = refused
         .diagnostics
         .iter()

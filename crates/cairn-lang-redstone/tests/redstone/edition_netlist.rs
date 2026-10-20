@@ -5,8 +5,8 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{
     EditionCell, EditionCellNode, GateKind, GateNode, InputPort, LogicIr, NetRef, OutputPort,
-    PortName, ScopeKind, ScopedLogicIr, ScopedLogicIrEntry, SignalRef, compile_edition_netlist,
-    compile_netlist,
+    PortName, ScopeKind, ScopedEditionNetlistIrEntry, ScopedLogicIr, ScopedLogicIrEntry, SignalRef,
+    compile_edition_netlist, compile_netlist,
 };
 
 use crate::common::{load_example, sig, synth_source};
@@ -218,7 +218,7 @@ fn empty_netlist_scopes_produce_no_edition_entry() {
     let scoped = cairn_lang_redstone::ScopedNetlistIr::new();
     let out = compile_edition_netlist(&scoped, Edition::Java);
     assert!(out.is_empty());
-    assert!(out.scopes.is_empty());
+    assert_eq!(out.scopes, [] as [ScopedEditionNetlistIrEntry; 0]);
 }
 
 #[test]

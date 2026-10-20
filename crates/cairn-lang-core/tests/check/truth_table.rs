@@ -61,13 +61,19 @@ fn found_covers(found: &Diagnostic) -> String {
 
 #[test]
 fn a_complete_table_is_quiet() {
-    assert!(codes(&table("sig.a, sig.b", "00->0; 01->0; 10->0; 11->0")).is_empty());
-    assert!(codes(&table("sig.a", "0->1; 1->0")).is_empty());
+    assert_eq!(
+        codes(&table("sig.a, sig.b", "00->0; 01->0; 10->0; 11->0")),
+        [] as [&str; 0]
+    );
+    assert_eq!(codes(&table("sig.a", "0->1; 1->0")), [] as [&str; 0]);
 }
 
 #[test]
 fn two_patterns_that_differ_only_in_order_are_different_rows() {
-    assert!(codes(&table("sig.a, sig.b", "00->0; 01->1; 10->0; 11->1")).is_empty());
+    assert_eq!(
+        codes(&table("sig.a, sig.b", "00->0; 01->1; 10->0; 11->1")),
+        [] as [&str; 0]
+    );
 }
 
 // -- no rows --------------------------------------------------------------
@@ -526,13 +532,22 @@ fn the_payload_sample_is_capped_and_says_nothing_about_the_total() {
 
 #[test]
 fn a_dont_care_row_stands_for_the_rows_it_replaces() {
-    assert!(codes(&table("sig.a, sig.b", "0- -> 0; 1- -> 1")).is_empty());
-    assert!(codes(&table("sig.a, sig.b, sig.c", "--0 -> 0; --1 -> 1")).is_empty());
+    assert_eq!(
+        codes(&table("sig.a, sig.b", "0- -> 0; 1- -> 1")),
+        [] as [&str; 0]
+    );
+    assert_eq!(
+        codes(&table("sig.a, sig.b, sig.c", "--0 -> 0; --1 -> 1")),
+        [] as [&str; 0]
+    );
 }
 
 #[test]
 fn a_row_of_only_dont_cares_completes_the_table() {
-    assert!(codes(&table("sig.a, sig.b, sig.c", "--- -> 1")).is_empty());
+    assert_eq!(
+        codes(&table("sig.a, sig.b, sig.c", "--- -> 1")),
+        [] as [&str; 0]
+    );
 }
 
 #[test]
@@ -719,12 +734,12 @@ fn a_dash_output_answers_the_coverage_finding() {
         codes(&table("sig.a, sig.b, sig.enable", enabled)),
         vec!["W_TRUTH_TABLE_PARTIAL"],
     );
-    assert!(
+    assert_eq!(
         codes(&table(
             "sig.a, sig.b, sig.enable",
             &format!("{enabled}; --0 -> -"),
-        ))
-        .is_empty(),
+        )),
+        [] as [&str; 0],
     );
 }
 
