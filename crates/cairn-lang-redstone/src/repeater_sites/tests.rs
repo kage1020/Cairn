@@ -98,6 +98,38 @@ fn stepping_back_can_cost_a_repeater_the_length_does_not_imply() {
     );
 }
 
+/// The fork is 4 blocks past the trunk's repeater, so each branch's 12th block is the 16th since.
+#[test]
+fn branches_forking_past_a_repeater_each_take_their_own() {
+    let trunk = walk((0, 0, 20), &[(EAST, 20)]);
+    let south = walk((20, 0, 20), &[(SOUTH, 20)]);
+    let north = walk((20, 0, 20), &[((0, 0, -1), 20)]);
+    let tree = NetTree::from_paths(&[&trunk, &south, &north]);
+    assert_eq!(
+        repeater_sites(&tree, 0, &HashMap::new()),
+        Ok(vec![
+            CellCoord::new(16, 0, 20),
+            CellCoord::new(20, 0, 32),
+            CellCoord::new(20, 0, 8),
+        ]),
+    );
+}
+
+/// Past the repeater at `(16,0,0)` every coord but `(17,0,0)` turns, and the 16th block since it
+/// is 15 past `(17,0,0)`.
+#[test]
+fn a_repeater_can_stand_on_the_block_in_front_of_another() {
+    let mut moves = vec![(EAST, 18)];
+    for step in 0..15 {
+        moves.push((if step % 2 == 0 { SOUTH } else { EAST }, 1));
+    }
+    let tree = NetTree::from_paths(&[&walk((0, 0, 0), &moves)]);
+    assert_eq!(
+        repeater_sites(&tree, 0, &HashMap::new()),
+        Ok(vec![CellCoord::new(16, 0, 0), CellCoord::new(17, 0, 0)]),
+    );
+}
+
 #[test]
 fn a_staircase_has_nowhere_for_a_repeater() {
     let mut moves = Vec::new();
@@ -633,6 +665,21 @@ fn a_sink_with_a_budget_takes_a_repeater_within_it() {
     );
 }
 
+/// The branch to the cell turns all the way from the fork, so its budget of 5 puts a repeater on
+/// the trunk, and the pad's branch counts the limit from there rather than from the source.
+#[test]
+fn a_budget_on_one_branch_moves_the_repeater_on_the_other() {
+    let trunk = walk((0, 0, 0), &[(EAST, 41)]);
+    let branch = walk((10, 0, 0), &[(SOUTH, 1), (EAST, 1), (SOUTH, 1)]);
+    let cell = *branch.last().expect("a walk has an end");
+    let tree = NetTree::from_paths(&[&trunk, &branch]);
+    assert_eq!(
+        repeater_sites(&tree, 0, &HashMap::from([(cell, 5)])),
+        Ok(vec![CellCoord::new(9, 0, 0), CellCoord::new(25, 0, 0)]),
+        "the pad at (41,0,0) is reached over the 15 blocks of dust past (25,0,0)",
+    );
+}
+
 #[test]
 fn a_budget_no_straight_coord_can_meet_is_refused() {
     // The coord before the sink is a corner, and the straight one before that is 2 blocks out.
@@ -862,4 +909,92 @@ fn a_cell_that_passes_strength_on_and_drives_nothing_is_held_to_the_limit() {
             "{kind:?}: the wire into a cell that drives nothing",
         );
     }
+}
+
+/// Hand-built: every gate the netlist lowers has an operand.
+#[test]
+fn a_cell_nothing_drives_starts_its_wire_with_no_dust_spent() {
+    let pad = CellCoord::new(16, 0, 0);
+    let trees = HashMap::from([(
+        NetRef::Cell(0),
+        NetTree::from_paths(&[&walk((0, 0, 0), &[(EAST, 16)])]),
+    )]);
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.region = Some(reservation(20, 3, 1));
+    ir.cells.push(placed_cell(
+        EditionCell::JavaComparatorAnd,
+        CellCoord::new(0, 0, 0),
+        Vec::new(),
+        ROUTED,
+    ));
+    ir.outputs.push(routed_output(NetRef::Cell(0), pad));
+    let entry = ScopedPlacementIrEntry {
+        kind: ScopeKind::Struct,
+        name: "undriven".to_owned(),
+        ir: ir.clone(),
+    };
+    let region = ir.region.clone().expect("set above");
+    let sites = repeater_sites_of_scope(&ir, &entry, "routed", &region, &trees)
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(
+        sites.along(NetRef::Cell(0), pad),
+        Some(Vec::new()),
+        "the pad is reached over 15 blocks of dust, the limit from a fresh source",
+    );
+}
+
+/// `sig.a` is sound and sorts first; `sig.b` and cell #0's net both have nowhere for a repeater.
+#[test]
+fn the_refusal_names_the_first_net_in_order_with_nowhere_for_a_repeater() {
+    let stairs = |start: (u32, u32, u32)| {
+        let moves: Vec<_> = (0..18)
+            .map(|step| (if step % 2 == 0 { EAST } else { SOUTH }, 1))
+            .collect();
+        walk(start, &moves)
+    };
+    let straight = walk((0, 0, 0), &[(EAST, 20)]);
+    let (b, out) = (stairs((0, 0, 2)), stairs((0, 0, 14)));
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.region = Some(reservation(30, 30, 1));
+    for name in ["a", "b"] {
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec![name.into()]),
+            span: Span::default(),
+        });
+    }
+    ir.cells.push(placed_cell(
+        EditionCell::JavaRepeaterOr,
+        out[0],
+        Vec::new(),
+        ROUTED,
+    ));
+    for (driver, path) in [
+        (NetRef::Input(0), &straight),
+        (NetRef::Input(1), &b),
+        (NetRef::Cell(0), &out),
+    ] {
+        ir.outputs.push(routed_output(
+            driver,
+            *path.last().expect("a walk has an end"),
+        ));
+    }
+    let trees = HashMap::from([
+        (NetRef::Input(0), NetTree::from_paths(&[&straight])),
+        (NetRef::Input(1), NetTree::from_paths(&[&b])),
+        (NetRef::Cell(0), NetTree::from_paths(&[&out])),
+    ]);
+    let entry = ScopedPlacementIrEntry {
+        kind: ScopeKind::Struct,
+        name: "ordered".to_owned(),
+        ir: ir.clone(),
+    };
+    let region = ir.region.clone().expect("set above");
+    let Err(refusal) = repeater_sites_of_scope(&ir, &entry, "routed", &region, &trees) else {
+        panic!("two of the three nets have nowhere for a repeater");
+    };
+    assert_eq!(refusal.code, DiagnosticCode::AttenuationLimit);
+    assert_eq!(
+        refusal.primary,
+        "routed netlist for struct `ordered` routes sig.b so that the signal leaving (0,0,2) runs out before (8,0,10), past the attenuation limit of 15 blocks of dust, and never reaches output pad #1: every coord after (0,0,2) up to and including (8,0,10) turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, so none can stand there",
+    );
 }
