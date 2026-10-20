@@ -154,8 +154,12 @@ fn edition_rows(
         }
 
         let portability = match edition {
-            Edition::Java => Ok(portability_for_java(&block_ir, &pack.blocks, &pack.aliases)),
-            Edition::Bedrock => portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases),
+            Edition::Java => Ok(portability_for_java(
+                &block_ir,
+                pack.blocks(),
+                pack.aliases(),
+            )),
+            Edition::Bedrock => portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases()),
         };
         // A refused palette does not end the walk: the scope and version notes below still print.
         let portability = portability_figure(edition, portability);
