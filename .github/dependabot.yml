@@ -1,10 +1,14 @@
-# Bumps each SHA-pinned action in `.github/workflows/` and the `# vX.Y.Z` comment beside it.
+# Every `cooldown` holds a new release back a week, long enough for a compromised one to be caught
+# and pulled. Security updates never wait.
 version: 2
 updates:
+  # Bumps each SHA-pinned action in `.github/workflows/` and the `# vX.Y.Z` comment beside it.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       # `release-plz.toml` skips `ci` commits and releases `build` ones.
       prefix: ci
@@ -19,3 +23,78 @@ updates:
           - "softprops/action-gh-release"
       actions:
         patterns: ["*"]
+
+  - package-ecosystem: rust-toolchain
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      # The release binaries build from `Cargo.lock`, so a bump here is one release-plz releases.
+      prefix: build(deps)
+    groups:
+      # For Cargo, Dependabot counts 0.x to 0.y as major, so this holds only compatible updates.
+      compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # npm bumps are `chore`: release-plz versions only the crates, and no crate builds from these
+  # manifests.
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      # Starlight and its plugins each support a narrow range of Astro releases.
+      astro:
+        patterns: ["astro", "@astrojs/*", "starlight-*"]
+      # For npm, Dependabot counts 0.x to 0.y as minor, though npm treats it as breaking.
+      patch:
+        patterns: ["*"]
+        update-types: [patch]
+
+  - package-ecosystem: npm
+    directory: /editors/vscode
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    ignore:
+      # `vsce package` refuses `@types/vscode` newer than `engines.vscode`; the two move by hand.
+      - dependency-name: "@types/vscode"
+      # The Node that VS Code's extension host runs picks the `@types/node` major.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      patch:
+        patterns: ["*"]
+        update-types: [patch]
+
+  - package-ecosystem: npm
+    directory: /crates/cairn-lang-tree-sitter
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      patch:
+        patterns: ["*"]
+        # A new `tree-sitter-cli` can change `src/parser.c`, which its own PR has to regenerate.
+        exclude-patterns: ["tree-sitter-cli"]
+        update-types: [patch]
