@@ -19,7 +19,7 @@ Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside 
 
 ## Development
 
-Requires Node.js ≥ 20 and `pnpm`.
+Requires Node.js ≥ 22 and `pnpm`.
 
 ```sh
 pnpm install

@@ -124,7 +124,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -145,7 +145,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -163,7 +163,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [22]
+        node: [22, 24]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -194,7 +194,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -256,7 +256,7 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
       - uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16

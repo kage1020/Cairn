@@ -91,7 +91,7 @@ Cloudflare Pages project settings:
 | Root directory | `website` |
 | Build command | `pnpm install --frozen-lockfile && pnpm build` |
 | Build output directory | `dist` |
-| Node.js version | `22` (also pinned via [`.nvmrc`](.nvmrc) and [`package.json#engines`](package.json)) |
+| Node.js version | `24` (also pinned via [`.nvmrc`](.nvmrc)) |
 | Compatibility date | `2026-06-14` (in [`wrangler.jsonc`](wrangler.jsonc)) |
 
 Custom domain `cairn.kage1020.com` is wired in the Cloudflare dashboard; the default `cairn.pages.dev` URL also resolves. Deployment is Cloudflare's Git integration, not a workflow. The `Documentation site` job in [`editors-website.yml`](../.github/workflows/editors-website.yml) runs `pnpm check` and `pnpm build` on `website/**` changes, so a type error or a dead link fails a PR instead of reaching the deploy. Cloudflare runs the build too, so a dead link that got past review would fail the deploy rather than ship — but the type check is CI's alone.
