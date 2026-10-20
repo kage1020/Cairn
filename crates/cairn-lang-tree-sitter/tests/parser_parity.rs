@@ -1410,6 +1410,76 @@ fn an_indent_past_sixteen_bits_of_levels_is_refused() {
     }
 }
 
+/// `MAX_INDENT_DEPTH` in `src/scanner.c`: the levels its indent stack holds, level 0 among them.
+const MAX_INDENT_DEPTH: usize = 507;
+
+/// A declaration to put after a deep block.
+const AFTER_THE_DEEP_BLOCK: &str = "struct t size=3x3\n  floor a=1\n";
+
+#[test]
+fn the_deepest_indent_the_scanner_stack_holds_parses() {
+    let mut parser = new_parser();
+    let source = nested_blocks(MAX_INDENT_DEPTH - 1) + AFTER_THE_DEEP_BLOCK;
+    let tree = parser.parse(&source, None).expect("parse produced no tree");
+    assert!(
+        !tree.root_node().has_error(),
+        "the grammar refused a line at level {}",
+        MAX_INDENT_DEPTH - 1,
+    );
+    let mut placed = Vec::new();
+    grammar_members(tree.root_node(), &source, 0, &mut placed);
+    let expected: Vec<_> = (1..MAX_INDENT_DEPTH)
+        .map(|level| (level, "level".to_owned()))
+        .chain([(1, "floor".to_owned())])
+        .collect();
+    assert_eq!(placed, expected, "a member left the level it is written at");
+}
+
+/// Without its `MAX_INDENT_DEPTH` guard the scanner refuses this file too, but from row 0.
+#[test]
+fn an_indent_past_the_scanner_stack_spares_the_declarations_around_it() {
+    let mut parser = new_parser();
+    let source = nested_blocks(MAX_INDENT_DEPTH) + AFTER_THE_DEEP_BLOCK;
+    let tree = parser.parse(&source, None).expect("parse produced no tree");
+    let root = tree.root_node();
+    let mut errors = Vec::new();
+    error_rows(root, &mut errors);
+    // Row `n` holds level `n`: the refused line, and the one it would open a body under.
+    assert_eq!(
+        errors,
+        [(MAX_INDENT_DEPTH - 1, MAX_INDENT_DEPTH)],
+        "the error spread past the line at level {MAX_INDENT_DEPTH} and its parent",
+    );
+    let mut cursor = root.walk();
+    let declarations: Vec<_> = root.children(&mut cursor).map(|node| node.kind()).collect();
+    assert_eq!(
+        declarations,
+        ["struct_decl", "struct_decl"],
+        "a declaration went down with the deep block",
+    );
+    let alone = parser
+        .parse(AFTER_THE_DEEP_BLOCK, None)
+        .expect("parse produced no tree");
+    let after = root.child(1).expect("source_file has a second child");
+    let on_its_own = alone.root_node().child(0).expect("source_file has a child");
+    assert_eq!(
+        after.to_sexp(),
+        on_its_own.to_sexp(),
+        "the declaration after the deep block changed shape",
+    );
+}
+
+/// `(start row, end row)` of every `ERROR` and `MISSING` node in the tree.
+fn error_rows(node: tree_sitter::Node<'_>, out: &mut Vec<(usize, usize)>) {
+    if node.is_error() || node.is_missing() {
+        out.push((node.start_position().row, node.end_position().row));
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        error_rows(child, out);
+    }
+}
+
 /// `_error_sentinel` is valid only in error recovery, where a scanner that answered would rewrite
 /// its layout state for a line the parse has discarded.
 #[test]
