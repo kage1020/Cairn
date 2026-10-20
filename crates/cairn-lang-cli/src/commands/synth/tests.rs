@@ -6,29 +6,42 @@ use crate::cli::Cli;
 
 use super::*;
 
-#[test]
-fn placement_stage_names_match_clap() {
-    for (stage, placement) in [
-        (SynthStage::Placement, PlacementStage::Placement),
-        (SynthStage::Route, PlacementStage::Route),
-        (SynthStage::Delay, PlacementStage::Delay),
-        (SynthStage::Crossing, PlacementStage::Crossing),
-    ] {
-        let clap_name = stage
-            .to_possible_value()
-            .expect("no SynthStage variant is skipped");
-        assert_eq!(clap_name.get_name(), placement.as_str());
-        assert_eq!(stage_cli_name(stage), placement.as_str());
+/// The Placement IR stage `--stage <stage>` emits, or `None` for a stage before Placement IR.
+fn placement_counterpart(stage: SynthStage) -> Option<PlacementStage> {
+    match stage {
+        SynthStage::Logic | SynthStage::Netlist | SynthStage::Edition => None,
+        SynthStage::Placement => Some(PlacementStage::Placement),
+        SynthStage::Route => Some(PlacementStage::Route),
+        SynthStage::Delay => Some(PlacementStage::Delay),
+        SynthStage::Crossing => Some(PlacementStage::Crossing),
     }
 }
 
 #[test]
-fn edition_neutral_stage_names_match_clap() {
-    for stage in [SynthStage::Logic, SynthStage::Netlist, SynthStage::Edition] {
+fn placement_stage_names_match_clap() {
+    for stage in SynthStage::value_variants() {
+        let Some(placement) = placement_counterpart(*stage) else {
+            continue;
+        };
         let clap_name = stage
             .to_possible_value()
             .expect("no SynthStage variant is skipped");
-        assert_eq!(clap_name.get_name(), stage_cli_name(stage));
+        assert_eq!(clap_name.get_name(), placement.as_str());
+        assert_eq!(stage_cli_name(*stage), placement.as_str());
+    }
+}
+
+/// `stage_cli_name`'s literal spellings, for the stages with no Placement IR counterpart.
+#[test]
+fn literal_stage_names_match_clap() {
+    for stage in SynthStage::value_variants() {
+        if placement_counterpart(*stage).is_some() {
+            continue;
+        }
+        let clap_name = stage
+            .to_possible_value()
+            .expect("no SynthStage variant is skipped");
+        assert_eq!(clap_name.get_name(), stage_cli_name(*stage));
     }
 }
 
