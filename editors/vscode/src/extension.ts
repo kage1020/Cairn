@@ -21,7 +21,7 @@ const PROBE_TIMEOUT_MS = 5_000;
 let client: LanguageClient | undefined;
 
 export async function activate(context: ExtensionContext): Promise<void> {
-  const output = window.createOutputChannel("Cairn Language Server");
+  const output = window.createOutputChannel("Cairn Language Server", { log: true });
   context.subscriptions.push(output);
 
   const serverPath = await resolveServerPath(output);
