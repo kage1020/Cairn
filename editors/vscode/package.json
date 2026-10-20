@@ -80,6 +80,8 @@
     "build": "esbuild src/extension.ts --bundle --external:vscode --platform=node --format=cjs --target=node20 --outfile=dist/extension.js --sourcemap",
     "build:prod": "esbuild src/extension.ts --bundle --external:vscode --platform=node --format=cjs --target=node20 --outfile=dist/extension.js --minify",
     "watch": "esbuild src/extension.ts --bundle --external:vscode --platform=node --format=cjs --target=node20 --outfile=dist/extension.js --sourcemap --watch",
+    "build:test": "esbuild src/test/extension.test.ts src/test/host.ts src/test/fake-cairn-lsp.ts --platform=node --format=cjs --target=node20 --outdir=out/test --sourcemap",
+    "test": "pnpm build && pnpm build:test && node --test out/test/extension.test.js",
     "package": "pnpm check && pnpm build:prod && vsce package --no-dependencies"
   },
   "dependencies": {
@@ -88,6 +90,7 @@
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.91.0",
+    "@vscode/test-electron": "3.1.0",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"

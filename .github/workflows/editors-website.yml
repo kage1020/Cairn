@@ -44,6 +44,9 @@ jobs:
       - name: Type-check, bundle, and package
         run: pnpm run package
 
+      - name: Start a stand-in cairn-lsp through the extension
+        run: xvfb-run -a pnpm test
+
   website:
     name: Documentation site
     runs-on: ubuntu-latest

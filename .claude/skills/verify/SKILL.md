@@ -32,7 +32,8 @@ Add these when the change reaches them:
   crate's directory.
 - `website/`: `pnpm install`, `pnpm run check` and `pnpm run build` in `website/`, then
   `cargo xtask lint --site website/dist site-parity` from the root.
-- `editors/vscode/`: `pnpm install` and `pnpm run package` in `editors/vscode/`.
+- `editors/vscode/`: `pnpm install`, `pnpm run package` and `pnpm test` in `editors/vscode/`.
+  `pnpm test` opens VS Code, so without a display run it as `xvfb-run -a pnpm test`.
 - A new dependency or a recently stabilised API: CI's `MSRV` job runs
   `cargo +<rust-version> check --workspace --locked --all-features` at the `rust-version` in
   `Cargo.toml`.
