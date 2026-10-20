@@ -16,7 +16,8 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum EditionCell {
-    /// Java AND — a comparator in subtract mode.
+    /// Java AND — a comparator in subtract mode with one operand inverted onto its side at full
+    /// strength, so while both operands are on it outputs the strength its rear input carries.
     JavaComparatorAnd,
     /// Bedrock AND — two torches inverting an OR.
     BedrockTorchAnd,
