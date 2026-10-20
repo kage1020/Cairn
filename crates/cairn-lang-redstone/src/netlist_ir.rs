@@ -82,9 +82,11 @@ pub struct CellNode {
 }
 
 /// A sensor-driven net feeding this scope (`pressure_plate ... -> sig.step`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NetlistInput {
     /// Dotted signal reference the sensor emits.
+    #[serde(deserialize_with = "crate::logic_ir::deserialize_dotted_ref")]
     pub name: DottedRef,
     /// Byte range of the originating `-> sig.X` binding in source.
     #[serde(skip)]
