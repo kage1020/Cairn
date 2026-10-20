@@ -34,6 +34,7 @@ pub const RULES: &[Rule] = &[
     readme::MODULES,
     readme::PUBLIC_API,
     readme::SUBCOMMANDS,
+    readme::SYNTH_STAGES,
     diagnostic_catalog::RULE,
     grammar_fields::RULE,
     editor_keywords::RULE,
