@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use indexmap::IndexMap;
 
-use crate::ast::ValueKind;
+use crate::ast::{Item, Module, ThemeRule, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::{
     IntentModule, Member, MemberRole, SelectorValue, UNIVERSAL_ARGUMENTS, Unread, ValueWithSpan,
@@ -20,18 +20,8 @@ use super::DiagnosticSink;
 /// Keys the theme selectors match on, per keyword; ordered for a stable closed-set note.
 type SelectorKeys<'a> = HashMap<&'a str, BTreeSet<&'a str>>;
 
-pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
-    for theme in &ir.themes {
-        for rule in &theme.selectors {
-            // An unknown keyword's own finding carries the repair.
-            if matches!(role_of(&rule.keyword), MemberRole::Other(_)) {
-                continue;
-            }
-            for (key, value) in &rule.bindings {
-                sink.push(unlowered_binding(&rule.keyword, key, &value.span));
-            }
-        }
-    }
+pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink) {
+    check_selector_bindings(module, sink);
     let selected = selector_keys(ir);
     for s in &ir.structs {
         check_header("struct", &s.args, sink);
@@ -43,6 +33,34 @@ pub(super) fn run(ir: &IntentModule, sink: &mut DiagnosticSink) {
     }
     for s in &ir.sites {
         walk(&s.placements, &selected, sink);
+    }
+}
+
+/// Every selector binding as written; the IR keeps only the last value of a key a row repeats.
+fn check_selector_bindings(module: &Module, sink: &mut DiagnosticSink) {
+    for item in &module.items {
+        let Item::Theme { body, .. } = item else {
+            continue;
+        };
+        for rule in body {
+            let ThemeRule::Selector {
+                keyword, bindings, ..
+            } = rule
+            else {
+                continue;
+            };
+            // An unknown keyword's own finding carries the repair.
+            if matches!(role_of(keyword), MemberRole::Other(_)) {
+                continue;
+            }
+            for binding in bindings {
+                sink.push(unlowered_binding(
+                    keyword,
+                    &binding.key,
+                    &binding.value.span,
+                ));
+            }
+        }
     }
 }
 

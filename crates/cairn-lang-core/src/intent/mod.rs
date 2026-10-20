@@ -99,7 +99,7 @@ pub struct SelectorRule {
     pub keyword: String,
     /// `[attr=...]` selector attributes in source order.
     pub attrs: IndexMap<String, ValueWithSpan>,
-    /// `key=value` bindings on the RHS of the arrow.
+    /// `key=value` bindings on the RHS of the arrow; a repeated key keeps its last value.
     pub bindings: IndexMap<String, ValueWithSpan>,
     /// Byte range of the originating selector rule line.
     #[serde(skip)]
