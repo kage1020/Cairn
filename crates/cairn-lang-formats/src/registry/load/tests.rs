@@ -313,10 +313,10 @@ fn a_pack_without_an_aliases_component_loads_and_names_no_rename() {
         );
     });
     assert!(pack.aliases.is_empty());
-    assert!(
+    assert_eq!(
         pack.view(Some("1.21.4"))
-            .aliases_for("minecraft:paleoak_planks")
-            .is_empty()
+            .aliases_for("minecraft:paleoak_planks"),
+        [] as [String; 0]
     );
 }
 
@@ -345,10 +345,9 @@ fn a_view_with_no_version_pinned_names_no_rename() {
     let pack = load_from_dir_or_die("aliases-unpinned", |dir| {
         write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
     });
-    assert!(
-        pack.view(None)
-            .aliases_for("minecraft:paleoak_planks")
-            .is_empty()
+    assert_eq!(
+        pack.view(None).aliases_for("minecraft:paleoak_planks"),
+        [] as [String; 0]
     );
 }
 
@@ -469,7 +468,10 @@ fn the_builtin_java_pack_loads() {
     assert_eq!(pack.manifest.edition, Edition::Java);
     assert_eq!(pack.manifest.name, "cairn-builtin-java");
     assert_eq!(pack.source, PackSource::Builtin);
-    assert!(!pack.data_versions.versions.is_empty());
+    assert!(
+        !pack.data_versions.versions.is_empty(),
+        "the pack names no DataVersion"
+    );
 }
 
 #[test]
@@ -748,7 +750,10 @@ fn the_builtin_bedrock_pack_loads_with_every_java_token() {
     assert_eq!(pack.manifest.edition, Edition::Bedrock);
     assert_eq!(pack.manifest.name, "cairn-builtin-bedrock");
     assert_eq!(pack.source, PackSource::Builtin);
-    assert!(!pack.data_versions.versions.is_empty());
+    assert!(
+        !pack.data_versions.versions.is_empty(),
+        "the pack names no DataVersion"
+    );
     // Bedrock must resolve every token Java does.
     let java = load_builtin_pack(Edition::Java).expect("java pack");
     for token in java.materials.tokens() {

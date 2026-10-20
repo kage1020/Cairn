@@ -297,7 +297,7 @@ fn the_same_sink_is_reachable_once_there_is_a_layer_to_climb_to() {
     ];
     let tree = router(&region, &walls).tree(source, &[sink], &nothing_in_the_way());
 
-    assert!(tree.unreachable().is_empty());
+    assert_eq!(tree.unreachable(), []);
     assert_eq!(
         tree.route_to(sink),
         Some(vec![

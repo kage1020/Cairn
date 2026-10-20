@@ -108,7 +108,7 @@ fn palette_entries_carry_name_empty_states_and_version() {
     let structure = structure_compound(&root);
 
     match structure.entries.get("entities") {
-        Some(Tag::List(l)) => assert!(l.items.is_empty()),
+        Some(Tag::List(l)) => assert_eq!(l.items, [] as [Tag; 0]),
         other => panic!("entities is not a List: {other:?}"),
     }
 

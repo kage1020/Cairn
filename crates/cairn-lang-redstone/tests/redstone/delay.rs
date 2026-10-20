@@ -4,8 +4,8 @@
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{
-    DiagnosticCode, MAX_ATTENUATION_SEGMENT, PlacedCellNode, ScopedPlacementIr, compile_delay,
-    compile_routing,
+    Diagnostic, DiagnosticCode, MAX_ATTENUATION_SEGMENT, PlacedCellNode, ScopedPlacementIr,
+    ScopedPlacementIrEntry, compile_delay, compile_routing,
 };
 
 use crate::common::{
@@ -406,8 +406,8 @@ fn max_attenuation_segment_boundary_at_257_is_exclusive() {
 fn empty_placement_ir_produces_empty_delay_output() {
     let scoped = ScopedPlacementIr::new();
     let delayed = compile_delay(&scoped);
-    assert!(delayed.diagnostics.is_empty());
-    assert!(delayed.scoped.scopes.is_empty());
+    assert_eq!(delayed.diagnostics, [] as [Diagnostic; 0]);
+    assert_eq!(delayed.scoped.scopes, [] as [ScopedPlacementIrEntry; 0]);
 }
 
 #[test]

@@ -282,8 +282,14 @@ mod tests {
             quoted_titles_after("` \"Time model\" / \"Connection to the IR and phases\""),
             ["Time model", "Connection to the IR and phases"]
         );
-        assert!(quoted_titles_after("` says \"not a title\"").is_empty());
-        assert!(quoted_titles_after("\".into(), \"not a title\"").is_empty());
+        assert_eq!(
+            quoted_titles_after("` says \"not a title\""),
+            [] as [String; 0]
+        );
+        assert_eq!(
+            quoted_titles_after("\".into(), \"not a title\""),
+            [] as [String; 0]
+        );
         assert_eq!(quoted_titles_after(r#"` \"Escaped\""#), ["Escaped"]);
     }
 

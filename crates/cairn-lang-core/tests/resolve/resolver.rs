@@ -1,7 +1,7 @@
 //! `resolve` over whole sources: theme binding, member and selector resolution, `connect` rows.
 
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
-use cairn_lang_core::resolve::{Resolution, ScopeResolution, resolve};
+use cairn_lang_core::resolve::{Resolution, ScopeResolution, ValidatedConnect, resolve};
 use cairn_lang_core::{Edition, IntentModule, Span, lower, parse};
 
 use crate::common::span_of;
@@ -446,7 +446,7 @@ fn connect_missing_path_emits_e_missing_path_material() {
         "expected E_MISSING_PATH_MATERIAL, got {:?}",
         r.diagnostics,
     );
-    assert!(r.connects.is_empty());
+    assert_eq!(r.connects, [] as [ValidatedConnect; 0]);
 }
 
 #[test]

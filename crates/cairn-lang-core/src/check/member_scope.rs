@@ -167,7 +167,7 @@ fn subtree_size(member: &Member) -> usize {
 
 fn carries_signal(member: &Member) -> bool {
     let is_signal = |value: &crate::ast::Value| matches!(&value.kind, ValueKind::DotRef(reference) if reference.head() == SIGNAL_HEAD);
-    member.binding.as_ref().is_some_and(&is_signal)
+    member.binding.as_ref().is_some_and(is_signal)
         || member
             .intent_state
             .values()

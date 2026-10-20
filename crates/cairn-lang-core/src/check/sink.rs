@@ -82,6 +82,6 @@ mod tests {
         let sink = DiagnosticSink::new();
         assert!(sink.is_empty());
         assert_eq!(sink.len(), 0);
-        assert!(sink.into_sorted().is_empty());
+        assert_eq!(sink.into_sorted(), [] as [Diagnostic; 0]);
     }
 }

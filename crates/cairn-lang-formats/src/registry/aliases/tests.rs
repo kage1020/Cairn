@@ -51,7 +51,10 @@ fn members_keep_the_order_the_file_wrote_them_in() {
 #[test]
 fn a_spelling_no_group_claims_answers_nothing() {
     let index = parse(RENAME_AND_SPLIT).expect("catalog");
-    assert!(index.spellings_of("minecraft:oak_planks").is_empty());
+    assert_eq!(
+        index.spellings_of("minecraft:oak_planks"),
+        [] as [String; 0]
+    );
 }
 
 #[test]
@@ -78,7 +81,7 @@ fn the_empty_index_claims_no_spelling() {
     let index = AliasIndex::empty();
     assert!(index.is_empty());
     assert_eq!(index.len(), 0);
-    assert!(index.spellings_of("minecraft:light").is_empty());
+    assert_eq!(index.spellings_of("minecraft:light"), [] as [String; 0]);
 }
 
 #[test]

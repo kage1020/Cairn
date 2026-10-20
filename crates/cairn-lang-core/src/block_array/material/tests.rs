@@ -252,7 +252,7 @@ fn a_misspelling_no_group_names_carries_no_alias() {
     let err = resolve_block_state(&token("stone_brick"), Some(&registry)).unwrap_err();
     match err {
         MaterialDeferred::UnknownId(unknown) => {
-            assert!(unknown.aliases.is_empty());
+            assert_eq!(unknown.aliases, [] as [String; 0]);
             assert_eq!(unknown.suggestion.as_deref(), Some("minecraft:stonebrick"));
         }
         other => panic!("expected UnknownId, got {other:?}"),
@@ -264,7 +264,7 @@ fn a_registry_with_no_alias_table_answers_no_alias() {
     let registry = FakeResolver::new(vec![]).pinned(&["minecraft:light_block"]);
     let err = resolve_block_state(&token("light"), Some(&registry)).unwrap_err();
     match err {
-        MaterialDeferred::UnknownId(unknown) => assert!(unknown.aliases.is_empty()),
+        MaterialDeferred::UnknownId(unknown) => assert_eq!(unknown.aliases, [] as [String; 0]),
         other => panic!("expected UnknownId, got {other:?}"),
     }
 }

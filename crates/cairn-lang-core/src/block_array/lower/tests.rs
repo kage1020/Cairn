@@ -1041,7 +1041,7 @@ fn missing_theme_warns_and_air_fills() {
     let src = "struct s size=3x3\n  floor mat_slot=f\n";
     let out = lowered(src);
     let ba = out.structures.get("struct::s").unwrap();
-    assert!(!findings(&out, DiagnosticCode::NoThemeBound).is_empty());
+    assert_eq!(findings(&out, DiagnosticCode::NoThemeBound).len(), 1);
     for z in 0..3 {
         for x in 0..3 {
             assert_eq!(block_id(ba, x, 0, z), BlockState::AIR_ID);
@@ -1518,7 +1518,7 @@ fn struct_without_size_is_skipped_with_warning() {
     let src = theme_t!("f", "\nstruct s\n  floor mat_slot=f\n");
     let out = lowered(src);
     assert!(!out.structures.contains_key("struct::s"));
-    assert!(!findings(&out, DiagnosticCode::StructNoSize).is_empty());
+    assert_eq!(findings(&out, DiagnosticCode::StructNoSize).len(), 1);
 }
 
 #[test]

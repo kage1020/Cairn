@@ -717,7 +717,7 @@ struct pass size=40x6
         .iter()
         .find(|e| e.name == "pass")
         .expect("the identity wire reaches stage 4");
-    assert!(scope.ir.cells.is_empty());
+    assert_eq!(scope.ir.cells, [] as [PlacedCellNode; 0]);
     let output = scope.ir.outputs.first().expect("the actuator");
     assert_eq!(
         output.stage(),
