@@ -32,6 +32,10 @@ pub(super) struct StructCtx<'a> {
     pub(super) wall_top: u32,
     /// Every row the walls members paint, gaps and all; ports read this same column.
     pub(super) wall_column: WallColumn,
+    /// The `y` extent [`Self::dims`] would have had every walls member painted.
+    pub(super) written_height: u32,
+    /// The [`Self::overhang`] the struct would have had every roof drawn.
+    pub(super) written_overhang: u32,
 }
 
 /// What the phase model does with a member.

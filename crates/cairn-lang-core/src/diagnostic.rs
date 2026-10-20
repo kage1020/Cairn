@@ -83,6 +83,8 @@ pub enum DiagnosticCode {
     ThemeSelectorUnmatched,
     /// A member whose role the block-array pass does not lower.
     DeferredMember,
+    /// A `pressure_plate` its own arguments put on no voxel its struct could hold.
+    UnplaceablePlate,
     /// A `key=` no pass read on the line it was written on.
     IgnoredArgument,
     /// A body with no theme in which a lowered member reads a `mat_slot=`.
@@ -195,6 +197,7 @@ impl DiagnosticCode {
             Self::UnknownSlotTarget => "E_UNKNOWN_SLOT_TARGET",
             Self::ThemeSelectorUnmatched => "E_THEME_SELECTOR_UNMATCHED",
             Self::DeferredMember => "W_DEFERRED_MEMBER",
+            Self::UnplaceablePlate => "E_UNPLACEABLE_PLATE",
             Self::IgnoredArgument => "W_IGNORED_ARGUMENT",
             Self::NoThemeBound => "W_NO_THEME_BOUND",
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
@@ -263,6 +266,7 @@ impl DiagnosticCode {
             | Self::UnknownAbstractToken
             | Self::UnknownId
             | Self::IncompatibleMaterial
+            | Self::UnplaceablePlate
             | Self::UnresolvedPlaceRef
             | Self::UnresolvedThemeRef
             | Self::ThemeVariantMissing

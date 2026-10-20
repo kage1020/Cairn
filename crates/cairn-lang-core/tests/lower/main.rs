@@ -19,6 +19,7 @@ mod port_rejection_reason;
 mod roof_seats_on_the_wall;
 mod structure_volume;
 mod the_volume_is_what_gets_painted;
+mod unplaceable_plate;
 mod unread_mat_slot;
 mod unreadable_argument_values;
 mod village;

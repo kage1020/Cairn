@@ -43,6 +43,29 @@ pub(super) fn painting_walls<'a>(
         .filter_map(|(y_offset, m)| height_value(m).map(|h| (*y_offset, h)))
 }
 
+/// Highest wall row the walls members of `flattened` ask for, whether or not they paint.
+pub(super) fn written_wall_top(flattened: &[(u32, &Member)]) -> u32 {
+    flattened
+        .iter()
+        .filter(|(_, m)| matches!(m.role, MemberRole::Walls))
+        .filter_map(|(y_offset, m)| height_value(m).map(|h| y_offset.saturating_add(h)))
+        .max()
+        .unwrap_or(0)
+}
+
+/// Largest `overhang=` a roof among `members` or their levels is written with, drawn or not.
+pub(super) fn written_roof_overhang(members: &[Member]) -> u32 {
+    members
+        .iter()
+        .map(|m| match m.role {
+            MemberRole::Roof => m.nonneg_u32("overhang").unwrap_or(0),
+            MemberRole::Level => written_roof_overhang(&m.children.members),
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
 /// Largest `overhang=` across the roofs that draw, reporting an unreadable one on every roof.
 ///
 /// This is the only reader of `overhang=`, so a value not checked here is reported nowhere.

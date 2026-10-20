@@ -181,6 +181,7 @@ fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
         "E_UNKNOWN_ARGUMENT",
         "E_UNKNOWN_KEYWORD",
         "E_UNKNOWN_SLOT_TARGET",
+        "E_UNPLACEABLE_PLATE",
         "E_UNRESOLVED_PLACE_REF",
         "E_UNRESOLVED_SLOT",
         "E_UNSUPPORTED_NESTING",
@@ -324,6 +325,7 @@ fn noisy_sources() -> Vec<String> {
     sources.extend(header_sources());
     sources.extend(truth_table_sources());
     sources.extend(mirror_sources());
+    sources.extend(plate_sources());
     sources
 }
 
@@ -364,6 +366,47 @@ fn header_sources() -> Vec<String> {
         format!("{THEME}struct s siz=7x7\n  floor mat_slot=floor\n"),
         format!("{THEME}def cottage class=house size=5x5:\n  floor mat_slot=floor\n"),
     ]
+}
+
+/// The sources for each refused or deferred `pressure_plate`, one of them bound to a signal.
+fn plate_sources() -> Vec<String> {
+    let walled = [
+        "pressure_plate",
+        "pressure_plate at=center",
+        "pressure_plate at=front.outside.left",
+        "pressure_plate at=front.inside",
+        "pressure_plate at=up.outside",
+        "pressure_plate at=inside.up",
+        "pressure_plate at=front.outside offset=two",
+        "pressure_plate at=front.outside y=two",
+        "pressure_plate at=front.outside offset=5",
+        "pressure_plate at=inside.front offset=5",
+        "pressure_plate at=front.outside y=4",
+        "pressure_plate at=front.outside y=2 -> sig.a",
+        "pressure_plate at=inside.front offset=0 y=1",
+        "pressure_plate at=inside.front offset=0",
+        "level y=2\n    pressure_plate at=front.outside y=2",
+        "level y=3\n    pressure_plate at=front.outside y=1",
+        "level y=5\n    pressure_plate at=front.outside",
+        "level y=1\n    pressure_plate at=front.outside",
+        "roof mat_slot=wall overhang=1\n  pressure_plate at=front.outside y=1",
+    ];
+    let mut sources: Vec<String> = walled
+        .iter()
+        .map(|line| format!("{THEME}struct s size=5x5\n  walls mat_slot=wall height=3\n  {line}\n"))
+        .collect();
+    sources.extend([
+        format!(
+            "{THEME}struct s size=5x2\n  walls mat_slot=wall height=3\n\
+             \x20\x20roof kind=flat mat_slot=wall overhang=1\n\
+             \x20\x20pressure_plate at=inside.front offset=0\n\
+             \x20\x20pressure_plate at=inside.left offset=2\n"
+        ),
+        "struct s size=5x5\n  walls mat_slot=wall height=3\n  \
+         pressure_plate at=inside.front offset=2 y=2\n"
+            .to_owned(),
+    ]);
+    sources
 }
 
 /// The source for a `sym=true` window that coincides with its mirror, and one that overlaps it.
