@@ -48,6 +48,10 @@ impl DelayOutput {
 
 /// Lowers a routed [`ScopedPlacementIr`] into a delayed one, leaving out a scope refused with an
 /// error.
+///
+/// # Panics
+///
+/// On a `NetRef` out of range, a node not at the route stage, or two cells on one `coord`.
 #[must_use]
 pub fn compile_delay(routed: &ScopedPlacementIr) -> DelayOutput {
     let (scoped, diagnostics) = lower_scopes(routed, |entry| {

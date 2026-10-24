@@ -86,7 +86,7 @@ pub(crate) fn open_scope(
 ///
 /// # Panics
 ///
-/// On an index out of range, which only a hand-built IR can cause.
+/// On an index out of range, which only an IR built or edited outside the passes can cause.
 fn source_of_net<'a>(
     region: &'a CircuitRegionReservation,
     column: PadColumn,
@@ -98,14 +98,14 @@ fn source_of_net<'a>(
             assert!(
                 (i as usize) < inputs,
                 "NetRef::Input({i}) out of range (inputs.len()={inputs}) — netlist invariant \
-                 broken by caller-side hand-built IR",
+                 broken by an IR built or edited outside the passes",
             );
             input_pad(i as usize, column, region)
         }
         NetRef::Cell(j) => *cell_coords.get(j as usize).unwrap_or_else(|| {
             panic!(
                 "NetRef::Cell({j}) out of range (cells.len()={}) — topological invariant broken \
-                 by caller-side hand-built IR",
+                 by an IR built or edited outside the passes",
                 cell_coords.len(),
             )
         }),

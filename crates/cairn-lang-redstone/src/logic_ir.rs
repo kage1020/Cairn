@@ -1,11 +1,15 @@
 //! Logic IR: the edition-neutral, zero-delay signal DAG the synth pass builds from sensor,
 //! actuator and `logic` bindings. Nodes are in topological order, so a cycle is not encodable.
 
+use std::fmt;
+use std::marker::PhantomData;
+
 use cairn_lang_core::ast::DottedRef;
 use cairn_lang_core::error::Span;
 use indexmap::IndexMap;
+use serde::de::{self, MapAccess, Visitor};
 use serde::ser::SerializeMap;
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A signal source: a top-level input port or a gate output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -159,6 +163,65 @@ pub(crate) fn serialize_signal_defs<S: Serializer, V: Serialize>(
     map.end()
 }
 
+/// Reads `signal_defs` back from the object [`serialize_signal_defs`] writes, refusing a name
+/// given twice.
+pub(crate) fn deserialize_signal_defs<'de, D: Deserializer<'de>, V: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<IndexMap<DottedRef, V>, D::Error> {
+    struct DefsVisitor<V>(PhantomData<V>);
+
+    impl<'de, V: Deserialize<'de>> Visitor<'de> for DefsVisitor<V> {
+        type Value = IndexMap<DottedRef, V>;
+
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("an object keyed by dotted signal name")
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut defs = IndexMap::new();
+            while let Some((name, value)) = map.next_entry::<String, V>()? {
+                let dotted =
+                    dotted_ref_from_segments(name.split('.').map(str::to_owned).collect())?;
+                if defs.insert(dotted, value).is_some() {
+                    return Err(de::Error::custom(format_args!(
+                        "`signal_defs` names `{name}` twice, and a signal has one definition"
+                    )));
+                }
+            }
+            Ok(defs)
+        }
+    }
+
+    deserializer.deserialize_map(DefsVisitor(PhantomData))
+}
+
+/// Reads back a [`DottedRef`] written as its list of segments.
+pub(crate) fn deserialize_dotted_ref<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<DottedRef, D::Error> {
+    dotted_ref_from_segments(Vec::deserialize(deserializer)?)
+}
+
+/// The [`DottedRef`] of `segments`, refusing no segment at all, an empty one, or one holding a `.`.
+pub(crate) fn dotted_ref_from_segments<E: de::Error>(
+    segments: Vec<String>,
+) -> Result<DottedRef, E> {
+    if segments.iter().any(String::is_empty) {
+        return Err(E::custom(format_args!(
+            "the dotted name {segments:?} has an empty segment, and every segment holds at least \
+             one character"
+        )));
+    }
+    if segments.iter().any(|segment| segment.contains('.')) {
+        return Err(E::custom(format_args!(
+            "the dotted name {segments:?} has a segment holding a `.`, which only ever separates \
+             segments"
+        )));
+    }
+    DottedRef::try_from_segments(segments)
+        .ok_or_else(|| E::invalid_length(0, &"a dotted name of one segment or more"))
+}
+
 impl LogicIr {
     /// An empty Logic IR.
     #[must_use]
@@ -185,7 +248,7 @@ impl Default for LogicIr {
 }
 
 /// The kind of scope an IR came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScopeKind {
     /// `struct NAME` scope.
@@ -210,7 +273,7 @@ impl ScopeKind {
 
 /// Per-scope IRs of a `.crn` module, in source order. `(kind, name)` is not unique: duplicate
 /// scope names are core's to report.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Scoped<T> {
     /// Per-scope IR, in source order.
@@ -239,7 +302,8 @@ impl<T> Scoped<T> {
 }
 
 /// One entry in a [`Scoped`] list.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScopedEntry<T> {
     /// Which family of scope this IR came from.
     pub kind: ScopeKind,

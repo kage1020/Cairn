@@ -1,12 +1,13 @@
-//! A dumped Placement IR reads back to the same cells, span emptied, at every stage. The shared
-//! bus is there because neither example produces `buffer_coords`.
+//! A `cairn synth --stage <s>` dump reads back as the Placement IR it was written from, every span
+//! emptied, at every stage. The other fixtures supply what neither example has: buffers on cells
+//! and on an output, and a scope with no cells.
 
 use cairn_lang_core::Edition;
-use cairn_lang_redstone::{PlacedCellNode, PlacementStage, ScopedPlacementIr};
+use cairn_lang_redstone::{PlacedCellNode, PlacedOutputNode, PlacementStage, ScopedPlacementIr};
 
 use crate::common::{
-    delayed_from_source, legalized_from_source, load_example, placement_from_source,
-    routed_from_source, shared_bus_source,
+    IDENTITY_WIRE_SOURCE, LONG_OUTWARD_WIRE_SOURCE, delayed_from_source, legalized_from_source,
+    load_example, placement_from_source, routed_from_source, shared_bus_source,
 };
 
 fn every_stage(source: &str, edition: Edition) -> [(PlacementStage, ScopedPlacementIr); 4] {
@@ -24,91 +25,164 @@ fn every_stage(source: &str, edition: Edition) -> [(PlacementStage, ScopedPlacem
     ]
 }
 
-/// Returns how many cells read back and how many of those carry buffer coords.
-fn assert_cells_round_trip(
-    label: &str,
-    stage: PlacementStage,
-    ir: &ScopedPlacementIr,
-) -> (usize, usize) {
-    let dump = serde_json::to_value(ir).expect("Placement IR serialises");
-    let mut read = 0;
-    let mut buffered = 0;
-    for (scope, entry) in ir.scopes.iter().enumerate() {
-        // A scope that placed no cells has no `cells` key.
-        let back: Vec<PlacedCellNode> = match dump[scope]["ir"].get("cells") {
-            None => Vec::new(),
-            Some(cells_json) => serde_json::from_value(cells_json.clone()).unwrap_or_else(|err| {
-                panic!("{label}: scope `{}` does not read back: {err}", entry.name)
-            }),
-        };
+/// `ir` with every span emptied, as its dump reads back.
+fn without_spans(ir: &ScopedPlacementIr) -> ScopedPlacementIr {
+    let mut ir = ir.clone();
+    for entry in &mut ir.scopes {
+        if let Some(region) = &mut entry.ir.region {
+            region.span = 0..0;
+        }
+        for input in &mut entry.ir.inputs {
+            input.span = 0..0;
+        }
+        for output in &mut entry.ir.outputs {
+            output.span = 0..0;
+        }
+        for cell in &mut entry.ir.cells {
+            cell.span = 0..0;
+        }
+    }
+    ir
+}
 
-        let expected: Vec<PlacedCellNode> = entry
+/// Asserts that `ir`'s dump reads back as `ir` but for its spans, every node at `stage`, and
+/// dumps again unchanged.
+fn assert_dump_round_trips(label: &str, stage: PlacementStage, ir: &ScopedPlacementIr) {
+    let dump = serde_json::to_string_pretty(ir).expect("Placement IR serialises");
+    let back: ScopedPlacementIr = serde_json::from_str(&dump)
+        .unwrap_or_else(|err| panic!("{label}: the dump does not read back: {err}"));
+    assert_eq!(back, without_spans(ir), "{label}: read back differently");
+    for entry in &back.scopes {
+        let stages: Vec<PlacementStage> = entry
             .ir
             .cells
             .iter()
-            .cloned()
-            .map(|mut cell| {
-                cell.span = 0..0;
-                cell
-            })
+            .map(PlacedCellNode::stage)
+            .chain(entry.ir.outputs.iter().map(PlacedOutputNode::stage))
             .collect();
         assert_eq!(
-            back, expected,
-            "{label}: scope `{}` read back differently",
-            entry.name
-        );
-        assert!(
-            back.iter().all(|cell| cell.stage() == stage),
-            "{label}: every cell read back must carry the {} stage",
+            stages,
+            vec![stage; stages.len()],
+            "{label}: scope `{}` must read back at the {} stage",
+            entry.name,
             stage.as_str(),
         );
-        assert_eq!(
-            serde_json::to_string(&back).expect("read-back cells serialise"),
-            serde_json::to_string(&entry.ir.cells).expect("pipeline cells serialise"),
-            "{label}: scope `{}` re-dumps differently",
-            entry.name,
-        );
-        read += back.len();
-        buffered += back
+    }
+    assert_eq!(
+        serde_json::to_string_pretty(&back).expect("read-back IR serialises"),
+        dump,
+        "{label}: re-dumps differently",
+    );
+}
+
+/// What a Placement IR places over all its scopes, and how much of it carries buffer coords.
+#[derive(Debug, Default)]
+struct Census {
+    cells: usize,
+    buffered_cells: usize,
+    outputs: usize,
+    buffered_outputs: usize,
+}
+
+fn census(ir: &ScopedPlacementIr) -> Census {
+    let mut census = Census::default();
+    for entry in &ir.scopes {
+        census.cells += entry.ir.cells.len();
+        census.buffered_cells += entry
+            .ir
+            .cells
             .iter()
-            .filter(|c| !c.buffer_coords().is_empty())
+            .filter(|cell| !cell.buffer_coords().is_empty())
+            .count();
+        census.outputs += entry.ir.outputs.len();
+        census.buffered_outputs += entry
+            .ir
+            .outputs
+            .iter()
+            .filter(|output| !output.buffer_coords().is_empty())
             .count();
     }
-    (read, buffered)
+    census
 }
 
 #[test]
-fn every_example_cell_reads_back_equal_at_every_stage() {
+fn every_example_dump_reads_back_equal_at_every_stage() {
     for example in ["redstone-door.crn", "crossbar.crn"] {
         let source = load_example(example);
         for edition in [Edition::Java, Edition::Bedrock] {
             for (stage, ir) in every_stage(&source, edition) {
                 let label = format!("{example} {edition:?} --stage {}", stage.as_str());
-                let (read, buffered) = assert_cells_round_trip(&label, stage, &ir);
+                assert_dump_round_trips(&label, stage, &ir);
+                let Census {
+                    cells,
+                    buffered_cells,
+                    outputs,
+                    buffered_outputs,
+                } = census(&ir);
                 assert!(
-                    read > 0,
-                    "{label}: the example must place at least one cell"
+                    cells > 0 && outputs > 0,
+                    "{label}: the example must place a cell and an output",
                 );
-                if stage == PlacementStage::Crossing {
-                    assert_eq!(buffered, 0, "{label}: neither example should need buffers");
-                }
+                assert_eq!(
+                    (buffered_cells, buffered_outputs),
+                    (0, 0),
+                    "{label}: neither example should need buffers",
+                );
             }
         }
     }
 }
 
 #[test]
-fn a_legalized_dump_with_buffer_coords_reads_back_equal() {
-    let source = shared_bus_source();
-    for (stage, ir) in every_stage(&source, Edition::Java) {
+fn a_dump_whose_cells_carry_buffer_coords_reads_back_equal() {
+    for (stage, ir) in every_stage(&shared_bus_source(), Edition::Java) {
         let label = format!("16-cell bus --stage {}", stage.as_str());
-        let (read, buffered) = assert_cells_round_trip(&label, stage, &ir);
-        assert_eq!(read, 16, "{label}: the fixture is the 16-cell chain");
+        assert_dump_round_trips(&label, stage, &ir);
+        let Census {
+            cells,
+            buffered_cells,
+            ..
+        } = census(&ir);
+        assert_eq!(cells, 16, "{label}: the fixture is the 16-cell chain");
         if stage == PlacementStage::Crossing {
             assert!(
-                buffered >= 2,
-                "{label}: expected buffer coords in the dump: {buffered}",
+                buffered_cells >= 2,
+                "{label}: expected buffer coords on the cells: {buffered_cells}",
             );
         }
+    }
+}
+
+#[test]
+fn a_dump_whose_output_carries_buffer_coords_reads_back_equal() {
+    for (stage, ir) in every_stage(LONG_OUTWARD_WIRE_SOURCE, Edition::Java) {
+        let label = format!("long outward wire --stage {}", stage.as_str());
+        assert_dump_round_trips(&label, stage, &ir);
+        let Census {
+            outputs,
+            buffered_outputs,
+            ..
+        } = census(&ir);
+        assert_eq!(outputs, 1, "{label}: the fixture has one door");
+        if stage == PlacementStage::Crossing {
+            assert_eq!(
+                buffered_outputs, 1,
+                "{label}: expected buffer coords on the door"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_dump_of_a_scope_with_no_cells_reads_back_equal() {
+    for (stage, ir) in every_stage(IDENTITY_WIRE_SOURCE, Edition::Java) {
+        let label = format!("identity wire --stage {}", stage.as_str());
+        assert_dump_round_trips(&label, stage, &ir);
+        let Census { cells, outputs, .. } = census(&ir);
+        assert_eq!(
+            (cells, outputs),
+            (0, 1),
+            "{label}: the fixture is one door and no cell",
+        );
     }
 }

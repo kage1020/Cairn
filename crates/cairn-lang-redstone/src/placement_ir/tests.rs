@@ -1,5 +1,6 @@
 use super::phase::TRANSITION_CARDINALITY;
 use super::*;
+use crate::test_fixtures::{reservation, scoped, sig};
 
 fn routed() -> PlacementPhase {
     PlacementPhase::Routed { wire_length: 3 }
@@ -681,16 +682,34 @@ fn sentence(err: &str) -> &str {
 
 #[test]
 fn every_payload_key_that_disagrees_with_the_stage_is_refused() {
-    let body = r#""cell":"java_repeater_or","drivers":[],"coord":{"x":0,"y":0,"z":0}"#;
+    refuses_every_payload_key_that_disagrees_with_the_stage(
+        "a cell",
+        r#""cell":"java_repeater_or","drivers":[],"coord":{"x":0,"y":0,"z":0}"#,
+        read_back,
+    );
+    refuses_every_payload_key_that_disagrees_with_the_stage(
+        "an output",
+        OUTPUT_IDENTITY,
+        read_output,
+    );
+}
+
+/// Asserts that `read` refuses each payload key disagreeing with the stage of `node`, read from
+/// `body`.
+fn refuses_every_payload_key_that_disagrees_with_the_stage<T: fmt::Debug>(
+    node: &str,
+    body: &str,
+    read: fn(&str) -> Result<T, String>,
+) {
     let early = |key: &str, writer: &str, stage: &str| {
         format!(
-            "`{key}` is written by the {writer} stage, which a cell tagged \
+            "`{key}` is written by the {writer} stage, which {node} tagged \
              `stage: \"{stage}\"` has not reached"
         )
     };
     let due = |key: &str, writer: &str, stage: &str| {
         format!(
-            "a cell tagged `stage: \"{stage}\"` has been through the {writer} stage and \
+            "{node} tagged `stage: \"{stage}\"` has been through the {writer} stage and \
              must carry `{key}`"
         )
     };
@@ -749,7 +768,7 @@ fn every_payload_key_that_disagrees_with_the_stage_is_refused() {
     ];
     for (stage, payload, expected) in rows {
         let json = format!(r#"{{"stage":"{stage}"{payload},{body}}}"#);
-        let err = read_back(&json).expect_err(&json);
+        let err = read(&json).expect_err(&json);
         assert_eq!(sentence(&err), expected, "{json}");
     }
 }
@@ -939,4 +958,355 @@ fn the_segment_vocabulary_is_every_word_a_segment_is_written_as() {
         })
         .collect();
     assert_eq!(written, BufferSegment::WORDS);
+}
+
+/// `probe_output`'s keys besides the phase ones.
+const OUTPUT_IDENTITY: &str =
+    r#""name":["sig","open"],"driver":{"kind":"cell","index":0},"pad":{"x":3,"y":0,"z":4}"#;
+
+/// The `sig.open` actuator fed by cell 0, at its pad `(3, 0, 4)`.
+fn probe_output(phase: PlacementPhase) -> PlacedOutputNode {
+    let mut output = PlacedOutputNode::new(
+        sig("open"),
+        NetRef::Cell(0),
+        CellCoord::new(3, 0, 4),
+        Span::default(),
+    );
+    output.phase = phase;
+    output
+}
+
+/// `json` read back as an output, or the deserializer's refusal as a string.
+fn read_output(json: &str) -> Result<PlacedOutputNode, String> {
+    serde_json::from_str(json).map_err(|err| err.to_string())
+}
+
+#[test]
+fn every_output_phase_round_trips_through_the_flat_wire_form() {
+    let buffered = PlacementPhase::Legalized {
+        wire_length: 20,
+        local_delay_ticks: 2,
+        buffer_coords: vec![
+            BufferCoord::new(BufferSegment::Out, CellCoord::new(3, 0, 12)),
+            BufferCoord::new(BufferSegment::Out, CellCoord::new(3, 1, 6)),
+        ],
+    };
+    let empty = PlacementPhase::Legalized {
+        wire_length: 3,
+        local_delay_ticks: 0,
+        buffer_coords: Vec::new(),
+    };
+    for phase in [
+        PlacementPhase::Unrouted,
+        routed(),
+        delayed(),
+        empty,
+        buffered,
+    ] {
+        let output = probe_output(phase);
+        let json = serde_json::to_string(&output).expect("output serialises");
+        assert_eq!(read_output(&json), Ok(output), "{json}");
+    }
+}
+
+#[test]
+fn an_output_buffer_off_the_out_segment_is_refused() {
+    let head =
+        format!(r#""stage":"crossing","wire_length":30,"local_delay_ticks":1,{OUTPUT_IDENTITY}"#);
+    let on = |segment: &str, z: u32| {
+        format!(r#"{{"port":"{segment}","coord":{{"x":3,"y":0,"z":{z}}}}}"#)
+    };
+
+    let fine = format!(
+        r#"{{{head},"buffer_coords":[{},{}]}}"#,
+        on("out", 12),
+        on("out", 20)
+    );
+    assert_eq!(
+        read_output(&fine).map(|output| output.buffer_coords().to_vec()),
+        Ok(vec![
+            BufferCoord::new(BufferSegment::Out, CellCoord::new(3, 0, 12)),
+            BufferCoord::new(BufferSegment::Out, CellCoord::new(3, 0, 20)),
+        ]),
+        "{fine}",
+    );
+
+    for port in ["a", "b", "sel"] {
+        let json = format!(
+            r#"{{{head},"buffer_coords":[{},{}]}}"#,
+            on("out", 12),
+            on(port, 20)
+        );
+        let err = read_output(&json).expect_err(&json);
+        assert_eq!(
+            sentence(&err),
+            format!(
+                "`buffer_coords[1]` stands on `{port}`, a cell's driver port, and an output's \
+                 buffers stand on the `out` segment"
+            ),
+            "{json}",
+        );
+    }
+}
+
+#[test]
+fn malformed_output_dumps_are_refused_rather_than_guessed_at() {
+    let name = r#""name":["sig","open"]"#;
+    let driver = r#""driver":{"kind":"cell","index":0}"#;
+    let pad = r#""pad":{"x":3,"y":0,"z":4}"#;
+    for (json, expected) in [
+        (
+            format!("{{{name},{driver},{pad}}}"),
+            "missing field `stage`",
+        ),
+        (
+            format!(r#"{{"stage":"placement",{driver},{pad}}}"#),
+            "missing field `name`",
+        ),
+        (
+            format!(r#"{{"stage":"placement",{name},{pad}}}"#),
+            "missing field `driver`",
+        ),
+        (
+            format!(r#"{{"stage":"placement",{name},{driver}}}"#),
+            "missing field `pad`",
+        ),
+        (
+            format!(r#"{{"stage":"placement","name":[],{driver},{pad}}}"#),
+            "invalid length 0, expected a dotted name of one segment or more",
+        ),
+        (
+            format!(r#"{{"stage":"placement","name":["sig","a.b"],{driver},{pad}}}"#),
+            r#"the dotted name ["sig", "a.b"] has a segment holding a `.`, which only ever separates segments"#,
+        ),
+        (
+            format!(r#"{{"stage":"placement",{name},{driver},"coord":{{"x":3,"y":0,"z":4}}}}"#),
+            "unknown field `coord`, expected one of `stage`, `name`, `driver`, `pad`, \
+             `wire_length`, `local_delay_ticks`, `buffer_coords`",
+        ),
+    ] {
+        let err = read_output(&json).expect_err(&json);
+        assert_eq!(sentence(&err), expected, "{json}");
+    }
+}
+
+/// One legalized scope that fills every key a dump can carry, buffers on its cell and its output.
+fn every_key_scope() -> ScopedPlacementIr {
+    let mut cell = probe_cell(PlacementPhase::Legalized {
+        wire_length: 4,
+        local_delay_ticks: 2,
+        buffer_coords: vec![BufferCoord::new(
+            BufferSegment::Port(PortName::A),
+            CellCoord::new(2, 0, 1),
+        )],
+    });
+    cell.drivers = vec![CellPortDriver {
+        port: PortName::A,
+        net: NetRef::Input(0),
+    }];
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.region = Some(reservation(9, 5, 2));
+    ir.inputs = vec![NetlistInput {
+        name: sig("a"),
+        span: Span::default(),
+    }];
+    ir.outputs = vec![probe_output(PlacementPhase::Legalized {
+        wire_length: 20,
+        local_delay_ticks: 1,
+        buffer_coords: vec![BufferCoord::new(
+            BufferSegment::Out,
+            CellCoord::new(3, 1, 3),
+        )],
+    })];
+    ir.cells = vec![cell];
+    ir.signal_defs = IndexMap::from([(sig("a"), NetRef::Input(0)), (sig("open"), NetRef::Cell(0))]);
+    scoped(ScopeKind::Struct, "gate", ir)
+}
+
+/// `json` read back as a whole dump, or the deserializer's refusal as a string.
+fn read_dump(json: &str) -> Result<ScopedPlacementIr, String> {
+    serde_json::from_str(json).map_err(|err| err.to_string())
+}
+
+#[test]
+fn a_dump_that_fills_every_key_reads_back_equal() {
+    let ir = every_key_scope();
+    let json = serde_json::to_string(&ir).expect("dump serialises");
+    let back = read_dump(&json).expect(&json);
+    // `IndexMap` equality ignores order, so only the re-dump pins the order of `signal_defs`.
+    assert_eq!(
+        serde_json::to_string(&back).expect("read-back dump serialises"),
+        json,
+        "re-dumps differently",
+    );
+    assert_eq!(back, ir, "{json}");
+}
+
+/// `node`'s dump with `key` given a second time, with the same value.
+fn with_key_twice(node: &impl Serialize, key: &str) -> String {
+    let dump = serde_json::to_string(node).expect("node serialises");
+    let value = &serde_json::to_value(node).expect("node serialises")[key];
+    let open = dump.strip_suffix('}').expect("a node dumps as an object");
+    format!(r#"{open},"{key}":{value}}}"#)
+}
+
+#[test]
+fn a_key_a_node_gives_twice_is_refused_rather_than_either_value_kept() {
+    let scope = every_key_scope();
+    let ir = &scope.scopes[0].ir;
+    for key in PLACED_CELL_FIELDS {
+        let json = with_key_twice(&ir.cells[0], key);
+        let err = read_back(&json).expect_err(&json);
+        assert_eq!(sentence(&err), format!("duplicate field `{key}`"), "{json}");
+    }
+    for key in PLACED_OUTPUT_FIELDS {
+        let json = with_key_twice(&ir.outputs[0], key);
+        let err = read_output(&json).expect_err(&json);
+        assert_eq!(sentence(&err), format!("duplicate field `{key}`"), "{json}");
+    }
+}
+
+#[test]
+fn an_absent_key_of_a_scope_reads_back_empty() {
+    type Emptying = fn(&mut PlacementIr);
+
+    let dump = serde_json::to_value(every_key_scope()).expect("dump serialises");
+    let emptied: [(&str, Emptying); 5] = [
+        ("region", |ir| ir.region = None),
+        ("inputs", |ir| ir.inputs.clear()),
+        ("outputs", |ir| ir.outputs.clear()),
+        ("cells", |ir| ir.cells.clear()),
+        ("signal_defs", |ir| ir.signal_defs.clear()),
+    ];
+    for (key, empty) in emptied {
+        let mut without = dump.clone();
+        without[0]["ir"]
+            .as_object_mut()
+            .and_then(|ir| ir.remove(key))
+            .expect(key);
+        let mut expected = every_key_scope();
+        empty(&mut expected.scopes[0].ir);
+        let json = serde_json::to_string(&without).expect("dump serialises");
+        assert_eq!(read_dump(&json), Ok(expected), "{json}");
+    }
+}
+
+#[test]
+fn an_unknown_key_is_refused_at_every_depth_of_a_dump() {
+    let dump = serde_json::to_value(every_key_scope()).expect("dump serialises");
+    let unknown = |expected: &str| format!("unknown field `junk`, expected {expected}");
+    let net = r#"invalid value: string "junk", expected "kind" or "index""#.to_owned();
+    let coord = unknown("one of `x`, `y`, `z`, `layer`");
+    let buffer = unknown("`port` or `coord`");
+    for (pointer, expected) in [
+        ("/0", unknown("one of `kind`, `name`, `ir`")),
+        (
+            "/0/ir",
+            unknown("one of `edition`, `region`, `inputs`, `outputs`, `cells`, `signal_defs`"),
+        ),
+        (
+            "/0/ir/region",
+            unknown("one of `label`, `void`, `width`, `depth`"),
+        ),
+        ("/0/ir/inputs/0", unknown("`name`")),
+        (
+            "/0/ir/outputs/0",
+            unknown(
+                "one of `stage`, `name`, `driver`, `pad`, `wire_length`, `local_delay_ticks`, \
+                 `buffer_coords`",
+            ),
+        ),
+        ("/0/ir/outputs/0/driver", net.clone()),
+        ("/0/ir/outputs/0/pad", coord.clone()),
+        ("/0/ir/outputs/0/buffer_coords/0", buffer.clone()),
+        ("/0/ir/outputs/0/buffer_coords/0/coord", coord.clone()),
+        (
+            "/0/ir/cells/0",
+            unknown(
+                "one of `stage`, `cell`, `drivers`, `coord`, `wire_length`, `local_delay_ticks`, \
+                 `buffer_coords`",
+            ),
+        ),
+        ("/0/ir/cells/0/drivers/0", unknown("`port` or `net`")),
+        ("/0/ir/cells/0/drivers/0/net", net.clone()),
+        ("/0/ir/cells/0/coord", coord.clone()),
+        ("/0/ir/cells/0/buffer_coords/0", buffer),
+        ("/0/ir/cells/0/buffer_coords/0/coord", coord),
+        ("/0/ir/signal_defs/sig.open", net),
+    ] {
+        let mut junk = dump.clone();
+        junk.pointer_mut(pointer)
+            .and_then(serde_json::Value::as_object_mut)
+            .expect(pointer)
+            .insert("junk".to_owned(), 7.into());
+        let json = serde_json::to_string(&junk).expect("dump serialises");
+        let err = read_dump(&json).expect_err(&json);
+        assert_eq!(sentence(&err), expected, "{pointer}: {json}");
+    }
+}
+
+#[test]
+fn malformed_scopes_are_refused_rather_than_guessed_at() {
+    let entry = |kind: &str, ir: &str| format!(r#"[{{"kind":"{kind}","name":"gate","ir":{ir}}}]"#);
+    let net = |index: u32| format!(r#"{{"kind":"input","index":{index}}}"#);
+    for (json, expected) in [
+        (
+            entry("level", r#"{"edition":"java"}"#),
+            "unknown variant `level`, expected one of `struct`, `def`, `site`",
+        ),
+        (
+            r#"[{"kind":"struct","ir":{"edition":"java"}}]"#.to_owned(),
+            "missing field `name`",
+        ),
+        (entry("struct", "{}"), "missing field `edition`"),
+        (
+            entry("struct", r#"{"edition":"java","inputs":[{"name":[]}]}"#),
+            "invalid length 0, expected a dotted name of one segment or more",
+        ),
+        (
+            entry(
+                "struct",
+                r#"{"edition":"java","inputs":[{"name":["sig",""]}]}"#,
+            ),
+            r#"the dotted name ["sig", ""] has an empty segment, and every segment holds at least one character"#,
+        ),
+        (
+            entry(
+                "struct",
+                r#"{"edition":"java","inputs":[{"name":["sig.a"]}]}"#,
+            ),
+            r#"the dotted name ["sig.a"] has a segment holding a `.`, which only ever separates segments"#,
+        ),
+        (
+            entry(
+                "struct",
+                &format!(r#"{{"edition":"java","signal_defs":{{"":{}}}}}"#, net(0)),
+            ),
+            r#"the dotted name [""] has an empty segment, and every segment holds at least one character"#,
+        ),
+        (
+            entry(
+                "struct",
+                &format!(
+                    r#"{{"edition":"java","signal_defs":{{"sig.":{}}}}}"#,
+                    net(0)
+                ),
+            ),
+            r#"the dotted name ["sig", ""] has an empty segment, and every segment holds at least one character"#,
+        ),
+        (
+            entry(
+                "struct",
+                &format!(
+                    r#"{{"edition":"java","signal_defs":{{"sig.a":{},"sig.a":{}}}}}"#,
+                    net(0),
+                    net(1)
+                ),
+            ),
+            "`signal_defs` names `sig.a` twice, and a signal has one definition",
+        ),
+    ] {
+        let err = read_dump(&json).expect_err(&json);
+        assert_eq!(sentence(&err), expected, "{json}");
+    }
 }

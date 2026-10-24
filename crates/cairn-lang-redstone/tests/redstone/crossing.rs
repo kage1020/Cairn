@@ -9,8 +9,8 @@ use cairn_lang_redstone::{
 };
 
 use crate::common::{
-    delayed_from_source, legalized_from_source, load_example, normalize_stage_tags,
-    shared_bus_source,
+    IDENTITY_WIRE_SOURCE, LONG_OUTWARD_WIRE_SOURCE, delayed_from_source, legalized_from_source,
+    load_example, normalize_stage_tags, shared_bus_source,
 };
 
 /// The Error-severity findings: whether a scope survived, not whether it said nothing.
@@ -560,21 +560,7 @@ struct gen size=9x8
 
 #[test]
 fn the_wire_out_to_an_actuator_carries_buffer_repeaters() {
-    let source = "\
-theme t:
-  slot wall -> @oak_planks
-  slot door -> @oak_door
-
-struct reach size=40x6
-  floor mat_slot=wall
-  door id=front side=front at=center mat_slot=door
-  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
-  logic sig.c = sig.a or sig.b
-  door[id=front] opened_by=sig.c
-  circuit region=floor void=3
-";
-    let delayed = delayed_from_source(source, Edition::Java);
+    let delayed = delayed_from_source(LONG_OUTWARD_WIRE_SOURCE, Edition::Java);
     let out = compile_crossing(&delayed);
     assert!(
         out.diagnostics.is_empty(),
@@ -619,21 +605,7 @@ struct reach size=40x6
 
 #[test]
 fn an_outward_segment_is_charged_like_an_inward_one_of_the_same_length() {
-    let source = "\
-theme t:
-  slot wall -> @oak_planks
-  slot door -> @oak_door
-
-struct pair size=40x6
-  floor mat_slot=wall
-  door id=front side=front at=center mat_slot=door
-  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
-  logic sig.c = sig.a or sig.b
-  door[id=front] opened_by=sig.c
-  circuit region=floor void=3
-";
-    let delayed = delayed_from_source(source, Edition::Java);
+    let delayed = delayed_from_source(LONG_OUTWARD_WIRE_SOURCE, Edition::Java);
     let out = compile_crossing(&delayed);
     let scope = out.scoped.scopes.first().expect("the scope legalizes");
     let output = scope.ir.outputs.first().expect("the actuator");
@@ -695,19 +667,7 @@ struct fan size=40x6
 
 #[test]
 fn an_identity_wire_is_legalized_like_any_other_segment() {
-    let source = "\
-theme t:
-  slot wall -> @oak_planks
-  slot door -> @oak_door
-
-struct pass size=40x6
-  floor mat_slot=wall
-  door id=d side=front at=center mat_slot=door
-  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
-  door[id=d] opened_by=sig.a
-  circuit region=floor void=2
-";
-    let delayed = delayed_from_source(source, Edition::Java);
+    let delayed = delayed_from_source(IDENTITY_WIRE_SOURCE, Edition::Java);
     let out = compile_crossing(&delayed);
     assert!(out.diagnostics.is_empty(), "{:?}", out.diagnostics);
 
@@ -734,21 +694,7 @@ struct pass size=40x6
 /// Pinned by key name, since the two hand-written `Serialize` impls could share a typo.
 #[test]
 fn the_json_for_a_placed_actuator_carries_its_own_keys() {
-    let source = "\
-theme t:
-  slot wall -> @oak_planks
-  slot door -> @oak_door
-
-struct reach size=40x6
-  floor mat_slot=wall
-  door id=front side=front at=center mat_slot=door
-  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
-  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
-  logic sig.c = sig.a or sig.b
-  door[id=front] opened_by=sig.c
-  circuit region=floor void=3
-";
-    let delayed = delayed_from_source(source, Edition::Java);
+    let delayed = delayed_from_source(LONG_OUTWARD_WIRE_SOURCE, Edition::Java);
     let out = compile_crossing(&delayed);
     let json = serde_json::to_string(&out.scoped).expect("serialise");
 
