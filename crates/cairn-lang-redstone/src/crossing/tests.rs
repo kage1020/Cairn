@@ -1378,20 +1378,20 @@ struct chain size=60x5
 }
 
 mod buffer_delay_invariant {
-    //! Property tests for the crossing and delay agreement, here because the strategy hand-builds
-    //! `Unrouted` [`PlacedCellNode`]s through the `pub(crate)` `phase` field.
+    //! Property tests for the crossing and delay agreement, here because their fixtures hand-build
+    //! `Unrouted` nodes through `pub(crate)` items.
     use proptest::prelude::*;
 
     use super::{
-        BufferSegment, CellCoord, CellPortDriver, Edition, EditionCell, HashMap, HashSet, NetRef,
-        PadColumn, PlacedCellNode, PlacementIr, PlacementPhase, PortName, RouteLayer, Router,
-        ScopeKind, ScopedPlacementIr, Span, block_sites, collect_nets, compile_crossing, input_pad,
-        net_trees, reservation, scoped,
+        BufferSegment, CellCoord, CellPortDriver, DiagnosticCode, Edition, EditionCell, HashMap,
+        HashSet, NetRef, PadColumn, PlacedCellNode, PlacedOutputNode, PlacementIr, PlacementPhase,
+        PortName, RouteLayer, Router, ScopeKind, ScopedPlacementIr, Span, block_sites,
+        collect_nets, compile_crossing, input_pad, net_trees, reservation, scoped,
     };
     use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
-    use crate::placement_ir::ScopedPlacementIrEntry;
+    use crate::placement_ir::{BufferCoord, CellIdentity, ScopedPlacementIrEntry};
     use crate::routing::compile_routing;
-    use crate::routing_geometry::NetTree;
+    use crate::routing_geometry::{NetTree, Unreached};
 
     /// One `(x, z, second port on the same net)` per cell, deduplicated in a `prop_map` over this
     /// same tuple, since a new shape would replay the seeds in `proptest-regressions/` as others.
@@ -1435,28 +1435,137 @@ mod buffer_delay_invariant {
         ir
     }
 
-    /// The proptest's assertions over one draw, as a function so a named test can replay it.
+    /// A cell or actuator pad of [`pad_scope_ir`]: `(x, z, the net driving it)`.
+    type Node = (u32, u32, NetRef);
+
+    /// Up to two cells, each on `sig.a` or `sig.b`, and one or two actuator pads, each on a sensor
+    /// or a cell. A cell that draws a pad's coord is dropped, so every draw keeps a pad.
+    fn pad_scope_strategy() -> impl Strategy<Value = (Vec<Node>, Vec<Node>)> {
+        let sensor = prop_oneof![Just(NetRef::Input(0)), Just(NetRef::Input(1))];
+        let cells = prop::collection::vec((1u32..=99u32, 0u32..8u32, sensor), 0..=2);
+        let pads = prop::collection::vec(
+            (1u32..=99u32, 0u32..8u32, any::<prop::sample::Index>()),
+            1..=2,
+        );
+        (cells, pads).prop_map(|(cells, pads)| {
+            let mut seen: HashSet<(u32, u32)> = HashSet::new();
+            let pads: Vec<_> = pads
+                .into_iter()
+                .filter(|(x, z, _)| seen.insert((*x, *z)))
+                .collect();
+            let cells: Vec<Node> = cells
+                .into_iter()
+                .filter(|(x, z, _)| seen.insert((*x, *z)))
+                .collect();
+            let drivers: Vec<NetRef> = [NetRef::Input(0), NetRef::Input(1)]
+                .into_iter()
+                .chain((0..cells.len()).map(|j| {
+                    NetRef::Cell(u32::try_from(j).expect("two cells fit the u32 a NetRef carries"))
+                }))
+                .collect();
+            let pads = pads
+                .into_iter()
+                .map(|(x, z, driver)| (x, z, *driver.get(&drivers)))
+                .collect();
+            (cells, pads)
+        })
+    }
+
+    /// [`scope_ir`]'s reservation with a second sensor, `sig.b`, a cell at `(x, 0, z)` per entry of
+    /// `cells` and an actuator pad at `(x, 0, z)` per entry of `pads`.
+    fn pad_scope_ir(cells: &[Node], pads: &[Node]) -> PlacementIr {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(reservation(200, 10, 3));
+        for name in ["a", "b"] {
+            ir.inputs.push(crate::netlist_ir::NetlistInput {
+                name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec![name.into()]),
+                span: Span::default(),
+            });
+        }
+        for &(x, z, net) in cells {
+            ir.cells.push(PlacedCellNode {
+                cell: EditionCell::JavaRepeaterOr,
+                drivers: vec![CellPortDriver {
+                    port: PortName::A,
+                    net,
+                }],
+                coord: CellCoord::new(x, 0, z),
+                phase: PlacementPhase::Unrouted,
+                span: Span::default(),
+            });
+        }
+        for (index, &(x, z, driver)) in pads.iter().enumerate() {
+            ir.outputs.push(PlacedOutputNode::new(
+                cairn_lang_core::ast::DottedRef::new("sig".into(), vec![format!("out{index}")]),
+                driver,
+                CellCoord::new(x, 0, z),
+                Span::default(),
+            ));
+        }
+        ir
+    }
+
+    /// [`check_legalized`] over a draw of [`scope_strategy`].
     fn check_scope(xs: &[(u32, u32, bool)]) -> Result<(), TestCaseError> {
-        let case = format!("xs={xs:?}");
-        let legalized = legalize_scope(scope_ir(xs), &case)?;
+        check_legalized(scope_ir(xs), &format!("xs={xs:?}"), &[])
+    }
+
+    /// [`check_legalized`] over a draw of [`pad_scope_strategy`].
+    fn check_pad_scope(cells: &[Node], pads: &[Node]) -> Result<(), TestCaseError> {
+        check_legalized(
+            pad_scope_ir(cells, pads),
+            &format!("cells={cells:?} pads={pads:?}"),
+            &[DiagnosticCode::RouteCongestion],
+        )
+    }
+
+    /// The assertions over one draw, as a function so a named test can replay it.
+    fn check_legalized(
+        ir: PlacementIr,
+        case: &str,
+        refusals: &[DiagnosticCode],
+    ) -> Result<(), TestCaseError> {
+        let legalized = legalize_scope(ir, case, refusals)?;
         for entry in &legalized.scopes {
-            check_buffer_sites(entry, &case)?;
-            check_cell_charges(entry, &case)?;
+            check_buffer_sites(entry, case)?;
+            check_charges(entry, case)?;
         }
         for entry in &legalized.scopes {
-            check_scope_total(entry, &case)?;
+            check_scope_total(entry, case)?;
         }
         Ok(())
     }
 
-    fn legalize_scope(ir: PlacementIr, case: &str) -> Result<ScopedPlacementIr, TestCaseError> {
-        let routing = compile_routing(&scoped(ScopeKind::Struct, "prop", ir));
+    /// The draw routed, delayed and legalized; a draw that routing refuses with one of `refusals`
+    /// over a walled-in sink is rejected.
+    fn legalize_scope(
+        ir: PlacementIr,
+        case: &str,
+        refusals: &[DiagnosticCode],
+    ) -> Result<ScopedPlacementIr, TestCaseError> {
+        let placed = scoped(ScopeKind::Struct, "prop", ir);
+        let routing = compile_routing(&placed);
+        let refused = routing.scoped.scopes.is_empty();
         prop_assert!(
-            routing.diagnostics.is_empty(),
+            routing.diagnostics.iter().all(|d| if refused {
+                refusals.contains(&d.code)
+            } else {
+                d.code == DiagnosticCode::RouteCrossLayerClearance
+            }),
             "routing diagnostics for {}: {:?}",
             case,
             routing.diagnostics,
         );
+        if refused {
+            prop_assert!(
+                walls_a_sink_in(&placed.scopes[0]),
+                "routing refused {} with no sink walled in: {:?}",
+                case,
+                routing.diagnostics,
+            );
+        }
+        // A sink other nets' wires wall in has no route, so refusing it is the right answer.
+        prop_assume!(!refused);
         let delayed = compile_delay(&routing.scoped);
         prop_assert!(
             delayed.diagnostics.is_empty(),
@@ -1465,14 +1574,28 @@ mod buffer_delay_invariant {
             delayed.diagnostics,
         );
         let legalized = compile_crossing(&delayed.scoped);
-        // Refusing is a correct answer for some layouts, so the case is rejected, not failed.
-        prop_assume!(legalized.diagnostics.is_empty());
+        prop_assert!(
+            legalized.diagnostics.is_empty(),
+            "crossing diagnostics for {}: {:?}",
+            case,
+            legalized.diagnostics,
+        );
         Ok(legalized.scoped)
+    }
+
+    /// Whether some sink of `entry` has no route of any length from its net's source.
+    fn walls_a_sink_in(entry: &ScopedPlacementIrEntry) -> bool {
+        let (_, trees) = laid_trees(entry);
+        trees.values().any(|tree| {
+            tree.unreachable()
+                .iter()
+                .any(|sink| tree.stranded_by(*sink) == Some(Unreached::WalledIn))
+        })
     }
 
     fn check_buffer_sites(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
         let (router, trees) = laid_trees(entry);
-        for cell in &entry.ir.cells {
+        for (index, cell) in entry.ir.cells.iter().enumerate() {
             for buffer in cell.buffer_coords() {
                 let BufferSegment::Port(port) = buffer.port else {
                     panic!("a cell's buffer must name one of its driver ports");
@@ -1482,22 +1605,50 @@ mod buffer_delay_invariant {
                     .iter()
                     .find(|d| d.port == port)
                     .expect("every buffer names a driver of its own cell");
-                let tree = &trees[&driver.net];
-                // Not `wire_path`, which holds the terminals and would accept a cell body.
-                let dust: HashSet<CellCoord> = router.dust(tree).into_iter().collect();
-                // Terminals included: a repeater beside a cell body or pad cuts it off too.
-                let net: HashSet<CellCoord> = tree.wire_path().into_iter().collect();
                 let on = Buffer {
                     coord: buffer.coord,
                     net: driver.net,
+                    sink: cell.coord,
+                    into: CellIdentity::new(index, cell.coord, entry),
                     case,
                 };
-                check_on_route(&on, tree, &dust, cell.coord)?;
-                let (before, after) = check_straight_through(&on, tree)?;
-                check_nothing_of_its_net_beside(&on, &net, before, &after)?;
+                check_buffer_site(&on, &router, &trees[&driver.net])?;
+            }
+        }
+        for (index, output) in entry.ir.outputs.iter().enumerate() {
+            for buffer in output.buffer_coords() {
+                assert_eq!(
+                    buffer.port,
+                    BufferSegment::Out,
+                    "a pad's buffer must name the outward segment",
+                );
+                let on = Buffer {
+                    coord: buffer.coord,
+                    net: output.driver,
+                    sink: output.pad,
+                    into: CellIdentity::output(index, output.pad, entry),
+                    case,
+                };
+                check_buffer_site(&on, &router, &trees[&output.driver])?;
             }
         }
         Ok(())
+    }
+
+    /// Every check on one buffer, against its own net's tree: another net's block may stand beside
+    /// it.
+    fn check_buffer_site(
+        on: &Buffer<'_>,
+        router: &Router,
+        tree: &NetTree,
+    ) -> Result<(), TestCaseError> {
+        // Not `wire_path`, which holds the terminals and would accept a cell body or pad.
+        let dust: HashSet<CellCoord> = router.dust(tree).into_iter().collect();
+        // Terminals included: a repeater beside a cell body or pad cuts it off too.
+        let net: HashSet<CellCoord> = tree.wire_path().into_iter().collect();
+        check_on_route(on, tree, &dust)?;
+        let (before, after) = check_straight_through(on, tree)?;
+        check_nothing_of_its_net_beside(on, &net, before, &after)
     }
 
     /// The router and the trees it lays for one scope, as the delay and crossing passes do.
@@ -1516,6 +1667,10 @@ mod buffer_delay_invariant {
     struct Buffer<'a> {
         coord: CellCoord,
         net: NetRef,
+        /// The cell body or pad the segment the buffer is on feeds.
+        sink: CellCoord,
+        /// That sink, as a failure names it.
+        into: CellIdentity<'a>,
         case: &'a str,
     }
 
@@ -1523,26 +1678,27 @@ mod buffer_delay_invariant {
         on: &Buffer<'_>,
         tree: &NetTree,
         dust: &HashSet<CellCoord>,
-        sink: CellCoord,
     ) -> Result<(), TestCaseError> {
         // The whole coord: footprints would accept a repeater on the plane under climbed wire.
         prop_assert!(
             dust.contains(&on.coord),
-            "buffer {:?} is not over dust the routing pass laid for {:?} ({})",
+            "buffer {:?} on the wire into {} is not over dust the routing pass laid for {:?} ({})",
             on.coord,
+            on.into,
             on.net,
             on.case,
         );
         // `wire_path` would accept a coord that refreshes a sibling sink instead.
         let route: HashSet<CellCoord> = tree
-            .route_to(sink)
-            .expect("every cell is a terminal of the net driving it")
+            .route_to(on.sink)
+            .expect("every cell and pad is a terminal of the net driving it")
             .into_iter()
             .collect();
         prop_assert!(
             route.contains(&on.coord),
-            "buffer {:?} is not over the route into this cell for {:?} ({})",
+            "buffer {:?} is not over the route into {} for {:?} ({})",
             on.coord,
+            on.into,
             on.net,
             on.case,
         );
@@ -1575,8 +1731,10 @@ mod buffer_delay_invariant {
         };
         prop_assert!(
             straight,
-            "buffer {:?} does not have the wire straight through it: in from {:?}, out to {:?} ({})",
+            "buffer {:?} on the wire into {} does not have the wire straight through it: in from \
+             {:?}, out to {:?} ({})",
             c,
+            on.into,
             before,
             after,
             on.case,
@@ -1626,73 +1784,108 @@ mod buffer_delay_invariant {
         prop_assert_eq!(
             &beside,
             &joined,
-            "buffer {:?} has a block of its own net beside it that it does not join ({})",
+            "buffer {:?} on the wire into {} has a block of its own net beside it that it does not \
+             join ({})",
             c,
+            on.into,
             on.case,
         );
         Ok(())
     }
 
-    /// Per cell, since an over-charged cell and an under-charged one cancel in a sum.
-    fn check_cell_charges(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
-        for cell in &entry.ir.cells {
-            let dt = cell
-                .local_delay_ticks()
-                .expect("legalized cells carry Some(local_delay_ticks)");
-            let base = cell.cell.base_delay_ticks();
+    /// What stage 3 charged one cell or pad, and the blocks stage 4 laid on the wire into it.
+    struct Charge<'a> {
+        /// The cell or pad, as a failure names it.
+        node: CellIdentity<'a>,
+        local_delay_ticks: u32,
+        /// Zero for a pad, which has no delay of its own.
+        base_delay_ticks: u32,
+        /// Distinct coords, since a cell's two ports on one net name the same repeaters.
+        blocks: u32,
+    }
+
+    /// Every cell's [`Charge`], then every actuator pad's.
+    fn charges(entry: &ScopedPlacementIrEntry) -> Vec<Charge<'_>> {
+        let blocks = |buffers: &[BufferCoord]| {
+            let coords: HashSet<CellCoord> = buffers.iter().map(|b| b.coord).collect();
+            u32::try_from(coords.len()).expect("buffer block count fits in u32")
+        };
+        let cells = entry
+            .ir
+            .cells
+            .iter()
+            .enumerate()
+            .map(|(index, cell)| Charge {
+                node: CellIdentity::new(index, cell.coord, entry),
+                local_delay_ticks: cell
+                    .local_delay_ticks()
+                    .expect("legalized cells carry Some(local_delay_ticks)"),
+                base_delay_ticks: cell.cell.base_delay_ticks(),
+                blocks: blocks(cell.buffer_coords()),
+            });
+        let pads = entry
+            .ir
+            .outputs
+            .iter()
+            .enumerate()
+            .map(|(index, output)| Charge {
+                node: CellIdentity::output(index, output.pad, entry),
+                local_delay_ticks: output
+                    .local_delay_ticks()
+                    .expect("legalized pads carry Some(local_delay_ticks)"),
+                base_delay_ticks: 0,
+                blocks: blocks(output.buffer_coords()),
+            });
+        cells.chain(pads).collect()
+    }
+
+    /// Per cell and pad, since an over-charged one and an under-charged one cancel in a sum.
+    fn check_charges(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
+        for charge in charges(entry) {
             // A cell below its edition base would clamp to zero and match a cell with no buffers.
-            let delta = dt.checked_sub(base);
+            let delta = charge
+                .local_delay_ticks
+                .checked_sub(charge.base_delay_ticks);
             prop_assert!(
                 delta.is_some(),
-                "local_delay_ticks {} < base_delay_ticks {} for cell at {:?} ({})",
-                dt,
-                base,
-                cell.coord,
+                "local_delay_ticks {} < base_delay_ticks {} for {} ({})",
+                charge.local_delay_ticks,
+                charge.base_delay_ticks,
+                charge.node,
                 case,
             );
             let delta = delta.unwrap_or_default();
-            let blocks: HashSet<CellCoord> = cell.buffer_coords().iter().map(|b| b.coord).collect();
-            let placed = u32::try_from(blocks.len()).expect("buffer block count fits in u32");
             prop_assert_eq!(
                 delta,
-                placed
+                charge
+                    .blocks
                     .checked_mul(BUFFER_REPEATER_TICKS)
                     .expect("block count × BUFFER_REPEATER_TICKS fits in u32"),
-                "cell at {:?} charged {} ticks of buffer but stands on {} block(s) ({})",
-                cell.coord,
+                "{} charged {} ticks of buffer but its wire carries {} block(s) ({})",
+                charge.node,
                 delta,
-                placed,
+                charge.blocks,
                 case,
             );
         }
         Ok(())
     }
 
-    /// `Σ blocks × BUFFER_REPEATER_TICKS = Σ (local − base)` over one scope's cells.
+    /// `Σ blocks × BUFFER_REPEATER_TICKS = Σ (local − base)` over one scope's cells and pads.
     fn check_scope_total(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
-        let buffer_total: u32 = entry
-            .ir
-            .cells
-            .iter()
-            .map(|c| {
-                let blocks: HashSet<CellCoord> =
-                    c.buffer_coords().iter().map(|b| b.coord).collect();
-                u32::try_from(blocks.len()).expect("buffer block count fits in u32")
-            })
-            .sum();
+        let charges = charges(entry);
+        let buffer_total: u32 = charges.iter().map(|charge| charge.blocks).sum();
         let mut delta_total: u32 = 0;
-        for cell in &entry.ir.cells {
-            let dt = cell
-                .local_delay_ticks()
-                .expect("legalized cells carry Some(local_delay_ticks)");
-            let base = cell.cell.base_delay_ticks();
-            let delta = dt.checked_sub(base);
+        for charge in &charges {
+            let delta = charge
+                .local_delay_ticks
+                .checked_sub(charge.base_delay_ticks);
             prop_assert!(
                 delta.is_some(),
-                "local_delay_ticks {} < base_delay_ticks {} for cell at {:?} — the delay pass charged less than the edition base",
-                dt,
-                base,
-                cell.coord,
+                "local_delay_ticks {} < base_delay_ticks {} for {} — the delay pass charged less than the edition base",
+                charge.local_delay_ticks,
+                charge.base_delay_ticks,
+                charge.node,
             );
             delta_total = delta_total
                 .checked_add(delta.unwrap())
@@ -1732,7 +1925,7 @@ mod buffer_delay_invariant {
         let case = format!("xs={xs:?}");
         replay(check_scope(&xs), &case);
         let legalized =
-            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case, &[]).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
@@ -1758,7 +1951,7 @@ mod buffer_delay_invariant {
         let case = format!("xs={xs:?}");
         replay(check_scope(&xs), &case);
         let legalized =
-            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case, &[]).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
@@ -1791,7 +1984,7 @@ mod buffer_delay_invariant {
         let case = format!("xs={xs:?}");
         replay(check_scope(&xs), &case);
         let legalized =
-            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case, &[]).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
@@ -1827,6 +2020,11 @@ mod buffer_delay_invariant {
         sites
     }
 
+    /// `c` spelled `(x, y, z)` for a failure message.
+    fn spelled(c: CellCoord) -> String {
+        format!("({}, {}, {})", c.x, c.y, c.z)
+    }
+
     /// Asserts `branch` and `beside` are both dust of the net that the tree does not join, so a
     /// repeater on `beside` would cut `branch` off.
     fn assert_a_branch_beside(
@@ -1836,7 +2034,6 @@ mod buffer_delay_invariant {
         branch: CellCoord,
         case: &str,
     ) {
-        let spelled = |c: CellCoord| format!("({}, {}, {})", c.x, c.y, c.z);
         let gone = format!("{case}: this shape no longer exercises the bug");
         assert!(
             faces_of(beside).contains(&branch),
@@ -1868,7 +2065,7 @@ mod buffer_delay_invariant {
         let case = format!("xs={xs:?}");
         replay(check_scope(&xs), &case);
         let legalized =
-            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case, &[]).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let tree = &trees[&NetRef::Input(0)];
@@ -1897,7 +2094,7 @@ mod buffer_delay_invariant {
         let case = format!("xs={xs:?}");
         replay(check_scope(&xs), &case);
         let legalized =
-            legalize_scope(scope_ir(&xs), &case).expect("the replay above legalized it");
+            legalize_scope(scope_ir(&xs), &case, &[]).expect("the replay above legalized it");
         let entry = &legalized.scopes[0];
         let (router, trees) = laid_trees(entry);
         let tree = &trees[&NetRef::Input(0)];
@@ -1928,11 +2125,10 @@ mod buffer_delay_invariant {
         terminal: CellCoord,
         case: &str,
     ) {
-        let spelled = |c: CellCoord| format!("({}, {}, {})", c.x, c.y, c.z);
         let gone = format!("{case}: this shape no longer exercises the bug");
         let route = tree
             .route_to(sink)
-            .expect("every cell is a terminal of the net driving it");
+            .expect("every cell and pad is a terminal of the net driving it");
         assert!(
             route.contains(&due),
             "{gone}: the route to {} no longer passes {}: {route:?}",
@@ -1975,6 +2171,195 @@ mod buffer_delay_invariant {
         );
     }
 
+    /// [`a_buffer_never_stands_beside_a_sink_of_its_own_net`] with actuator pads for the cells.
+    #[test]
+    fn a_buffer_never_stands_beside_a_pad_of_its_own_net() {
+        let cells: [Node; 0] = [];
+        let pads = [(31, 0, NetRef::Input(0)), (32, 0, NetRef::Input(0))];
+        let case = format!("cells={cells:?} pads={pads:?}");
+        replay(check_pad_scope(&cells, &pads), &case);
+        let legalized = legalize_scope(pad_scope_ir(&cells, &pads), &case, &[])
+            .expect("the replay above legalized it");
+        let entry = &legalized.scopes[0];
+        let (router, trees) = laid_trees(entry);
+        let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
+        assert_only_a_terminal_beside(
+            &router,
+            &trees[&NetRef::Input(0)],
+            plane(32, 0),
+            [plane(30, 1), plane(31, 1), plane(32, 1)],
+            plane(31, 0),
+            &case,
+        );
+        assert_eq!(
+            entry.ir.outputs[1]
+                .buffer_coords()
+                .iter()
+                .map(|b| b.coord)
+                .collect::<Vec<_>>(),
+            vec![plane(16, 0), plane(29, 0)],
+            "{case}: the second repeater must step back off (31, 0, 1), beside the pad at \
+             (31, 0, 0), onto (29, 0, 0)",
+        );
+    }
+
+    /// `sig.a` runs straight to its pad past the cell `sig.b` feeds at `(16, 0, 1)`, so the first
+    /// repeater on the pad's wire stands beside that cell's body.
+    #[test]
+    fn a_buffer_stands_beside_a_cell_body_of_another_net() {
+        let cells = [(16, 1, NetRef::Input(1))];
+        let pads = [(40, 0, NetRef::Input(0))];
+        let case = format!("cells={cells:?} pads={pads:?}");
+        replay(check_pad_scope(&cells, &pads), &case);
+        let legalized = legalize_scope(pad_scope_ir(&cells, &pads), &case, &[])
+            .expect("the replay above legalized it");
+        let entry = &legalized.scopes[0];
+        let (router, trees) = laid_trees(entry);
+        let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
+        assert_a_block_of_another_net_beside(
+            &router,
+            &trees,
+            NetRef::Input(0),
+            plane(40, 0),
+            plane(16, 0),
+            plane(16, 1),
+            &case,
+        );
+        assert_eq!(
+            entry.ir.outputs[0]
+                .buffer_coords()
+                .iter()
+                .map(|b| b.coord)
+                .collect::<Vec<_>>(),
+            vec![plane(16, 0), plane(32, 0)],
+            "{case}: the first repeater must stand on (16, 0, 0), beside the cell `sig.b` feeds",
+        );
+    }
+
+    /// Asserts `due` is dust on `net`'s route into `pad`, and `block` is on a face of it and on
+    /// another net's tree, not on `net`'s, so a check that took every net's blocks for `net`'s
+    /// would refuse a repeater on `due`.
+    fn assert_a_block_of_another_net_beside(
+        router: &Router,
+        trees: &HashMap<NetRef, NetTree>,
+        net: NetRef,
+        pad: CellCoord,
+        due: CellCoord,
+        block: CellCoord,
+        case: &str,
+    ) {
+        let gone = format!("{case}: this shape no longer puts another net beside a repeater");
+        let tree = &trees[&net];
+        assert!(
+            router.dust(tree).contains(&due),
+            "{gone}: {} is not dust of {net:?}",
+            spelled(due),
+        );
+        let route = tree
+            .route_to(pad)
+            .expect("every cell and pad is a terminal of the net driving it");
+        assert!(
+            route.contains(&due),
+            "{gone}: the route to {} no longer passes {}: {route:?}",
+            spelled(pad),
+            spelled(due),
+        );
+        assert!(
+            faces_of(due).contains(&block),
+            "{gone}: {} is not on a face of {}",
+            spelled(block),
+            spelled(due),
+        );
+        let holds = |net: &NetRef| trees[net].wire_path().contains(&block);
+        assert!(
+            !holds(&net),
+            "{gone}: {} is a block of {net:?}",
+            spelled(block),
+        );
+        assert!(
+            trees.keys().any(|other| *other != net && holds(other)),
+            "{gone}: {} is a block of no other net",
+            spelled(block),
+        );
+    }
+
+    /// `sig.a` forks at `(28, 0, 0)`, so the pad's wire shares the repeater on `(16, 0, 0)` with
+    /// the cell's and runs on past the fork through two the cell's wire does not.
+    #[test]
+    fn a_pad_counts_the_repeaters_past_the_fork_its_wire_shares_with_a_cell() {
+        let cells = [(28, 7, NetRef::Input(0))];
+        let pads = [(60, 0, NetRef::Input(0))];
+        let case = format!("cells={cells:?} pads={pads:?}");
+        replay(check_pad_scope(&cells, &pads), &case);
+        let legalized = legalize_scope(pad_scope_ir(&cells, &pads), &case, &[])
+            .expect("the replay above legalized it");
+        let entry = &legalized.scopes[0];
+        let (router, trees) = laid_trees(entry);
+        let plane = |x, z| CellCoord::with_layer(x, 0, z, RouteLayer::Plane);
+        assert_a_fork_before(
+            &router,
+            &trees[&NetRef::Input(0)],
+            [plane(28, 7), plane(60, 0)],
+            plane(28, 0),
+            plane(32, 0),
+            &case,
+        );
+        let coords = |buffers: &[BufferCoord]| buffers.iter().map(|b| b.coord).collect::<Vec<_>>();
+        assert_eq!(
+            coords(entry.ir.cells[0].buffer_coords()),
+            vec![plane(16, 0), plane(28, 4)],
+            "{case}: the cell's wire must keep only the shared repeater and its own past the fork",
+        );
+        assert_eq!(
+            coords(entry.ir.outputs[0].buffer_coords()),
+            vec![plane(16, 0), plane(32, 0), plane(48, 0)],
+            "{case}: the pad's wire must name the shared repeater, then its own two past the fork",
+        );
+    }
+
+    /// Asserts the routes into `cell` and `pad` part at `fork`, a block of dust, and `due` is on
+    /// the pad's past it, so a repeater there is the pad's alone.
+    fn assert_a_fork_before(
+        router: &Router,
+        tree: &NetTree,
+        [cell, pad]: [CellCoord; 2],
+        fork: CellCoord,
+        due: CellCoord,
+        case: &str,
+    ) {
+        let gone = format!("{case}: this shape no longer puts a repeater past a fork");
+        let route = |sink: CellCoord| {
+            tree.route_to(sink)
+                .expect("every cell and pad is a terminal of the net driving it")
+        };
+        let (to_cell, to_pad) = (route(cell), route(pad));
+        let shared = to_cell
+            .iter()
+            .zip(&to_pad)
+            .take_while(|(a, b)| a == b)
+            .last()
+            .map(|(a, _)| *a);
+        assert_eq!(
+            shared,
+            Some(fork),
+            "{gone}: the routes to {} and {} no longer part at {}",
+            spelled(cell),
+            spelled(pad),
+            spelled(fork),
+        );
+        assert!(
+            router.dust(tree).contains(&fork),
+            "{gone}: {} is not dust of the net",
+            spelled(fork),
+        );
+        assert!(
+            to_pad.contains(&due) && !to_cell.contains(&due),
+            "{gone}: {} is not on the route to {} alone",
+            spelled(due),
+            spelled(pad),
+        );
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
 
@@ -1982,6 +2367,14 @@ mod buffer_delay_invariant {
         #[test]
         fn a_cell_waits_its_base_delay_plus_its_buffer_ticks(xs in scope_strategy()) {
             check_scope(&xs)?;
+        }
+
+        /// Up to four nets, so a buffer can stand beside a block of a net other than its own.
+        #[test]
+        fn a_pad_waits_the_buffer_ticks_of_the_repeaters_on_its_wire(
+            (cells, pads) in pad_scope_strategy(),
+        ) {
+            check_pad_scope(&cells, &pads)?;
         }
     }
 }
