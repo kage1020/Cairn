@@ -846,7 +846,28 @@ fn data_versions_rows_out_of_order_are_refused() {
     let RegistryError::VersionOrderBroken { reason } = &err else {
         panic!("expected VersionOrderBroken, got {err}");
     };
-    assert!(reason.contains("keys must ascend"), "{reason}");
+    assert_eq!(
+        reason,
+        "`1.20.4` has data_version 3700 but follows `1.21.4` with 4189; keys must ascend and be unique"
+    );
+    let keys_equal = r#"{
+        "schema_version": 1,
+        "latest": "1.21.4",
+        "versions": [
+            { "mc_version": "1.20.4", "data_version": 3700 },
+            { "mc_version": "1.21.4", "data_version": 3700 }
+        ]
+    }"#;
+    let err = load_from_dir_err("order-keys-equal", |dir| {
+        write_pack(dir, good_manifest(), keys_equal);
+    });
+    let RegistryError::VersionOrderBroken { reason } = &err else {
+        panic!("expected VersionOrderBroken, got {err}");
+    };
+    assert_eq!(
+        reason,
+        "`1.21.4` has data_version 3700 but follows `1.20.4` with 3700; keys must ascend and be unique"
+    );
     let labels_descend = r#"{
         "schema_version": 1,
         "latest": "1.21.4",
@@ -861,7 +882,10 @@ fn data_versions_rows_out_of_order_are_refused() {
     let RegistryError::VersionOrderBroken { reason } = &err else {
         panic!("expected VersionOrderBroken, got {err}");
     };
-    assert!(reason.contains("does not sort above"), "{reason}");
+    assert_eq!(
+        reason,
+        "`1.20.4` does not sort above `1.21.4` by label, but its data_version is higher; placing a floor outside the table reads the labels"
+    );
     // Two spellings of one version, with distinct keys so the label check is what refuses.
     let labels_equal = r#"{
         "schema_version": 1,
@@ -877,7 +901,10 @@ fn data_versions_rows_out_of_order_are_refused() {
     let RegistryError::VersionOrderBroken { reason } = &err else {
         panic!("expected VersionOrderBroken, got {err}");
     };
-    assert!(reason.contains("does not sort above"), "{reason}");
+    assert_eq!(
+        reason,
+        "`1.21.0` does not sort above `1.21` by label, but its data_version is higher; placing a floor outside the table reads the labels"
+    );
 }
 
 #[test]

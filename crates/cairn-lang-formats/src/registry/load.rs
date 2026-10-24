@@ -269,13 +269,13 @@ fn targetable_row_for(table: &DataVersionTable, mc_version: &str) -> Option<(Str
 }
 
 impl RegistryPack {
-    /// The manifest.
+    /// The `pack.json` body, of the edition the pack was loaded as.
     #[must_use]
     pub fn manifest(&self) -> &PackManifest {
         &self.manifest
     }
 
-    /// The version table.
+    /// The version table, its rows strictly ascending by `data_version` and label.
     #[must_use]
     pub fn data_versions(&self) -> &DataVersionTable {
         &self.data_versions
@@ -795,6 +795,7 @@ fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError>
     let mut previous: Option<&super::data_versions::DataVersionEntry> = None;
     for entry in &table.versions {
         if let Some(previous) = previous {
+            // `RegistryPack::targetable` returns the rows in this order, unsorted.
             if entry.data_version <= previous.data_version {
                 return Err(RegistryError::VersionOrderBroken {
                     reason: format!(
