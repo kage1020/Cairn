@@ -4,12 +4,12 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::error::Span;
 
 use super::{
-    Allowance, Blocked, DUST_ATTENUATION_LIMIT, Misfit, NoRepeaterSite, Refused, Touching,
-    holds_repeater, no_repeater_site_diagnostic, repeater_sites, repeater_sites_of_scope,
+    Allowance, Blocked, DUST_ATTENUATION_LIMIT, Misfit, NoRepeaterSite, Refused, RepeaterSites,
+    Touching, holds_repeater, no_repeater_site_diagnostic, repeater_sites, repeater_sites_of_scope,
     why_no_site,
 };
 use crate::delay::buffer_count_for_segment;
-use crate::diagnostic::DiagnosticCode;
+use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition_netlist_ir::EditionCell;
 use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
@@ -115,8 +115,8 @@ fn branches_forking_past_a_repeater_each_take_their_own() {
     );
 }
 
-/// Past the repeater at `(16,0,0)` every coord but `(17,0,0)` turns, and the 16th block since it
-/// is 15 past `(17,0,0)`.
+/// Past the repeater at `(16,0,0)` only `(17,0,0)` runs straight, and the 16th block since it is
+/// 15 past `(17,0,0)`.
 #[test]
 fn a_repeater_can_stand_on_the_block_in_front_of_another() {
     let mut moves = vec![(EAST, 18)];
@@ -211,6 +211,36 @@ fn a_straight_run_beside_its_own_net_is_refused_for_touching_it() {
     assert_eq!(
         diagnostic.primary,
         "routed netlist for struct `beside` routes sig.a so that the signal leaving (0,0,0) runs out before (16,0,0), past the attenuation limit of 15 blocks of dust, and never reaches output pad #0: every coord after (0,0,0) up to and including (16,0,0) runs straight but touches another block of its own net on one of its faces, as (16,0,0) touches (16,0,1) — a buffer repeater, which joins only the blocks at its back and front, would cut that block off from the dust it replaces, so none can stand there",
+    );
+}
+
+/// The wire doubles back beside itself, and `(1,0,3)`, the first straight coord the walk back
+/// meets, touches only the source.
+#[test]
+fn a_straight_coord_beside_the_source_is_refused_for_touching_it() {
+    let path = walk(
+        (1, 0, 2),
+        &[(EAST, 7), (SOUTH, 1), ((-1, 0, 0), 8), (SOUTH, 2)],
+    );
+    let tree = NetTree::from_paths(&[&path]);
+    assert_eq!(
+        repeater_sites(&tree, 0, &HashMap::new()),
+        Err(NoRepeaterSite {
+            from: CellCoord::new(1, 0, 2),
+            spent: 0,
+            unpowered: CellCoord::new(0, 0, 3),
+            allowance: Allowance::Limit,
+            reach: DUST_ATTENUATION_LIMIT,
+            starts_on_unpowered: true,
+            blocked: Blocked::NoneBetween,
+            refused: Refused {
+                bends: true,
+                touching: Some(Touching {
+                    at: CellCoord::new(1, 0, 3),
+                    touching: CellCoord::new(1, 0, 2),
+                }),
+            },
+        }),
     );
 }
 
@@ -666,7 +696,7 @@ fn a_sink_with_a_budget_takes_a_repeater_within_it() {
 }
 
 /// The branch to the cell turns all the way from the fork, so its budget of 5 puts a repeater on
-/// the trunk, and the pad's branch counts the limit from there rather than from the source.
+/// `(9,0,0)`, before the fork, and the pad's side counts the limit from there.
 #[test]
 fn a_budget_on_one_branch_moves_the_repeater_on_the_other() {
     let trunk = walk((0, 0, 0), &[(EAST, 41)]);
@@ -745,6 +775,21 @@ fn a_budget_no_straight_coord_can_meet_is_refused() {
     );
 }
 
+/// [`repeater_sites_of_scope`] over `trees`, with `ir` as the routed IR of struct `name`.
+fn sites_in_struct<'t>(
+    name: &str,
+    ir: PlacementIr,
+    trees: &'t HashMap<NetRef, NetTree>,
+) -> Result<RepeaterSites<'t>, Diagnostic> {
+    let region = ir.region.clone().expect("the fixture carries a region");
+    let entry = ScopedPlacementIrEntry {
+        kind: ScopeKind::Struct,
+        name: name.to_owned(),
+        ir,
+    };
+    repeater_sites_of_scope(&entry.ir, &entry, "routed", &region, trees)
+}
+
 /// At 16 steps the budget would need nothing spent, which no cell ever is.
 #[test]
 fn a_cell_whose_own_wire_has_no_room_is_refused_on_its_own_net() {
@@ -784,13 +829,7 @@ fn a_cell_whose_own_wire_has_no_room_is_refused_on_its_own_net() {
             }],
             ROUTED,
         ));
-        let entry = ScopedPlacementIrEntry {
-            kind: ScopeKind::Struct,
-            name: "cramped".to_owned(),
-            ir: ir.clone(),
-        };
-        let region = ir.region.clone().expect("set above");
-        let Err(refusal) = repeater_sites_of_scope(&ir, &entry, "routed", &region, &trees) else {
+        let Err(refusal) = sites_in_struct("cramped", ir, &trees) else {
             panic!("{steps}-step staircase: the comparator's own wire has no room");
         };
         assert_eq!(refusal.code, DiagnosticCode::AttenuationLimit);
@@ -848,14 +887,8 @@ fn a_cell_that_passes_strength_on_sends_its_repeater_upstream() {
             ROUTED,
         ));
         ir.outputs.push(routed_output(NetRef::Cell(0), pad));
-        let entry = ScopedPlacementIrEntry {
-            kind: ScopeKind::Struct,
-            name: "upstream".to_owned(),
-            ir: ir.clone(),
-        };
-        let region = ir.region.clone().expect("set above");
-        let sites = repeater_sites_of_scope(&ir, &entry, "routed", &region, &trees)
-            .unwrap_or_else(|d| panic!("{kind:?}: {d:?}"));
+        let sites =
+            sites_in_struct("upstream", ir, &trees).unwrap_or_else(|d| panic!("{kind:?}: {d:?}"));
         assert_eq!(
             sites.along(NetRef::Input(0), cell),
             Some(expected),
@@ -895,14 +928,8 @@ fn a_cell_that_passes_strength_on_and_drives_nothing_is_held_to_the_limit() {
             }],
             ROUTED,
         ));
-        let entry = ScopedPlacementIrEntry {
-            kind: ScopeKind::Struct,
-            name: "unused".to_owned(),
-            ir: ir.clone(),
-        };
-        let region = ir.region.clone().expect("set above");
-        let sites = repeater_sites_of_scope(&ir, &entry, "routed", &region, &trees)
-            .unwrap_or_else(|d| panic!("{kind:?}: {d:?}"));
+        let sites =
+            sites_in_struct("unused", ir, &trees).unwrap_or_else(|d| panic!("{kind:?}: {d:?}"));
         assert_eq!(
             sites.along(NetRef::Input(0), cell),
             Some(expected),
@@ -928,14 +955,7 @@ fn a_cell_nothing_drives_starts_its_wire_with_no_dust_spent() {
         ROUTED,
     ));
     ir.outputs.push(routed_output(NetRef::Cell(0), pad));
-    let entry = ScopedPlacementIrEntry {
-        kind: ScopeKind::Struct,
-        name: "undriven".to_owned(),
-        ir: ir.clone(),
-    };
-    let region = ir.region.clone().expect("set above");
-    let sites = repeater_sites_of_scope(&ir, &entry, "routed", &region, &trees)
-        .unwrap_or_else(|d| panic!("{d:?}"));
+    let sites = sites_in_struct("undriven", ir, &trees).unwrap_or_else(|d| panic!("{d:?}"));
     assert_eq!(
         sites.along(NetRef::Cell(0), pad),
         Some(Vec::new()),
@@ -943,17 +963,14 @@ fn a_cell_nothing_drives_starts_its_wire_with_no_dust_spent() {
     );
 }
 
-/// `sig.a` is sound and sorts first; `sig.b` and cell #0's net both have nowhere for a repeater.
-#[test]
-fn the_refusal_names_the_first_net_in_order_with_nowhere_for_a_repeater() {
-    let stairs = |start: (u32, u32, u32)| {
-        let moves: Vec<_> = (0..18)
-            .map(|step| (if step % 2 == 0 { EAST } else { SOUTH }, 1))
-            .collect();
-        walk(start, &moves)
-    };
+/// The refusal for struct `ordered`: `sig.a` runs straight, while `sig.b` and cell #0, a `kind`
+/// nothing drives, turn at every block on the way to their pads.
+fn ordered_refusal(kind: EditionCell) -> Diagnostic {
+    let stairs: Vec<_> = (0..18)
+        .map(|step| (if step % 2 == 0 { EAST } else { SOUTH }, 1))
+        .collect();
     let straight = walk((0, 0, 0), &[(EAST, 20)]);
-    let (b, out) = (stairs((0, 0, 2)), stairs((0, 0, 14)));
+    let (b, out) = (walk((0, 0, 2), &stairs), walk((0, 0, 14), &stairs));
     let mut ir = PlacementIr::new(Edition::Java);
     ir.region = Some(reservation(30, 30, 1));
     for name in ["a", "b"] {
@@ -962,12 +979,7 @@ fn the_refusal_names_the_first_net_in_order_with_nowhere_for_a_repeater() {
             span: Span::default(),
         });
     }
-    ir.cells.push(placed_cell(
-        EditionCell::JavaRepeaterOr,
-        out[0],
-        Vec::new(),
-        ROUTED,
-    ));
+    ir.cells.push(placed_cell(kind, out[0], Vec::new(), ROUTED));
     for (driver, path) in [
         (NetRef::Input(0), &straight),
         (NetRef::Input(1), &b),
@@ -983,18 +995,32 @@ fn the_refusal_names_the_first_net_in_order_with_nowhere_for_a_repeater() {
         (NetRef::Input(1), NetTree::from_paths(&[&b])),
         (NetRef::Cell(0), NetTree::from_paths(&[&out])),
     ]);
-    let entry = ScopedPlacementIrEntry {
-        kind: ScopeKind::Struct,
-        name: "ordered".to_owned(),
-        ir: ir.clone(),
-    };
-    let region = ir.region.clone().expect("set above");
-    let Err(refusal) = repeater_sites_of_scope(&ir, &entry, "routed", &region, &trees) else {
+    let Err(refusal) = sites_in_struct("ordered", ir, &trees) else {
         panic!("two of the three nets have nowhere for a repeater");
     };
+    refusal
+}
+
+/// `sig.a` is sound and sorts first; `sig.b` and cell #0's net both have nowhere for a repeater.
+/// Cell #0 restores strength, so the budget pass skips it and only the forward walk sees its net.
+#[test]
+fn the_refusal_names_the_first_net_in_order_with_nowhere_for_a_repeater() {
+    let refusal = ordered_refusal(EditionCell::JavaRepeaterOr);
     assert_eq!(refusal.code, DiagnosticCode::AttenuationLimit);
     assert_eq!(
         refusal.primary,
         "routed netlist for struct `ordered` routes sig.b so that the signal leaving (0,0,2) runs out before (8,0,10), past the attenuation limit of 15 blocks of dust, and never reaches output pad #1: every coord after (0,0,2) up to and including (8,0,10) turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, so none can stand there",
+    );
+}
+
+/// Cell #0 passes strength on, so the budget pass refuses its net before the forward walk reaches
+/// `sig.b`.
+#[test]
+fn a_cell_no_budget_can_feed_is_refused_ahead_of_an_earlier_net() {
+    let refusal = ordered_refusal(EditionCell::JavaComparatorAnd);
+    assert_eq!(refusal.code, DiagnosticCode::AttenuationLimit);
+    assert_eq!(
+        refusal.primary,
+        "routed netlist for struct `ordered` routes cell #0 so that the signal leaving (0,0,14), with 1 block of dust already spent, runs out before (8,0,21), past the attenuation limit of 15 blocks of dust, and never reaches output pad #2: every coord after (0,0,14) up to and including (8,0,21) turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, so none can stand there",
     );
 }
