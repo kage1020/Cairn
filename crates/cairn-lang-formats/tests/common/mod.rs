@@ -72,7 +72,7 @@ pub fn example_source(name: &str) -> String {
 
 /// The version `--target latest` pins on `edition`.
 pub fn latest(edition: Edition) -> &'static str {
-    &builtin_pack(edition).data_versions.latest
+    &builtin_pack(edition).data_versions().latest
 }
 
 /// The block-array IR `cairn compile --edition <edition>` lowers `source` to; a `mc_version` of

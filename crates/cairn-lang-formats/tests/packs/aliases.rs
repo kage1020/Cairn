@@ -10,7 +10,7 @@ use crate::common::supported_versions;
 fn known_to_some_edition(id: &str) -> bool {
     [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)]
         .into_iter()
-        .any(|pack| pack.blocks.declared_by_some_version(id) == Some(true))
+        .any(|pack| pack.blocks().declared_by_some_version(id) == Some(true))
 }
 
 /// The ids `edition version` spells the same block as `id`.
@@ -22,13 +22,13 @@ fn aliases_at(pack: &RegistryPack, version: &str, id: &str) -> Vec<String> {
 #[test]
 fn every_spelling_is_an_id_some_supported_version_declares() {
     for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
-        for group in pack.aliases.groups() {
+        for group in pack.aliases().groups() {
             for spelling in group {
                 assert!(
                     known_to_some_edition(spelling),
                     "the {} pack groups `{spelling}`, which no supported version of either \
                      edition declares",
-                    pack.manifest.edition.as_str(),
+                    pack.manifest().edition.as_str(),
                 );
             }
         }
@@ -39,9 +39,9 @@ fn every_spelling_is_an_id_some_supported_version_declares() {
 #[test]
 fn every_group_answers_somewhere_in_its_own_range() {
     for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
-        for group in pack.aliases.groups() {
+        for group in pack.aliases().groups() {
             let answers = supported_versions(pack).into_iter().any(|version| {
-                let declared = pack.blocks.ids_for(version).unwrap_or(&[]);
+                let declared = pack.blocks().ids_for(version).unwrap_or(&[]);
                 group.iter().any(|spelling| {
                     !declared.contains(spelling) && !aliases_at(pack, version, spelling).is_empty()
                 })
@@ -50,7 +50,7 @@ fn every_group_answers_somewhere_in_its_own_range() {
                 answers,
                 "the {} pack's group [{}] answers no version it supports about a spelling that \
                  version lacks, so nothing can ever read it",
-                pack.manifest.edition.as_str(),
+                pack.manifest().edition.as_str(),
                 group.join(", "),
             );
         }
@@ -123,11 +123,11 @@ fn the_java_pack_answers_a_bedrock_spelling() {
 #[test]
 fn the_java_groups_are_a_subset_of_the_bedrock_ones() {
     let bedrock: Vec<Vec<String>> = builtin_pack(Edition::Bedrock)
-        .aliases
+        .aliases()
         .groups()
         .map(<[String]>::to_vec)
         .collect();
-    for group in builtin_pack(Edition::Java).aliases.groups() {
+    for group in builtin_pack(Edition::Java).aliases().groups() {
         assert!(
             bedrock.iter().any(|other| other == group),
             "the Java pack's group [{}] is in no Bedrock group, so the two packs disagree \
@@ -144,7 +144,7 @@ fn an_id_no_group_names_is_answered_with_nothing() {
             assert!(
                 aliases_at(pack, version, "minecraft:totally_not_a_block").is_empty(),
                 "{} {version} named an alias for an id no group carries",
-                pack.manifest.edition.as_str(),
+                pack.manifest().edition.as_str(),
             );
         }
     }
