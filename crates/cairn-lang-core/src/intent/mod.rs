@@ -97,7 +97,7 @@ pub struct ThemeIr {
 pub struct SelectorRule {
     /// Member keyword on the LHS (`window`, `door`, ...).
     pub keyword: String,
-    /// `[attr=...]` selector attributes in source order.
+    /// `[attr=...]` selector attributes in source order; a repeated key keeps its last value.
     pub attrs: IndexMap<String, ValueWithSpan>,
     /// `key=value` bindings on the RHS of the arrow; a repeated key keeps its last value.
     pub bindings: IndexMap<String, ValueWithSpan>,

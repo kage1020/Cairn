@@ -51,9 +51,9 @@ not and in an applied theme or not. A row whose keyword it does not know gets `E
 instead. A binding's value is not resolved as a block either, because what the key would paint is
 not specified: `frame=@no_such_block` is reported exactly as `frame=@spruce_wood` or `frame=42` is,
 with or without `--target`, and no binding makes `check`, `compile` or `info` refuse a build.
-Binding one key twice does, since the earlier value is dead text either way: in one row that is
-`E_DUPLICATE_ARG`, beside the `W_IGNORED_ARGUMENT` each of the two values gets, and in two rows
-that select the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is checked as before:
+Binding one key twice for the same members does, since the earlier value is dead text whatever a
+binding comes to mean: within one row that is `E_DUPLICATE_ARG`, and across two rows that select
+the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is still checked:
 `E_THEME_SELECTOR_UNMATCHED` applies to it exactly as its own entry says.
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism

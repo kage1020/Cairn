@@ -1,6 +1,7 @@
-//! The `arguments` pass: each `key=value`, member selector and theme-selector binding judged
-//! against the vocabulary of the member's role. A theme selector's attribute (`window[tags=...]`)
-//! widens that vocabulary for its keyword only.
+//! The `arguments` pass: each `key=value` and member selector judged against the vocabulary of
+//! the member's role or the header's, and each binding on a known keyword's theme-selector row
+//! reported as ignored whatever its key. A theme selector's attribute (`window[tags=...]`) widens
+//! a role's vocabulary for its keyword only.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -36,7 +37,8 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
     }
 }
 
-/// Every selector binding as written; the IR keeps only the last value of a key a row repeats.
+/// One `W_IGNORED_ARGUMENT` per selector binding as written; the IR keeps only the last value of a
+/// key a row repeats.
 fn check_selector_bindings(module: &Module, sink: &mut DiagnosticSink) {
     for item in &module.items {
         let Item::Theme { body, .. } = item else {

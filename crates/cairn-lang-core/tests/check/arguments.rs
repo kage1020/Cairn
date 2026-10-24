@@ -793,6 +793,29 @@ fn a_binding_in_a_theme_no_scope_applies_is_reported_too() {
 }
 
 #[test]
+fn a_binding_in_a_theme_whose_name_an_earlier_theme_took_is_reported_too() {
+    let src = "theme t:\n  slot glass -> @glass_pane\n\n\
+               theme t:\n  slot glass -> @glass_pane\n  \
+               window[class=small] -> frame=@no_such_block frame=@spruce_wood\n\n\
+               struct s size=9x7\n  \
+               window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    let found = diagnose(src);
+    let at: Vec<(&str, &str)> = found
+        .iter()
+        .map(|d| (d.code.as_str(), &src[d.span.clone()]))
+        .collect();
+    assert_eq!(
+        at,
+        [
+            ("E_DUPLICATE_ITEM", "t"),
+            ("W_IGNORED_ARGUMENT", "@no_such_block"),
+            ("E_DUPLICATE_ARG", "frame=@spruce_wood"),
+            ("W_IGNORED_ARGUMENT", "@spruce_wood"),
+        ],
+    );
+}
+
+#[test]
 fn a_selector_row_with_an_unknown_keyword_answers_only_for_the_keyword() {
     let src = "theme t:\n  slot glass -> @glass_pane\n  \
                windw[class=small] -> frame=@spruce_wood\n\n\

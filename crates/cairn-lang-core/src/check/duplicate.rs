@@ -205,7 +205,7 @@ fn duplicate_selector_diag(
     });
     notes.push(DiagnosticNote {
         span: None,
-        message: "merge the rows, or narrow one selector so they pick different members".into(),
+        message: "delete the value you do not mean from one of the rows, or narrow one selector so they pick different members".into(),
     });
     Diagnostic {
         code: DiagnosticCode::DuplicateSelector,

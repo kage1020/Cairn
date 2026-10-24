@@ -50,11 +50,10 @@ theme medieval:
 `E_UNKNOWN_KEYWORD` になります。キーが何を塗るかが規定されていないので、バインディングの値をブロッ
 クとして解決することもしません。`frame=@no_such_block` は `frame=@spruce_wood` や `frame=42` とまっ
 たく同じに報告され、`--target` の有無は関係なく、バインディングが原因で `check` / `compile` /
-`info` がビルドを拒否することはありません。1 つのキーを 2 回束ねると拒否されます。どちらにしても
-先の値は死んだテキストだからです。1 つの行の中なら `E_DUPLICATE_ARG` で、2 つの値はそれぞれ
-`W_IGNORED_ARGUMENT` も受け取ります。同じメンバを選ぶ 2 つの行にまたがるなら
-`E_DUPLICATE_SELECTOR` です。行のそれ以外の部分は以前と同じく検査され、
-`E_THEME_SELECTOR_UNMATCHED` はその項目に書かれたとおりに適用されます。
+`info` がビルドを拒否することはありません。同じメンバに 1 つのキーを 2 回束ねると拒否されます。
+バインディングが今後何を意味することになっても先の値は死んだテキストだからです。1 つの行の中なら
+`E_DUPLICATE_ARG`、同じメンバを選ぶ 2 つの行にまたがるなら `E_DUPLICATE_SELECTOR` です。行のそれ
+以外の部分も検査され、`E_THEME_SELECTOR_UNMATCHED` はその項目に書かれたとおりに適用されます。
 
 `def` / `theme` / `site` は、同じスロット保持型コンポーネント機構で統一されています
 ([コンポーネント・編集・複数建築](/ja/spec/components-editing-sites/))。

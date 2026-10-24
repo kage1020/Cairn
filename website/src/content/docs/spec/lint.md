@@ -43,8 +43,8 @@ row sharing its `id=` with any other row of that body, such as a `connect`, is s
 and `class=` / `id=` / `mat_slot=` compare as label text, so `small` and `"small"` are one value.
 Rows that bind *different* keys compose and are not reported. Neither are rows whose attributes
 partly overlap (see [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)).
-It is an error while selector bindings are reserved too, and [§11.3](#113-error-vs-warning) says
-why.
+`E_DUPLICATE_SELECTOR` is an error even while selector bindings are reserved
+([§11.3](#113-error-vs-warning)).
 
 `E_DUPLICATE_ITEM` treats `theme` / `def` / `struct` / `site` as four separate namespaces, so one
 name may appear once in each. For the first three the first declaration resolves and the rest bind
@@ -714,10 +714,12 @@ was to be cut into it is deferred as well.
 `E_DUPLICATE_SELECTOR` is an **error** on the same test, though selector bindings are reserved and
 neither of the two values it is about is built. Whatever a binding comes to mean, the later row
 makes the earlier value dead text, and that is a fault in the source: it is there today and stays
-there once bindings are lowered. The compiler's gap is the reservation itself, which each binding's
-`W_IGNORED_ARGUMENT` already reports. The code also gives two rows the verdict `E_DUPLICATE_ARG`
-gives one. The same key written twice inside one row is refused, and rows that select the same
-members are one binding list split over two lines
+there once bindings are lowered. Every member the earlier row selects is selected by the later row
+too, so no edit to the members brings the earlier value back, where adding a member revives a row
+`E_THEME_SELECTOR_UNMATCHED` reports. The compiler's gap is the reservation itself, which each
+binding's `W_IGNORED_ARGUMENT` already reports. The code also gives two rows the verdict
+`E_DUPLICATE_ARG` gives one. The same key written twice inside one row is refused, and rows that
+select the same members are one binding list split over two lines
 ([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)), so where
 the line breaks does not decide whether the build is refused.
 
