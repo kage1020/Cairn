@@ -1,4 +1,4 @@
-//! Just enough Markdown for the inventory tables: sections, fences and table rows.
+//! Just enough Markdown for the inventories: sections, fences, table rows and code spans.
 
 /// The heading level of `line` and its text, if `line` is an ATX heading.
 fn heading(line: &str) -> Option<(usize, &str)> {
@@ -39,6 +39,11 @@ pub fn section(
     found
 }
 
+/// The text inside each code span of `text`, whose backticks pair up.
+pub fn code_spans(text: &str) -> impl Iterator<Item = &str> {
+    text.split('`').skip(1).step_by(2)
+}
+
 /// The code spans in the first cell of a table row, or `None` when `line` is not a row.
 pub fn first_cell_spans(line: &str) -> Result<Option<Vec<&str>>, String> {
     let Some(cell) = line
@@ -53,9 +58,7 @@ pub fn first_cell_spans(line: &str) -> Result<Option<Vec<&str>>, String> {
             "unpaired backtick in a table row's first cell: {line:?}"
         ));
     }
-    Ok(Some(
-        cell.split('`').skip(1).step_by(2).map(str::trim).collect(),
-    ))
+    Ok(Some(code_spans(cell).map(str::trim).collect()))
 }
 
 #[cfg(test)]
