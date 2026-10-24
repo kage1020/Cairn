@@ -1,6 +1,7 @@
 //! Crate READMEs that keep an inventory keep it exact, in both directions: crates.io shows a
 //! crate's README as its front page. Only which names an inventory holds is checked, and, for
-//! `cairn synth`, which stage its prose says `--edition` starts at.
+//! `cairn synth`, that its stages follow `--stage`'s order and that its prose names the stage
+//! `--edition` is required from.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -10,7 +11,7 @@ use regex::Regex;
 use syn::{UseTree, Visibility};
 
 use super::{Finding, Rule};
-use crate::markdown::{first_cell_spans, section};
+use crate::markdown::{code_spans, first_cell_spans, section};
 use crate::repo::Repo;
 
 pub const MODULES: Rule = Rule {
@@ -33,13 +34,19 @@ pub const SUBCOMMANDS: Rule = Rule {
 
 pub const SYNTH_STAGES: Rule = Rule {
     name: "readme-synth-stages",
-    summary: "cairn-lang-cli's `cairn synth` section names what `--stage` offers and where \
-              `--edition` starts",
+    summary: "cairn-lang-cli's `cairn synth` section lists what `--stage` offers, in its order, \
+              and where `--edition` starts",
     check: check_synth_stages,
 };
 
 /// The crates whose README carries a `## Public API` table, listed so deleting one is seen.
 const PUBLIC_API_CRATES: &[&str] = &["cairn-lang-formats", "cairn-lang-nbt"];
+
+/// The README that holds `cairn`'s subcommand table and its `cairn synth` section.
+const CLI_README: &str = "crates/cairn-lang-cli/README.md";
+
+/// The source whose clap attributes print `cairn synth --help`.
+const CLI_SOURCE: &str = "crates/cairn-lang-cli/src/cli.rs";
 
 /// The spans in the first column of a README section's table, with the line each is on.
 fn table_names(
@@ -255,13 +262,18 @@ fn check_public_api(repo: &Repo) -> Vec<Finding> {
     findings
 }
 
+/// How far `line` is indented.
+fn indent(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
 /// The subcommands clap lists under `Commands:`, without its own `help`.
 fn listed_subcommands(help: &str) -> Option<BTreeSet<String>> {
     let block = help.split_once("\nCommands:\n")?.1.split("\n\n").next()?;
     Some(
         block
             .lines()
-            .filter(|line| line.len() - line.trim_start().len() == 2)
+            .filter(|line| indent(line) == 2)
             .filter_map(|line| line.split_whitespace().next())
             .filter(|name| *name != "help")
             .map(str::to_owned)
@@ -318,7 +330,7 @@ fn help_text(repo: &Repo, subcommand: &[&str], readme: &Path) -> Result<String, 
 }
 
 fn check_subcommands(repo: &Repo) -> Vec<Finding> {
-    let readme = Path::new("crates/cairn-lang-cli/README.md");
+    let readme = Path::new(CLI_README);
     let help = match help_text(repo, &[], readme) {
         Ok(help) => help,
         Err(finding) => return vec![finding],
@@ -351,47 +363,129 @@ fn check_subcommands(repo: &Repo) -> Vec<Finding> {
     findings
 }
 
-/// The lines clap prints under `option` in a long `--help`, each trimmed.
+/// The lines clap prints under `option` in a long `--help`, or `None` when it has no such option.
 fn option_help<'a>(help: &'a str, option: &str) -> Option<Vec<&'a str>> {
-    let indent = |line: &str| line.len() - line.trim_start().len();
+    let header = Regex::new(&format!(
+        r"^(\s*(?:-[^\s,]+, )?){}(?:\s|$)",
+        regex::escape(option)
+    ))
+    .expect("valid regex");
     let mut lines = help.lines();
-    let header = lines.find(|line| line.split_whitespace().next() == Some(option))?;
-    let depth = indent(header);
+    // clap starts each long flag at one column, short flag or not: the next header is no deeper.
+    let column = lines.find_map(|line| header.captures(line).map(|found| found[1].len()))?;
     Some(
         lines
-            .take_while(|line| line.trim().is_empty() || indent(line) > depth)
-            .map(str::trim)
+            .take_while(|line| line.trim().is_empty() || indent(line) > column)
             .collect(),
     )
 }
 
-/// The values an option's long help lists under `Possible values:`, in its order.
-fn possible_values(option_help: &[&str]) -> Vec<String> {
-    option_help
+/// The values `option`'s long help lists under `Possible values:`, in its order, or why
+/// `cairn synth --help` gives none to read.
+fn possible_values(option: &str, lines: &[&str]) -> Result<Vec<String>, String> {
+    let no_values = || {
+        format!(
+            "`cairn synth --help` lists no values under `{option}`; restore its \
+             `Possible values:` list in `{CLI_SOURCE}`, or update this rule"
+        )
+    };
+    let Some(start) = lines
         .iter()
-        .skip_while(|line| **line != "Possible values:")
-        .skip(1)
-        .map_while(|line| line.strip_prefix("- "))
-        .map(|item| {
+        .position(|line| line.trim() == "Possible values:")
+    else {
+        if lines.iter().any(|line| line.contains("[possible values: ")) {
+            return Err(format!(
+                "`cairn synth --help` prints `{option}`'s values inline, as \
+                 `[possible values: …]`, which clap does when no value has help; give each value \
+                 its help again in `{CLI_SOURCE}`, or update this rule"
+            ));
+        }
+        return Err(no_values());
+    };
+    let depth = indent(lines[start]);
+    let mut values = Vec::new();
+    for line in lines[start + 1..]
+        .iter()
+        .take_while(|line| !line.trim().is_empty())
+    {
+        // A value's help that wraps carries on deeper than its `- `.
+        if indent(line) > depth {
+            continue;
+        }
+        let item = line.trim_start().strip_prefix("- ").ok_or_else(|| {
+            format!(
+                "`cairn synth --help` has {:?} among `{option}`'s possible values, which is \
+                 neither a `- <value>: <help>` line nor one wrapped from it; restore that shape \
+                 in `{CLI_SOURCE}`, or update this rule",
+                line.trim()
+            )
+        })?;
+        values.push(
             item.split_once(':')
                 .map_or(item, |(value, _)| value)
-                .to_owned()
-        })
-        .collect()
+                .to_owned(),
+        );
+    }
+    if values.is_empty() {
+        return Err(no_values());
+    }
+    Ok(values)
 }
 
-/// The stages `--edition`'s long help names in its "Required when `--stage …` is set".
-fn edition_tagged(option_help: &[&str]) -> Option<Vec<String>> {
-    let text = option_help.join(" ");
-    let (_, rest) = text.split_once("Required when ")?;
-    let (clause, _) = rest.split_once(" is set")?;
-    clause
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .map(|span| span.strip_prefix("--stage ").map(str::to_owned))
-        .collect::<Option<Vec<_>>>()
-        .filter(|stages| !stages.is_empty())
+/// The stages `--edition`'s long help names in its "Required when `--stage …` is set", or why
+/// `cairn synth --help` gives none to read.
+fn edition_tagged(lines: &[&str]) -> Result<Vec<String>, String> {
+    let text = lines
+        .iter()
+        .map(|line| line.trim())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let Some((clause, _)) = text
+        .split_once("Required when ")
+        .and_then(|(_, rest)| rest.split_once(" is set"))
+    else {
+        return Err(format!(
+            "`cairn synth --help` has no \"Required when … is set\" under `--edition` to read the \
+             stages that require it from; restore that sentence in `{CLI_SOURCE}`, or update \
+             this rule"
+        ));
+    };
+    let tagged = code_spans(clause)
+        .map(|span| {
+            span.strip_prefix("--stage ")
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    format!(
+                        "`--edition`'s \"Required when … is set\" in `cairn synth --help` names \
+                         `{span}`, which is not a `--stage <stage>`; write each stage that \
+                         requires `--edition` as one in `{CLI_SOURCE}`, or update this rule"
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if tagged.is_empty() {
+        return Err(format!(
+            "`--edition`'s \"Required when … is set\" in `cairn synth --help` names no \
+             `--stage <stage>`; name each stage that requires `--edition` as one in \
+             `{CLI_SOURCE}`, or update this rule"
+        ));
+    }
+    Ok(tagged)
+}
+
+/// The `--stage` values in `cairn synth --help`'s order and the ones it requires `--edition` for,
+/// or what in the help keeps them from being read.
+fn synth_help(help: &str) -> Result<(Vec<String>, Vec<String>), String> {
+    let no_option = |option: &str| {
+        format!(
+            "`cairn synth --help` lists no `{option}` option; restore it in `{CLI_SOURCE}`, or \
+             update this rule"
+        )
+    };
+    let stage = option_help(help, "--stage").ok_or_else(|| no_option("--stage"))?;
+    let stages = possible_values("--stage", &stage)?;
+    let edition = option_help(help, "--edition").ok_or_else(|| no_option("--edition"))?;
+    Ok((stages, edition_tagged(&edition)?))
 }
 
 /// `names` as code spans, comma-separated.
@@ -413,91 +507,100 @@ fn synth_section(readme: &Path, text: &str, stages: &[String], tagged: &[String]
             "no `##` section whose title starts with `cairn synth`",
         )];
     };
+    let unpaired: Vec<Finding> = lines
+        .iter()
+        .filter(|(_, row)| row.matches('`').count() % 2 != 0)
+        .map(|&(line, _)| {
+            Finding::new(
+                readme,
+                Some(line),
+                "unpaired backtick; close the code span on this line, since the stages are read \
+                 from this section's code spans",
+            )
+        })
+        .collect();
+    if !unpaired.is_empty() {
+        return unpaired;
+    }
     let mut findings = Vec::new();
-    let (listed, starts) = synth_spans(readme, &lines, &mut findings);
-    listed_stage_findings(readme, &listed, stages, &mut findings);
-    edition_start_findings(readme, &starts, stages, tagged, &mut findings);
+    match stage_list(&lines, stages) {
+        Some((line, listed)) => listed_stage_findings(readme, line, &listed, stages, &mut findings),
+        None => findings.push(Finding::new(
+            readme,
+            None,
+            format!(
+                "the section has no comma-separated list of the stages; list them as \
+                 `cairn synth --help` does: {}",
+                spans(stages)
+            ),
+        )),
+    }
+    edition_start_findings(readme, &lines, stages, tagged, &mut findings);
     findings
 }
 
-/// Names a README holds, each with the line it is on.
-type LinedNames = Vec<(usize, String)>;
-
-/// The section's code spans of one lowercase word outside a "from `…` onwards", each at its first
-/// line, and the stage each "from `…` onwards" names, at its line.
-fn synth_spans(
-    readme: &Path,
-    lines: &[(usize, &str)],
-    findings: &mut Vec<Finding>,
-) -> (LinedNames, LinedNames) {
-    let onwards = Regex::new(r"from `([^`]*)` onwards").expect("valid regex");
-    let is_stage_like = |span: &str| {
-        span.starts_with(|c: char| c.is_ascii_lowercase())
-            && span
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+/// The section's comma-separated run of one-word code spans that names the most `--stage` values,
+/// with its line.
+fn stage_list<'a>(lines: &[(usize, &'a str)], stages: &[String]) -> Option<(usize, Vec<&'a str>)> {
+    let span = "`[a-z][a-z0-9-]*`";
+    let run =
+        Regex::new(&format!("(?:{span}, )+(?:{span},? (?:or|and) )?{span}")).expect("valid regex");
+    let stage_count = |spans: &[&str]| {
+        spans
+            .iter()
+            .filter(|span| stages.iter().any(|stage| stage == *span))
+            .count()
     };
-    let mut listed: LinedNames = Vec::new();
-    let mut starts = Vec::new();
-    for (line, row) in lines {
-        if row.matches('`').count() % 2 != 0 {
-            findings.push(Finding::new(
-                readme,
-                Some(*line),
-                "unpaired backtick; the stages are read from this section's code spans",
-            ));
-            continue;
-        }
-        starts.extend(
-            onwards
-                .captures_iter(row)
-                .map(|capture| (*line, capture[1].to_owned())),
-        );
-        let rest = onwards.replace_all(row, "");
-        for span in rest.split('`').skip(1).step_by(2) {
-            if is_stage_like(span) && !listed.iter().any(|(_, name)| name == span) {
-                listed.push((*line, span.to_owned()));
+    let mut best: Option<(usize, Vec<&str>)> = None;
+    for &(line, row) in lines {
+        for found in run.find_iter(row) {
+            let listed: Vec<&str> = code_spans(found.as_str()).collect();
+            if stage_count(&listed) > best.as_ref().map_or(0, |(_, list)| stage_count(list)) {
+                best = Some((line, listed));
             }
         }
     }
-    (listed, starts)
+    best
 }
 
-/// Report each of `stages` that `listed` leaves out, each name in it that is not a stage, and a
-/// list out of `stages`' order.
+/// Report each of `stages` that the section's list of stages, on `line`, leaves out, each name in
+/// it that is not a stage, and a list out of `stages`' order.
 fn listed_stage_findings(
     readme: &Path,
-    listed: &[(usize, String)],
+    line: usize,
+    listed: &[&str],
     stages: &[String],
     findings: &mut Vec<Finding>,
 ) {
-    for stage in stages {
-        if !listed.iter().any(|(_, name)| name == stage) {
-            findings.push(Finding::new(
-                readme,
-                None,
-                format!(
-                    "`--stage {stage}` ships but the `cairn synth` section does not name it; add \
-                     `{stage}` to its list of stages"
-                ),
-            ));
-        }
-    }
-    for (line, phantom) in listed.iter().filter(|(_, name)| !stages.contains(name)) {
+    let is_stage = |name: &str| stages.iter().any(|stage| stage == name);
+    for stage in stages
+        .iter()
+        .filter(|stage| !listed.contains(&stage.as_str()))
+    {
         findings.push(Finding::new(
             readme,
-            Some(*line),
+            Some(line),
             format!(
-                "`{phantom}` is not a `--stage` value; a one-word code span in this section \
-                 names a stage, and `cairn synth --help` lists {}",
+                "`--stage {stage}` ships but the `cairn synth` section does not list it among its \
+                 stages; add `{stage}` to that list"
+            ),
+        ));
+    }
+    for phantom in listed.iter().filter(|name| !is_stage(name)) {
+        findings.push(Finding::new(
+            readme,
+            Some(line),
+            format!(
+                "`{phantom}` is in the section's list of stages but is not a `--stage` value; \
+                 `cairn synth --help` lists {}, so drop it or name one of those",
                 spans(stages)
             ),
         ));
     }
     let in_readme: Vec<&str> = listed
         .iter()
-        .map(|(_, name)| name.as_str())
-        .filter(|name| stages.iter().any(|stage| stage == name))
+        .copied()
+        .filter(|name| is_stage(name))
         .collect();
     let in_help: Vec<&str> = stages
         .iter()
@@ -507,7 +610,7 @@ fn listed_stage_findings(
     if in_readme != in_help {
         findings.push(Finding::new(
             readme,
-            None,
+            Some(line),
             format!(
                 "the section lists the stages as {}, but `--stage` offers them as {}, the order \
                  \"from … onwards\" reads against; list them in that order",
@@ -518,46 +621,46 @@ fn listed_stage_findings(
     }
 }
 
-/// Report a section whose "from `…` onwards" is missing or names another stage than the first of
-/// `tagged`, or `tagged` stages that are not the last of `stages`.
+/// Report `tagged` stages that are not the last of `stages`, in its order, or a section that does
+/// not say `--edition` is required from the first of them onwards.
 fn edition_start_findings(
     readme: &Path,
-    starts: &[(usize, String)],
+    lines: &[(usize, &str)],
     stages: &[String],
     tagged: &[String],
     findings: &mut Vec<Finding>,
 ) {
-    let first = match stages.iter().position(|stage| tagged.contains(stage)) {
-        Some(start) if stages[start..] == *tagged => &stages[start],
-        _ => {
-            findings.push(Finding::new(
-                readme,
-                None,
-                format!(
-                    "`cairn synth --help` requires `--edition` for {}, which are not the last \
-                     stages in `--stage`'s order ({}), so \"from … onwards\" cannot describe \
-                     them; reword the section, and this rule with it",
-                    spans(tagged),
-                    spans(stages)
-                ),
-            ));
-            return;
-        }
+    let Some(first) = tagged.first().filter(|_| stages.ends_with(tagged)) else {
+        findings.push(Finding::new(readme, None, not_the_last(stages, tagged)));
+        return;
     };
+    let onwards =
+        Regex::new(r"`--edition` is required from `([^`]*)` onwards").expect("valid regex");
+    let starts: Vec<(usize, &str)> = lines
+        .iter()
+        .flat_map(|&(line, row)| {
+            onwards
+                .captures_iter(row)
+                .filter_map(move |found| Some((line, found.get(1)?.as_str())))
+        })
+        .collect();
     if starts.is_empty() {
         findings.push(Finding::new(
             readme,
             None,
             format!(
-                "the section does not say which stage `--edition` starts at; say it is required \
-                 from `{first}` onwards"
+                "the section does not say which stage `--edition` starts at; write \"`--edition` \
+                 is required from `{first}` onwards\""
             ),
         ));
     }
-    for (line, start) in starts.iter().filter(|(_, start)| start != first) {
+    for (line, start) in starts
+        .into_iter()
+        .filter(|&(_, start)| start != first.as_str())
+    {
         findings.push(Finding::new(
             readme,
-            Some(*line),
+            Some(line),
             format!(
                 "\"from `{start}` onwards\" names `{start}`, but the first stage `cairn synth \
                  --help` requires `--edition` for is `{first}`; write \"from `{first}` onwards\""
@@ -566,30 +669,36 @@ fn edition_start_findings(
     }
 }
 
+/// Why `tagged`, which `stages` does not end with, cannot be read as "from … onwards".
+fn not_the_last(stages: &[String], tagged: &[String]) -> String {
+    let last = &stages[stages.len().saturating_sub(tagged.len())..];
+    if last.iter().collect::<BTreeSet<_>>() == tagged.iter().collect::<BTreeSet<_>>() {
+        format!(
+            "`cairn synth --help` names the stages that require `--edition` as {}, but `--stage` \
+             orders them {}; name them in that order in `{CLI_SOURCE}`",
+            spans(tagged),
+            spans(last)
+        )
+    } else {
+        format!(
+            "the stages `cairn synth --help` requires `--edition` for, {}, do not run to the end \
+             of `--stage`'s order ({}), so \"from … onwards\" cannot describe them; reword the \
+             section, and this rule with it",
+            spans(tagged),
+            spans(stages)
+        )
+    }
+}
+
 fn check_synth_stages(repo: &Repo) -> Vec<Finding> {
-    let readme = Path::new("crates/cairn-lang-cli/README.md");
+    let readme = Path::new(CLI_README);
     let help = match help_text(repo, &["synth"], readme) {
         Ok(help) => help,
         Err(finding) => return vec![finding],
     };
-    let stages = option_help(&help, "--stage")
-        .map(|lines| possible_values(&lines))
-        .unwrap_or_default();
-    if stages.is_empty() {
-        return vec![Finding::new(
-            readme,
-            None,
-            "`cairn synth --help` lists no `Possible values:` under `--stage`",
-        )];
-    }
-    let Some(tagged) = option_help(&help, "--edition").and_then(|lines| edition_tagged(&lines))
-    else {
-        return vec![Finding::new(
-            readme,
-            None,
-            "`cairn synth --help` has no \"Required when `--stage …` is set\" under `--edition` \
-             to read the stages that require it from",
-        )];
+    let (stages, tagged) = match synth_help(&help) {
+        Ok(read) => read,
+        Err(fault) => return vec![Finding::new(readme, None, fault)],
     };
     match repo.read(readme) {
         Ok(text) => synth_section(readme, &text, &stages, &tagged),
