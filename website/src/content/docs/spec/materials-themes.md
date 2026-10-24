@@ -34,7 +34,9 @@ the wider row's binding.
 Two rows that select the *same* members are different. Same keyword and same attributes means they
 match member for member, so no member keeps the earlier row's value of a key they both bind: that
 value is dead text whatever a binding comes to mean. That is
-`E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)). Sameness is by meaning: attribute
+`E_DUPLICATE_SELECTOR` ([Lint §11.1](/spec/lint/#111-diagnostic-codes)), an error even while
+bindings are reserved, for the reason `E_DUPLICATE_ARG` refuses one key written twice inside one row
+([Lint §11.3](/spec/lint/#113-error-vs-warning)). Sameness is by meaning: attribute
 order does not count, and `class=` / `id=` / `mat_slot=` values compare as label text, so
 `window[class=small]` and `window[class="small"]` are one selector. Rows that coincide but bind
 different keys are not reported. They compose, and splitting a long binding list over two lines is
@@ -48,9 +50,11 @@ specified the compiler reports each binding as an unreached key, `W_IGNORED_ARGU
 not and in an applied theme or not. A row whose keyword it does not know gets `E_UNKNOWN_KEYWORD`
 instead. A binding's value is not resolved as a block either, because what the key would paint is
 not specified: `frame=@no_such_block` is reported exactly as `frame=@spruce_wood` or `frame=42` is,
-with or without `--target`, and no binding makes `check`, `compile` or `info` refuse a build. The
-rest of a row is checked as before: `E_THEME_SELECTOR_UNMATCHED` and `E_DUPLICATE_SELECTOR` apply
-to it exactly as their own entries say.
+with or without `--target`, and no binding makes `check`, `compile` or `info` refuse a build.
+Binding one key twice for the same members does, since the earlier value is dead text whatever a
+binding comes to mean: within one row that is `E_DUPLICATE_ARG`, and across two rows that select
+the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is still checked:
+`E_THEME_SELECTOR_UNMATCHED` applies to it exactly as its own entry says.
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
 ([Components, Editing, and Multi-building](/spec/components-editing-sites/)).

@@ -842,27 +842,43 @@ mod selector {
     //! `E_DUPLICATE_SELECTOR`: a theme row rebinding a key that a row with the same selector binds.
     //! Rows binding different keys compose, and overlapping selectors cascade.
 
-    use cairn_lang_core::{DiagnosticCode, Severity, lower, parse};
+    use cairn_lang_core::ast::{Item, ThemeRule};
+    use cairn_lang_core::intent::{MemberRole, role_of};
+    use cairn_lang_core::{DiagnosticCode, Severity, Span, parse};
 
     use crate::common::{diagnose, notes, of_code, one_of_code};
 
-    /// Every code `source` raises but the one `W_IGNORED_ARGUMENT` per selector binding.
+    /// Every code `source` raises but the `W_IGNORED_ARGUMENT` on each binding written on a row
+    /// whose keyword is known.
     fn row_codes(source: &str) -> Vec<&'static str> {
         let found = diagnose(source);
         let (dropped, kept): (Vec<_>, Vec<_>) = found
             .iter()
             .partition(|d| d.code == DiagnosticCode::IgnoredArgument);
-        let module = parse(source).expect("fixtures parse");
-        let bindings: usize = lower(&module)
-            .themes
-            .iter()
-            .flat_map(|theme| &theme.selectors)
-            .map(|row| row.bindings.len())
-            .sum();
+        let mut written: Vec<Span> = parse(source)
+            .expect("fixtures parse")
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                Item::Theme { body, .. } => Some(body),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|rule| match rule {
+                ThemeRule::Selector {
+                    keyword, bindings, ..
+                } if !matches!(role_of(&keyword), MemberRole::Other(_)) => Some(bindings),
+                _ => None,
+            })
+            .flatten()
+            .map(|binding| binding.value.span)
+            .collect();
+        let mut reported: Vec<Span> = dropped.iter().map(|d| d.span.clone()).collect();
+        written.sort_by_key(|span| (span.start, span.end));
+        reported.sort_by_key(|span| (span.start, span.end));
         assert_eq!(
-            dropped.len(),
-            bindings,
-            "one W_IGNORED_ARGUMENT per binding, got {found:#?}",
+            reported, written,
+            "one W_IGNORED_ARGUMENT on each binding's value, got {found:#?}",
         );
         for d in &dropped {
             assert!(
@@ -947,8 +963,8 @@ mod selector {
             notes(&d),
             vec![
                 "`frame=` bound here",
-                "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's `frame=` and the earlier value is lost (no pass lowers a selector's bindings yet, so neither value is built today)",
-                "merge the rows, or narrow one selector so they pick different members",
+                "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's `frame=` and the earlier value is dead text whatever a binding comes to mean (no pass lowers a selector's bindings yet, so neither value is built today)",
+                "delete the value you do not mean from one of the rows, or narrow one selector so they pick different members",
             ],
         );
         assert!(
