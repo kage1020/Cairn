@@ -12,10 +12,15 @@
 
   ```text
   an output tagged `stage: "route"` has been through the route stage and must carry `wire_length`
-  `buffer_coords[1]` stands on a cell's driver port, and an output's buffers stand on the `out` segment
+  `buffer_coords[1]` stands on `a`, a cell's driver port, and an output's buffers stand on the `out` segment
   ```
 
   A key the dump leaves out because it is empty (`region`, `inputs`, `outputs`, `cells`,
-  `signal_defs`) reads back empty. An unknown key at any depth, an unknown scope kind, an empty
-  dotted name and a signal that `signal_defs` names twice are refused, each as a deserialisation
-  error rather than a panic. Reading back is for self-describing formats such as JSON.
+  `signal_defs`) reads back empty. These are refused as deserialisation errors: an unknown key at
+  any depth, an unknown scope kind, a key a node gives twice, a signal that `signal_defs` names
+  twice, and a dotted name with no segment, an empty segment (`"sig."` as a `signal_defs` key,
+  `["sig", ""]` as a name) or a segment holding a `.` (`["sig.a"]`). The reader checks each node,
+  not the IR as a whole: a `NetRef` out of range, nodes at another stage than the pass expects or
+  two cells on one `coord` read back, and `compile_routing`, `compile_delay` and
+  `compile_crossing` panic on them, as their `# Panics` sections now say. Reading back is for
+  self-describing formats such as JSON.

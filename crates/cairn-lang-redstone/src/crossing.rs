@@ -29,6 +29,10 @@ impl CrossingOutput {
 
 /// Lowers a delayed [`ScopedPlacementIr`] into a legalized one, leaving out a scope refused with
 /// an error.
+///
+/// # Panics
+///
+/// On a `NetRef` out of range, a node not at the delay stage, or two cells on one `coord`.
 #[must_use]
 pub fn compile_crossing(delayed: &ScopedPlacementIr) -> CrossingOutput {
     let (scoped, diagnostics) = lower_scopes(delayed, |entry| {

@@ -1,6 +1,6 @@
 //! A `cairn synth --stage <s>` dump reads back as the Placement IR it was written from, every span
-//! emptied, at every stage. The fixtures beyond the examples put buffers on cells, buffers on an
-//! output, and a scope with no cells, which neither example does.
+//! emptied, at every stage. The other fixtures supply what neither example has: buffers on cells
+//! and on an output, and a scope with no cells.
 
 use cairn_lang_core::Edition;
 use cairn_lang_redstone::{PlacedCellNode, PlacedOutputNode, PlacementStage, ScopedPlacementIr};
@@ -75,27 +75,34 @@ fn assert_dump_round_trips(label: &str, stage: PlacementStage, ir: &ScopedPlacem
     );
 }
 
-/// How many cells and how many outputs `ir` places, and how many of each carry buffer coords.
-fn census(ir: &ScopedPlacementIr) -> [(usize, usize); 2] {
-    let mut cells = (0, 0);
-    let mut outputs = (0, 0);
+/// What a Placement IR places over all its scopes, and how much of it carries buffer coords.
+#[derive(Debug, Default)]
+struct Census {
+    cells: usize,
+    buffered_cells: usize,
+    outputs: usize,
+    buffered_outputs: usize,
+}
+
+fn census(ir: &ScopedPlacementIr) -> Census {
+    let mut census = Census::default();
     for entry in &ir.scopes {
-        cells.0 += entry.ir.cells.len();
-        cells.1 += entry
+        census.cells += entry.ir.cells.len();
+        census.buffered_cells += entry
             .ir
             .cells
             .iter()
             .filter(|cell| !cell.buffer_coords().is_empty())
             .count();
-        outputs.0 += entry.ir.outputs.len();
-        outputs.1 += entry
+        census.outputs += entry.ir.outputs.len();
+        census.buffered_outputs += entry
             .ir
             .outputs
             .iter()
             .filter(|output| !output.buffer_coords().is_empty())
             .count();
     }
-    [cells, outputs]
+    census
 }
 
 #[test]
@@ -106,7 +113,12 @@ fn every_example_dump_reads_back_equal_at_every_stage() {
             for (stage, ir) in every_stage(&source, edition) {
                 let label = format!("{example} {edition:?} --stage {}", stage.as_str());
                 assert_dump_round_trips(&label, stage, &ir);
-                let [(cells, buffered_cells), (outputs, buffered_outputs)] = census(&ir);
+                let Census {
+                    cells,
+                    buffered_cells,
+                    outputs,
+                    buffered_outputs,
+                } = census(&ir);
                 assert!(
                     cells > 0 && outputs > 0,
                     "{label}: the example must place a cell and an output",
@@ -126,12 +138,16 @@ fn a_dump_whose_cells_carry_buffer_coords_reads_back_equal() {
     for (stage, ir) in every_stage(&shared_bus_source(), Edition::Java) {
         let label = format!("16-cell bus --stage {}", stage.as_str());
         assert_dump_round_trips(&label, stage, &ir);
-        let [(cells, buffered), _] = census(&ir);
+        let Census {
+            cells,
+            buffered_cells,
+            ..
+        } = census(&ir);
         assert_eq!(cells, 16, "{label}: the fixture is the 16-cell chain");
         if stage == PlacementStage::Crossing {
             assert!(
-                buffered >= 2,
-                "{label}: expected buffer coords on the cells: {buffered}",
+                buffered_cells >= 2,
+                "{label}: expected buffer coords on the cells: {buffered_cells}",
             );
         }
     }
@@ -142,10 +158,17 @@ fn a_dump_whose_output_carries_buffer_coords_reads_back_equal() {
     for (stage, ir) in every_stage(LONG_OUTWARD_WIRE_SOURCE, Edition::Java) {
         let label = format!("long outward wire --stage {}", stage.as_str());
         assert_dump_round_trips(&label, stage, &ir);
-        let [_, (outputs, buffered)] = census(&ir);
+        let Census {
+            outputs,
+            buffered_outputs,
+            ..
+        } = census(&ir);
         assert_eq!(outputs, 1, "{label}: the fixture has one door");
         if stage == PlacementStage::Crossing {
-            assert_eq!(buffered, 1, "{label}: expected buffer coords on the door");
+            assert_eq!(
+                buffered_outputs, 1,
+                "{label}: expected buffer coords on the door"
+            );
         }
     }
 }
@@ -155,7 +178,7 @@ fn a_dump_of_a_scope_with_no_cells_reads_back_equal() {
     for (stage, ir) in every_stage(IDENTITY_WIRE_SOURCE, Edition::Java) {
         let label = format!("identity wire --stage {}", stage.as_str());
         assert_dump_round_trips(&label, stage, &ir);
-        let [(cells, _), (outputs, _)] = census(&ir);
+        let Census { cells, outputs, .. } = census(&ir);
         assert_eq!(
             (cells, outputs),
             (0, 1),

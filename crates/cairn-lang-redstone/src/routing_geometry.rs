@@ -619,9 +619,9 @@ pub(crate) fn collapsed_block(blocks: &[BlockSite]) -> Option<&BlockSite> {
         assert!(
             site.kind != BlockKind::Cell,
             "two cells stand on ({x},{y},{z}) — a cell's coord is derived from its topological \
-             index by the placement pass, so a repeat is an IR the caller assembled itself rather \
-             than a reservation too small for its pad row. There is no `size=` that repairs it and \
-             so no diagnostic to raise",
+             index by the placement pass, so a repeat is an IR built or edited outside the passes \
+             rather than a reservation too small for its pad row. There is no `size=` that repairs \
+             it and so no diagnostic to raise",
             x = site.coord.x,
             y = site.coord.y,
             z = site.coord.z,

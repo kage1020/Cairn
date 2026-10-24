@@ -202,10 +202,22 @@ pub(crate) fn deserialize_dotted_ref<'de, D: Deserializer<'de>>(
     dotted_ref_from_segments(Vec::deserialize(deserializer)?)
 }
 
-/// The [`DottedRef`] of `segments`, refusing an empty list.
+/// The [`DottedRef`] of `segments`, refusing no segment at all, an empty one, or one holding a `.`.
 pub(crate) fn dotted_ref_from_segments<E: de::Error>(
     segments: Vec<String>,
 ) -> Result<DottedRef, E> {
+    if segments.iter().any(String::is_empty) {
+        return Err(E::custom(format_args!(
+            "the dotted name {segments:?} has an empty segment, and every segment holds at least \
+             one character"
+        )));
+    }
+    if segments.iter().any(|segment| segment.contains('.')) {
+        return Err(E::custom(format_args!(
+            "the dotted name {segments:?} has a segment holding a `.`, which only ever separates \
+             segments"
+        )));
+    }
     DottedRef::try_from_segments(segments)
         .ok_or_else(|| E::invalid_length(0, &"a dotted name of one segment or more"))
 }

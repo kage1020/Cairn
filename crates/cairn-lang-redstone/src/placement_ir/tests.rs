@@ -1,5 +1,6 @@
 use super::phase::TRANSITION_CARDINALITY;
 use super::*;
+use crate::test_fixtures::{reservation, scoped, sig};
 
 fn routed() -> PlacementPhase {
     PlacementPhase::Routed { wire_length: 3 }
@@ -684,19 +685,21 @@ fn every_payload_key_that_disagrees_with_the_stage_is_refused() {
     refuses_every_payload_key_that_disagrees_with_the_stage(
         "a cell",
         r#""cell":"java_repeater_or","drivers":[],"coord":{"x":0,"y":0,"z":0}"#,
-        |json| read_back(json).err(),
+        read_back,
     );
-    refuses_every_payload_key_that_disagrees_with_the_stage("an output", OUTPUT_IDENTITY, |json| {
-        read_output(json).err()
-    });
+    refuses_every_payload_key_that_disagrees_with_the_stage(
+        "an output",
+        OUTPUT_IDENTITY,
+        read_output,
+    );
 }
 
-/// Asserts that `refusal` names each payload key disagreeing with the stage of `node`, read from
+/// Asserts that `read` refuses each payload key disagreeing with the stage of `node`, read from
 /// `body`.
-fn refuses_every_payload_key_that_disagrees_with_the_stage(
+fn refuses_every_payload_key_that_disagrees_with_the_stage<T: fmt::Debug>(
     node: &str,
     body: &str,
-    refusal: fn(&str) -> Option<String>,
+    read: fn(&str) -> Result<T, String>,
 ) {
     let early = |key: &str, writer: &str, stage: &str| {
         format!(
@@ -765,7 +768,7 @@ fn refuses_every_payload_key_that_disagrees_with_the_stage(
     ];
     for (stage, payload, expected) in rows {
         let json = format!(r#"{{"stage":"{stage}"{payload},{body}}}"#);
-        let err = refusal(&json).expect(&json);
+        let err = read(&json).expect_err(&json);
         assert_eq!(sentence(&err), expected, "{json}");
     }
 }
@@ -964,7 +967,7 @@ const OUTPUT_IDENTITY: &str =
 /// The `sig.open` actuator fed by cell 0, at its pad `(3, 0, 4)`.
 fn probe_output(phase: PlacementPhase) -> PlacedOutputNode {
     let mut output = PlacedOutputNode::new(
-        DottedRef::new("sig".to_owned(), vec!["open".to_owned()]),
+        sig("open"),
         NetRef::Cell(0),
         CellCoord::new(3, 0, 4),
         Span::default(),
@@ -1037,8 +1040,10 @@ fn an_output_buffer_off_the_out_segment_is_refused() {
         let err = read_output(&json).expect_err(&json);
         assert_eq!(
             sentence(&err),
-            "`buffer_coords[1]` stands on a cell's driver port, and an output's buffers stand on \
-             the `out` segment",
+            format!(
+                "`buffer_coords[1]` stands on `{port}`, a cell's driver port, and an output's \
+                 buffers stand on the `out` segment"
+            ),
             "{json}",
         );
     }
@@ -1071,8 +1076,8 @@ fn malformed_output_dumps_are_refused_rather_than_guessed_at() {
             "invalid length 0, expected a dotted name of one segment or more",
         ),
         (
-            format!(r#"{{"stage":"placement",{name},{driver},{pad},{pad}}}"#),
-            "duplicate field `pad`",
+            format!(r#"{{"stage":"placement","name":["sig","a.b"],{driver},{pad}}}"#),
+            r#"the dotted name ["sig", "a.b"] has a segment holding a `.`, which only ever separates segments"#,
         ),
         (
             format!(r#"{{"stage":"placement",{name},{driver},"coord":{{"x":3,"y":0,"z":4}}}}"#),
@@ -1083,11 +1088,6 @@ fn malformed_output_dumps_are_refused_rather_than_guessed_at() {
         let err = read_output(&json).expect_err(&json);
         assert_eq!(sentence(&err), expected, "{json}");
     }
-}
-
-/// `sig.<name>` as a [`DottedRef`].
-fn sig(name: &str) -> DottedRef {
-    DottedRef::new("sig".to_owned(), vec![name.to_owned()])
 }
 
 /// One legalized scope that fills every key a dump can carry, buffers on its cell and its output.
@@ -1105,7 +1105,7 @@ fn every_key_scope() -> ScopedPlacementIr {
         net: NetRef::Input(0),
     }];
     let mut ir = PlacementIr::new(Edition::Java);
-    ir.region = Some(crate::test_fixtures::reservation(9, 5, 2));
+    ir.region = Some(reservation(9, 5, 2));
     ir.inputs = vec![NetlistInput {
         name: sig("a"),
         span: Span::default(),
@@ -1120,7 +1120,7 @@ fn every_key_scope() -> ScopedPlacementIr {
     })];
     ir.cells = vec![cell];
     ir.signal_defs = IndexMap::from([(sig("a"), NetRef::Input(0)), (sig("open"), NetRef::Cell(0))]);
-    crate::test_fixtures::scoped(ScopeKind::Struct, "gate", ir)
+    scoped(ScopeKind::Struct, "gate", ir)
 }
 
 /// `json` read back as a whole dump, or the deserializer's refusal as a string.
@@ -1130,9 +1130,40 @@ fn read_dump(json: &str) -> Result<ScopedPlacementIr, String> {
 
 #[test]
 fn a_dump_that_fills_every_key_reads_back_equal() {
-    let scoped = every_key_scope();
-    let json = serde_json::to_string(&scoped).expect("dump serialises");
-    assert_eq!(read_dump(&json), Ok(scoped), "{json}");
+    let ir = every_key_scope();
+    let json = serde_json::to_string(&ir).expect("dump serialises");
+    let back = read_dump(&json).expect(&json);
+    // `IndexMap` equality ignores order, so only the re-dump pins the order of `signal_defs`.
+    assert_eq!(
+        serde_json::to_string(&back).expect("read-back dump serialises"),
+        json,
+        "re-dumps differently",
+    );
+    assert_eq!(back, ir, "{json}");
+}
+
+/// `node`'s dump with `key` given a second time, with the same value.
+fn with_key_twice(node: &impl Serialize, key: &str) -> String {
+    let dump = serde_json::to_string(node).expect("node serialises");
+    let value = &serde_json::to_value(node).expect("node serialises")[key];
+    let open = dump.strip_suffix('}').expect("a node dumps as an object");
+    format!(r#"{open},"{key}":{value}}}"#)
+}
+
+#[test]
+fn a_key_a_node_gives_twice_is_refused_rather_than_either_value_kept() {
+    let scope = every_key_scope();
+    let ir = &scope.scopes[0].ir;
+    for key in PLACED_CELL_FIELDS {
+        let json = with_key_twice(&ir.cells[0], key);
+        let err = read_back(&json).expect_err(&json);
+        assert_eq!(sentence(&err), format!("duplicate field `{key}`"), "{json}");
+    }
+    for key in PLACED_OUTPUT_FIELDS {
+        let json = with_key_twice(&ir.outputs[0], key);
+        let err = read_output(&json).expect_err(&json);
+        assert_eq!(sentence(&err), format!("duplicate field `{key}`"), "{json}");
+    }
 }
 
 #[test]
@@ -1231,6 +1262,37 @@ fn malformed_scopes_are_refused_rather_than_guessed_at() {
         (
             entry("struct", r#"{"edition":"java","inputs":[{"name":[]}]}"#),
             "invalid length 0, expected a dotted name of one segment or more",
+        ),
+        (
+            entry(
+                "struct",
+                r#"{"edition":"java","inputs":[{"name":["sig",""]}]}"#,
+            ),
+            r#"the dotted name ["sig", ""] has an empty segment, and every segment holds at least one character"#,
+        ),
+        (
+            entry(
+                "struct",
+                r#"{"edition":"java","inputs":[{"name":["sig.a"]}]}"#,
+            ),
+            r#"the dotted name ["sig.a"] has a segment holding a `.`, which only ever separates segments"#,
+        ),
+        (
+            entry(
+                "struct",
+                &format!(r#"{{"edition":"java","signal_defs":{{"":{}}}}}"#, net(0)),
+            ),
+            r#"the dotted name [""] has an empty segment, and every segment holds at least one character"#,
+        ),
+        (
+            entry(
+                "struct",
+                &format!(
+                    r#"{{"edition":"java","signal_defs":{{"sig.":{}}}}}"#,
+                    net(0)
+                ),
+            ),
+            r#"the dotted name ["sig", ""] has an empty segment, and every segment holds at least one character"#,
         ),
         (
             entry(

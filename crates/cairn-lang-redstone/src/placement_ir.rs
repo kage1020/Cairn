@@ -18,6 +18,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, PortName};
 mod phase;
 
 pub(crate) use phase::CellIdentity;
+use phase::PlacedSubject;
 pub use phase::{PlacementPhase, PlacementPhaseTransitionError, PlacementStage};
 
 /// Which pseudo-2.5D layer of `spec/redstone` "Place-and-route" a coordinate lives on.
@@ -158,6 +159,16 @@ impl Serialize for BufferSegment {
 impl BufferSegment {
     /// Every segment word, for the error an unknown word earns.
     const WORDS: &'static [&'static str] = &["a", "b", "sel", "out"];
+
+    /// The segment's word in the JSON form, one of [`Self::WORDS`].
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Port(PortName::A) => "a",
+            Self::Port(PortName::B) => "b",
+            Self::Port(PortName::Sel) => "sel",
+            Self::Out => "out",
+        }
+    }
 }
 
 /// Reads back the flat word [`Serialize`] writes.
@@ -216,7 +227,7 @@ pub struct PlacedCellNode {
     pub drivers: Vec<CellPortDriver>,
     /// Coordinate assigned by the placement pass.
     pub coord: CellCoord,
-    /// Pipeline state, written only through the [`PlacementPhase`] transitions.
+    /// Pipeline state, which the passes advance only through the [`PlacementPhase`] transitions.
     pub(crate) phase: PlacementPhase,
     /// Byte range inherited from the source [`crate::edition_netlist_ir::EditionCellNode`].
     pub span: Span,
@@ -384,12 +395,12 @@ impl PhaseFields {
         Ok(true)
     }
 
-    /// The [`PlacementPhase`] the `stage` tag names, holding the payload keys to what it carries;
-    /// `node` is what an error calls the node, `a cell` or `an output`.
-    fn into_phase<E: de::Error>(self, node: &str) -> Result<PlacementPhase, E> {
+    /// The [`PlacementPhase`] the `stage` tag names, holding the payload keys to what it carries.
+    fn into_phase<E: de::Error>(self, subject: PlacedSubject) -> Result<PlacementPhase, E> {
         use PlacementStage::{Crossing, Delay, Placement, Route};
 
         let stage = self.stage.ok_or_else(|| E::missing_field("stage"))?;
+        let node = subject.with_article();
         // A payload key the tagged stage has not reached yet.
         let early = |key: &str, writer: PlacementStage, present: bool| {
             if present {
@@ -500,7 +511,7 @@ impl<'de> Deserialize<'de> for PlacedCellNode {
                     }
                 }
                 let drivers = drivers.ok_or_else(|| de::Error::missing_field("drivers"))?;
-                let phase = phase.into_phase("a cell")?;
+                let phase = phase.into_phase(PlacedSubject::Cell)?;
                 check_buffers_stand_on_drivers(&phase, &drivers)?;
                 Ok(PlacedCellNode {
                     cell: cell.ok_or_else(|| de::Error::missing_field("cell"))?,
@@ -516,8 +527,8 @@ impl<'de> Deserialize<'de> for PlacedCellNode {
     }
 }
 
-/// An actuator-driven net sink placed at its output pad, dumped and read back in
-/// [`PlacedCellNode`]'s flat, stage-tagged form; its `local_delay_ticks` has no base delay.
+/// An actuator-driven net sink placed at its output pad, dumped flat with the same `stage` and
+/// phase keys as a [`PlacedCellNode`]; its `local_delay_ticks` has no base delay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PlacedOutputNode {
@@ -527,7 +538,7 @@ pub struct PlacedOutputNode {
     pub driver: NetRef,
     /// Coordinate of this actuator's pad.
     pub pad: CellCoord,
-    /// Pipeline state, written only through the [`PlacementPhase`] transitions.
+    /// Pipeline state, which the passes advance only through the [`PlacementPhase`] transitions.
     pub(crate) phase: PlacementPhase,
     /// Byte range of the originating `opened_by=` argument.
     pub span: Span,
@@ -575,17 +586,19 @@ const PLACED_OUTPUT_FIELDS: &[&str] = &[
 
 /// Refuses a buffer on any segment but `out`, the one wire an output's buffers stand on.
 fn check_buffers_stand_on_out<E: de::Error>(phase: &PlacementPhase) -> Result<(), E> {
-    match phase
-        .buffer_coords()
-        .iter()
-        .position(|buffer| buffer.port != BufferSegment::Out)
-    {
-        Some(i) => Err(E::custom(format_args!(
-            "`buffer_coords[{i}]` stands on a cell's driver port, and an output's buffers stand \
-             on the `out` segment"
-        ))),
-        None => Ok(()),
+    for (i, buffer) in phase.buffer_coords().iter().enumerate() {
+        match buffer.port {
+            BufferSegment::Out => {}
+            BufferSegment::Port(_) => {
+                return Err(E::custom(format_args!(
+                    "`buffer_coords[{i}]` stands on `{word}`, a cell's driver port, and an \
+                     output's buffers stand on the `out` segment",
+                    word = buffer.port.as_str(),
+                )));
+            }
+        }
     }
+    Ok(())
 }
 
 impl<'de> Deserialize<'de> for PlacedOutputNode {
@@ -619,7 +632,7 @@ impl<'de> Deserialize<'de> for PlacedOutputNode {
                     }
                 }
                 let name = name.ok_or_else(|| de::Error::missing_field("name"))?;
-                let phase = phase.into_phase("an output")?;
+                let phase = phase.into_phase(PlacedSubject::Output)?;
                 check_buffers_stand_on_out(&phase)?;
                 Ok(PlacedOutputNode {
                     name: dotted_ref_from_segments(name)?,
@@ -640,9 +653,11 @@ impl<'de> Deserialize<'de> for PlacedOutputNode {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct PlacementIr {
-    /// Edition this IR was compiled for, which every cell's [`EditionCell::edition`] matches.
+    /// Edition this IR was compiled for, matched by the [`EditionCell::edition`] of every cell the
+    /// placement pass places.
     pub edition: Edition,
-    /// Reservation the cells and pads were placed into; absent only on an empty IR.
+    /// Reservation the cells and pads were placed into, which the placement pass leaves absent
+    /// only on an empty IR.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<CircuitRegionReservation>,
     /// Sensor-driven nets, copied from the source Edition Netlist IR.
@@ -685,8 +700,8 @@ impl PlacementIr {
     }
 }
 
-/// Every scope's [`PlacementIr`], in source order. Its dump in a self-describing format, such as
-/// the JSON of `cairn synth --stage <s>`, reads back equal to it except that every span is empty.
+/// Every scope's [`PlacementIr`], in source order; its `cairn synth --stage <s>` dump reads back
+/// equal to it but for its spans.
 pub type ScopedPlacementIr = Scoped<PlacementIr>;
 
 /// One entry in a [`ScopedPlacementIr`].
