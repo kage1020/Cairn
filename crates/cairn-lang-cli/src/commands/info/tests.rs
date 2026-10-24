@@ -92,14 +92,14 @@ fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
         .palette
         .intern(leaked);
 
-    let invalid = portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases)
+    let invalid = portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases())
         .expect_err("a value outside the Java domain is not a portability figure");
 
     let lines = invalid_palette_report(Edition::Bedrock, &invalid);
     assert!(
         portability_figure(
             Edition::Bedrock,
-            portability_for_bedrock(&block_ir, &pack.blocks, &pack.aliases),
+            portability_for_bedrock(&block_ir, pack.blocks(), pack.aliases()),
         )
         .is_none(),
         "a refused palette costs the edition its row rather than printing counts over it",

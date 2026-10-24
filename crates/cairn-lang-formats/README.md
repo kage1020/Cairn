@@ -43,7 +43,7 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `registry::builtin_pack` | The block, alias, material, and data-version tables for one edition, built in and parsed once per process. |
 | `registry::load_builtin_pack` | The same pack as a `Result`, for a caller that wants the parse error rather than the panic. |
 | `registry::load_from_dir` | The same tables from an external pack directory. Loads it as a Java pack; there is no Bedrock equivalent yet. |
-| `registry::RegistryPack` | A loaded and validated pack. `#[non_exhaustive]`, so "cannot be built without passing the validators" holds outside this crate too. |
+| `registry::RegistryPack` | A loaded and validated pack. Its fields are private and read through accessors, so a pack cannot be built without passing the validators or changed after. |
 | `registry::RegistryError` | Everything reading or validating a pack can refuse: a missing or unreadable component, a schema version past what this build understands, a failed validator. |
 | `registry::PackSource` | `Builtin` or `Path`. Carried into diagnostics so a reader can tell which directory was read. |
 | `registry::PackManifest` | The `pack.json` body: schema version, edition, and the component file references. An unknown edition, such as `"BEDROCK"`, is refused. |

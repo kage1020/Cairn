@@ -163,7 +163,7 @@ pub(crate) fn build_lockfile(
         },
         inputs: LockInputs {
             // No constraint catalog ships, so its hash is zero.
-            registry_pack_hash: target.registry_pack().bytes_hash.clone(),
+            registry_pack_hash: target.registry_pack().bytes_hash().clone(),
             constraint_catalog_hash: HashHex::zero(),
         },
         resolved_ir_hash: hash_resolved_ir(block_ir)?,

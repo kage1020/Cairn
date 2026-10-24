@@ -46,8 +46,8 @@ fn report_for(
     name: &str,
 ) -> PortabilityReport {
     match edition {
-        Edition::Java => portability_for_java(ir, &pack.blocks, &pack.aliases),
-        Edition::Bedrock => portability_for_bedrock(ir, &pack.blocks, &pack.aliases)
+        Edition::Java => portability_for_java(ir, pack.blocks(), pack.aliases()),
+        Edition::Bedrock => portability_for_bedrock(ir, pack.blocks(), pack.aliases())
             .unwrap_or_else(|invalid| {
                 panic!(
                     "{name} leaked a blockstate the pack was expected to refuse on \

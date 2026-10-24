@@ -385,8 +385,8 @@ fn material_items(
     source: &str,
     replace: &Span,
 ) -> Vec<lsp_types::CompletionItem> {
-    let java = &builtin_pack(Edition::Java).materials;
-    let bedrock = &builtin_pack(Edition::Bedrock).materials;
+    let java = builtin_pack(Edition::Java).materials();
+    let bedrock = builtin_pack(Edition::Bedrock).materials();
     let mut items = Vec::new();
     let mut order = 0;
     let mut seen = HashSet::new();
@@ -805,8 +805,8 @@ mod tests {
         sorted.sort_unstable();
         assert_eq!(sort_texts, sorted, "items must carry their own order");
 
-        let java = &builtin_pack(Edition::Java).materials;
-        let bedrock = &builtin_pack(Edition::Bedrock).materials;
+        let java = builtin_pack(Edition::Java).materials();
+        let bedrock = builtin_pack(Edition::Bedrock).materials();
         let expected_abstract: BTreeSet<&str> = java.tokens().chain(bedrock.tokens()).collect();
         let (canonical, abstract_items): (Vec<_>, Vec<_>) = items
             .iter()

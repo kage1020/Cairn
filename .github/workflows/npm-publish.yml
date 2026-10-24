@@ -62,9 +62,22 @@ jobs:
           package_json_file: crates/cairn-lang-tree-sitter/package.json
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: crates/cairn-lang-tree-sitter/pnpm-lock.yaml
+
+      - name: Ensure the bundled npm can do Trusted Publishing
+        shell: bash
+        env:
+          MIN_NPM: "11.5.1"
+        run: |
+          set -euo pipefail
+          bundled=$(npm --version)
+          if [ "$(printf '%s\n' "$MIN_NPM" "$bundled" | sort -V | head -n 1)" != "$MIN_NPM" ]; then
+            echo "Node $(node --version) bundles npm $bundled, and Trusted Publishing needs npm $MIN_NPM or newer." >&2
+            echo 'Raise node-version above to a Node line whose bundled npm clears that.' >&2
+            exit 1
+          fi
 
       - run: pnpm install --frozen-lockfile
 
@@ -72,22 +85,6 @@ jobs:
       - name: Ensure generated files match the tag
         run: git diff --exit-code src/parser.c src/grammar.json src/node-types.json
       - run: pnpm test
-
-      # Node 22 bundles npm 10, and Trusted Publishing needs 11.5.1 or newer. Nothing bumps this
-      # pin. `hash -r` drops the path bash cached for the npm this step replaces.
-      - name: Install a Trusted-Publishing-capable npm
-        shell: bash
-        env:
-          NPM_VERSION: "12.1.0"
-        run: |
-          set -euo pipefail
-          npm install -g --engine-strict "npm@$NPM_VERSION"
-          hash -r
-          installed=$(npm --version)
-          if [ "$installed" != "$NPM_VERSION" ]; then
-            echo "npm $installed is on PATH, but this job pinned $NPM_VERSION" >&2
-            exit 1
-          fi
 
       - name: Ensure the tarball carries the tree-sitter manifest
         shell: bash

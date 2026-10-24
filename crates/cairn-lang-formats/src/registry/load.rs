@@ -64,24 +64,16 @@ pub enum PackSource {
     Path(PathBuf),
 }
 
-/// A loaded and validated registry pack, built only by the loader.
+/// A loaded and validated registry pack, built only by the loader and read-only after.
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct RegistryPack {
-    /// The manifest.
-    pub manifest: PackManifest,
-    /// The version table.
-    pub data_versions: DataVersionTable,
-    /// The materials catalog, empty without the component.
-    pub materials: MaterialsIndex,
-    /// The block-id tables; empty without the component, which turns id checks off.
-    pub blocks: BlocksIndex,
-    /// The alias groups, empty without the component.
-    pub aliases: AliasIndex,
-    /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
-    pub bytes_hash: HashHex,
-    /// Where the pack came from.
-    pub source: PackSource,
+    manifest: PackManifest,
+    data_versions: DataVersionTable,
+    materials: MaterialsIndex,
+    blocks: BlocksIndex,
+    aliases: AliasIndex,
+    bytes_hash: HashHex,
+    source: PackSource,
 }
 
 /// A registry pack seen through the one version a compile pinned, whose ids it checks against.
@@ -277,6 +269,48 @@ fn targetable_row_for(table: &DataVersionTable, mc_version: &str) -> Option<(Str
 }
 
 impl RegistryPack {
+    /// The `pack.json` body, of the edition the pack was loaded as.
+    #[must_use]
+    pub fn manifest(&self) -> &PackManifest {
+        &self.manifest
+    }
+
+    /// The version table, its rows strictly ascending by `data_version` and label.
+    #[must_use]
+    pub fn data_versions(&self) -> &DataVersionTable {
+        &self.data_versions
+    }
+
+    /// The materials catalog, empty without the component.
+    #[must_use]
+    pub fn materials(&self) -> &MaterialsIndex {
+        &self.materials
+    }
+
+    /// The block-id tables; empty without the component, which turns id checks off.
+    #[must_use]
+    pub fn blocks(&self) -> &BlocksIndex {
+        &self.blocks
+    }
+
+    /// The alias groups, empty without the component.
+    #[must_use]
+    pub fn aliases(&self) -> &AliasIndex {
+        &self.aliases
+    }
+
+    /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
+    #[must_use]
+    pub fn bytes_hash(&self) -> &HashHex {
+        &self.bytes_hash
+    }
+
+    /// Where the pack came from.
+    #[must_use]
+    pub fn source(&self) -> &PackSource {
+        &self.source
+    }
+
     /// The `(mc_version, data_version)` row `requested` names, `"latest"` included.
     ///
     /// # Panics
@@ -355,14 +389,11 @@ impl RegistryPack {
     /// The rows `--target` may name, ascending by `data_version`.
     #[must_use]
     pub fn targetable(&self) -> Vec<&DataVersionEntry> {
-        let mut rows: Vec<&DataVersionEntry> = self
-            .data_versions
+        self.data_versions
             .versions
             .iter()
             .filter(|entry| entry.targetable)
-            .collect();
-        rows.sort_by_key(|entry| entry.data_version);
-        rows
+            .collect()
     }
 
     /// Every row, targetable or not, as the ordering an `@requires` floor is placed against
@@ -764,6 +795,7 @@ fn validate_version_order(table: &DataVersionTable) -> Result<(), RegistryError>
     let mut previous: Option<&super::data_versions::DataVersionEntry> = None;
     for entry in &table.versions {
         if let Some(previous) = previous {
+            // `RegistryPack::targetable` returns the rows in this order, unsorted.
             if entry.data_version <= previous.data_version {
                 return Err(RegistryError::VersionOrderBroken {
                     reason: format!(
