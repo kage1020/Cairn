@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use cairn_lang_core::block_array::{BlockArray, PALETTE_CAPACITY, PaletteIndex};
+use cairn_lang_core::block_array::{BlockArray, PaletteIndex};
 use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
@@ -78,7 +78,7 @@ pub enum BedrockStructureError {
     /// A list longer than an NBT list's `i32` length prefix allows.
     #[error("the `{list}` list would hold {len} entries, past the NBT list limit of 2147483647")]
     ListTooLong {
-        /// `"block_indices"`.
+        /// `"block_indices"` or `"block_palette"`.
         list: &'static str,
         /// Its length.
         len: usize,
@@ -90,19 +90,6 @@ pub enum BedrockStructureError {
         volume: usize,
         /// `voxels.len()`.
         voxels: usize,
-    },
-    /// A palette entry translating to a new Bedrock block once `block_palette` holds
-    /// [`PALETTE_CAPACITY`] blocks, reachable only through the public fields.
-    #[error(
-        "palette entry {index}, `{id}`, translates to a new Bedrock block, but `block_palette` \
-         already holds the {capacity} a palette index can name",
-        capacity = PALETTE_CAPACITY
-    )]
-    BlockPaletteFull {
-        /// The entry's position in the palette.
-        index: usize,
-        /// The entry's id.
-        id: String,
     },
     /// A palette string the NBT encoder cannot write, checked first since the file writes it last.
     #[error("palette entry `{id}`: {field} cannot be written as NBT: {source}")]
@@ -149,7 +136,7 @@ pub struct McStructure<'a> {
     palette: Compound,
     block_palette_len: usize,
     /// Each palette entry's `block_palette` slot; entries translation merges share one.
-    slots: Vec<u16>,
+    slots: Vec<i32>,
 }
 
 /// Leaves out the grid, which can hold millions of voxels.
@@ -177,11 +164,11 @@ pub fn prepare_mcstructure<'a>(
 ) -> Result<(McStructure<'a>, Vec<ParityNote>), BedrockStructureError> {
     let entries = &block_array.palette.entries;
     let mut block_palette: Vec<Compound> = Vec::with_capacity(entries.len());
-    // Keyed by name: blocks of two names never merge, and translation gives one name few states.
-    let mut slots_by_name: HashMap<&str, Vec<u16>> = HashMap::new();
-    let mut slots: Vec<u16> = Vec::with_capacity(entries.len());
+    // Keyed by id, which each compound carries as `name`: entries of two ids never merge.
+    let mut slots_by_id: HashMap<&str, Vec<i32>> = HashMap::new();
+    let mut slots: Vec<i32> = Vec::with_capacity(entries.len());
     let mut notes: Vec<ParityNote> = Vec::new();
-    for (index, entry) in entries.iter().enumerate() {
+    for entry in entries {
         if !is_concrete_id(&entry.id) {
             return Err(BedrockStructureError::AbstractPaletteEntry {
                 id: entry.id.clone(),
@@ -201,21 +188,20 @@ pub fn prepare_mcstructure<'a>(
         let compound = palette_entry(&entry.id, translated.states, target.block_version);
         // The palette is a set (`spec/compilation` "Within-phase conflicts and the palette"):
         // an entry whose translation folds into an earlier one takes that slot, so air stays at 0.
-        let named = slots_by_name.entry(&entry.id).or_default();
+        let named = slots_by_id.entry(&entry.id).or_default();
         let earlier = named
             .iter()
             .copied()
-            .find(|&slot| block_palette[usize::from(slot)] == compound);
+            .find(|&slot| usize::try_from(slot).is_ok_and(|slot| block_palette[slot] == compound));
         let slot = if let Some(slot) = earlier {
             slot
         } else {
-            let slot = u16::try_from(block_palette.len()).map_err(|_| {
-                BedrockStructureError::BlockPaletteFull {
-                    index,
-                    id: entry.id.clone(),
-                }
-            })?;
             block_palette.push(compound);
+            let len = block_palette.len();
+            let slot = i32::try_from(len).map_err(|_| BedrockStructureError::ListTooLong {
+                list: "block_palette",
+                len,
+            })? - 1;
             named.push(slot);
             slot
         };
@@ -261,7 +247,7 @@ fn check_palette_strings(id: &str, states: &Compound) -> Result<(), BedrockStruc
 impl McStructure<'_> {
     /// The `block_palette` slot a voxel is written as.
     fn slot(&self, voxel: PaletteIndex) -> i32 {
-        i32::from(self.slots[usize::from(voxel.0)])
+        self.slots[usize::from(voxel.0)]
     }
 
     /// Writes the structure as uncompressed little-endian NBT, encoding the voxels as it goes.
