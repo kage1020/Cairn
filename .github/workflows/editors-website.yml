@@ -24,6 +24,7 @@ jobs:
   vscode:
     name: VS Code extension
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: editors/vscode
@@ -43,6 +44,21 @@ jobs:
 
       - name: Type-check, bundle, and package
         run: pnpm run package
+
+      - name: Read the VS Code version the tests pin
+        id: vscode
+        run: |
+          version=$(grep -oP '^const VSCODE_VERSION = "\K[^"]+(?=";$)' src/test/extension.test.ts)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache VS Code
+        uses: actions/cache@v6
+        with:
+          path: editors/vscode/.vscode-test
+          key: vscode-test-${{ runner.os }}-${{ steps.vscode.outputs.version }}
+
+      - name: Start a stand-in cairn-lsp through the extension
+        run: xvfb-run -a pnpm test
 
   website:
     name: Documentation site
