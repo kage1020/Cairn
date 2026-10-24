@@ -1196,7 +1196,7 @@ type Shape = fn(usize) -> String;
 /// `(name, shape, depth)` one step past a core depth bound, where the grammar accepts and core
 /// refuses. Core spends one descent counter on bodies, lists, parentheses and `not` alike, which
 /// the grammar cannot share: its rules keep no count, and the scanner bounds indentation alone,
-/// at `MAX_INDENT_DEPTH`. One step shallower, both accept.
+/// at [`MAX_INDENT_DEPTH`]. One step shallower, both accept.
 const DEPTH_DIVERGENCES: &[(&str, Shape, usize)] = &[
     (
         "blocks_past_the_nesting_bound",
@@ -1410,32 +1410,38 @@ fn an_indent_past_sixteen_bits_of_levels_is_refused() {
     }
 }
 
-/// `MAX_INDENT_DEPTH` in `src/scanner.c`: the levels its indent stack holds, level 0 among them.
+/// `MAX_INDENT_DEPTH` in `src/scanner.c`: the most levels its stack holds, level 0 among them.
 const MAX_INDENT_DEPTH: usize = 507;
 
-/// A declaration to put after a deep block.
+/// A declaration with a body, so the scanner must indent again from level 0 after the deep block.
 const AFTER_THE_DEEP_BLOCK: &str = "struct t size=3x3\n  floor a=1\n";
 
 #[test]
 fn the_deepest_indent_the_scanner_stack_holds_parses() {
     let mut parser = new_parser();
-    let source = nested_blocks(MAX_INDENT_DEPTH - 1) + AFTER_THE_DEEP_BLOCK;
+    let sibling = format!("{}level y=1\n", "  ".repeat(MAX_INDENT_DEPTH - 1));
+    let source = nested_blocks(MAX_INDENT_DEPTH - 1) + &sibling + AFTER_THE_DEEP_BLOCK;
     let tree = parser.parse(&source, None).expect("parse produced no tree");
+    let mut errors = Vec::new();
+    error_rows(tree.root_node(), &mut errors);
     assert!(
-        !tree.root_node().has_error(),
-        "the grammar refused a line at level {}",
+        errors.is_empty(),
+        "the grammar refused a file nested {} levels deep, at rows {errors:?}",
         MAX_INDENT_DEPTH - 1,
     );
     let mut placed = Vec::new();
     grammar_members(tree.root_node(), &source, 0, &mut placed);
     let expected: Vec<_> = (1..MAX_INDENT_DEPTH)
         .map(|level| (level, "level".to_owned()))
-        .chain([(1, "floor".to_owned())])
+        .chain([
+            (MAX_INDENT_DEPTH - 1, "level".to_owned()),
+            (1, "floor".to_owned()),
+        ])
         .collect();
     assert_eq!(placed, expected, "a member left the level it is written at");
 }
 
-/// Without its `MAX_INDENT_DEPTH` guard the scanner refuses this file too, but from row 0.
+/// Without the `MAX_INDENT_DEPTH` guard, the scanner refuses this file as one `ERROR` from row 0.
 #[test]
 fn an_indent_past_the_scanner_stack_spares_the_declarations_around_it() {
     let mut parser = new_parser();
@@ -1444,11 +1450,11 @@ fn an_indent_past_the_scanner_stack_spares_the_declarations_around_it() {
     let root = tree.root_node();
     let mut errors = Vec::new();
     error_rows(root, &mut errors);
-    // Row `n` holds level `n`: the refused line, and the one it would open a body under.
+    // Row `n` holds level `n`: the deepest line the stack holds, then the refused line.
     assert_eq!(
         errors,
         [(MAX_INDENT_DEPTH - 1, MAX_INDENT_DEPTH)],
-        "the error spread past the line at level {MAX_INDENT_DEPTH} and its parent",
+        "the refusal of the line at level {MAX_INDENT_DEPTH} did not cover exactly it and its parent",
     );
     let mut cursor = root.walk();
     let declarations: Vec<_> = root.children(&mut cursor).map(|node| node.kind()).collect();
@@ -1467,6 +1473,29 @@ fn an_indent_past_the_scanner_stack_spares_the_declarations_around_it() {
         on_its_own.to_sexp(),
         "the declaration after the deep block changed shape",
     );
+}
+
+#[test]
+fn a_comment_or_blank_line_past_the_scanner_stack_is_not_refused() {
+    let mut parser = new_parser();
+    let past = "  ".repeat(MAX_INDENT_DEPTH);
+    let source = nested_blocks(MAX_INDENT_DEPTH - 1)
+        + &format!("{past}# a note\n{past}\n")
+        + AFTER_THE_DEEP_BLOCK;
+    let tree = parser.parse(&source, None).expect("parse produced no tree");
+    let mut errors = Vec::new();
+    error_rows(tree.root_node(), &mut errors);
+    assert!(
+        errors.is_empty(),
+        "the grammar refused a comment or blank line at level {MAX_INDENT_DEPTH}, at rows {errors:?}",
+    );
+    let mut placed = Vec::new();
+    grammar_members(tree.root_node(), &source, 0, &mut placed);
+    let expected: Vec<_> = (1..MAX_INDENT_DEPTH)
+        .map(|level| (level, "level".to_owned()))
+        .chain([(1, "floor".to_owned())])
+        .collect();
+    assert_eq!(placed, expected, "a member left the level it is written at");
 }
 
 /// `(start row, end row)` of every `ERROR` and `MISSING` node in the tree.
