@@ -954,6 +954,72 @@ fn a_turn_at_the_limit_costs_the_route_a_second_repeater() {
     );
 }
 
+/// Cell #1's wire crosses over cell #0's bridge at `y=2` and comes straight down two blocks onto
+/// its pad. `(29,1,3)`, where its second repeater falls due, runs straight but not at one height,
+/// so the repeater steps back over the top of the descent onto `(28,2,3)`.
+#[test]
+fn a_repeater_due_on_a_straight_descent_steps_back_onto_the_bridge() {
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.region = Some(reservation(30, 7, 3));
+    let walls = (19..=21).flat_map(|x| (1..=5).map(move |z| CellCoord::new(x, 0, z)));
+    for coord in [CellCoord::new(20, 0, 0), CellCoord::new(0, 0, 3)]
+        .into_iter()
+        .chain(walls)
+    {
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            coord,
+            Vec::new(),
+            PlacementPhase::Unrouted,
+        ));
+    }
+    let pad = CellCoord::new(29, 0, 3);
+    for (driver, coord) in [
+        (NetRef::Cell(0), CellCoord::new(20, 0, 6)),
+        (NetRef::Cell(1), pad),
+    ] {
+        ir.outputs.push(PlacedOutputNode::new(
+            cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["out".into()]),
+            driver,
+            coord,
+            Span::default(),
+        ));
+    }
+    let routed = compile_routing(&scoped(ScopeKind::Struct, "descent", ir));
+    let codes: Vec<_> = routed.diagnostics.iter().map(|d| d.code).collect();
+    assert_eq!(codes, vec![DiagnosticCode::RouteCrossLayerClearance]);
+
+    let (_, trees) = buffer_delay_invariant::laid_trees(&routed.scoped.scopes[0]);
+    let route = trees[&NetRef::Cell(1)]
+        .route_to(pad)
+        .expect("the pad is a terminal of the net driving it");
+    assert_eq!(
+        route[route.len() - 3..],
+        [CellCoord::new(29, 2, 3), CellCoord::new(29, 1, 3), pad],
+        "the shape no longer comes straight down onto the pad: {route:?}",
+    );
+
+    let delayed = compile_delay(&routed.scoped);
+    assert!(delayed.diagnostics.is_empty(), "{:?}", delayed.diagnostics);
+    let legalized = compile_crossing(&delayed.scoped);
+    assert!(
+        legalized.diagnostics.is_empty(),
+        "{:?}",
+        legalized.diagnostics
+    );
+    let output = &legalized.scoped.scopes[0].ir.outputs[1];
+    assert_eq!(output.wire_length(), Some(33));
+    assert_eq!(
+        output
+            .buffer_coords()
+            .iter()
+            .map(|b| b.coord)
+            .collect::<Vec<_>>(),
+        vec![CellCoord::new(16, 0, 3), CellCoord::new(28, 2, 3)],
+    );
+    assert_eq!(output.local_delay_ticks(), Some(2 * BUFFER_REPEATER_TICKS));
+}
+
 #[test]
 fn buffer_coord_index_at_kth_boundary() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -1501,7 +1567,7 @@ mod buffer_delay_invariant {
     }
 
     /// The router and the trees it lays for one scope, as the delay and crossing passes do.
-    fn laid_trees(entry: &ScopedPlacementIrEntry) -> (Router, HashMap<NetRef, NetTree>) {
+    pub(super) fn laid_trees(entry: &ScopedPlacementIrEntry) -> (Router, HashMap<NetRef, NetTree>) {
         let region = entry.ir.region.clone().expect("fixture carries a region");
         let nets = collect_nets(&entry.ir);
         let cell_coords: Vec<CellCoord> = entry.ir.cells.iter().map(|c| c.coord).collect();
