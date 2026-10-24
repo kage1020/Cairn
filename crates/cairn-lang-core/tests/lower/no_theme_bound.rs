@@ -161,6 +161,13 @@ fn a_themeless_scope_refuses_an_eave_only_its_walls_would_have_reached() {
             ),
         ],
     );
+    assert_eq!(
+        notes(&out.diagnostics[3]),
+        [
+            "a `walls` member that would reach this row paints nothing; the plate fits once that \
+          member's material resolves to a block"
+        ],
+    );
     let themed = format!(
         "theme t:\n  slot w -> @stone\n  slot r -> @oak_stairs\n  slot e -> @oak_stairs\n  \
          slot p -> @oak_pressure_plate\n\n{TALL}"

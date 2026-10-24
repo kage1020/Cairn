@@ -4,7 +4,7 @@
 use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::block_array::BlockArrayIr;
 
-use crate::common::lowered;
+use crate::common::{lowered, notes};
 
 fn dims_of(out: &BlockArrayIr, key: &str) -> (u32, u32, u32) {
     let built = out
@@ -118,16 +118,21 @@ fn a_plate_outside_a_wall_names_the_overhang_a_roof_draws() {
          pressure_plate id=p at=front.outside offset=0 y=1 mat_slot=wall\n"
     );
     let out = lowered(&source);
-    let reason = out
+    let plate = out
         .diagnostics
         .iter()
         .find(|d| d.primary.contains("pressure_plate"))
-        .unwrap_or_else(|| panic!("the plate must be reported: {:?}", codes(&out)))
-        .primary
-        .clone();
-    assert!(
-        reason.contains("draws an overhang"),
-        "the reason must name the overhang a roof draws: {reason}",
+        .unwrap_or_else(|| panic!("the plate must be reported: {:?}", codes(&out)));
+    assert_eq!(
+        (plate.code, plate.primary.as_str(), notes(plate)),
+        (
+            DiagnosticCode::DeferredMember,
+            "pressure_plate `at=front.outside` at y=1 has no exterior voxel to sit on",
+            vec![
+                "a `roof` written with an `overhang=` draws nothing, so the struct has no \
+                 overhang to hold the plate; it fits once that roof draws",
+            ],
+        ),
     );
 }
 

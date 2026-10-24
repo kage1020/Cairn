@@ -18,7 +18,10 @@ use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
 use super::paint::paint_member;
 use super::phase::Phase;
-use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
+use super::sizing::{
+    max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls, written_roof_overhang,
+    written_wall_top,
+};
 
 /// What every body of one run is lowered against.
 #[derive(Clone, Copy)]
@@ -106,6 +109,10 @@ pub(super) fn lower_body_to_block_array<'a>(
         interior_h,
         wall_top: max_wall_top,
         wall_column,
+        written_height: 1u32
+            .saturating_add(written_wall_top(&flattened))
+            .saturating_add(roof_extra),
+        written_overhang: written_roof_overhang(body.members),
     };
 
     let buckets = bucket_members(&flattened, diagnostics);

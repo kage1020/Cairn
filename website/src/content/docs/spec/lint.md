@@ -432,6 +432,7 @@ send the author to a line that is correct.
 | Code | Meaning |
 |---|---|
 | `W_DEFERRED_MEMBER` | A member the block-array pass does not lower, so the scope builds without it. |
+| `E_UNPLACEABLE_PLATE` | A `pressure_plate` its own `at=`, `offset=` or `y=` puts on no voxel of its struct ([§14.2](/spec/redstone/#142-signal-binding)). |
 | `W_STRUCT_NO_SIZE` | A `struct` declares no `size=WxH`, so lowering can derive no extent and skips it. |
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
@@ -463,10 +464,22 @@ literal's properties go unchecked under every target, as `W_STATE_LITERAL_UNCHEC
 `W_DEFERRED_MEMBER` keeps a partial build inspectable rather than failing the module: the rest of
 the scope lowers, and the finding names what is missing from it.
 
-`E_PARTIAL_BUILD` is the run-level counterpart, and the one error among these: a warning above says
-a scope builds without something, and this says a scope the command was asked for did not build at
-all. A scope that lowers to air alone did not build either, whatever left it empty: every member
-deferred, no theme gave its `mat_slot=` members a block, or it declares no member. It is reported
+`E_UNPLACEABLE_PLATE` is an error for the reason `E_MISSING_MATERIAL` is
+([§11.3](#113-error-vs-warning)): the plate is dropped with nothing in its place, and the incomplete
+side is its own line rather than the compiler. The drop reaches past the block array as well. The
+plate's `->` binding is still read, so its signal stays in the netlist with no plate to drive it,
+and the finding says so in a note. [Redstone §14.2](/spec/redstone/#142-signal-binding) lists the
+lines that put a plate nowhere. A plate the struct would have held had another member built is
+`W_DEFERRED_MEMBER` instead, with the same note: a row that `walls` painting nothing would have
+reached, or an `at=<side>.outside` beside a `roof` written with an `overhang=` that draws nothing.
+The repair is on that member, whose finding, or the scope's `W_NO_THEME_BOUND`, says why it did
+not build, and the plate's line is correct. A `door` cut into such walls is deferred for the same
+reason.
+
+`E_PARTIAL_BUILD` is the run-level counterpart: a finding above says a scope builds without
+something, and this says a scope the command was asked for did not build at all. A scope that
+lowers to air alone did not build either, whatever left it empty: every member deferred or
+refused, no theme gave its `mat_slot=` members a block, or it declares no member. It is reported
 once for the run, naming how many of the requested scopes were lost, by `cairn compile` and by a
 `cairn check --edition E --target V` that runs the same lowering pass.
 
@@ -806,11 +819,12 @@ silent drop ([§9.3.2](/spec/components-editing-sites/#932-origin-selectors)).
 
 Where the **selector** names no rule at all — a value the dispatch does not know, or, on an axis
 with no absent arm, nothing written — no finding is raised here: that member lowers to nothing and
-`W_DEFERRED_MEMBER` is the whole repair, so a second finding about the argument that rule would not
-have read bills one repair twice. That deferral needs no target either, so a `cairn check` with no
-`--target` reports it as a pinned check does. A key another key makes inert *without*
-selecting a rule is a different shape again and is not reported today: `window step=` at `repeat=1`
-is a condition on a count rather than on a rule.
+its refusal is the whole repair, so a second finding about the argument that rule would not have
+read bills one repair twice. That refusal is `W_DEFERRED_MEMBER`, or `E_UNPLACEABLE_PLATE` for a
+`pressure_plate`'s `at=`, and needs no target either, so a `cairn check` with no `--target` reports
+it as a pinned check does. A key another key makes inert *without* selecting a rule is a different
+shape again and is not reported today: `window step=` at `repeat=1` is a condition on a count rather
+than on a rule.
 
 `E_MISPLACED_BINDING` is the fourth field of a member line asked the same question the other three
 are: is this word read by anything. A `-> value` tail is read by exactly one thing — the sensor set
