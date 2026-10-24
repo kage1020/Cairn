@@ -1,14 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync } from "node:fs";
-
-/**
- * A line the stand-in server appends to its record: a launch, a message it
- * handled, or its exit.
- */
-export type ServerEvent =
-  | { readonly id: string; readonly server: string; readonly argv: string[] }
-  | { readonly id: string; readonly received: string }
-  | { readonly id: string; readonly exited: true };
+import type { ServerEvent } from "./server-event";
 
 type Message = { readonly id?: number | string; readonly method?: string };
 
@@ -50,7 +42,7 @@ function handle(message: Message): void {
 }
 
 record({ id, server, argv });
-process.on("exit", () => record({ id, exited: true }));
+process.on("exit", (code) => record({ id, exited: code }));
 
 if (argv.length === 1 && argv[0] === "--version") {
   process.stdout.write("cairn-lsp 0.0.0\n");
@@ -66,7 +58,11 @@ process.stdin.on("data", (chunk: Buffer) => {
       return;
     }
     const header = pending.toString("ascii", 0, headerEnd);
-    const length = Number(/content-length: *(\d+)/i.exec(header)?.[1]);
+    const contentLength = /content-length: *(\d+)/i.exec(header);
+    if (!contentLength) {
+      throw new Error(`no Content-Length in header ${JSON.stringify(header)}`);
+    }
+    const length = Number(contentLength[1]);
     const bodyStart = headerEnd + 4;
     if (pending.length < bodyStart + length) {
       return;
