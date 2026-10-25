@@ -739,6 +739,35 @@ fn every_binding_is_reported_whatever_its_key_or_value() {
 }
 
 #[test]
+fn the_first_value_of_a_key_repeated_in_one_row_is_reported_as_it_would_be_alone() {
+    let row = |bindings: &str| {
+        format!(
+            "theme t:\n  slot glass -> @glass_pane\n  window[class=small] -> {bindings}\n\n\
+             struct s size=9x7\n  \
+             window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n"
+        )
+    };
+    let src = row("frame=@no_such_block frame=@spruce_wood");
+    let found = diagnose(&src);
+    let at: Vec<(&str, &str)> = found
+        .iter()
+        .map(|d| (d.code.as_str(), &src[d.span.clone()]))
+        .collect();
+    assert_eq!(
+        at,
+        [
+            ("W_IGNORED_ARGUMENT", "@no_such_block"),
+            ("E_DUPLICATE_ARG", "frame=@spruce_wood"),
+            ("W_IGNORED_ARGUMENT", "@spruce_wood"),
+        ],
+    );
+    assert_eq!(
+        found[0],
+        exactly_one(diagnose(&row("frame=@no_such_block")))
+    );
+}
+
+#[test]
 fn a_row_that_matches_nothing_is_reported_for_its_binding_too() {
     let src = "theme t:\n  slot glass -> @glass_pane\n  \
                window[class=big] -> frame=@spruce_wood\n\n\
@@ -760,6 +789,29 @@ fn a_binding_in_a_theme_no_scope_applies_is_reported_too() {
         ["@no_such_block"],
         "got {:#?}",
         diagnose(src)
+    );
+}
+
+#[test]
+fn a_binding_in_a_theme_whose_name_an_earlier_theme_took_is_reported_too() {
+    let src = "theme t:\n  slot glass -> @glass_pane\n\n\
+               theme t:\n  slot glass -> @glass_pane\n  \
+               window[class=small] -> frame=@no_such_block frame=@spruce_wood\n\n\
+               struct s size=9x7\n  \
+               window class=small side=front offset=2 y=2 size=2x2 mat_slot=glass\n";
+    let found = diagnose(src);
+    let at: Vec<(&str, &str)> = found
+        .iter()
+        .map(|d| (d.code.as_str(), &src[d.span.clone()]))
+        .collect();
+    assert_eq!(
+        at,
+        [
+            ("E_DUPLICATE_ITEM", "t"),
+            ("W_IGNORED_ARGUMENT", "@no_such_block"),
+            ("E_DUPLICATE_ARG", "frame=@spruce_wood"),
+            ("W_IGNORED_ARGUMENT", "@spruce_wood"),
+        ],
     );
 }
 

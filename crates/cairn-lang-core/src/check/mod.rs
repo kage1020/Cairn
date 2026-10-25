@@ -41,7 +41,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     cairn_version::run(module, &mut sink);
     duplicate::run(module, ir, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
-    arguments::run(ir, &mut sink);
+    arguments::run(module, ir, &mut sink);
     binding::run(ir, &mut sink);
     material::run(ir, &mut sink);
     member_scope::run(ir, &mut sink);
