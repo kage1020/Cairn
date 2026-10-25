@@ -381,7 +381,7 @@ pub(crate) struct CellIdentity<'a> {
     scope: &'a ScopedPlacementIrEntry,
 }
 
-/// Which list the index in a [`CellIdentity`] indexes.
+/// Which list a placed node is an entry of.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PlacedSubject {
     /// An entry of [`PlacementIr::cells`](super::PlacementIr::cells).
@@ -395,6 +395,14 @@ impl PlacedSubject {
         match self {
             Self::Cell => "cell",
             Self::Output => "output",
+        }
+    }
+
+    /// The label with its indefinite article, as a refusal to read the node names it.
+    pub(super) const fn with_article(self) -> &'static str {
+        match self {
+            Self::Cell => "a cell",
+            Self::Output => "an output",
         }
     }
 }

@@ -174,6 +174,36 @@ struct chain size=60x5
     source
 }
 
+/// One cell driving a door across a 40-wide floor, on a wire long enough to need buffer repeaters.
+pub const LONG_OUTWARD_WIRE_SOURCE: &str = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct reach size=40x6
+  floor mat_slot=wall
+  door id=front side=front at=center mat_slot=door
+  pressure_plate id=p1 at=front.outside offset=0 y=0 -> sig.a
+  pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b
+  logic sig.c = sig.a or sig.b
+  door[id=front] opened_by=sig.c
+  circuit region=floor void=3
+";
+
+/// A door opened straight off a pressure plate across a 40-wide floor: a wire and no cell.
+pub const IDENTITY_WIRE_SOURCE: &str = "\
+theme t:
+  slot wall -> @oak_planks
+  slot door -> @oak_door
+
+struct pass size=40x6
+  floor mat_slot=wall
+  door id=d side=front at=center mat_slot=door
+  pressure_plate id=p at=front.outside offset=0 y=0 -> sig.a
+  door[id=d] opened_by=sig.a
+  circuit region=floor void=2
+";
+
 /// Replaces every `"stage"` value with a placeholder, so adjacent stages' dumps compare equal.
 pub fn normalize_stage_tags(json: &str) -> String {
     const KEY: &str = "\"stage\":";

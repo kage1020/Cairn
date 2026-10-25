@@ -33,6 +33,10 @@ impl RoutingOutput {
 }
 
 /// Lowers a [`ScopedPlacementIr`] into a routed one, leaving out a scope refused with an error.
+///
+/// # Panics
+///
+/// On a `NetRef` out of range, a node not at the placement stage, or two cells on one `coord`.
 #[must_use]
 pub fn compile_routing(placement: &ScopedPlacementIr) -> RoutingOutput {
     let (scoped, diagnostics) = lower_scopes(placement, route_scope);
