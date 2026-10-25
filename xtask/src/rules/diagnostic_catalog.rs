@@ -3,7 +3,9 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::LazyLock;
 
+use regex::Regex;
 use syn::visit::Visit;
 
 use super::{Finding, Rule};
@@ -12,11 +14,20 @@ use crate::repo::Repo;
 
 pub const RULE: Rule = Rule {
     name: "diagnostic-catalog",
-    summary: "every core DiagnosticCode has a row in spec/lint's catalog, in each language",
+    summary: "every code core's DiagnosticCode or the CLI prints has a row in spec/lint's catalog, \
+              in each language",
     check,
 };
 
 const CORE_SRC: &str = "crates/cairn-lang-core/src";
+
+/// The CLI prints the codes of the checks it runs itself, outside core's enum.
+const CLI_SRC: &str = "crates/cairn-lang-cli/src";
+
+/// A code as the CLI prints one: `error[E_X]`, `warning[W_X]`, or `W_X:` opening the line.
+static PRINTED_CODE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:^|error\[|warning\[)([EW]_[A-Z0-9_]+)(?:\]|:)").expect("a valid pattern")
+});
 
 /// The spec directory in each language, with its catalog section's title. The chapter file is
 /// joined on apart, since a path spelled whole would read as a citation to `spec-citations`.
@@ -59,6 +70,54 @@ impl<'ast> Visit<'ast> for Codes {
     }
 }
 
+/// Codes printed by string literals outside `#[cfg(test)]` items.
+#[derive(Default)]
+struct Printed {
+    found: BTreeSet<String>,
+}
+
+impl<'ast> Visit<'ast> for Printed {
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        let attrs = match item {
+            syn::Item::Fn(item) => &item.attrs,
+            syn::Item::Mod(item) => &item.attrs,
+            syn::Item::Impl(item) => &item.attrs,
+            _ => return syn::visit::visit_item(self, item),
+        };
+        if !attrs.iter().any(is_cfg_test) {
+            syn::visit::visit_item(self, item);
+        }
+    }
+
+    fn visit_lit_str(&mut self, literal: &'ast syn::LitStr) {
+        let value = literal.value();
+        self.found.extend(
+            PRINTED_CODE
+                .captures_iter(&value)
+                .map(|captures| captures[1].to_owned()),
+        );
+    }
+
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        let literals = mac
+            .parse_body_with(
+                syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
+            )
+            .into_iter()
+            .flatten();
+        for expr in literals {
+            self.visit_expr(&expr);
+        }
+    }
+}
+
+fn is_cfg_test(attr: &syn::Attribute) -> bool {
+    attr.path().is_ident("cfg")
+        && attr
+            .parse_args::<syn::Ident>()
+            .is_ok_and(|ident| ident == "test")
+}
+
 fn catalog_rows(text: &str, title: &str) -> Option<BTreeSet<String>> {
     let lines = section(text, 2, |heading| heading.ends_with(title))?;
     Some(
@@ -71,10 +130,23 @@ fn catalog_rows(text: &str, title: &str) -> Option<BTreeSet<String>> {
     )
 }
 
-fn check(repo: &Repo) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    let mut codes = Codes::default();
-    for path in repo.files_in(Path::new(CORE_SRC), &["rs"]) {
+/// Feeds each parsed `.rs` file under `dir` to `visit`, skipping test modules kept in files of
+/// their own when `skip_tests` is set.
+fn visit_sources(
+    repo: &Repo,
+    dir: &str,
+    skip_tests: bool,
+    findings: &mut Vec<Finding>,
+    mut visit: impl FnMut(&syn::File),
+) {
+    for path in repo.files_in(Path::new(dir), &["rs"]) {
+        if skip_tests
+            && path
+                .iter()
+                .any(|part| part == "tests" || part == "tests.rs")
+        {
+            continue;
+        }
         let source = match repo.read(path) {
             Ok(source) => source,
             Err(error) => {
@@ -83,7 +155,7 @@ fn check(repo: &Repo) -> Vec<Finding> {
             }
         };
         match syn::parse_file(&source) {
-            Ok(file) => codes.visit_file(&file),
+            Ok(file) => visit(&file),
             Err(error) => findings.push(Finding::new(
                 path,
                 Some(error.span().start().line),
@@ -91,6 +163,14 @@ fn check(repo: &Repo) -> Vec<Finding> {
             )),
         }
     }
+}
+
+fn check(repo: &Repo) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let mut codes = Codes::default();
+    visit_sources(repo, CORE_SRC, false, &mut findings, |file| {
+        codes.visit_file(file);
+    });
     if codes.found.is_empty() {
         findings.push(Finding::new(
             CORE_SRC,
@@ -99,6 +179,19 @@ fn check(repo: &Repo) -> Vec<Finding> {
         ));
         return findings;
     }
+    let mut printed = Printed::default();
+    visit_sources(repo, CLI_SRC, true, &mut findings, |file| {
+        printed.visit_file(file);
+    });
+    if printed.found.is_empty() {
+        findings.push(Finding::new(
+            CLI_SRC,
+            None,
+            "found no string literal printing a code as `error[E_…]`, `warning[W_…]` or `W_…:`",
+        ));
+    }
+    let mut codes = codes.found;
+    codes.append(&mut printed.found);
 
     for (dir, title) in CATALOGS {
         let path = Path::new(dir).join(LINT_CHAPTER);
@@ -118,7 +211,7 @@ fn check(repo: &Repo) -> Vec<Finding> {
             ));
             continue;
         };
-        for code in codes.found.difference(&rows) {
+        for code in codes.difference(&rows) {
             findings.push(Finding::new(
                 path,
                 None,
@@ -147,6 +240,24 @@ impl Severity { pub fn as_str(self) -> &'static str { "error" } }
         let mut codes = Codes::default();
         codes.visit_file(&syn::parse_file(source).unwrap());
         assert_eq!(codes.found.into_iter().collect::<Vec<_>>(), ["E_A", "W_B"]);
+    }
+
+    #[test]
+    fn printed_codes_are_read_from_literals_and_macros_outside_tests() {
+        let source = r#"
+fn warn() { eprintln!("W_SEEN: {} now", x); }
+fn fail() -> String { format!("error[E_SEEN]: {}", y) }
+const NOTE: &str = "warning[W_ALSO]: z";
+const HELP: &str = "fires `E_ONLY_NAMED` when";
+#[cfg(test)]
+mod tests { fn t() { assert!(s.contains("error[E_IN_TEST]")); } }
+"#;
+        let mut printed = Printed::default();
+        printed.visit_file(&syn::parse_file(source).unwrap());
+        assert_eq!(
+            printed.found.into_iter().collect::<Vec<_>>(),
+            ["E_SEEN", "W_ALSO", "W_SEEN"]
+        );
     }
 
     #[test]
