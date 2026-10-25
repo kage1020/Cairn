@@ -3,11 +3,11 @@ title: "Tutorial"
 description: Build up from a single cottage to a themed tower, a redstone gatehouse, and a village.
 ---
 
-This walks through the [examples](/examples/), one idea at a time. Read it top to bottom; each
-section assumes the one before it.
+This page walks through the [examples](/examples/), one idea at a time. Read it top to bottom, since
+each section builds on the one before it.
 
-> The reference compiler is still a skeleton, so the `cairn compile` commands below do not run yet.
-> They match the spec exactly, which makes them the right way to build intuition for the CLI.
+> The `cairn compile` commands on this page run with the current compiler. Redstone does not reach
+> compiled output yet, so the gatehouse in section 3 builds without its circuit.
 
 ## 1. A cottage
 
@@ -124,7 +124,7 @@ struct gatehouse size=7x5
 actuator's input. `logic` writes the dependency between them.
 
 **There is no tick arithmetic.** The logic expression carries no time at all. The `within 2` in the
-assertion is the only place a number means ticks, because delay is not known until the circuit has
+assertion is the only number that means ticks, because delay is not known until the circuit has
 been placed and routed.
 
 **`circuit region=…` reserves space** for place-and-route. If routing does not fit you get

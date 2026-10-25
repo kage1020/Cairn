@@ -43,17 +43,20 @@ different keys are not reported. They compose, and splitting a long binding list
 allowed.
 
 **Selector bindings are reserved.** Which keys a row may bind on each keyword, and what each one
-paints, is not specified yet, and no lowering reads a binding: the two selector rows above build the
-same cottage as a theme without them, and no member's block depends on them. Until that is
-specified the compiler reports each binding as an unreached key, `W_IGNORED_ARGUMENT`
-([Lint](/spec/lint/)), whatever its key or value, on every row whose keyword it knows, matched or
-not and in an applied theme or not. A row whose keyword it does not know gets `E_UNKNOWN_KEYWORD`
-instead. A binding's value is not resolved as a block either, because what the key would paint is
-not specified: `frame=@no_such_block` is reported exactly as `frame=@spruce_wood` or `frame=42` is,
-with or without `--target`, and no binding makes `check`, `compile` or `info` refuse a build.
-Binding one key twice for the same members does, since the earlier value is dead text whatever a
-binding comes to mean: within one row that is `E_DUPLICATE_ARG`, and across two rows that select
-the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is still checked:
+paints, is not specified yet, and no lowering reads a binding. The two selector rows above build the
+same cottage as a theme without them, and no member's block depends on them.
+
+Until that is specified, the compiler reports each binding as an unreached key,
+`W_IGNORED_ARGUMENT` ([Lint](/spec/lint/)). It does so whatever the key or value, on every row whose
+keyword it knows, whether the row matched and whether its theme was applied. A row whose keyword it
+does not know gets `E_UNKNOWN_KEYWORD` instead. A binding's value is not resolved as a block either,
+because what the key would paint is not specified: `frame=@no_such_block` is reported exactly as
+`frame=@spruce_wood` or `frame=42` is, with or without `--target`, and no binding makes `check`,
+`compile` or `info` refuse a build.
+
+Binding one key twice for the same members does refuse a build, since the earlier value is dead
+text whatever a binding comes to mean. Within one row that is `E_DUPLICATE_ARG`; across two rows
+that select the same members it is `E_DUPLICATE_SELECTOR`. The rest of a row is still checked:
 `E_THEME_SELECTOR_UNMATCHED` applies to it exactly as its own entry says.
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism

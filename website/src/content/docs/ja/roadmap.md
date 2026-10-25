@@ -1,83 +1,61 @@
 ---
 title: ロードマップ
-description: 日付駆動の小さく頻繁なリリース。月次 minor と必要に応じた patch、「ソースが parse できる」から「レッドストーンが simulate できる」までの 6 マイルストーン。
+description: 日付ベースで、小さく頻繁にリリースします。毎月のマイナーリリースと必要に応じたパッチ、そして「ソースをパースできる」から「レッドストーンをシミュレートできる」までの 6 つのマイルストーン。
 ---
 
-Cairn は [日付ベースのバージョニング](/ja/spec/versioning-editions#101-ターゲットはコンパイル時パラメータ)
-`YYYY.M[.PATCH]` の下で **月次 minor リリース** を出します。各月は準備できたものを出し、任意の
-「1.0」を待つために何かを抑え込むことはしません。月次スケジュールを横断する 6 つの名前付きマイル
-ストーンが、カレンダーの刻みより耐久性のある約束を提供します。
+Cairn は[日付ベースのバージョン](/ja/spec/versioning-editions#101-ターゲットはコンパイル時のパラメータ) `YYYY.M[.PATCH]` で、**毎月マイナーリリース** を出します。毎月、準備ができたものをリリースし、区切りのよい「1.0」を待って何かを出し惜しむことはしません。月ごとの予定とは別に、名前付きのマイルストーンを 6 つ設けています。カレンダーの日付よりも変わりにくい目標なので、コントリビューターも利用者もこれを目安に計画を立てられます。
 
-> スケジュールは計画であって約束ではありません。コンパイラはオープンに実装されており、遅延は起こり
-> ます。実際に何がリリースされたかの一次情報は
-> [CHANGELOG](https://github.com/kage1020/Cairn/blob/main/CHANGELOG.md) です (英語)。
+> スケジュールは計画であり、約束ではありません。コンパイラはオープンに開発しているので、予定が遅れることもあります。実際に何がリリースされたかは [CHANGELOG](https://github.com/kage1020/Cairn/blob/main/CHANGELOG.md) (英語) で確認してください。
 
-## リリースサイクル
+## リリースの周期
 
-- **月次 minor** (`YYYY.M.0`) は月初に出します。リリース PR は cron で自動生成され、人間レビュー
-  を経てマージされます。
-- **patch** (`YYYY.M.N`, `N ≥ 1`) は関連コミットが入り次第 `main` から切り出します。代表的な
-  トリガーは registry/constraint pack の更新、リグレッション、セキュリティ修正です。月あたりの
-  patch 回数に上限はありません。
-- **チャネル:** `stable` のみです。Cairn は別系統の nightly/beta を走らせません。まだ安定していない
-  振る舞いはリリースチャネルではなく [互換性ティア](/ja/spec/compatibility) で示します。
-- **バックポート:** ありません。最新リリースがサポート対象です。過去の `YYYY.M.*` 系列にはそれ以上
-  の patch を当てません。
+- **毎月のマイナーリリース** (`YYYY.M.0`) は毎月 1 日に出します。リリース PR は cron ジョブが自動で作り、人がレビューしてからマージします。
+- **パッチリリース** (`YYYY.M.N`、`N ≥ 1`) は、必要なコミットが入るたびに `main` から出します。主なきっかけは、レジストリパックや制約パックの更新、リグレッション、セキュリティ修正です。1 か月あたりのパッチの回数に上限はありません。
+- **チャンネル** は `stable` の 1 つだけです。nightly や beta を別に運用することはしません。まだ安定していない挙動は、リリースチャンネルではなく[互換性ティア](/ja/spec/compatibility/)で区別します。
+- **バックポート** はしません。サポート対象は最新のリリースだけです。古い `YYYY.M.*` の系列には、それ以上パッチを出しません。
 
 ## マイルストーン
 
-各マイルストーンは「Cairn が信頼できる形で X を実現できる」というゲートで、対応する月のリリースが
-出た時点で達成と見なします。バージョン番号と切り離して名前を付けることで、月次スケジュールがずれて
-もロードマップの語彙が安定します。
+各マイルストーンは「Cairn が X を確実にこなせる」ことを示す関門で、対応する月のリリースが出た時点で達成とみなします。バージョン番号とは別に名前を付けておくことで、月ごとの予定がずれても、ロードマップで使う言葉は変わりません。
 
-| マイルストーン | 達成想定 | そこで得られるもの |
+| マイルストーン | 達成の目安 | 達成するとできること |
 |---|---|---|
-| **M1 — source parses** | 2026.7.0 | `examples/` のすべてのファイルに対して `cairn parse` が AST を返す |
-| **M2 — minimal build** | 2026.10.0 | `cairn compile` が床と壁だけの単室構造に対して Java の `.nbt` と lockfile を書き出す |
-| **M3 — examples work** | 2027.1.0 | `cottage`, `themed-tower`, `village` が `cairn compile --edition java` を通り、Minecraft でロードできる |
-| **M4 — Java/Bedrock parity** | 2027.2.0 | 同じ DSL ソースから両エディションの有効な出力が出る。parity 表が埋まり、エディション別 theme fallback が動く |
-| **M5 — developer experience** | 2027.3.0 | `cairn-lang-lsp` が少なくとも 1 エディタ (VS Code) で diagnostics と completion を提供 |
-| **M6 — redstone simulates** | 2027.5.0 | 論理レッドストーンの synthesis、place-and-route、tick simulator が揃う。`redstone-door` が verify される |
+| **M1, source parses** | 2026.7.0 | `examples/` のすべてのファイルについて、`cairn parse` が AST を出力する |
+| **M2, minimal build** | 2026.10.0 | 床と壁だけの 1 部屋の構造について、`cairn compile` が Java の `.nbt` とロックファイルを書き出す |
+| **M3, examples work** | 2027.1.0 | `cottage`、`themed-tower`、`village` のすべてが `cairn compile --edition java` を最後まで通り、Minecraft で読み込める |
+| **M4, Java/Bedrock parity** | 2027.2.0 | 同じ DSL ソースから、両エディション向けに有効な出力ができる。エディション対応表が埋まり、エディション別のテーマのフォールバックが動く |
+| **M5, developer experience** | 2027.3.0 | `cairn-lang-lsp` が、少なくとも 1 つのエディタ (VS Code) で診断と補完を提供する |
+| **M6, redstone simulates** | 2027.5.0 | 論理レッドストーンの合成、配置配線、tick シミュレータが揃う。`redstone-door` のサンプルが検証を通る |
 
-## 月別スコープ
+## 月ごとのスコープ
 
-下表は実装計画です。マイルストーンゲートを跨がない月でも月次 minor は出るので、マイルストーン表より
-密になります。
+下の表は、作業中の実装計画です。マイルストーンを越えない月にもマイナーリリースは出るので、マイルストーンの表より細かくなっています。
 
-| リリース | 追加スコープ |
+| リリース | 追加するもの |
 |---|---|
-| **2026.7.0** | `cairn-lang-core` の lexer/parser、`cairn parse` サブコマンド (AST 表示のみ)。リリース自動化が稼働。 |
-| **2026.8.0** | Intent IR、構文バリデーション、`cairn check`。 |
-| **2026.9.0** | Semantic 層、materials/themes の基礎、`cairn info` が三軸を返す。 |
-| **2026.10.0** | block-array pivot、Java backend (壁と床のみ)、lockfile (`build.cairn.lock`)。 |
-| **2026.11.0** | `cottage.crn` が `--edition java` で end-to-end コンパイルできる。 |
-| **2026.12.0** | registry pack 取り込み、fail-loud + nearest-valid 候補。 |
-| **2027.1.0** | `examples/` 全部が Java で動く。**M3**。 |
-| **2027.2.0** | Bedrock backend、parity 表、エディション別 theme fallback。**M4**。 |
-| **2027.3.0** | `cairn-lang-lsp` 最小版 (diagnostics + completion)、VS Code 拡張。**M5**。 |
-| **2027.4.0** | レッドストーン論理層、組み合わせ回路の合成と place-and-route。 |
-| **2027.5.0** | レッドストーン tick simulator、sequential macros、`redstone-door` 検証。**M6**。 |
-| **2027.6.0** | `cairn-lang-wasm` + ブラウザ playground (docs サイト上でライブコンパイル)。 |
+| **2026.7.0** | `cairn-lang-core` の字句解析器と構文解析器、`cairn parse` サブコマンド (AST の表示のみ)。リリースの自動化を開始。 |
+| **2026.8.0** | Intent IR、構文の検証、`cairn check`。 |
+| **2026.9.0** | Semantic 層、マテリアルとテーマの基本、`cairn info` が 3 つのバージョン軸を報告する。 |
+| **2026.10.0** | block-array ピボット、Java バックエンド (壁と床のみ)、ロックファイル (`build.cairn.lock`)。 |
+| **2026.11.0** | `cottage.crn` を `--edition java` で最後までコンパイルできる。 |
+| **2026.12.0** | レジストリパックの取り込み、最も近い有効な候補を示す fail-loud なエラー。 |
+| **2027.1.0** | `examples/` のすべてが Java で動く。**M3**。 |
+| **2027.2.0** | Bedrock バックエンド、エディション対応表、エディション別のテーマのフォールバック。**M4**。 |
+| **2027.3.0** | 最小限の `cairn-lang-lsp` (診断と補完)、VS Code 拡張。**M5**。 |
+| **2027.4.0** | レッドストーンの論理層、組み合わせ回路の合成と配置配線。 |
+| **2027.5.0** | レッドストーンの tick シミュレータ、順序回路のマクロ、`redstone-door` の検証。**M6**。 |
+| **2027.6.0** | `cairn-lang-wasm` とブラウザのプレイグラウンド (ドキュメントサイト上でその場でコンパイル)。 |
 
-`2027.6.0` より先のスケジュールは意図的に描いていません。M6 まで到達すれば仕様駆動の部分はほぼ
-完了し、その先は実利用のフィードバックを元にロードマップを引き直します。
+`2027.6.0` より先の予定は、意図的に決めていません。M6 に到達すれば、仕様を起点に進める部分はほぼ完了します。その先のロードマップは、実際の利用から得たフィードバックをもとに引き直します。
 
-## スケジュールはどう守られているか
+## スケジュールを守る仕組み
 
-リリース戦略そのものが自動化されています:
+リリースの手順そのものを自動化しています。
 
-1. **月次 minor PR** は毎月 1 日 `04:17 UTC` の GitHub Actions cron で立ち上がります (GHA cron が
-   遅延・スキップしやすい時刻ちょうどを意図的に外しています)。
-2. **バージョン**は既存タグから計算します: `vYYYY.M.*` タグがまだなければ次は `YYYY.M.0`、
-   既にあれば次の patch を採ります。
-3. **release-plz** がバージョン bump と changelog を生成し、`--version-overrides` で算出した
-   バージョンを適用して PR を開きます。
-4. **人間レビュー**は月次 minor で必須です。`main` への push から派生する patch も同じ PR フロー
-   を辿り、マージで publish パイプラインが発火します。
-5. **Publish** は `v*` タグで起動します: Linux/macOS/Windows × `x86_64`/`aarch64` の
-   クロスコンパイル、sigstore による署名、GitHub Release への添付、ワークスペース全 crate の
-   `cargo publish`。
+1. **毎月のマイナーリリースの PR** は、毎月 1 日の `04:17 UTC` に GitHub Actions の cron が作ります。GitHub Actions の cron は毎時 0 分ちょうどに遅れたりスキップされたりしやすいので、あえて時刻をずらしています。
+2. **バージョン** は既存のタグから計算します。`vYYYY.M.*` のタグがまだなければ次は `YYYY.M.0`、すでにあればその月の次のパッチになります。
+3. **release-plz** がバージョンの更新と changelog を生成し、計算したバージョンを `--version-overrides` で適用して PR を開きます。
+4. 毎月のマイナーリリースでは、**人によるレビュー** が必須です。`main` への push から作られるパッチも同じ PR の流れをたどり、マージすると公開のパイプラインが動きます。
+5. **公開** は、作られた `v*` タグをきっかけに実行します。Linux・macOS・Windows の `x86_64` と `aarch64` 向けにバイナリをクロスコンパイルし、sigstore で署名して GitHub Release に添付し、ワークスペースのすべてのクレートを crates.io に `cargo publish` します。
 
-このスケジュールを通じての互換性は、別途 [互換性ティア](/ja/spec/compatibility) が規定します。
-`.crn` 構文と lockfile は **Stable** ルールで進化し、Rust API は M3 まで **Internal**
-(`#[doc(hidden)]`)、その他のほとんどは当面 **Evolving** に置かれます。
+このスケジュールを通じた互換性の扱いは、別に[互換性ティア](/ja/spec/compatibility/)で定めています。`.crn` の構文とロックファイルは **Stable** のルールで変更します。Rust の API は M3 まで **Internal** (`#[doc(hidden)]`) とし、それ以外のほとんどは当面 **Evolving** とします。

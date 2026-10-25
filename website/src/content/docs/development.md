@@ -6,8 +6,8 @@ This guide covers the Rust workspace and the day-to-day contributor flow. If you
 language spec rather than the compiler, start at the [Specification](/spec/) and
 [CONTRIBUTING.md](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md).
 
-> Cairn is at the design stage. The spec is the source of truth and the Rust skeleton implements it
-> chapter by chapter. Several crates are still empty.
+> Cairn is at the design stage. The spec is the source of truth and the Rust workspace implements it
+> chapter by chapter. `cairn-lang-wasm` is still a placeholder.
 
 ## Workspace layout
 
@@ -39,8 +39,8 @@ Each crate maps back to the spec chapter it implements:
 
 `cairn-lang-core` sits at the root. `cairn-lang-cli`, `cairn-lang-lsp`, and `cairn-lang-wasm` are
 leaf integrations that nothing depends on. `cairn-lang-formats` is the only crate that pulls in
-`cairn-lang-nbt`. `cairn-lang-docs` depends on nothing, and its manifest is `website/Cargo.toml`, so
-the pages it embeds are the site's own sources and no copy of them can drift.
+`cairn-lang-nbt`. `cairn-lang-docs` depends on nothing. Its manifest is `website/Cargo.toml`, so the
+pages it embeds are the site's own sources, with no copy to drift.
 
 - **`cairn-lang-core` knows nothing about NBT, file formats, redstone simulation, or editor
   protocols.** The block-array IR is the universal pivot ([Architecture](/spec/architecture/));
@@ -60,29 +60,33 @@ the pages it embeds are the site's own sources and no copy of them can drift.
 | Lints | `[workspace.lints]` in `Cargo.toml` | `unsafe_code = forbid`, `missing_docs = warn`, `clippy::all` + `clippy::pedantic`. |
 
 The Rust version is exact because CI treats every clippy finding as fatal. On a channel, a Rust
-release turns every open branch red on its own — the finding lands on a file the branch never
-touched. The pin decides when new lints arrive rather than whether: bumping it is its own pull
-request, carrying whatever the new release found. It is not the MSRV; `rust-version` is the floor a
-consumer needs, and raising the pin does not raise it. The number itself lives only in
-`Cargo.toml`: CI's `MSRV` job reads it back out with `cargo metadata` and checks the workspace at
-that compiler, so a change reaching for a newly stabilised API goes red there rather than at a
-consumer's.
+release would turn every open branch red by itself, with findings in files the branch never
+touched. The pin decides when new lints arrive, not whether they do: bumping it is a pull request of
+its own, carrying whatever the new release found.
 
-Every crate but the tree-sitter one inherits these with `[lints] workspace = true` and writes no
-`[lints.*]` table of its own; the next paragraph says why that one carries a copy. Inheritance is
-opt-in per crate and all-or-nothing: a crate without that line receives none of the workspace
-lints, so a lint added to the workspace later would silently skip it.
+The pin is not the MSRV. `rust-version` is the floor a consumer needs, and raising the pin does not
+raise it. That number lives only in `Cargo.toml`. CI's `MSRV` job reads it back out with
+`cargo metadata` and checks the workspace with that compiler, so a change that reaches for a newly
+stabilised API goes red in CI rather than for a consumer.
 
-`unsafe_code` is forbidden everywhere but one module: `ffi` in the tree-sitter crate's Rust
+Every crate except the tree-sitter one inherits these with `[lints] workspace = true` and writes no
+`[lints.*]` table of its own; the next paragraph explains why the tree-sitter crate carries a copy.
+Inheritance is opt-in per crate and all-or-nothing. A crate without that line receives none of the
+workspace lints, so a lint added to the workspace later would silently skip it.
+
+`unsafe_code` is forbidden everywhere except one module: `ffi` in the tree-sitter crate's Rust
 binding, which is the only way to reach the generated C parser. `forbid` cannot be lifted, so that
 crate alone carries a copy of the workspace lints with `unsafe_code` at `deny`, and `ffi` lifts it
-with `#![expect(unsafe_code)]`. `cargo xtask lint` holds the exception that narrow: its `manifest`
-rule fails if the workspace level is anything but `forbid`, if a crate does not inherit the
-workspace lints, or if the tree-sitter copy differs from them in anything else, and its
-`unsafe-code` rule fails if an `allow`, `expect`, `warn` or `cfg_attr` attribute names
-`unsafe_code` outside that module. If another use case ever needs `unsafe`, it lifts the lint on a
-single module with documented invariants and adds that file and module to the rule's `ALLOWED`
-list, never `#[allow]` at a call site.
+with `#![expect(unsafe_code)]`. `cargo xtask lint` keeps the exception that narrow:
+
+- its `manifest` rule fails if the workspace level is anything but `forbid`, if a crate does not
+  inherit the workspace lints, or if the tree-sitter copy differs from them in anything else;
+- its `unsafe-code` rule fails if an `allow`, `expect`, `warn` or `cfg_attr` attribute names
+  `unsafe_code` outside that module.
+
+If another use case ever needs `unsafe`, it lifts the lint on a single module with documented
+invariants and adds that file and module to the rule's `ALLOWED` list. It never uses `#[allow]` at a
+call site.
 
 ## Build, test, lint
 
@@ -98,13 +102,13 @@ cargo test -p cairn-lang-core --bench lowering
 cargo test -p cairn-lang-redstone --bench place_and_route
 ```
 
-The last two run each bench once as a test, untimed; `--workspace` does not select bench
-targets.
+`--workspace` does not select bench targets, so the last two run each bench once, as an untimed
+test.
 
-CI's `Lint` job also runs `cargo xtask lint`, the checks that compare files with each other rather
-than test behaviour: README inventories, spec citations, the diagnostic catalog, the copies of the
-version, the lint configuration. `cargo xtask lint --list` names them, and each rule's module in
-`xtask/src/rules/` says why it holds.
+CI's `Lint` job also runs `cargo xtask lint`, which compares files with each other rather than
+testing behaviour: README inventories, spec citations, the diagnostic catalog, the copies of the
+version, and the lint configuration. `cargo xtask lint --list` names the rules, and each rule's
+module in `xtask/src/rules/` explains why it exists.
 
 CI sets `RUSTFLAGS=-D warnings`, so any new warning fails the build. To match it locally:
 
@@ -112,32 +116,33 @@ CI sets `RUSTFLAGS=-D warnings`, so any new warning fails the build. To match it
 RUSTFLAGS="-D warnings" cargo build --workspace --locked
 ```
 
-CI also builds the API docs on Linux, twice, with rustdoc's warnings fatal, since clippy does not
-see a doc link to a private item or to a path that no longer resolves. The first run is the
-public surface and the only one that flags a public doc linking to a private item; the second
-also covers the docs only a contributor reads:
+CI also builds the API docs twice on Linux, with rustdoc's warnings fatal, because clippy does not
+see a doc link to a private item or to a path that no longer resolves. The first run covers the
+public surface, and it is the only one that flags a public doc linking to a private item. The
+second also covers the docs only a contributor reads:
 
 ```sh
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked --all-features --document-private-items
 ```
 
-Two benches time the passes a build spends its time in: `lowering` in `cairn-lang-core` and
-`place_and_route` in `cairn-lang-redstone`. They call the passes in-process, since timing the CLI
-over an example would mostly time process startup, and they generate their sources, since an
-example-sized one goes through a pass faster than the timer can tell a change apart. They take
-their settings from the release profile except `panic`, which Cargo builds unwinding for benches as
-it does for tests. CI runs them once as tests, above, but never times them. They exist to measure
-a change to `[profile.release]`, `opt-level` above all, before it is made.
+Two benches time the passes a build spends most of its time in: `lowering` in `cairn-lang-core`
+and `place_and_route` in `cairn-lang-redstone`. They call the passes in-process, since timing the
+CLI over an example would mostly time process startup. They generate their sources, since an
+example-sized source goes through a pass faster than the timer can tell a change apart. They take
+their settings from the release profile, except `panic`: Cargo builds benches with unwinding, as it
+does tests.
+
+CI runs the benches once as tests, as above, but never times them. They exist to measure a change to
+`[profile.release]`, above all to `opt-level`, before it is made.
 [CONTRIBUTING.md](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md) walks through
-comparing two profiles with them from the first release that includes the benches; until then that
-section is only on `canary`. To run both:
+comparing two profiles with them. To run both:
 
 ```sh
 cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route
 ```
 
-`cairn-lang-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/) and the website
+`cairn-lang-wasm` builds with [`wasm-pack`](https://rustwasm.github.io/wasm-pack/), and the website
 expects the resulting `pkg/` at `website/src/wasm/`:
 
 ```sh
@@ -168,8 +173,8 @@ wasm-pack build crates/cairn-lang-wasm --target web --release
 4. **Implementation.** Make them pass.
 5. **Iterate.** Keep tests and implementation in lockstep until green.
 
-The spec is compact enough that an AC list almost always fits in a few lines. There is no value in
-skipping ahead.
+The spec is compact enough that an acceptance-criteria list almost always fits in a few lines, so
+there is nothing to gain by skipping ahead.
 
 ## Adding a format backend
 
@@ -180,8 +185,8 @@ Format support lives in `cairn-lang-formats`. A new file type needs three things
 3. An `(edition, version)` provenance stamp on import
    ([Ecosystem Interop §12.4](/spec/ecosystem-interop#124-import-stamping-and-pitfalls)).
 
-If you find yourself reaching into `cairn-lang-core` to add format-specific fields, the block-array
-IR is leaking format concerns. Discuss before merging.
+If you find yourself reaching into `cairn-lang-core` to add format-specific fields, format concerns
+are leaking into the block-array IR. Discuss it before merging.
 
 ## Adding redstone primitives
 
@@ -197,6 +202,6 @@ Adding to it is a **spec change**. Open a spec PR with:
 
 ## Where to ask
 
-Open an issue against the relevant spec chapter. Implementation-only questions can reference the
-crate README. Design questions about vocabulary, IR shape, or error message wording belong against
-the spec.
+Open an issue against the relevant spec chapter. A question about implementation alone can point
+at the crate README instead. Design questions about vocabulary, IR shape, or error message wording
+belong against the spec.

@@ -6,10 +6,10 @@ description: Date-driven, small-and-frequent releases. Monthly minor with patche
 Cairn ships **monthly minor releases** under
 [date-based versioning](/spec/versioning-editions/#101-the-target-is-a-compile-time-parameter)
 `YYYY.M[.PATCH]`. Each month delivers what is ready; nothing is held back for an arbitrary "1.0".
-Six named milestones cross-cut the monthly schedule so contributors and consumers can plan against
-something more durable than a calendar tick.
+Six named milestones sit across the monthly schedule, so contributors and consumers can plan
+against something more durable than a calendar date.
 
-> Schedule is a plan, not a promise. The compiler is implemented in the open and slips happen.
+> The schedule is a plan, not a promise. The compiler is implemented in the open, and slips happen.
 > The [CHANGELOG](https://github.com/kage1020/Cairn/blob/main/CHANGELOG.md) is the source of truth
 > for what shipped.
 
@@ -43,8 +43,8 @@ the monthly schedule shifts.
 
 ## Monthly scope
 
-The month → release contents table below is the working plan. It is denser than the milestone
-table because monthly minors can ship without crossing a milestone gate.
+The table below is the working plan, month by month. It is denser than the milestone table because
+a monthly minor can ship without crossing a milestone gate.
 
 | Release | Scope added |
 |---|---|
@@ -61,16 +61,16 @@ table because monthly minors can ship without crossing a milestone gate.
 | **2027.5.0** | Redstone tick simulator; sequential macros; `redstone-door` verifies. **M6.** |
 | **2027.6.0** | `cairn-lang-wasm` + browser playground (live compile in the docs site). |
 
-Beyond `2027.6.0` the schedule is intentionally not drawn. Once M6 lands the spec-driven part of
-the project is largely complete and the roadmap will be redrawn around real usage feedback.
+Beyond `2027.6.0` the schedule is intentionally not drawn. Once M6 lands, the spec-driven part of
+the project is largely complete, and the roadmap will be redrawn around feedback from real use.
 
 ## How the schedule is enforced
 
 The release strategy itself is automated:
 
-1. **Monthly minor PR** is opened by a GitHub Actions cron at `17:04 UTC` on the first of each
-   month, offset from the hour boundary on purpose because GHA crons are most likely to be delayed
-   or skipped there.
+1. **Monthly minor PR** is opened by a GitHub Actions cron at `04:17 UTC` on the first of each
+   month. The time is deliberately off the hour, because GitHub Actions crons are most likely to be
+   delayed or skipped on the hour.
 2. **Version is computed** from existing tags: no `vYYYY.M.*` tag yet → next is `YYYY.M.0`,
    otherwise the next in-month patch.
 3. **release-plz** generates the version bump and changelog, applies the computed version via
