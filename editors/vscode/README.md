@@ -25,8 +25,11 @@ Requires Node.js ≥ 22 and `pnpm`.
 pnpm install
 pnpm build            # esbuild → dist/extension.js
 pnpm watch            # rebuild on save while developing
+pnpm test             # open a .crn file in VS Code against a stand-in cairn-lsp
 pnpm package          # produces cairn-lang-<version>.vsix
 ```
+
+`pnpm test` downloads VS Code into `.vscode-test/`. Its stand-in `cairn-lsp` is a shell script, so the tests are skipped on Windows. `pnpm test` opens a window, so on a headless Linux machine run it as `xvfb-run -a pnpm test`.
 
 Sideload for local testing with `code --install-extension ./cairn-lang-<version>.vsix`. Use the `Cairn Language Server` output channel (View → Output → Cairn Language Server) to inspect the LSP wire log; set `cairn.trace.server` to `verbose` for full request/response bodies.
 

@@ -2,6 +2,8 @@
 //! `(x * size_y + y) * size_z + z`, unlike Java's `blocks`; the second, waterlogging layer is all
 //! `-1`, since lowering authors none.
 
+use std::collections::HashMap;
+
 use cairn_lang_core::block_array::{BlockArray, PaletteIndex};
 use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
@@ -15,7 +17,7 @@ use thiserror::Error;
 use crate::bedrock_state::{BedrockStateError, translate_states};
 use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
-use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
+use crate::dims::{VolumeError, dims_to_i32, list_volume};
 
 /// One intent a palette entry dropped to fit Bedrock, reported as `W_INTENT_DEGRADED`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,7 +136,7 @@ pub struct McStructure<'a> {
     palette: Compound,
     block_palette_len: usize,
     /// Each palette entry's `block_palette` slot; entries translation merges share one.
-    slots: Vec<u16>,
+    slots: Vec<i32>,
 }
 
 /// Leaves out the grid, which can hold millions of voxels.
@@ -156,17 +158,15 @@ impl std::fmt::Debug for McStructure<'_> {
 /// # Errors
 ///
 /// The first fault found, as any [`BedrockStructureError`] but [`BedrockStructureError::Nbt`].
-///
-/// # Panics
-///
-/// When `block_palette` needs a slot past `u16::MAX`, which only a hand-built palette can cause.
 pub fn prepare_mcstructure<'a>(
     block_array: &'a BlockArray,
     target: &BedrockTarget,
 ) -> Result<(McStructure<'a>, Vec<ParityNote>), BedrockStructureError> {
     let entries = &block_array.palette.entries;
     let mut block_palette: Vec<Compound> = Vec::with_capacity(entries.len());
-    let mut slots: Vec<u16> = Vec::with_capacity(entries.len());
+    // Keyed by id, which each compound carries as `name`: entries of two ids never merge.
+    let mut slots_by_id: HashMap<&str, Vec<i32>> = HashMap::new();
+    let mut slots: Vec<i32> = Vec::with_capacity(entries.len());
     let mut notes: Vec<ParityNote> = Vec::new();
     for entry in entries {
         if !is_concrete_id(&entry.id) {
@@ -188,25 +188,26 @@ pub fn prepare_mcstructure<'a>(
         let compound = palette_entry(&entry.id, translated.states, target.block_version);
         // The palette is a set (`spec/compilation` "Within-phase conflicts and the palette"):
         // an entry whose translation folds into an earlier one takes that slot, so air stays at 0.
-        let slot = block_palette
+        let named = slots_by_id.entry(&entry.id).or_default();
+        let earlier = named
             .iter()
-            .position(|written| *written == compound)
-            .unwrap_or_else(|| {
-                block_palette.push(compound);
-                block_palette.len() - 1
-            });
-        slots.push(
-            u16::try_from(slot)
-                .expect("block_palette grew past u16::MAX slots; widen PaletteIndex first"),
-        );
+            .copied()
+            .find(|&slot| usize::try_from(slot).is_ok_and(|slot| block_palette[slot] == compound));
+        let slot = if let Some(slot) = earlier {
+            slot
+        } else {
+            block_palette.push(compound);
+            let len = block_palette.len();
+            let slot = i32::try_from(len).map_err(|_| BedrockStructureError::ListTooLong {
+                list: "block_palette",
+                len,
+            })? - 1;
+            named.push(slot);
+            slot
+        };
+        slots.push(slot);
     }
     let block_palette_len = block_palette.len();
-    if !fits_list_limit(block_palette_len) {
-        return Err(BedrockStructureError::ListTooLong {
-            list: "block_palette",
-            len: block_palette_len,
-        });
-    }
     let size = dims_to_i32(&block_array.dims)?;
     let volume = list_volume(block_array)?;
     if let Some((index, len)) = block_array.first_index_outside_palette() {
@@ -246,7 +247,7 @@ fn check_palette_strings(id: &str, states: &Compound) -> Result<(), BedrockStruc
 impl McStructure<'_> {
     /// The `block_palette` slot a voxel is written as.
     fn slot(&self, voxel: PaletteIndex) -> i32 {
-        i32::from(self.slots[usize::from(voxel.0)])
+        self.slots[usize::from(voxel.0)]
     }
 
     /// Writes the structure as uncompressed little-endian NBT, encoding the voxels as it goes.

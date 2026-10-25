@@ -135,7 +135,7 @@ fn a_pack_without_a_blocks_component_loads_and_refutes_no_id() {
             &one_material(r#"{ "token": "a.b", "block": "oak_planks" }"#),
         );
     });
-    assert!(pack.blocks.is_empty());
+    assert!(pack.blocks().is_empty());
     assert!(pack.view(Some("1.20.4")).block_ids().is_none());
 }
 
@@ -151,7 +151,7 @@ fn a_blocks_component_folds_one_table_per_version() {
         );
     });
     assert_eq!(
-        pack.blocks.versions().collect::<Vec<_>>(),
+        pack.blocks().versions().collect::<Vec<_>>(),
         ["1.20.4", "1.21.4"]
     );
     let old = pack.view(Some("1.20.4"));
@@ -312,7 +312,7 @@ fn a_pack_without_an_aliases_component_loads_and_names_no_rename() {
             good_blocks(),
         );
     });
-    assert!(pack.aliases.is_empty());
+    assert!(pack.aliases().is_empty());
     assert_eq!(
         pack.view(Some("1.21.4"))
             .aliases_for("minecraft:paleoak_planks"),
@@ -325,7 +325,7 @@ fn an_alias_answers_with_the_spellings_the_pinned_version_declares() {
     let pack = load_from_dir_or_die("aliases", |dir| {
         write_pack_with_aliases(dir, good_data_versions(), good_blocks(), good_aliases());
     });
-    assert_eq!(pack.aliases.len(), 1);
+    assert_eq!(pack.aliases().len(), 1);
     // `pale_oak_planks` arrives in `1.21.4`.
     assert_eq!(
         pack.view(Some("1.21.4"))
@@ -413,7 +413,7 @@ fn the_aliases_bytes_reach_the_pack_hash() {
             }"#,
         );
     });
-    assert_ne!(one.bytes_hash, other.bytes_hash);
+    assert_ne!(one.bytes_hash(), other.bytes_hash());
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn the_blocks_bytes_reach_the_pack_hash() {
             }"#,
         );
     });
-    assert_ne!(one.bytes_hash, other.bytes_hash);
+    assert_ne!(one.bytes_hash(), other.bytes_hash());
 }
 
 fn load_from_dir_or_die(label: &str, write: impl FnOnce(&Path)) -> RegistryPack {
@@ -465,11 +465,11 @@ fn load_from_dir_err(label: &str, write: impl FnOnce(&Path)) -> RegistryError {
 #[test]
 fn the_builtin_java_pack_loads() {
     let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
-    assert_eq!(pack.manifest.edition, Edition::Java);
-    assert_eq!(pack.manifest.name, "cairn-builtin-java");
-    assert_eq!(pack.source, PackSource::Builtin);
+    assert_eq!(pack.manifest().edition, Edition::Java);
+    assert_eq!(pack.manifest().name, "cairn-builtin-java");
+    assert_eq!(pack.source(), &PackSource::Builtin);
     assert!(
-        !pack.data_versions.versions.is_empty(),
+        !pack.data_versions().versions.is_empty(),
         "the pack names no DataVersion"
     );
 }
@@ -478,23 +478,23 @@ fn the_builtin_java_pack_loads() {
 fn builtin_pack_includes_materials_catalog() {
     let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     assert!(
-        !pack.materials.is_empty(),
+        !pack.materials().is_empty(),
         "built-in pack ships a non-empty materials catalog",
     );
     assert_eq!(
-        pack.materials.lookup_id("floor.wood.broadleaf"),
+        pack.materials().lookup_id("floor.wood.broadleaf"),
         Some("minecraft:oak_planks"),
     );
     assert_eq!(
-        pack.materials.lookup_id("wall.stone.cobble"),
+        pack.materials().lookup_id("wall.stone.cobble"),
         Some("minecraft:cobblestone"),
     );
     assert_eq!(
-        pack.materials.lookup_id("wood.dark"),
+        pack.materials().lookup_id("wood.dark"),
         Some("minecraft:dark_oak_planks"),
     );
     assert_eq!(
-        pack.materials.lookup_id("roof.dark_wood"),
+        pack.materials().lookup_id("roof.dark_wood"),
         Some("minecraft:dark_oak_stairs"),
     );
 }
@@ -506,7 +506,7 @@ fn pack_without_materials_component_loads_with_empty_index() {
     // `good_manifest()` omits the `materials` key.
     write_pack(tmp, good_manifest(), good_data_versions());
     let pack = load_from_dir(tmp).expect("load");
-    assert!(pack.materials.is_empty());
+    assert!(pack.materials().is_empty());
 }
 
 #[test]
@@ -533,7 +533,7 @@ fn pack_with_materials_component_lifts_tokens() {
     write_pack_with_materials(tmp, manifest, good_data_versions(), materials);
     let pack = load_from_dir(tmp).expect("load");
     assert_eq!(
-        pack.materials.lookup_id("wall.stone.cobble"),
+        pack.materials().lookup_id("wall.stone.cobble"),
         Some("minecraft:cobblestone"),
     );
 }
@@ -587,25 +587,12 @@ fn targetable_rows_are_the_buildable_ones_in_data_version_order() {
 }
 
 #[test]
-fn targetable_rows_sort_by_data_version_whatever_the_table_order() {
-    let mut pack = load_builtin_pack(Edition::Java).expect("builtin java");
-    pack.data_versions.versions.reverse();
-    let rows: Vec<i32> = pack
-        .targetable()
-        .into_iter()
-        .map(|e| e.data_version)
-        .collect();
-    assert!(rows.is_sorted(), "{rows:?}");
-    assert_eq!(rows.len(), 3);
-}
-
-#[test]
 fn version_order_carries_every_row_including_the_untargetable_ones() {
     for pack in [builtin_pack(Edition::Java), builtin_pack(Edition::Bedrock)] {
         let order = pack.version_order();
-        assert_eq!(order.rows().count(), pack.data_versions.versions.len());
-        assert!(pack.data_versions.versions.iter().any(|e| !e.targetable));
-        for entry in &pack.data_versions.versions {
+        assert_eq!(order.rows().count(), pack.data_versions().versions.len());
+        assert!(pack.data_versions().versions.iter().any(|e| !e.targetable));
+        for entry in &pack.data_versions().versions {
             assert_eq!(
                 order.key_of(&entry.mc_version),
                 Some(i64::from(entry.data_version)),
@@ -632,7 +619,7 @@ fn builtin_pack_resolves_known_targets() {
 fn builtin_pack_resolves_latest_alias() {
     let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
     let latest = pack.resolve_java_target("latest").expect("latest");
-    assert_eq!(latest.mc_version, pack.data_versions.latest);
+    assert_eq!(latest.mc_version, pack.data_versions().latest);
 }
 
 #[test]
@@ -707,7 +694,7 @@ fn an_ordering_only_row_is_not_a_target_in_any_spelling() {
     let bedrock = load_builtin_pack(Edition::Bedrock).expect("bedrock pack");
     for (pack, label) in [(&java, "1.21.1"), (&bedrock, "1.21.20")] {
         assert!(
-            pack.data_versions
+            pack.data_versions()
                 .versions
                 .iter()
                 .any(|e| e.mc_version == label && !e.targetable),
@@ -741,24 +728,24 @@ fn a_pre_release_or_an_empty_component_is_not_the_release() {
 fn pack_hash_is_deterministic() {
     let a = load_builtin_pack(Edition::Java).expect("a");
     let b = load_builtin_pack(Edition::Java).expect("b");
-    assert_eq!(a.bytes_hash, b.bytes_hash);
+    assert_eq!(a.bytes_hash(), b.bytes_hash());
 }
 
 #[test]
 fn the_builtin_bedrock_pack_loads_with_every_java_token() {
     let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
-    assert_eq!(pack.manifest.edition, Edition::Bedrock);
-    assert_eq!(pack.manifest.name, "cairn-builtin-bedrock");
-    assert_eq!(pack.source, PackSource::Builtin);
+    assert_eq!(pack.manifest().edition, Edition::Bedrock);
+    assert_eq!(pack.manifest().name, "cairn-builtin-bedrock");
+    assert_eq!(pack.source(), &PackSource::Builtin);
     assert!(
-        !pack.data_versions.versions.is_empty(),
+        !pack.data_versions().versions.is_empty(),
         "the pack names no DataVersion"
     );
     // Bedrock must resolve every token Java does.
     let java = load_builtin_pack(Edition::Java).expect("java pack");
-    for token in java.materials.tokens() {
+    for token in java.materials().tokens() {
         assert!(
-            pack.materials.lookup_id(token).is_some(),
+            pack.materials().lookup_id(token).is_some(),
             "bedrock pack is missing token `{token}`",
         );
     }
@@ -778,7 +765,7 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         ("1.21.60", version(1, 21, 60, 33)),
     ];
     let targetable: Vec<&str> = pack
-        .data_versions
+        .data_versions()
         .versions
         .iter()
         .filter(|row| row.targetable)
@@ -786,7 +773,12 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         .collect();
     assert_eq!(targetable, expected.map(|(mc_version, _)| mc_version));
     // This pack gives ordering rows revision 0, though the schema does not require it.
-    for row in pack.data_versions.versions.iter().filter(|r| !r.targetable) {
+    for row in pack
+        .data_versions()
+        .versions
+        .iter()
+        .filter(|r| !r.targetable)
+    {
         assert_eq!(row.data_version & 0xFF, 0, "{}", row.mc_version);
     }
     for (mc_version, block_version) in expected {
@@ -795,7 +787,7 @@ fn builtin_bedrock_resolves_known_targets_and_latest() {
         assert_eq!(t.block_version, block_version, "{mc_version}");
     }
     let latest = pack.resolve_bedrock_target("latest").expect("latest");
-    assert_eq!(latest.mc_version, pack.data_versions.latest);
+    assert_eq!(latest.mc_version, pack.data_versions().latest);
     assert_eq!(latest.block_version, version(1, 21, 60, 33));
 }
 
@@ -817,7 +809,7 @@ fn builtin_bedrock_unknown_target_names_bedrock_edition() {
 #[test]
 fn bedrock_pack_hash_snapshot() {
     let pack = load_builtin_pack(Edition::Bedrock).expect("builtin pack");
-    insta::assert_snapshot!("builtin_bedrock_pack_hash", pack.bytes_hash.as_str());
+    insta::assert_snapshot!("builtin_bedrock_pack_hash", pack.bytes_hash().as_str());
 }
 
 #[test]
@@ -833,7 +825,7 @@ fn load_from_dir_reads_a_complete_pack() {
     let tmp = dir.path();
     write_pack(tmp, good_manifest(), good_data_versions());
     let pack = load_from_dir(tmp).expect("load");
-    assert!(matches!(pack.source, PackSource::Path(ref p) if p == tmp));
+    assert_eq!(pack.source(), &PackSource::Path(tmp.to_path_buf()));
     let t = pack.resolve_java_target("1.21.4").expect("resolve");
     assert_eq!(t.data_version, 4189);
 }
@@ -854,7 +846,28 @@ fn data_versions_rows_out_of_order_are_refused() {
     let RegistryError::VersionOrderBroken { reason } = &err else {
         panic!("expected VersionOrderBroken, got {err}");
     };
-    assert!(reason.contains("keys must ascend"), "{reason}");
+    assert_eq!(
+        reason,
+        "`1.20.4` has data_version 3700 but follows `1.21.4` with 4189; keys must ascend and be unique"
+    );
+    let keys_equal = r#"{
+        "schema_version": 1,
+        "latest": "1.21.4",
+        "versions": [
+            { "mc_version": "1.20.4", "data_version": 3700 },
+            { "mc_version": "1.21.4", "data_version": 3700 }
+        ]
+    }"#;
+    let err = load_from_dir_err("order-keys-equal", |dir| {
+        write_pack(dir, good_manifest(), keys_equal);
+    });
+    let RegistryError::VersionOrderBroken { reason } = &err else {
+        panic!("expected VersionOrderBroken, got {err}");
+    };
+    assert_eq!(
+        reason,
+        "`1.21.4` has data_version 3700 but follows `1.20.4` with 3700; keys must ascend and be unique"
+    );
     let labels_descend = r#"{
         "schema_version": 1,
         "latest": "1.21.4",
@@ -869,7 +882,10 @@ fn data_versions_rows_out_of_order_are_refused() {
     let RegistryError::VersionOrderBroken { reason } = &err else {
         panic!("expected VersionOrderBroken, got {err}");
     };
-    assert!(reason.contains("does not sort above"), "{reason}");
+    assert_eq!(
+        reason,
+        "`1.20.4` does not sort above `1.21.4` by label, but its data_version is higher; placing a floor outside the table reads the labels"
+    );
     // Two spellings of one version, with distinct keys so the label check is what refuses.
     let labels_equal = r#"{
         "schema_version": 1,
@@ -885,7 +901,10 @@ fn data_versions_rows_out_of_order_are_refused() {
     let RegistryError::VersionOrderBroken { reason } = &err else {
         panic!("expected VersionOrderBroken, got {err}");
     };
-    assert!(reason.contains("does not sort above"), "{reason}");
+    assert_eq!(
+        reason,
+        "`1.21.0` does not sort above `1.21` by label, but its data_version is higher; placing a floor outside the table reads the labels"
+    );
 }
 
 #[test]
@@ -990,5 +1009,5 @@ fn malformed_manifest_json_is_error() {
 #[test]
 fn pack_hash_snapshot() {
     let pack = load_builtin_pack(Edition::Java).expect("builtin pack");
-    insta::assert_snapshot!("builtin_java_pack_hash", pack.bytes_hash.as_str());
+    insta::assert_snapshot!("builtin_java_pack_hash", pack.bytes_hash().as_str());
 }

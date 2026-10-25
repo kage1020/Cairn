@@ -23,6 +23,11 @@ pub(crate) fn reservation(width: u32, depth: u32, void: u32) -> CircuitRegionRes
     }
 }
 
+/// `sig.<name>` as a [`DottedRef`].
+pub(crate) fn sig(name: &str) -> DottedRef {
+    DottedRef::new("sig".to_owned(), vec![name.to_owned()])
+}
+
 pub(crate) fn scoped(kind: ScopeKind, name: &str, ir: PlacementIr) -> ScopedPlacementIr {
     let mut scoped = ScopedPlacementIr::new();
     scoped.scopes.push(ScopedPlacementIrEntry {
@@ -228,11 +233,11 @@ impl DanglingNet {
         match self {
             Self::Cell => {
                 "NetRef::Cell(1) out of range (cells.len()=1) — topological invariant broken by \
-                 caller-side hand-built IR"
+                 an IR built or edited outside the passes"
             }
             Self::Input => {
                 "NetRef::Input(1) out of range (inputs.len()=1) — netlist invariant broken by \
-                 caller-side hand-built IR"
+                 an IR built or edited outside the passes"
             }
         }
     }

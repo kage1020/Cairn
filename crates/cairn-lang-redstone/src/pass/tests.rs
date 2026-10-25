@@ -274,23 +274,100 @@ fn every_stage_panics_on_a_net_index_the_ir_cannot_answer() {
     for which in [DanglingNet::Cell, DanglingNet::Input] {
         for (stage, _, phase, run) in &stages() {
             let fixture = dangling_net(phase, which);
-            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run(&fixture);
-            }))
-            .expect_err(&format!(
-                "the {stage} pass must not answer a dangling {which:?} net with a coord",
-            ));
-            let message = panic
-                .downcast_ref::<String>()
-                .map(String::as_str)
-                .or_else(|| panic.downcast_ref::<&str>().copied())
-                .unwrap_or("<non-string panic>");
+            let message = panic_message(
+                || {
+                    run(&fixture);
+                },
+                &format!("the {stage} pass must not answer a dangling {which:?} net with a coord"),
+            );
             assert!(
                 message.contains(which.expected()),
                 "the {stage} pass names the index and the list it ran past, got {message:?}",
             );
         }
     }
+}
+
+#[test]
+fn every_stage_names_the_actuator_pad_it_refuses_not_the_first_one() {
+    // No stage takes `Legalized`, so each one commits pad #0 and refuses pad #1.
+    let legalized = PlacementPhase::Legalized {
+        wire_length: 0,
+        local_delay_ticks: 0,
+        buffer_coords: Vec::new(),
+    };
+    let region = reservation(6, 4, 2);
+    let column = PadColumn::for_cell_count(1);
+    let [routing, delay, crossing] = stages();
+    for ((stage, _, phase, run), method, clause) in [
+        (
+            routing,
+            "route",
+            "routing must run exactly once per placement",
+        ),
+        (
+            delay,
+            "delay",
+            "delay insertion must run exactly once per routed IR",
+        ),
+        (
+            crossing,
+            "legalize",
+            "crossing legalization must run exactly once per delayed IR",
+        ),
+    ] {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.region = Some(region.clone());
+        ir.inputs.push(NetlistInput {
+            name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+            span: Span::default(),
+        });
+        ir.cells.push(placed_cell(
+            EditionCell::JavaRepeaterOr,
+            CellCoord::new(2, 0, 1),
+            vec![CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            }],
+            phase.clone(),
+        ));
+        for (k, pad_phase) in [phase, legalized.clone()].into_iter().enumerate() {
+            let mut output = PlacedOutputNode::new(
+                cairn_lang_core::ast::DottedRef::new("sig".into(), vec![format!("out{k}")]),
+                NetRef::Cell(0),
+                output_pad(k, column, &region),
+                Span::default(),
+            );
+            output.phase = pad_phase;
+            ir.outputs.push(output);
+        }
+        let fixture = scoped(ScopeKind::Struct, "pads", ir);
+
+        let message = panic_message(
+            || {
+                run(&fixture);
+            },
+            &format!("the {stage} pass must refuse pad #1"),
+        );
+        assert_eq!(
+            message,
+            format!(
+                "PlacementPhase::{method} called on {legalized:?} for output #1 at (5,0,2) in \
+                 struct `pads` — {clause}"
+            ),
+            "the {stage} pass names the pad it refused",
+        );
+    }
+}
+
+/// What `body` panics with, failing with `refusal` if it returns instead.
+fn panic_message(body: impl FnOnce(), refusal: &str) -> String {
+    let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)).expect_err(refusal);
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+        .unwrap_or_else(|| "<non-string panic>".to_owned())
 }
 
 #[test]

@@ -200,12 +200,12 @@ fn duplicate_selector_diag(
     notes.push(DiagnosticNote {
         span: None,
         message: format!(
-            "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's {listed} and the earlier value is lost (no pass lowers a selector's bindings yet, so neither value is built today)",
+            "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's {listed} and the earlier value is dead text whatever a binding comes to mean (no pass lowers a selector's bindings yet, so neither value is built today)",
         ),
     });
     notes.push(DiagnosticNote {
         span: None,
-        message: "merge the rows, or narrow one selector so they pick different members".into(),
+        message: "delete the value you do not mean from one of the rows, or narrow one selector so they pick different members".into(),
     });
     Diagnostic {
         code: DiagnosticCode::DuplicateSelector,
