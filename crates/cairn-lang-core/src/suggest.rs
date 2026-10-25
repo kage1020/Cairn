@@ -74,6 +74,25 @@ where
     best.map(|(_, c)| c)
 }
 
+/// The first candidate exactly one edit from `input`; `None` when there is none or `input` is
+/// itself a candidate.
+#[must_use]
+pub(crate) fn one_edit_match<'a, I>(input: &str, candidates: I) -> Option<&'a str>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut found = None;
+    for cand in candidates {
+        if cand == input {
+            return None;
+        }
+        if found.is_none() && damerau_levenshtein(input, cand) == 1 {
+            found = Some(cand);
+        }
+    }
+    found
+}
+
 /// The candidate in `id`'s namespace closest to it, scored on the path alone so the prefix buys no
 /// extra edits; `None` when `id` has no `namespace:` prefix.
 #[must_use]

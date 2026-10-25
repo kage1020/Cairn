@@ -19,10 +19,19 @@ pub(super) fn unresolved_slot_diag(
     member: &Member,
     available_slots: &IndexMap<String, ValueWithSpan>,
 ) -> Diagnostic {
-    let mut notes = Vec::with_capacity(2);
+    let mut notes = Vec::with_capacity(3);
     notes.extend(
         nearest_match(slot, available_slots.keys().map(String::as_str)).map(did_you_mean_note),
     );
+    notes.push(DiagnosticNote {
+        span: None,
+        message: if available_slots.is_empty() {
+            format!("theme `{theme_name}` declares no slots")
+        } else {
+            let declared: Vec<&str> = available_slots.keys().map(String::as_str).collect();
+            format!("expected one of: {}", declared.join(", "))
+        },
+    });
     notes.push(DiagnosticNote {
         span: None,
         message: format!(

@@ -150,6 +150,37 @@ fn unresolved_slot_attaches_did_you_mean_note() {
 }
 
 #[test]
+fn unresolved_slot_lists_what_the_theme_declares() {
+    for (theme, listed) in [
+        (
+            "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @spruce_stairs\n",
+            "expected one of: wall, roof",
+        ),
+        (
+            "theme t:\n  walls[class=outer] -> trim=@spruce_log\n",
+            "theme `t` declares no slots",
+        ),
+    ] {
+        let src = format!("{theme}\nstruct s size=4x4\n  walls mat_slot=quartz height=3\n");
+        let r = resolve(&ir(&src), None);
+        let unresolved: Vec<Vec<&str>> = r
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::UnresolvedSlot)
+            .map(|d| d.notes.iter().map(|n| n.message.as_str()).collect())
+            .collect();
+        assert_eq!(
+            unresolved,
+            [[
+                listed,
+                "add `slot quartz -> @...` to theme `t` or correct the slot name",
+            ]],
+            "source:\n{src}",
+        );
+    }
+}
+
+#[test]
 fn unresolved_slot_skips_suggestion_when_pool_is_far_away() {
     let src = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=4x4\n  walls mat_slot=quartz height=3\n";
     let r = resolve(&ir(src), None);

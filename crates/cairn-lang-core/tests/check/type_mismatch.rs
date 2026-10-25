@@ -3,7 +3,7 @@
 
 use cairn_lang_core::DiagnosticCode;
 
-use crate::common::{diagnose, of_code, slice};
+use crate::common::{diagnose, notes, of_code, slice};
 
 #[test]
 fn id_set_to_token_is_flagged_as_label_mismatch() {
@@ -12,6 +12,10 @@ fn id_set_to_token_is_flagged_as_label_mismatch() {
     assert_eq!(diags.len(), 1, "got {diags:#?}");
     assert_eq!(diags[0].code, DiagnosticCode::TypeMismatchLabel);
     assert_eq!(slice(src, &diags[0]), "@oak");
+    assert_eq!(
+        notes(&diags[0]),
+        ["write a name, such as `id=main`, or a quoted string"]
+    );
     assert!(
         diags[0].primary.contains("token"),
         "primary should name the offending kind, got: {}",
@@ -45,6 +49,10 @@ fn struct_size_set_to_integer_is_flagged() {
     assert_eq!(diags.len(), 1, "got {diags:#?}");
     assert_eq!(diags[0].code, DiagnosticCode::TypeMismatchSize);
     assert_eq!(slice(src, &diags[0]), "5");
+    assert_eq!(
+        notes(&diags[0]),
+        ["write two whole numbers joined by `x`, such as `size=9x7`"]
+    );
     assert!(
         diags[0].primary.contains("integer"),
         "primary should name the offending kind, got: {}",

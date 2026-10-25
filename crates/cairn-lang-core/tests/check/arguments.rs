@@ -447,6 +447,25 @@ fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
 }
 
 #[test]
+fn a_selector_coins_a_word_two_edits_from_a_real_one() {
+    let theme =
+        "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hiegt=3] -> frame=@spruce_wood\n\n";
+    // The member's own selector filters on a value it does not carry, so the row matches nothing.
+    for (member, found) in [
+        ("walls hiegt=3 height=3", &["W_IGNORED_ARGUMENT"][..]),
+        (
+            "walls[hiegt=3] height=3",
+            &["E_THEME_SELECTOR_UNMATCHED", "W_IGNORED_ARGUMENT"][..],
+        ),
+    ] {
+        let src =
+            format!("{theme}struct s size=5x5\n  floor mat_slot=wall\n  {member} mat_slot=wall\n");
+        assert_eq!(codes(&src), found, "source:\n{src}");
+        assert_eq!(ignored_at(&src), ["@spruce_wood"], "source:\n{src}");
+    }
+}
+
+#[test]
 fn a_widened_key_appears_once_in_the_closed_set() {
     // `shape` is both in the role's vocabulary and selected on.
     let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=slit] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=1x2 shape=slit mat_slot=glass zzz=1\n";

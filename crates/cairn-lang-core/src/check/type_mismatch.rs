@@ -2,7 +2,7 @@
 //! It walks the surface AST, where a value lowering hoisted still has its type and span.
 
 use crate::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
-use crate::diagnostic::{Diagnostic, DiagnosticCode};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 
 use super::DiagnosticSink;
 
@@ -73,7 +73,10 @@ fn check_size(value: &Value, sink: &mut DiagnosticSink) {
         code: DiagnosticCode::TypeMismatchSize,
         span: value.span.clone(),
         primary: format!("`size=` expects a `WxH` literal, got {}", value.kind_name()),
-        notes: Vec::new(),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: "write two whole numbers joined by `x`, such as `size=9x7`".to_owned(),
+        }],
         data: None,
     });
 }
@@ -89,7 +92,10 @@ fn check_label(key: &str, value: &Value, sink: &mut DiagnosticSink) {
             "`{key}=` expects a label (identifier or string), got {}",
             value.kind_name()
         ),
-        notes: Vec::new(),
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: format!("write a name, such as `{key}=main`, or a quoted string"),
+        }],
         data: None,
     });
 }

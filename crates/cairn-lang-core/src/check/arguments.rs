@@ -14,7 +14,7 @@ use crate::intent::{
     role_of,
 };
 use crate::prose::or_list;
-use crate::suggest::{did_you_mean_note, nearest_match};
+use crate::suggest::{did_you_mean_note, nearest_match, one_edit_match};
 
 use super::DiagnosticSink;
 
@@ -135,7 +135,7 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             ));
         } else if coined && !own.contains(&key.as_str()) {
             // Only the role's own keys: the widened set would suggest the key itself.
-            if let Some(suggested) = nearest_match(key, own.iter().copied()) {
+            if let Some(suggested) = one_edit_match(key, own.iter().copied()) {
                 sink.push(coined_near_miss(
                     Field::Argument,
                     keyword,
@@ -180,7 +180,7 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             ));
         } else if widened.is_some_and(|extra| extra.contains(key.as_str()))
             && !own.contains(&key.as_str())
-            && let Some(suggested) = nearest_match(key, own.iter().copied())
+            && let Some(suggested) = one_edit_match(key, own.iter().copied())
         {
             sink.push(coined_near_miss(
                 Field::Selector,

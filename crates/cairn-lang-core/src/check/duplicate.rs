@@ -252,7 +252,13 @@ fn check_arg_keys(args: &[Arg], scope: ArgScope, sink: &mut DiagnosticSink) {
             code,
             span: arg.span.clone(),
             primary,
-            notes: vec![first_declaration_note(first_span)],
+            notes: vec![
+                first_declaration_note(first_span),
+                DiagnosticNote {
+                    span: None,
+                    message: format!("keep the `{}=` you mean and delete the other", arg.key),
+                },
+            ],
             data: None,
         });
     }
@@ -333,7 +339,15 @@ fn check_body(body: &[Statement], place_ids: PlaceIdOwner, sink: &mut Diagnostic
                             code: DiagnosticCode::DuplicateId,
                             span: id_span,
                             primary: format!("`id={id}` is declared more than once in this scope"),
-                            notes: vec![first_declaration_note(&first.span)],
+                            notes: vec![
+                                first_declaration_note(&first.span),
+                                DiagnosticNote {
+                                    span: None,
+                                    message: "give one of the two members another `id=`, or \
+                                              delete the one you do not mean"
+                                        .into(),
+                                },
+                            ],
                             data: None,
                         });
                     }

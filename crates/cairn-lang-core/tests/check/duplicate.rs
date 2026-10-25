@@ -16,9 +16,11 @@ fn duplicate_size_flags_second_occurrence_only() {
     assert_eq!(diags[0].code, DiagnosticCode::DuplicateSize);
     assert_eq!(slice(src, &diags[0]), "size=5x5");
     assert_eq!(
-        diags[0].notes.len(),
-        1,
-        "note pointing at first declaration"
+        notes(&diags[0]),
+        [
+            "first declaration here",
+            "keep the `size=` you mean and delete the other"
+        ],
     );
     let first_span = diags[0].notes[0]
         .span
@@ -56,7 +58,13 @@ fn duplicate_id_in_same_body_scope() {
     assert_eq!(diags.len(), 1, "got {diags:#?}");
     assert_eq!(diags[0].code, DiagnosticCode::DuplicateId);
     assert_eq!(slice(src, &diags[0]), "id=front", "second declaration");
-    assert_eq!(diags[0].notes.len(), 1);
+    assert_eq!(
+        notes(&diags[0]),
+        [
+            "first declaration here",
+            "give one of the two members another `id=`, or delete the one you do not mean",
+        ],
+    );
     let first_span = diags[0].notes[0]
         .span
         .as_ref()
@@ -117,10 +125,9 @@ fn of_code(diags: &[Diagnostic], code: DiagnosticCode) -> Vec<&Diagnostic> {
 
 /// The text the first note of `diag` points at: the declaration that stands.
 fn note_text<'a>(source: &'a str, diag: &Diagnostic) -> &'a str {
-    let expected = if diag.code == DiagnosticCode::DuplicateCircuit {
-        2
-    } else {
-        1
+    let expected = match diag.code {
+        DiagnosticCode::DuplicateCircuit | DiagnosticCode::DuplicateId => 2,
+        _ => 1,
     };
     assert_eq!(diag.notes.len(), expected, "got {diag:#?}");
     assert!(
