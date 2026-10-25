@@ -16,7 +16,8 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum EditionCell {
-    /// Java AND — a comparator in subtract mode.
+    /// Java AND — a comparator in subtract mode with one operand inverted onto its side at full
+    /// strength.
     JavaComparatorAnd,
     /// Bedrock AND — two torches inverting an OR.
     BedrockTorchAnd,
@@ -90,8 +91,9 @@ impl EditionCell {
         }
     }
 
-    /// Whether this cell's output leaves at full strength, whatever reached its inputs; the dust
-    /// either side of one that does not counts as one run for the attenuation limit.
+    /// Whether this cell's output leaves at full strength, whatever reached its inputs; the output
+    /// of one that does not must never be weaker, while the cell is on, than the input that has
+    /// spent the most, so the dust either side of it counts as one run for the attenuation limit.
     #[must_use]
     pub const fn regenerates(self) -> bool {
         match self {

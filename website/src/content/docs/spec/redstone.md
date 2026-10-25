@@ -275,16 +275,20 @@ The internal algorithm runs five stages:
 
    The limit is counted from the last component that restores strength — a sensor pad, a repeater,
    a torch — not from the start of each segment. Two of the cells pass on the strength they
-   receive instead: the Bedrock OR is a dust merge, and the Java comparator AND never outputs more
-   than its rear input carries. The wire into either of them and the wire out of it therefore count
-   as one run of dust, though the cell stands between them, measured from the input that has spent
-   the most: the pass does not track which input of a comparator is its rear, so it takes the one
-   that has spent the most. The repeater the run needs goes where the running total would pass 15,
-   or, on the wire into such a cell, what the cell can spare of it, since the wire out needs the
-   rest. Where that is a block of dust, the repeater stands in its place and reads the dust before
-   it, as on a straight run. Where it is a sink — such a cell is one — the repeater cannot stand in
-   its place and stands on the wire before it. It lands on the wire out of the cell, or on the wire
-   into it when the wire out has no coordinate near enough to the cell to take one.
+   receive instead: the Bedrock OR is a dust merge, and the Java comparator AND, a comparator with
+   one operand inverted onto its side ([§14.6](#146-edition-differences)), outputs the strength its
+   rear input carries while it is on. The pass does not track which input of a comparator is its
+   rear. The wire into either cell and the wire out of it count as one run of dust, though the cell
+   stands between them, measured from the input that has spent the most. While the cell is on, its
+   output is never weaker than that input — the merge passes on its strongest lit input and the
+   comparator its rear. The inverted operand's wire ends at the inverter, which restores strength,
+   so holding it to the cell's budget asks more of it than the cell needs. The repeater the run
+   needs goes where the running total would pass 15, or, on the wire into such a cell, what the cell
+   can spare of it, since the wire out needs the rest. Where that is a block of dust, the repeater
+   stands in its place and reads the dust before it, as on a straight run. Where it is a sink — such
+   a cell is one — the repeater cannot stand in its place and stands on the wire before it. It lands
+   on the wire out of the cell, or on the wire into it when the wire out has no coordinate near
+   enough to the cell to take one.
 4. **Crossing legalization.** Assigns the coordinate of every buffer repeater stage 3 counted. The
    wire needs no legalizing by this point: a repeater stands on its own net's routed path, that
    path belongs to that net alone, and no other net runs within a step of it, so there is no
@@ -335,6 +339,13 @@ Logical Cell → Edition Cell → Physical Tile
   AND        → Java:    ComparatorAND → block array
              → Bedrock: TorchAND      → block array
 ```
+
+The Java `ComparatorAND` is a comparator in subtract mode with one operand inverted onto its side at
+full strength. While that operand is on, the side reads 0 and the comparator outputs the strength
+its rear input carries; while it is off, the side reads 15 and the output is 0 whatever the rear
+carries. Both operands reach the cell as the netlist carries them, so the inversion is the cell's
+own, and subtract mode is the one that then computes AND: while the side reads 15, compare mode
+would still pass a rear input at 15 through.
 
 The tile tier carries one place-and-route obligation of its own: a `bridge` coordinate renders as
 a tile that conducts to neither **another net's** coordinate below it nor another net's
