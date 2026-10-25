@@ -14,6 +14,7 @@ use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput, Por
 /// stand for the reserved cells, whose realisations are not chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum EditionCell {
     /// Java AND — a comparator in subtract mode with port `a` at its rear and port `b` inverted
@@ -74,10 +75,11 @@ impl EditionCell {
     #[must_use]
     pub const fn port_delay_ticks(self, port: PortName) -> u32 {
         match self {
-            // The side operand passes the inverter before the comparator.
+            // The side operand passes the inverter before the comparator. An AND has no `sel`, so
+            // asked for one it errs on the slow side.
             Self::JavaComparatorAnd => match port {
-                PortName::B => 2,
-                PortName::A | PortName::Sel => 1,
+                PortName::A => 1,
+                PortName::B | PortName::Sel => 2,
             },
             Self::JavaRepeaterOr | Self::JavaInverterTorch | Self::BedrockInverterTorch => 1,
             Self::BedrockTorchAnd => 2,

@@ -509,7 +509,8 @@ fn cell_on_the_fifteen_step_point() -> ScopedPlacementIr {
     scoped(ScopeKind::Struct, "packed", ir)
 }
 
-/// Two buffers on `sig.a`, one on the cell's net: `base + 3`, where a max would write `base + 2`.
+/// Two buffers on `sig.a`, one on the cell's net: three ticks of buffer, where a max over the nets
+/// would charge two.
 #[test]
 fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
     let mut ir = PlacementIr::new(Edition::Java);
@@ -572,6 +573,11 @@ fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
         "two distinct nets share no repeater: {buffers:?}",
     );
 
+    assert_eq!(
+        cell.local_delay_ticks(),
+        Some(2 + 3 * BUFFER_REPEATER_TICKS),
+        "the side port's 2 plus a charge for each of the three blocks",
+    );
     let slowest = slowest_port_ticks(cell);
     let ticks = cell
         .local_delay_ticks()
@@ -1888,8 +1894,9 @@ mod buffer_delay_invariant {
         /// The cell or pad, as a failure names it.
         node: CellIdentity<'a>,
         local_delay_ticks: u32,
-        /// The cell's slowest driven port; zero for a pad, which has no delay of its own.
-        port_delay_ticks: u32,
+        /// The delay of the cell's slowest driven port; zero for a pad, which has no delay
+        /// of its own.
+        slowest_port_ticks: u32,
         /// Distinct coords, since a cell's two ports on one net name the same repeaters.
         blocks: u32,
     }
@@ -1910,7 +1917,7 @@ mod buffer_delay_invariant {
                 local_delay_ticks: cell
                     .local_delay_ticks()
                     .expect("legalized cells carry Some(local_delay_ticks)"),
-                port_delay_ticks: slowest_port_ticks(cell),
+                slowest_port_ticks: slowest_port_ticks(cell),
                 blocks: blocks(cell.buffer_coords()),
             });
         let pads = entry
@@ -1923,7 +1930,7 @@ mod buffer_delay_invariant {
                 local_delay_ticks: output
                     .local_delay_ticks()
                     .expect("legalized pads carry Some(local_delay_ticks)"),
-                port_delay_ticks: 0,
+                slowest_port_ticks: 0,
                 blocks: blocks(output.buffer_coords()),
             });
         cells.chain(pads).collect()
@@ -1932,15 +1939,15 @@ mod buffer_delay_invariant {
     /// Per cell and pad, since an over-charged one and an under-charged one cancel in a sum.
     fn check_charges(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
         for charge in charges(entry) {
-            // A cell below its port delay would clamp to zero and match a cell with no buffers.
+            // A cell below its slowest port would clamp to zero and match a cell with no buffers.
             let delta = charge
                 .local_delay_ticks
-                .checked_sub(charge.port_delay_ticks);
+                .checked_sub(charge.slowest_port_ticks);
             prop_assert!(
                 delta.is_some(),
-                "local_delay_ticks {} < port_delay_ticks {} for {} ({})",
+                "local_delay_ticks {} < slowest_port_ticks {} for {} ({})",
                 charge.local_delay_ticks,
-                charge.port_delay_ticks,
+                charge.slowest_port_ticks,
                 charge.node,
                 case,
             );
@@ -1961,7 +1968,7 @@ mod buffer_delay_invariant {
         Ok(())
     }
 
-    /// `Σ blocks × BUFFER_REPEATER_TICKS = Σ (local − port)` over one scope's cells and pads.
+    /// `Σ blocks × BUFFER_REPEATER_TICKS = Σ (local − slowest port)` over a scope's cells and pads.
     fn check_scope_total(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
         let charges = charges(entry);
         let buffer_total: u32 = charges.iter().map(|charge| charge.blocks).sum();
@@ -1969,12 +1976,12 @@ mod buffer_delay_invariant {
         for charge in &charges {
             let delta = charge
                 .local_delay_ticks
-                .checked_sub(charge.port_delay_ticks);
+                .checked_sub(charge.slowest_port_ticks);
             prop_assert!(
                 delta.is_some(),
-                "local_delay_ticks {} < port_delay_ticks {} for {} — the delay pass charged less than the slowest port",
+                "local_delay_ticks {} < slowest_port_ticks {} for {} — the delay pass charged less than the slowest port",
                 charge.local_delay_ticks,
-                charge.port_delay_ticks,
+                charge.slowest_port_ticks,
                 charge.node,
             );
             delta_total = delta_total
@@ -1987,7 +1994,7 @@ mod buffer_delay_invariant {
         prop_assert_eq!(
             lhs,
             delta_total,
-            "buffer block count × BUFFER_REPEATER_TICKS ({}) must equal Σ(local_delay_ticks − port_delay_ticks) ({}) for scope `{}` with {}",
+            "buffer block count × BUFFER_REPEATER_TICKS ({}) must equal Σ(local_delay_ticks − slowest_port_ticks) ({}) for scope `{}` with {}",
             lhs,
             delta_total,
             entry.name,

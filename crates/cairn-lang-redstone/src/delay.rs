@@ -114,7 +114,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     Ok(ir)
 }
 
-/// Summed over the driving nets, not maxed: `local_delay_ticks` is a local wire cost.
+/// Buffer ticks are summed over the driving nets, not maxed: `local_delay_ticks` is a wire cost.
 fn attribute_local_delay_ticks<F>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,

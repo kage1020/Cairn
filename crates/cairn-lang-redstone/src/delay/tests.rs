@@ -1,7 +1,6 @@
-use std::collections::HashSet;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::error::Span;
+use strum::IntoEnumIterator;
 
 use super::{
     BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, Fed, MAX_ATTENUATION_SEGMENT,
@@ -247,23 +246,58 @@ fn a_cell_is_charged_its_slowest_port_whichever_net_carries_the_buffers() {
     );
 }
 
-/// Names every [`EditionCell`] variant, so adding one stops this compiling.
-const fn listed(cell: EditionCell) {
+#[test]
+fn a_cell_is_charged_the_slowest_of_its_driven_ports_in_any_order() {
+    let driver = |port, input| CellPortDriver {
+        port,
+        net: NetRef::Input(input),
+    };
+    let charged = |drivers: Vec<CellPortDriver>| {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord::new(4, 0, 1),
+            drivers,
+            ROUTED,
+        ));
+        let entry = ScopedPlacementIrEntry {
+            kind: ScopeKind::Struct,
+            name: "drivers".to_owned(),
+            ir: ir.clone(),
+        };
+        attribute_local_delay_ticks(&mut ir, &entry, &|_net, _sink, _fed| 0);
+        ir.cells[0].local_delay_ticks()
+    };
+    assert_eq!(
+        [
+            charged(vec![]),
+            charged(vec![driver(PortName::A, 0)]),
+            charged(vec![driver(PortName::B, 1)]),
+            charged(vec![driver(PortName::B, 1), driver(PortName::A, 0)]),
+        ],
+        [Some(0), Some(1), Some(2), Some(2)],
+        "no driver, the rear alone, the side alone, the side listed before the rear",
+    );
+}
+
+/// The ports the netlist drives on `cell`; the match names every variant, so adding one stops
+/// this compiling.
+const fn ports(cell: EditionCell) -> &'static [PortName] {
     match cell {
         EditionCell::JavaComparatorAnd
         | EditionCell::BedrockTorchAnd
         | EditionCell::JavaRepeaterOr
         | EditionCell::BedrockTorchOr
-        | EditionCell::JavaInverterTorch
-        | EditionCell::BedrockInverterTorch
         | EditionCell::JavaXorUnpinned
         | EditionCell::BedrockXorUnpinned
         | EditionCell::JavaNandUnpinned
         | EditionCell::BedrockNandUnpinned
         | EditionCell::JavaNorUnpinned
-        | EditionCell::BedrockNorUnpinned
-        | EditionCell::JavaMuxUnpinned
-        | EditionCell::BedrockMuxUnpinned => {}
+        | EditionCell::BedrockNorUnpinned => &[PortName::A, PortName::B],
+        EditionCell::JavaInverterTorch | EditionCell::BedrockInverterTorch => &[PortName::A],
+        EditionCell::JavaMuxUnpinned | EditionCell::BedrockMuxUnpinned => {
+            &[PortName::Sel, PortName::A, PortName::B]
+        }
     }
 }
 
@@ -299,14 +333,14 @@ fn each_port_counts_the_stages_between_it_and_the_output() {
         (EditionCell::BedrockMuxUnpinned, PortName::A, 3),
         (EditionCell::BedrockMuxUnpinned, PortName::B, 3),
     ];
-    let distinct: HashSet<EditionCell> = table.iter().map(|(cell, _, _)| *cell).collect();
-    assert_eq!(distinct.len(), 14, "every variant");
+    let rows: Vec<_> = table.iter().map(|&(cell, port, _)| (cell, port)).collect();
+    let every: Vec<_> = EditionCell::iter()
+        .flat_map(|cell| ports(cell).iter().map(move |&port| (cell, port)))
+        .collect();
+    assert_eq!(rows, every, "one row per port of every variant");
     let counted: Vec<_> = table
         .iter()
-        .map(|&(cell, port, _)| {
-            listed(cell);
-            (cell, port, cell.port_delay_ticks(port))
-        })
+        .map(|&(cell, port, _)| (cell, port, cell.port_delay_ticks(port)))
         .collect();
     assert_eq!(counted, table);
 }
@@ -315,9 +349,9 @@ fn each_port_counts_the_stages_between_it_and_the_output() {
 fn only_the_merge_and_the_comparator_pass_strength_on() {
     let table = [
         (EditionCell::JavaComparatorAnd, false),
-        (EditionCell::BedrockTorchOr, false),
-        (EditionCell::JavaRepeaterOr, true),
         (EditionCell::BedrockTorchAnd, true),
+        (EditionCell::JavaRepeaterOr, true),
+        (EditionCell::BedrockTorchOr, false),
         (EditionCell::JavaInverterTorch, true),
         (EditionCell::BedrockInverterTorch, true),
         (EditionCell::JavaXorUnpinned, false),
@@ -329,12 +363,13 @@ fn only_the_merge_and_the_comparator_pass_strength_on() {
         (EditionCell::JavaMuxUnpinned, false),
         (EditionCell::BedrockMuxUnpinned, false),
     ];
-    let distinct: HashSet<EditionCell> = table.iter().map(|(cell, _)| *cell).collect();
-    assert_eq!(distinct.len(), 14, "every variant, once");
-    for (cell, regenerates) in table {
-        listed(cell);
-        assert_eq!(cell.regenerates(), regenerates, "{cell:?}");
-    }
+    let every: Vec<_> = EditionCell::iter()
+        .map(|cell| (cell, cell.regenerates()))
+        .collect();
+    assert_eq!(
+        every, table,
+        "one row per variant, in declaration order, each with its `regenerates`",
+    );
 }
 
 #[test]

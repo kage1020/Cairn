@@ -13,7 +13,7 @@ use crate::common::{
 };
 
 #[test]
-fn redstone_door_java_local_delay_ticks_equal_base_repeater_delay() {
+fn redstone_door_java_local_delay_ticks_are_the_or_port_delay_alone() {
     let source = load_example("redstone-door.crn");
     let routed = routed_from_source(&source, Edition::Java);
     let delayed = compile_delay(&routed);
@@ -37,7 +37,7 @@ fn redstone_door_java_local_delay_ticks_equal_base_repeater_delay() {
     assert_eq!(
         cell.local_delay_ticks(),
         Some(1),
-        "JavaRepeaterOr base = 1 tick, both driver segments ≤ 15 → 0 buffers",
+        "JavaRepeaterOr delays 1 tick from either port, both driver segments ≤ 15 → 0 buffers",
     );
     assert_eq!(
         cell.wire_length(),
