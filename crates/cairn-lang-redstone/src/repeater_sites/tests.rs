@@ -1149,6 +1149,123 @@ fn a_side_no_budget_could_carry_needs_no_repeater() {
     );
 }
 
+/// Cell #0's wire winds 13 steps into the side of cell #1, past the 12 blocks cell #1 can spare,
+/// yet it ends at the inverter, so cell #0 can spare 3 and `sig.long` takes one repeater.
+#[test]
+fn a_cell_feeding_only_the_side_of_a_java_and_is_held_to_the_limit_in_its_budget_search() {
+    let upstream = CellCoord::new(9, 0, 10);
+    let long = walk((0, 0, 10), &[(EAST, 9)]);
+    assert_eq!(long.last(), Some(&upstream));
+    let zigzag: Vec<_> = (0..13)
+        .map(|step| (if step % 2 == 0 { EAST } else { (0, 0, -1) }, 1))
+        .collect();
+    let between = walk((9, 0, 10), &zigzag);
+    assert_eq!(between.last(), Some(&GATE));
+    let short = walk((16, 0, 0), &[(SOUTH, 4)]);
+    let out = walk((16, 0, 4), &[(EAST, 1), (SOUTH, 1), (EAST, 1), (SOUTH, 1)]);
+    let mut ir = PlacementIr::new(EditionCell::JavaComparatorAnd.edition());
+    ir.region = Some(reservation(20, 14, 1));
+    for name in ["long", "short"] {
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: sig(name),
+            span: Span::default(),
+        });
+    }
+    ir.cells.push(placed_cell(
+        EditionCell::JavaComparatorAnd,
+        upstream,
+        vec![CellPortDriver {
+            port: PortName::A,
+            net: LONG,
+        }],
+        ROUTED,
+    ));
+    ir.cells.push(placed_cell(
+        EditionCell::JavaComparatorAnd,
+        GATE,
+        vec![
+            CellPortDriver {
+                port: PortName::A,
+                net: SHORT,
+            },
+            CellPortDriver {
+                port: PortName::B,
+                net: NetRef::Cell(0),
+            },
+        ],
+        ROUTED,
+    ));
+    ir.outputs.push(routed_output(NetRef::Cell(1), GATE_PAD));
+    let trees = HashMap::from([
+        (LONG, NetTree::from_paths(&[&long])),
+        (SHORT, NetTree::from_paths(&[&short])),
+        (NetRef::Cell(0), NetTree::from_paths(&[&between])),
+        (NetRef::Cell(1), NetTree::from_paths(&[&out])),
+    ]);
+    let sites = sites_in_struct("chain", ir, &trees).unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(
+        [
+            sites.along(LONG, upstream),
+            sites.along(NetRef::Cell(0), GATE),
+            sites.along(SHORT, GATE),
+            sites.along(NetRef::Cell(1), GATE_PAD),
+        ],
+        [
+            Some(vec![CellCoord::new(8, 0, 10)]),
+            Some(Vec::new()),
+            Some(Vec::new()),
+            Some(Vec::new()),
+        ],
+    );
+}
+
+/// `sig.long` forks at `(12,0,4)`: on into the side of [`GATE`], and down into the rear of cell #1,
+/// which can spare 12 blocks as [`GATE`] can, so only the branch to cell #1 takes a repeater.
+#[test]
+fn a_net_forking_to_a_side_and_a_rear_is_held_to_the_budget_on_the_rear_branch_alone() {
+    let rear = CellCoord::new(12, 0, 8);
+    let pad = CellCoord::new(14, 0, 10);
+    let trunk = straight_into_the_gate();
+    let branch = walk((12, 0, 4), &[(SOUTH, 4)]);
+    assert_eq!(branch.last(), Some(&rear));
+    let out = walk((12, 0, 8), &[(EAST, 1), (SOUTH, 1), (EAST, 1), (SOUTH, 1)]);
+    assert_eq!(out.last(), Some(&pad));
+    let (mut ir, mut trees) = gate(
+        EditionCell::JavaComparatorAnd,
+        &trunk,
+        &[(PortName::A, SHORT), (PortName::B, LONG)],
+    );
+    ir.cells.push(placed_cell(
+        EditionCell::JavaComparatorAnd,
+        rear,
+        vec![CellPortDriver {
+            port: PortName::A,
+            net: LONG,
+        }],
+        ROUTED,
+    ));
+    ir.outputs.push(routed_output(NetRef::Cell(1), pad));
+    trees.insert(LONG, NetTree::from_paths(&[&trunk, &branch]));
+    trees.insert(NetRef::Cell(1), NetTree::from_paths(&[&out]));
+    let sites = sites_in_struct("fork", ir, &trees).unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(
+        [
+            sites.along(LONG, GATE),
+            sites.along(LONG, rear),
+            sites.along(SHORT, GATE),
+            sites.along(NetRef::Cell(0), GATE_PAD),
+            sites.along(NetRef::Cell(1), pad),
+        ],
+        [
+            Some(Vec::new()),
+            Some(vec![CellCoord::new(12, 0, 7)]),
+            Some(Vec::new()),
+            Some(Vec::new()),
+            Some(Vec::new()),
+        ],
+    );
+}
+
 /// The refusal of `sig.long`'s stairs into `ports` of cell #0, in struct `name`.
 fn stairs_refusal(name: &str, ports: &str) -> Diagnostic {
     Diagnostic::new(
@@ -1177,7 +1294,7 @@ fn a_budget_refusal_names_the_port_it_holds_to_the_budget() {
 }
 
 #[test]
-fn a_budget_refusal_names_every_port_its_net_feeds() {
+fn a_budget_refusal_of_a_net_on_both_ports_of_a_merge_names_both() {
     let (ir, trees) = gate(
         EditionCell::BedrockTorchOr,
         &stairs_into_the_gate(),
@@ -1186,6 +1303,24 @@ fn a_budget_refusal_names_every_port_its_net_feeds() {
     assert_eq!(
         sites_in_struct("merge", ir, &trees).err(),
         Some(stairs_refusal("merge", "ports `a` and `b`")),
+    );
+}
+
+/// Hand-built: `mux` has no surface syntax.
+#[test]
+fn a_budget_refusal_of_a_net_on_every_port_of_a_mux_names_all_three() {
+    let (ir, trees) = gate(
+        EditionCell::JavaMuxUnpinned,
+        &stairs_into_the_gate(),
+        &[
+            (PortName::Sel, LONG),
+            (PortName::A, LONG),
+            (PortName::B, LONG),
+        ],
+    );
+    assert_eq!(
+        sites_in_struct("mux", ir, &trees).err(),
+        Some(stairs_refusal("mux", "ports `sel`, `a`, and `b`")),
     );
 }
 

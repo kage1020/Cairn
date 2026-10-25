@@ -95,10 +95,9 @@ impl EditionCell {
         }
     }
 
-    /// Whether this cell's output leaves at full strength, whatever reached its inputs; the output
-    /// of one that does not must never be weaker, while the cell is on, than the input that has
-    /// spent the most of those on ports it does not restore ([`Self::port_regenerates`]), so the
-    /// dust into such a port and out of the cell counts as one run for the attenuation limit.
+    /// Whether this cell's output leaves at full strength, whatever reached its inputs; when it
+    /// does not, the output must never be weaker, while the cell is on, than whichever input on a
+    /// port it passes on ([`Self::port_regenerates`]) has spent the most.
     #[must_use]
     pub const fn regenerates(self) -> bool {
         match self {
@@ -126,7 +125,10 @@ impl EditionCell {
         match self {
             // The side operand ends at the inverter. An AND has no `sel`, so asked for one it errs
             // on the strict side.
-            Self::JavaComparatorAnd => matches!(port, PortName::B),
+            Self::JavaComparatorAnd => match port {
+                PortName::A | PortName::Sel => false,
+                PortName::B => true,
+            },
             _ => self.regenerates(),
         }
     }

@@ -60,7 +60,7 @@ pub enum PortName {
 }
 
 impl PortName {
-    /// The port's name as the source and the JSON form spell it.
+    /// The port's name as the JSON form spells it.
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::A => "a",

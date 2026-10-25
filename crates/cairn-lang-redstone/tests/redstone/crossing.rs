@@ -37,8 +37,9 @@ fn buffers_from(cell: &PlacedCellNode, from: impl Fn(NetRef) -> bool) -> Vec<Cel
         .collect()
 }
 
-/// The trunk's repeaters stand 14 apart, not 16: each Java comparator passes on the strength it
-/// reads, so a tap may arrive with at most 14 spent.
+/// The trunk's repeaters stand 14 apart, not 16: each Java comparator passes on the strength its
+/// rear reads, and the bus feeds the rear of every cell but the first, so a tap may arrive with at
+/// most 14 spent.
 #[test]
 fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
     let legalized = legalized_from_source(&shared_bus_source(), Edition::Java);

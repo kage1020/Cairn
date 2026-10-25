@@ -79,7 +79,8 @@ pub(crate) fn repeater_sites_of_scope<'t>(
         )
     };
 
-    // A cell holds a net to its budget only through a port whose strength it passes on.
+    // Every wire into a cell ends on its coord, the side's as well as the rear's, so a net sees
+    // only the budgets of the cells it feeds on a port whose strength they pass on.
     let mut passed_on: HashMap<NetRef, Vec<CellCoord>> = HashMap::new();
     for cell in &ir.cells {
         for driver in &cell.drivers {
@@ -449,7 +450,7 @@ fn no_repeater_site_diagnostic(
             blocks(spent)
         )
     };
-    let reach = match allowance {
+    let (reach, footer) = match allowance {
         Allowance::Limit => {
             let passes = |sink: CellCoord| {
                 tree.route_to(sink)
@@ -467,18 +468,32 @@ fn no_repeater_site_diagnostic(
                         .map(|index| format!("output pad #{index}"))
                 })
                 .expect("every coord of a net's tree is on the route to one of its sinks");
-            format!(
-                "runs out before {}, past the attenuation limit of {} of dust, and never reaches {dark}",
-                at(unpowered),
-                blocks(DUST_ATTENUATION_LIMIT),
+            (
+                format!(
+                    "runs out before {}, past the attenuation limit of {} of dust, and never reaches {dark}",
+                    at(unpowered),
+                    blocks(DUST_ATTENUATION_LIMIT),
+                ),
+                // A repeater reads the 15 blocks before it, so the wire needs a straight coord
+                // every 16.
+                format!(
+                    "Fix: leave the wire room to run straight at least once in every {} — a larger `region=` is one way, moving what walls it in is another — or split the logic across several scopes, each with its own `circuit` line",
+                    blocks(DUST_ATTENUATION_LIMIT + 1),
+                ),
             )
         }
         Allowance::Budget(budget) => {
             let (cell, ports) = budget_ports(ir, unpowered, net);
-            format!(
-                "reaches {ports} of {cell} at {coord} over more than the {spare} of dust the cell can spare — {cell} passes on the strength it receives on {ports} rather than restoring it, and the wire past it needs the rest",
-                coord = at(unpowered),
-                spare = blocks(budget),
+            (
+                format!(
+                    "reaches {ports} of {cell} at {coord} over more than the {spare} of dust the cell can spare — {cell} passes on the strength it receives on {ports} rather than restoring it, and the wire past it needs the rest",
+                    coord = at(unpowered),
+                    spare = blocks(budget),
+                ),
+                format!(
+                    "Fix: leave the wire into {ports} of {cell} room to run straight within {near} of it, or shorten the wire out of {cell} so it can spare more — a larger `region=` is one way to do either — or drive {ports} from a cell that restores strength, or split the logic across several scopes, each with its own `circuit` line",
+                    near = blocks(near),
+                ),
             )
         }
     };
@@ -489,20 +504,6 @@ fn no_repeater_site_diagnostic(
         name = entry.name,
         net = net_label(net, ir),
     );
-    let footer = match allowance {
-        // A repeater reads the 15 blocks before it, so the wire needs a straight coord every 16.
-        Allowance::Limit => format!(
-            "Fix: leave the wire room to run straight at least once in every {} — a larger `region=` is one way, moving what walls it in is another — or split the logic across several scopes, each with its own `circuit` line",
-            blocks(DUST_ATTENUATION_LIMIT + 1),
-        ),
-        Allowance::Budget(_) => {
-            let (cell, ports) = budget_ports(ir, unpowered, net);
-            format!(
-                "Fix: leave the wire into {ports} of {cell} room to run straight within {near} of it, or shorten the wire out of {cell} so it can spare more — a larger `region=` is one way to do either — or drive {ports} from a cell that restores strength, or split the logic across several scopes, each with its own `circuit` line",
-                near = blocks(near),
-            )
-        }
-    };
     error_with_footer(
         DiagnosticCode::AttenuationLimit,
         reservation.span.clone(),
@@ -605,7 +606,8 @@ fn budget_ports(ir: &PlacementIr, coord: CellCoord, net: NetRef) -> (String, Str
     let ports = match ports.as_slice() {
         [] => panic!("a net is held to a budget only through a port it feeds"),
         [only] => format!("port {only}"),
-        [head @ .., last] => format!("ports {} and {last}", head.join(", ")),
+        [first, last] => format!("ports {first} and {last}"),
+        [head @ .., last] => format!("ports {}, and {last}", head.join(", ")),
     };
     (format!("cell #{index}"), ports)
 }
