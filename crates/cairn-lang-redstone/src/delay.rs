@@ -1,12 +1,13 @@
-//! Stage 3 of `spec/redstone` "Place-and-route": sets each cell's `local_delay_ticks` to its base
-//! delay plus the buffer repeaters on the routed nets feeding it. That is a local wire cost summed
-//! over the nets, not an arrival time.
+//! Stage 3 of `spec/redstone` "Place-and-route": sets each cell's `local_delay_ticks` to the delay
+//! of its slowest driven port plus the buffer repeaters on the routed nets feeding it. That is a
+//! local wire cost summed over the nets, not an arrival time.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, error_with_footer};
 use crate::netlist_ir::NetRef;
 use crate::pass::{OpenScope, attribute_nodes, lower_scopes, open_scope};
 use crate::placement_ir::{
-    CellCoord, CircuitRegionReservation, PlacementIr, ScopedPlacementIr, ScopedPlacementIrEntry,
+    CellCoord, CircuitRegionReservation, PlacedCellNode, PlacementIr, ScopedPlacementIr,
+    ScopedPlacementIrEntry,
 };
 use crate::repeater_sites::{Fed, repeater_sites_of_scope};
 use crate::routing_geometry::sum_over_driving_nets;
@@ -113,7 +114,7 @@ fn delay_scope(entry: &ScopedPlacementIrEntry) -> ScopeDelay {
     Ok(ir)
 }
 
-/// Summed over the driving nets, not maxed: `local_delay_ticks` is a local wire cost.
+/// Buffer ticks are summed over the driving nets, not maxed: `local_delay_ticks` is a wire cost.
 fn attribute_local_delay_ticks<F>(
     ir: &mut PlacementIr,
     entry: &ScopedPlacementIrEntry,
@@ -128,7 +129,7 @@ fn attribute_local_delay_ticks<F>(
             let buffer_ticks = sum_over_driving_nets(&cell.drivers, |net| {
                 buffers_on(net, cell.coord, Fed::Cell(index)).saturating_mul(BUFFER_REPEATER_TICKS)
             });
-            cell.cell.base_delay_ticks().saturating_add(buffer_ticks)
+            slowest_port_ticks(cell).saturating_add(buffer_ticks)
         },
         |index, output| {
             buffers_on(output.driver, output.pad, Fed::Output(index))
@@ -136,6 +137,16 @@ fn attribute_local_delay_ticks<F>(
         },
         |phase, ticks, identity| phase.delay_at(ticks, identity),
     );
+}
+
+/// The largest [`crate::EditionCell::port_delay_ticks`] over the ports `cell`'s drivers feed, or 0
+/// for a cell with none.
+pub(crate) fn slowest_port_ticks(cell: &PlacedCellNode) -> u32 {
+    cell.drivers
+        .iter()
+        .map(|driver| cell.cell.port_delay_ticks(driver.port))
+        .max()
+        .unwrap_or(0)
 }
 
 /// The fewest buffer repeaters on a segment of `steps` steps from a fresh source; exact only on a
