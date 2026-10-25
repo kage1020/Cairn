@@ -294,12 +294,12 @@ struct chain size=40x5
         .iter()
         .find(|e| e.name == "chain")
         .expect("chain scope");
-    // A comparator passes on the strength it reads, so the dust from `sig.b` to the door is one
-    // strand and repeaters land on some cell-to-cell nets too.
+    // A comparator passes on the strength its rear reads, so `sig.b`'s dust runs on through each
+    // cell to the next one's side, and repeaters land on two cell-to-cell nets too.
     assert_eq!(entry.ir.cells.len(), 16);
     let expected: [u32; 16] = [
-        2, 2, 2, 2, 3, 2, 3, // i = 0..=6
-        4, 3, 3, 3, 4, 3, 4, // i = 7..=13
+        2, 2, 2, 2, 2, 2, 2, // i = 0..=6
+        4, 3, 3, 3, 3, 3, 3, // i = 7..=13
         5, 4, // i = 14..=15
     ];
     for (i, cell) in entry.ir.cells.iter().enumerate() {

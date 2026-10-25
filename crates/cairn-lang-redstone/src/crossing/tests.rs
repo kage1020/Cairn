@@ -1267,6 +1267,7 @@ mod strand_invariant {
                     } else {
                         cell.drivers
                             .iter()
+                            .filter(|d| !cell.cell.port_regenerates(d.port))
                             .map(|d| arrived[&(d.net, cell.coord)])
                             .max()
                             .unwrap_or(0)

@@ -15,7 +15,7 @@ use crate::logic_ir::ScopeKind;
 use crate::netlist_ir::{CellPortDriver, NetRef, PortName};
 use crate::placement_ir::{CellCoord, PlacementIr, ScopedPlacementIrEntry};
 use crate::routing_geometry::NetTree;
-use crate::test_fixtures::{ROUTED, placed_cell, reservation, routed_output};
+use crate::test_fixtures::{ROUTED, placed_cell, reservation, routed_output, sig};
 
 /// The coords a walk from `start` visits, `start` included, taking each `(step, count)` in turn.
 fn walk(start: (u32, u32, u32), moves: &[((i64, i64, i64), u32)]) -> Vec<CellCoord> {
@@ -767,11 +767,11 @@ fn a_budget_no_straight_coord_can_meet_is_refused() {
     );
     assert_eq!(
         diagnostic.primary,
-        "routed netlist for struct `near` routes sig.a so that the signal leaving (0,0,0) reaches cell #0 at (3,0,1) over more than the 1 block of dust it can spare — cell #0 passes on the strength it receives rather than restoring it, and the wire past it needs the rest: every coord within 1 block before it turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, and one further back would leave too little strength to get there",
+        "routed netlist for struct `near` routes sig.a so that the signal leaving (0,0,0) reaches port `a` of cell #0 at (3,0,1) over more than the 1 block of dust the cell can spare — cell #0 passes on the strength it receives on port `a` rather than restoring it, and the wire past it needs the rest: every coord within 1 block before it turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, and one further back would leave too little strength to get there",
     );
     assert_eq!(
         diagnostic.notes[0].message,
-        "Fix: leave the wire into cell #0 room to run straight within 1 block of it, or shorten the wire out of it so it can spare more — a larger `region=` is one way to do either — or drive cell #0 from a cell that restores strength, or split the logic across several scopes, each with its own `circuit` line",
+        "Fix: leave the wire into port `a` of cell #0 room to run straight within 1 block of it, or shorten the wire out of cell #0 so it can spare more — a larger `region=` is one way to do either — or drive port `a` from a cell that restores strength, or split the logic across several scopes, each with its own `circuit` line",
     );
 }
 
@@ -1022,5 +1022,182 @@ fn a_cell_no_budget_can_feed_is_refused_ahead_of_an_earlier_net() {
     assert_eq!(
         refusal.primary,
         "routed netlist for struct `ordered` routes cell #0 so that the signal leaving (0,0,14), with 1 block of dust already spent, runs out before (8,0,21), past the attenuation limit of 15 blocks of dust, and never reaches output pad #2: every coord after (0,0,14) up to and including (8,0,21) turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, so none can stand there",
+    );
+}
+
+const LONG: NetRef = NetRef::Input(0);
+const SHORT: NetRef = NetRef::Input(1);
+const GATE: CellCoord = CellCoord::new(16, 0, 4);
+const GATE_PAD: CellCoord = CellCoord::new(18, 0, 6);
+
+/// `sig.long` straight east to [`GATE`] over 16 steps, 15 blocks of dust.
+fn straight_into_the_gate() -> Vec<CellCoord> {
+    walk((0, 0, 4), &[(EAST, 16)])
+}
+
+/// `sig.long` into [`GATE`] over 16 steps that turn at every block, so none holds a repeater.
+fn stairs_into_the_gate() -> Vec<CellCoord> {
+    let stairs: Vec<_> = (0..16)
+        .map(|step| (if step % 2 == 0 { (0, 0, -1) } else { EAST }, 1))
+        .collect();
+    walk((8, 0, 12), &stairs)
+}
+
+/// A `kind` cell on [`GATE`] whose `ports` are fed by `sig.long`, over `long`, and `sig.short`, over
+/// 4 steps from the north. Its own wire turns at every block of its 4 steps to [`GATE_PAD`], so the
+/// cell can spare 12 blocks of dust.
+fn gate(
+    kind: EditionCell,
+    long: &[CellCoord],
+    ports: &[(PortName, NetRef)],
+) -> (PlacementIr, HashMap<NetRef, NetTree>) {
+    assert_eq!(long.last(), Some(&GATE));
+    let short = walk((16, 0, 0), &[(SOUTH, 4)]);
+    let out = walk((16, 0, 4), &[(EAST, 1), (SOUTH, 1), (EAST, 1), (SOUTH, 1)]);
+    assert_eq!(out.last(), Some(&GATE_PAD));
+    let mut ir = PlacementIr::new(kind.edition());
+    ir.region = Some(reservation(20, 14, 1));
+    for name in ["long", "short"] {
+        ir.inputs.push(crate::netlist_ir::NetlistInput {
+            name: sig(name),
+            span: Span::default(),
+        });
+    }
+    let drivers = ports
+        .iter()
+        .map(|&(port, net)| CellPortDriver { port, net })
+        .collect();
+    ir.cells.push(placed_cell(kind, GATE, drivers, ROUTED));
+    ir.outputs.push(routed_output(NetRef::Cell(0), GATE_PAD));
+    let mut trees = HashMap::from([(NetRef::Cell(0), NetTree::from_paths(&[&out]))]);
+    for (net, path) in [(LONG, long), (SHORT, &short)] {
+        if ports.iter().any(|&(_, fed)| fed == net) {
+            trees.insert(net, NetTree::from_paths(&[path]));
+        }
+    }
+    (ir, trees)
+}
+
+/// The repeaters on the wires into [`GATE`] from `sig.long` and `sig.short`, and on the one out.
+fn gate_sites(sites: &RepeaterSites<'_>) -> [Option<Vec<CellCoord>>; 3] {
+    [
+        sites.along(LONG, GATE),
+        sites.along(SHORT, GATE),
+        sites.along(NetRef::Cell(0), GATE_PAD),
+    ]
+}
+
+/// The side ends at the inverter, so its wire may spend all 15 blocks and none of them counts on
+/// the wire out, which leaves with the rear's 4.
+#[test]
+fn the_side_of_a_java_and_is_held_to_the_limit_rather_than_the_budget() {
+    let (ir, trees) = gate(
+        EditionCell::JavaComparatorAnd,
+        &straight_into_the_gate(),
+        &[(PortName::A, SHORT), (PortName::B, LONG)],
+    );
+    let sites = sites_in_struct("side", ir, &trees).unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(
+        gate_sites(&sites),
+        [Some(Vec::new()), Some(Vec::new()), Some(Vec::new())],
+    );
+}
+
+#[test]
+fn the_rear_of_a_java_and_is_held_to_the_budget() {
+    let (ir, trees) = gate(
+        EditionCell::JavaComparatorAnd,
+        &straight_into_the_gate(),
+        &[(PortName::A, LONG), (PortName::B, SHORT)],
+    );
+    let sites = sites_in_struct("rear", ir, &trees).unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(
+        gate_sites(&sites),
+        [
+            Some(vec![CellCoord::new(15, 0, 4)]),
+            Some(Vec::new()),
+            Some(Vec::new()),
+        ],
+    );
+}
+
+#[test]
+fn a_net_on_both_ports_of_a_java_and_is_held_to_the_budget_through_the_rear() {
+    let (ir, trees) = gate(
+        EditionCell::JavaComparatorAnd,
+        &straight_into_the_gate(),
+        &[(PortName::A, LONG), (PortName::B, LONG)],
+    );
+    let sites = sites_in_struct("shared", ir, &trees).unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(
+        gate_sites(&sites),
+        [Some(vec![CellCoord::new(15, 0, 4)]), None, Some(Vec::new())],
+    );
+}
+
+#[test]
+fn a_side_no_budget_could_carry_needs_no_repeater() {
+    let (ir, trees) = gate(
+        EditionCell::JavaComparatorAnd,
+        &stairs_into_the_gate(),
+        &[(PortName::A, SHORT), (PortName::B, LONG)],
+    );
+    let sites = sites_in_struct("stairs", ir, &trees).unwrap_or_else(|d| panic!("{d:?}"));
+    assert_eq!(
+        gate_sites(&sites),
+        [Some(Vec::new()), Some(Vec::new()), Some(Vec::new())],
+    );
+}
+
+/// The refusal of `sig.long`'s stairs into `ports` of cell #0, in struct `name`.
+fn stairs_refusal(name: &str, ports: &str) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::AttenuationLimit,
+        Span::default(),
+        format!(
+            "routed netlist for struct `{name}` routes sig.long so that the signal leaving (8,0,12) reaches {ports} of cell #0 at (16,0,4) over more than the 12 blocks of dust the cell can spare — cell #0 passes on the strength it receives on {ports} rather than restoring it, and the wire past it needs the rest: every coord within 12 blocks before it turns, climbs or branches — a buffer repeater carries a signal only where the wire runs straight through it at one height, and one further back would leave too little strength to get there"
+        ),
+    )
+    .with_footer(format!(
+        "Fix: leave the wire into {ports} of cell #0 room to run straight within 12 blocks of it, or shorten the wire out of cell #0 so it can spare more — a larger `region=` is one way to do either — or drive {ports} from a cell that restores strength, or split the logic across several scopes, each with its own `circuit` line"
+    ))
+}
+
+#[test]
+fn a_budget_refusal_names_the_port_it_holds_to_the_budget() {
+    let (ir, trees) = gate(
+        EditionCell::JavaComparatorAnd,
+        &stairs_into_the_gate(),
+        &[(PortName::A, LONG), (PortName::B, SHORT)],
+    );
+    assert_eq!(
+        sites_in_struct("rear", ir, &trees).err(),
+        Some(stairs_refusal("rear", "port `a`")),
+    );
+}
+
+#[test]
+fn a_budget_refusal_names_every_port_its_net_feeds() {
+    let (ir, trees) = gate(
+        EditionCell::BedrockTorchOr,
+        &stairs_into_the_gate(),
+        &[(PortName::A, LONG), (PortName::B, LONG)],
+    );
+    assert_eq!(
+        sites_in_struct("merge", ir, &trees).err(),
+        Some(stairs_refusal("merge", "ports `a` and `b`")),
+    );
+}
+
+#[test]
+fn a_budget_refusal_of_a_net_on_both_ports_of_a_java_and_names_only_the_rear() {
+    let (ir, trees) = gate(
+        EditionCell::JavaComparatorAnd,
+        &stairs_into_the_gate(),
+        &[(PortName::A, LONG), (PortName::B, LONG)],
+    );
+    assert_eq!(
+        sites_in_struct("shared", ir, &trees).err(),
+        Some(stairs_refusal("shared", "port `a`")),
     );
 }

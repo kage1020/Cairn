@@ -163,9 +163,7 @@ impl BufferSegment {
     /// The segment's word in the JSON form, one of [`Self::WORDS`].
     const fn as_str(self) -> &'static str {
         match self {
-            Self::Port(PortName::A) => "a",
-            Self::Port(PortName::B) => "b",
-            Self::Port(PortName::Sel) => "sel",
+            Self::Port(port) => port.as_str(),
             Self::Out => "out",
         }
     }

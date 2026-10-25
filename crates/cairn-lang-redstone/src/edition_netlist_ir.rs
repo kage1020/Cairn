@@ -97,7 +97,8 @@ impl EditionCell {
 
     /// Whether this cell's output leaves at full strength, whatever reached its inputs; the output
     /// of one that does not must never be weaker, while the cell is on, than the input that has
-    /// spent the most, so the dust either side of it counts as one run for the attenuation limit.
+    /// spent the most of those on ports it does not restore ([`Self::port_regenerates`]), so the
+    /// dust into such a port and out of the cell counts as one run for the attenuation limit.
     #[must_use]
     pub const fn regenerates(self) -> bool {
         match self {
@@ -115,6 +116,18 @@ impl EditionCell {
             | Self::BedrockNandUnpinned
             | Self::BedrockNorUnpinned
             | Self::BedrockMuxUnpinned => false,
+        }
+    }
+
+    /// Whether this cell restores the strength of a signal entering by `port`, so the wire into
+    /// `port` ends a run of dust there.
+    #[must_use]
+    pub const fn port_regenerates(self, port: PortName) -> bool {
+        match self {
+            // The side operand ends at the inverter. An AND has no `sel`, so asked for one it errs
+            // on the strict side.
+            Self::JavaComparatorAnd => matches!(port, PortName::B),
+            _ => self.regenerates(),
         }
     }
 }

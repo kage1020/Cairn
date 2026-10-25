@@ -59,6 +59,17 @@ pub enum PortName {
     Sel,
 }
 
+impl PortName {
+    /// The port's name as the source and the JSON form spell it.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::A => "a",
+            Self::B => "b",
+            Self::Sel => "sel",
+        }
+    }
+}
+
 /// One `(port name, driving net)` pair on a [`CellNode`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

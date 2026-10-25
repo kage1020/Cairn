@@ -64,10 +64,10 @@ fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
     );
 }
 
-/// The pass starts each comparator's wire with the more spent of its two inputs, so the strand
-/// leaves cells #3, #5, #6, #10, #12 and #13 with 14 blocks spent, and the 4-step wire to the next
-/// cell takes a repeater on its second block, on the plane or the bridge. The strand leaves
-/// cell #15 with 6, so the door's wire takes its first on its 10th block.
+/// The pass starts each comparator's wire with what the bus at its rear has spent, so the strand
+/// leaves cells #6 and #13 with 14 blocks spent, and the 4-step wire to the next cell's side takes
+/// a repeater on its second block, on the bridge or the plane. The strand leaves cell #15 with 4,
+/// so the door's wire takes its first on its 12th block.
 #[test]
 fn the_wires_a_bus_chain_drives_take_repeaters_where_the_strand_runs_out() {
     let legalized = legalized_from_source(&shared_bus_source(), Edition::Java);
@@ -85,16 +85,12 @@ fn the_wires_a_bus_chain_drives_take_repeaters_where_the_strand_runs_out() {
         .collect();
     assert_eq!(
         buffered,
-        [4, 6, 7, 11, 13, 14],
-        "of the wires between cells, only those out of cells #3, #5, #6, #10, #12 and #13, which the strand leaves with 14 blocks spent, take a repeater",
+        [7, 14],
+        "of the wires between cells, only those out of cells #6 and #13, which the strand leaves with 14 blocks spent, take a repeater",
     );
     let mut expected = vec![Vec::new(); 16];
     for (cell, coord) in [
-        (4, CellCoord::new(8, 0, 0)),
-        (6, CellCoord::new(12, 0, 0)),
         (7, CellCoord::new(14, 1, 1)),
-        (11, CellCoord::new(22, 1, 1)),
-        (13, CellCoord::new(26, 1, 1)),
         (14, CellCoord::new(28, 0, 0)),
     ] {
         expected[cell] = vec![coord];
@@ -106,7 +102,7 @@ fn the_wires_a_bus_chain_drives_take_repeaters_where_the_strand_runs_out() {
             .iter()
             .map(|b| b.coord)
             .collect::<Vec<_>>(),
-        vec![CellCoord::new(41, 0, 1), CellCoord::new(57, 0, 1)],
+        vec![CellCoord::new(43, 0, 1), CellCoord::new(58, 0, 1)],
     );
 }
 
@@ -172,11 +168,15 @@ struct s size=20x5
     )
 }
 
-/// Every segment is at most 15 blocks, yet the strand from a plate through three cells to the
-/// door is over 20 with nothing restoring it.
+/// Every segment is at most 15 blocks, yet the strand from a plate through a cell to the door is
+/// over 20 with nothing restoring it. A comparator's side ends at its inverter, so the Java strand
+/// reaches the door's wire with a block less spent than the one through three merges.
 #[test]
 fn cells_that_pass_strength_on_share_one_strand_with_their_inputs() {
-    for (op, edition) in [("or", Edition::Bedrock), ("and", Edition::Java)] {
+    for (op, edition, repeater) in [
+        ("or", Edition::Bedrock, (12, 0, 1)),
+        ("and", Edition::Java, (13, 0, 1)),
+    ] {
         let source = four_plates_one_door(op);
         let legalized = legalized_from_source(&source, edition);
         let ir = &legalized.scopes[0].ir;
@@ -192,7 +192,7 @@ fn cells_that_pass_strength_on_share_one_strand_with_their_inputs() {
                 .iter()
                 .map(|b| (b.coord.x, b.coord.y, b.coord.z))
                 .collect::<Vec<_>>(),
-            vec![(12, 0, 1)],
+            vec![repeater],
             "{op}: one repeater on the wire out to the door",
         );
         assert_eq!(

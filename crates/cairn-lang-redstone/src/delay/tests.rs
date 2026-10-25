@@ -373,6 +373,50 @@ fn only_the_merge_and_the_comparator_pass_strength_on() {
 }
 
 #[test]
+fn a_port_restores_strength_where_its_cell_regenerates_and_on_the_comparator_side() {
+    let table = [
+        (EditionCell::JavaComparatorAnd, PortName::A, false),
+        (EditionCell::JavaComparatorAnd, PortName::B, true),
+        (EditionCell::BedrockTorchAnd, PortName::A, true),
+        (EditionCell::BedrockTorchAnd, PortName::B, true),
+        (EditionCell::JavaRepeaterOr, PortName::A, true),
+        (EditionCell::JavaRepeaterOr, PortName::B, true),
+        (EditionCell::BedrockTorchOr, PortName::A, false),
+        (EditionCell::BedrockTorchOr, PortName::B, false),
+        (EditionCell::JavaInverterTorch, PortName::A, true),
+        (EditionCell::BedrockInverterTorch, PortName::A, true),
+        (EditionCell::JavaXorUnpinned, PortName::A, false),
+        (EditionCell::JavaXorUnpinned, PortName::B, false),
+        (EditionCell::BedrockXorUnpinned, PortName::A, false),
+        (EditionCell::BedrockXorUnpinned, PortName::B, false),
+        (EditionCell::JavaNandUnpinned, PortName::A, false),
+        (EditionCell::JavaNandUnpinned, PortName::B, false),
+        (EditionCell::BedrockNandUnpinned, PortName::A, false),
+        (EditionCell::BedrockNandUnpinned, PortName::B, false),
+        (EditionCell::JavaNorUnpinned, PortName::A, false),
+        (EditionCell::JavaNorUnpinned, PortName::B, false),
+        (EditionCell::BedrockNorUnpinned, PortName::A, false),
+        (EditionCell::BedrockNorUnpinned, PortName::B, false),
+        (EditionCell::JavaMuxUnpinned, PortName::Sel, false),
+        (EditionCell::JavaMuxUnpinned, PortName::A, false),
+        (EditionCell::JavaMuxUnpinned, PortName::B, false),
+        (EditionCell::BedrockMuxUnpinned, PortName::Sel, false),
+        (EditionCell::BedrockMuxUnpinned, PortName::A, false),
+        (EditionCell::BedrockMuxUnpinned, PortName::B, false),
+    ];
+    let rows: Vec<_> = table.iter().map(|&(cell, port, _)| (cell, port)).collect();
+    let every: Vec<_> = EditionCell::iter()
+        .flat_map(|cell| ports(cell).iter().map(move |&port| (cell, port)))
+        .collect();
+    assert_eq!(rows, every, "one row per port of every variant");
+    let restored: Vec<_> = table
+        .iter()
+        .map(|&(cell, port, _)| (cell, port, cell.port_regenerates(port)))
+        .collect();
+    assert_eq!(restored, table);
+}
+
+#[test]
 fn a_stretch_with_nowhere_for_a_repeater_is_refused() {
     let routed = compile_routing(&staircase(&PlacementPhase::Unrouted));
     assert_eq!(routed.diagnostics, Vec::new(), "stage 2 lays the staircase");
