@@ -6,8 +6,8 @@ This guide covers the Rust workspace and the day-to-day contributor flow. If you
 language spec rather than the compiler, start at the [Specification](/spec/) and
 [CONTRIBUTING.md](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md).
 
-> Cairn is at the design stage. The spec is the source of truth and the Rust skeleton implements it
-> chapter by chapter. Several crates are still empty.
+> Cairn is at the design stage. The spec is the source of truth and the Rust workspace implements it
+> chapter by chapter. `cairn-lang-wasm` is still a placeholder.
 
 ## Workspace layout
 
@@ -102,8 +102,8 @@ cargo test -p cairn-lang-core --bench lowering
 cargo test -p cairn-lang-redstone --bench place_and_route
 ```
 
-The last two run each bench once as an untimed test, since `--workspace` does not select bench
-targets.
+`--workspace` does not select bench targets, so the last two run each bench once, as an untimed
+test.
 
 CI's `Lint` job also runs `cargo xtask lint`, which compares files with each other rather than
 testing behaviour: README inventories, spec citations, the diagnostic catalog, the copies of the
@@ -133,11 +133,10 @@ example-sized source goes through a pass faster than the timer can tell a change
 their settings from the release profile, except `panic`: Cargo builds benches with unwinding, as it
 does tests.
 
-CI runs the benches once as tests, as above, but never times them. They exist to measure a change
-to `[profile.release]`, above all to `opt-level`, before it is made.
+CI runs the benches once as tests, as above, but never times them. They exist to measure a change to
+`[profile.release]`, above all to `opt-level`, before it is made.
 [CONTRIBUTING.md](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md) walks through
-comparing two profiles with them. That link opens `main`, which has the section only from the first
-release that includes the benches; until then it is on `canary`. To run both:
+comparing two profiles with them. To run both:
 
 ```sh
 cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench place_and_route

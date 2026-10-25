@@ -104,7 +104,7 @@ semantic-sensitive:      (none)
 
 ## 基本の考え方
 
-- **ブロックステートではなく意図を書く。** 切妻屋根は、自分の階段がどちらを向き、それぞれがブロックの上半分と下半分のどちらに置かれるかを知っています。そのため `facing=` を書く必要はありません。ブロックステートはコンパイラが導出します。自分で指定するのは、その値自体が意図であるときだけです。
+- **ブロックステートではなく意図を書く。** 切妻屋根は、自分の階段がどちらを向き、それぞれがブロックの上半分と下半分のどちらに置かれるかを知っているので、`facing=` を書く必要はありません。ブロックステートはコンパイラが導出します。自分で指定するのは、その値自体が意図であるときだけです。
 - **書く順番は問わない。** メンバーはどの順に書いても構いません。コンパイラが固定のフェーズ (massing → envelope → openings → fixtures → redstone → raw) に並べ替えます。
 - **テーマで「どこに」と「何で」を分ける。** 構造は `mat_slot` を持ち、テーマがそのスロットに素材を割り当てます。スタイルシートがクラスにスタイルを割り当てるのと同じ関係です。
 - **変換せず、再コンパイルする。** 持ち運べる成果物は `.crn` ソースです。構造ファイルは特定のエディションとバージョン向けのビルド出力で、プログラムでいえば実行バイナリにあたります。
@@ -112,7 +112,7 @@ semantic-sensitive:      (none)
 
 ## ドキュメント
 
-ドキュメントの正本は英語版の <https://cairn.kage1020.com/> です。日本語版は <https://cairn.kage1020.com/ja/> にあり、英語版の `/<path>/` が日本語版の `/ja/<path>/` に対応します。
+ドキュメントは英語版の <https://cairn.kage1020.com/> を基準とします。日本語訳は `/ja/<path>/` の下にあります (<https://cairn.kage1020.com/ja/>)。
 
 - [チュートリアル](https://cairn.kage1020.com/ja/tutorial/): インストールから、ワールドに構造ファイルを置くまでの最短ルート。
 - [サンプル](examples/): `cottage` / `themed-tower` / `village` / `redstone-door` と、メンバーを 1 つずつ扱う小さなファイル。
@@ -125,7 +125,7 @@ semantic-sensitive:      (none)
 同じページはコンパイラにも同梱されていて、言語モデル向けの形式でも配信しています。
 
 - `cairn docs` は、トップページとプレイグラウンドを除くサイトのページを一覧します。表示されるのは、インストールした `cairn` がビルドされた時点の内容です。`cairn docs ja/spec/syntax` で 1 ページを Markdown で表示でき、`cairn docs spec/lint "Error vs warning"` で引用が指す節だけを表示できます。ネットワークは不要で、表示される内容は常にそのリリースが実装している仕様と一致します。
-- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) は言語モデル向けのサイト索引です。各ページは URL の末尾に `index.md` を付けると Markdown で取得できます ([`/ja/spec/syntax/index.md`](https://cairn.kage1020.com/ja/spec/syntax/index.md))。[`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) は英語版の全ページを 1 つにまとめたものです。
+- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) は言語モデル向けのサイト索引です。同じページは、URL の末尾に `index.md` を付けると Markdown で取得できます ([`/ja/spec/syntax/index.md`](https://cairn.kage1020.com/ja/spec/syntax/index.md))。[`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) は英語版の全ページを 1 つにまとめたものです。
 
 ## バージョニング
 

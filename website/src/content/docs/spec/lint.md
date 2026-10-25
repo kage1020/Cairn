@@ -269,8 +269,8 @@ answered. A pack was offered and does not declare the token, so the build stops 
 towards the closest one it does declare; no pack was offered, so nothing was asked and the member
 degrades with a warning. The second is the path only a library caller reaches, by lowering with no
 pack at all, and it is a warning for that reason: refusing there would refuse every source read
-without a pack. A front end with no target, such as the language server or a `cairn check` with no
-`--target`, raises neither, and leaves the token to the pack of the target that builds it
+without a pack. A front end with no target (the language server, or a `cairn check` with no
+`--target`) raises neither, and leaves the token to the pack of the target that builds it
 ([§11.3](#113-error-vs-warning)).
 
 The warning says how the member degrades. A `floor` leaves its cells air, and a `roof`, eave `stair`
@@ -660,7 +660,7 @@ are filled by independent rules and a renamed ID near its replacement carries bo
 `aliases` is the other half, and the two are different claims about the same ID. A suggestion is a
 guess from a string distance; an alias is the registry pack's `aliases` component stating that two
 names are one block, so a quick-fix may apply an alias unasked and should not apply a suggestion. It
-holds every ID the target declares for that block, the closed set rather than a pick from it, in the
+holds every ID the target declares for that block, the closed set, never a pick from it, in the
 pack's own order, and is absent when the pack names none. The rendered note prints the first few and
 counts the rest; the payload is where the whole set lives. See [Versioning and Editions
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
@@ -833,14 +833,14 @@ mistake. `place gap=` is the case: a row with no `at=` is placed relative to ano
 distance, and `at=origin` is anchored absolutely and does not, so `at=origin gap=5` is the same
 silent drop ([§9.3.2](/spec/components-editing-sites/#932-origin-selectors)).
 
-Where the **selector** names no rule at all, because the value is one the dispatch does not know or
-nothing is written on an axis with no absent arm, no finding is raised here: that member lowers to
-nothing and its refusal is the whole repair, so a second finding about the argument that rule would
-not have read bills one repair twice. That refusal is `W_DEFERRED_MEMBER`, or `E_UNPLACEABLE_PLATE`
-for a `pressure_plate`'s `at=`, and needs no target either, so a `cairn check` with no `--target`
-reports it as a pinned check does. A key another key makes inert *without* selecting a rule is a
-different shape again and is not reported today: `window step=` at `repeat=1` is a condition on a
-count rather than on a rule.
+Where the **selector** names no rule at all (a value the dispatch does not know, or nothing written
+on an axis with no absent arm), no finding is raised here: that member lowers to nothing and its
+refusal is the whole repair, so a second finding about the argument that rule would not have read
+bills one repair twice. That refusal is `W_DEFERRED_MEMBER`, or `E_UNPLACEABLE_PLATE` for a
+`pressure_plate`'s `at=`, and needs no target either, so a `cairn check` with no `--target` reports
+it as a pinned check does. A key another key makes inert *without* selecting a rule is a different
+shape again and is not reported today: `window step=` at `repeat=1` is a condition on a count rather
+than on a rule.
 
 `E_MISPLACED_BINDING` is the fourth field of a member line asked the same question the other three
 are: is this word read by anything. A `-> value` tail is read by exactly one thing, the sensor set

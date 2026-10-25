@@ -6,7 +6,7 @@ title: "15. 未決事項"
 
 **来歴 (provenance) をどこに置くか。** `.crn` のヘッダか、ロックか。暫定の方針は、「`.crn` はヒントである `@intended_targets` だけを持ち、`verified` のような記録はコンパイラがロックに書く」です ([バージョンとエディション](/ja/spec/versioning-editions/))。
 
-**逆変換で使う IR の型。** 縮退できる単一の IR にするか、Intent IR と Raw Geometry IR を別の型にするか。暫定の方針は、「ブロック配列の層は共有し、その上のメンバーの層で型を分ける」です ([アーキテクチャ](/ja/spec/architecture/))。
+**逆変換で使う IR の型。** 情報の一部を欠いた状態も表せる単一の IR にするか、Intent IR と Raw Geometry IR を別の型にするか。暫定の方針は、「block-array の層は共有し、その上のメンバーの層で型を分ける」です ([アーキテクチャ](/ja/spec/architecture/))。
 
 **旧形式の `.schematic`** (1.13 より前) は、v1 では扱いません。数値 ID の対応付けは、将来オプションとして検討する余地があります。
 

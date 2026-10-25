@@ -7,8 +7,8 @@ Every file lives in
 [`examples/`](https://github.com/kage1020/Cairn/tree/main/examples) and is intentionally minimal.
 The [Tutorial](/tutorial/) walks through the four in the first group.
 
-> The reference compiler is not finished, so these are normative illustrations rather than files you
-> can build today.
+> Every file here compiles with the current compiler. Redstone does not reach compiled output yet,
+> so `redstone-door.crn` builds without its circuit.
 
 ## Start here
 

@@ -6,8 +6,8 @@ description: Build up from a single cottage to a themed tower, a redstone gateho
 This page walks through the [examples](/examples/), one idea at a time. Read it top to bottom, since
 each section builds on the one before it.
 
-> The reference compiler is still a skeleton, so the `cairn compile` commands below do not run yet.
-> They follow the spec exactly, though, so they still show how the CLI is meant to work.
+> The `cairn compile` commands on this page run with the current compiler. Redstone does not reach
+> compiled output yet, so the gatehouse in section 3 builds without its circuit.
 
 ## 1. A cottage
 

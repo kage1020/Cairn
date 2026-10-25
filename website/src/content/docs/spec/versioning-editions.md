@@ -430,9 +430,10 @@ stdout is empty rather than short a line.
 The row reads declarations back; it never looks at the blocks the source uses. `Vmin` is the
 strictest floor the file is bound by with no edition named, or `0.0` when there is none. The
 candidates are the `@requires version>=X` headers, plus the `requires version>=X` line of every
-`def` and `theme` the build instantiates ([§10.4](#a-part-may-declare-its-own-floor)). Working out
-*which* parts a build instantiates is real work over the source; reading which blocks they paint is
-not part of it.
+`def` and `theme` the build instantiates that feeds this row
+([§10.4](#a-part-may-declare-its-own-floor)); a theme feeds it only when both editions bind the same
+one. Working out *which* parts a build instantiates is real work over the source; reading which
+blocks they paint is not part of it.
 
 "Strictest" is a comparison of the labels, so it is exact only while they are all dotted decimals. A
 label the comparison cannot read as a number sorts above every one it can, which is fixed rather
@@ -644,7 +645,7 @@ The text rows say none of this. `buildable targets: Bedrock: none (1.21.0, 1.21.
 refuse)` is true for every one of the four causes. Each cause is reported on stderr as well, though
 not in the same shape: the two floor causes print a `note:` carrying the position of the line, a
 dropped scope prints a `note:` naming the scope and no position, and a refused lowering prints the
-findings themselves under the version, each with its own position. Only the JSON lacked them, and
+findings themselves under the version, each with its own position. Only the JSON lacks them, and
 `reason` fills that gap.
 
 A fifth line, `recommended test targets`, belongs to this axis and answers a different question

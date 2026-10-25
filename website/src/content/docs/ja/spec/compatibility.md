@@ -22,7 +22,7 @@ Stable な面:
 - 仕様が規範として定める `.crn` の構文 (キーワード、ヘッダ、ブロックの種類、ブロックステートのプリミティブ、テーマとマテリアルのプリミティブ、エディションガード)。
 - `build.cairn.lock` のファイル形式 (フィールド、ハッシュの入力、[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) が定める `verified` の意味)。
 - `cairn compile`、`cairn check`、`cairn info` のフラグ名、引数の形、JSON 出力のスキーマ、終了コード。
-- 正準マテリアル語彙の tier-1 トークン (ユーザーがソースに書く名前)。
+- tier-1 のマテリアルトークン (ユーザーがソースに書く名前)。
 - 仕様に記載されたエラーと警告のコード (`E_*`、`W_*`)。
 
 ### Evolving
@@ -38,7 +38,7 @@ Evolving な面:
 - ドラフトと明記された仕様の章や節 ([未決事項](/ja/spec/open-issues/) と、本文中で変更の余地があると注記された節)。
 - 新しく追加された `cairn` サブコマンドの、最初の 3 か月分の月次マイナーリリース。
 - レジストリパックと制約カタログのファイル構成 (それらの *ハッシュ* は Stable なロックの意味に含まれますが、*内部構造* は Evolving です)。
-- 正準語彙の tier-2 トークン (tier-1 の解決先となる実装レベルの名前)。
+- tier-2 のトークン (tier-1 の解決先となる実装レベルの名前)。
 - CLI の人間向け診断の書式と文言 (*コード* は Stable ですが、*文言* は違います)。
 - `cairn-lang-cli` の `--features` の組 (cargo features) と、ワークスペースの各クレートの `[features]`。
 
@@ -49,13 +49,13 @@ Evolving な面:
 Internal な面:
 
 - ワークスペースの全クレートの Rust API (`cairn-lang-core`、`cairn-lang-nbt`、`cairn-lang-formats`、`cairn-lang-redstone`、`cairn-lang-lsp`、`cairn-lang-wasm`、`cairn-lang-docs`)。これらは、含まれる最初の月次マイナーリリースから crates.io に公開しますが、CLI の推移的な公開依存でない項目にはすべて `#[doc(hidden)]` を付けます。
-- コンパイラの中間表現 (Intent IR、Semantic IR、ブロック配列ピボットのレイアウト)。
+- コンパイラの中間表現 (Intent IR、Semantic IR、block-array ピボットのレイアウト)。
 - 増分ビルドキャッシュのディスク上の形式 (プロジェクト内の `target/` に相当するもの)。
 - 言語サーバーの内部プロトコル (VS Code などとの間の LSP の通信仕様は Stable ですが、`cairn-lang-lsp` の内部の分け方は Stable ではありません)。
 
 ## C.2 マイルストーンごとのティア表
 
-ある面のティアは固定ではなく、プロジェクトが [ロードマップ](/ja/roadmap/) を進むにつれて Stable に昇格していきます。この表が正本です。
+ある面のティアは固定ではなく、プロジェクトが [ロードマップ](/ja/roadmap/) を進むにつれて Stable に昇格していきます。この表が基準です。
 
 | 面 | 現在 (M1 前) | M2 (minimal build) | M3 (examples work) | M5 (DX) | M6 (redstone) |
 |---|---|---|---|---|---|
@@ -63,13 +63,13 @@ Internal な面:
 | `build.cairn.lock` の形式 | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` のフラグ | Evolving | Evolving | **Stable** | Stable | Stable |
 | 診断コード (`E_*`、`W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
-| tier-1 のマテリアル語彙 | Evolving | Evolving | **Stable** | Stable | Stable |
+| tier-1 のマテリアルトークン | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP の通信プロトコル (LSP 標準) | — | — | — | **Stable** | Stable |
 | レッドストーン DSL (14 章) | Evolving | Evolving | Evolving | Evolving | **Stable** |
-| tier-2 の語彙、レジストリパックの構成 | Evolving | Evolving | Evolving | Evolving | Evolving |
+| tier-2 のトークン、レジストリパックの構成 | Evolving | Evolving | Evolving | Evolving | Evolving |
 | Rust API (全クレート) | Internal | Internal | Internal | Internal | Internal |
 
-表の読み方: **ある行が初めて Stable になる列が、緩やかな約束です。** それより前の列が Evolving であるのは、その列に到達するまで、非推奨期間なしでその面を変更する権利をプロジェクトが留保するという意味です。
+表の読み方: **ある行が初めて Stable になる列が、緩やかな約束です。** その列のマイルストーンに到達するまで、プロジェクトは非推奨期間を設けずにその面を変更できます。
 
 Rust API の行は、計画中のロードマップの範囲では昇格しません。Cairn は Rust ライブラリとしてではなく、`cairn` CLI のバイナリと言語サーバーを通じて使うように設計されています。利用者が安定した組み込み用 API を求める場合、プロジェクトはそれを別途管理する新しい面として扱います。
 

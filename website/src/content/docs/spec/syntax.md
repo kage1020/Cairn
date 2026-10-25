@@ -203,9 +203,9 @@ worse than an absent one, because a reader will still believe it.
 The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 /
 1.21.40 / 1.21.60`: `1.21.4` is Java's newest release and names no Bedrock release at all. A label
 is dot-separated components that each begin with a digit and carry only letters and digits, with an
-optional `-` and a pre-release tag of the same form. `1.21.4`, `1.21.4-rc1`, and `24w14a` are all
-labels. Which of them the *target edition* can order is not a syntax question and is not answered
-here. See [Versioning and Editions](/spec/versioning-editions/).
+optional `-` and a pre-release tag of dot-separated letters and digits. `1.21.4`, `1.21.4-rc1`, and
+`24w14a` are all labels. Which of them the *target edition* can order is not a syntax question and
+is not answered here. See [Versioning and Editions](/spec/versioning-editions/).
 
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
 of being verified. That record lives only in the lock.

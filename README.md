@@ -112,7 +112,7 @@ semantic-sensitive:      (none)
 
 ## Documentation
 
-The project's prose lives at <https://cairn.kage1020.com/>. A Japanese translation mirrors each page at `/ja/<path>/`.
+The project's prose lives at <https://cairn.kage1020.com/>. A Japanese translation lives under `/ja/<path>/`.
 
 - [Tutorial](https://cairn.kage1020.com/tutorial/) — the shortest path from install to a structure file in your world.
 - [Examples](examples/) — `cottage`, `themed-tower`, `village`, `redstone-door`, and the smaller files that cover one member each.
@@ -125,7 +125,7 @@ Site source lives in [`website/src/content/docs/`](website/README.md) and is rev
 The same pages ship with the compiler, and the site also serves them in a form language models read well:
 
 - `cairn docs` lists the site's pages, all but the home page and the playground, as they were when the installed `cairn` was built. `cairn docs spec/syntax` prints one page as Markdown, and `cairn docs spec/lint "Error vs warning"` prints only the section a citation names. It needs no network, and the pages always match what that release implements.
-- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) indexes the site for language models. Each page is also served as Markdown at its URL followed by `index.md` ([`/spec/syntax/index.md`](https://cairn.kage1020.com/spec/syntax/index.md)), and [`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) holds every English page in one file.
+- [`/llms.txt`](https://cairn.kage1020.com/llms.txt) indexes the site for language models. The same pages are also served as Markdown at their URL followed by `index.md` ([`/spec/syntax/index.md`](https://cairn.kage1020.com/spec/syntax/index.md)), and [`/llms-full.txt`](https://cairn.kage1020.com/llms-full.txt) holds every English page in one file.
 
 ## Versioning
 

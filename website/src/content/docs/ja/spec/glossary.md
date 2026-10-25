@@ -4,7 +4,7 @@ title: "用語集"
 
 仕様書の各章で定義している用語をまとめたページです。詳しい定義がある章にはリンクを張っています。
 
-このページ **だけでは規範になりません**。正本はリンク先の章です。それでも、実装でも `.crn` を書くときでも、ここにある綴りをそのまま使ってください (SHOULD)。語彙は意図的に閉じています ([原則 P3](/ja/spec/principles/))。同じものを別の言葉で呼び始めると、lint のループが働かなくなります。
+このページ **だけでは規範になりません**。定義はリンク先の各章にあります。それでも、実装でも `.crn` を書くときでも、ここにある綴りをそのまま使ってください (SHOULD)。語彙は意図的に閉じています ([原則 P3](/ja/spec/principles/))。同じものを別の言葉で呼び始めると、lint のループが働かなくなります。
 
 ## アーキテクチャと IR
 
@@ -18,7 +18,7 @@ title: "用語集"
 
 - **メンバー (Member)**: Intent IR の名前付きの要素です。型は `block`、`block_entity`、`entity` の 3 つです。IR は型を区別しますが、書き手はどの型にも同じセレクタ文法を使います ([原則 P4](/ja/spec/principles/))。
 - **`id` / `class` / `role`**: メンバーに付ける、同一性、グループ、建築上の役割のタグです。セレクタと安定したアドレスに使います。
-- **`mat_slot`**: メンバーにマテリアルを注入する口です。`theme` が値を割り当てます。構造はスロットだけを持ち、どのブロックを使うかはテーマが持ちます。[マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット) を参照してください。
+- **`mat_slot`**: メンバー上のマテリアルの注入ポイントです。`theme` が値を割り当てます。構造はスロットだけを持ち、どのブロックを使うかはテーマが持ちます。[マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット) を参照してください。
 - **`intent_state`**: 書き手が意図したブロックステートです。編集の差分は **ここだけ** を比べます。[ブロックステート §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state) を参照してください。
 - **`resolved_state`**: コンパイラが導いたブロックステート (向き、接続、waterlogged) です。手で書くことはありません。
 - **上書きによる昇格 (Override-promotion)**: 意図になりうるブロックステートを書くと、そのブロックステートは `resolved_state` から `intent_state` に昇格します。仕様上のルールは「既定では導出し、意図になりうるブロックステートはどれも上書きできる」です。[ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する) を参照してください。
@@ -26,10 +26,10 @@ title: "用語集"
 
 ## マテリアルとテーマ
 
-- **正準トークン (Canonical token)**: スロットやテーマのセレクタに割り当てる値です。生のブロック ID ではなく、**意味** を表すトークンです。`(edition, version)` ごとの ID や状態名は、バックエンドが解決します。[マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正準語彙) を参照してください。
-- **正準ブロックトークン (Canonical block token)**: 特定のブロックの意味を表すトークンです (`@oak_planks`、`@water_cauldron`、`@oak_log[axis=x]`)。意味を壊すダウングレード (`@water_cauldron` を `cauldron` にするなど) を黙って行うことは禁止です。
+- **正規トークン (Canonical token)**: スロットやテーマのセレクタに割り当てる値です。生のブロック ID ではなく、**意味** を表すトークンです。`(edition, version)` ごとの ID や状態名は、バックエンドが解決します。[マテリアルとテーマ §7.2](/ja/spec/materials-themes/#72-正規トークン) を参照してください。
+- **正規ブロックトークン (Canonical block token)**: 特定のブロックの意味を表すトークンです (`@oak_planks`、`@water_cauldron`、`@oak_log[axis=x]`)。意味を壊すダウングレード (`@water_cauldron` を `cauldron` にするなど) を黙って行うことは禁止です。
 - **抽象マテリアルトークン (Abstract material token)**: 見た目の好みを表すトークンです (`@floor.wood.broadleaf`、`@roof.dark_wood`)。テーマのポリシーでダウングレードしてかまいません (MAY) (オークをシラカバにするなど)。
-- **`theme`**: スロットやセレクタの値を正準トークンに割り当てる、CSS のような仕組みです。**構造** (どこに壁があるか) と **スタイル** (どのブロックを使うか) を分けます。
+- **`theme`**: スロットやセレクタの値を正規トークンに割り当てる、CSS のような仕組みです。**構造** (どこに壁があるか) と **スタイル** (どのブロックを使うか) を分けます。
 - **`def`**: スロットを持つコンポーネントの定義 (再利用できる struct) です。再帰は禁止で、パラメータ化は許されます。ただし、その仕組みが決まるまで、ヘッダに書けるのは `size=` と `class=` だけです。組み合わせたものの最小バージョンは、構成要素の最小バージョンのうち最も新しいものになります。[コンポーネント・編集・複数建築 §9.1](/ja/spec/components-editing-sites/#91-コンポーネントを定義する-def) を参照してください。
 - **`site`**: 複数の建物をまとめるコンテナです。`def` から作った構造物を、絶対座標ではなく位置関係 (`east_of`、`gap=`、`connect`) で配置します。[コンポーネント・編集・複数建築 §9.3](/ja/spec/components-editing-sites/#93-site-による複数建築) を参照してください。
 
@@ -38,7 +38,8 @@ title: "用語集"
 - **フェーズ (Phase)**: コンパイラが各コマンドを振り分ける、順番の決まった評価の枠です。`massing → envelope → openings → fixtures → logic_synth → logic_place → logic_route → raw` の順に評価します。ソース上の順番は関係なく、意味はフェーズの順番で決まります ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))。
 - **フェーズ内の後勝ち (Last-wins, local)**: 同じフェーズの中では、後に書いたコマンドが先のコマンドを上書きします。プログラム全体で後勝ちにする考え方 (「ペイントモデル」) は採りません。[原則 P2](/ja/spec/principles/) を参照してください。
 - **ターゲット軸 (Target axes)**: `(edition, version)` の組です。これを知っているのはバックエンドだけで、DSL のソースには決して現れません。`--edition` は必須で、`--target` だけを指定することはできません。[コンパイルモデル §4.2](/ja/spec/compilation/#42-ターゲット軸) と [バージョンとエディション](/ja/spec/versioning-editions/) を参照してください。
-- **DataVersion**: Mojang が Java 版の各バージョンに振る、単調に増える整数です。Cairn はこれをバージョンの順序を決める正準のキーに使います。そのため、Minecraft のバージョンが semver から日付ベースに移っても、`since/until` や `@requires` は壊れません。[バージョンとエディション §10.1](/ja/spec/versioning-editions/#101-ターゲットはコンパイル時のパラメータ) を参照してください。
+- **lowering**: スコープのメンバーを block-array IR に変換するパスです。壁、開口部、屋根、通路、マテリアルが、パレットとインデックスの配列になります。`cairn compile`、`cairn lower`、`cairn info`、`cairn check` のどれもこのパスを通ります。[アーキテクチャ §3.1](/ja/spec/architecture/#31-block-array-ir-はすべてのフォーマットに共通のピボット) を参照してください。
+- **DataVersion**: Mojang が Java 版の各バージョンに振る、単調に増える整数です。Cairn はこれをバージョンの順序を決めるキーに使うので、Minecraft のバージョンが semver から日付ベースに移っても、`since/until` や `@requires` は壊れません。[バージョンとエディション §10.1](/ja/spec/versioning-editions/#101-ターゲットはコンパイル時のパラメータ) を参照してください。
 
 ## ヘッダと来歴
 
@@ -50,7 +51,7 @@ title: "用語集"
 
 ## レッドストーン
 
-- **論理セル、エディションセル、物理タイル (Logical cell / edition cell / physical tile)**: 3 段のセルライブラリです。Logic IR が論理セルを選び、エディションごとのセルライブラリがそれを物理タイルに展開します。Java 版と Bedrock 版の違いは、このライブラリの中に閉じ込めます。[レッドストーン §14.6](/ja/spec/redstone/#146-エディションの違い) を参照してください。
+- **論理セル、エディションセル、物理タイル (Logical cell / edition cell / physical tile)**: 3 段のセルライブラリです。Logic IR が論理セルを選び、エディションごとのセルライブラリがそれを物理タイルに lowering します。Java 版と Bedrock 版の違いは、このライブラリの中に閉じ込めます。[レッドストーン §14.6](/ja/spec/redstone/#146-エディションの違い) を参照してください。
 - **組み合わせ回路と順序回路 (Combinational vs sequential)**: v1 が提供するのは、決まった種類の組み合わせゲートと、厳選した順序回路のマクロ (`latch` / `pulse` / `delay` / `edge_rising` / `edge_falling` / `counter`) です。任意の FSM や CPU は v1 の範囲外です。
 - **真理値、レイテンシ、時相のアサーション (Truth / latency / temporal assertion)**: 3 種類の検証です。時相のアサーションは、範囲を区切った `eventually within N` だけで、完全な LTL ではありません。[レッドストーン §14.7](/ja/spec/redstone/#147-検証) を参照してください。
 - **QC / BUD**: 疑似接続 (quasi-connectivity) と、ブロック更新検出器 (block-update-detector) の挙動です。セルライブラリはこれらを **吸収しません**。更新順序の意味論に依存する回路は、`E_NO_PORTABLE_IMPL` のコンパイルエラーになります。

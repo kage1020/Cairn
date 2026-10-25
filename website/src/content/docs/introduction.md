@@ -48,13 +48,13 @@ Every page of this site except the home page and the playground also ships insid
 stood in the release you installed. `cairn docs` lists the pages, and `cairn docs spec/syntax`
 prints one as Markdown, with no network needed.
 
-For language models, [`/llms.txt`](/llms.txt) indexes the site. Each page is also served as
-Markdown at its URL followed by `index.md`, and [`/llms-full.txt`](/llms-full.txt) holds every
+For language models, [`/llms.txt`](/llms.txt) indexes the site. The same pages are also served as
+Markdown at their URL followed by `index.md`, and [`/llms-full.txt`](/llms-full.txt) holds every
 English page in one file.
 
 ## Status
 
-Cairn is at the design stage, draft `2026.06`. The language is being designed in the open and the
-reference compiler is a skeleton, so the most useful contributions right now are design critique,
-concrete proposals, and worked examples. See
+Cairn is at the design stage, draft `2026.06`. The language is being designed in the open, and the
+reference compiler already builds Java and Bedrock structure files from one source. The most useful
+contributions right now are design critique, concrete proposals, and worked examples. See
 [`CONTRIBUTING.md`](https://github.com/kage1020/Cairn/blob/main/CONTRIBUTING.md).

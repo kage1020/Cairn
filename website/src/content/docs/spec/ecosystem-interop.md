@@ -5,7 +5,7 @@ title: "12. Ecosystem Interop and Reverse Conversion"
 ## 12.1 Forward direction
 
 Serializing the block-array IR emits `.nbt`, `.litematic`, `.schem`, and `.mcstructure`
-([Architecture](/spec/architecture/)). Each format is only a serializer: an existing format is one
+([Architecture](/spec/architecture/)). Each format is a serializer, and an existing format is one
 more backend around the pivot.
 
 ## 12.2 Reverse direction: the compiler transliterates, an LLM lifts
@@ -70,7 +70,7 @@ Other rules:
   metric and extract only first-class entities ([Entities](/spec/entities/)). Chest contents and command
   blocks are dropped.
 - Huge schematics (over 48³, or whole villages) do not fit in an LLM's context if lifted at once.
-  They need a streaming parse that drives chunk split → per-chunk L1 → per-part lift → join with
-  `site`.
+  They need chunk split → per-chunk L1 → per-part lift → join with `site`, run over a streaming
+  parse.
 - Legacy numeric-ID `.schematic` files from before 1.13 flattening are not supported in v1
   ([Purpose and Scope](/spec/overview/)).

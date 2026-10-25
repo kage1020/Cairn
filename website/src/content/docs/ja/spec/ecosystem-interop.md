@@ -4,7 +4,7 @@ title: "12. エコシステム連携と逆変換"
 
 ## 12.1 順方向の変換
 
-block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem` / `.mcstructure` が出力されます ([アーキテクチャ](/ja/spec/architecture/))。各形式は単なるシリアライザで、既存の形式は、ピボットの周りに追加するバックエンドという位置付けです。
+block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem` / `.mcstructure` が出力されます ([アーキテクチャ](/ja/spec/architecture/))。各形式はシリアライザで、既存の形式は、ピボットの周りに追加するバックエンドという位置付けです。
 
 ## 12.2 逆方向の変換: コンパイラは写し取り、LLM がリフトする
 
@@ -46,9 +46,9 @@ window id=front_windows side=front mat_slot=glass repeat=5 ...
 
 ## 12.4 取り込み時の記録と落とし穴
 
-取り込むときは、`(edition, version)` と来歴 (provenance) をblock-array IR に記録します (`.litematic` → java、`.mcstructure` → bedrock、`.schem` → java)。これによって、取り込んだものも再現できるようになります ([バージョンとエディション](/ja/spec/versioning-editions/))。
+取り込むときは、`(edition, version)` と来歴 (provenance) を block-array IR に記録します (`.litematic` → java、`.mcstructure` → bedrock、`.schem` → java)。これによって、取り込んだものも再現できるようになります ([バージョンとエディション](/ja/spec/versioning-editions/))。
 
-**取り込みを「作者の意図の復元」として見せてはいけません。** これが最大の落とし穴です。復元できるのはボクセルと一部の規則性だけで、CLI は `W_SEMANTIC_LOSS` でそのことを伝えます。
+**取り込みを「作者の意図の復元」として見せてはいけません。** これが最大の落とし穴です。復元できるのはボクセルと一部の規則性だけで、そのことは CLI の `W_SEMANTIC_LOSS` に示されます。
 
 ほかの規則:
 

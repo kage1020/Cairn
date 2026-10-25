@@ -28,7 +28,7 @@ title: "13. 評価フレームワーク"
 - `residual_ratio`: リフト後に残った raw の体積。`compression_ratio`: ボクセル数 ÷ トークン数。
 - `editability_score`: 名前付きメンバーの数、スロット化の割合、安定したアドレスの割合。
 - `theme_extraction_score`: 具体的なブロックがインラインで書かれず、スロットとテーマに分離されているか。
-- `symmetry_score`: `repeat` / `mirror` / `def` に畳み込まれた割合。`version_portability`: 正準トークンの割合。
+- `symmetry_score`: `repeat` / `mirror` / `def` に畳み込まれた割合。`version_portability`: 正規トークンの割合。
 
 ## 13.3 運用のルール
 

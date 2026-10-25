@@ -13,7 +13,7 @@ Cairn is a working compiler backed by a normative [specification](https://cairn.
 - **Design critique.** Challenge a decision, surface a missing case, propose an alternative. Open an issue pointing at the specific chapter and section.
 - **Prior art.** Pointers to redstone compilers, schematic formats, voxel and CAD place-and-route, or HDL synthesis are welcome in design discussions.
 
-English is the source of truth for the spec and documentation. Translations are welcome as clearly labelled secondary copies.
+English is the source of truth for the spec and documentation. Translations are welcome as clearly labelled secondary copies. Under `website/src/content/docs/`, English pages wrap at 100 columns, and Japanese pages keep each paragraph on one line, because Chromium renders a line break between two Japanese characters as a visible space.
 
 ## Getting set up
 
@@ -39,7 +39,7 @@ cargo test -p cairn-lang-core --bench lowering
 cargo test -p cairn-lang-redstone --bench place_and_route
 ```
 
-The last two run each bench once as an untimed test, since `--workspace` does not select bench targets. [Changing the release profile](#changing-the-release-profile) explains what they check.
+`--workspace` does not select bench targets, so the last two run each bench once, as an untimed test. [Changing the release profile](#changing-the-release-profile) explains what they check.
 
 CI also builds the API docs twice on Linux, with rustdoc's warnings fatal, because clippy does not see a doc link to a private item or to a path that no longer resolves. The first run covers the public surface, and it is the only one that flags a public doc linking to a private item. The second also covers the docs only a contributor reads:
 
@@ -207,7 +207,7 @@ Raising `rust-version` changes who can build the crates, so it is never a quiet 
 
 ## Changing the release profile
 
-`[profile.release]` in the workspace manifest is tuned for the size of the release archives, and its comments say why. Most of its settings cost only build time. `opt-level` is the exception: it trades away throughput in block-array lowering and in place-and-route, which is where a build spends its time.
+`[profile.release]` in the workspace manifest is tuned for the size of the release archives, and its comments say why. Most of its settings cost only build time. `opt-level` is the exception: a size-oriented level would shrink the archives but slow block-array lowering and place-and-route, which is where a build spends its time.
 
 Two benches measure that throughput: `lowering` in `cairn-lang-core` and `place_and_route` in `cairn-lang-redstone`. They call the passes in-process, since timing the CLI over an example would mostly time process startup. They also generate their sources instead of using an example, since a source that small goes through a pass faster than the timer can tell a change apart.
 
