@@ -5,15 +5,15 @@ title: "12. Ecosystem Interop and Reverse Conversion"
 ## 12.1 Forward direction
 
 Serializing the block-array IR emits `.nbt`, `.litematic`, `.schem`, and `.mcstructure`
-([Architecture](/spec/architecture/)). Each format is a serializer, and existing formats are additional
-backends around the pivot.
+([Architecture](/spec/architecture/)). Each format is only a serializer: an existing format is one
+more backend around the pivot.
 
 ## 12.2 Reverse direction: the compiler transliterates, an LLM lifts
 
-The compiler does not build voxel-to-"this is a wall" computer vision; that becomes unmaintainable.
-It implements a robust faithful transliteration, verification, and voxel-diff. The meaning lift is
-an LLM refactor of the raw-centric DSL. That dogfoods the language and matches P5's
-self-correction loop.
+The compiler does not look at voxels and decide "this is a wall": that kind of computer vision
+becomes unmaintainable. What it implements is robust, faithful transliteration, verification, and a
+voxel diff. Lifting the result to meaning is an LLM's job, done as a refactor of the raw-centric
+DSL. That dogfoods the language and matches P5's self-correction loop.
 
 ```text
 cairn import house.litematic --mode raw    → house.raw.crn     # fill/raw_block centric
@@ -30,9 +30,9 @@ E_DECOMPILE_DIFF: block IoU = 0.962 < threshold 0.985
   Suggested patch: edit window[id=front_windows] set repeat=4
 ```
 
-Convergence thresholds are block IoU ≥ 0.985, `state_accuracy` ≥ 0.995, and residual raw ≤ 5%. Exact
-match is not required; the residue stays explicit as
-`raw_fill id=residual_* origin=imported`.
+Convergence thresholds are block IoU ≥ 0.985, `state_accuracy` ≥ 0.995, and residual raw ≤ 5%. An
+exact match is not required, and the residue stays explicit as `raw_fill id=residual_*
+origin=imported`.
 
 ## 12.3 Three tiers of transliteration
 
@@ -45,17 +45,17 @@ Naming is the boundary between transliteration and lift.
 | **L2, semantically lifted** | fill → `wall`, repeat → `def` / `use`, concrete block → `mat_slot` + `theme`. | The LLM's ceiling. |
 
 ```
-# L1 — no naming, deterministic
+# L1: no naming, deterministic
 raw_repeat id=r03 count=5 step=3,0,0: raw_fill mat=@glass_pane from=0,2,0 to=1,3,0
-# L2 — the LLM names it and gives it meaning
+# L2: the LLM names it and gives it meaning
 window id=front_windows side=front mat_slot=glass repeat=5 ...
 ```
 
 ## 12.4 Import stamping and pitfalls
 
-On import, the `(edition, version)` pair and provenance are stamped onto the block-array IR —
-`.litematic` → java, `.mcstructure` → bedrock, `.schem` → java. This is what connects import to
-reproducibility ([Versioning and Editions](/spec/versioning-editions/)).
+On import, the `(edition, version)` pair and provenance are stamped onto the block-array IR
+(`.litematic` → java, `.mcstructure` → bedrock, `.schem` → java). This is what makes an import
+reproducible ([Versioning and Editions](/spec/versioning-editions/)).
 
 **Never present import as "recovering author intent."** That is the biggest pitfall. Only voxels
 and some regularity can be recovered, and the CLI says so with `W_SEMANTIC_LOSS`.
@@ -69,8 +69,8 @@ Other rules:
 - For entity-bearing schematics, do not mark success on block IoU alone. Keep a separate entity
   metric and extract only first-class entities ([Entities](/spec/entities/)). Chest contents and command
   blocks are dropped.
-- Huge schematics (over 48³, or whole villages) blow up LLM context if lifted at once. They need an
-  orchestration of chunk split → per-chunk L1 → per-part lift → join with `site`, over a streaming
-  parse.
+- Huge schematics (over 48³, or whole villages) do not fit in an LLM's context if lifted at once.
+  They need a streaming parse that drives chunk split → per-chunk L1 → per-part lift → join with
+  `site`.
 - Legacy numeric-ID `.schematic` files from before 1.13 flattening are not supported in v1
   ([Purpose and Scope](/spec/overview/)).

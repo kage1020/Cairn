@@ -7,9 +7,8 @@ Cairn ships a single release train under
 Because CalVer has no semver-style "major" axis, the **scope of what is and is not safe to break in
 a release** is set by this document rather than by version numbers.
 
-Every public surface area of the project sits in exactly one of three tiers: **Stable**,
-**Evolving**, or **Internal**. The tier sets the rules; the version number only records when
-something happened.
+Every public surface of the project sits in exactly one of three tiers: **Stable**, **Evolving**, or
+**Internal**. The tier sets the rules; the version number only records when something happened.
 
 ## C.1 Tier definitions
 
@@ -42,15 +41,15 @@ No deprecation window is promised.
 
 - Consumers SHOULD read the CHANGELOG before bumping the minor.
 - Patches MUST NOT introduce Evolving-tier breaks; only monthly minors may.
-- A surface MAY graduate from Evolving to Stable by being moved in this document plus
-  CHANGELOG; demotion (Stable → Evolving) is forbidden and constitutes a spec amendment.
+- A surface MAY graduate from Evolving to Stable by being moved in this document plus CHANGELOG.
+  Demotion (Stable → Evolving) is forbidden short of a spec amendment.
 
 Evolving surfaces:
 
 - Spec chapters or sections explicitly marked as draft (the
   [Open Issues](/spec/open-issues/) list and any section flagged "subject to change" in its prose).
 - New `cairn` subcommands during their first three monthly minors after introduction.
-- registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
+- The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving).
 - Tier-2 canonical material tokens (the implementation-level names that tier-1 names resolve
   to).
@@ -93,13 +92,12 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 | Tier-2 vocabulary, registry pack layout | Evolving | Evolving | Evolving | Evolving | Evolving |
 | Rust API (every crate) | Internal | Internal | Internal | Internal | Internal |
 
-Reading the table: **the column where a row first turns Stable is the soft commitment.** Earlier
-columns being Evolving means the project reserves the right to change those surfaces without a
-deprecation window until that column lands.
+Reading the table: **the column where a row first turns Stable is the soft commitment.** Until that
+milestone lands, the project reserves the right to change the surface without a deprecation window.
 
-The Rust API row never graduates within the planned roadmap. Cairn is consumed through the
-`cairn` CLI binary and the language server, not as a Rust library. If a downstream consumer
-wants a stable embedding API the project will treat that as a new, separately-tracked surface.
+The Rust API row never graduates within the planned roadmap. Cairn is consumed through the `cairn`
+CLI binary and the language server, not as a Rust library. If a downstream consumer wants a stable
+embedding API, the project will treat that as a new, separately tracked surface.
 
 ## C.3 How a break is communicated
 

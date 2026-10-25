@@ -13,8 +13,8 @@ that. The name is the thesis.
 
 ## What it solves
 
-Minecraft's NBT/SNBT is inefficient for an AI to read and write. It is binary, and it is one record
-per block. It is also pitched at the wrong granularity: people and AI reason about walls, roofs, and
+Minecraft's NBT/SNBT is inefficient for an AI to read and write. It is binary, with one record per
+block. It also works at the wrong granularity: people and AI reason about walls, roofs, and
 symmetry. Cairn sits between an AI's general architectural knowledge and Minecraft's voxel world.
 
 The portable artifact is always the Cairn source. Emitted NBT and schematics are per-target build
@@ -44,11 +44,13 @@ See [Purpose and Scope](/spec/overview/) for the normative wording.
 | [Developer Guide](/development/) | The Rust workspace, how the crates split, and how to land changes. |
 | [Playground](/playground/) | A placeholder for the browser-hosted compiler. Tracks `cairn-lang-wasm`. |
 
-Every page of this site but the home page and the playground also ships inside `cairn`, as the
-release you installed has it: `cairn docs` lists the pages and `cairn docs spec/syntax` prints one as
-Markdown, with no network. For a language model, [`/llms.txt`](/llms.txt) indexes the site, the same
-pages are served as Markdown at their URL followed by `index.md`, and
-[`/llms-full.txt`](/llms-full.txt) is every English one in one file.
+Every page of this site except the home page and the playground also ships inside `cairn`, as it
+stood in the release you installed. `cairn docs` lists the pages, and `cairn docs spec/syntax`
+prints one as Markdown, with no network needed.
+
+For language models, [`/llms.txt`](/llms.txt) indexes the site. Each page is also served as
+Markdown at its URL followed by `index.md`, and [`/llms-full.txt`](/llms-full.txt) holds every
+English page in one file.
 
 ## Status
 

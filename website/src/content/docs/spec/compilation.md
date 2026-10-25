@@ -19,9 +19,9 @@ raw         escape hatch
 ```
 
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
-what a member means — nor, per [§4.8](#48-within-phase-conflicts-and-the-palette), what the artifact
-is: permuting two members that share no voxel leaves the whole `BlockArray` equal, palette
-numbering included, and not only the voxels.
+what a member means. Nor does it decide what the artifact is
+([§4.8](#48-within-phase-conflicts-and-the-palette)): permuting two members that share no voxel
+leaves the whole `BlockArray` equal, palette numbering included, not only the voxels.
 
 `circuit` marks a routing region and writes no voxel, so it belongs to no phase. The three
 `logic_*` phases follow `fixtures` because port coordinates are not fixed until sensors and
@@ -62,8 +62,8 @@ below. Their layouts are this section and the three that follow. `overhang=` is 
 kind; `slope_to=` belongs to `shed` alone, and written on any other kind it is read by nothing and
 reported as `W_IGNORED_ARGUMENT` ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
-**Material.** A sloped roof takes its material from `mat_slot=` and it MUST be in the stair family
-— an id whose path ends in `_stairs`. The geometry attaches `facing`, `half`, and `shape` to
+**Material.** A sloped roof takes its material from `mat_slot=`, and it MUST be in the stair family
+(an id whose path ends in `_stairs`). The geometry attaches `facing`, `half`, and `shape` to
 whatever it paints, and a whole block cannot carry them. A binding outside the family is
 `E_INCOMPATIBLE_MATERIAL` and stops the build. With no `mat_slot=` at all the roof falls back to
 `minecraft:spruce_stairs`. The registry pack's four roof species (`roof.dark_wood`,
@@ -77,9 +77,9 @@ Those arguments are `facing=out | in`, `half=top | bottom` and
 `shape=straight | outer_left | outer_right`, each a bare identifier, defaulting to `out`, `top` and
 `straight`. An identifier outside the list is not yet supported, and the stair is deferred with
 `W_DEFERRED_MEMBER`. A value of another shape (`half="bottom"`, `facing=1`) is an unreadable value:
-the stair is built with that key's default, and the value is reported as `W_IGNORED_ARGUMENT` —
-also when the stair is refused for another reason, with a note saying it is not built either way
-([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+the stair is built with that key's default, and the value is reported as `W_IGNORED_ARGUMENT`.
+The value is reported even when the stair is refused for another reason, with a note saying the
+stair is not built either way ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
 
 **Ridge axis.** The ridge runs along the long horizontal axis of the footprint. A square footprint
 (`size=WxW`) ties to `x`, giving an east-west ridge.
@@ -245,10 +245,10 @@ makes the order independent of how a state literal happens to spell its properti
 `@oak_stairs[half=top,facing=north]` and `@oak_stairs[facing=north,half=top]` name one block, and
 which of them a theme wrote first must not move a slot.
 
-Slot `0` is the one exception to "the blocks that body contains": air holds it whatever happens, so a
-fully paved volume still carries the entry. A slot that was never painted at all is the other, and it
-is kept on purpose — dropping it would delete the only evidence a released build carries that a
-generator interned a material for geometry it does not emit.
+"The blocks that body contains" has two exceptions. Slot `0` is one: air holds it whatever happens,
+so a fully paved volume still carries the entry. A slot that was never painted at all is the other,
+and it is kept on purpose. Dropping it would delete the only evidence a released build carries that
+a generator interned a material for geometry it does not emit.
 
 Two rules follow, and both exist because the numbering reaches the `.nbt`, `cairn info`'s per-entry
 rows, and `resolved_ir_hash`:
@@ -257,9 +257,9 @@ rows, and `resolved_ir_hash`:
   onto the gap. Otherwise two sources differing only in which member lost would produce different
   artifacts for the same build.
 - Two members that share no voxel do not order each other. Nothing about the finished grid depends
-  on which of their lines came first, so nothing about the artifact may either — which is what §4.1
-  opens by promising, and it is a claim about the bytes and not only about the voxels. Sorting is
-  what makes it true: the palette is derived from the finished grid alone, so any permutation of the
+  on which of their lines came first, so nothing about the artifact may either. That is the promise
+  §4.1 opens with, and it is a claim about the bytes, not only about the voxels. Sorting is what
+  makes it true: the palette is derived from the finished grid alone, so any permutation of the
   source that leaves the grid alone leaves the whole `BlockArray` alone.
 
 The sort is over the resolved state, so it is stable across editions and versions in the sense that
@@ -267,7 +267,7 @@ matters: it does not consult source spans, member ids, phases, or paint order. I
 that two targets agree on the palette, because two targets need not agree on the ids in it.
 
 The `.mcstructure` palette is written from this one and stays a set. Translating to Bedrock can map
-several entries to one Bedrock block — stairs that differ only in `shape`, once `shape` is dropped —
-and those share the first one's slot, so air stays at `0` and no Bedrock block is listed twice.
+several entries to one Bedrock block (stairs that differ only in `shape`, once `shape` is dropped).
+Those entries share the first one's slot, so air stays at `0` and no Bedrock block is listed twice.
 
 A walkway's array is laid by the `connect` pass rather than by the phases, and is not covered here.

@@ -2,9 +2,9 @@
 title: "13. Evaluation Framework"
 ---
 
-The quality of the spec is iterated quantitatively, with a headless geometry simulator independent
-of Minecraft itself, rather than by taste. Vocabulary and syntax debates drift into preference, so
-the evaluation bench is fixed first.
+The spec improves by measurement, not taste, using a headless geometry simulator that does not
+depend on Minecraft itself. Vocabulary and syntax debates drift into preference, so the evaluation
+bench comes first.
 
 ```text
 test prompt set (~50)
@@ -24,9 +24,9 @@ test prompt set (~50)
 
 ## 13.2 Reverse-conversion auxiliary metrics
 
-Reverse-conversion quality ([Ecosystem Interop](/spec/ecosystem-interop/)) is removed from the primary
-evaluation and treated as auxiliary, consistent with the lossy approach. What it measures is not
-"did it reproduce the shape" but **"did it become editable DSL"**.
+Reverse-conversion quality ([Ecosystem Interop](/spec/ecosystem-interop/)) is kept out of the
+primary evaluation and treated as auxiliary, consistent with the lossy approach. What it measures is
+not "did it reproduce the shape" but **"did it become editable DSL"**.
 
 - `block_iou`, `state_accuracy` (facing / shape / waterlogged match), `entity_accuracy` (frame,
   sign, villager, display retention).
@@ -39,10 +39,9 @@ evaluation and treated as auxiliary, consistent with the lossy approach. What it
 
 ## 13.3 Operating rule
 
-Vocabulary additions and syntax changes are adopted only in the direction that improves these
-metrics, especially fix convergence rate and edit stability. One experiment settles most syntax and
-vocabulary questions on real data: give the model only the spec, have it generate, and see where
-the errors are.
+A vocabulary addition or syntax change is adopted only if it improves these metrics, especially fix
+convergence rate and edit stability. One experiment settles most syntax and vocabulary questions on
+real data: give the model only the spec, have it generate, and see where the errors are.
 
 The reverse-conversion harness doubles as an engine that grows the `def` and `theme` standard
 library from a community schematic corpus:
