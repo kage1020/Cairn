@@ -1,33 +1,28 @@
 ---
 title: プレイグラウンド
-description: cairn-lang-wasm 上で動くブラウザ内 Cairn コンパイラ。近日公開予定。
+description: cairn-lang-wasm で動く、ブラウザ上の Cairn コンパイラ。近日公開予定です。
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside type="caution" title="未実装">
-リファレンスコンパイラはまだスケルトンです。このページは
-[`cairn-lang-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-lang-wasm) バインディングが揃ったら
-ブラウザ内プレイグラウンドになる場所のプレースホルダーです。下の編集枠は装飾用で、いま動かせる
-コンパイラは存在しません。
+リファレンスコンパイラはまだ骨組みの段階です。このページは、[`cairn-lang-wasm`](https://github.com/kage1020/Cairn/tree/main/crates/cairn-lang-wasm) のバインディングが揃ったときにブラウザ上のプレイグラウンドを置くための場所です。まだコンパイルできるものがないので、下の編集欄は見た目だけのものです。
 </Aside>
 
-## ここに最終的に乗るもの
+## このページで最終的にできること
 
-クライアントサイド完結の二面構成 Cairn 作業台:
+すべてブラウザ内で完結する、2 ペイン構成の Cairn の作業台になる予定です。
 
-- 左に `.crn` エディタ。シンタックスハイライトと Cairn LSP のインライン診断。
-- ターゲット選択 (`--edition java|bedrock`、`--target <version>`) とコンパイルボタン。
-- 右ペインは次のいずれかを切り替え:
-  - **Resolved IR** — フェーズ評価後の block-array IR。
-  - **Diagnostics** — CLI と LSP と同じ「何が間違っているか / 有効な候補 / 推奨される修正」の lint
-    出力 ([Lint](/ja/spec/lint/))。
-  - **Bytes** — エディションごとに吐く NBT / schematic のバイト列。
+- 左側に `.crn` エディタ。シンタックスハイライトと、Cairn LSP による診断をその場で表示します。
+- ターゲットの選択 (`--edition java|bedrock`、`--target <version>`) とコンパイルボタン。
+- 右側のペインは、次の表示を切り替えられます。
+  - **Resolved IR**: フェーズ評価を終えた block-array IR。
+  - **Diagnostics**: `cairn` や LSP と同じ「何が誤りか / 有効な候補 / 推奨する修正」の形の lint 出力 ([Lint](/ja/spec/lint/))。
+  - **Bytes**: コンパイラがエディションごとに出力する NBT / schematic のバイト列。
 
-リフトループ ([エコシステム連携](/ja/spec/ecosystem-interop/)) もここに乗ります。`.litematic` や
-`.mcstructure` をドロップすると、raw 中心 `.crn` と元データに対する voxel diff が出てきます。
+[エコシステム連携](/ja/spec/ecosystem-interop/)で説明する引き上げのループも、ここで使えるようにします。`.litematic` や `.mcstructure` のファイルをドロップすると、コンパイラが raw 主体の `.crn` と、元データとのボクセル差分を表示します。
 
-## いま読めるサンプル
+## それまでの間に読めるサンプル
 
 ```text
 @cairn 2026.06
@@ -45,5 +40,4 @@ struct cottage size=9x7
   roof   kind=gable mat_slot=roof overhang=1
 ```
 
-進捗は [Cairn GitHub リポジトリ](https://github.com/kage1020/Cairn) で追跡できます。
-`cairn-lang-wasm` が `compile()` バインディングを露出した瞬間にプレイグラウンドが解禁されます。
+進捗は [Cairn の GitHub リポジトリ](https://github.com/kage1020/Cairn)で確認できます。`cairn-lang-wasm` が `compile()` のバインディングを公開したら、すぐにプレイグラウンドを使えるようにします。
