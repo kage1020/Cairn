@@ -14,7 +14,7 @@ use crate::report::FailureReport;
 #[command(
     name = "cairn",
     version = CAIRN_VERSION,
-    about = "Compile .crn build descriptions to Minecraft NBT and back",
+    about = "Compile .crn build descriptions to Minecraft structure files",
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -151,12 +151,12 @@ pub(crate) enum Command {
     #[command(
         long_about = "Lower a .crn source file all the way to the block-array IR and print the \
             result. A debugging surface for the universal voxel pivot; `cairn compile` writes the \
-            same IR out as a Java `.nbt` artifact. Lowering warnings (deferred members, themeless \
-            scopes, abstract tokens) print to stderr but do not affect the exit code. Exits 0 on \
-            success, 1 on a parse failure, on any `Error`-severity diagnostic \
-            (`E_UNKNOWN_ABSTRACT_TOKEN` among them; `E_UNKNOWN_ID` is not, since nothing here pins \
-            a target to check ids against), or on an I/O error, and 2 when the file cannot be \
-            located"
+            same IR out as a `.nbt` or `.mcstructure` file, per edition. Lowering warnings \
+            (deferred members, themeless scopes, abstract tokens) print to stderr but do not \
+            affect the exit code. Exits 0 on success, 1 on a parse failure, on any \
+            `Error`-severity diagnostic (`E_UNKNOWN_ABSTRACT_TOKEN` among them; `E_UNKNOWN_ID` is \
+            not, since nothing here pins a target to check ids against), or on an I/O error, and 2 \
+            when the file cannot be located"
     )]
     Lower {
         /// Path to the .crn file to lower.
@@ -205,8 +205,9 @@ pub(crate) enum Command {
         /// Output directory for the structure files; defaults to the source file's directory.
         #[arg(
             long,
-            long_help = "Output directory for the generated `.nbt` files. Created if missing. \
-                Defaults to the source file's parent directory"
+            long_help = "Output directory for the generated structure files (`.nbt` for Java, \
+                `.mcstructure` for Bedrock). Created if missing. Defaults to the source file's \
+                parent directory"
         )]
         out: Option<PathBuf>,
         /// Lockfile path; defaults to `<source>.lock` next to the source.
@@ -299,10 +300,11 @@ pub(crate) enum Command {
             included, as can a URL of the site: `cairn docs /spec/#two-version-axes` prints the \
             section that fragment opens.\n\n\
             TITLE names a part of the page the way `--help` cites the spec: a heading without its \
-            number, a term the page defines in bold, or the page's own title. The citation \
-            `spec/lint` \"Error vs warning\" reads as `cairn docs spec/lint \"Error vs warning\"`. \
-            A heading or the page's title is also taken with its number, and a title more than \
-            one part has is refused with each of them listed.\n\n\
+            number, a term a list item on the page defines in bold (`- **Term.**`), or the \
+            page's own title. The citation `spec/lint` \"Error vs warning\" reads as \
+            `cairn docs spec/lint \"Error vs warning\"`. A heading or the page's title is also \
+            taken with its number, and a title more than one part has is refused with each of \
+            them listed.\n\n\
             Exits 0 when the list, the page or its part is printed, and 2 when PAGE or TITLE \
             names nothing this binary carries, TITLE names more than one part, or a `#fragment` \
             comes with TITLE or `--toc`."
@@ -324,12 +326,8 @@ fn edition_parser() -> impl TypedValueParser<Value = Edition> {
     PossibleValuesParser::new([Edition::Java, Edition::Bedrock].map(|edition| {
         // Exhaustive, so an edition core adds stops the build here until it is listed.
         let help = match edition {
-            Edition::Java => "Java Edition. Emits a gzip-compressed vanilla `.nbt` structure",
-            Edition::Bedrock => {
-                "Bedrock Edition. Emits an uncompressed little-endian `.mcstructure`; the stair \
-                 family's blockstate is mapped to Bedrock `states` and unrepresentable intent \
-                 (stair `shape`) degrades with a `W_INTENT_DEGRADED` warning"
-            }
+            Edition::Java => "Java Edition",
+            Edition::Bedrock => "Bedrock Edition",
         };
         PossibleValue::new(edition.as_str()).help(help)
     }))
