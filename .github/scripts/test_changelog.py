@@ -143,6 +143,11 @@ class CheckTest(Case):
         self.fresh()
         self.assertRefused(self.check_one(".gitkeep", ""), "is named `<slug>.<kind>.md`")
 
+    def test_a_directory_is_refused(self) -> None:
+        (self.repo.dir / "changelog.d/more").mkdir()
+        self.repo.write("changelog.d/more/x.fixed.md", GOOD)
+        self.assertRefused(self.repo.run("check"), "directly in changelog.d/")
+
     def test_a_leading_blank_line_is_refused(self) -> None:
         self.assertRefused(self.check_one("x.breaking.md", "\n" + GOOD), "on its first line")
 
@@ -204,6 +209,14 @@ class PrTest(Case):
         self.repo.git("checkout", "-q", "-b", "other")
         self.repo.write("changelog.d/y.fixed.md", GOOD)
         self.assertPasses(self.repo.pr("fix(core): y", head="other"))
+
+    def test_a_file_in_a_directory_under_changelog_d_is_refused(self) -> None:
+        for name in ("x.fixed.md", "README.md"):
+            with self.subTest(name=name):
+                self.fresh()
+                (self.repo.dir / "changelog.d/more").mkdir()
+                self.repo.write(f"changelog.d/more/{name}", GOOD)
+                self.assertRefused(self.repo.pr("fix(core): x"), "directly in changelog.d/")
 
     def test_all_problems_are_reported_together(self) -> None:
         self.repo.write("changelog.d/x.breaking.md", "- #12\n")

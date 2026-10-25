@@ -24,9 +24,10 @@ those and `-`, and no other fragment has it; a few words of what changed is enou
 | `performance`  | `Performance`      | a `perf` PR                                                     |
 | `build`        | `Build`            | a `build` PR, such as raising `rust-version`                    |
 
-`added` through `build` are the five groups `commit_parsers` in
-[release-plz.toml](../release-plz.toml) does not skip, so the fragment lands beside the line
-release-plz writes from the PR's title. `breaking` and `deprecations` are the two sections
+`added` through `build` are the groups `commit_parsers` in [release-plz.toml](../release-plz.toml)
+writes for `feat`, `refactor`, `fix`, `perf` and `build` titles, so the fragment lands beside the
+line release-plz writes from the PR's title. The one other group it keeps, `Other`, catches a title
+of no known type and has no kind of its own. `breaking` and `deprecations` are the two sections
 [compatibility "How a break is communicated"](https://cairn.kage1020.com/spec/compatibility/)
 requires. A PR can add more than one fragment, one per kind.
 
@@ -51,7 +52,8 @@ it. Say what changed and why rather than restating the PR title, which release-p
 The `Changelog` workflow runs `changelog.py pr` on every PR. It reports, all at once:
 
 - a fragment the PR adds or edits whose name is not `<slug>.<kind>.md` with a kind from the table
-  (a stray file such as `.gitkeep` or a directory counts; a `README*.md` does not);
+  (a stray file such as `.gitkeep` counts, and so does any file in a directory under `changelog.d/`;
+  a `README.md` or `README.<lang>.md` directly inside it does not);
 - a fragment that is empty, does not start on its first line with a `- ` item, has an item with
   nothing after its scope, or has a line that is neither an item nor indented under one;
 - an issue or PR number, as `#123` or as a link to an issue or PR. Say what changed, so a reader

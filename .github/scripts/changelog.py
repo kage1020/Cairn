@@ -65,6 +65,10 @@ def fragments() -> list[Path]:
 
 def check_fragment(path: Path) -> bool:
     """Report what is wrong with one fragment; true when nothing is."""
+    if path.parent != FRAGMENT_DIR or path.is_dir():
+        error(path, None, "a fragment is a file directly in changelog.d/, not in a directory "
+              "under it")
+        return False
     match = FRAGMENT_NAME.match(path.name)
     if not path.is_file() or not match:
         error(path, None, "a fragment is named `<slug>.<kind>.md`: the slug starts with a "
@@ -159,7 +163,7 @@ def pr(args: argparse.Namespace) -> int:
     touched = [
         ROOT / name for name, code in status.items()
         if code in "AM" and name.startswith("changelog.d/")
-        and not README_NAME.match(Path(name).name)
+        and not (name.count("/") == 1 and README_NAME.match(Path(name).name))
     ]
     ok = all([check_fragment(path) for path in touched])
 
