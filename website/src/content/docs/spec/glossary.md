@@ -86,6 +86,10 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
 - **Target axes.** `(edition, version)`: the only layer that knows them is the backend. The DSL
   source never names them. `--edition` is required, `--target` alone is forbidden. See
   [compilation §4.2](/spec/compilation/#42-target-axes), [versioning-editions](/spec/versioning-editions/).
+- **Lowering.** The pass that turns a scope's members into the block-array IR: walls, openings,
+  roofs, walkways, and materials become a palette and an index array. `cairn compile`, `cairn lower`,
+  `cairn info`, and `cairn check` all run it. See
+  [architecture §3.1](/spec/architecture/#31-the-block-array-ir-is-the-universal-pivot).
 - **DataVersion.** Mojang's monotonically increasing integer key for a Java version. Cairn uses it
   as the canonical ordering key so the semver→date-based version transition does not break
   `since/until` or `@requires`. See

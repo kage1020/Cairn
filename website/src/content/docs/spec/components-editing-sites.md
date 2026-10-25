@@ -84,22 +84,24 @@ Combining selectors, or using `at=` with anything other than `origin`, is
 
 `gap=` belongs to the two relative selectors. An `at=origin` row is anchored absolutely and reads
 no distance, so a `gap=` written beside it is read by nothing and reported as `W_IGNORED_ARGUMENT`
-([Lint §11.3](/spec/lint/#113-error-vs-warning)) — the argument is real, and which of the two the author
-meant is theirs to say.
+([Lint §11.3](/spec/lint/#113-error-vs-warning)). The argument is real, and which of the two the
+author meant is theirs to say.
 
 On a relative row, `gap=` takes a non-negative integer, the number of cells left between the two
 bodies, so neither reaches into the other. A negative value does not parse: `gap=-3` is `E_PARSE`,
 since no `key=` value starts with `-`. Any other value (`gap=wide`, `gap="4"`) is an unreadable
-value: the row is placed as `gap=0` places it, and the value is reported as `W_IGNORED_ARGUMENT`. An
-origin is recorded as a 32-bit signed coordinate, so a row whose origin, or the far edge of whose
+value: the row is placed as `gap=0` places it, and the value is reported as `W_IGNORED_ARGUMENT`.
+
+An origin is recorded as a 32-bit signed coordinate. A row whose origin, or the far edge of whose
 body, works out past that range is not placed at all and is reported as `W_DEFERRED_MEMBER`, as is
 every row placed relative to it. It is refused rather than clamped to the edge: a clamped origin is
 not the one the source asks for, two rows clamped to one edge land on one coordinate, and a cell
-past the range has no coordinate at all. Every row refused for its origin or its far edge, including
-one refused because the row it is placed relative to was, still reports what its `def` body raises —
-an `E_INCOMPATIBLE_MATERIAL` or `W_NO_THEME_BOUND` is a defect in the `def` or the theme wherever
-the row lands — and an unreadable `gap=` on any row that is not placed is reported with a note
-saying so.
+past the range has no coordinate at all.
+
+Every row refused for its origin or its far edge still reports what its `def` body raises, and so
+does one refused because the row it is placed relative to was. An `E_INCOMPATIBLE_MATERIAL` or
+`W_NO_THEME_BOUND` is a defect in the `def` or the theme wherever the row lands. An unreadable
+`gap=` on any row that is not placed is reported with a note saying so.
 
 ### 9.3.3 Cross-scope references
 
@@ -123,14 +125,19 @@ instead.
 ### 9.3.4 Output naming
 
 The compiler writes one `.nbt` per `place`, named after the `id=` (`home1.nbt`, `home2.nbt`), directly
-into the output directory. An id carrying `/` or `\` would name a path rather than a file, one
-carrying a character a Windows file name cannot hold could not be written there, and one spelling
-a device name Windows reserves, such as `CON` or `NUL`, may be opened there as the device, so each
-is `E_INVALID_PLACE_ID` ([Lint](/spec/lint/)). The site is not part of the name, and the same
-directory holds every `struct`, written under its own name (`E_INVALID_STRUCT_NAME` when that name
-spells such a device), and every walkway ([§9.3.5](#935-ports-and-connect)). Two artifacts that
-would share a file name, compared ignoring case, are `E_OUTPUT_NAME_COLLISION`: a `place` named
-after a `struct`, or one `id=` placed in two sites, is refused rather than written over the other.
+into the output directory. These ids are each `E_INVALID_PLACE_ID` ([Lint](/spec/lint/)):
+
+- one carrying `/` or `\`, which would name a path rather than a file;
+- one carrying a character a Windows file name cannot hold, which could not be written there;
+- one spelling a device name Windows reserves, such as `CON` or `NUL`, which may be opened there as
+  the device.
+
+The site is not part of the name. The same directory holds every `struct`, written under its own
+name (`E_INVALID_STRUCT_NAME` when that name spells such a device), and every walkway
+([§9.3.5](#935-ports-and-connect)). Two artifacts that would share a file name, compared ignoring
+case, are `E_OUTPUT_NAME_COLLISION`: a `place` named after a `struct`, or one `id=` placed in two
+sites, is refused rather than written over the other.
+
 The world-space origin and the `(site, def, theme)` provenance of every placement is recorded in
 `build.cairn.lock` under `placements`, so a downstream consumer can rebuild the layout without
 re-running the coordinate solver.
@@ -172,32 +179,34 @@ every row of y … y + size.h - 1 in one course    # window, vertical
 ```
 
 Those are the rules a port reads for itself. It also anchors only on an opening the openings pass
-actually cut: a `window` deferred by an argument only the cut reads — `repeat=` or `step=`,
-including a `repeat=` above 1 written beside `sym=true` or an unreadable `sym=` — or whose own
-`mat_slot=` resolves to no block leaves its wall standing, and its port is refused with it. A
+actually cut. A `window` deferred by an argument only the cut reads (`repeat=` or `step=`,
+including a `repeat=` above 1 written beside `sym=true` or an unreadable `sym=`), or whose own
+`mat_slot=` resolves to no block, leaves its wall standing, and its port is refused with it. A
 `sym=true` window whose mirror is skipped is reported with `W_DEFERRED_MEMBER` for the mirror, but
 its own rectangle is cut, so its port anchors.
 
-A `walls height=H` member under `level y=N` paints world rows `N + 1 … N + H` — one above the
-level's base row, which is where that level's floor slab would go, though a level-scoped `floor` is
-deferred today and the struct's own slab owns row `0`. Courses that touch merge, so `walls height=5` plus a `level y=5 walls
-height=4` is one wall from row 1 to row 9 and a window spanning the seam is inside it; courses with
-air between them do not, and a window hung in the gap is outside every one of them. A `door` member
-of the `def` body opens at row `1`, so a placement whose only masonry is a `level y=6 walls` is a
-wall the doorway never reaches — the same body's `window` is refused for the same reason.
+A `walls height=H` member under `level y=N` paints world rows `N + 1 … N + H`, starting one above
+the level's base row. The base row is where that level's floor slab would go, though a level-scoped
+`floor` is deferred today and the struct's own slab owns row `0`. Courses that touch merge, so
+`walls height=5` plus a `level y=5 walls height=4` is one wall from row 1 to row 9, and a window
+spanning the seam is inside it. Courses with air between them do not merge, and a window hung in
+the gap is outside every one of them. A `door` member of the `def` body opens at row `1`, so a
+placement whose only masonry is a `level y=6 walls` is a wall the doorway never reaches. The same
+body's `window` is refused for the same reason.
 
-The rows a port is judged against are the rows the placement **painted**, which is the same value
-the openings pass cut against — not a second reading of the `def`. A `walls` whose `mat_slot=` does
-not resolve paints nothing, so the cut is deferred and the port is refused with it; a `walls`
-declared inside a `level` paints its rows, so the cut happens and the port stands on it. A port
-that cannot be placed drops its row with a `W_DEFERRED_MEMBER` carrying one note per refused
+The rows a port is judged against are the rows the placement **painted**. That is the same value
+the openings pass cut against, not a second reading of the `def`. A `walls` whose `mat_slot=` does
+not resolve paints nothing, so the cut is deferred and the port is refused with it. A `walls`
+declared inside a `level` paints its rows, so the cut happens and the port stands on it.
+
+A port that cannot be placed drops its row with a `W_DEFERRED_MEMBER` carrying one note per refused
 endpoint, naming the one rule that endpoint broke: a role that cannot anchor a port, the `side=` or
 `at=` it was written with, the window argument it lacks or wrote in the wrong shape, how far its
 rectangle runs past the wall, which rows the masonry does and does not cover, or that the openings
-pass did not cut it. The note points at the member's line; when the fault is `side=`, an argument or
-the masonry, that line carries the member's own finding too — worded from the same reading of the
-argument, so the two do not disagree about what was written. A port pushed past the coordinate range by its `place`
-has no member line to point at and says so on the row alone.
+pass did not cut it. The note points at the member's line. When the fault is `side=`, an argument or
+the masonry, that line carries the member's own finding too, worded from the same reading of the
+argument, so the two never disagree about what was written. A port pushed past the coordinate range
+by its `place` has no member line to point at and says so on the row alone.
 
 **How the path runs.** A Manhattan L, x-axis leg then z-axis leg, at the two ports' shared Y. 3D
 path search over staircases and multi-level walkways is out of scope by design.
@@ -207,8 +216,13 @@ detour: the shortest route around the obstacle, and among equal-length routes th
 fewest turns, with deterministic tie-breaking so the same source always lays the same strip.
 
 The row falls back to the straight L, with the colliding cells skipped, only when no unobstructed
-route exists at all: a port buried under another placement's floor or under a block its own
-placement lays on the port cell, a fully enclosed target, or a search past the router's area cap.
+route exists at all:
+
+- a port is buried under another placement's floor, or under a block its own placement lays on the
+  port cell;
+- the target is fully enclosed;
+- the search goes past the router's area cap.
+
 The router searches the box spanning both ports and every placement floor on the walk plane, so
 the cap can be reached by a distant pair of ports or by a widely spread floor plan.
 
@@ -226,19 +240,25 @@ need the pack's materials catalog and surface `W_ABSTRACT_TOKEN_DEFERRED` or
 ports (`hamlet_walkway_home1_entry__home2_entry.nbt`) and records a `walkways:` entry in the lockfile
 with the world origin, dims, and resolved path material.
 
-A row that lays no block has lost a walkway the source asked for: an endpoint whose `place` was
-refused upstream (`W_DEFERRED_MEMBER`), a port that cannot be placed, an id the walkway's name
-cannot carry, a path material that does not resolve, a straight L that is itself past the router's
-search-area cap, or a straight L whose every cell overlaps a placement, which leaves the strip all
-air. `cairn compile` then refuses the build with `E_PARTIAL_BUILD`, as it does for a lost scope, and
+A row that lays no block has lost a walkway the source asked for. That happens for:
+
+- an endpoint whose `place` was refused upstream (`W_DEFERRED_MEMBER`);
+- a port that cannot be placed;
+- an id the walkway's name cannot carry;
+- a path material that does not resolve;
+- a straight L that is itself past the router's search-area cap;
+- a straight L whose every cell overlaps a placement, which leaves the strip all air.
+
+`cairn compile` then refuses the build with `E_PARTIAL_BUILD`, as it does for a lost scope, and
 `cairn check --edition E --target V` refuses with it too ([Lint](/spec/lint/)). A `cairn check`
-without `--target` reports the findings behind the loss that need no target, and not the loss
+without `--target` reports the findings behind the loss that need no target, but not the loss
 itself ([Lint §11.3](/spec/lint/#113-error-vs-warning)). The loss is named
-`site::SITE::FROM ↔ TO`, with the ports as the row wrote them. A `W_DUPLICATE_WALKWAY` row loses
-nothing, since the earlier row laid its pair, and two rows naming one pair that neither laid are one
-loss. One mistake can cost more than one loss: a `place` whose def has no `size=` is a lost scope,
-and every walkway with an endpoint on it is lost too, so each adds a note to `E_PARTIAL_BUILD` and
-one to the count of scopes that did not lower.
+`site::SITE::FROM ↔ TO`, with the ports as the row wrote them.
+
+A `W_DUPLICATE_WALKWAY` row loses nothing, since the earlier row laid its pair, and two rows naming
+one pair that neither laid are one loss. One mistake can cost more than one loss: a `place` whose
+def has no `size=` is a lost scope, and every walkway with an endpoint on it is lost too, so each
+adds a note to `E_PARTIAL_BUILD` and one to the count of scopes that did not lower.
 
 **Diagnostics.**
 

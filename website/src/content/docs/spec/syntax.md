@@ -60,12 +60,12 @@ The literal's properties and values are not yet checked against the target: `E_S
 
 Besides that literal, the one place a comma carries meaning is the input list of
 `assert truth(...)`, where it separates the signals whose count the row width is checked against. A
-row writes one character per input signal — `0`, `1`, or `-` — so `truth(a, b -> out)` takes rows
+row writes one character per input signal (`0`, `1`, or `-`), so `truth(a, b -> out)` takes rows
 two characters wide and refuses `{ 2->0 }` or `{ 0->0 }`.
 
 `-` is a **don't-care**: the row means every value of that input, so `0- -> 1` says what `00->1` and
 `01->1` say together. It is a shorthand for those rows and not a construct of its own, which is why
-two rows may not both stand for one combination — see the table below.
+two rows may not both stand for one combination (see the table below).
 
 `-` and `->` share a character, and the lexer takes the arrow whenever it can. A row whose last
 input is a don't-care is therefore written `11--> 0` or `11- -> 0`; both are the same three-wide
@@ -184,8 +184,8 @@ headers. It is optional and exists as provenance, so a future compiler can parse
 No pass branches on the value, but it is read: `YYYY.M` or `YYYY.M.PATCH`, with a four-digit year
 and a month `1 … 12`. A leading zero on the month is accepted, so `2026.06` and `2026.6` are one
 version. Anything else is `W_INVALID_CAIRN_VERSION`, and a version later than the compiler reading
-it is `W_FUTURE_CAIRN_VERSION` — provenance that cannot be read by a later compiler is not doing
-the job the header exists for.
+it is `W_FUTURE_CAIRN_VERSION`: provenance that a later compiler cannot read is not doing the job
+the header exists for.
 
 **`@requires`** is a capability floor. Its expression is an optional edition, the subject
 `version`, the operator `>=`, and a version label, with whitespace optional between them, so
@@ -203,18 +203,18 @@ worse than an absent one, because a reader will still believe it.
 The edition is there because Java releases run `1.20.4 / 1.21 / 1.21.4` and Bedrock `1.21.0 /
 1.21.40 / 1.21.60`: `1.21.4` is Java's newest release and names no Bedrock release at all. A label
 is dot-separated components that each begin with a digit and carry only letters and digits, with an
-optional `-` and a pre-release tag of the same — `1.21.4`, `1.21.4-rc1`, and `24w14a` are all
-labels. Which of them the *target edition* can order is not a syntax question and is not answered
-here. See [Versioning and Editions](/spec/versioning-editions/).
+optional `-` and a pre-release tag of dot-separated letters and digits. `1.21.4`, `1.21.4-rc1`, and
+`24w14a` are all labels. Which of them the *target edition* can order is not a syntax question and
+is not answered here. See [Versioning and Editions](/spec/versioning-editions/).
 
 **`@intended_targets`** says which Minecraft versions the file was designed for. It is not a claim
 of being verified. That record lives only in the lock.
 
-A hint is still weighed against the floor beside it. A file whose `@requires` refuses every version
-its `@intended_targets` names that the target edition can build states an intention the compiler
-will refuse the moment anyone acts on it, and that is `E_INTENDED_TARGET_CAP`; a list only partly
-below the floor is `W_INTENDED_TARGET_CAP`, and a version the target edition cannot build at all is
-`W_INTENDED_TARGET_UNSUPPORTED`. See
+A hint is still weighed against the floor beside it. Take the versions a file's
+`@intended_targets` names that the target edition can build. If its `@requires` refuses every one
+of them, the file states an intention the compiler will refuse the moment anyone acts on it, and
+that is `E_INTENDED_TARGET_CAP`. A list only partly below the floor is `W_INTENDED_TARGET_CAP`, and
+a version the target edition cannot build at all is `W_INTENDED_TARGET_UNSUPPORTED`. See
 [Versioning and Editions §10.4](/spec/versioning-editions/#the-hint-is-weighed-against-the-floor).
 
 `@cairn` and `@intended_targets` appear at most once per module, and a repeat is
@@ -222,8 +222,8 @@ below the floor is `W_INTENDED_TARGET_CAP`, and a version the target edition can
 constraint rather than displacing one.
 
 A `def` or a `theme` may carry the same expression as a body line, spelled `requires` without the
-`@` — a floor on that part rather than on the file, inherited by every build that instantiates it.
-The sigil is what marks a file directive, and a part's floor is not one. See
+`@`. It is a floor on that part rather than on the file, inherited by every build that instantiates
+it. The sigil is what marks a file directive, and a part's floor is not one. See
 [Versioning and Editions](/spec/versioning-editions/).
 
 ## 5.4 Selectors
@@ -264,11 +264,11 @@ The same column resolves both the openings cut and any `connect` walkway anchore
 Numeric offsets (`at=N`) are reserved for a future extension.
 
 **Which rows a door opens.** A door under `level y=N` opens at row `N + 1`, the row above that
-level's base plane, and takes the two rows a doorway wants, or as much of that row's wall course as
-it has counting the row it opens at — so a door under a one-row course opens that one row rather
-than cutting into the roof. The row it opens at MUST be inside a course of the masonry; a door
-written against walls that do not reach it is `W_DEFERRED_MEMBER` and cuts nothing, the same finding
-the `window` on that body earns ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the
+level's base plane. It takes the two rows a doorway wants, or, if fewer remain, as much of that
+row's wall course as is left counting the row it opens at. A door under a one-row course therefore
+opens that one row rather than cutting into the roof. The row it opens at MUST be inside a course
+of the masonry. A door written against walls that do not reach it is `W_DEFERRED_MEMBER` and cuts
+nothing, the same finding the `window` on that body earns ([§9.3.5](/spec/components-editing-sites/#935-ports-and-connect) states the
 courses a `walls` paints).
 
 ## 5.5 IDs, classes, addresses
