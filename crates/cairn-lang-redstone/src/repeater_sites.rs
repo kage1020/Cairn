@@ -123,8 +123,6 @@ pub(crate) fn repeater_sites_of_scope<'t>(
                 } else {
                     const PLACED: &str =
                         "every net driving a cell comes before it in `net_ref_key` order";
-                    // While the cell is on, a merge carries its strongest lit input on and a
-                    // comparator its rear: neither is weaker than the input that spent the most.
                     cell.drivers
                         .iter()
                         .map(|driver| {
