@@ -4,8 +4,9 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_core::{lower, parse};
 use cairn_lang_redstone::{
-    BufferCoord, BufferSegment, DiagnosticCode, PlacedCellNode, RouteLayer, compile_crossing,
-    compile_edition_netlist, compile_netlist, compile_placement, compile_routing, synthesize,
+    BufferCoord, BufferSegment, CellCoord, DiagnosticCode, NetRef, PlacedCellNode, RouteLayer,
+    compile_crossing, compile_edition_netlist, compile_netlist, compile_placement, compile_routing,
+    synthesize,
 };
 
 use crate::common::{
@@ -23,6 +24,19 @@ fn errors(
         .collect()
 }
 
+/// Where `cell`'s buffers stand on the wires into it from the nets `from` accepts.
+fn buffers_from(cell: &PlacedCellNode, from: impl Fn(NetRef) -> bool) -> Vec<CellCoord> {
+    cell.buffer_coords()
+        .iter()
+        .filter(|b| {
+            cell.drivers
+                .iter()
+                .any(|d| from(d.net) && BufferSegment::Port(d.port) == b.port)
+        })
+        .map(|b| b.coord)
+        .collect()
+}
+
 /// The trunk's repeaters stand 14 apart, not 16: each Java comparator passes on the strength it
 /// reads, so a tap may arrive with at most 14 spent.
 #[test]
@@ -31,20 +45,13 @@ fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
 
     let cells = &legalized.scopes[0].ir.cells;
     assert_eq!(cells.len(), 16, "the fixture is the 16-cell chain");
-    let bus = cairn_lang_redstone::NetRef::Input(1);
-    let on_the_bus = |cell: &PlacedCellNode| -> Vec<(u32, u32, u32)> {
-        cell.buffer_coords()
-            .iter()
-            .filter(|b| {
-                cell.drivers
-                    .iter()
-                    .any(|d| d.net == bus && BufferSegment::Port(d.port) == b.port)
-            })
-            .map(|b| (b.coord.x, b.coord.y, b.coord.z))
-            .collect()
-    };
-    let blocks: std::collections::BTreeSet<(u32, u32, u32)> =
-        cells.iter().flat_map(on_the_bus).collect();
+    let bus = NetRef::Input(1);
+    let on_the_bus = |cell: &PlacedCellNode| buffers_from(cell, |net| net == bus);
+    let blocks: std::collections::BTreeSet<(u32, u32, u32)> = cells
+        .iter()
+        .flat_map(on_the_bus)
+        .map(|b| (b.x, b.y, b.z))
+        .collect();
     assert_eq!(
         blocks,
         [(14, 0, 2), (28, 0, 2)].into_iter().collect(),
@@ -54,6 +61,52 @@ fn a_shared_bus_of_sixteen_cells_shares_its_repeaters() {
     assert!(
         attributions >= 2,
         "the sharing is only pinned if more than one cell names it: {attributions}",
+    );
+}
+
+/// The pass starts each comparator's wire with the more spent of its two inputs, so the strand
+/// leaves cells #3, #5, #6, #10, #12 and #13 with 14 blocks spent, and the 4-step wire to the next
+/// cell takes a repeater on its second block, on the plane or the bridge. The strand leaves
+/// cell #15 with 6, so the door's wire takes its first on its 10th block.
+#[test]
+fn the_wires_a_bus_chain_drives_take_repeaters_where_the_strand_runs_out() {
+    let legalized = legalized_from_source(&shared_bus_source(), Edition::Java);
+    let ir = &legalized.scopes[0].ir;
+    let from_a_cell: Vec<Vec<CellCoord>> = ir
+        .cells
+        .iter()
+        .map(|cell| buffers_from(cell, |net| matches!(net, NetRef::Cell(_))))
+        .collect();
+    let buffered: Vec<usize> = from_a_cell
+        .iter()
+        .enumerate()
+        .filter(|(_, buffers)| !buffers.is_empty())
+        .map(|(cell, _)| cell)
+        .collect();
+    assert_eq!(
+        buffered,
+        [4, 6, 7, 11, 13, 14],
+        "of the wires between cells, only those out of cells #3, #5, #6, #10, #12 and #13, which the strand leaves with 14 blocks spent, take a repeater",
+    );
+    let mut expected = vec![Vec::new(); 16];
+    for (cell, coord) in [
+        (4, CellCoord::new(8, 0, 0)),
+        (6, CellCoord::new(12, 0, 0)),
+        (7, CellCoord::new(14, 1, 1)),
+        (11, CellCoord::new(22, 1, 1)),
+        (13, CellCoord::new(26, 1, 1)),
+        (14, CellCoord::new(28, 0, 0)),
+    ] {
+        expected[cell] = vec![coord];
+    }
+    assert_eq!(from_a_cell, expected);
+    assert_eq!(
+        ir.outputs[0]
+            .buffer_coords()
+            .iter()
+            .map(|b| b.coord)
+            .collect::<Vec<_>>(),
+        vec![CellCoord::new(41, 0, 1), CellCoord::new(57, 0, 1)],
     );
 }
 
