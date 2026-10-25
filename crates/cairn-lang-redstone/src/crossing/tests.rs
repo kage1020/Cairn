@@ -805,6 +805,30 @@ fn re_running_crossing_pass_panics_loudly() {
     let _second = compile_crossing(&first.scoped);
 }
 
+/// No cells, so only the loop over the actuator pads can refuse the second run.
+#[test]
+#[should_panic(
+    expected = "for output #0 at (5,0,1) in struct `twice` — crossing legalization must run exactly once per delayed IR"
+)]
+fn re_running_crossing_pass_over_a_pad_names_the_output() {
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.region = Some(reservation(6, 3, 2));
+    ir.inputs.push(crate::netlist_ir::NetlistInput {
+        name: cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["a".into()]),
+        span: Span::default(),
+    });
+    let mut output = PlacedOutputNode::new(
+        cairn_lang_core::ast::DottedRef::new("sig".into(), vec!["out".into()]),
+        NetRef::Input(0),
+        CellCoord::new(5, 0, 1),
+        Span::default(),
+    );
+    output.phase = DELAYED;
+    ir.outputs.push(output);
+    let first = compile_crossing(&scoped(ScopeKind::Struct, "twice", ir));
+    let _second = compile_crossing(&first.scoped);
+}
+
 #[test]
 fn missing_region_with_cells_fires_no_circuit_region() {
     // Only an IR that skipped placement has cells and no region.
