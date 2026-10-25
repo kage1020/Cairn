@@ -1267,6 +1267,7 @@ mod strand_invariant {
                     } else {
                         cell.drivers
                             .iter()
+                            .filter(|d| !cell.cell.port_regenerates(d.port))
                             .map(|d| arrived[&(d.net, cell.coord)])
                             .max()
                             .unwrap_or(0)
@@ -1310,7 +1311,7 @@ mod strand_invariant {
     }
 
     /// Four plates into one door through three cells that pass strength on: no single segment is
-    /// past the limit, but the strand is.
+    /// past the limit, but the strand from a plate through a cell to the door is.
     fn four_plates(op: &str) -> String {
         format!(
             r"

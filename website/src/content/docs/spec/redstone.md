@@ -293,13 +293,15 @@ The internal algorithm runs five stages:
    torch), not from the start of each segment. Two of the cells pass on the strength they receive
    instead: the Bedrock OR is a dust merge, and the Java comparator AND, a comparator with one
    operand inverted onto its side ([§14.6](#146-edition-differences)), outputs the strength its rear
-   input carries while it is on. The count treats a comparator's rear input and its side alike. The
-   wire into either cell and the wire out of it count as one run of dust, though the cell stands
-   between them, measured from the input that has spent the most. While the cell is on, its output
-   is never weaker than that input: the merge passes on its strongest lit input and the comparator
-   its rear. The inverted operand's wire ends at the inverter, which restores strength, so holding
-   it to the cell's budget asks more of it than the cell needs. The repeater the run needs goes
-   where the running total would pass 15, or, on the wire into such a cell, what the cell can spare
+   input carries while it is on. The wire into either cell on an input it passes on (both of the
+   merge's, and the comparator's rear) and the wire out of it count as one run of dust, though the
+   cell stands between them, measured from whichever of those inputs has spent the most. While the
+   cell is on, its output is never weaker than that input: the merge passes on its strongest lit
+   input and the comparator its rear. The wire into the comparator's side, port `b`, ends at the
+   inverter, which restores strength, so it is held to the limit as the wire into any sink that
+   restores strength is, and the dust spent on it does not count on the wire out. A net on both
+   ports feeds the rear as well, so it stays in the run. The repeater the run needs goes where the
+   running total would pass 15, or, on a wire of the run into such a cell, what the cell can spare
    of it, since the wire out needs the rest. Where that is a block of dust, the repeater stands in
    its place and reads the dust before it, as on a straight run. Where it is a sink, as such a cell
    is, the repeater cannot stand in its place and stands on the wire before it. It lands on the wire
