@@ -4,7 +4,7 @@ use cairn_lang_core::error::Span;
 use std::collections::{HashMap, HashSet};
 
 use super::compile_crossing;
-use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
+use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay, slowest_port_ticks};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition_netlist_ir::EditionCell;
 use crate::grid::{PadColumn, input_pad};
@@ -294,7 +294,7 @@ fn the_buffer_count_matches_the_ticks_delay_charged() {
         let charged = cell
             .local_delay_ticks()
             .expect("stage 3 wrote the ticks")
-            .saturating_sub(cell.cell.base_delay_ticks());
+            .saturating_sub(slowest_port_ticks(cell));
         let blocks: HashSet<CellCoord> = cell.buffer_coords().iter().map(|b| b.coord).collect();
         let placed = u32::try_from(blocks.len()).expect("small");
         assert_eq!(
@@ -572,20 +572,20 @@ fn two_distinct_nets_charge_a_cell_for_every_buffer_under_it() {
         "two distinct nets share no repeater: {buffers:?}",
     );
 
-    let base = EditionCell::JavaComparatorAnd.base_delay_ticks();
+    let slowest = slowest_port_ticks(cell);
     let ticks = cell
         .local_delay_ticks()
         .expect("legalized cells carry Some(local_delay_ticks)");
     let blocks = u32::try_from(distinct.len()).expect("three blocks fit in u32");
     assert_eq!(
-        ticks - base,
+        ticks - slowest,
         blocks * BUFFER_REPEATER_TICKS,
         "every block stage 4 laid is a tick stage 3 charged",
     );
     let widest = u32::try_from(per_port(PortName::A).max(per_port(PortName::B)))
         .expect("two buffers fit in u32");
     assert_ne!(
-        ticks - base,
+        ticks - slowest,
         widest * BUFFER_REPEATER_TICKS,
         "a max over the driving nets would drop the shorter segment's block",
     );
@@ -635,8 +635,8 @@ fn ports_sharing_a_net_share_the_repeater_the_charge_and_the_dust() {
     );
     assert_eq!(
         cell.local_delay_ticks(),
-        Some(1 + BUFFER_REPEATER_TICKS),
-        "base 1 plus the one repeater the signal passes through",
+        Some(2 + BUFFER_REPEATER_TICKS),
+        "the side port's 2 plus the one repeater the signal passes through",
     );
     let buffers = cell.buffer_coords();
     assert_eq!(
@@ -973,7 +973,7 @@ fn a_turn_at_the_limit_costs_the_route_a_second_repeater() {
     );
     assert_eq!(
         cell.local_delay_ticks(),
-        Some(EditionCell::JavaRepeaterOr.base_delay_ticks() + 2 * BUFFER_REPEATER_TICKS),
+        Some(EditionCell::JavaRepeaterOr.port_delay_ticks(PortName::A) + 2 * BUFFER_REPEATER_TICKS),
         "stage 3 charges for both blocks stage 4 lays",
     );
 }
@@ -1478,7 +1478,7 @@ mod buffer_delay_invariant {
         PortName, RouteLayer, Router, ScopeKind, ScopedPlacementIr, Span, block_sites,
         collect_nets, compile_crossing, input_pad, net_trees, reservation, scoped,
     };
-    use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay};
+    use crate::delay::{BUFFER_REPEATER_TICKS, compile_delay, slowest_port_ticks};
     use crate::placement_ir::{BufferCoord, CellIdentity, ScopedPlacementIrEntry};
     use crate::routing::compile_routing;
     use crate::routing_geometry::{NetTree, Unreached};
@@ -1888,8 +1888,8 @@ mod buffer_delay_invariant {
         /// The cell or pad, as a failure names it.
         node: CellIdentity<'a>,
         local_delay_ticks: u32,
-        /// Zero for a pad, which has no delay of its own.
-        base_delay_ticks: u32,
+        /// The cell's slowest driven port; zero for a pad, which has no delay of its own.
+        port_delay_ticks: u32,
         /// Distinct coords, since a cell's two ports on one net name the same repeaters.
         blocks: u32,
     }
@@ -1910,7 +1910,7 @@ mod buffer_delay_invariant {
                 local_delay_ticks: cell
                     .local_delay_ticks()
                     .expect("legalized cells carry Some(local_delay_ticks)"),
-                base_delay_ticks: cell.cell.base_delay_ticks(),
+                port_delay_ticks: slowest_port_ticks(cell),
                 blocks: blocks(cell.buffer_coords()),
             });
         let pads = entry
@@ -1923,7 +1923,7 @@ mod buffer_delay_invariant {
                 local_delay_ticks: output
                     .local_delay_ticks()
                     .expect("legalized pads carry Some(local_delay_ticks)"),
-                base_delay_ticks: 0,
+                port_delay_ticks: 0,
                 blocks: blocks(output.buffer_coords()),
             });
         cells.chain(pads).collect()
@@ -1932,15 +1932,15 @@ mod buffer_delay_invariant {
     /// Per cell and pad, since an over-charged one and an under-charged one cancel in a sum.
     fn check_charges(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
         for charge in charges(entry) {
-            // A cell below its edition base would clamp to zero and match a cell with no buffers.
+            // A cell below its port delay would clamp to zero and match a cell with no buffers.
             let delta = charge
                 .local_delay_ticks
-                .checked_sub(charge.base_delay_ticks);
+                .checked_sub(charge.port_delay_ticks);
             prop_assert!(
                 delta.is_some(),
-                "local_delay_ticks {} < base_delay_ticks {} for {} ({})",
+                "local_delay_ticks {} < port_delay_ticks {} for {} ({})",
                 charge.local_delay_ticks,
-                charge.base_delay_ticks,
+                charge.port_delay_ticks,
                 charge.node,
                 case,
             );
@@ -1961,7 +1961,7 @@ mod buffer_delay_invariant {
         Ok(())
     }
 
-    /// `Σ blocks × BUFFER_REPEATER_TICKS = Σ (local − base)` over one scope's cells and pads.
+    /// `Σ blocks × BUFFER_REPEATER_TICKS = Σ (local − port)` over one scope's cells and pads.
     fn check_scope_total(entry: &ScopedPlacementIrEntry, case: &str) -> Result<(), TestCaseError> {
         let charges = charges(entry);
         let buffer_total: u32 = charges.iter().map(|charge| charge.blocks).sum();
@@ -1969,12 +1969,12 @@ mod buffer_delay_invariant {
         for charge in &charges {
             let delta = charge
                 .local_delay_ticks
-                .checked_sub(charge.base_delay_ticks);
+                .checked_sub(charge.port_delay_ticks);
             prop_assert!(
                 delta.is_some(),
-                "local_delay_ticks {} < base_delay_ticks {} for {} — the delay pass charged less than the edition base",
+                "local_delay_ticks {} < port_delay_ticks {} for {} — the delay pass charged less than the slowest port",
                 charge.local_delay_ticks,
-                charge.base_delay_ticks,
+                charge.port_delay_ticks,
                 charge.node,
             );
             delta_total = delta_total
@@ -1987,7 +1987,7 @@ mod buffer_delay_invariant {
         prop_assert_eq!(
             lhs,
             delta_total,
-            "buffer block count × BUFFER_REPEATER_TICKS ({}) must equal Σ(local_delay_ticks − base_delay_ticks) ({}) for scope `{}` with {}",
+            "buffer block count × BUFFER_REPEATER_TICKS ({}) must equal Σ(local_delay_ticks − port_delay_ticks) ({}) for scope `{}` with {}",
             lhs,
             delta_total,
             entry.name,
@@ -2455,7 +2455,7 @@ mod buffer_delay_invariant {
 
         /// Every cell here is driven by one net, so a sum and a max over the driving nets agree.
         #[test]
-        fn a_cell_waits_its_base_delay_plus_its_buffer_ticks(xs in scope_strategy()) {
+        fn a_cell_waits_its_slowest_port_plus_its_buffer_ticks(xs in scope_strategy()) {
             check_scope(&xs)?;
         }
 

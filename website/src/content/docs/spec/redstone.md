@@ -145,6 +145,10 @@ in the Placement IR** ([§14.8](#148-connection-to-the-ir-and-phases)). `and` is
 zero-delay, but the tick count is known only after cell selection (`and → ComparatorAND` on Java)
 and the actual post-placement wire length.
 
+A cell's delay is counted per input port, as the ticks from that port to the cell's output, since
+one input can pass through more of a cell than another. A signal's delay through a cell is the
+delay of the port it enters by.
+
 A number appears as ticks only in verification assertions ([§14.7](#147-verification)). You never do
 tick arithmetic inside a logic expression.
 
@@ -290,7 +294,7 @@ The internal algorithm runs five stages:
    a torch — not from the start of each segment. Two of the cells pass on the strength they
    receive instead: the Bedrock OR is a dust merge, and the Java comparator AND, a comparator with
    one operand inverted onto its side ([§14.6](#146-edition-differences)), outputs the strength its
-   rear input carries while it is on. The pass does not track which input of a comparator is its
+   rear input carries while it is on. The limit does not track which input of a comparator is its
    rear. The wire into either cell and the wire out of it count as one run of dust, though the cell
    stands between them, measured from the input that has spent the most. While the cell is on, its
    output is never weaker than that input — the merge passes on its strongest lit input and the
@@ -359,6 +363,11 @@ its rear input carries; while it is off, the side reads 15 and the output is 0 w
 carries. Both operands reach the cell as the netlist carries them, so the inversion is the cell's
 own, and subtract mode is the one that then computes AND: while the side reads 15, compare mode
 would still pass a rear input at 15 through.
+
+The netlist hands a two-input cell its operands on ports `a` and `b`, and the `ComparatorAND` takes
+`a` at its rear and inverts `b` onto its side. Counted per port ([§14.4](#144-time-model)), a signal
+entering by `a` passes the comparator alone, 1 tick, and one entering by `b` passes the inverter and
+then the comparator, 2 ticks.
 
 The tile tier carries one place-and-route obligation of its own: a `bridge` coordinate renders as
 a tile that conducts to neither **another net's** coordinate below it nor another net's
