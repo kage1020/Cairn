@@ -528,7 +528,7 @@ impl<'de> Deserialize<'de> for PlacedCellNode {
 }
 
 /// An actuator-driven net sink placed at its output pad, dumped flat with the same `stage` and
-/// phase keys as a [`PlacedCellNode`]; its `local_delay_ticks` has no base delay.
+/// phase keys as a [`PlacedCellNode`]; its `local_delay_ticks` has no port delay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PlacedOutputNode {

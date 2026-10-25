@@ -228,11 +228,12 @@ pub(crate) enum Command {
             placement` lays those edition-tagged cells out inside each scope's `circuit region=` \
             reservation and prints the Placement IR; `--stage route` runs Steiner routing over the \
             Placement IR and prints the routed layout with every cell's `wire_length` populated; \
-            `--stage delay` runs delay insertion over the routed IR and fills every cell's \
-            `local_delay_ticks` with the sum of the cell's base delay and each implicit buffer \
-            repeater's `BUFFER_REPEATER_TICKS` contribution over every driving net's segment that \
-            carries more than `DUST_ATTENUATION_LIMIT` blocks of dust — from a fresh source, a \
-            segment of more than `DUST_ATTENUATION_LIMIT + 1` steps; `--stage crossing` runs \
+            `--stage delay` runs delay insertion over the routed IR and fills every \
+            cell's `local_delay_ticks` with the sum of the delay of the cell's slowest \
+            driven port and each implicit buffer repeater's `BUFFER_REPEATER_TICKS` \
+            contribution over every driving net's segment that carries more than \
+            `DUST_ATTENUATION_LIMIT` blocks of dust — from a fresh source, a segment \
+            of more than `DUST_ATTENUATION_LIMIT + 1` steps; `--stage crossing` runs \
             crossing legalization over the delayed IR and fills every cell's `buffer_coords` with \
             the coord of the buffer repeater each driver segment passes through (a repeater this \
             net already placed is recorded rather than duplicated, so one block can be named by \
@@ -377,10 +378,10 @@ pub(crate) enum SynthStage {
         help = "Delayed Placement IR: delay insertion over the routed Placement IR against \
             `--edition`. Stage 3 of the pipeline `spec/redstone` \"Place-and-route\" lays out. \
             Fills every cell's `local_delay_ticks` with the sum (a per-cell wire cost, not an \
-            arrival time) of the cell's physical base delay and each implicit buffer repeater's \
-            `BUFFER_REPEATER_TICKS` contribution implied by each driving net's segment that \
-            carries more than `DUST_ATTENUATION_LIMIT` blocks of dust — from a fresh source, a \
-            segment of more than `DUST_ATTENUATION_LIMIT + 1` steps; refuses with \
+            arrival time) of the delay of the cell's slowest driven port and each implicit buffer \
+            repeater's `BUFFER_REPEATER_TICKS` contribution implied by each driving net's segment \
+            that carries more than `DUST_ATTENUATION_LIMIT` blocks of dust — from a fresh \
+            source, a segment of more than `DUST_ATTENUATION_LIMIT + 1` steps; refuses with \
             `E_ATTENUATION_LIMIT` when a segment's routed length in steps exceeds \
             `MAX_ATTENUATION_SEGMENT`, or when a stretch of dust past the limit has no coord a \
             repeater can stand on"

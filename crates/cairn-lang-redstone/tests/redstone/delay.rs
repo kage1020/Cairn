@@ -1,11 +1,11 @@
-//! `compile_delay`: each cell's `local_delay_ticks` as its base delay plus the implicit buffer
-//! repeaters on the nets feeding it, a local wire cost rather than an arrival time.
+//! `compile_delay`: each cell's `local_delay_ticks` as the delay of its slowest driven port plus the
+//! implicit buffer repeaters on the nets feeding it, a local wire cost rather than an arrival time.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::check::Severity;
 use cairn_lang_redstone::{
-    Diagnostic, DiagnosticCode, MAX_ATTENUATION_SEGMENT, PlacedCellNode, ScopedPlacementIr,
-    ScopedPlacementIrEntry, compile_delay, compile_routing,
+    Diagnostic, DiagnosticCode, EditionCell, MAX_ATTENUATION_SEGMENT, PlacedCellNode,
+    ScopedPlacementIr, ScopedPlacementIrEntry, compile_delay, compile_routing,
 };
 
 use crate::common::{
@@ -13,7 +13,7 @@ use crate::common::{
 };
 
 #[test]
-fn redstone_door_java_local_delay_ticks_equal_base_repeater_delay() {
+fn redstone_door_java_local_delay_ticks_are_the_or_port_delay_alone() {
     let source = load_example("redstone-door.crn");
     let routed = routed_from_source(&source, Edition::Java);
     let delayed = compile_delay(&routed);
@@ -37,7 +37,7 @@ fn redstone_door_java_local_delay_ticks_equal_base_repeater_delay() {
     assert_eq!(
         cell.local_delay_ticks(),
         Some(1),
-        "JavaRepeaterOr base = 1 tick, both driver segments ≤ 15 → 0 buffers",
+        "JavaRepeaterOr delays 1 tick from either port, both driver segments ≤ 15 → 0 buffers",
     );
     assert_eq!(
         cell.wire_length(),
@@ -82,7 +82,7 @@ fn redstone_door_bedrock_local_delay_ticks_are_zero() {
 }
 
 #[test]
-fn multi_cell_scope_pins_local_delay_ticks_from_base_only() {
+fn multi_cell_scope_pins_local_delay_ticks_from_port_delays_only() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -115,10 +115,20 @@ struct sim size=7x5
         .iter()
         .find(|e| e.name == "sim")
         .expect("sim scope");
-    assert_eq!(entry.ir.cells.len(), 3);
-    assert_eq!(entry.ir.cells[0].local_delay_ticks(), Some(1));
-    assert_eq!(entry.ir.cells[1].local_delay_ticks(), Some(1));
-    assert_eq!(entry.ir.cells[2].local_delay_ticks(), Some(1));
+    assert_eq!(
+        entry
+            .ir
+            .cells
+            .iter()
+            .map(|cell| (cell.cell, cell.local_delay_ticks()))
+            .collect::<Vec<_>>(),
+        vec![
+            (EditionCell::JavaComparatorAnd, Some(2)),
+            (EditionCell::JavaRepeaterOr, Some(1)),
+            (EditionCell::JavaComparatorAnd, Some(2)),
+        ],
+        "an AND waits its side port's 2 ticks, an OR 1 from either port",
+    );
     assert_eq!(
         entry
             .ir
@@ -288,9 +298,9 @@ struct chain size=40x5
     // strand and repeaters land on some cell-to-cell nets too.
     assert_eq!(entry.ir.cells.len(), 16);
     let expected: [u32; 16] = [
-        1, 1, 1, 1, 2, 1, 2, // i = 0..=6
-        3, 2, 2, 2, 3, 2, 3, // i = 7..=13
-        4, 3, // i = 14..=15
+        2, 2, 2, 2, 3, 2, 3, // i = 0..=6
+        4, 3, 3, 3, 4, 3, 4, // i = 7..=13
+        5, 4, // i = 14..=15
     ];
     for (i, cell) in entry.ir.cells.iter().enumerate() {
         assert_eq!(
@@ -305,19 +315,19 @@ struct chain size=40x5
             .ir
             .cells
             .iter()
-            .any(|c| c.local_delay_ticks() == Some(1))
+            .any(|c| c.local_delay_ticks() == Some(2))
     );
     assert!(
         entry
             .ir
             .cells
             .iter()
-            .any(|c| c.local_delay_ticks() == Some(2))
+            .any(|c| c.local_delay_ticks() == Some(3))
     );
 }
 
 #[test]
-fn bedrock_torch_and_local_delay_ticks_pin_two_tick_base() {
+fn bedrock_torch_and_local_delay_ticks_pin_two_ticks() {
     let source = r"
 theme t:
   slot wall -> @oak_planks
@@ -344,7 +354,7 @@ struct band size=5x5
     assert_eq!(
         entry.ir.cells[0].local_delay_ticks(),
         Some(2),
-        "BedrockTorchAnd base_delay must be 2 ticks",
+        "BedrockTorchAnd delays 2 ticks from either port",
     );
 }
 
@@ -524,7 +534,7 @@ struct inv size=5x5
     assert_eq!(
         j.ir.cells[0].local_delay_ticks(),
         b.ir.cells[0].local_delay_ticks(),
-        "InverterTorch base_delay is identical on both editions → local_delay_ticks must match",
+        "an inverter torch delays its port by the same ticks on both editions → local_delay_ticks must match",
     );
     assert_ne!(
         j.ir.cells[0].cell, b.ir.cells[0].cell,

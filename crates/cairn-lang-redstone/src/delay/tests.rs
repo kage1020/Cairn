@@ -1,7 +1,6 @@
-use std::collections::HashSet;
-
 use cairn_lang_core::Edition;
 use cairn_lang_core::error::Span;
+use strum::IntoEnumIterator;
 
 use super::{
     BUFFER_REPEATER_TICKS, DUST_ATTENUATION_LIMIT, Fed, MAX_ATTENUATION_SEGMENT,
@@ -99,12 +98,12 @@ fn a_cell_is_charged_once_per_net_that_drives_it() {
         (
             "both ports on one net",
             NetRef::Input(0),
-            1 + BUFFER_REPEATER_TICKS,
+            2 + BUFFER_REPEATER_TICKS,
         ),
         (
             "one port each on two nets",
             NetRef::Input(1),
-            1 + 2 * BUFFER_REPEATER_TICKS,
+            2 + 2 * BUFFER_REPEATER_TICKS,
         ),
     ] {
         let mut ir = PlacementIr::new(Edition::Java);
@@ -139,7 +138,7 @@ fn a_cell_is_charged_once_per_net_that_drives_it() {
         assert_eq!(
             delayed.scoped.scopes[0].ir.cells[0].local_delay_ticks(),
             Some(expected),
-            "{label}: base 1 plus one charge per driving net",
+            "{label}: the side port's 2 plus one charge per driving net",
         );
     }
 }
@@ -183,19 +182,18 @@ fn local_delay_is_the_wire_cost_not_the_arrival_time() {
     };
     attribute_local_delay_ticks(&mut ir, &entry, &buffers_on);
 
-    let base = EditionCell::JavaComparatorAnd.base_delay_ticks();
     let recorded = ir.cells[0]
         .local_delay_ticks()
         .expect("delay insertion writes Some(_)");
     let ticks = |segment| buffer_count_for_segment(segment) * BUFFER_REPEATER_TICKS;
     assert_eq!(
         recorded,
-        base + ticks(SHORT) + ticks(LONG),
-        "the wire cost is every buffer on every net feeding the cell",
+        2 + ticks(SHORT) + ticks(LONG),
+        "the wire cost is the side port's 2 and every buffer on every net feeding the cell",
     );
 
-    // The arrival time takes the max over the nets.
-    let arrival = base + ticks(SHORT).max(ticks(LONG));
+    // The arrival time takes the max over the ports, each its own net's buffers and its own delay.
+    let arrival = (1 + ticks(SHORT)).max(2 + ticks(LONG));
     assert_eq!(
         recorded - arrival,
         ticks(SHORT),
@@ -203,32 +201,157 @@ fn local_delay_is_the_wire_cost_not_the_arrival_time() {
     );
 }
 
-// `listed` stops compiling when a variant is added; the count catches one left out.
 #[test]
-fn only_the_merge_and_the_comparator_pass_strength_on() {
-    const fn listed(cell: EditionCell) {
-        match cell {
-            EditionCell::JavaComparatorAnd
-            | EditionCell::BedrockTorchAnd
-            | EditionCell::JavaRepeaterOr
-            | EditionCell::BedrockTorchOr
-            | EditionCell::JavaInverterTorch
-            | EditionCell::BedrockInverterTorch
-            | EditionCell::JavaXorUnpinned
-            | EditionCell::BedrockXorUnpinned
-            | EditionCell::JavaNandUnpinned
-            | EditionCell::BedrockNandUnpinned
-            | EditionCell::JavaNorUnpinned
-            | EditionCell::BedrockNorUnpinned
-            | EditionCell::JavaMuxUnpinned
-            | EditionCell::BedrockMuxUnpinned => {}
+fn a_cell_is_charged_its_slowest_port_whichever_net_carries_the_buffers() {
+    let mut ir = PlacementIr::new(Edition::Java);
+    ir.cells.push(placed_cell(
+        EditionCell::JavaComparatorAnd,
+        CellCoord::new(4, 0, 1),
+        vec![
+            CellPortDriver {
+                port: PortName::A,
+                net: NetRef::Input(0),
+            },
+            CellPortDriver {
+                port: PortName::B,
+                net: NetRef::Input(1),
+            },
+        ],
+        ROUTED,
+    ));
+    let entry = ScopedPlacementIrEntry {
+        kind: ScopeKind::Struct,
+        name: "ports".to_owned(),
+        ir: ir.clone(),
+    };
+    let charged = |buffered: Option<NetRef>| {
+        let mut ir = ir.clone();
+        let buffers_on =
+            |net: NetRef, _sink: CellCoord, _fed: Fed| u32::from(Some(net) == buffered);
+        attribute_local_delay_ticks(&mut ir, &entry, &buffers_on);
+        ir.cells[0].local_delay_ticks()
+    };
+    assert_eq!(
+        [
+            charged(None),
+            charged(Some(NetRef::Input(0))),
+            charged(Some(NetRef::Input(1))),
+        ],
+        [
+            Some(2),
+            Some(2 + BUFFER_REPEATER_TICKS),
+            Some(2 + BUFFER_REPEATER_TICKS),
+        ],
+        "no buffer, one on the rear's net, one on the side's",
+    );
+}
+
+#[test]
+fn a_cell_is_charged_the_slowest_of_its_driven_ports_in_any_order() {
+    let driver = |port, input| CellPortDriver {
+        port,
+        net: NetRef::Input(input),
+    };
+    let charged = |drivers: Vec<CellPortDriver>| {
+        let mut ir = PlacementIr::new(Edition::Java);
+        ir.cells.push(placed_cell(
+            EditionCell::JavaComparatorAnd,
+            CellCoord::new(4, 0, 1),
+            drivers,
+            ROUTED,
+        ));
+        let entry = ScopedPlacementIrEntry {
+            kind: ScopeKind::Struct,
+            name: "drivers".to_owned(),
+            ir: ir.clone(),
+        };
+        attribute_local_delay_ticks(&mut ir, &entry, &|_net, _sink, _fed| 0);
+        ir.cells[0].local_delay_ticks()
+    };
+    assert_eq!(
+        [
+            charged(vec![]),
+            charged(vec![driver(PortName::A, 0)]),
+            charged(vec![driver(PortName::B, 1)]),
+            charged(vec![driver(PortName::B, 1), driver(PortName::A, 0)]),
+        ],
+        [Some(0), Some(1), Some(2), Some(2)],
+        "no driver, the rear alone, the side alone, the side listed before the rear",
+    );
+}
+
+/// The ports the netlist drives on `cell`; the match names every variant, so adding one stops
+/// this compiling.
+const fn ports(cell: EditionCell) -> &'static [PortName] {
+    match cell {
+        EditionCell::JavaComparatorAnd
+        | EditionCell::BedrockTorchAnd
+        | EditionCell::JavaRepeaterOr
+        | EditionCell::BedrockTorchOr
+        | EditionCell::JavaXorUnpinned
+        | EditionCell::BedrockXorUnpinned
+        | EditionCell::JavaNandUnpinned
+        | EditionCell::BedrockNandUnpinned
+        | EditionCell::JavaNorUnpinned
+        | EditionCell::BedrockNorUnpinned => &[PortName::A, PortName::B],
+        EditionCell::JavaInverterTorch | EditionCell::BedrockInverterTorch => &[PortName::A],
+        EditionCell::JavaMuxUnpinned | EditionCell::BedrockMuxUnpinned => {
+            &[PortName::Sel, PortName::A, PortName::B]
         }
     }
+}
+
+#[test]
+fn each_port_counts_the_stages_between_it_and_the_output() {
+    let table = [
+        (EditionCell::JavaComparatorAnd, PortName::A, 1),
+        (EditionCell::JavaComparatorAnd, PortName::B, 2),
+        (EditionCell::BedrockTorchAnd, PortName::A, 2),
+        (EditionCell::BedrockTorchAnd, PortName::B, 2),
+        (EditionCell::JavaRepeaterOr, PortName::A, 1),
+        (EditionCell::JavaRepeaterOr, PortName::B, 1),
+        (EditionCell::BedrockTorchOr, PortName::A, 0),
+        (EditionCell::BedrockTorchOr, PortName::B, 0),
+        (EditionCell::JavaInverterTorch, PortName::A, 1),
+        (EditionCell::BedrockInverterTorch, PortName::A, 1),
+        (EditionCell::JavaXorUnpinned, PortName::A, 3),
+        (EditionCell::JavaXorUnpinned, PortName::B, 3),
+        (EditionCell::BedrockXorUnpinned, PortName::A, 3),
+        (EditionCell::BedrockXorUnpinned, PortName::B, 3),
+        (EditionCell::JavaNandUnpinned, PortName::A, 3),
+        (EditionCell::JavaNandUnpinned, PortName::B, 3),
+        (EditionCell::BedrockNandUnpinned, PortName::A, 3),
+        (EditionCell::BedrockNandUnpinned, PortName::B, 3),
+        (EditionCell::JavaNorUnpinned, PortName::A, 3),
+        (EditionCell::JavaNorUnpinned, PortName::B, 3),
+        (EditionCell::BedrockNorUnpinned, PortName::A, 3),
+        (EditionCell::BedrockNorUnpinned, PortName::B, 3),
+        (EditionCell::JavaMuxUnpinned, PortName::Sel, 3),
+        (EditionCell::JavaMuxUnpinned, PortName::A, 3),
+        (EditionCell::JavaMuxUnpinned, PortName::B, 3),
+        (EditionCell::BedrockMuxUnpinned, PortName::Sel, 3),
+        (EditionCell::BedrockMuxUnpinned, PortName::A, 3),
+        (EditionCell::BedrockMuxUnpinned, PortName::B, 3),
+    ];
+    let rows: Vec<_> = table.iter().map(|&(cell, port, _)| (cell, port)).collect();
+    let every: Vec<_> = EditionCell::iter()
+        .flat_map(|cell| ports(cell).iter().map(move |&port| (cell, port)))
+        .collect();
+    assert_eq!(rows, every, "one row per port of every variant");
+    let counted: Vec<_> = table
+        .iter()
+        .map(|&(cell, port, _)| (cell, port, cell.port_delay_ticks(port)))
+        .collect();
+    assert_eq!(counted, table);
+}
+
+#[test]
+fn only_the_merge_and_the_comparator_pass_strength_on() {
     let table = [
         (EditionCell::JavaComparatorAnd, false),
-        (EditionCell::BedrockTorchOr, false),
-        (EditionCell::JavaRepeaterOr, true),
         (EditionCell::BedrockTorchAnd, true),
+        (EditionCell::JavaRepeaterOr, true),
+        (EditionCell::BedrockTorchOr, false),
         (EditionCell::JavaInverterTorch, true),
         (EditionCell::BedrockInverterTorch, true),
         (EditionCell::JavaXorUnpinned, false),
@@ -240,12 +363,13 @@ fn only_the_merge_and_the_comparator_pass_strength_on() {
         (EditionCell::JavaMuxUnpinned, false),
         (EditionCell::BedrockMuxUnpinned, false),
     ];
-    let distinct: HashSet<EditionCell> = table.iter().map(|(cell, _)| *cell).collect();
-    assert_eq!(distinct.len(), 14, "every variant, once");
-    for (cell, regenerates) in table {
-        listed(cell);
-        assert_eq!(cell.regenerates(), regenerates, "{cell:?}");
-    }
+    let every: Vec<_> = EditionCell::iter()
+        .map(|cell| (cell, cell.regenerates()))
+        .collect();
+    assert_eq!(
+        every, table,
+        "one row per variant, in declaration order, each with its `regenerates`",
+    );
 }
 
 #[test]

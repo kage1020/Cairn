@@ -8,16 +8,17 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::logic_ir::{ScopeKind, Scoped, ScopedEntry};
-use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput};
+use crate::netlist_ir::{CellPortDriver, NetRef, NetlistInput, NetlistOutput, PortName};
 
 /// Edition-specific realisation of a [`crate::netlist_ir::LogicalCell`]; the `*Unpinned` variants
 /// stand for the reserved cells, whose realisations are not chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(test, derive(strum::EnumIter))]
 #[non_exhaustive]
 pub enum EditionCell {
-    /// Java AND — a comparator in subtract mode with one operand inverted onto its side at full
-    /// strength.
+    /// Java AND — a comparator in subtract mode with port `a` at its rear and port `b` inverted
+    /// onto its side at full strength.
     JavaComparatorAnd,
     /// Bedrock AND — two torches inverting an OR.
     BedrockTorchAnd,
@@ -69,15 +70,18 @@ impl EditionCell {
         }
     }
 
-    /// Base tick delay of this cell, excluding buffer repeaters; an `*Unpinned` cell returns a
-    /// sentinel above every pinned delay.
+    /// Tick delay from input `port` to this cell's output, excluding buffer repeaters; an
+    /// `*Unpinned` cell returns a sentinel above every pinned delay.
     #[must_use]
-    pub const fn base_delay_ticks(self) -> u32 {
+    pub const fn port_delay_ticks(self, port: PortName) -> u32 {
         match self {
-            Self::JavaComparatorAnd
-            | Self::JavaRepeaterOr
-            | Self::JavaInverterTorch
-            | Self::BedrockInverterTorch => 1,
+            // The side operand passes the inverter before the comparator. An AND has no `sel`, so
+            // asked for one it errs on the slow side.
+            Self::JavaComparatorAnd => match port {
+                PortName::A => 1,
+                PortName::B | PortName::Sel => 2,
+            },
+            Self::JavaRepeaterOr | Self::JavaInverterTorch | Self::BedrockInverterTorch => 1,
             Self::BedrockTorchAnd => 2,
             Self::BedrockTorchOr => 0,
             Self::JavaXorUnpinned
@@ -87,7 +91,7 @@ impl EditionCell {
             | Self::BedrockXorUnpinned
             | Self::BedrockNandUnpinned
             | Self::BedrockNorUnpinned
-            | Self::BedrockMuxUnpinned => UNPINNED_BASE_DELAY_TICKS,
+            | Self::BedrockMuxUnpinned => UNPINNED_PORT_DELAY_TICKS,
         }
     }
 
@@ -115,12 +119,13 @@ impl EditionCell {
     }
 }
 
-const UNPINNED_BASE_DELAY_TICKS: u32 = 3;
+const UNPINNED_PORT_DELAY_TICKS: u32 = 3;
 
-// 2 is the largest pinned base delay, `BedrockTorchAnd`'s.
+// 2 is the largest pinned port delay, on both of `BedrockTorchAnd`'s ports and on the side of
+// `JavaComparatorAnd`.
 const _: () = assert!(
-    UNPINNED_BASE_DELAY_TICKS > 2,
-    "UNPINNED_BASE_DELAY_TICKS must sit strictly above every pinned base_delay_ticks value",
+    UNPINNED_PORT_DELAY_TICKS > 2,
+    "UNPINNED_PORT_DELAY_TICKS must sit strictly above every pinned port_delay_ticks value",
 );
 
 /// One cell in the DAG, tagged with its edition-specific realisation.

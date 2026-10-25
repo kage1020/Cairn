@@ -145,6 +145,11 @@ in the Placement IR** ([§14.8](#148-connection-to-the-ir-and-phases)). `and` is
 zero-delay, but the tick count is known only after cell selection (`and → ComparatorAND` on Java)
 and the actual post-placement wire length.
 
+A cell takes each operand on an input port of its own: `a` and `b` on a two-input cell, `a` on
+`not`, and on `mux` the `sel`, `a` and `b` its arguments name. A cell's delay is counted per input
+port, as the ticks from that port to the cell's output, since one input can pass through more of a
+cell than another. A signal's delay through a cell is the delay of the port it enters by.
+
 A number appears as ticks only in verification assertions ([§14.7](#147-verification)). You never do
 tick arithmetic inside a logic expression.
 
@@ -268,7 +273,8 @@ The internal algorithm runs five stages:
    path from driver to sink, and the buffer stands on that path, so the straight line between the
    two is not always wire. A segment past the v1 cap of 256 steps is refused rather than buffered,
    under the same `E_ATTENUATION_LIMIT` stage 2 raises; what differs is that this pass measures the
-   wire that was actually laid.
+   wire that was actually laid. The figure the pass records per cell is a local cost, the delay of
+   its slowest driven port plus the buffer repeaters on the nets feeding it, not a signal's latency.
 
    A repeater reads the block behind it and drives the one in front of it, at its own height, so it
    stands only where the wire runs straight through a coordinate at one height and nothing branches
@@ -287,8 +293,8 @@ The internal algorithm runs five stages:
    torch), not from the start of each segment. Two of the cells pass on the strength they receive
    instead: the Bedrock OR is a dust merge, and the Java comparator AND, a comparator with one
    operand inverted onto its side ([§14.6](#146-edition-differences)), outputs the strength its rear
-   input carries while it is on. The pass does not track which input of a comparator is its rear.
-   The wire into either cell and the wire out of it count as one run of dust, though the cell stands
+   input carries while it is on. The count treats a comparator's rear input and its side alike. The
+   wire into either cell and the wire out of it count as one run of dust, though the cell stands
    between them, measured from the input that has spent the most. While the cell is on, its output
    is never weaker than that input: the merge passes on its strongest lit input and the comparator
    its rear. The inverted operand's wire ends at the inverter, which restores strength, so holding
@@ -356,6 +362,12 @@ its rear input carries; while it is off, the side reads 15 and the output is 0 w
 carries. Both operands reach the cell as the netlist carries them, so the inversion is the cell's
 own, and subtract mode is the one that then computes AND: while the side reads 15, compare mode
 would still pass a rear input at 15 through.
+
+The `ComparatorAND` takes port `a` at its rear and inverts `b` onto its side. Counted per port
+([§14.4](#144-time-model)), a signal entering by `a` passes the comparator alone, 1 tick, and one
+entering by `b` passes the inverter and then the comparator, 2 ticks. Which operand of `and` or `or`
+the netlist puts on `a` is not specified; `assert latency` ([§14.7](#147-verification)), not the
+order written, pins a path's ticks through a `ComparatorAND`.
 
 The tile tier carries one place-and-route obligation of its own: a `bridge` coordinate renders as a
 tile that conducts to neither **another net's** coordinate below it nor another net's coordinates

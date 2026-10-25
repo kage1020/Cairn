@@ -53,7 +53,8 @@ pub enum PlacementPhase {
     Delayed {
         /// Preserved from [`Self::Routed`].
         wire_length: u32,
-        /// Base delay plus buffer ticks on each distinct feeding net; not an arrival time.
+        /// The slowest driven port's delay plus buffer ticks on each distinct feeding net; not an
+        /// arrival time.
         local_delay_ticks: u32,
     },
     /// After crossing legalization: the buffer repeaters have coords.
