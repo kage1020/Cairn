@@ -282,7 +282,7 @@ it is refused with it ([§9.3.5](/spec/components-editing-sites/#935-ports-and-c
 all has no slot map to read, so the member degrades the same way. With no theme no `walls` is built
 or takes up rows, so no `door` or `window` is cut and the structure is shorter than asked. A `floor`
 leaves its cells air, and a `roof` is still built from its default block, as is an eave `stair` or
-`pressure_plate` that still fits the shorter structure; one set higher than it reaches is refused.
+`pressure_plate` that still fits the shorter structure; one set higher than it reaches is deferred.
 It is judged per scope: a scope with no theme bound that reads no `mat_slot=` is not reported,
 whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none, such as a
 `door`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
@@ -475,8 +475,9 @@ lines that put a plate nowhere. A plate the struct would have held had another m
 `W_DEFERRED_MEMBER` instead, with the same note: a row that `walls` painting nothing would have
 reached, or an `at=<side>.outside` beside a `roof` written with an `overhang=` that draws nothing.
 The repair is on that member, whose finding, or the scope's `W_NO_THEME_BOUND`, says why it did
-not build, and the plate's line is correct. A `door` cut into such walls is deferred for the same
-reason.
+not build, and the plate's line is correct. A plate whose line is wrong too is
+`E_UNPLACEABLE_PLATE` all the same, so a missing member never hides the plate's own fault. A `door`
+cut into such walls is deferred for the same reason.
 
 `E_PARTIAL_BUILD` is the run-level counterpart: a finding above says a scope builds without
 something, and this says a scope the command was asked for did not build at all. A scope that

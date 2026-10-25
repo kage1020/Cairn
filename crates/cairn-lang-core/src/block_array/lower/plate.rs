@@ -26,11 +26,22 @@ pub(super) const PRESSURE_PLATE_BASE_ID: &str = "minecraft:oak_pressure_plate";
 const ANCHOR_FORMS: &str = "write `at=<side>.outside` to sit outside a wall or `at=inside.<side>` \
                             to sit inside it, where `<side>` is front, back, left or right";
 
-/// The note on every refused plate that carries a `->` binding.
+/// The note on every plate left unplaced that carries a `->` binding.
 const BINDING_STILL_READ: &str =
     "its signal binding still reaches the netlist, with no plate placed to drive it";
 
-/// The finding that refuses a plate.
+/// The note on a plate deferred because a `walls` member that would reach its row paints nothing.
+const WALLS_PAINT_NOTHING: &str = "a `walls` member that would reach this row paints nothing; the \
+                                   plate fits once that member's material resolves to a block";
+
+/// The note on an `at=<side>.outside` plate deferred because a roof does not draw its overhang.
+const ROOF_DRAWS_NOTHING: &str = "a `roof` written with an `overhang=` draws nothing, so the struct \
+                                  has no overhang to hold the plate; it fits once that roof draws";
+
+/// The note on an `at=inside.<side>` plate on a struct with no interior.
+const INTERIOR_NEEDS: &str = "an interior needs a size of at least 3 on both axes";
+
+/// The finding that leaves a plate unplaced.
 type Refusal = Box<Diagnostic>;
 
 /// The side names an anchor takes.
@@ -90,14 +101,6 @@ fn with_binding_note(member: &Member, refusal: Refusal) -> Diagnostic {
     refusal
 }
 
-/// The size axis a side's wall runs along: `w` for `front` and `back`, `h` for the other two.
-fn size_axis(side: WallSide) -> &'static str {
-    match side {
-        WallSide::Front | WallSide::Back => "w",
-        WallSide::Left | WallSide::Right => "h",
-    }
-}
-
 /// Parse a `pressure_plate at=` value, or the refusal of any other shape.
 fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, Refusal> {
     let refuse =
@@ -108,10 +111,19 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, Refusal> {
         ));
     };
     let ValueKind::DotRef(dotref) = &raw.value.kind else {
-        return Err(refuse(format!(
+        let mut refusal = refuse(format!(
             "pressure_plate `at=` must be a two-segment reference, not {}",
             raw.value.describe(),
-        )));
+        ));
+        if let ValueKind::Ident(word) = &raw.value.kind
+            && let Some(side) = known_or_nearest(word, &SIDE_NAMES)
+        {
+            refusal.notes.push(DiagnosticNote {
+                span: None,
+                message: format!("did you mean `at={side}.outside` or `at=inside.{side}`?"),
+            });
+        }
+        return Err(refusal);
     };
     let segments = dotref.segments();
     if segments.len() != 2 {
@@ -148,19 +160,27 @@ fn plate_anchor_of(member: &Member) -> Result<PlateAnchor, Refusal> {
     ))
 }
 
+/// `word` as it appears in `vocabulary`, or the entry one typo from it.
+fn known_or_nearest(word: &str, vocabulary: &[&'static str]) -> Option<&'static str> {
+    vocabulary
+        .iter()
+        .copied()
+        .find(|known| *known == word)
+        .or_else(|| nearest_match(word, vocabulary.iter().copied()))
+}
+
 /// The `at=` anchor `head.tail` was likely meant as, when a segment is misspelled or the two are
 /// swapped.
 fn intended_anchor(head: &str, tail: &str) -> Option<String> {
-    let nearest = |word: &str, vocabulary: &[&'static str]| {
-        vocabulary
-            .iter()
-            .copied()
-            .find(|known| *known == word)
-            .or_else(|| nearest_match(word, vocabulary.iter().copied()))
-    };
-    let (side, place) = match (nearest(head, &SIDE_NAMES), nearest(tail, &PLACE_NAMES)) {
+    let (side, place) = match (
+        known_or_nearest(head, &SIDE_NAMES),
+        known_or_nearest(tail, &PLACE_NAMES),
+    ) {
         (Some(side), Some(place)) => (side, place),
-        _ => (nearest(tail, &SIDE_NAMES)?, nearest(head, &PLACE_NAMES)?),
+        _ => (
+            known_or_nearest(tail, &SIDE_NAMES)?,
+            known_or_nearest(head, &PLACE_NAMES)?,
+        ),
     };
     Some(if place == "outside" {
         format!("at={side}.outside")
@@ -225,7 +245,7 @@ fn plate_coordinate(member: &Member, key: &str, counts: &str) -> Result<u32, Ref
     })
 }
 
-/// The world voxel a plate paints onto, or the finding that refuses it.
+/// The world voxel a plate paints onto, or the finding that leaves it unplaced.
 ///
 /// With no exterior cell, `<side>.outside` falls back to the wall's foundation, at `y = 0` only.
 /// `inside.<side>` must land strictly inside the wall ring.
@@ -250,12 +270,33 @@ fn plate_voxel_position(
         level: y_offset,
     };
     let y_world = row.world();
-    if y_world >= ctx.dims.y {
-        return Err(Box::new(above_the_struct(member, row, ctx)));
-    }
+    // The plate's own line is asked first, so its fault is an error even when another member is
+    // missing too.
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
     if offset >= length {
-        return Err(Box::new(past_the_wall(member, anchor, offset, length)));
+        return Err(Box::new(past_the_wall(member, anchor, offset, length, ctx)));
+    }
+    if let PlateAnchor::Inside(_) = anchor
+        && let Some((primary, notes)) = inside_plate_refusal(side, offset, y_world, ctx)
+    {
+        return Err(Box::new(unplaceable(member, primary, notes)));
+    }
+    if y_world >= ctx.written_height {
+        return Err(Box::new(above_the_struct(member, row, ctx)));
+    }
+    if let PlateAnchor::Outside(_) = anchor
+        && y_world > 0
+        && ctx.written_overhang == 0
+    {
+        return Err(Box::new(no_exterior_voxel(member, side, row)));
+    }
+    // A struct shorter than its walls ask for is theirs to repair, so the plate only defers.
+    if y_world >= ctx.dims.y {
+        return Err(Box::new(diag_deferred_member_noted(
+            member,
+            &row_past_the_struct(row, ctx),
+            WALLS_PAINT_NOTHING,
+        )));
     }
     let Some((wx, _wy, wz)) = wall_local_to_grid(
         side,
@@ -266,8 +307,8 @@ fn plate_voxel_position(
         ctx.interior_h,
         ctx.dims,
     ) else {
-        // INVARIANT(wall-grid-validated): the two refusals above are every rejection
-        // `wall_local_to_grid` makes.
+        // INVARIANT(wall-grid-validated): the `offset` and `dims.y` refusals above are every
+        // rejection `wall_local_to_grid` makes.
         debug_assert!(
             false,
             "pressure_plate cell u={offset} y={y_world} on the {} wall is outside the wall grid; \
@@ -292,15 +333,17 @@ fn plate_voxel_position(
                 // The wall column's y=0 cell is floor (walls start at y=1).
                 Ok((wx, y_world, wz))
             } else {
-                Err(Box::new(no_exterior_voxel(member, side, row, ctx)))
+                // An overhang a roof is written with and does not draw is the roof's to repair.
+                Err(Box::new(diag_deferred_member_noted(
+                    member,
+                    &no_exterior_primary(side, row),
+                    ROOF_DRAWS_NOTHING,
+                )))
             }
         }
         PlateAnchor::Inside(_) => {
             let (sx, sz) = shift_inward(side, wx, wz);
-            match inside_plate_refusal(side, offset, y_world, (sx, sz), ctx) {
-                Some((primary, notes)) => Err(Box::new(unplaceable(member, primary, notes))),
-                None => Ok((sx, y_world, sz)),
-            }
+            Ok((sx, y_world, sz))
         }
     }
 }
@@ -333,23 +376,19 @@ impl PlateRow {
     }
 }
 
-/// The refusal of a plate whose row is at or above the struct's height.
-fn above_the_struct(member: &Member, row: PlateRow, ctx: &StructCtx<'_>) -> Diagnostic {
-    let height = ctx.dims.y;
-    let primary = format!(
-        "pressure_plate {} does not fit in the struct (dims.y={height})",
+/// The primary of a plate whose row is at or above `dims.y`.
+fn row_past_the_struct(row: PlateRow, ctx: &StructCtx<'_>) -> String {
+    format!(
+        "pressure_plate {} does not fit in the struct (dims.y={})",
         row.named(),
-    );
-    // A struct shorter than its walls ask for is theirs to repair, so the plate only defers.
-    if row.world() < ctx.written_height {
-        return diag_deferred_member_noted(
-            member,
-            &primary,
-            "a `walls` member that would reach this row paints nothing; the plate fits once that \
-             member's material resolves to a block",
-        );
-    }
-    let top = height - 1;
+        ctx.dims.y,
+    )
+}
+
+/// The refusal of a plate whose row is at or above the struct's height with every walls member
+/// painted.
+fn above_the_struct(member: &Member, row: PlateRow, ctx: &StructCtx<'_>) -> Diagnostic {
+    let top = ctx.written_height - 1;
     let level = row.level;
     let runs_to = |highest: u32| {
         if highest == 0 {
@@ -358,7 +397,7 @@ fn above_the_struct(member: &Member, row: PlateRow, ctx: &StructCtx<'_>) -> Diag
             format!("`y=` runs from 0 to {highest}")
         }
     };
-    let range = if level == 0 {
+    let mut notes = vec![if level == 0 {
         format!("{}, the struct's top row", runs_to(top))
     } else if let Some(highest) = top.checked_sub(level) {
         format!(
@@ -367,41 +406,84 @@ fn above_the_struct(member: &Member, row: PlateRow, ctx: &StructCtx<'_>) -> Diag
         )
     } else {
         format!("the struct's top row is {top}, below this plate's `level y={level}`")
-    };
-    unplaceable(
-        member,
-        primary,
-        vec![
-            range,
-            "lower the plate, or raise the `walls` to reach its row".to_owned(),
-        ],
-    )
+    }];
+    let built = ctx.dims.y;
+    if built < ctx.written_height {
+        notes.push(if built == top {
+            format!("row {top} waits on a `walls` member that paints nothing")
+        } else {
+            format!("rows {built} to {top} wait on a `walls` member that paints nothing")
+        });
+    }
+    // Under a level above the top row, no `y=` brings the plate down far enough.
+    notes.push(if level > top {
+        "lower the plate's `level`, or raise the `walls` to reach its row".to_owned()
+    } else {
+        "lower the plate, or raise the `walls` to reach its row".to_owned()
+    });
+    unplaceable(member, row_past_the_struct(row, ctx), notes)
 }
 
 /// The refusal of a plate whose `offset=` is at or past its wall's length.
-fn past_the_wall(member: &Member, anchor: PlateAnchor, offset: u32, length: u32) -> Diagnostic {
-    let side = anchor.side();
-    let name = side_name(side);
-    let valid = match anchor {
-        PlateAnchor::Outside(_) => format!(
+fn past_the_wall(
+    member: &Member,
+    anchor: PlateAnchor,
+    offset: u32,
+    length: u32,
+    ctx: &StructCtx<'_>,
+) -> Diagnostic {
+    let name = side_name(anchor.side());
+    let thin = thin_axes(ctx);
+    let notes = match anchor {
+        PlateAnchor::Outside(_) => vec![format!(
             "an `at={name}.outside` plate takes an `offset=` from 0 to {}",
             length - 1,
-        ),
-        PlateAnchor::Inside(_) if length >= 3 => format!(
+        )],
+        PlateAnchor::Inside(_) if thin.is_empty() => vec![format!(
             "an `at=inside.{name}` plate takes an `offset=` {}, clear of the wall's corners",
             inside_offsets(length),
-        ),
-        PlateAnchor::Inside(_) => format!(
-            "no `offset=` along a wall {length} long reaches an interior voxel; grow `size.{}` to \
-             at least 3",
-            size_axis(side),
-        ),
+        )],
+        PlateAnchor::Inside(_) => vec![
+            format!(
+                "the struct's {}, so no `offset=` reaches an interior voxel; {INTERIOR_NEEDS}",
+                thin_sizes(&thin),
+            ),
+            format!(
+                "grow {} and use an `offset=` {}",
+                thin_growth(&thin),
+                inside_offsets(length),
+            ),
+        ],
     };
     unplaceable(
         member,
         format!("pressure_plate `offset={offset}` runs past the {name} wall (length {length})"),
-        vec![valid],
+        notes,
     )
+}
+
+/// The size axes of `ctx` under 3, each with its extent, `w` before `h`.
+fn thin_axes(ctx: &StructCtx<'_>) -> Vec<(&'static str, u32)> {
+    [("w", ctx.interior_w), ("h", ctx.interior_h)]
+        .into_iter()
+        .filter(|&(_, extent)| extent < 3)
+        .collect()
+}
+
+/// `thin` as "size.w is 2 and size.h is 1".
+fn thin_sizes(thin: &[(&str, u32)]) -> String {
+    thin.iter()
+        .map(|(axis, extent)| format!("size.{axis} is {extent}"))
+        .collect::<Vec<_>>()
+        .join(" and ")
+}
+
+/// `thin` as the growth that gives the struct an interior, completing "grow …".
+fn thin_growth(thin: &[(&str, u32)]) -> String {
+    thin.iter()
+        .map(|(axis, _)| format!("`size.{axis}` to at least 3"))
+        .collect::<Vec<_>>()
+        .join(" and ")
 }
 
 /// The `offset=` values an `at=inside.<side>` plate on a wall `length` long takes, completing
@@ -414,35 +496,26 @@ fn inside_offsets(length: u32) -> String {
     }
 }
 
-/// The refusal of an `at=<side>.outside` plate above `y = 0` with no exterior voxel beside it.
-fn no_exterior_voxel(
-    member: &Member,
-    side: WallSide,
-    row: PlateRow,
-    ctx: &StructCtx<'_>,
-) -> Diagnostic {
-    let primary = format!(
+/// The primary of an `at=<side>.outside` plate with no exterior voxel beside it.
+fn no_exterior_primary(side: WallSide, row: PlateRow) -> String {
+    format!(
         "pressure_plate `at={}.outside` at {} has no exterior voxel to sit on",
         side_name(side),
         row.named(),
-    );
-    // An overhang a roof is written with and does not draw is the roof's to repair.
-    if ctx.written_overhang > 0 {
-        return diag_deferred_member_noted(
-            member,
-            &primary,
-            "a `roof` written with an `overhang=` draws nothing, so the struct has no overhang to \
-             hold the plate; it fits once that roof draws",
-        );
-    }
+    )
+}
+
+/// The refusal of an `at=<side>.outside` plate above `y = 0` beside no roof written with an
+/// overhang.
+fn no_exterior_voxel(member: &Member, side: WallSide, row: PlateRow) -> Diagnostic {
     let fix = if row.level == 0 {
-        "set `y=0`, or give the struct a `roof` with an `overhang=` of at least 1"
+        "set `y=0`, or give a `roof` an `overhang=` of at least 1"
     } else {
-        "give the struct a `roof` with an `overhang=` of at least 1"
+        "give a `roof` an `overhang=` of at least 1"
     };
     unplaceable(
         member,
-        primary,
+        no_exterior_primary(side, row),
         vec![
             "no roof on this struct draws an overhang, and only at y=0 does the plate fall back to \
              the wall's foundation"
@@ -452,34 +525,26 @@ fn no_exterior_voxel(
     )
 }
 
-/// Why an `at=inside.<side>` plate stepped onto `(sx, sz)` has no interior cell, as a primary and
-/// its notes, or `None`.
+/// Why an `at=inside.<side>` plate at an `offset=` within its wall's length has no interior cell,
+/// as a primary and its notes, or `None`.
 ///
 /// The interior is strictly inside the footprint's wall ring, whether or not walls paint it.
 fn inside_plate_refusal(
     side: WallSide,
     offset: u32,
     y: u32,
-    (sx, sz): (u32, u32),
     ctx: &StructCtx<'_>,
 ) -> Option<(String, Vec<String>)> {
-    let strictly_inside = |c: u32, extent: u32| {
-        c > ctx.overhang && c < ctx.overhang.saturating_add(extent).saturating_sub(1)
-    };
-    if strictly_inside(sx, ctx.interior_w) && strictly_inside(sz, ctx.interior_h) {
-        return None;
-    }
     let name = side_name(side);
     let length = wall_length(side, ctx.interior_w, ctx.interior_h);
-    let thin: Vec<(&str, u32)> = [("w", ctx.interior_w), ("h", ctx.interior_h)]
-        .into_iter()
-        .filter(|&(_, extent)| extent < 3)
-        .collect();
-    // With no thin axis, only the two ends of the wall miss the interior.
-    let corner = thin.is_empty() || offset == 0 || offset == length - 1;
+    let thin = thin_axes(ctx);
+    let corner = offset == 0 || offset == length - 1;
+    if thin.is_empty() && !corner {
+        return None;
+    }
     let valid_offsets = inside_offsets(length);
     if thin.is_empty() {
-        let inside_it = if ctx.wall_column.course_top_at(y).is_some() {
+        let inside_it = if ctx.written_walls.course_top_at(y).is_some() {
             "belongs to the neighbouring wall"
         } else {
             "is not an interior cell of this struct"
@@ -499,35 +564,26 @@ fn inside_plate_refusal(
     } else {
         String::new()
     };
-    let sizes = thin
-        .iter()
-        .map(|(axis, extent)| format!("size.{axis} is {extent}"))
-        .collect::<Vec<_>>()
-        .join(" and ");
-    let grow = thin
-        .iter()
-        .map(|(axis, _)| format!("`size.{axis}` to at least 3"))
-        .collect::<Vec<_>>()
-        .join(" and ");
     let use_offset = if corner {
         format!(" and use an `offset=` {valid_offsets}")
     } else {
         String::new()
     };
-    // Without an overhang, `<side>.outside` has no ring to sit in, so it is no remedy.
-    let outside = if ctx.overhang > 0 {
+    // `<side>.outside` finds a cell in a drawn overhang, or on the foundation at y=0.
+    let outside = if y == 0 || (ctx.overhang > 0 && y < ctx.dims.y) {
         format!(", or anchor the plate with `at={name}.outside`")
     } else {
         String::new()
     };
     Some((
         format!(
-            "pressure_plate `at=inside.{name} offset={offset}`: the struct's {sizes}, so it has \
-             no interior voxel{also_corner}",
+            "pressure_plate `at=inside.{name} offset={offset}`: the struct's {}, so it has no \
+             interior voxel{also_corner}",
+            thin_sizes(&thin),
         ),
         vec![
-            "an interior needs a size of at least 3 on both axes".to_owned(),
-            format!("grow {grow}{use_offset}{outside}"),
+            INTERIOR_NEEDS.to_owned(),
+            format!("grow {}{use_offset}{outside}", thin_growth(&thin)),
         ],
     ))
 }
@@ -535,7 +591,7 @@ fn inside_plate_refusal(
 /// The block id a `pressure_plate` paints: its `mat_slot=`, or the pack's default.
 ///
 /// A binding with a state literal defers and paints nothing. An unresolved binding was already
-/// reported, so the default raises no finding of its own.
+/// reported, so falling back adds no finding about the binding.
 fn plate_id_for_member(
     member: &Member,
     ctx: &StructCtx<'_>,

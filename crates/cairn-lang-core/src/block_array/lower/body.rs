@@ -19,8 +19,7 @@ use super::members::{MemberDisposition, StructCtx, flatten_members, member_dispo
 use super::paint::paint_member;
 use super::phase::Phase;
 use super::sizing::{
-    max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls, written_roof_overhang,
-    written_wall_top,
+    max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls, written,
 };
 
 /// What every body of one run is lowered against.
@@ -71,6 +70,8 @@ pub(super) fn lower_body_to_block_array<'a>(
 
     // Flattened once: sizing and the phase buckets must read the same paint set.
     let flattened = flatten_members(body.members, diagnostics);
+    // Unflattened: a roof a `level` drops is still written.
+    let written = written(body.members);
     // A scope that reads no `mat_slot=` loses nothing to a missing theme (`spec/lint` "Materials
     // and targets"), so it is not reported.
     if theme_missing && flattened.iter().any(|(_, m)| m.read_slot().is_some()) {
@@ -109,10 +110,9 @@ pub(super) fn lower_body_to_block_array<'a>(
         interior_h,
         wall_top: max_wall_top,
         wall_column,
-        written_height: 1u32
-            .saturating_add(written_wall_top(&flattened))
-            .saturating_add(roof_extra),
-        written_overhang: written_roof_overhang(body.members),
+        written_height: written.height(roof_extra),
+        written_walls: written.walls,
+        written_overhang: written.overhang,
     };
 
     let buckets = bucket_members(&flattened, diagnostics);

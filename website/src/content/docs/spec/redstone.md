@@ -81,7 +81,8 @@ no roof gives an overhang, or an `at=inside.<side>` outside the interior. A plat
 have held had another member built is `W_DEFERRED_MEMBER` instead, because that member's finding
 has the repair: a row that `walls` painting nothing would have reached, or an `at=<side>.outside`
 beside a `roof` written with an `overhang=` that draws nothing ([Lint](/spec/lint/#lowering)).
-Either way the plate's `->` binding is still read, since synthesis reads the member line and not
+The plate's own line is judged first, so a line that puts it nowhere is the error even when such a
+member is missing too. Either way the plate's `->` binding is still read, since synthesis reads the member line and not
 the voxels, so the signal stays in the netlist with no plate to drive it, and the finding says so.
 
 **Signal names.** Sensors emit into the `sig.` namespace and actuators read from it, so a name

@@ -426,3 +426,40 @@ fn a_theme_both_editions_bind_is_no_ones_own() {
     );
     assert_eq!(without_target_declaring(source, None, &java_only), []);
 }
+
+#[test]
+fn a_plate_its_own_line_puts_nowhere_is_refused_whichever_edition_paints_its_walls() {
+    let plate = "pressure_plate at=inside.front offset=0 y=2 -> sig.a";
+    let source = format!(
+        "theme t_java:\n  slot wall -> @stone\n\nstruct s size=5x5\n  \
+         walls mat_slot=wall height=3\n  {plate}\n"
+    );
+    let refused = ("E_UNPLACEABLE_PLATE", "6:3".to_owned());
+    assert_eq!(
+        by_edition(&source),
+        [
+            vec![refused.clone()],
+            vec![("W_NO_THEME_BOUND", "4:1".to_owned()), refused.clone()],
+            vec![refused],
+        ],
+        "premise: only Java binds a theme, so only Java paints the walls",
+    );
+    let found = without_target(&source, None);
+    assert_eq!(found, lowered_for(&source, Edition::Java));
+    assert_eq!(
+        (
+            located(&source, &found),
+            found[0].primary.as_str(),
+            notes(&found[0])
+        ),
+        (
+            vec![("E_UNPLACEABLE_PLATE", plate)],
+            "pressure_plate `at=inside.front offset=0` is at a corner of the front wall, so the \
+             voxel inside it belongs to the neighbouring wall",
+            vec![
+                "use an `offset=` from 1 to 3 to reach an interior voxel",
+                "its signal binding still reaches the netlist, with no plate placed to drive it",
+            ],
+        ),
+    );
+}

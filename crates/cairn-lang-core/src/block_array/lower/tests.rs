@@ -3772,22 +3772,35 @@ fn pressure_plate_outside_at_y_zero_without_overhang_falls_back_to_foundation() 
 }
 
 #[test]
-fn pressure_plate_outside_saturating_shift_is_refused_above_ground() {
+fn pressure_plate_outside_saturating_shift_defers_beside_a_roof_that_draws_nothing() {
     // `shift_outward` saturates back to the wall cell at x=0, which is still in the volume.
     let out = lowered(&plate_walled_3x3(
-        "pressure_plate at=left.outside offset=0 y=1",
+        "roof mat_slot=p overhang=1\n  pressure_plate at=left.outside offset=0 y=1",
     ));
     let ba = out.structures.get("struct::s").unwrap();
+    let found = findings_of(&out);
     assert_eq!(
-        findings_of(&out),
-        [unplaceable(
-            "pressure_plate `at=left.outside` at y=1 has no exterior voxel to sit on",
-            &[
-                "no roof on this struct draws an overhang, and only at y=0 does the plate fall \
-                 back to the wall's foundation",
-                "set `y=0`, or give the struct a `roof` with an `overhang=` of at least 1",
-            ],
-        )],
+        found
+            .iter()
+            .map(|(code, primary, _)| (*code, primary.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                DiagnosticCode::DeferredMember,
+                "missing `kind=` (expected one of gable, shed, hip, flat)",
+            ),
+            (
+                DiagnosticCode::DeferredMember,
+                "pressure_plate `at=left.outside` at y=1 has no exterior voxel to sit on",
+            ),
+        ],
+    );
+    assert_eq!(
+        found[1].2,
+        [
+            "a `roof` written with an `overhang=` draws nothing, so the struct has no overhang to \
+          hold the plate; it fits once that roof draws"
+        ],
     );
     assert_eq!(block_id(ba, 0, 1, 1), "minecraft:oak_pressure_plate");
 }
@@ -4025,6 +4038,27 @@ fn pressure_plate_inside_a_two_deep_struct_is_refused_and_keeps_the_back_wall() 
 }
 
 #[test]
+fn pressure_plate_inside_a_two_deep_struct_at_the_floor_row_is_offered_the_outside_anchor() {
+    let (out, findings) = lowered_inside_plate("5x2", "", "at=inside.front offset=2 y=0");
+    assert_eq!(
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.front offset=2`: the struct's size.h is 2, so it has no \
+             interior voxel",
+            &[
+                "an interior needs a size of at least 3 on both axes",
+                "grow `size.h` to at least 3, or anchor the plate with `at=front.outside`",
+            ],
+        )],
+    );
+    assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
+    // The remedy the reason offers works on this very struct.
+    let (out, findings) = lowered_inside_plate("5x2", "", "at=front.outside offset=2 y=0");
+    assert_eq!(findings, []);
+    assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 1);
+}
+
+#[test]
 fn pressure_plate_inside_a_one_deep_struct_with_an_overhang_is_refused() {
     let roof = overhang_roof(1);
     let (out, findings) = lowered_inside_plate("5x1", &roof, "at=inside.front offset=2 y=1");
@@ -4046,6 +4080,24 @@ fn pressure_plate_inside_a_one_deep_struct_with_an_overhang_is_refused() {
     let (out, findings) = lowered_inside_plate("5x1", &roof, "at=front.outside offset=2 y=1");
     assert_eq!(findings, []);
     assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 1);
+}
+
+#[test]
+fn pressure_plate_inside_a_one_deep_struct_is_not_offered_the_outside_anchor_above_its_rows() {
+    let (out, findings) =
+        lowered_inside_plate("5x1", &overhang_roof(1), "at=inside.front offset=2 y=9");
+    assert_eq!(
+        findings,
+        [unplaceable(
+            "pressure_plate `at=inside.front offset=2`: the struct's size.h is 1, so it has no \
+             interior voxel",
+            &[
+                "an interior needs a size of at least 3 on both axes",
+                "grow `size.h` to at least 3",
+            ],
+        )],
+    );
+    assert_eq!(plate_count(out.structures.get("struct::s").unwrap()), 0);
 }
 
 #[test]

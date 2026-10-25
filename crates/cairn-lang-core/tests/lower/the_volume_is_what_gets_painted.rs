@@ -4,7 +4,7 @@
 use cairn_lang_core::DiagnosticCode;
 use cairn_lang_core::block_array::BlockArrayIr;
 
-use crate::common::{lowered, notes};
+use crate::common::{lowered, notes, slice};
 
 fn dims_of(out: &BlockArrayIr, key: &str) -> (u32, u32, u32) {
     let built = out
@@ -111,22 +111,26 @@ fn a_shed_with_a_slope_to_still_widens_the_footprint() {
 
 /// A roof with `overhang=2` and no `kind=` draws no overhang for the plate to sit on.
 #[test]
-fn a_plate_outside_a_wall_names_the_overhang_a_roof_draws() {
-    let source = format!(
-        "{THEME}struct s size=5x5\n  walls mat_slot=wall height=3\n  \
-         roof mat_slot=roof overhang=2\n  \
-         pressure_plate id=p at=front.outside offset=0 y=1 mat_slot=wall\n"
-    );
+fn a_plate_outside_a_wall_beside_a_roof_that_draws_nothing_only_defers() {
+    let roof = "roof mat_slot=roof overhang=2";
+    let plate = "pressure_plate id=p at=front.outside offset=0 y=1 mat_slot=wall";
+    let source =
+        format!("{THEME}struct s size=5x5\n  walls mat_slot=wall height=3\n  {roof}\n  {plate}\n");
     let out = lowered(&source);
-    let plate = out
-        .diagnostics
-        .iter()
-        .find(|d| d.primary.contains("pressure_plate"))
-        .unwrap_or_else(|| panic!("the plate must be reported: {:?}", codes(&out)));
     assert_eq!(
-        (plate.code, plate.primary.as_str(), notes(plate)),
+        out.diagnostics
+            .iter()
+            .map(|d| (d.code, slice(&source, d)))
+            .collect::<Vec<_>>(),
+        [
+            (DiagnosticCode::DeferredMember, roof),
+            (DiagnosticCode::DeferredMember, plate),
+        ],
+    );
+    let found = &out.diagnostics[1];
+    assert_eq!(
+        (found.primary.as_str(), notes(found)),
         (
-            DiagnosticCode::DeferredMember,
             "pressure_plate `at=front.outside` at y=1 has no exterior voxel to sit on",
             vec![
                 "a `roof` written with an `overhang=` draws nothing, so the struct has no \

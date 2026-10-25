@@ -373,6 +373,7 @@ fn plate_sources() -> Vec<String> {
     let walled = [
         "pressure_plate",
         "pressure_plate at=center",
+        "pressure_plate at=front",
         "pressure_plate at=front.outside.left",
         "pressure_plate at=front.inside",
         "pressure_plate at=up.outside",
@@ -400,10 +401,12 @@ fn plate_sources() -> Vec<String> {
             "{THEME}struct s size=5x2\n  walls mat_slot=wall height=3\n\
              \x20\x20roof kind=flat mat_slot=wall overhang=1\n\
              \x20\x20pressure_plate at=inside.front offset=0\n\
-             \x20\x20pressure_plate at=inside.left offset=2\n"
+             \x20\x20pressure_plate at=inside.left offset=2\n\
+             \x20\x20pressure_plate at=inside.front offset=9\n"
         ),
         "struct s size=5x5\n  walls mat_slot=wall height=3\n  \
-         pressure_plate at=inside.front offset=2 y=2\n"
+         pressure_plate at=inside.front offset=2 y=2\n  \
+         pressure_plate at=inside.front offset=2 y=4\n"
             .to_owned(),
     ]);
     sources
